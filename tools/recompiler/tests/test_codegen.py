@@ -5,6 +5,7 @@ import subprocess
 import sys
 
 from tools.disassembler.instruction import EA, EAMode, FlowType, Instruction
+from tools.disassembler.rom import ROM
 from tools.recompiler import ea_codegen as ea
 from tools.recompiler import main as recompiler_main
 from tools.recompiler import opcodes
@@ -334,6 +335,16 @@ def test_disassemble_to_fixpoint_repeats_after_new_table_targets(monkeypatch):
     assert calls == [{0x100}, {0x100, 0x200}]
     assert disasm.aux_addresses == {0x100, 0x200}
     assert seeds == {0x100, 0x200}
+
+
+def test_banked_word_dispatch_table_discovers_016d0a_without_runtime_aux():
+    rom = ROM.from_file(str(_ROOT / 'rom/SOR.bin'))
+    seeds = set(_load_aux(str(_ROOT / 'code-analysis/aux_addresses.txt')))
+    seeds.discard(0x016D0A)
+
+    _, fixed = recompiler_main._disassemble_to_fixpoint(rom, seeds)
+
+    assert 0x016D0A in fixed
 
 
 def test_speculative_scope_does_not_confirm_derived_entries():

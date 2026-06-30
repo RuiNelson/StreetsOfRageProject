@@ -105,7 +105,7 @@ def _discover_bra_tables(disasm, rom) -> set:
 _CODE_LO, _CODE_HI = 0x000200, 0x010000
 
 
-def _read_word_table(rom, base) -> set:
+def _read_word_table(rom, base, high_prefix=0) -> set:
     """Read a forward, self-bounded word jump table starting at *base*.
 
     Each entry is a 16-bit absolute address. The table is accepted only if it is
@@ -113,6 +113,9 @@ def _read_word_table(rom, base) -> set:
     exactly `[base, earliest-target)` — the storage cannot overlap its own first
     handler. Returns the set of target addresses, or empty if it is not a table.
     """
+    if high_prefix:
+        return _read_prefixed_word_table(rom, base, high_prefix)
+
     targets, addr, min_target = [], base, None
     while rom.in_bounds(addr, 2):
         if min_target is not None and addr >= min_target:
@@ -130,6 +133,42 @@ def _read_word_table(rom, base) -> set:
     return set()
 
 
+def _read_prefixed_word_table(rom, base, high_prefix) -> set:
+    """Read a word table whose entries inherit the destination register's high word.
+
+    SoR uses a shared dispatcher shape like:
+
+        moveq   #bank, Dn
+        swap    Dn              ; Dn high word now selects a 64K ROM bank
+        ...
+        move.w  (An,Dn.w), Dn   ; low word comes from the table
+        movea.l Dn, Am
+        jmp     (Am)
+
+    The table's first target usually starts immediately after the table, but
+    later entries may point backward into already-known handlers. That makes the
+    stricter minimum-target bound used by plain 16-bit tables invalid here, so
+    the first entry defines the table end instead.
+    """
+    if (base & 1) or not rom.in_bounds(base, 2):
+        return set()
+    first = high_prefix | rom.read_word(base)
+    if (first & 1) or first <= base or not rom.in_bounds(first, 2):
+        return set()
+
+    targets, addr = [], base
+    while addr < first and rom.in_bounds(addr, 2):
+        word = rom.read_word(addr)
+        target = high_prefix | word
+        if (target & 1) or target < _CODE_LO or not rom.in_bounds(target, 2):
+            return set()
+        targets.append(target)
+        addr += 2
+        if addr - base > 0x100:  # sanity cap; no real table is this large
+            return set()
+    return set(targets) if addr == first else set()
+
+
 def _feeds_indirect_jump(disasm, instr) -> bool:
     """True if a register-indirect `jmp`/`jsr` follows *instr* within a few steps."""
     nxt = disasm.instructions.get(instr.next_address)
@@ -140,6 +179,32 @@ def _feeds_indirect_jump(disasm, instr) -> bool:
             return True
         nxt = disasm.instructions.get(nxt.next_address)
     return False
+
+
+def _dreg_high_prefix(ordered, index_of, move_instr, dreg):
+    """Return a preserved high-word prefix for a table load into Dn, if known."""
+    k = index_of.get(move_instr.address)
+    if k is None:
+        return 0
+    for j in range(k - 1, max(k - 9, -1), -1):
+        prev = ordered[j]
+        if (prev.mnemonic == 'swap' and prev.eas
+                and prev.eas[0].mode == EAMode.DATA_REG
+                and prev.eas[0].reg == dreg):
+            for between in ordered[j + 1:k]:
+                if (between.eas and between.eas[-1].mode == EAMode.DATA_REG
+                        and between.eas[-1].reg == dreg
+                        and (between.size == 'l' or between.mnemonic in ('moveq', 'swap'))):
+                    return 0
+            for i in range(j - 1, max(j - 5, -1), -1):
+                seed = ordered[i]
+                if (seed.mnemonic == 'moveq' and len(seed.eas) >= 2
+                        and seed.eas[0].mode == EAMode.IMMEDIATE
+                        and seed.eas[1].mode == EAMode.DATA_REG
+                        and seed.eas[1].reg == dreg):
+                    return (seed.eas[0].imm & 0xFFFF) << 16
+            return 0
+    return 0
 
 
 def _discover_word_jump_tables(disasm, rom) -> set:
@@ -192,6 +257,7 @@ def _discover_word_jump_tables(disasm, rom) -> set:
             continue
         if (len(instr.eas) < 2 or instr.eas[1].mode != EAMode.DATA_REG):
             continue
+        dst_reg = instr.eas[1].reg
         src = instr.eas[0]
         if src.mode == EAMode.PC_INDEX:
             base = src.abs_value                       # shape (a)
@@ -206,7 +272,8 @@ def _discover_word_jump_tables(disasm, rom) -> set:
         if not _feeds_indirect_jump(disasm, instr):
             continue
 
-        found |= _read_word_table(rom, base)
+        found |= _read_word_table(
+            rom, base, _dreg_high_prefix(ordered, index_of, instr, dst_reg))
     return found
 
 
@@ -268,8 +335,10 @@ def _discover_shared_dispatcher_tables(disasm, rom) -> set:
             continue
         an_reg = src.reg
 
-        # The dispatcher's function entry is the nearest subroutine at or before
-        # the move; An must arrive untouched from it (a parameter, not local).
+        # The dispatcher may be the function entry or an extra entry inside a
+        # larger routine. For each concrete caller target before the indexed
+        # move, An must arrive untouched from that target (a parameter, not
+        # local setup).
         i = bisect.bisect_right(subs, instr.address) - 1
         if i < 0:
             continue
@@ -277,15 +346,20 @@ def _discover_shared_dispatcher_tables(disasm, rom) -> set:
         k_entry, k_here = index_of.get(entry), index_of.get(instr.address)
         if k_entry is None or k_here is None:
             continue
-        if any(_writes_areg(ordered[j], an_reg) for j in range(k_entry, k_here)):
-            continue  # An set locally — handled by _discover_word_jump_tables
         if not _feeds_indirect_jump(disasm, instr):
             continue
 
-        for caller in callers.get(entry, ()):
-            base = _lea_base_at(caller, an_reg)
-            if base is not None:
-                found |= _read_word_table(rom, base)
+        high_prefix = _dreg_high_prefix(ordered, index_of, instr, instr.eas[1].reg)
+        for j in range(k_entry, k_here + 1):
+            target_callers = callers.get(ordered[j].address, ())
+            if not target_callers:
+                continue
+            if any(_writes_areg(ordered[k], an_reg) for k in range(j, k_here)):
+                continue  # An set locally after this entry point
+            for caller in target_callers:
+                base = _lea_base_at(caller, an_reg)
+                if base is not None:
+                    found |= _read_word_table(rom, base, high_prefix)
     return found
 
 

@@ -159,7 +159,7 @@ void MegaDriveEnvironment::confirmSpeculative(m_long addr) {
         return; // already known; not a newly confirmed speculative candidate
     std::fprintf(stderr, "[speculative] confirmed: %06X\n", a);
     if (FILE *out = std::fopen(auxAddrFile_.c_str(), "a")) {
-        std::fprintf(out, "%06x\n", a);
+        std::fprintf(out, "%06X\n", a);
         std::fclose(out);
     }
 }
@@ -256,7 +256,7 @@ void MegaDriveEnvironment::reportUnhandledDispatch(m_long addr) {
     // Record the new target and exit (42) so the discovery loop re-seeds and
     // regenerates. _Exit avoids the unreliable SDL/global teardown on this path.
     if (FILE *out = std::fopen(auxAddrFile_.c_str(), "a")) {
-        std::fprintf(out, "%08x\n", a);
+        std::fprintf(out, "%06X\n", a);
         std::fclose(out);
         std::fprintf(stderr, "[aux] recorded $%06X to %s\n", a, auxAddrFile_.c_str());
         std::_Exit(42);
