@@ -1,8 +1,9 @@
 #!/bin/bash
 # Fast aux discovery: speculate → build → loop.
 #
-# 1. Scan unmapped ROM regions for 68000 entry point candidates (speculative_scan.py)
-#    and write them to code-analysis/speculative_addresses.txt.
+# 1. Scan ROM regions still unknown after the recompiler's static table-discovery
+#    fixpoint for 68000 entry point candidates (speculative_scan.py), and write
+#    them to code-analysis/speculative_addresses.txt.
 # 2. Build once with all speculative stubs compiled in (--full --discover).
 # 3. Run the game in a loop:
 #      - Confirmed speculative addresses are appended to aux_addresses.txt on-the-fly
@@ -40,7 +41,7 @@ if ! python3 -m tools.disassembler "$ROM" -o "$SCAN_ASM" -a "$AUX" --map "$SCAN_
     exit 1
 fi
 
-echo "==> [fast] Scanning for speculative entry points..."
+echo "==> [fast] Scanning for speculative entry points (after static fixpoint)..."
 if ! python3 -m tools.speculative_scan "$SCAN_MAP" "$ROM" "$AUX" -o "$SPEC"; then
     echo "Speculative scan failed." >&2
     exit 1

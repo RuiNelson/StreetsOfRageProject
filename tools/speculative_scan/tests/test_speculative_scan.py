@@ -6,8 +6,11 @@ true fall-through hits invalid data. An earlier optimistic-cycle memoisation
 wrongly accepted such an address; reachability must reject it.
 """
 
+from pathlib import Path
+
 from tools.disassembler.rom import ROM
 from tools.speculative_scan import Validator, scan
+from tools.speculative_scan.main import static_recompiler_map, write_output
 
 _MAP = b'X' * (ROM.END + 1)  # everything unmapped, so nothing short-circuits
 
@@ -62,6 +65,34 @@ def test_scan_emits_one_address_per_function():
     mp = bytearray(b'C' * (ROM.END + 1))  # only the window is unmapped ('X')
     mp[0x2000:0x2008] = b'X' * 8
     assert scan(bytes(mp), rom, known=set()) == [0x2000, 0x2004]
+
+
+def test_write_output_uses_canonical_uppercase_6_digit_addresses(tmp_path):
+    out = tmp_path / 'spec.txt'
+
+    write_output([0x16D0A, 0x72E9C], out)
+
+    lines = out.read_text().splitlines()
+    assert lines[1:] == ['016D0A', '072E9C']
+
+
+def test_static_filter_prevents_known_recompiler_targets_from_being_speculative(tmp_path):
+    root = Path(__file__).resolve().parents[3]
+    aux = tmp_path / 'aux_without_016d0a.txt'
+    lines = []
+    for line in (root / 'code-analysis/aux_addresses.txt').read_text().splitlines():
+        s = line.split(';')[0].split('#')[0].strip()
+        if s and int(s, 16) == 0x016D0A:
+            continue
+        lines.append(line)
+    aux.write_text('\n'.join(lines) + '\n')
+
+    rom = ROM.from_file(str(root / 'rom/SOR.bin'))
+    rom_map, known = static_recompiler_map(rom, aux)
+    results = scan(rom_map, rom, known)
+
+    assert 0x016D0A in known
+    assert 0x016D0A not in results
 
 
 if __name__ == '__main__':

@@ -19,6 +19,7 @@ from tools.disassembler.disassembler import Disassembler
 from tools.disassembler.instruction import EAMode
 from tools.disassembler.main import _load_csv_addresses, _load_labels_csv
 from tools.disassembler.rom import ROM
+from tools.common.addresses import parse_address_lines
 from tools.recompiler.generator import Generator
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -364,23 +365,7 @@ def _discover_shared_dispatcher_tables(disasm, rom) -> set:
 
 
 def _load_aux(path):
-    if not path or not os.path.exists(path):
-        return []
-    out = []
-    with open(path) as f:
-        for line in f:
-            line = line.split(';')[0].split('#')[0].strip()
-            if line:
-                addr = int(line, 16)
-                # Runtime discovery can observe bad computed-jump values while
-                # debugging. Do not let vector-table/data addresses become code
-                # seeds; the SoR cartridge's recompiled code starts at $200.
-                if addr < 0x000200 or (addr & 1):
-                    print(f'[recompile] ignoring invalid aux address ${addr:06X}',
-                          file=sys.stderr)
-                    continue
-                out.append(addr)
-    return out
+    return parse_address_lines(path, code_only=True, warn_prefix='[recompile]')
 
 
 def main(argv=None):
@@ -393,9 +378,9 @@ def main(argv=None):
                          'targets from the active disassembly (optional)')
     ap.add_argument('--speculative', default='',
                     help='speculative entry-point file: compiled like aux but '
-                         'emit confirmSpeculative() at entry so the runtime can '
-                         'promote confirmed ones to the aux file. Disabled unless '
-                         'this option is provided.')
+                         'confirm indirect dispatches to those addresses so the '
+                         'runtime can promote confirmed ones to the aux file. '
+                         'Disabled unless this option is provided.')
     ap.add_argument('--labels-csv', default='code-analysis/labels.csv',
                     help='CSV of code-segment names (address,label,comment)')
     ap.add_argument('--addresses-csv', default='code-analysis/addresses.csv',
@@ -422,9 +407,8 @@ def main(argv=None):
         disasm, seeds = _disassemble_to_fixpoint(
             rom, seeds | speculative_raw, args.verbose)
     speculative_derived = set(disasm.subroutines) - baseline_entries
-    # Only the raw seeds need confirmSpeculative() — derivatives are reached via
-    # normal calls from the seed and will be found in Phase 1 once the seed is
-    # promoted to aux_addresses.txt.
+    # Only raw seeds are promoted by dispatch confirmation. Derived entries are
+    # reached through normal generated control flow once the seed is promoted.
     speculative_seeds = speculative_raw & speculative_derived
 
     if args.verbose:

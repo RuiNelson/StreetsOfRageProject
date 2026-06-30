@@ -34,6 +34,14 @@ def _run_recompiler(out_dir, *args):
     )
 
 
+def _function_source(source, name):
+    start = source.index(f'void Sor::{name}(')
+    end = source.find('\n}\n\n', start)
+    if end < 0:
+        end = source.rindex('\n}', start)
+    return source[start:end]
+
+
 # --- effective-address codegen -------------------------------------------
 
 def test_areg_a7_is_ssp():
@@ -361,7 +369,9 @@ def test_speculative_scope_does_not_confirm_derived_entries():
                     speculative_scope={0x200, 0x300},
                     baseline_instrs={0x100}).emit_source()
 
-    assert 'confirmSpeculative(0x00000200u);' in src
+    assert ('case 0x00000200u: confirmSpeculative(0x00000200u); '
+            'sub_000200(); return;') in src
+    assert 'confirmSpeculative(0x00000200u);' not in _function_source(src, 'sub_000200')
     assert 'confirmSpeculative(0x00000300u);' not in src
 
 
@@ -380,7 +390,9 @@ def test_invalid_speculative_derived_entry_is_rejected_not_fatal():
                     baseline_instrs={0x100}).emit_source()
 
     assert 'void Sor::sub_000300' not in src
-    assert 'confirmSpeculative(0x00000200u);' in src
+    assert ('case 0x00000200u: confirmSpeculative(0x00000200u); '
+            'sub_000200(); return;') in src
+    assert 'confirmSpeculative(0x00000200u);' not in _function_source(src, 'sub_000200')
 
 
 def test_csv_names_applied_to_goto_labels():

@@ -14,6 +14,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from tools.common.addresses import parse_address_lines
+
 
 @dataclass
 class AuxAddress:
@@ -119,20 +121,7 @@ def _load_aux(path: str) -> list[int]:
     Each line is a 6-digit hex address.  Lines starting with ``;`` and blank
     lines are ignored.  Inline comments (after the address) are also stripped.
     """
-    addresses: list[int] = []
-    with open(path) as f:
-        for lineno, raw in enumerate(f, 1):
-            line = raw.split(';')[0].strip()
-            if not line:
-                continue
-            try:
-                addr = int(line, 16)
-            except ValueError:
-                print(f'Warning: bad address on line {lineno} of {path!r}: '
-                      f'{raw.rstrip()!r}', file=sys.stderr)
-                continue
-            addresses.append(addr)
-    return addresses
+    return parse_address_lines(path, warn_prefix='Warning:')
 
 
 def main(argv: list[str] | None = None) -> int:

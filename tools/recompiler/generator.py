@@ -76,7 +76,8 @@ class Generator:
         self.rom_path = rom_path
         self.stats = Stats()
         self._names = names or {}
-        # _speculative: only raw seeds — these get confirmSpeculative() emitted.
+        # _speculative: raw seeds promoted only when an indirect dispatch lands
+        # on them. Direct calls within generated code must not confirm aux hits.
         self._speculative = set(speculative_addrs or [])
         # _speculative_scope: all Phase-2-derived functions (seeds + derivatives)
         # — these get their full address list instead of the baseline-filtered one.
@@ -386,8 +387,6 @@ class Generator:
     def _emit_function(self, func):
         out = [f'void Sor::{self.fn(func.entry)}(m_long __entry) {{']
         out.append(f'    traceEnter({ea._hex(func.entry)}); // diagnostic')
-        if func.entry in self._speculative:
-            out.append(f'    confirmSpeculative({ea._hex(func.entry)});')
         return self._emit_function_body(func, out)
 
     def _emit_function_body(self, func, out):
@@ -464,7 +463,12 @@ class Generator:
         disp = ['void Sor::dispatch(m_long addr) {', '    switch (addr) {']
         for e in self.part.entries:
             if e not in rejected:
-                disp.append(f'        case {ea._hex(e)}: {self.fn(e)}(); return;')
+                if e in self._speculative:
+                    disp.append(
+                        f'        case {ea._hex(e)}: '
+                        f'confirmSpeculative({ea._hex(e)}); {self.fn(e)}(); return;')
+                else:
+                    disp.append(f'        case {ea._hex(e)}: {self.fn(e)}(); return;')
         disp += ['        default: unhandledDispatch(addr); return;', '    }', '}']
         parts.append('\n'.join(disp))
 
