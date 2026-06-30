@@ -1,0 +1,385 @@
+"""CLI: recompile the ROM into a Sor.hpp / Sor.cpp MegaDriveEnvironment subclass.
+
+    python3 -m tools.recompiler rom/StreetsOfRage.bin -o src/generated [--aux aux_addresses.txt]
+
+Loads the ROM, runs the recursive-descent disassembler (seeded with the
+reset/IRQ vectors and any auxiliary entry points), then emits the recompiled
+C++. Prints coverage: how many instructions were translated vs. emitted as
+compile-safe stubs (unimplemented opcodes), broken down by mnemonic.
+"""
+
+import argparse
+import bisect
+import os
+import shutil
+import sys
+from pathlib import Path
+
+from tools.disassembler.disassembler import Disassembler
+from tools.disassembler.instruction import EAMode
+from tools.disassembler.main import _load_csv_addresses, _load_labels_csv
+from tools.disassembler.rom import ROM
+from tools.recompiler.generator import Generator
+
+_ROOT = Path(__file__).resolve().parents[2]
+_MACROS_SRC = _ROOT / 'tools/recompiler/M68KMacros.hpp'
+
+
+def _install_macros(out_dir: str):
+    """Copy the static M68KMacros.hpp alongside the generated Sor sources."""
+    dst = Path(out_dir) / 'M68KMacros.hpp'
+    shutil.copy2(_MACROS_SRC, dst)
+    return dst
+
+
+def _discover_bra_tables(disasm, rom) -> set:
+    """Find PC-relative `bra` jump-table entries.
+
+    A `jmp d(pc,Dn)` lands on a contiguous table of `bra` entries. Those entries
+    are reachable only through the computed jump, so static following never
+    decodes them. Return every entry address so they can be seeded as code.
+
+    The table is uniform in one of the three `bra` widths; the stride is taken
+    from the first entry:
+      * `bra.s` — opcode 0x60xx with xx ∉ {0x00, 0xFF} (2-byte entries)
+      * `bra.w` — opcode 0x6000 then a 16-bit displacement (4-byte entries)
+      * `bra.l` — opcode 0x60FF then a 32-bit displacement (6-byte entries)
+    """
+    found = set()
+    for instr in disasm.instructions.values():
+        if instr.mnemonic not in ('jmp', 'jsr') or not instr.indirect:
+            continue
+        if not instr.eas or instr.eas[0].mode != EAMode.PC_INDEX:
+            continue
+        base = instr.eas[0].abs_value
+        if base is None or (base & 1) or not rom.in_bounds(base, 2):
+            continue
+        first = rom.read_word(base)
+        if first == 0x6000:                                      # bra.w
+            stride = 4
+        elif first == 0x60FF:                                    # bra.l
+            stride = 6
+        elif (first >> 8) == 0x60 and (first & 0xFF) not in (0x00, 0xFF):
+            stride = 2                                           # bra.s
+        else:
+            continue
+        addr = base
+        while rom.in_bounds(addr, stride):
+            word = rom.read_word(addr)
+            # Every entry must be the same `bra` width as the first.
+            if stride == 4 and word != 0x6000:
+                break
+            if stride == 6 and word != 0x60FF:
+                break
+            if stride == 2 and ((word >> 8) != 0x60 or (word & 0xFF) in (0x00, 0xFF)):
+                break
+            found.add(addr)
+            addr += stride
+            if addr - base > 0x400:  # sanity cap; no real table is this large
+                break
+    return found
+
+
+# Word jump-table entries hold a 16-bit absolute address, so they can only
+# reach code below 64 KiB; valid targets sit above the vector table / header.
+_CODE_LO, _CODE_HI = 0x000200, 0x010000
+
+
+def _read_word_table(rom, base) -> set:
+    """Read a forward, self-bounded word jump table starting at *base*.
+
+    Each entry is a 16-bit absolute address. The table is accepted only if it is
+    clean: every entry is an even, in-range code address and the entries occupy
+    exactly `[base, earliest-target)` — the storage cannot overlap its own first
+    handler. Returns the set of target addresses, or empty if it is not a table.
+    """
+    targets, addr, min_target = [], base, None
+    while rom.in_bounds(addr, 2):
+        if min_target is not None and addr >= min_target:
+            break  # the table cannot extend into its own earliest target
+        word = rom.read_word(addr)
+        if (word & 1) or not (_CODE_LO <= word < _CODE_HI):
+            break  # not a plausible even, in-range code address
+        targets.append(word)
+        min_target = word if min_target is None else min(min_target, word)
+        addr += 2
+        if addr - base > 0x100:  # sanity cap; no real table is this large
+            break
+    if targets and min_target is not None and min_target > base and addr == min_target:
+        return set(targets)
+    return set()
+
+
+def _feeds_indirect_jump(disasm, instr) -> bool:
+    """True if a register-indirect `jmp`/`jsr` follows *instr* within a few steps."""
+    nxt = disasm.instructions.get(instr.next_address)
+    for _ in range(3):
+        if nxt is None:
+            return False
+        if nxt.mnemonic in ('jmp', 'jsr') and nxt.indirect:
+            return True
+        nxt = disasm.instructions.get(nxt.next_address)
+    return False
+
+
+def _discover_word_jump_tables(disasm, rom) -> set:
+    """Find word-address jump/call tables and return their target addresses.
+
+    A common dispatcher loads a 16-bit absolute code address out of a PC-relative
+    table and jumps/calls through it, in two shapes:
+
+        move.w  d(pc,Dn.w), Dm     ; (a) table base is PC-relative in the move
+        movea.l Dm, An
+        jmp     (An)
+
+        lea     table(pc), An      ; (b) table base set up by a preceding lea
+        move.w  (An,Dn.w), Dm
+        movea.l Dm, Am
+        jsr     (Am)
+
+    Unlike `bra` tables the entries are raw word addresses and the jump is
+    register-indirect, so `_discover_bra_tables` never sees them. The entries are
+    reachable only through the computed jump, so static following never decodes
+    them. Return every target so they can be seeded as code.
+
+    Only forward, self-bounded tables are accepted: the entries occupy
+    `[base, earliest-target)` (the storage cannot overlap its own first handler),
+    every entry is an even address inside the word-addressable code range, and a
+    register-indirect jmp/jsr must follow within a few instructions. These guards
+    keep PC-relative *data* word reads from being mistaken for jump tables.
+    """
+    found = set()
+    ordered = sorted(disasm.instructions.values(), key=lambda i: i.address)
+    index_of = {ins.address: k for k, ins in enumerate(ordered)}
+
+    def _lea_base(move_instr, an_reg):
+        """Resolve `lea d(pc),A{an_reg}` set up shortly before `move_instr`."""
+        k = index_of.get(move_instr.address)
+        if k is None:
+            return None
+        for j in range(k - 1, max(k - 9, -1), -1):
+            prev = ordered[j]
+            if prev.mnemonic != 'lea' or len(prev.eas) < 2:
+                continue
+            src, dst = prev.eas[0], prev.eas[1]
+            if (dst.mode == EAMode.ADDR_REG and dst.reg == an_reg
+                    and src.mode in (EAMode.PC_DISP, EAMode.PC_INDEX)):
+                return src.abs_value
+        return None
+
+    for instr in disasm.instructions.values():
+        if instr.mnemonic != 'move' or instr.size != 'w':
+            continue
+        if (len(instr.eas) < 2 or instr.eas[1].mode != EAMode.DATA_REG):
+            continue
+        src = instr.eas[0]
+        if src.mode == EAMode.PC_INDEX:
+            base = src.abs_value                       # shape (a)
+        elif src.mode == EAMode.ADDR_INDEX and src.reg is not None:
+            base = _lea_base(instr, src.reg)           # shape (b)
+        else:
+            continue
+        if base is None:
+            continue
+
+        # Confirm the loaded word feeds a register-indirect jmp/jsr shortly after.
+        if not _feeds_indirect_jump(disasm, instr):
+            continue
+
+        found |= _read_word_table(rom, base)
+    return found
+
+
+def _discover_shared_dispatcher_tables(disasm, rom) -> set:
+    """Find word jump tables reached through a *shared* register-indirect dispatcher.
+
+    Many object routines set a table base then tail-jump to a common dispatcher:
+
+        lea     table(pc), An      ; in the caller routine
+        jmp     dispatcher         ; (or bra/jsr)
+      dispatcher:
+        move.w  (An,Dn.w), Dm      ; An is the incoming table base
+        movea.l Dm, Ak
+        jmp     (Ak)
+
+    `_discover_word_jump_tables` misses these because the `lea` (caller) and the
+    indexed `move.w` (dispatcher) live in different functions, so its same-flow
+    `lea` lookback never sees the base. Here we recognise the dispatcher by the
+    fact that its index register An is *not* written between the function entry
+    and the `move.w` (i.e. An arrives as a parameter), then resolve a table base
+    from every caller that `lea`s one immediately before jumping to the entry.
+    """
+    found = set()
+    ordered = sorted(disasm.instructions.values(), key=lambda i: i.address)
+    index_of = {ins.address: k for k, ins in enumerate(ordered)}
+    subs = sorted(disasm.subroutines)
+
+    # caller index: target address -> instructions that branch/jump/call to it.
+    callers: dict[int, list] = {}
+    for ins in ordered:
+        for tgt in (ins.targets or ()):
+            callers.setdefault(tgt, []).append(ins)
+
+    def _writes_areg(ins, an_reg):
+        return bool(ins.eas) and ins.eas[-1].mode == EAMode.ADDR_REG \
+            and ins.eas[-1].reg == an_reg
+
+    def _lea_base_at(call_instr, an_reg):
+        """Resolve `lea d(pc),A{an_reg}` shortly before *call_instr* (caller side)."""
+        k = index_of.get(call_instr.address)
+        if k is None:
+            return None
+        for j in range(k - 1, max(k - 9, -1), -1):
+            prev = ordered[j]
+            if prev.mnemonic == 'lea' and len(prev.eas) >= 2:
+                src, dst = prev.eas[0], prev.eas[1]
+                if (dst.mode == EAMode.ADDR_REG and dst.reg == an_reg
+                        and src.mode in (EAMode.PC_DISP, EAMode.PC_INDEX)):
+                    return src.abs_value
+        return None
+
+    for instr in disasm.instructions.values():
+        if instr.mnemonic != 'move' or instr.size != 'w':
+            continue
+        if (len(instr.eas) < 2 or instr.eas[1].mode != EAMode.DATA_REG):
+            continue
+        src = instr.eas[0]
+        if src.mode != EAMode.ADDR_INDEX or src.reg is None:
+            continue
+        an_reg = src.reg
+
+        # The dispatcher's function entry is the nearest subroutine at or before
+        # the move; An must arrive untouched from it (a parameter, not local).
+        i = bisect.bisect_right(subs, instr.address) - 1
+        if i < 0:
+            continue
+        entry = subs[i]
+        k_entry, k_here = index_of.get(entry), index_of.get(instr.address)
+        if k_entry is None or k_here is None:
+            continue
+        if any(_writes_areg(ordered[j], an_reg) for j in range(k_entry, k_here)):
+            continue  # An set locally — handled by _discover_word_jump_tables
+        if not _feeds_indirect_jump(disasm, instr):
+            continue
+
+        for caller in callers.get(entry, ()):
+            base = _lea_base_at(caller, an_reg)
+            if base is not None:
+                found |= _read_word_table(rom, base)
+    return found
+
+
+def _load_aux(path):
+    if not path or not os.path.exists(path):
+        return []
+    out = []
+    with open(path) as f:
+        for line in f:
+            line = line.split(';')[0].split('#')[0].strip()
+            if line:
+                addr = int(line, 16)
+                # Runtime discovery can observe bad computed-jump values while
+                # debugging. Do not let vector-table/data addresses become code
+                # seeds; the SoR cartridge's recompiled code starts at $200.
+                if addr < 0x000200 or (addr & 1):
+                    print(f'[recompile] ignoring invalid aux address ${addr:06X}',
+                          file=sys.stderr)
+                    continue
+                out.append(addr)
+    return out
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description='Recompile the SoR ROM to C++.')
+    ap.add_argument('rom', help='path to the ROM binary')
+    ap.add_argument('-o', '--out-dir', default='src/generated',
+                    help='output directory for Sor.hpp / Sor.cpp')
+    ap.add_argument('--aux', default='code-analysis/aux_addresses.txt',
+                    help='auxiliary entry-point address file: indirect-jump '
+                         'targets from the active disassembly (optional)')
+    ap.add_argument('--speculative', default='code-analysis/speculative_addresses.txt',
+                    help='speculative entry-point file: compiled like aux but '
+                         'emit confirmSpeculative() at entry so the runtime can '
+                         'promote confirmed ones to the aux file (optional)')
+    ap.add_argument('--labels-csv', default='code-analysis/labels.csv',
+                    help='CSV of code-segment names (address,label,comment)')
+    ap.add_argument('--addresses-csv', default='code-analysis/addresses.csv',
+                    help='CSV of address labels (address,label,comment)')
+    ap.add_argument('-v', '--verbose', action='store_true')
+    args = ap.parse_args(argv)
+
+    macros_dst = _install_macros(args.out_dir)
+    print(f'[recompile] copied {_MACROS_SRC} -> {macros_dst}')
+
+    rom = ROM.from_file(args.rom)
+
+    # Phase 1: baseline disassembly (aux only) with iterative table discovery.
+    seeds = set(_load_aux(args.aux))
+    while True:
+        disasm = Disassembler(rom, aux_addresses=sorted(seeds),
+                              verbose=args.verbose)
+        disasm.disassemble()
+        discovered = _discover_bra_tables(disasm, rom)
+        discovered |= _discover_word_jump_tables(disasm, rom)
+        discovered |= _discover_shared_dispatcher_tables(disasm, rom)
+        if discovered <= seeds:
+            break
+        seeds |= discovered
+    baseline_entries = set(disasm.subroutines)
+    baseline_instrs = set(disasm.instructions.keys())
+
+    # Phase 2: one more pass with speculative seeds merged in.
+    # The _transfer fix (addrs_set check) ensures that speculative entries which
+    # straddle baseline-instruction ranges don't generate invalid cross-fn gotos.
+    speculative_raw = set(_load_aux(args.speculative)) - seeds  # skip already-known
+    if speculative_raw:
+        seeds |= speculative_raw
+        disasm = Disassembler(rom, aux_addresses=sorted(seeds),
+                              verbose=args.verbose)
+        disasm.disassemble()
+    speculative_derived = set(disasm.subroutines) - baseline_entries
+
+    if args.verbose:
+        print(f'[recompile] {len(seeds)} seed addresses, '
+              f'{len(speculative_derived)} speculative-derived entries',
+              file=sys.stderr)
+
+    # Function names and intra-function goto labels: code-segment labels
+    # (labels.csv) take precedence over the general address labels
+    # (addresses.csv). Names at non-code addresses are harmlessly ignored.
+    names = {}
+    if os.path.exists(args.addresses_csv):
+        names.update({a: x.label for a, x in
+                      _load_csv_addresses(args.addresses_csv).items()})
+    if os.path.exists(args.labels_csv):
+        names.update(_load_labels_csv(args.labels_csv)[0])
+
+    gen = Generator(disasm.instructions, disasm.subroutines,
+                    rom_path=args.rom, names=names,
+                    speculative_addrs=speculative_derived,
+                    baseline_instrs=baseline_instrs)
+    source = gen.emit_source()   # must run first — populates self._rejected
+    header = gen.emit_header()
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    with open(os.path.join(args.out_dir, 'Sor.hpp'), 'w') as f:
+        f.write(header)
+    with open(os.path.join(args.out_dir, 'Sor.cpp'), 'w') as f:
+        f.write(source)
+
+    s = gen.stats
+    total = s.handled + s.stubbed
+    print(f'[recompile] {len(disasm.instructions)} instructions, '
+          f'{len(gen.part.entries)} functions')
+    print(f'[recompile] translated {s.handled}/{total} '
+          f'({100 * s.handled / total:.1f}%), {s.stubbed} stubbed')
+    if s.stub_mnemonics:
+        top = sorted(s.stub_mnemonics.items(), key=lambda kv: -kv[1])
+        print('[recompile] stubbed opcodes: ' +
+              ', '.join(f'{m}×{n}' for m, n in top))
+    print(f'[recompile] wrote {args.out_dir}/Sor.hpp, {args.out_dir}/Sor.cpp')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

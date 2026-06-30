@@ -1,0 +1,7 @@
+.DS_Store
+/build
+code-analysis/speculative_addresses.txt
+/src/generated
+/src/.*
+__pycache__
+/output

@@ -1,0 +1,8 @@
+000000, 400000, mem_rom
+A00000, A10000, mem_z80
+A10000, A11000, mem_io
+A11000, A12000, mem_control
+A14000, A14003, mem_tmms
+C00000, E00000, mem_vdp
+FF0000, FFFFFF, mem_ram
+FFFF0000, FFFFFFFF, mem_ram_
