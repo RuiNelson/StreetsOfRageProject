@@ -38,8 +38,8 @@ spec_count=$(grep -cE '^[0-9a-fA-F]+' "$SPEC" 2>/dev/null || echo 0)
 echo "    $spec_count speculative candidates written to $SPEC"
 
 do_build() {
-    echo "==> [fast $1] build (--full)"
-    if ! ./build.sh --full; then
+    echo "==> [fast $1] build (--full --discover)"
+    if ! ./build.sh --full --discover; then
         echo "Build failed." >&2
         exit 1
     fi

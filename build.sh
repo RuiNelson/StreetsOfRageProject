@@ -11,6 +11,9 @@
 #   ./build.sh                     Configure (if needed) and build.
 #   ./build.sh -f | --full         Recompile the ROM to C++ (run the recompiler)
 #                                  before building. ROM: $SOR_ROM or rom/SOR.bin.
+#   ./build.sh -d | --discover     With --full: also pass speculative_addresses.txt
+#                                  to the recompiler (for discover_aux_fast.sh runs).
+#                                  Omit for normal builds — no speculative stubs.
 #   ./build.sh -c | --clean        Wipe the build dir and reconfigure from scratch.
 #   ./build.sh -t Release          Set the CMake build type (default: Debug).
 #   ./build.sh -j 8                Override the parallel job count.
@@ -39,6 +42,7 @@ BIN="$ROOT/$BUILD_DIR/sor"
 BUILD_TYPE="Debug"
 CLEAN=0
 FULL=0
+DISCOVER=0
 RUN=0
 RUN_ARGS=()
 JOBS=""
@@ -54,6 +58,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -c | --clean) CLEAN=1 ;;
         -f | --full) FULL=1 ;;
+        -d | --discover) DISCOVER=1 ;;
         -t | --type)
             shift
             BUILD_TYPE="${1:?missing build type after -t}"
@@ -102,9 +107,11 @@ if [ "$FULL" = 1 ]; then
         exit 1
     fi
     echo "==> Full: recompiling $ROM -> $SRC_DIR/generated"
-    SPEC_FILE="code-analysis/speculative_addresses.txt"
     SPEC_ARG=""
-    [ -f "$SPEC_FILE" ] && SPEC_ARG="--speculative $SPEC_FILE"
+    if [ "$DISCOVER" = 1 ]; then
+        SPEC_FILE="code-analysis/speculative_addresses.txt"
+        [ -f "$SPEC_FILE" ] && SPEC_ARG="--speculative $SPEC_FILE"
+    fi
     # shellcheck disable=SC2086
     if ! python3 -m tools.recompiler "$ROM" -o "$SRC_DIR/generated" $SPEC_ARG; then
         echo "Recompile failed." >&2
