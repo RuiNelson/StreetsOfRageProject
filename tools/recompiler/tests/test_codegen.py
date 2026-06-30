@@ -355,6 +355,16 @@ def test_banked_word_dispatch_table_discovers_016d0a_without_runtime_aux():
     assert 0x016D0A in fixed
 
 
+def test_shared_dispatcher_backward_table_discovers_00d62a_without_runtime_aux():
+    rom = ROM.from_file(str(_ROOT / 'rom/SOR.bin'))
+    seeds = set(_load_aux(str(_ROOT / 'code-analysis/aux_addresses.txt')))
+    seeds.discard(0x00D62A)
+
+    _, fixed = recompiler_main._disassemble_to_fixpoint(rom, seeds)
+
+    assert 0x00D62A in fixed
+
+
 def test_speculative_scope_does_not_confirm_derived_entries():
     ins = {
         0x100: _instr('rts', None, [], FlowType.RETURN),

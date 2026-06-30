@@ -106,7 +106,7 @@ def _discover_bra_tables(disasm, rom) -> set:
 _CODE_LO, _CODE_HI = 0x000200, 0x010000
 
 
-def _read_word_table(rom, base, high_prefix=0) -> set:
+def _read_word_table(rom, base, high_prefix=0, allow_backward=False) -> set:
     """Read a forward, self-bounded word jump table starting at *base*.
 
     Each entry is a 16-bit absolute address. The table is accepted only if it is
@@ -116,6 +116,8 @@ def _read_word_table(rom, base, high_prefix=0) -> set:
     """
     if high_prefix:
         return _read_prefixed_word_table(rom, base, high_prefix)
+    if allow_backward:
+        return _read_backward_tolerant_word_table(rom, base)
 
     targets, addr, min_target = [], base, None
     while rom.in_bounds(addr, 2):
@@ -130,6 +132,35 @@ def _read_word_table(rom, base, high_prefix=0) -> set:
         if addr - base > 0x100:  # sanity cap; no real table is this large
             break
     if targets and min_target is not None and min_target > base and addr == min_target:
+        return set(targets)
+    return set()
+
+
+def _read_backward_tolerant_word_table(rom, base) -> set:
+    """Read a word table that may branch back to already-known handlers.
+
+    Some shared-dispatcher tables are inline before their first new handler, but
+    early entries point backward into handlers discovered from other tables. The
+    table is therefore bounded by the earliest target greater than the table
+    base, not by the absolute minimum target.
+    """
+    if (base & 1) or not rom.in_bounds(base, 2):
+        return set()
+
+    targets, addr, end = [], base, None
+    while rom.in_bounds(addr, 2):
+        if end is not None and addr >= end:
+            break
+        word = rom.read_word(addr)
+        if (word & 1) or not (_CODE_LO <= word < _CODE_HI):
+            break
+        targets.append(word)
+        if word > base:
+            end = word if end is None else min(end, word)
+        addr += 2
+        if addr - base > 0x100:  # sanity cap; no real table is this large
+            break
+    if targets and end is not None and addr == end:
         return set(targets)
     return set()
 
@@ -360,7 +391,8 @@ def _discover_shared_dispatcher_tables(disasm, rom) -> set:
             for caller in target_callers:
                 base = _lea_base_at(caller, an_reg)
                 if base is not None:
-                    found |= _read_word_table(rom, base, high_prefix)
+                    found |= _read_word_table(
+                        rom, base, high_prefix, allow_backward=True)
     return found
 
 
