@@ -123,9 +123,8 @@ class MegaDriveEnvironment {
         auxAddrFile_ = path;
     }
 
-    /// Called by generated code at the entry of a speculative function (compiled
-    /// from speculative_addresses.txt). Appends the address to the aux file once,
-    /// so a single run confirms all reachable speculative entry points.
+    /// Called by generated code at the entry of a speculative function. Active
+    /// only when an aux file is configured, so normal runs stay silent.
     void confirmSpeculative(m_long addr);
 
     /// Logs one line of recompiled-CPU state — invoked once per ~second from the

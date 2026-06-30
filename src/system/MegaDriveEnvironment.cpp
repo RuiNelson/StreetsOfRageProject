@@ -8,6 +8,29 @@
 #include <cstdio>
 #include <cstdlib>
 
+namespace {
+
+bool auxFileContainsAddress(const std::string &path, unsigned addr) {
+    if (FILE *in = std::fopen(path.c_str(), "r")) {
+        char line[64];
+        while (std::fgets(line, sizeof line, in)) {
+            char *p = line;
+            while (*p == ' ' || *p == '\t')
+                ++p;
+            if (*p == ';' || *p == '#' || *p == '\r' || *p == '\n' || *p == '\0')
+                continue;
+            if ((static_cast<unsigned>(std::strtoul(p, nullptr, 16)) & 0x00FFFFFFu) == addr) {
+                std::fclose(in);
+                return true;
+            }
+        }
+        std::fclose(in);
+    }
+    return false;
+}
+
+} // namespace
+
 MegaDriveEnvironment::MegaDriveEnvironment(VDP::Synchronization sync, VDP::Scaling scaling)
     : memory_(this), z80_(this), sound_(this), controllers_(this), vdp_(this, sync, scaling) {
 }
@@ -126,15 +149,18 @@ void MegaDriveEnvironment::logFrame(unsigned frame, bool displayEnabled) {
 }
 
 void MegaDriveEnvironment::confirmSpeculative(m_long addr) {
+    if (auxAddrFile_.empty())
+        return;
+
     unsigned a = static_cast<unsigned>(addr & 0x00FFFFFFu);
     if (!confirmedSpeculative_.insert(a).second)
         return; // already logged this run
+    if (auxFileContainsAddress(auxAddrFile_, a))
+        return; // already known; not a newly confirmed speculative candidate
     std::fprintf(stderr, "[speculative] confirmed: %06X\n", a);
-    if (!auxAddrFile_.empty()) {
-        if (FILE *out = std::fopen(auxAddrFile_.c_str(), "a")) {
-            std::fprintf(out, "%06x\n", a);
-            std::fclose(out);
-        }
+    if (FILE *out = std::fopen(auxAddrFile_.c_str(), "a")) {
+        std::fprintf(out, "%06x\n", a);
+        std::fclose(out);
     }
 }
 
@@ -219,24 +245,12 @@ void MegaDriveEnvironment::reportUnhandledDispatch(m_long addr) {
 
     // Already seeded? Then a previous pass added it but regenerating produced no
     // handler — stop the discovery loop (exit 43) instead of spinning forever.
-    if (FILE *in = std::fopen(auxAddrFile_.c_str(), "r")) {
-        char line[64];
-        while (std::fgets(line, sizeof line, in)) {
-            char *p = line;
-            while (*p == ' ' || *p == '\t')
-                ++p;
-            if (*p == ';' || *p == '#' || *p == '\r' || *p == '\n' || *p == '\0')
-                continue;
-            if ((static_cast<unsigned>(std::strtoul(p, nullptr, 16)) & 0x00FFFFFFu) == a) {
-                std::fclose(in);
-                std::fprintf(stderr,
-                             "[aux] $%06X already seeded in %s — seeding did not help; stopping\n",
-                             a,
-                             auxAddrFile_.c_str());
-                std::_Exit(43);
-            }
-        }
-        std::fclose(in);
+    if (auxFileContainsAddress(auxAddrFile_, a)) {
+        std::fprintf(stderr,
+                     "[aux] $%06X already seeded in %s — seeding did not help; stopping\n",
+                     a,
+                     auxAddrFile_.c_str());
+        std::_Exit(43);
     }
 
     // Record the new target and exit (42) so the discovery loop re-seeds and

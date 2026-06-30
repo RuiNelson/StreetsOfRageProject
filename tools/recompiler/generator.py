@@ -69,26 +69,32 @@ class Stats:
 
 class Generator:
     def __init__(self, instructions, subroutines, rom_path='rom/StreetsOfRage.bin',
-                 names=None, speculative_addrs=None, baseline_instrs=None):
+                 names=None, speculative_addrs=None, speculative_scope=None,
+                 baseline_instrs=None):
         self.ins = instructions
         self.part = partition(instructions, subroutines)
         self.rom_path = rom_path
         self.stats = Stats()
         self._names = names or {}
+        # _speculative: only raw seeds — these get confirmSpeculative() emitted.
         self._speculative = set(speculative_addrs or [])
+        # _speculative_scope: all Phase-2-derived functions (seeds + derivatives)
+        # — these get their full address list instead of the baseline-filtered one.
+        self._speculative_scope = set(speculative_scope or self._speculative)
         # Effective instruction addresses per function.
         # Baseline functions are restricted to Phase-1 addresses so that phantom
         # instructions injected by overlapping speculative decodes are excluded.
         bl = set(baseline_instrs) if baseline_instrs is not None else None
         self._eff_addrs = {
-            e: (f.addrs if (bl is None or e in self._speculative)
+            e: (f.addrs if (bl is None or e in self._speculative_scope)
                 else [a for a in f.addrs if a in bl])
             for e, f in self.part.functions.items()
         }
         # Set version of _eff_addrs for O(1) membership in _transfer.
         self._addrs_sets = {e: set(addrs) for e, addrs in self._eff_addrs.items()}
-        # Rejected entries (speculative with invalid opcodes): populated in emit_source
-        # before the second pass; _transfer skips direct calls to rejected functions.
+        # Rejected entries (speculative-scope with invalid opcodes): populated in
+        # emit_source before the second pass; _transfer skips direct calls to
+        # rejected functions.
         self._rejected: set = set()
         self._build_fn_names(self._names)
         self._build_label_names(self._names)
@@ -427,8 +433,9 @@ class Generator:
         boot = self.fn(self.part.func_of(0x000200))
         parts = [_SOURCE_PREAMBLE.format(rom_path=self.rom_path, boot_fn=boot)]
 
-        # Pre-translate all functions; speculative entries that fail are excluded
-        # entirely — they decoded data as code and are not valid entry points.
+        # Pre-translate all functions; speculative-scope entries that fail are
+        # excluded entirely — they decoded data as code and are not valid entry
+        # points.
         # Non-speculative failures are real recompiler bugs and re-raise.
         bodies = {}
         rejected = set()
@@ -436,7 +443,7 @@ class Generator:
             try:
                 bodies[e] = '\n'.join(self._emit_function(self.part.functions[e]))
             except Exception:
-                if e in self._speculative:
+                if e in self._speculative_scope:
                     rejected.add(e)
                 else:
                     raise

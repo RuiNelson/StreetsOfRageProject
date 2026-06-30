@@ -3,7 +3,7 @@
 #
 # 1. Scan unmapped ROM regions for 68000 entry point candidates (speculative_scan.py)
 #    and write them to code-analysis/speculative_addresses.txt.
-# 2. Build once with all speculative stubs compiled in (--full).
+# 2. Build once with all speculative stubs compiled in (--full --discover).
 # 3. Run the game in a loop:
 #      - Confirmed speculative addresses are appended to aux_addresses.txt on-the-fly
 #        (no restart needed for those).
@@ -27,13 +27,24 @@ AUX="code-analysis/aux_addresses.txt"
 SPEC="code-analysis/speculative_addresses.txt"
 ROM="${SOR_ROM:-rom/SOR.bin}"
 BIN="src/build/sor"
-MAP="output/sor.map"
 MAX_ITERS="${MAX_ITERS:-500}"
+SCAN_ASM="$(mktemp -t sor_fast_disasm.XXXXXX)"
+SCAN_MAP="$(mktemp -t sor_fast_map.XXXXXX)"
+trap 'rm -f "$SCAN_ASM" "$SCAN_MAP"' EXIT
 
 start_count=$(grep -cE '^[0-9a-fA-F]+' "$AUX" 2>/dev/null || echo 0)
 
+echo "==> [fast] Refreshing coverage map from current aux addresses..."
+if ! python3 -m tools.disassembler "$ROM" -o "$SCAN_ASM" -a "$AUX" --map "$SCAN_MAP"; then
+    echo "Coverage-map refresh failed." >&2
+    exit 1
+fi
+
 echo "==> [fast] Scanning for speculative entry points..."
-python3 -m tools.speculative_scan "$MAP" "$ROM" "$AUX"
+if ! python3 -m tools.speculative_scan "$SCAN_MAP" "$ROM" "$AUX" -o "$SPEC"; then
+    echo "Speculative scan failed." >&2
+    exit 1
+fi
 spec_count=$(grep -cE '^[0-9a-fA-F]+' "$SPEC" 2>/dev/null || echo 0)
 echo "    $spec_count speculative candidates written to $SPEC"
 

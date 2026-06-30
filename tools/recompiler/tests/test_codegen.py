@@ -1,17 +1,36 @@
 """Unit tests for the recompiler codegen (EA expressions + opcode lowering)."""
 
+from pathlib import Path
+import subprocess
+import sys
+
 from tools.disassembler.instruction import EA, EAMode, FlowType, Instruction
 from tools.recompiler import ea_codegen as ea
+from tools.recompiler import main as recompiler_main
 from tools.recompiler import opcodes
 from tools.recompiler.ea_codegen import TempPool
 from tools.recompiler.generator import Generator
-from tools.recompiler.main import _load_aux
+from tools.recompiler.main import _install_macros, _load_aux
 from tools.recompiler.opcodes import Unsupported
 from tools.recompiler.regions import partition
+
+_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _tp():
     return TempPool(0x1000)
+
+
+def _run_recompiler(out_dir, *args):
+    return subprocess.run(
+        [sys.executable, '-m', 'tools.recompiler',
+         'rom/SOR.bin', '-o', str(out_dir), *args],
+        cwd=_ROOT,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
 
 
 # --- effective-address codegen -------------------------------------------
@@ -256,6 +275,101 @@ def test_load_aux_ignores_vector_table_and_odd_addresses(tmp_path):
     aux.write_text('0000001e\n00000200\n00000201\n00000436 ; valid\n')
 
     assert _load_aux(aux) == [0x200, 0x436]
+
+
+def test_load_aux_empty_path_disables_optional_inputs():
+    assert _load_aux('') == []
+
+
+def test_recompiler_default_emits_no_speculative_hooks(tmp_path):
+    out = tmp_path / 'normal'
+
+    _run_recompiler(out)
+
+    source = (out / 'Sor.cpp').read_text()
+    assert 'confirmSpeculative(' not in source
+
+
+def test_recompiler_speculative_option_emits_speculative_hooks(tmp_path):
+    out = tmp_path / 'discover'
+
+    _run_recompiler(out, '--speculative', 'code-analysis/speculative_addresses.txt')
+
+    source = (out / 'Sor.cpp').read_text()
+    assert 'confirmSpeculative(' in source
+
+
+def test_install_macros_creates_output_directory(tmp_path):
+    out = tmp_path / 'new-generated-dir'
+
+    copied = _install_macros(str(out))
+
+    assert copied == out / 'M68KMacros.hpp'
+    assert copied.exists()
+
+
+def test_disassemble_to_fixpoint_repeats_after_new_table_targets(monkeypatch):
+    calls = []
+
+    class FakeDisassembler:
+        def __init__(self, rom, aux_addresses, verbose=False):
+            self.rom = rom
+            self.aux_addresses = set(aux_addresses)
+            self.verbose = verbose
+            self.subroutines = set()
+            self.instructions = {}
+            calls.append(self.aux_addresses)
+
+        def disassemble(self):
+            pass
+
+    def fake_discover(disasm, rom):
+        return {0x200} if 0x200 not in disasm.aux_addresses else set()
+
+    monkeypatch.setattr(recompiler_main, 'Disassembler', FakeDisassembler)
+    monkeypatch.setattr(recompiler_main, '_discover_table_targets', fake_discover)
+
+    disasm, seeds = recompiler_main._disassemble_to_fixpoint('rom', {0x100})
+
+    assert calls == [{0x100}, {0x100, 0x200}]
+    assert disasm.aux_addresses == {0x100, 0x200}
+    assert seeds == {0x100, 0x200}
+
+
+def test_speculative_scope_does_not_confirm_derived_entries():
+    ins = {
+        0x100: _instr('rts', None, [], FlowType.RETURN),
+        0x200: _instr('rts', None, [], FlowType.RETURN),
+        0x300: _instr('rts', None, [], FlowType.RETURN),
+    }
+    for a in ins:
+        ins[a].address = a
+
+    src = Generator(ins, {0x100, 0x200, 0x300},
+                    speculative_addrs={0x200},
+                    speculative_scope={0x200, 0x300},
+                    baseline_instrs={0x100}).emit_source()
+
+    assert 'confirmSpeculative(0x00000200u);' in src
+    assert 'confirmSpeculative(0x00000300u);' not in src
+
+
+def test_invalid_speculative_derived_entry_is_rejected_not_fatal():
+    ins = {
+        0x100: _instr('rts', None, [], FlowType.RETURN),
+        0x200: _instr('rts', None, [], FlowType.RETURN),
+        0x300: _instr('tas', 'b', [EA(EAMode.DATA_REG, reg=0)]),
+    }
+    for a in ins:
+        ins[a].address = a
+
+    src = Generator(ins, {0x100, 0x200, 0x300},
+                    speculative_addrs={0x200},
+                    speculative_scope={0x200, 0x300},
+                    baseline_instrs={0x100}).emit_source()
+
+    assert 'void Sor::sub_000300' not in src
+    assert 'confirmSpeculative(0x00000200u);' in src
 
 
 def test_csv_names_applied_to_goto_labels():

@@ -27,9 +27,29 @@ _MACROS_SRC = _ROOT / 'tools/recompiler/M68KMacros.hpp'
 
 def _install_macros(out_dir: str):
     """Copy the static M68KMacros.hpp alongside the generated Sor sources."""
+    os.makedirs(out_dir, exist_ok=True)
     dst = Path(out_dir) / 'M68KMacros.hpp'
     shutil.copy2(_MACROS_SRC, dst)
     return dst
+
+
+def _discover_table_targets(disasm, rom) -> set:
+    found = _discover_bra_tables(disasm, rom)
+    found |= _discover_word_jump_tables(disasm, rom)
+    found |= _discover_shared_dispatcher_tables(disasm, rom)
+    return found
+
+
+def _disassemble_to_fixpoint(rom, seeds, verbose=False):
+    seeds = set(seeds)
+    while True:
+        disasm = Disassembler(rom, aux_addresses=sorted(seeds),
+                              verbose=verbose)
+        disasm.disassemble()
+        discovered = _discover_table_targets(disasm, rom)
+        if discovered <= seeds:
+            return disasm, seeds
+        seeds |= discovered
 
 
 def _discover_bra_tables(disasm, rom) -> set:
@@ -297,10 +317,11 @@ def main(argv=None):
     ap.add_argument('--aux', default='code-analysis/aux_addresses.txt',
                     help='auxiliary entry-point address file: indirect-jump '
                          'targets from the active disassembly (optional)')
-    ap.add_argument('--speculative', default='code-analysis/speculative_addresses.txt',
+    ap.add_argument('--speculative', default='',
                     help='speculative entry-point file: compiled like aux but '
                          'emit confirmSpeculative() at entry so the runtime can '
-                         'promote confirmed ones to the aux file (optional)')
+                         'promote confirmed ones to the aux file. Disabled unless '
+                         'this option is provided.')
     ap.add_argument('--labels-csv', default='code-analysis/labels.csv',
                     help='CSV of code-segment names (address,label,comment)')
     ap.add_argument('--addresses-csv', default='code-analysis/addresses.csv',
@@ -315,33 +336,27 @@ def main(argv=None):
 
     # Phase 1: baseline disassembly (aux only) with iterative table discovery.
     seeds = set(_load_aux(args.aux))
-    while True:
-        disasm = Disassembler(rom, aux_addresses=sorted(seeds),
-                              verbose=args.verbose)
-        disasm.disassemble()
-        discovered = _discover_bra_tables(disasm, rom)
-        discovered |= _discover_word_jump_tables(disasm, rom)
-        discovered |= _discover_shared_dispatcher_tables(disasm, rom)
-        if discovered <= seeds:
-            break
-        seeds |= discovered
+    disasm, seeds = _disassemble_to_fixpoint(rom, seeds, args.verbose)
     baseline_entries = set(disasm.subroutines)
     baseline_instrs = set(disasm.instructions.keys())
 
-    # Phase 2: one more pass with speculative seeds merged in.
+    # Phase 2: merge speculative seeds and re-run table discovery to convergence.
     # The _transfer fix (addrs_set check) ensures that speculative entries which
     # straddle baseline-instruction ranges don't generate invalid cross-fn gotos.
     speculative_raw = set(_load_aux(args.speculative)) - seeds  # skip already-known
     if speculative_raw:
-        seeds |= speculative_raw
-        disasm = Disassembler(rom, aux_addresses=sorted(seeds),
-                              verbose=args.verbose)
-        disasm.disassemble()
+        disasm, seeds = _disassemble_to_fixpoint(
+            rom, seeds | speculative_raw, args.verbose)
     speculative_derived = set(disasm.subroutines) - baseline_entries
+    # Only the raw seeds need confirmSpeculative() — derivatives are reached via
+    # normal calls from the seed and will be found in Phase 1 once the seed is
+    # promoted to aux_addresses.txt.
+    speculative_seeds = speculative_raw & speculative_derived
 
     if args.verbose:
         print(f'[recompile] {len(seeds)} seed addresses, '
-              f'{len(speculative_derived)} speculative-derived entries',
+              f'{len(speculative_derived)} speculative-derived entries, '
+              f'{len(speculative_seeds)} seeds needing confirmation',
               file=sys.stderr)
 
     # Function names and intra-function goto labels: code-segment labels
@@ -356,7 +371,8 @@ def main(argv=None):
 
     gen = Generator(disasm.instructions, disasm.subroutines,
                     rom_path=args.rom, names=names,
-                    speculative_addrs=speculative_derived,
+                    speculative_addrs=speculative_seeds,
+                    speculative_scope=speculative_derived,
                     baseline_instrs=baseline_instrs)
     source = gen.emit_source()   # must run first — populates self._rejected
     header = gen.emit_header()
