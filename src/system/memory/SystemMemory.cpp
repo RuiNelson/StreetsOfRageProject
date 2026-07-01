@@ -182,7 +182,7 @@ m_byte SystemMemory::hwReadByte(m_long address) {
     if (env_ == nullptr)
         return 0;
     if (a >= 0xA00000u && a < 0xA02000u) {
-        return env_->z80().ram()[a & 0x1FFFu];
+        return env_->z80().readRAMFor68K(static_cast<uint16_t>(a));
     }
     switch (a) {
         case 0xA10001u:
@@ -213,8 +213,8 @@ m_word SystemMemory::hwReadWord(m_long address) {
     if (env_ == nullptr)
         return 0;
     if (a >= 0xA00000u && a < 0xA02000u) {
-        m_byte hi = env_->z80().ram()[a & 0x1FFFu];
-        m_byte lo = env_->z80().ram()[(a + 1) & 0x1FFFu];
+        m_byte hi = env_->z80().readRAMFor68K(static_cast<uint16_t>(a));
+        m_byte lo = env_->z80().readRAMFor68K(static_cast<uint16_t>(a + 1));
         return static_cast<m_word>((static_cast<m_word>(hi) << 8) | lo);
     }
     if (a == 0xA11100u) {
@@ -248,7 +248,7 @@ void SystemMemory::hwWriteByte(m_long address, m_byte value) {
     if (env_ == nullptr)
         return;
     if (a >= 0xA00000u && a < 0xA02000u) {
-        env_->z80().ram()[a & 0x1FFFu] = value;
+        env_->z80().writeRAMFor68K(static_cast<uint16_t>(a), value);
         return;
     }
     switch (a) {
@@ -297,8 +297,8 @@ void SystemMemory::hwWriteWord(m_long address, m_word value) {
     if (env_ == nullptr)
         return;
     if (a >= 0xA00000u && a < 0xA02000u) {
-        env_->z80().ram()[a & 0x1FFFu]       = static_cast<m_byte>(value >> 8);
-        env_->z80().ram()[(a + 1) & 0x1FFFu] = static_cast<m_byte>(value & 0xFFu);
+        env_->z80().writeRAMFor68K(static_cast<uint16_t>(a), static_cast<m_byte>(value >> 8));
+        env_->z80().writeRAMFor68K(static_cast<uint16_t>(a + 1), static_cast<m_byte>(value & 0xFFu));
         return;
     }
     if (a == 0xA11100u) {

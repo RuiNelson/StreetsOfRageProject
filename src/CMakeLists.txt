@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# ── C standard (vendored Genesis-Plus-GX cores: Z80, YM2612, PSG, blip_buf) ───
+# ── C standard ────────────────────────────────────────────────────────────────
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -69,36 +69,9 @@ FetchContent_MakeAvailable(libpng)
 FetchContent_MakeAvailable(CLI11)
 
 # ── Sources ───────────────────────────────────────────────────────────────────
-file(GLOB_RECURSE SOR_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+file(GLOB_RECURSE SOR_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
 list(FILTER SOR_SOURCES EXCLUDE REGEX ".*/_deps/.*")
 list(FILTER SOR_SOURCES EXCLUDE REGEX ".*/build/.*")
-
-# Vendored Genesis-Plus-GX C cores (Z80 CPU, YM2612, PSG, blip_buf) — kept out
-# of the *.cpp glob above since they're plain C, not C++.
-file(GLOB GPGX_C_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/system/z80/gpgx_z80/*.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/system/sound/gpgx_sound/*.c"
-)
-list(APPEND SOR_SOURCES ${GPGX_C_SOURCES})
-
-# ym3438.c's entire body is gated behind HAVE_YM3438_CORE (GPGX selects FM
-# cores at build time via this define); we only ever build the one core.
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/system/sound/gpgx_sound/ym3438.c"
-    PROPERTIES COMPILE_DEFINITIONS HAVE_YM3438_CORE
-)
-
-# z80.c's PAIR union and types.h's reg16_t union pick their in-memory byte
-# layout based on LSB_FIRST. This project only targets little-endian hosts
-# (x86_64/ARM64), so it must always be defined — without it, the union's
-# `.w.l`/`.b.l` accessors alias the *wrong* half of the 32-bit value on a
-# little-endian machine (the Z80 core's "PC" macro silently incremented bits
-# 16-31 instead of 0-15, corrupting the program counter within a few
-# instructions).
-set_property(
-    SOURCE ${GPGX_C_SOURCES}
-    APPEND PROPERTY COMPILE_DEFINITIONS LSB_FIRST
-)
 
 # ── Target ────────────────────────────────────────────────────────────────────
 add_executable(sor ${SOR_SOURCES})
@@ -114,10 +87,6 @@ set_source_files_properties(
     PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>"
 )
 
-# The vendored cores are untouched third-party C; don't hold them to this
-# project's C++ warning level.
-set_source_files_properties(${GPGX_C_SOURCES} PROPERTIES COMPILE_OPTIONS -w)
-
 target_include_directories(sor PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/generated
@@ -127,9 +96,8 @@ target_include_directories(sor PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/system/graphics
     ${CMAKE_CURRENT_SOURCE_DIR}/system/controllers
     ${CMAKE_CURRENT_SOURCE_DIR}/system/sound
-    ${CMAKE_CURRENT_SOURCE_DIR}/system/sound/gpgx_sound
+    ${CMAKE_CURRENT_SOURCE_DIR}/system/sound/mame_ymfm
     ${CMAKE_CURRENT_SOURCE_DIR}/system/z80
-    ${CMAKE_CURRENT_SOURCE_DIR}/system/z80/gpgx_z80
     ${CMAKE_CURRENT_SOURCE_DIR}/config
     ${CMAKE_CURRENT_SOURCE_DIR}/util
 )

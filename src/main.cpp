@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 #include <runtime_tests/TestFontPNG.hpp>
 #include <runtime_tests/TestFontSDL.hpp>
+#include <runtime_tests/sound/AudioHeadlessTest.hpp>
 #include <runtime_tests/sound/TestSound.hpp>
 #include <runtime_tests/vdp_tests/TestVDP.hpp>
 #include <string>
@@ -18,6 +19,7 @@ int main(int argc, char *argv[]) {
     bool        testVDPFlag         = false;
     bool        testControllersFlag = false;
     bool        testSoundFlag       = false;
+    bool        testAudioHeadlessFlag = false;
     bool        configControlsFlag  = false;
     bool        runSorFlag          = false;
     bool        sorDebugFlag        = false;
@@ -25,12 +27,15 @@ int main(int argc, char *argv[]) {
     int         sorVSyncMode        = 0; // 0 = internal timer (default); 1/2/3 = VSync/VSync2/VSync3
     std::string sorRomPath          = "rom/SOR.bin";
     std::string sorAuxAddrFile;         // if set, record unknown dispatch targets here
+    std::string audioWavPath;
 
     app.add_flag("--testFontSDL", testFontSDLFlag, "3D rotating cube with glyphs on faces (SDL window)");
     app.add_flag("--testFontPNG", testFontPNGFlag, "Font PNG export with artistic effects");
     app.add_flag("--testVDP", testVDPFlag, "VDP emulator test suite — 18 tests, exports PNGs");
     app.add_flag("--testControllers", testControllersFlag, "Interactive controller readout via VDP display");
     app.add_flag("--testSound", testSoundFlag, "YM2612/PSG audio output + Z80 CPU test");
+    app.add_flag("--testAudioHeadless", testAudioHeadlessFlag, "Headless YM2612/PSG/Z80 audio regression tests");
+    app.add_option("--writeAudioWav", audioWavPath, "With --testAudioHeadless: write a 48 kHz stereo diagnostic WAV");
     app.add_flag("--configControls", configControlsFlag, "Open controller configuration UI");
     app.add_flag("--runSor", runSorFlag, "Run the recompiled Streets of Rage cartridge");
     app.add_flag("--debug", sorDebugFlag, "With --runSor: log CPU/VDP state once per second");
@@ -50,6 +55,9 @@ int main(int argc, char *argv[]) {
 
     CLI11_PARSE(app, argc, argv);
 
+    if (testAudioHeadlessFlag || !audioWavPath.empty()) {
+        return runAudioHeadlessTest({audioWavPath});
+    }
     if (configControlsFlag) {
         runControlsConfig();
     }

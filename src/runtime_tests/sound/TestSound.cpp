@@ -140,7 +140,6 @@ TestSound::TestSound() : MegaDriveEnvironment(VDP::InternalTimer, VDP::Integer) 
 
 void TestSound::vSync() {
     frameReady_ = true;
-    sound().endFrame();
 }
 
 void TestSound::waitVBlank() {
@@ -209,6 +208,23 @@ constexpr Note kArpeggio[] = {
     {G4, 9},
     {C5, 16},
 };
+
+struct YM2612Pitch {
+    int      block;
+    unsigned fnum;
+};
+
+YM2612Pitch ym2612Pitch(double freq) {
+    constexpr double ymClock = 53'693'175.0 / 7.0;
+    constexpr double ymRate  = ymClock / 144.0;
+    for (int block = 1; block <= 7; ++block) {
+        const double scale = static_cast<double>(1u << (block - 1));
+        const auto   fnum  = static_cast<unsigned>((freq * 1'048'576.0 / (ymRate * scale)) + 0.5);
+        if (fnum <= 0x3FF)
+            return {block, fnum};
+    }
+    return {7, 0x3FF};
+}
 } // namespace
 
 // ── YM2612 (FM) ───────────────────────────────────────────────────────────────
@@ -258,14 +274,11 @@ void TestSound::playFMArpeggio() {
     setupFMVoice();
     for (const Note &n : kArpeggio) {
         if (n.freq > 0) {
-            // FNUM/BLOCK (block 4): see Sound::renderFM()'s 24-tick-per-host-
-            // sample accumulator — pitch is derived against Sound::kSampleRate,
-            // not the real chip clock.
-            unsigned fnum = static_cast<unsigned>(n.freq * 131072.0 / Sound::kSampleRate + 0.5);
+            const YM2612Pitch pitch = ym2612Pitch(n.freq);
             sound().writeYM2612(0, 0xA4);
-            sound().writeYM2612(1, static_cast<m_byte>(0x20 | ((fnum >> 8) & 0x07))); // block 4
+            sound().writeYM2612(1, static_cast<m_byte>((pitch.block << 3) | ((pitch.fnum >> 8) & 0x07)));
             sound().writeYM2612(0, 0xA0);
-            sound().writeYM2612(1, static_cast<m_byte>(fnum & 0xFF));
+            sound().writeYM2612(1, static_cast<m_byte>(pitch.fnum & 0xFF));
             sound().writeYM2612(0, 0x28);
             sound().writeYM2612(1, 0xF0); // key on, all operators, channel 0
         }
@@ -281,11 +294,11 @@ void TestSound::playFMMelody() {
     setupFMVoice();
     for (const Note &n : kTwinkle) {
         if (n.freq > 0) {
-            unsigned fnum = static_cast<unsigned>(n.freq * 131072.0 / Sound::kSampleRate + 0.5);
+            const YM2612Pitch pitch = ym2612Pitch(n.freq);
             sound().writeYM2612(0, 0xA4);
-            sound().writeYM2612(1, static_cast<m_byte>(0x20 | ((fnum >> 8) & 0x07)));
+            sound().writeYM2612(1, static_cast<m_byte>((pitch.block << 3) | ((pitch.fnum >> 8) & 0x07)));
             sound().writeYM2612(0, 0xA0);
-            sound().writeYM2612(1, static_cast<m_byte>(fnum & 0xFF));
+            sound().writeYM2612(1, static_cast<m_byte>(pitch.fnum & 0xFF));
             sound().writeYM2612(0, 0x28);
             sound().writeYM2612(1, 0xF0);
             holdFrames(n.frames - 3);

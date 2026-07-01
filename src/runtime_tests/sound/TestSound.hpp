@@ -41,8 +41,7 @@ class TestSound : public MegaDriveEnvironment {
 
     void vSync() override;
 
-    /// Waits for the next VBlank, dispatching VDP interrupts and flushing one
-    /// frame of audio through Sound::endFrame().
+    /// Waits for the next VBlank, dispatching VDP interrupts.
     void waitVBlank();
 
     /// Holds the current state for ~seconds frames, calling waitVBlank() each time.

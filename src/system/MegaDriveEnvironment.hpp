@@ -220,7 +220,6 @@ class MegaDriveEnvironment {
 
     /// Called by runVDPInterrupts() once per frame (vertical blank).
     virtual void vSync() {
-        sound_.endFrame();
     }
 
     /// Called by runVDPInterrupts() per scanline @p line (0-based, horizontal blank).
