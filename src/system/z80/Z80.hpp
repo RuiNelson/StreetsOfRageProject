@@ -39,6 +39,8 @@ class Z80 {
     void       resetCPU();
     void       installCallbacks();
     void       runCoreForTStates(uint32_t tStates);
+    void       runTowardWallClock(uint32_t maxTStates);
+    uint64_t   wallMasterCycles() const;
     uint64_t   currentMasterCyclesForCore() const;
 
     uint8_t read8ForCore(uint16_t address);
@@ -65,4 +67,5 @@ class Z80 {
     uint64_t                   irqClearAtMasterCycles_   = 0;
     bool                       irqLineAsserted_          = false;
     uint64_t                   cycleEpochMasterCycles_   = 0;
+    uint64_t                   fallbackBaseNS_           = 0; ///< wall-clock base when env_ is null (tests)
 };

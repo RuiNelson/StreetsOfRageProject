@@ -24,6 +24,7 @@ int main(int argc, char *argv[]) {
     bool        runSorFlag            = false;
     bool        sorDebugFlag          = false;
     bool        sorFastFlag           = false;
+    bool        silentFlag            = false;
     int         sorVSyncMode          = 0; // 0 = internal timer (default); 1/2/3 = VSync/VSync2/VSync3
     std::string sorRomPath            = "rom/SOR.bin";
     std::string sorAuxAddrFile; // if set, record unknown dispatch targets here
@@ -38,6 +39,7 @@ int main(int argc, char *argv[]) {
     app.add_flag("--testSound", testSoundFlag, "YM2612/PSG audio output + Z80 CPU test");
     app.add_flag("--testAudioHeadless", testAudioHeadlessFlag, "Headless YM2612/PSG/Z80 audio regression tests");
     app.add_option("--writeAudioWav", audioWavPath, "With --testAudioHeadless: write a 48 kHz stereo diagnostic WAV");
+    app.add_flag("--silent", silentFlag, "Disable audio output entirely (chip writes are dropped)");
     app.add_flag("--configControls", configControlsFlag, "Open controller configuration UI");
     app.add_option("--lang", languagePin, "Console language pin: jp=low/Japanese, en=high/overseas")
         ->capture_default_str()
@@ -67,6 +69,8 @@ int main(int argc, char *argv[]) {
                                                : MegaDriveEnvironment::LanguagePin::Japanese);
         env.setVideoStandard(videoHz == "50" ? MegaDriveEnvironment::VideoStandard::Hz50
                                              : MegaDriveEnvironment::VideoStandard::Hz60);
+        if (silentFlag)
+            env.sound().disable();
     };
 
     if (testAudioHeadlessFlag || !audioWavPath.empty()) {

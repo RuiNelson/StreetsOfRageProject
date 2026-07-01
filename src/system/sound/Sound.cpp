@@ -99,6 +99,9 @@ Sound::~Sound() {
 }
 
 void Sound::start() {
+    if (disabled())
+        return;
+
     SDL_LockMutex(mutex_);
     resetChipState();
     SDL_UnlockMutex(mutex_);
@@ -141,14 +144,21 @@ m_byte Sound::readYM2612(int port) {
 }
 
 m_byte Sound::readYM2612At(uint64_t masterCycles, int port) {
+    (void)port; // every YM2612 port reads back the status register
+    if (disabled())
+        return 0;
+
+    // While streaming, the chip belongs to the render thread; status reads
+    // must never block gameplay on it, so they return the last status the
+    // renderer published (a few ms stale at worst — the busy-wait loops in
+    // the drivers only need "not busy").
+    if (stream_)
+        return cachedStatus_.load(std::memory_order_relaxed);
+
     SDL_LockMutex(mutex_);
-    // Reads normally leave queued writes to the renderer so they keep their
-    // timestamps; only a queued timer-register write ($24–$27) must be applied
-    // now, because it changes the status flags the driver is polling for.
-    if (pendingTimerWrites_ > 0 || !stream_)
-        processEventsUntil(masterCycles);
+    processEventsUntil(masterCycles);
     ymInterface_.syncTimersToMasterCycle(masterCycles);
-    m_byte result = ym_.read(static_cast<uint32_t>(port & 3));
+    m_byte result = ym_.read(0);
     SDL_UnlockMutex(mutex_);
     return result;
 }
@@ -158,6 +168,8 @@ void Sound::writeYM2612(int port, m_byte value) {
 }
 
 void Sound::writeYM2612At(uint64_t masterCycles, int port, m_byte value) {
+    if (disabled())
+        return;
     SDL_LockMutex(mutex_);
     enqueueEvent(TimedEvent{
         .masterCycle = masterCycles,
@@ -175,6 +187,8 @@ void Sound::writePSG(m_byte value) {
 }
 
 void Sound::writePSGAt(uint64_t masterCycles, m_byte value) {
+    if (disabled())
+        return;
     SDL_LockMutex(mutex_);
     enqueueEvent(TimedEvent{
         .masterCycle = masterCycles,
@@ -199,21 +213,24 @@ void Sound::renderForDiagnostics(int16_t *dst, int frames) {
 
 Sound::Diagnostics Sound::diagnostics() const {
     SDL_LockMutex(mutex_);
-    const Diagnostics result{
-        .audioFramesRendered = audioFramesRendered_,
-        .underruns           = underrunCount_,
-        .overruns            = overrunCount_,
+    const size_t   queued = pendingEvents_.size();
+    const uint64_t late   = lateEventCount_;
+    SDL_UnlockMutex(mutex_);
+    // The remaining counters are owned by the render thread; reading them
+    // unlocked is fine for diagnostics.
+    return Diagnostics{
+        .audioFramesRendered = audioFramesRendered_.load(std::memory_order_relaxed),
+        .underruns           = underrunCount_.load(std::memory_order_relaxed),
+        .overruns            = overrunCount_.load(std::memory_order_relaxed),
         .ymTimerExpirations  = ymInterface_.timerExpirationCount(),
-        .queuedEvents        = pendingEvents_.size(),
-        .lateEvents          = lateEventCount_,
-        .clippedSamples      = clippedSampleCount_,
-        .peakLeft            = peakSample_[0],
-        .peakRight           = peakSample_[1],
+        .queuedEvents        = queued,
+        .lateEvents          = late,
+        .clippedSamples      = clippedSampleCount_.load(std::memory_order_relaxed),
+        .peakLeft            = peakSample_[0].load(std::memory_order_relaxed),
+        .peakRight           = peakSample_[1].load(std::memory_order_relaxed),
         .ringBufferedFrames  = ringBufferedFrames_,
         .fmSourceSampleRate  = fmSampleRate_,
     };
-    SDL_UnlockMutex(mutex_);
-    return result;
 }
 
 void Sound::audioCallback(void *userdata, SDL_AudioStream *stream, int additionalAmount, int totalAmount) {
@@ -230,25 +247,26 @@ void Sound::resetChipState() {
     nextFM_.clear();
     ym_.generate(&previousFM_, 1);
     ym_.generate(&nextFM_, 1);
-    fmAccumulator_           = 1.0;
-    renderMasterCycle_       = std::max(0.0, static_cast<double>(masterCyclesNow()) - kEventLatencyCycles);
-    lastRenderedMasterCycle_ = 0;
-    queuedYMAddress_         = 0;
-    pendingTimerWrites_      = 0;
-    lateEventCount_          = 0;
-    clippedSampleCount_      = 0;
-    peakSample_.fill(0);
+    fmAccumulator_     = 1.0;
+    renderMasterCycle_ = std::max(0.0, static_cast<double>(masterCyclesNow()) - kEventLatencyCycles);
+    lastRenderedMasterCycle_.store(0, std::memory_order_relaxed);
+    queuedYMAddress_ = 0;
+    lateEventCount_  = 0;
+    clippedSampleCount_.store(0, std::memory_order_relaxed);
+    peakSample_[0].store(0, std::memory_order_relaxed);
+    peakSample_[1].store(0, std::memory_order_relaxed);
+    cachedStatus_.store(0, std::memory_order_relaxed);
     dcPrevInput_.fill(0.0);
     dcPrevOutput_.fill(0.0);
     lowpassState_.fill(0.0);
     pendingEvents_.clear();
     ringBuffer_.assign(kRingBufferFrames * 2, 0);
-    ringReadFrame_       = 0;
-    ringWriteFrame_      = 0;
-    ringBufferedFrames_  = 0;
-    audioFramesRendered_ = 0;
-    underrunCount_       = 0;
-    overrunCount_        = 0;
+    ringReadFrame_      = 0;
+    ringWriteFrame_     = 0;
+    ringBufferedFrames_ = 0;
+    audioFramesRendered_.store(0, std::memory_order_relaxed);
+    underrunCount_.store(0, std::memory_order_relaxed);
+    overrunCount_.store(0, std::memory_order_relaxed);
     ymInterface_.resetTiming();
 }
 
@@ -326,7 +344,6 @@ void Sound::popRingFrames(int16_t *dst, int frames) {
 void Sound::renderSamples(int16_t *dst, int frames) {
     for (int base = 0; base < frames; base += kRenderChunkFrames) {
         const int chunkFrames = std::min(kRenderChunkFrames, frames - base);
-        SDL_LockMutex(mutex_);
         // Keep the render clock kEventLatencyCycles behind the producers'
         // wall clock: snap on gross drift (startup, host stalls), otherwise
         // trim the per-sample step so the pitch shift stays inaudible.
@@ -341,18 +358,22 @@ void Sound::renderSamples(int16_t *dst, int frames) {
         for (int i = 0; i < chunkFrames; ++i) {
             const int      frame       = base + i;
             const uint64_t masterCycle = static_cast<uint64_t>(renderMasterCycle_);
+            // Only the queue drain takes the lock; the chip is owned by this
+            // thread, so generation never blocks the producer (game) threads.
+            SDL_LockMutex(mutex_);
             processEventsUntil(masterCycle);
+            SDL_UnlockMutex(mutex_);
             ymInterface_.syncTimersToMasterCycle(masterCycle);
-            const auto fm            = renderFM();
-            const auto psg           = psg_.render();
-            const auto filtered      = filterOutput({fm[0] + psg[0], fm[1] + psg[1]});
-            dst[frame * 2 + 0]       = clampMixedSample(filtered[0], 0);
-            dst[frame * 2 + 1]       = clampMixedSample(filtered[1], 1);
-            lastRenderedMasterCycle_ = masterCycle;
+            const auto fm       = renderFM();
+            const auto psg      = psg_.render();
+            const auto filtered = filterOutput({fm[0] + psg[0], fm[1] + psg[1]});
+            dst[frame * 2 + 0]  = clampMixedSample(filtered[0], 0);
+            dst[frame * 2 + 1]  = clampMixedSample(filtered[1], 1);
+            lastRenderedMasterCycle_.store(masterCycle, std::memory_order_relaxed);
             renderMasterCycle_ += step;
         }
-        audioFramesRendered_ += static_cast<uint64_t>(chunkFrames);
-        SDL_UnlockMutex(mutex_);
+        cachedStatus_.store(ym_.read(0), std::memory_order_relaxed);
+        audioFramesRendered_.fetch_add(static_cast<uint64_t>(chunkFrames), std::memory_order_relaxed);
         if (FILE *tap = sndTapFile())
             std::fwrite(
                 dst + static_cast<size_t>(base) * 2, sizeof(int16_t), static_cast<size_t>(chunkFrames) * 2, tap);
@@ -369,8 +390,9 @@ void Sound::enqueueEvent(TimedEvent event) {
                      event.port,
                      event.value);
     }
-    if (event.masterCycle < lastRenderedMasterCycle_) {
-        event.masterCycle = lastRenderedMasterCycle_;
+    const uint64_t lastRendered = lastRenderedMasterCycle_.load(std::memory_order_relaxed);
+    if (event.masterCycle < lastRendered) {
+        event.masterCycle = lastRendered;
         ++lateEventCount_;
     }
 
@@ -379,8 +401,11 @@ void Sound::enqueueEvent(TimedEvent event) {
             if (event.port == 0)
                 queuedYMAddress_ = event.value;
         } else if (event.port == 1 && queuedYMAddress_ >= 0x24 && queuedYMAddress_ <= 0x27) {
+            // Optimistically clear the timer flags in the published status so
+            // a driver that just wrote $27 to reset them doesn't re-read the
+            // stale set flags before the renderer applies the write.
             event.timerRegister = true;
-            ++pendingTimerWrites_;
+            cachedStatus_.fetch_and(static_cast<uint8_t>(~0x03u), std::memory_order_relaxed);
         }
     }
 
@@ -394,8 +419,6 @@ void Sound::processEventsUntil(uint64_t masterCycle) {
     while (!pendingEvents_.empty() && pendingEvents_.front().masterCycle <= masterCycle) {
         TimedEvent event = pendingEvents_.front();
         pendingEvents_.pop_front();
-        if (event.timerRegister)
-            --pendingTimerWrites_;
         applyEvent(event);
     }
 }
@@ -447,8 +470,8 @@ std::array<int, 2> Sound::filterOutput(std::array<int, 2> sample) {
 
 int16_t Sound::clampMixedSample(int value, size_t channel) {
     const int32_t absValue = static_cast<int32_t>(std::abs(value));
-    if (channel < peakSample_.size())
-        peakSample_[channel] = std::max(peakSample_[channel], absValue);
+    if (channel < peakSample_.size() && absValue > peakSample_[channel].load(std::memory_order_relaxed))
+        peakSample_[channel].store(absValue, std::memory_order_relaxed); // single writer: render thread
     if (value < -32768 || value > 32767)
         ++clippedSampleCount_;
     return clamp16(value);

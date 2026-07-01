@@ -29,6 +29,15 @@ class Sound {
     void start();
     void stop();
 
+    /// Disables the sound subsystem entirely (--silent): start() opens no
+    /// audio device, chip writes are dropped, and status reads return 0.
+    void disable() {
+        disabled_.store(true, std::memory_order_release);
+    }
+    bool disabled() const {
+        return disabled_.load(std::memory_order_acquire);
+    }
+
     m_byte readYM2612(int port);
     m_byte readYM2612At(uint64_t masterCycles, int port);
     void   writeYM2612(int port, m_byte value);
@@ -134,38 +143,44 @@ class Sound {
     std::array<int, 2> filterOutput(std::array<int, 2> sample);
     int16_t            clampMixedSample(int value, size_t channel);
 
+    // Threading model while streaming: producers (68K/Z80 threads) only touch
+    // the event queue under mutex_ (short critical sections) and read the
+    // atomic cachedStatus_; the chip state (ym_, psg_, ymInterface_, filters,
+    // render clock) is owned exclusively by the audio render thread. Headless
+    // (!stream_) everything runs on the caller's thread.
     MegaDriveEnvironment *env_              = nullptr;
-    SDL_Mutex            *mutex_            = nullptr;
+    SDL_Mutex            *mutex_            = nullptr; ///< guards pendingEvents_ + enqueue bookkeeping
     SDL_AudioStream      *stream_           = nullptr;
     bool                  audioInitialized_ = false;
+    std::atomic<bool>     disabled_{false};
+    std::atomic<uint8_t>  cachedStatus_{0}; ///< last YM status published by the render thread
 
-    YMInterface               ymInterface_;
-    ymfm::ym2612              ym_;
-    PSG                       psg_;
-    ymfm::ym2612::output_data lastFM_{};
-    ymfm::ym2612::output_data previousFM_{};
-    ymfm::ym2612::output_data nextFM_{};
-    double                    fmAccumulator_           = 1.0;
-    uint32_t                  fmSampleRate_            = 0;
-    double                    renderMasterCycle_       = 0.0;
-    uint64_t                  lastRenderedMasterCycle_ = 0;
-    uint64_t                  baseTimeNS_              = 0;
-    uint8_t                   queuedYMAddress_         = 0; ///< enqueue-time shadow of the port-0 address latch
-    int                       pendingTimerWrites_      = 0; ///< queued events with timerRegister set
-    uint64_t                  lateEventCount_          = 0;
-    uint64_t                  clippedSampleCount_      = 0;
-    std::array<int32_t, 2>    peakSample_{};
-    std::array<double, 2>     dcPrevInput_{};
-    std::array<double, 2>     dcPrevOutput_{};
-    std::array<double, 2>     lowpassState_{};
-    std::deque<TimedEvent>    pendingEvents_;
-    std::vector<int16_t>      callbackBuffer_;
-    std::vector<int16_t>      renderBuffer_;
-    std::vector<int16_t>      ringBuffer_;
-    size_t                    ringReadFrame_       = 0;
-    size_t                    ringWriteFrame_      = 0;
-    size_t                    ringBufferedFrames_  = 0;
-    uint64_t                  audioFramesRendered_ = 0;
-    uint64_t                  underrunCount_       = 0;
-    uint64_t                  overrunCount_        = 0;
+    YMInterface                         ymInterface_;
+    ymfm::ym2612                        ym_;
+    PSG                                 psg_;
+    ymfm::ym2612::output_data           lastFM_{};
+    ymfm::ym2612::output_data           previousFM_{};
+    ymfm::ym2612::output_data           nextFM_{};
+    double                              fmAccumulator_     = 1.0;
+    uint32_t                            fmSampleRate_      = 0;
+    double                              renderMasterCycle_ = 0.0;
+    std::atomic<uint64_t>               lastRenderedMasterCycle_{0};
+    uint64_t                            baseTimeNS_      = 0;
+    uint8_t                             queuedYMAddress_ = 0; ///< enqueue-time shadow of the port-0 address latch
+    uint64_t                            lateEventCount_  = 0;
+    std::atomic<uint64_t>               clippedSampleCount_{0};
+    std::array<std::atomic<int32_t>, 2> peakSample_{};
+    std::array<double, 2>               dcPrevInput_{};
+    std::array<double, 2>               dcPrevOutput_{};
+    std::array<double, 2>               lowpassState_{};
+    std::deque<TimedEvent>              pendingEvents_;
+    std::vector<int16_t>                callbackBuffer_;
+    std::vector<int16_t>                renderBuffer_;
+    std::vector<int16_t>                ringBuffer_;
+    size_t                              ringReadFrame_      = 0;
+    size_t                              ringWriteFrame_     = 0;
+    size_t                              ringBufferedFrames_ = 0;
+    std::atomic<uint64_t>               audioFramesRendered_{0};
+    std::atomic<uint64_t>               underrunCount_{0};
+    std::atomic<uint64_t>               overrunCount_{0};
 };

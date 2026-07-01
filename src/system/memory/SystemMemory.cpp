@@ -339,6 +339,8 @@ void SystemMemory::hwWriteLong(m_long address, m_long value) {
 m_byte SystemMemory::readByte(m_long address) {
     if (isHardware(address))
         return hwReadByte(address);
+    if (isROM(address))
+        return _readByte(address); // ROM is immutable after loadROM(): lock-free
     SDL_LockMutex(mutex_);
     auto val = _readByte(address);
     SDL_UnlockMutex(mutex_);
@@ -348,6 +350,8 @@ m_byte SystemMemory::readByte(m_long address) {
 m_word SystemMemory::readWord(m_long address) {
     if (isHardware(address))
         return hwReadWord(address);
+    if (isROM(address))
+        return _readWord(address); // ROM is immutable after loadROM(): lock-free
     SDL_LockMutex(mutex_);
     auto val = _readWord(address);
     SDL_UnlockMutex(mutex_);
@@ -357,6 +361,8 @@ m_word SystemMemory::readWord(m_long address) {
 m_long SystemMemory::readLong(m_long address) {
     if (isHardware(address))
         return hwReadLong(address);
+    if (isROM(address))
+        return _readLong(address); // ROM is immutable after loadROM(): lock-free
     SDL_LockMutex(mutex_);
     auto val = _readLong(address);
     SDL_UnlockMutex(mutex_);
