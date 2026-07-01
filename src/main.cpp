@@ -14,20 +14,22 @@ int main(int argc, char *argv[]) {
     CLI::App app{"MegaDrive Environment"};
     app.set_version_flag("-V,--version", "0.1.0");
 
-    bool        testFontSDLFlag     = false;
-    bool        testFontPNGFlag     = false;
-    bool        testVDPFlag         = false;
-    bool        testControllersFlag = false;
-    bool        testSoundFlag       = false;
+    bool        testFontSDLFlag       = false;
+    bool        testFontPNGFlag       = false;
+    bool        testVDPFlag           = false;
+    bool        testControllersFlag   = false;
+    bool        testSoundFlag         = false;
     bool        testAudioHeadlessFlag = false;
-    bool        configControlsFlag  = false;
-    bool        runSorFlag          = false;
-    bool        sorDebugFlag        = false;
-    bool        sorFastFlag         = false;
-    int         sorVSyncMode        = 0; // 0 = internal timer (default); 1/2/3 = VSync/VSync2/VSync3
-    std::string sorRomPath          = "rom/SOR.bin";
-    std::string sorAuxAddrFile;         // if set, record unknown dispatch targets here
+    bool        configControlsFlag    = false;
+    bool        runSorFlag            = false;
+    bool        sorDebugFlag          = false;
+    bool        sorFastFlag           = false;
+    int         sorVSyncMode          = 0; // 0 = internal timer (default); 1/2/3 = VSync/VSync2/VSync3
+    std::string sorRomPath            = "rom/SOR.bin";
+    std::string sorAuxAddrFile; // if set, record unknown dispatch targets here
     std::string audioWavPath;
+    std::string languagePin = "jp";
+    std::string videoHz     = "60";
 
     app.add_flag("--testFontSDL", testFontSDLFlag, "3D rotating cube with glyphs on faces (SDL window)");
     app.add_flag("--testFontPNG", testFontPNGFlag, "Font PNG export with artistic effects");
@@ -37,12 +39,18 @@ int main(int argc, char *argv[]) {
     app.add_flag("--testAudioHeadless", testAudioHeadlessFlag, "Headless YM2612/PSG/Z80 audio regression tests");
     app.add_option("--writeAudioWav", audioWavPath, "With --testAudioHeadless: write a 48 kHz stereo diagnostic WAV");
     app.add_flag("--configControls", configControlsFlag, "Open controller configuration UI");
+    app.add_option("--lang", languagePin, "Console language pin: jp=low/Japanese, en=high/overseas")
+        ->capture_default_str()
+        ->check(CLI::IsMember({"jp", "en"}));
+    app.add_option("--hz", videoHz, "Console video frequency pin: 60=low/NTSC, 50=high/PAL")
+        ->capture_default_str()
+        ->check(CLI::IsMember({"60", "50"}));
     app.add_flag("--runSor", runSorFlag, "Run the recompiled Streets of Rage cartridge");
     app.add_flag("--debug", sorDebugFlag, "With --runSor: log CPU/VDP state once per second");
     app.add_flag("--fast", sorFastFlag, "With --runSor: disable CPU pacing (faster bring-up)");
     app.add_option("--vsync",
                    sorVSyncMode,
-                   "With --runSor: frame sync — 0=internal 59.94 Hz timer (default), "
+                   "With --runSor: frame sync — 0=internal timer from --hz (default), "
                    "1=VSync, 2=VSync2 (½ rate), 3=VSync3 (⅓ rate)")
         ->capture_default_str()
         ->check(CLI::Range(0, 3));
@@ -52,8 +60,14 @@ int main(int argc, char *argv[]) {
                    "With --runSor: on an indirect dispatch to an unknown address, append it to "
                    "this aux file and exit (42) instead of aborting — for the discovery loop");
 
-
     CLI11_PARSE(app, argc, argv);
+
+    auto configureEnvironment = [&](MegaDriveEnvironment &env) {
+        env.setLanguagePin(languagePin == "en" ? MegaDriveEnvironment::LanguagePin::Overseas
+                                               : MegaDriveEnvironment::LanguagePin::Japanese);
+        env.setVideoStandard(videoHz == "50" ? MegaDriveEnvironment::VideoStandard::Hz50
+                                             : MegaDriveEnvironment::VideoStandard::Hz60);
+    };
 
     if (testAudioHeadlessFlag || !audioWavPath.empty()) {
         return runAudioHeadlessTest({audioWavPath});
@@ -69,18 +83,22 @@ int main(int argc, char *argv[]) {
     }
     if (testVDPFlag) {
         VDPTester tester;
+        configureEnvironment(tester);
         tester.boot();
     }
     if (testControllersFlag) {
         TestControllers tester;
+        configureEnvironment(tester);
         tester.boot();
     }
     if (testSoundFlag) {
         TestSound tester;
+        configureEnvironment(tester);
         tester.boot();
     }
     if (runSorFlag) {
         Sor sor(sorRomPath, static_cast<VDP::Synchronization>(sorVSyncMode));
+        configureEnvironment(sor);
         sor.setDebugLog(sorDebugFlag);
         sor.setFastMode(sorFastFlag);
         if (!sorAuxAddrFile.empty()) {

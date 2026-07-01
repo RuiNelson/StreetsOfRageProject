@@ -39,6 +39,7 @@ class Z80 {
     void       resetCPU();
     void       installCallbacks();
     void       runCoreForTStates(uint32_t tStates);
+    uint64_t   currentMasterCyclesForCore() const;
 
     uint8_t read8ForCore(uint16_t address);
     void    write8ForCore(uint16_t address, uint8_t value);
@@ -59,8 +60,9 @@ class Z80 {
     std::atomic<bool>          busAcked_{true};
     std::atomic<bool>          resetHeld_{true};
     std::atomic<bool>          irqPending_{false};
-    uint32_t                   bankRegister_         = 0;
-    uint64_t                   executedScaledCycles_ = 0;
-    uint64_t                   irqClearTimeNS_       = 0;
-    bool                       irqLineAsserted_      = false;
+    uint32_t                   bankRegister_           = 0;
+    uint64_t                   executedScaledCycles_   = 0;
+    uint64_t                   irqClearTimeNS_         = 0;
+    bool                       irqLineAsserted_        = false;
+    uint64_t                   cycleEpochMasterCycles_ = 0;
 };

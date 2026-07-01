@@ -49,7 +49,7 @@ class VDP {
     public:
     /// Render synchronization mode for framerate control.
     enum Synchronization : int {
-        InternalTimer = 0, ///< Use internal 59.94 Hz timer
+        InternalTimer = 0, ///< Use internal 60/50 Hz timer from the environment region pins
         VSync         = 1, ///< Sync to monitor refresh rate (1:1)
         VSync2        = 2, ///< Hold frame for 2 monitor refreshes (half speed)
         VSync3        = 3, ///< Hold frame for 3 monitor refreshes (third speed)

@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <vector>
 
@@ -29,14 +30,22 @@ class Sound {
     void stop();
 
     m_byte readYM2612(int port);
+    m_byte readYM2612At(uint64_t masterCycles, int port);
     void   writeYM2612(int port, m_byte value);
+    void   writeYM2612At(uint64_t masterCycles, int port, m_byte value);
     void   writePSG(m_byte value);
+    void   writePSGAt(uint64_t masterCycles, m_byte value);
 
     struct Diagnostics {
         uint64_t audioFramesRendered = 0;
         uint64_t underruns           = 0;
         uint64_t overruns            = 0;
         uint64_t ymTimerExpirations  = 0;
+        uint64_t queuedEvents        = 0;
+        uint64_t lateEvents          = 0;
+        uint64_t clippedSamples      = 0;
+        int32_t  peakLeft            = 0;
+        int32_t  peakRight           = 0;
         size_t   ringBufferedFrames  = 0;
         uint32_t fmSourceSampleRate  = 0;
     };
@@ -52,51 +61,71 @@ class Sound {
     private:
     class YMInterface : public ymfm::ymfm_interface {
         public:
-        void resetTiming();
-        void syncTimersToNow();
-        void ymfm_sync_mode_write(uint8_t data) override;
-        void ymfm_sync_check_interrupts() override;
-        void ymfm_set_timer(uint32_t tnum, int32_t duration_in_clocks) override;
-        void ymfm_set_busy_end(uint32_t clocks) override;
-        bool ymfm_is_busy() override;
-        void ymfm_update_irq(bool asserted) override;
-        bool irqAsserted() const;
+        void     resetTiming();
+        void     setMasterCycle(uint64_t masterCycle);
+        void     syncTimersToMasterCycle(uint64_t masterCycle);
+        void     ymfm_sync_mode_write(uint8_t data) override;
+        void     ymfm_sync_check_interrupts() override;
+        void     ymfm_set_timer(uint32_t tnum, int32_t duration_in_clocks) override;
+        void     ymfm_set_busy_end(uint32_t clocks) override;
+        bool     ymfm_is_busy() override;
+        void     ymfm_update_irq(bool asserted) override;
+        bool     irqAsserted() const;
         uint64_t timerExpirationCount() const;
 
         private:
-        std::array<uint64_t, 2> timerDeadlineNS_{};
+        std::array<uint64_t, 2> timerDeadlineMasterCycles_{};
         std::array<bool, 2>     timerActive_{};
-        uint64_t                busyUntilNS_   = 0;
-        uint64_t                timerExpirations_ = 0;
-        bool                    irq_           = false;
-        bool                    syncingTimers_ = false;
+        uint64_t                busyUntilMasterCycle_ = 0;
+        uint64_t                currentMasterCycle_   = 0;
+        uint64_t                timerExpirations_     = 0;
+        bool                    irq_                  = false;
+        bool                    syncingTimers_        = false;
     };
 
     struct PSG {
-        void reset();
-        void write(m_byte value);
-        int  render();
+        void               reset();
+        void               write(m_byte value);
+        std::array<int, 2> render();
+        void               setPanning(uint8_t mask);
 
         std::array<uint16_t, 3> tonePeriod{};
-        std::array<uint8_t, 4>  volume{};
-        std::array<double, 3>   tonePhase{};
-        std::array<int, 3>      toneLevel{};
-        uint8_t                 latchedChannel = 0;
-        bool                    latchedVolume  = false;
-        uint8_t                 noiseControl   = 0;
-        double                  noisePhase     = 0.0;
-        uint16_t                noiseLFSR      = 0x8000;
-        int                     noiseLevel     = 1;
+        std::array<uint16_t, 4> volume{};
+        std::array<double, 4>   counter{};
+        std::array<int, 3>      tonePolarity{};
+        std::array<int, 4>      leftAmp{};
+        std::array<int, 4>      rightAmp{};
+        uint8_t                 latchedRegister = 3;
+        uint8_t                 noiseControl    = 0;
+        uint16_t                noiseLFSR       = 0x8000;
+        int                     noiseOutput     = 0;
     };
 
-    static void audioCallback(void *userdata, SDL_AudioStream *stream, int additionalAmount, int totalAmount);
-    void        resetChipState();
-    void        renderToStream(SDL_AudioStream *stream, int bytesRequested);
-    void        ensureRingFrames(int frames);
-    void        pushRingFrames(const int16_t *src, int frames);
-    void        popRingFrames(int16_t *dst, int frames);
-    void        renderSamples(int16_t *dst, int frames);
+    enum class EventType : uint8_t {
+        YMWrite,
+        PSGWrite,
+    };
+
+    struct TimedEvent {
+        uint64_t  masterCycle = 0;
+        EventType type        = EventType::YMWrite;
+        uint8_t   port        = 0;
+        uint8_t   value       = 0;
+    };
+
+    static void        audioCallback(void *userdata, SDL_AudioStream *stream, int additionalAmount, int totalAmount);
+    void               resetChipState();
+    void               renderToStream(SDL_AudioStream *stream, int bytesRequested);
+    void               ensureRingFrames(int frames);
+    void               pushRingFrames(const int16_t *src, int frames);
+    void               popRingFrames(int16_t *dst, int frames);
+    void               renderSamples(int16_t *dst, int frames);
+    void               enqueueEvent(TimedEvent event);
+    void               processEventsUntil(uint64_t masterCycle);
+    void               applyEvent(const TimedEvent &event);
     std::array<int, 2> renderFM();
+    std::array<int, 2> filterOutput(std::array<int, 2> sample);
+    int16_t            clampMixedSample(int value, size_t channel);
 
     MegaDriveEnvironment *env_              = nullptr;
     SDL_Mutex            *mutex_            = nullptr;
@@ -107,15 +136,27 @@ class Sound {
     ymfm::ym2612              ym_;
     PSG                       psg_;
     ymfm::ym2612::output_data lastFM_{};
-    double                    fmAccumulator_ = 0.0;
-    uint32_t                  fmSampleRate_  = 0;
+    ymfm::ym2612::output_data previousFM_{};
+    ymfm::ym2612::output_data nextFM_{};
+    double                    fmAccumulator_           = 1.0;
+    uint32_t                  fmSampleRate_            = 0;
+    double                    renderMasterCycle_       = 0.0;
+    uint64_t                  lastRenderedMasterCycle_ = 0;
+    uint64_t                  untimedMasterCycle_      = 0;
+    uint64_t                  lateEventCount_          = 0;
+    uint64_t                  clippedSampleCount_      = 0;
+    std::array<int32_t, 2>    peakSample_{};
+    std::array<double, 2>     dcPrevInput_{};
+    std::array<double, 2>     dcPrevOutput_{};
+    std::array<double, 2>     lowpassState_{};
+    std::deque<TimedEvent>    pendingEvents_;
     std::vector<int16_t>      callbackBuffer_;
     std::vector<int16_t>      renderBuffer_;
     std::vector<int16_t>      ringBuffer_;
-    size_t                    ringReadFrame_      = 0;
-    size_t                    ringWriteFrame_     = 0;
-    size_t                    ringBufferedFrames_ = 0;
+    size_t                    ringReadFrame_       = 0;
+    size_t                    ringWriteFrame_      = 0;
+    size_t                    ringBufferedFrames_  = 0;
     uint64_t                  audioFramesRendered_ = 0;
-    uint64_t                  underrunCount_      = 0;
-    uint64_t                  overrunCount_       = 0;
+    uint64_t                  underrunCount_       = 0;
+    uint64_t                  overrunCount_        = 0;
 };

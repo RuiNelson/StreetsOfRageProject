@@ -109,6 +109,15 @@ void MegaDriveEnvironment::boot() {
     powerOff();
 }
 
+m_byte MegaDriveEnvironment::hardwareVersionRegister() const {
+    m_byte value = 0x00; // Model 1, no TMSS, JP + 60 Hz by default.
+    if (languagePin() == LanguagePin::Overseas)
+        value |= 0x80;
+    if (videoStandard() == VideoStandard::Hz50)
+        value |= 0x40;
+    return value;
+}
+
 void MegaDriveEnvironment::logFrame(unsigned frame, bool displayEnabled) {
     // Progression-state probe: which game mode the state machine is in ($FF00),
     // the VBlank-routine / palette-upload requests ($FA00/$FA01), the intro
@@ -246,10 +255,8 @@ void MegaDriveEnvironment::reportUnhandledDispatch(m_long addr) {
     // Already seeded? Then a previous pass added it but regenerating produced no
     // handler — stop the discovery loop (exit 43) instead of spinning forever.
     if (auxFileContainsAddress(auxAddrFile_, a)) {
-        std::fprintf(stderr,
-                     "[aux] $%06X already seeded in %s — seeding did not help; stopping\n",
-                     a,
-                     auxAddrFile_.c_str());
+        std::fprintf(
+            stderr, "[aux] $%06X already seeded in %s — seeding did not help; stopping\n", a, auxAddrFile_.c_str());
         std::_Exit(43);
     }
 
@@ -289,6 +296,7 @@ void MegaDriveEnvironment::runVDPInterrupts() {
 void MegaDriveEnvironment::powerOn() {
     cpu_    = CPU68K{};
     cpu_.sr = 0x2700;
+    m68kMasterCycles_.store(0, std::memory_order_release);
     vdp_.start();
     z80_.start();
     sound_.start();

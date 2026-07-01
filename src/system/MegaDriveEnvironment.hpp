@@ -73,6 +73,16 @@ class MegaDriveEnvironment {
     friend class SystemMemory;
 
     public:
+    enum class LanguagePin : uint8_t {
+        Japanese = 0,
+        Overseas = 1,
+    };
+
+    enum class VideoStandard : uint8_t {
+        Hz60 = 0,
+        Hz50 = 1,
+    };
+
     /// Wires the subsystems together. Does not start any threads (see boot()).
     MegaDriveEnvironment(VDP::Synchronization sync, VDP::Scaling scaling);
 
@@ -115,6 +125,26 @@ class MegaDriveEnvironment {
         return fastMode_.load(std::memory_order_relaxed);
     }
 
+    /// Console region pins exposed through the hardware version register
+    /// ($A10001): bit 7 is language (0=JP, 1=overseas), bit 6 is video
+    /// frequency (0=60 Hz, 1=50 Hz). Defaults are both pins low: JP + 60 Hz.
+    void setLanguagePin(LanguagePin pin) {
+        languagePin_.store(pin, std::memory_order_relaxed);
+    }
+    LanguagePin languagePin() const {
+        return languagePin_.load(std::memory_order_relaxed);
+    }
+    void setVideoStandard(VideoStandard standard) {
+        videoStandard_.store(standard, std::memory_order_relaxed);
+    }
+    VideoStandard videoStandard() const {
+        return videoStandard_.load(std::memory_order_relaxed);
+    }
+    bool isPal50Hz() const {
+        return videoStandard() == VideoStandard::Hz50;
+    }
+    m_byte hardwareVersionRegister() const;
+
     /// When set, an indirect dispatch to an address with no recompiled handler
     /// (a jump-table target the static analysis missed) appends that address to
     /// @p path and exits, instead of aborting — so a discovery loop can re-seed
@@ -147,6 +177,9 @@ class MegaDriveEnvironment {
     Sound &sound() {
         return sound_;
     }
+    uint64_t current68KMasterCycles() const {
+        return m68kMasterCycles_.load(std::memory_order_acquire);
+    }
 
     /// Marks an interrupt of the given autovector @p level (e.g. 6 = VBlank,
     /// 4 = HBlank) as pending. Called from the VDP render thread; lock-free.
@@ -173,6 +206,7 @@ class MegaDriveEnvironment {
     /// opcode (which is ~100× slower than 68000 timing and made boot/decompression
     /// look frozen). Disabled entirely when fastMode() is set (--fast).
     void pace() {
+        m68kMasterCycles_.fetch_add(64, std::memory_order_release);
         if (fastMode_.load(std::memory_order_relaxed))
             return;
         if ((++paceCounter_ & 0x3Fu) == 0)
@@ -254,10 +288,13 @@ class MegaDriveEnvironment {
     /// VDP render thread (raiseInterrupt), consumed on the run() thread.
     std::atomic<std::uint32_t>   pendingIRQMask_{0};
     std::atomic<m_long>          traceFn_{0}; ///< entry of the running recompiled fn
+    std::atomic<uint64_t>        m68kMasterCycles_{0};
     m_long                       traceHistory_[16]{};
     unsigned                     traceHistoryPos_{0};
     std::atomic<bool>            debugLog_{false};
     std::atomic<bool>            fastMode_{false};
+    std::atomic<LanguagePin>     languagePin_{LanguagePin::Japanese};
+    std::atomic<VideoStandard>   videoStandard_{VideoStandard::Hz60};
     std::uint32_t                paceCounter_{0};       ///< CPU thread only
     std::string                  auxAddrFile_;          ///< append unknown dispatch targets here (if set)
     std::unordered_set<unsigned> confirmedSpeculative_; ///< guards against duplicate confirmSpeculative logs

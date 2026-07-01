@@ -6,12 +6,13 @@
 #include <cstdint>
 
 extern "C" {
-void z80_init(const void *config, int (*irqcallback)(int));
-void z80_reset(void);
-void z80_run(unsigned int cycles);
-void z80_set_cycle_counter(unsigned int cycles);
-void z80_set_irq_line(unsigned int state);
-void z80_set_nmi_line(unsigned int state);
+void         z80_init(const void *config, int (*irqcallback)(int));
+void         z80_reset(void);
+void         z80_run(unsigned int cycles);
+void         z80_set_cycle_counter(unsigned int cycles);
+unsigned int z80_get_cycle_counter(void);
+void         z80_set_irq_line(unsigned int state);
+void         z80_set_nmi_line(unsigned int state);
 
 extern void (*z80_writemem)(unsigned int address, unsigned char data);
 extern unsigned char (*z80_readmem)(unsigned int address);
@@ -156,10 +157,11 @@ void Z80::resetCPU() {
     z80_reset();
     z80_set_irq_line(CLEAR_LINE);
     z80_set_nmi_line(CLEAR_LINE);
-    executedScaledCycles_ = 0;
-    bankRegister_         = 0;
-    irqClearTimeNS_       = 0;
-    irqLineAsserted_      = false;
+    executedScaledCycles_   = 0;
+    cycleEpochMasterCycles_ = 0;
+    bankRegister_           = 0;
+    irqClearTimeNS_         = 0;
+    irqLineAsserted_        = false;
     irqPending_.store(false, std::memory_order_release);
 }
 
@@ -168,6 +170,7 @@ void Z80::runCoreForTStates(uint32_t tStates) {
         return;
 
     if (executedScaledCycles_ > kCycleCounterWrapNear) {
+        cycleEpochMasterCycles_ += executedScaledCycles_;
         z80_set_cycle_counter(0);
         executedScaledCycles_ = 0;
     }
@@ -185,6 +188,10 @@ void Z80::runCoreForTStates(uint32_t tStates) {
 
     executedScaledCycles_ += static_cast<uint64_t>(tStates) * kZ80CoreCycleScale;
     z80_run(static_cast<unsigned int>(executedScaledCycles_));
+}
+
+uint64_t Z80::currentMasterCyclesForCore() const {
+    return cycleEpochMasterCycles_ + static_cast<uint64_t>(z80_get_cycle_counter());
 }
 
 m_byte Z80::readRAMFor68K(uint16_t address) {
@@ -205,7 +212,7 @@ uint8_t Z80::read8ForCore(uint16_t address) {
         return ram_[address & 0x1FFFu];
 
     if (address >= 0x4000 && address < 0x6000)
-        return env_->sound().readYM2612(address & 3u);
+        return env_->sound().readYM2612At(currentMasterCyclesForCore(), address & 3u);
 
     if ((address & 0xFF00u) == 0x7F00u)
         return env_->memory().readByte(0x00C00000u | (address & 0x00FFu));
@@ -225,7 +232,7 @@ void Z80::write8ForCore(uint16_t address, uint8_t value) {
     }
 
     if (address >= 0x4000 && address < 0x6000) {
-        env_->sound().writeYM2612(address & 3u, value);
+        env_->sound().writeYM2612At(currentMasterCyclesForCore(), address & 3u, value);
         return;
     }
 
@@ -235,7 +242,11 @@ void Z80::write8ForCore(uint16_t address, uint8_t value) {
     }
 
     if ((address & 0xFF00u) == 0x7F00u) {
-        env_->memory().writeByte(0x00C00000u | (address & 0x00FFu), value);
+        const uint32_t vdpAddress = 0x00C00000u | (address & 0x00FFu);
+        if (vdpAddress >= 0x00C00010u && vdpAddress < 0x00C00018u && (vdpAddress & 1u) != 0)
+            env_->sound().writePSGAt(currentMasterCyclesForCore(), value);
+        else
+            env_->memory().writeByte(vdpAddress, value);
         return;
     }
 

@@ -62,12 +62,13 @@ VDP::VDP(MegaDriveEnvironment *env, Synchronization synchronization, Scaling sca
             if (syncMode_ != InternalTimer) {
                 SDL_SetRenderVSync(sdlRenderer_, 1);
             }
-            texture_ = SDL_CreateTexture(sdlRenderer_, SDL_PIXELFORMAT_BGR24,
+            texture_ = SDL_CreateTexture(sdlRenderer_,
+                                         SDL_PIXELFORMAT_BGR24,
                                          SDL_TEXTUREACCESS_STREAMING,
-                                         VDPState::SCREEN_W, VDPState::SCREEN_H);
+                                         VDPState::SCREEN_W,
+                                         VDPState::SCREEN_H);
             if (texture_) {
-                SDL_SetTextureScaleMode(texture_,
-                    (scalingMode_ == Fit) ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
+                SDL_SetTextureScaleMode(texture_, (scalingMode_ == Fit) ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
             }
         }
     }
@@ -275,10 +276,9 @@ void VDP::presentToScreen() {
 /// sets the VBlank flag, schedules a VSync interrupt, presents to display, and manages frame timing based on sync mode.
 /// Interrupts are dispatched on the program thread via MegaDriveEnvironment::runVDPInterrupts().
 int VDP::renderLoop() {
-    const uint64_t frameTimeNs = 16'715'000; // ~59.94 Hz
-
     while (running_) {
-        uint64_t frameStart = SDL_GetTicksNS();
+        const uint64_t frameTimeNs = (env_ != nullptr && env_->isPal50Hz()) ? 20'000'000ull : 16'715'000ull;
+        uint64_t       frameStart  = SDL_GetTicksNS();
 
         // Render the frame one scanline at a time so a per-line interrupt can be
         // scheduled (raster effects). Mirrors VDPRenderer::renderFrame().

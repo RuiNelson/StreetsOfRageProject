@@ -3439,6 +3439,11 @@ void z80_set_cycle_counter(unsigned int cycles)
   Z80.cycles = cycles;
 }
 
+unsigned int z80_get_cycle_counter(void)
+{
+  return Z80.cycles;
+}
+
 /****************************************************************************
  * Get all registers in given buffer
  ****************************************************************************/
@@ -3483,4 +3488,3 @@ void z80_set_nmi_line(unsigned int state)
 
   Z80.nmi_state = state;
 }
-

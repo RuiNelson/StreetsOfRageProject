@@ -186,7 +186,7 @@ m_byte SystemMemory::hwReadByte(m_long address) {
     }
     switch (a) {
         case 0xA10001u:
-            return 0x00; // console hardware version: domestic Model 1, no TMSS
+            return env_->hardwareVersionRegister();
         case 0xA10003u:
             return env_->controllers().readPlayer1DataPort();
         case 0xA10005u:
@@ -199,7 +199,9 @@ m_byte SystemMemory::hwReadByte(m_long address) {
             break;
     }
     if (a >= 0xA04000u && a <= 0xA04003u) {
-        return env_->sound().readYM2612(static_cast<int>(a - 0xA04000u));
+        if (env_->fastMode())
+            return env_->sound().readYM2612(static_cast<int>(a - 0xA04000u));
+        return env_->sound().readYM2612At(env_->current68KMasterCycles(), static_cast<int>(a - 0xA04000u));
     }
     if (a >= 0xC00000u && a < 0xC00010u) {
         m_word w = hwReadWord(a & ~1u);
@@ -224,8 +226,15 @@ m_word SystemMemory::hwReadWord(m_long address) {
         return static_cast<m_word>(hwReadByte(a)) << 8;
     }
     if (a >= 0xA04000u && a <= 0xA04003u) {
-        m_word hi = env_->sound().readYM2612(static_cast<int>(a - 0xA04000u));
-        m_word lo = (a + 1 <= 0xA04003u) ? env_->sound().readYM2612(static_cast<int>(a + 1 - 0xA04000u)) : 0u;
+        if (env_->fastMode()) {
+            m_word hi = env_->sound().readYM2612(static_cast<int>(a - 0xA04000u));
+            m_word lo = (a + 1 <= 0xA04003u) ? env_->sound().readYM2612(static_cast<int>(a + 1 - 0xA04000u)) : 0u;
+            return static_cast<m_word>((hi << 8) | lo);
+        }
+        const uint64_t cycles = env_->current68KMasterCycles();
+        m_word         hi     = env_->sound().readYM2612At(cycles, static_cast<int>(a - 0xA04000u));
+        m_word         lo =
+            (a + 1 <= 0xA04003u) ? env_->sound().readYM2612At(cycles + 1, static_cast<int>(a + 1 - 0xA04000u)) : 0u;
         return static_cast<m_word>((hi << 8) | lo);
     }
     if (a >= 0xC00000u && a < 0xC00010u) {
@@ -274,11 +283,19 @@ void SystemMemory::hwWriteByte(m_long address, m_byte value) {
             break;
     }
     if (a >= 0xA04000u && a <= 0xA04003u) {
-        env_->sound().writeYM2612(static_cast<int>(a - 0xA04000u), value);
+        if (env_->fastMode()) {
+            env_->sound().writeYM2612(static_cast<int>(a - 0xA04000u), value);
+            return;
+        }
+        env_->sound().writeYM2612At(env_->current68KMasterCycles(), static_cast<int>(a - 0xA04000u), value);
         return;
     }
     if (a >= 0xC00010u && a < 0xC00018u && (a & 1u) != 0) {
-        env_->sound().writePSG(value);
+        if (env_->fastMode()) {
+            env_->sound().writePSG(value);
+            return;
+        }
+        env_->sound().writePSGAt(env_->current68KMasterCycles(), value);
         return;
     }
     if (a >= 0xC00000u && a < 0xC00008u) {
@@ -312,9 +329,17 @@ void SystemMemory::hwWriteWord(m_long address, m_word value) {
         return;
     }
     if (a >= 0xA04000u && a <= 0xA04003u) {
-        env_->sound().writeYM2612(static_cast<int>(a - 0xA04000u), static_cast<m_byte>(value >> 8));
+        if (env_->fastMode()) {
+            env_->sound().writeYM2612(static_cast<int>(a - 0xA04000u), static_cast<m_byte>(value >> 8));
+            if (a + 1 <= 0xA04003u)
+                env_->sound().writeYM2612(static_cast<int>(a + 1 - 0xA04000u), static_cast<m_byte>(value & 0xFFu));
+            return;
+        }
+        const uint64_t cycles = env_->current68KMasterCycles();
+        env_->sound().writeYM2612At(cycles, static_cast<int>(a - 0xA04000u), static_cast<m_byte>(value >> 8));
         if (a + 1 <= 0xA04003u)
-            env_->sound().writeYM2612(static_cast<int>(a + 1 - 0xA04000u), static_cast<m_byte>(value & 0xFFu));
+            env_->sound().writeYM2612At(
+                cycles + 1, static_cast<int>(a + 1 - 0xA04000u), static_cast<m_byte>(value & 0xFFu));
         return;
     }
     if (a >= 0xC00000u && a < 0xC00008u) {
