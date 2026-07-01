@@ -36,6 +36,12 @@ class Sound {
     void   writePSG(m_byte value);
     void   writePSGAt(uint64_t masterCycles, m_byte value);
 
+    /// Shared audio timeline: master cycles elapsed on the wall clock since
+    /// this Sound was constructed. Every producer (Z80, 68K) stamps its
+    /// port writes with this clock and the renderer chases it, so event
+    /// timestamps and rendered samples stay on one timeline.
+    uint64_t masterCyclesNow() const;
+
     struct Diagnostics {
         uint64_t audioFramesRendered = 0;
         uint64_t underruns           = 0;
@@ -107,10 +113,11 @@ class Sound {
     };
 
     struct TimedEvent {
-        uint64_t  masterCycle = 0;
-        EventType type        = EventType::YMWrite;
-        uint8_t   port        = 0;
-        uint8_t   value       = 0;
+        uint64_t  masterCycle   = 0;
+        EventType type          = EventType::YMWrite;
+        uint8_t   port          = 0;
+        uint8_t   value         = 0;
+        bool      timerRegister = false; ///< YM data write hitting $24–$27 (affects polled status)
     };
 
     static void        audioCallback(void *userdata, SDL_AudioStream *stream, int additionalAmount, int totalAmount);
@@ -142,7 +149,9 @@ class Sound {
     uint32_t                  fmSampleRate_            = 0;
     double                    renderMasterCycle_       = 0.0;
     uint64_t                  lastRenderedMasterCycle_ = 0;
-    uint64_t                  untimedMasterCycle_      = 0;
+    uint64_t                  baseTimeNS_              = 0;
+    uint8_t                   queuedYMAddress_         = 0; ///< enqueue-time shadow of the port-0 address latch
+    int                       pendingTimerWrites_      = 0; ///< queued events with timerRegister set
     uint64_t                  lateEventCount_          = 0;
     uint64_t                  clippedSampleCount_      = 0;
     std::array<int32_t, 2>    peakSample_{};

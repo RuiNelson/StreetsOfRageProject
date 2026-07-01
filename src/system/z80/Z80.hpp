@@ -60,9 +60,9 @@ class Z80 {
     std::atomic<bool>          busAcked_{true};
     std::atomic<bool>          resetHeld_{true};
     std::atomic<bool>          irqPending_{false};
-    uint32_t                   bankRegister_           = 0;
-    uint64_t                   executedCoreTStates_    = 0;
-    uint64_t                   irqClearTimeNS_         = 0;
-    bool                       irqLineAsserted_        = false;
-    uint64_t                   cycleEpochMasterCycles_ = 0;
+    uint32_t                   bankRegister_             = 0;
+    uint64_t                   executedCoreMasterCycles_ = 0; ///< core cycle counter (master cycles, 15/T-state)
+    uint64_t                   irqClearAtMasterCycles_   = 0;
+    bool                       irqLineAsserted_          = false;
+    uint64_t                   cycleEpochMasterCycles_   = 0;
 };

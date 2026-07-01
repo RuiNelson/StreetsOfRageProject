@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 
 extern "C" {
 void         z80_init(const void *config, int (*irqcallback)(int));
@@ -21,14 +23,23 @@ extern unsigned char (*z80_readport)(unsigned int port);
 }
 
 namespace {
-constexpr uint64_t kZ80Clock                 = 3'579'545;
+constexpr uint64_t kZ80Clock = 3'579'545;
+// The GPX-derived core's cycle tables are premultiplied by 15 (e.g. `4*15`),
+// so Z80.cycles counts Mega Drive MASTER cycles, not T-states. Convert at the
+// boundary: ×15 when feeding T-states in, and the counter maps 1:1 onto the
+// shared master-cycle timeline.
 constexpr uint32_t kMasterCyclesPerZ80TState = 15;
 constexpr uint32_t kMaxRunChunkTStates       = 512;
-constexpr uint32_t kBusReleaseTStates        = 2048;
-constexpr uint32_t kCycleCounterWrapNear     = 0x70000000u;
-constexpr uint64_t kIRQHoldNS                = 2'000'000;
-constexpr uint8_t  CLEAR_LINE                = 0;
-constexpr uint8_t  ASSERT_LINE               = 1;
+constexpr uint64_t kCycleCounterWrapNear     = 0x70000000u;
+// Genesis Plus GX asserts the Z80 INT at VBlank and clears it at the end of
+// that scanline; hold it for one scanline of emulated time (~228 T-states).
+constexpr uint64_t kIRQHoldTStates = 228;
+// After a host stall, don't try to catch up more than ~2 frames of Z80 time:
+// real hardware doesn't catch up either, and a large burst would stamp sound
+// events far ahead of the shared wall clock.
+constexpr double  kMaxBacklogTStates = 120'000.0;
+constexpr uint8_t CLEAR_LINE         = 0;
+constexpr uint8_t ASSERT_LINE        = 1;
 
 Z80 *gActiveZ80 = nullptr;
 } // namespace
@@ -79,10 +90,6 @@ void Z80::setBusRequest(bool requested) {
         busAcked_.store(true, std::memory_order_release);
     } else if (!resetHeld_.load(std::memory_order_acquire)) {
         busAcked_.store(false, std::memory_order_release);
-        SDL_LockMutex(mutex_);
-        installCallbacks();
-        runCoreForTStates(kBusReleaseTStates);
-        SDL_UnlockMutex(mutex_);
     }
 }
 
@@ -120,13 +127,30 @@ void Z80::runThread() {
     uint64_t last        = SDL_GetTicksNS();
     double   cycleCredit = 0.0;
 
+    const bool traceRate    = std::getenv("SOR_Z80_TRACE") != nullptr;
+    uint64_t   traceLastNS  = last;
+    uint64_t   traceTStates = 0;
+    uint64_t   traceStalls  = 0;
+
     while (running_.load(std::memory_order_acquire)) {
         const uint64_t now = SDL_GetTicksNS();
         cycleCredit += (static_cast<double>(now - last) * static_cast<double>(kZ80Clock)) / 1'000'000'000.0;
-        last = now;
+        cycleCredit = std::min(cycleCredit, kMaxBacklogTStates);
+        last        = now;
+
+        if (traceRate && now - traceLastNS >= 1'000'000'000ull) {
+            std::fprintf(stderr,
+                         "[z80] tstates/s=%llu stallPolls/s=%llu\n",
+                         static_cast<unsigned long long>(traceTStates),
+                         static_cast<unsigned long long>(traceStalls));
+            traceTStates = 0;
+            traceStalls  = 0;
+            traceLastNS  = now;
+        }
 
         if (resetHeld_.load(std::memory_order_acquire) || busRequested_.load(std::memory_order_acquire)) {
             busAcked_.store(true, std::memory_order_release);
+            ++traceStalls;
             SDL_DelayNS(500'000);
             cycleCredit = std::min(cycleCredit, 256.0);
             continue;
@@ -145,6 +169,7 @@ void Z80::runThread() {
             SDL_UnlockMutex(mutex_);
 
             cycleCredit -= tStates;
+            traceTStates += tStates;
         }
 
         SDL_DelayNS(100'000);
@@ -157,11 +182,11 @@ void Z80::resetCPU() {
     z80_reset();
     z80_set_irq_line(CLEAR_LINE);
     z80_set_nmi_line(CLEAR_LINE);
-    executedCoreTStates_    = 0;
-    cycleEpochMasterCycles_ = 0;
-    bankRegister_           = 0;
-    irqClearTimeNS_         = 0;
-    irqLineAsserted_        = false;
+    executedCoreMasterCycles_ = 0;
+    cycleEpochMasterCycles_   = 0;
+    bankRegister_             = 0;
+    irqClearAtMasterCycles_   = 0;
+    irqLineAsserted_          = false;
     irqPending_.store(false, std::memory_order_release);
 }
 
@@ -169,30 +194,44 @@ void Z80::runCoreForTStates(uint32_t tStates) {
     if (tStates == 0)
         return;
 
-    if (executedCoreTStates_ > kCycleCounterWrapNear) {
-        cycleEpochMasterCycles_ += executedCoreTStates_ * kMasterCyclesPerZ80TState;
+    if (executedCoreMasterCycles_ > kCycleCounterWrapNear) {
+        cycleEpochMasterCycles_ += executedCoreMasterCycles_;
+        irqClearAtMasterCycles_ = (irqClearAtMasterCycles_ > executedCoreMasterCycles_)
+                                    ? irqClearAtMasterCycles_ - executedCoreMasterCycles_
+                                    : 0;
         z80_set_cycle_counter(0);
-        executedCoreTStates_ = 0;
+        executedCoreMasterCycles_ = 0;
     }
 
-    const uint64_t now = SDL_GetTicksNS();
+    // Re-anchor this core's master-cycle timeline to the shared audio wall
+    // clock (forward only), so sound-event timestamps stay aligned with the
+    // renderer across 68K-driven resets and bus-request stalls.
+    if (env_) {
+        const uint64_t nowMaster = env_->sound().masterCyclesNow();
+        if (cycleEpochMasterCycles_ + executedCoreMasterCycles_ < nowMaster)
+            cycleEpochMasterCycles_ = nowMaster - executedCoreMasterCycles_;
+    }
+
     if (irqPending_.exchange(false, std::memory_order_acq_rel)) {
         z80_set_irq_line(ASSERT_LINE);
-        irqLineAsserted_ = true;
-        irqClearTimeNS_  = now + kIRQHoldNS;
-    } else if (irqLineAsserted_ && now >= irqClearTimeNS_) {
-        z80_set_irq_line(CLEAR_LINE);
-        irqLineAsserted_ = false;
-        irqClearTimeNS_  = 0;
+        irqLineAsserted_        = true;
+        irqClearAtMasterCycles_ = executedCoreMasterCycles_ + (kIRQHoldTStates * kMasterCyclesPerZ80TState);
     }
 
-    const uint64_t targetTStates = executedCoreTStates_ + tStates;
-    z80_run(static_cast<unsigned int>(targetTStates));
-    executedCoreTStates_ = static_cast<uint64_t>(z80_get_cycle_counter());
+    const uint64_t targetMasterCycles =
+        executedCoreMasterCycles_ + (static_cast<uint64_t>(tStates) * kMasterCyclesPerZ80TState);
+    if (irqLineAsserted_ && irqClearAtMasterCycles_ < targetMasterCycles) {
+        if (irqClearAtMasterCycles_ > executedCoreMasterCycles_)
+            z80_run(static_cast<unsigned int>(irqClearAtMasterCycles_));
+        z80_set_irq_line(CLEAR_LINE);
+        irqLineAsserted_ = false;
+    }
+    z80_run(static_cast<unsigned int>(targetMasterCycles));
+    executedCoreMasterCycles_ = static_cast<uint64_t>(z80_get_cycle_counter());
 }
 
 uint64_t Z80::currentMasterCyclesForCore() const {
-    return cycleEpochMasterCycles_ + (static_cast<uint64_t>(z80_get_cycle_counter()) * kMasterCyclesPerZ80TState);
+    return cycleEpochMasterCycles_ + static_cast<uint64_t>(z80_get_cycle_counter());
 }
 
 m_byte Z80::readRAMFor68K(uint16_t address) {

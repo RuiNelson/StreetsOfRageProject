@@ -3,18 +3,43 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace {
 
-constexpr uint32_t kYM2612Clock       = 53'693'175u / 7u;
-constexpr double   kMasterClock       = 53'693'175.0;
-constexpr double   kPSGClock          = 3'579'545.0;
-constexpr int      kRenderChunkFrames = 256;
-constexpr int      kRingBufferFrames  = 4096;
-constexpr int      kFmPreampPercent   = 100;
-constexpr int      kPsgPreampPercent  = 150;
-constexpr uint32_t kLowpassRange      = 0x9999;
-constexpr double   kDCBlockR          = 0.995;
+constexpr uint32_t kYM2612Clock   = 53'693'175u / 7u;
+constexpr uint64_t kMasterClockHz = 53'693'175ull;
+constexpr double   kMasterClock   = 53'693'175.0;
+constexpr double   kPSGClock      = 3'579'545.0;
+// The renderer trails the producers' wall clock by this margin so queued
+// events are still in its future and play at their exact timestamps.
+constexpr double   kEventLatencyCycles = 0.040 * kMasterClock;
+constexpr double   kSnapCycles         = 0.250 * kMasterClock; // resync hard beyond this drift
+constexpr double   kMaxRateTrim        = 0.005;                // ±0.5% render-rate trim toward the latency target
+constexpr int      kRenderChunkFrames  = 256;
+constexpr int      kRingBufferFrames   = 4096;
+constexpr int      kFmPreampPercent    = 100;
+constexpr int      kPsgPreampPercent   = 150;
+constexpr uint32_t kLowpassRange       = 0x9999;
+constexpr double   kDCBlockR           = 0.995;
+
+// Temporary diagnostics: SOR_SND_TAP=<path> dumps rendered s16 stereo frames,
+// SOR_YM_LOG=<path> logs every enqueued chip write with its producer thread.
+FILE *sndTapFile() {
+    static FILE *f = [] {
+        const char *p = std::getenv("SOR_SND_TAP");
+        return p ? std::fopen(p, "wb") : nullptr;
+    }();
+    return f;
+}
+
+FILE *ymLogFile() {
+    static FILE *f = [] {
+        const char *p = std::getenv("SOR_YM_LOG");
+        return p ? std::fopen(p, "w") : nullptr;
+    }();
+    return f;
+}
 
 int16_t clamp16(int value) {
     return static_cast<int16_t>(std::clamp(value, -32768, 32767));
@@ -53,8 +78,16 @@ int psgVolume(uint8_t attenuation) {
 } // namespace
 
 Sound::Sound(MegaDriveEnvironment *env) : env_(env), mutex_(SDL_CreateMutex()), ym_(ymInterface_) {
+    baseTimeNS_   = SDL_GetTicksNS();
     fmSampleRate_ = ym_.sample_rate(kYM2612Clock);
     psg_.reset();
+}
+
+uint64_t Sound::masterCyclesNow() const {
+    const uint64_t ns  = SDL_GetTicksNS() - baseTimeNS_;
+    const uint64_t s   = ns / 1'000'000'000ull;
+    const uint64_t rem = ns % 1'000'000'000ull;
+    return (s * kMasterClockHz) + ((rem * kMasterClockHz) / 1'000'000'000ull);
 }
 
 Sound::~Sound() {
@@ -104,12 +137,16 @@ void Sound::stop() {
 }
 
 m_byte Sound::readYM2612(int port) {
-    return readYM2612At(untimedMasterCycle_ += 64, port);
+    return readYM2612At(masterCyclesNow(), port);
 }
 
 m_byte Sound::readYM2612At(uint64_t masterCycles, int port) {
     SDL_LockMutex(mutex_);
-    processEventsUntil(masterCycles);
+    // Reads normally leave queued writes to the renderer so they keep their
+    // timestamps; only a queued timer-register write ($24–$27) must be applied
+    // now, because it changes the status flags the driver is polling for.
+    if (pendingTimerWrites_ > 0 || !stream_)
+        processEventsUntil(masterCycles);
     ymInterface_.syncTimersToMasterCycle(masterCycles);
     m_byte result = ym_.read(static_cast<uint32_t>(port & 3));
     SDL_UnlockMutex(mutex_);
@@ -117,7 +154,7 @@ m_byte Sound::readYM2612At(uint64_t masterCycles, int port) {
 }
 
 void Sound::writeYM2612(int port, m_byte value) {
-    writeYM2612At(untimedMasterCycle_ += 64, port, value);
+    writeYM2612At(masterCyclesNow(), port, value);
 }
 
 void Sound::writeYM2612At(uint64_t masterCycles, int port, m_byte value) {
@@ -134,7 +171,7 @@ void Sound::writeYM2612At(uint64_t masterCycles, int port, m_byte value) {
 }
 
 void Sound::writePSG(m_byte value) {
-    writePSGAt(untimedMasterCycle_ += 64, value);
+    writePSGAt(masterCyclesNow(), value);
 }
 
 void Sound::writePSGAt(uint64_t masterCycles, m_byte value) {
@@ -194,9 +231,10 @@ void Sound::resetChipState() {
     ym_.generate(&previousFM_, 1);
     ym_.generate(&nextFM_, 1);
     fmAccumulator_           = 1.0;
-    renderMasterCycle_       = 0.0;
+    renderMasterCycle_       = std::max(0.0, static_cast<double>(masterCyclesNow()) - kEventLatencyCycles);
     lastRenderedMasterCycle_ = 0;
-    untimedMasterCycle_      = 0;
+    queuedYMAddress_         = 0;
+    pendingTimerWrites_      = 0;
     lateEventCount_          = 0;
     clippedSampleCount_      = 0;
     peakSample_.fill(0);
@@ -289,6 +327,17 @@ void Sound::renderSamples(int16_t *dst, int frames) {
     for (int base = 0; base < frames; base += kRenderChunkFrames) {
         const int chunkFrames = std::min(kRenderChunkFrames, frames - base);
         SDL_LockMutex(mutex_);
+        // Keep the render clock kEventLatencyCycles behind the producers'
+        // wall clock: snap on gross drift (startup, host stalls), otherwise
+        // trim the per-sample step so the pitch shift stays inaudible.
+        const double target = static_cast<double>(masterCyclesNow()) - kEventLatencyCycles;
+        double       error  = renderMasterCycle_ - target;
+        if (std::abs(error) > kSnapCycles) {
+            renderMasterCycle_ = std::max(target, 0.0);
+            error              = 0.0;
+        }
+        const double step = (kMasterClock / static_cast<double>(kSampleRate)) *
+                            (1.0 - std::clamp(error / kSnapCycles, -kMaxRateTrim, kMaxRateTrim));
         for (int i = 0; i < chunkFrames; ++i) {
             const int      frame       = base + i;
             const uint64_t masterCycle = static_cast<uint64_t>(renderMasterCycle_);
@@ -300,17 +349,39 @@ void Sound::renderSamples(int16_t *dst, int frames) {
             dst[frame * 2 + 0]       = clampMixedSample(filtered[0], 0);
             dst[frame * 2 + 1]       = clampMixedSample(filtered[1], 1);
             lastRenderedMasterCycle_ = masterCycle;
-            renderMasterCycle_ += kMasterClock / static_cast<double>(kSampleRate);
+            renderMasterCycle_ += step;
         }
         audioFramesRendered_ += static_cast<uint64_t>(chunkFrames);
         SDL_UnlockMutex(mutex_);
+        if (FILE *tap = sndTapFile())
+            std::fwrite(
+                dst + static_cast<size_t>(base) * 2, sizeof(int16_t), static_cast<size_t>(chunkFrames) * 2, tap);
     }
 }
 
 void Sound::enqueueEvent(TimedEvent event) {
+    if (FILE *log = ymLogFile()) {
+        std::fprintf(log,
+                     "%c %llu tid=%llu port=%u val=%02X\n",
+                     event.type == EventType::YMWrite ? 'Y' : 'P',
+                     static_cast<unsigned long long>(event.masterCycle),
+                     static_cast<unsigned long long>(SDL_GetCurrentThreadID()),
+                     event.port,
+                     event.value);
+    }
     if (event.masterCycle < lastRenderedMasterCycle_) {
         event.masterCycle = lastRenderedMasterCycle_;
         ++lateEventCount_;
+    }
+
+    if (event.type == EventType::YMWrite) {
+        if ((event.port & 1u) == 0) {
+            if (event.port == 0)
+                queuedYMAddress_ = event.value;
+        } else if (event.port == 1 && queuedYMAddress_ >= 0x24 && queuedYMAddress_ <= 0x27) {
+            event.timerRegister = true;
+            ++pendingTimerWrites_;
+        }
     }
 
     auto it = pendingEvents_.end();
@@ -323,6 +394,8 @@ void Sound::processEventsUntil(uint64_t masterCycle) {
     while (!pendingEvents_.empty() && pendingEvents_.front().masterCycle <= masterCycle) {
         TimedEvent event = pendingEvents_.front();
         pendingEvents_.pop_front();
+        if (event.timerRegister)
+            --pendingTimerWrites_;
         applyEvent(event);
     }
 }

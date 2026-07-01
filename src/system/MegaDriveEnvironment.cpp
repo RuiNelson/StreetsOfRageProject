@@ -154,6 +154,20 @@ void MegaDriveEnvironment::logFrame(unsigned frame, bool displayEnabled) {
                  fa61,
                  fa63,
                  fa05);
+
+    const Sound::Diagnostics snd = sound_.diagnostics();
+    std::fprintf(stderr,
+                 "[snd] frames=%llu queued=%llu late=%llu under=%llu over=%llu clip=%llu timers=%llu peakL=%d "
+                 "peakR=%d\n",
+                 static_cast<unsigned long long>(snd.audioFramesRendered),
+                 static_cast<unsigned long long>(snd.queuedEvents),
+                 static_cast<unsigned long long>(snd.lateEvents),
+                 static_cast<unsigned long long>(snd.underruns),
+                 static_cast<unsigned long long>(snd.overruns),
+                 static_cast<unsigned long long>(snd.clippedSamples),
+                 static_cast<unsigned long long>(snd.ymTimerExpirations),
+                 snd.peakLeft,
+                 snd.peakRight);
     std::fflush(stderr);
 }
 
