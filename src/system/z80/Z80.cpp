@@ -21,14 +21,14 @@ extern unsigned char (*z80_readport)(unsigned int port);
 }
 
 namespace {
-constexpr uint64_t kZ80Clock             = 3'579'545;
-constexpr uint32_t kZ80CoreCycleScale    = 15;
-constexpr uint32_t kMaxRunChunkTStates   = 512;
-constexpr uint32_t kBusReleaseTStates    = 2048;
-constexpr uint32_t kCycleCounterWrapNear = 0x70000000u;
-constexpr uint64_t kIRQHoldNS            = 2'000'000;
-constexpr uint8_t  CLEAR_LINE            = 0;
-constexpr uint8_t  ASSERT_LINE           = 1;
+constexpr uint64_t kZ80Clock                 = 3'579'545;
+constexpr uint32_t kMasterCyclesPerZ80TState = 15;
+constexpr uint32_t kMaxRunChunkTStates       = 512;
+constexpr uint32_t kBusReleaseTStates        = 2048;
+constexpr uint32_t kCycleCounterWrapNear     = 0x70000000u;
+constexpr uint64_t kIRQHoldNS                = 2'000'000;
+constexpr uint8_t  CLEAR_LINE                = 0;
+constexpr uint8_t  ASSERT_LINE               = 1;
 
 Z80 *gActiveZ80 = nullptr;
 } // namespace
@@ -157,7 +157,7 @@ void Z80::resetCPU() {
     z80_reset();
     z80_set_irq_line(CLEAR_LINE);
     z80_set_nmi_line(CLEAR_LINE);
-    executedScaledCycles_   = 0;
+    executedCoreTStates_    = 0;
     cycleEpochMasterCycles_ = 0;
     bankRegister_           = 0;
     irqClearTimeNS_         = 0;
@@ -169,10 +169,10 @@ void Z80::runCoreForTStates(uint32_t tStates) {
     if (tStates == 0)
         return;
 
-    if (executedScaledCycles_ > kCycleCounterWrapNear) {
-        cycleEpochMasterCycles_ += executedScaledCycles_;
+    if (executedCoreTStates_ > kCycleCounterWrapNear) {
+        cycleEpochMasterCycles_ += executedCoreTStates_ * kMasterCyclesPerZ80TState;
         z80_set_cycle_counter(0);
-        executedScaledCycles_ = 0;
+        executedCoreTStates_ = 0;
     }
 
     const uint64_t now = SDL_GetTicksNS();
@@ -186,12 +186,13 @@ void Z80::runCoreForTStates(uint32_t tStates) {
         irqClearTimeNS_  = 0;
     }
 
-    executedScaledCycles_ += static_cast<uint64_t>(tStates) * kZ80CoreCycleScale;
-    z80_run(static_cast<unsigned int>(executedScaledCycles_));
+    const uint64_t targetTStates = executedCoreTStates_ + tStates;
+    z80_run(static_cast<unsigned int>(targetTStates));
+    executedCoreTStates_ = static_cast<uint64_t>(z80_get_cycle_counter());
 }
 
 uint64_t Z80::currentMasterCyclesForCore() const {
-    return cycleEpochMasterCycles_ + static_cast<uint64_t>(z80_get_cycle_counter());
+    return cycleEpochMasterCycles_ + (static_cast<uint64_t>(z80_get_cycle_counter()) * kMasterCyclesPerZ80TState);
 }
 
 m_byte Z80::readRAMFor68K(uint16_t address) {
