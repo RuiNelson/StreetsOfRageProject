@@ -136,8 +136,9 @@ bool testYMStereoAndKeyOff() {
     if (!rightPan)
         reportEnergy("right pan energy", rightOnly);
 
-    const Sound::Diagnostics diag = sound.diagnostics();
-    const bool counters = diag.audioFramesRendered >= 4096 && diag.fmSourceSampleRate > 0;
+    const Sound::Diagnostics diag     = sound.diagnostics();
+    const bool               counters = diag.audioFramesRendered >= 4096 && diag.fmSourceSampleRate > 0 &&
+                                        std::max(diag.peakLeft, diag.peakRight) > 0 && diag.clippedSamples == 0;
     reportCheck("audio diagnostics counters", counters);
 
     return leftPan && released && rightPan && counters;

@@ -11,7 +11,9 @@ constexpr double   kMasterClock       = 53'693'175.0;
 constexpr double   kPSGClock          = 3'579'545.0;
 constexpr int      kRenderChunkFrames = 256;
 constexpr int      kRingBufferFrames  = 4096;
-constexpr double   kOutputLowpass     = 0.58;
+constexpr int      kFmPreampPercent   = 100;
+constexpr int      kPsgPreampPercent  = 150;
+constexpr uint32_t kLowpassRange      = 0x9999;
 constexpr double   kDCBlockR          = 0.995;
 
 int16_t clamp16(int value) {
@@ -20,6 +22,10 @@ int16_t clamp16(int value) {
 
 uint64_t ymClocksToMasterCycles(uint32_t clocks) {
     return static_cast<uint64_t>(clocks) * 7ull;
+}
+
+int applyPreamp(int value, int percent) {
+    return (value * percent) / 100;
 }
 
 int psgVolume(uint8_t attenuation) {
@@ -345,19 +351,22 @@ std::array<int, 2> Sound::renderFM() {
     lastFM_.data[1]   = static_cast<int32_t>((static_cast<double>(previousFM_.data[1]) * (1.0 - frac)) +
                                              (static_cast<double>(nextFM_.data[1]) * frac));
     return {
-        std::clamp(lastFM_.data[0] / 4, -24000, 24000),
-        std::clamp(lastFM_.data[1] / 4, -24000, 24000),
+        applyPreamp(std::clamp(lastFM_.data[0], -24000, 24000), kFmPreampPercent),
+        applyPreamp(std::clamp(lastFM_.data[1], -24000, 24000), kFmPreampPercent),
     };
 }
 
 std::array<int, 2> Sound::filterOutput(std::array<int, 2> sample) {
+    constexpr uint32_t kLowpassInput = 0x10000u - kLowpassRange;
     std::array<int, 2> out{};
     for (size_t ch = 0; ch < 2; ++ch) {
         const double input = static_cast<double>(sample[ch]);
         const double hp    = input - dcPrevInput_[ch] + (kDCBlockR * dcPrevOutput_[ch]);
         dcPrevInput_[ch]   = input;
         dcPrevOutput_[ch]  = hp;
-        lowpassState_[ch] += kOutputLowpass * (hp - lowpassState_[ch]);
+        lowpassState_[ch] =
+            ((lowpassState_[ch] * static_cast<double>(kLowpassRange)) + (hp * static_cast<double>(kLowpassInput))) /
+            65536.0;
         out[ch] = static_cast<int>(lowpassState_[ch]);
     }
     return out;
@@ -499,7 +508,7 @@ void Sound::PSG::write(m_byte value) {
         case 3:
         case 5: {
             const int ch = reg >> 1;
-            volume[ch]   = static_cast<uint16_t>(psgVolume(value & 0x0F));
+            volume[ch]   = static_cast<uint16_t>(applyPreamp(psgVolume(value & 0x0F), kPsgPreampPercent));
             leftAmp[ch]  = volume[ch];
             rightAmp[ch] = volume[ch];
             break;
@@ -510,7 +519,7 @@ void Sound::PSG::write(m_byte value) {
             noiseOutput  = 0;
             break;
         case 7:
-            volume[3]   = static_cast<uint16_t>(psgVolume(value & 0x0F));
+            volume[3]   = static_cast<uint16_t>(applyPreamp(psgVolume(value & 0x0F), kPsgPreampPercent));
             leftAmp[3]  = volume[3];
             rightAmp[3] = volume[3];
             break;
