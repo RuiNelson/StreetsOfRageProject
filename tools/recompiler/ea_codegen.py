@@ -23,6 +23,7 @@ SIZE_BYTES = {'b': 1, 'w': 2, 'l': 4}
 _READ_FN   = {'b': 'readByte',  'w': 'readWord',  'l': 'readLong'}
 _WRITE_FN  = {'b': 'writeByte', 'w': 'writeWord', 'l': 'writeLong'}
 _CTYPE     = {'b': 'm_byte', 'w': 'm_word', 'l': 'm_long'}
+_CAST      = {'b': 'BYTE', 'w': 'WORD', 'l': 'LONG'}
 
 
 class EAGenError(Exception):
@@ -62,65 +63,65 @@ def addr_step(reg: int, size: str) -> int:
 def read_dn(n: int, size: str) -> str:
     """Expression reading Dn at byte / word / long width."""
     if size == 'b':
-        return f'static_cast<m_byte>(cpu().d[{n}] & 0xFFu)'
+        return f'BYTE(cpu().d[{n}] & 0xFFu)'
     if size == 'w':
-        return f'static_cast<m_word>(cpu().d[{n}] & 0xFFFFu)'
+        return f'WORD(cpu().d[{n}] & 0xFFFFu)'
     return f'cpu().d[{n}]'
 
 
 def write_dn(n: int, size: str, value: str) -> str:
     """Statement writing ``value`` into Dn, preserving untouched high bits."""
     if size == 'b':
-        return (f'cpu().d[{n}] = static_cast<m_long>((cpu().d[{n}] & 0xFFFFFF00u) '
-                f'| static_cast<m_long>(static_cast<m_byte>({value})));')
+        return (f'cpu().d[{n}] = LONG((cpu().d[{n}] & 0xFFFFFF00u) '
+                f'| LONG(BYTE({value})));')
     if size == 'w':
-        return (f'cpu().d[{n}] = static_cast<m_long>((cpu().d[{n}] & 0xFFFF0000u) '
-                f'| static_cast<m_long>(static_cast<m_word>({value})));')
-    return f'cpu().d[{n}] = static_cast<m_long>({value});'
+        return (f'cpu().d[{n}] = LONG((cpu().d[{n}] & 0xFFFF0000u) '
+                f'| LONG(WORD({value})));')
+    return f'cpu().d[{n}] = LONG({value});'
 
 
 def write_dn_word_preserve_high(n: int, value: str) -> str:
     """MOVE.W to Dn: merge low word only (do not sign-extend into the high half)."""
-    return (f'cpu().d[{n}] = static_cast<m_long>((cpu().d[{n}] & 0xFFFF0000u) '
-            f'| static_cast<m_long>(static_cast<m_word>({value})));')
+    return (f'cpu().d[{n}] = LONG((cpu().d[{n}] & 0xFFFF0000u) '
+            f'| LONG(WORD({value})));')
 
 
 def write_areg_word(ar: str, value: str) -> str:
     """Word write to An — sign-extend bit 15 (movea / lea)."""
-    return (f'{ar} = static_cast<m_long>(static_cast<int32_t>('
-            f'static_cast<int16_t>(static_cast<m_word>({value}))));')
+    return (f'{ar} = LONG(static_cast<int32_t>('
+            f'static_cast<int16_t>(WORD({value}))));')
 
 
 def write_areg_long(ar: str, value: str) -> str:
-    return f'{ar} = static_cast<m_long>({value});'
+    return f'{ar} = LONG({value});'
 
 
 def merge_areg_byte(ar: str, value: str) -> str:
-    return (f'{ar} = static_cast<m_long>(({ar} & 0xFFFFFF00u) '
-            f'| static_cast<m_long>(static_cast<m_byte>({value})));')
+    return (f'{ar} = LONG(({ar} & 0xFFFFFF00u) '
+            f'| LONG(BYTE({value})));')
 
 
 def merge_areg_word(ar: str, value: str) -> str:
-    return (f'{ar} = static_cast<m_long>(({ar} & 0xFFFF0000u) '
-            f'| static_cast<m_long>(static_cast<m_word>({value})));')
+    return (f'{ar} = LONG(({ar} & 0xFFFF0000u) '
+            f'| LONG(WORD({value})));')
 
 
 def signext_to_long(expr: str, size: str) -> str:
     if size == 'l':
         return expr
     if size == 'w':
-        return (f'static_cast<m_long>(static_cast<int32_t>('
-                f'static_cast<int16_t>(static_cast<m_word>({expr}))))')
-    return (f'static_cast<m_long>(static_cast<int32_t>('
-            f'static_cast<int8_t>(static_cast<m_byte>({expr}))))')
+        return (f'LONG(static_cast<int32_t>('
+                f'static_cast<int16_t>(WORD({expr}))))')
+    return (f'LONG(static_cast<int32_t>('
+            f'static_cast<int8_t>(BYTE({expr}))))')
 
 
 def _index_expr(ea: EA) -> str:
     """C++ expression for the (sign-extended) index register of an indexed EA."""
     reg = areg(ea.index_reg) if ea.index_is_addr else f'cpu().d[{ea.index_reg}]'
     if ea.index_size == 'w':
-        return (f'static_cast<m_long>(static_cast<int32_t>('
-                f'static_cast<int16_t>({reg} & 0xFFFFu)))')
+        return (f'LONG(static_cast<int32_t>('
+                f'static_cast<int16_t>(WORD({reg} & 0xFFFFu))))')
     return reg
 
 
@@ -153,11 +154,11 @@ def read_ea(ea: EA, size: str, tmp: TempPool) -> tuple[list[str], str]:
         if size == 'l':
             return [], areg(ea.reg)
         if size == 'w':
-            return [], f'static_cast<m_word>({areg(ea.reg)} & 0xFFFFu)'
-        return [], f'static_cast<m_byte>({areg(ea.reg)} & 0xFFu)'
+            return [], f'WORD({areg(ea.reg)} & 0xFFFFu)'
+        return [], f'BYTE({areg(ea.reg)} & 0xFFu)'
 
     if ea.mode == EAMode.IMMEDIATE:
-        return [], f'static_cast<{_CTYPE[size]}>({_hex(ea.imm)})'
+        return [], f'{_CAST[size]}({_hex(ea.imm)})'
 
     if ea.mode == EAMode.ADDR_POSTINC:
         v = tmp.fresh()

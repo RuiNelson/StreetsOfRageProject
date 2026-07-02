@@ -11,7 +11,7 @@ from tools.recompiler import main as recompiler_main
 from tools.recompiler import opcodes
 from tools.recompiler.ea_codegen import TempPool
 from tools.recompiler.generator import Generator
-from tools.recompiler.main import _install_macros, _load_aux
+from tools.recompiler.main import _load_aux
 from tools.recompiler.opcodes import Unsupported
 from tools.recompiler.regions import partition
 
@@ -52,7 +52,7 @@ def test_areg_a7_is_ssp():
 def test_read_data_reg_sizes():
     assert ea.read_ea(EA(EAMode.DATA_REG, reg=3), 'l', _tp())[1] == 'cpu().d[3]'
     assert ea.read_ea(EA(EAMode.DATA_REG, reg=0), 'b', _tp())[1] == \
-        'static_cast<m_byte>(cpu().d[0] & 0xFFu)'
+        'BYTE(cpu().d[0] & 0xFFu)'
 
 
 def test_read_postinc_has_side_effect_after_read():
@@ -87,11 +87,9 @@ def test_read_predec_decrements_before_read():
 
 def test_write_subregister_uses_merge_helpers():
     assert ea.write_ea(EA(EAMode.DATA_REG, reg=2), 'b', 'v', _tp()) == \
-        ['cpu().d[2] = static_cast<m_long>((cpu().d[2] & 0xFFFFFF00u) '
-         '| static_cast<m_long>(static_cast<m_byte>(v)));']
+        ['cpu().d[2] = LONG((cpu().d[2] & 0xFFFFFF00u) | LONG(BYTE(v)));']
     assert ea.write_ea(EA(EAMode.DATA_REG, reg=2), 'w', 'v', _tp()) == \
-        ['cpu().d[2] = static_cast<m_long>((cpu().d[2] & 0xFFFF0000u) '
-         '| static_cast<m_long>(static_cast<m_word>(v)));']
+        ['cpu().d[2] = LONG((cpu().d[2] & 0xFFFF0000u) | LONG(WORD(v)));']
 
 
 def test_write_addr_reg_word_sign_extends():
@@ -117,14 +115,16 @@ def _instr(mnem, size, eas, flow=FlowType.SEQUENTIAL):
 def test_move_sets_logical_flags():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'move', 'l', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.DATA_REG, reg=1)])))
-    assert 'cpu().d[1]' in out and 'M68K_MOVE_L(' in out
+    assert 'cpu().d[1]' in out
+    assert 'cpu().sr = WORD' in out
 
 
 def test_movea_no_flags_sign_extends():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'move', 'w', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.ADDR_REG, reg=1)])))
-    assert 'setLogicalFlags' not in out          # movea never touches CCR
-    assert 'M68K_MOVEA_W(cpu().a[1]' in out       # word source sign-extended
+    assert 'cpu().sr' not in out                 # movea never touches CCR
+    assert 'cpu().a[1]' in out                   # word source sign-extended
+    assert 'static_cast<int16_t>' in out
 
 
 def test_move_word_to_data_reg_sign_extends():
@@ -132,8 +132,7 @@ def test_move_word_to_data_reg_sign_extends():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'move', 'w', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.DATA_REG, reg=7)])))
     assert 'cpu().d[7]' in out and '0xFFFF0000u' in out
-    assert 'M68K_WRITE_DN_W(7' not in out
-    assert 'M68K_MOVE_W(' in out
+    assert 'cpu().sr = WORD' in out
 
 
 def test_move_word_to_memory_uses_ea_writer_not_data_reg_macro():
@@ -141,47 +140,48 @@ def test_move_word_to_memory_uses_ea_writer_not_data_reg_macro():
         'move', 'w', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.ADDR_IND, reg=1)])))
     assert '0xFFFF0000u' not in out
     assert 'memory().writeWord(cpu().a[1]' in out
-    assert 'M68K_MOVE_W(' in out
+    assert 'cpu().sr = WORD' in out
 
 
 def test_moveq_long_signext_and_flags():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'moveq', None, [EA(EAMode.IMMEDIATE, imm=-1), EA(EAMode.DATA_REG, reg=0)])))
-    assert 'cpu().d[0]' in out and 'M68K_MOVE_L(' in out
+    assert 'cpu().d[0]' in out and 'cpu().sr = WORD' in out
 
 
 def test_add_uses_macro_and_writes_back():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'add', 'w', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.DATA_REG, reg=1)])))
-    assert 'M68K_ADD_W(' in out
+    assert '+ LONG(' in out
     assert 'cpu().d[1]' in out
 
 
 def test_cmp_sets_flags_without_writing():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'cmp', 'l', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.DATA_REG, reg=1)])))
-    assert 'M68K_CMP_L(' in out
-    assert 'setData' not in out                   # compare writes nothing
+    assert '- static_cast<uint64_t>' in out
+    assert 'cpu().d[1] =' not in out              # compare writes nothing
 
 
 def test_adda_is_address_arith_no_flags():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'adda', 'l', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.ADDR_REG, reg=1)])))
-    assert 'M68K_ADDA_L(cpu().a[1]' in out
-    assert 'M68K_ADD_' not in out and 'setLogicalFlags' not in out
+    assert 'cpu().a[1] = LONG(cpu().a[1] +' in out
+    assert 'cpu().sr' not in out
 
 
 def test_shift_immediate_count():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'lsr', 'w', [EA(EAMode.IMMEDIATE, imm=3), EA(EAMode.DATA_REG, reg=2)])))
-    assert 'M68K_LSR_W(' in out and ', 3)' in out
+    assert 'static_cast<int>(3)' in out
+    assert '>>= 1' in out
 
 
 def test_shift_register_count_uses_reg_shift_count():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'lsl', 'w', [EA(EAMode.DATA_REG, reg=1), EA(EAMode.DATA_REG, reg=0)])))
-    assert 'M68K_LSL_W(' in out
-    assert 'M68K_REG_SHIFT_COUNT(1, 16)' in out
+    assert 'cpu().d[1] & 63' in out
+    assert '!= 0 ?' in out and ': 16' in out
 
 
 def test_movem_unsupported_via_generator():
@@ -199,20 +199,22 @@ def test_movem_reglist_crosses_data_to_addr():
 def test_scc_sets_byte_by_condition():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'sne', 'b', [EA(EAMode.DATA_REG, reg=6)])))
-    assert 'M68K_SCC(' in out and ', 6)' in out      # 6 == NE
+    assert 'BYTE(0xFF)' in out and 'BYTE(0)' in out
     assert 'cpu().d[6]' in out
 
 
 def test_exg_swaps_registers():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'exg', 'l', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.ADDR_REG, reg=1)])))
-    assert 'M68K_EXG(cpu().d[0], cpu().a[1])' in out
+    assert 'cpu().d[0] = cpu().a[1];' in out
+    assert 'cpu().a[1] =' in out
 
 
 def test_abcd_uses_macro():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'abcd', 'b', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.DATA_REG, reg=1)])))
-    assert 'M68K_ABCD(' in out
+    assert '& 0x0F' in out
+    assert 'cpu().sr = WORD' in out
 
 
 def test_flow_opcodes_return_none():
@@ -239,10 +241,12 @@ def test_irq_check_emitted_before_each_instruction():
     for a in ins:
         ins[a].address = a
     src = Generator(ins, {0x100}).emit_source()
-    assert src.count('M68K_STEP();') == 2
-    assert 'M68K_NOP();' in src
-    assert 'M68K_RTS();' in src
+    assert src.count('pace();') == 2
+    assert '(void)0;' in src
+    assert 'cpu().ssp += 4;' in src
     assert 'void Sor::serviceIRQ()' in src
+    assert '#define BYTE(v) static_cast<m_byte>(v)' in src
+    assert '#include "M68KMacros.hpp"' not in src
 
 
 def test_jsr_emits_nonlocal_return_guard():
@@ -259,7 +263,7 @@ def test_jsr_emits_nonlocal_return_guard():
     src = Generator(ins, {0x100, 0x200}).emit_source()
 
     assert 'm_long __sp_000100 = cpu().ssp;' in src
-    assert 'M68K_PUSH_RET(0x00000106u);' in src
+    assert 'memory().writeLong(cpu().ssp, LONG(0x00000106u));' in src
     assert 'if ((cpu().ssp & 0x00FFFFFFu) > (__sp_000100 & 0x00FFFFFFu)) return;' in src
 
 
@@ -306,15 +310,6 @@ def test_recompiler_speculative_option_emits_speculative_hooks(tmp_path):
 
     source = (out / 'Sor.cpp').read_text()
     assert 'confirmSpeculative(' in source
-
-
-def test_install_macros_creates_output_directory(tmp_path):
-    out = tmp_path / 'new-generated-dir'
-
-    copied = _install_macros(str(out))
-
-    assert copied == out / 'M68KMacros.hpp'
-    assert copied.exists()
 
 
 def test_disassemble_to_fixpoint_repeats_after_new_table_targets(monkeypatch):

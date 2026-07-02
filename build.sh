@@ -115,7 +115,7 @@ if [ "$FULL" = 1 ]; then
         [ -f "$SPEC_FILE" ] && SPEC_ARG="--speculative $SPEC_FILE"
     fi
     # shellcheck disable=SC2086
-    if ! python3 -m tools.recompiler "$ROM" -o "$SRC_DIR/generated" $SPEC_ARG; then
+    if ! python3 -m tools recompile "$ROM" -o "$SRC_DIR/generated" $SPEC_ARG; then
         echo "Recompile failed." >&2
         exit 1
     fi

@@ -34,10 +34,9 @@ to ~21k lines of assembly.
 - **Interrupts:** the handler is the game's own recompiled code; entry simulates
   the 68K exception (push SR+PC, mask IPL) and `rte` undoes it; checked before
   each instruction via a cheap atomic flag gated by the IPL (§5b).
-- **Helpers:** the generated code calls **one macro per opcode**
-  (`M68KMacros.hpp`); each macro builds on the unit-tested `CPU68K` helpers, and
-  the generator feeds them side-effect-free temporaries so the classic macro
-  double-evaluation hazard cannot occur (§2d).
+- **Helpers:** opcode semantics are emitted as direct C++ statements. The only
+  generated macros are one-line cast shorthands (`BYTE`, `WORD`, `LONG`) used to
+  reduce visual noise around `static_cast` (§2d).
 - **Verification:** primary = **run the game**; safety net = **unit tests of the
   EA + flag/CCR core** (§7).
 - **Memory:** `SystemMemory` owns mirroring/masking; `convertAddress` masks all
@@ -128,20 +127,24 @@ unit-tested inline helpers** rather than generic codegen:
   flags (and the div-by-zero exception, vector 5) is written only if coverage
   ever reaches them.
 
-### 2d. Primitive operation macros (`tools/recompiler/M68KMacros.hpp`)
+### 2d. Direct opcode semantics
 
-`M68KMacros.hpp` holds **one self-contained macro per operation** — `M68K_ADD_W`,
-`M68K_LSR_L`, `M68K_MOVE_L`, … — each taking already-evaluated operand values.
+`cpp_semantics.py` emits the arithmetic, logical, shift/rotate, BCD, multiply /
+divide, special-register, and CCR-update statements directly into `Sor.cpp`.
 Effective-address expansion (read, write, read-modify-write, `(An)+` side
-effects) is emitted as plain C++ by `opcodes.py` + `ea_codegen.py`; the
-generated cartridge calls at most one operation macro per 68000 instruction
-(sometimes preceded/followed by register or memory access statements).
+effects) is emitted by `opcodes.py` + `ea_codegen.py`; the generated cartridge
+therefore reads an operand, runs the C++ semantics on an already-materialized
+temporary, then writes the result back when needed.
+
+The generated source still defines exactly three macros from a raw string:
+`BYTE(v)`, `WORD(v)`, and `LONG(v)`. They are one-line `static_cast` shorthands
+for readability only; they do not carry instruction semantics or side effects.
 
 The classic macro hazard — re-evaluating an argument that has a side effect — is
-avoided structurally: the generator **materializes every effective address into
-a plain temporary first** (§2a), so the values handed to a macro are
-side-effect-free. Read-modify-write operands (`(An)+`, `-(An)`) go through
-`rmw_ea`, which computes the address once and auto-increments once.
+removed structurally: opcode behaviour is plain C++, and the generator
+**materializes every effective address into a plain temporary first** (§2a).
+Read-modify-write operands (`(An)+`, `-(An)`) go through `rmw_ea`, which computes
+the address once and auto-increments once.
 
 ---
 
@@ -295,18 +298,10 @@ cause. So the safety net is:
 (Genesis-Plus-GX stays available as an *ad-hoc* reference if a specific divergence
 needs pinning down, but is not part of the routine workflow.)
 
-**Note (2026-06-29):** point 1 above was aspirational for a long time —
-`tests/test_codegen.py` only ever asserted which macro name + operand shape the
-*generator* emits, never compiled or executed a macro from `M68KMacros.hpp`
-itself. That gap let two real bugs (`M68K_NEG_B/W/L` computing `r-0` instead of
-`0-r`, silently a no-op; `M68K_ROL`/`M68K_ROR` writing the X flag, which real
-ROL/ROR never touch) ship and survive every existing check, because nothing
-ever drove the macros with concrete values and inspected the result. Fixed by
-`tools/recompiler/tests/test_m68k_macros.cpp` — a small, dependency-free C++
-program that calls macros directly with known inputs and checks both the
-result and N/Z/V/C/X. Run it with `tools/recompiler/tests/run_macro_tests.sh`.
-It is not (yet) wired into CI or `./clang-format.sh`; run it by hand after
-touching `M68KMacros.hpp`.
+**Note (2026-07-02):** the old `M68KMacros.hpp` source of truth was removed.
+`tests/test_codegen.py` now checks direct C++ lowering and generated-source
+shape, and semantic regressions should be covered by generator tests or runtime
+behaviour tests against the generated `Sor.cpp`.
 
 ---
 
@@ -315,16 +310,15 @@ touching `M68KMacros.hpp`.
 ```
 tools/recompiler/
   DESIGN.md            ← this document
-  M68KMacros.hpp       ← static per-opcode macros (source of truth)
+  cpp_semantics.py     ← direct opcode/CCR C++ snippets + cast macro raw string
   ea_codegen.py        ← per-addressing-mode read/write/address/RMW emitters (temps)
-  opcodes.py           ← data-op lowering; emits per-opcode M68K_* macro calls
+  opcodes.py           ← data-op lowering; composes EA code with direct semantics
   regions.py           ← partition into small functions; each loop fully contained
   generator.py         ← control-flow lowering, movem, dispatch table, Sor emit
   main.py / __main__.py← CLI; consumes decoder + active-disasm seeds
   tests/test_codegen.py
 src/generated/
   Sor.hpp/.cpp         ← MegaDriveEnvironment subclass; generated run() + regions
-  M68KMacros.hpp       ← copy of tools/recompiler/M68KMacros.hpp (on recompile)
 ```
 
 The decoder is **extended** to expose structured operands; `AsmFormatter` is
@@ -349,10 +343,9 @@ generator cannot translate is a hard error (it never silently degrades). The
 generated `Sor.cpp` compiles cleanly (`-Wall -Wextra`) and is built as part of
 the project.
 
-Interrupt delivery (§5b) is wired: every instruction is preceded by
-`M68K_IRQ_CHECK()` (a relaxed atomic load + IPL compare), and when an unmasked
-IRQ is pending `serviceIRQ()` performs the 68000 autovector exception entry and
-dispatches the recompiled handler.
+Interrupt delivery (§5b) is wired: every instruction is preceded by a direct IPL
+compare, and when an unmasked IRQ is pending `serviceIRQ()` performs the 68000
+autovector exception entry and dispatches the recompiled handler.
 
 It **runs without crashing**: `./build.sh && src/build/sor --runSor` boots
 through the cartridge hardware init (TMSS, VDP register setup, CRAM/VRAM clear,

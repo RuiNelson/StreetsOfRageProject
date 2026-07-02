@@ -15,13 +15,14 @@ come from the labels CSV when present (falling back to ``sub_XXXXXX`` /
 import re
 
 from tools.disassembler.instruction import FlowType, EAMode
+from tools.recompiler import cpp_semantics as sem
 from tools.recompiler import ea_codegen as ea
 from tools.recompiler import opcodes
 from tools.recompiler.opcodes import Unsupported
 from tools.recompiler.ea_codegen import EAGenError, TempPool
 from tools.recompiler.regions import partition
 
-# Condition-code numbers (M68K_TEST_CC / M68K_DBCC encoding).
+# Condition-code numbers.
 _CC = {
     't': 0, 'f': 1, 'hi': 2, 'ls': 3, 'cc': 4, 'cs': 5, 'ne': 6, 'eq': 7,
     'vc': 8, 'vs': 9, 'pl': 10, 'mi': 11, 'ge': 12, 'lt': 13, 'gt': 14, 'le': 15,
@@ -167,7 +168,7 @@ class Generator:
         nxt = instr.next_address
 
         if m == 'nop':
-            return ['M68K_NOP();']
+            return ['(void)0;']
 
         if m == 'bra':
             return self._transfer(a, instr.targets[0])
@@ -175,7 +176,7 @@ class Generator:
         if m.startswith('b') and m[1:] in _CC and m not in ('bra',):
             cc = _CC[m[1:]]
             body = self._transfer(a, instr.targets[0])
-            return [f'if (M68K_TEST_CC({cc})) {{'] + \
+            return [f'if ({sem.cc_expr(cc)}) {{'] + \
                    [f'    {s}' for s in body] + ['}']
 
         if m in ('jmp',):
@@ -188,7 +189,8 @@ class Generator:
         if m in ('bsr', 'jsr'):
             call_sp = f'__sp_{a:06x}'
             push = [f'm_long {call_sp} = cpu().ssp;',
-                    f'M68K_PUSH_RET({ea._hex(nxt)});']
+                    f'cpu().ssp -= 4;',
+                    f'memory().writeLong(cpu().ssp, LONG({ea._hex(nxt)}));']
             check_nonlocal_return = [
                 f'if ((cpu().ssp & 0x00FFFFFFu) > ({call_sp} & 0x00FFFFFFu)) return;'
             ]
@@ -207,21 +209,38 @@ class Generator:
                            f'dispatch({ea._hex(tgt)});'] + check_nonlocal_return
 
         if m == 'rts':
-            return ['M68K_RTS();']
+            return [
+                'cpu().ssp += 4;',
+                'if ((cpu().ssp & 0x00FFFFFFu) > 0x00FFFF00u) {',
+                '    std::fprintf(stderr, "[RTS] ssp=$%06X fn=$%06X\\n",',
+                '                 static_cast<unsigned>(cpu().ssp & 0x00FFFFFFu),',
+                '                 static_cast<unsigned>(lastFunction() & 0x00FFFFFFu));',
+                '}',
+                'return;',
+            ]
 
         if m == 'rte':
-            return ['M68K_RTE();']
+            return ['cpu().sr = memory().readWord(cpu().ssp);',
+                    'cpu().ssp += 6;',
+                    'return;']
 
         if m == 'rtr':
-            return ['M68K_RTR();']
+            return ['cpu().sr = WORD((cpu().sr & 0xFF00u) | '
+                    '(memory().readWord(cpu().ssp) & 0x00FFu));',
+                    'cpu().ssp += 6;',
+                    'return;']
 
         if m.startswith('db'):
             suffix = m[2:]
             cc = 1 if suffix in ('f', 'ra') else _CC[suffix]
             reg = instr.eas[0].reg
             body = self._transfer(a, instr.targets[0])
-            return [f'if (M68K_DBCC_DEC({cc}, {reg})) {{'] + \
-                   [f'    {s}' for s in body] + ['}']
+            ctr = f'__dbcc_{a:06x}'
+            return [f'if (!({sem.cc_expr(cc)})) {{',
+                    f'    m_word {ctr} = WORD((WORD(cpu().d[{reg}] & 0xFFFFu) - 1) & 0xFFFFu);',
+                    f'    cpu().d[{reg}] = LONG((cpu().d[{reg}] & 0xFFFF0000u) | LONG({ctr}));',
+                    f'    if ({ctr} != 0xFFFFu) {{'] + \
+                   [f'        {s}' for s in body] + ['    }', '}']
 
         raise Unsupported(m)
 
@@ -258,7 +277,8 @@ class Generator:
         if self.part.needs_label(instr.address):
             lines.append(f'{self.label(instr.address)}:')
         lines.append(f'{{ // ${instr.address:06X} {instr}')
-        lines.append('    M68K_STEP();')
+        lines.append(f'    if (irqLevel() > {sem.int_level()}) serviceIRQ();')
+        lines.append('    pace();')
         for stmt in body:
             lines.append(f'    {stmt}')
         lines.append('}')
@@ -315,7 +335,7 @@ class Generator:
         if is_addr:
             ar = ea.areg(n)
             if size == 'w':
-                return f'static_cast<m_word>({ar} & 0xFFFFu)'
+                return f'WORD({ar} & 0xFFFFu)'
             return ar
         return ea.read_dn(n, size)
 
@@ -430,7 +450,9 @@ class Generator:
 
     def emit_source(self):
         boot = self.fn(self.part.func_of(0x000200))
-        parts = [_SOURCE_PREAMBLE.format(rom_path=self.rom_path, boot_fn=boot)]
+        parts = [_SOURCE_PREAMBLE.format(cast_macros=sem.CAST_MACROS.strip(),
+                                         rom_path=self.rom_path,
+                                         boot_fn=boot)]
 
         # Pre-translate all functions; speculative-scope entries that fail are
         # excluded entirely — they decoded data as code and are not valid entry
@@ -485,7 +507,6 @@ _HEADER_TEMPLATE = '''\
 // Generated by tools/recompiler — do not edit by hand.
 // Recompiled Streets of Rage cartridge as a MegaDriveEnvironment subclass.
 
-#include "M68KMacros.hpp"
 #include "MegaDriveEnvironment.hpp"
 #include <string>
 
@@ -504,8 +525,7 @@ class Sor : public MegaDriveEnvironment {{
     void unhandledDispatch(m_long addr);
 
     // Cooperative interrupt delivery: 68000 exception entry + handler dispatch,
-    // invoked by M68K_IRQ_CHECK() before an instruction when an unmasked IRQ is
-    // pending.
+    // invoked before an instruction when an unmasked IRQ is pending.
     void serviceIRQ();
 
     // One method per recompiled subroutine entry.
@@ -520,6 +540,8 @@ _SOURCE_PREAMBLE = '''\
 
 #include <cstdio>
 #include <cstdlib>
+
+{cast_macros}
 
 Sor::Sor(const std::string &romPath, VDP::Synchronization sync,
          VDP::Scaling scaling)
@@ -538,7 +560,7 @@ void Sor::serviceIRQ() {{
     // exception entry, then dispatch the recompiled handler; its `rte` restores
     // the saved SR (and the previous IPL) and balances the stack.
     int level = irqLevel();
-    if (level <= M68K_INT_LEVEL())
+    if (level <= static_cast<int>((cpu().sr >> 8) & 0x07u))
         return; // raced with another service / masked
     clearInterrupt(level);
     m_word oldSR = cpu().sr;
@@ -547,9 +569,8 @@ void Sor::serviceIRQ() {{
     cpu().ssp -= 2;
     memory().writeWord(cpu().ssp, oldSR);
     // Stay in supervisor mode and raise the interrupt mask to this level.
-    cpu().sr = static_cast<m_word>((cpu().sr & ~0x0700u) | 0x2000u |
-                                   (static_cast<m_word>(level) << 8));
-    dispatch(memory().readLong(0x60 + static_cast<m_long>(level) * 4));
+    cpu().sr = WORD((cpu().sr & ~0x0700u) | 0x2000u | (WORD(level) << 8));
+    dispatch(memory().readLong(0x60 + LONG(level) * 4));
     if (level == 6) {{
         sound().endFrame();
     }}

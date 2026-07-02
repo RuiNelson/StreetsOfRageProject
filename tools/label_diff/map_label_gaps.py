@@ -30,20 +30,27 @@ def extract_labels(path: Path) -> list[int]:
     return sorted(labels)
 
 
-def main() -> None:
-    if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} <rom.map> <reference.asm>")
-        sys.exit(1)
-
-    map_path = Path(sys.argv[1])
-    asm_path = Path(sys.argv[2])
-
+def find_gaps(map_path: Path, asm_path: Path) -> list[int]:
     rom_map = map_path.read_bytes()
+    return [
+        addr for addr in extract_labels(asm_path)
+        if addr < len(rom_map) and rom_map[addr:addr+1] == b'X'
+    ]
 
-    for addr in extract_labels(asm_path):
-        if addr < len(rom_map) and rom_map[addr:addr+1] == b'X':
-            print(f"{addr:08X}")
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) != 2 or (argv and argv[0] in ('-h', '--help')):
+        print("Usage: python3 -m tools map-label-gaps <rom.map> <reference.asm>")
+        return 0 if argv and argv[0] in ('-h', '--help') else 1
+
+    map_path = Path(argv[0])
+    asm_path = Path(argv[1])
+
+    for addr in find_gaps(map_path, asm_path):
+        print(f"{addr:08X}")
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

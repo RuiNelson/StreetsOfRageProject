@@ -1,10 +1,9 @@
 """Instruction → C++ statement generation for data-processing opcodes.
 
-Each handler emits C++ that materializes the operands (via ``ea_codegen``) and
-then invokes a per-opcode macro from ``tools/recompiler/M68KMacros.hpp`` — e.g.
-``M68K_ADD_W``, ``M68K_LSR_L``, ``M68K_MOVE_TO_SR``. The macros carry the
-operation + CCR semantics; the generator supplies side-effect-free temporaries
-so a macro never re-evaluates an operand.
+Each handler emits C++ that materializes operands via ``ea_codegen`` and then
+splices direct C++ statements for the opcode/CCR semantics. The generated source
+is intentionally self-contained; it no longer depends on a shared per-opcode
+macro header.
 
 Control-flow instructions (bra/bcc/bsr/jsr/jmp/dbcc/rts/rte/rtr) are emitted by
 ``generator`` (they need region context); ``emit_dataop`` returns ``None`` for
@@ -15,6 +14,7 @@ generator fails loudly — the recompiler must translate 100% of what it sees.
 
 from tools.disassembler.instruction import EAMode
 from tools.recompiler import ea_codegen as ea
+from tools.recompiler import cpp_semantics as sem
 from tools.recompiler.ea_codegen import EAGenError, TempPool
 
 _SUF = {'b': 'B', 'w': 'W', 'l': 'L'}
@@ -76,9 +76,9 @@ def _special_size(e):
 
 def _special_src_expr(e):
     if e.special == 'sr':
-        return 'M68K_MOVE_FROM_SR()'
+        return 'cpu().sr'
     if e.special == 'ccr':
-        return 'static_cast<m_word>(M68K_SR & 0x00FFu)'
+        return 'WORD(cpu().sr & 0x00FFu)'
     if e.special == 'usp':
         return 'cpu().usp'
     raise EAGenError(f'read from special register {e.special}')
@@ -86,11 +86,11 @@ def _special_src_expr(e):
 
 def _special_write(e, value):
     if e.special == 'sr':
-        return [f'M68K_MOVE_TO_SR({value});']
+        return [f'cpu().sr = WORD({value});']
     if e.special == 'ccr':
-        return [f'M68K_MOVE_TO_CCR({value});']
+        return [f'cpu().sr = WORD((cpu().sr & 0xFF00u) | (WORD({value}) & 0x00FFu));']
     if e.special == 'usp':
-        return [f'M68K_MOVE_TO_USP({value});']
+        return [f'cpu().usp = LONG({value});']
     raise EAGenError(f'write to special register {e.special}')
 
 
@@ -119,27 +119,24 @@ def _move(instr, tmp):
     if dst.mode == EAMode.ADDR_REG:                # movea — sign-extend, no flags
         if size == 'b':
             raise Unsupported('movea.b')           # invalid on 68000
-        return stmts + [f'M68K_MOVEA_{_SUF[size]}({ea.areg(dst.reg)}, {val});']
+        return stmts + sem.movea(ea.areg(dst.reg), val, size)
     r = tmp.fresh()
     stmts.append(f'{ea._CTYPE[size]} {r} = {val};')
     if size == 'w' and dst.mode == EAMode.DATA_REG:
         # Word move to Dn: merge low 16 bits only (68000 MOVE.W to Dn).
         stmts.append(ea.write_dn_word_preserve_high(dst.reg, r))
-        stmts.append(f'M68K_MOVE_W({r});')
-        return stmts
+        return stmts + sem.move(r, size)
     stmts += ea.write_ea(dst, size, r, tmp)
-    stmts.append(f'M68K_MOVE_{_SUF[size]}({r});')
-    return stmts
+    return stmts + sem.move(r, size)
 
 
 def _moveq(instr, tmp):
     src, dst = instr.eas[0], instr.eas[1]
     r = tmp.fresh()
     return [
-        f'm_long {r} = {_signext_to_long(f"static_cast<m_byte>({ea._hex(src.imm)})", "b")};',
+        f'm_long {r} = {_signext_to_long(f"BYTE({ea._hex(src.imm)})", "b")};',
         ea.write_dn(dst.reg, 'l', r),
-        f'M68K_MOVE_L({r});',
-    ]
+    ] + sem.move(r, 'l')
 
 
 def _arith(instr, tmp, op):
@@ -154,16 +151,17 @@ def _arith(instr, tmp, op):
         s_stmts, sval = ea.read_ea(src, size, tmp)
         ar = ea.areg(dst.reg)
         if op == 'CMP':
-            return s_stmts + [f'M68K_CMPA_{_SUF[size]}({ar}, {sval});']
-        macro = 'ADDA' if op == 'ADD' else 'SUBA'
-        return s_stmts + [f'M68K_{macro}_{_SUF[size]}({ar}, {sval});']
+            return s_stmts + sem.cmpa(ar, sval, size, tmp)
+        return s_stmts + (sem.adda(ar, sval, size) if op == 'ADD'
+                          else sem.suba(ar, sval, size))
 
     s_stmts, sval = ea.read_ea(src, size, tmp)
     if op == 'CMP':
         d_stmts, dval = ea.read_ea(dst, size, tmp)
-        return s_stmts + d_stmts + [f'M68K_CMP_{suf}({dval}, {sval});']
+        return s_stmts + d_stmts + sem.cmp(dval, sval, size, tmp)
     pre, r, post = ea.rmw_ea(dst, size, tmp)
-    return s_stmts + pre + [f'M68K_{op}_{suf}({r}, {sval});'] + post
+    op_stmts = sem.add(r, sval, size, tmp) if op == 'ADD' else sem.sub(r, sval, size, tmp)
+    return s_stmts + pre + op_stmts + post
 
 
 def _add(instr, tmp): return _arith(instr, tmp, 'ADD')
@@ -182,7 +180,7 @@ def _logic(instr, tmp, op):
         return _special_write(dst, f'({cur} {cxx} {sval})')
     s_stmts, sval = ea.read_ea(src, size, tmp)
     pre, r, post = ea.rmw_ea(dst, size, tmp)
-    return s_stmts + pre + [f'M68K_{op}_{_SUF[size]}({r}, {sval});'] + post
+    return s_stmts + pre + sem.logic_op(r, sval, size, op) + post
 
 
 def _and(instr, tmp): return _logic(instr, tmp, 'AND')
@@ -193,27 +191,27 @@ def _eor(instr, tmp): return _logic(instr, tmp, 'EOR')
 def _tst(instr, tmp):
     size = _sized(instr)
     stmts, val = ea.read_ea(instr.eas[0], size, tmp)
-    return stmts + [f'M68K_TST_{_SUF[size]}({val});']
+    return stmts + sem.logical(val, size)
 
 
 def _clr(instr, tmp):
     size = _sized(instr)
     r = tmp.fresh()
-    stmts = [f'{ea._CTYPE[size]} {r} = 0;', f'M68K_CLR_{_SUF[size]}({r});']
+    stmts = [f'{ea._CTYPE[size]} {r} = 0;'] + sem.clr(r, size)
     return stmts + ea.write_ea(instr.eas[0], size, r, tmp)
 
 
 def _lea(instr, tmp):
     src, dst = instr.eas[0], instr.eas[1]
     setup, addr = ea.address_of(src, tmp)
-    return setup + [f'{ea.areg(dst.reg)} = static_cast<m_long>({addr});']
+    return setup + [f'{ea.areg(dst.reg)} = LONG({addr});']
 
 
 def _pea(instr, tmp):
     setup, addr = ea.address_of(instr.eas[0], tmp)
     return setup + [
         'cpu().ssp -= 4;',
-        f'memory().writeLong(cpu().ssp, static_cast<m_long>({addr}));',
+        f'memory().writeLong(cpu().ssp, LONG({addr}));',
     ]
 
 
@@ -221,7 +219,8 @@ def _unary(instr, tmp, macro):
     """neg / not — read-modify-write a single operand via a no-arg macro."""
     size = _sized(instr)
     pre, r, post = ea.rmw_ea(instr.eas[0], size, tmp)
-    return pre + [f'M68K_{macro}_{_SUF[size]}({r});'] + post
+    op = sem.neg(r, size, tmp) if macro == 'NEG' else sem.not_op(r, size)
+    return pre + op + post
 
 
 def _neg(instr, tmp): return _unary(instr, tmp, 'NEG')
@@ -232,31 +231,32 @@ def _swap(instr, tmp):
     n = instr.eas[0].reg
     r = tmp.fresh()
     return [f'm_long {r} = {ea.read_dn(n, "l")};',
-            f'M68K_SWAP({r});',
+            *sem.swap(r),
             ea.write_dn(n, 'l', r)]
 
 
 def _ext(instr, tmp):
     n = instr.eas[0].reg
-    return [f'M68K_EXT_{"L" if instr.size == "l" else "W"}({n});']
+    return sem.ext(n, instr.size or 'w', tmp)
 
 
 def _shift(instr, tmp, macro):
     """Shift/rotate. Forms: '<op> #cnt, Dn' / '<op> Dm, Dn' / '<op> <ea>' (×1)."""
     size = _sized(instr)
-    suf = _SUF[size]
     if len(instr.eas) == 1:                       # memory shift, count = 1
         pre, r, post = ea.rmw_ea(instr.eas[0], size, tmp)
-        return pre + [f'M68K_{macro}_{suf}({r}, 1);'] + post
+        return pre + sem.shift(r, '1', size, macro, tmp) + post
     count, dst = instr.eas[0], instr.eas[1]
+    setup = []
     if count.mode == EAMode.IMMEDIATE:
         cnt = str((count.imm - 1) % 8 + 1)        # immediate count is 1..8
     else:
         # Register count: low six bits of Dn; zero → 8/16/32 by operand size.
         zero = {'b': 8, 'w': 16, 'l': 32}[size]
-        cnt = f'M68K_REG_SHIFT_COUNT({count.reg}, {zero})'
+        setup, cnt = sem.reg_shift_count(count.reg, zero, tmp)
     pre, r, post = ea.rmw_ea(dst, size, tmp)
-    return pre + [f'M68K_{macro}_{suf}({r}, {cnt});'] + post
+    return (setup if count.mode != EAMode.IMMEDIATE else []) + pre + \
+        sem.shift(r, cnt, size, macro, tmp) + post
 
 
 def _muldiv(instr, tmp, macro):
@@ -267,7 +267,8 @@ def _muldiv(instr, tmp, macro):
         dexpr = ea.read_dn(dst.reg, 'w')
     else:
         dexpr = ea.read_dn(dst.reg, 'l')
-    return s_stmts + [ea.write_dn(dst.reg, 'l', f'M68K_{macro}({dexpr}, {sval})')]
+    op_stmts, result = sem.muldiv(dexpr, sval, macro, tmp)
+    return s_stmts + op_stmts + [ea.write_dn(dst.reg, 'l', result)]
 
 
 def _bitop(instr, tmp, kind):
@@ -281,14 +282,14 @@ def _bitop(instr, tmp, kind):
         bit = f'(cpu().d[{bit_ea.reg}] % {modulo})'
     if kind == 'BTST':
         stmts, val = ea.read_ea(dst, size, tmp)
-        return stmts + [f'M68K_BTST({val}, {bit});']
+        return stmts + sem.bitop(val, bit, kind)
     pre, r, post = ea.rmw_ea(dst, size, tmp)
-    return pre + [f'M68K_{kind}({r}, {bit});'] + post
+    return pre + sem.bitop(r, bit, kind) + post
 
 
 def _scc(instr, tmp, cc):
     r = tmp.fresh()
-    stmts = [f'm_byte {r} = 0;', f'M68K_SCC({r}, {cc});']
+    stmts = [f'm_byte {r} = 0;', *sem.scc(r, cc)]
     return stmts + ea.write_ea(instr.eas[0], 'b', r, tmp)
 
 
@@ -303,25 +304,26 @@ def _reg_lvalue(e):
 def _exg(instr, tmp):
     a = _reg_lvalue(instr.eas[0])
     b = _reg_lvalue(instr.eas[1])
-    return [f'M68K_EXG({a}, {b});']
+    t = tmp.fresh()
+    return [f'm_long {t} = {a};', f'{a} = {b};', f'{b} = {t};']
 
 
 def _bcd(instr, tmp, macro):
     src, dst = instr.eas[0], instr.eas[1]
     s_stmts, sval = ea.read_ea(src, 'b', tmp)
     pre, r, post = ea.rmw_ea(dst, 'b', tmp)
-    return s_stmts + pre + [f'M68K_{macro}({r}, {sval});'] + post
+    return s_stmts + pre + sem.bcd(r, sval, macro, tmp) + post
 
 
 def _nbcd(instr, tmp):
     pre, r, post = ea.rmw_ea(instr.eas[0], 'b', tmp)
-    return pre + [f'M68K_NBCD({r});'] + post
+    return pre + sem.nbcd(r, tmp) + post
 
 
 def _negx(instr, tmp):
     size = _sized(instr)
     pre, r, post = ea.rmw_ea(instr.eas[0], size, tmp)
-    return pre + [f'M68K_NEGX_{_SUF[size]}({r});'] + post
+    return pre + sem.negx(r, size, tmp) + post
 
 
 def _movep(instr, tmp):
@@ -336,7 +338,7 @@ def _movep(instr, tmp):
         shifts = [24, 16, 8, 0] if size == 'l' else [8, 0]
         for i, sh in enumerate(shifts):
             stmts.append(f'memory().writeByte({b} + {i * 2}, '
-                         f'static_cast<m_byte>((cpu().d[{dn}] >> {sh}) & 0xFFu));')
+                         f'BYTE((cpu().d[{dn}] >> {sh}) & 0xFFu));')
         return stmts
     else:                                    # mem → reg
         dn = dst.reg
@@ -346,22 +348,22 @@ def _movep(instr, tmp):
         if size == 'l':
             stmts.append(
                 f'cpu().d[{dn}] = '
-                f'(static_cast<m_long>(memory().readByte({b})) << 24) | '
-                f'(static_cast<m_long>(memory().readByte({b} + 2)) << 16) | '
-                f'(static_cast<m_long>(memory().readByte({b} + 4)) << 8) | '
-                f'static_cast<m_long>(memory().readByte({b} + 6));'
+                f'(LONG(memory().readByte({b})) << 24) | '
+                f'(LONG(memory().readByte({b} + 2)) << 16) | '
+                f'(LONG(memory().readByte({b} + 4)) << 8) | '
+                f'LONG(memory().readByte({b} + 6));'
             )
         else:
             stmts.append(
                 f'cpu().d[{dn}] = (cpu().d[{dn}] & 0xFFFF0000u) | '
-                f'(static_cast<m_long>(memory().readByte({b})) << 8) | '
-                f'static_cast<m_long>(memory().readByte({b} + 2));'
+                f'(LONG(memory().readByte({b})) << 8) | '
+                f'LONG(memory().readByte({b} + 2));'
             )
         return stmts
 
 
 def _nop(instr, tmp):
-    return ['M68K_NOP();']
+    return ['(void)0;']
 
 
 _HANDLERS = {

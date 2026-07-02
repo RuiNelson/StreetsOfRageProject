@@ -201,7 +201,7 @@ def write_output(results: list[int], out_path: Path) -> None:
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Scan unmapped ROM for 68k function entry candidates")
     ap.add_argument('map_file', help="ROM coverage map (output/sor.map)")
     ap.add_argument('rom_file', help="ROM binary (rom/SOR.bin)")
@@ -211,7 +211,7 @@ def main() -> int:
                     help="Scan the supplied map directly instead of first applying "
                          "the recompiler's static table-discovery fixpoint")
     ap.add_argument('-o', '--output', default='code-analysis/speculative_addresses.txt')
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     rom_map = Path(args.map_file).read_bytes()
     rom = ROM.from_file(args.rom_file)

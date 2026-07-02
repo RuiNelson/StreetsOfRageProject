@@ -36,13 +36,13 @@ trap 'rm -f "$SCAN_ASM" "$SCAN_MAP"' EXIT
 start_count=$(grep -cE '^[0-9a-fA-F]+' "$AUX" 2>/dev/null || echo 0)
 
 echo "==> [fast] Refreshing coverage map from current aux addresses..."
-if ! python3 -m tools.disassembler "$ROM" -o "$SCAN_ASM" -a "$AUX" --map "$SCAN_MAP"; then
+if ! python3 -m tools disassemble "$ROM" -o "$SCAN_ASM" -a "$AUX" --map "$SCAN_MAP"; then
     echo "Coverage-map refresh failed." >&2
     exit 1
 fi
 
 echo "==> [fast] Scanning for speculative entry points (after static fixpoint)..."
-if ! python3 -m tools.speculative_scan "$SCAN_MAP" "$ROM" "$AUX" -o "$SPEC"; then
+if ! python3 -m tools speculative-scan "$SCAN_MAP" "$ROM" "$AUX" -o "$SPEC"; then
     echo "Speculative scan failed." >&2
     exit 1
 fi

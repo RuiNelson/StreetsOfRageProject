@@ -11,9 +11,7 @@ compile-safe stubs (unimplemented opcodes), broken down by mnemonic.
 import argparse
 import bisect
 import os
-import shutil
 import sys
-from pathlib import Path
 
 from tools.disassembler.disassembler import Disassembler
 from tools.disassembler.instruction import EAMode
@@ -21,17 +19,6 @@ from tools.disassembler.main import _load_csv_addresses, _load_labels_csv
 from tools.disassembler.rom import ROM
 from tools.common.addresses import parse_address_lines
 from tools.recompiler.generator import Generator
-
-_ROOT = Path(__file__).resolve().parents[2]
-_MACROS_SRC = _ROOT / 'tools/recompiler/M68KMacros.hpp'
-
-
-def _install_macros(out_dir: str):
-    """Copy the static M68KMacros.hpp alongside the generated Sor sources."""
-    os.makedirs(out_dir, exist_ok=True)
-    dst = Path(out_dir) / 'M68KMacros.hpp'
-    shutil.copy2(_MACROS_SRC, dst)
-    return dst
 
 
 def _discover_table_targets(disasm, rom) -> set:
@@ -419,9 +406,6 @@ def main(argv=None):
                     help='CSV of address labels (address,label,comment)')
     ap.add_argument('-v', '--verbose', action='store_true')
     args = ap.parse_args(argv)
-
-    macros_dst = _install_macros(args.out_dir)
-    print(f'[recompile] copied {_MACROS_SRC} -> {macros_dst}')
 
     rom = ROM.from_file(args.rom)
 

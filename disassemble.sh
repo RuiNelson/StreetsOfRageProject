@@ -12,7 +12,7 @@ OUT_DIR="output"
 
 mkdir -p "$OUT_DIR"
 
-python3 -m tools.disassembler "$ROM" \
+python3 -m tools disassemble "$ROM" \
     -o "$OUT_DIR/sor.asm" \
     -a "$AUX" \
     --addresses-csv "$ADDR_CSV" \

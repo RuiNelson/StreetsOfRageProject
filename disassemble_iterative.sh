@@ -13,14 +13,14 @@ AUX="aux_addresses.txt"
 mkdir -p "$OUT_DIR"
 
 # First pass: disassemble with current aux_addresses
-python3 -m tools.disassembler "$ROM" \
+python3 -m tools disassemble "$ROM" \
     -o "$SOR_ASM" \
     -a "$AUX" \
     --map "$SOR_MAP" \
     -v
 
 # Iterative loop: add missing addresses one by one
-python3 tools/iterative_disasm/script.py \
+python3 -m tools iterative-disasm \
     "$SOR_ASM" \
     "$SOR_MAP" \
     "$EXODUS" \

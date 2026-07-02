@@ -2,6 +2,7 @@
 """Remove locations containing data (dc.b/dc.w) from sor-exodus.asm"""
 
 import re
+import sys
 
 BLOCK_START = re.compile(r'^loc_[0-9A-F]+:')
 
@@ -43,10 +44,18 @@ def process_file(filename):
 
     return result
 
-if __name__ == '__main__':
-    import sys
-    filename = sys.argv[1] if len(sys.argv) > 1 else 'etc/sor-exodus.asm'
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] in ('-h', '--help'):
+        print("Usage: python3 -m tools remove-data [asm-file]")
+        return 0
+    filename = argv[0] if argv else 'etc/sor-exodus.asm'
     result = process_file(filename)
     with open(filename, 'w') as f:
         f.writelines(result)
     print(f"Processed {filename}")
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

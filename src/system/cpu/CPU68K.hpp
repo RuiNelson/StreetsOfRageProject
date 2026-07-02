@@ -6,8 +6,8 @@
  * @file CPU68K.hpp
  * @brief Motorola 68000 register file — storage only.
  *
- * All instruction semantics live in M68KMacros.hpp. Generated cartridge code
- * reads and writes these fields exclusively through those macros.
+ * Generated cartridge code reads and writes these fields directly while
+ * emitting the 68000 instruction semantics inline.
  */
 struct CPU68K {
     m_long d[8]{}; ///< D0–D7

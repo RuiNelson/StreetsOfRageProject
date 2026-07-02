@@ -15,6 +15,10 @@ The key insight: many 68000 instructions jump/call indirectly (via registers or 
 - `aux_addresses.txt` — extra entry points for the static disassembler, derived from active disassembly
 - `output/sor.map` — binary coverage map (each byte = 'I'=instruction, 'D'=data, 'X'=unknown)
 
+**Unified tool entry point:** use `python3 -m tools <command> ...`.  The old
+module entry points still delegate for compatibility, but the cohesive operator
+surface is the unified CLI.
+
 **Tools pipeline:**
 
 ```
@@ -43,7 +47,7 @@ Disassembler
 Converts the ROM binary into readable 68000 assembly.
 
 ```bash
-python3 tools/disassembler/main.py rom/StreetsOfRage.bin -o output/sor.asm -v
+python3 -m tools disassemble rom/StreetsOfRage.bin -o output/sor.asm -v
 ```
 
 **Entry points:** defaults to reset vector (0x000208) and VBlank IRQ (0x019D16). Use `--aux` to add addresses from `aux_addresses.txt` (one hex address per line).
@@ -84,7 +88,7 @@ remove-data-locations
 Strips blocks containing data directives (`dc.b`, `dc.w`, `dc.l`) from assembly output. Keeps only code blocks.
 
 ```bash
-python3 -m tools.remove_data_locations output/sor.asm
+python3 -m tools remove-data output/sor.asm
 ```
 
 Modifies the file in place. Splits by label, filters out any block with a data directive.
@@ -98,12 +102,12 @@ Two scripts for comparing assembly and finding gaps:
 
 **script.py** — labels in file B but not in file A:
 ```bash
-python3 tools/label_diff/script.py output/sor-new.asm etc/sor-exodus.asm
+python3 -m tools label-diff output/sor-new.asm etc/sor-exodus.asm
 ```
 
 **map_label_gaps.py** — labels that point to 'X' (unmapped) bytes in the ROM map:
 ```bash
-python3 tools/label_diff/map_label_gaps.py output/sor.map etc/sor-exodus.asm
+python3 -m tools map-label-gaps output/sor.map etc/sor-exodus.asm
 ```
 Used by `iterative-disasm` to discover which labels land on unmapped regions.
 
@@ -115,7 +119,7 @@ iterative-disasm
 Iteratively expands static disassembly coverage toward the active disassembly ground-truth.
 
 ```bash
-python3 tools/iterative_disasm/script.py output/sor.asm output/sor.map etc/sor-exodus.asm aux_addresses.txt rom/StreetsOfRage.bin
+python3 -m tools iterative-disasm output/sor.asm output/sor.map etc/sor-exodus.asm aux_addresses.txt rom/StreetsOfRage.bin
 ```
 
 **Loop:**
