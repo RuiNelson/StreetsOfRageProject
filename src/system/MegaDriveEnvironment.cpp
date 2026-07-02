@@ -143,7 +143,7 @@ void MegaDriveEnvironment::logFrame(unsigned frame, bool displayEnabled) {
                  "master[$DD90]=%04X master[$DDA0]=%04X  live[$F410]=%04X  fade($FA61)=%02X f63=%02X f05=%02X\n",
                  frame / 60,
                  frame,
-                 (cpu_.sr >> 8) & 0x07,
+                 cpu_.interruptMask(),
                  traceFn_.load(std::memory_order_relaxed),
                  mode,
                  fa30,
@@ -195,7 +195,7 @@ void MegaDriveEnvironment::reportUnhandledDispatch(m_long addr) {
 
     std::fprintf(stderr,
                  "[dispatch] SR=$%04X SSP=$%06X USP=$%06X PC=$%06X\n",
-                 static_cast<unsigned>(cpu_.sr),
+                 static_cast<unsigned>(cpu_.status()),
                  static_cast<unsigned>(cpu_.ssp & 0x00FFFFFFu),
                  static_cast<unsigned>(cpu_.usp & 0x00FFFFFFu),
                  static_cast<unsigned>(cpu_.pc & 0x00FFFFFFu));
@@ -308,8 +308,8 @@ void MegaDriveEnvironment::runVDPInterrupts() {
 }
 
 void MegaDriveEnvironment::powerOn() {
-    cpu_    = CPU68K{};
-    cpu_.sr = 0x2700;
+    cpu_ = CPU68K{};
+    cpu_.setStatus(0x2700);
     m68kMasterCycles_.store(0, std::memory_order_release);
     vdp_.start();
     z80_.start();

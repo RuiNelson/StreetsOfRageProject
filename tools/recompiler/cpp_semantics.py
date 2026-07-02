@@ -11,6 +11,7 @@ CAST_MACROS = r'''
 #define BYTE(v) static_cast<m_byte>(v)
 #define WORD(v) static_cast<m_word>(v)
 #define LONG(v) static_cast<m_long>(v)
+#define BEFORE_INSTRUCTION if (irqLevel() > cpu().interruptMask()) serviceIRQ(); pace();
 '''
 
 _SIGN = {'b': '0x80u', 'w': '0x8000u', 'l': '0x80000000u'}
@@ -29,52 +30,42 @@ def _wide(size: str, expr: str) -> str:
     return f'{_WIDEN[size]}({expr})'
 
 
+_FLAG = {
+    'c': 'cpu().flagC()', 'v': 'cpu().flagV()', 'z': 'cpu().flagZ()',
+    'n': 'cpu().flagN()', 'x': 'cpu().flagX()',
+}
+_FLAG_BIT = {
+    'c': 'CPU68K::FlagC', 'v': 'CPU68K::FlagV', 'z': 'CPU68K::FlagZ',
+    'n': 'CPU68K::FlagN', 'x': 'CPU68K::FlagX',
+}
+
+
 def flag(name: str) -> str:
-    mask = {'c': '0x0001u', 'v': '0x0002u', 'z': '0x0004u',
-            'n': '0x0008u', 'x': '0x0010u'}[name.lower()]
-    return f'((cpu().sr & {mask}) != 0)'
+    return _FLAG[name.lower()]
 
 
 def set_flag(name: str, value: str) -> str:
-    mask = {'c': '0x0001u', 'v': '0x0002u', 'z': '0x0004u',
-            'n': '0x0008u', 'x': '0x0010u'}[name.lower()]
-    return (f'cpu().sr = WORD((cpu().sr & ~{mask}) | '
-            f'(({value}) ? {mask} : 0u));')
+    bit = _FLAG_BIT[name.lower()]
+    return f'cpu().setFlag({bit}, {value});'
 
 
 def int_level() -> str:
-    return 'static_cast<int>((cpu().sr >> 8) & 0x07u)'
+    return 'cpu().interruptMask()'
 
 
 def cc_expr(cc: int) -> str:
-    c, v, z, n = flag('c'), flag('v'), flag('z'), flag('n')
-    return {
-        0: 'true',
-        1: 'false',
-        2: f'(!{c} && !{z})',
-        3: f'({c} || {z})',
-        4: f'(!{c})',
-        5: c,
-        6: f'(!{z})',
-        7: z,
-        8: f'(!{v})',
-        9: v,
-        10: f'(!{n})',
-        11: n,
-        12: f'({n} == {v})',
-        13: f'({n} != {v})',
-        14: f'(!{z} && ({n} == {v}))',
-        15: f'({z} || ({n} != {v}))',
-    }[cc]
+    return f'cpu().condition({cc})'
 
 
-def set_nzvc(value: str, size: str, v: str = 'false', c: str = 'false') -> list[str]:
-    return [
-        set_flag('n', f'(({value}) & {_SIGN[size]}) != 0'),
-        set_flag('z', f'({value}) == 0'),
-        set_flag('v', v),
-        set_flag('c', c),
-    ]
+def set_nzvc(value: str, size: str, v: str = 'false', c: str = 'false',
+             x: str | None = None) -> list[str]:
+    """Update N/Z/V/C and optionally X through compact CPU68K helpers."""
+    sign = _SIGN[size]
+    if v == 'false' and c == 'false' and x in (None, 'false'):
+        return [f'cpu().setNZClearVC({value}, {sign});']
+    if x is None:
+        return [f'cpu().setNZVC({value}, {sign}, {v}, {c});']
+    return [f'cpu().setNZVCX({value}, {sign}, {v}, {c}, {x});']
 
 
 def logical(value: str, size: str) -> list[str]:
@@ -94,8 +85,7 @@ def add(dst: str, src: str, size: str, tmp) -> list[str]:
         f'{dst} = {_CAST[size]}({full});',
         f'bool {cy} = ({full} & {_CARRY[size]}) != 0;',
         f'bool {ov} = ((~({old} ^ {sval}) & ({old} ^ {dst})) & {_SIGN[size]}) != 0;',
-        *set_nzvc(dst, size, ov, cy),
-        set_flag('x', cy),
+        *set_nzvc(dst, size, ov, cy, x=cy),
     ]
 
 
@@ -108,8 +98,7 @@ def sub(dst: str, src: str, size: str, tmp) -> list[str]:
         f'{dst} = {_CAST[size]}({full});',
         f'bool {cy} = ({full} & {_CARRY[size]}) != 0;',
         f'bool {ov} = ((({old} ^ {sval}) & ({old} ^ {dst})) & {_SIGN[size]}) != 0;',
-        *set_nzvc(dst, size, ov, cy),
-        set_flag('x', cy),
+        *set_nzvc(dst, size, ov, cy, x=cy),
     ]
 
 
@@ -170,8 +159,7 @@ def neg(dst: str, size: str, tmp) -> list[str]:
         f'{dst} = {_CAST[size]}({full});',
         f'bool {cy} = ({full} & {_CARRY[size]}) != 0;',
         f'bool {ov} = (({old} & {dst}) & {_SIGN[size]}) != 0;',
-        *set_nzvc(dst, size, ov, cy),
-        set_flag('x', cy),
+        *set_nzvc(dst, size, ov, cy, x=cy),
     ]
 
 
@@ -245,9 +233,7 @@ def shift(dst: str, count: str, size: str, kind: str, tmp) -> list[str]:
                     f'{x} = __ls != 0;')
         out += [
             f'for (int __i = 0; __i < static_cast<int>({count}); ++__i) {{ {body} }}',
-            set_flag('v', 'false'),
-            set_flag('c', x),
-            set_flag('x', x),
+            f'cpu().setVCX(false, {x}, {x});',
         ]
     else:
         bodies = {
@@ -263,15 +249,14 @@ def shift(dst: str, count: str, size: str, kind: str, tmp) -> list[str]:
             'ROR': (f'm_long __ls = {v} & 1u; '
                     f'{v} = (({v} >> 1) | (__ls << ({v}_nbits - 1))) & {v}_mask; {c} = __ls != 0;'),
         }
-        out += [
-            f'for (int __i = 0; __i < static_cast<int>({count}); ++__i) {{ {bodies[kind]} }}',
-            set_flag('c', c),
-            *( [set_flag('x', c)] if kind in ('LSL', 'LSR', 'ASL', 'ASR') else [] ),
-            set_flag('v', ov if kind == 'ASL' else 'false'),
-        ]
+        out.append(
+            f'for (int __i = 0; __i < static_cast<int>({count}); ++__i) {{ {bodies[kind]} }}')
+        if kind in ('LSL', 'LSR', 'ASL', 'ASR'):
+            out.append(f'cpu().setVCX({ov}, {c}, {c});')
+        else:
+            out.append(f'cpu().setVC(false, {c});')
     out += [
-        set_flag('n', f'({v} & (1u << ({v}_nbits - 1))) != 0'),
-        set_flag('z', f'({v} & {v}_mask) == 0'),
+        f'cpu().setNZ({v} & {v}_mask, 1u << ({v}_nbits - 1));',
         f'{dst} = {cast}({v});',
     ]
     return out

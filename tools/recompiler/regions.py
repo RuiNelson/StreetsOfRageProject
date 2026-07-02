@@ -3,16 +3,16 @@
 A *function* spans from a subroutine/call entry up to the next entry, so that
 sequential code and intra-function branches (including back-edges) stay inside
 one function — loops therefore stay as ``goto``/``while``, never recursion
-(DESIGN.md §3).
+through native calls.
 
 Transfers are classified:
 
 * **intra-function** (target in the same function)  → ``goto`` to a local label;
 * **cross-function to another entry**                → native call to that fn;
 * **cross-function into the middle** of a function   → native call carrying the
-  target address; the callee routes it via an entry ``switch`` trampoline
-  (DESIGN.md §4). Such mid-function targets are recorded as extra entry points
-  of the owning function.
+  target address; the callee routes it via an entry ``switch`` trampoline.
+  Such mid-function targets are recorded as extra entry points of the owning
+  function.
 """
 
 import bisect

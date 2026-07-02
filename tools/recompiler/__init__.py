@@ -2,8 +2,7 @@
 
 Consumes the disassembler's structured ``Instruction`` / ``EA`` stream (see
 ``tools/disassembler/instruction.py``) and emits a ``MegaDriveEnvironment``
-subclass whose ``run()`` is the recompiled cartridge code. See
-``tools/recompiler/DESIGN.md`` for the architecture.
+subclass whose ``run()`` is the recompiled cartridge code.
 
 Pipeline
 --------

@@ -76,9 +76,9 @@ def _special_size(e):
 
 def _special_src_expr(e):
     if e.special == 'sr':
-        return 'cpu().sr'
+        return 'cpu().status()'
     if e.special == 'ccr':
-        return 'WORD(cpu().sr & 0x00FFu)'
+        return 'cpu().ccr()'
     if e.special == 'usp':
         return 'cpu().usp'
     raise EAGenError(f'read from special register {e.special}')
@@ -86,9 +86,9 @@ def _special_src_expr(e):
 
 def _special_write(e, value):
     if e.special == 'sr':
-        return [f'cpu().sr = WORD({value});']
+        return [f'cpu().setStatus(WORD({value}));']
     if e.special == 'ccr':
-        return [f'cpu().sr = WORD((cpu().sr & 0xFF00u) | (WORD({value}) & 0x00FFu));']
+        return [f'cpu().setCCR(WORD({value}));']
     if e.special == 'usp':
         return [f'cpu().usp = LONG({value});']
     raise EAGenError(f'write to special register {e.special}')
@@ -133,8 +133,9 @@ def _move(instr, tmp):
 def _moveq(instr, tmp):
     src, dst = instr.eas[0], instr.eas[1]
     r = tmp.fresh()
+    imm = src.imm & 0xFF
     return [
-        f'm_long {r} = {_signext_to_long(f"BYTE({ea._hex(src.imm)})", "b")};',
+        f'm_long {r} = LONG(static_cast<int32_t>(static_cast<int8_t>({imm})));',
         ea.write_dn(dst.reg, 'l', r),
     ] + sem.move(r, 'l')
 

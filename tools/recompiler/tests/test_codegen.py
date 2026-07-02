@@ -116,23 +116,23 @@ def test_move_sets_logical_flags():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'move', 'l', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.DATA_REG, reg=1)])))
     assert 'cpu().d[1]' in out
-    assert 'cpu().sr = WORD' in out
+    assert 'cpu().setNZClearVC' in out
 
 
 def test_movea_no_flags_sign_extends():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'move', 'w', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.ADDR_REG, reg=1)])))
-    assert 'cpu().sr' not in out                 # movea never touches CCR
+    assert 'setCCR' not in out and 'setFlag' not in out  # movea never touches CCR
     assert 'cpu().a[1]' in out                   # word source sign-extended
     assert 'static_cast<int16_t>' in out
 
 
-def test_move_word_to_data_reg_sign_extends():
-    """68000 MOVE.W to Dn sign-extends; must not use setDataWord (preserves high half)."""
+def test_move_word_to_data_reg_preserves_high_word():
+    """68000 MOVE.W to Dn merges the low word and preserves the high word."""
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'move', 'w', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.DATA_REG, reg=7)])))
     assert 'cpu().d[7]' in out and '0xFFFF0000u' in out
-    assert 'cpu().sr = WORD' in out
+    assert 'cpu().setNZClearVC' in out
 
 
 def test_move_word_to_memory_uses_ea_writer_not_data_reg_macro():
@@ -140,13 +140,25 @@ def test_move_word_to_memory_uses_ea_writer_not_data_reg_macro():
         'move', 'w', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.ADDR_IND, reg=1)])))
     assert '0xFFFF0000u' not in out
     assert 'memory().writeWord(cpu().a[1]' in out
-    assert 'cpu().sr = WORD' in out
+    assert 'cpu().setNZClearVC' in out
 
 
 def test_moveq_long_signext_and_flags():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'moveq', None, [EA(EAMode.IMMEDIATE, imm=-1), EA(EAMode.DATA_REG, reg=0)])))
-    assert 'cpu().d[0]' in out and 'cpu().sr = WORD' in out
+    assert 'cpu().d[0]' in out and 'cpu().setNZClearVC' in out
+
+
+def test_move_special_registers_use_cpu_sr_helpers():
+    from_sr = '\n'.join(opcodes.emit_dataop(_instr(
+        'move', 'w', [EA(EAMode.SPECIAL_REG, special='sr'), EA(EAMode.DATA_REG, reg=0)])))
+    to_ccr = '\n'.join(opcodes.emit_dataop(_instr(
+        'move', 'w', [EA(EAMode.IMMEDIATE, imm=0x1F), EA(EAMode.SPECIAL_REG, special='ccr')])))
+
+    assert 'cpu().status()' in from_sr
+    assert 'cpu().setCCR(WORD(' in to_ccr
+    assert 'cpu().sr' not in from_sr
+    assert 'cpu().sr' not in to_ccr
 
 
 def test_add_uses_macro_and_writes_back():
@@ -154,6 +166,7 @@ def test_add_uses_macro_and_writes_back():
         'add', 'w', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.DATA_REG, reg=1)])))
     assert '+ LONG(' in out
     assert 'cpu().d[1]' in out
+    assert 'cpu().setNZVCX' in out
 
 
 def test_cmp_sets_flags_without_writing():
@@ -167,7 +180,7 @@ def test_adda_is_address_arith_no_flags():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'adda', 'l', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.ADDR_REG, reg=1)])))
     assert 'cpu().a[1] = LONG(cpu().a[1] +' in out
-    assert 'cpu().sr' not in out
+    assert 'setCCR' not in out and 'setFlag' not in out
 
 
 def test_shift_immediate_count():
@@ -200,6 +213,7 @@ def test_scc_sets_byte_by_condition():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'sne', 'b', [EA(EAMode.DATA_REG, reg=6)])))
     assert 'BYTE(0xFF)' in out and 'BYTE(0)' in out
+    assert 'cpu().condition(6)' in out
     assert 'cpu().d[6]' in out
 
 
@@ -214,7 +228,7 @@ def test_abcd_uses_macro():
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'abcd', 'b', [EA(EAMode.DATA_REG, reg=0), EA(EAMode.DATA_REG, reg=1)])))
     assert '& 0x0F' in out
-    assert 'cpu().sr = WORD' in out
+    assert 'cpu().setFlag' in out
 
 
 def test_flow_opcodes_return_none():
@@ -241,11 +255,14 @@ def test_irq_check_emitted_before_each_instruction():
     for a in ins:
         ins[a].address = a
     src = Generator(ins, {0x100}).emit_source()
-    assert src.count('pace();') == 2
+    assert '#define BEFORE_INSTRUCTION if (irqLevel() > cpu().interruptMask()) serviceIRQ(); pace();' in src
+    assert src.count('BEFORE_INSTRUCTION') == 3
     assert '(void)0;' in src
     assert 'cpu().ssp += 4;' in src
     assert 'void Sor::serviceIRQ()' in src
     assert '#define BYTE(v) static_cast<m_byte>(v)' in src
+    assert '#define F_Z' not in src
+    assert 'cpu().enterInterrupt(level);' in src
     assert '#include "M68KMacros.hpp"' not in src
 
 
@@ -263,7 +280,7 @@ def test_jsr_emits_nonlocal_return_guard():
     src = Generator(ins, {0x100, 0x200}).emit_source()
 
     assert 'm_long __sp_000100 = cpu().ssp;' in src
-    assert 'memory().writeLong(cpu().ssp, LONG(0x00000106u));' in src
+    assert 'memory().writeLong(cpu().ssp, LONG(0x0106u));' in src
     assert 'if ((cpu().ssp & 0x00FFFFFFu) > (__sp_000100 & 0x00FFFFFFu)) return;' in src
 
 
@@ -374,10 +391,10 @@ def test_speculative_scope_does_not_confirm_derived_entries():
                     speculative_scope={0x200, 0x300},
                     baseline_instrs={0x100}).emit_source()
 
-    assert ('case 0x00000200u: confirmSpeculative(0x00000200u); '
+    assert ('case 0x0200u: confirmSpeculative(0x0200u); '
             'sub_000200(); return;') in src
-    assert 'confirmSpeculative(0x00000200u);' not in _function_source(src, 'sub_000200')
-    assert 'confirmSpeculative(0x00000300u);' not in src
+    assert 'confirmSpeculative(0x0200u);' not in _function_source(src, 'sub_000200')
+    assert 'confirmSpeculative(0x0300u);' not in src
 
 
 def test_invalid_speculative_derived_entry_is_rejected_not_fatal():
@@ -395,9 +412,9 @@ def test_invalid_speculative_derived_entry_is_rejected_not_fatal():
                     baseline_instrs={0x100}).emit_source()
 
     assert 'void Sor::sub_000300' not in src
-    assert ('case 0x00000200u: confirmSpeculative(0x00000200u); '
+    assert ('case 0x0200u: confirmSpeculative(0x0200u); '
             'sub_000200(); return;') in src
-    assert 'confirmSpeculative(0x00000200u);' not in _function_source(src, 'sub_000200')
+    assert 'confirmSpeculative(0x0200u);' not in _function_source(src, 'sub_000200')
 
 
 def test_csv_names_applied_to_goto_labels():

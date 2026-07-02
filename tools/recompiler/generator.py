@@ -3,7 +3,7 @@
 Ties together region partitioning (``regions``), data-op codegen (``opcodes``)
 and EA codegen (``ea_codegen``), adding the control-flow lowering that needs
 region context: intra-function ``goto``, cross-function calls, the indirect
-``dispatch`` table, and the JSR/RTS emulated-stack handling (DESIGN.md §3–§5).
+``dispatch`` table, and the JSR/RTS emulated-stack handling.
 
 Output: a ``Sor.hpp`` / ``Sor.cpp`` pair. Generation is total — an opcode that
 cannot be translated is a hard error, never a silent stub; coverage statistics
@@ -220,13 +220,12 @@ class Generator:
             ]
 
         if m == 'rte':
-            return ['cpu().sr = memory().readWord(cpu().ssp);',
+            return ['cpu().setStatus(memory().readWord(cpu().ssp));',
                     'cpu().ssp += 6;',
                     'return;']
 
         if m == 'rtr':
-            return ['cpu().sr = WORD((cpu().sr & 0xFF00u) | '
-                    '(memory().readWord(cpu().ssp) & 0x00FFu));',
+            return ['cpu().setCCR(memory().readWord(cpu().ssp));',
                     'cpu().ssp += 6;',
                     'return;']
 
@@ -276,9 +275,9 @@ class Generator:
         lines = []
         if self.part.needs_label(instr.address):
             lines.append(f'{self.label(instr.address)}:')
-        lines.append(f'{{ // ${instr.address:06X} {instr}')
-        lines.append(f'    if (irqLevel() > {sem.int_level()}) serviceIRQ();')
-        lines.append('    pace();')
+        lines.append(f'// ${instr.address:06X} {instr}')
+        lines.append('{')
+        lines.append('    BEFORE_INSTRUCTION')
         for stmt in body:
             lines.append(f'    {stmt}')
         lines.append('}')
@@ -560,16 +559,16 @@ void Sor::serviceIRQ() {{
     // exception entry, then dispatch the recompiled handler; its `rte` restores
     // the saved SR (and the previous IPL) and balances the stack.
     int level = irqLevel();
-    if (level <= static_cast<int>((cpu().sr >> 8) & 0x07u))
+    if (level <= cpu().interruptMask())
         return; // raced with another service / masked
     clearInterrupt(level);
-    m_word oldSR = cpu().sr;
+    m_word oldSR = cpu().status();
     cpu().ssp -= 4;
     memory().writeLong(cpu().ssp, 0); // return PC slot (native return drives flow)
     cpu().ssp -= 2;
     memory().writeWord(cpu().ssp, oldSR);
     // Stay in supervisor mode and raise the interrupt mask to this level.
-    cpu().sr = WORD((cpu().sr & ~0x0700u) | 0x2000u | (WORD(level) << 8));
+    cpu().enterInterrupt(level);
     dispatch(memory().readLong(0x60 + LONG(level) * 4));
     if (level == 6) {{
         sound().endFrame();

@@ -4,7 +4,7 @@ Translates one structured :class:`EA` (from the disassembler) into C++ that
 reads it, writes it, or computes its address — emitting **temporaries** so that
 addressing-mode side effects (``(An)+`` post-increment, ``-(An)`` pre-decrement)
 are sequenced correctly even when the same register appears in both operands
-(``move.l (a0)+,(a0)+``). See DESIGN.md §2a.
+(``move.l (a0)+,(a0)+``).
 
 Conventions of the emitted code
 -------------------------------
@@ -44,8 +44,13 @@ class TempPool:
 
 
 def _hex(value: int) -> str:
-    """Format an unsigned 32-bit constant as a C++ hex literal."""
-    return f'0x{value & 0xFFFFFFFF:08X}u'
+    """Format an unsigned 32-bit constant as a compact C++ hex literal."""
+    v = value & 0xFFFFFFFF
+    if v <= 0xFF:
+        return f'0x{v:02X}u'
+    if v <= 0xFFFF:
+        return f'0x{v:04X}u'
+    return f'0x{v:08X}u'
 
 
 def areg(n: int) -> str:
