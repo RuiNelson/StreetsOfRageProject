@@ -400,6 +400,11 @@ class InstructionDecoder:
             raise DecodeError(f'Unknown group-0 sub={sub:#05b} at ${ctx.base_addr:06X}')
         mnem = op_map[sub]
 
+        # Immediate ops never take An as destination on the 68000.
+        if mode == 0b001:
+            raise DecodeError(
+                f'{mnem} with address-register destination at ${ctx.base_addr:06X}')
+
         # Special forms: ORI/ANDI/EORI to CCR or SR
         if ea_id == 0x3C:
             if sz_id == 0:    # …  to CCR
@@ -900,6 +905,11 @@ class InstructionDecoder:
                 0b100: 'roxr', 0b101: 'roxl',
                 0b110: 'ror',  0b111: 'rol',
             }
+            # Only memory-alterable EAs are legal: (An)…d8(An,Xn) and abs.w/l.
+            if mode < 0b010 or (mode == 0b111 and reg > 1):
+                raise DecodeError(
+                    f'Memory shift with non-alterable EA mode={mode} reg={reg} '
+                    f'at ${ctx.base_addr:06X}')
             mnem = _MEM_SHIFT[(word >> 8) & 7]
             ea   = self._ea(ctx, mode, reg, 'w')
             return self._make(ctx, mnem, 'w', [ea])

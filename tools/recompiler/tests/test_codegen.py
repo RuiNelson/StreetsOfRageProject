@@ -188,13 +188,18 @@ def test_shift_immediate_count():
         'lsr', 'w', [EA(EAMode.IMMEDIATE, imm=3), EA(EAMode.DATA_REG, reg=2)])))
     assert 'static_cast<int>(3)' in out
     assert '>>= 1' in out
+    assert 'cpu().setVCX(' in out                 # count is never 0, X = C
 
 
-def test_shift_register_count_uses_reg_shift_count():
+def test_shift_register_count_is_mod_64_and_zero_shifts_nothing():
+    """Register count is Dn mod 64; a count of 0 must not become 8/16/32
+    and must leave X unchanged (C and V are still cleared)."""
     out = '\n'.join(opcodes.emit_dataop(_instr(
         'lsl', 'w', [EA(EAMode.DATA_REG, reg=1), EA(EAMode.DATA_REG, reg=0)])))
     assert 'cpu().d[1] & 63' in out
-    assert '!= 0 ?' in out and ': 16' in out
+    assert '!= 0 ?' not in out                    # no zero → 16 remap
+    assert 'cpu().setVC(' in out
+    assert '!= 0) cpu().setFlagX(' in out         # X only touched when count != 0
 
 
 def test_movem_unsupported_via_generator():
@@ -207,6 +212,19 @@ def test_movem_reglist_crosses_data_to_addr():
     regs = Generator._parse_reglist('d5-a4')
     assert regs == [(False, 5), (False, 6), (False, 7),
                     (True, 0), (True, 1), (True, 2), (True, 3), (True, 4)]
+
+
+def test_movem_word_load_sign_extends_into_data_reg():
+    """68000 MOVEM.W memory→register sign-extends each word — Dn included."""
+    ins = {0x100: _instr('rts', None, [], FlowType.RETURN)}
+    ins[0x100].address = 0x100
+    gen = Generator(ins, {0x100})
+    out = '\n'.join(gen._emit_movem(_instr(
+        'movem', 'w',
+        [EA(EAMode.ADDR_POSTINC, reg=0), EA(EAMode.DATA_REG, reg=2)])))
+    assert 'static_cast<int16_t>' in out       # sign-extended…
+    assert 'cpu().d[2] = LONG(' in out         # …into the full register
+    assert '0xFFFF0000u' not in out            # no preserve-high merge
 
 
 def test_scc_sets_byte_by_condition():
@@ -279,9 +297,9 @@ def test_jsr_emits_nonlocal_return_guard():
 
     src = Generator(ins, {0x100, 0x200}).emit_source()
 
-    assert 'm_long __sp_000100 = cpu().ssp;' in src
+    assert 'm_long sp_000100 = cpu().ssp;' in src
     assert 'memory().writeLong(cpu().ssp, LONG(0x0106u));' in src
-    assert 'if ((cpu().ssp & 0x00FFFFFFu) > (__sp_000100 & 0x00FFFFFFu)) return;' in src
+    assert 'if ((cpu().ssp & 0x00FFFFFFu) > (sp_000100 & 0x00FFFFFFu)) return;' in src
 
 
 def test_partition_assigns_to_nearest_entry():

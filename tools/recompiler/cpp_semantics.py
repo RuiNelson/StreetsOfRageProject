@@ -119,24 +119,25 @@ def signext_to_long(value: str, size: str) -> str:
     return ea.signext_to_long(value, size)
 
 
+def _addr_operand(src: str, size: str) -> str:
+    """Source operand of an An-destination op: word forms sign-extend to 32 bits."""
+    return signext_to_long(src, size) if size == 'w' else f'LONG({src})'
+
+
 def movea(dst: str, src: str, size: str) -> list[str]:
-    value = signext_to_long(src, size) if size == 'w' else f'LONG({src})'
-    return [f'{dst} = {value};']
+    return [f'{dst} = {_addr_operand(src, size)};']
 
 
 def adda(dst: str, src: str, size: str) -> list[str]:
-    value = signext_to_long(src, size) if size == 'w' else f'LONG({src})'
-    return [f'{dst} = LONG({dst} + {value});']
+    return [f'{dst} = LONG({dst} + {_addr_operand(src, size)});']
 
 
 def suba(dst: str, src: str, size: str) -> list[str]:
-    value = signext_to_long(src, size) if size == 'w' else f'LONG({src})'
-    return [f'{dst} = LONG({dst} - {value});']
+    return [f'{dst} = LONG({dst} - {_addr_operand(src, size)});']
 
 
 def cmpa(dst: str, src: str, size: str, tmp) -> list[str]:
-    value = signext_to_long(src, size) if size == 'w' else f'LONG({src})'
-    return cmp(dst, value, 'l', tmp)
+    return cmp(dst, _addr_operand(src, size), 'l', tmp)
 
 
 def logic_op(dst: str, src: str, size: str, op: str) -> list[str]:
@@ -189,34 +190,33 @@ def ext(reg: int, size: str, tmp) -> list[str]:
     ]
 
 
-def bitop(dst: str, bit: str, kind: str) -> list[str]:
+def bitop(dst: str, bit: str, kind: str, size: str) -> list[str]:
+    cast = _CAST[size]
     out = [set_flag('z', f'((LONG({dst}) >> ({bit})) & 1u) == 0')]
     if kind == 'BSET':
-        out.append(f'{dst} = static_cast<decltype({dst})>({dst} | (static_cast<decltype({dst})>(1) << ({bit})));')
+        out.append(f'{dst} = {cast}({dst} | (1u << ({bit})));')
     elif kind == 'BCLR':
-        out.append(f'{dst} = static_cast<decltype({dst})>({dst} & ~(static_cast<decltype({dst})>(1) << ({bit})));')
+        out.append(f'{dst} = {cast}({dst} & ~(1u << ({bit})));')
     elif kind == 'BCHG':
-        out.append(f'{dst} = static_cast<decltype({dst})>({dst} ^ (static_cast<decltype({dst})>(1) << ({bit})));')
+        out.append(f'{dst} = {cast}({dst} ^ (1u << ({bit})));')
     return out
 
 
-def reg_shift_count(reg: int, zero_means: int, tmp) -> list[str]:
+def reg_shift_count(reg: int, tmp) -> tuple[list[str], str]:
+    """Register shift count: Dn mod 64; a count of zero shifts nothing."""
     name = tmp.fresh()
-    return [
-        f'int {name} = static_cast<int>(cpu().d[{reg}] & 63);',
-        f'{name} = {name} != 0 ? {name} : {zero_means};',
-    ], name
+    return [f'int {name} = static_cast<int>(cpu().d[{reg}] & 63);'], name
 
 
-def shift(dst: str, count: str, size: str, kind: str, tmp) -> list[str]:
-    nbits = _NBITS[size]
+def shift(dst: str, count: str, size: str, kind: str, tmp,
+          count_may_be_zero: bool = False) -> list[str]:
     v, c, ov = tmp.fresh(), tmp.fresh(), tmp.fresh()
     cast = _CAST[size]
     mask = _MASK[size]
+    sign = _SIGN[size]
+    top = _NBITS[size] - 1
     out = [
-        f'const int {v}_nbits = {nbits};',
-        f'm_long {v}_mask = {mask};',
-        f'm_long {v} = LONG({cast}({dst})) & {v}_mask;',
+        f'm_long {v} = LONG({cast}({dst}));',
         f'bool {c} = false;',
         f'bool {ov} = false;',
     ]
@@ -224,39 +224,44 @@ def shift(dst: str, count: str, size: str, kind: str, tmp) -> list[str]:
         x = tmp.fresh()
         out.append(f'bool {x} = {flag("x")};')
         if kind == 'ROXL':
-            body = (f'm_long __ms = ({v} >> ({v}_nbits - 1)) & 1u; '
-                    f'{v} = (({v} << 1) | ({x} ? 1u : 0u)) & {v}_mask; '
-                    f'{x} = __ms != 0;')
+            body = (f'm_long ms_ = ({v} >> {top}) & 1u; '
+                    f'{v} = (({v} << 1) | ({x} ? 1u : 0u)) & {mask}; '
+                    f'{x} = ms_ != 0;')
         else:
-            body = (f'm_long __ls = {v} & 1u; '
-                    f'{v} = (({v} >> 1) | (({x} ? 1u : 0u) << ({v}_nbits - 1))) & {v}_mask; '
-                    f'{x} = __ls != 0;')
+            body = (f'm_long ls_ = {v} & 1u; '
+                    f'{v} = (({v} >> 1) | (({x} ? 1u : 0u) << {top})) & {mask}; '
+                    f'{x} = ls_ != 0;')
         out += [
-            f'for (int __i = 0; __i < static_cast<int>({count}); ++__i) {{ {body} }}',
+            f'for (int i_ = 0; i_ < static_cast<int>({count}); ++i_) {{ {body} }}',
             f'cpu().setVCX(false, {x}, {x});',
         ]
     else:
         bodies = {
-            'LSL': f'{c} = ({v} & (1u << ({v}_nbits - 1))) != 0; {v} = ({v} << 1) & {v}_mask;',
+            'LSL': f'{c} = ({v} & {sign}) != 0; {v} = ({v} << 1) & {mask};',
             'LSR': f'{c} = ({v} & 1u) != 0; {v} >>= 1;',
-            'ASL': (f'm_long __sg = {v} & (1u << ({v}_nbits - 1)); {c} = __sg != 0; '
-                    f'{v} = ({v} << 1) & {v}_mask; '
-                    f'if (({v} & (1u << ({v}_nbits - 1))) != __sg) {ov} = true;'),
-            'ASR': (f'm_long __sg = {v} & (1u << ({v}_nbits - 1)); {c} = ({v} & 1u) != 0; '
-                    f'{v} = (({v} >> 1) | __sg) & {v}_mask;'),
-            'ROL': (f'm_long __ms = ({v} >> ({v}_nbits - 1)) & 1u; '
-                    f'{v} = (({v} << 1) | __ms) & {v}_mask; {c} = __ms != 0;'),
-            'ROR': (f'm_long __ls = {v} & 1u; '
-                    f'{v} = (({v} >> 1) | (__ls << ({v}_nbits - 1))) & {v}_mask; {c} = __ls != 0;'),
+            'ASL': (f'm_long sg_ = {v} & {sign}; {c} = sg_ != 0; '
+                    f'{v} = ({v} << 1) & {mask}; '
+                    f'if (({v} & {sign}) != sg_) {ov} = true;'),
+            'ASR': (f'm_long sg_ = {v} & {sign}; {c} = ({v} & 1u) != 0; '
+                    f'{v} = (({v} >> 1) | sg_) & {mask};'),
+            'ROL': (f'm_long ms_ = ({v} >> {top}) & 1u; '
+                    f'{v} = (({v} << 1) | ms_) & {mask}; {c} = ms_ != 0;'),
+            'ROR': (f'm_long ls_ = {v} & 1u; '
+                    f'{v} = (({v} >> 1) | (ls_ << {top})) & {mask}; {c} = ls_ != 0;'),
         }
         out.append(
-            f'for (int __i = 0; __i < static_cast<int>({count}); ++__i) {{ {bodies[kind]} }}')
+            f'for (int i_ = 0; i_ < static_cast<int>({count}); ++i_) {{ {bodies[kind]} }}')
         if kind in ('LSL', 'LSR', 'ASL', 'ASR'):
-            out.append(f'cpu().setVCX({ov}, {c}, {c});')
+            if count_may_be_zero:
+                # Count 0: C and V are cleared but X is unchanged.
+                out.append(f'cpu().setVC({ov}, {c});')
+                out.append(f'if ({count} != 0) cpu().setFlagX({c});')
+            else:
+                out.append(f'cpu().setVCX({ov}, {c}, {c});')
         else:
             out.append(f'cpu().setVC(false, {c});')
     out += [
-        f'cpu().setNZ({v} & {v}_mask, 1u << ({v}_nbits - 1));',
+        f'cpu().setNZ({v}, {sign});',
         f'{dst} = {cast}({v});',
     ]
     return out
@@ -282,6 +287,7 @@ def muldiv(dst_expr: str, src_expr: str, macro: str, tmp) -> tuple[list[str], st
             f'    m_long {rem} = LONG({dst_expr}) % {s};',
             f'    if ({q} > 0xFFFFu) {{',
             f'        {set_flag("v", "true")}',
+            f'        {set_flag("c", "false")}',
             f'    }} else {{',
             f'        {r} = LONG(({rem} << 16) | ({q} & 0xFFFFu));',
             f'        {set_flag("v", "false")}',
@@ -299,16 +305,23 @@ def muldiv(dst_expr: str, src_expr: str, macro: str, tmp) -> tuple[list[str], st
             f'm_long {r} = LONG({dst_expr});',
             f'if ({s} != 0) {{',
             f'    int32_t {d} = static_cast<int32_t>(LONG({dst_expr}));',
-            f'    int32_t {q} = {d} / {s};',
-            f'    int32_t {rem} = {d} % {s};',
-            f'    if ({q} > 32767 || {q} < -32768) {{',
+            # INT32_MIN / -1 overflows before the quotient check (UB in C++).
+            f'    if ({d} == INT32_MIN && {s} == -1) {{',
             f'        {set_flag("v", "true")}',
-            f'    }} else {{',
-            f'        {r} = LONG((LONG({rem} & 0xFFFF) << 16) | (LONG({q}) & 0xFFFFu));',
-            f'        {set_flag("v", "false")}',
             f'        {set_flag("c", "false")}',
-            f'        {set_flag("n", f"(WORD({q}) & 0x8000u) != 0")}',
-            f'        {set_flag("z", f"WORD({q}) == 0")}',
+            f'    }} else {{',
+            f'        int32_t {q} = {d} / {s};',
+            f'        int32_t {rem} = {d} % {s};',
+            f'        if ({q} > 32767 || {q} < -32768) {{',
+            f'            {set_flag("v", "true")}',
+            f'            {set_flag("c", "false")}',
+            f'        }} else {{',
+            f'            {r} = LONG((LONG({rem} & 0xFFFF) << 16) | (LONG({q}) & 0xFFFFu));',
+            f'            {set_flag("v", "false")}',
+            f'            {set_flag("c", "false")}',
+            f'            {set_flag("n", f"(WORD({q}) & 0x8000u) != 0")}',
+            f'            {set_flag("z", f"WORD({q}) == 0")}',
+            f'        }}',
             f'    }}',
             f'}}',
         ]

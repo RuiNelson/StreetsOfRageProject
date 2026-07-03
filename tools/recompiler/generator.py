@@ -187,7 +187,7 @@ class Generator:
             return self._transfer(a, instr.targets[0])
 
         if m in ('bsr', 'jsr'):
-            call_sp = f'__sp_{a:06x}'
+            call_sp = f'sp_{a:06x}'
             push = [f'm_long {call_sp} = cpu().ssp;',
                     f'cpu().ssp -= 4;',
                     f'memory().writeLong(cpu().ssp, LONG({ea._hex(nxt)}));']
@@ -234,7 +234,7 @@ class Generator:
             cc = 1 if suffix in ('f', 'ra') else _CC[suffix]
             reg = instr.eas[0].reg
             body = self._transfer(a, instr.targets[0])
-            ctr = f'__dbcc_{a:06x}'
+            ctr = f'dbcc_{a:06x}'
             return [f'if (!({sem.cc_expr(cc)})) {{',
                     f'    m_word {ctr} = WORD((WORD(cpu().d[{reg}] & 0xFFFFu) - 1) & 0xFFFFu);',
                     f'    cpu().d[{reg}] = LONG((cpu().d[{reg}] & 0xFFFF0000u) | LONG({ctr}));',
@@ -346,7 +346,8 @@ class Generator:
             return ea.write_areg_word(ar, value)
         if size == 'l':
             return ea.write_dn(n, 'l', value)
-        return ea.write_dn_word_preserve_high(n, value)
+        # MOVEM memory→register sign-extends each word to 32 bits — Dn too.
+        return ea.write_dn(n, 'l', ea.signext_to_long(value, 'w'))
 
     def _emit_movem(self, instr):
         size = instr.size or 'w'
@@ -372,9 +373,19 @@ class Generator:
         out = []
         if store and mem.mode == EAMode.ADDR_PREDEC:
             ar = ea.areg(mem.reg)
+            init = None
+            if (True, mem.reg) in regs:
+                # 68000: when the base An is in the list, its *initial* value
+                # is stored, not the partially-decremented one.
+                init = tmp.fresh()
+                out.append(f'm_long {init} = {ar};')
             for is_addr, n in reversed(regs):       # predec stores high→low
                 out.append(f'{ar} -= {nbytes};')
-                out.append(f'{storem}({ar}, {self._movem_reg_read(is_addr, n, size)});')
+                if init is not None and is_addr and n == mem.reg:
+                    val = f'WORD({init} & 0xFFFFu)' if size == 'w' else init
+                else:
+                    val = self._movem_reg_read(is_addr, n, size)
+                out.append(f'{storem}({ar}, {val});')
             return out
         if not store and mem.mode == EAMode.ADDR_POSTINC:
             ar = ea.areg(mem.reg)
@@ -404,7 +415,7 @@ class Generator:
     # -- function emission ----------------------------------------------------
 
     def _emit_function(self, func):
-        out = [f'void Sor::{self.fn(func.entry)}(m_long __entry) {{']
+        out = [f'void Sor::{self.fn(func.entry)}(m_long entry_) {{']
         out.append(f'    traceEnter({ea._hex(func.entry)}); // diagnostic')
         return self._emit_function_body(func, out)
 
@@ -415,13 +426,13 @@ class Generator:
         # emitted — phantom entries from speculative contamination are excluded.
         eff_extras = [t for t in sorted(func.extra_entries) if t in eff_set]
         if eff_extras:
-            out.append('    switch (__entry) {')
+            out.append('    switch (entry_) {')
             for t in eff_extras:
                 out.append(f'        case {ea._hex(t)}: goto {self.label(t)};')
             out.append('        default: break;')
             out.append('    }')
         else:
-            out.append('    (void)__entry;')
+            out.append('    (void)entry_;')
         for addr in addrs:
             out += [f'    {ln}' for ln in self._emit_instr(self.ins[addr])]
         # A function whose last instruction falls through (no RTS/RTE/BRA/JMP)
@@ -443,7 +454,7 @@ class Generator:
     # -- whole-program emission ----------------------------------------------
 
     def emit_header(self):
-        decls = [f'    void {self.fn(e)}(m_long __entry = {ea._hex(e)});'
+        decls = [f'    void {self.fn(e)}(m_long entry_ = {ea._hex(e)});'
                  for e in self.part.entries if e not in self._rejected]
         return _HEADER_TEMPLATE.format(decls='\n'.join(decls))
 
@@ -537,6 +548,7 @@ _SOURCE_PREAMBLE = '''\
 
 #include "Sor.hpp"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 

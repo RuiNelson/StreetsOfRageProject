@@ -122,10 +122,6 @@ def _move(instr, tmp):
         return stmts + sem.movea(ea.areg(dst.reg), val, size)
     r = tmp.fresh()
     stmts.append(f'{ea._CTYPE[size]} {r} = {val};')
-    if size == 'w' and dst.mode == EAMode.DATA_REG:
-        # Word move to Dn: merge low 16 bits only (68000 MOVE.W to Dn).
-        stmts.append(ea.write_dn_word_preserve_high(dst.reg, r))
-        return stmts + sem.move(r, size)
     stmts += ea.write_ea(dst, size, r, tmp)
     return stmts + sem.move(r, size)
 
@@ -175,10 +171,10 @@ def _logic(instr, tmp, op):
     src, dst = instr.eas[0], instr.eas[1]
     # andi/ori/eori to SR or CCR.
     if _is_special(dst):
-        sval = ea.read_ea(src, 'w', tmp)[1]
+        s_stmts, sval = ea.read_ea(src, 'w', tmp)
         cur = _special_src_expr(dst)
         cxx = {'AND': '&', 'OR': '|', 'EOR': '^'}[op]
-        return _special_write(dst, f'({cur} {cxx} {sval})')
+        return s_stmts + _special_write(dst, f'({cur} {cxx} {sval})')
     s_stmts, sval = ea.read_ea(src, size, tmp)
     pre, r, post = ea.rmw_ea(dst, size, tmp)
     return s_stmts + pre + sem.logic_op(r, sval, size, op) + post
@@ -248,16 +244,15 @@ def _shift(instr, tmp, macro):
         pre, r, post = ea.rmw_ea(instr.eas[0], size, tmp)
         return pre + sem.shift(r, '1', size, macro, tmp) + post
     count, dst = instr.eas[0], instr.eas[1]
-    setup = []
     if count.mode == EAMode.IMMEDIATE:
-        cnt = str((count.imm - 1) % 8 + 1)        # immediate count is 1..8
+        setup, cnt = [], str((count.imm - 1) % 8 + 1)  # immediate count is 1..8
     else:
-        # Register count: low six bits of Dn; zero → 8/16/32 by operand size.
-        zero = {'b': 8, 'w': 16, 'l': 32}[size]
-        setup, cnt = sem.reg_shift_count(count.reg, zero, tmp)
+        # Register count: Dn mod 64; a count of zero shifts nothing.
+        setup, cnt = sem.reg_shift_count(count.reg, tmp)
     pre, r, post = ea.rmw_ea(dst, size, tmp)
-    return (setup if count.mode != EAMode.IMMEDIATE else []) + pre + \
-        sem.shift(r, cnt, size, macro, tmp) + post
+    return setup + pre + \
+        sem.shift(r, cnt, size, macro, tmp,
+                  count_may_be_zero=count.mode != EAMode.IMMEDIATE) + post
 
 
 def _muldiv(instr, tmp, macro):
@@ -283,9 +278,9 @@ def _bitop(instr, tmp, kind):
         bit = f'(cpu().d[{bit_ea.reg}] % {modulo})'
     if kind == 'BTST':
         stmts, val = ea.read_ea(dst, size, tmp)
-        return stmts + sem.bitop(val, bit, kind)
+        return stmts + sem.bitop(val, bit, kind, size)
     pre, r, post = ea.rmw_ea(dst, size, tmp)
-    return pre + sem.bitop(r, bit, kind) + post
+    return pre + sem.bitop(r, bit, kind, size) + post
 
 
 def _scc(instr, tmp, cc):

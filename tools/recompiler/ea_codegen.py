@@ -85,12 +85,6 @@ def write_dn(n: int, size: str, value: str) -> str:
     return f'cpu().d[{n}] = LONG({value});'
 
 
-def write_dn_word_preserve_high(n: int, value: str) -> str:
-    """MOVE.W to Dn: merge low word only (do not sign-extend into the high half)."""
-    return (f'cpu().d[{n}] = LONG((cpu().d[{n}] & 0xFFFF0000u) '
-            f'| LONG(WORD({value})));')
-
-
 def write_areg_word(ar: str, value: str) -> str:
     """Word write to An — sign-extend bit 15 (movea / lea)."""
     return (f'{ar} = LONG(static_cast<int32_t>('
@@ -99,16 +93,6 @@ def write_areg_word(ar: str, value: str) -> str:
 
 def write_areg_long(ar: str, value: str) -> str:
     return f'{ar} = LONG({value});'
-
-
-def merge_areg_byte(ar: str, value: str) -> str:
-    return (f'{ar} = LONG(({ar} & 0xFFFFFF00u) '
-            f'| LONG(BYTE({value})));')
-
-
-def merge_areg_word(ar: str, value: str) -> str:
-    return (f'{ar} = LONG(({ar} & 0xFFFF0000u) '
-            f'| LONG(WORD({value})));')
 
 
 def signext_to_long(expr: str, size: str) -> str:
@@ -198,15 +182,12 @@ def rmw_ea(ea: EA, size: str, tmp: TempPool) -> tuple[list[str], str, list[str]]
                 v, [write_dn(ea.reg, size, v)])
 
     if ea.mode == EAMode.ADDR_REG:
+        # No 68000 opcode does a byte/word read-modify-write on An.
+        if size != 'l':
+            raise EAGenError(f'{size}-size read-modify-write on an address register')
         v = tmp.fresh()
-        _, expr = read_ea(ea, size, tmp)
-        if size == 'l':
-            post = [write_areg_long(areg(ea.reg), v)]
-        elif size == 'b':
-            post = [merge_areg_byte(areg(ea.reg), v)]
-        else:
-            post = [merge_areg_word(areg(ea.reg), v)]
-        return ([f'{_CTYPE[size]} {v} = {expr};'], v, post)
+        return ([f'm_long {v} = {areg(ea.reg)};'],
+                v, [write_areg_long(areg(ea.reg), v)])
 
     bytes_ = (
         addr_step(ea.reg, size)
@@ -241,8 +222,9 @@ def write_ea(ea: EA, size: str, value: str, tmp: TempPool) -> list[str]:
         return [write_dn(ea.reg, size, value)]
 
     if ea.mode == EAMode.ADDR_REG:
+        # No 68000 opcode writes a byte to An; word writes sign-extend (movea).
         if size == 'b':
-            return [merge_areg_byte(areg(ea.reg), value)]
+            raise EAGenError('byte write to an address register')
         if size == 'l':
             return [write_areg_long(areg(ea.reg), value)]
         return [write_areg_word(areg(ea.reg), value)]
