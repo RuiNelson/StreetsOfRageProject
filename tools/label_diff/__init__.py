@@ -1,2 +1,0 @@
-"""Assembly label comparison helpers."""
-

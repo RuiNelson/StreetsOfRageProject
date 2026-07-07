@@ -8,16 +8,30 @@ Overview
 
 This project reverse-engineers the Streets of Rage ROM using a mix of **static recursive-descent disassembly** and **active disassembly** data gathered from a running emulator (Exodus).
 
+Repository layout
+-----------------
+
+The workspace is now split into three sibling repositories:
+
+- `MegaDriveEnvironment/` — reusable C++23 Mega Drive runtime/development environment.
+- `RageDecompiler/` — Python disassembly/recompilation tools. Use it with
+  `PYTHONPATH=../RageDecompiler python3 -m tools ...` from the recompilation repo.
+- `StreetsOfRageRecompilation/` — Streets of Rage-specific generated C++,
+  `code-analysis/`, `rom/`, output, and build/discovery scripts.
+
+Most commands below should be run from `StreetsOfRageRecompilation/`.
+
 The key insight: many 68000 instructions jump/call indirectly (via registers or RAM, e.g. `jmp (a0)`), which is impossible to resolve statically. Active disassembly records every ROM address the CPU actually executes or reads as data during gameplay, providing a ground-truth list of reachable code locations.
 
 **Key files:**
 - `etc/sor-exodus.asm` — ground-truth disassembly from the emulator (active disassembly)
-- `aux_addresses.txt` — extra entry points for the static disassembler, derived from active disassembly
+- `code-analysis/aux_addresses.txt` — extra entry points for the static disassembler, derived from active disassembly
 - `output/sor.map` — binary coverage map (each byte = 'I'=instruction, 'D'=data, 'X'=unknown)
 
-**Unified tool entry point:** use `python3 -m tools <command> ...`.  The old
-module entry points still delegate for compatibility, but the cohesive operator
-surface is the unified CLI.
+**Unified tool entry point:** from `StreetsOfRageRecompilation/`, use
+`PYTHONPATH=../RageDecompiler python3 -m tools <command> ...`. The shell scripts
+set this automatically. The old module entry points still delegate for
+compatibility, but the cohesive operator surface is the unified CLI.
 
 **Tools pipeline:**
 
@@ -25,18 +39,19 @@ surface is the unified CLI.
 ROM binary
     │
     ▼
-tools/disassembler/          # Static recursive-descent disassembler
-    │                         # Reads aux_addresses.txt for extra entry points
+RageDecompiler/tools/disassembler/
+    │                         # Static recursive-descent disassembler
+    │                         # Reads code-analysis/aux_addresses.txt for extra entry points
     │                         # Outputs: .asm + .map
     │
     ▼
-tools/remove_data_locations/  # (Optional) Strip data blocks
+RageDecompiler/tools/remove_data_locations/
     │
     ▼
-tools/label_diff/            # Compare static output vs sor-exodus.asm
+RageDecompiler/tools/label_diff/
     │
     ▼
-tools/iterative_disasm/      # Iteratively close the gap with active disasm
+RageDecompiler/tools/iterative_disasm/
 ```
 
 ---
@@ -47,10 +62,10 @@ Disassembler
 Converts the ROM binary into readable 68000 assembly.
 
 ```bash
-python3 -m tools disassemble rom/StreetsOfRage.bin -o output/sor.asm -v
+PYTHONPATH=../RageDecompiler python3 -m tools disassemble rom/StreetsOfRage.bin -o output/sor.asm -v
 ```
 
-**Entry points:** defaults to reset vector (0x000208) and VBlank IRQ (0x019D16). Use `--aux` to add addresses from `aux_addresses.txt` (one hex address per line).
+**Entry points:** defaults to reset vector (0x000208) and VBlank IRQ (0x019D16). Use `--aux` to add addresses from `code-analysis/aux_addresses.txt` (one hex address per line).
 
 **Optional CSV files** to improve the output:
 
@@ -76,7 +91,7 @@ Active vs Static Disassembly
 
 **Static disassembly** (what this tool does): recursively follows code from known entry points. Misses anything reachable only via indirect jumps.
 
-**Active disassembly** (Exodus emulator): runs the game and records every ROM address the CPU executes or reads as data. Produces `etc/sor-exodus.asm` and `aux_addresses.txt`.
+**Active disassembly** (Exodus emulator): runs the game and records every ROM address the CPU executes or reads as data. Produces `etc/sor-exodus.asm` and `code-analysis/aux_addresses.txt`.
 
 **Why both?** Static disassembly gives clean, commented, labeled code. Active disassembly provides complete coverage. The goal of `iterative-disasm` is to make the static output converge toward the active disassembly by discovering the entry points that the static disassembler missed.
 
@@ -88,7 +103,7 @@ remove-data-locations
 Strips blocks containing data directives (`dc.b`, `dc.w`, `dc.l`) from assembly output. Keeps only code blocks.
 
 ```bash
-python3 -m tools remove-data output/sor.asm
+PYTHONPATH=../RageDecompiler python3 -m tools remove-data output/sor.asm
 ```
 
 Modifies the file in place. Splits by label, filters out any block with a data directive.
@@ -102,12 +117,12 @@ Two scripts for comparing assembly and finding gaps:
 
 **script.py** — labels in file B but not in file A:
 ```bash
-python3 -m tools label-diff output/sor-new.asm etc/sor-exodus.asm
+PYTHONPATH=../RageDecompiler python3 -m tools label-diff output/sor-new.asm etc/sor-exodus.asm
 ```
 
 **map_label_gaps.py** — labels that point to 'X' (unmapped) bytes in the ROM map:
 ```bash
-python3 -m tools map-label-gaps output/sor.map etc/sor-exodus.asm
+PYTHONPATH=../RageDecompiler python3 -m tools map-label-gaps output/sor.map etc/sor-exodus.asm
 ```
 Used by `iterative-disasm` to discover which labels land on unmapped regions.
 
@@ -119,13 +134,13 @@ iterative-disasm
 Iteratively expands static disassembly coverage toward the active disassembly ground-truth.
 
 ```bash
-python3 -m tools iterative-disasm output/sor.asm output/sor.map etc/sor-exodus.asm aux_addresses.txt rom/StreetsOfRage.bin
+PYTHONPATH=../RageDecompiler python3 -m tools iterative-disasm output/sor.asm output/sor.map etc/sor-exodus.asm code-analysis/aux_addresses.txt rom/StreetsOfRage.bin
 ```
 
 **Loop:**
-1. Run disassembler with current `aux_addresses.txt`
+1. Run disassembler with current `code-analysis/aux_addresses.txt`
 2. Find labels that point to 'X' (unmapped/data) bytes via `map_label_gaps.py`
-3. Append the first missing address to `aux_addresses.txt`
+3. Append the first missing address to `code-analysis/aux_addresses.txt`
 4. Repeat until no gaps remain
 
 **Output:** table of iteration, instruction/subroutine/label counts, and deltas per step.
@@ -143,9 +158,9 @@ Top-level scripts for common workflows:
 | `./disassemble.sh` | Run disassembler with all CSV files (`addresses.csv`, `blocks.csv`, `labels.csv`) |
 | `./disassemble_nolabels.sh` | Same as above but without `labels.csv` |
 | `./disassemble_iterative.sh` | Run disassembler then execute iterative loop to expand coverage |
-| `./clang-format.sh` | Run `clang-format` on all C++ sources in `src/` using `.clang-format` |
+| `clang-format` | Run `clang-format` on C++ sources in `MegaDriveEnvironment/` and `StreetsOfRageRecompilation/` using `.clang-format` |
 
-All disassemble scripts accept an optional ROM path argument (defaults to `rom/SOR.bin`).
+These scripts live in `StreetsOfRageRecompilation/`. All disassemble scripts accept an optional ROM path argument (defaults to `rom/SOR.bin`).
 
 ---
 
@@ -163,15 +178,17 @@ Before committing C++ changes, run `clang-format.sh`:
 C++ RECOMPILATION
 ================================================================================
 
-The `src/` directory contains a C++23 recompilation of Streets of Rage that
-emulates the Sega Mega Drive hardware and runs the original ROM.
+The `StreetsOfRageRecompilation/` directory contains a C++23 recompilation of
+Streets of Rage that uses the sibling `MegaDriveEnvironment/` runtime to emulate
+the Sega Mega Drive hardware and run the original ROM.
 
-The C++ side is organised around **`MegaDriveEnvironment`** (`src/system/`): a
+The C++ side is organised around **`MegaDriveEnvironment`** (`MegaDriveEnvironment/include/MegaDriveEnvironment/system/`
+and `MegaDriveEnvironment/src/system/`): a
 base class that owns the hardware subsystems. Games/programs **subclass** it
 (UIKit-style, like subclassing `UIViewController`) and override `run()` (the
 cartridge entry point). The 68K CPU is not emulated — `run()` is native C++.
 
-Entry point: `src/main.cpp` — parses flags `--testFontSDL`, `--testFontPNG`,
+Entry point: `StreetsOfRageRecompilation/main.cpp` — parses flags `--testFontSDL`, `--testFontPNG`,
 `--testVDP`, `--testControllers`, `--configControls`, then constructs the
 matching `MegaDriveEnvironment` subclass and calls `boot()`.
 
@@ -180,24 +197,25 @@ Build: CMake with SDL3, yaml-cpp, zlib, libpng (FetchContent). Requires C++23.
 ```bash
 ./build.sh           # preferred: smart configure + build (see --help)
 # or directly:
-cmake -S src -B src/build && cmake --build src/build
+cd StreetsOfRageRecompilation
+cmake -S . -B build && cmake --build build
 ```
 
-Executable: `src/build/sor`
+Executable: `StreetsOfRageRecompilation/build/sor`
 
-> Note: only the static libpng/zlib are linked. `src/CMakeLists.txt` disables
+> Note: only the static libpng/zlib are linked. `MegaDriveEnvironment/CMakeLists.txt` disables
 > libpng's shared/framework/tests/tools/example targets, which otherwise break
 > on this toolchain. If a build ever fails inside `_deps/libpng-*`, re-fetch it:
-> `rm -rf src/build/_deps/libpng-* && ./build.sh` (build.sh does this automatically).
+> `rm -rf build/_deps/libpng-* && ./build.sh` (build.sh does this automatically).
 
-**Always run the game under `timeout`.** Whenever you run `src/build/sor` or
+**Always run the game under `timeout`.** Whenever you run `StreetsOfRageRecompilation/build/sor` or
 `./build.sh -r` / `./build.sh --run`, wrap the command with `timeout`. Boot bugs
 can hang or spin forever, and the SDL window does not exit on plain `SIGTERM` —
 a bare `timeout N ...` leaves the process running past the deadline. Always use
 the `-k` grace period so `SIGKILL` actually ends it:
 
 ```bash
-timeout -k 3 20 ./src/build/sor --runSor --debug --fast --rom rom/SOR.bin
+timeout -k 3 20 ./StreetsOfRageRecompilation/build/sor --runSor --debug --fast --rom StreetsOfRageRecompilation/rom/SOR.bin
 ```
 
 ```bash

@@ -1,8 +1,10 @@
 .DS_Store
 /build
-code-analysis/speculative_addresses.txt
-/src/generated
-/src/.*
+/MegaDriveEnvironment/
+/RageDecompiler/
+/StreetsOfRageRecompilation/
+StreetsOfRageRecompilation/code-analysis/speculative_addresses.txt
 __pycache__
-/output
+RageDecompiler/**/__pycache__
+/StreetsOfRageRecompilation/output
 /*.png
