@@ -1,8 +1,5 @@
 .DS_Store
 /build
-/MegaDriveEnvironment/
-/RageDecompiler/
-/StreetsOfRageRecompilation/
 StreetsOfRageRecompilation/code-analysis/speculative_addresses.txt
 __pycache__
 RageDecompiler/**/__pycache__
