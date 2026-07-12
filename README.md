@@ -39,7 +39,7 @@ git submodule update --init --recursive
 Update all submodules to the commits recorded by this meta-repository:
 
 ```bash
-git submodule update --recursive
+./update_submodules.sh
 ```
 
 ## Build

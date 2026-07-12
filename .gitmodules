@@ -1,12 +1,16 @@
 [submodule "Genesis-Plus-GX"]
 	path = Genesis-Plus-GX
 	url = https://github.com/ekeeke/Genesis-Plus-GX.git
+	branch = master
 [submodule "MegaDriveEnvironment"]
 	path = MegaDriveEnvironment
 	url = https://github.com/RuiNelson/MegaDriveEnvironment.git
+	branch = main
 [submodule "RageDecompiler"]
 	path = RageDecompiler
 	url = https://github.com/RuiNelson/RageDecompiler.git
+	branch = main
 [submodule "StreetsOfRageRecompilation"]
 	path = StreetsOfRageRecompilation
 	url = https://github.com/RuiNelson/StreetsOfRageRecompilation.git
+	branch = main
