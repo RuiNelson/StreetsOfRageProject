@@ -43,6 +43,15 @@ git add <submodule-path>
 git commit -m "Update <submodule-name> submodule"
 ```
 
+## Publishing
+
+After completing and validating requested changes, commit and push them
+automatically unless the user explicitly asks not to publish. For changes in an
+owned submodule, commit and push the submodule first, then commit and push the
+updated gitlink in this meta-repository. Preserve unrelated user changes and
+include them only when the user explicitly requests publishing the whole
+worktree.
+
 ## Build
 
 Most build and runtime work happens from `StreetsOfRageRecompilation/`:
