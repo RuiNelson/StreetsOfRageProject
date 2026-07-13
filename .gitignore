@@ -5,3 +5,4 @@ __pycache__
 RageDecompiler/**/__pycache__
 /StreetsOfRageRecompilation/output
 /*.png
+.vscode/
