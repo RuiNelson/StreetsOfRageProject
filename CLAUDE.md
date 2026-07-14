@@ -9,6 +9,8 @@ submodules:
 
 - `MegaDriveEnvironment/` - reusable C++23 Sega Mega Drive runtime/development
   environment.
+- `MegaDriveEnvironmentSampleGame/` - small C++23 game demonstrating how a
+  standalone consumer integrates and uses `MegaDriveEnvironment`.
 - `RageDecompiler/` - Python reverse-engineering tools for disassembly,
   recompilation, label/map diffing, and speculative scanning.
 - `StreetsOfRageRecompilation/` - Streets of Rage-specific C++ recompilation,

@@ -9,6 +9,7 @@ here as Git submodules.
 | Submodule | Purpose |
 | --- | --- |
 | `MegaDriveEnvironment/` | Reusable Sega Mega Drive development environment and PC runtime. |
+| `MegaDriveEnvironmentSampleGame/` | Small playable example showing how to create a new game with `MegaDriveEnvironment`. |
 | `RageDecompiler/` | Python reverse-engineering tools: disassembler, recompiler, label/map diffing, and speculative scanning. |
 | `StreetsOfRageRecompilation/` | Streets of Rage recompilation project, including `code-analysis/`, generated C++, ROM-local scripts, and build entry points. |
 | `Genesis-Plus-GX/` | Emulator reference dependency. |
@@ -44,7 +45,16 @@ Update all submodules to the commits recorded by this meta-repository:
 
 ## Build
 
-Build the recompilation from its repository:
+Build and run the sample game:
+
+```bash
+cd MegaDriveEnvironmentSampleGame
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+./build/mega_drive_environment_sample_game
+```
+
+Or build the Streets of Rage recompilation:
 
 ```bash
 cd StreetsOfRageRecompilation

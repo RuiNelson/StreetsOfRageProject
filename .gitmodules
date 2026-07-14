@@ -14,3 +14,7 @@
 	path = StreetsOfRageRecompilation
 	url = https://github.com/RuiNelson/StreetsOfRageRecompilation.git
 	branch = main
+[submodule "MegaDriveEnvironmentSampleGame"]
+	path = MegaDriveEnvironmentSampleGame
+	url = https://github.com/RuiNelson/MegaDriveEnvironmentSampleGame.git
+	branch = main
