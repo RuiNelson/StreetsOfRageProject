@@ -1,43 +1,43 @@
 # Streets of Rage Project
 
-Meta-repository for a Streets of Rage reverse-engineering and recompilation
-workspace. The project is split into separate public repositories and tracked
-here as Git submodules.
+This is the public meta-repository for a Streets of Rage reverse-engineering and
+recompilation workspace. The actual work lives in separate repositories,
+tracked here as Git submodules so the whole tree can be checked out together.
 
 ## Repositories
 
 | Submodule | Purpose |
 | --- | --- |
 | `MegaDriveEnvironment/` | Reusable Sega Mega Drive development environment and PC runtime. |
-| `MegaDriveEnvironmentSampleGame/` | Small playable example showing how to create a new game with `MegaDriveEnvironment`. |
-| `RageDecompiler/` | Python reverse-engineering tools: disassembler, recompiler, label/map diffing, and speculative scanning. |
-| `StreetsOfRageRecompilation/` | Streets of Rage recompilation project, including `code-analysis/`, generated C++, ROM-local scripts, and build entry points. |
+| `MegaDriveEnvironmentSampleGame/` | Small playable example of a new game built on `MegaDriveEnvironment`. |
+| `RageDecompiler/` | Python tools: disassembler, recompiler, label/map diffing, and speculative scanning. |
+| `StreetsOfRageRecompilation/` | Streets of Rage recompilation — analysis data, generated C++, scripts, and build entry points. |
 | `Genesis-Plus-GX/` | Emulator reference dependency. |
 
-`StreetsOfRageRecompilation` expects the other two repositories to live beside it:
+The recompilation project expects its two main dependencies as siblings:
 
-```bash
+```text
 ./MegaDriveEnvironment
 ./RageDecompiler
 ./StreetsOfRageRecompilation
 ```
 
-## Clone
+That layout is what you get from a full clone of this meta-repository.
 
-Clone this repository with submodules:
+## Clone
 
 ```bash
 git clone --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
 cd StreetsOfRageProject
 ```
 
-If you already cloned without submodules:
+If the repo was cloned without submodules:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-Update all submodules to the commits recorded by this meta-repository:
+To refresh every submodule to the commits recorded here:
 
 ```bash
 ./update_submodules.sh
@@ -45,7 +45,7 @@ Update all submodules to the commits recorded by this meta-repository:
 
 ## Build
 
-Build and run the sample game:
+The sample game is a plain CMake project:
 
 ```bash
 cd MegaDriveEnvironmentSampleGame
@@ -54,22 +54,21 @@ cmake --build build
 ./build/mega_drive_environment_sample_game
 ```
 
-Or build the Streets of Rage recompilation:
+Streets of Rage uses its own wrapper. Drop a local copy of the original ROM at
+`StreetsOfRageRecompilation/rom/SOR.bin` (it is not versioned), then:
 
 ```bash
 cd StreetsOfRageRecompilation
 ./build.sh
 ```
 
-The original game ROM is not committed. Put your local ROM at:
-
-```bash
-StreetsOfRageRecompilation/rom/SOR.bin
-```
+See that repository’s README for run flags, full ROM recompilation, and
+disassembly workflows.
 
 ## Tools
 
-Run RageDecompiler commands from `StreetsOfRageRecompilation` by putting the tools repository on `PYTHONPATH`:
+From `StreetsOfRageRecompilation`, put the sibling tools repo on `PYTHONPATH`
+and call the CLI:
 
 ```bash
 cd StreetsOfRageRecompilation
