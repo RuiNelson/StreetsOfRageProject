@@ -104,7 +104,7 @@ Common workflows:
 ./disassemble.sh
 ./disassemble_nolabels.sh
 ./disassemble_iterative.sh
-./discover_aux_fast.sh
+./discover_aux_smart.sh
 ```
 
 ## Project Notes
