@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mega Drive Remote"
+  short_description: "Control and inspect Mega Drive applications"
+  default_prompt: "Use $megadrive-remote to exercise the running MegaDriveEnvironment application through Python."
