@@ -47,6 +47,9 @@ with MegaDriveClient("127.0.0.1", 6969) as md:
 
 Follow these rules:
 
+- Pass controller arguments by keyword: `press_buttons(player1=..., frames=...)`.
+  The controller arguments are keyword-only. The constructor timeout keyword is
+  `io_timeout`, not `timeout`.
 - Express button durations in frames. `press_buttons()` begins at the next
   VSync, combines masks with OR, releases automatically, and then replies.
 - Use memory state and `wait_memory_changed()` / `wait_memory_equals()` instead
@@ -81,6 +84,20 @@ Use:
 
 ## Automate Streets of Rage
 
+Develop new gameplay automations incrementally. Do not write an untested full
+route in one pass:
+
+1. Add one small input/state transition to a temporary Python program.
+2. Run it from a known reset state.
+3. Verify the result through both relevant RAM values and VDP output. Wait for
+   the scene to settle before judging a framebuffer.
+4. Reset, add only the next step, and repeat from the beginning.
+
+Keep the final natural demonstration separate from this development loop. Once
+the route is proven, launch a fresh process and run the consolidated script
+without intermediate resets or memory writes so the user can watch the genuine
+controller path.
+
 Use these confirmed work-RAM values:
 
 | Address | Width | Meaning |
@@ -89,22 +106,41 @@ Use these confirmed work-RAM values:
 | `0xFFFF02` | 2 | Level (`0` is level 1) |
 | `0xFFFF04` | 2 | Wave |
 | `0xFFF904` | 2 | Character-select substate |
+| `0xFFFB0E` | 2 | Main-menu substate (`0x02` is interactive) |
+| `0xFFB840` | 2 | Main-menu cursor (`0` is 1 PLAYER) |
+| `0xFFB858` | 2 | P1 character-selection slot |
 
-Relevant game states are `0x0A` title, `0x12` player-mode menu, `0x22`
-character select, `0x2A` level intro, and `0x16` active gameplay. These steps
-assume the application is already running; `restart_game()` returns at cold
-boot, before the logo/story/title sequence completes.
+Relevant game states are `0x06` story, `0x0A` title, `0x12` player-mode menu,
+`0x22` character select, `0x2A` level intro, and `0x16` active gameplay. These
+steps assume the application is already running; `restart_game()` returns at
+cold boot, before the logo/story/title sequence completes.
+
+When the user asks to watch a natural boot or suspects state skipping, launch
+a fresh application process and do not call `restart_game()` or write memory.
+Use read-only state checks only for timing, keep the same process throughout,
+and leave its window open when requested. Run the bundled natural-input path:
+
+```bash
+PYTHONPATH=MegaDriveEnvironment/python/src \
+  python3 .agents/skills/megadrive-remote/scripts/enter_first_level.py \
+  --character axel
+```
 
 To exercise the real input path:
 
-1. Wait for title state `0x0A`, then tap Start for one frame.
-2. Wait for state `0x12`. The cursor starts on 1 PLAYER; confirm it with A or
-   Start for one frame.
-3. Wait for state `0x22` and character-select substate `0x04`, then confirm the
-   default character with A for one frame.
-4. Let level-intro state `0x2A` progress to active gameplay state `0x16`.
-5. Confirm level is `0`, wait 60–180 further VSyncs, re-check state and level,
-   and only then capture the framebuffer.
+1. Send no input during the SEGA logo. Wait for story state `0x06`, leave it
+   visible for about 75 VSyncs, then tap Start for one frame.
+2. Wait for title state `0x0A`, leave the three-character title visible for
+   about 75 VSyncs, then tap Start for one frame.
+3. Wait for state `0x12` and main-menu substate `0x02`. Read the menu cursor as
+   a 2-byte value and verify it is `0` (1 PLAYER), then confirm with Start.
+4. Wait for state `0x22` and character-select substate `0x04`. Read the P1 slot
+   at `0xFFB858` as a 2-byte value: slot `0` is Adam, `1` Axel, and `2` Blaze.
+   Move one slot at a time and verify each change before confirming with A.
+5. Let level-intro state `0x2A` progress to active gameplay state `0x16`.
+6. Confirm level is `0`, wait about 180 further VSyncs for the entrance fall and
+   round setup, then re-check state and level. Do not invent object-field
+   offsets to detect landing unless they have been independently verified.
 
 If a one-frame tap is ignored, use a bounded retry: re-read the state, wait a
 few VSyncs, and tap again only while still in the same expected state. Never
