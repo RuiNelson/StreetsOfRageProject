@@ -1,5 +1,15 @@
 # Manual subroutine patterns (StreetsOfRageRecompilation)
 
+## Contents
+
+- File map
+- Generated call/return macros
+- Entry, tail-call, and mid-entry handling
+- Host wait helpers
+- ASM-first extraction and missing indirect targets
+- Cross-routine contracts learned
+- Existing manuals, build/run, and commit boundaries
+
 ## File map
 
 | Path | Role |
@@ -11,6 +21,7 @@
 | `generated/Sor.hpp` | Declarations (regenerated; do not hand-edit) |
 | `generated/Sor.cpp` | Generated bodies + CALL macros (regenerated; gitignored) |
 | `SorManualFunctions.cpp` | Manual game/runtime bodies |
+| `SoRMainMenus.cpp` | Manual mode-select, OPTIONS, and character-select bodies |
 | `SoRSound.cpp` | Manual sound helpers |
 | `output/sor.asm` | Local disassembly (gitignored) |
 | `rom/SOR.bin` | Local ROM (not versioned) |
@@ -90,17 +101,70 @@ Typical VBlank mailbox (see `sync_z80_1` / `sync_z80_2`):
 - Enable IRQs in SR
 - Wait until mailbox cleared by `vblank_handler`
 
-## Finding the generated body
+## ASM-first extraction
+
+Start from compact ASM ranges, not generated bodies:
 
 ```bash
 cd StreetsOfRageRecompilation
-rg -n "void Sor::NAME|case 0xADDR" generated/Sor.cpp generated/Sor.hpp
-rg -n "LABEL|0xADDR" output/sor.asm
-rg -n "ADDR|name" code-analysis/labels.csv
+rg -n "target_label:|nearby_label:" output/sor.asm
+sed -n 'START,ENDp' output/sor.asm
+rg -n "ADDR|name" code-analysis/labels.csv code-analysis/addresses.csv
 ```
+
+From ASM, record:
+
+- entry and every reachable mid-entry;
+- `jsr` versus `jmp`, explicit `rts`, and label fall-through;
+- byte/word/long widths and partial-register writes;
+- the last flag-producing instruction before each conditional branch;
+- temporary `movem`/`move …,-(sp)` saves around calls;
+- PC-relative jump-table bases and signed word offsets.
+
+Only then query generated code for the recompiler contract:
+
+```bash
+rg -n "void Sor::NAME|case 0xADDR" generated/Sor.cpp generated/Sor.hpp
+rg -n "NAME\(0x|CALL\(NAME|CALL_ENTRY\(NAME" generated/Sor.cpp
+```
+
+Generated C++ is useful for names, folded entries, soft-call return PCs, and
+dispatch coverage. It is not the preferred behavioral source.
 
 After `./build.sh --full`, the body definition must disappear; declaration and
 calls remain.
+
+## Missing indirect targets
+
+Jump-table targets can have high-confidence labels yet be absent from ASM,
+`Sor.hpp`, and dispatch because they were never supplied as auxiliary roots. An
+`org` gap around the address is a strong signal.
+
+```bash
+xxd -g 2 -s 0xTARGET -l 0x80 rom/SOR.bin
+rg -n "TARGET" code-analysis/aux_addresses.txt generated/Sor.hpp generated/Sor.cpp
+```
+
+Decode enough ROM to confirm code, add the six-digit root to
+`aux_addresses.txt`, regenerate, and verify declaration + dispatch before
+writing the manual body. This was required for OPTIONS handlers `$1404` and
+`$1476`.
+
+## Cross-routine contracts learned
+
+- **Fall-through wrappers:** `$9170` and `$927C` initialize a mode and flow
+  directly into the adjacent update wrapper. Their manual init bodies must
+  tail-call the update path, not pop an extra return address.
+- **Flags as return values:** `$14F2` communicates whether OPTIONS navigation
+  occurred through Z; callers immediately execute `bne`.
+- **High-half preservation:** object dispatch near `$AE20` sets bit 16 in `D0`
+  and then executes `move.w …,d0`; the word write preserves the bank bit used
+  by the absolute handler address.
+- **Nested temporary saves:** `$AD8E` pushes a word loop counter before a soft
+  `jsr`. Restore it only on the normal path; if a call unwinds past the frame,
+  return exactly as generated code does.
+- **Scope discipline:** for a document-driven batch, inventory its explicit
+  related-code table first. Do not manualize every helper mentioned in prose.
 
 ## Existing manuals (examples)
 
@@ -112,6 +176,7 @@ calls remain.
 | `$010514` | `sync_z80_2` | `SorManualFunctions.cpp` | Mailbox wait 2 |
 | `$01069E` | `queue_sound_id` | `SoRSound.cpp` | Mid-entry `$106CA` |
 | `$011B12` | `play_level_music` | `SoRSound.cpp` | Level BGM queue |
+| `$000FE8`–`$00AD8E` | select/OPTIONS/character-select set | `SoRMainMenus.cpp` | 27 roots; includes mid-entry `$AE10` |
 
 ## Build / run
 
