@@ -1,0 +1,4 @@
+interface:
+  display_name: "Control Mega Drive Game"
+  short_description: "Script game control and runtime observation"
+  default_prompt: "Use $control-megadrive-game to write a small Python script that drives and observes a running MegaDriveEnvironment game."
