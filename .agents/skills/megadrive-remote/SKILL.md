@@ -1,6 +1,6 @@
 ---
 name: megadrive-remote
-description: Control, test, inspect, and automate a running MegaDriveEnvironment application through the typed megadrive_remote Python client. Use for remote joystick input, deterministic frame-based button presses, game restart, 24-bit bus memory reads/writes/waits, ROM patching, VDP framebuffer/VRAM/palette/SAT/tilemap inspection, HSync/VSync waits, gameplay smoke tests, entering Streets of Rage levels, or diagnosing application progression through TCP port 6969.
+description: Control, test, inspect, and automate a running MegaDriveEnvironment application through the typed megadrive_remote Python client. Use for remote joystick input, deterministic frame-based button presses, game restart, 24-bit bus memory reads/writes/waits, ROM patching, VDP framebuffer/VRAM/palette/SAT/tilemap inspection, HSync/VSync waits, gameplay smoke tests, entering Streets of Rage levels, diagnosing application progression through TCP port 6969, or generalizing a repeatedly useful remote workflow into this skill's scripts.
 ---
 
 # Mega Drive Remote
@@ -28,6 +28,21 @@ Use `scripts/probe.py` for a non-mutating connectivity/VDP smoke test. Add
 ```bash
 python3 .agents/skills/megadrive-remote/scripts/probe.py \
   --wait-frames 3 --capture /tmp/megadrive-frame.ppm
+```
+
+Use `scripts/observe_timeline.py` instead of rewriting an ad-hoc sampler when
+tracking RAM-backed state machines over time. It is read-only and can wait for
+a known state, sample named fields at VSync intervals, hash every framebuffer,
+and optionally save captures.
+
+```bash
+python3 .agents/skills/megadrive-remote/scripts/observe_timeline.py \
+  --wait-for 0xFFFF00:2:0x0006 \
+  --field game_state:0xFFFF00:2 \
+  --field scene_step:0xFFFA30:1 \
+  --field scene_timer:0xFFFB06:2 \
+  --samples 10 --interval-frames 60 \
+  --capture-dir /tmp/sor-story-captures --capture-every 3
 ```
 
 ## Write automation
@@ -105,13 +120,22 @@ Use these confirmed work-RAM values:
 | `0xFFFF00` | 2 | Game state |
 | `0xFFFF02` | 2 | Level (`0` is level 1) |
 | `0xFFFF04` | 2 | Wave |
+| `0xFFFF2A` | 1 | Demo/attract mode; bit 7 marks a Start-button abort |
 | `0xFFF904` | 2 | Character-select substate |
+| `0xFFFA30` | 1 | Story-scene timeline step |
+| `0xFFFA31` | 1 | Story-scene last step |
+| `0xFFFA33` | 1 | Next game state configured for the story scene |
+| `0xFFFB06` | 2 | Per-entry story-scene timer |
 | `0xFFFB0E` | 2 | Main-menu substate (`0x02` is interactive) |
+| `0xFFFC24` | 4 | Active story-scene script pointer |
 | `0xFFB840` | 2 | Main-menu cursor (`0` is 1 PLAYER) |
 | `0xFFB858` | 2 | P1 character-selection slot |
 
-Relevant game states are `0x06` story, `0x0A` title, `0x12` player-mode menu,
-`0x22` character select, `0x2A` level intro, and `0x16` active gameplay. These
+Relevant game states are `0x06` story-opening animation, `0x0A` title, `0x12`
+player-mode menu, `0x22` character select, `0x2A` level intro, and `0x16`
+active gameplay. Do not call `0x06` the playable “story mode”; the campaign
+reuses several global states. A natural, uninterrupted opening has been
+observed ending in attract gameplay at `0x16` with `demo_mode == 1`. These
 steps assume the application is already running; `restart_game()` returns at
 cold boot, before the logo/story/title sequence completes.
 
@@ -162,3 +186,35 @@ Report observable evidence rather than only “connected”:
 
 Keep ad-hoc programs in a temporary directory and remove them after use. Keep
 captures only when they help the user verify the result.
+
+## Improve the skill after verified use
+
+Treat every real remote-control task as a chance to reduce future ad-hoc work.
+Before finishing, review what was learned and update this skill when the
+improvement is reusable, in scope, and supported by evidence.
+
+1. Identify repeated code, unclear instructions, missing confirmed addresses,
+   fragile waits, or misleading terminology encountered during the run.
+2. Generalize repeated deterministic code into `scripts/`; extend an existing
+   script when its contract still fits instead of creating a near-duplicate.
+3. Add RAM addresses or state transitions only after confirming address,
+   width, and meaning. Prefer both static call-site evidence and a dynamic
+   observation. Mark uncertainty explicitly rather than presenting it as fact.
+4. Preserve the boundary between natural-input demonstrations, read-only
+   observation, diagnostic memory writes, restart tests, and ROM patching.
+   Never make a natural-path script silently reset, warp, or write memory.
+5. Keep script CLIs backward compatible where practical. Emit structured JSON
+   for machine-readable results and actionable errors for failed waits.
+6. Test every changed script. At minimum run `--help` and Python compilation;
+   for behavior changes, run a bounded representative test against the local
+   server when available. Do not claim live validation when no server ran.
+7. Run the skill validator after editing `SKILL.md`, and keep
+   `agents/openai.yaml` aligned if the trigger scope or default workflow changes.
+8. Remove temporary programs, restore temporary ROM patches, release buttons,
+   close clients, and stop test processes. Preserve captures only as evidence.
+9. Report the improvement separately from the game result: files changed,
+   validation performed, and any behavior intentionally left unverified.
+
+Do not add one-off game facts, raw logs, captures, generated output, or a
+changelog to the skill. Put detailed domain analysis in the owning project's
+analysis files; keep this skill focused on reusable remote workflows.

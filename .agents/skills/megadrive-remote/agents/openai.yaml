@@ -1,4 +1,4 @@
 interface:
   display_name: "Mega Drive Remote"
-  short_description: "Control and inspect Mega Drive applications"
-  default_prompt: "Use $megadrive-remote to exercise the running MegaDriveEnvironment application through Python."
+  short_description: "Control, inspect, and improve Mega Drive automation"
+  default_prompt: "Use $megadrive-remote to inspect and control the running MegaDriveEnvironment application, then generalize verified repeated workflows into the skill."
