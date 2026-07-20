@@ -2,6 +2,23 @@
 
 ## StreetsOfRageRecompilation
 
+For the common request "reach gameplay quickly with a chosen character", reuse
+the checked-in tool instead of scripting the menus or rewriting RAM setup:
+
+```bash
+python3 tools/reach_gameplay.py axel
+python3 tools/reach_gameplay.py adam
+python3 tools/reach_gameplay.py blaze
+```
+
+Run it from `StreetsOfRageRecompilation/` against an existing `--runSor`
+process. It supports `axel`, `adam`, and `blaze`, discovers the sibling Python
+client without `PYTHONPATH`, and uses only joypad presses plus RAM observations.
+It preserves the real menu, level, player, sound, and music initialization,
+waits for the spawn-complete sound command `$A1`, then verifies playable state,
+character ID, object type, health, and music voice bank. Use `--help` for host,
+port, and timeout options.
+
 Build from its submodule root:
 
 ```bash
