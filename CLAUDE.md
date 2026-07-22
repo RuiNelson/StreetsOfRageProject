@@ -83,7 +83,7 @@ Boot bugs can spin forever, and the SDL window may survive plain `SIGTERM`.
 
 ```bash
 cd StreetsOfRageRecompilation
-timeout -k 3 20 ./build.sh -r -- --runSor --debug --fast --rom rom/SOR.bin
+timeout -k 3 20 ./build.sh -r -- --runSor --debug --rom rom/SOR.bin
 ```
 
 After runs, check that no `sor` process is left behind.

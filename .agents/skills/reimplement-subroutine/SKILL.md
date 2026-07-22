@@ -255,7 +255,7 @@ Always wrap runs (boot hangs / SDL survival):
 
 ```bash
 cd StreetsOfRageRecompilation
-timeout -k 3 20 ./build.sh -r -- --runSor --debug --fast --rom rom/SOR.bin
+timeout -k 3 20 ./build.sh -r -- --runSor --debug --rom rom/SOR.bin
 # after:
 pgrep -lf '[/]sor' || true   # must be empty
 ```

@@ -29,7 +29,7 @@ Run only with a kill grace period, using the local ROM:
 
 ```bash
 timeout -k 3 60 ./build/sor \
-  --runSor --silent --fast --rom rom/SOR.bin
+  --runSor --silent --rom rom/SOR.bin
 ```
 
 Use a longer timeout than the experiment, retain the process/session handle,
@@ -39,9 +39,8 @@ and stop it after the Python script finishes. Confirm cleanup with:
 pgrep -lf '[/]sor' || true
 ```
 
-For a normal paced visual experiment, omit `--fast`. Fast mode is useful for
-state bring-up but makes wall-clock timing unsuitable as evidence; synchronize
-through VSync or memory instead.
+Synchronize experiments through VSync or memory rather than guessed wall-clock
+delays.
 
 Treat `code-analysis/addresses.csv` as the source of truth for semantic RAM
 names, widths, and confidence. Useful current examples include:

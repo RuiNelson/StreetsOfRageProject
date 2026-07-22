@@ -183,7 +183,7 @@ writing the manual body. This was required for OPTIONS handlers `$1404` and
 ```bash
 cd StreetsOfRageRecompilation
 ./build.sh --full
-timeout -k 3 20 ./build.sh -r -- --runSor --debug --fast --rom rom/SOR.bin
+timeout -k 3 20 ./build.sh -r -- --runSor --debug --rom rom/SOR.bin
 pgrep -lf '[/]sor' || echo 'clean'
 ```
 
