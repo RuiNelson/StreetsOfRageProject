@@ -1,12 +1,12 @@
-# AI Play — detetor de eventos
+# AI Play
 
-Primeiro componente da AI: observa uma sessão humana de *Streets of Rage* em
-modo de um jogador através da porta remota do `MegaDriveEnvironment` e escreve
-os eventos na consola em formato JSON Lines.
+Detetor de eventos e agente PPO para *Streets of Rage*. Ambos usam a porta
+remota do `MegaDriveEnvironment`, arrancam uma campanha de um jogador com
+**Blaze** e partilham uma única cópia dos 64 KiB de Work RAM por atualização.
 
-## Como executar
+## Detetor de eventos
 
-Num terminal, iniciar o jogo com um limite de execução e a porta remota ativa:
+Iniciar o jogo com limite de execução e a porta remota ativa:
 
 ```bash
 cd StreetsOfRageRecompilation
@@ -21,73 +21,176 @@ python3 -m ai_play
 
 Por omissão, o detetor reutiliza
 `StreetsOfRageRecompilation/tools/reach_gameplay.py`: reinicia o jogo, percorre
-os menus através de input real, escolhe **Blaze**, espera até ela estar jogável
-e começa então a observação. A navegação e o detetor partilham a mesma ligação
-remota.
+os menus através de input real, escolhe Blaze, espera até ela estar jogável e
+começa então a observação. A navegação e o detetor partilham a mesma ligação.
 
-O cliente procura automaticamente
-`MegaDriveEnvironment/python/src/megadrive_remote`. Também aceita outra porta,
-máquina ou frequência:
+Também aceita outra porta, máquina ou frequência:
 
 ```bash
-python3 -m ai_play --host 127.0.0.1 --port 6969 --poll-hz 4 --character blaze
+python3 -m ai_play --host 127.0.0.1 --port 6969 --poll-hz 5 --character blaze
 ```
 
-Para observar uma sessão que já esteja em curso, sem reiniciar ou navegar nos
-menus:
+Para observar uma sessão já em curso sem reiniciar:
 
 ```bash
 python3 -m ai_play --observe-current-game
 ```
 
-Interromper o detetor com `Ctrl-C`. Depois de Blaze ficar jogável, o detetor
-deixa de enviar comandos e apenas observa a sessão humana.
+Depois da navegação são feitas aproximadamente cinco atualizações por segundo.
+Cada atualização contém uma única leitura
+`read_memory(0xFF0000, 0x10000)` e uma leitura do contador de frames. Todos os
+discriminadores consomem a mesma cópia local.
 
-## Modelo de polling
-
-Depois da navegação inicial, são feitas aproximadamente quatro atualizações por
-segundo. Cada atualização contém:
-
-1. Uma única chamada `read_memory(0xFF0000, 0x10000)`, que copia os 64 KiB
-   completos de Work RAM.
-2. Uma leitura do contador remoto de frames, que não reside na Work RAM.
-
-Todos os eventos atuais e futuros devem ser discriminados sobre a mesma cópia
-local de RAM. Não devem ser acrescentadas leituras remotas de endereços RAM
-individuais ao ciclo de polling.
-
-## Eventos
+### Eventos
 
 | Evento | Sinal |
 |---|---|
-| `frames_elapsed` | Um ou mais intervalos de 60 VSyncs passaram. Intervalos em atraso são agregados num evento. |
-| `player_energy_lost` | `$FFB832 (p1_health)` diminuiu durante gameplay 1P; inclui a quantidade. |
+| `frames_elapsed` | Um ou mais intervalos de 60 VSyncs passaram. |
+| `player_energy_lost` | `$FFB832 (p1_health)` diminuiu durante gameplay 1P. |
 | `player_life_lost` | `$FFFF20 (p1_lives)` BCD diminuiu durante gameplay 1P. |
-| `enemy_defeated` | Um ou mais slots de combatentes entraram numa transição letal entre snapshots. Nos inimigos comuns, compara o byte alto do estado em `+$30`; o byte baixo `+$31` contém flags que mudam durante a morte. Inclui quantidade, slots, tipos e energia. |
-| `level_completed` | Flanco ascendente de `$FFFA73 (end_of_level_flag)`. |
-| `level_increased` | `$FFFF02 (level)` aumentou durante a campanha, normalmente quando o round-clear avança para o nível seguinte; inclui nível anterior, novo nível e quantidade. |
-| `level_decreased` | `$FFFF02 (level)` diminuiu durante a campanha; os números apresentados são 1–8. Isto também cobre o recuo da campanha que pode ocorrer no encontro final. |
-| `game_completed` | Entrada no good ending (`game_state $24/$26`) ou bad ending (`$1C/$1E`). |
+| `enemy_defeated` | Um ou mais slots entraram numa transição letal. |
+| `level_completed` | Flanco de `$FFFA73`; mantido por diagnóstico, reward zero. |
+| `level_increased` | `$FFFF02 (level)` aumentou durante a campanha. |
+| `level_decreased` | `$FFFF02 (level)` diminuiu durante a campanha. |
+| `game_completed` | Entrada no good ending ou bad ending. |
 
-Exemplo de saída:
+## Instalar o treino
 
-```json
-{"event": "player_energy_lost", "frame": 912, "amount": 8, "before": 80, "after": 72}
-{"event": "enemy_defeated", "frame": 1044, "count": 2, "enemies": [{"slot": 3, "type": "0x20", "name": "Garcia", "health_before": 8, "health_after": 0}, {"slot": 5, "type": "0x24", "name": "Signal", "health_before": 6, "health_after": -2}]}
+O Python 3.14 do sistema pode continuar a executar o detetor, mas o stack de ML
+fica isolado numa virtualenv Python 3.13:
+
+```bash
+uv venv --python python3.13 .venv
+uv pip install --python .venv/bin/python -r ai_play/requirements-train.txt
 ```
+
+O treino exige um Mac com PyTorch MPS disponível. `--train` usa explicitamente
+`device="mps"` e termina com erro se Metal não estiver disponível; não existe
+fallback silencioso para CPU.
+
+## Treinar
+
+Com um processo do jogo já ativo na porta 6969:
+
+```bash
+.venv/bin/python -m ai_play --train
+```
+
+O ambiente reinicia o jogo, escolhe Blaze e entra em lockstep antes do primeiro
+passo. Um `step_input` remoto aplica o comando, avança exatamente 12 VSyncs e
+devolve atomicamente o contador final e os 65 536 bytes de Work RAM. O jogo não
+avança enquanto o PPO calcula a ação seguinte.
+
+Também é possível deixar o treino lançar o processo, sempre à velocidade real
+de 60 Hz e sem `--turbo`:
+
+```bash
+.venv/bin/python -m ai_play --train --launch-games --port 7000
+```
+
+Para recolha paralela, cada worker lança um processo na porta
+`--port + índice`; com mais de um ambiente é usado `SubprocVecEnv(spawn)`:
+
+```bash
+.venv/bin/python -m ai_play \
+  --train \
+  --launch-games \
+  --n-envs 4 \
+  --port 7000 \
+  --total-timesteps 1000000 \
+  --progress-bar
+```
+
+Com um ambiente é usado `DummyVecEnv`. Sem `--launch-games`, os processos têm
+de já estar ativos nas portas consecutivas. O modelo final é guardado por
+omissão em `ai_play/models/ppo_sor.zip`; existem checkpoints periódicos e logs
+TensorBoard na mesma diretoria. Para continuar:
+
+```bash
+.venv/bin/python -m ai_play --train --resume ai_play/models/ppo_sor.zip
+```
+
+### Observação e policy
+
+A observação Gymnasium é:
+
+```text
+Box(low=0, high=255, shape=(65536,), dtype=uint8)
+```
+
+O extrator `PerceiverLiteExtractor` usa:
+
+1. embedding dos 256 valores possíveis do byte, dimensão 16;
+2. embedding absoluto aprendido para cada endereço 68000;
+3. Conv1D com kernel/stride 16, reduzindo 65 536 para 4096 tokens de dimensão 64;
+4. cross-attention de 128 latents, quatro heads;
+5. dois blocos de self-attention apenas sobre os latents;
+6. mean pooling e saída de 256 features.
+
+O PPO é on-policy, portanto não mantém um replay buffer com observações RAM.
+Usa `log_std_init=-1.0`, minibatches pequenos e a policy completa é treinada no
+MPS.
+
+### Ação
+
+A ação contínua é:
+
+```text
+Box(
+  low=[-1, -1, 0, 0, 0, 0, 0],
+  high=[1, 1, 1, 1, 1, 1, 1],
+  dtype=float32
+)
+```
+
+Os valores são `[x, y, raio, A, B, C, Start]`. As coordenadas seguem o ecrã:
+`+x` é direita e `+y` é baixo.
+
+- `(x, y)` é quantizado numa das oito direções; diagonais premem duas teclas.
+- `raio <= 0.25` descarta toda a combinação como ruído.
+- `raio > 0.25` mapeia linearmente para 1–12 frames premidos.
+- A, B e C só ativam acima de `0.5`.
+- Start só ativa acima de `0.9`.
+- Cada passo ocupa sempre 12 frames: mantém a combinação no início e solta-a
+  nos frames restantes.
+
+### Rewards e fim do episódio
+
+Os pesos imutáveis estão em `ai_play/weights.py`:
+
+| Sinal | Reward |
+|---|---:|
+| 60 frames decorridos | `-0.001` |
+| cada ponto de energia perdido | `-0.10` |
+| cada vida perdida | `-10` |
+| inimigo comum derrotado | `+1` |
+| boss derrotado | `+10` |
+| `level_completed` | `0` |
+| nível aumentado | `+50` |
+| nível diminuído | `-50` |
+| good ending | `+500` |
+| bad ending | `-100` |
+| ativação de Start | `-0.05` |
+
+Não existe reward de wave nem castigo adicional de game over. O episódio
+termina e o jogo é reiniciado depois de três vidas perdidas, ou quando a
+campanha é completada. Existe ainda uma truncagem de segurança configurável
+por `--max-episode-steps`.
 
 ## Testes
 
+Testes sem dependências de treino:
+
 ```bash
 python3 -m unittest discover -s ai_play/tests -v
-python3 -m py_compile ai_play/__init__.py ai_play/__main__.py ai_play/event_detector.py
 ```
 
-Os testes verificam, entre outros casos, que cada snapshot usa exatamente uma
-leitura dos 64 KiB completos de Work RAM e que várias derrotas observadas na
-mesma atualização são agregadas.
+Suite completa na virtualenv:
 
-Os pesos acordados para a reward do agente estão centralizados no objeto
-imutável `DEFAULT_WEIGHTS`, em `ai_play/weights.py`. O peso de
-`level_completed` é explicitamente zero; o avanço da campanha é recompensado
-por `level_increased`.
+```bash
+.venv/bin/python -m unittest discover -s ai_play/tests -v
+```
+
+Os testes cobrem os eventos, a reutilização dos 64 KiB, ações e thresholds,
+rewards, episódio de três vidas, forward do Perceiver e construção da policy
+PPO.

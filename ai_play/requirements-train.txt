@@ -1,0 +1,7 @@
+numpy>=2.0,<3
+torch>=2.6,<3
+gymnasium>=1.1,<2
+stable-baselines3>=2.7,<3
+tensorboard>=2.18,<3
+tqdm>=4.67,<5
+rich>=13.9,<15

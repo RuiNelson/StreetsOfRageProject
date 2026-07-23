@@ -6,3 +6,5 @@ RageDecompiler/**/__pycache__
 /StreetsOfRageRecompilation/output
 /*.png
 .vscode/
+.venv/
+/ai_play/models/

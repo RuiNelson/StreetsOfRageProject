@@ -104,6 +104,7 @@ class Snapshot:
     lives_bcd: int
     end_of_level: int
     enemies: Tuple[EnemySnapshot, ...]
+    ram: bytes = b""
 
 
 @dataclass(frozen=True)
@@ -124,10 +125,10 @@ class WorkRamSnapshotReader:
     def __init__(self, game: Any) -> None:
         self._game = game
 
-    def read(self) -> Snapshot:
-        # Keep this as one READ_MEMORY request. Future detectors should consume
-        # this same local byte snapshot instead of adding remote RAM reads.
-        ram = self._game.read_memory(WORK_RAM_BASE, WORK_RAM_SIZE)
+    @staticmethod
+    def decode(ram: bytes, frame: int) -> Snapshot:
+        """Decode a complete Work RAM image already collected by the caller."""
+
         if len(ram) != WORK_RAM_SIZE:
             raise RuntimeError(
                 f"expected {WORK_RAM_SIZE} Work RAM bytes, received {len(ram)}"
@@ -145,9 +146,6 @@ class WorkRamSnapshotReader:
                 )
             )
 
-        # The uptime counter is not a Work RAM value. Reading it after RAM makes
-        # the frame number an approximate upper timestamp for this snapshot.
-        frame = self._game.get_game_uptime_frames()
         return Snapshot(
             frame=frame,
             game_state=_u16(ram, GAME_STATE),
@@ -157,7 +155,18 @@ class WorkRamSnapshotReader:
             lives_bcd=_u8(ram, P1_LIVES),
             end_of_level=_u8(ram, END_OF_LEVEL_FLAG),
             enemies=tuple(enemies),
+            ram=ram,
         )
+
+    def read(self) -> Snapshot:
+        # Keep this as one READ_MEMORY request. Future detectors and the agent
+        # consume this same local byte snapshot instead of adding remote reads.
+        ram = self._game.read_memory(WORK_RAM_BASE, WORK_RAM_SIZE)
+
+        # The uptime counter is not a Work RAM value. Reading it after RAM makes
+        # the frame number an approximate upper timestamp for this snapshot.
+        frame = self._game.get_game_uptime_frames()
+        return self.decode(ram, frame)
 
 
 class EventDetector:
@@ -439,8 +448,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--poll-hz",
         type=float,
-        default=4.0,
-        help="Work RAM snapshots per second (default: 4)",
+        default=5.0,
+        help="Work RAM snapshots per second (default: 5)",
     )
     parser.add_argument(
         "--character",
@@ -459,6 +468,96 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not restart/navigate; observe the current session as-is",
     )
+    parser.add_argument(
+        "--train",
+        action="store_true",
+        help="train a PPO agent instead of printing events",
+    )
+    parser.add_argument(
+        "--n-envs",
+        type=int,
+        default=1,
+        help="parallel emulator environments; ports are --port + worker (default: 1)",
+    )
+    parser.add_argument(
+        "--total-timesteps",
+        type=int,
+        default=100_000,
+        help="PPO environment timesteps to collect (default: 100000)",
+    )
+    parser.add_argument(
+        "--n-steps",
+        type=int,
+        default=256,
+        help="rollout steps per environment and PPO update (default: 256)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=16,
+        help="PPO minibatch size (default: 16)",
+    )
+    parser.add_argument(
+        "--max-episode-steps",
+        type=int,
+        default=18_000,
+        help="truncate an episode after this many 12-frame actions (default: 18000)",
+    )
+    parser.add_argument(
+        "--step-timeout-ms",
+        type=int,
+        default=5_000,
+        help="timeout for one atomic 12-frame training step (default: 5000)",
+    )
+    parser.add_argument(
+        "--launch-games",
+        action="store_true",
+        help="launch one real-speed sor process per environment",
+    )
+    parser.add_argument(
+        "--game-executable",
+        default=str(
+            Path(__file__).resolve().parents[1]
+            / "StreetsOfRageRecompilation"
+            / "build"
+            / "sor"
+        ),
+        help="sor executable used by --launch-games",
+    )
+    parser.add_argument(
+        "--rom",
+        default=str(
+            Path(__file__).resolve().parents[1]
+            / "StreetsOfRageRecompilation"
+            / "rom"
+            / "SOR.bin"
+        ),
+        help="ROM used by --launch-games",
+    )
+    parser.add_argument(
+        "--process-timeout-seconds",
+        type=int,
+        default=86_400,
+        help="hard timeout for each launched game process (default: 86400)",
+    )
+    parser.add_argument(
+        "--model-path",
+        default="ai_play/models/ppo_sor",
+        help="final PPO model path (default: ai_play/models/ppo_sor)",
+    )
+    parser.add_argument("--resume", help="resume an existing PPO .zip model")
+    parser.add_argument("--seed", type=int, default=0, help="training seed")
+    parser.add_argument(
+        "--checkpoint-frequency",
+        type=int,
+        default=10_000,
+        help="aggregate environment steps between checkpoints (default: 10000)",
+    )
+    parser.add_argument(
+        "--progress-bar",
+        action="store_true",
+        help="show the Stable-Baselines3 progress bar",
+    )
     return parser
 
 
@@ -469,6 +568,38 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("--poll-hz must be positive")
     if args.startup_timeout_ms <= 0:
         parser.error("--startup-timeout-ms must be positive")
+    if args.train:
+        positive_training_values = {
+            "--n-envs": args.n_envs,
+            "--total-timesteps": args.total_timesteps,
+            "--n-steps": args.n_steps,
+            "--batch-size": args.batch_size,
+            "--max-episode-steps": args.max_episode_steps,
+            "--step-timeout-ms": args.step_timeout_ms,
+            "--process-timeout-seconds": args.process_timeout_seconds,
+            "--checkpoint-frequency": args.checkpoint_frequency,
+        }
+        for option, value in positive_training_values.items():
+            if value <= 0:
+                parser.error(f"{option} must be positive")
+        rollout_size = args.n_steps * args.n_envs
+        if rollout_size % args.batch_size:
+            parser.error("--batch-size must divide --n-steps * --n-envs")
+        try:
+            from .training import train_from_args
+        except ModuleNotFoundError as error:
+            if error.name in {
+                "gymnasium",
+                "numpy",
+                "stable_baselines3",
+                "torch",
+            }:
+                parser.error(
+                    "training dependencies are missing; install "
+                    "ai_play/requirements-train.txt with Python 3.13"
+                )
+            raise
+        return train_from_args(args)
 
     remote = _load_remote_client()
     try:

@@ -14,13 +14,12 @@ class RewardWeights:
     per_life_lost: float = -10.0
     per_regular_enemy_defeated: float = 1.0
     per_boss_defeated: float = 10.0
-    per_wave_increased: float = 5.0
     per_level_completed: float = 0.0
     per_level_increased: float = 50.0
     per_level_decreased: float = -50.0
     good_ending: float = 500.0
     bad_ending: float = -100.0
-    game_over: float = -100.0
+    per_start_activation: float = -0.05
 
 
 DEFAULT_WEIGHTS = RewardWeights()

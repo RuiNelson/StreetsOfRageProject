@@ -11,13 +11,12 @@ class RewardWeightsTests(unittest.TestCase):
         self.assertEqual(DEFAULT_WEIGHTS.per_life_lost, -10.0)
         self.assertEqual(DEFAULT_WEIGHTS.per_regular_enemy_defeated, 1.0)
         self.assertEqual(DEFAULT_WEIGHTS.per_boss_defeated, 10.0)
-        self.assertEqual(DEFAULT_WEIGHTS.per_wave_increased, 5.0)
         self.assertEqual(DEFAULT_WEIGHTS.per_level_completed, 0.0)
         self.assertEqual(DEFAULT_WEIGHTS.per_level_increased, 50.0)
         self.assertEqual(DEFAULT_WEIGHTS.per_level_decreased, -50.0)
         self.assertEqual(DEFAULT_WEIGHTS.good_ending, 500.0)
         self.assertEqual(DEFAULT_WEIGHTS.bad_ending, -100.0)
-        self.assertEqual(DEFAULT_WEIGHTS.game_over, -100.0)
+        self.assertEqual(DEFAULT_WEIGHTS.per_start_activation, -0.05)
 
     def test_weights_are_immutable(self) -> None:
         with self.assertRaises(FrozenInstanceError):

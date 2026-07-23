@@ -59,7 +59,14 @@ class EventDetectorTests(unittest.TestCase):
     def test_blaze_is_the_default_starting_character(self) -> None:
         args = _parser().parse_args([])
         self.assertEqual(args.character, "blaze")
+        self.assertEqual(args.poll_hz, 5.0)
         self.assertFalse(args.observe_current_game)
+
+    def test_training_defaults_to_one_real_speed_environment(self) -> None:
+        args = _parser().parse_args(["--train"])
+        self.assertEqual(args.n_envs, 1)
+        self.assertFalse(args.launch_games)
+        self.assertNotIn("turbo", vars(args))
 
     def test_aggregates_elapsed_frame_intervals(self) -> None:
         detector = EventDetector()
@@ -195,9 +202,20 @@ class WorkRamSnapshotReaderTests(unittest.TestCase):
 
         self.assertEqual(game.reads, [(WORK_RAM_BASE, WORK_RAM_SIZE)])
         self.assertEqual(observed.frame, 123)
+        self.assertEqual(observed.ram, bytes(ram))
         self.assertEqual(observed.level, 2)
         self.assertEqual(observed.health, 65)
         self.assertEqual(observed.enemies[0].object_type, 0x20)
+
+    def test_decodes_ram_already_collected_by_lockstep(self) -> None:
+        ram = bytearray(WORK_RAM_SIZE)
+        write_value(ram, GAME_STATE, 0x16, 2)
+        write_value(ram, PLAYER_MODE, 1, 1)
+        write_value(ram, P1_HEALTH, 80, 2)
+        observed = WorkRamSnapshotReader.decode(bytes(ram), 77)
+        self.assertEqual(observed.frame, 77)
+        self.assertEqual(observed.health, 80)
+        self.assertEqual(observed.ram, bytes(ram))
 
 
 if __name__ == "__main__":
