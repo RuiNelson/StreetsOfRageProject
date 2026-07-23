@@ -161,6 +161,9 @@ $env:PYTHONPATH = (Resolve-Path RageDecompiler)
 
 python -m tools recompile StreetsOfRageRecompilation\rom\SOR.bin `
   -o StreetsOfRageRecompilation\generated `
+  --aux StreetsOfRageRecompilation\code-analysis\aux_addresses.txt `
+  --labels-csv StreetsOfRageRecompilation\code-analysis\labels.csv `
+  --addresses-csv StreetsOfRageRecompilation\code-analysis\addresses.csv `
   --manual-functions StreetsOfRageRecompilation\code-analysis\manual_functions.txt
 ```
 
@@ -340,6 +343,9 @@ CMake build:
 $env:PYTHONPATH = (Resolve-Path RageDecompiler)
 python -m tools recompile StreetsOfRageRecompilation\rom\SOR.bin `
   -o StreetsOfRageRecompilation\generated `
+  --aux StreetsOfRageRecompilation\code-analysis\aux_addresses.txt `
+  --labels-csv StreetsOfRageRecompilation\code-analysis\labels.csv `
+  --addresses-csv StreetsOfRageRecompilation\code-analysis\addresses.csv `
   --manual-functions StreetsOfRageRecompilation\code-analysis\manual_functions.txt
 ```
 
