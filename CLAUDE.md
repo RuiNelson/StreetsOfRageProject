@@ -167,3 +167,6 @@ indirect jumps and calls.
 
 Finish by summarizing changed files, validation performed, and anything not
 tested on the current host.
+
+> Keep this file and the other `CLAUDE.md` files updated as you work
+> 
