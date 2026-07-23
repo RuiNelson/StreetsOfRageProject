@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import socket
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -8,7 +9,12 @@ try:
     import numpy as np
 
     from ai_play.actions import A, RIGHT
-    from ai_play.environment import EnvironmentConfig, StreetsOfRageEnv
+    from ai_play.environment import (
+        EnvironmentConfig,
+        LaunchPortUnavailableError,
+        StreetsOfRageEnv,
+        ensure_launch_port_available,
+    )
     from ai_play.event_detector import (
         GAME_STATE,
         P1_HEALTH,
@@ -67,6 +73,17 @@ class _FakeGame:
 
 @unittest.skipUnless(TRAINING_AVAILABLE, "training dependencies are not installed")
 class EnvironmentTests(unittest.TestCase):
+    def test_rejects_an_occupied_launch_port_before_starting(self) -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            with self.assertRaisesRegex(
+                LaunchPortUnavailableError,
+                rf"TCP port {port} is already in use",
+            ):
+                ensure_launch_port_available(port)
+
     def test_atomic_step_reuses_ram_and_ends_after_three_lives(self) -> None:
         game = _FakeGame()
         env = StreetsOfRageEnv(EnvironmentConfig(max_episode_steps=100))

@@ -85,7 +85,7 @@ Também é possível deixar o treino lançar o processo, sempre à velocidade re
 de 60 Hz e sem `--turbo`:
 
 ```bash
-.venv/bin/python -m ai_play --train --launch-games --port 7000
+.venv/bin/python -m ai_play --train --launch-games --port 6970
 ```
 
 Para recolha paralela, cada worker lança um processo na porta
@@ -96,7 +96,7 @@ Para recolha paralela, cada worker lança um processo na porta
   --train \
   --launch-games \
   --n-envs 4 \
-  --port 7000 \
+  --port 6970 \
   --total-timesteps 1000000 \
   --progress-bar
 ```
@@ -104,7 +104,13 @@ Para recolha paralela, cada worker lança um processo na porta
 Com um ambiente é usado `DummyVecEnv`. Sem `--launch-games`, os processos têm
 de já estar ativos nas portas consecutivas. O modelo final é guardado por
 omissão em `ai_play/models/ppo_sor.zip`; existem checkpoints periódicos e logs
-TensorBoard na mesma diretoria. Para continuar:
+TensorBoard na mesma diretoria.
+
+O launcher verifica todas as portas antes de criar o modelo. Se alguma já
+estiver ocupada, termina imediatamente e sugere o comando `lsof` correspondente.
+No macOS, a porta 7000 é frequentemente usada pelo `ControlCenter`/AirPlay.
+
+Para continuar:
 
 ```bash
 .venv/bin/python -m ai_play --train --resume ai_play/models/ppo_sor.zip

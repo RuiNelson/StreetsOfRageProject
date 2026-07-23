@@ -586,6 +586,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if rollout_size % args.batch_size:
             parser.error("--batch-size must divide --n-steps * --n-envs")
         try:
+            from .environment import LaunchPortUnavailableError
             from .training import train_from_args
         except ModuleNotFoundError as error:
             if error.name in {
@@ -599,7 +600,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "ai_play/requirements-train.txt with Python 3.13"
                 )
             raise
-        return train_from_args(args)
+        try:
+            return train_from_args(args)
+        except LaunchPortUnavailableError as error:
+            parser.error(str(error))
 
     remote = _load_remote_client()
     try:

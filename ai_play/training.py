@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,11 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
 from torch import nn
 
-from .environment import EnvironmentConfig, make_environment
+from .environment import (
+    EnvironmentConfig,
+    ensure_launch_port_available,
+    make_environment,
+)
 from .perceiver import PerceiverLiteExtractor
 
 
@@ -50,7 +55,6 @@ def _require_mps() -> torch.device:
 def train_from_args(args: Any) -> int:
     """Construct vector environments and train or resume PPO on MPS."""
 
-    device = _require_mps()
     base_config = EnvironmentConfig(
         host=args.host,
         port=args.port,
@@ -64,6 +68,11 @@ def train_from_args(args: Any) -> int:
         process_timeout_seconds=args.process_timeout_seconds,
         seed=args.seed,
     )
+    if base_config.launch_game:
+        for worker in range(args.n_envs):
+            ensure_launch_port_available(base_config.port + worker)
+    device = _require_mps()
+
     env_factories = [
         (
             lambda worker=worker: make_environment(
@@ -90,33 +99,41 @@ def train_from_args(args: Any) -> int:
     tensorboard_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        if args.resume:
-            model = PPO.load(
-                Path(args.resume).expanduser().resolve(),
-                env=env,
-                device=device,
+        # SB3 warns solely because the outer class is named MlpPolicy; it
+        # cannot see that our custom extractor is attention/Conv1D-heavy.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="You are trying to run PPO on the GPU.*",
+                category=UserWarning,
             )
-            reset_num_timesteps = False
-        else:
-            model = PPO(
-                "MlpPolicy",
-                env,
-                device=device,
-                policy_kwargs=perceiver_policy_kwargs(),
-                learning_rate=3e-4,
-                n_steps=args.n_steps,
-                batch_size=args.batch_size,
-                n_epochs=4,
-                gamma=0.99,
-                gae_lambda=0.95,
-                clip_range=0.2,
-                ent_coef=0.01,
-                target_kl=0.03,
-                tensorboard_log=str(tensorboard_dir),
-                seed=args.seed,
-                verbose=1,
-            )
-            reset_num_timesteps = True
+            if args.resume:
+                model = PPO.load(
+                    Path(args.resume).expanduser().resolve(),
+                    env=env,
+                    device=device,
+                )
+                reset_num_timesteps = False
+            else:
+                model = PPO(
+                    "MlpPolicy",
+                    env,
+                    device=device,
+                    policy_kwargs=perceiver_policy_kwargs(),
+                    learning_rate=3e-4,
+                    n_steps=args.n_steps,
+                    batch_size=args.batch_size,
+                    n_epochs=4,
+                    gamma=0.99,
+                    gae_lambda=0.95,
+                    clip_range=0.2,
+                    ent_coef=0.01,
+                    target_kl=0.03,
+                    tensorboard_log=str(tensorboard_dir),
+                    seed=args.seed,
+                    verbose=1,
+                )
+                reset_num_timesteps = True
 
         callback = CheckpointCallback(
             save_freq=max(args.checkpoint_frequency // args.n_envs, 1),

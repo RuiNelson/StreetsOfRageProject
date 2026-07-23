@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import signal
+import socket
 import subprocess
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, BinaryIO, Optional
 
 import gymnasium as gym
 import numpy as np
@@ -29,6 +31,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_GAME_ROOT = PROJECT_ROOT / "StreetsOfRageRecompilation"
 DEFAULT_EXECUTABLE = DEFAULT_GAME_ROOT / "build" / "sor"
 DEFAULT_ROM = DEFAULT_GAME_ROOT / "rom" / "SOR.bin"
+
+
+class LaunchPortUnavailableError(RuntimeError):
+    """A local game instance cannot bind its configured remote port."""
+
+
+def ensure_launch_port_available(port: int) -> None:
+    """Fail early if a local game process could not bind ``port``."""
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", port))
+    except OSError as error:
+        raise LaunchPortUnavailableError(
+            f"TCP port {port} is already in use; choose another --port "
+            f"(inspect it with: lsof -nP -iTCP:{port})"
+        ) from error
 
 
 @dataclass(frozen=True)
@@ -52,6 +71,7 @@ class _GameProcess:
     def __init__(self, config: EnvironmentConfig) -> None:
         self._config = config
         self._process: subprocess.Popen[bytes] | None = None
+        self._output: BinaryIO | None = None
 
     def start(self) -> None:
         if not self._config.launch_game or self._process is not None:
@@ -62,6 +82,7 @@ class _GameProcess:
             raise FileNotFoundError(f"game executable not found: {executable}")
         if not rom.is_file():
             raise FileNotFoundError(f"ROM not found: {rom}")
+        ensure_launch_port_available(self._config.port)
 
         timeout = Path("/opt/homebrew/bin/timeout")
         timeout_command = str(timeout) if timeout.is_file() else "timeout"
@@ -82,33 +103,59 @@ class _GameProcess:
             "--rom",
             str(rom),
         ]
-        self._process = subprocess.Popen(
-            command,
-            cwd=str(executable.parent.parent),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        output = tempfile.TemporaryFile(mode="w+b")
+        try:
+            self._process = subprocess.Popen(
+                command,
+                cwd=str(executable.parent.parent),
+                stdin=subprocess.DEVNULL,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            self._output = output
+        except BaseException:
+            output.close()
+            raise
+
+    def _output_tail(self) -> str:
+        if self._output is None:
+            return ""
+        self._output.flush()
+        self._output.seek(0, os.SEEK_END)
+        size = self._output.tell()
+        self._output.seek(max(0, size - 8_192))
+        return self._output.read().decode("utf-8", errors="replace").strip()
 
     def check(self) -> None:
         if self._process is not None and self._process.poll() is not None:
-            raise RuntimeError(
+            message = (
                 f"game process on port {self._config.port} exited with "
                 f"status {self._process.returncode}"
             )
+            output = self._output_tail()
+            if output:
+                message += f"\nGame output:\n{output}"
+            raise RuntimeError(message)
 
     def stop(self) -> None:
         process, self._process = self._process, None
-        if process is None or process.poll() is not None:
-            return
         try:
-            os.killpg(process.pid, signal.SIGTERM)
-            process.wait(timeout=5)
-        except (ProcessLookupError, subprocess.TimeoutExpired):
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=5)
+            if process is not None and process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    process.wait(timeout=5)
+                except (ProcessLookupError, subprocess.TimeoutExpired):
+                    if process.poll() is None:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        process.wait(timeout=5)
+        finally:
+            output, self._output = self._output, None
+            if output is not None:
+                output.close()
 
 
 class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
