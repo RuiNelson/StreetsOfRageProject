@@ -17,7 +17,7 @@ from stable_baselines3.common.callbacks import (
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
 from torch import nn
 
-from .actions import A, B, C, START
+from .actions import A, B, C
 from .environment import (
     EnvironmentConfig,
     ensure_launch_port_available,
@@ -29,8 +29,8 @@ from .perceiver import PerceiverLiteExtractor
 # SB3 initializes every continuous mean at zero. That is neutral for [-1, 1]
 # movement, but it sits on the lower bound of our [0, 1] controls. Center the
 # duration and the two fundamental combat buttons while keeping the limited
-# police special (A) and Start rare.
-INITIAL_ACTION_BIAS = (0.0, 0.0, 0.5, 0.0, 0.5, 0.5, 0.0)
+# police special (A) rare.
+INITIAL_ACTION_BIAS = (0.0, 0.0, 0.5, 0.0, 0.5, 0.5)
 
 
 def initialize_combat_action_head(policy: Any) -> None:
@@ -38,7 +38,7 @@ def initialize_combat_action_head(policy: Any) -> None:
 
     bias = policy.action_net.bias
     if bias is None or bias.numel() != len(INITIAL_ACTION_BIAS):
-        raise RuntimeError("PPO action head does not match the seven-value action space")
+        raise RuntimeError("PPO action head does not match the six-value action space")
     with torch.no_grad():
         bias.copy_(bias.new_tensor(INITIAL_ACTION_BIAS))
 
@@ -56,10 +56,13 @@ class ActionUsageCallback(BaseCallback):
         self._a = 0
         self._b = 0
         self._c = 0
-        self._start = 0
+        self._round_clear_skips = 0
 
     def _on_step(self) -> bool:
         for info in self.locals.get("infos", ()):
+            if info.get("action_source") == "deterministic_round_clear_skip":
+                self._round_clear_skips += 1
+                continue
             action = info.get("action")
             if not isinstance(action, dict):
                 continue
@@ -69,7 +72,6 @@ class ActionUsageCallback(BaseCallback):
             self._a += int(bool(buttons & A))
             self._b += int(bool(buttons & B))
             self._c += int(bool(buttons & C))
-            self._start += int(bool(buttons & START))
         return True
 
     def _on_rollout_end(self) -> None:
@@ -78,7 +80,10 @@ class ActionUsageCallback(BaseCallback):
         self.logger.record("actions/a_rate", self._a / denominator)
         self.logger.record("actions/b_rate", self._b / denominator)
         self.logger.record("actions/c_rate", self._c / denominator)
-        self.logger.record("actions/start_rate", self._start / denominator)
+        self.logger.record(
+            "actions/deterministic_round_clear_skips",
+            self._round_clear_skips,
+        )
         self._reset_counts()
 
 

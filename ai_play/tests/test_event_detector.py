@@ -11,6 +11,7 @@ from ai_play.event_detector import (
     P1_HEALTH,
     P1_LIVES,
     PLAYER_MODE,
+    ROUND_CLEAR_SUBSTATE,
     WORK_RAM_BASE,
     WORK_RAM_SIZE,
     EnemySnapshot,
@@ -193,6 +194,7 @@ class WorkRamSnapshotReaderTests(unittest.TestCase):
         write_value(ram, P1_HEALTH, 65, 2)
         write_value(ram, P1_LIVES, 0x03, 1)
         write_value(ram, END_OF_LEVEL_FLAG, 1, 1)
+        write_value(ram, ROUND_CLEAR_SUBSTATE, 0x20, 2)
         write_value(ram, OBJECT_TABLE, 0x20, 1)
         write_value(ram, OBJECT_TABLE + 0x30, 0x0100, 2)
         write_value(ram, OBJECT_TABLE + 0x32, 20, 2)
@@ -205,6 +207,7 @@ class WorkRamSnapshotReaderTests(unittest.TestCase):
         self.assertEqual(observed.ram, bytes(ram))
         self.assertEqual(observed.level, 2)
         self.assertEqual(observed.health, 65)
+        self.assertEqual(observed.round_clear_substate, 0x20)
         self.assertEqual(observed.enemies[0].object_type, 0x20)
 
     def test_decodes_ram_already_collected_by_lockstep(self) -> None:

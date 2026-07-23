@@ -27,7 +27,6 @@ def _add(components: dict[str, float], name: str, value: float) -> None:
 def reward_events(
     events: Iterable[Event],
     *,
-    start_pressed: bool = False,
     weights: RewardWeights = DEFAULT_WEIGHTS,
 ) -> RewardResult:
     """Score events observed after one atomic action interval."""
@@ -104,9 +103,6 @@ def reward_events(
                 "game_completed",
                 weights.good_ending if ending == "good" else weights.bad_ending,
             )
-
-    if start_pressed:
-        _add(components, "start_activation", weights.per_start_activation)
 
     return RewardResult(
         total=float(sum(components.values())),

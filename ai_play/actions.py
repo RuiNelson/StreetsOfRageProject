@@ -7,11 +7,10 @@ from dataclasses import dataclass
 from typing import Sequence
 
 
-ACTION_SIZE = 7
+ACTION_SIZE = 6
 FRAMES_PER_ACTION = 12
 RADIUS_NOISE_THRESHOLD = 0.25
 BUTTON_THRESHOLD = 0.5
-START_THRESHOLD = 0.9
 
 # Keep these protocol values dependency-free so action tests and event
 # monitoring do not need the training stack or remote package installed.
@@ -24,8 +23,8 @@ B = 1 << 5
 C = 1 << 6
 START = 1 << 7
 
-ACTION_LOW = (-1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-ACTION_HIGH = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+ACTION_LOW = (-1.0, -1.0, 0.0, 0.0, 0.0, 0.0)
+ACTION_HIGH = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
 
 # Screen coordinates: +x moves right and +y moves down.
 _DIRECTIONS = (
@@ -48,7 +47,6 @@ class DecodedAction:
     held_frames: int
     total_frames: int
     direction: str | None
-    start_pressed: bool
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:
@@ -56,7 +54,7 @@ def _clamp(value: float, lower: float, upper: float) -> float:
 
 
 def decode_action(action: Sequence[float]) -> DecodedAction:
-    """Quantize ``[x, y, radius, A, B, C, Start]`` into controller input."""
+    """Quantize ``[x, y, radius, A, B, C]`` into controller input."""
 
     if len(action) != ACTION_SIZE:
         raise ValueError(f"action must contain exactly {ACTION_SIZE} values")
@@ -66,7 +64,7 @@ def decode_action(action: Sequence[float]) -> DecodedAction:
     radius = _clamp(action[2], 0.0, 1.0)
 
     if radius <= RADIUS_NOISE_THRESHOLD:
-        return DecodedAction(0, 0, FRAMES_PER_ACTION, None, False)
+        return DecodedAction(0, 0, FRAMES_PER_ACTION, None)
 
     # The open interval above 0.25 maps monotonically to 1..12 frames.
     normalized = (radius - RADIUS_NOISE_THRESHOLD) / (
@@ -91,13 +89,10 @@ def decode_action(action: Sequence[float]) -> DecodedAction:
         buttons |= B
     if float(action[5]) > BUTTON_THRESHOLD:
         buttons |= C
-    if float(action[6]) > START_THRESHOLD:
-        buttons |= START
 
     return DecodedAction(
         buttons=buttons,
         held_frames=held_frames,
         total_frames=FRAMES_PER_ACTION,
         direction=direction,
-        start_pressed=bool(buttons & START),
     )

@@ -10,7 +10,6 @@ from ai_play.actions import (
     FRAMES_PER_ACTION,
     LEFT,
     RIGHT,
-    START,
     UP,
     decode_action,
 )
@@ -18,15 +17,14 @@ from ai_play.actions import (
 
 class ActionDecoderTests(unittest.TestCase):
     def test_radius_noise_gate_suppresses_every_button(self) -> None:
-        decoded = decode_action((1, 0, 0.25, 1, 1, 1, 1))
+        decoded = decode_action((1, 0, 0.25, 1, 1, 1))
         self.assertEqual(decoded.buttons, 0)
         self.assertEqual(decoded.held_frames, 0)
-        self.assertFalse(decoded.start_pressed)
 
     def test_radius_maps_to_one_through_twelve_frames(self) -> None:
-        self.assertEqual(decode_action((0, 0, 0.25001, 0, 0, 0, 0)).held_frames, 1)
+        self.assertEqual(decode_action((0, 0, 0.25001, 0, 0, 0)).held_frames, 1)
         self.assertEqual(
-            decode_action((0, 0, 1.0, 0, 0, 0, 0)).held_frames,
+            decode_action((0, 0, 1.0, 0, 0, 0)).held_frames,
             FRAMES_PER_ACTION,
         )
 
@@ -44,17 +42,16 @@ class ActionDecoderTests(unittest.TestCase):
         for (x, y), buttons in expected:
             with self.subTest(x=x, y=y):
                 self.assertEqual(
-                    decode_action((x, y, 1, 0, 0, 0, 0)).buttons,
+                    decode_action((x, y, 1, 0, 0, 0)).buttons,
                     buttons,
                 )
 
     def test_button_thresholds_are_strict(self) -> None:
-        at_threshold = decode_action((0, 0, 1, 0.5, 0.5, 0.5, 0.9))
+        at_threshold = decode_action((0, 0, 1, 0.5, 0.5, 0.5))
         self.assertEqual(at_threshold.buttons, 0)
 
-        above = decode_action((0, 0, 1, 0.5001, 0.9, 1, 0.9001))
-        self.assertEqual(above.buttons, A | B | C | START)
-        self.assertTrue(above.start_pressed)
+        above = decode_action((0, 0, 1, 0.5001, 0.9, 1))
+        self.assertEqual(above.buttons, A | B | C)
 
     def test_rejects_wrong_action_size(self) -> None:
         with self.assertRaises(ValueError):

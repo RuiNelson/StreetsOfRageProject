@@ -143,29 +143,36 @@ A ação contínua é:
 
 ```text
 Box(
-  low=[-1, -1, 0, 0, 0, 0, 0],
-  high=[1, 1, 1, 1, 1, 1, 1],
+  low=[-1, -1, 0, 0, 0, 0],
+  high=[1, 1, 1, 1, 1, 1],
   dtype=float32
 )
 ```
 
-Os valores são `[x, y, raio, A, B, C, Start]`. As coordenadas seguem o ecrã:
+Os valores são `[x, y, raio, A, B, C]`. As coordenadas seguem o ecrã:
 `+x` é direita e `+y` é baixo.
 
 - `(x, y)` é quantizado numa das oito direções; diagonais premem duas teclas.
 - `raio <= 0.25` descarta toda a combinação como ruído.
 - `raio > 0.25` mapeia linearmente para 1–12 frames premidos.
 - A, B e C só ativam acima de `0.5`.
-- Start só ativa acima de `0.9`.
 - Cada passo ocupa sempre 12 frames: mantém a combinação no início e solta-a
   nos frames restantes.
 
 Como o SB3 centra inicialmente uma distribuição Normal em zero, um `Box [0,1]`
 sem correção tornaria o raio, ataque e salto demasiado raros. As policies novas
-começam com bias `0.5` no raio, B e C. A e Start mantêm bias zero porque são,
-respetivamente, um recurso limitado e um botão de navegação. Cada relatório de
-rollout mostra em `actions/` as taxas efetivas pós-threshold de A, B, C, Start e
-do gate de raio.
+começam com bias `0.5` no raio, B e C. A mantém bias zero por ser um recurso
+limitado. Cada relatório de rollout mostra em `actions/` as taxas efetivas
+pós-threshold de A, B, C e do gate de raio.
+
+Start não pertence ao modelo. O ambiente só o envia deterministicamente no
+round-clear de níveis 1–7, quando `game_state == 0x1A` e
+`round_clear_substate` está em `[0x14, 0x52)`, a janela exata em que o jogo o
+interpreta como “saltar tally”. Assim nunca pode pausar gameplay.
+
+Esta redução de sete para seis valores altera o `action_space`: checkpoints
+anteriores não são compatíveis com `--resume` e o treino tem de recomeçar com
+um modelo novo.
 
 ### Rewards e fim do episódio
 
@@ -183,7 +190,6 @@ Os pesos imutáveis estão em `ai_play/weights.py`:
 | nível diminuído | `-50` |
 | good ending | `+500` |
 | bad ending | `-100` |
-| ativação de Start | `-0.05` |
 
 Não existe reward de wave nem castigo adicional de game over. O episódio
 termina e o jogo é reiniciado depois de três vidas perdidas, ou quando a

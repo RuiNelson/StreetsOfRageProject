@@ -37,10 +37,6 @@ class RewardTests(unittest.TestCase):
         self.assertEqual(result.lives_lost, 2)
         self.assertNotIn("game_over", result.components)
 
-    def test_penalizes_only_an_actual_start_activation(self) -> None:
-        self.assertEqual(reward_events((), start_pressed=False).total, 0.0)
-        self.assertEqual(reward_events((), start_pressed=True).total, -0.05)
-
     def test_scores_endings_and_marks_completion(self) -> None:
         result = reward_events(
             (Event("game_completed", 100, {"ending": "good"}),)

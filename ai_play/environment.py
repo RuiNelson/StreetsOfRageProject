@@ -16,9 +16,18 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from .actions import ACTION_HIGH, ACTION_LOW, ACTION_SIZE, decode_action
+from .actions import (
+    ACTION_HIGH,
+    ACTION_LOW,
+    ACTION_SIZE,
+    FRAMES_PER_ACTION,
+    START,
+    DecodedAction,
+    decode_action,
+)
 from .event_detector import (
     EventDetector,
+    Snapshot,
     WORK_RAM_SIZE,
     WorkRamSnapshotReader,
     _load_reach_gameplay,
@@ -31,6 +40,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_GAME_ROOT = PROJECT_ROOT / "StreetsOfRageRecompilation"
 DEFAULT_EXECUTABLE = DEFAULT_GAME_ROOT / "build" / "sor"
 DEFAULT_ROM = DEFAULT_GAME_ROOT / "rom" / "SOR.bin"
+ROUND_CLEAR_UPDATE = 0x1A
+FINAL_LEVEL_INDEX = 7
+ROUND_CLEAR_SKIP_FIRST_SUBSTATE = 0x14
+ROUND_CLEAR_SKIP_END_SUBSTATE = 0x52
+DETERMINISTIC_START_HELD_FRAMES = 2
 
 
 class LaunchPortUnavailableError(RuntimeError):
@@ -48,6 +62,18 @@ def ensure_launch_port_available(port: int) -> None:
             f"TCP port {port} is already in use; choose another --port "
             f"(inspect it with: lsof -nP -iTCP:{port})"
         ) from error
+
+
+def should_skip_round_clear(snapshot: Snapshot) -> bool:
+    """Match the game's exact non-final-round Start-to-skip window."""
+
+    return (
+        snapshot.game_state == ROUND_CLEAR_UPDATE
+        and snapshot.level != FINAL_LEVEL_INDEX
+        and ROUND_CLEAR_SKIP_FIRST_SUBSTATE
+        <= snapshot.round_clear_substate
+        < ROUND_CLEAR_SKIP_END_SUBSTATE
+    )
 
 
 @dataclass(frozen=True)
@@ -184,6 +210,7 @@ class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
         self._lives_lost = 0
         self._episode_steps = 0
         self._lockstep_enabled = False
+        self._current_snapshot: Snapshot | None = None
 
     def _connect(self) -> Any:
         if self._game is not None:
@@ -250,6 +277,7 @@ class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
         self._detector.consume(baseline)
         self._lives_lost = 0
         self._episode_steps = 0
+        self._current_snapshot = baseline
         return self._observation(baseline.ram), {
             "frame": baseline.frame,
             "character": ready["character"],
@@ -260,10 +288,24 @@ class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
         self,
         action: np.ndarray,
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
-        if self._game is None or not self._lockstep_enabled:
+        if (
+            self._game is None
+            or not self._lockstep_enabled
+            or self._current_snapshot is None
+        ):
             raise RuntimeError("reset() must be called before step()")
 
-        decoded = decode_action(action)
+        if should_skip_round_clear(self._current_snapshot):
+            decoded = DecodedAction(
+                buttons=START,
+                held_frames=DETERMINISTIC_START_HELD_FRAMES,
+                total_frames=FRAMES_PER_ACTION,
+                direction=None,
+            )
+            action_source = "deterministic_round_clear_skip"
+        else:
+            decoded = decode_action(action)
+            action_source = "policy"
         stepped = self._game.step_input(
             player1=decoded.buttons,
             player2=0,
@@ -276,7 +318,8 @@ class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
             stepped.frame,
         )
         events = self._detector.consume(snapshot)
-        reward = reward_events(events, start_pressed=decoded.start_pressed)
+        reward = reward_events(events)
+        self._current_snapshot = snapshot
 
         self._episode_steps += 1
         self._lives_lost += reward.lives_lost
@@ -288,6 +331,7 @@ class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
             "reward_components": reward.components,
             "lives_lost": self._lives_lost,
             "action": asdict(decoded),
+            "action_source": action_source,
         }
         if self._lives_lost >= 3:
             info["episode_end"] = "three_lives_lost"
@@ -313,6 +357,7 @@ class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
                     pass
             game.close()
         self._lockstep_enabled = False
+        self._current_snapshot = None
         self._process.stop()
         super().close()
 

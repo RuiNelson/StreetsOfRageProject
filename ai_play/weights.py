@@ -19,7 +19,6 @@ class RewardWeights:
     per_level_decreased: float = -50.0
     good_ending: float = 500.0
     bad_ending: float = -100.0
-    per_start_activation: float = -0.05
 
 
 DEFAULT_WEIGHTS = RewardWeights()

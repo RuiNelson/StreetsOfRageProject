@@ -22,6 +22,7 @@ OBJECT_TABLE = 0xFFB900  # 32 objects, $80 bytes each
 OBJECT_COUNT = 32
 OBJECT_SIZE = 0x80
 END_OF_LEVEL_FLAG = 0xFFFA73  # B
+ROUND_CLEAR_SUBSTATE = 0xFFFB4C  # W
 GAME_STATE = 0xFFFF00  # W
 LEVEL = 0xFFFF02  # W, zero-based round index
 PLAYER_MODE = 0xFFFF18  # B, 1=P1 and 3=P1+P2
@@ -104,6 +105,7 @@ class Snapshot:
     lives_bcd: int
     end_of_level: int
     enemies: Tuple[EnemySnapshot, ...]
+    round_clear_substate: int = 0
     ram: bytes = b""
 
 
@@ -155,6 +157,7 @@ class WorkRamSnapshotReader:
             lives_bcd=_u8(ram, P1_LIVES),
             end_of_level=_u8(ram, END_OF_LEVEL_FLAG),
             enemies=tuple(enemies),
+            round_clear_substate=_u16(ram, ROUND_CLEAR_SUBSTATE),
             ram=ram,
         )
 

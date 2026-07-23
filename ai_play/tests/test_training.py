@@ -51,6 +51,7 @@ class ZeroRamEnv(gym.Env if TRAINING_AVAILABLE else object):  # type: ignore[mis
 @unittest.skipUnless(TRAINING_AVAILABLE, "training dependencies are not installed")
 class TrainingTests(unittest.TestCase):
     def test_ppo_policy_uses_the_perceiver_configuration(self) -> None:
+        self.assertEqual(ACTION_SIZE, 6)
         model = PPO(
             "MlpPolicy",
             ZeroRamEnv(),

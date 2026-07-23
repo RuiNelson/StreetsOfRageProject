@@ -16,7 +16,6 @@ class RewardWeightsTests(unittest.TestCase):
         self.assertEqual(DEFAULT_WEIGHTS.per_level_decreased, -50.0)
         self.assertEqual(DEFAULT_WEIGHTS.good_ending, 500.0)
         self.assertEqual(DEFAULT_WEIGHTS.bad_ending, -100.0)
-        self.assertEqual(DEFAULT_WEIGHTS.per_start_activation, -0.05)
 
     def test_weights_are_immutable(self) -> None:
         with self.assertRaises(FrozenInstanceError):

@@ -8,20 +8,24 @@ from unittest.mock import patch
 try:
     import numpy as np
 
-    from ai_play.actions import A, RIGHT
+    from ai_play.actions import A, RIGHT, START
     from ai_play.environment import (
         EnvironmentConfig,
         LaunchPortUnavailableError,
         StreetsOfRageEnv,
         ensure_launch_port_available,
+        should_skip_round_clear,
     )
     from ai_play.event_detector import (
         GAME_STATE,
+        LEVEL,
         P1_HEALTH,
         P1_LIVES,
         PLAYER_MODE,
+        ROUND_CLEAR_SUBSTATE,
         WORK_RAM_BASE,
         WORK_RAM_SIZE,
+        WorkRamSnapshotReader,
     )
 
     TRAINING_AVAILABLE = True
@@ -34,12 +38,20 @@ def _write(ram: bytearray, address: int, value: int, width: int) -> None:
     ram[offset : offset + width] = value.to_bytes(width, "big")
 
 
-def _ram(lives: int) -> bytes:
+def _ram(
+    lives: int,
+    *,
+    game_state: int = 0x16,
+    level: int = 0,
+    round_clear_substate: int = 0,
+) -> bytes:
     ram = bytearray(WORK_RAM_SIZE)
-    _write(ram, GAME_STATE, 0x16, 2)
+    _write(ram, GAME_STATE, game_state, 2)
+    _write(ram, LEVEL, level, 2)
     _write(ram, PLAYER_MODE, 1, 1)
     _write(ram, P1_HEALTH, 80, 2)
     _write(ram, P1_LIVES, lives, 1)
+    _write(ram, ROUND_CLEAR_SUBSTATE, round_clear_substate, 2)
     return bytes(ram)
 
 
@@ -102,7 +114,7 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(info["character"], "blaze")
         self.assertEqual(game.lockstep, [True])
 
-        action = np.asarray((1, 0, 1, 0.75, 0, 0, 0), dtype=np.float32)
+        action = np.asarray((1, 0, 1, 0.75, 0, 0), dtype=np.float32)
         observation, reward, terminated, truncated, info = env.step(action)
         self.assertEqual(
             game.step_calls,
@@ -126,6 +138,81 @@ class EnvironmentTests(unittest.TestCase):
         env.close()
         self.assertEqual(game.lockstep, [True, False])
         self.assertTrue(game.closed)
+
+    def test_start_is_only_used_for_the_exact_round_clear_skip_window(self) -> None:
+        game = _FakeGame()
+        env = StreetsOfRageEnv(EnvironmentConfig(max_episode_steps=100))
+        env._game = game
+        ready = {"character": "blaze"}
+        with patch(
+            "ai_play.environment._load_reach_gameplay",
+            return_value=lambda *_a, **_k: ready,
+        ):
+            env.reset()
+
+        round_clear_ram = _ram(
+            0x03,
+            game_state=0x1A,
+            level=0,
+            round_clear_substate=0x20,
+        )
+        game.ram = round_clear_ram
+        env._current_snapshot = WorkRamSnapshotReader.decode(round_clear_ram, 1)
+        _, _, _, _, info = env.step(np.zeros(6, dtype=np.float32))
+
+        self.assertEqual(
+            game.step_calls[-1],
+            {
+                "player1": START,
+                "player2": 0,
+                "held_frames": 2,
+                "total_frames": 12,
+                "timeout_ms": 5_000,
+            },
+        )
+        self.assertEqual(info["action_source"], "deterministic_round_clear_skip")
+
+        final_round = WorkRamSnapshotReader.decode(
+            _ram(
+                0x03,
+                game_state=0x1A,
+                level=7,
+                round_clear_substate=0x20,
+            ),
+            2,
+        )
+        before_window = WorkRamSnapshotReader.decode(
+            _ram(
+                0x03,
+                game_state=0x1A,
+                level=0,
+                round_clear_substate=0x12,
+            ),
+            3,
+        )
+        after_window = WorkRamSnapshotReader.decode(
+            _ram(
+                0x03,
+                game_state=0x1A,
+                level=0,
+                round_clear_substate=0x52,
+            ),
+            4,
+        )
+        gameplay = WorkRamSnapshotReader.decode(
+            _ram(
+                0x03,
+                game_state=0x16,
+                level=0,
+                round_clear_substate=0x20,
+            ),
+            5,
+        )
+        self.assertFalse(should_skip_round_clear(final_round))
+        self.assertFalse(should_skip_round_clear(before_window))
+        self.assertFalse(should_skip_round_clear(after_window))
+        self.assertFalse(should_skip_round_clear(gameplay))
+        env.close()
 
 
 if __name__ == "__main__":
