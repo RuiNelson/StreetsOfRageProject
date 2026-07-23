@@ -56,6 +56,7 @@ The project is developed against the `JUE` cartridge with these hashes:
 | Property | Value |
 | --- | --- |
 | Size | `524288` bytes |
+| CRC32 | `4052E845` (WinRAR checked) |
 | MD5 | `59a3b22a1899461dceba50d1ade88d3a` |
 | SHA-256 | `95d7efb98e97f4ffffe68257aef9a855034a36a41b86cf9d332d129f30cb2d4b` |
 
