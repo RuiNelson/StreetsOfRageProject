@@ -211,6 +211,8 @@ try {
 If CMake cannot find SDL3, confirm that the toolchain path and vcpkg triplet
 used during configuration match the installed `sdl3:x64-windows` package.
 
+**For information about configuring the controls and other settings, read the `StreetsOfRageRecompilation` README [here](https://github.com/RuiNelson/StreetsOfRageProject).**
+
 ## Build on macOS
 
 ### Prerequisites
@@ -258,6 +260,8 @@ cmake -S StreetsOfRageRecompilation \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build StreetsOfRageRecompilation/build/macos --parallel
 ```
+
+**For information about configuring the controls and other settings, read the `StreetsOfRageRecompilation` README [here](https://github.com/RuiNelson/StreetsOfRageProject).**
 
 ## Build on Ubuntu
 
@@ -324,6 +328,8 @@ cmake --build StreetsOfRageRecompilation/build/ubuntu --parallel
 
 If SDL3 was installed to a custom prefix, add
 `-DCMAKE_PREFIX_PATH=/path/to/prefix` during configuration.
+
+**For information about configuring the controls and other settings, read the `StreetsOfRageRecompilation` README [here](https://github.com/RuiNelson/StreetsOfRageProject).**
 
 ## Regenerate the port from the ROM
 
