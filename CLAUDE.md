@@ -94,8 +94,10 @@ cmake -S StreetsOfRageRecompilation \
 cmake --build StreetsOfRageRecompilation/build --parallel
 ```
 
-See `README.md` for platform-specific prerequisites and exact Windows, macOS,
-and Ubuntu commands.
+With the Visual Studio generator, select the configuration on both build and
+test commands (`--config Release` and `ctest -C Release`); `CMAKE_BUILD_TYPE`
+is for single-configuration generators. See `README.md` for platform-specific
+prerequisites and exact Windows, macOS, and Ubuntu commands.
 
 ## ROM and generated code
 

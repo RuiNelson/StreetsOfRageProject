@@ -161,6 +161,9 @@ $env:PYTHONPATH = (Resolve-Path RageDecompiler)
 
 python -m tools recompile StreetsOfRageRecompilation\rom\SOR.bin `
   -o StreetsOfRageRecompilation\generated `
+  --aux StreetsOfRageRecompilation\code-analysis\aux_addresses.txt `
+  --labels-csv StreetsOfRageRecompilation\code-analysis\labels.csv `
+  --addresses-csv StreetsOfRageRecompilation\code-analysis\addresses.csv `
   --manual-functions StreetsOfRageRecompilation\code-analysis\manual_functions.txt
 ```
 
@@ -180,7 +183,7 @@ session:
 ```powershell
 $VcpkgRoot = "C:\src\vcpkg"
 $BuildDir = "build/windows"
-$BinDir = "bin"
+$BinDir = (Join-Path (Resolve-Path ".") "$BuildDir/bin")
 
 cmake -S StreetsOfRageRecompilation -B $BuildDir -G "Visual Studio 17 2022" -A x64 `
   -DCMAKE_TOOLCHAIN_FILE="$VcpkgRoot\scripts\buildsystems\vcpkg.cmake" `
@@ -189,15 +192,20 @@ cmake -S StreetsOfRageRecompilation -B $BuildDir -G "Visual Studio 17 2022" -A x
 cmake --build $BuildDir --config Release --parallel
 ```
 
-`CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE` puts `sor.exe` and the shared
-libraries built by the project in one directory, avoiding Windows DLL
-search-path problems. The Visual Studio generator is multi-configuration, so
-`--config Release` selects the optimized build.
+The Visual Studio generator is multi-configuration, so `--config Release`
+selects the optimized build. `CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE` puts
+`sor.exe` in `$BinDir`, and the project copies all required runtime DLLs beside
+it after linking.
 
 Run the port:
 
 ```powershell
-& "$BinDir\sor.exe" --runSor --rom StreetsOfRageRecompilation\rom\SOR.bin
+Push-Location StreetsOfRageRecompilation
+try {
+  & "$BinDir\sor.exe" --runSor --rom "rom\SOR.bin"
+} finally {
+  Pop-Location
+}
 ```
 
 If CMake cannot find SDL3, confirm that the toolchain path and vcpkg triplet
@@ -339,6 +347,9 @@ CMake build:
 $env:PYTHONPATH = (Resolve-Path RageDecompiler)
 python -m tools recompile StreetsOfRageRecompilation\rom\SOR.bin `
   -o StreetsOfRageRecompilation\generated `
+  --aux StreetsOfRageRecompilation\code-analysis\aux_addresses.txt `
+  --labels-csv StreetsOfRageRecompilation\code-analysis\labels.csv `
+  --addresses-csv StreetsOfRageRecompilation\code-analysis\addresses.csv `
   --manual-functions StreetsOfRageRecompilation\code-analysis\manual_functions.txt
 ```
 
@@ -349,25 +360,29 @@ Do not add them to Git.
 
 Build and run the reusable environment's tests:
 
-```bash
-cmake -S MegaDriveEnvironment -B MegaDriveEnvironment/build \
-  -DCMAKE_BUILD_TYPE=Debug
-cmake --build MegaDriveEnvironment/build --parallel
-ctest --test-dir MegaDriveEnvironment/build --output-on-failure
+```powershell
+$VcpkgRoot = "C:\src\vcpkg"
+
+cmake -S MegaDriveEnvironment -B MegaDriveEnvironment/build/windows `
+  -G "Visual Studio 17 2022" -A x64 `
+  -DCMAKE_TOOLCHAIN_FILE="$VcpkgRoot\scripts\buildsystems\vcpkg.cmake"
+cmake --build MegaDriveEnvironment/build/windows --config Debug --parallel
+ctest --test-dir MegaDriveEnvironment/build/windows -C Debug `
+  --output-on-failure
 ```
 
 Run the Python decompiler tests:
 
-```bash
+```powershell
 cd RageDecompiler
-python3 -m pytest
+python -m pytest
 ```
 
 Inspect the reverse-engineering CLI:
 
-```bash
-cd StreetsOfRageRecompilation
-PYTHONPATH=../RageDecompiler python3 -m tools --help
+```powershell
+$env:PYTHONPATH = (Resolve-Path RageDecompiler)
+python -m tools --help
 ```
 
 The sample game's separate PC and real-hardware workflows are documented in
