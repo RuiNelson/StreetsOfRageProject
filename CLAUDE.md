@@ -1,104 +1,141 @@
-# CLAUDE.md
+# Agent guide
 
-Guidance for LLM agents working in the Streets of Rage project workspace.
+Instructions for automated contributors working in the Streets of Rage
+workspace.
 
-## Scope
+## Start here
 
-This repository is a public meta-repository. The project code lives in Git
-submodules:
+1. Inspect `git status` in the meta-repository and in every submodule that is
+   in scope. Preserve unrelated changes.
+2. Read the local `CLAUDE.md` before editing an owned submodule.
+3. Identify whether the requested change belongs to the meta-repository or to
+   one or more submodules. Do not place project code in the meta-repository.
+4. Use the smallest relevant build or test first, then expand validation in
+   proportion to the change.
 
-- `MegaDriveEnvironment/` - reusable C++23 Sega Mega Drive runtime/development
-  environment.
-- `MegaDriveEnvironmentSampleGame/` - small C++23 game demonstrating how a
-  standalone consumer integrates and uses `MegaDriveEnvironment`.
-- `RageDecompiler/` - Python reverse-engineering tools for disassembly,
-  recompilation, label/map diffing, and speculative scanning.
-- `StreetsOfRageRecompilation/` - Streets of Rage-specific C++ recompilation,
-  ROM analysis data, generated code, and build/discovery scripts.
-- `Genesis-Plus-GX/` - upstream emulator reference dependency. Do not edit this
-  repo unless the user explicitly asks; it is not owned by this project.
+## Repository map and ownership
 
-Each owned submodule has its own `AGENTS.md` and `CLAUDE.md`. Read the
-submodule-local `CLAUDE.md` before changing files inside that repository.
+This public meta-repository pins the repositories that make up the workspace:
 
-## Submodule Workflow
+| Path | Role | Ownership |
+| --- | --- | --- |
+| `MegaDriveEnvironment/` | C++23 Mega Drive host runtime and development library | Project-owned; editable |
+| `MegaDriveEnvironmentSampleGame/` | Dual-target sample for PC and real Mega Drive hardware | Project-owned; editable |
+| `RageDecompiler/` | Python disassembly and recompilation tools | Project-owned; editable |
+| `StreetsOfRageRecompilation/` | Streets of Rage analysis, generated C++, native overrides, and host executable | Project-owned; editable |
+| `Genesis-Plus-GX/` | Upstream emulator used only as a behavioral reference | Upstream; never edit |
 
-Clone with submodules:
+`Genesis-Plus-GX` is reference material only. Do not modify files, create
+patches, reformat code, commit inside it, or update its gitlink. If comparison
+with it is useful, perform read-only inspection and keep the implementation in
+an owned repository.
+
+## Submodule workflow
+
+Clone the complete workspace with:
 
 ```bash
 git clone --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
+cd StreetsOfRageProject
 ```
 
-Initialize submodules after a plain clone:
+Initialize an existing plain clone with:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-After committing inside a submodule, commit the updated gitlink in this
-meta-repository too:
+The checked-out submodule commits are part of the reproducible workspace.
+Do not advance them casually. When a requested change spans an owned
+submodule:
 
-```bash
-git status -sb
-git submodule status
-git add <submodule-path>
-git commit -m "Update <submodule-name> submodule"
-```
+1. make and validate the change inside that submodule;
+2. commit and publish the submodule only when explicitly requested;
+3. update the meta-repository gitlink in the same delivery;
+4. report both repositories and their validation.
 
-## Publishing
+Never include unrelated dirty files in a commit. Do not publish, force-push,
+rewrite history, or open a pull request unless the user explicitly requests
+that external action.
 
-After completing and validating requested changes, commit and push them
-automatically unless the user explicitly asks not to publish. For changes in an
-owned submodule, commit and push the submodule first, then commit and push the
-updated gitlink in this meta-repository. Preserve unrelated user changes and
-include them only when the user explicitly requests publishing the whole
-worktree.
+## Build model
 
-## Build
+The playable port is built from `StreetsOfRageRecompilation/`, which consumes
+the sibling `MegaDriveEnvironment/` checkout. Its checked-in `generated/`
+sources allow a normal CMake build without running the decompiler.
 
-Most build and runtime work happens from `StreetsOfRageRecompilation/`:
+Requirements:
+
+- CMake 3.24 or newer;
+- a C++23 compiler;
+- SDL3 development files;
+- Git and network access for first-time CMake `FetchContent` dependencies;
+- Python 3 for ROM regeneration, analysis scripts, and Python tests.
+
+On macOS and Linux, the preferred wrapper is:
 
 ```bash
 cd StreetsOfRageRecompilation
 ./build.sh
+./build.sh --clean --type Release  # when switching to Release
 ```
 
-Full regeneration from the local ROM:
+The portable CMake path, including Windows, is:
+
+```bash
+cmake -S StreetsOfRageRecompilation \
+  -B StreetsOfRageRecompilation/build \
+  -DCMAKE_BUILD_TYPE=Debug
+cmake --build StreetsOfRageRecompilation/build --parallel
+```
+
+See `README.md` for platform-specific prerequisites and exact Windows, macOS,
+and Ubuntu commands.
+
+## ROM and generated code
+
+The original ROM is copyrighted and is never versioned. A legally obtained
+compatible dump may be placed at:
+
+```text
+StreetsOfRageRecompilation/rom/SOR.bin
+```
+
+A normal build uses checked-in generated C++. Regenerate it only when the task
+requires changes derived from ROM analysis:
 
 ```bash
 cd StreetsOfRageRecompilation
 ./build.sh --full
 ```
 
-The original ROM is not versioned. Put it at:
+Do not commit ROMs, build trees, CMake download trees, caches, screenshots, or
+transient discovery output.
 
-```bash
-StreetsOfRageRecompilation/rom/SOR.bin
-```
+## Running safely
 
-## Running the Game
-
-Always run the built `sor` executable under `timeout` with a kill grace period.
-Boot bugs can spin forever, and the SDL window may survive plain `SIGTERM`.
+Game boot defects can spin indefinitely. On platforms with GNU `timeout`, use
+a kill grace period:
 
 ```bash
 cd StreetsOfRageRecompilation
 timeout -k 3 20 ./build.sh -r -- --runSor --debug --rom rom/SOR.bin
 ```
 
-After runs, check that no `sor` process is left behind.
+After automated runs, verify that no `sor` process remains. On Windows, use a
+bounded process runner or stop the process explicitly after the observation.
 
-## Tools
+## Reverse-engineering tools
 
-Run decompiler tools from `StreetsOfRageRecompilation/` with the sibling
-`RageDecompiler` repository on `PYTHONPATH`:
+Run tools from the recompilation repository with the sibling decompiler on
+`PYTHONPATH`:
 
 ```bash
 cd StreetsOfRageRecompilation
 PYTHONPATH=../RageDecompiler python3 -m tools --help
 ```
 
-Common workflows:
+Prefer the repository entry points for common workflows:
 
 ```bash
 ./disassemble.sh
@@ -107,13 +144,21 @@ Common workflows:
 ./discover_aux_smart.sh
 ```
 
-## Project Notes
+The static disassembler follows known control flow. Active runtime discovery
+and `code-analysis/aux_addresses.txt` provide additional entry points for
+indirect jumps and calls.
 
-- The static disassembler follows known code paths; active disassembly data from
-  emulator runs supplies extra entry points for indirect jumps/calls.
-- `StreetsOfRageRecompilation/code-analysis/aux_addresses.txt` contains known
-  extra entry points.
-- Generated recompilation output is produced under
-  `StreetsOfRageRecompilation/generated/`.
-- Do not commit ROM files, build directories, CMake fetch content, or generated
-  transient outputs unless the user explicitly requests it.
+## Validation and handoff
+
+- Documentation-only changes: check Markdown structure, links, paths, command
+  syntax, and consistency with CMake/scripts.
+- C++ runtime changes: configure, compile, and run the narrow relevant tests.
+- Python tooling changes: run the affected tests, then the repository suite
+  when practical.
+- Analysis/symbol changes: follow the synchronization and regeneration rules
+  in `StreetsOfRageRecompilation/CLAUDE.md`.
+- Cross-repository changes: validate each changed repository and inspect the
+  final meta-repository gitlinks.
+
+Finish by summarizing changed files, validation performed, and anything not
+tested on the current host.
