@@ -203,7 +203,7 @@ Run the port:
 ```powershell
 Push-Location StreetsOfRageRecompilation
 try {
-  & "$BinDir\sor.exe" --runSor --rom "rom\SOR.bin"
+  & "$BinDir\sor.exe" --rom "rom\SOR.bin"
 } finally {
   Pop-Location
 }
@@ -211,6 +211,8 @@ try {
 
 If CMake cannot find SDL3, confirm that the toolchain path and vcpkg triplet
 used during configuration match the installed `sdl3:x64-windows` package.
+
+**For information about configuring the controls and other settings, read the `StreetsOfRageRecompilation` README [here](https://github.com/RuiNelson/StreetsOfRageProject).**
 
 ## Build on macOS
 
@@ -247,7 +249,7 @@ builds may use `./build.sh` without `--full`.
 Run the port:
 
 ```bash
-./build.sh --run -- --runSor --rom rom/SOR.bin
+./build.sh --run -- --rom rom/SOR.bin
 ```
 
 The equivalent direct CMake workflow is:
@@ -259,6 +261,8 @@ cmake -S StreetsOfRageRecompilation \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build StreetsOfRageRecompilation/build/macos --parallel
 ```
+
+**For information about configuring the controls and other settings, read the `StreetsOfRageRecompilation` README [here](https://github.com/RuiNelson/StreetsOfRageProject).**
 
 ## Build on Ubuntu
 
@@ -310,7 +314,7 @@ builds may omit `--full`.
 Run the port:
 
 ```bash
-./build.sh --run -- --runSor --rom rom/SOR.bin
+./build.sh --run -- --rom rom/SOR.bin
 ```
 
 The equivalent direct CMake workflow is:
@@ -325,6 +329,8 @@ cmake --build StreetsOfRageRecompilation/build/ubuntu --parallel
 
 If SDL3 was installed to a custom prefix, add
 `-DCMAKE_PREFIX_PATH=/path/to/prefix` during configuration.
+
+**For information about configuring the controls and other settings, read the `StreetsOfRageRecompilation` README [here](https://github.com/RuiNelson/StreetsOfRageProject).**
 
 ## Regenerate the port from the ROM
 

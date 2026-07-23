@@ -126,7 +126,7 @@ a kill grace period:
 
 ```bash
 cd StreetsOfRageRecompilation
-timeout -k 3 20 ./build.sh -r -- --runSor --debug --rom rom/SOR.bin
+timeout -k 3 20 ./build.sh -r -- --debug --rom rom/SOR.bin
 ```
 
 After automated runs, verify that no `sor` process remains. On Windows, use a
@@ -169,3 +169,5 @@ indirect jumps and calls.
 
 Finish by summarizing changed files, validation performed, and anything not
 tested on the current host.
+
+> Keep this file and the other `CLAUDE.md` files updated as you work
