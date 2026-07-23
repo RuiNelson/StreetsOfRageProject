@@ -155,10 +155,10 @@ session:
 
 ```powershell
 $VcpkgRoot = "C:\src\vcpkg"
-$BuildDir = "$PWD\StreetsOfRageRecompilation\build\windows"
-$BinDir = "$BuildDir\bin"
+$BuildDir = "build/windows"
+$BinDir = "bin"
 
-cmake -S StreetsOfRageRecompilation -B $BuildDir -G Ninja `
+cmake -S StreetsOfRageRecompilation -B $BuildDir -G "Visual Studio 17 2022" -A x64 `
   -DCMAKE_BUILD_TYPE=Release `
   -DCMAKE_TOOLCHAIN_FILE="$VcpkgRoot\scripts\buildsystems\vcpkg.cmake" `
   -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$BinDir"
