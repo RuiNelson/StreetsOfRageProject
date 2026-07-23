@@ -118,6 +118,27 @@ def _require_mps() -> torch.device:
     return torch.device("mps")
 
 
+def learn_and_save(
+    model: Any,
+    output: Path,
+    **learn_kwargs: Any,
+) -> bool:
+    """Run PPO and always save a usable model after the first Ctrl+C."""
+
+    interrupted = False
+    try:
+        model.learn(**learn_kwargs)
+    except KeyboardInterrupt:
+        interrupted = True
+        print("\nCtrl+C received; saving the current model...", flush=True)
+
+    model.save(str(output))
+    if interrupted:
+        saved_path = output if output.suffix == ".zip" else Path(f"{output}.zip")
+        print(f"Training stopped cleanly. Model saved to {saved_path}", flush=True)
+    return interrupted
+
+
 def train_from_args(args: Any) -> int:
     """Construct vector environments and train or resume PPO on MPS."""
 
@@ -212,13 +233,14 @@ def train_from_args(args: Any) -> int:
                 ),
             ]
         )
-        model.learn(
+        learn_and_save(
+            model,
+            output,
             total_timesteps=args.total_timesteps,
             callback=callback,
             reset_num_timesteps=reset_num_timesteps,
             progress_bar=args.progress_bar,
         )
-        model.save(str(output))
     finally:
         env.close()
     return 0

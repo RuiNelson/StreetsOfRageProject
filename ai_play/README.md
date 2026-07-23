@@ -116,6 +116,17 @@ Para continuar:
 .venv/bin/python -m ai_play --train --resume ai_play/models/ppo_sor.zip
 ```
 
+`--resume` é obrigatório para carregar uma policy existente; sem essa opção é
+criado um modelo novo. `--total-timesteps` indica quantos passos adicionais
+recolher nessa execução, arredondados ao rollout completo seguinte. Os
+hiperparâmetros do PPO, como `n_steps`, são restaurados do checkpoint. Ao
+retomar um checkpoint que não seja o modelo final, use também `--model-path` se
+quiser controlar onde será guardado o resultado.
+
+Para parar graciosamente, prima `Ctrl+C` uma vez. O rollout atual é
+interrompido, a policy e o estado do otimizador são guardados em
+`--model-path`, os emuladores são fechados e o processo termina sem traceback.
+
 ### Observação e policy
 
 A observação Gymnasium é:

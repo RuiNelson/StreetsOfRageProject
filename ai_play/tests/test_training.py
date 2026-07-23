@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
 
 try:
     import gymnasium as gym
@@ -13,6 +16,7 @@ try:
     from ai_play.training import (
         INITIAL_ACTION_BIAS,
         initialize_combat_action_head,
+        learn_and_save,
         perceiver_policy_kwargs,
     )
 
@@ -50,6 +54,29 @@ class ZeroRamEnv(gym.Env if TRAINING_AVAILABLE else object):  # type: ignore[mis
 
 @unittest.skipUnless(TRAINING_AVAILABLE, "training dependencies are not installed")
 class TrainingTests(unittest.TestCase):
+    def test_ctrl_c_saves_the_current_model_without_propagating(self) -> None:
+        class InterruptingModel:
+            def __init__(self) -> None:
+                self.saved_to: str | None = None
+
+            def learn(self, **kwargs):  # type: ignore[no-untyped-def]
+                self.learn_kwargs = kwargs
+                raise KeyboardInterrupt
+
+            def save(self, path: str) -> None:
+                self.saved_to = path
+
+        model = InterruptingModel()
+        output = Path("/tmp/ppo_interrupted_test")
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            interrupted = learn_and_save(model, output, total_timesteps=123)
+
+        self.assertTrue(interrupted)
+        self.assertEqual(model.learn_kwargs, {"total_timesteps": 123})
+        self.assertEqual(model.saved_to, str(output))
+        self.assertIn("Training stopped cleanly", captured.getvalue())
+
     def test_ppo_policy_uses_the_perceiver_configuration(self) -> None:
         self.assertEqual(ACTION_SIZE, 6)
         model = PPO(
