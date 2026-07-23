@@ -131,12 +131,51 @@ def learn_and_save(
     except KeyboardInterrupt:
         interrupted = True
         print("\nCtrl+C received; saving the current model...", flush=True)
+    except Exception:
+        print(
+            "\nTraining failed; saving the current model before propagating the error...",
+            flush=True,
+        )
+        model.save(str(output))
+        raise
 
     model.save(str(output))
     if interrupted:
         saved_path = output if output.suffix == ".zip" else Path(f"{output}.zip")
         print(f"Training stopped cleanly. Model saved to {saved_path}", flush=True)
     return interrupted
+
+
+def close_vector_environment(env: Any, raw_env: Any) -> None:
+    """Close vector workers without letting a dead pipe mask the real error."""
+
+    try:
+        env.close()
+        return
+    except (Exception, KeyboardInterrupt) as error:
+        print(
+            f"Vector environment close failed ({type(error).__name__}); "
+            "forcing worker shutdown.",
+            flush=True,
+        )
+
+    for remote in getattr(raw_env, "remotes", ()):
+        try:
+            remote.close()
+        except Exception:
+            pass
+
+    processes = tuple(getattr(raw_env, "processes", ()))
+    for process in processes:
+        if process.is_alive():
+            process.terminate()
+    for process in processes:
+        process.join(timeout=5)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=5)
+    if hasattr(raw_env, "closed"):
+        raw_env.closed = True
 
 
 def train_from_args(args: Any) -> int:
@@ -242,5 +281,5 @@ def train_from_args(args: Any) -> int:
             progress_bar=args.progress_bar,
         )
     finally:
-        env.close()
+        close_vector_environment(env, raw_env)
     return 0

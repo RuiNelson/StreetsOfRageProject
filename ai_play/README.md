@@ -81,6 +81,12 @@ passo. Um `step_input` remoto aplica o comando, avança exatamente 12 VSyncs e
 devolve atomicamente o contador final e os 65 536 bytes de Work RAM. O jogo não
 avança enquanto o PPO calcula a ação seguinte.
 
+O timeout de um passo é 30 segundos por omissão. Se um emulador exceder esse
+limite, apenas esse episódio é truncado: a ligação é descartada e o worker
+reinicia o jogo, em vez de morrer e provocar um `EOFError` no `SubprocVecEnv`.
+Falhas transitórias durante esse reset têm até três tentativas; se todas
+falharem, o modelo atual é guardado antes de o erro original ser apresentado.
+
 Também é possível deixar o treino lançar o processo, sempre à velocidade real
 de 60 Hz e sem `--turbo`:
 
@@ -194,6 +200,7 @@ Os pesos imutáveis estão em `ai_play/weights.py`:
 | 60 frames decorridos | `-0.001` |
 | cada ponto de energia perdido | `-0.10` |
 | cada vida perdida | `-10` |
+| cada novo pixel de progresso na direção do nível | `+0.01` |
 | inimigo comum derrotado | `+1` |
 | boss derrotado | `+10` |
 | `level_completed` | `0` |
@@ -203,9 +210,15 @@ Os pesos imutáveis estão em `ai_play/weights.py`:
 | bad ending | `-100` |
 
 Não existe reward de wave nem castigo adicional de game over. O episódio
-termina e o jogo é reiniciado depois de três vidas perdidas, ou quando a
+termina e o jogo é reiniciado depois de duas vidas perdidas, ou quando a
 campanha é completada. Existe ainda uma truncagem de segurança configurável
 por `--max-episode-steps`.
+
+O progresso usa a posição X mundial do jogador e uma fronteira monotónica por
+nível: só uma nova posição mais avançada recebe reward, portanto recuar e
+repetir o mesmo troço não permite acumular reward. A direção é direita nos
+níveis 1–6, não há reward horizontal no elevador do nível 7, e a direção é
+esquerda no nível 8.
 
 ## Testes
 
@@ -222,5 +235,5 @@ Suite completa na virtualenv:
 ```
 
 Os testes cobrem os eventos, a reutilização dos 64 KiB, ações e thresholds,
-rewards, episódio de três vidas, forward do Perceiver e construção da policy
+rewards, episódio de duas vidas, forward do Perceiver e construção da policy
 PPO.

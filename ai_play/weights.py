@@ -12,6 +12,7 @@ class RewardWeights:
     per_60_frames: float = -0.001
     per_energy_lost: float = -0.10
     per_life_lost: float = -10.0
+    per_forward_progress_pixel: float = 0.01
     per_regular_enemy_defeated: float = 1.0
     per_boss_defeated: float = 10.0
     per_level_completed: float = 0.0

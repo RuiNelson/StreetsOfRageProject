@@ -18,6 +18,7 @@ WORK_RAM_SIZE = 0x10000
 # Canonical addresses and widths come from
 # StreetsOfRageRecompilation/code-analysis/addresses.csv.
 P1_HEALTH = 0xFFB832  # W
+P1_WORLD_X = 0xFFB810  # W, p1_object+$10 world X integer
 OBJECT_TABLE = 0xFFB900  # 32 objects, $80 bytes each
 OBJECT_COUNT = 32
 OBJECT_SIZE = 0x80
@@ -105,6 +106,7 @@ class Snapshot:
     lives_bcd: int
     end_of_level: int
     enemies: Tuple[EnemySnapshot, ...]
+    player_x: int = 0
     round_clear_substate: int = 0
     ram: bytes = b""
 
@@ -157,6 +159,7 @@ class WorkRamSnapshotReader:
             lives_bcd=_u8(ram, P1_LIVES),
             end_of_level=_u8(ram, END_OF_LEVEL_FLAG),
             enemies=tuple(enemies),
+            player_x=_u16(ram, P1_WORLD_X),
             round_clear_substate=_u16(ram, ROUND_CLEAR_SUBSTATE),
             ram=ram,
         )
@@ -179,6 +182,8 @@ class EventDetector:
         self._previous: Optional[Snapshot] = None
         self._next_frame_event: Optional[int] = None
         self._defeated_slots: set[int] = set()
+        self._progress_level: Optional[int] = None
+        self._progress_frontier = 0
 
     @staticmethod
     def _is_one_player(snapshot: Snapshot) -> bool:
@@ -219,6 +224,8 @@ class EventDetector:
         self._previous = snapshot
         self._next_frame_event = snapshot.frame + FRAMES_PER_EVENT
         self._defeated_slots.clear()
+        self._progress_level = snapshot.level
+        self._progress_frontier = snapshot.player_x
 
     def consume(self, snapshot: Snapshot) -> List[Event]:
         previous = self._previous
@@ -251,6 +258,44 @@ class EventDetector:
             and self._is_gameplay(previous)
             and self._is_gameplay(snapshot)
         )
+
+        if (
+            not in_one_player_gameplay
+            or self._progress_level != snapshot.level
+        ):
+            # Establish a fresh origin on menu/gameplay transitions and level
+            # changes. A respawn within gameplay deliberately keeps the
+            # frontier so walking the same corridor again cannot farm reward.
+            self._progress_level = snapshot.level
+            self._progress_frontier = snapshot.player_x
+        elif 0 <= snapshot.level <= 5 and snapshot.player_x > self._progress_frontier:
+            pixels = snapshot.player_x - self._progress_frontier
+            self._progress_frontier = snapshot.player_x
+            events.append(
+                Event(
+                    "player_forward_progress",
+                    snapshot.frame,
+                    {
+                        "pixels": pixels,
+                        "direction": "right",
+                        "level": snapshot.level + 1,
+                    },
+                )
+            )
+        elif snapshot.level == 7 and snapshot.player_x < self._progress_frontier:
+            pixels = self._progress_frontier - snapshot.player_x
+            self._progress_frontier = snapshot.player_x
+            events.append(
+                Event(
+                    "player_forward_progress",
+                    snapshot.frame,
+                    {
+                        "pixels": pixels,
+                        "direction": "left",
+                        "level": snapshot.level + 1,
+                    },
+                )
+            )
 
         if in_one_player_gameplay and snapshot.health < previous.health:
             events.append(
@@ -509,8 +554,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--step-timeout-ms",
         type=int,
-        default=5_000,
-        help="timeout for one atomic 12-frame training step (default: 5000)",
+        default=30_000,
+        help="timeout for one atomic 12-frame training step (default: 30000)",
     )
     parser.add_argument(
         "--launch-games",

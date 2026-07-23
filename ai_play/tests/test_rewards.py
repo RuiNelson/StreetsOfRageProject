@@ -11,6 +11,7 @@ class RewardTests(unittest.TestCase):
         events = (
             Event("frames_elapsed", 60, {"frames": 60, "intervals": 1}),
             Event("player_energy_lost", 60, {"amount": 8}),
+            Event("player_forward_progress", 60, {"pixels": 12}),
             Event(
                 "enemy_defeated",
                 60,
@@ -25,7 +26,11 @@ class RewardTests(unittest.TestCase):
             Event("level_increased", 60, {"amount": 1}),
         )
         result = reward_events(events)
-        self.assertAlmostEqual(result.total, -0.001 - 0.8 + 1.0 + 10.0 + 50.0)
+        self.assertAlmostEqual(
+            result.total,
+            -0.001 - 0.8 + 0.12 + 1.0 + 10.0 + 50.0,
+        )
+        self.assertEqual(result.components["player_forward_progress"], 0.12)
         self.assertEqual(result.lives_lost, 0)
         self.assertFalse(result.game_completed)
 

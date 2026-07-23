@@ -57,6 +57,12 @@ def reward_events(
                 "player_life_lost",
                 amount * weights.per_life_lost,
             )
+        elif event.kind == "player_forward_progress":
+            _add(
+                components,
+                "player_forward_progress",
+                int(data.get("pixels", 0)) * weights.per_forward_progress_pixel,
+            )
         elif event.kind == "enemy_defeated":
             regular = 0
             bosses = 0

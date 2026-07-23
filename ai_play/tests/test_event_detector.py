@@ -10,6 +10,7 @@ from ai_play.event_detector import (
     OBJECT_TABLE,
     P1_HEALTH,
     P1_LIVES,
+    P1_WORLD_X,
     PLAYER_MODE,
     ROUND_CLEAR_SUBSTATE,
     WORK_RAM_BASE,
@@ -38,6 +39,7 @@ def snapshot(
     health: int = 80,
     lives_bcd: int = 0x03,
     end_of_level: int = 0,
+    player_x: int = 0,
     enemy_values: tuple[EnemySnapshot, ...] | None = None,
 ) -> Snapshot:
     return Snapshot(
@@ -49,6 +51,7 @@ def snapshot(
         lives_bcd=lives_bcd,
         end_of_level=end_of_level,
         enemies=enemy_values or enemies(),
+        player_x=player_x,
     )
 
 
@@ -67,6 +70,7 @@ class EventDetectorTests(unittest.TestCase):
         args = _parser().parse_args(["--train"])
         self.assertEqual(args.n_envs, 1)
         self.assertFalse(args.launch_games)
+        self.assertEqual(args.step_timeout_ms, 30_000)
         self.assertNotIn("turbo", vars(args))
 
     def test_aggregates_elapsed_frame_intervals(self) -> None:
@@ -82,6 +86,43 @@ class EventDetectorTests(unittest.TestCase):
         events = event_map(detector.consume(snapshot(25, health=57, lives_bcd=0x09)))
         self.assertEqual(events["player_energy_lost"].data["amount"], 23)  # type: ignore[attr-defined]
         self.assertEqual(events["player_life_lost"].data["amount"], 1)  # type: ignore[attr-defined]
+
+    def test_rewards_only_new_forward_progress_in_each_level_direction(self) -> None:
+        detector = EventDetector()
+        detector.consume(snapshot(10, level=0, player_x=100))
+
+        right = event_map(detector.consume(snapshot(20, level=0, player_x=112)))
+        self.assertEqual(
+            right["player_forward_progress"].data,  # type: ignore[attr-defined]
+            {"pixels": 12, "direction": "right", "level": 1},
+        )
+
+        self.assertNotIn(
+            "player_forward_progress",
+            event_map(detector.consume(snapshot(30, level=0, player_x=90))),
+        )
+        self.assertNotIn(
+            "player_forward_progress",
+            event_map(detector.consume(snapshot(40, level=0, player_x=110))),
+        )
+        new_frontier = event_map(
+            detector.consume(snapshot(50, level=0, player_x=115))
+        )
+        self.assertEqual(
+            new_frontier["player_forward_progress"].data["pixels"],  # type: ignore[attr-defined]
+            3,
+        )
+
+        detector.consume(snapshot(60, level=6, player_x=500))
+        elevator = event_map(detector.consume(snapshot(70, level=6, player_x=550)))
+        self.assertNotIn("player_forward_progress", elevator)
+
+        detector.consume(snapshot(80, level=7, player_x=500))
+        left = event_map(detector.consume(snapshot(90, level=7, player_x=480)))
+        self.assertEqual(
+            left["player_forward_progress"].data,  # type: ignore[attr-defined]
+            {"pixels": 20, "direction": "left", "level": 8},
+        )
 
     def test_does_not_report_player_changes_outside_gameplay(self) -> None:
         detector = EventDetector()
@@ -193,6 +234,7 @@ class WorkRamSnapshotReaderTests(unittest.TestCase):
         write_value(ram, PLAYER_MODE, 1, 1)
         write_value(ram, P1_HEALTH, 65, 2)
         write_value(ram, P1_LIVES, 0x03, 1)
+        write_value(ram, P1_WORLD_X, 0x0234, 2)
         write_value(ram, END_OF_LEVEL_FLAG, 1, 1)
         write_value(ram, ROUND_CLEAR_SUBSTATE, 0x20, 2)
         write_value(ram, OBJECT_TABLE, 0x20, 1)
@@ -207,6 +249,7 @@ class WorkRamSnapshotReaderTests(unittest.TestCase):
         self.assertEqual(observed.ram, bytes(ram))
         self.assertEqual(observed.level, 2)
         self.assertEqual(observed.health, 65)
+        self.assertEqual(observed.player_x, 0x0234)
         self.assertEqual(observed.round_clear_substate, 0x20)
         self.assertEqual(observed.enemies[0].object_type, 0x20)
 

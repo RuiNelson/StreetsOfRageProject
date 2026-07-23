@@ -9,6 +9,7 @@ class RewardWeightsTests(unittest.TestCase):
         self.assertEqual(DEFAULT_WEIGHTS.per_60_frames, -0.001)
         self.assertEqual(DEFAULT_WEIGHTS.per_energy_lost, -0.10)
         self.assertEqual(DEFAULT_WEIGHTS.per_life_lost, -10.0)
+        self.assertEqual(DEFAULT_WEIGHTS.per_forward_progress_pixel, 0.01)
         self.assertEqual(DEFAULT_WEIGHTS.per_regular_enemy_defeated, 1.0)
         self.assertEqual(DEFAULT_WEIGHTS.per_boss_defeated, 10.0)
         self.assertEqual(DEFAULT_WEIGHTS.per_level_completed, 0.0)

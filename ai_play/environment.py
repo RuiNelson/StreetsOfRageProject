@@ -45,6 +45,8 @@ FINAL_LEVEL_INDEX = 7
 ROUND_CLEAR_SKIP_FIRST_SUBSTATE = 0x14
 ROUND_CLEAR_SKIP_END_SUBSTATE = 0x52
 DETERMINISTIC_START_HELD_FRAMES = 2
+MAX_LIVES_LOST = 2
+RESET_ATTEMPTS = 3
 
 
 class LaunchPortUnavailableError(RuntimeError):
@@ -82,7 +84,7 @@ class EnvironmentConfig:
     port: int = 6969
     character: str = "blaze"
     startup_timeout_ms: int = 30_000
-    step_timeout_ms: int = 5_000
+    step_timeout_ms: int = 30_000
     max_episode_steps: int = 18_000
     launch_game: bool = False
     executable: str = str(DEFAULT_EXECUTABLE)
@@ -256,23 +258,47 @@ class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
     ) -> tuple[np.ndarray, dict[str, Any]]:
         del options
         super().reset(seed=seed)
-        game = self._connect()
-        if self._lockstep_enabled:
-            game.set_lockstep(False)
-            self._lockstep_enabled = False
+        last_error: BaseException | None = None
+        for attempt in range(1, RESET_ATTEMPTS + 1):
+            try:
+                game = self._connect()
+                if self._lockstep_enabled:
+                    game.set_lockstep(False)
+                    self._lockstep_enabled = False
 
-        ready = _load_reach_gameplay()(
-            game,
-            self.config.character,
-            timeout_ms=self.config.startup_timeout_ms,
-        )
-        game.set_lockstep(True)
-        self._lockstep_enabled = True
+                ready = _load_reach_gameplay()(
+                    game,
+                    self.config.character,
+                    timeout_ms=self.config.startup_timeout_ms,
+                )
+                game.set_lockstep(
+                    True,
+                    timeout_ms=self.config.startup_timeout_ms,
+                )
+                self._lockstep_enabled = True
 
-        # Lockstep is now holding a frame boundary, so these two reads describe
-        # the same stable game state. Every later observation comes directly
-        # from the atomic step response.
-        baseline = WorkRamSnapshotReader(game).read()
+                # Lockstep is now holding a frame boundary, so these two reads
+                # describe the same stable game state. Every later observation
+                # comes directly from the atomic step response.
+                baseline = WorkRamSnapshotReader(game).read()
+                break
+            except (ConnectionError, OSError, RuntimeError, TimeoutError) as error:
+                last_error = error
+                self._disconnect_game()
+                if self.config.launch_game:
+                    self._process.stop()
+                if attempt < RESET_ATTEMPTS:
+                    print(
+                        f"Game reset attempt {attempt} failed on port "
+                        f"{self.config.port}; retrying.",
+                        flush=True,
+                    )
+        else:
+            raise RuntimeError(
+                f"could not reset game on port {self.config.port} after "
+                f"{RESET_ATTEMPTS} attempts"
+            ) from last_error
+
         self._detector = EventDetector()
         self._detector.consume(baseline)
         self._lives_lost = 0
@@ -306,13 +332,32 @@ class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
         else:
             decoded = decode_action(action)
             action_source = "policy"
-        stepped = self._game.step_input(
-            player1=decoded.buttons,
-            player2=0,
-            held_frames=decoded.held_frames,
-            total_frames=decoded.total_frames,
-            timeout_ms=self.config.step_timeout_ms,
-        )
+        try:
+            stepped = self._game.step_input(
+                player1=decoded.buttons,
+                player2=0,
+                held_frames=decoded.held_frames,
+                total_frames=decoded.total_frames,
+                timeout_ms=self.config.step_timeout_ms,
+            )
+        except TimeoutError as error:
+            # A STEP_INPUT timeout used to kill a SubprocVecEnv worker and
+            # surface as an unrelated EOFError in the parent. End only this
+            # episode, discard the connection to avoid protocol desync, and
+            # let the vector environment reconnect through reset().
+            last_snapshot = self._current_snapshot
+            last_observation = self._observation(last_snapshot.ram)
+            self._disconnect_game()
+            return last_observation, 0.0, False, True, {
+                "frame": last_snapshot.frame,
+                "events": [],
+                "reward_components": {},
+                "lives_lost": self._lives_lost,
+                "action": asdict(decoded),
+                "action_source": action_source,
+                "episode_end": "remote_step_timeout",
+                "remote_error": str(error),
+            }
         snapshot = WorkRamSnapshotReader.decode(
             stepped.work_ram,
             stepped.frame,
@@ -323,7 +368,7 @@ class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
 
         self._episode_steps += 1
         self._lives_lost += reward.lives_lost
-        terminated = reward.game_completed or self._lives_lost >= 3
+        terminated = reward.game_completed or self._lives_lost >= MAX_LIVES_LOST
         truncated = self._episode_steps >= self.config.max_episode_steps
         info = {
             "frame": snapshot.frame,
@@ -333,8 +378,8 @@ class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
             "action": asdict(decoded),
             "action_source": action_source,
         }
-        if self._lives_lost >= 3:
-            info["episode_end"] = "three_lives_lost"
+        if self._lives_lost >= MAX_LIVES_LOST:
+            info["episode_end"] = "two_lives_lost"
         elif reward.game_completed:
             info["episode_end"] = "game_completed"
         elif truncated:
@@ -347,7 +392,7 @@ class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
             info,
         )
 
-    def close(self) -> None:
+    def _disconnect_game(self) -> None:
         game, self._game = self._game, None
         if game is not None:
             if self._lockstep_enabled:
@@ -358,6 +403,9 @@ class StreetsOfRageEnv(gym.Env[np.ndarray, np.ndarray]):
             game.close()
         self._lockstep_enabled = False
         self._current_snapshot = None
+
+    def close(self) -> None:
+        self._disconnect_game()
         self._process.stop()
         super().close()
 

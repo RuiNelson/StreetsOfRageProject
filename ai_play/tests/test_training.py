@@ -15,6 +15,7 @@ try:
     from ai_play.event_detector import WORK_RAM_SIZE
     from ai_play.training import (
         INITIAL_ACTION_BIAS,
+        close_vector_environment,
         initialize_combat_action_head,
         learn_and_save,
         perceiver_policy_kwargs,
@@ -76,6 +77,73 @@ class TrainingTests(unittest.TestCase):
         self.assertEqual(model.learn_kwargs, {"total_timesteps": 123})
         self.assertEqual(model.saved_to, str(output))
         self.assertIn("Training stopped cleanly", captured.getvalue())
+
+    def test_training_error_saves_model_and_preserves_original_error(self) -> None:
+        class FailingModel:
+            def __init__(self) -> None:
+                self.saved_to: str | None = None
+
+            def learn(self, **kwargs):  # type: ignore[no-untyped-def]
+                raise EOFError("worker disconnected")
+
+            def save(self, path: str) -> None:
+                self.saved_to = path
+
+        model = FailingModel()
+        output = Path("/tmp/ppo_failed_test")
+        with (
+            redirect_stdout(io.StringIO()),
+            self.assertRaisesRegex(EOFError, "worker disconnected"),
+        ):
+            learn_and_save(model, output, total_timesteps=123)
+        self.assertEqual(model.saved_to, str(output))
+
+    def test_broken_vector_close_forces_all_workers_down(self) -> None:
+        class BrokenEnv:
+            def close(self) -> None:
+                raise EOFError("worker already exited")
+
+        class FakeRemote:
+            def __init__(self) -> None:
+                self.closed = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        class FakeProcess:
+            def __init__(self) -> None:
+                self.alive = True
+                self.terminated = False
+                self.joined = 0
+
+            def is_alive(self) -> bool:
+                return self.alive
+
+            def terminate(self) -> None:
+                self.terminated = True
+                self.alive = False
+
+            def join(self, timeout: int) -> None:
+                del timeout
+                self.joined += 1
+
+            def kill(self) -> None:
+                self.alive = False
+
+        remote = FakeRemote()
+        process = FakeProcess()
+        raw_env = type(
+            "RawEnv",
+            (),
+            {"remotes": (remote,), "processes": (process,), "closed": False},
+        )()
+        with redirect_stdout(io.StringIO()):
+            close_vector_environment(BrokenEnv(), raw_env)
+
+        self.assertTrue(remote.closed)
+        self.assertTrue(process.terminated)
+        self.assertEqual(process.joined, 1)
+        self.assertTrue(raw_env.closed)
 
     def test_ppo_policy_uses_the_perceiver_configuration(self) -> None:
         self.assertEqual(ACTION_SIZE, 6)
