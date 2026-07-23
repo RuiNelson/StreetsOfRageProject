@@ -5,11 +5,16 @@ import unittest
 try:
     import gymnasium as gym
     import numpy as np
+    import torch
     from stable_baselines3 import PPO
 
     from ai_play.actions import ACTION_HIGH, ACTION_LOW, ACTION_SIZE
     from ai_play.event_detector import WORK_RAM_SIZE
-    from ai_play.training import perceiver_policy_kwargs
+    from ai_play.training import (
+        INITIAL_ACTION_BIAS,
+        initialize_combat_action_head,
+        perceiver_policy_kwargs,
+    )
 
     TRAINING_AVAILABLE = True
 except ModuleNotFoundError:
@@ -56,10 +61,28 @@ class TrainingTests(unittest.TestCase):
             n_epochs=1,
             verbose=0,
         )
+        initialize_combat_action_head(model.policy)
         observation = model.get_env().reset()
         action, _ = model.predict(observation, deterministic=True)
         self.assertEqual(action.shape, (1, ACTION_SIZE))
         self.assertEqual(model.policy.log_std.detach().cpu().tolist(), [-1.0] * ACTION_SIZE)
+        self.assertEqual(
+            model.policy.action_net.bias.detach().cpu().tolist(),
+            list(INITIAL_ACTION_BIAS),
+        )
+
+        torch.manual_seed(7)
+        observation_tensor = torch.zeros((1, WORK_RAM_SIZE))
+        distribution = model.policy.get_distribution(observation_tensor).distribution
+        sampled = distribution.sample((20_000,)).squeeze(1)
+        low = torch.tensor(ACTION_LOW)
+        high = torch.tensor(ACTION_HIGH)
+        sampled = torch.maximum(torch.minimum(sampled, high), low)
+        radius_active = sampled[:, 2] > 0.25
+        effective_b = radius_active & (sampled[:, 4] > 0.5)
+        effective_c = radius_active & (sampled[:, 5] > 0.5)
+        self.assertGreater(float(effective_b.float().mean()), 0.30)
+        self.assertGreater(float(effective_c.float().mean()), 0.30)
 
 
 if __name__ == "__main__":

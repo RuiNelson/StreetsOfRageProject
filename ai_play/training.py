@@ -9,16 +9,77 @@ from typing import Any
 
 import torch
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.callbacks import (
+    BaseCallback,
+    CallbackList,
+    CheckpointCallback,
+)
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
 from torch import nn
 
+from .actions import A, B, C, START
 from .environment import (
     EnvironmentConfig,
     ensure_launch_port_available,
     make_environment,
 )
 from .perceiver import PerceiverLiteExtractor
+
+
+# SB3 initializes every continuous mean at zero. That is neutral for [-1, 1]
+# movement, but it sits on the lower bound of our [0, 1] controls. Center the
+# duration and the two fundamental combat buttons while keeping the limited
+# police special (A) and Start rare.
+INITIAL_ACTION_BIAS = (0.0, 0.0, 0.5, 0.0, 0.5, 0.5, 0.0)
+
+
+def initialize_combat_action_head(policy: Any) -> None:
+    """Give a new PPO policy useful attack/jump exploration."""
+
+    bias = policy.action_net.bias
+    if bias is None or bias.numel() != len(INITIAL_ACTION_BIAS):
+        raise RuntimeError("PPO action head does not match the seven-value action space")
+    with torch.no_grad():
+        bias.copy_(bias.new_tensor(INITIAL_ACTION_BIAS))
+
+
+class ActionUsageCallback(BaseCallback):
+    """Publish actual post-threshold controller rates for every rollout."""
+
+    def __init__(self) -> None:
+        super().__init__(verbose=0)
+        self._reset_counts()
+
+    def _reset_counts(self) -> None:
+        self._steps = 0
+        self._active = 0
+        self._a = 0
+        self._b = 0
+        self._c = 0
+        self._start = 0
+
+    def _on_step(self) -> bool:
+        for info in self.locals.get("infos", ()):
+            action = info.get("action")
+            if not isinstance(action, dict):
+                continue
+            buttons = int(action.get("buttons", 0))
+            self._steps += 1
+            self._active += int(int(action.get("held_frames", 0)) > 0)
+            self._a += int(bool(buttons & A))
+            self._b += int(bool(buttons & B))
+            self._c += int(bool(buttons & C))
+            self._start += int(bool(buttons & START))
+        return True
+
+    def _on_rollout_end(self) -> None:
+        denominator = max(self._steps, 1)
+        self.logger.record("actions/active_rate", self._active / denominator)
+        self.logger.record("actions/a_rate", self._a / denominator)
+        self.logger.record("actions/b_rate", self._b / denominator)
+        self.logger.record("actions/c_rate", self._c / denominator)
+        self.logger.record("actions/start_rate", self._start / denominator)
+        self._reset_counts()
 
 
 def perceiver_policy_kwargs() -> dict[str, Any]:
@@ -133,12 +194,18 @@ def train_from_args(args: Any) -> int:
                     seed=args.seed,
                     verbose=1,
                 )
+                initialize_combat_action_head(model.policy)
                 reset_num_timesteps = True
 
-        callback = CheckpointCallback(
-            save_freq=max(args.checkpoint_frequency // args.n_envs, 1),
-            save_path=str(checkpoint_dir),
-            name_prefix="ppo_sor",
+        callback = CallbackList(
+            [
+                ActionUsageCallback(),
+                CheckpointCallback(
+                    save_freq=max(args.checkpoint_frequency // args.n_envs, 1),
+                    save_path=str(checkpoint_dir),
+                    name_prefix="ppo_sor",
+                ),
+            ]
         )
         model.learn(
             total_timesteps=args.total_timesteps,

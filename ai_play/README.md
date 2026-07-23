@@ -160,6 +160,13 @@ Os valores são `[x, y, raio, A, B, C, Start]`. As coordenadas seguem o ecrã:
 - Cada passo ocupa sempre 12 frames: mantém a combinação no início e solta-a
   nos frames restantes.
 
+Como o SB3 centra inicialmente uma distribuição Normal em zero, um `Box [0,1]`
+sem correção tornaria o raio, ataque e salto demasiado raros. As policies novas
+começam com bias `0.5` no raio, B e C. A e Start mantêm bias zero porque são,
+respetivamente, um recurso limitado e um botão de navegação. Cada relatório de
+rollout mostra em `actions/` as taxas efetivas pós-threshold de A, B, C, Start e
+do gate de raio.
+
 ### Rewards e fim do episódio
 
 Os pesos imutáveis estão em `ai_play/weights.py`:
