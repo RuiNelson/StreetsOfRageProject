@@ -200,8 +200,12 @@ it after linking.
 Run the port:
 
 ```powershell
-& "$BinDir\sor.exe" --runSor `
-  --rom StreetsOfRageRecompilation\rom\SOR.bin
+Push-Location StreetsOfRageRecompilation
+try {
+  & "$BinDir\sor.exe" --runSor --rom "rom\SOR.bin"
+} finally {
+  Pop-Location
+}
 ```
 
 If CMake cannot find SDL3, confirm that the toolchain path and vcpkg triplet
