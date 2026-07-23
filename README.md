@@ -43,9 +43,9 @@ git submodule update --init --recursive --checkout
 
 ## ROM requirement
 
-A normal build compiles the checked-in generated C++ and does not read the ROM.
-Running the game or regenerating the C++ requires a compatible 512 KiB
-Streets of Rage / Bare Knuckle dump at:
+The generated C++ under `StreetsOfRageRecompilation/generated/` is ignored by
+Git and is not included in a fresh clone. Before the first build, generate it
+from a compatible 512 KiB Streets of Rage / Bare Knuckle dump at:
 
 ```text
 StreetsOfRageRecompilation/rom/SOR.bin
@@ -71,7 +71,8 @@ All three desktop platforms need:
 - SDL3 development headers and libraries;
 - network access during the first configuration, because CMake downloads
   CLI11, yaml-cpp, zlib, and libpng;
-- Python 3 only for full ROM regeneration and analysis tools.
+- Python 3 for the mandatory first C++ generation and analysis tools;
+- a compatible local ROM for the mandatory first C++ generation.
 
 Check the main tools before configuring:
 
@@ -130,8 +131,10 @@ ninja --version
 python --version
 ```
 
-Python is needed for ROM regeneration and analysis, but not for an ordinary
-build of the checked-in generated C++.
+Python is required to generate the ignored C++ files after a fresh clone.
+After `generated/Sor.cpp` and `generated/Sor.hpp` exist locally, subsequent
+incremental builds do not need to run Python again unless the analysis inputs
+change.
 
 Use Microsoft's official [vcpkg](https://github.com/microsoft/vcpkg) bootstrap
 flow to install the SDL3 development package in a predictable location:
@@ -148,6 +151,27 @@ The `sdl3:x64-windows` port provides the headers, import library, and runtime
 DLL for a 64-bit build. The vcpkg toolchain makes it available to the
 project's `find_package(SDL3 REQUIRED)` call.
 
+### Generate the C++ port
+
+This step is mandatory after a fresh clone because `generated/` is ignored by
+Git. Run it from the meta-repository root before invoking CMake:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path RageDecompiler)
+
+python -m tools recompile StreetsOfRageRecompilation\rom\SOR.bin `
+  -o StreetsOfRageRecompilation\generated `
+  --manual-functions StreetsOfRageRecompilation\code-analysis\manual_functions.txt
+```
+
+This requires the compatible ROM at
+`StreetsOfRageRecompilation\rom\SOR.bin`. The command creates the local
+`StreetsOfRageRecompilation\generated\Sor.cpp` and `Sor.hpp`. Regenerate them
+whenever ROM analysis, labels, auxiliary addresses, manual-function inputs, or
+the recompiler changes. These outputs remain ignored and must not be committed.
+See [Regenerate the port from the ROM](#regenerate-the-port-from-the-rom) for
+the equivalent Bash workflow.
+
 ### Configure and compile
 
 From the meta-repository root in the same **Developer PowerShell for VS 2022**
@@ -159,15 +183,16 @@ $BuildDir = "build/windows"
 $BinDir = "bin"
 
 cmake -S StreetsOfRageRecompilation -B $BuildDir -G "Visual Studio 17 2022" -A x64 `
-  -DCMAKE_BUILD_TYPE=Release `
   -DCMAKE_TOOLCHAIN_FILE="$VcpkgRoot\scripts\buildsystems\vcpkg.cmake" `
-  -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$BinDir"
+  -DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE="$BinDir"
 
-cmake --build $BuildDir --parallel
+cmake --build $BuildDir --config Release --parallel
 ```
 
-`CMAKE_RUNTIME_OUTPUT_DIRECTORY` puts `sor.exe` and the shared libraries built
-by the project in one directory, avoiding Windows DLL search-path problems.
+`CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE` puts `sor.exe` and the shared
+libraries built by the project in one directory, avoiding Windows DLL
+search-path problems. The Visual Studio generator is multi-configuration, so
+`--config Release` selects the optimized build.
 
 Run the port:
 
@@ -194,18 +219,21 @@ toolchain. Keep CMake, the compiler, and SDL3 on the same architecture.
 
 ### Configure and compile
 
-The project wrapper builds a Debug configuration by default:
+Generate the ignored C++ and build a Debug configuration after a fresh clone:
 
 ```bash
 cd StreetsOfRageRecompilation
-./build.sh
+./build.sh --full
 ```
 
-For an optimized build:
+For the first optimized build:
 
 ```bash
-./build.sh --clean --type Release
+./build.sh --full --clean --type Release
 ```
+
+Once `generated/Sor.cpp` and `generated/Sor.hpp` exist locally, subsequent
+builds may use `./build.sh` without `--full`.
 
 Run the port:
 
@@ -260,10 +288,15 @@ sudo ldconfig
 
 ### Configure and compile
 
+Generate the ignored C++ and create the first optimized build:
+
 ```bash
 cd StreetsOfRageRecompilation
-./build.sh --clean --type Release
+./build.sh --full --clean --type Release
 ```
+
+Once `generated/Sor.cpp` and `generated/Sor.hpp` exist locally, subsequent
+builds may omit `--full`.
 
 Run the port:
 
@@ -286,8 +319,11 @@ If SDL3 was installed to a custom prefix, add
 
 ## Regenerate the port from the ROM
 
-Normal builds use `StreetsOfRageRecompilation/generated/Sor.cpp`. Regeneration
-is needed only when changing disassembly/recompilation data or generated code.
+`StreetsOfRageRecompilation/generated/` is ignored by Git. Generation is
+mandatory after a fresh clone and must be repeated whenever the ROM analysis,
+labels, auxiliary addresses, manual-function inputs, or RageDecompiler changes.
+Once the local generated files exist and their inputs are unchanged,
+incremental builds can skip this step.
 
 On macOS, Ubuntu, Git Bash, or another Bash environment:
 
@@ -306,7 +342,8 @@ python -m tools recompile StreetsOfRageRecompilation\rom\SOR.bin `
   --manual-functions StreetsOfRageRecompilation\code-analysis\manual_functions.txt
 ```
 
-Regeneration intentionally changes checked-in files under `generated/`.
+Regeneration creates or replaces ignored local files under `generated/`.
+Do not add them to Git.
 
 ## Tests and developer tools
 

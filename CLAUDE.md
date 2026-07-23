@@ -50,19 +50,21 @@ Do not advance them casually. When a requested change spans an owned
 submodule:
 
 1. make and validate the change inside that submodule;
-2. commit and publish the submodule only when explicitly requested;
+2. commit and push the submodule after validation unless the user explicitly
+   asks not to publish;
 3. update the meta-repository gitlink in the same delivery;
 4. report both repositories and their validation.
 
-Never include unrelated dirty files in a commit. Do not publish, force-push,
-rewrite history, or open a pull request unless the user explicitly requests
-that external action.
+After completing and validating requested changes, commit and push them to
+`main` automatically unless the user explicitly asks not to publish. Never
+include unrelated dirty files in a commit. Do not force-push, rewrite history,
+or open a pull request unless the user explicitly requests that action.
 
 ## Build model
 
 The playable port is built from `StreetsOfRageRecompilation/`, which consumes
-the sibling `MegaDriveEnvironment/` checkout. Its checked-in `generated/`
-sources allow a normal CMake build without running the decompiler.
+the sibling `MegaDriveEnvironment/` checkout. Its `generated/` directory is
+ignored by Git, so a fresh checkout must run the decompiler before CMake.
 
 Requirements:
 
@@ -70,17 +72,20 @@ Requirements:
 - a C++23 compiler;
 - SDL3 development files;
 - Git and network access for first-time CMake `FetchContent` dependencies;
-- Python 3 for ROM regeneration, analysis scripts, and Python tests.
+- Python 3 and a compatible local ROM for the mandatory first C++ generation,
+  analysis scripts, and Python tests.
 
 On macOS and Linux, the preferred wrapper is:
 
 ```bash
 cd StreetsOfRageRecompilation
-./build.sh
-./build.sh --clean --type Release  # when switching to Release
+./build.sh --full
+./build.sh --full --clean --type Release
 ```
 
-The portable CMake path, including Windows, is:
+After `generated/Sor.cpp` and `generated/Sor.hpp` exist locally, subsequent
+builds may omit `--full`. The portable CMake path, including Windows, must be
+run only after that generation step:
 
 ```bash
 cmake -S StreetsOfRageRecompilation \
@@ -101,16 +106,16 @@ compatible dump may be placed at:
 StreetsOfRageRecompilation/rom/SOR.bin
 ```
 
-A normal build uses checked-in generated C++. Regenerate it only when the task
-requires changes derived from ROM analysis:
+`generated/` is ignored by Git. Generate it after a fresh clone and regenerate
+it whenever ROM analysis or recompiler inputs change:
 
 ```bash
 cd StreetsOfRageRecompilation
 ./build.sh --full
 ```
 
-Do not commit ROMs, build trees, CMake download trees, caches, screenshots, or
-transient discovery output.
+Do not commit ROMs, ignored generated C++, build trees, CMake download trees,
+caches, screenshots, or transient discovery output.
 
 ## Running safely
 
