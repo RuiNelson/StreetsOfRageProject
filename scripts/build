@@ -1,27 +1,170 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
+# Central build entry point. It owns the Streets of Rage build workflow so the
+# submodule no longer needs a user-facing build script.
 SCRIPT_DIR="${0:A:h}"
 META_ROOT="${SCRIPT_DIR:h}"
 SOR_ROOT="$META_ROOT/StreetsOfRageRecompilation"
+RAGE_DECOMPILER="$META_ROOT/RageDecompiler"
+ORIG_PWD="$PWD"
+BIN="$SOR_ROOT/build/sor"
 
-BUILD_ARGS=()
+BUILD_TYPE=Debug
+CLEAN=0
+FULL=0
+DISCOVER=0
+RUN=0
+RUN_ARGS=()
+JOBS=""
+
+if (( $+commands[python3.14] )); then
+    PYTHON_BIN=python3.14
+elif (( $+commands[python3.13] )); then
+    PYTHON_BIN=python3.13
+else
+    PYTHON_BIN="${PYTHON:-python3}"
+fi
+
+usage() {
+    print "Usage: $SCRIPT_DIR/build [--release] [--full] [--discover] [--clean] [--jobs N] [--run [sor options...]]"
+    print ""
+    print "  --release       Clean and build the Release configuration."
+    print "  --full          Regenerate C++ from the ROM before building."
+    print "  --discover      Include speculative entry points with --full."
+    print "  --clean         Remove the build directory before configuring."
+    print "  --jobs N        Override the parallel build job count."
+    print "  --run           Run sor after building; remaining arguments go to sor."
+}
+
 while (( $# )); do
     case "$1" in
         --release)
-            BUILD_ARGS+=(--clean --type Release)
+            BUILD_TYPE=Release
+            CLEAN=1
+            ;;
+        -c|--clean)
+            CLEAN=1
+            ;;
+        -f|--full)
+            FULL=1
+            ;;
+        -d|--discover)
+            DISCOVER=1
+            ;;
+        -t|--type)
+            shift
+            (( $# )) || { print -u2 "Missing build type after --type"; exit 2; }
+            BUILD_TYPE="$1"
+            ;;
+        -j|--jobs)
+            shift
+            (( $# )) || { print -u2 "Missing job count after --jobs"; exit 2; }
+            JOBS="$1"
+            ;;
+        -r|--run)
+            RUN=1
+            shift
+            [[ "${1:-}" == "--" ]] && shift
+            RUN_ARGS=("$@")
+            break
             ;;
         -h|--help)
-            print "Usage: $0 [--release]"
+            usage
             exit 0
             ;;
         *)
             print -u2 "Unknown option: $1"
-            print -u2 "Usage: $0 [--release]"
+            usage >&2
             exit 2
             ;;
     esac
     shift
 done
 
-exec "$SOR_ROOT/build.sh" "${BUILD_ARGS[@]}"
+if [[ -z "$JOBS" ]]; then
+    if (( $+commands[nproc] )); then
+        JOBS="$(nproc)"
+    elif (( $+commands[sysctl] )); then
+        JOBS="$(sysctl -n hw.ncpu 2>/dev/null || print 4)"
+    else
+        JOBS=4
+    fi
+fi
+
+if (( FULL )); then
+    ROM="${SOR_ROM:-$SOR_ROOT/rom/SOR.bin}"
+    ROM="${ROM:A}"
+    if [[ ! -f "$ROM" ]]; then
+        print -u2 "Full build: ROM not found at '$ROM' (set SOR_ROM to override)."
+        exit 1
+    fi
+
+    SPEC_ARGS=()
+    if (( DISCOVER )); then
+        SPEC_FILE="$SOR_ROOT/code-analysis/speculative_addresses.txt"
+        [[ -f "$SPEC_FILE" ]] && SPEC_ARGS=(--speculative "$SPEC_FILE")
+    fi
+
+    print "==> Full: recompiling $ROM -> generated"
+    export PYTHONPATH="$RAGE_DECOMPILER${PYTHONPATH:+:$PYTHONPATH}"
+    "$PYTHON_BIN" -m tools recompile "$ROM" \
+        -o "$SOR_ROOT/generated" \
+        --aux "$SOR_ROOT/code-analysis/aux_addresses.txt" \
+        --labels-csv "$SOR_ROOT/code-analysis/labels.csv" \
+        --addresses-csv "$SOR_ROOT/code-analysis/addresses.csv" \
+        --manual-functions "$SOR_ROOT/code-analysis/manual_functions.txt" \
+        "${SPEC_ARGS[@]}"
+fi
+
+BUILD_DIR="$SOR_ROOT/build"
+if (( CLEAN )); then
+    print "==> Clean: removing $BUILD_DIR"
+    rm -rf "$BUILD_DIR"
+fi
+
+need_configure() {
+    [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]] && return 0
+    [[ ! -f "$BUILD_DIR/Makefile" ]] && return 0
+    [[ "$SOR_ROOT/CMakeLists.txt" -nt "$BUILD_DIR/CMakeCache.txt" ]] && return 0
+    [[ "$META_ROOT/MegaDriveEnvironment/CMakeLists.txt" -nt "$BUILD_DIR/CMakeCache.txt" ]] && return 0
+    return 1
+}
+
+if need_configure; then
+    print "==> Configuring ($BUILD_TYPE)"
+    if ! cmake -S "$SOR_ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE"; then
+        print -u2 "Configure failed. Try: $0 --clean"
+        exit 1
+    fi
+fi
+
+LOG="$(mktemp -t sor_build.XXXXXX)"
+trap 'rm -f "$LOG"' EXIT
+
+build_once() {
+    cmake --build "$BUILD_DIR" -j "$JOBS" 2>&1 | tee "$LOG"
+    return "${pipestatus[1]}"
+}
+
+print "==> Building sor (-j $JOBS)"
+if ! build_once; then
+    if grep -qiE 'png_xy|png_framework|png_shared|libpng-src.*error' "$LOG"; then
+        print "==> libpng dependency looks broken — re-fetching it and retrying once."
+        rm -rf "$BUILD_DIR/_deps/libpng-src" \
+            "$BUILD_DIR/_deps/libpng-build" \
+            "$BUILD_DIR/_deps/libpng-subbuild"
+        build_once || { print -u2 "Build failed after libpng recovery."; exit 1; }
+    else
+        print -u2 "Build failed."
+        exit 1
+    fi
+fi
+
+print "==> Built: $BIN"
+
+if (( RUN )); then
+    print "==> Running: sor ${RUN_ARGS[*]}"
+    cd "$ORIG_PWD"
+    exec "$BIN" "${RUN_ARGS[@]}"
+fi

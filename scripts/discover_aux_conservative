@@ -40,7 +40,7 @@ start_count=$(grep -cE '^[0-9a-fA-F]+' "$AUX" || true)
 for (( i = 1; i <= MAX_ITERS; i++ )); do
     pkill -9 -f "$BIN" 2>/dev/null || true
     print "==> [discover $i] regenerate + build (--full)"
-    if ! (cd "$SOR_ROOT" && SOR_ROM="$ROM" ./build.sh --full 2>&1 | tee "$BUILD_LOG"); then
+    if ! (SOR_ROM="$ROM" "$SCRIPT_DIR/build" --full 2>&1 | tee "$BUILD_LOG"); then
         print -u2 "Build failed:"
         tail -25 "$BUILD_LOG" >&2
         exit 1

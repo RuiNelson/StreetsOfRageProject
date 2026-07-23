@@ -75,12 +75,11 @@ Requirements:
 - Python 3 and a compatible local ROM for the mandatory first C++ generation,
   analysis scripts, and Python tests.
 
-On macOS and Linux, the preferred wrapper is:
+On macOS and Linux, the preferred wrappers are:
 
 ```bash
-cd StreetsOfRageRecompilation
-./build.sh --full
-./build.sh --full --clean --type Release
+./scripts/generate_cpp_and_build
+./scripts/generate_cpp_and_build --release
 ```
 
 After `generated/Sor.cpp` and `generated/Sor.hpp` exist locally, subsequent
@@ -112,8 +111,7 @@ StreetsOfRageRecompilation/rom/SOR.bin
 it whenever ROM analysis or recompiler inputs change:
 
 ```bash
-cd StreetsOfRageRecompilation
-./build.sh --full
+./scripts/generate_cpp
 ```
 
 Do not commit ROMs, ignored generated C++, build trees, CMake download trees,
@@ -125,8 +123,7 @@ Game boot defects can spin indefinitely. On platforms with GNU `timeout`, use
 a kill grace period:
 
 ```bash
-cd StreetsOfRageRecompilation
-timeout -k 3 20 ./build.sh -r -- --debug --rom rom/SOR.bin
+timeout -k 3 20 ./scripts/run StreetsOfRageRecompilation/rom/SOR.bin --debug
 ```
 
 After automated runs, verify that no `sor` process remains. On Windows, use a
@@ -145,10 +142,8 @@ PYTHONPATH=../RageDecompiler python3 -m tools --help
 Prefer the repository entry points for common workflows:
 
 ```bash
-./disassemble.sh
-./disassemble_nolabels.sh
-./disassemble_iterative.sh
-./discover_aux_smart.sh
+./scripts/disassemble_to_asm
+./scripts/discover_aux_smart
 ```
 
 The static disassembler follows known control flow. Active runtime discovery

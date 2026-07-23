@@ -78,6 +78,7 @@ use `StreetsOfRageRecompilation/rom/SOR.bin` by default:
 ./scripts/disassemble_to_asm [ROM]
 ./scripts/discover_aux_conservative [sor options...]
 ./scripts/discover_aux_smart [sor options...]
+./scripts/update_submodules
 ```
 
 `--release` selects a clean Release build. Arguments after the ROM path in
@@ -250,23 +251,22 @@ toolchain. Keep CMake, the compiler, and SDL3 on the same architecture.
 Generate the ignored C++ and build a Debug configuration after a fresh clone:
 
 ```bash
-cd StreetsOfRageRecompilation
-./build.sh --full
+./scripts/generate_cpp_and_build
 ```
 
 For the first optimized build:
 
 ```bash
-./build.sh --full --clean --type Release
+./scripts/generate_cpp_and_build --release
 ```
 
 Once `generated/Sor.cpp` and `generated/Sor.hpp` exist locally, subsequent
-builds may use `./build.sh` without `--full`.
+builds may use `./scripts/build` without regenerating C++.
 
 Run the port:
 
 ```bash
-./build.sh --run -- --rom rom/SOR.bin
+./scripts/run StreetsOfRageRecompilation/rom/SOR.bin
 ```
 
 The equivalent direct CMake workflow is:
@@ -321,17 +321,16 @@ sudo ldconfig
 Generate the ignored C++ and create the first optimized build:
 
 ```bash
-cd StreetsOfRageRecompilation
-./build.sh --full --clean --type Release
+./scripts/generate_cpp_and_build --release
 ```
 
 Once `generated/Sor.cpp` and `generated/Sor.hpp` exist locally, subsequent
-builds may omit `--full`.
+builds may use `./scripts/build`.
 
 Run the port:
 
 ```bash
-./build.sh --run -- --rom rom/SOR.bin
+./scripts/run StreetsOfRageRecompilation/rom/SOR.bin
 ```
 
 The equivalent direct CMake workflow is:
@@ -360,8 +359,7 @@ incremental builds can skip this step.
 On macOS, Ubuntu, Git Bash, or another Bash environment:
 
 ```bash
-cd StreetsOfRageRecompilation
-./build.sh --full
+./scripts/generate_cpp
 ```
 
 On native Windows PowerShell, run the equivalent Python command before the
@@ -414,11 +412,11 @@ The sample game's separate PC and real-hardware workflows are documented in
 
 ## Updating the workspace
 
-`update_submodules.sh` follows the configured branches and may advance several
+`scripts/update_submodules` follows the configured branches and may advance several
 gitlinks. Use it only when intentionally updating dependencies:
 
 ```bash
-./update_submodules.sh
+./scripts/update_submodules
 ```
 
 For a reproducible checkout, prefer `git submodule update --init --recursive`

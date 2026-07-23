@@ -63,7 +63,7 @@ fi
 
 do_build() {
     print "==> [smart $1] build (--full --discover)"
-    if ! (cd "$SOR_ROOT" && SOR_ROM="$ROM" ./build.sh --full --discover); then
+    if ! (SOR_ROM="$ROM" "$SCRIPT_DIR/build" --full --discover); then
         print -u2 "Build failed."
         exit 1
     fi
