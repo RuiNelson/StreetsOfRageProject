@@ -5,19 +5,25 @@ SCRIPT_DIR="${0:A:h}"
 META_ROOT="${SCRIPT_DIR:h}"
 SOR_ROOT="$META_ROOT/StreetsOfRageRecompilation"
 RAGE_DECOMPILER="$META_ROOT/RageDecompiler"
-ROM="${1:-${SOR_ROM:-$SOR_ROOT/rom/SOR.bin}}"
-ROM="${ROM:A}"
+ROM="${SOR_ROM:-$SOR_ROOT/rom/SOR.bin}"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     print "Usage: $0 [ROM]"
     exit 0
 fi
+
+if (( $# )) && [[ "$1" != -* ]]; then
+    ROM="$1"
+    shift
+fi
+ROM="${ROM:A}"
+
 if [[ ! -f "$ROM" ]]; then
     print -u2 "ROM not found: $ROM"
     exit 1
 fi
 
-if (( $# > 1 )); then
+if (( $# )); then
     print -u2 "Usage: $0 [ROM]"
     exit 2
 fi

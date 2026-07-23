@@ -7,25 +7,30 @@ DEFAULT_ROM="${SOR_ROM:-$META_ROOT/StreetsOfRageRecompilation/rom/SOR.bin}"
 ROM=""
 RELEASE=0
 PROGRAM_ARGS=()
+LAST_WAS_FLAG=0
 
 while (( $# )); do
     case "$1" in
         --release)
             RELEASE=1
+            LAST_WAS_FLAG=0
             ;;
         -h|--help)
             print "Usage: $0 [--release] [ROM] [sor options...]"
             exit 0
+            LAST_WAS_FLAG=0
             ;;
         -* )
             PROGRAM_ARGS+=("$1")
+            LAST_WAS_FLAG=1
             ;;
         *)
-            if [[ -z "$ROM" ]]; then
+            if [[ -z "$ROM" && $LAST_WAS_FLAG -eq 0 ]]; then
                 ROM="$1"
             else
                 PROGRAM_ARGS+=("$1")
             fi
+            LAST_WAS_FLAG=0
             ;;
     esac
     shift
