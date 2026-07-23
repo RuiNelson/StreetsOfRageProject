@@ -85,27 +85,73 @@ python3 --version
 
 ### Prerequisites
 
-Install:
-
-1. Visual Studio 2022 Build Tools or Visual Studio 2022 with **Desktop
-   development with C++**;
-2. Git for Windows;
-3. CMake and Ninja;
-4. Python 3;
-5. [vcpkg](https://github.com/microsoft/vcpkg), used here to provide SDL3.
-
-Open **Developer PowerShell for VS 2022**. Bootstrap vcpkg once and install the
-64-bit SDL3 package:
+Open PowerShell as Administrator and install the command-line tools with
+[WinGet](https://learn.microsoft.com/windows/package-manager/winget/):
 
 ```powershell
-git clone https://github.com/microsoft/vcpkg.git C:\src\vcpkg
-C:\src\vcpkg\bootstrap-vcpkg.bat
-C:\src\vcpkg\vcpkg.exe install sdl3:x64-windows
+winget source update
+
+winget install --exact --id Git.Git --source winget `
+  --accept-package-agreements --accept-source-agreements
+
+winget install --exact --id Kitware.CMake --source winget `
+  --accept-package-agreements --accept-source-agreements
+
+winget install --exact --id Ninja-build.Ninja --source winget `
+  --accept-package-agreements --accept-source-agreements
+
+winget install --exact --id Python.Python.3.14 --source winget `
+  --accept-package-agreements --accept-source-agreements
+
+winget install --exact --id Microsoft.VisualStudio.2022.BuildTools `
+  --source winget `
+  --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools;includeRecommended" `
+  --accept-package-agreements --accept-source-agreements
 ```
+
+The `Microsoft.VisualStudio.Workload.VCTools` workload supplies MSVC, the
+Windows SDK, and the native x64/x86 build environment. The
+`;includeRecommended` suffix also installs the workload's recommended CMake
+and vcpkg integration components. See Microsoft's
+[Build Tools component list](https://learn.microsoft.com/visualstudio/install/workload-component-id-vs-build-tools?view=visualstudio)
+and
+[command-line installation reference](https://learn.microsoft.com/visualstudio/install/use-command-line-parameters-to-install-visual-studio?view=visualstudio).
+
+Close the administrator terminal after installation and open **Developer
+PowerShell for VS 2022** from the Start menu. Confirm that the tools are
+available:
+
+```powershell
+where.exe cl
+cl
+git --version
+cmake --version
+ninja --version
+python --version
+```
+
+Python is needed for ROM regeneration and analysis, but not for an ordinary
+build of the checked-in generated C++.
+
+Use Microsoft's official [vcpkg](https://github.com/microsoft/vcpkg) bootstrap
+flow to install the SDL3 development package in a predictable location:
+
+```powershell
+$VcpkgRoot = "C:\src\vcpkg"
+
+git clone https://github.com/microsoft/vcpkg.git $VcpkgRoot
+& "$VcpkgRoot\bootstrap-vcpkg.bat" -disableMetrics
+& "$VcpkgRoot\vcpkg.exe" install sdl3:x64-windows
+```
+
+The `sdl3:x64-windows` port provides the headers, import library, and runtime
+DLL for a 64-bit build. The vcpkg toolchain makes it available to the
+project's `find_package(SDL3 REQUIRED)` call.
 
 ### Configure and compile
 
-From the meta-repository root:
+From the meta-repository root in the same **Developer PowerShell for VS 2022**
+session:
 
 ```powershell
 $VcpkgRoot = "C:\src\vcpkg"
