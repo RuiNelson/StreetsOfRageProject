@@ -202,7 +202,7 @@ Run the port:
 ```powershell
 Push-Location StreetsOfRageRecompilation
 try {
-  & "$BinDir\sor.exe" --runSor --rom "rom\SOR.bin"
+  & "$BinDir\sor.exe" --rom "rom\SOR.bin"
 } finally {
   Pop-Location
 }
@@ -246,7 +246,7 @@ builds may use `./build.sh` without `--full`.
 Run the port:
 
 ```bash
-./build.sh --run -- --runSor --rom rom/SOR.bin
+./build.sh --run -- --rom rom/SOR.bin
 ```
 
 The equivalent direct CMake workflow is:
@@ -309,7 +309,7 @@ builds may omit `--full`.
 Run the port:
 
 ```bash
-./build.sh --run -- --runSor --rom rom/SOR.bin
+./build.sh --run -- --rom rom/SOR.bin
 ```
 
 The equivalent direct CMake workflow is:
