@@ -1,0 +1,68 @@
+#!/usr/bin/env zsh
+set -uo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+META_ROOT="${SCRIPT_DIR:h}"
+SOR_ROOT="$META_ROOT/StreetsOfRageRecompilation"
+AUX="$SOR_ROOT/code-analysis/aux_addresses.txt"
+ROM="${SOR_ROM:-$SOR_ROOT/rom/SOR.bin}"
+ROM="${ROM:A}"
+BIN="$SOR_ROOT/build/sor"
+MAX_ITERS="${MAX_ITERS:-500}"
+BUILD_LOG="$(mktemp -t discover_build.XXXXXX)"
+trap 'rm -f "$BUILD_LOG"' EXIT
+
+sort_aux_addresses() {
+    local sorted
+    sorted="$(mktemp -t aux_addresses.XXXXXX)"
+    {
+        grep -Ev '^[[:space:]]*[[:xdigit:]]{6}[[:space:]]*$' "$AUX" || true
+        (grep -E '^[[:space:]]*[[:xdigit:]]{6}[[:space:]]*$' "$AUX" || true) | LC_ALL=C sort -u
+    } >"$sorted"
+    chmod 0644 "$sorted"
+    mv "$sorted" "$AUX"
+}
+
+run_sor_with_output() {
+    "$BIN" "$@" 2>&1 | tee
+    local sor_code=${pipestatus[1]}
+    return "$sor_code"
+}
+
+if [[ ! -f "$ROM" ]]; then
+    print -u2 "ROM not found: $ROM"
+    exit 1
+fi
+
+sort_aux_addresses
+start_count=$(grep -cE '^[0-9a-fA-F]+' "$AUX" || true)
+
+for (( i = 1; i <= MAX_ITERS; i++ )); do
+    pkill -9 -f "$BIN" 2>/dev/null || true
+    print "==> [discover $i] regenerate + build (--full)"
+    if ! (cd "$SOR_ROOT" && SOR_ROM="$ROM" ./build.sh --full 2>&1 | tee "$BUILD_LOG"); then
+        print -u2 "Build failed:"
+        tail -25 "$BUILD_LOG" >&2
+        exit 1
+    fi
+
+    print "==> [discover $i] run"
+    run_sor_with_output --debugUtils --runSor --auxAddrFile "$AUX" --rom "$ROM" "$@"
+    code=$?
+    sort_aux_addresses
+
+    case "$code" in
+        42) print "==> [discover $i] recorded a new address; re-seeding" ;;
+        43)
+            print -u2 "==> [discover $i] STUCK: a seeded address still has no handler."
+            exit 1
+            ;;
+        *)
+            print -u2 "==> [discover $i] exited $code (not an unknown dispatch). Stopping."
+            exit "$code"
+            ;;
+    esac
+done
+
+print -u2 "Reached MAX_ITERS=$MAX_ITERS without converging."
+exit 1

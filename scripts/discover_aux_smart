@@ -1,0 +1,99 @@
+#!/usr/bin/env zsh
+set -uo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+META_ROOT="${SCRIPT_DIR:h}"
+SOR_ROOT="$META_ROOT/StreetsOfRageRecompilation"
+RAGE_DECOMPILER="$META_ROOT/RageDecompiler"
+AUX="$SOR_ROOT/code-analysis/aux_addresses.txt"
+SPEC="$SOR_ROOT/code-analysis/speculative_addresses.txt"
+ROM="${SOR_ROM:-$SOR_ROOT/rom/SOR.bin}"
+ROM="${ROM:A}"
+BIN="$SOR_ROOT/build/sor"
+MAX_ITERS="${MAX_ITERS:-500}"
+SCAN_ASM="$(mktemp -t sor_smart_disasm.XXXXXX)"
+SCAN_MAP="$(mktemp -t sor_smart_map.XXXXXX)"
+trap 'rm -f "$SCAN_ASM" "$SCAN_MAP"' EXIT
+
+if (( $+commands[python3.14] )); then
+    PYTHON_BIN=python3.14
+elif (( $+commands[python3.13] )); then
+    PYTHON_BIN=python3.13
+else
+    PYTHON_BIN="${PYTHON:-python3}"
+fi
+export PYTHONPATH="$RAGE_DECOMPILER${PYTHONPATH:+:$PYTHONPATH}"
+
+sort_aux_addresses() {
+    local sorted
+    sorted="$(mktemp -t aux_addresses.XXXXXX)"
+    {
+        grep -Ev '^[[:space:]]*[[:xdigit:]]{6}[[:space:]]*$' "$AUX" || true
+        (grep -E '^[[:space:]]*[[:xdigit:]]{6}[[:space:]]*$' "$AUX" || true) | LC_ALL=C sort -u
+    } >"$sorted"
+    chmod 0644 "$sorted"
+    mv "$sorted" "$AUX"
+}
+
+run_sor_with_output() {
+    "$BIN" "$@" 2>&1 | tee
+    local sor_code=${pipestatus[1]}
+    return "$sor_code"
+}
+
+if [[ ! -f "$ROM" ]]; then
+    print -u2 "ROM not found: $ROM"
+    exit 1
+fi
+
+sort_aux_addresses
+start_count=$(grep -cE '^[0-9a-fA-F]+' "$AUX" 2>/dev/null || true)
+
+print "==> [smart] Refreshing coverage map from current aux addresses..."
+if ! "$PYTHON_BIN" -m tools disassemble "$ROM" -o "$SCAN_ASM" -a "$AUX" --map "$SCAN_MAP"; then
+    print -u2 "Coverage-map refresh failed."
+    exit 1
+fi
+
+print "==> [smart] Scanning for speculative entry points..."
+if ! "$PYTHON_BIN" -m tools speculative-scan "$SCAN_MAP" "$ROM" "$AUX" -o "$SPEC"; then
+    print -u2 "Speculative scan failed."
+    exit 1
+fi
+
+do_build() {
+    print "==> [smart $1] build (--full --discover)"
+    if ! (cd "$SOR_ROOT" && SOR_ROM="$ROM" ./build.sh --full --discover); then
+        print -u2 "Build failed."
+        exit 1
+    fi
+}
+
+do_build init
+
+for (( i = 1; i <= MAX_ITERS; i++ )); do
+    pkill -9 -f "$BIN" 2>/dev/null || true
+    print "==> [smart $i] run"
+    run_sor_with_output --debugUtils --lang en --runSor --rom "$ROM" --auxAddrFile "$AUX" "$@"
+    code=$?
+    sort_aux_addresses
+
+    case "$code" in
+        42)
+            print "==> [smart $i] new unknown address recorded; rebuilding"
+            do_build "$i"
+            ;;
+        43)
+            print -u2 "==> [smart $i] STUCK: a seeded address still has no handler."
+            exit 1
+            ;;
+        *)
+            now=$(grep -cE '^[0-9a-fA-F]+' "$AUX" 2>/dev/null || true)
+            print "==> [smart $i] exited $code. Added $(( now - start_count )) address(es)."
+            exit 0
+            ;;
+    esac
+done
+
+print -u2 "Reached MAX_ITERS=$MAX_ITERS without converging."
+exit 1

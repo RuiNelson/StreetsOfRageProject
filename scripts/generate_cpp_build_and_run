@@ -1,0 +1,48 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+META_ROOT="${SCRIPT_DIR:h}"
+DEFAULT_ROM="${SOR_ROM:-$META_ROOT/StreetsOfRageRecompilation/rom/SOR.bin}"
+ROM=""
+RELEASE=0
+PROGRAM_ARGS=()
+
+while (( $# )); do
+    case "$1" in
+        --release)
+            RELEASE=1
+            ;;
+        -h|--help)
+            print "Usage: $0 [--release] [ROM] [sor options...]"
+            exit 0
+            ;;
+        -* )
+            PROGRAM_ARGS+=("$1")
+            ;;
+        *)
+            if [[ -z "$ROM" ]]; then
+                ROM="$1"
+            else
+                PROGRAM_ARGS+=("$1")
+            fi
+            ;;
+    esac
+    shift
+done
+
+if [[ -n "$ROM" ]]; then
+    "$SCRIPT_DIR/generate_cpp" "$ROM"
+else
+    ROM="$DEFAULT_ROM"
+    "$SCRIPT_DIR/generate_cpp" "$ROM"
+fi
+
+if (( RELEASE )); then
+    "$SCRIPT_DIR/build" --release
+else
+    "$SCRIPT_DIR/build"
+fi
+
+ROM="${ROM:A}"
+exec "$SCRIPT_DIR/run" "$ROM" "${PROGRAM_ARGS[@]}"

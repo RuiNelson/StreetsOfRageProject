@@ -62,6 +62,28 @@ The project is developed against the `JUE` cartridge with these hashes:
 
 ROM images are ignored by Git. Do not commit or redistribute them.
 
+## Central scripts
+
+The user-facing Streets of Rage workflows live in [`scripts/`](scripts/) at
+the meta-repository root. They can be invoked from any working directory and
+use `StreetsOfRageRecompilation/rom/SOR.bin` by default:
+
+```bash
+./scripts/generate_cpp [ROM]
+./scripts/build [--release]
+./scripts/generate_cpp_and_build [--release] [ROM]
+./scripts/run [ROM] [sor options...]
+./scripts/generate_cpp_build_and_run [--release] [ROM] [sor options...]
+./scripts/configure_controls
+./scripts/disassemble_to_asm [ROM]
+./scripts/discover_aux_conservative [sor options...]
+./scripts/discover_aux_smart [sor options...]
+```
+
+`--release` selects a clean Release build. Arguments after the ROM path in
+`run` and `generate_cpp_build_and_run` are passed to `sor`; arguments supplied
+to either discovery script are passed to each discovery run.
+
 ## Common prerequisites
 
 All three desktop platforms need:

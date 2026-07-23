@@ -1,0 +1,27 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+META_ROOT="${SCRIPT_DIR:h}"
+SOR_ROOT="$META_ROOT/StreetsOfRageRecompilation"
+
+BUILD_ARGS=()
+while (( $# )); do
+    case "$1" in
+        --release)
+            BUILD_ARGS+=(--clean --type Release)
+            ;;
+        -h|--help)
+            print "Usage: $0 [--release]"
+            exit 0
+            ;;
+        *)
+            print -u2 "Unknown option: $1"
+            print -u2 "Usage: $0 [--release]"
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+exec "$SOR_ROOT/build.sh" "${BUILD_ARGS[@]}"

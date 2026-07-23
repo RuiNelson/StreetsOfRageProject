@@ -1,0 +1,39 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+META_ROOT="${SCRIPT_DIR:h}"
+SOR_ROOT="$META_ROOT/StreetsOfRageRecompilation"
+RAGE_DECOMPILER="$META_ROOT/RageDecompiler"
+ROM="${1:-${SOR_ROM:-$SOR_ROOT/rom/SOR.bin}}"
+ROM="${ROM:A}"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    print "Usage: $0 [ROM]"
+    exit 0
+fi
+if (( $# > 1 )); then
+    print -u2 "Usage: $0 [ROM]"
+    exit 2
+fi
+if [[ ! -f "$ROM" ]]; then
+    print -u2 "ROM not found: $ROM"
+    exit 1
+fi
+
+if (( $+commands[python3.14] )); then
+    PYTHON_BIN=python3.14
+elif (( $+commands[python3.13] )); then
+    PYTHON_BIN=python3.13
+else
+    PYTHON_BIN="${PYTHON:-python3}"
+fi
+
+export PYTHONPATH="$RAGE_DECOMPILER${PYTHONPATH:+:$PYTHONPATH}"
+
+exec "$PYTHON_BIN" -m tools recompile "$ROM" \
+    -o "$SOR_ROOT/generated" \
+    --aux "$SOR_ROOT/code-analysis/aux_addresses.txt" \
+    --labels-csv "$SOR_ROOT/code-analysis/labels.csv" \
+    --addresses-csv "$SOR_ROOT/code-analysis/addresses.csv" \
+    --manual-functions "$SOR_ROOT/code-analysis/manual_functions.txt"

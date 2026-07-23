@@ -1,0 +1,42 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROM=""
+RELEASE=0
+
+while (( $# )); do
+    case "$1" in
+        --release)
+            RELEASE=1
+            ;;
+        -h|--help)
+            print "Usage: $0 [--release] [ROM]"
+            exit 0
+            ;;
+        -* )
+            print -u2 "Unknown option: $1"
+            print -u2 "Usage: $0 [--release] [ROM]"
+            exit 2
+            ;;
+        *)
+            if [[ -n "$ROM" ]]; then
+                print -u2 "Only one ROM path may be supplied."
+                exit 2
+            fi
+            ROM="$1"
+            ;;
+    esac
+    shift
+done
+
+if [[ -n "$ROM" ]]; then
+    "$SCRIPT_DIR/generate_cpp" "$ROM"
+else
+    "$SCRIPT_DIR/generate_cpp"
+fi
+
+if (( RELEASE )); then
+    exec "$SCRIPT_DIR/build" --release
+fi
+exec "$SCRIPT_DIR/build"

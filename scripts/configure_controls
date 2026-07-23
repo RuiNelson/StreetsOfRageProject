@@ -1,0 +1,19 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+META_ROOT="${SCRIPT_DIR:h}"
+SOR_ROOT="$META_ROOT/StreetsOfRageRecompilation"
+BIN="$SOR_ROOT/build/sor"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    print "Usage: $0"
+    exit 0
+fi
+if [[ ! -x "$BIN" ]]; then
+    print -u2 "Executable not found: $BIN"
+    print -u2 "Run scripts/build first."
+    exit 1
+fi
+
+exec "$BIN" --configControls "$@"
