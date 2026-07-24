@@ -166,3 +166,4 @@ Finish by summarizing changed files, validation performed, and anything not
 tested on the current host.
 
 > Keep this file and the other `CLAUDE.md` files updated as you work
+> Save in the `CLAUDE.md` all the information that charactizes the project that you obtain from the user.
