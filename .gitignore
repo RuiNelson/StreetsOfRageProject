@@ -8,3 +8,4 @@ RageDecompiler/**/__pycache__
 .vscode/
 .venv/
 /ai_play/models/
+controls.yaml
