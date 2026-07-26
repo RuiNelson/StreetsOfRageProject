@@ -1,28 +1,152 @@
 # Streets of Rage Project
 
-This repository assembles the complete Streets of Rage reverse-engineering and
-native recompilation workspace. The playable host port is C++23; its runtime,
-analysis tools, sample game, and emulator reference are pinned as Git
-submodules so the full workspace can be reproduced from one clone.
+Welcome to my reverse-engineering and recompilation project for SEGA's
+celebrated Mega Drive classic (released as SEGA Genesis in the United States),
+*Streets of Rage*.
 
-> The project does not include the original Streets of Rage ROM. You must
-> provide a compatible dump that you are legally entitled to use.
+This is a strictly academic, non-commercial project. If you are looking for a
+free copy of the game, this repository is not the place to find one: **it does
+not contain copyrighted game material**. The original ROM is deliberately
+omitted; you must provide a compatible image that you are legally entitled to
+use.
 
-## Repository layout
+The project brings together several components whose primary purpose is to
+recompile Streets of Rage faithfully and make its internals available for
+study.
+
+## Project structure
 
 | Submodule | Purpose |
 | --- | --- |
 | [`MegaDriveEnvironment/`](MegaDriveEnvironment/) | SDL3-based Mega Drive host runtime and reusable C++ library |
-| [`StreetsOfRageRecompilation/`](StreetsOfRageRecompilation/) | Streets of Rage generated/native C++, analysis data, build scripts, and `sor` executable |
-| [`RageDecompiler/`](RageDecompiler/) | Python disassembler, recompiler, label tools, and discovery workflows |
-| [`MegaDriveEnvironmentSampleGame/`](MegaDriveEnvironmentSampleGame/) | Small game that targets both the PC runtime and real Mega Drive hardware |
-| [`Genesis-Plus-GX/`](Genesis-Plus-GX/) | Read-only upstream emulator reference; it is not modified by this project |
+| [`StreetsOfRageRecompilation/`](StreetsOfRageRecompilation/) | Generated and hand-written C++, analysis data, build scripts, and the `sor` executable |
+| [`RageDecompiler/`](RageDecompiler/) | Python tools for disassembly, recompilation, label generation, and runtime discovery |
+| [`MegaDriveEnvironmentSampleGame/`](MegaDriveEnvironmentSampleGame/) | A small game targeting both the PC runtime and real Mega Drive hardware |
+| `Genesis-Plus-GX` | Upstream emulator reference, when available; it must not be modified |
 
-The playable port expects `MegaDriveEnvironment`, `RageDecompiler`, and
+The playable host expects `MegaDriveEnvironment`, `RageDecompiler`, and
 `StreetsOfRageRecompilation` to remain sibling directories. This is the layout
 created by the meta-repository.
 
-## Clone the complete workspace
+## The `RageDecompiler` recompiler
+
+`RageDecompiler` disassembles the ROM into assembly and also transpiles the
+required routines into C++ for the desktop build.
+
+Minimal code generation is a deliberate design goal: the tool should emit no
+more code than is necessary to execute the game. Particular care has been
+taken with the challenges of translating an assembly-language program that
+relies on patterns such as jump tables.
+
+The recompiler is designed to operate in concert with the executable it
+produces. During bootstrap, it recompiles the routines reachable from address
+`0x200` and from the interrupt autovectors, together with every routine reached
+through a direct call from those entry points.
+
+Some subroutines, however, are not reachable through direct calls. To account
+for them, the disassembler/recompiler consumes the auxiliary file
+`StreetsOfRageRecompilation/code-analysis/aux_addresses.txt`. This file records
+call-site addresses and tells the recompiler where to look for additional
+functions. At runtime, `StreetsOfRageRecompilation` writes to *stdout* the
+addresses that are called but do not yet have an equivalent compiled function.
+
+The initial assumption was that exercising the game would expose a small set
+of entry points and that most of the remaining routines would be reached from
+them. In practice, the control-flow structure is substantially more complex;
+the same subroutine may also be referenced by multiple call sites.
+
+The project therefore includes a speculative discovery mode. The recompiler
+searches the ROM for plausible code, emits it, and provides support for
+potential call sites. As the game runs, confirmed addresses are added to
+`aux_addresses.txt`. This makes it possible to discover dozens or hundreds of
+addresses in a single compilation without restarting the game.
+
+The discovery loop is:
+
+**exercise the game** → **record new addresses** → **recompile** → **play again**
+
+The project supports both conservative discovery and a smart mode that uses
+speculative addresses.
+
+## The `MegaDriveEnvironment` development and runtime library
+
+Producing code that could execute directly on a PC would be impractical while
+the recompilation still depends on the Mega Drive's video, audio, and input
+subsystems.
+
+`MegaDriveEnvironment` serves two closely related purposes. It can be used to
+develop Mega Drive games as native PC applications: instead of targeting APIs
+such as Vulkan or DirectX, the application uses an emulated Mega Drive VDP
+(Video Display Processor). The same approach is used for controllers and
+audio.
+
+These emulated devices use SDL3 to communicate with the host operating
+system's native APIs. As a result, between 90% and 100% of a Mega Drive game
+can be developed as a PC application, while the same source can also produce a
+ROM image for an emulator or original hardware. The source can likewise be
+used to build a conventional application for PC, macOS, or Linux.
+
+The accompanying `MegaDriveEnvironmentSampleGame` demonstrates this
+cross-platform workflow, including a basic resource-packaging system for tiles,
+audio samples, and Z80 programs.
+
+Beyond development support, `MegaDriveEnvironment` provides the emulated VDP,
+audio, controllers, and related devices that allow the static Streets of Rage
+recompilation to run before its rendering engine, audio system, and other
+hardware-facing subsystems have been reimplemented.
+
+The long-term roadmap is:
+
+1. Reimplement every game procedure in C++.
+2. Refactor the code into a medium- or high-level architecture, with functions
+   that accept explicit arguments and use dynamic memory where appropriate,
+   while preserving the original gameplay rules.
+3. Remove the dependency on the hardware emulated by `MegaDriveEnvironment`
+   and implement the graphics pipeline, audio, and input directly through SDL.
+4. Enable enhancements such as higher-resolution replacement assets, 16:9
+   support, and variable frame rates, with object motion designed to benefit
+   from the available frame rate.
+
+## The recompiled game in `StreetsOfRageRecompilation`
+
+The combination of the preceding tools produces the recompiled game in
+`StreetsOfRageRecompilation`. That repository also contains the results of
+several lines of analysis:
+
+### `output`
+
+`RageDecompiler` can emit the recompiled game as C++ and can also produce an
+assembly representation. The assembly is useful for human inspection and,
+especially, for enabling LLMs to study the original program's behavior and
+structure.
+
+### `ai-analysis`
+
+Contains analyses of the code produced by multiple frontier-level language
+models.
+
+### `code-analysis`
+
+Contains the data that guides recompilation and analysis, including labels,
+auxiliary addresses, and the list of manually reimplemented functions.
+
+### `generated`
+
+Contains the C++ generated from the ROM. This directory is ignored by Git and
+must be recreated after a fresh clone or whenever the ROM, analysis data, or
+recompiler changes.
+
+### Hand-written code
+
+Some parts of the program have already been reimplemented, with assistance
+from LLMs, while preserving maximum compatibility with the remaining
+recompiler-generated code. These parts include routines such as the
+compressor/decompressor and substitutes for the "wait for VBlank" routines
+that use busy waiting.
+
+## How to build
+
+### 1. Clone the repository and submodules
 
 ```bash
 git clone --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
@@ -35,67 +159,61 @@ If the repository was cloned without submodules:
 git submodule update --init --recursive
 ```
 
-To restore every submodule to the commit recorded by this repository:
+To restore all submodules to the commits recorded by the meta-repository:
 
 ```bash
 git submodule update --init --recursive --checkout
 ```
 
-## ROM requirement
+### 2. Obtain a compatible ROM
 
 The generated C++ under `StreetsOfRageRecompilation/generated/` is ignored by
 Git and is not included in a fresh clone. Before the first build, generate it
-from a compatible 512 KiB Streets of Rage / Bare Knuckle dump at:
+from a compatible 512 KiB Streets of Rage / Bare Knuckle ROM image at:
 
 ```text
 StreetsOfRageRecompilation/rom/SOR.bin
 ```
 
-The project is developed against the `JUE` cartridge with these hashes:
+#### Legal and preservation considerations
+
+The preferred way to obtain this image is to make a private dump of a physical
+cartridge that you own, or that you are otherwise explicitly authorized to
+access, using a compatible Mega Drive cartridge dumper. Follow the dumper's
+documentation and verify the resulting file against the reference hashes
+below. This approach also contributes to responsible preservation: it keeps the
+source of the image clear and avoids relying on unverified downloads.
+
+Copyright, archival-copy, reverse-engineering, and anti-circumvention rules
+differ substantially between jurisdictions. Owning a cartridge does not
+necessarily grant permission to redistribute its ROM, upload it, include it in
+this repository, or bypass technical protection measures. Check the law that
+applies to you before making or using a dump; this project provides technical
+documentation, not legal advice. Keep the ROM private, use it only as permitted
+by the applicable law, and do not share it with the project or its community.
+
+The project is developed against the `JUE` cartridge, with these hashes:
 
 | Property | Value |
 | --- | --- |
 | Size | `524288` bytes |
-| CRC32 | `4052E845` (WinRAR checked) |
+| CRC32 | `4052E845` |
 | MD5 | `59a3b22a1899461dceba50d1ade88d3a` |
 | SHA-256 | `95d7efb98e97f4ffffe68257aef9a855034a36a41b86cf9d332d129f30cb2d4b` |
 
 ROM images are ignored by Git. Do not commit or redistribute them.
 
-## Central scripts
+### 3. Common prerequisites
 
-The user-facing Streets of Rage workflows live in [`scripts/`](scripts/) at
-the meta-repository root. They can be invoked from any working directory and
-use `StreetsOfRageRecompilation/rom/SOR.bin` by default:
+All three desktop platforms require:
 
-```bash
-./scripts/generate_cpp [ROM]
-./scripts/build [--release]
-./scripts/generate_cpp_and_build [--release] [ROM]
-./scripts/run [ROM] [sor options...]
-./scripts/generate_cpp_build_and_run [--release] [ROM] [sor options...]
-./scripts/configure_controls
-./scripts/disassemble_to_asm [ROM]
-./scripts/discover_aux_conservative [sor options...]
-./scripts/discover_aux_smart [sor options...]
-./scripts/update_submodules
-```
-
-`--release` selects a clean Release build. Arguments after the ROM path in
-`run` and `generate_cpp_build_and_run` are passed to `sor`; arguments supplied
-to either discovery script are passed to each discovery run.
-
-## Common prerequisites
-
-All three desktop platforms need:
-
-- Git, including Git submodule support;
+- Git, including submodule support;
 - CMake 3.24 or newer;
 - a compiler with C++23 support;
 - SDL3 development headers and libraries;
-- network access during the first configuration, because CMake downloads
-  CLI11, yaml-cpp, zlib, and libpng;
-- Python 3 for the mandatory first C++ generation and analysis tools;
+- network access during the first configuration, because CMake downloads CLI11,
+  yaml-cpp, zlib, and libpng;
+- Python 3 for the first C++ generation and the analysis tools;
 - a compatible local ROM for the mandatory first C++ generation.
 
 Check the main tools before configuring:
@@ -106,9 +224,9 @@ cmake --version
 python3 --version
 ```
 
-## Build on Windows
+### 4. Build on Windows
 
-### Prerequisites
+#### Prerequisites
 
 Open PowerShell as Administrator and install the command-line tools with
 [WinGet](https://learn.microsoft.com/windows/package-manager/winget/):
@@ -135,16 +253,13 @@ winget install --exact --id Microsoft.VisualStudio.2022.BuildTools `
 ```
 
 The `Microsoft.VisualStudio.Workload.VCTools` workload supplies MSVC, the
-Windows SDK, and the native x64/x86 build environment. The
-`;includeRecommended` suffix also installs the workload's recommended CMake
-and vcpkg integration components. See Microsoft's
+Windows SDK, and the native x64/x86 build environment. See Microsoft's
 [Build Tools component list](https://learn.microsoft.com/visualstudio/install/workload-component-id-vs-build-tools?view=visualstudio)
-and
-[command-line installation reference](https://learn.microsoft.com/visualstudio/install/use-command-line-parameters-to-install-visual-studio?view=visualstudio).
+and [command-line installation parameter
+reference](https://learn.microsoft.com/visualstudio/install/use-command-line-parameters-to-install-visual-studio?view=visualstudio).
 
-Close the administrator terminal after installation and open **Developer
-PowerShell for VS 2022** from the Start menu. Confirm that the tools are
-available:
+Close the Administrator terminal and open **Developer PowerShell for VS 2022**.
+Confirm that the tools are available:
 
 ```powershell
 where.exe cl
@@ -155,13 +270,7 @@ ninja --version
 python --version
 ```
 
-Python is required to generate the ignored C++ files after a fresh clone.
-After `generated/Sor.cpp` and `generated/Sor.hpp` exist locally, subsequent
-incremental builds do not need to run Python again unless the analysis inputs
-change.
-
-Use Microsoft's official [vcpkg](https://github.com/microsoft/vcpkg) bootstrap
-flow to install the SDL3 development package in a predictable location:
+Install SDL3 with [Microsoft's official vcpkg](https://github.com/microsoft/vcpkg):
 
 ```powershell
 $VcpkgRoot = "C:\src\vcpkg"
@@ -171,14 +280,12 @@ git clone https://github.com/microsoft/vcpkg.git $VcpkgRoot
 & "$VcpkgRoot\vcpkg.exe" install sdl3:x64-windows
 ```
 
-The `sdl3:x64-windows` port provides the headers, import library, and runtime
-DLL for a 64-bit build. The vcpkg toolchain makes it available to the
-project's `find_package(SDL3 REQUIRED)` call.
+#### Configure, compile, and run (PowerShell)
 
-### Generate the C++ port
-
-This step is mandatory after a fresh clone because `generated/` is ignored by
-Git. Run it from the meta-repository root before invoking CMake:
+The native PowerShell workflow below performs the generation, CMake
+configuration, compilation, and launch directly. Generation is mandatory after
+a fresh clone because `generated/` is ignored by Git. Run these commands from
+the meta-repository root in the **Developer PowerShell for VS 2022**:
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path RageDecompiler)
@@ -191,18 +298,12 @@ python -m tools recompile StreetsOfRageRecompilation\rom\SOR.bin `
   --manual-functions StreetsOfRageRecompilation\code-analysis\manual_functions.txt
 ```
 
-This requires the compatible ROM at
-`StreetsOfRageRecompilation\rom\SOR.bin`. The command creates the local
+The command creates the local files
 `StreetsOfRageRecompilation\generated\Sor.cpp` and `Sor.hpp`. Regenerate them
-whenever ROM analysis, labels, auxiliary addresses, manual-function inputs, or
-the recompiler changes. These outputs remain ignored and must not be committed.
-See [Regenerate the port from the ROM](#regenerate-the-port-from-the-rom) for
-the equivalent Bash workflow.
+whenever the ROM, analysis data, labels, auxiliary addresses, manual-function
+inputs, or recompiler changes.
 
-### Configure and compile
-
-From the meta-repository root in the same **Developer PowerShell for VS 2022**
-session:
+In the same **Developer PowerShell for VS 2022** session, configure and compile:
 
 ```powershell
 $VcpkgRoot = "C:\src\vcpkg"
@@ -217,9 +318,8 @@ cmake --build $BuildDir --config Release --parallel
 ```
 
 The Visual Studio generator is multi-configuration, so `--config Release`
-selects the optimized build. `CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE` puts
-`sor.exe` in `$BinDir`, and the project copies all required runtime DLLs beside
-it after linking.
+selects the optimized build. `sor.exe` and the required runtime DLLs are
+placed in `build/windows/bin`.
 
 Run the port:
 
@@ -228,13 +328,11 @@ Run the port:
 ```
 
 If CMake cannot find SDL3, confirm that the toolchain path and vcpkg triplet
-used during configuration match the installed `sdl3:x64-windows` package.
+match the installed `sdl3:x64-windows` package.
 
-**For information about configuring the controls and other settings, read the `StreetsOfRageRecompilation` README [here](https://github.com/RuiNelson/StreetsOfRageRecompilation).**
+### 5. Build on macOS
 
-## Build on macOS
-
-### Prerequisites
+#### Prerequisites
 
 Install the Xcode command-line tools and Homebrew dependencies:
 
@@ -243,12 +341,12 @@ xcode-select --install
 brew install cmake ninja sdl3 python
 ```
 
-Both Apple Silicon and Intel Macs are supported by the native Homebrew
-toolchain. Keep CMake, the compiler, and SDL3 on the same architecture.
+Both Apple Silicon and Intel Macs are supported. Keep CMake, the compiler, and
+SDL3 on the same architecture.
 
-### Configure and compile
+#### Configure, compile, and run
 
-Generate the ignored C++ and build a Debug configuration after a fresh clone:
+After a fresh clone, generate the C++ port and create a Debug build:
 
 ```bash
 ./scripts/generate_cpp_and_build
@@ -261,7 +359,11 @@ For the first optimized build:
 ```
 
 Once `generated/Sor.cpp` and `generated/Sor.hpp` exist locally, subsequent
-builds may use `./scripts/build` without regenerating C++.
+incremental builds can use:
+
+```bash
+./scripts/build
+```
 
 Run the port:
 
@@ -279,11 +381,9 @@ cmake -S StreetsOfRageRecompilation \
 cmake --build StreetsOfRageRecompilation/build/macos --parallel
 ```
 
-**For information about configuring the controls and other settings, read the `StreetsOfRageRecompilation` README [here](https://github.com/RuiNelson/StreetsOfRageRecompilation).**
+### 6. Build on Ubuntu
 
-## Build on Ubuntu
-
-### Prerequisites
+#### Prerequisites
 
 Install the compiler and build tools:
 
@@ -292,42 +392,23 @@ sudo apt update
 sudo apt install build-essential cmake git ninja-build python3 pkg-config
 ```
 
-Verify that `cmake --version` reports 3.24 or newer. On an Ubuntu release whose
-package repository provides SDL3:
+Confirm that `cmake --version` reports 3.24 or newer. On an Ubuntu release
+whose package repositories provide SDL3:
 
 ```bash
 sudo apt install libsdl3-dev
 ```
 
-If `libsdl3-dev` is unavailable, build SDL's maintained SDL3 release branch:
+#### Configure, compile, and run
 
-```bash
-sudo apt install libasound2-dev libpulse-dev libx11-dev libxext-dev \
-  libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
-  libwayland-dev libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev
-
-git clone --depth 1 --branch release-3.2.x \
-  https://github.com/libsdl-org/SDL.git /tmp/SDL3
-cmake -S /tmp/SDL3 -B /tmp/SDL3/build -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DSDL_TEST_LIBRARY=OFF
-cmake --build /tmp/SDL3/build --parallel
-sudo cmake --install /tmp/SDL3/build
-sudo ldconfig
-```
-
-### Configure and compile
-
-Generate the ignored C++ and create the first optimized build:
+Generate the C++ port and create the first optimized build:
 
 ```bash
 ./scripts/generate_cpp_and_build --release
 ```
 
-Once `generated/Sor.cpp` and `generated/Sor.hpp` exist locally, subsequent
-builds may use `./scripts/build`.
-
-Run the port:
+Once the generated files exist locally, subsequent builds can use
+`./scripts/build`.
 
 ```bash
 ./scripts/run StreetsOfRageRecompilation/rom/SOR.bin
@@ -346,78 +427,125 @@ cmake --build StreetsOfRageRecompilation/build/ubuntu --parallel
 If SDL3 was installed to a custom prefix, add
 `-DCMAKE_PREFIX_PATH=/path/to/prefix` during configuration.
 
-**For information about configuring the controls and other settings, read the `StreetsOfRageRecompilation` README [here](https://github.com/RuiNelson/StreetsOfRageRecompilation).**
+### Configure and play
 
-## Regenerate the port from the ROM
-
-`StreetsOfRageRecompilation/generated/` is ignored by Git. Generation is
-mandatory after a fresh clone and must be repeated whenever the ROM analysis,
-labels, auxiliary addresses, manual-function inputs, or RageDecompiler changes.
-Once the local generated files exist and their inputs are unchanged,
-incremental builds can skip this step.
-
-On macOS, Ubuntu, Git Bash, or another Bash environment:
+On macOS or Linux, run the executable from the recompilation directory:
 
 ```bash
-./scripts/generate_cpp
+cd StreetsOfRageRecompilation
+./build/sor --rom rom/SOR.bin
 ```
 
-On native Windows PowerShell, run the equivalent Python command before the
-CMake build:
+On Windows, run:
 
 ```powershell
-$env:PYTHONPATH = (Resolve-Path RageDecompiler)
-python -m tools recompile StreetsOfRageRecompilation\rom\SOR.bin `
-  -o StreetsOfRageRecompilation\generated `
-  --aux StreetsOfRageRecompilation\code-analysis\aux_addresses.txt `
-  --labels-csv StreetsOfRageRecompilation\code-analysis\labels.csv `
-  --addresses-csv StreetsOfRageRecompilation\code-analysis\addresses.csv `
-  --manual-functions StreetsOfRageRecompilation\code-analysis\manual_functions.txt
+cd StreetsOfRageRecompilation
+..\build\windows\bin\sor.exe --rom rom\SOR.bin
 ```
 
-Regeneration creates or replaces ignored local files under `generated/`.
-Do not add them to Git.
+Press `Ctrl+Q` to exit the game. The controls below are the default keyboard
+bindings shipped in `StreetsOfRageRecompilation/controls.yaml`.
 
-## Tests and developer tools
+#### Default controls
 
-Build and run the reusable environment's tests:
+The game exposes the original three-button Mega Drive pad as A, B, C, and
+Start.
 
-```powershell
-$VcpkgRoot = "C:\src\vcpkg"
+| Mega Drive input | Player 1 |
+| --- | --- |
+| Up | Up Arrow |
+| Down | Down Arrow |
+| Left | Left Arrow |
+| Right | Right Arrow |
+| A — Special | `Z` |
+| B — Attack | `X` |
+| C — Jump | `C` |
+| Start | `V` |
 
-cmake -S MegaDriveEnvironment -B MegaDriveEnvironment/build/windows `
-  -G "Visual Studio 17 2022" -A x64 `
-  -DCMAKE_TOOLCHAIN_FILE="$VcpkgRoot\scripts\buildsystems\vcpkg.cmake"
-cmake --build MegaDriveEnvironment/build/windows --config Debug --parallel
-ctest --test-dir MegaDriveEnvironment/build/windows -C Debug `
-  --output-on-failure
-```
+#### Configure keyboard and gamepad bindings
 
-Run the Python decompiler tests:
+Start the executable with `--configControls`:
 
-```powershell
-cd RageDecompiler
-python -m pytest
-```
-
-Inspect the reverse-engineering CLI:
-
-```powershell
-$env:PYTHONPATH = (Resolve-Path RageDecompiler)
-python -m tools --help
-```
-
-The sample game's separate PC and real-hardware workflows are documented in
-[`MegaDriveEnvironmentSampleGame/docs/BUILDING.md`](MegaDriveEnvironmentSampleGame/docs/BUILDING.md).
-
-## Updating the workspace
-
-`scripts/update_submodules` follows the configured branches and may advance several
-gitlinks. Use it only when intentionally updating dependencies:
+On macOS or Linux:
 
 ```bash
-./scripts/update_submodules
+./build/sor --configControls
 ```
 
-For a reproducible checkout, prefer `git submodule update --init --recursive`
-and keep the commits recorded by this meta-repository.
+On Windows:
+
+```powershell
+..\build\windows\bin\sor.exe --configControls
+```
+
+#### Host keyboard shortcuts
+
+These shortcuts operate at the host-runtime level and are independent of the
+gamepad bindings:
+
+| Shortcut | Availability | Effect |
+| --- | --- | --- |
+| `Ctrl+F` | Always | Toggle desktop fullscreen |
+| `Ctrl+Q` | Always | Request an orderly shutdown |
+| `Ctrl+R` | `--debugUtils` | Cold-restart the game while preserving the process and remote TCP connection |
+| `Ctrl+P` | `--debugUtils` | Save the composited frame as `screenshot_NNN.png` |
+| `Ctrl+S` | `--debugUtils` | Save a complete VDP diagnostic view as `vdp_NNN.png`, including the frame, tile sheets, nametables, and registers |
+
+The capture files are written to the process's current working directory.
+`Ctrl+R`, `Ctrl+P`, and `Ctrl+S` are inactive unless `--debugUtils` is set.
+
+#### Debug utility hotkeys
+
+When started with `--debugUtils`, the host also exposes optional keyboard
+cheats. Hold **Alt** on Windows/Linux or **Option** on macOS and press the
+corresponding key. The unmodified key alone has no effect; gamepad modifier
+chords are not handled by these host-side cheats.
+
+| Shortcut | Effect |
+| --- | --- |
+| `Alt/Option+L` | Add one Player 1 life, capped at `0xFF` |
+| `Alt/Option+S` | Add one Player 1 special attack, capped at `0xFF` |
+| `Alt/Option+P` | Toggle Player 1 punch damage ×12, capped at the cartridge's maximum damage nibble |
+| `Alt/Option+K` | Kill all instantiated enemies, including bosses, through their normal lethal states |
+| `Alt/Option+W` | Call the police for the active player without consuming a special attack |
+| `Alt/Option+1`–`8` | Jump to levels 1–8 and enter the corresponding level-intro state |
+| `Alt/Option+G` | Start the good ending |
+| `Alt/Option+B` | Start the bad ending |
+
+These are host debugging facilities, not part of the original cartridge input
+protocol. Use them only when investigating runtime behavior or exercising
+specific game paths.
+
+#### Startup flags
+
+The `sor` executable accepts the following command-line options. `--help`
+prints the CLI11-generated help screen, and `--version` prints the executable
+version.
+
+| Flag | Meaning |
+| --- | --- |
+| `--configControls` | Open the controller configuration UI instead of starting the game |
+| `--runSor` | Explicitly start Streets of Rage; this is already the default unless `--configControls` is used |
+| `--rom PATH` | ROM image to load; default: `rom/SOR.bin` |
+| `--lang jp\|en` | Console language pin: `jp` is Japanese/domestic; `en` is overseas; default: `jp` |
+| `--hz 50\|60` | Console video-standard pin: `60` is NTSC/low and `50` is PAL/high; default: `60` |
+| `--silent` | Disable audio output completely by dropping audio-chip writes |
+| `--debug` | Log CPU and VDP state once per second |
+| `--debugUtils` | Enable debug hotkeys, host cheats, and remote access |
+| `--fullScreen` | Start in desktop fullscreen |
+| `--vsync 0\|1\|2\|3` | Frame synchronization: `0` uses the internal timer (default), `1` uses display VSync, `2` uses half-rate VSync, and `3` uses third-rate VSync |
+| `--turbo N` | With `--vsync 0`, run the internal VDP at `60 × N` Hz; `N` must be a positive integer |
+| `--port PORT` | With `--debugUtils`, select the remote-access TCP port; default: `6969`; `0` disables remote access |
+| `--auxAddrFile PATH` | Discovery mode: append an unknown indirect-dispatch address to this file and exit with status `42` instead of aborting |
+
+Examples:
+
+```bash
+./build/sor --rom rom/SOR.bin --lang en --hz 60 --vsync 1 --debugUtils --port 6970
+./build/sor --rom rom/SOR.bin --fullScreen
+./build/sor --rom rom/SOR.bin --turbo 2 --silent
+```
+
+The controls configurator can also be selected explicitly alongside the game
+with `--configControls --runSor`, although normal configuration sessions omit
+`--runSor` so that the game does not start after the UI closes.
