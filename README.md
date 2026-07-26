@@ -1,5 +1,9 @@
 # Streets of Rage Project
 
+<p align="center">
+ <img src="docs/charselect.webp" width="400">
+</p>
+
 Welcome to my reverse-engineering and recompilation project for SEGA's
 celebrated Mega Drive classic (released as SEGA Genesis in the United States),
 *Streets of Rage*.
@@ -16,6 +20,10 @@ study.
 
 ## Project structure
 
+<p align="center">
+ <img src="docs/firstlevel.webp" width="400">
+</p>
+
 | Submodule | Purpose |
 | --- | --- |
 | [`MegaDriveEnvironment/`](MegaDriveEnvironment/) | SDL3-based Mega Drive host runtime and reusable C++ library |
@@ -28,7 +36,7 @@ The playable host expects `MegaDriveEnvironment`, `RageDecompiler`, and
 `StreetsOfRageRecompilation` to remain sibling directories. This is the layout
 created by the meta-repository.
 
-## The `RageDecompiler` recompiler
+### The `RageDecompiler` recompiler
 
 `RageDecompiler` disassembles the ROM into assembly and also transpiles the
 required routines into C++ for the desktop build.
@@ -68,7 +76,7 @@ The discovery loop is:
 The project supports both conservative discovery and a smart mode that uses
 speculative addresses.
 
-## The `MegaDriveEnvironment` development and runtime library
+### The `MegaDriveEnvironment` development and runtime library
 
 Producing code that could execute directly on a PC would be impractical while
 the recompilation still depends on the Mega Drive's video, audio, and input
@@ -107,36 +115,36 @@ The long-term roadmap is:
    support, and variable frame rates, with object motion designed to benefit
    from the available frame rate.
 
-## The recompiled game in `StreetsOfRageRecompilation`
+### The recompiled game in `StreetsOfRageRecompilation`
 
 The combination of the preceding tools produces the recompiled game in
 `StreetsOfRageRecompilation`. That repository also contains the results of
 several lines of analysis:
 
-### `output`
+#### `output`
 
 `RageDecompiler` can emit the recompiled game as C++ and can also produce an
 assembly representation. The assembly is useful for human inspection and,
 especially, for enabling LLMs to study the original program's behavior and
 structure.
 
-### `ai-analysis`
+#### `ai-analysis`
 
 Contains analyses of the code produced by multiple frontier-level language
 models.
 
-### `code-analysis`
+#### `code-analysis`
 
 Contains the data that guides recompilation and analysis, including labels,
 auxiliary addresses, and the list of manually reimplemented functions.
 
-### `generated`
+#### `generated`
 
 Contains the C++ generated from the ROM. This directory is ignored by Git and
 must be recreated after a fresh clone or whenever the ROM, analysis data, or
 recompiler changes.
 
-### Hand-written code
+#### Hand-written code
 
 Some parts of the program have already been reimplemented, with assistance
 from LLMs, while preserving maximum compatibility with the remaining
@@ -145,6 +153,11 @@ compressor/decompressor and substitutes for the "wait for VBlank" routines
 that use busy waiting.
 
 ## How to build
+
+<p align="center">
+ <img src="docs/raineffect.webp" width="400">
+ <br>Click to enlarge
+</p>
 
 ### 1. Clone the repository and submodules
 
