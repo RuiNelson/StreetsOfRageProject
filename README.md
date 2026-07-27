@@ -475,6 +475,21 @@ Start.
 | C — Jump | `C` |
 | Start | `V` |
 
+#### Alternative 6-button controls
+
+Start the game with `--altControls` to use the native 6-button layout. In this
+mode, the OPTIONS menu does not expose the original control remap row.
+
+| Button | Effect |
+| --- | --- |
+| A | Rear attack, equivalent to B+C |
+| B | Attack |
+| C | Jump |
+| X | Special attack |
+| Y | Pick up nearby item or weapon |
+| Z | Unused |
+| Start | Pause |
+
 #### Configure keyboard and gamepad bindings
 
 Start the executable with `--configControls`:
@@ -546,6 +561,7 @@ version.
 | `--debug` | Log CPU and VDP state once per second |
 | `--debugUtils` | Enable debug hotkeys, host cheats, and remote access |
 | `--fullScreen` | Start in desktop fullscreen |
+| `--altControls` | Use the alternative 6-button controls and hide the OPTIONS control remap |
 | `--vsync 0\|1\|2\|3` | Frame synchronization: `0` uses the internal timer (default), `1` uses display VSync, `2` uses half-rate VSync, and `3` uses third-rate VSync |
 | `--turbo N` | With `--vsync 0`, run the internal VDP at `60 × N` Hz; `N` must be a positive integer |
 | `--port PORT` | With `--debugUtils`, select the remote-access TCP port; default: `6969`; `0` disables remote access |
@@ -556,6 +572,7 @@ Examples:
 ```bash
 ./build/sor --rom rom/SOR.bin --lang en --hz 60 --vsync 1 --debugUtils --port 6970
 ./build/sor --rom rom/SOR.bin --fullScreen
+./build/sor --rom rom/SOR.bin --altControls
 ./build/sor --rom rom/SOR.bin --turbo 2 --silent
 ```
 
