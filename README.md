@@ -30,11 +30,14 @@ study.
 | [`StreetsOfRageRecompilation/`](StreetsOfRageRecompilation/) | Generated and hand-written C++, analysis data, build scripts, and the `sor` executable |
 | [`RageDecompiler/`](RageDecompiler/) | Python tools for disassembly, recompilation, label generation, and runtime discovery |
 | [`MegaDriveEnvironmentSampleGame/`](MegaDriveEnvironmentSampleGame/) | A small game targeting both the PC runtime and real Mega Drive hardware |
-| `Genesis-Plus-GX` | Upstream emulator reference, when available; it must not be modified |
 
 The playable host expects `MegaDriveEnvironment`, `RageDecompiler`, and
 `StreetsOfRageRecompilation` to remain sibling directories. This is the layout
 created by the meta-repository.
+
+### Acknowledgments
+
+I would like to thank [ekeeke for the Geneis Plus GX](https://github.com/ekeeke/genesis-plus-gx), the emulator served almost as technical document about the Sega Mega Drive, and [gsaurus for it's Streets of Rage](https://github.com/gsaurus/sor-disassemblies/) disassembly (and annotations), it provided an important starting point for the analysis of the game.
 
 ### The `RageDecompiler` recompiler
 
