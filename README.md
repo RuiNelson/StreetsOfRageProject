@@ -8,6 +8,8 @@ Welcome to my reverse-engineering and recompilation project for SEGA's
 celebrated Mega Drive classic (released as SEGA Genesis in the United States),
 *Streets of Rage*.
 
+
+
 This is a strictly academic, non-commercial project. If you are looking for a
 free copy of the game, this repository is not the place to find one: **it does
 not contain copyrighted game material**. The original ROM is deliberately
@@ -37,7 +39,7 @@ created by the meta-repository.
 
 ### Acknowledgments
 
-I would like to thank [ekeeke for the Geneis Plus GX](https://github.com/ekeeke/genesis-plus-gx), the emulator served almost as technical document about the Sega Mega Drive, and [gsaurus for it's Streets of Rage](https://github.com/gsaurus/sor-disassemblies/) disassembly (and annotations), it provided an important starting point for the analysis of the game.
+I would like to thank [ekeeke for the Genesis Plus GX](https://github.com/ekeeke/genesis-plus-gx), which served almost as a technical document for the Sega Mega Drive, and [gsaurus for its Streets of Rage](https://github.com/gsaurus/sor-disassemblies/) disassembly (and annotations), which provided an important starting point for the analysis of the game. And of course, my slaves: Claude, ChatGPT, and Grok 4.5. Without them, this work would be impossible for my meat brain to do as a side project!
 
 ### The `RageDecompiler` recompiler
 
