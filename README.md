@@ -571,7 +571,7 @@ version.
 | `--turbo N` | With `--vsync 0`, run the internal VDP at `60 × N` Hz; `N` must be a positive integer |
 | `--port PORT` | With `--debugUtils`, select the remote-access TCP port; default: `6969`; `0` disables remote access |
 | `--auxAddrFile PATH` | Discovery mode: append an unknown indirect-dispatch address to this file and exit with status `42` instead of aborting |
-| `--callLog PATH` | Write every 68000 subroutine call to a CSV file as `source,callsite,target` (six-digit hexadecimal ROM addresses); the file is replaced on startup |
+| `--callLog PATH` | Write every 68000 subroutine entry and call to a typed CSV log (six-digit hexadecimal ROM addresses); the file is replaced on startup |
 
 Examples:
 
@@ -593,9 +593,16 @@ python3 tools/call_map.py ../calls.csv \
   --database call-map.sqlite
 ```
 
-The SQLite database keeps the complete deduplicated map in `subroutine`,
-`callsite`, `call_edge`, and `callsite_target`. It also provides the
-human-readable `subroutine_flow` and `callsite_flow` views:
+New logs have the header `event,source,callsite,target`. A `call` row fills all
+three address fields; an `entry` row uses `source` for the entered routine and
+leaves `callsite` and `target` empty. The tool also accepts legacy three-column
+call logs.
+
+The SQLite database keeps every routine from `labels.csv`, including routines
+with no activity in the captured run. Dynamic entry counts are stored in
+`subroutine_entry`; deduplicated calls use `callsite`, `call_edge`, and
+`callsite_target`. The `subroutine_activity`, `subroutine_flow`, and
+`callsite_flow` views provide human-readable queries:
 
 ```bash
 sqlite3 -header -column call-map.sqlite \
@@ -612,10 +619,11 @@ python3 tools/call_map.py ../calls.csv \
   --labels code-analysis/labels.csv
 ```
 
-Open `http://127.0.0.1:8080` to search flows, inspect observed call counts and
-navigate incoming and outgoing calls, including their callsites. The server
-binds only to localhost by default; pass `--host` explicitly to expose it on a
-different interface.
+Open `http://127.0.0.1:8080` to search all known routines, distinguish executed
+entries from labelled-only routines, inspect observed call counts, and navigate
+incoming and outgoing calls including their callsites. The server binds only
+to localhost by default; pass `--host` explicitly to expose it on a different
+interface.
 
 Current logs record the dynamic 68000 entry as their source, including when
 several entries share one generated C++ body. The tool always preserves a
