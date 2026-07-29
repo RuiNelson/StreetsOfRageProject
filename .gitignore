@@ -9,3 +9,6 @@ RageDecompiler/**/__pycache__
 .venv/
 /ai_play/models/
 controls.yaml
+calls.csv
+call-map.mmd
+call-map.sqlite
