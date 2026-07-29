@@ -1,0 +1,4 @@
+interface:
+  display_name: "Explore Call Map"
+  short_description: "Generate and inspect runtime call graphs"
+  default_prompt: "Use $explore-call-map to generate and inspect a Streets of Rage runtime call map."
