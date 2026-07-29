@@ -617,10 +617,13 @@ navigate incoming and outgoing calls, including their callsites. The server
 binds only to localhost by default; pass `--host` explicitly to expose it on a
 different interface.
 
-By default, the tool repairs older logs whose source field used a grouped C++
-implementation owner rather than the closest human-facing `labels.csv` entry.
-Use `--trust-recorded-source` for logs created after the corresponding logger
-fix if exact preservation of the recorded source field is desired.
+Current logs record the dynamic 68000 entry as their source, including when
+several entries share one generated C++ body. The tool always preserves a
+source already present in `labels.csv`. For older logs it approximates
+anonymous grouped C++ owners from the closest label; use
+`--trust-recorded-source` to disable that approximation. Since old logs cannot
+reliably reconstruct every non-contiguous entry, regenerate the log after
+recompiling when an expected routine such as `$019D16` is absent.
 
 The controls configurator can also be selected explicitly alongside the game
 with `--configControls --runSor`, although normal configuration sessions omit

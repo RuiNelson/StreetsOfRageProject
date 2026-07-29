@@ -56,10 +56,12 @@ python3 StreetsOfRageRecompilation/tools/call_map.py calls.csv \
 
 Pass multiple log paths to merge observations from several runs.
 
-By default, the tool maps source addresses to the closest preceding label to
-repair logs produced before the grouped-owner logger fix. Use
-`--trust-recorded-source` only when exact preservation of a newer log's source
-field is desired.
+The tool preserves source addresses already present in `labels.csv`. For older
+logs it approximates anonymous grouped C++ owners from the closest preceding
+label; use `--trust-recorded-source` to disable that approximation. Old logs
+cannot reliably reconstruct every dynamic entry across non-contiguous grouped
+code. If an expected labelled routine such as `$019D16` is absent, regenerate
+the game and capture a new log before treating the map as authoritative.
 
 ## Start the web viewer
 
