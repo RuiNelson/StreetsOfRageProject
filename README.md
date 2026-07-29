@@ -602,6 +602,21 @@ sqlite3 -header -column call-map.sqlite \
   'SELECT * FROM callsite_flow ORDER BY observed_count DESC LIMIT 20;'
 ```
 
+Pass `--port` to start the interactive web viewer after generating the
+database. `--labels` selects the labels file used for subroutine names:
+
+```bash
+python3 tools/call_map.py ../calls.csv \
+  --database call-map.sqlite \
+  --port 8080 \
+  --labels code-analysis/labels.csv
+```
+
+Open `http://127.0.0.1:8080` to search flows, inspect observed call counts and
+navigate incoming and outgoing calls, including their callsites. The server
+binds only to localhost by default; pass `--host` explicitly to expose it on a
+different interface.
+
 By default, the tool repairs older logs whose source field used a grouped C++
 implementation owner rather than the closest human-facing `labels.csv` entry.
 Use `--trust-recorded-source` for logs created after the corresponding logger
