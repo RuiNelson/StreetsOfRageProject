@@ -571,6 +571,7 @@ version.
 | `--turbo N` | With `--vsync 0`, run the internal VDP at `60 × N` Hz; `N` must be a positive integer |
 | `--port PORT` | With `--debugUtils`, select the remote-access TCP port; default: `6969`; `0` disables remote access |
 | `--auxAddrFile PATH` | Discovery mode: append an unknown indirect-dispatch address to this file and exit with status `42` instead of aborting |
+| `--callLog PATH` | Write every 68000 subroutine call to a CSV file as `source,callsite,target` (six-digit hexadecimal ROM addresses); the file is replaced on startup |
 
 Examples:
 
@@ -579,6 +580,7 @@ Examples:
 ./build/sor --rom rom/SOR.bin --fullScreen
 ./build/sor --rom rom/SOR.bin --altControls
 ./build/sor --rom rom/SOR.bin --turbo 2 --silent
+./build/sor --rom rom/SOR.bin --callLog calls.csv
 ```
 
 The controls configurator can also be selected explicitly alongside the game
