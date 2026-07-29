@@ -23,6 +23,11 @@ logic. The tool accepts one or more CSV logs with the exact header
 `source,callsite,target`, collapses repeated events, stores the result in
 SQLite, and can serve a read-only interactive viewer.
 
+Treat the web viewer strictly as a presentation surface for humans. When an AI
+agent needs to inspect or reason about the call map, query the SQLite database
+directly; do not start the web server or use browser automation for agent-side
+analysis.
+
 ## Workflow
 
 1. Resolve the input log paths, output database path, and labels file. Prefer
@@ -32,8 +37,8 @@ SQLite, and can serve a read-only interactive viewer.
 3. Check that the database path is not an input log or the labels file. The
    database is regenerated, so preserve an existing database if the user needs
    it.
-4. Generate the SQLite map, adding `--port` only when an interactive viewer is
-   requested.
+4. Generate the SQLite map. Add `--port` only when a human explicitly wants an
+   interactive viewer; never add it merely so an agent can inspect the data.
 5. Report event, flow, and callsite counts printed by the tool. For SQL
    analysis, query the human-readable `subroutine_flow` and `callsite_flow`
    views before joining raw tables.
@@ -58,6 +63,9 @@ field is desired.
 
 ## Start the web viewer
 
+Use this mode only to let a human explore the map visually. Agents must use the
+SQLite queries below instead.
+
 ```bash
 python3 StreetsOfRageRecompilation/tools/call_map.py calls.csv \
   --database StreetsOfRageRecompilation/call-map.sqlite \
@@ -72,9 +80,41 @@ explicitly asks to expose it. Stop temporary validation servers before
 finishing; leave a user-requested server running only when the environment can
 reliably preserve its process.
 
-If visual or interaction validation is part of the request, use the available
-browser-control skill against the localhost URL, verify search and subroutine
-navigation, then close the validation tab and stop the temporary server.
+If a human-facing viewer change itself requires visual validation, use the
+available browser-control skill against the localhost URL, verify search and
+subroutine navigation, then close the validation tab and stop the temporary
+server. Do not use browser control to extract or analyze call relationships.
+
+## SQLite schema
+
+Use these tables for agent-side analysis:
+
+| Object | Purpose | Key columns |
+|---|---|---|
+| `metadata` | Generation context and totals | `key`, `value` |
+| `subroutine` | Observed source/target routines and label data | `address` PK, `name`, `description` |
+| `callsite` | Call instructions grouped by their source routine | composite PK (`source_address`, `address`), `observed_count` |
+| `call_edge` | Deduplicated source-to-target flows | composite PK (`source_address`, `target_address`), `observed_count` |
+| `callsite_target` | Exact source/callsite/target relationships | composite PK (`source_address`, `callsite_address`, `target_address`), `observed_count` |
+
+`callsite.source_address`, both addresses in `call_edge`, and the source and
+target addresses in `callsite_target` refer to `subroutine.address`.
+`callsite_target.(source_address, callsite_address)` refers to
+`callsite.(source_address, address)`. Target indexes support reverse-caller
+queries.
+
+Raw-table addresses are 24-bit integers. The `subroutine_flow` and
+`callsite_flow` views join labels and format addresses as `$XXXXXX` text:
+
+- `subroutine_flow(source_address, source_name, target_address, target_name,
+  observed_count)`
+- `callsite_flow(source_address, source_name, callsite_address,
+  target_address, target_name, observed_count)`
+
+`observed_count` is the number of runtime events collapsed into that row; it is
+not a static reachability weight. Expected `metadata` keys are
+`format_version`, `total_events`, `normalized_source_events`, and
+`input_files`.
 
 ## Query useful relationships
 
