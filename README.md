@@ -583,15 +583,14 @@ Examples:
 ./build/sor --rom rom/SOR.bin --callLog calls.csv
 ```
 
-### Call-map database and Mermaid diagram
+### Call-map database
 
 Collapse a runtime call log into unique observed control-flow relationships:
 
 ```bash
 cd StreetsOfRageRecompilation
 python3 tools/call_map.py ../calls.csv \
-  --database call-map.sqlite \
-  --mermaid call-map.mmd
+  --database call-map.sqlite
 ```
 
 The SQLite database keeps the complete deduplicated map in `subroutine`,
@@ -601,19 +600,6 @@ human-readable `subroutine_flow` and `callsite_flow` views:
 ```bash
 sqlite3 -header -column call-map.sqlite \
   'SELECT * FROM callsite_flow ORDER BY observed_count DESC LIMIT 20;'
-```
-
-The Mermaid file aggregates each subroutine-to-subroutine edge and lists its
-callsites and observation counts. For a smaller diagram, restrict only the
-Mermaid output to flows reachable from one or more roots; the SQLite database
-always remains complete:
-
-```bash
-python3 tools/call_map.py ../calls.csv \
-  --database call-map.sqlite \
-  --mermaid game-loop.mmd \
-  --root '$0003A2' \
-  --max-depth 2
 ```
 
 By default, the tool repairs older logs whose source field used a grouped C++
