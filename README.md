@@ -549,6 +549,19 @@ These are host debugging facilities, not part of the original cartridge input
 protocol. Use them only when investigating runtime behavior or exercising
 specific game paths.
 
+The remote debugging client can invoke the same cheats when the game is
+started with `--debugUtils`. Use `trigger_option_hotkey()` with the character
+from the table (without Alt/Option):
+
+```python
+from megadrive_remote import MegaDriveClient
+
+with MegaDriveClient("127.0.0.1", 6969) as game:
+    game.trigger_option_hotkey("l")  # add a P1 life
+    game.trigger_option_hotkey("p")  # toggle P1 punch power
+    game.trigger_option_hotkey("3")  # load level 3
+```
+
 #### Startup flags
 
 The `sor` executable accepts the following command-line options. `--help`

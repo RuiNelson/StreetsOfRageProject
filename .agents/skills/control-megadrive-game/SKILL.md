@@ -10,7 +10,8 @@ description: >
   MegaDriveEnvironment consumer. Triggers include "control the game", "observe
   the game", "remote client", "MegaDriveClient", "automation script",
   "scripted input", "read game memory", "capture frames", "controla o jogo",
-  "observa a execucao", and "script Python para o jogo".
+  "observa a execucao", "script Python para o jogo", "remote cheats",
+  "cheats remotos", and "ativar cheats remotamente".
 ---
 
 # Control a MegaDriveEnvironment game
@@ -69,6 +70,25 @@ Treat `press_buttons(..., frames=N)` as a blocking hold for exactly `N` complete
 frame intervals starting at the next VSync. Use a fresh call for each input
 phase; the server releases the remote buttons before replying.
 
+## Host debug actions and cheats
+
+`trigger_option_hotkey(key)` sends one printable ASCII key to the same
+game-defined host callback as an Alt/Option keyboard chord. It is appropriate
+for host debugging actions such as Streets of Rage cheats, not emulated joypad
+input. The target must have debug utilities enabled; for Streets of Rage, start
+`sor` with `--debugUtils` and a non-zero `--port`.
+
+```python
+with MegaDriveClient() as game:
+    game.trigger_option_hotkey("l")  # Streets of Rage: add one P1 life
+    game.trigger_option_hotkey("p")  # toggle P1 punch power
+    game.trigger_option_hotkey("3")  # load level 3
+```
+
+The client normalizes ASCII letters to lowercase. Unsupported game keys are
+acknowledged but have no effect. Keep these actions explicitly requested and
+record which hotkey was invoked in the experiment output.
+
 ## Observation strategy
 
 Choose the narrowest reliable signal:
@@ -81,6 +101,7 @@ Choose the narrowest reliable signal:
 | Inspect rendering setup | VDP state, palettes, tilemap, or a bounded VRAM range |
 | Synchronize an action | VSync/scanline wait or a semantic memory condition |
 | Reproduce controls | Explicit `Buttons` masks and frame counts |
+| Exercise host cheats | `trigger_option_hotkey()` plus a game-state observation |
 
 For Streets of Rage, resolve names and widths from
 `code-analysis/addresses.csv`; do not guess offsets from generated C++. For the
@@ -94,6 +115,8 @@ SAT, tilemap, and source-derived assertions instead of inventing RAM symbols.
 - Bind scripts to `127.0.0.1` unless the user explicitly needs a remote host.
 - Remote controller state is ORed with physical input; avoid touching the
   keyboard/gamepad during deterministic runs.
+- `trigger_option_hotkey()` is a host debugging facility, not an emulated
+  controller event; it is ignored if debug utilities are disabled.
 - One connection permits one in-flight request. Do not wait for a memory change
   that only a second request on the same client could cause; the running game
   must cause it, or use a separately coordinated producer.

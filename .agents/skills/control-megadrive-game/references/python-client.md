@@ -38,9 +38,11 @@ releases the socket and any remote buttons.
 
 ```python
 game.restart_game(timeout_ms=5_000)
+print(game.get_game_uptime_ms())
+print(game.get_game_uptime_frames())
 game.press_buttons(
-    player1=Buttons.A | Buttons.RIGHT,
-    player2=Buttons.NONE,
+    player1=Buttons.A | Buttons.X | Buttons.RIGHT,
+    player2=Buttons.START | Buttons.MODE,
     frames=3,
 )
 game.release_buttons()  # emergency/explicit release; normal press releases too
@@ -49,12 +51,49 @@ game.wait_hsync_count(10, timeout_ms=1_000)
 game.wait_hsync_reach_line(120, timeout_ms=1_000)
 ```
 
-Buttons are `UP`, `DOWN`, `LEFT`, `RIGHT`, `A`, `B`, `C`, `START`, and `NONE`.
-Combine masks with `|`.
+Buttons are `UP`, `DOWN`, `LEFT`, `RIGHT`, `A`, `B`, `C`, `START`, `X`, `Y`,
+`Z`, `MODE`, and `NONE`. Combine masks with `|`.
 
 `press_buttons` waits for the next VSync, holds the mask for the requested full
 frame intervals, releases it, and then returns. Its default timeout scales with
 the frame count.
+
+## Execution data and host debug actions
+
+```python
+debug_data = game.get_execution_data()
+game.set_execution_data(b'{"probe":"ready"}')
+game.trigger_option_hotkey("l")
+```
+
+The execution-data buffer is opaque and game-defined; it persists across
+remote reconnects and cold restarts until replaced or cleared with `b""`.
+
+`trigger_option_hotkey(key)` sends exactly one printable ASCII character to the
+target's host-only debug-hotkey callback, normalizing letters to lowercase. It
+does not emulate a joypad button. The method returns after the callback runs;
+unsupported keys are harmless. Games may ignore it when their debug utilities
+are disabled. Streets of Rage exposes its documented host cheats through this
+method when launched with `--debugUtils`.
+
+## Lockstep
+
+```python
+game.set_lockstep(True)
+step = game.step_input(
+    player1=Buttons.B | Buttons.RIGHT,
+    held_frames=4,
+    total_frames=12,
+)
+print(step.frame, len(step.work_ram))  # 65536 bytes
+game.set_lockstep(False)
+```
+
+Lockstep pauses at a complete-frame boundary. `step_input()` advances exactly
+`total_frames`, applies its masks only for the first `held_frames`, and returns
+the matching final frame number plus a coherent 64 KiB work-RAM snapshot.
+Always release lockstep before returning control to a human; disconnect and
+restart also release it.
 
 ## Memory
 
