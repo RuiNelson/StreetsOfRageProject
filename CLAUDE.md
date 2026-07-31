@@ -82,9 +82,11 @@ On macOS and Linux, the preferred wrappers are:
 ./scripts/generate_cpp_and_build --release
 ```
 
-After `generated/Sor.cpp` and `generated/Sor.hpp` exist locally, subsequent
-builds may omit `--full`. The portable CMake path, including Windows, must be
-run only after that generation step:
+After `generated/SoR.hpp`, `generated/SoR-common.hpp`, and the split
+`generated/SoR-XXX.cpp` files exist locally, subsequent builds may omit
+`--full`. Each source group uses the first three hexadecimal digits of its
+first subroutine entry address. The portable CMake path, including Windows,
+must be run only after that generation step:
 
 ```bash
 cmake -S StreetsOfRageRecompilation \

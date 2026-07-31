@@ -316,10 +316,11 @@ python -m tools recompile StreetsOfRageRecompilation\rom\SOR.bin `
   --manual-functions StreetsOfRageRecompilation\code-analysis\manual_functions.txt
 ```
 
-The command creates the local files
-`StreetsOfRageRecompilation\generated\Sor.cpp` and `Sor.hpp`. Regenerate them
-whenever the ROM, analysis data, labels, auxiliary addresses, manual-function
-inputs, or recompiler changes.
+The command creates `SoR.hpp`, `SoR-common.hpp`, and split `SoR-XXX.cpp` files
+under `StreetsOfRageRecompilation\generated`. Each `XXX` is formed from the
+first three hexadecimal digits of the first subroutine entry address in that
+source file. Regenerate them whenever the ROM, analysis data, labels, auxiliary
+addresses, manual-function inputs, or recompiler changes.
 
 In the same **Developer PowerShell for VS 2022** session, configure and compile:
 
@@ -376,8 +377,9 @@ For the first optimized build:
 ./scripts/generate_cpp_and_build --release
 ```
 
-Once `generated/Sor.cpp` and `generated/Sor.hpp` exist locally, subsequent
-incremental builds can use:
+Once `generated/SoR.hpp`, `generated/SoR-common.hpp`, and the
+`generated/SoR-XXX.cpp` files exist locally, subsequent incremental builds can
+use:
 
 ```bash
 ./scripts/build
