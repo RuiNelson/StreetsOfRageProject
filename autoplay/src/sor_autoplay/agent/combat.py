@@ -27,6 +27,8 @@ from ..world_map import SCREEN_WIDTH, MapEntity
 from . import enemies as enemy_ai
 from .characters import CharacterProfile
 from .enemies import CounterPlan
+from .fuzzy import falling
+from .knowledge import Relation, TacticalKnowledgeGraph
 
 
 # map_x is camera-relative: 0 = left edge of the visible screen, 320 = right.
@@ -88,6 +90,8 @@ class TargetChoice:
     dy: float
     dist: float
     plan: CounterPlan
+    utility: float = 0.0
+    explanation: tuple[str, ...] = ()
 
 
 def is_on_screen(entity: MapEntity, *, soft: bool = False) -> bool:
@@ -344,10 +348,13 @@ def select_target(
     prefer_forward: bool = True,
     include_projectiles: bool = True,
     my_seat: int = 1,
+    graph: TacticalKnowledgeGraph | None = None,
+    preferred_slot: str | None = None,
+    switch_margin: float = 0.12,
 ) -> TargetChoice | None:
-    """Pick the most urgent **on-screen** combatant."""
+    """Choose a reachable combatant by fuzzy peril/value with hysteresis."""
 
-    best: TargetChoice | None = None
+    choices: list[TargetChoice] = []
     for entity in entities:
         if entity.kind not in ("enemy", "boss", "projectile"):
             continue
@@ -363,63 +370,100 @@ def select_target(
         if should_ignore_as_target(entity.combat_phase):
             continue
 
-        if entity.kind != "projectile" and not is_on_screen(entity):
-            continue
-        if entity.kind == "projectile" and not is_on_screen(entity):
+        reachable = (
+            graph.entity_has(entity, Relation.REACHABLE)
+            if graph is not None
+            else is_on_screen(entity)
+        )
+        if not reachable:
             continue
 
         plan = enemy_ai.plan_for(entity)
         dx = entity.map_x - me.map_x
         dy = entity.map_y - me.map_y
         dist = math.hypot(dx, dy)
-        if dist > 220 and entity.kind != "projectile":
+        # A visible boss locks progression and stays a target across the whole
+        # arena. Ordinary enemies retain a locality bound to avoid long chases.
+        if dist > 220 and entity.kind not in ("projectile", "boss"):
             continue
         if entity.kind == "projectile" and dist > 140:
             continue
 
-        lane_pen = abs(dy) / max(1.0, LANE_HIT_HALF)
-        forward_bonus = 0.0
-        if prefer_forward and dx > 0:
-            forward_bonus = 0.25
-        elif not prefer_forward and dx < 0:
-            forward_bonus = 0.25
-
-        weight = plan.priority
-        # Prefer same-lane threats — off-lane "close" foes were air-punch bait.
-        score = (dist / max(0.5, weight)) + lane_pen * 18.0 - forward_bonus * 12.0
-
-        if entity.kind == "boss":
-            score -= 40.0
-        if entity.kind == "projectile":
-            score -= 35.0
-
         phase = entity.combat_phase
-        if is_punishable(phase):
-            score -= 80.0
+        closeness = falling(dist, 20.0, 260.0 if entity.kind == "boss" else 220.0)
+        lane_access = falling(abs(dy), 8.0, 72.0)
+        peril = 0.15
+        reasons = [f"near={closeness:.2f}", f"lane={lane_access:.2f}"]
+        if entity.kind == "projectile" or plan.kind == enemy_ai.ThreatKind.PROJECTILE:
+            peril = 1.0
+            reasons.append("ranged")
         if is_dangerous(phase):
-            # An active attacker must beat a tempting knockdown/blocked target
-            # in another lane. Round-1 Garcia can cross ~13 lane units between
-            # observations, so late target switching costs a full punch.
-            score -= 120.0
-            if phase == CombatPhase.CHARGE and dist < 80:
-                score -= 30.0
+            peril = 1.0
+            reasons.append("attacking")
         if entity.targets_player == my_seat:
-            score -= 30.0
+            peril = max(peril, 0.82)
+            reasons.append("targets-me")
+        if entity.kind == "boss":
+            peril = max(peril, 0.70)
+            reasons.append("boss")
         if abs(dx) < REAR_REACT_RANGE and abs(dy) < LANE_HIT_HALF + 4:
-            score -= 12.0
-        if plan.distrust_downed and entity.health is not None and entity.health <= 3:
-            score -= 5.0
-        if entity.pair_role == 2 and entity.kind == "boss":
-            score += 8.0
-        # Already aligned + in strike range: strong preference.
-        if can_punch(me, entity, profile, require_facing=False):
-            score -= 25.0
+            peril = max(peril, 0.62)
+            reasons.append("contact-band")
+
+        punish = 1.0 if is_punishable(phase) else 0.0
+        boss = 1.0 if entity.kind == "boss" else 0.0
+        forward = 1.0 if (prefer_forward and dx > 0) or (not prefer_forward and dx < 0) else 0.0
+        strike = 1.0 if can_punch(me, entity, profile, require_facing=False) else 0.0
+        priority = min(1.0, max(0.0, (plan.priority - 1.0) / 2.5))
+        utility = (
+            0.26 * closeness
+            + 0.30 * peril
+            + 0.12 * lane_access
+            + 0.30 * punish
+            + 0.06 * boss
+            + 0.03 * forward
+            + 0.03 * strike
+            + 0.02 * priority
+        )
+        if is_dangerous(phase) or entity.kind == "projectile":
+            utility = max(utility, 0.84)
+        if entity.kind == "boss":
+            utility = max(utility, 0.72)
+        if entity.slot == preferred_slot:
+            reasons.append("current-focus")
+        utility = min(1.0, utility)
 
         choice = TargetChoice(
-            entity=entity, score=score, dx=dx, dy=dy, dist=dist, plan=plan
+            entity=entity,
+            score=1.0 - utility,
+            dx=dx,
+            dy=dy,
+            dist=dist,
+            plan=plan,
+            utility=utility,
+            explanation=tuple(reasons),
         )
-        if best is None or choice.score < best.score:
-            best = choice
+        choices.append(choice)
+
+    if not choices:
+        return None
+    best = max(choices, key=lambda choice: choice.utility)
+    current = next(
+        (choice for choice in choices if choice.entity.slot == preferred_slot),
+        None,
+    )
+    if current is not None and best.entity.slot != current.entity.slot:
+        challenger_dangerous = (
+            is_dangerous(best.entity.combat_phase)
+            or best.entity.kind == "projectile"
+        )
+        current_dangerous = (
+            is_dangerous(current.entity.combat_phase)
+            or current.entity.kind == "projectile"
+        )
+        if not (challenger_dangerous and not current_dangerous):
+            if best.utility < current.utility + switch_margin:
+                return current
     return best
 
 
@@ -550,6 +594,7 @@ def select_breakable(
     *,
     max_dist: float = 200.0,
     prefer_forward: bool = True,
+    graph: TacticalKnowledgeGraph | None = None,
 ) -> MapEntity | None:
     """Nearest on-screen breakable (phone booth / crate) to smash for loot."""
 
@@ -557,6 +602,8 @@ def select_breakable(
     best_score = 1e9
     for entity in entities:
         if entity.kind != "breakable":
+            continue
+        if graph is not None and not graph.entity_has(entity, Relation.REACHABLE):
             continue
         if not is_on_screen(entity):
             continue
@@ -598,6 +645,7 @@ def select_pickup(
     max_dist: float = 160.0,
     already_holding_weapon: bool = False,
     profile: CharacterProfile | None = None,
+    graph: TacticalKnowledgeGraph | None = None,
 ) -> MapEntity | None:
     best: MapEntity | None = None
     best_score = 1e9
@@ -621,6 +669,8 @@ def select_pickup(
             w_bonus = 0.0
         else:
             continue
+        if graph is not None and not graph.entity_has(entity, Relation.COLLECTIBLE):
+            continue
         if not is_on_screen(entity):
             continue
         d = math.hypot(entity.map_x - me.map_x, entity.map_y - me.map_y)
@@ -634,11 +684,15 @@ def select_pickup(
 def nearest_foe(
     me: MapEntity,
     entities: tuple[MapEntity, ...],
+    *,
+    graph: TacticalKnowledgeGraph | None = None,
 ) -> MapEntity | None:
     best: MapEntity | None = None
     best_d = 1e9
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
+            continue
+        if graph is not None and not graph.entity_has(entity, Relation.REACHABLE):
             continue
         if (
             entity.health is not None
@@ -673,6 +727,7 @@ def closest_behind(
     *,
     face_right: bool,
     max_dist: float = REAR_REACT_RANGE,
+    graph: TacticalKnowledgeGraph | None = None,
 ) -> MapEntity | None:
     """Nearest on-screen foe truly behind us (for turn + back attack)."""
 
@@ -680,6 +735,8 @@ def closest_behind(
     best_d = max_dist
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
+            continue
+        if graph is not None and not graph.entity_has(entity, Relation.REACHABLE):
             continue
         if (
             entity.health is not None

@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from ..phases import CombatPhase, is_dangerous
 from ..state import GameSnapshot, PlayerSnapshot
 from ..world_map import SCREEN_WIDTH, MapEntity
+from .fuzzy import FuzzyInference, FuzzyRule, falling, rising
+from .knowledge import Relation, TacticalKnowledgeGraph
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +25,28 @@ class PressureReport:
     reason: str
     hunters: int = 0
     charging: int = 0
+    urgency: float = 0.0
+    fired_rules: tuple[str, ...] = ()
+
+
+_PRESSURE_ENGINE = FuzzyInference(
+    (
+        FuzzyRule("baseline", (), 0.0, weight=0.35),
+        FuzzyRule("crowd", ("crowd",), 0.85),
+        FuzzyRule("hunters", ("hunters",), 0.60),
+        FuzzyRule("active-attacks", ("active_attacks",), 0.60),
+        FuzzyRule("boss", ("boss",), 0.55),
+        FuzzyRule("surrounded", ("surrounded",), 0.80),
+        FuzzyRule(
+            "critical-health",
+            ("critical_health", "any_threat"),
+            0.85,
+        ),
+        FuzzyRule("crowd-while-hurt", ("crowd", "low_health"), 1.0),
+        FuzzyRule("attack-while-hurt", ("active_attacks", "low_health"), 1.0),
+        FuzzyRule("boss-while-hurt", ("boss", "low_health"), 0.95),
+    )
+)
 
 
 def nearby_threats(
@@ -31,6 +55,7 @@ def nearby_threats(
     *,
     x_radius: float = 200.0,
     lane_radius: float = 48.0,
+    graph: TacticalKnowledgeGraph | None = None,
 ) -> tuple[list[MapEntity], list[MapEntity]]:
     """Return (enemies, bosses) near the player in map space."""
 
@@ -38,6 +63,8 @@ def nearby_threats(
     bosses: list[MapEntity] = []
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
+            continue
+        if graph is not None and not graph.entity_has(entity, Relation.REACHABLE):
             continue
         if (
             entity.health is not None
@@ -64,13 +91,19 @@ def compute_pressure(
     snapshot: GameSnapshot,
     player_snap: PlayerSnapshot,
     player_entity: MapEntity | None,
+    *,
+    graph: TacticalKnowledgeGraph | None = None,
 ) -> PressureReport:
-    """Scalar pressure in roughly 0..10+; call special when score ≥ threshold."""
+    """Fuzzy danger pressure on a stable 0..10 scale."""
 
     if player_entity is None or not player_snap.is_playable:
         return PressureReport(0.0, 0, False, "no player")
 
-    enemies, bosses = nearby_threats(player_entity, snapshot.world_map.entities)
+    enemies, bosses = nearby_threats(
+        player_entity,
+        snapshot.world_map.entities,
+        graph=graph,
+    )
     all_near = enemies + bosses
     enemy_count = len(enemies)
     boss_present = bool(bosses)
@@ -79,59 +112,39 @@ def compute_pressure(
     charging = sum(1 for e in all_near if is_dangerous(e.combat_phase))
 
     hp = player_snap.health_percent if player_snap.health_percent is not None else 100.0
-    score = 0.0
-    reasons: list[str] = []
-
-    if enemy_count >= 5:
-        score += 4.0 + 0.5 * (enemy_count - 5)
-        reasons.append(f"{enemy_count} enemies")
-    elif enemy_count >= 3:
-        score += 2.0 + 0.5 * (enemy_count - 3)
-        reasons.append(f"{enemy_count} enemies")
-    elif enemy_count >= 1:
-        score += 0.4 * enemy_count
-
-    if boss_present:
-        score += 2.5
-        reasons.append("boss")
-
-    if hunters >= 3:
-        score += 2.0
-        reasons.append(f"{hunters} hunting me")
-    elif hunters >= 2:
-        score += 1.0
-        reasons.append(f"{hunters} hunting")
-
-    if charging >= 2:
-        score += 2.0
-        reasons.append(f"{charging} charging")
-    elif charging == 1 and hp <= 50:
-        score += 1.2
-        reasons.append("charge + mid hp")
-
-    if hp <= 25.0:
-        score += 3.5
-        reasons.append(f"hp {hp:.0f}%")
-    elif hp <= 45.0:
-        score += 2.0
-        reasons.append(f"hp {hp:.0f}%")
-    elif hp <= 60.0 and enemy_count >= 2:
-        score += 1.0
-        reasons.append("mid hp + pack")
-
     left = sum(1 for e in enemies if e.map_x < player_entity.map_x - 8)
     right = sum(1 for e in enemies if e.map_x > player_entity.map_x + 8)
-    if left >= 1 and right >= 1 and enemy_count >= 3:
-        score += 1.5
-        reasons.append("surrounded")
+    facts = {
+        "crowd": rising(float(enemy_count), 2.0, 6.0),
+        "hunters": rising(float(hunters), 0.5, 3.0),
+        "active_attacks": rising(float(charging), 0.0, 2.0),
+        "boss": 1.0 if boss_present else 0.0,
+        "surrounded": 1.0 if left and right and enemy_count >= 3 else 0.0,
+        "low_health": falling(hp, 30.0, 75.0),
+        "critical_health": falling(hp, 12.0, 35.0),
+        "any_threat": 1.0 if all_near else 0.0,
+    }
+    inferred = _PRESSURE_ENGINE.infer(facts)
+    fired = tuple(
+        name
+        for name, activation in inferred.activations
+        if name != "baseline" and activation >= 0.15
+    )
+    reasons = list(fired)
+    if enemy_count:
+        reasons.append(f"{enemy_count} enemies")
+    if hp < 75.0:
+        reasons.append(f"hp {hp:.0f}%")
 
     return PressureReport(
-        score=score,
+        score=inferred.value * 10.0,
         enemy_count=enemy_count,
         boss_present=boss_present,
         reason=", ".join(reasons) if reasons else "calm",
         hunters=hunters,
         charging=charging,
+        urgency=inferred.value,
+        fired_rules=fired,
     )
 
 

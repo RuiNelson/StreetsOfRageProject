@@ -40,6 +40,9 @@ WEAPON_PEPPER = 0x0C
 HOLD_LATCH_TICKS = 2
 # Live: B alone knees; mix B+back for throws after a few knees.
 THROW_EVERY = 3
+GRAB_INPUT_RETRY_TICKS = 4
+HOLD_INPUT_ACTIONS = frozenset({0x28, 0x4A, 0x60, 0x66})
+GRAB_ANIMATION_ACTIONS = frozenset({0x62, 0x64, 0x68, 0x6A, 0x6C, 0x6E})
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,18 +78,21 @@ def context_from_player(
     if entities is not None:
         linked = _player_has_grabbed_enemy(me, entities, player_index=player_index)
 
-    weapon = 0x08 <= held_type <= 0x0C
+    weapon_type = 0x08 <= held_type <= 0x0C
     # Strong evidence only. +$4C is a general contact pointer, while +$5E
     # remains a pointer to the projectile after pepper spray/other weapons are
     # released and +$60 has already cleared. Neither pointer alone proves an
     # enemy hold. The live $60 hold is recognized by the GRABBED enemy's
     # reciprocal link; other grab layouts retain a non-weapon held_type.
-    enemy_grab = linked or (held_type != 0 and not weapon)
+    enemy_grab = linked or (held_type != 0 and not weapon_type)
+    # A live reciprocal GRABBED link is stronger evidence than +$60, which can
+    # retain the previously carried weapon type after the player grabs a foe.
+    weapon = weapon_type and not linked
     holding = weapon or enemy_grab
 
     return GrabContext(
         holding=holding,
-        weapon=weapon and held_type != 0,
+        weapon=weapon,
         enemy_grab=enemy_grab,
         held_type=held_type,
         action_base=me.action_base,
@@ -127,11 +133,13 @@ class GrabMemory:
     latched: bool = False
     clear_ticks: int = 0
     pulse: int = 0
+    last_input_tick: int = -10_000
 
     def reset(self) -> None:
         self.latched = False
         self.clear_ticks = 0
         self.pulse = 0
+        self.last_input_tick = -10_000
 
 
 def decide_held(
@@ -155,9 +163,16 @@ def decide_held(
     # frozen indefinitely; one B edge selects $6A and returns to idle $02.
     # Restrict this to exact $60 so the resulting $6A transition is not fed
     # another artificial knee/throw pulse.
-    if not ctx.holding and me.action_base == 0x60 and me.contact_ptr:
-        memory.reset()
-        return Intent(attack=True, note="release stale contact")
+    if not ctx.holding and me.action_base in HOLD_INPUT_ACTIONS:
+        if tick - memory.last_input_tick < GRAB_INPUT_RETRY_TICKS:
+            return Intent(note=f"await orphan grab ${me.action_state:02X}")
+        memory.last_input_tick = tick
+        note = (
+            "release stale contact"
+            if me.action_base == 0x60 and me.contact_ptr
+            else f"resolve orphan grab ${me.action_state:02X}"
+        )
+        return Intent(attack=True, note=note)
 
     prof = profile if profile is not None else DEFAULT_PROFILE
 
@@ -179,8 +194,6 @@ def decide_held(
     else:
         memory.reset()
         return None
-
-    memory.pulse += 1
 
     return _enemy_grab_tree(
         me,
@@ -222,12 +235,24 @@ def _enemy_grab_tree(
     crowd: int,
     profile: CharacterProfile,
 ) -> Intent:
-    """Live: B alone knees the held foe. Mix B+back for throws.
+    """Live: B alone knees the held foe. Mix B+back for throws."""
 
-    Always set attack=True so the app can fire VSync press edges every poll.
-    """
+    # B/C edges are accepted only in the stable front/back hold actions. The
+    # baseline trace showed repeated B presses through $6A/$63 animations,
+    # keeping the player stuck after the enemy was already dead.
+    if me.action_base not in HOLD_INPUT_ACTIONS:
+        return Intent(note=f"grab anim ${me.action_state:02X}")
+    if tick - memory.last_input_tick < GRAB_INPUT_RETRY_TICKS:
+        return Intent(note=f"await grab input ${me.action_state:02X}")
+    memory.last_input_tick = tick
+    memory.pulse += 1
 
-    del tick
+    if me.action_base == 0x66:
+        return Intent(
+            attack=True,
+            note=f"suplex ({profile.name}) act=${me.action_state:02X}",
+        )
+
     back = throw_back_direction(
         me, progress_right=progress_right, crowd=crowd, foe=foe
     )
@@ -268,10 +293,33 @@ def _weapon_tree(
     throwable = held in (WEAPON_KNIFE, WEAPON_BOTTLE, WEAPON_PEPPER)
     blaze_weak = held in profile.weak_weapons
 
+    # The ROM's held-weapon jump family ($3C-$42) is owned by the airborne
+    # policy. It steers the evasion without manufacturing an unsupported
+    # weapon attack edge in flight.
+    if ctx.airborne:
+        return None
+
+    # A held weapon's input loop is active only in ordinary ground actions or
+    # its ROM-specific ready family ($30-$3A). Do not hammer B throughout
+    # $44/$6x attack animations: besides being useless, that was the visible
+    # "furious" repeated attack behaviour.
+    action = me.action_base
+    input_ready = 0x02 <= action <= 0x0E or 0x30 <= action <= 0x3A
+    if not input_ready:
+        dx = 0.0 if foe is None else foe.map_x - me.map_x
+        face_left = dx < 0 or (dx == 0 and bool(me.action_state & 0x01))
+        face_right = not face_left
+        return Intent(
+            left=face_left,
+            right=face_right,
+            note=f"weapon anim ${held:02X} act=${me.action_state:02X}",
+        )
+
     # A carried weapon is inventory, not an instruction to attack every poll.
     # Let normal stage/combat policy run until a live foe is in a usable box.
     # Dangerous attacks also return to combat policy so family counters (for
-    # example jumping Signal's sweep) take priority over a weapon swing.
+    # example jumping Signal's sweep) take priority over a weapon swing. This
+    # is deliberately after the animation lock above.
     if foe is None or is_dangerous(foe.combat_phase):
         return None
 
@@ -288,19 +336,6 @@ def _weapon_tree(
         face_right = not face_left
     in_melee = abs(dx) <= 36
     mid = 20 <= abs(dx) <= 100
-
-    # A held weapon's input loop is active only in ordinary ground actions or
-    # its ROM-specific ready family ($30-$3A). Do not hammer B throughout
-    # $44/$6x attack animations: besides being useless, that was the visible
-    # "furious" repeated attack behaviour.
-    action = me.action_base
-    input_ready = 0x02 <= action <= 0x0E or 0x30 <= action <= 0x3A
-    if not input_ready:
-        return Intent(
-            left=face_left,
-            right=face_right,
-            note=f"weapon anim ${held:02X} act=${me.action_state:02X}",
-        )
 
     if melee:
         if not in_melee:

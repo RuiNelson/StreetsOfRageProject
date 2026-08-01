@@ -17,9 +17,11 @@ from pathlib import Path
 from typing import Callable, Protocol, Sequence, TextIO
 
 from .agent import AgentConfig, AgentDecision, AgentState, decide_actions
-from .agent.combat import signal_sweep_threat
+from .agent.combat import player_can_start_ground_action, signal_sweep_threat
 from .agent.expert import DEFAULT_COMBAT_EXPERT, TacticalGoal
 from .agent.grabs import context_from_player, held_enemy_entity
+from .agent.knowledge import Relation, build_tactical_graph
+from .phases import should_ignore_as_target
 from .state import GameSnapshot, read_snapshot
 from .world_map import MapEntity
 
@@ -29,6 +31,7 @@ WORK_RAM_SIZE = 0x10000
 FACE_BUTTONS = 0x70
 DIRECTIONS = 0x0F
 GAMEPLAY_STATES = frozenset({0x14, 0x16})
+BOSS_STALL_GRACE_STEPS = 8
 
 
 class LockstepClient(Protocol):
@@ -140,12 +143,18 @@ class EpisodeMetrics:
     missed_back_exposure_responses: int = 0
     crossover_suplex_starts: int = 0
     suplexes: int = 0
+    invalid_grab_animation_attacks: int = 0
+    unreachable_enemy_stall_steps: int = 0
+    loot_under_threat_steps: int = 0
+    boss_progress_steps: int = 0
+    boss_stall_steps: int = 0
     face_actions: int = 0
     forward_progress: int = 0
     total_reward: float = 0.0
     actions: Counter[str] = field(default_factory=Counter)
     _last_x: int | None = field(default=None, repr=False)
     _zero_health_foes: set[str] = field(default_factory=set, repr=False)
+    _boss_stall_streak: int = field(default=0, repr=False)
 
     @classmethod
     def start(cls, snapshot: GameSnapshot, player_index: int) -> "EpisodeMetrics":
@@ -215,6 +224,12 @@ class EpisodeMetrics:
                 self.signal_sweep_jumps += 1
 
         if before_entity is not None:
+            graph = build_tactical_graph(
+                before_entity,
+                before.world_map.entities,
+                level_index=before.level_index,
+                player_index=self.player_index,
+            )
             grab = context_from_player(
                 before_entity,
                 before.world_map.entities,
@@ -238,6 +253,57 @@ class EpisodeMetrics:
                     self.missed_back_exposure_responses += 1
             if grab.enemy_grab and before_entity.action_base == 0x66 and mask & 0x20:
                 self.suplexes += 1
+
+            if (
+                mask & 0x20
+                and 0x60 <= before_entity.action_base <= 0x6E
+                and before_entity.action_base not in (0x60, 0x66)
+            ):
+                self.invalid_grab_animation_attacks += 1
+
+            blocking = graph.entities_with(Relation.BLOCKS_PROGRESS)
+            unreachable = tuple(
+                entity
+                for entity in before.world_map.entities
+                if entity.kind in ("enemy", "boss")
+                and 0.0 <= entity.map_x <= 320.0
+                and not graph.entity_has(entity, Relation.REACHABLE)
+                and not should_ignore_as_target(entity.combat_phase)
+            )
+            if (
+                unreachable
+                and not blocking
+                and not mask & 0x0F
+                and player_can_start_ground_action(before_entity)
+            ):
+                self.unreachable_enemy_stall_steps += 1
+
+            loot_action = (
+                note.startswith("loot ")
+                or note.startswith("await loot ")
+                or " loot " in note
+            )
+            immediate_danger = any(
+                graph.entity_has(entity, Relation.NEAR_PLAYER)
+                for entity in graph.entities_with(Relation.DANGEROUS)
+            )
+            boss_blocking = any(entity.kind == "boss" for entity in blocking)
+            if loot_action and (immediate_danger or boss_blocking):
+                self.loot_under_threat_steps += 1
+            if boss_blocking and "progress" in note:
+                self.boss_progress_steps += 1
+            boss_guard_stall = (
+                boss_blocking
+                and mask == 0
+                and note.startswith("guard lane ")
+                and player_can_start_ground_action(before_entity)
+            )
+            if boss_guard_stall:
+                self._boss_stall_streak += 1
+                if self._boss_stall_streak > BOSS_STALL_GRACE_STEPS:
+                    self.boss_stall_steps += 1
+            else:
+                self._boss_stall_streak = 0
 
         lives_lost = max(0, before_player.lives - after_player.lives)
         self.lives_lost += lives_lost
@@ -352,6 +418,11 @@ class EpisodeMetrics:
             "missed_back_exposure_responses": self.missed_back_exposure_responses,
             "crossover_suplex_starts": self.crossover_suplex_starts,
             "suplexes": self.suplexes,
+            "invalid_grab_animation_attacks": self.invalid_grab_animation_attacks,
+            "unreachable_enemy_stall_steps": self.unreachable_enemy_stall_steps,
+            "loot_under_threat_steps": self.loot_under_threat_steps,
+            "boss_progress_steps": self.boss_progress_steps,
+            "boss_stall_steps": self.boss_stall_steps,
             "face_actions": self.face_actions,
             "forward_progress": self.forward_progress,
             "total_reward": round(self.total_reward, 3),
@@ -372,6 +443,11 @@ class EvaluationCriteria:
     min_forward_progress: int | None = None
     min_signal_sweep_jumps: int | None = None
     min_suplexes: int | None = None
+    max_invalid_grab_attacks: int | None = None
+    max_unreachable_enemy_stalls: int | None = None
+    max_loot_under_threat: int | None = None
+    max_boss_progress: int | None = None
+    max_boss_stalls: int | None = None
 
     def failures(self, metrics: EpisodeMetrics) -> tuple[str, ...]:
         failures: list[str] = []
@@ -400,6 +476,36 @@ class EvaluationCriteria:
                 self.max_missed_back_exposures,
                 metrics.missed_back_exposure_responses,
                 "missed back-exposure responses",
+                "at most",
+            ),
+            (
+                self.max_invalid_grab_attacks,
+                metrics.invalid_grab_animation_attacks,
+                "invalid grab-animation attacks",
+                "at most",
+            ),
+            (
+                self.max_unreachable_enemy_stalls,
+                metrics.unreachable_enemy_stall_steps,
+                "unreachable-enemy stall steps",
+                "at most",
+            ),
+            (
+                self.max_loot_under_threat,
+                metrics.loot_under_threat_steps,
+                "loot-under-threat steps",
+                "at most",
+            ),
+            (
+                self.max_boss_progress,
+                metrics.boss_progress_steps,
+                "boss-progress steps",
+                "at most",
+            ),
+            (
+                self.max_boss_stalls,
+                metrics.boss_stall_steps,
+                "boss-stall steps after grace window",
                 "at most",
             ),
         )
@@ -586,10 +692,16 @@ class LockstepEvaluator:
             if not snapshot.players[self.player_index - 1].is_playable:
                 raise RuntimeError(f"P{self.player_index} is not playable")
             metrics = EpisodeMetrics.start(snapshot, self.player_index)
+            runtime_failure: str | None = None
 
             for index in range(self.decisions):
                 decision = self.policy(snapshot)
-                result = self._advance(decision)
+                try:
+                    result = self._advance(decision)
+                except TimeoutError as exc:
+                    runtime_failure = f"lockstep timeout at decision {index}: {exc}"
+                    terminal_reason = runtime_failure
+                    break
                 next_snapshot = snapshot_from_work_ram(result.work_ram)  # type: ignore[attr-defined]
                 outcome = metrics.observe(
                     snapshot,
@@ -663,6 +775,8 @@ class LockstepEvaluator:
                     break
 
             failures = self.criteria.failures(metrics)
+            if runtime_failure is not None:
+                failures = (*failures, runtime_failure)
             return EvaluationReport(metrics, failures, terminal_reason)
         finally:
             try:
@@ -722,6 +836,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-forward-progress", type=int)
     parser.add_argument("--min-signal-sweep-jumps", type=int)
     parser.add_argument("--min-suplexes", type=int)
+    parser.add_argument("--max-invalid-grab-attacks", type=int)
+    parser.add_argument("--max-unreachable-enemy-stalls", type=int)
+    parser.add_argument("--max-loot-under-threat", type=int)
+    parser.add_argument("--max-boss-progress", type=int)
+    parser.add_argument("--max-boss-stalls", type=int)
     return parser
 
 
@@ -744,6 +863,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         min_forward_progress=args.min_forward_progress,
         min_signal_sweep_jumps=args.min_signal_sweep_jumps,
         min_suplexes=args.min_suplexes,
+        max_invalid_grab_attacks=args.max_invalid_grab_attacks,
+        max_unreachable_enemy_stalls=args.max_unreachable_enemy_stalls,
+        max_loot_under_threat=args.max_loot_under_threat,
+        max_boss_progress=args.max_boss_progress,
+        max_boss_stalls=args.max_boss_stalls,
     )
     trace_stream: TextIO | None = None
     try:

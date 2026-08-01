@@ -105,7 +105,7 @@ class EnemyCounterTests(unittest.TestCase):
 
 class GrabTreeTests(unittest.TestCase):
     def test_throw_is_b_plus_back(self) -> None:
-        """Throw is always B+back from facing; every tick requests attack edge."""
+        """A ready hold emits a guarded B+back throw input."""
 
         from sor_autoplay.agent.characters import PROFILES
         from sor_autoplay.agent.grabs import throw_back_direction
@@ -139,7 +139,8 @@ class GrabTreeTests(unittest.TestCase):
         foe_behind = _e(map_x=70, map_y=64, family="Garcia")
         notes: list[str] = []
         saw_throw = False
-        for t in range(6):
+        attack_pulses = 0
+        for t in range(10):
             intent = decide_held(
                 me,
                 ctx,
@@ -152,13 +153,15 @@ class GrabTreeTests(unittest.TestCase):
             )
             assert intent is not None
             notes.append(intent.note)
-            # Every tick must request attack so app can fire +$55 edges.
-            self.assertTrue(intent.attack, msg=notes)
+            if intent.attack:
+                attack_pulses += 1
             if "throw" in intent.note:
                 saw_throw = True
                 self.assertTrue(intent.left, msg=notes)
                 self.assertFalse(intent.right)
         self.assertTrue(saw_throw, notes)
+        self.assertEqual(attack_pulses, 3, notes)
+        self.assertTrue(any("await grab input" in note for note in notes), notes)
 
     def test_hold_latch_survives_brief_ram_drop(self) -> None:
         from sor_autoplay.agent.characters import PROFILES
@@ -190,7 +193,7 @@ class GrabTreeTests(unittest.TestCase):
             profile=PROFILES[0],
         )
         assert a is not None and a.attack
-        # One frame without held_type must still attack (latched).
+        # One dropped sample keeps ownership but must not inject B from idle.
         b = decide_held(
             me_drop,
             context_from_player(me_drop),
@@ -199,7 +202,7 @@ class GrabTreeTests(unittest.TestCase):
             profile=PROFILES[0],
         )
         assert b is not None
-        self.assertTrue(b.attack)
+        self.assertFalse(b.attack)
         self.assertTrue(mem.latched)
 
     def test_live_hold_action_60_without_held_type(self) -> None:
@@ -330,7 +333,7 @@ class GrabTreeTests(unittest.TestCase):
         mem = GrabMemory()
         notes = []
         saw_atk = False
-        for t in range(8):
+        for t in range(12):
             intent = decide_held(
                 me,
                 ctx,
@@ -680,7 +683,7 @@ class PolicyIntegrationTests(unittest.TestCase):
         mem = AgentState()
         notes = []
         saw_attack = False
-        for _ in range(6):
+        for _ in range(12):
             decision = decide_actions(snap, AgentConfig(p1_enabled=True), mem)
             notes.append(decision.p1_note)
             if decision.p1_mask & int(ATTACK):

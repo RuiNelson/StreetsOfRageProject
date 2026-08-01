@@ -151,6 +151,14 @@ class _FakeClient:
         self.released = True
 
 
+class _TimeoutClient(_FakeClient):
+    def step_input(self, **kwargs: int) -> _Result:
+        if self.calls:
+            self.calls.append(kwargs)
+            raise TimeoutError("host did not complete the frame step")
+        return super().step_input(**kwargs)
+
+
 class WorkRamTests(unittest.TestCase):
     def test_snapshot_decodes_coherent_step_ram(self) -> None:
         snapshot = snapshot_from_work_ram(_game_ram())
@@ -189,6 +197,84 @@ class WorkRamTests(unittest.TestCase):
 
 
 class LockstepEvaluatorTests(unittest.TestCase):
+    def test_lockstep_timeout_produces_partial_failing_report(self) -> None:
+        client = _TimeoutClient([_game_ram(item=False)])
+        report = LockstepEvaluator(client, decisions=5).run()
+        self.assertFalse(report.passed)
+        self.assertEqual(report.metrics.decisions, 0)
+        self.assertIn("lockstep timeout at decision 0", report.terminal_reason)
+        self.assertEqual(client.lockstep, [True, False])
+        self.assertTrue(client.released)
+
+    def test_symbolic_policy_regression_metrics(self) -> None:
+        staged = bytearray(
+            _game_ram(item=False, enemy_health=4, enemy_primary=0x1300)
+        )
+        _put_fixed(staged, OBJECT_TABLE + OBJ_POS_Y, 0)
+        stalled = LockstepEvaluator(
+            _FakeClient([bytes(staged), bytes(staged)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(0, 0, p1_note="guard lane"),
+            criteria=EvaluationCriteria(max_unreachable_enemy_stalls=0),
+        ).run()
+        self.assertEqual(stalled.metrics.unreachable_enemy_stall_steps, 1)
+        self.assertFalse(stalled.passed)
+
+        grab_anim = _grab_threat_ram(action=0x6B)
+        mashed = LockstepEvaluator(
+            _FakeClient([grab_anim, grab_anim]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                0x20, 0, p1_note="knee during animation"
+            ),
+            criteria=EvaluationCriteria(max_invalid_grab_attacks=0),
+        ).run()
+        self.assertEqual(mashed.metrics.invalid_grab_animation_attacks, 1)
+        self.assertFalse(mashed.passed)
+
+        threatened_loot = bytearray(
+            _game_ram(item=False, enemy_health=4, enemy_primary=0x0900)
+        )
+        item = OBJECT_TABLE + 0x80
+        _put_u8(threatened_loot, item + OBJ_TYPE, 0x0B)
+        _put_fixed(threatened_loot, item + OBJ_POS_X, 110)
+        _put_fixed(threatened_loot, item + OBJ_POS_Y, 64)
+        _put_fixed(threatened_loot, item + OBJ_POS_Z, 160)
+        loot = LockstepEvaluator(
+            _FakeClient([bytes(threatened_loot), bytes(threatened_loot)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(0x20, 0, p1_note="loot Pipe"),
+            criteria=EvaluationCriteria(max_loot_under_threat=0),
+        ).run()
+        self.assertEqual(loot.metrics.loot_under_threat_steps, 1)
+        self.assertFalse(loot.passed)
+
+        boss_ram = bytearray(
+            _game_ram(item=False, enemy_health=0x14, enemy_primary=0x0200)
+        )
+        _put_u8(boss_ram, OBJECT_TABLE + OBJ_TYPE, 0x56)
+        boss_progress = LockstepEvaluator(
+            _FakeClient([bytes(boss_ram), bytes(boss_ram)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                0x08, 0, p1_note="progress default"
+            ),
+            criteria=EvaluationCriteria(max_boss_progress=0),
+        ).run()
+        self.assertEqual(boss_progress.metrics.boss_progress_steps, 1)
+        self.assertFalse(boss_progress.passed)
+
+        boss_stall = LockstepEvaluator(
+            _FakeClient([bytes(boss_ram)] * 10),
+            decisions=9,
+            policy=lambda _snapshot: AgentDecision(
+                0, 0, p1_note="guard lane Antonio [charge]"
+            ),
+            criteria=EvaluationCriteria(max_boss_stalls=0),
+        ).run()
+        self.assertEqual(boss_stall.metrics.boss_stall_steps, 1)
+        self.assertFalse(boss_stall.passed)
+
     def test_back_exposure_and_suplex_acceptance_metrics(self) -> None:
         front_hold = _grab_threat_ram()
         crossover = LockstepEvaluator(

@@ -8,6 +8,7 @@ from enum import Enum, auto
 from ..phases import CombatPhase, is_dangerous
 from ..world_map import SCREEN_WIDTH, MapEntity
 from .inference import InferenceEngine, Rule
+from .knowledge import Relation, TacticalKnowledgeGraph
 
 
 BACK_THREAT_X = 160.0
@@ -82,6 +83,7 @@ class CombatExpert:
         entities: tuple[MapEntity, ...],
         *,
         held_enemy: MapEntity | None,
+        graph: TacticalKnowledgeGraph | None = None,
     ) -> ExpertAssessment:
         facts: set[TacticalFact] = set()
         if held_enemy is not None:
@@ -91,7 +93,12 @@ class CombatExpert:
             elif me.action_base == 0x66:
                 facts.add(TacticalFact.BACK_HOLD)
 
-        rear = _nearest_hostile_behind(me, entities, held_enemy=held_enemy)
+        rear = _nearest_hostile_behind(
+            me,
+            entities,
+            held_enemy=held_enemy,
+            graph=graph,
+        )
         if rear is not None:
             facts.add(TacticalFact.HOSTILE_BEHIND)
 
@@ -116,12 +123,15 @@ def _nearest_hostile_behind(
     entities: tuple[MapEntity, ...],
     *,
     held_enemy: MapEntity | None,
+    graph: TacticalKnowledgeGraph | None = None,
 ) -> MapEntity | None:
     facing_left = bool(me.action_state & 0x01)
     best: MapEntity | None = None
     best_distance = float("inf")
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
+            continue
+        if graph is not None and not graph.entity_has(entity, Relation.REACHABLE):
             continue
         if held_enemy is not None and entity.slot == held_enemy.slot:
             continue

@@ -40,6 +40,33 @@ Combat intelligence is split into three reusable layers:
 - a persistent autoplanner turns a goal into guarded controller steps across
   multiple observations, cancelling safely if its preconditions disappear.
 
+The tactical choice layer uses complementary symbolic forms rather than a
+single priority chain:
+
+- a typed knowledge graph records `REACHABLE`, `DANGEROUS`, `PUNISHABLE`,
+  `TARGETS_PLAYER`, `BEHIND_PLAYER`, `COLLECTIBLE`, and `BLOCKS_PROGRESS`
+  relations from each coherent snapshot;
+- fuzzy inference represents graded concepts such as special-attack pressure,
+  target peril versus proximity, item value, safety, and travel cost;
+- a deterministic constrained optimizer enumerates legal fight, loot, and
+  progress goals, applies hard facts first, then maximizes fuzzy utility;
+- goal and target hysteresis retain focus unless new evidence is materially
+  better, avoiding oscillation without hiding the explanation trace.
+
+Hard game facts always dominate fuzzy preference. An actor outside the playable
+lane cannot be attacked even if RAM makes it look dangerous; a boss blocking
+the arena forbids progress and loot; immediate danger forbids an item detour.
+In Round 1, enemies pre-created at lane Y `0` are observed for diagnosis but
+are unreachable until the player advances through their activation trigger.
+Antonio remains a blocker when his activation point is just beyond the visible
+screen edge.
+
+A grab must always resolve. Controller inputs are issued only in confirmed
+input-ready hold states, never through `$62-$6E` transition/throw animations.
+The reciprocal grabbed-enemy relationship overrides stale weapon fields. If a
+crossover is rejected, retry it a bounded number of times and fall back to a
+direct strike/throw instead of waiting indefinitely.
+
 This boundary must remain usable by future learning: learned components may
 propose facts, goals, rule weights, or plan selection, while ROM-state guards
 and the evaluator continue to enforce legal and reproducible execution.
@@ -53,6 +80,14 @@ RAM snapshots, and supports explicit pass/fail thresholds plus per-step traces.
 It also records exposed-back grab opportunities, missed responses, crossover
 starts, and suplexes so tactical positioning is measurable rather than judged
 only from video.
+
+The evaluator also records invalid grab-animation attack edges, stalls caused
+by unreachable observed enemies, loot choices made under immediate threat, and
+progress choices made while a boss blocks the arena. Each has a zero-tolerance
+acceptance threshold so symbolic rules remain testable as later learned
+components are introduced.
+Prolonged no-input boss guarding is measured after a short grace window, so a
+legitimate defensive pause remains possible but a tactical fixed point fails.
 
 Future scripted or learned policies must use the same snapshot-to-decision
 interface and evaluation metrics. Learning may replace policy selection and

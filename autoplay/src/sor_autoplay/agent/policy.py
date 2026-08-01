@@ -14,11 +14,13 @@ from ..phases import CombatPhase, is_dangerous, is_punishable
 from ..state import GameSnapshot, PlayerSnapshot
 from ..world_map import MapEntity
 from . import combat, coop, enemies as enemy_ai, grabs, pressure, stage
+from .arbiter import GoalKind, GoalMemory, solve_goal
 from .autoplanner import AutoPlanner
 from .characters import profile_for
 from .controls import Intent, mask_from_intent
 from .expert import DEFAULT_COMBAT_EXPERT
 from .grabs import GrabMemory
+from .knowledge import build_tactical_graph
 from .walk import WalkState, blend_walk_with_actions
 
 
@@ -66,6 +68,8 @@ class AgentState:
     p2_walk: WalkState = field(default_factory=WalkState)
     p1_planner: AutoPlanner = field(default_factory=AutoPlanner)
     p2_planner: AutoPlanner = field(default_factory=AutoPlanner)
+    p1_goal: GoalMemory = field(default_factory=GoalMemory)
+    p2_goal: GoalMemory = field(default_factory=GoalMemory)
 
     def phase(self, player_index: int) -> int:
         return self.p1_phase if player_index == 1 else self.p2_phase
@@ -97,6 +101,13 @@ class AgentState:
     def clear_planners(self) -> None:
         self.p1_planner.reset()
         self.p2_planner.reset()
+
+    def goal(self, player_index: int) -> GoalMemory:
+        return self.p1_goal if player_index == 1 else self.p2_goal
+
+    def clear_goals(self) -> None:
+        self.p1_goal.clear()
+        self.p2_goal.clear()
 
     def set_note(self, player_index: int, note: str) -> None:
         if player_index == 1:
@@ -142,18 +153,21 @@ def decide_actions(
 
     if not config.any_enabled() or not snapshot.connected:
         memory.clear_planners()
+        memory.clear_goals()
         return AgentDecision(0, 0, steady=True)
 
     if snapshot.paused or snapshot.police_special_active:
         memory.p1_walk.clear()
         memory.p2_walk.clear()
         memory.clear_planners()
+        memory.clear_goals()
         return AgentDecision(0, 0, p1_note="steady", p2_note="steady", steady=True)
 
     if snapshot.game_state not in _INGAME_STATES:
         memory.p1_walk.clear()
         memory.p2_walk.clear()
         memory.clear_planners()
+        memory.clear_goals()
         return AgentDecision(0, 0, p1_note="menu idle", p2_note="menu idle", steady=True)
 
     p1_mask = 0
@@ -234,19 +248,28 @@ def _decide_one(
     if stage.is_mr_x_offer(snapshot):
         walk.clear()
         memory.planner(player_index).reset()
+        memory.goal(player_index).clear()
         return _mr_x_intent(snapshot, player_index, memory)
 
     if me is None or not player_snap.is_playable:
         walk.clear()
         memory.planner(player_index).reset()
+        memory.goal(player_index).clear()
         return Intent(note="not playable")
 
     if me.is_hurt:
         walk.clear()
         memory.planner(player_index).reset()
+        memory.goal(player_index).clear()
         return Intent(note="hurt")
 
-    press = pressure.compute_pressure(snapshot, player_snap, me)
+    graph = build_tactical_graph(
+        me,
+        snapshot.world_map.entities,
+        level_index=snapshot.level_index,
+        player_index=player_index,
+    )
+    press = pressure.compute_pressure(snapshot, player_snap, me, graph=graph)
 
     # --- Expert inference + persistent grab plan ---
     # A production rule recognizes a live threat behind a front hold. The
@@ -264,6 +287,7 @@ def _decide_one(
         me,
         snapshot.world_map.entities,
         held_enemy=held_foe if gctx.enemy_grab else None,
+        graph=graph,
     )
     planned_intent = memory.planner(player_index).decide(
         assessment,
@@ -288,7 +312,11 @@ def _decide_one(
     # --- Grab / weapon hold ---
     # Live: hold uses action $60 with held_type often 0; detect via action,
     # contact_ptr, and GRABBED enemies linked to this seat. Then knee/throw.
-    foe_near = held_foe or combat.nearest_foe(me, snapshot.world_map.entities)
+    foe_near = held_foe or combat.nearest_foe(
+        me,
+        snapshot.world_map.entities,
+        graph=graph,
+    )
     held_intent = grabs.decide_held(
         me,
         gctx,
@@ -303,12 +331,21 @@ def _decide_one(
         walk.clear()
         return held_intent
 
+    # Contact, reciprocal-link and held-item fields clear on different ROM
+    # frames.  The $62-$6E grab/recovery states are nevertheless closed
+    # animations, so do not let later combat or loot rules inject B while an
+    # evidence-dependent grab context is briefly empty.
+    if me.action_base in grabs.GRAB_ANIMATION_ACTIONS:
+        walk.clear()
+        return Intent(note=f"grab anim ${me.action_state:02X}")
+
     if both_agents and coop.partner_throw_opportunity(me, coop_ctx.partner):
         walk.clear()
         # Co-op air throw is the one intentional B+C mid-air chord.
         return Intent(jump=True, attack=True, note="2P air assist")
 
     low_hp = (player_snap.health_percent or 100.0) < 40.0
+    goal_memory = memory.goal(player_index)
 
     # --- Airborne first (must beat loot/walk) ---
     # ROM state sequence is $10 launch -> $12 free flight -> $16 air attack ->
@@ -322,6 +359,8 @@ def _decide_one(
             profile,
             prefer_forward=advice.progress_right,
             my_seat=player_index,
+            graph=graph,
+            preferred_slot=goal_memory.target_slot,
         )
         aim_e = aim.entity if aim is not None else None
         if aim_e is None:
@@ -329,6 +368,7 @@ def _decide_one(
                 me,
                 snapshot.world_map.entities,
                 prefer_forward=advice.progress_right,
+                graph=graph,
             )
         if aim_e is not None:
             fl, fr = combat.face_intent_dirs(me, aim_e)
@@ -358,7 +398,10 @@ def _decide_one(
             note=f"air {state} {aim_e.label if aim_e else 'follow'}".strip(),
         )
 
-    # --- Pickups (after breakables spill weapons/food) ---
+    # --- Symbolic/fuzzy tactical arbitration ---
+    # Generate legal fight/loot/progress goals from the knowledge graph, then
+    # solve a constrained utility problem. This replaces the old unconditional
+    # "pickup before combat" priority.
     allow_hp = coop.should_take_health_pickup(player_snap, coop_ctx)
     allow_star = coop.should_take_special_or_life(player_snap, coop_ctx)
     item = combat.select_pickup(
@@ -369,8 +412,33 @@ def _decide_one(
         allow_weapons=True,
         already_holding_weapon=me.is_holding_weapon,
         profile=profile,
+        graph=graph,
     )
-    if item is not None:
+    target = combat.select_target(
+        me,
+        snapshot.world_map.entities,
+        profile,
+        prefer_forward=advice.progress_right,
+        my_seat=player_index,
+        graph=graph,
+        preferred_slot=(
+            goal_memory.target_slot
+            if goal_memory.kind == GoalKind.FIGHT
+            else None
+        ),
+    )
+    arbitration = solve_goal(
+        graph,
+        me,
+        target=None if target is None else target.entity,
+        target_utility=0.0 if target is None else target.utility,
+        item=item,
+        pressure_urgency=press.urgency,
+        health_percent=player_snap.health_percent or 100.0,
+        memory=goal_memory,
+    )
+
+    if arbitration.winner.kind == GoalKind.LOOT and item is not None:
         close = combat.can_collect_pickup(me, item)
         if close and combat.player_can_start_ground_action(me):
             walk.clear()
@@ -393,14 +461,6 @@ def _decide_one(
     # --- Combat ---
     # Face-then-hit. Jump-kick is C, then B while airborne — NEVER C+B together
     # (that is rear attack on the ground).
-    target = combat.select_target(
-        me,
-        snapshot.world_map.entities,
-        profile,
-        prefer_forward=advice.progress_right,
-        my_seat=player_index,
-    )
-
     # ROM facing: bit0 set = face left. Rear threats use current ROM face.
     if not me.is_hurt:
         rear_foe = combat.closest_behind(
@@ -408,6 +468,7 @@ def _decide_one(
             snapshot.world_map.entities,
             face_right=not combat.player_facing_left(me),
             max_dist=min(profile.rear_range_max + 4, combat.REAR_REACT_RANGE),
+            graph=graph,
         )
         if rear_foe is not None and (
             target is None or rear_foe.slot != target.entity.slot
@@ -520,6 +581,24 @@ def _decide_one(
         # first; an already-safe off-lane player must not walk back into it.
         if combat.enemy_attack_committed(me, foe):
             if not lane_ok:
+                # Boss phase decoders can report CHARGE while the boss is
+                # actually waiting for the player to enter its lane. Ordinary
+                # enemies will close the lane themselves, but Antonio was
+                # observed motionless for hundreds of frames at dy=73. A boss
+                # is a hard progression blocker, so deliberately re-align
+                # instead of accepting an unbounded "guard lane" fixed point.
+                if foe.kind == "boss":
+                    return _walk_toward(
+                        walk,
+                        me,
+                        goal_x=float(me.world_x),
+                        goal_y=float(foe.world_y),
+                        reason=f"reengage boss {foe.label} [{tag}]",
+                        snapshot=snapshot,
+                        advice=advice,
+                        eps_x=3.0,
+                        eps_y=6.0,
+                    )
                 if abs_dy <= combat.THREAT_LANE_REACT_HALF:
                     escape_y = float(me.world_y) + (
                         -combat.THREAT_LANE_ESCAPE
@@ -682,7 +761,12 @@ def _decide_one(
             )
 
         stand_x, stand_y = _stand_point(me, target, profile, low_health=low_hp)
-        if is_dangerous(phase) and plan.sidestep and band != "close":
+        if (
+            is_dangerous(phase)
+            and plan.sidestep
+            and band != "close"
+            and abs_dx <= combat.DANGER_REACT_X
+        ):
             stand_y = float(me.world_y) + (16 if dy >= 0 else -16)
             stand_x = float(me.world_x) + (-28 if dx > 0 else 28)
             reason = f"evade {foe.label} [{tag}]"
@@ -715,6 +799,7 @@ def _decide_one(
         me,
         snapshot.world_map.entities,
         prefer_forward=advice.progress_right,
+        graph=graph,
     )
     if prop is not None:
         fl, fr = combat.face_intent_dirs(me, prop)

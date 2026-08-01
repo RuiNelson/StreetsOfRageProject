@@ -31,16 +31,26 @@ Per-player toggle (HUD button or keys **1** / **2**):
 - No air punches: match lane before closing X; queue ordinary combo hits through
   the ROM's action flag; jump-kick B only in the `$12/$13` free-flight state
 - No generic jump-ins: jumps are reserved for explicit enemy-family counters
-- Strict live targeting: dormant enemies are excluded from observations; live
-  enemies outside camera X `0..320` may appear on the HUD but are not chased
-  and do not inflate police pressure
-- Phase-aware targeting: knockdown punish, charge sidestep, ignore dead/scripted,
-  prefer hunters (`+$42` / boss target)
+- A typed tactical knowledge graph separates observation from actionability:
+  dormant, off-camera, and out-of-lane actors may remain visible on the HUD but
+  cannot become combat goals. Round-1 enemies staged at lane Y `0` are ignored
+  until the ROM materializes them. Boss activation points get a narrow X
+  margin because they can lock scrolling just outside the 320 px viewport.
+- Fuzzy, phase-aware target utility balances distance, lane access, immediate
+  peril, ranged attacks, punish windows, bosses, and who is targeting the
+  player. Goal/target hysteresis prevents indecisive switching.
+- A constrained utility solver arbitrates **fight / loot / progress**. Bosses
+  block progress, immediate danger vetoes loot, and safe valuable nearby items
+  can win after combat instead of being chased unconditionally.
+- Fuzzy special pressure combines crowds, active attackers, hunters,
+  surrounding geometry, bosses, and health, retaining the fired-rule trace.
 - Held weapons are conserved until a live foe is in the weapon's usable lane
   and range, without repeated B during weapon animations; Signal's low sweep
   is countered by jumping (and by an airborne B attack when unarmed)
 - Family-specific counters (Signal, Haku-Ro, Nora, Jack, all bosses, Mr. X)
-- **Grab/throw trees**: always throw; weapon swing/throw facing the foe
+- **Grab/throw trees**: guarded input windows, bounded orphan recovery, and a
+  crossover/suplex plan; stale weapon/contact fields cannot leak B into closed
+  `$62-$6E` animations
 - Character-tuned ranges (Axel / Adam / Blaze), measured from the live attack
   hitboxes rather than estimated sprite distance
 - Police special under pressure; pickups use the ROM's X/Y/Z interaction box
@@ -153,6 +163,11 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.eva
   --max-failed-pickups 0 \
   --max-weapon-air-attacks 0 \
   --max-missed-back-exposures 0 \
+  --max-invalid-grab-attacks 0 \
+  --max-unreachable-enemy-stalls 0 \
+  --max-loot-under-threat 0 \
+  --max-boss-progress 0 \
+  --max-boss-stalls 0 \
   --min-enemy-damage 15 \
   --min-forward-progress 600 \
   --report /tmp/sor-autoplay-report.json \
@@ -167,7 +182,9 @@ JSON-lines trace contains each observation, action, note, outcome, and visible
 actor state for replay analysis. A learned policy can be passed to
 `LockstepEvaluator(policy=...)` while retaining the same measurements and
 acceptance criteria, so improvements remain comparable with the scripted
-baseline.
+baseline. If the host cannot complete a frame step, the evaluator emits a
+partial failing report with the exact decision index instead of losing the
+episode metrics in a traceback.
 
 The combat policy has an explainable intelligence pipeline: a generic
 forward-chaining inference engine evaluates expert production rules, then a
@@ -178,6 +195,16 @@ is pressed once at the confirmed back hold `$66/$67` to enter suplex `$68/$69`.
 Evaluator metrics expose the opportunity, response, and completion; use
 `--max-missed-back-exposures 0` and `--min-suplexes 1` for a controlled scenario
 that is known to present it.
+
+Five additional symbolic-policy gates make the reported behavior executable
+as a regression contract: invalid B edges during grab animations, stalls on
+observed-but-unreachable enemies, loot decisions under immediate threat, and
+progress decisions while a boss blocks the arena. Enforce them with
+`--max-invalid-grab-attacks 0`, `--max-unreachable-enemy-stalls 0`,
+`--max-loot-under-threat 0`, and `--max-boss-progress 0`.
+`--max-boss-stalls 0` rejects continued no-input `guard lane`
+behavior after an eight-decision grace window, while allowing brief defensive
+guards.
 
 For a Stage 2 cheat episode, also require
 `--min-signal-sweep-jumps 1`. Together with
@@ -210,10 +237,13 @@ autoplay/
       inference.py      # generic production-rule forward chaining
       expert.py         # tactical facts, rules, and explainable goals
       autoplanner.py     # persistent guarded multi-step combat plans
-      combat.py         # phase-aware targeting / approach
+      fuzzy.py          # dependency-free fuzzy memberships + Sugeno rules
+      knowledge.py      # typed entity/relation tactical knowledge graph
+      arbiter.py        # constrained fight / loot / progress utility solver
+      combat.py         # fuzzy phase-aware targeting / approach
       enemies.py        # family/boss counter plans
       grabs.py          # hold / knee / throw / weapon trees
-      pressure.py       # police special score
+      pressure.py       # fuzzy police-special pressure
       stage.py          # holes, elevator, stage 8, Mr. X
       coop.py           # item fairness + 2P assist
       characters.py     # Axel / Adam / Blaze profiles

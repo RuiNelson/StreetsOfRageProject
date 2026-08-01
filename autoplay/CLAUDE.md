@@ -76,8 +76,18 @@ that layout yet.
    entering suplex `$68/$69`. A pre-existing back hold is a direct suplex goal.
    Plans persist across snapshots, tolerate one missing hold observation, time
    out safely, and take ownership before police and ordinary grab heuristics.
-4. Police special when pressure score ≥ threshold and specials remain (not round 8)
-5. **Grab / weapon hold tree** (`agent/grabs.py`): normally **B+back throw**
+4. **Knowledge graph + fuzzy inference + constrained solver**
+   (`agent/knowledge.py`, `fuzzy.py`, `arbiter.py`): build typed relations from
+   each coherent snapshot, fuzzify genuinely graded facts, enumerate feasible
+   fight/loot/progress goals, then choose the deterministic maximum utility.
+   Hard reachability and progression constraints always precede preferences.
+   Target and goal hysteresis add a small persistence bonus. Keep this boundary
+   explainable and injectable so future learned models can propose weights or
+   candidates without bypassing ROM-state guards.
+5. Police special when fuzzy pressure score ≥ threshold and specials remain
+   (not round 8). Pressure combines crowd size, hunters, active attacks,
+   surrounding geometry, bosses, and health and retains its fired-rule trace.
+6. **Grab / weapon hold tree** (`agent/grabs.py`): normally **B+back throw**
    (away = opposite action-state facing bit0). A hold needs a dedicated held
    field or the grabbed enemy's reciprocal player link; the latch bridges only
    one missing observer sample so stale contact/reaction state cannot create an
@@ -92,12 +102,19 @@ that layout yet.
    After pepper spray fires, `+$60` clears but `+$5E` can keep pointing at its
    projectile; `+$5E` alone is therefore not enemy-grab evidence. Enemy holds
    require a reciprocal GRABBED link or a non-weapon `+$60` type.
-6. 2P mid-air assist when both agents and partner is airborne nearby
-7. Pick up weapons freely; health/life/special only if co-op fairness allows
+   A reciprocal grabbed-enemy link overrides a stale weapon type. B/C inputs
+   are legal only in confirmed hold windows; `$62/$64/$68/$6A/$6C/$6E` are
+   unconditional animation locks even after pointers clear. Retry a rejected
+   crossover twice, then resolve the hold with a direct B rather than waiting
+   for the long planner timeout.
+7. 2P mid-air assist when both agents and partner is airborne nearby
+8. Pick up weapons/items only when the constrained solver selects loot;
+   immediate danger and a blocking boss make loot infeasible. Health/life/
+   special still obey co-op fairness.
    - ROM routine `$3136` accepts only X ±20, Y ±16, Z ±8. Walk inside a
      conservative X ±16, Y ±12, Z ±6 box, and emit B only from a grounded
      action state; otherwise wait for the current animation to finish
-8. **Face-then-hit combat** (`agent/combat.py` + `enemies.py`):
+9. **Face-then-hit combat** (`agent/combat.py` + `enemies.py`):
    - Player facing = action-state `+$30` **bit 0** (set = face left)
    - Punch only when same lane (Y ≤ ±12), within strike range, and facing foe
    - Turn one tick before attack if facing the wrong way (no air / reverse punches)
@@ -142,8 +159,15 @@ that layout yet.
      jump-break; then loot spilled pickups/weapons
    - Deterministic attack choice; jump-ins only when an enemy-family counter
      explicitly asks for one (for example Haku-Ro), not from character reach
-8. Avoid floor holes (stage 4) and elevator edges (stage 7)
-9. Progress right (stage 8: left) when the screen is clear
+   - Fuzzy target utility weighs proximity, lane access, danger/ranged attacks,
+     punishability, boss status, and `targets_player`; keep the current target
+     unless a challenger wins by a material margin
+   - Generic charge/sidestep retreat applies only inside the 100 px reaction
+     radius. A distant Antonio is approached rather than fled from
+   - A boss decoded as CHARGE but waiting in a distant Y lane is deliberately
+     re-aligned with; do not enter the ordinary-enemy `guard lane` fixed point
+10. Avoid floor holes (stage 4) and elevator edges (stage 7)
+11. Progress right (stage 8: left) only when the graph has no blocker
 
 Map entities carry full combat RAM for agents:
 
@@ -206,6 +230,16 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
   `crossover_suplex_starts`, and `suplexes`; enforce it with
   `--max-missed-back-exposures 0` and, in a scenario known to contain the
   opportunity, `--min-suplexes 1`.
+  Symbolic arbitration/execution regressions are first-class too:
+  `invalid_grab_animation_attacks`, `unreachable_enemy_stall_steps`,
+  `loot_under_threat_steps`, and `boss_progress_steps`; normally enforce all
+  their corresponding `--max-*` thresholds at zero.
+  `boss_stall_steps` begins after eight consecutive input-ready `guard lane`
+  decisions against a blocking boss; enforce `--max-boss-stalls 0` to catch
+  the Antonio cross-lane fixed point without rejecting a brief guard.
+  A host `TimeoutError` during a decision produces a partial failing report
+  with the exact decision index; do not discard the metrics/trace behind an
+  unhandled exception.
 - Use evaluator `--restart-character` for comparable episodes. It restarts,
   navigates menus, verifies the player/health/game state, and enables lockstep
   on the same connection before returning control; a separate setup process
@@ -245,7 +279,13 @@ See `src/sor_autoplay/memory_map.py` and
   the **camera** rect remains the visible 320×lane band. Agent targeting,
   danger, pickups, and police pressure use the strict camera-relative
   `0..320` X band; the ROM's wider `-16..336` activation band (`$A59C` /
-  `$97E6`) is not player visibility.
+  `$97E6`) is not player visibility. The tactical graph additionally rejects
+  actors outside the level's playable lane. This fixes the Round-1 actors
+  pre-created at lane Y `0`: keep them on the diagnostic map, but do not target
+  or wait for them before their walk-through activation. Bosses are the narrow
+  exception to strict X reachability (`0..384`): Antonio was observed at map X
+  328 while already locking player scroll, so `BLOCKS_PROGRESS` and targeting
+  must remain active there.
 - apple = type `$4B`
 - Pause: `$FFFA46 (pause_text_flag)` **nonzero** (written as 3, then often 1
   after `bclr #1` on the first paused frame)
@@ -256,8 +296,8 @@ See `src/sor_autoplay/memory_map.py` and
   bit4=choice UI active (initial refuse path wants bit3=1 = NO)
 - Styles live in `object_catalog.py`; extraction in `world_map.py`
 - Agent modules: `agent/policy.py`, `inference.py`, `expert.py`,
-  `autoplanner.py`, `combat.py`, `pressure.py`, `stage.py`, `coop.py`,
-  `characters.py`, `controls.py`
+  `autoplanner.py`, `knowledge.py`, `fuzzy.py`, `arbiter.py`, `combat.py`,
+  `pressure.py`, `stage.py`, `coop.py`, `characters.py`, `controls.py`
 - Deterministic evaluator: `evaluation.py` (metrics, JSONL trace, acceptance
   criteria, injectable policy callable)
 

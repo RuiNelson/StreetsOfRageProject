@@ -17,6 +17,8 @@ BACK_HOLD_ACTION = 0x66
 SUPLEX_ACTION = 0x68
 PLAN_TIMEOUT_TICKS = 24
 LOST_HOLD_TOLERANCE = 2
+CROSSOVER_RETRY_TICKS = 2
+MAX_CROSSOVER_ATTEMPTS = 2
 
 
 class PlanKind(Enum):
@@ -41,6 +43,8 @@ class AutoPlanner:
     lost_hold_ticks: int = 0
     saw_crossover: bool = False
     saw_suplex: bool = False
+    phase_age: int = 0
+    crossover_attempts: int = 0
 
     @property
     def active(self) -> bool:
@@ -54,6 +58,8 @@ class AutoPlanner:
         self.lost_hold_ticks = 0
         self.saw_crossover = False
         self.saw_suplex = False
+        self.phase_age = 0
+        self.crossover_attempts = 0
 
     def decide(
         self,
@@ -101,6 +107,8 @@ class AutoPlanner:
                 self.reset()
                 return None
             self.phase = PlanPhase.WAIT_CROSSOVER
+            self.phase_age = 0
+            self.crossover_attempts = 1
             return Intent(
                 jump=True,
                 note=(
@@ -110,12 +118,34 @@ class AutoPlanner:
             )
 
         if self.phase == PlanPhase.WAIT_CROSSOVER:
+            self.phase_age += 1
             if me.action_base in CROSSOVER_ACTIONS:
                 self.saw_crossover = True
                 return Intent(note=f"plan vault {held_enemy.label}")
             if self.saw_crossover and me.action_base == BACK_HOLD_ACTION:
                 self.phase = PlanPhase.WAIT_SUPLEX_FINISH
+                self.phase_age = 0
                 return Intent(attack=True, note=f"plan suplex {held_enemy.label}")
+            if (
+                not self.saw_crossover
+                and me.action_base == FRONT_HOLD_ACTION
+                and self.phase_age >= CROSSOVER_RETRY_TICKS
+            ):
+                if self.crossover_attempts < MAX_CROSSOVER_ATTEMPTS:
+                    self.crossover_attempts += 1
+                    self.phase_age = 0
+                    return Intent(
+                        jump=True,
+                        note=f"plan retry crossover {held_enemy.label}",
+                    )
+                # The guarded crossover edge was rejected twice. Resolve the
+                # hold with a direct B instead of waiting until plan timeout.
+                label = held_enemy.label
+                self.reset()
+                return Intent(
+                    attack=True,
+                    note=f"plan fallback strike {label}",
+                )
             return Intent(note=f"plan await crossover {held_enemy.label}")
 
         if self.phase == PlanPhase.WAIT_SUPLEX_FINISH:
@@ -148,6 +178,8 @@ class AutoPlanner:
         self.lost_hold_ticks = 0
         self.saw_crossover = False
         self.saw_suplex = False
+        self.phase_age = 0
+        self.crossover_attempts = 0
 
         # A pre-existing back hold needs no cross-over; emit its B edge from
         # ``decide`` immediately by presenting it as the completed vault step.
