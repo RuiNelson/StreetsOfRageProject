@@ -44,8 +44,9 @@ The tactical choice layer uses complementary symbolic forms rather than a
 single priority chain:
 
 - a typed knowledge graph records `REACHABLE`, `DANGEROUS`, `PUNISHABLE`,
-  `TARGETS_PLAYER`, `BEHIND_PLAYER`, `COLLECTIBLE`, and `BLOCKS_PROGRESS`
-  relations from each coherent snapshot;
+  `TARGETS_PLAYER`, `BEHIND_PLAYER`, `COLLECTIBLE`, `BLOCKS_PROGRESS`, and
+  enemy interaction affordances such as `ARMED`, `THROWING`, `GRABBABLE`, and
+  `AIR_ATTACK_ONLY` from each coherent snapshot;
 - fuzzy inference represents graded concepts such as special-attack pressure,
   target peril versus proximity, item value, safety, and travel cost;
 - a deterministic constrained optimizer enumerates legal fight, loot, and
@@ -60,6 +61,13 @@ In Round 1, enemies pre-created at lane Y `0` are observed for diagnosis but
 are unreachable until the player advances through their activation trigger.
 Antonio remains a blocker when his activation point is just beyond the visible
 screen edge.
+
+Jack (`$27`) has a hard, state-dependent interaction rule. While his carried
+weapon latch is set he cannot be grabbed or hit with the ordinary grounded
+approach; line up at jump-kick range and execute C followed by airborne B. His
+weapon-throw state makes him temporarily grabbable and punchable, while the
+separate thrown helper (`$28`) remains a projectile to evade. This legality
+constraint must override fuzzy target and attack preferences.
 
 A grab must always resolve. Controller inputs are issued only in confirmed
 input-ready hold states, never through `$62-$6E` transition/throw animations.
@@ -88,6 +96,9 @@ acceptance threshold so symbolic rules remain testable as later learned
 components are introduced.
 Prolonged no-input boss guarding is measured after a short grace window, so a
 legitimate defensive pause remains possible but a tactical fixed point fails.
+It records grounded attacks against armed Jack, valid armed-Jack jump starts,
+and grounded counters during Jack's throw window so this family rule remains
+an acceptance gate for future learned policies.
 
 Future scripted or learned policies must use the same snapshot-to-decision
 interface and evaluation metrics. Learning may replace policy selection and

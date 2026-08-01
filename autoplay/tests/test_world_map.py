@@ -4,6 +4,7 @@ from sor_autoplay.memory_map import (
     OBJ_CHARACTER_ID,
     OBJ_FLAGS,
     OBJ_HEALTH,
+    OBJ_JACK_WEAPON_ATTACHED,
     OBJ_POS_X,
     OBJ_POS_Y,
     OBJ_POS_Z,
@@ -60,6 +61,27 @@ class ProjectionTests(unittest.TestCase):
 
 
 class WorldMapParseTests(unittest.TestCase):
+    def test_jack_weapon_latch_is_exposed_to_observation(self) -> None:
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+
+        base = 0x100
+        _put_u8(actors, base + OBJ_TYPE, 0x27)
+        _put_u8(actors, base + OBJ_FLAGS, 0x0C)
+        _put_fixed16(actors, base + OBJ_POS_X, 848)
+        _put_fixed16(actors, base + OBJ_POS_Y, 64)
+        _put_fixed16(actors, base + OBJ_POS_Z, 160)
+        _put_u16(actors, base + OBJ_PRIMARY_STATE, 0x0C00)
+        _put_u16(actors, base + OBJ_HEALTH, 10)
+        _put_u8(actors, base + OBJ_JACK_WEAPON_ATTACHED, 0x01)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+        jack = next(entity for entity in world.entities if entity.type_id == 0x27)
+        self.assertEqual(jack.family_state, 0x01)
+
     def test_bottom_of_lane_is_bottom_of_camera(self) -> None:
         actors = bytearray(ACTORS_BYTES)
         camera = bytearray(CAMERA_BYTES)

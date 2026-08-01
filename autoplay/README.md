@@ -48,6 +48,9 @@ Per-player toggle (HUD button or keys **1** / **2**):
   and range, without repeated B during weapon animations; Signal's low sweep
   is countered by jumping (and by an airborne B attack when unarmed)
 - Family-specific counters (Signal, Haku-Ro, Nora, Jack, all bosses, Mr. X)
+  include a ROM-backed Jack affordance: attached weapons require C then an
+  airborne B; his throw window allows grounded punches/grabs, and only the
+  separate thrown helper is treated as a projectile
 - **Grab/throw trees**: guarded input windows, bounded orphan recovery, and a
   crossover/suplex plan; stale weapon/contact fields cannot leak B into closed
   `$62-$6E` animations
@@ -162,12 +165,15 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.eva
   --max-lives-lost 0 \
   --max-failed-pickups 0 \
   --max-weapon-air-attacks 0 \
+  --max-jack-armed-ground-attacks 0 \
   --max-missed-back-exposures 0 \
   --max-invalid-grab-attacks 0 \
   --max-unreachable-enemy-stalls 0 \
   --max-loot-under-threat 0 \
   --max-boss-progress 0 \
   --max-boss-stalls 0 \
+  --min-jack-armed-jumps 1 \
+  --min-jack-throw-counters 1 \
   --min-enemy-damage 15 \
   --min-forward-progress 600 \
   --report /tmp/sor-autoplay-report.json \
@@ -179,7 +185,8 @@ zero; omit it only when deliberately evaluating the current live state. Use
 `--scenario-seed` and `--scenario-frame-phase` to select another controlled
 enemy pattern. The JSON report is suitable for CI artifacts. The compact
 JSON-lines trace contains each observation, action, note, outcome, and visible
-actor state for replay analysis. A learned policy can be passed to
+actor state for replay analysis, including ordinary-family byte `+$52` used by
+Jack's weapon latch. A learned policy can be passed to
 `LockstepEvaluator(policy=...)` while retaining the same measurements and
 acceptance criteria, so improvements remain comparable with the scripted
 baseline. If the host cannot complete a frame step, the evaluator emits a

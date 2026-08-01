@@ -142,6 +142,15 @@ that layout yet.
      kick. A held weapon changes grounded idle to `$30–$3A`; ROM routine `$3010`
      accepts C there and enters the `$3C–$42` weapon-jump family, which evades
      the sweep without injecting unsupported airborne weapon attacks
+   - Jack type `$27` is a combatant, not a projectile; only its type `$28`
+     helper uses the projectile-dodge plan. Dispatcher `$F27E` uses the table
+     at ROM `$1037C`. Jack state `$0C` (`$F55E`) sets bit 0 of object `+$52`
+     and creates/attaches a `$28` helper when needed. State `$0E` (`$F410`)
+     clears `+$52` before launching the helper. Treat this as a hard symbolic
+     affordance: `+$52.bit0` means `ARMED` and `AIR_ATTACK_ONLY`, so align and
+     space into the character's measured jump-kick band, press C, then B only
+     in free flight. State `$0E` means `THROWING`/`GRABBABLE` even if a sample
+     catches the old latch; ordinary B/grab pressure is legal in that window
    - Type `$22` state `$0B` dispatches through ROM table `$DD80` to `$E20A`
      and is dangerous; live it retained outgoing damage `$04` at zero health.
      Enemy health uses a signed lethal check: `0` is still active and needs a
@@ -175,6 +184,7 @@ Map entities carry full combat RAM for agents:
   `$0500` grabbed / `$0600` death / `$0700` blocked
 - `tactical` (boss +$67), `pair_role` (+$5D), `target_ptr` (who they hunt)
 - `boss_dist_x` / `boss_dist_lane` (later-boss geometry)
+- `family_state` (ordinary `+$52`; Jack bit0 is weapon attached)
 - `combat_phase` decoded in `phases.py` → map outline colours + agent punish/evade
 
 HUD map: phase outline (green=down, orange=charge, red=atk…), hunt counts,
@@ -222,9 +232,13 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
   scenario thresholds so results remain directly comparable. Face buttons are
   pulsed for three frames and released for the remaining frame in every exact
   four-frame decision step. JSONL traces belong outside the repository.
-  `weapon_attack_edges`, `weapon_air_attack_edges`, and `signal_sweep_jumps`
+  `weapon_attack_edges`, `weapon_air_attack_edges`, `signal_sweep_jumps`,
+  `jack_armed_ground_attacks`, `jack_armed_jump_starts`, and
+  `jack_throw_window_ground_attacks`
   are first-class metrics; Stage-2 runs can enforce
-  `--max-weapon-air-attacks 0 --min-signal-sweep-jumps 1` for scripted or
+  `--max-weapon-air-attacks 0 --min-signal-sweep-jumps 1`, plus
+  `--max-jack-armed-ground-attacks 0 --min-jack-armed-jumps 1
+  --min-jack-throw-counters 1`, for scripted or
   future learned policies. Back protection is likewise observable through
   `back_exposed_grab_opportunities`, `missed_back_exposure_responses`,
   `crossover_suplex_starts`, and `suplexes`; enforce it with

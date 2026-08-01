@@ -96,6 +96,11 @@ OBJ_CONTACT_PTR = 0x4C
 OBJ_BOSS_DIST_X = 0x50  # also Abadede linked helper / character id on players
 OBJ_CHARACTER_ID = 0x50  # player character id (same offset, different meaning)
 OBJ_BOSS_DIST_LANE = 0x52
+# Ordinary family-private byte at the same offset. Jack ($27) uses bit 0 as
+# the weapon-attached latch: set while an axe/torch is in his hands and clear
+# when state $0E launches it. Keep this distinct from the boss distance alias.
+OBJ_FAMILY_STATE = 0x52
+OBJ_JACK_WEAPON_ATTACHED = 0x52
 OBJ_ACTION_FLAGS = 0x58  # player combo/action flags; bit5 queues next normal hit
 OBJ_PAIR_ROLE = 0x5D  # later-boss pair role 1/2; player combo state reuses $5D
 OBJ_COMBO_STATE = 0x5D  # player combo / action chain

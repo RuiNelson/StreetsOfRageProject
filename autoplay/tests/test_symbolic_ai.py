@@ -55,6 +55,32 @@ class FuzzyInferenceTests(unittest.TestCase):
 
 
 class KnowledgeGraphTests(unittest.TestCase):
+    def test_jack_affordances_follow_weapon_latch_and_throw_state(self) -> None:
+        me = _player()
+        armed = _entity(
+            slot="E0",
+            family="Jack",
+            type_id=0x27,
+            primary_state=0x0C00,
+            family_state=0x01,
+        )
+        throwing = _entity(
+            slot="E1",
+            family="Jack",
+            type_id=0x27,
+            primary_state=0x0E00,
+            family_state=0x01,
+        )
+        graph = build_tactical_graph(
+            me, (me, armed, throwing), level_index=0, player_index=1
+        )
+        self.assertTrue(graph.entity_has(armed, Relation.ARMED))
+        self.assertTrue(graph.entity_has(armed, Relation.AIR_ATTACK_ONLY))
+        self.assertFalse(graph.entity_has(armed, Relation.GRABBABLE))
+        self.assertTrue(graph.entity_has(throwing, Relation.THROWING))
+        self.assertTrue(graph.entity_has(throwing, Relation.GRABBABLE))
+        self.assertFalse(graph.entity_has(throwing, Relation.AIR_ATTACK_ONLY))
+
     def test_round1_lane_zero_actor_is_not_reachable(self) -> None:
         me = _player()
         staged = _entity(

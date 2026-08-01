@@ -8,6 +8,7 @@ from enum import Enum, auto
 
 from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
 from ..world_map import LANE_Y_MIN, SCREEN_WIDTH, MapEntity, lane_y_max_for_level
+from .enemies import JackWeaponPhase, jack_weapon_phase
 
 
 # Boss sprites/activation points may sit just beyond the 320 px viewport while
@@ -27,6 +28,10 @@ class Relation(Enum):
     NEAR_PLAYER = auto()
     BLOCKS_PROGRESS = auto()
     COLLECTIBLE = auto()
+    ARMED = auto()
+    THROWING = auto()
+    GRABBABLE = auto()
+    AIR_ATTACK_ONLY = auto()
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +141,16 @@ def build_tactical_graph(
                 and (entity.kind == "boss" or distance <= 220.0)
             ):
                 edges.add(Edge(entity.slot, Relation.BLOCKS_PROGRESS))
+
+            jack_phase = jack_weapon_phase(entity)
+            if jack_phase == JackWeaponPhase.ARMED:
+                edges.add(Edge(entity.slot, Relation.ARMED))
+                edges.add(Edge(entity.slot, Relation.AIR_ATTACK_ONLY))
+            elif jack_phase == JackWeaponPhase.THROWING:
+                edges.add(Edge(entity.slot, Relation.THROWING))
+                edges.add(Edge(entity.slot, Relation.GRABBABLE))
+            elif jack_phase == JackWeaponPhase.UNARMED:
+                edges.add(Edge(entity.slot, Relation.GRABBABLE))
 
         if reachable and entity.kind in ("pickup", "weapon"):
             edges.add(Edge(entity.slot, Relation.COLLECTIBLE))

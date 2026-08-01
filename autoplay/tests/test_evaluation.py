@@ -36,6 +36,7 @@ from sor_autoplay.memory_map import (
     OBJ_FLAGS,
     OBJ_HEALTH,
     OBJ_HELD_TYPE,
+    OBJ_JACK_WEAPON_ATTACHED,
     OBJ_POS_X,
     OBJ_POS_Y,
     OBJ_POS_Z,
@@ -197,6 +198,56 @@ class WorkRamTests(unittest.TestCase):
 
 
 class LockstepEvaluatorTests(unittest.TestCase):
+    def test_jack_affordance_acceptance_metrics(self) -> None:
+        armed = bytearray(_game_ram(item=False, enemy_health=10))
+        _put_u8(armed, OBJECT_TABLE + OBJ_TYPE, 0x27)
+        _put_u16(armed, OBJECT_TABLE + OBJ_PRIMARY_STATE, 0x0C00)
+        _put_u8(armed, OBJECT_TABLE + OBJ_JACK_WEAPON_ATTACHED, 0x01)
+
+        bad_ground = LockstepEvaluator(
+            _FakeClient([bytes(armed), bytes(armed)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                p1_mask=0x20,
+                p2_mask=0,
+                p1_note="bad ground hit Jack",
+            ),
+            criteria=EvaluationCriteria(max_jack_armed_ground_attacks=0),
+        ).run()
+        self.assertEqual(bad_ground.metrics.jack_armed_ground_attacks, 1)
+        self.assertFalse(bad_ground.passed)
+
+        jump = LockstepEvaluator(
+            _FakeClient([bytes(armed), bytes(armed)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                p1_mask=0x40,
+                p2_mask=0,
+                p1_note="jump armed Jack",
+            ),
+            criteria=EvaluationCriteria(min_jack_armed_jumps=1),
+        ).run()
+        self.assertEqual(jump.metrics.jack_armed_jump_starts, 1)
+        self.assertTrue(jump.passed)
+
+        throwing = bytearray(armed)
+        _put_u16(throwing, OBJECT_TABLE + OBJ_PRIMARY_STATE, 0x0E00)
+        throw_counter = LockstepEvaluator(
+            _FakeClient([bytes(throwing), bytes(throwing)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                p1_mask=0x20,
+                p2_mask=0,
+                p1_note="punch throwing Jack",
+            ),
+            criteria=EvaluationCriteria(min_jack_throw_counters=1),
+        ).run()
+        self.assertEqual(
+            throw_counter.metrics.jack_throw_window_ground_attacks,
+            1,
+        )
+        self.assertTrue(throw_counter.passed)
+
     def test_lockstep_timeout_produces_partial_failing_report(self) -> None:
         client = _TimeoutClient([_game_ram(item=False)])
         report = LockstepEvaluator(client, decisions=5).run()

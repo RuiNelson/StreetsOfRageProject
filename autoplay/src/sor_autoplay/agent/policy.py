@@ -20,7 +20,7 @@ from .characters import profile_for
 from .controls import Intent, mask_from_intent
 from .expert import DEFAULT_COMBAT_EXPERT
 from .grabs import GrabMemory
-from .knowledge import build_tactical_graph
+from .knowledge import Relation, build_tactical_graph
 from .walk import WalkState, blend_walk_with_actions
 
 
@@ -519,6 +519,82 @@ def _decide_one(
                 reason=f"dodge {foe.label}",
                 snapshot=snapshot,
                 advice=advice,
+            )
+
+        # Jack type $27 is not itself a projectile. His +$52 bit0 is the
+        # weapon-attached latch: while set, ground B/grab interactions are not
+        # legal, so own the whole branch and create a C -> airborne B sequence.
+        # State $0E clears the latch and has a separate THROWING graph fact,
+        # deliberately falling through to the normal punch/grab policy.
+        if graph.entity_has(foe, Relation.AIR_ATTACK_ONLY):
+            if combat.player_busy_attacking(me):
+                walk.clear()
+                return Intent(
+                    left=face_left,
+                    right=face_right_now,
+                    note=f"finish before armed Jack [{tag}]",
+                )
+            if not lane_ok:
+                return _walk_toward(
+                    walk,
+                    me,
+                    goal_x=float(me.world_x),
+                    goal_y=float(foe.world_y),
+                    reason=f"line up armed Jack [{tag}]",
+                    snapshot=snapshot,
+                    advice=advice,
+                    eps_x=3.0,
+                    eps_y=6.0,
+                )
+            if abs_dx < profile.jump_kick_min:
+                away = -1.0 if target.dx >= 0 else 1.0
+                retreat = profile.jump_kick_min - abs_dx + 6.0
+                return _walk_toward(
+                    walk,
+                    me,
+                    goal_x=float(me.world_x) + away * retreat,
+                    goal_y=float(me.world_y),
+                    reason=f"space armed Jack [{tag}]",
+                    snapshot=snapshot,
+                    advice=advice,
+                    eps_x=2.0,
+                    eps_y=3.0,
+                )
+            if abs_dx > profile.jump_kick_max:
+                side = -1.0 if target.dx >= 0 else 1.0
+                launch_x = float(foe.world_x) + side * (
+                    profile.jump_kick_max - 4.0
+                )
+                return _walk_toward(
+                    walk,
+                    me,
+                    goal_x=launch_x,
+                    goal_y=float(foe.world_y),
+                    reason=f"close for armed Jack kick [{tag}]",
+                    snapshot=snapshot,
+                    advice=advice,
+                    eps_x=3.0,
+                    eps_y=6.0,
+                )
+            walk.clear()
+            if not facing_ok:
+                return Intent(
+                    left=face_left,
+                    right=face_right_now,
+                    note=f"face armed Jack [{tag}]",
+                )
+            if cd == 0 and jump_ok and combat.player_can_start_ground_action(me):
+                memory.set_attack_cd(player_index, 1)
+                return Intent(
+                    left=face_left,
+                    right=face_right_now,
+                    jump=True,
+                    note=f"jump armed Jack [{tag}]",
+                )
+            return Intent(
+                left=face_left,
+                right=face_right_now,
+                note=f"await armed Jack kick [{tag}]",
             )
 
         if phase == CombatPhase.GRABBED and not me.is_grabbing:

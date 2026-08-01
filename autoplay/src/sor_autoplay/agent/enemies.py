@@ -8,7 +8,7 @@ Family behaviours (``ai-analysis/enemy-ai.md``):
 | Signal | Slide, get behind, throw | Face them; rear-attack when flanking; don't stay still |
 | Haku-Ro | Fast ninja, jump-ins | Pre-empt with jump kick; don't chase teleports |
 | Nora | Whip + feign injury | Mid-range then burst; don't rush "downed" poses |
-| Jack | Axe/torch projectiles | Lane-dodge projectiles; rush when juggling |
+| Jack | Armed guard + axe/torch projectiles | Jump-kick armed body; rush throw window; lane-dodge helper |
 | Abadede | Clothesline charge | Sidestep charge, punish recovery |
 | Antonio | Boomerang / mid spacing | Stay just outside $28-$78 attack window, then burst |
 | Souther | Claws, punishes jumps | Prefer grounded combos; avoid jump-ins |
@@ -45,6 +45,14 @@ class ThreatKind(Enum):
     GENERIC = auto()
 
 
+class JackWeaponPhase(Enum):
+    """ROM-backed interaction phase for enemy type $27."""
+
+    ARMED = auto()
+    THROWING = auto()
+    UNARMED = auto()
+
+
 @dataclass(frozen=True, slots=True)
 class CounterPlan:
     """How to stand and what attack mix to prefer against one foe."""
@@ -69,8 +77,30 @@ class CounterPlan:
     note: str = ""
 
 
-# Type-id ranges for Jack projectile helper.
+# Jack's type-$27 state $0E clears +$52 before creating/launching its type-$28
+# helper. While bit 0 remains set the weapon is attached and Jack rejects the
+# ordinary ground grab/strike interaction; an air kick is the legal counter.
+JACK_TYPE = 0x27
+JACK_THROW_STATE = 0x0E
 _JACK_PROJECTILE = 0x28
+
+
+def jack_weapon_phase(entity: MapEntity) -> JackWeaponPhase | None:
+    """Decode Jack's weapon affordance from his dispatcher state and +$52.
+
+    State $0E wins over the latch because the state transition and byte clear
+    can straddle an observation boundary. Non-Jack entities return ``None`` so
+    callers cannot accidentally apply this family rule to the $28 projectile.
+    """
+
+    if entity.type_id != JACK_TYPE or entity.kind not in ("enemy", "boss"):
+        return None
+    primary = (entity.primary_state >> 8) & 0xFF
+    if primary == JACK_THROW_STATE:
+        return JackWeaponPhase.THROWING
+    if entity.family_state & 0x01:
+        return JackWeaponPhase.ARMED
+    return JackWeaponPhase.UNARMED
 
 _FAMILY_PLANS: dict[str, CounterPlan] = {
     "Garcia": CounterPlan(
@@ -107,14 +137,12 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
         note="nora mid then grab",
     ),
     "Jack": CounterPlan(
-        ThreatKind.PROJECTILE,
-        range_scale=0.85,
-        prefer_lane_delta=1.0,
-        jump_bias=0.05,
-        grab_bias=0.20,
-        sidestep=True,
+        ThreatKind.MIDRANGE,
+        range_scale=0.9,
+        jump_bias=0.0,
+        grab_bias=0.35,
         priority=1.6,
-        note="jack lane dodge / rush",
+        note="jack armed jump / throw-window rush",
     ),
     "Abadede": CounterPlan(
         ThreatKind.CHARGER,

@@ -818,6 +818,100 @@ class PolicyAggressionTests(unittest.TestCase):
             msg=f"must NOT attack on jump start (B+C=rear): {d.p1_mask:#x}",
         )
 
+    def test_armed_jack_forces_jump_kick_instead_of_ground_attack(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            world_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        jack = _e(
+            family="Jack",
+            type_id=0x27,
+            label="Jack",
+            map_x=140,
+            world_x=140,
+            map_y=64,
+            world_y=64,
+            primary_state=0x0C00,
+            family_state=0x01,
+        )
+        d = decide_actions(
+            self._snap((p1, jack)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertTrue(d.p1_mask & 0x40, d.p1_note)
+        self.assertFalse(d.p1_mask & 0x20, d.p1_note)
+        self.assertIn("jump armed Jack", d.p1_note)
+
+    def test_armed_jack_too_close_is_spaced_without_punch_or_grab(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            world_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        jack = _e(
+            family="Jack",
+            type_id=0x27,
+            label="Jack",
+            map_x=118,
+            world_x=118,
+            map_y=64,
+            world_y=64,
+            primary_state=0x0C00,
+            family_state=0x01,
+        )
+        d = decide_actions(
+            self._snap((p1, jack)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertFalse(d.p1_mask & 0x60, d.p1_note)
+        self.assertTrue(d.p1_mask & 0x04, d.p1_note)
+        self.assertIn("space armed Jack", d.p1_note)
+
+    def test_throwing_jack_is_ground_attackable_even_if_latch_sample_is_stale(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            world_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        jack = _e(
+            family="Jack",
+            type_id=0x27,
+            label="Jack",
+            map_x=140,
+            world_x=140,
+            map_y=64,
+            world_y=64,
+            primary_state=0x0E00,
+            family_state=0x01,
+            combat_phase=CombatPhase.NORMAL,
+        )
+        d = decide_actions(
+            self._snap((p1, jack)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertTrue(d.p1_mask & 0x20, d.p1_note)
+        self.assertFalse(d.p1_mask & 0x40, d.p1_note)
+        self.assertIn("punch Jack", d.p1_note)
+
     def test_airborne_fires_b_only(self) -> None:
         p1 = _e(
             kind="player",

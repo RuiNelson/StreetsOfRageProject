@@ -6,7 +6,13 @@ import unittest
 from dataclasses import replace
 
 from sor_autoplay.agent.controls import ATTACK, JUMP, Intent, mask_from_intent
-from sor_autoplay.agent.enemies import ThreatKind, attack_mix, plan_for
+from sor_autoplay.agent.enemies import (
+    JackWeaponPhase,
+    ThreatKind,
+    attack_mix,
+    jack_weapon_phase,
+    plan_for,
+)
 from sor_autoplay.agent.grabs import (
     GrabMemory,
     context_from_player,
@@ -34,6 +40,8 @@ def _e(
     action_flags: int = 0,
     held_type: int = 0,
     held_ptr: int = 0,
+    primary_state: int = 0,
+    family_state: int = 0,
 ) -> MapEntity:
     return MapEntity(
         kind=kind,
@@ -53,6 +61,8 @@ def _e(
         action_flags=action_flags,
         held_type=held_type,
         held_ptr=held_ptr,
+        primary_state=primary_state,
+        family_state=family_state,
     )
 
 
@@ -66,6 +76,33 @@ class EnemyCounterTests(unittest.TestCase):
     def test_jack_projectile_is_dodge(self) -> None:
         plan = plan_for(_e(kind="projectile", family="Jack", type_id=0x28, health=None))
         self.assertEqual(plan.kind, ThreatKind.PROJECTILE)
+
+    def test_jack_body_is_not_mistaken_for_its_projectile(self) -> None:
+        plan = plan_for(_e(family="Jack", type_id=0x27))
+        self.assertNotEqual(plan.kind, ThreatKind.PROJECTILE)
+
+    def test_jack_weapon_phase_uses_latch_and_throw_state(self) -> None:
+        armed = _e(
+            family="Jack",
+            type_id=0x27,
+            primary_state=0x0C00,
+            family_state=0x01,
+        )
+        throwing = _e(
+            family="Jack",
+            type_id=0x27,
+            primary_state=0x0E00,
+            family_state=0x01,
+        )
+        unarmed = _e(
+            family="Jack",
+            type_id=0x27,
+            primary_state=0x0100,
+            family_state=0,
+        )
+        self.assertEqual(jack_weapon_phase(armed), JackWeaponPhase.ARMED)
+        self.assertEqual(jack_weapon_phase(throwing), JackWeaponPhase.THROWING)
+        self.assertEqual(jack_weapon_phase(unarmed), JackWeaponPhase.UNARMED)
 
     def test_souther_no_jump(self) -> None:
         plan = plan_for(_e(kind="boss", family="Souther", type_id=0x55))

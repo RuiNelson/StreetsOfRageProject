@@ -17,7 +17,13 @@ from pathlib import Path
 from typing import Callable, Protocol, Sequence, TextIO
 
 from .agent import AgentConfig, AgentDecision, AgentState, decide_actions
-from .agent.combat import player_can_start_ground_action, signal_sweep_threat
+from .agent.characters import profile_for
+from .agent.combat import (
+    can_jump_kick,
+    can_punch,
+    player_can_start_ground_action,
+    signal_sweep_threat,
+)
 from .agent.expert import DEFAULT_COMBAT_EXPERT, TacticalGoal
 from .agent.grabs import context_from_player, held_enemy_entity
 from .agent.knowledge import Relation, build_tactical_graph
@@ -139,6 +145,9 @@ class EpisodeMetrics:
     weapon_attack_edges: int = 0
     weapon_air_attack_edges: int = 0
     signal_sweep_jumps: int = 0
+    jack_armed_ground_attacks: int = 0
+    jack_armed_jump_starts: int = 0
+    jack_throw_window_ground_attacks: int = 0
     back_exposed_grab_opportunities: int = 0
     missed_back_exposure_responses: int = 0
     crossover_suplex_starts: int = 0
@@ -230,6 +239,42 @@ class EpisodeMetrics:
                 level_index=before.level_index,
                 player_index=self.player_index,
             )
+            profile = profile_for(before_player.character_id)
+            armed_jacks = graph.entities_with(Relation.AIR_ATTACK_ONLY)
+            throwing_jacks = graph.entities_with(Relation.THROWING)
+            if (
+                mask & 0x20
+                and player_can_start_ground_action(before_entity)
+                and any(
+                    can_punch(
+                        before_entity,
+                        jack,
+                        profile,
+                        require_facing=False,
+                    )
+                    for jack in armed_jacks
+                )
+            ):
+                self.jack_armed_ground_attacks += 1
+            if mask & 0x40 and any(
+                can_jump_kick(before_entity, jack, profile)
+                for jack in armed_jacks
+            ):
+                self.jack_armed_jump_starts += 1
+            if (
+                mask & 0x20
+                and player_can_start_ground_action(before_entity)
+                and any(
+                    can_punch(
+                        before_entity,
+                        jack,
+                        profile,
+                        require_facing=False,
+                    )
+                    for jack in throwing_jacks
+                )
+            ):
+                self.jack_throw_window_ground_attacks += 1
             grab = context_from_player(
                 before_entity,
                 before.world_map.entities,
@@ -414,6 +459,9 @@ class EpisodeMetrics:
             "weapon_attack_edges": self.weapon_attack_edges,
             "weapon_air_attack_edges": self.weapon_air_attack_edges,
             "signal_sweep_jumps": self.signal_sweep_jumps,
+            "jack_armed_ground_attacks": self.jack_armed_ground_attacks,
+            "jack_armed_jump_starts": self.jack_armed_jump_starts,
+            "jack_throw_window_ground_attacks": self.jack_throw_window_ground_attacks,
             "back_exposed_grab_opportunities": self.back_exposed_grab_opportunities,
             "missed_back_exposure_responses": self.missed_back_exposure_responses,
             "crossover_suplex_starts": self.crossover_suplex_starts,
@@ -442,6 +490,9 @@ class EvaluationCriteria:
     min_enemy_damage: int | None = None
     min_forward_progress: int | None = None
     min_signal_sweep_jumps: int | None = None
+    max_jack_armed_ground_attacks: int | None = None
+    min_jack_armed_jumps: int | None = None
+    min_jack_throw_counters: int | None = None
     min_suplexes: int | None = None
     max_invalid_grab_attacks: int | None = None
     max_unreachable_enemy_stalls: int | None = None
@@ -476,6 +527,12 @@ class EvaluationCriteria:
                 self.max_missed_back_exposures,
                 metrics.missed_back_exposure_responses,
                 "missed back-exposure responses",
+                "at most",
+            ),
+            (
+                self.max_jack_armed_ground_attacks,
+                metrics.jack_armed_ground_attacks,
+                "armed-Jack ground attacks",
                 "at most",
             ),
             (
@@ -524,6 +581,16 @@ class EvaluationCriteria:
                 self.min_signal_sweep_jumps,
                 metrics.signal_sweep_jumps,
                 "Signal sweep jumps",
+            ),
+            (
+                self.min_jack_armed_jumps,
+                metrics.jack_armed_jump_starts,
+                "armed-Jack jump starts",
+            ),
+            (
+                self.min_jack_throw_counters,
+                metrics.jack_throw_window_ground_attacks,
+                "Jack throw-window ground counters",
             ),
             (self.min_suplexes, metrics.suplexes, "suplexes"),
         )
@@ -738,6 +805,7 @@ class LockstepEvaluator:
                             "health": entity.health,
                             "action": entity.action_state,
                             "primary": entity.primary_state,
+                            "family_state": entity.family_state,
                             "phase": entity.phase_tag,
                         }
                         for entity in next_snapshot.world_map.entities
@@ -835,6 +903,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-enemy-damage", type=int)
     parser.add_argument("--min-forward-progress", type=int)
     parser.add_argument("--min-signal-sweep-jumps", type=int)
+    parser.add_argument("--max-jack-armed-ground-attacks", type=int)
+    parser.add_argument("--min-jack-armed-jumps", type=int)
+    parser.add_argument("--min-jack-throw-counters", type=int)
     parser.add_argument("--min-suplexes", type=int)
     parser.add_argument("--max-invalid-grab-attacks", type=int)
     parser.add_argument("--max-unreachable-enemy-stalls", type=int)
@@ -862,6 +933,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         min_enemy_damage=args.min_enemy_damage,
         min_forward_progress=args.min_forward_progress,
         min_signal_sweep_jumps=args.min_signal_sweep_jumps,
+        max_jack_armed_ground_attacks=args.max_jack_armed_ground_attacks,
+        min_jack_armed_jumps=args.min_jack_armed_jumps,
+        min_jack_throw_counters=args.min_jack_throw_counters,
         min_suplexes=args.min_suplexes,
         max_invalid_grab_attacks=args.max_invalid_grab_attacks,
         max_unreachable_enemy_stalls=args.max_unreachable_enemy_stalls,

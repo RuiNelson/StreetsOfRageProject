@@ -111,6 +111,7 @@ class MapEntity:
     pair_role: int = 0  # later-boss +$5D (1/2) when kind==boss
     target_ptr: int = 0  # ordinary +$42 / boss target low word
     attacker_ptr: int = 0  # ordinary +$3E attacker/holder low word
+    family_state: int = 0  # ordinary +$52; Jack bit0 = weapon attached
     facing_left: bool = False  # ordinary +$09 bit1; player action bit0
     boss_dist_x: int = 0  # later-boss +$50 abs X to target
     boss_dist_lane: int = 0  # later-boss +$52 abs lane to target
@@ -336,6 +337,7 @@ def _entity_from_object(
     pair_role = 0
     target_ptr = 0
     attacker_ptr = 0
+    family_state = 0
     boss_dist_x = 0
     boss_dist_lane = 0
     phase = CombatPhase.UNKNOWN
@@ -351,6 +353,7 @@ def _entity_from_object(
     elif style.kind == "enemy":
         target_ptr = _u16(slot, mm.OBJ_TARGET_PTR)
         attacker_ptr = _u16(slot, mm.OBJ_ATTACKER_PTR)
+        family_state = _u8(slot, mm.OBJ_FAMILY_STATE)
         phase = ordinary_enemy_phase(primary_state, type_id=type_id)
     elif style.kind == "boss":
         tactical = _u8(slot, mm.OBJ_BOSS_TACTICAL)
@@ -394,6 +397,7 @@ def _entity_from_object(
         pair_role=pair_role,
         target_ptr=target_ptr,
         attacker_ptr=attacker_ptr,
+        family_state=family_state,
         facing_left=facing_left,
         boss_dist_x=boss_dist_x,
         boss_dist_lane=boss_dist_lane,
