@@ -114,11 +114,14 @@ that layout yet.
    for the long planner timeout.
 7. 2P mid-air assist when both agents and partner is airborne nearby
 7b. **Never attack other players** (`agent/coop.py`): SoR1 has friendly fire.
-   Before any punch, rear attack, jump kick, weapon swing/throw, or pickup B
-   near a body-overlapped partner, test `attack_would_hit_ally`. If the live
-   partner sits in the facing cone + lane band, clear their lane or hold —
-   do not emit B/B+C through them. Grab throws prefer the side away from the
-   partner. The sole intentional near-partner attack is the 2P air assist.
+   Body-close partners block any B; otherwise a wide directional strike/throw
+   /rear cone applies. **Final `guard_attack_intent`** runs on every seat
+   before `mask_from_intent`, so no combat/weapon/planner/grab path can emit
+   B or B+C into a live partner. Prefer clearing their lane when blocked.
+   Grab throws prefer the side away from the partner. The sole intentional
+   near-partner attack is the 2P air assist, and only when the partner is in
+   a jump **action** family — never `world_z` (standing elevation is always
+   large and previously false-triggered assist forever).
 8. Pick up weapons/items only when the constrained solver selects loot;
    immediate danger and a blocking boss make loot infeasible. Health/life/
    special still obey co-op fairness.

@@ -346,8 +346,8 @@ def _enemy_grab_tree(
     # Mostly knees (proven to deal damage). Every Nth pulse: B+back throw.
     # If a co-op partner is body-overlapped on the hold, prefer an immediate
     # away throw rather than kneeing into them (SoR1 friendly fire).
-    force_throw = coop.attack_would_hit_ally(
-        me, ally, max_range=coop.ALLY_BODY_X + 2.0
+    force_throw = coop.ally_in_attack_bubble(
+        me, ally, max_x=coop.ALLY_BODY_X + 2.0, max_y=coop.ALLY_LANE_HALF
     )
     if force_throw or crowd >= 2 or memory.pulse % THROW_EVERY == 0:
         left = back < 0
@@ -435,13 +435,12 @@ def _weapon_tree(
     in_melee = abs(dx) <= 36
     mid = 20 <= abs(dx) <= 100
 
-    # Never swing or throw a weapon through a co-op partner (SoR1 friendly fire).
-    if coop.attack_would_hit_ally(
+    # Never swing or throw a weapon near a co-op partner (SoR1 friendly fire).
+    # Omnidirectional bubble: thrown knives pass partners behind as well.
+    if coop.ally_in_attack_bubble(
         me,
         ally,
-        face_left=face_left,
-        thrown=throwable,
-        max_range=coop.ALLY_THROWN_RANGE if throwable else coop.ALLY_MELEE_RANGE,
+        max_x=coop.ALLY_THROWN_RANGE if throwable else coop.ALLY_MELEE_RANGE,
     ):
         return None
 

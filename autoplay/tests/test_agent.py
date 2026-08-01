@@ -577,8 +577,11 @@ class PolicyTests(unittest.TestCase):
 
 
 class AllySafetyUnitTests(unittest.TestCase):
-    def test_attack_would_hit_ally_front_and_rear(self) -> None:
-        from sor_autoplay.agent.coop import attack_would_hit_ally
+    def test_directional_hit_and_body_range(self) -> None:
+        from sor_autoplay.agent.coop import (
+            ally_in_body_range,
+            attack_would_hit_ally,
+        )
 
         me = _entity(
             kind="player",
@@ -596,6 +599,9 @@ class AllySafetyUnitTests(unittest.TestCase):
         ally_offlane = _entity(
             kind="player", map_x=130, map_y=20, slot="P2", action_state=0x02
         )
+        ally_body = _entity(
+            kind="player", map_x=110, map_y=64, slot="P2", action_state=0x02
+        )
         self.assertTrue(
             attack_would_hit_ally(me, ally_front, face_left=False)
         )
@@ -607,6 +613,114 @@ class AllySafetyUnitTests(unittest.TestCase):
         )
         self.assertFalse(
             attack_would_hit_ally(me, ally_offlane, face_left=False)
+        )
+        self.assertTrue(ally_in_body_range(me, ally_body))
+        # Body-close partner is risky regardless of facing.
+        self.assertTrue(
+            attack_would_hit_ally(me, ally_body, face_left=False)
+        )
+
+    def test_standing_partner_is_not_air_assist(self) -> None:
+        """world_z is always large for standing players; only jump actions count."""
+        from dataclasses import replace
+
+        from sor_autoplay.agent.coop import partner_throw_opportunity
+
+        me = _entity(kind="player", map_x=100, map_y=64, slot="P1", action_state=0x02)
+        standing = _entity(
+            kind="player", map_x=110, map_y=64, slot="P2", action_state=0x02
+        )
+        standing = replace(standing, world_z=160)
+        airborne = _entity(
+            kind="player", map_x=110, map_y=64, slot="P2", action_state=0x12
+        )
+        airborne = replace(airborne, world_z=160)
+        self.assertFalse(partner_throw_opportunity(me, standing))
+        self.assertTrue(partner_throw_opportunity(me, airborne))
+
+    def test_final_guard_strips_attack_near_partner(self) -> None:
+        from sor_autoplay.agent.controls import Intent
+        from sor_autoplay.agent.coop import guard_attack_intent
+
+        me = _entity(kind="player", map_x=100, map_y=64, slot="P1", action_state=0x02)
+        ally = _entity(kind="player", map_x=120, map_y=64, slot="P2", action_state=0x02)
+        raw = Intent(attack=True, note="punch Garcia")
+        safe = guard_attack_intent(me, ally, raw, both_agents=False)
+        self.assertFalse(safe.attack)
+        self.assertIn("ally safe", safe.note)
+
+    def test_both_agents_do_not_rear_attack_standing_partner(self) -> None:
+        """Regression: false air-assist used jump+attack (= B+C) on standing allies."""
+        p1 = _entity(
+            kind="player",
+            map_x=100,
+            map_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+            action_state=0x02,
+        )
+        p2 = _entity(
+            kind="player",
+            map_x=120,
+            map_y=64,
+            slot="P2",
+            label="P2 Blaze",
+            family="Player",
+            action_state=0x02,
+        )
+        foe = _entity(
+            kind="enemy",
+            map_x=160,
+            map_y=64,
+            slot="E0",
+            label="Garcia",
+            family="Garcia",
+            type_id=0x20,
+        )
+        snap = _snapshot_with_map((p1, p2, foe), p2=True)
+        decision = decide_actions(
+            snap, AgentConfig(p1_enabled=True, p2_enabled=True)
+        )
+        # P1 has P2 between them and the foe — must not attack through P2.
+        self.assertEqual(decision.p1_mask & int(ATTACK), 0, decision.p1_note)
+        self.assertNotIn("2P air assist", decision.p1_note)
+        self.assertNotIn("2P air assist", decision.p2_note)
+
+    def test_agent_can_punch_when_partner_stands_behind(self) -> None:
+        p1 = _entity(
+            kind="player",
+            map_x=120,
+            map_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+            action_state=0x02,
+        )
+        p2 = _entity(
+            kind="player",
+            map_x=80,
+            map_y=64,
+            slot="P2",
+            label="P2 Blaze",
+            family="Player",
+            action_state=0x02,
+        )
+        foe = _entity(
+            kind="enemy",
+            map_x=155,
+            map_y=64,
+            slot="E0",
+            label="Garcia",
+            family="Garcia",
+            type_id=0x20,
+        )
+        snap = _snapshot_with_map((p1, p2, foe), p2=True)
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertEqual(
+            decision.p1_mask & int(ATTACK),
+            int(ATTACK),
+            msg=f"expected punch with partner behind: {decision.p1_note}",
         )
 
     def test_throw_direction_avoids_ally(self) -> None:

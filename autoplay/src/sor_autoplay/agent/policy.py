@@ -199,6 +199,15 @@ def decide_actions(
             memory=memory,
             both_agents=both,
         )
+        # Hard final gate: no path may emit B/B+C into a live partner.
+        intent = coop.guard_attack_intent(
+            _player_entity(snapshot, 1),
+            _player_entity(snapshot, 2)
+            if (snapshot.p2.is_playable or snapshot.p2.mode_active)
+            else None,
+            intent,
+            both_agents=both,
+        )
         p1_mask = mask_from_intent(intent)
         p1_note = intent.note
         memory.set_note(1, intent.note)
@@ -210,6 +219,14 @@ def decide_actions(
             player_snap=snapshot.p2,
             config=config,
             memory=memory,
+            both_agents=both,
+        )
+        intent = coop.guard_attack_intent(
+            _player_entity(snapshot, 2),
+            _player_entity(snapshot, 1)
+            if (snapshot.p1.is_playable or snapshot.p1.mode_active)
+            else None,
+            intent,
             both_agents=both,
         )
         p2_mask = mask_from_intent(intent)
@@ -370,9 +387,10 @@ def _decide_one(
         walk.clear()
         return Intent(note=f"grab anim ${me.action_state:02X}")
 
+    # Only when the partner is in a jump action family — never world_z
+    # (standing elevation is always large and falsely enabled this forever).
     if both_agents and coop.partner_throw_opportunity(me, coop_ctx.partner):
         walk.clear()
-        # Co-op air throw is the one intentional B+C mid-air chord.
         return Intent(jump=True, attack=True, note="2P air assist")
 
     low_hp = (player_snap.health_percent or 100.0) < 40.0
@@ -408,8 +426,8 @@ def _decide_one(
             fr = not fl
         if combat.player_jump_attack_ready(me):
             if coop.attack_would_hit_ally(
-                me, coop_ctx.partner, face_left=fl
-            ):
+                    me, coop_ctx.partner, face_left=fl
+                ):
                 return Intent(
                     left=fl,
                     right=fr,
@@ -466,7 +484,9 @@ def _decide_one(
             and combat.player_can_start_ground_action(me)
             and memory.attack_cd(player_index) == 0
         ):
-            if coop.attack_would_hit_ally(me, coop_ctx.partner, face_left=fl):
+            if coop.attack_would_hit_ally(
+                    me, coop_ctx.partner, face_left=fl
+                ):
                 walk.clear()
                 return Intent(
                     left=fl,
@@ -553,9 +573,7 @@ def _decide_one(
         close = combat.can_collect_pickup(me, item)
         if close and combat.player_can_start_ground_action(me):
             # Pickup uses B; body-overlap with a partner can still friendly-fire.
-            if coop.attack_would_hit_ally(
-                me, coop_ctx.partner, max_range=coop.ALLY_BODY_X + 4.0
-            ):
+            if coop.ally_in_attack_bubble(me, coop_ctx.partner, max_x=coop.ALLY_BODY_X + 4.0, max_y=coop.ALLY_LANE_HALF):
                 walk.clear()
                 return Intent(note=f"ally blocks {loot_verb} {item.label}")
             walk.clear()
@@ -598,10 +616,7 @@ def _decide_one(
                 face_right=not face_left_now,
             ):
                 if coop.attack_would_hit_ally(
-                    me,
-                    coop_ctx.partner,
-                    face_left=face_left_now,
-                    rear=True,
+                    me, coop_ctx.partner, face_left=face_left_now, rear=True
                 ):
                     return _clear_ally_lane(
                         walk,
@@ -795,8 +810,8 @@ def _decide_one(
             if abs_dx <= profile.strike_range + combat.PREEMPTIVE_PUNCH_LEAD:
                 if cd == 0 and combat.player_can_start_ground_action(me):
                     if coop.attack_would_hit_ally(
-                        me, coop_ctx.partner, face_left=face_left
-                    ):
+                    me, coop_ctx.partner, face_left=face_left
+                ):
                         return _clear_ally_lane(
                             walk,
                             me,
@@ -889,8 +904,8 @@ def _decide_one(
             if is_punishable(phase) and phase != CombatPhase.GRABBED:
                 if punch_ok:
                     if coop.attack_would_hit_ally(
-                        me, coop_ctx.partner, face_left=face_left
-                    ):
+                    me, coop_ctx.partner, face_left=face_left
+                ):
                         return _clear_ally_lane(
                             walk,
                             me,
