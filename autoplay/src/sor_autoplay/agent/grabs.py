@@ -2,14 +2,15 @@
 
 ROM (``loc_00002D20`` / ``player_held_object_attack_input``):
 
-- While holding, **attack edge** (``+$55`` bit4) enters grab-attack family ``$44``
-  via ``player_held_object_attack_input``.
-- Throw is **B + away/back** (GameFAQs): away is **opposite player facing**,
-  not "away from nearest free enemy". Using nearest-foe flipped the stick to
-  *toward* the held target and produced endless knees / freezes.
-- Player facing is action-state bit 0 (set = face left).
+- Grab input is only processed while player ``+$60`` (held type) is nonzero, and
+  often only on certain animation frames.
+- **Attack uses the press edge** at object ``+$55`` bit4 — not the held bit.
+  Sticky ``hold_buttons`` with B continuously latched produces **one** edge then
+  silence; the agent looked frozen while holding.
+- Throw is **B + back** (opposite action-state facing bit0). Knees are B alone.
 
-Default path: always throw (B+back with clean edges). Never idle while holding.
+Policy: latch hold for several ticks (RAM can flicker), always request B with
+back, and let the app fire **VSync-aligned** press pulses so edges land.
 """
 
 from __future__ import annotations
@@ -28,10 +29,10 @@ WEAPON_BAT = 0x0A
 WEAPON_PIPE = 0x0B
 WEAPON_PEPPER = 0x0C
 
-# Sticky hold_buttons needs a real off frame so +$55 sees an attack edge.
-FACE_TICKS = 1
-# throw_on (B held) / throw_off (B released) pairs.
-THROW_PULSES = 8
+# Keep treating hold as active this many ticks after RAM drops (anti-flicker).
+HOLD_LATCH_TICKS = 12
+# After this many throw pulses still holding → also try plain knee (B, no dir).
+KNEE_AFTER_THROWS = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,13 +50,22 @@ def context_from_player(me: MapEntity) -> GrabContext:
     held_type = me.held_type & 0xFF
     held_ptr = me.held_ptr & 0xFFFF
     action_grab = is_grab_family(me.action_base)
-    # Also treat player combat phase HOLDING as holding (held_type path).
     phase_hold = me.combat_phase == CombatPhase.HOLDING
-    holding = held_type != 0 or held_ptr != 0 or action_grab or phase_hold
+    holding = (
+        held_type != 0
+        or held_ptr != 0
+        or action_grab
+        or phase_hold
+        or me.is_grabbing
+    )
     weapon = 0x08 <= held_type <= 0x0C
     enemy_grab = holding and (not weapon)
     if action_grab and not weapon:
         enemy_grab = True
+    # Enemy type in +$60 is not a weapon — force enemy grab tree.
+    if held_type != 0 and not weapon:
+        enemy_grab = True
+        holding = True
     return GrabContext(
         holding=holding,
         weapon=weapon and held_type != 0,
@@ -80,16 +90,18 @@ def is_grab_family(action_base: int) -> bool:
 
 @dataclass
 class GrabMemory:
-    phase: str = "idle"  # idle | face | throw_on | throw_off
-    face_ticks: int = 0
-    throw_pulses: int = 0
-    throw_dir: int = -1  # +1 right, -1 left (back / away)
+    """Latched hold so one-frame RAM glitches do not abort the throw loop."""
+
+    latched: bool = False
+    clear_ticks: int = 0
+    throw_count: int = 0
+    tick: int = 0
 
     def reset(self) -> None:
-        self.phase = "idle"
-        self.face_ticks = 0
-        self.throw_pulses = 0
-        self.throw_dir = -1
+        self.latched = False
+        self.clear_ticks = 0
+        self.throw_count = 0
+        self.tick = 0
 
 
 def decide_held(
@@ -106,13 +118,24 @@ def decide_held(
     if ctx.hurt:
         memory.reset()
         return None
-    if not ctx.holding:
+
+    if ctx.holding:
+        memory.latched = True
+        memory.clear_ticks = 0
+    elif memory.latched:
+        memory.clear_ticks += 1
+        if memory.clear_ticks >= HOLD_LATCH_TICKS:
+            memory.reset()
+            return None
+        # Fall through: still finish throw while latched.
+    else:
         memory.reset()
         return None
 
     prof = profile if profile is not None else DEFAULT_PROFILE
+    memory.tick += 1
 
-    if ctx.weapon:
+    if ctx.weapon and ctx.holding:
         return _weapon_tree(me, ctx, memory, tick=tick, foe=foe, profile=prof)
 
     return _enemy_grab_tree(
@@ -132,15 +155,17 @@ def throw_back_direction(
     *,
     progress_right: bool = True,
     crowd: int = 0,
+    foe: MapEntity | None = None,
 ) -> int:
-    """B+away direction: opposite of player facing (ROM bit0 set = face left).
+    """Direction for B+away throw: opposite of player facing.
 
-    Crowd override: throw toward stage progress so the body hits packs.
+    ROM action-state bit0 set = face left → back is right. Do not use a free
+    nearby foe here — that aimed the stick the wrong way while holding.
     """
 
+    del foe  # facing only; held enemy is in front of facing
     if crowd >= 3:
         return 1 if progress_right else -1
-    # Facing left → back is right (+1); facing right → back is left (−1).
     if me.action_state & 0x01:
         return 1
     return -1
@@ -157,79 +182,35 @@ def _enemy_grab_tree(
     crowd: int,
     profile: CharacterProfile,
 ) -> Intent:
-    """Always throw with B+back — never idle while holding an enemy.
+    """Always attack while holding: B+back throw, occasional plain knee.
 
-    Sequence: hold away 1 tick → pulse B+away (on/off) until release.
-    ``foe`` is ignored for direction (was the stall bug); kept for API compat.
+    App layer converts ``attack=True`` into a **press_buttons** pulse so the ROM
+    sees a real +$55 edge every decision (sticky latch cannot do that alone).
     """
 
-    del foe  # direction is face-relative, not nearest-foe
+    del tick  # use memory.tick for cadence
 
-    if memory.phase == "idle":
-        memory.phase = "face"
-        memory.face_ticks = 0
-        memory.throw_pulses = 0
-        memory.throw_dir = throw_back_direction(
-            me, progress_right=progress_right, crowd=crowd
-        )
-
-    # Refresh throw_dir each cycle in case facing flipped during the grab.
-    if memory.phase == "face":
-        memory.throw_dir = throw_back_direction(
-            me, progress_right=progress_right, crowd=crowd
-        )
-
-    left = memory.throw_dir < 0
-    right = memory.throw_dir > 0
+    memory.throw_count += 1
+    back = throw_back_direction(
+        me, progress_right=progress_right, crowd=crowd, foe=foe
+    )
+    left = back < 0
+    right = back > 0
     side = "L" if left else "R"
 
-    if memory.phase == "face":
-        memory.face_ticks += 1
-        if memory.face_ticks >= FACE_TICKS:
-            memory.phase = "throw_on"
-            memory.throw_pulses = 0
+    # Every few throws: plain knee (B, no dir) in case back-throw is rejected.
+    if memory.throw_count >= KNEE_AFTER_THROWS and (memory.throw_count % 4) == 0:
         return Intent(
-            left=left,
-            right=right,
-            note=f"throw aim ({profile.name}) {side}",
-        )
-
-    if memory.phase == "throw_on":
-        memory.throw_pulses += 1
-        memory.phase = "throw_off"
-        return Intent(
-            left=left,
-            right=right,
             attack=True,
-            note=f"throw ({profile.name}) {side}",
+            note=f"knee ({profile.name}) hold=${ctx.held_type:02X}",
         )
 
-    if memory.phase == "throw_off":
-        memory.throw_pulses += 1
-        if memory.throw_pulses >= THROW_PULSES * 2:
-            memory.phase = "face"
-            memory.face_ticks = 0
-            memory.throw_dir = throw_back_direction(
-                me, progress_right=progress_right, crowd=crowd
-            )
-        else:
-            memory.phase = "throw_on"
-        return Intent(
-            left=left,
-            right=right,
-            note=f"throw hold ({profile.name}) {side}",
-        )
-
-    memory.phase = "face"
-    memory.face_ticks = 0
-    memory.throw_dir = throw_back_direction(
-        me, progress_right=progress_right, crowd=crowd
-    )
+    # Always request attack edge + back. Never idle / direction-only.
     return Intent(
-        left=memory.throw_dir < 0,
-        right=memory.throw_dir > 0,
-        attack=True,  # hard edge immediately on recover
-        note=f"throw recover ({profile.name})",
+        left=left,
+        right=right,
+        attack=True,
+        note=f"throw ({profile.name}) {side} hold=${ctx.held_type:02X}",
     )
 
 
@@ -261,12 +242,10 @@ def _weapon_tree(
         in_melee = abs(dx) <= 36 and abs(foe.map_y - me.map_y) <= 12
         mid = 20 <= abs(dx) <= 100
     else:
-        # Keep current face.
         face_left = bool(me.action_state & 0x01)
         face_right = not face_left
 
-    pulse = (tick % 2) == 0
-
+    # Always pulse attack so app can fire edges (same as enemy grab).
     if melee:
         if not in_melee and foe is not None:
             return Intent(
@@ -277,7 +256,7 @@ def _weapon_tree(
         return Intent(
             left=face_left,
             right=face_right,
-            attack=pulse,
+            attack=True,
             note=f"weapon swing ${held:02X}",
         )
 
@@ -286,21 +265,26 @@ def _weapon_tree(
             return Intent(
                 left=face_left,
                 right=face_right,
-                attack=pulse,
+                attack=True,
                 note=f"dump weapon ${held:02X}",
             )
         if foe is not None and (mid or in_melee):
             return Intent(
                 left=face_left,
                 right=face_right,
-                attack=pulse,
+                attack=True,
                 note=f"weapon use ${held:02X}",
             )
         if foe is not None:
-            return Intent(left=face_left, right=face_right, note="weapon close")
-        return Intent(note=f"hold weapon ${held:02X}")
+            return Intent(
+                left=face_left,
+                right=face_right,
+                attack=True,
+                note=f"weapon throw ${held:02X}",
+            )
+        return Intent(attack=True, note=f"hold weapon ${held:02X}")
 
-    # Unknown held type (enemy type id left in +$60): treat as grab throw.
+    # Unknown held type (enemy id in +$60): throw tree.
     return _enemy_grab_tree(
         me,
         ctx,
@@ -346,7 +330,6 @@ def held_enemy_entity(
                 best = entity
     if best is not None:
         return best
-    # Fallback: very close combatant (body-overlap grab without phase yet).
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
             continue
@@ -357,3 +340,21 @@ def held_enemy_entity(
             best_d = d
             best = entity
     return best
+
+
+def notes_need_attack_pulse(note: str) -> bool:
+    """True when the app must use press_buttons so +$55 sees an edge."""
+
+    n = note.lower()
+    return any(
+        k in n
+        for k in (
+            "throw",
+            "knee",
+            "weapon swing",
+            "weapon use",
+            "weapon throw",
+            "dump weapon",
+            "hold weapon",
+        )
+    )

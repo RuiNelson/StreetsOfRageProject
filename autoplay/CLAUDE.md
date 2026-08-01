@@ -61,8 +61,10 @@ that layout yet.
 2. Mr. X offer: always select **NO** (refuse) then confirm
 3. Police special when pressure score ≥ threshold and specials remain (not round 8)
 4. **Grab / weapon hold tree** (`agent/grabs.py`): always **B+back throw**
-   (away = opposite action-state facing bit0 — not nearest-foe); bat/pipe swing;
-   knife/bottle/pepper throw at mid-range
+   (away = opposite action-state facing bit0). Hold is **latched** against RAM
+   flicker. App fires **VSync `press_buttons`** for throw/knee so ROM `+$55`
+   attack edges actually land (sticky B alone freezes the grab). Also knee
+   fallback; bat/pipe swing; throwable weapons
 5. 2P mid-air assist when both agents and partner is airborne nearby
 6. Pick up weapons freely; health/life/special only if co-op fairness allows
 7. **Face-then-hit combat** (`agent/combat.py` + `enemies.py`):

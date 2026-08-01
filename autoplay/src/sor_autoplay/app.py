@@ -240,16 +240,48 @@ class ObserverApp:
         p2_mask: int,
         *,
         hold_frames: int,
+        p1_note: str = "",
+        p2_note: str = "",
     ) -> None:
         """Latch or pulse controller masks for the agent.
 
-        Prefers sticky ``hold_buttons`` (needs a host rebuilt with MDE that
-        understands command 0x14). On UNKNOWN_COMMAND / missing method, falls
-        back to ``press_buttons`` and remembers that for the rest of the
-        session so the HUD is not spammed with errors.
+        Prefers sticky ``hold_buttons`` for continuous D-pad walking. Face
+        buttons that need ROM **press edges** (grab throw/knee, weapon swing)
+        use blocking ``press_buttons`` for a few VSync frames so +$55 fires,
+        then re-latch directions only.
         """
 
         assert self._client is not None
+        from .agent.grabs import notes_need_attack_pulse
+
+        # D-pad bits only (re-latch after a face-button press pulse).
+        DIRS = 0x0F
+        # Grab throw/knee/weapon: ROM attack is a +$55 press edge. Sticky
+        # hold_buttons keeps B latched with no further edges — looks frozen.
+        if notes_need_attack_pulse(p1_note) or notes_need_attack_pulse(p2_note):
+            frames = max(3, hold_frames)
+            try:
+                self._client.press_buttons(
+                    player1=p1_mask,
+                    player2=p2_mask,
+                    frames=frames,
+                )
+                # Keep D-pad latched after auto-release so we stay on back/face.
+                if hasattr(self._client, "hold_buttons"):
+                    try:
+                        self._client.hold_buttons(
+                            player1=p1_mask & DIRS,
+                            player2=p2_mask & DIRS,
+                        )
+                        self._sticky_hold = True
+                    except Exception:  # noqa: BLE001
+                        pass
+                return
+            except Exception as exc:  # noqa: BLE001
+                msg = str(exc).upper()
+                if "UNKNOWN_COMMAND" not in msg:
+                    raise
+
         use_sticky = self._sticky_hold is not False
         if use_sticky and hasattr(self._client, "hold_buttons"):
             try:
@@ -317,6 +349,8 @@ class ObserverApp:
                             decision.p1_mask,
                             decision.p2_mask,
                             hold_frames=config.hold_frames,
+                            p1_note=decision.p1_note,
+                            p2_note=decision.p2_note,
                         )
                         self._was_agent_active = bool(
                             decision.p1_mask or decision.p2_mask

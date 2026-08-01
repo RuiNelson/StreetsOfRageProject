@@ -100,7 +100,7 @@ class EnemyCounterTests(unittest.TestCase):
 
 class GrabTreeTests(unittest.TestCase):
     def test_throw_is_b_plus_back(self) -> None:
-        """Throw direction is opposite facing, not 'away from nearest foe'."""
+        """Throw is always B+back from facing; every tick requests attack edge."""
 
         from sor_autoplay.agent.characters import PROFILES
         from sor_autoplay.agent.grabs import throw_back_direction
@@ -116,7 +116,6 @@ class GrabTreeTests(unittest.TestCase):
             map_y=64,
         )
         self.assertEqual(throw_back_direction(me), -1)
-        # Face left (odd) → back = right.
         me_l = _e(
             kind="player",
             family="Player",
@@ -131,11 +130,11 @@ class GrabTreeTests(unittest.TestCase):
         ctx = context_from_player(me)
         self.assertTrue(ctx.enemy_grab)
         mem = GrabMemory()
-        # Nearest foe BEHIND us must not flip throw toward the held enemy.
+        # Foe behind must not flip throw dir (facing-only).
         foe_behind = _e(map_x=70, map_y=64, family="Garcia")
         notes: list[str] = []
         saw_throw = False
-        for t in range(16):
+        for t in range(6):
             intent = decide_held(
                 me,
                 ctx,
@@ -148,12 +147,55 @@ class GrabTreeTests(unittest.TestCase):
             )
             assert intent is not None
             notes.append(intent.note)
-            if "throw" in intent.note and intent.attack:
+            # Every tick must request attack so app can fire +$55 edges.
+            self.assertTrue(intent.attack, msg=notes)
+            if "throw" in intent.note:
                 saw_throw = True
-                # Face right → B+left (back), not right toward front.
                 self.assertTrue(intent.left, msg=notes)
                 self.assertFalse(intent.right)
         self.assertTrue(saw_throw, notes)
+
+    def test_hold_latch_survives_brief_ram_drop(self) -> None:
+        from sor_autoplay.agent.characters import PROFILES
+
+        me_hold = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            held_type=0x20,
+            action_state=0x28,
+            map_x=100,
+            map_y=64,
+        )
+        me_drop = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            held_type=0,
+            action_state=0x02,
+            map_x=100,
+            map_y=64,
+        )
+        mem = GrabMemory()
+        a = decide_held(
+            me_hold,
+            context_from_player(me_hold),
+            mem,
+            tick=0,
+            profile=PROFILES[0],
+        )
+        assert a is not None and a.attack
+        # One frame without held_type must still throw (latched).
+        b = decide_held(
+            me_drop,
+            context_from_player(me_drop),
+            mem,
+            tick=1,
+            profile=PROFILES[0],
+        )
+        assert b is not None
+        self.assertTrue(b.attack)
+        self.assertTrue(mem.latched)
 
     def test_grab_always_throws(self) -> None:
         from sor_autoplay.agent.characters import PROFILES
