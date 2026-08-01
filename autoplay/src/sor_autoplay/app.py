@@ -240,25 +240,22 @@ class ObserverApp:
         p2_mask: int,
         *,
         hold_frames: int,
-        p1_note: str = "",
-        p2_note: str = "",
     ) -> None:
         """Latch or pulse controller masks for the agent.
 
-        Prefers sticky ``hold_buttons`` for continuous D-pad walking. Face
-        buttons that need ROM **press edges** (grab throw/knee, weapon swing)
-        use blocking ``press_buttons`` for a few VSync frames so +$55 fires,
-        then re-latch directions only.
+        Prefers sticky ``hold_buttons`` for continuous D-pad walking. Every
+        face-button action uses blocking ``press_buttons`` for a few VSync
+        frames so ROM +$55 sees a fresh edge, then directions are re-latched.
         """
 
         assert self._client is not None
-        from .agent.grabs import notes_need_attack_pulse
-
         # D-pad bits only (re-latch after a face-button press pulse).
         DIRS = 0x0F
-        # Grab throw/knee/weapon: ROM attack is a +$55 press edge. Sticky
-        # hold_buttons keeps B latched with no further edges — looks frozen.
-        if notes_need_attack_pulse(p1_note) or notes_need_attack_pulse(p2_note):
+        FACE_BUTTONS = 0x70
+        # All gameplay actions are edge-sensitive in +$55.  Never infer input
+        # transport from human-readable notes: pulse any A/B/C mask, then keep
+        # only its D-pad component latched for movement/facing.
+        if (p1_mask | p2_mask) & FACE_BUTTONS:
             frames = max(3, hold_frames)
             try:
                 self._client.press_buttons(
@@ -349,8 +346,6 @@ class ObserverApp:
                             decision.p1_mask,
                             decision.p2_mask,
                             hold_frames=config.hold_frames,
-                            p1_note=decision.p1_note,
-                            p2_note=decision.p2_note,
                         )
                         self._was_agent_active = bool(
                             decision.p1_mask or decision.p2_mask

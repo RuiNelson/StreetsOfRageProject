@@ -29,11 +29,14 @@ from .characters import CharacterProfile
 from .enemies import CounterPlan
 
 
-# map_x is camera-relative: 0 = left edge of visible screen, 320 = right.
-ON_SCREEN_LEFT = -24.0
-ON_SCREEN_RIGHT = float(SCREEN_WIDTH) + 24.0
-LOOKAHEAD_RIGHT = float(SCREEN_WIDTH) + 80.0
-LOOKAHEAD_LEFT = -48.0
+# map_x is camera-relative: 0 = left edge of the visible screen, 320 = right.
+# The ROM activates ordinary enemies in a slightly wider -16..336 band
+# ($A59C -> $97E6), but activation is not visibility: the agent must not chase
+# an actor until it has actually entered the camera view.
+ON_SCREEN_LEFT = 0.0
+ON_SCREEN_RIGHT = float(SCREEN_WIDTH)
+ACTIVATION_LEFT = -16.0
+ACTIVATION_RIGHT = float(SCREEN_WIDTH) + 16.0
 
 # ROM ``hasNearbyObjectInFront`` uses Y ∈ [playerY-12, playerY+12).
 LANE_HIT_HALF = 12.0
@@ -61,10 +64,10 @@ class TargetChoice:
 
 
 def is_on_screen(entity: MapEntity, *, soft: bool = False) -> bool:
-    """True if the entity is in (or just outside) the camera band on X."""
+    """True if the entity is visible, or in the ROM activation band if soft."""
 
-    left = LOOKAHEAD_LEFT if soft else ON_SCREEN_LEFT
-    right = LOOKAHEAD_RIGHT if soft else ON_SCREEN_RIGHT
+    left = ACTIVATION_LEFT if soft else ON_SCREEN_LEFT
+    right = ACTIVATION_RIGHT if soft else ON_SCREEN_RIGHT
     return left <= entity.map_x <= right
 
 
@@ -196,18 +199,54 @@ def player_airborne_action(me: MapEntity) -> bool:
     return 0x10 <= base <= 0x17
 
 
-def player_jump_rising(me: MapEntity) -> bool:
-    """Jump started, air-attack not yet selected (``$10/$11``)."""
+def player_jump_starting(me: MapEntity) -> bool:
+    """Jump launch state (``$10/$11``); an attack edge is too early here."""
 
     base = me.action_base
     return base == 0x10 or base == 0x11
 
 
-def player_jump_attacking(me: MapEntity) -> bool:
-    """Air attack animation (``$12/$13``)."""
+def player_jump_attack_ready(me: MapEntity) -> bool:
+    """Free-flight state (``$12/$13``) that accepts B and enters ``$16``."""
 
-    base = me.action_base
-    return base == 0x12 or base == 0x13
+    return me.action_base == 0x12
+
+
+def player_jump_landing(me: MapEntity) -> bool:
+    """Landing state (``$14/$15``); do not turn it into a ground attack."""
+
+    return me.action_base == 0x14
+
+
+def player_jump_attacking(me: MapEntity) -> bool:
+    """Air-attack animation (``$16/$17``)."""
+
+    return me.action_base == 0x16
+
+
+def can_queue_normal_combo(
+    me: MapEntity,
+    foe: MapEntity,
+    profile: CharacterProfile,
+) -> bool:
+    """Whether to send the B edge that queues the next grounded combo hit.
+
+    ROM ``$201E`` accepts a new attack edge during action ``$18/$19`` and
+    stores it in player ``+$58`` bit 5.  ``player_normal_attack_input`` later
+    consumes that bit to advance the action chain.  Allow a little knockback
+    slack beyond the first-hit box so a connecting jab can continue.
+    """
+
+    if me.action_base != 0x18:
+        return False
+    if me.action_flags & 0x20:
+        return False
+    abs_dx, abs_dy = abs_dx_dy(me, foe)
+    if abs_dy > LANE_HIT_HALF + 6.0:
+        return False
+    if abs_dx > profile.strike_range + 20.0:
+        return False
+    return facing_toward(me, foe)
 
 
 def select_target(
@@ -232,9 +271,9 @@ def select_target(
         if should_ignore_as_target(entity.combat_phase):
             continue
 
-        if entity.kind != "projectile" and not is_on_screen(entity, soft=True):
+        if entity.kind != "projectile" and not is_on_screen(entity):
             continue
-        if entity.kind == "projectile" and not is_on_screen(entity, soft=True):
+        if entity.kind == "projectile" and not is_on_screen(entity):
             continue
 
         plan = enemy_ai.plan_for(entity)
@@ -247,9 +286,6 @@ def select_target(
             continue
 
         lane_pen = abs(dy) / max(1.0, LANE_HIT_HALF)
-        on_strict = is_on_screen(entity, soft=False)
-        screen_pen = 0.0 if on_strict else 35.0
-
         forward_bonus = 0.0
         if prefer_forward and dx > 0:
             forward_bonus = 0.25
@@ -258,7 +294,7 @@ def select_target(
 
         weight = plan.priority
         # Prefer same-lane threats — off-lane "close" foes were air-punch bait.
-        score = (dist / max(0.5, weight)) + lane_pen * 18.0 + screen_pen - forward_bonus * 12.0
+        score = (dist / max(0.5, weight)) + lane_pen * 18.0 - forward_bonus * 12.0
 
         if entity.kind == "boss":
             score -= 40.0
@@ -393,7 +429,7 @@ def peril_vector(
             continue
         if should_ignore_as_target(entity.combat_phase):
             continue
-        if not is_on_screen(entity, soft=True):
+        if not is_on_screen(entity):
             continue
         dx = me.map_x - entity.map_x
         dy = me.map_y - entity.map_y
@@ -427,7 +463,7 @@ def select_breakable(
     for entity in entities:
         if entity.kind != "breakable":
             continue
-        if not is_on_screen(entity, soft=True):
+        if not is_on_screen(entity):
             continue
         dx = entity.map_x - me.map_x
         dy = entity.map_y - me.map_y
@@ -490,7 +526,7 @@ def select_pickup(
             w_bonus = 0.0
         else:
             continue
-        if not is_on_screen(entity, soft=True):
+        if not is_on_screen(entity):
             continue
         d = math.hypot(entity.map_x - me.map_x, entity.map_y - me.map_y)
         score = d + w_bonus
@@ -513,7 +549,7 @@ def nearest_foe(
             continue
         if should_ignore_as_target(entity.combat_phase):
             continue
-        if not is_on_screen(entity, soft=True):
+        if not is_on_screen(entity):
             continue
         d = math.hypot(entity.map_x - me.map_x, entity.map_y - me.map_y)
         if d < best_d:
@@ -528,7 +564,7 @@ def count_hunters(entities: tuple[MapEntity, ...], seat: int) -> int:
         for e in entities
         if e.kind in ("enemy", "boss")
         and e.targets_player == seat
-        and is_on_screen(e, soft=True)
+        and is_on_screen(e)
     )
 
 

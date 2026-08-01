@@ -323,7 +323,7 @@ def attack_mix(
     - Otherwise **wait** (caller walks).
     """
 
-    del tick, crowd  # reserved / unused
+    del tick, crowd, profile  # reserved / unused
 
     if behind:
         return "rear"
@@ -339,8 +339,15 @@ def attack_mix(
     if phase_name in ("charge", "attacking") and plan.sidestep and not in_range:
         return "wait"
 
-    # Mid-range jump window: jump-kick is the correct tool (C then B later).
-    if band == "jump" and can_jump and not plan.no_jump:
+    # Mid-range jump only for an enemy-specific counter plan.  Character jump
+    # reach says whether a kick can connect, not whether jumping is tactically
+    # necessary; using profile bias here made every ordinary gap a jump-in.
+    if (
+        band == "jump"
+        and can_jump
+        and not plan.no_jump
+        and plan.jump_bias >= 0.25
+    ):
         return "jump"
 
     if not in_range:
@@ -349,7 +356,7 @@ def attack_mix(
             band == "approach"
             and can_jump
             and not plan.no_jump
-            and (plan.jump_bias >= 0.25 or profile.jump_attack_bias >= 0.35)
+            and plan.jump_bias >= 0.25
         ):
             return "jump"
         return "wait"

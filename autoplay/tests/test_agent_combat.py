@@ -30,6 +30,7 @@ def _e(
     slot: str = "E0",
     label: str | None = None,
     action_state: int = 0x02,
+    action_flags: int = 0,
     held_type: int = 0,
     held_ptr: int = 0,
 ) -> MapEntity:
@@ -48,6 +49,7 @@ def _e(
         health=health,
         slot=slot,
         action_state=action_state,
+        action_flags=action_flags,
         held_type=held_type,
         held_ptr=held_ptr,
     )
@@ -386,7 +388,7 @@ class GrabTreeTests(unittest.TestCase):
             any(k in a.note or k in b.note for k in ("weapon", "dump", "use"))
         )
 
-    def test_holding_detected_from_action_only(self) -> None:
+    def test_action_family_alone_is_not_a_hold(self) -> None:
         me = _e(
             kind="player",
             family="Player",
@@ -398,8 +400,59 @@ class GrabTreeTests(unittest.TestCase):
             map_y=64,
         )
         ctx = context_from_player(me)
-        self.assertTrue(ctx.holding)
-        self.assertTrue(ctx.enemy_grab)
+        self.assertFalse(ctx.holding)
+        self.assertFalse(ctx.enemy_grab)
+
+    def test_stale_contact_pointer_alone_is_not_a_hold(self) -> None:
+        me = MapEntity(
+            kind="player",
+            family="Player",
+            symbol="1",
+            color="#fff",
+            label="P1",
+            type_id=1,
+            world_x=100,
+            world_y=64,
+            world_z=0,
+            map_x=100,
+            map_y=64,
+            health=80,
+            slot="P1",
+            action_state=0x60,
+            contact_ptr=0xBA00,
+        )
+        ctx = context_from_player(me)
+        self.assertFalse(ctx.holding)
+        self.assertFalse(ctx.enemy_grab)
+
+    def test_hold_latch_expires_even_if_reaction_action_persists(self) -> None:
+        from sor_autoplay.agent.characters import PROFILES
+
+        strong = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            held_type=0x20,
+            action_state=0x60,
+        )
+        stale = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            held_type=0,
+            action_state=0x6E,
+        )
+        mem = GrabMemory()
+        self.assertIsNotNone(
+            decide_held(strong, context_from_player(strong), mem, tick=0, profile=PROFILES[0])
+        )
+        self.assertIsNotNone(
+            decide_held(stale, context_from_player(stale), mem, tick=1, profile=PROFILES[0])
+        )
+        self.assertIsNone(
+            decide_held(stale, context_from_player(stale), mem, tick=2, profile=PROFILES[0])
+        )
+        self.assertFalse(mem.latched)
 
     def test_want_grab_when_close(self) -> None:
         me = _e(kind="player", family="Player", map_x=100, map_y=64)

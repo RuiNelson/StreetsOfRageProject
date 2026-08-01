@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from ..phases import CombatPhase, is_dangerous
 from ..state import GameSnapshot, PlayerSnapshot
-from ..world_map import MapEntity
+from ..world_map import SCREEN_WIDTH, MapEntity
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +40,8 @@ def nearby_threats(
         if entity.kind not in ("enemy", "boss"):
             continue
         if entity.combat_phase in (CombatPhase.DEATH, CombatPhase.SCRIPTED):
+            continue
+        if not 0.0 <= entity.map_x <= float(SCREEN_WIDTH):
             continue
         if abs(entity.map_x - player.map_x) > x_radius:
             continue

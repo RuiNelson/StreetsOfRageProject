@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from sor_autoplay.agent.characters import PROFILES
 from sor_autoplay.agent.combat import engagement_band
@@ -89,7 +90,7 @@ class MoveListProfileTests(unittest.TestCase):
             "rear",
         )
 
-    def test_blaze_jump_band_wide(self) -> None:
+    def test_blaze_jump_reach_does_not_force_a_jump(self) -> None:
         bl = PROFILES[2]
         self.assertEqual(engagement_band(70, 4, bl), "jump")
         plan = plan_for(_foe())
@@ -100,6 +101,19 @@ class MoveListProfileTests(unittest.TestCase):
                 tick=1,
                 in_range=False,
                 crowd=1,
+                band="jump",
+                can_jump=True,
+                lane_ok=True,
+                facing_ok=True,
+            ),
+            "wait",
+        )
+        haku_plan = plan_for(replace(_foe(), family="Haku-Ro", type_id=0x25))
+        self.assertEqual(
+            attack_mix(
+                haku_plan,
+                bl,
+                in_range=False,
                 band="jump",
                 can_jump=True,
                 lane_ok=True,

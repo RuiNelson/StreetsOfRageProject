@@ -8,6 +8,7 @@ from sor_autoplay.agent.characters import PROFILES
 from sor_autoplay.agent.combat import (
     can_jump_kick,
     can_punch,
+    can_queue_normal_combo,
     closest_behind,
     engagement_band,
     face_intent_dirs,
@@ -60,6 +61,13 @@ class ScreenAndBandTests(unittest.TestCase):
         self.assertEqual(choice.entity.label, "On")
         self.assertFalse(is_on_screen(far, soft=True))
 
+    def test_actor_beyond_camera_edge_is_not_selected(self) -> None:
+        me = _e(kind="player", family="Player", slot="P1", map_x=100, type_id=1)
+        waiting = _e(map_x=321, label="Waiting", slot="E0")
+        self.assertTrue(is_on_screen(waiting, soft=True))  # ROM activation margin
+        self.assertFalse(is_on_screen(waiting))
+        self.assertIsNone(select_target(me, (waiting,), PROFILES[0], my_seat=1))
+
     def test_jump_band(self) -> None:
         self.assertEqual(engagement_band(50, 4, PROFILES[0]), "jump")
         self.assertEqual(engagement_band(20, 4, PROFILES[0]), "close")
@@ -83,7 +91,7 @@ class ScreenAndBandTests(unittest.TestCase):
             ),
             "wait",
         )
-        # Blaze has high jump bias and can_jump true → jump.
+        # Reach alone is not a tactical reason to jump.
         self.assertEqual(
             attack_mix(
                 plan,
@@ -91,6 +99,19 @@ class ScreenAndBandTests(unittest.TestCase):
                 tick=0,
                 in_range=False,
                 crowd=1,
+                band="jump",
+                can_jump=True,
+                lane_ok=True,
+                facing_ok=True,
+            ),
+            "wait",
+        )
+        haku = plan_for(_e(family="Haku-Ro", type_id=0x25))
+        self.assertEqual(
+            attack_mix(
+                haku,
+                PROFILES[2],
+                in_range=False,
                 band="jump",
                 can_jump=True,
                 lane_ok=True,
@@ -193,6 +214,29 @@ class GeometryTests(unittest.TestCase):
         self.assertTrue(can_jump_kick(me, mid, PROFILES[2]))  # Blaze long jump
         off = _e(map_x=145, map_y=90)
         self.assertFalse(can_jump_kick(me, off, PROFILES[2]))
+
+    def test_combo_queue_uses_rom_pending_flag(self) -> None:
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            action_state=0x18,
+            action_flags=0,
+            type_id=1,
+        )
+        foe = _e(map_x=128)
+        self.assertTrue(can_queue_normal_combo(me, foe, PROFILES[0]))
+        pending = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            action_state=0x18,
+            action_flags=0x20,
+            type_id=1,
+        )
+        self.assertFalse(can_queue_normal_combo(pending, foe, PROFILES[0]))
 
 
 class PolicyAggressionTests(unittest.TestCase):
@@ -299,6 +343,29 @@ class PolicyAggressionTests(unittest.TestCase):
         self.assertLessEqual(gap, PROFILES[0].strike_range)
         self.assertEqual(sy, float(foe.world_y))
 
+    def test_approach_does_not_stop_just_outside_strike_range(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        # Axel strike range is 30.  The old stand goal/tolerance considered
+        # dx=34 "arrived" and emitted no input while the foe could attack.
+        foe = _e(map_x=134, world_x=134, map_y=64, label="Garcia")
+        d = decide_actions(
+            self._snap((p1, foe)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertTrue(d.p1_mask & 0x08, d.p1_note)
+        self.assertNotIn("walk idle", d.p1_note)
+
     def test_no_punch_off_lane(self) -> None:
         p1 = _e(
             kind="player",
@@ -334,7 +401,14 @@ class PolicyAggressionTests(unittest.TestCase):
             label="P1",
             action_state=0x02,
         )
-        foe = _e(map_x=150, world_x=150, map_y=64, label="Garcia")
+        foe = _e(
+            map_x=150,
+            world_x=150,
+            map_y=64,
+            label="Haku-Ro",
+            family="Haku-Ro",
+            type_id=0x25,
+        )
         snap = self._snap((p1, foe), char_id=2)  # Blaze
         d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
         self.assertIn("jump start", d.p1_note)
@@ -354,7 +428,7 @@ class PolicyAggressionTests(unittest.TestCase):
             map_y=64,
             type_id=1,
             label="P1",
-            action_state=0x11,  # jump rising
+            action_state=0x13,  # free flight; ROM accepts B here
         )
         foe = _e(map_x=150, world_x=150, map_y=64, label="Garcia")
         snap = self._snap((p1, foe), char_id=2)
@@ -362,6 +436,50 @@ class PolicyAggressionTests(unittest.TestCase):
         self.assertIn("air attack", d.p1_note)
         self.assertTrue(d.p1_mask & 0x20, msg=f"needs B: {d.p1_mask:#x}")
         self.assertFalse(d.p1_mask & 0x40, msg=f"no C while air attacking: {d.p1_mask:#x}")
+
+    def test_jump_launch_landing_and_attack_states_do_not_repress_b(self) -> None:
+        foe = _e(map_x=150, world_x=150, map_y=64, label="Garcia")
+        for action, expected in ((0x11, "launch"), (0x15, "land"), (0x17, "kick")):
+            p1 = _e(
+                kind="player",
+                family="Player",
+                slot="P1",
+                map_x=100,
+                world_x=100,
+                map_y=64,
+                type_id=1,
+                label="P1",
+                action_state=action,
+            )
+            d = decide_actions(
+                self._snap((p1, foe), char_id=2),
+                AgentConfig(p1_enabled=True),
+                AgentState(),
+            )
+            self.assertIn(expected, d.p1_note)
+            self.assertFalse(d.p1_mask & 0x20, d.p1_note)
+
+    def test_busy_normal_attack_queues_combo_against_live_foe(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x18,
+            action_flags=0,
+        )
+        foe = _e(map_x=128, world_x=128, map_y=64, label="Garcia")
+        d = decide_actions(
+            self._snap((p1, foe)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertIn("combo queue", d.p1_note)
+        self.assertTrue(d.p1_mask & 0x20, d.p1_note)
 
     def test_smashes_breakable(self) -> None:
         p1 = _e(

@@ -28,8 +28,11 @@ Per-player toggle (HUD button or keys **1** / **2**):
 
 - **Face-then-hit combat**: punch only when same lane (±12 Y), in strike range,
   and facing the foe (player action-state bit 0). Turn one tick if wrong-way.
-- No air punches: match lane before closing X; no B while mid-attack animation;
-  no RNG jump spam from out of range
+- No air punches: match lane before closing X; queue ordinary combo hits through
+  the ROM's action flag; jump-kick B only in the `$12/$13` free-flight state
+- No generic jump-ins: jumps are reserved for explicit enemy-family counters
+- Strict on-screen targeting: dormant enemies outside camera X `0..320` remain
+  visible on the HUD but are not chased and do not inflate police pressure
 - Phase-aware targeting: knockdown punish, charge sidestep, ignore dead/scripted,
   prefer hunters (`+$42` / boss target)
 - Family-specific counters (Signal, Haku-Ro, Nora, Jack, all bosses, Mr. X)
@@ -98,8 +101,10 @@ Options:
 | `--agent-hold-frames 2` | Frames each AI mask is held via `press_buttons` |
 | `--once` | Print one snapshot to stdout (no GUI) |
 
-When an agent is on, the poller applies `press_buttons` for `--agent-hold-frames`
-each decision (blocking ~N VSyncs). When off, sampling is wall-clock only.
+When an agent is on, D-pad movement is kept continuous with `hold_buttons`.
+Decisions containing A/B/C use `press_buttons` for at least three VSyncs to
+produce a fresh ROM input edge, then re-latch their D-pad component. When agents
+are off, sampling is wall-clock only.
 
 Keys: **Esc** / **Q** quit · **1** / **2** toggle P1 / P2 AI.
 

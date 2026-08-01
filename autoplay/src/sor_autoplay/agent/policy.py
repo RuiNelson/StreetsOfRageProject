@@ -272,7 +272,9 @@ def _decide_one(
     low_hp = (player_snap.health_percent or 100.0) < 40.0
 
     # --- Airborne first (must beat loot/walk) ---
-    # Jump-kick = C on ground, then B while action $10–$17. Never loot mid-jump.
+    # ROM state sequence is $10 launch -> $12 free flight -> $16 air attack ->
+    # $14 landing.  B is accepted in $12, not in $10; pressing it during $14
+    # starts an unrelated ground action on landing.
     if combat.player_airborne_action(me):
         walk.clear()
         aim = combat.select_target(
@@ -294,7 +296,7 @@ def _decide_one(
         else:
             fl = combat.player_facing_left(me)
             fr = not fl
-        if combat.player_jump_rising(me) or not combat.player_jump_attacking(me):
+        if combat.player_jump_attack_ready(me):
             memory.set_attack_cd(player_index, 2)
             return Intent(
                 left=fl,
@@ -302,10 +304,19 @@ def _decide_one(
                 attack=True,
                 note=f"air attack {aim_e.label if aim_e else ''}".strip(),
             )
+        state = (
+            "launch"
+            if combat.player_jump_starting(me)
+            else "kick"
+            if combat.player_jump_attacking(me)
+            else "land"
+            if combat.player_jump_landing(me)
+            else "air"
+        )
         return Intent(
             left=fl,
             right=fr,
-            note=f"air {aim_e.label if aim_e else 'follow'}".strip(),
+            note=f"air {state} {aim_e.label if aim_e else 'follow'}".strip(),
         )
 
     # --- Pickups (after breakables spill weapons/food) ---
@@ -420,13 +431,18 @@ def _decide_one(
 
         if combat.player_busy_attacking(me):
             walk.clear()
-            if punch_ok and cd == 0 and is_punishable(phase):
-                memory.set_attack_cd(player_index, 2)
+            if combat.can_queue_normal_combo(me, foe, profile):
                 return Intent(
                     left=face_left,
                     right=face_right_now,
                     attack=True,
-                    note=f"combo {foe.label} [{tag}]",
+                    note=f"combo queue {foe.label} [{tag}]",
+                )
+            if me.action_base == 0x18 and me.action_flags & 0x20:
+                return Intent(
+                    left=face_left,
+                    right=face_right_now,
+                    note=f"combo queued {foe.label} [{tag}]",
                 )
             return Intent(
                 left=face_left,
@@ -542,7 +558,9 @@ def _decide_one(
             reason=reason,
             snapshot=snapshot,
             advice=advice,
-            eps_x=8.0,
+            # The stand point is only 2–6 px inside character strike range.
+            # An 8 px arrival tolerance can stop outside the hit box forever.
+            eps_x=3.0,
             eps_y=6.0,
         )
 

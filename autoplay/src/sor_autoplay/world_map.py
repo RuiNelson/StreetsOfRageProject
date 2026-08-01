@@ -105,6 +105,7 @@ class MapEntity:
     held_ptr: int = 0  # player +$5E low word
     contact_ptr: int = 0  # player +$4C contact/grab partner (live hold uses this)
     outgoing_damage: int = 0  # +$34 active hit frame damage nibble
+    action_flags: int = 0  # player +$58; bit5 queues normal-combo continuation
     combo_state: int = 0  # player +$5D
     tactical: int = 0  # boss +$67
     pair_role: int = 0  # later-boss +$5D (1/2) when kind==boss
@@ -132,7 +133,10 @@ class MapEntity:
 
     @property
     def is_holding(self) -> bool:
-        return self.held_type != 0 or self.held_ptr != 0 or self.contact_ptr != 0
+        # +$4C is a general contact pointer and can remain nonzero outside a
+        # hold.  Treat only the dedicated held fields as standalone evidence;
+        # enemy-link evidence is resolved with the full entity list in grabs.py.
+        return self.held_type != 0 or self.held_ptr != 0
 
     @property
     def is_airborne(self) -> bool:
@@ -320,6 +324,7 @@ def _entity_from_object(
     held_ptr = 0
     contact_ptr = 0
     combo = 0
+    action_flags = 0
     tactical = 0
     pair_role = 0
     target_ptr = 0
@@ -332,6 +337,7 @@ def _entity_from_object(
         held_type = _u8(slot, mm.OBJ_HELD_TYPE)
         held_ptr = _u16(slot, mm.OBJ_HELD_PTR)
         contact_ptr = _u16(slot, mm.OBJ_CONTACT_PTR)
+        action_flags = _u8(slot, mm.OBJ_ACTION_FLAGS)
         combo = _u8(slot, mm.OBJ_COMBO_STATE)
         facing_left = bool(action_state & 0x01)
         phase = player_phase(action_byte=action_state, held_type=held_type)
@@ -375,6 +381,7 @@ def _entity_from_object(
         held_ptr=held_ptr,
         contact_ptr=contact_ptr,
         outgoing_damage=outgoing,
+        action_flags=action_flags,
         combo_state=combo,
         tactical=tactical,
         pair_role=pair_role,

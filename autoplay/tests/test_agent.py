@@ -243,6 +243,17 @@ class PolicyTests(unittest.TestCase):
         decision = decide_actions(snap, AgentConfig(p1_enabled=True))
         self.assertTrue(decision.p1_mask & int(SPECIAL), msg=f"mask={decision.p1_mask:#x} note={decision.p1_note}")
 
+    def test_offscreen_enemies_do_not_trigger_police_or_chase(self) -> None:
+        p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")
+        foes = tuple(
+            _entity(kind="enemy", map_x=321 + i, map_y=64, slot=f"E{i}")
+            for i in range(6)
+        )
+        snap = _snapshot_with_map((p1, *foes), health=MAX_HEALTH // 5, specials=2)
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertFalse(decision.p1_mask & int(SPECIAL), decision.p1_note)
+        self.assertIn("progress", decision.p1_note)
+
     def test_mr_x_selects_no(self) -> None:
         from dataclasses import replace
 

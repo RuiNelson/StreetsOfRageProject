@@ -34,8 +34,10 @@ WEAPON_BAT = 0x0A
 WEAPON_PIPE = 0x0B
 WEAPON_PEPPER = 0x0C
 
-# Keep treating hold as active after RAM drops (anti-flicker).
-HOLD_LATCH_TICKS = 18
+# Keep treating a proven hold as active through one missed observer sample.
+# A longer latch feeds its own B presses back into the $60-$6F reaction family
+# after the held enemy has died, producing an empty knee/throw loop.
+HOLD_LATCH_TICKS = 2
 # Live: B alone knees; mix B+back for throws after a few knees.
 THROW_EVERY = 3
 
@@ -70,32 +72,19 @@ def context_from_player(
 ) -> GrabContext:
     held_type = me.held_type & 0xFF
     held_ptr = me.held_ptr & 0xFFFF
-    contact_ptr = me.contact_ptr & 0xFFFF
-    action_grab = is_grab_family(me.action_base)
-    phase_hold = me.combat_phase == CombatPhase.HOLDING
     linked = False
     if entities is not None:
         linked = _player_has_grabbed_enemy(me, entities, player_index=player_index)
 
-    holding = (
-        held_type != 0
-        or held_ptr != 0
-        or contact_ptr != 0
-        or action_grab
-        or phase_hold
-        or me.is_grabbing
-        or linked
-    )
     weapon = 0x08 <= held_type <= 0x0C
-    enemy_grab = holding and not weapon
-    if action_grab and not weapon:
-        enemy_grab = True
-    if linked:
-        enemy_grab = True
-        holding = True
-    if held_type != 0 and not weapon:
-        enemy_grab = True
-        holding = True
+    # Strong evidence only.  +$4C is a general contact pointer and the
+    # $28-$6F action families include pickup/recovery states; either one alone
+    # can be stale after combat.  The live $60 hold is still recognized by the
+    # GRABBED enemy's reciprocal link.
+    enemy_grab = linked or (held_type != 0 and not weapon) or (
+        held_ptr != 0 and not weapon
+    )
+    holding = weapon or enemy_grab
 
     return GrabContext(
         holding=holding,
@@ -168,9 +157,7 @@ def decide_held(
         memory.clear_ticks = 0
     elif memory.latched:
         memory.clear_ticks += 1
-        # Drop latch faster once action leaves hold families (enemy already gone).
-        limit = 4 if not is_grab_family(me.action_base) else HOLD_LATCH_TICKS
-        if memory.clear_ticks >= limit:
+        if memory.clear_ticks >= HOLD_LATCH_TICKS:
             memory.reset()
             return None
     else:
@@ -365,25 +352,3 @@ def held_enemy_entity(
             best_d = d
             best = entity
     return best
-
-
-def notes_need_attack_pulse(note: str) -> bool:
-    """True when the app must use press_buttons so +$55 sees an edge."""
-
-    n = note.lower()
-    return any(
-        k in n
-        for k in (
-            "throw",
-            "knee",
-            "weapon swing",
-            "weapon use",
-            "weapon throw",
-            "dump weapon",
-            "hold weapon",
-            "air attack",
-            "jump start",
-            "jump-break",
-            "smash",
-        )
-    )

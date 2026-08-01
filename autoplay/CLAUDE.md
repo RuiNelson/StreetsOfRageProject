@@ -61,25 +61,30 @@ that layout yet.
 2. Mr. X offer: always select **NO** (refuse) then confirm
 3. Police special when pressure score ≥ threshold and specials remain (not round 8)
 4. **Grab / weapon hold tree** (`agent/grabs.py`): always **B+back throw**
-   (away = opposite action-state facing bit0). Hold is **latched** against RAM
-   flicker. App fires **VSync `press_buttons`** for throw/knee so ROM `+$55`
-   attack edges actually land (sticky B alone freezes the grab). Also knee
-   fallback; bat/pipe swing; throwable weapons
+   (away = opposite action-state facing bit0). A hold needs a dedicated held
+   field or the grabbed enemy's reciprocal player link; the latch bridges only
+   one missing observer sample so stale contact/reaction state cannot create an
+   empty knee/throw loop. Also knee fallback; bat/pipe swing; throwable weapons
 5. 2P mid-air assist when both agents and partner is airborne nearby
 6. Pick up weapons freely; health/life/special only if co-op fairness allows
 7. **Face-then-hit combat** (`agent/combat.py` + `enemies.py`):
    - Player facing = action-state `+$30` **bit 0** (set = face left)
    - Punch only when same lane (Y ≤ ±12), within strike range, and facing foe
    - Turn one tick before attack if facing the wrong way (no air / reverse punches)
-   - Never attack while already in attack animation (except rare punish combo edge)
+   - During normal action `$18`, queue the next combo B edge only while player
+     `+$58` bit 5 is clear; stop sending B after the ROM has accepted the edge
    - Match lane **before** closing X (off-lane "close" was the air-punch bug)
    - Stand at ``approach_offset`` (~24–28, outer strike) — not body-grab range
      (~≤18); retreat when closer so enemies cannot free-hit
-   - **Jump-kick = C then B** (never C+B together — that is rear attack).
-     Airborne is action ``$10–$17`` only (not world_z; ground Z is ~$A0).
+   - **Jump-kick = C, then B specifically in free-flight `$12/$13`** (never
+     C+B together — that is rear attack). The ROM sequence is `$10` launch,
+     `$12` free flight, `$16` air attack, `$14` landing. Do not send B during
+     launch or landing. Airborne is action `$10–$17` (not world_z; ground Z is
+     about `$A0`).
    - Breakables (phone booth / crate): walk in → smash (B) or mid-range
      jump-break; then loot spilled pickups/weapons
-   - Deterministic attack choice; family counters for bosses/specials
+   - Deterministic attack choice; jump-ins only when an enemy-family counter
+     explicitly asks for one (for example Haku-Ro), not from character reach
 8. Avoid floor holes (stage 4) and elevator edges (stage 7)
 9. Progress right (stage 8: left) when the screen is clear
 
@@ -102,10 +107,11 @@ phase tallies in the map meta line.
 
 Input is applied on the same remote poll thread as RAM reads (one client
 connection). Agents use sticky **`hold_buttons`** (remote command `0x14`) so
-D-pad directions stay latched between polls — continuous walking. Face buttons
-are pulsed by the policy (on one tick, off the next) so the ROM still sees
-attack edges. `press_buttons` is only a fallback for older hosts; it always
-releases after N frames and produces walk-taps.
+D-pad directions stay latched between polls — continuous walking. Any mask
+containing A/B/C is sent as a blocking VSync `press_buttons` pulse so the ROM
+sees a fresh `+$55` edge; its D-pad component is then re-latched. Notes never
+select the input transport. `press_buttons` is also the fallback for older
+hosts, where it releases after N frames and produces walk-taps.
 
 **Rebuild** `MegaDriveEnvironment` + `sor` after pulling so the host serves
 `HOLD_BUTTONS`. Without it the client falls back to `press_buttons`.
@@ -149,7 +155,9 @@ See `src/sor_autoplay/memory_map.py` and
   (or `[$02,$A0]` on level index 6). Camera box height uses that max.
 - Dormant off-screen enemy spawns (flags bit0 held) stay on the map; the
   **view** expands to include them while the **camera** rect stays the
-  visible 320×lane band.
+  visible 320×lane band. Agent targeting, danger, pickups, and police pressure
+  use the strict camera-relative `0..320` X band. The ROM's wider `-16..336`
+  activation band (`$A59C` / `$97E6`) is not player visibility.
 - apple = type `$4B`
 - Pause: `$FFFA46 (pause_text_flag)` **nonzero** (written as 3, then often 1
   after `bclr #1` on the first paused frame)

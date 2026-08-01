@@ -96,6 +96,7 @@ OBJ_CONTACT_PTR = 0x4C
 OBJ_BOSS_DIST_X = 0x50  # also Abadede linked helper / character id on players
 OBJ_CHARACTER_ID = 0x50  # player character id (same offset, different meaning)
 OBJ_BOSS_DIST_LANE = 0x52
+OBJ_ACTION_FLAGS = 0x58  # player combo/action flags; bit5 queues next normal hit
 OBJ_PAIR_ROLE = 0x5D  # later-boss pair role 1/2; player combo state reuses $5D
 OBJ_COMBO_STATE = 0x5D  # player combo / action chain
 OBJ_HELD_PTR = 0x5E  # word pointer to grabbed/held object (weapons / some grabs)
@@ -120,7 +121,12 @@ ENEMY_ST_BLOCKED = 0x0700
 
 # Player action-state families (bit0 often facing; compare with & ~1).
 ACTION_IDLE = 0x02
-ACTION_JUMP = 0x10
+ACTION_JUMP_START = 0x10
+ACTION_JUMP_AIRBORNE = 0x12
+ACTION_JUMP_LANDING = 0x14
+ACTION_JUMP_ATTACK = 0x16
+# Backwards-compatible family alias.
+ACTION_JUMP = ACTION_JUMP_START
 ACTION_ATTACK = 0x18
 ACTION_REAR = 0x20
 ACTION_GRAB = 0x28
