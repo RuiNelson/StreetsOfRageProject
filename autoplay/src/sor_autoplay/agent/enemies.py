@@ -24,7 +24,7 @@ the main source of air punches and wrong-direction swings.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum, auto
 
 from ..world_map import MapEntity
@@ -86,8 +86,8 @@ class CounterPlan:
 
 
 # Jack's type-$27 state $0E clears +$52 before creating/launching its type-$28
-# helper. The latch describes helper ownership only: common damage/grab code
-# never tests it, so Jack's body remains normally vulnerable in every phase.
+# helper. Damage still applies while armed (punches land), but a body grab is
+# only reliable while unarmed or during the throw window ($0E).
 JACK_TYPE = 0x27
 JACK_THROW_STATE = 0x0E
 _JACK_PROJECTILE = 0x28
@@ -148,12 +148,15 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
     ),
     "Signal": CounterPlan(
         ThreatKind.FLANKER,
-        range_scale=0.9,
-        rear_bias=0.45,
-        grab_bias=0.15,
+        # Keep mid/far spacing and open with C→B jump kicks rather than
+        # walking into Signal's slide/flank range for grounded punches.
+        range_scale=1.15,
+        jump_bias=0.85,
+        rear_bias=0.30,
+        grab_bias=0.05,
         sidestep=True,
         priority=1.7,
-        note="signal face + rear",
+        note="signal jump-in mid-air",
     ),
     "Haku-Ro": CounterPlan(
         ThreatKind.MOBILE,
@@ -165,18 +168,19 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
     ),
     "Nora": CounterPlan(
         ThreatKind.WHIP,
-        range_scale=1.15,
+        # Close for a body grab, then knee/throw — safer than trading whip hits.
+        range_scale=0.75,
         jump_bias=0.0,
-        grab_bias=0.25,
+        grab_bias=0.85,
         distrust_downed=True,
         priority=1.9,
-        note="nora mid then grab",
+        note="nora grab and attack",
     ),
     "Jack": CounterPlan(
         ThreatKind.MIDRANGE,
         range_scale=0.9,
         jump_bias=0.0,
-        grab_bias=0.35,
+        grab_bias=0.15,  # overridden per weapon phase in plan_for
         priority=2.1,
         note="jack normal vulnerable / helper dodge",
     ),
@@ -272,23 +276,44 @@ _FAMILY_TARGET_PRIORITY: dict[str, float] = {
 }
 
 
+def is_enemy_grabbable(entity: MapEntity) -> bool:
+    """Hard grab affordance. Armed Jack cannot be grabbed; throwing can.
+
+    Other live combatants remain grabbable. Projectiles and defeated objects
+    never are. Punches against armed Jack remain legal separately.
+    """
+
+    if entity.kind not in ("enemy", "boss"):
+        return False
+    if entity.is_defeated:
+        return False
+    jack_phase = jack_weapon_phase(entity)
+    if jack_phase == JackWeaponPhase.ARMED:
+        return False
+    if jack_phase == JackWeaponPhase.THROWING:
+        return True
+    if jack_phase == JackWeaponPhase.UNARMED:
+        return True
+    return True
+
+
 def plan_for(entity: MapEntity) -> CounterPlan:
     """Return the counter plan for one combatant (or projectile)."""
 
     if entity.type_id in _TYPE_PLANS:
-        return _TYPE_PLANS[entity.type_id]
-    if entity.family in _FAMILY_PLANS:
-        return _FAMILY_PLANS[entity.family]
-    if entity.kind == "boss":
-        return CounterPlan(
+        plan = _TYPE_PLANS[entity.type_id]
+    elif entity.family in _FAMILY_PLANS:
+        plan = _FAMILY_PLANS[entity.family]
+    elif entity.kind == "boss":
+        plan = CounterPlan(
             ThreatKind.GENERIC,
             range_scale=1.15,
             sidestep=True,
             priority=2.5,
             note="boss generic",
         )
-    if entity.kind == "projectile":
-        return CounterPlan(
+    elif entity.kind == "projectile":
+        plan = CounterPlan(
             ThreatKind.PROJECTILE,
             range_scale=2.0,
             prefer_lane_delta=1.0,
@@ -296,7 +321,32 @@ def plan_for(entity: MapEntity) -> CounterPlan:
             priority=2.0,
             note="projectile dodge",
         )
-    return _DEFAULT
+    else:
+        plan = _DEFAULT
+
+    # Jack grab affordance is phase-dependent: armed helpers block grabs;
+    # the throw window is the opening to close and grapple.
+    jack_phase = jack_weapon_phase(entity)
+    if jack_phase == JackWeaponPhase.ARMED:
+        return replace(
+            plan,
+            grab_bias=0.0,
+            note="jack armed — punch/dodge, no grab",
+        )
+    if jack_phase == JackWeaponPhase.THROWING:
+        return replace(
+            plan,
+            grab_bias=0.75,
+            jump_bias=0.0,
+            note="jack throw window — grab",
+        )
+    if jack_phase == JackWeaponPhase.UNARMED:
+        return replace(
+            plan,
+            grab_bias=0.40,
+            note="jack unarmed — grab ok",
+        )
+    return plan
 
 
 def threat_priority(entity: MapEntity) -> float:
@@ -342,8 +392,20 @@ def adjust_approach(
     stand_dist = max(profile.approach_offset, strike * 0.85)
     if low_health:
         stand_dist = max(stand_dist, profile.caution_range * 0.7)
-    # Body-grab / contact danger band — never park inside this on X.
+    # Jump-in counters (Signal, Haku-Ro): park in the kick window, not punch.
+    if plan.jump_bias >= 0.5:
+        stand_dist = max(
+            stand_dist,
+            (profile.jump_kick_min + profile.jump_kick_max) * 0.5,
+        )
+    # Grab pressure (Nora, throw-window Jack, back-shield): walk to body range.
+    if plan.grab_bias >= 0.5:
+        stand_dist = min(stand_dist, 20.0)
+    # Body-grab / contact danger band — never park inside this on X unless
+    # we are deliberately grabbing.
     too_close = max(18.0, profile.approach_offset * 0.7)
+    if plan.grab_bias >= 0.5:
+        too_close = 10.0
 
     if plan.kind == ThreatKind.PROJECTILE or foe.kind == "projectile":
         evade_x = -1.0 if dx > 0 else 1.0
@@ -364,7 +426,8 @@ def adjust_approach(
         ThreatKind.FLANKER,
         ThreatKind.CLAWER,
     ):
-        if abs(dx) < strike + 50:
+        # Jump-in Signal prefers same-lane spacing, not permanent sidestep.
+        if plan.jump_bias < 0.5 and abs(dx) < strike + 50:
             desired_y = foe.map_y + (14.0 if plan.prefer_lane_delta >= 0 else -14.0)
 
     err_x = desired_x - me.map_x
@@ -382,8 +445,13 @@ def adjust_approach(
             out_dx = 1.0 if err_x > 0 else -1.0
 
     abs_dx = abs(dx)
-    # Inside body-contact band: back out first (do not walk further in).
-    if abs_dx < too_close and abs(dy) <= lane_slop + 4:
+    # Inside body-contact band: back out first (do not walk further in),
+    # unless this plan wants a body grab.
+    if (
+        plan.grab_bias < 0.5
+        and abs_dx < too_close
+        and abs(dy) <= lane_slop + 4
+    ):
         out_dx = -1.0 if dx > 0 else 1.0 if dx < 0 else out_dx
 
     in_range = abs_dx <= strike and abs(dy) <= 12.0
@@ -403,15 +471,17 @@ def attack_mix(
     lane_ok: bool = True,
     facing_ok: bool = True,
     can_jump: bool = False,
+    grabbable: bool = True,
+    back_exposed: bool = False,
 ) -> str:
     """Return 'punch' | 'jump' | 'rear' | 'grab_walk' | 'wait'.
 
     Deterministic rules (``tick`` kept for API compat, unused for rolls):
 
     - **rear** only when ``behind`` and we would otherwise punch.
+    - **jump** for family jump counters (Signal, Haku-Ro) in jump/approach.
+    - **grab_walk** when grab_bias is high (Nora) or back security demands it.
     - **punch** only when ``in_range`` and ``lane_ok`` (and ideally facing).
-    - **jump** only when ``can_jump`` (geometry already validated) and plan
-      allows it — never as a default for "not in range".
     - Otherwise **wait** (caller walks).
     """
 
@@ -423,40 +493,56 @@ def attack_mix(
     if not lane_ok:
         return "wait"
 
+    # Back security outranks family preference: close and grab a legal front
+    # target so the crossover-suplex plan can shield the rear.
+    grab_pressure = plan.grab_bias
+    if back_exposed and grabbable:
+        grab_pressure = max(grab_pressure, 0.9)
+
     if phase_name in ("knockdown", "blocked", "recovery"):
+        if grab_pressure >= 0.5 and grabbable:
+            return "grab_walk"
         if in_range and facing_ok:
             return "punch"
         return "wait"
 
     if phase_name in ("charge", "attacking") and plan.sidestep and not in_range:
-        return "wait"
-
-    # Mid-range jump only for an enemy-specific counter plan.  Character jump
-    # reach says whether a kick can connect, not whether jumping is tactically
-    # necessary; using profile bias here made every ordinary gap a jump-in.
-    if (
-        band == "jump"
-        and can_jump
-        and not plan.no_jump
-        and plan.jump_bias >= 0.25
-    ):
-        return "jump"
-
-    if not in_range:
-        # Approach band: jump if character/plan likes air and geometry allows.
+        # Still allow Signal-style jump-ins while they wind up at range.
         if (
-            band == "approach"
-            and can_jump
+            can_jump
             and not plan.no_jump
-            and plan.jump_bias >= 0.25
+            and plan.jump_bias >= 0.5
+            and band in ("jump", "approach")
         ):
             return "jump"
         return "wait"
 
-    if not facing_ok:
+    # Family jump counters (Signal mid-air, Haku-Ro intercept): prefer C→B
+    # from the jump window rather than walking into grounded trade range.
+    if (
+        can_jump
+        and not plan.no_jump
+        and plan.jump_bias >= 0.25
+        and band in ("jump", "approach")
+        and grab_pressure < 0.7
+    ):
+        return "jump"
+
+    # High grab bias only (Nora, Jack throw window, elevated back-shield).
+    # Mild Garcia grab_bias (~0.35) must not force body walks over punches.
+    if grab_pressure >= 0.5 and grabbable and phase_name in (
+        "normal",
+        "recovery",
+        "knockdown",
+        "unknown",
+    ):
+        if band in ("close", "approach", "jump") or not in_range:
+            return "grab_walk"
+
+    if not in_range:
         return "wait"
 
-    if plan.grab_bias >= 0.3 and phase_name == "normal" and band == "close":
-        return "punch"
+    if not facing_ok:
+        return "wait"
 
     return "punch"

@@ -89,14 +89,23 @@ check: health `0` remains alive and needs a finishing hit, while
 same observation. A defeated object may stay allocated on the floor, but it
 must never be reachable, dangerous, blocking, selected, chased, or attacked.
 
-Jack (`$27`) is always vulnerable like the other ordinary enemies. His carried
-weapon latch records whether the separate type-`$28` helper is attached; it is
-not armor and must never prohibit normal punches or grabs. `ARMED` and
-`THROWING` remain useful descriptive facts, while `GRABBABLE` is true in every
-Jack weapon phase. Only the independent thrown helper is a projectile to evade.
-The helper's own ROM state is symbolic too: state `$01` adds `ATTACHED` but not
-`DANGEROUS`, while launched states `$02-$04` add `LAUNCHED` and `DANGEROUS`.
-This prevents juggling props from outranking Jack's vulnerable body.
+Jack (`$27`) remains punchable in every weapon phase (the latch is not armor).
+Grab affordance is phase-dependent: `ARMED` (helper attached, state `$0C` /
+`+$52.bit0`) is **not** `GRABBABLE`; `THROWING` (state `$0E`) and unarmed Jack
+**are** grabbable. Prefer grab+suplex during the throw window; otherwise
+punch/jump-kick the body and dodge only launched type-`$28` helpers. Helper
+state `$01` is `ATTACHED` but not `DANGEROUS`; launched `$02-$04` are
+`LAUNCHED` and `DANGEROUS` so juggling props never outrank Jack's body.
+
+Family counters:
+
+- **Nora**: prefer body grab then knee/throw rather than trading whip hits.
+- **Signal**: prefer mid/far jump kicks (C then airborne B) over walking into
+  slide range for grounded punches.
+- **Back security** outranks other free-combat preferences: when a live hostile
+  is behind the player, close and grab a legal front target so the
+  crossover→suplex plan can shield the rear (unless the front foe is ungrabbable,
+  e.g. armed Jack).
 
 A grab must always resolve. Controller inputs are issued only in confirmed
 input-ready hold states, never through `$62-$6E` transition/throw animations.

@@ -59,11 +59,12 @@ Per-player toggle (HUD button or keys **1** / **2**):
 - Ground weapons have ROM-backed fuzzy value (damage, range, control, and
   character preference), so an armed player replaces a weapon only with a
   material upgrade and does not detour for a downgrade.
-- Family-specific counters (Signal, Haku-Ro, Nora, Jack, all bosses, Mr. X)
-  preserve Jack's normal vulnerability in every weapon phase: punches, grabs,
-  and jump kicks can hit his body while `+$52.bit0` describes only the attached
-  helper. Type-`$28` state `$01` is attached/juggling and cannot distract the
-  target solver; only its launched states `$02-$04` are projectile threats.
+- Family-specific counters (Signal, Haku-Ro, Nora, Jack, all bosses, Mr. X):
+  Nora closes for grab+knee/throw; Signal prefers mid/far C→B jump kicks;
+  back security grabs a legal front foe for crossover-suplex when a hostile
+  is behind. Jack is punchable while armed but **not** grabbable until the
+  throw window (`$0E`) or unarmed; type-`$28` `$01` is attached (not target),
+  `$02-$04` launched are projectile threats.
 - **Grab/throw trees**: guarded input windows, bounded orphan recovery, and a
   crossover/suplex plan; stale weapon/contact fields cannot leak B into closed
   `$62-$6E` animations. If an enemy holds the player, `$7A` emits C, `$7C`

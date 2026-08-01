@@ -75,9 +75,21 @@ class KnowledgeGraphTests(unittest.TestCase):
             me, (me, armed, throwing), level_index=0, player_index=1
         )
         self.assertTrue(graph.entity_has(armed, Relation.ARMED))
-        self.assertTrue(graph.entity_has(armed, Relation.GRABBABLE))
+        # Armed Jack keeps weapons attached: punches still land, grabs do not.
+        self.assertFalse(graph.entity_has(armed, Relation.GRABBABLE))
         self.assertTrue(graph.entity_has(throwing, Relation.THROWING))
         self.assertTrue(graph.entity_has(throwing, Relation.GRABBABLE))
+        unarmed = _entity(
+            slot="E2",
+            family="Jack",
+            type_id=0x27,
+            primary_state=0x0100,
+            family_state=0,
+        )
+        graph2 = build_tactical_graph(
+            me, (me, unarmed), level_index=0, player_index=1
+        )
+        self.assertTrue(graph2.entity_has(unarmed, Relation.GRABBABLE))
 
     def test_jack_attached_helpers_are_not_dangerous_until_launched(self) -> None:
         me = _player()

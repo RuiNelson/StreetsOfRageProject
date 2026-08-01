@@ -480,11 +480,14 @@ def want_grab_approach(
     *,
     grab_bias: float,
 ) -> bool:
+    """True when geometry is in the body-grab band for a high grab-bias plan."""
+
     if grab_bias < 0.35:
         return False
     dx = abs(foe.map_x - me.map_x)
     dy = abs(foe.map_y - me.map_y)
-    return 18 <= dx <= 26 and dy <= 10
+    # Slightly wider band so Nora grab pressure keeps walking until contact.
+    return 12 <= dx <= 28 and dy <= 12
 
 
 def held_enemy_entity(

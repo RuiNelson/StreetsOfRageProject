@@ -334,9 +334,8 @@ class PolicyAggressionTests(unittest.TestCase):
         )
         return replace(snap, world_map=world)
 
-    def test_turns_and_intercepts_basic_enemy_when_wrong_way(self) -> None:
-        # Direction+B turns and attacks in the same sample; a separate turn
-        # costs four frames, enough for a close Garcia punch to land.
+    def test_rear_attacks_basic_enemy_on_back_arc(self) -> None:
+        # A sole foe on the rear arc uses B+C; do not turn-and-punch into it.
         p1 = _e(
             kind="player",
             family="Player",
@@ -351,9 +350,11 @@ class PolicyAggressionTests(unittest.TestCase):
         foe = _e(map_x=82, world_x=82, map_y=64, label="Lefty")
         snap = self._snap((p1, foe))
         d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
-        self.assertIn("intercept", d.p1_note)
-        self.assertTrue(d.p1_mask & 0x20, msg=d.p1_note)
-        self.assertTrue(d.p1_mask & 0x04, msg=f"expected LEFT: {d.p1_mask:#x}")
+        self.assertTrue(
+            "rear" in d.p1_note or "back atk" in d.p1_note,
+            d.p1_note,
+        )
+        self.assertEqual(d.p1_mask & 0x60, 0x60, msg=hex(d.p1_mask))
 
     def test_punches_when_facing_and_in_range(self) -> None:
         p1 = _e(
@@ -669,9 +670,12 @@ class PolicyAggressionTests(unittest.TestCase):
         decision = decide_actions(
             self._snap((p1, foe)), AgentConfig(p1_enabled=True), AgentState()
         )
-        self.assertTrue(decision.p1_mask & 0x20, decision.p1_note)
-        self.assertFalse(decision.p1_mask & 0x40, decision.p1_note)
-        self.assertIn("intercept", decision.p1_note)
+        # Signal counters prefer mid/far jump-ins over grounded intercept punches.
+        self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
+        self.assertTrue(
+            "jump" in decision.p1_note or decision.p1_mask & 0x40,
+            decision.p1_note,
+        )
 
     def test_jumps_signal_sweep_then_attacks_in_free_flight(self) -> None:
         for state, phase in (
@@ -915,9 +919,16 @@ class PolicyAggressionTests(unittest.TestCase):
         d = decide_actions(
             self._snap((p1, jack)), AgentConfig(p1_enabled=True), AgentState()
         )
-        self.assertTrue(d.p1_mask & 0x20, d.p1_note)
+        # Throw window: prefer close-for-grab (or punch if already body-close).
         self.assertFalse(d.p1_mask & 0x40, d.p1_note)
-        self.assertIn("punch Jack", d.p1_note)
+        self.assertTrue(
+            d.p1_mask & 0x20 or "grab" in d.p1_note,
+            d.p1_note,
+        )
+        self.assertTrue(
+            "grab" in d.p1_note or "punch" in d.p1_note or "close" in d.p1_note,
+            d.p1_note,
+        )
 
     def test_airborne_fires_b_only(self) -> None:
         p1 = _e(
@@ -1144,16 +1155,37 @@ class PolicyAggressionTests(unittest.TestCase):
             label="P1",
             action_state=0x02,  # face right
         )
-        # Primary must be the closer front foe; rear is a second threat at our back.
-        front = _e(map_x=118, world_x=118, map_y=64, label="Front", slot="E0")
+        # Only a rear threat (no grabbable front target): use rear B+C.
         back = _e(map_x=78, world_x=78, map_y=64, label="Backstab", slot="E1")
-        snap = self._snap((p1, front, back))
+        snap = self._snap((p1, back))
         d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
         self.assertTrue(
             "rear" in d.p1_note or "back atk" in d.p1_note,
             d.p1_note,
         )
         self.assertEqual(d.p1_mask & 0x60, 0x60, msg=hex(d.p1_mask))
+
+    def test_back_exposed_prefers_grab_shield_on_front(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        front = _e(map_x=118, world_x=118, map_y=64, label="Front", slot="E0")
+        back = _e(map_x=70, world_x=70, map_y=64, label="Backstab", slot="E1")
+        d = decide_actions(
+            self._snap((p1, front, back)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertIn("grab shield", d.p1_note)
+        self.assertNotIn("back atk", d.p1_note)
 
 
 if __name__ == "__main__":

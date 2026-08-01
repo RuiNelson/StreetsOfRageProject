@@ -13,7 +13,7 @@ stay held until the world-space goal is reached or passed through.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as dc_replace
 
 from ..phases import CombatPhase, is_dangerous, is_punishable
 from ..state import GameSnapshot, PlayerSnapshot
@@ -22,6 +22,7 @@ from . import bosses, combat, coop, enemies as enemy_ai, navigation, pressure, s
 from .arbiter import GoalKind, solve_goal
 from .context import DecisionContext, PlayerMode, SeatMemory, build_decision_context
 from .controls import Intent, mask_from_intent
+from .expert import DEFAULT_COMBAT_EXPERT
 from .knowledge import Relation
 from .navigation import NavMemory
 from .skills import try_crossover_suplex, try_hold_resolve, try_start_mode_skill
@@ -605,8 +606,20 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             max_dist=min(profile.rear_range_max + 4, combat.REAR_REACT_RANGE),
             graph=graph,
         )
-        if rear_foe is not None and (
-            target is None or rear_foe.slot != target.entity.slot
+        # Prefer grab→suplex on a legal front target over a rear B+C when the
+        # back is exposed. Rear-attack only when there is no grabbable front foe.
+        front = None if target is None else target.entity
+        can_grab_shield = (
+            front is not None
+            and rear_foe is not None
+            and front.slot != rear_foe.slot
+            and enemy_ai.is_enemy_grabbable(front)
+            and front.kind in ("enemy", "boss")
+        )
+        if (
+            rear_foe is not None
+            and not can_grab_shield
+            and (target is None or rear_foe.slot != target.entity.slot)
         ):
             face_left_now = combat.player_facing_left(me)
             if combat.can_rear_hit(
@@ -638,9 +651,46 @@ def _decide_free(ctx: DecisionContext) -> Intent:
 
     if target is not None:
         foe = target.entity
+        # Back security is the top free-combat priority: a second live hostile
+        # behind the player means grab a legal front target and let the
+        # crossover-suplex skill shield the back. Armed Jack is not grabbable.
+        rear_threat = DEFAULT_COMBAT_EXPERT.assess(
+            me,
+            snapshot.world_map.entities,
+            held_enemy=None,
+            graph=graph,
+        ).rear_threat_slot
+        rear_entity = next(
+            (
+                entity
+                for entity in snapshot.world_map.entities
+                if entity.slot == rear_threat
+            ),
+            None,
+        )
+        back_exposed = (
+            rear_entity is not None
+            and rear_entity.slot != foe.slot
+            and foe.kind in ("enemy", "boss")
+        )
+        grabbable = enemy_ai.is_enemy_grabbable(foe)
+        if graph.entity_has(foe, Relation.GRABBABLE):
+            grabbable = True
+        elif graph.entity_has(foe, Relation.ARMED) and not graph.entity_has(
+            foe, Relation.THROWING
+        ):
+            grabbable = False
+
         dx, dy, _geom, plan = combat.approach_vector(
             me, target, profile, low_health=low_hp
         )
+        if back_exposed and grabbable:
+            plan = dc_replace(
+                plan,
+                grab_bias=max(plan.grab_bias, 0.9),
+                jump_bias=min(plan.jump_bias, 0.1),
+                note=f"{plan.note}|back-shield",
+            )
         phase = foe.combat_phase
         phase_name = phase.name.lower()
         tag = foe.phase_tag
@@ -705,6 +755,61 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 left=face_left,
                 right=face_right_now,
                 note=f"atk anim {foe.label} [{tag}]",
+            )
+
+        # Secure the back first: walk into a legal grab on the front target so
+        # the hold can convert to crossover→suplex when a rear hostile exists.
+        if (
+            back_exposed
+            and grabbable
+            and not me.is_hurt
+            and foe.kind in ("enemy", "boss")
+            and phase != CombatPhase.GRABBED
+        ):
+            if (
+                abs_dx <= 24.0
+                and lane_ok
+                and facing_ok
+                and cd == 0
+                and combat.player_can_start_ground_action(me)
+            ):
+                if coop.attack_would_hit_ally(
+                    me, coop_ctx.partner, face_left=face_left
+                ):
+                    return _clear_ally_lane(
+                        walk,
+                        me,
+                        coop_ctx.partner,
+                        reason=f"ally blocks grab shield {foe.label}",
+                        snapshot=snapshot,
+                        advice=advice,
+                        nav=nav,
+                    )
+                walk.clear()
+                ctx.set_attack_cd(3)
+                return Intent(
+                    left=face_left,
+                    right=face_right_now,
+                    attack=True,
+                    note=(
+                        f"grab shield {foe.label} "
+                        f"vs rear {rear_entity.label if rear_entity else ''}"
+                    ).strip(),
+                )
+            return _walk_toward(
+                walk,
+                me,
+                goal_x=float(foe.world_x),
+                goal_y=float(foe.world_y),
+                reason=(
+                    f"close grab shield {foe.label} "
+                    f"[{rear_entity.label if rear_entity else 'rear'}]"
+                ),
+                snapshot=snapshot,
+                advice=advice,
+                nav=nav,
+                eps_x=4.0,
+                eps_y=6.0,
             )
 
         boss_tactic = bosses.tactical_move(
@@ -849,10 +954,20 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                     )
                 return Intent(note=f"guard threat {foe.label} [{tag}]")
 
+        behind = combat.enemy_is_behind(
+            me,
+            foe,
+            face_right=not combat.player_facing_left(me),
+        )
+
         # State transitions can start and finish between four-frame samples
         # (notably Signal's easy slide). Meet nearby basic enemies during their
         # approach instead of waiting for the first dangerous-state sample.
-        if combat.should_intercept_basic_enemy(me, foe, profile):
+        # Never intercept a foe already on our rear arc — that is a B+C case.
+        if (
+            not behind
+            and combat.should_intercept_basic_enemy(me, foe, profile)
+        ):
             if cd == 0 and combat.player_can_start_ground_action(me):
                 if coop.attack_would_hit_ally(
                     me, coop_ctx.partner, face_left=face_left
@@ -884,7 +999,7 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             return Intent(note=f"hold range {foe.label} [{tag}]")
 
         # Face first when about to punch.
-        if punch_geom and not facing_ok and cd == 0:
+        if punch_geom and not facing_ok and cd == 0 and not behind:
             walk.clear()
             ctx.set_attack_cd(1)
             return Intent(
@@ -892,12 +1007,6 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 right=face_right_now,
                 note=f"face {foe.label} [{tag}]",
             )
-
-        behind = combat.enemy_is_behind(
-            me,
-            foe,
-            face_right=not combat.player_facing_left(me),
-        )
 
         if not me.is_hurt and cd == 0:
             mix = enemy_ai.attack_mix(
@@ -912,10 +1021,13 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 lane_ok=lane_ok,
                 facing_ok=facing_ok,
                 can_jump=jump_ok,
+                grabbable=grabbable,
+                back_exposed=back_exposed,
             )
 
             if is_punishable(phase) and phase != CombatPhase.GRABBED:
-                if punch_ok:
+                # Nora-style grab still preferred on punish when grab_bias high.
+                if mix != "grab_walk" and punch_ok:
                     if coop.attack_would_hit_ally(
                     me, coop_ctx.partner, face_left=face_left
                 ):
@@ -964,6 +1076,55 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                     note=f"back atk {profile.name} {foe.label}",
                 )
 
+            # Grab approach (Nora, Jack throw window, elevated back-shield):
+            # walk to body range and press B to start the hold tree.
+            if mix == "grab_walk" and grabbable:
+                if (
+                    abs_dx <= 24.0
+                    and lane_ok
+                    and facing_ok
+                    and combat.player_can_start_ground_action(me)
+                ):
+                    if coop.attack_would_hit_ally(
+                        me, coop_ctx.partner, face_left=face_left
+                    ):
+                        return _clear_ally_lane(
+                            walk,
+                            me,
+                            coop_ctx.partner,
+                            reason=f"ally blocks grab {foe.label}",
+                            snapshot=snapshot,
+                            advice=advice,
+                            nav=nav,
+                        )
+                    walk.clear()
+                    ctx.set_attack_cd(3)
+                    return Intent(
+                        left=face_left,
+                        right=face_right_now,
+                        attack=True,
+                        note=f"grab {foe.label} [{tag}]",
+                    )
+                if not facing_ok and abs_dx <= 40.0:
+                    walk.clear()
+                    return Intent(
+                        left=face_left,
+                        right=face_right_now,
+                        note=f"face grab {foe.label} [{tag}]",
+                    )
+                return _walk_toward(
+                    walk,
+                    me,
+                    goal_x=float(foe.world_x),
+                    goal_y=float(foe.world_y),
+                    reason=f"close grab {foe.label} [{tag}]",
+                    snapshot=snapshot,
+                    advice=advice,
+                    nav=nav,
+                    eps_x=4.0,
+                    eps_y=6.0,
+                )
+
             # Jump start: C only + face. Attack comes next ticks while airborne.
             # Still refuse the approach when the partner already sits in the
             # eventual kick box — the airborne branch will also gate B.
@@ -990,11 +1151,12 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                     )
                 walk.clear()
                 ctx.set_attack_cd(1)
+                family = foe.family or foe.label
                 return Intent(
                     left=face_left,
                     right=face_right_now,
                     jump=True,
-                    note=f"jump start {foe.label} [{tag}]",
+                    note=f"jump start {family} [{tag}]",
                 )
 
             if mix == "punch" and punch_ok:
@@ -1027,10 +1189,24 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 note=f"face {foe.label} cd={cd}",
             )
 
-        stand_x, stand_y = _stand_point(me, target, profile, low_health=low_hp)
+        # Stand point: jump counters hold mid range; grab plans walk to body.
+        if plan.grab_bias >= 0.5 and grabbable:
+            stand_x = float(foe.world_x)
+            stand_y = float(foe.world_y)
+            reason = f"close grab {foe.label} [{tag}]"
+        elif plan.jump_bias >= 0.5:
+            side = -1.0 if target.dx > 0 else 1.0
+            mid = (profile.jump_kick_min + profile.jump_kick_max) * 0.5
+            stand_x = float(foe.world_x) + side * mid
+            stand_y = float(foe.world_y)
+            reason = f"jump range {foe.label} [{tag}]"
+        else:
+            stand_x, stand_y = _stand_point(me, target, profile, low_health=low_hp)
+            reason = f"close {foe.label} [{tag}]"
         if (
             is_dangerous(phase)
             and plan.sidestep
+            and plan.jump_bias < 0.5
             and band != "close"
             and abs_dx <= combat.DANGER_REACT_X
         ):
@@ -1041,11 +1217,9 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             stand_x = float(me.world_x)
             stand_y = float(foe.world_y)
             reason = f"lane {foe.label} [{tag}]"
-        elif is_punishable(phase):
+        elif is_punishable(phase) and plan.grab_bias < 0.5:
             stand_x, stand_y = _stand_point(me, target, profile, low_health=False)
             reason = f"chase punish {foe.label} [{tag}]"
-        else:
-            reason = f"close {foe.label} [{tag}]"
 
         return _walk_toward(
             walk,

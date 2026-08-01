@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 from dataclasses import replace
 
+from sor_autoplay.agent.characters import PROFILES
 from sor_autoplay.agent.controls import ATTACK, JUMP, Intent, mask_from_intent
 from sor_autoplay.agent.enemies import (
     JackProjectilePhase,
@@ -143,6 +144,74 @@ class EnemyCounterTests(unittest.TestCase):
     def test_nora_distrusts_downed(self) -> None:
         plan = plan_for(_e(family="Nora", type_id=0x26, health=1))
         self.assertTrue(plan.distrust_downed)
+
+    def test_nora_prefers_grab(self) -> None:
+        plan = plan_for(_e(family="Nora", type_id=0x26))
+        self.assertGreaterEqual(plan.grab_bias, 0.7)
+        self.assertEqual(
+            attack_mix(
+                plan,
+                PROFILES[0],
+                in_range=False,
+                band="approach",
+                lane_ok=True,
+                facing_ok=True,
+                grabbable=True,
+            ),
+            "grab_walk",
+        )
+
+    def test_signal_prefers_jump_from_mid_range(self) -> None:
+        plan = plan_for(_e(family="Signal", type_id=0x24))
+        self.assertGreaterEqual(plan.jump_bias, 0.7)
+        self.assertEqual(
+            attack_mix(
+                plan,
+                PROFILES[0],
+                in_range=False,
+                band="jump",
+                can_jump=True,
+                lane_ok=True,
+                facing_ok=True,
+            ),
+            "jump",
+        )
+
+    def test_jack_armed_not_grabbable_throw_window_is(self) -> None:
+        from sor_autoplay.agent.enemies import is_enemy_grabbable
+
+        armed = _e(
+            family="Jack",
+            type_id=0x27,
+            primary_state=0x0C00,
+            family_state=0x01,
+        )
+        throwing = _e(
+            family="Jack",
+            type_id=0x27,
+            primary_state=0x0E00,
+            family_state=0x01,
+        )
+        self.assertFalse(is_enemy_grabbable(armed))
+        self.assertEqual(plan_for(armed).grab_bias, 0.0)
+        self.assertTrue(is_enemy_grabbable(throwing))
+        self.assertGreaterEqual(plan_for(throwing).grab_bias, 0.6)
+
+    def test_back_exposed_forces_grab_walk(self) -> None:
+        plan = plan_for(_e(family="Garcia", type_id=0x22))
+        self.assertEqual(
+            attack_mix(
+                plan,
+                PROFILES[0],
+                in_range=True,
+                band="close",
+                lane_ok=True,
+                facing_ok=True,
+                grabbable=True,
+                back_exposed=True,
+            ),
+            "grab_walk",
+        )
 
     def test_attack_mix_respects_no_jump(self) -> None:
         from sor_autoplay.agent.characters import PROFILES

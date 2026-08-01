@@ -12,6 +12,7 @@ from .enemies import (
     JackProjectilePhase,
     JackWeaponPhase,
     dangerous_projectile,
+    is_enemy_grabbable,
     jack_projectile_phase,
     jack_weapon_phase,
 )
@@ -167,11 +168,15 @@ def build_tactical_graph(
             jack_phase = jack_weapon_phase(entity)
             if jack_phase == JackWeaponPhase.ARMED:
                 edges.add(Edge(entity.slot, Relation.ARMED))
-                edges.add(Edge(entity.slot, Relation.GRABBABLE))
+                # Armed Jack is punchable but not grabbable until the throw
+                # window (state $0E) or the helper latch clears.
             elif jack_phase == JackWeaponPhase.THROWING:
                 edges.add(Edge(entity.slot, Relation.THROWING))
-                edges.add(Edge(entity.slot, Relation.GRABBABLE))
-            elif jack_phase == JackWeaponPhase.UNARMED:
+            if (
+                entity.kind in ("enemy", "boss")
+                and is_enemy_grabbable(entity)
+                and entity.combat_phase != CombatPhase.GRABBED
+            ):
                 edges.add(Edge(entity.slot, Relation.GRABBABLE))
 
         if reachable and entity.kind in ("pickup", "weapon"):

@@ -64,7 +64,9 @@ THREAT_LANE_REACT_HALF = ENEMY_PUNCH_LANE_HALF + 16.0
 THREAT_LANE_ESCAPE = 24.0
 ENEMY_LANE_MIN = 2.0
 ENEMY_LANE_MAX = 112.0
-BASIC_ENEMY_TYPES = frozenset(range(0x20, 0x25))
+# Garcia pack types — exclude Signal ($24): prefer jump-ins over grounded
+# intercept punches that walk into its slide/flank.
+BASIC_ENEMY_TYPES = frozenset({0x20, 0x21, 0x22, 0x23})
 # Signal's dispatcher table at ROM $E4DA maps state $08 to the sweep selector
 # ($E5EC) and state $0B to the actual low sliding kick ($E80A): animation $18,
 # X velocity $00070000. Jump before generic grounded-interrupt logic handles it.
