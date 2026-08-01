@@ -7,6 +7,7 @@ from typing import Protocol
 
 
 GAME_STATE = 0xFFFF00
+LEVEL = 0xFFFF02
 P1_CHARACTER_ID = 0xFFFF1E
 P1_OBJECT = 0xFFB800
 P1_HEALTH = 0xFFB832
@@ -73,6 +74,8 @@ class ScenarioClient(Protocol):
     def write_memory(self, address: int, data: bytes) -> None: ...
 
     def set_lockstep(self, enabled: bool) -> object: ...
+
+    def trigger_option_hotkey(self, key: str) -> object: ...
 
 
 def _wait(
@@ -187,4 +190,72 @@ def reach_round1_start(
     observed["work_ram_sha256"] = hashlib.sha256(
         game.read_memory(0xFF0000, 0x10000)
     ).hexdigest()
+    return observed
+
+
+def reach_level_start(
+    game: ScenarioClient,
+    character: str,
+    level_number: int,
+    *,
+    timeout_ms: int = 30_000,
+    rng_seed: int = DEFAULT_RNG_SEED,
+    frame_phase: int = DEFAULT_FRAME_PHASE,
+) -> dict[str, object]:
+    """Reach a deterministic level start through the host's debug hotkey.
+
+    Character selection still follows the real menus. Levels 2–8 then use the
+    same Alt/Option digit action exposed by ``--debugUtils`` and the remote
+    client, wait for the complete level-intro/gameplay transition, and freeze
+    on the same connection used by the evaluator.
+    """
+
+    if not 1 <= level_number <= 8:
+        raise ValueError("level_number must be in 1..8")
+    if level_number == 1:
+        return reach_round1_start(
+            game,
+            character,
+            timeout_ms=timeout_ms,
+            rng_seed=rng_seed,
+            frame_phase=frame_phase,
+        )
+
+    observed = reach_round1_start(
+        game,
+        character,
+        timeout_ms=timeout_ms,
+        rng_seed=rng_seed,
+        frame_phase=frame_phase,
+    )
+    game.set_lockstep(False)
+    game.trigger_option_hotkey(str(level_number))
+    _wait(game, GAME_STATE, LEVEL_INTRO_UPDATE, width=2, timeout_ms=timeout_ms)
+    _wait(game, GAME_STATE, GAMEPLAY_UPDATE, width=2, timeout_ms=timeout_ms)
+    _wait(game, LEVEL_INTRO_ACTIVE, 0, width=1, timeout_ms=timeout_ms)
+    _wait(game, PLAY_SE, SPAWN_COMPLETE_SOUND_ID, width=1, timeout_ms=timeout_ms)
+    game.wait_vsync(2, timeout_ms=timeout_ms)
+
+    level_index = game.read_value(LEVEL, width=2)
+    if level_index != level_number - 1:
+        raise RuntimeError(
+            f"Round-{level_number} scenario verification failed: "
+            f"level index is {level_index}"
+        )
+
+    game.set_lockstep(True)
+    game.write_memory(RNG_STATE, rng_seed.to_bytes(4, "big"))
+    game.write_memory(FRAME_PHASE, frame_phase.to_bytes(2, "big"))
+    observed.update(
+        {
+            "name": f"round{level_number}-start",
+            "level_number": level_number,
+            "level_index": level_index,
+            "rng_seed": rng_seed,
+            "frame_phase": frame_phase,
+            "work_ram_sha256": hashlib.sha256(
+                game.read_memory(0xFF0000, 0x10000)
+            ).hexdigest(),
+        }
+    )
     return observed

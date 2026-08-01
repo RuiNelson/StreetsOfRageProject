@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from sor_autoplay.agent.controls import ATTACK, JUMP, SPECIAL, Intent, mask_from_intent
 from sor_autoplay.agent.policy import AgentConfig, AgentState, decide_actions
 from sor_autoplay.agent.pressure import PressureReport, should_call_police
-from sor_autoplay.agent.stage import stage_advice, steer_away_from_holes
+from sor_autoplay.agent.stage import point_in_hole, stage_advice, steer_away_from_holes
 from sor_autoplay.hazards import FloorHole
 from sor_autoplay.memory_map import (
     MAX_HEALTH,
@@ -18,6 +19,7 @@ from sor_autoplay.memory_map import (
     OBJ_TYPE,
     OBJECT_SLOT_SIZE,
 )
+from sor_autoplay.phases import CombatPhase
 from sor_autoplay.state import snapshot_from_memory_blocks
 from sor_autoplay.world_map import MapEntity, WorldMap
 
@@ -172,6 +174,35 @@ class PressureTests(unittest.TestCase):
         self.assertFalse(should_call_police(high, specials=0))
         self.assertFalse(should_call_police(high, specials=1, level_index=7))
 
+    def test_special_is_saved_during_small_full_health_skirmish(self) -> None:
+        trigger_happy = PressureReport(
+            9.0,
+            2,
+            False,
+            "two active attackers",
+            charging=2,
+            health_percent=100.0,
+        )
+        self.assertFalse(should_call_police(trigger_happy, specials=2))
+
+    def test_low_health_or_boss_unlocks_special_spending(self) -> None:
+        low_health = PressureReport(
+            5.0,
+            1,
+            False,
+            "hurt",
+            health_percent=35.0,
+        )
+        boss = PressureReport(
+            10.0,
+            0,
+            True,
+            "boss-immediate",
+            health_percent=100.0,
+        )
+        self.assertTrue(should_call_police(low_health, specials=1))
+        self.assertTrue(should_call_police(boss, specials=1))
+
 
 class PolicyTests(unittest.TestCase):
     def test_disabled_agents_emit_zero(self) -> None:
@@ -194,6 +225,64 @@ class PolicyTests(unittest.TestCase):
         snap = _snapshot_with_map((p1,), level_index=7)
         decision = decide_actions(snap, AgentConfig(p1_enabled=True))
         self.assertTrue(decision.p1_mask & 0x04, msg=f"expected LEFT, got {decision.p1_mask:#x}")
+
+    def test_stage7_elevator_clear_screen_centers_without_horizontal_input(self) -> None:
+        p1 = _entity(
+            kind="player",
+            map_x=100,
+            map_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+        )
+        fake_hole = FloorHole(world_x=80, lane_y=48, width=96, height=64)
+        snap = _snapshot_with_map((p1,), level_index=6, holes=(fake_hole,))
+        memory = AgentState()
+        # A corridor-progress latch from the preceding wave must be discarded.
+        memory.p1_walk.set_goal(p1, 260.0, 64.0, reason="old progress")
+        decision = decide_actions(
+            snap,
+            AgentConfig(p1_enabled=True),
+            memory,
+        )
+        self.assertEqual(decision.p1_mask & 0x0C, 0, decision.p1_note)
+        self.assertTrue(decision.p1_mask & 0x02, decision.p1_note)  # DOWN
+        self.assertIn("elevator", decision.p1_note)
+
+    def test_stage4_progress_routes_around_pit_then_resumes_right(self) -> None:
+        hole = FloorHole(world_x=100, lane_y=40, width=32, height=24)
+        memory = AgentState()
+        x, y = 90, 50
+        notes: list[str] = []
+        for _ in range(10):
+            p1 = _entity(
+                kind="player",
+                map_x=x,
+                map_y=y,
+                world_x=x,
+                world_y=y,
+                slot="P1",
+                label="P1 Axel",
+                family="Player",
+                action_state=0x02,
+            )
+            snap = _snapshot_with_map((p1,), level_index=3, holes=(hole,))
+            decision = decide_actions(
+                snap,
+                AgentConfig(p1_enabled=True),
+                memory,
+            )
+            notes.append(decision.p1_note)
+            x += 12 * bool(decision.p1_mask & 0x08)
+            x -= 12 * bool(decision.p1_mask & 0x04)
+            y += 12 * bool(decision.p1_mask & 0x02)
+            y -= 12 * bool(decision.p1_mask & 0x01)
+            self.assertIsNone(
+                point_in_hole(x, y, (hole,), margin=0.0),
+                notes,
+            )
+        self.assertGreater(x, hole.world_x_end, notes)
+        self.assertLess(abs(y - 64), 8, notes)
 
     def test_attacks_nearby_enemy(self) -> None:
         # Face right in grounded idle toward a foe inside strike range.
@@ -226,6 +315,34 @@ class PolicyTests(unittest.TestCase):
             msg=decision.p1_note,
         )
 
+    def test_souther_committed_claw_uses_boss_lane_tactic(self) -> None:
+        p1 = _entity(
+            kind="player",
+            map_x=100,
+            map_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+            action_state=0x02,
+        )
+        souther = replace(
+            _entity(
+                kind="boss",
+                map_x=155,
+                map_y=64,
+                slot="B0",
+                label="Souther",
+                family="Souther",
+                type_id=0x55,
+                action_state=0x02,
+            ),
+            combat_phase=CombatPhase.ATTACKING,
+        )
+        snap = _snapshot_with_map((p1, souther), level_index=1, specials=0)
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertTrue(decision.p1_mask & 0x03, decision.p1_note)
+        self.assertIn("sidestep Souther", decision.p1_note)
+
     def test_steady_when_paused(self) -> None:
         p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")
         snap = _snapshot_with_map((p1,), paused=True)
@@ -241,7 +358,15 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(decision.p1_mask, 0)
 
     def test_police_under_pressure(self) -> None:
-        p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")
+        p1 = _entity(
+            kind="player",
+            map_x=100,
+            map_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+            action_state=0x02,
+        )
         foes = tuple(
             _entity(
                 kind="enemy",

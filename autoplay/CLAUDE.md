@@ -88,6 +88,10 @@ that layout yet.
 5. Police special when fuzzy pressure score ≥ threshold and specials remain
    (not round 8). Pressure combines crowd size, hunters, active attacks,
    surrounding geometry, bosses, and health and retains its fired-rule trace.
+   Conserve stock during small full-health skirmishes. Eligible spends are a
+   crowd of at least four, health at or below 40% with a reachable threat, or
+   any reachable live boss; a boss forces maximum pressure and the first legal
+   grounded A edge immediately.
 6. **Grab / weapon hold tree** (`agent/grabs.py`): normally **B+back throw**
    (away = opposite action-state facing bit0). A hold needs a dedicated held
    field or the grabbed enemy's reciprocal player link; the latch bridges only
@@ -115,6 +119,10 @@ that layout yet.
    - ROM routine `$3136` accepts only X ±20, Y ±16, Z ±8. Walk inside a
      conservative X ±16, Y ±12, Z ±6 box, and emit B only from a grounded
      action state; otherwise wait for the current animation to finish
+   - Held weapons do not suppress weapon observations. Assign fuzzy value from
+     ROM damage/range/control plus character preferences and pick a ground
+     weapon only when it improves the carried type by a material margin. Fight
+     constraints still outrank the upgrade.
 9. **Face-then-hit combat** (`agent/combat.py` + `enemies.py`):
    - Player facing = action-state `+$30` **bit 0** (set = face left)
    - Punch only when same lane (Y ≤ ±12), within strike range, and facing foe
@@ -185,16 +193,47 @@ that layout yet.
      about `$A0`).
    - Breakables (phone booth / crate): walk in → smash (B) or mid-range
      jump-break; then loot spilled pickups/weapons
+     - Later rounds use distinct ROM object families rather than the early
+       type-`$11/$19` props: level indexes 2/3/4/5/7 use smashable types
+       `$18`; `$1B/$1C/$1D`; `$1F`; `$41`; and `$45`, respectively. Intact
+       props have primary byte `+$30 = $01`. Broken originals and same-type
+       debris in later states are not targets; type `$11` fragments also use
+       nonzero `+$31`, while `$18/$1D/$41` debris use nonzero `+$0B`.
+     - Round-8 type `$45` records with nonzero script parameter `+$40` move
+       horizontally, follow a player's lane, and expose outgoing damage 3.
+       They remain smashable breakables but carry an ATTACKING observation
+       phase while damage is active. Round-6 type `$42` is different: its
+       moving vertical state machine exposes damage `$14` but has no
+       player-hit destruction path, so observe it as an avoid-only hazard.
+       A seeded live trace measured `$45` advancing 12 px per four-frame
+       decision. Leave its lane inside 220 px, hold the safe lane until it
+       passes, and smash only when already in grounded punch range; never chase
+       it with the static-crate stand point.
    - Deterministic attack choice; jump-ins only when an enemy-family counter
      explicitly asks for one (for example Haku-Ro), not from character reach
    - Fuzzy target utility weighs proximity, lane access, danger/ranged attacks,
-     punishability, boss status, and `targets_player`; keep the current target
-     unless a challenger wins by a material margin
+     punishability, boss status, and `targets_player`. At equal geometry the
+     tier is boss > Jack > Nora > Signal > Haku-Ro/ninja > Garcia, while a
+     materially closer or immediately dangerous lower-tier foe can still win;
+     keep the current target unless a challenger wins by a material margin
    - Generic charge/sidestep retreat applies only inside the 100 px reaction
      radius. A distant Antonio is approached rather than fled from
    - A boss decoded as CHARGE but waiting in a distant Y lane is deliberately
      re-aligned with; do not enter the ordinary-enemy `guard lane` fixed point
-10. Avoid floor holes (stage 4) and elevator edges (stage 7)
+   - Souther (type `$55`) and Onihime/Yasha (type `$58`) both use primary
+     state `$02` for live attacks even when tactical `+$67` is zero:
+     `$16118` is Souther's claw/contact state and `$15D0C` is the twins'
+     damaging jump/grab choreography. Keep grounded against Souther, leave a
+     committed boss attack lane, and escape vertically when the twins bracket
+     the player so focusing either one does not expose the player's back
+10. Route around floor holes (stage 4) and hold the elevator (stage 7)
+    - Stage-4 horizontal progression must turn into a persistent vertical
+      detour at a pit, cross beside it, then resume X; never reverse X forever
+      at the first blocked collision cell
+    - Round 7 (level index 6) is a fixed moving elevator/gauntlet. Its platform
+      is not represented by the static collision-class map, so class-0 cells
+      are not holes. With no combat target, clear any old horizontal walk
+      latch, center only on lane `$50`, and emit no LEFT/RIGHT progression
 11. Progress right (stage 8: left) only when the graph has no blocker
 
 Map entities carry full combat RAM for agents:
@@ -280,6 +319,14 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
   `boss_stall_steps` begins after eight consecutive input-ready `guard lane`
   decisions against a blocking boss; enforce `--max-boss-stalls 0` to catch
   the Antonio cross-lane fixed point without rejecting a brief guard.
+  Special-resource and stage mechanics are first-class metrics:
+  `special_calls`, `wasteful_special_calls`, `boss_special_opportunities`,
+  `missed_boss_special_calls`, `elevator_horizontal_progress_steps`,
+  `moving_breakable_threat_steps`, `moving_breakable_response_steps`, and
+  `missed_moving_breakable_responses`. Normally enforce
+  `--max-wasteful-specials 0 --max-missed-boss-specials 0
+  --max-elevator-horizontal-progress 0 --max-missed-moving-breakables 0`.
+  JSONL actors include intact breakables and their outgoing `damage`.
   A host `TimeoutError` during a decision produces a partial failing report
   with the exact decision index; do not discard the metrics/trace behind an
   unhandled exception.
@@ -287,7 +334,10 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
   navigates menus, verifies the player/health/game state, and enables lockstep
   on the same connection before returning control; a separate setup process
   leaves an uncontrolled frame gap and is not a comparable scenario start.
-- Round-1 evaluation seeds the ROM RNG long at `$FFFFFF40` and the VBlank frame
+- `--restart-level 1..8` composes that path with the `--debugUtils` level
+  hotkey, waits for spawn completion, verifies `$FFFF02`, then relocks and
+  reseeds. Use it for repeatable later-round geometry, prop, and boss episodes.
+- Deterministic evaluation seeds the ROM RNG long at `$FFFFFF40` and the VBlank frame
   phase word at `$FFFFFB08` after enabling lockstep. These writes are test
   setup only; the evaluated AI still acts solely through controller inputs.
   Reports include the starting 64 KiB work-RAM SHA-256. Use acceptance

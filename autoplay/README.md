@@ -42,15 +42,23 @@ Per-player toggle (HUD button or keys **1** / **2**):
   visible for diagnosis with the gray death outline instead of green punish.
 - Fuzzy, phase-aware target utility balances distance, lane access, immediate
   peril, ranged attacks, punish windows, bosses, and who is targeting the
-  player. Goal/target hysteresis prevents indecisive switching.
+  player. At equal geometry its symbolic tier is boss, Jack, Nora, Signal,
+  Haku-Ro/ninja, then Garcia; a much closer or actively attacking lower-tier
+  enemy can still win. Goal/target hysteresis prevents indecisive switching.
 - A constrained utility solver arbitrates **fight / loot / progress**. Bosses
   block progress, immediate danger vetoes loot, and safe valuable nearby items
   can win after combat instead of being chased unconditionally.
 - Fuzzy special pressure combines crowds, active attackers, hunters,
   surrounding geometry, bosses, and health, retaining the fired-rule trace.
+  It conserves police calls during small healthy fights, spends for crowds of
+  four or more or low health under threat, and fires immediately when a
+  reachable boss appears and stock remains.
 - Held weapons are conserved until a live foe is in the weapon's usable lane
   and range, without repeated B during weapon animations; Signal's low sweep
   is countered by jumping (and by an airborne B attack when unarmed)
+- Ground weapons have ROM-backed fuzzy value (damage, range, control, and
+  character preference), so an armed player replaces a weapon only with a
+  material upgrade and does not detour for a downgrade.
 - Family-specific counters (Signal, Haku-Ro, Nora, Jack, all bosses, Mr. X)
   preserve Jack's normal vulnerability in every weapon phase: punches, grabs,
   and jump kicks can hit his body while `+$52.bit0` describes only the attached
@@ -64,7 +72,10 @@ Per-player toggle (HUD button or keys **1** / **2**):
   hitboxes rather than estimated sprite distance
 - Police special under pressure; pickups use the ROM's X/Y/Z interaction box
   with co-op fairness
-- Stage rules (holes / elevator / stage 8 left); Mr. X always **NO**
+- Stage rules include vertical Stage-4 pit detours, a no-horizontal-progress
+  Stage-7 elevator hold, and Stage-8 leftward travel; Mr. X is always **NO**.
+  Later-round breakables are lifecycle-filtered, and Stage-8 moving damaging
+  props are evaded until safe or smashed only from grounded strike range.
 
 **Standard control mapping** (OPTIONS scheme 0):
 
@@ -165,6 +176,7 @@ episode inputs while thresholds remain robust to host state outside work RAM:
 cd autoplay
 PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.evaluation \
   --restart-character axel \
+  --restart-level 1 \
   --decisions 600 \
   --max-damage 12 \
   --max-damage-events 3 \
@@ -181,6 +193,10 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.eva
   --max-loot-under-threat 0 \
   --max-boss-progress 0 \
   --max-boss-stalls 0 \
+  --max-elevator-horizontal-progress 0 \
+  --max-wasteful-specials 0 \
+  --max-missed-boss-specials 0 \
+  --max-missed-moving-breakables 0 \
   --min-enemy-damage 15 \
   --min-forward-progress 600 \
   --report /tmp/sor-autoplay-report.json \
@@ -188,7 +204,10 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.eva
 ```
 
 `--restart-character` prevents uncontrolled frames between setup and decision
-zero; omit it only when deliberately evaluating the current live state. Use
+zero; omit it only when deliberately evaluating the current live state.
+`--restart-level 1..8` uses the host's debug level hotkey after the real menu
+and character-selection path, verifies the requested level, then refreezes and
+reseeds on the same connection. Use
 `--scenario-seed` and `--scenario-frame-phase` to select another controlled
 enemy pattern. The JSON report is suitable for CI artifacts. The compact
 JSON-lines trace contains each observation, action, note, outcome, and visible
@@ -219,6 +238,14 @@ progress decisions while a boss blocks the arena. Enforce them with
 `--max-boss-stalls 0` rejects continued no-input `guard lane`
 behavior after an eight-decision grace window, while allowing brief defensive
 guards.
+
+Resource, elevator, and moving-prop regressions have direct gates too.
+`--max-wasteful-specials 0` rejects police calls outside the boss/crowd/
+low-health rules, `--max-missed-boss-specials 0` requires the first legal boss
+call, `--max-elevator-horizontal-progress 0` rejects left/right progress on
+Round 7, and `--max-missed-moving-breakables 0` requires every reachable
+damaging Round-8 prop step to be a smash, vertical evade, or safe-lane hold.
+Breakables and their outgoing damage are retained in JSONL actor traces.
 
 Enemy-held-player scenarios can additionally require
 `--min-enemy-grab-escape-jumps 1 --min-enemy-grab-counter-throws 1`. The trace
@@ -261,6 +288,7 @@ autoplay/
       inference.py      # generic production-rule forward chaining
       expert.py         # tactical facts, rules, and explainable goals
       autoplanner.py     # persistent guarded multi-step combat plans
+      bosses.py          # Souther/twin lane tactics
       fuzzy.py          # dependency-free fuzzy memberships + Sugeno rules
       knowledge.py      # typed entity/relation tactical knowledge graph
       arbiter.py        # constrained fight / loot / progress utility solver

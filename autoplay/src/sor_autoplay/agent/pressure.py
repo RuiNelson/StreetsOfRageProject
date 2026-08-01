@@ -27,6 +27,7 @@ class PressureReport:
     charging: int = 0
     urgency: float = 0.0
     fired_rules: tuple[str, ...] = ()
+    health_percent: float = 100.0
 
 
 _PRESSURE_ENGINE = FuzzyInference(
@@ -42,6 +43,7 @@ _PRESSURE_ENGINE = FuzzyInference(
             ("critical_health", "any_threat"),
             0.85,
         ),
+        FuzzyRule("low-health-threat", ("low_health", "any_threat"), 0.80),
         FuzzyRule("crowd-while-hurt", ("crowd", "low_health"), 1.0),
         FuzzyRule("attack-while-hurt", ("active_attacks", "low_health"), 1.0),
         FuzzyRule("boss-while-hurt", ("boss", "low_health"), 0.95),
@@ -95,14 +97,30 @@ def compute_pressure(
     if player_entity is None or not player_snap.is_playable:
         return PressureReport(0.0, 0, False, "no player")
 
-    enemies, bosses = nearby_threats(
+    enemies, nearby_bosses = nearby_threats(
         player_entity,
         snapshot.world_map.entities,
         graph=graph,
     )
-    all_near = enemies + bosses
+    # Boss presence is a symbolic resource-spend rule, not a proximity grade:
+    # Antonio and later bosses can become active at an arena edge or in another
+    # lane.  Fire as soon as any reachable live boss exists, while ordinary
+    # crowd pressure remains local to the player.
+    active_bosses = [
+        entity
+        for entity in snapshot.world_map.entities
+        if entity.kind == "boss"
+        and not entity.is_defeated
+        and entity.combat_phase not in (CombatPhase.DEATH, CombatPhase.SCRIPTED)
+        and (
+            graph.entity_has(entity, Relation.REACHABLE)
+            if graph is not None
+            else 0.0 <= entity.map_x <= float(SCREEN_WIDTH + 64)
+        )
+    ]
+    all_near = enemies + nearby_bosses
     enemy_count = len(enemies)
-    boss_present = bool(bosses)
+    boss_present = bool(active_bosses)
     seat = player_snap.index
     hunters = sum(1 for e in all_near if e.targets_player == seat)
     charging = sum(1 for e in all_near if is_dangerous(e.combat_phase))
@@ -126,6 +144,12 @@ def compute_pressure(
         for name, activation in inferred.activations
         if name != "baseline" and activation >= 0.15
     )
+    urgency = inferred.value
+    if boss_present:
+        urgency = 1.0
+        fired = ("boss-immediate",) + tuple(
+            name for name in fired if name != "boss"
+        )
     reasons = list(fired)
     if enemy_count:
         reasons.append(f"{enemy_count} enemies")
@@ -133,14 +157,15 @@ def compute_pressure(
         reasons.append(f"hp {hp:.0f}%")
 
     return PressureReport(
-        score=inferred.value * 10.0,
+        score=urgency * 10.0,
         enemy_count=enemy_count,
         boss_present=boss_present,
         reason=", ".join(reasons) if reasons else "calm",
         hunters=hunters,
         charging=charging,
-        urgency=inferred.value,
+        urgency=urgency,
         fired_rules=fired,
+        health_percent=hp,
     )
 
 
@@ -160,4 +185,13 @@ def should_call_police(
         return False
     if level_index >= 7:
         return False
-    return pressure.score >= threshold
+    # Preserve specials during ordinary skirmishes. A boss is an immediate
+    # symbolic trigger; otherwise spending requires either a real crowd or low
+    # health with at least one local threat. The fuzzy score still decides
+    # borderline eligible cases and remains configurable for test scenarios.
+    eligible = (
+        pressure.boss_present
+        or pressure.enemy_count >= 4
+        or (pressure.health_percent <= 40.0 and pressure.enemy_count > 0)
+    )
+    return eligible and pressure.score >= threshold

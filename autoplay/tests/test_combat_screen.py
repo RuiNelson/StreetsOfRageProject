@@ -288,7 +288,13 @@ class GeometryTests(unittest.TestCase):
 
 
 class PolicyAggressionTests(unittest.TestCase):
-    def _snap(self, entities: tuple[MapEntity, ...], *, char_id: int = 0):
+    def _snap(
+        self,
+        entities: tuple[MapEntity, ...],
+        *,
+        char_id: int = 0,
+        level: int = 0,
+    ):
         from dataclasses import replace
 
         def put_u8(b: bytearray, o: int, v: int) -> None:
@@ -299,6 +305,7 @@ class PolicyAggressionTests(unittest.TestCase):
 
         g, t, o = bytearray(0x40), bytearray(4), bytearray(0x100)
         put_u16(g, 0x00, 0x0016)
+        put_u16(g, 0x02, level)
         put_u8(g, 0x18, 0x01)
         put_u8(g, 0x1E, char_id)
         put_u8(g, 0x20, 0x03)
@@ -1010,6 +1017,120 @@ class PolicyAggressionTests(unittest.TestCase):
         )
         if "smash" in d.p1_note:
             self.assertTrue(d.p1_mask & 0x20, d.p1_note)
+
+    def test_smashes_round8_moving_breakable(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        moving_prop = _e(
+            kind="breakable",
+            family="Breakable",
+            symbol="◆",
+            label="Moving prop",
+            type_id=0x45,
+            map_x=120,
+            world_x=120,
+            map_y=64,
+            health=None,
+            slot="B0",
+            outgoing_damage=3,
+            script_param=2,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+
+        decision = decide_actions(
+            self._snap((p1, moving_prop), level=7),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+
+        self.assertIn("smash Moving prop", decision.p1_note)
+        self.assertTrue(decision.p1_mask & 0x20, decision.p1_note)
+
+    def test_evades_midrange_round8_moving_breakable_instead_of_chasing(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=160,
+            world_x=160,
+            map_y=64,
+            world_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x03,
+        )
+        moving_prop = _e(
+            kind="breakable",
+            family="Breakable",
+            symbol="◆",
+            label="Moving prop",
+            type_id=0x45,
+            map_x=47,
+            world_x=47,
+            map_y=64,
+            world_y=64,
+            health=None,
+            slot="B0",
+            outgoing_damage=3,
+            script_param=2,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+
+        decision = decide_actions(
+            self._snap((p1, moving_prop), level=7),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+
+        self.assertIn("evade moving threat Moving prop", decision.p1_note)
+        self.assertTrue(decision.p1_mask & 0x01, decision.p1_note)
+        self.assertFalse(decision.p1_mask & 0x0C, decision.p1_note)
+        self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
+
+    def test_avoids_round6_moving_stage_hazard(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        hazard = _e(
+            kind="projectile",
+            family="Stage hazard",
+            symbol="!",
+            label="Moving hazard",
+            type_id=0x42,
+            map_x=130,
+            world_x=130,
+            map_y=64,
+            health=None,
+            slot="H0",
+            outgoing_damage=0x14,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+
+        decision = decide_actions(
+            self._snap((p1, hazard), level=5),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+
+        self.assertIn("dodge Moving hazard", decision.p1_note)
+        self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
 
     def test_rear_when_enemy_behind(self) -> None:
         p1 = _e(

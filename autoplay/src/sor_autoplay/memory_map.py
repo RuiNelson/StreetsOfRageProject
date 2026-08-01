@@ -75,6 +75,9 @@ OBJ_PLAYER_FLAGS_59 = 0x59
 OBJ_TYPE = 0x00
 OBJ_FLAGS = 0x01  # bit0 set => hidden from SAT (see enqueue_object_render_bucket)
 OBJ_FACING = 0x09  # ordinary enemies: bit1 left/right (enemy-ai.md)
+# Family-local visual/subtype selector.  Several breakable dispatchers reuse
+# their original object type for debris and distinguish the debris at +$0B.
+OBJ_SUBTYPE = 0x0B
 OBJ_POS_X = 0x10  # long 16.16 world X; integer is the high word (unsigned)
 OBJ_POS_Y = 0x14  # long 16.16 lane / depth Y
 OBJ_POS_Z = 0x18  # long 16.16 height
@@ -87,6 +90,10 @@ OBJ_PRIMARY_STATE = 0x30
 OBJ_ACTION_STATE = 0x30  # player/boss: read as **byte** at +$30
 OBJ_HEALTH = 0x32
 OBJ_OUTGOING_DAMAGE = 0x34  # active hit descriptor low nibble when attacking
+# Generic level-record parameters copied by the ELC object spawner.  The
+# stage-8 type-$45 moving breakable uses +$40 to select its moving/damaging
+# variant; most families interpret these bytes differently.
+OBJ_SCRIPT_PARAM = 0x40
 # Ordinary enemy: target player object pointer (low 16 bits of address).
 OBJ_TARGET_PTR = 0x42
 # Contact/grab partner pointer (word). Live hold used +$4C = enemy slot while

@@ -38,6 +38,7 @@ from sor_autoplay.memory_map import (
     OBJ_HEALTH,
     OBJ_HELD_TYPE,
     OBJ_JACK_WEAPON_ATTACHED,
+    OBJ_OUTGOING_DAMAGE,
     OBJ_POS_X,
     OBJ_POS_Y,
     OBJ_POS_Z,
@@ -553,6 +554,51 @@ class LockstepEvaluatorTests(unittest.TestCase):
         self.assertEqual(client.calls[2]["player1"], 0)
         self.assertEqual(client.calls[2]["held_frames"], 1)
 
+    def test_trace_keeps_moving_breakable_damage_state(self) -> None:
+        moving_prop = bytearray(_game_ram(item=False))
+        _put_u8(moving_prop, OBJECT_TABLE + OBJ_TYPE, 0x45)
+        _put_u8(moving_prop, OBJECT_TABLE + OBJ_ACTION_STATE, 0x01)
+        _put_u8(moving_prop, OBJECT_TABLE + OBJ_OUTGOING_DAMAGE, 0x03)
+        _put_fixed(moving_prop, OBJECT_TABLE + OBJ_POS_X, 130)
+        _put_fixed(moving_prop, OBJECT_TABLE + OBJ_POS_Y, 64)
+        _put_fixed(moving_prop, OBJECT_TABLE + OBJ_POS_Z, 160)
+        trace: list[EvaluationStep] = []
+
+        LockstepEvaluator(
+            _FakeClient([bytes(moving_prop), bytes(moving_prop)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(0, 0, p1_note="observe"),
+            trace_sink=trace.append,
+        ).run()
+
+        prop = next(actor for actor in trace[0].actors if actor["type"] == 0x45)
+        self.assertEqual(prop["kind"], "breakable")
+        self.assertEqual(prop["phase"], "atk")
+        self.assertEqual(prop["damage"], 3)
+
+    def test_weapon_upgrade_is_measured_as_a_pickup_attempt(self) -> None:
+        before = bytearray(_game_ram(item=True))
+        _put_u8(before, OBJECT_TABLE + OBJ_TYPE, 0x0B)
+        _put_u8(before, ADDR_P1_OBJECT + OBJ_ACTION_STATE, 0x32)
+        _put_u8(before, ADDR_P1_OBJECT + OBJ_HELD_TYPE, 0x09)
+        after = bytearray(before)
+        _put_u8(after, OBJECT_TABLE + OBJ_TYPE, 0)
+
+        report = LockstepEvaluator(
+            _FakeClient([bytes(before), bytes(before), bytes(after)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                0x20,
+                0,
+                p1_note="upgrade weapon Steel pipe",
+            ),
+            criteria=EvaluationCriteria(min_pickups=1, max_failed_pickups=0),
+        ).run()
+
+        self.assertEqual(report.metrics.pickup_attempts, 1)
+        self.assertEqual(report.metrics.pickups_collected, 1)
+        self.assertTrue(report.passed, report.failures)
+
     def test_criteria_reports_every_regression(self) -> None:
         snapshot = snapshot_from_work_ram(_game_ram())
         client = _FakeClient([_game_ram(), _game_ram()])
@@ -564,6 +610,106 @@ class LockstepEvaluatorTests(unittest.TestCase):
         ).run()
         self.assertEqual(len(report.failures), 2)
         self.assertEqual(snapshot.p1.health, 80)
+
+    def test_elevator_rejects_horizontal_progress_but_allows_lane_centering(self) -> None:
+        elevator = bytearray(_game_ram(item=False))
+        _put_u16(elevator, ADDR_LEVEL, 6)
+
+        horizontal = LockstepEvaluator(
+            _FakeClient([bytes(elevator), bytes(elevator)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                0x08,
+                0,
+                p1_note="walk right (progress (stage 7 elevator hold))",
+            ),
+            criteria=EvaluationCriteria(max_elevator_horizontal_progress=0),
+        ).run()
+        self.assertEqual(horizontal.metrics.elevator_horizontal_progress_steps, 1)
+        self.assertFalse(horizontal.passed)
+
+        vertical = LockstepEvaluator(
+            _FakeClient([bytes(elevator), bytes(elevator)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                0x02,
+                0,
+                p1_note="walk down (progress (stage 7 elevator hold))",
+            ),
+            criteria=EvaluationCriteria(max_elevator_horizontal_progress=0),
+        ).run()
+        self.assertEqual(vertical.metrics.elevator_horizontal_progress_steps, 0)
+        self.assertTrue(vertical.passed, vertical.failures)
+
+    def test_special_resource_policy_metrics(self) -> None:
+        calm = _game_ram(item=False, enemy_health=4)
+        wasteful = LockstepEvaluator(
+            _FakeClient([calm, calm]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                0x10,
+                0,
+                p1_note="police too early",
+            ),
+            criteria=EvaluationCriteria(max_wasteful_specials=0),
+        ).run()
+        self.assertEqual(wasteful.metrics.special_calls, 1)
+        self.assertEqual(wasteful.metrics.wasteful_special_calls, 1)
+        self.assertFalse(wasteful.passed)
+
+        boss_ram = bytearray(
+            _game_ram(item=False, enemy_health=0x14, enemy_primary=0x0200)
+        )
+        _put_u8(boss_ram, OBJECT_TABLE + OBJ_TYPE, 0x56)
+        missed = LockstepEvaluator(
+            _FakeClient([bytes(boss_ram), bytes(boss_ram)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(0, 0, p1_note="wait"),
+            criteria=EvaluationCriteria(max_missed_boss_specials=0),
+        ).run()
+        self.assertEqual(missed.metrics.boss_special_opportunities, 1)
+        self.assertEqual(missed.metrics.missed_boss_special_calls, 1)
+        self.assertFalse(missed.passed)
+
+        production = LockstepEvaluator(
+            _FakeClient([bytes(boss_ram), bytes(boss_ram)]),
+            decisions=1,
+            criteria=EvaluationCriteria(
+                max_wasteful_specials=0,
+                max_missed_boss_specials=0,
+            ),
+        ).run()
+        self.assertEqual(production.metrics.special_calls, 1)
+        self.assertEqual(production.metrics.missed_boss_special_calls, 0)
+        self.assertTrue(production.passed, production.failures)
+
+    def test_moving_breakable_response_metric(self) -> None:
+        moving_prop = bytearray(_game_ram(item=False))
+        _put_u8(moving_prop, OBJECT_TABLE + OBJ_TYPE, 0x45)
+        _put_u8(moving_prop, OBJECT_TABLE + OBJ_ACTION_STATE, 0x01)
+        _put_u8(moving_prop, OBJECT_TABLE + OBJ_OUTGOING_DAMAGE, 0x03)
+        _put_fixed(moving_prop, OBJECT_TABLE + OBJ_POS_X, 130)
+        _put_fixed(moving_prop, OBJECT_TABLE + OBJ_POS_Y, 64)
+        _put_fixed(moving_prop, OBJECT_TABLE + OBJ_POS_Z, 160)
+
+        production = LockstepEvaluator(
+            _FakeClient([bytes(moving_prop), bytes(moving_prop)]),
+            decisions=1,
+            criteria=EvaluationCriteria(max_missed_moving_breakables=0),
+        ).run()
+        self.assertEqual(production.metrics.moving_breakable_threat_steps, 1)
+        self.assertEqual(production.metrics.moving_breakable_response_steps, 1)
+        self.assertEqual(production.metrics.missed_moving_breakable_responses, 0)
+        self.assertTrue(production.passed, production.failures)
+
+        missed = LockstepEvaluator(
+            _FakeClient([bytes(moving_prop), bytes(moving_prop)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(0, 0, p1_note="idle"),
+            criteria=EvaluationCriteria(max_missed_moving_breakables=0),
+        ).run()
+        self.assertEqual(missed.metrics.missed_moving_breakable_responses, 1)
+        self.assertFalse(missed.passed)
 
     def test_life_loss_cannot_look_like_health_gain(self) -> None:
         before = _game_ram(health=4, lives=3, item=False)

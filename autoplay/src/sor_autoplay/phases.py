@@ -152,6 +152,14 @@ def boss_phase(
             return CombatPhase.ATTACKING
         return CombatPhase.NORMAL
 
+    # Souther and Onihime/Yasha both use primary state $02 for their live
+    # attack choreography even when tactical +$67 is zero.  The state tables
+    # dispatch Souther $02 to $16118 (claw/contact) and the twins $02 to
+    # $15D0C (jump/grab with outgoing damage).  Treating these as NORMAL made
+    # the policy walk back into Stage-2 claws and Stage-5 twin grabs.
+    if type_id in (0x55, 0x58) and p == 0x02:
+        return CombatPhase.ATTACKING
+
     # Later bosses $55-$58: police reaction shared state $0A
     if p == 0x0A:
         return CombatPhase.RECOVERY

@@ -20,6 +20,7 @@ class StageAdvice:
     """Progress direction and geometric constraints for the current level."""
 
     progress_right: bool  # False on stage 8 (move left)
+    horizontal_progress: bool
     avoid_holes: bool
     elevator: bool
     note: str
@@ -29,6 +30,7 @@ def stage_advice(level_index: int) -> StageAdvice:
     if level_index == LEVEL_STAGE8_LEFT:
         return StageAdvice(
             progress_right=False,
+            horizontal_progress=True,
             avoid_holes=False,
             elevator=False,
             note="stage 8 leftward",
@@ -36,19 +38,25 @@ def stage_advice(level_index: int) -> StageAdvice:
     if level_index == LEVEL_STAGE7_ELEVATOR:
         return StageAdvice(
             progress_right=True,
-            avoid_holes=True,  # elevator edges behave like pits
+            # Round 7 is a fixed elevator/gauntlet.  Its dynamic platform is
+            # not represented by the ordinary collision-class map, so class-0
+            # cells are not evidence of holes and must never drive navigation.
+            horizontal_progress=False,
+            avoid_holes=False,
             elevator=True,
-            note="stage 7 elevator",
+            note="stage 7 elevator hold",
         )
     if level_index == LEVEL_STAGE4_HOLES:
         return StageAdvice(
             progress_right=True,
+            horizontal_progress=True,
             avoid_holes=True,
             elevator=False,
             note="stage 4 holes",
         )
     return StageAdvice(
         progress_right=True,
+        horizontal_progress=True,
         avoid_holes=level_index in (LEVEL_STAGE4_HOLES, LEVEL_STAGE7_ELEVATOR),
         elevator=False,
         note="default",
@@ -74,7 +82,13 @@ def steer_away_from_holes(
     *,
     level_index: int,
 ) -> tuple[float, float]:
-    """If the next step would enter a pit, cancel or reverse that axis."""
+    """Route a movement step around a pit instead of stalling at its edge.
+
+    A horizontal-only progress goal is the important case: when its next X
+    step meets a hole, choose the nearest safe lane above or below that hole
+    and move vertically first.  The old code tested the unchanged lane as its
+    proposed "detour", found the same hole, and reversed X forever.
+    """
 
     if not holes:
         return desired_dx, desired_dy
@@ -90,13 +104,26 @@ def steer_away_from_holes(
     if trial_y > lane_max - 4:
         desired_dy = min(0.0, desired_dy)
 
-    if desired_dx != 0 and point_in_hole(trial_x, lane_y, holes, margin=10.0):
-        # Prefer vertical detour if the sideways step is a pit.
-        if not point_in_hole(world_x, trial_y, holes, margin=10.0):
-            desired_dx = 0.0
-        else:
-            desired_dx = -desired_dx  # reverse
-    if desired_dy != 0 and point_in_hole(world_x, trial_y, holes, margin=10.0):
+    if desired_dx != 0:
+        blocked = point_in_hole(trial_x, lane_y, holes, margin=10.0)
+        if blocked is not None:
+            detour = _nearest_safe_detour_lane(
+                world_x,
+                lane_y,
+                trial_x,
+                blocked,
+                holes,
+                level_index=level_index,
+            )
+            if detour is not None:
+                desired_dx = 0.0
+                desired_dy = -1.0 if detour < lane_y else 1.0 if detour > lane_y else 0.0
+            else:
+                # Back away only when neither side has a traversable lane.
+                desired_dx = -desired_dx
+    trial_y = lane_y + (step if desired_dy > 0 else -step if desired_dy < 0 else 0.0)
+    vertical_x = trial_x if desired_dx != 0 else world_x
+    if desired_dy != 0 and point_in_hole(vertical_x, trial_y, holes, margin=6.0):
         desired_dy = 0.0
 
     # If already overlapping a hole AABB, push toward nearest safe edge.
@@ -108,6 +135,41 @@ def steer_away_from_holes(
         desired_dy = -1.0 if lane_y >= mid_y else 1.0
 
     return desired_dx, desired_dy
+
+
+def _nearest_safe_detour_lane(
+    world_x: float,
+    lane_y: float,
+    trial_x: float,
+    blocked: FloorHole,
+    holes: tuple[FloorHole, ...],
+    *,
+    level_index: int,
+    clearance: float = 12.0,
+) -> float | None:
+    """Return the closest lane that clears ``blocked`` at both X samples."""
+
+    lane_min = float(LANE_Y_MIN + 4)
+    lane_max = float(lane_y_max_for_level(level_index) - 4)
+    candidates = (
+        float(blocked.lane_y) - clearance,
+        float(blocked.lane_y_end) + clearance,
+    )
+    safe: list[float] = []
+    for candidate in candidates:
+        if not lane_min <= candidate <= lane_max:
+            continue
+        # The vertical part happens beside the pit, then X can resume on the
+        # selected lane.  Use a smaller margin at the current X so an actor at
+        # the approach boundary can still move parallel to the edge.
+        if point_in_hole(world_x, candidate, holes, margin=6.0) is not None:
+            continue
+        if point_in_hole(trial_x, candidate, holes, margin=10.0) is not None:
+            continue
+        safe.append(candidate)
+    if not safe:
+        return None
+    return min(safe, key=lambda candidate: (abs(candidate - lane_y), candidate))
 
 
 def is_mr_x_offer(snapshot: GameSnapshot) -> bool:

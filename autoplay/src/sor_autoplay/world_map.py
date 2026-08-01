@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from . import memory_map as mm
-from .object_catalog import EntityStyle, player_style, style_for_type
+from .object_catalog import EntityStyle, player_style, style_for_object
 from .phases import (
     CombatPhase,
     boss_phase,
@@ -113,6 +113,8 @@ class MapEntity:
     target_ptr: int = 0  # ordinary +$42 / boss target low word
     attacker_ptr: int = 0  # ordinary +$3E attacker/holder low word
     family_state: int = 0  # ordinary +$52; Jack bit0 = weapon attached
+    subtype: int = 0  # generic +$0B family-local subtype/debris selector
+    script_param: int = 0  # generic +$40 ELC parameter; type $45 motion selector
     facing_left: bool = False  # ordinary +$09 bit1; player action bit0
     boss_dist_x: int = 0  # later-boss +$50 abs X to target
     boss_dist_lane: int = 0  # later-boss +$52 abs lane to target
@@ -352,6 +354,8 @@ def _entity_from_object(
     # primary_state & 0xFF (that is +$31) — live hold was $60 read as $00.
     action_state = _u8(slot, mm.OBJ_ACTION_STATE)
     outgoing = _u8(slot, mm.OBJ_OUTGOING_DAMAGE)
+    subtype = _u8(slot, mm.OBJ_SUBTYPE)
+    script_param = _u8(slot, mm.OBJ_SCRIPT_PARAM)
     # Ordinary enemies: +$09 bit1. Players: action-state +$30 bit0 (set = left).
     facing_left = bool(_u8(slot, mm.OBJ_FACING) & 0x02)
 
@@ -397,6 +401,11 @@ def _entity_from_object(
         )
     elif style.kind == "projectile":
         phase = CombatPhase.ATTACKING
+    elif style.kind == "breakable" and outgoing:
+        # Round-8 type-$45 moving props set outgoing damage while in flight.
+        # Retain their smashable kind, but expose the active danger phase to
+        # symbolic/fuzzy consumers instead of treating them as inert scenery.
+        phase = CombatPhase.ATTACKING
 
     return MapEntity(
         kind=style.kind,
@@ -425,6 +434,8 @@ def _entity_from_object(
         target_ptr=target_ptr,
         attacker_ptr=attacker_ptr,
         family_state=family_state,
+        subtype=subtype,
+        script_param=script_param,
         facing_left=facing_left,
         boss_dist_x=boss_dist_x,
         boss_dist_lane=boss_dist_lane,
@@ -598,7 +609,12 @@ def parse_world_map(
         off = i * OBJECT_SLOT_SIZE
         slot = table[off : off + OBJECT_SLOT_SIZE]
         type_id = _u8(slot, mm.OBJ_TYPE)
-        style = style_for_type(type_id)
+        style = style_for_object(
+            type_id,
+            action_state=_u8(slot, mm.OBJ_ACTION_STATE),
+            subtype=_u8(slot, mm.OBJ_SUBTYPE),
+            variant=_u8(slot, mm.OBJ_PRIMARY_STATE + 1),
+        )
         if style is None or style.kind == "player":
             continue
         entity = _entity_from_object(

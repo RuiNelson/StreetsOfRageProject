@@ -8,7 +8,7 @@ from dataclasses import replace
 from sor_autoplay.agent.arbiter import GoalKind, GoalMemory, solve_goal
 from sor_autoplay.agent.autoplanner import AutoPlanner
 from sor_autoplay.agent.characters import PROFILES
-from sor_autoplay.agent.combat import select_target
+from sor_autoplay.agent.combat import select_pickup, select_target
 from sor_autoplay.agent.expert import DEFAULT_COMBAT_EXPERT
 from sor_autoplay.agent.fuzzy import FuzzyInference, FuzzyRule, falling, rising
 from sor_autoplay.agent.grabs import GrabMemory, context_from_player, decide_held
@@ -213,6 +213,108 @@ class FuzzyTargetTests(unittest.TestCase):
         assert choice is not None
         self.assertEqual(choice.entity.label, "Antonio")
 
+    def test_family_priority_order_at_equal_geometry(self) -> None:
+        me = _player()
+        ordered = (
+            _entity(
+                kind="boss",
+                family="Antonio",
+                type_id=0x56,
+                slot="B0",
+                label="Boss",
+                map_x=150,
+            ),
+            _entity(family="Jack", type_id=0x27, slot="E1", label="Jack", map_x=150),
+            _entity(family="Nora", type_id=0x26, slot="E2", label="Nora", map_x=150),
+            _entity(family="Signal", type_id=0x24, slot="E3", label="Signal", map_x=150),
+            _entity(family="Haku-Ro", type_id=0x25, slot="E4", label="Ninja", map_x=150),
+            _entity(family="Garcia", type_id=0x22, slot="E5", label="Garcia", map_x=150),
+        )
+        for higher, lower in zip(ordered, ordered[1:]):
+            with self.subTest(higher=higher.label, lower=lower.label):
+                choice = select_target(me, (lower, higher), PROFILES[0])
+                assert choice is not None
+                self.assertEqual(choice.entity.slot, higher.slot)
+
+    def test_position_can_outweigh_ordinary_family_priority(self) -> None:
+        me = _player()
+        distant_jack = _entity(
+            family="Jack",
+            type_id=0x27,
+            slot="E0",
+            label="Distant Jack",
+            map_x=290,
+            map_y=108,
+        )
+        immediate_garcia = _entity(
+            family="Garcia",
+            type_id=0x22,
+            slot="E1",
+            label="Immediate Garcia",
+            map_x=125,
+            map_y=64,
+        )
+        choice = select_target(me, (distant_jack, immediate_garcia), PROFILES[0])
+        assert choice is not None
+        self.assertEqual(choice.entity.label, "Immediate Garcia")
+
+
+class WeaponUpgradeTests(unittest.TestCase):
+    def test_held_bottle_can_be_replaced_by_pipe(self) -> None:
+        me = replace(_player(action=0x32), held_type=0x09, held_ptr=0xBA00)
+        pipe = _entity(
+            kind="weapon",
+            family="Weapon",
+            type_id=0x0B,
+            slot="W0",
+            label="Steel pipe",
+            map_x=112,
+            health=None,
+            combat_phase=CombatPhase.UNKNOWN,
+        )
+        graph = build_tactical_graph(
+            me, (me, pipe), level_index=0, player_index=1
+        )
+        choice = select_pickup(
+            me,
+            (pipe,),
+            allow_health=True,
+            allow_special_life=True,
+            already_holding_weapon=True,
+            held_weapon_type=me.held_type,
+            profile=PROFILES[0],
+            graph=graph,
+        )
+        self.assertEqual(choice, pipe)
+
+    def test_held_pipe_is_not_replaced_by_weaker_bottle(self) -> None:
+        me = replace(_player(action=0x32), held_type=0x0B, held_ptr=0xBA00)
+        bottle = _entity(
+            kind="weapon",
+            family="Weapon",
+            type_id=0x09,
+            slot="W0",
+            label="Bottle",
+            map_x=112,
+            health=None,
+            combat_phase=CombatPhase.UNKNOWN,
+        )
+        graph = build_tactical_graph(
+            me, (me, bottle), level_index=0, player_index=1
+        )
+        self.assertIsNone(
+            select_pickup(
+                me,
+                (bottle,),
+                allow_health=True,
+                allow_special_life=True,
+                already_holding_weapon=True,
+                held_weapon_type=me.held_type,
+                profile=PROFILES[0],
+                graph=graph,
+            )
+        )
+
 
 class EnemyGrabEscapeTests(unittest.TestCase):
     def test_policy_executes_rom_guarded_c_then_b_counter(self) -> None:
@@ -385,12 +487,52 @@ class PolicyRegressionTests(unittest.TestCase):
         )
         decision = decide_actions(
             _snapshot((me, antonio, weapon)),
-            AgentConfig(p1_enabled=True),
+            AgentConfig(p1_enabled=True, police_threshold=99.0),
             AgentState(),
         )
         self.assertIn("Antonio", decision.p1_note)
         self.assertNotIn("loot", decision.p1_note)
         self.assertNotIn("progress", decision.p1_note)
+
+    def test_reachable_boss_triggers_special_before_approach(self) -> None:
+        me = _player(x=288, y=37)
+        antonio = _entity(
+            kind="boss",
+            family="Antonio",
+            type_id=0x56,
+            slot="B0",
+            label="Antonio",
+            map_x=328,
+            world_x=3848,
+            map_y=100,
+            world_y=100,
+        )
+        decision = decide_actions(
+            _snapshot((me, antonio)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertTrue(decision.p1_mask & 0x10, decision.p1_note)
+        self.assertIn("boss-immediate", decision.p1_note)
+
+    def test_policy_walks_to_a_better_weapon_while_already_armed(self) -> None:
+        me = replace(_player(action=0x32), held_type=0x09, held_ptr=0xBA00)
+        pipe = _entity(
+            kind="weapon",
+            family="Weapon",
+            type_id=0x0B,
+            slot="W0",
+            label="Steel pipe",
+            map_x=140,
+            health=None,
+            combat_phase=CombatPhase.UNKNOWN,
+        )
+        decision = decide_actions(
+            _snapshot((me, pipe)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertIn("upgrade weapon Steel pipe", decision.p1_note)
 
     def test_antonio_at_scroll_boundary_is_targeted_not_progressed_past(self) -> None:
         me = _player(x=288, y=37)

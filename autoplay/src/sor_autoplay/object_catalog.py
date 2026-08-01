@@ -73,6 +73,25 @@ _WEAPON_STYLES: dict[int, EntityStyle] = {
 _BREAKABLE_STYLES: dict[int, EntityStyle] = {
     0x11: EntityStyle("breakable", "Breakable", "#", "#a1a1aa", "Phone booth"),
     0x19: EntityStyle("breakable", "Breakable", "□", "#71717a", "Crate/prop"),
+    # Later rounds do not reuse the early phone-booth/crate dispatchers.  The
+    # exact types come from the decoded ELC streams and their collision paths:
+    #   R3 $18; R4 $1B/$1C/$1D; R5 $1F; R6 $41; R8 $45.
+    # Use descriptive labels rather than retail scenery names that the ROM
+    # does not encode.  State-aware debris rejection lives below.
+    0x18: EntityStyle("breakable", "Breakable", "□", "#8b7d6b", "Round 3 prop"),
+    0x1B: EntityStyle("breakable", "Breakable", "□", "#88786a", "Round 4 prop"),
+    0x1C: EntityStyle("breakable", "Breakable", "□", "#927d68", "Round 4 prop"),
+    0x1D: EntityStyle("breakable", "Breakable", "□", "#9b8269", "Round 4 prop"),
+    0x1F: EntityStyle("breakable", "Breakable", "□", "#867768", "Round 5 prop"),
+    0x41: EntityStyle("breakable", "Breakable", "□", "#7c7368", "Round 6 prop"),
+    0x45: EntityStyle("breakable", "Breakable", "◆", "#d97706", "Moving prop"),
+}
+
+# Type $42 is a separate Round-6 moving collision object.  Its initializer
+# writes outgoing damage $14 and its state machine repeatedly moves it on Z;
+# unlike the prop families above, it has no player-hit destruction path.
+_HAZARD_STYLES: dict[int, EntityStyle] = {
+    0x42: EntityStyle("projectile", "Stage hazard", "!", "#ef4444", "Moving hazard"),
 }
 
 # Consumable pickups (types with shared effect index at +$50).
@@ -105,7 +124,15 @@ _ALL_STATIC.update(_ENEMY_STYLES)
 _ALL_STATIC.update(_BOSS_STYLES)
 _ALL_STATIC.update(_WEAPON_STYLES)
 _ALL_STATIC.update(_BREAKABLE_STYLES)
+_ALL_STATIC.update(_HAZARD_STYLES)
 _ALL_STATIC.update(_PICKUP_STYLES)
+
+
+# Intact breakables have completed their initializer and sit in primary byte
+# state $01.  Hits advance the original object to later bounce/timer states;
+# types $11/$18/$1D/$41 can additionally spawn fragments with the *same* type.
+_INTACT_BREAKABLE_STATE = 0x01
+_SUBTYPE_DEBRIS_TYPES = frozenset({0x18, 0x1D, 0x41})
 
 
 def player_style(player_index: int, character_id: int | None) -> EntityStyle:
@@ -141,6 +168,37 @@ def style_for_type(type_id: int) -> EntityStyle | None:
     if type_id in (0x30, 0x55, 0x56, 0x57, 0x58):
         return EntityStyle("boss", "Boss", "B", "#ff453a", f"Boss ${type_id:02X}")
     return None
+
+
+def style_for_object(
+    type_id: int,
+    *,
+    action_state: int,
+    subtype: int = 0,
+    variant: int = 0,
+) -> EntityStyle | None:
+    """Classify one live object using type plus family-local lifecycle state.
+
+    A type-only catalog is sufficient for enemies and pickups, but not for
+    breakables: their broken originals and debris can retain the intact type
+    for several visible frames.  Returning ``None`` for those states prevents
+    the map and policy from attacking fragments after the prop is gone.
+
+    ``variant`` is object ``+$31`` (the type-$11 fragment selector), while
+    ``subtype`` is ``+$0B`` (used by later same-type debris families).
+    """
+
+    type_id &= 0xFF
+    style = style_for_type(type_id)
+    if style is None or style.kind != "breakable":
+        return style
+    if (action_state & 0xFF) != _INTACT_BREAKABLE_STATE:
+        return None
+    if type_id == 0x11 and (variant & 0xFF) != 0:
+        return None
+    if type_id in _SUBTYPE_DEBRIS_TYPES and (subtype & 0xFF) != 0:
+        return None
+    return style
 
 
 def is_map_relevant_type(type_id: int) -> bool:

@@ -8,11 +8,13 @@ from sor_autoplay.scenarios import (
     DEFAULT_RNG_SEED,
     FRAME_PHASE,
     GAME_STATE,
+    LEVEL,
     P1_CHARACTER_ID,
     P1_CHARACTER_ID_INGAME,
     P1_HEALTH,
     P1_OBJECT,
     RNG_STATE,
+    reach_level_start,
     reach_round1_start,
 )
 
@@ -23,6 +25,8 @@ class _ScenarioClient:
         self.presses: list[int] = []
         self.lockstep: list[bool] = []
         self.writes: list[tuple[int, bytes]] = []
+        self.level_index = 0
+        self.hotkeys: list[str] = []
 
     def ping(self) -> None:
         pass
@@ -58,6 +62,7 @@ class _ScenarioClient:
         del width
         return {
             GAME_STATE: 0x16,
+            LEVEL: self.level_index,
             P1_CHARACTER_ID: 2,
             P1_CHARACTER_ID_INGAME: 2,
             P1_HEALTH: 80,
@@ -73,6 +78,10 @@ class _ScenarioClient:
 
     def set_lockstep(self, enabled: bool) -> None:
         self.lockstep.append(enabled)
+
+    def trigger_option_hotkey(self, key: str) -> None:
+        self.hotkeys.append(key)
+        self.level_index = int(key) - 1
 
 
 class ScenarioTests(unittest.TestCase):
@@ -96,6 +105,22 @@ class ScenarioTests(unittest.TestCase):
             observed["work_ram_sha256"],
             "de2f256064a0af797747c2b97505dc0b9f3df0de4f489eac731c23ae9ca9cc31",
         )
+
+    def test_later_level_setup_uses_cheat_and_refreezes_same_connection(self) -> None:
+        client = _ScenarioClient()
+
+        observed = reach_level_start(client, "blaze", 7)
+
+        self.assertEqual(client.hotkeys, ["7"])
+        self.assertEqual(client.lockstep, [True, False, True])
+        self.assertEqual(observed["name"], "round7-start")
+        self.assertEqual(observed["level_number"], 7)
+        self.assertEqual(observed["level_index"], 6)
+        self.assertEqual(client.writes[-2:], client.writes[:2])
+
+    def test_level_setup_rejects_out_of_range_level(self) -> None:
+        with self.assertRaises(ValueError):
+            reach_level_start(_ScenarioClient(), "axel", 9)
 
 
 if __name__ == "__main__":

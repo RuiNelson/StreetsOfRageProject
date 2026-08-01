@@ -21,6 +21,7 @@ from .agent.characters import profile_for
 from .agent.combat import (
     can_jump_kick,
     can_punch,
+    player_airborne_action,
     player_can_start_ground_action,
     signal_sweep_threat,
 )
@@ -171,6 +172,14 @@ class EpisodeMetrics:
     loot_under_threat_steps: int = 0
     boss_progress_steps: int = 0
     boss_stall_steps: int = 0
+    elevator_horizontal_progress_steps: int = 0
+    special_calls: int = 0
+    wasteful_special_calls: int = 0
+    boss_special_opportunities: int = 0
+    missed_boss_special_calls: int = 0
+    moving_breakable_threat_steps: int = 0
+    moving_breakable_response_steps: int = 0
+    missed_moving_breakable_responses: int = 0
     face_actions: int = 0
     forward_progress: int = 0
     total_reward: float = 0.0
@@ -220,6 +229,14 @@ class EpisodeMetrics:
             self.face_actions += 1
         if mask & 0x40:
             self.jumps += 1
+        if mask & 0x10:
+            self.special_calls += 1
+
+        # Round 7 is a stationary elevator arena.  A progress decision that
+        # presses left/right there is a navigation regression, even when the
+        # resulting movement is small or blocked by the platform edge.
+        if before.level_index == 6 and "progress" in note and mask & 0x0C:
+            self.elevator_horizontal_progress_steps += 1
 
         before_entity = _player_entity(before, self.player_index)
         after_entity = _player_entity(after, self.player_index)
@@ -277,6 +294,61 @@ class EpisodeMetrics:
                 player_index=self.player_index,
             )
             profile = profile_for(before_player.character_id)
+            reachable_foes = tuple(
+                entity
+                for entity in graph.entities_with(Relation.REACHABLE)
+                if entity.kind in ("enemy", "boss")
+            )
+            reachable_boss = any(entity.kind == "boss" for entity in reachable_foes)
+            nearby_enemies = tuple(
+                entity
+                for entity in reachable_foes
+                if entity.kind == "enemy"
+                and 0.0 <= entity.map_x <= 320.0
+                and abs(entity.map_x - before_entity.map_x) <= 200.0
+                and abs(entity.map_y - before_entity.map_y) <= 48.0
+            )
+            special_eligible = (
+                reachable_boss
+                or len(nearby_enemies) >= 4
+                or (
+                    before_player.health_percent is not None
+                    and before_player.health_percent <= 40.0
+                    and bool(nearby_enemies)
+                )
+            )
+            can_call_special = (
+                before.level_index < 7
+                and before_player.specials > 0
+                and not before.paused
+                and not before.police_special_active
+                and player_can_start_ground_action(before_entity)
+            )
+            if reachable_boss and can_call_special:
+                self.boss_special_opportunities += 1
+                if not mask & 0x10:
+                    self.missed_boss_special_calls += 1
+            if mask & 0x10 and not special_eligible:
+                self.wasteful_special_calls += 1
+            moving_breakable_threat = any(
+                entity.kind == "breakable"
+                and entity.outgoing_damage > 0
+                and graph.entity_has(entity, Relation.REACHABLE)
+                and abs(entity.map_x - before_entity.map_x) <= 220.0
+                for entity in before.world_map.entities
+            )
+            if moving_breakable_threat:
+                self.moving_breakable_threat_steps += 1
+                moving_response = (
+                    "evade moving threat " in note
+                    or note.startswith("hold safe lane Moving prop")
+                    or (note.startswith("smash Moving prop") and "moving threat" in note)
+                    or player_airborne_action(before_entity)
+                )
+                if moving_response:
+                    self.moving_breakable_response_steps += 1
+                else:
+                    self.missed_moving_breakable_responses += 1
             armed_jacks = graph.entities_with(Relation.ARMED)
             throwing_jacks = graph.entities_with(Relation.THROWING)
             if (
@@ -453,7 +525,10 @@ class EpisodeMetrics:
             loot_action = (
                 note.startswith("loot ")
                 or note.startswith("await loot ")
+                or note.startswith("upgrade weapon ")
+                or note.startswith("await upgrade weapon ")
                 or " loot " in note
+                or " upgrade weapon " in note
             )
             immediate_danger = any(
                 graph.entity_has(entity, Relation.NEAR_PLAYER)
@@ -533,7 +608,7 @@ class EpisodeMetrics:
         self.enemy_damage += enemy_damage
         self.enemies_defeated += defeated
 
-        loot_attempt = attack_edge and note.startswith("loot ")
+        loot_attempt = attack_edge and note.startswith(("loot ", "upgrade weapon "))
         pickup_count = 0
         failed_pickup = 0
         if loot_attempt:
@@ -605,6 +680,18 @@ class EpisodeMetrics:
             "loot_under_threat_steps": self.loot_under_threat_steps,
             "boss_progress_steps": self.boss_progress_steps,
             "boss_stall_steps": self.boss_stall_steps,
+            "elevator_horizontal_progress_steps": (
+                self.elevator_horizontal_progress_steps
+            ),
+            "special_calls": self.special_calls,
+            "wasteful_special_calls": self.wasteful_special_calls,
+            "boss_special_opportunities": self.boss_special_opportunities,
+            "missed_boss_special_calls": self.missed_boss_special_calls,
+            "moving_breakable_threat_steps": self.moving_breakable_threat_steps,
+            "moving_breakable_response_steps": self.moving_breakable_response_steps,
+            "missed_moving_breakable_responses": (
+                self.missed_moving_breakable_responses
+            ),
             "face_actions": self.face_actions,
             "forward_progress": self.forward_progress,
             "total_reward": round(self.total_reward, 3),
@@ -639,6 +726,10 @@ class EvaluationCriteria:
     max_loot_under_threat: int | None = None
     max_boss_progress: int | None = None
     max_boss_stalls: int | None = None
+    max_elevator_horizontal_progress: int | None = None
+    max_wasteful_specials: int | None = None
+    max_missed_boss_specials: int | None = None
+    max_missed_moving_breakables: int | None = None
 
     def failures(self, metrics: EpisodeMetrics) -> tuple[str, ...]:
         failures: list[str] = []
@@ -721,6 +812,30 @@ class EvaluationCriteria:
                 self.max_boss_stalls,
                 metrics.boss_stall_steps,
                 "boss-stall steps after grace window",
+                "at most",
+            ),
+            (
+                self.max_elevator_horizontal_progress,
+                metrics.elevator_horizontal_progress_steps,
+                "elevator horizontal-progress steps",
+                "at most",
+            ),
+            (
+                self.max_wasteful_specials,
+                metrics.wasteful_special_calls,
+                "wasteful special calls",
+                "at most",
+            ),
+            (
+                self.max_missed_boss_specials,
+                metrics.missed_boss_special_calls,
+                "missed boss-special calls",
+                "at most",
+            ),
+            (
+                self.max_missed_moving_breakables,
+                metrics.missed_moving_breakable_responses,
+                "missed moving-breakable responses",
                 "at most",
             ),
         )
@@ -883,7 +998,6 @@ class LockstepEvaluator:
             config = agent_config or AgentConfig(
                 p1_enabled=player_index == 1,
                 p2_enabled=player_index == 2,
-                police_threshold=99.0,
             )
             memory = AgentState()
             self.policy = lambda snapshot: decide_actions(snapshot, config, memory)
@@ -982,10 +1096,18 @@ class LockstepEvaluator:
                             "primary": entity.primary_state,
                             "family_state": entity.family_state,
                             "phase": entity.phase_tag,
+                            "damage": entity.outgoing_damage,
                         }
                         for entity in next_snapshot.world_map.entities
                         if entity.kind
-                        in ("enemy", "boss", "projectile", "pickup", "weapon")
+                        in (
+                            "enemy",
+                            "boss",
+                            "projectile",
+                            "pickup",
+                            "weapon",
+                            "breakable",
+                        )
                         and -32 <= entity.map_x <= 352
                     )
                     self.trace_sink(
@@ -1058,6 +1180,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="restart and freeze at a verified Round-1 start before evaluation",
     )
     parser.add_argument(
+        "--restart-level",
+        type=int,
+        choices=range(1, 9),
+        default=1,
+        metavar="1..8",
+        help="with --restart-character, use the debug level hotkey before freezing",
+    )
+    parser.add_argument(
         "--scenario-seed",
         type=lambda value: int(value, 0),
         default=0x2A6D365A,
@@ -1096,6 +1226,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-loot-under-threat", type=int)
     parser.add_argument("--max-boss-progress", type=int)
     parser.add_argument("--max-boss-stalls", type=int)
+    parser.add_argument("--max-elevator-horizontal-progress", type=int)
+    parser.add_argument("--max-wasteful-specials", type=int)
+    parser.add_argument("--max-missed-boss-specials", type=int)
+    parser.add_argument("--max-missed-moving-breakables", type=int)
     return parser
 
 
@@ -1132,6 +1266,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_loot_under_threat=args.max_loot_under_threat,
         max_boss_progress=args.max_boss_progress,
         max_boss_stalls=args.max_boss_stalls,
+        max_elevator_horizontal_progress=args.max_elevator_horizontal_progress,
+        max_wasteful_specials=args.max_wasteful_specials,
+        max_missed_boss_specials=args.max_missed_boss_specials,
+        max_missed_moving_breakables=args.max_missed_moving_breakables,
     )
     trace_stream: TextIO | None = None
     try:
@@ -1143,11 +1281,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             client.ping()
             scenario = None
             if args.restart_character is not None:
-                from .scenarios import reach_round1_start
+                from .scenarios import reach_level_start
 
-                scenario = reach_round1_start(
+                scenario = reach_level_start(
                     client,
                     args.restart_character,
+                    args.restart_level,
                     rng_seed=args.scenario_seed,
                     frame_phase=args.scenario_frame_phase,
                 )

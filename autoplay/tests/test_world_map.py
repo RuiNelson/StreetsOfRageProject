@@ -9,10 +9,14 @@ from sor_autoplay.memory_map import (
     OBJ_POS_Y,
     OBJ_POS_Z,
     OBJ_PRIMARY_STATE,
+    OBJ_OUTGOING_DAMAGE,
+    OBJ_SCRIPT_PARAM,
+    OBJ_SUBTYPE,
     OBJ_TYPE,
     OBJECT_SLOT_SIZE,
 )
-from sor_autoplay.object_catalog import player_style, style_for_type
+from sor_autoplay.object_catalog import player_style, style_for_object, style_for_type
+from sor_autoplay.phases import CombatPhase
 from sor_autoplay.world_map import (
     ACTORS_BYTES,
     CAMERA_BYTES,
@@ -47,6 +51,37 @@ class ObjectCatalogTests(unittest.TestCase):
     def test_pickups(self) -> None:
         self.assertEqual(style_for_type(0x4B).symbol, "a")
 
+    def test_later_round_breakable_types(self) -> None:
+        expected = {
+            0x18,  # Round 3
+            0x1B,
+            0x1C,
+            0x1D,  # Round 4
+            0x1F,  # Round 5
+            0x41,  # Round 6
+            0x45,  # Round 8 moving prop
+        }
+        self.assertEqual(
+            {type_id for type_id in expected if style_for_type(type_id).kind == "breakable"},
+            expected,
+        )
+
+    def test_round6_moving_hazard_is_not_a_breakable(self) -> None:
+        style = style_for_type(0x42)
+        self.assertIsNotNone(style)
+        self.assertEqual(style.kind, "projectile")
+
+    def test_same_type_debris_is_not_a_live_breakable(self) -> None:
+        self.assertIsNotNone(
+            style_for_object(0x18, action_state=1, subtype=0)
+        )
+        self.assertIsNone(
+            style_for_object(0x18, action_state=2, subtype=1)
+        )
+        self.assertIsNone(
+            style_for_object(0x11, action_state=2, variant=3)
+        )
+
 
 class ProjectionTests(unittest.TestCase):
     def test_map_is_lane_depth(self) -> None:
@@ -61,6 +96,88 @@ class ProjectionTests(unittest.TestCase):
 
 
 class WorldMapParseTests(unittest.TestCase):
+    def _put_object(
+        self,
+        actors: bytearray,
+        *,
+        type_id: int,
+        state: int = 1,
+        subtype: int = 0,
+        damage: int = 0,
+        script_param: int = 0,
+        slot_index: int = 0,
+    ) -> None:
+        base = 0x100 + slot_index * OBJECT_SLOT_SIZE
+        _put_u8(actors, base + OBJ_TYPE, type_id)
+        _put_u8(actors, base + OBJ_FLAGS, 0x00)
+        _put_u8(actors, base + OBJ_PRIMARY_STATE, state)
+        _put_u8(actors, base + OBJ_SUBTYPE, subtype)
+        _put_u8(actors, base + OBJ_OUTGOING_DAMAGE, damage)
+        _put_u8(actors, base + OBJ_SCRIPT_PARAM, script_param)
+        _put_fixed16(actors, base + OBJ_POS_X, 800 + slot_index * 16)
+        _put_fixed16(actors, base + OBJ_POS_Y, 0x40)
+        _put_fixed16(actors, base + OBJ_POS_Z, 0xA0)
+
+    def test_later_round_intact_breakables_are_observed(self) -> None:
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+        late_types = (0x18, 0x1B, 0x1C, 0x1D, 0x1F, 0x41, 0x45)
+        for index, type_id in enumerate(late_types):
+            self._put_object(actors, type_id=type_id, slot_index=index)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+
+        self.assertEqual(
+            {entity.type_id for entity in world.entities if entity.kind == "breakable"},
+            set(late_types),
+        )
+
+    def test_broken_original_and_same_type_debris_are_ignored(self) -> None:
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+        self._put_object(actors, type_id=0x18, state=2, subtype=1)
+        self._put_object(actors, type_id=0x41, state=3, subtype=4, slot_index=1)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+
+        self.assertFalse(any(entity.kind == "breakable" for entity in world.entities))
+
+    def test_round8_moving_prop_exposes_active_damage_phase(self) -> None:
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+        self._put_object(actors, type_id=0x45, damage=3, script_param=2)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+        prop = next(entity for entity in world.entities if entity.type_id == 0x45)
+
+        self.assertEqual(prop.kind, "breakable")
+        self.assertEqual(prop.outgoing_damage, 3)
+        self.assertEqual(prop.script_param, 2)
+        self.assertEqual(prop.combat_phase, CombatPhase.ATTACKING)
+
+    def test_round6_moving_hazard_is_observed_as_dangerous(self) -> None:
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+        self._put_object(actors, type_id=0x42, state=3, damage=0x14)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+        hazard = next(entity for entity in world.entities if entity.type_id == 0x42)
+
+        self.assertEqual(hazard.kind, "projectile")
+        self.assertEqual(hazard.combat_phase, CombatPhase.ATTACKING)
+
     def test_jack_weapon_latch_is_exposed_to_observation(self) -> None:
         actors = bytearray(ACTORS_BYTES)
         camera = bytearray(CAMERA_BYTES)

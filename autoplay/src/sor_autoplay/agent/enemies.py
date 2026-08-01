@@ -169,7 +169,7 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
         jump_bias=0.0,
         grab_bias=0.25,
         distrust_downed=True,
-        priority=1.3,
+        priority=1.9,
         note="nora mid then grab",
     ),
     "Jack": CounterPlan(
@@ -177,7 +177,7 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
         range_scale=0.9,
         jump_bias=0.0,
         grab_bias=0.35,
-        priority=1.6,
+        priority=2.1,
         note="jack normal vulnerable / helper dodge",
     ),
     "Abadede": CounterPlan(
@@ -259,6 +259,18 @@ _TYPE_PLANS: dict[int, CounterPlan] = {
 
 _DEFAULT = CounterPlan(ThreatKind.GENERIC, note="default")
 
+# User-facing target order expressed as fuzzy membership, rather than a hard
+# lexicographic sort.  Geometry, an active attack and a punish window can still
+# outweigh a family preference, while equally positioned foes consistently use
+# boss > Jack > Nora > Signal > Haku-Ro (ninja) > Garcia.
+_FAMILY_TARGET_PRIORITY: dict[str, float] = {
+    "Garcia": 0.20,
+    "Haku-Ro": 0.36,
+    "Signal": 0.52,
+    "Nora": 0.68,
+    "Jack": 0.84,
+}
+
 
 def plan_for(entity: MapEntity) -> CounterPlan:
     """Return the counter plan for one combatant (or projectile)."""
@@ -289,6 +301,22 @@ def plan_for(entity: MapEntity) -> CounterPlan:
 
 def threat_priority(entity: MapEntity) -> float:
     return plan_for(entity).priority
+
+
+def target_priority_membership(entity: MapEntity) -> float:
+    """Return a normalized symbolic preference for target arbitration.
+
+    A launched projectile is an immediate defensive concern and therefore
+    keeps the highest reactive membership.  Bosses are the highest combatant
+    class; ordinary family values retain enough spacing for hysteresis to
+    notice a meaningful tier change.
+    """
+
+    if entity.kind == "projectile":
+        return 1.0
+    if entity.kind == "boss":
+        return 0.96
+    return _FAMILY_TARGET_PRIORITY.get(entity.family, 0.28)
 
 
 def adjust_approach(

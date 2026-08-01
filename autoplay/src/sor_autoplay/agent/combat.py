@@ -27,7 +27,7 @@ from ..world_map import SCREEN_WIDTH, MapEntity
 from . import enemies as enemy_ai
 from .characters import CharacterProfile
 from .enemies import CounterPlan
-from .fuzzy import falling
+from .fuzzy import clamp01, falling
 from .knowledge import Relation, TacticalKnowledgeGraph
 
 
@@ -417,21 +417,24 @@ def select_target(
         boss = 1.0 if entity.kind == "boss" else 0.0
         forward = 1.0 if (prefer_forward and dx > 0) or (not prefer_forward and dx < 0) else 0.0
         strike = 1.0 if can_punch(me, entity, profile, require_facing=False) else 0.0
-        priority = min(1.0, max(0.0, (plan.priority - 1.0) / 2.5))
+        priority = enemy_ai.target_priority_membership(entity)
+        reasons.append(f"family-priority={priority:.2f}")
         utility = (
-            0.26 * closeness
-            + 0.30 * peril
-            + 0.12 * lane_access
-            + 0.30 * punish
-            + 0.06 * boss
+            0.24 * closeness
+            + 0.25 * peril
+            + 0.10 * lane_access
+            + 0.22 * punish
+            + 0.10 * boss
             + 0.03 * forward
             + 0.03 * strike
-            + 0.02 * priority
+            + 0.22 * priority
         )
-        if is_dangerous(phase) or entity.kind == "projectile":
-            utility = max(utility, 0.84)
+        if entity.kind == "projectile":
+            utility = max(utility, 0.98)
+        elif is_dangerous(phase):
+            utility = max(utility, 0.82)
         if entity.kind == "boss":
-            utility = max(utility, 0.72)
+            utility = max(utility, 0.94)
         if entity.slot == preferred_slot:
             reasons.append("current-focus")
         utility = min(1.0, utility)
@@ -464,7 +467,13 @@ def select_target(
             is_dangerous(current.entity.combat_phase)
             or current.entity.kind == "projectile"
         )
-        if not (challenger_dangerous and not current_dangerous):
+        challenger_priority = enemy_ai.target_priority_membership(best.entity)
+        current_priority = enemy_ai.target_priority_membership(current.entity)
+        material_priority_jump = challenger_priority >= current_priority + 0.12
+        if not (
+            (challenger_dangerous and not current_dangerous)
+            or material_priority_jump
+        ):
             if best.utility < current.utility + switch_margin:
                 return current
     return best
@@ -640,6 +649,50 @@ def can_break(
     return can_punch(me, prop, profile, require_facing=require_facing)
 
 
+# ROM values from ai-analysis/items-and-weapons.md: bottle damage 3, knife 5,
+# bat/pipe 4 with long melee reach, and pepper damage 2 plus immobilization.
+# Values deliberately include control/range rather than sorting by damage only.
+_WEAPON_BASE_VALUE: dict[int, float] = {
+    0x08: 0.62,  # knife
+    0x09: 0.32,  # one-way bottle/shards
+    0x0A: 0.82,  # baseball bat, long melee
+    0x0B: 0.82,  # steel pipe, long melee
+    0x0C: 0.52,  # pepper spray, low damage but immobilizes
+}
+
+
+def weapon_value(type_id: int, profile: CharacterProfile | None = None) -> float:
+    """Fuzzy usefulness of a carried weapon for one character profile."""
+
+    tid = type_id & 0xFF
+    value = _WEAPON_BASE_VALUE.get(tid, 0.0)
+    if profile is not None:
+        if tid in profile.preferred_weapons:
+            value += 0.12
+        if tid in profile.weak_weapons:
+            value -= 0.20
+    return clamp01(value)
+
+
+def is_weapon_upgrade(
+    current_type: int,
+    candidate_type: int,
+    profile: CharacterProfile | None,
+    *,
+    margin: float = 0.08,
+) -> bool:
+    """Whether replacing the held weapon is a material fuzzy improvement."""
+
+    current = current_type & 0xFF
+    candidate = candidate_type & 0xFF
+    if current not in _WEAPON_BASE_VALUE:
+        return candidate in _WEAPON_BASE_VALUE
+    return (
+        weapon_value(candidate, profile)
+        >= weapon_value(current, profile) + margin
+    )
+
+
 def select_pickup(
     me: MapEntity,
     entities: tuple[MapEntity, ...],
@@ -649,6 +702,7 @@ def select_pickup(
     allow_weapons: bool = True,
     max_dist: float = 160.0,
     already_holding_weapon: bool = False,
+    held_weapon_type: int = 0,
     profile: CharacterProfile | None = None,
     graph: TacticalKnowledgeGraph | None = None,
 ) -> MapEntity | None:
@@ -656,15 +710,22 @@ def select_pickup(
     best_score = 1e9
     for entity in entities:
         if entity.kind == "weapon":
-            if not allow_weapons or already_holding_weapon:
+            if not allow_weapons:
                 continue
-            w_bonus = 0.0
-            if profile is not None:
-                tid = entity.type_id & 0xFF
-                if tid in profile.weak_weapons:
-                    w_bonus = 80.0
-                elif tid in profile.preferred_weapons:
-                    w_bonus = -20.0
+            tid = entity.type_id & 0xFF
+            current_type = held_weapon_type & 0xFF
+            holding_weapon = already_holding_weapon or 0x08 <= current_type <= 0x0C
+            if holding_weapon:
+                # A caller that only knows the old Boolean API cannot compare
+                # qualities safely; policy passes the concrete +$60 type.
+                if current_type not in _WEAPON_BASE_VALUE:
+                    continue
+                if not is_weapon_upgrade(current_type, tid, profile):
+                    continue
+            # Prefer a materially stronger weapon, but preserve enough travel
+            # cost that the agent does not cross the whole screen for a tiny
+            # improvement.
+            w_bonus = -80.0 * weapon_value(tid, profile)
         elif entity.kind == "pickup":
             fam = entity.family
             if fam in ("Health",) and not allow_health:

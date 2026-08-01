@@ -8,12 +8,13 @@ stay held until the world-space goal is reached or passed through.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from ..phases import CombatPhase, is_dangerous, is_punishable
 from ..state import GameSnapshot, PlayerSnapshot
 from ..world_map import MapEntity
-from . import combat, coop, enemies as enemy_ai, grabs, pressure, stage
+from . import bosses, combat, coop, enemies as enemy_ai, grabs, pressure, stage
 from .arbiter import GoalKind, GoalMemory, solve_goal
 from .autoplanner import AutoPlanner
 from .characters import profile_for
@@ -334,7 +335,7 @@ def _decide_one(
         player_snap.specials,
         threshold=config.police_threshold,
         level_index=snapshot.level_index,
-    ):
+    ) and combat.player_can_start_ground_action(me):
         walk.clear()
         return Intent(special=True, note=f"police ({press.reason})")
 
@@ -427,6 +428,65 @@ def _decide_one(
             note=f"air {state} {aim_e.label if aim_e else 'follow'}".strip(),
         )
 
+    # Round-8 type-$45 props can cross the screen at roughly 12 px per
+    # four-frame decision while carrying damage.  Treating them like static
+    # crates made the stand-off goal move toward the player every tick, so the
+    # agent walked straight into the collision.  Smash only when already in
+    # grounded range; otherwise leave the prop's lane and hold there until it
+    # passes instead of chasing it.
+    moving_props = tuple(
+        entity
+        for entity in snapshot.world_map.entities
+        if entity.kind == "breakable"
+        and entity.outgoing_damage > 0
+        and graph.entity_has(entity, Relation.REACHABLE)
+    )
+    if moving_props:
+        prop = min(
+            moving_props,
+            key=lambda entity: math.hypot(
+                entity.map_x - me.map_x,
+                entity.map_y - me.map_y,
+            ),
+        )
+        abs_dx = abs(prop.map_x - me.map_x)
+        abs_dy = abs(prop.map_y - me.map_y)
+        fl, fr = combat.face_intent_dirs(me, prop)
+        if (
+            combat.can_break(me, prop, profile, require_facing=True)
+            and combat.player_can_start_ground_action(me)
+            and memory.attack_cd(player_index) == 0
+        ):
+            walk.clear()
+            memory.set_attack_cd(player_index, 3)
+            return Intent(
+                left=fl,
+                right=fr,
+                attack=True,
+                note=f"smash {prop.label} moving threat",
+            )
+        if abs_dx <= 220.0:
+            if abs_dy < 28.0:
+                lane_low = 14.0
+                lane_high = max(lane_low, snapshot.world_map.camera_bottom - 12.0)
+                goal_y = max(
+                    (lane_low, lane_high),
+                    key=lambda lane: (abs(lane - prop.world_y), lane),
+                )
+                return _walk_toward(
+                    walk,
+                    me,
+                    goal_x=float(me.world_x),
+                    goal_y=goal_y,
+                    reason=f"evade moving threat {prop.label}",
+                    snapshot=snapshot,
+                    advice=advice,
+                    eps_x=3.0,
+                    eps_y=5.0,
+                )
+            walk.clear()
+            return Intent(note=f"hold safe lane {prop.label}")
+
     # --- Symbolic/fuzzy tactical arbitration ---
     # Generate legal fight/loot/progress goals from the knowledge graph, then
     # solve a constrained utility problem. This replaces the old unconditional
@@ -440,6 +500,7 @@ def _decide_one(
         allow_special_life=allow_star,
         allow_weapons=True,
         already_holding_weapon=me.is_holding_weapon,
+        held_weapon_type=me.held_type,
         profile=profile,
         graph=graph,
     )
@@ -468,19 +529,24 @@ def _decide_one(
     )
 
     if arbitration.winner.kind == GoalKind.LOOT and item is not None:
+        loot_verb = (
+            "upgrade weapon"
+            if item.kind == "weapon" and me.is_holding_weapon
+            else "loot"
+        )
         close = combat.can_collect_pickup(me, item)
         if close and combat.player_can_start_ground_action(me):
             walk.clear()
-            return Intent(attack=True, note=f"loot {item.label}")
+            return Intent(attack=True, note=f"{loot_verb} {item.label}")
         if close:
             walk.clear()
-            return Intent(note=f"await loot {item.label}")
+            return Intent(note=f"await {loot_verb} {item.label}")
         return _walk_toward(
             walk,
             me,
             goal_x=float(item.world_x),
             goal_y=float(item.world_y),
-            reason=f"loot {item.label}",
+            reason=f"{loot_verb} {item.label}",
             snapshot=snapshot,
             advice=advice,
             eps_x=3.0,
@@ -582,6 +648,28 @@ def _decide_one(
                 left=face_left,
                 right=face_right_now,
                 note=f"atk anim {foe.label} [{tag}]",
+            )
+
+        boss_tactic = bosses.tactical_move(
+            me,
+            foe,
+            snapshot.world_map.entities,
+            level_index=snapshot.level_index,
+        )
+        if boss_tactic is not None:
+            if boss_tactic.hold:
+                walk.clear()
+                return Intent(note=boss_tactic.note)
+            return _walk_toward(
+                walk,
+                me,
+                goal_x=boss_tactic.goal_x,
+                goal_y=boss_tactic.goal_y,
+                reason=boss_tactic.note,
+                snapshot=snapshot,
+                advice=advice,
+                eps_x=3.0,
+                eps_y=5.0,
             )
 
         # Signal's state $08 can select the state-$0B low sliding sweep. The
@@ -898,11 +986,20 @@ def _decide_one(
 
     # --- Progress ---
     lead = _PROGRESS_LEAD if advice.progress_right else -_PROGRESS_LEAD
-    goal_x = float(me.world_x) + lead
+    goal_x = (
+        float(me.world_x) + lead
+        if advice.horizontal_progress
+        else float(me.world_x)
+    )
     goal_y = float(me.world_y)
     if advice.avoid_holes or advice.elevator:
         mid = 0x40 if snapshot.level_index != 6 else 0x50
         goal_y = float(mid)
+    if not advice.horizontal_progress:
+        # Discard a progress/approach latch left by the preceding elevator
+        # wave.  Even if its old X goal is within WalkState's refresh slack,
+        # the clear platform must never inherit LEFT/RIGHT.
+        walk.clear()
     return _walk_toward(
         walk,
         me,
@@ -978,13 +1075,10 @@ def _walk_toward(
 
     # Hole steer on latched dirs (may zero one axis without flipping every tick).
     intent = _apply_stage_geometry(intent, me, snapshot, advice)
-    # If hole steer flipped a direction, re-lock walk dirs to match.
-    if walk.active:
-        new_dx = (-1 if intent.left else 1 if intent.right else 0)
-        new_dy = (-1 if intent.up else 1 if intent.down else 0)
-        if new_dx != walk.dir_x or new_dy != walk.dir_y:
-            walk.dir_x = new_dx
-            walk.dir_y = new_dy
+    # Geometry steering is a temporary waypoint around the obstacle.  Keep the
+    # original WalkState signs latched so horizontal progress resumes as soon
+    # as the selected detour lane is clear; persisting the temporary UP/DOWN
+    # signs was the Stage-4 edge stall.
 
     if attack or jump or rear:
         return blend_walk_with_actions(
@@ -1021,7 +1115,11 @@ def _apply_stage_geometry(
     snapshot: GameSnapshot,
     advice: stage.StageAdvice,
 ) -> Intent:
-    if not advice.avoid_holes and not snapshot.floor_holes:
+    # Collision class 0 is meaningful as a pit only on stages that opt into
+    # hole avoidance.  In particular, Round 7's moving elevator floor is not
+    # encoded in this static map; treating its zero cells as holes produced
+    # phantom rectangles and false horizontal escape/progression.
+    if not advice.avoid_holes:
         return intent
 
     desired_dx = (-1.0 if intent.left else 1.0 if intent.right else 0.0)
