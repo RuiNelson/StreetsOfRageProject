@@ -42,11 +42,17 @@ class ObserverHud:
     def __init__(
         self,
         *,
-        title: str = "SoR Autoplay Observer",
+        title: str = "SoR Autoplay",
         subtitle: str = "live replica",
         on_close: Callable[[], None] | None = None,
+        on_toggle_agent: Callable[[int], bool] | None = None,
+        agent_config_provider: Callable[[], object] | None = None,
+        agent_notes_provider: Callable[[], tuple[str, str]] | None = None,
     ) -> None:
         self._on_close = on_close
+        self._on_toggle_agent = on_toggle_agent
+        self._agent_config_provider = agent_config_provider
+        self._agent_notes_provider = agent_notes_provider
         self._latest_map: WorldMap | None = None
         self._latest_holes: tuple = ()
         self._map_draw_job: str | None = None
@@ -70,6 +76,8 @@ class ObserverHud:
         self._start_maximized()
         self.root.bind("<Escape>", self._handle_close)
         self.root.bind("<q>", self._handle_close)
+        self.root.bind("1", lambda _e: self._toggle_agent(1))
+        self.root.bind("2", lambda _e: self._toggle_agent(2))
         self.root.protocol("WM_DELETE_WINDOW", self._handle_close)
 
         family = self._pick_font_family()
@@ -104,7 +112,7 @@ class ObserverHud:
         self._holes = self._label(self._col_state, font=self._font_small, fg=_MUTED)
         self._footer = self._label(
             self._col_state,
-            text="Esc / Q  quit",
+            text="Esc/Q quit · 1/2 toggle AI · std controls (B atk C jump A special)",
             font=self._font_small,
             fg=_DIM,
         )
@@ -115,6 +123,8 @@ class ObserverHud:
         self._p1_health = self._label(self._col_p1, mono=True)
         self._p1_stats = self._label(self._col_p1, mono=True)
         self._p1_score = self._label(self._col_p1, mono=True)
+        self._p1_agent_btn = self._agent_button(self._col_p1, 1, "#9ecbff")
+        self._p1_agent_note = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
 
         # P2 column (always present for a stable 3-column layout)
         self._p2_title = self._heading(self._col_p2, "P2", fg="#ffb3c7")
@@ -122,6 +132,8 @@ class ObserverHud:
         self._p2_health = self._label(self._col_p2, mono=True)
         self._p2_stats = self._label(self._col_p2, mono=True)
         self._p2_score = self._label(self._col_p2, mono=True)
+        self._p2_agent_btn = self._agent_button(self._col_p2, 2, "#ffb3c7")
+        self._p2_agent_note = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
 
         # --- Bottom: map fills all remaining window space ---
         self._map_frame = tk.Frame(
@@ -204,6 +216,51 @@ class ObserverHud:
         )
         label.pack(fill=tk.X, pady=(0, 4))
         return label
+
+    def _agent_button(self, parent: tk.Frame, player_index: int, accent: str) -> tk.Button:
+        btn = tk.Button(
+            parent,
+            text=f"AI P{player_index}: OFF",
+            command=lambda: self._toggle_agent(player_index),
+            bg="#1c1f2b",
+            fg=accent,
+            activebackground="#2a2f42",
+            activeforeground=accent,
+            relief=tk.FLAT,
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=_BORDER,
+            font=self._font_small,
+            padx=8,
+            pady=4,
+            cursor="hand2",
+        )
+        btn.pack(anchor="w", pady=(6, 0))
+        return btn
+
+    def _toggle_agent(self, player_index: int) -> None:
+        if self._on_toggle_agent is None:
+            return
+        self._on_toggle_agent(player_index)
+        self._refresh_agent_buttons()
+
+    def _refresh_agent_buttons(self) -> None:
+        p1_on = False
+        p2_on = False
+        if self._agent_config_provider is not None:
+            cfg = self._agent_config_provider()
+            p1_on = bool(getattr(cfg, "p1_enabled", False))
+            p2_on = bool(getattr(cfg, "p2_enabled", False))
+        self._p1_agent_btn.configure(
+            text=f"AI P1: {'ON' if p1_on else 'OFF'}  (key 1)",
+            bg="#1a3d2e" if p1_on else "#1c1f2b",
+            fg="#5ddea0" if p1_on else "#9ecbff",
+        )
+        self._p2_agent_btn.configure(
+            text=f"AI P2: {'ON' if p2_on else 'OFF'}  (key 2)",
+            bg="#3d1a28" if p2_on else "#1c1f2b",
+            fg="#5ddea0" if p2_on else "#ffb3c7",
+        )
 
     def _label(
         self,
@@ -344,6 +401,13 @@ class ObserverHud:
 
         self._render_player(snapshot.p1, self._p1_header, self._p1_health, self._p1_stats, self._p1_score)
         self._render_player(snapshot.p2, self._p2_header, self._p2_health, self._p2_stats, self._p2_score)
+
+        self._refresh_agent_buttons()
+        notes = ("", "")
+        if self._agent_notes_provider is not None:
+            notes = self._agent_notes_provider()
+        self._p1_agent_note.configure(text=f"AI: {notes[0]}" if notes[0] else "AI: —")
+        self._p2_agent_note.configure(text=f"AI: {notes[1]}" if notes[1] else "AI: —")
 
         self._latest_map = snapshot.world_map
         self._latest_holes = snapshot.floor_holes

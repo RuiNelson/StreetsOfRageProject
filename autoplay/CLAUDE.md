@@ -6,9 +6,9 @@
 `StreetsOfRageRecompilation` (`sor`) process via
 `MegaDriveEnvironment`'s `megadrive_remote` client.
 
-Intended end state: an automatic play agent. **Current scope:** a read-only
-maximized-window observer that mirrors mode, characters, health, lives, specials,
-timer, level, scores, and a 2D world map (players / enemies / bosses / items).
+**Current scope:** maximized-window observer (mode, characters, health, lives,
+specials, timer, level, scores, 2D world map) **plus** optional scripted agents
+that inject standard-control input through `press_buttons`.
 
 ## Ownership
 
@@ -20,11 +20,13 @@ timer, level, scores, and a 2D world map (players / enemies / bosses / items).
 ## Commands
 
 ```bash
-# Host (meta-repo root)
+# Host (meta-repo root) — do NOT use --altControls with the agents yet
 ./scripts/run StreetsOfRageRecompilation/rom/SOR.bin --debugUtils --port 6969
 
-# Observer (meta-repo wrapper; defaults host 127.0.0.1 port 6969)
+# Observer + AI (meta-repo wrapper; defaults host 127.0.0.1 port 6969)
 ./scripts/autoplay
+./scripts/autoplay --agent-p1
+./scripts/autoplay --agent-p1 --agent-p2
 ./scripts/autoplay --once
 ./scripts/autoplay --poll-ms 33
 
@@ -37,16 +39,50 @@ PYTHONPATH=src python3.11 -m unittest discover -s tests -q
 Use Python 3.11+ with Tk (`_tkinter`). System/Homebrew 3.13/3.14 builds on this
 machine may lack Tk.
 
+## Agent design (standard controls only)
+
+Specs live in `AgentSpecs.md`. Implementation under `src/sor_autoplay/agent/`.
+
+**Controls assumption:** OPTIONS scheme 0 and **no** host `--altControls`.
+
+| Physical | Role | `Buttons` |
+|---|---|---|
+| B | Attack / pickup | `Buttons.B` |
+| C | Jump | `Buttons.C` |
+| A | Police special | `Buttons.A` |
+| D-pad | Move | UP/DOWN/LEFT/RIGHT |
+
+`--altControls` remaps A/X/Y and splits pickup from attack; agents do not support
+that layout yet.
+
+### Behaviour (priority)
+
+1. Steady (no input) while paused or police special is active
+2. Mr. X offer: always select **NO** (refuse) then confirm
+3. Police special when pressure score ≥ threshold and specials remain (not round 8)
+4. 2P mid-air assist when both agents and partner is airborne nearby
+5. Pick up weapons freely; health/life/special only if co-op fairness allows
+6. Engage nearest threat (bosses preferred); character-tuned range/jump/rear mix
+7. Avoid floor holes (stage 4) and elevator edges (stage 7)
+8. Progress right (stage 8: left) when the screen is clear
+
+### UI
+
+- Per-player **AI ON/OFF** buttons in the P1/P2 columns
+- Keys **1** / **2** toggle P1 / P2 agents
+- CLI: `--agent-p1`, `--agent-p2`, `--agent-hold-frames N`
+
+Input is applied on the same remote poll thread as RAM reads (one client
+connection). When an agent is active, `press_buttons(..., frames=hold)` paces
+the loop; when off, wall-clock `--poll-ms` is used.
+
 ## Design constraints
 
-- Read-only observation for now (no injected buttons unless explicitly requested).
 - Prefer small multi-byte `read_memory` windows over many single-byte reads.
-- **Snapshot cadence is wall-clock polling, not VSync waits.** Default
-  `--poll-ms 33` (~2 frames at 60 Hz): `read_snapshot()` on the remote poll
-  thread, then sleep the remainder of the period. Do not call `wait_vsync` for
-  ordinary observation.
-- HUD must stay visually small (corner card), even if the window is maximized.
-  Prefer maximized normal window over exclusive fullscreen.
+- **Snapshot cadence is wall-clock polling, not VSync waits** (when agents off).
+  Default `--poll-ms 33` (~2 frames at 60 Hz).
+- HUD must stay visually clear (corner status + map). Prefer maximized normal
+  window over exclusive fullscreen.
 - Do not commit ROMs, captures, or build artifacts.
 - Never leave a background `sor` process running after local experiments; use
   `timeout -k` when scripting launches.
@@ -78,10 +114,16 @@ See `src/sor_autoplay/memory_map.py` and
 - Police special: `$FFFA1A` nonzero (+ caller `$FFFA1C`)
 - Floor holes: `$FFA000` collision-class map, class 0 = open/pit
   (query matches `sub_0000AD30`: x>>4, lane>>3, stride `$FFE02E`)
+- Mr. X offer: `$FFDE00` flag, `$FFDE04` state; player object `+$59` bit3=side,
+  bit4=choice UI active (initial refuse path wants bit3=1 = NO)
 - Styles live in `object_catalog.py`; extraction in `world_map.py`
+- Agent modules: `agent/policy.py`, `combat.py`, `pressure.py`, `stage.py`,
+  `coop.py`, `characters.py`, `controls.py`
 
-## Next milestones (not done)
+## Next milestones
 
-- Agent policy / scripted input via `press_buttons` or lockstep `step_input`
-- Stronger attract-vs-real-play discrimination if needed
-- Optional transparent overlay instead of black fullscreen stage
+- Stronger enemy-specific counters (Signal throws, Nora feints, boss patterns)
+- Full move tables per character (grab combos, weapon throws)
+- Optional `--altControls` mapping
+- Attract-vs-real-play discrimination if needed
+- Optional transparent overlay instead of black stage

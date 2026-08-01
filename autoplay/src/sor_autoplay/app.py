@@ -1,4 +1,4 @@
-"""Entry point: attach to a running SoR host and show the observer HUD."""
+"""Entry point: attach to a running SoR host, observe, and optionally drive AI."""
 
 from __future__ import annotations
 
@@ -10,12 +10,15 @@ from pathlib import Path
 from typing import Sequence
 
 from . import __version__
+from .agent import AgentConfig, AgentState, decide_actions
 from .hud import HUD_PAINT_MS_DEFAULT, ObserverHud
 from .state import GameSnapshot, disconnected_snapshot, read_snapshot
 
 # Wall-clock sample period. ~2 frames at 60 Hz (2 / 60 * 1000 ≈ 33.3 ms).
 DEFAULT_POLL_MS = 33
 ASSUMED_HZ = 60
+# Frames to hold each AI button mask (standard controls; press_buttons is blocking).
+DEFAULT_AGENT_HOLD_FRAMES = 2
 
 
 def _default_megadrive_python_src() -> Path | None:
@@ -53,8 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sor-autoplay",
         description=(
-            "Maximized-window observer for a running StreetsOfRageRecompilation "
-            "instance via MegaDriveEnvironment remote access."
+            "Observer + optional AI agents for a running StreetsOfRageRecompilation "
+            "instance via MegaDriveEnvironment remote access. "
+            "Agents use standard controls only (no --altControls)."
         ),
     )
     parser.add_argument(
@@ -73,9 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_POLL_MS,
         help=(
-            "Wall-clock remote poll period in milliseconds "
+            "Wall-clock remote poll period in milliseconds when agents are off "
             f"(default: {DEFAULT_POLL_MS}, ~2 frames at {ASSUMED_HZ} Hz). "
-            "Does not wait on VSync."
+            "Does not wait on VSync. When an agent is on, hold-frames pace input."
         ),
     )
     parser.add_argument(
@@ -85,6 +89,25 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "GUI paint period in milliseconds; only redraws the latest snapshot "
             f"(default: {HUD_PAINT_MS_DEFAULT})"
+        ),
+    )
+    parser.add_argument(
+        "--agent-p1",
+        action="store_true",
+        help="Start with the P1 agent enabled (standard controls)",
+    )
+    parser.add_argument(
+        "--agent-p2",
+        action="store_true",
+        help="Start with the P2 agent enabled (standard controls)",
+    )
+    parser.add_argument(
+        "--agent-hold-frames",
+        type=int,
+        default=DEFAULT_AGENT_HOLD_FRAMES,
+        help=(
+            "Frames to hold each AI button mask via press_buttons "
+            f"(default: {DEFAULT_AGENT_HOLD_FRAMES})"
         ),
     )
     parser.add_argument(
@@ -152,6 +175,9 @@ class ObserverApp:
         *,
         poll_ms: int = DEFAULT_POLL_MS,
         hud_ms: int = HUD_PAINT_MS_DEFAULT,
+        agent_p1: bool = False,
+        agent_p2: bool = False,
+        agent_hold_frames: int = DEFAULT_AGENT_HOLD_FRAMES,
     ) -> None:
         self.host = host
         self.port = port
@@ -162,6 +188,44 @@ class ObserverApp:
         self._latest: GameSnapshot = disconnected_snapshot("starting")
         self._client = None
         self._hud: ObserverHud | None = None
+        self._agent_config = AgentConfig(
+            p1_enabled=agent_p1,
+            p2_enabled=agent_p2,
+            hold_frames=max(1, agent_hold_frames),
+        )
+        self._agent_memory = AgentState()
+        self._agent_notes: tuple[str, str] = ("", "")
+        self._was_agent_active = False
+
+    def agent_config(self) -> AgentConfig:
+        with self._lock:
+            return AgentConfig(
+                p1_enabled=self._agent_config.p1_enabled,
+                p2_enabled=self._agent_config.p2_enabled,
+                hold_frames=self._agent_config.hold_frames,
+                police_threshold=self._agent_config.police_threshold,
+            )
+
+    def set_agent_enabled(self, player_index: int, enabled: bool) -> None:
+        with self._lock:
+            if player_index == 1:
+                self._agent_config.p1_enabled = enabled
+            elif player_index == 2:
+                self._agent_config.p2_enabled = enabled
+
+    def toggle_agent(self, player_index: int) -> bool:
+        with self._lock:
+            if player_index == 1:
+                self._agent_config.p1_enabled = not self._agent_config.p1_enabled
+                return self._agent_config.p1_enabled
+            if player_index == 2:
+                self._agent_config.p2_enabled = not self._agent_config.p2_enabled
+                return self._agent_config.p2_enabled
+        return False
+
+    def agent_notes(self) -> tuple[str, str]:
+        with self._lock:
+            return self._agent_notes
 
     def start_poller(self) -> None:
         thread = threading.Thread(target=self._poll_loop, name="sor-remote-poll", daemon=True)
@@ -190,30 +254,69 @@ class ObserverApp:
 
                 assert self._client is not None
                 snapshot = read_snapshot(self._client)
+
+                config = self.agent_config()
+                notes = ("", "")
+                if config.any_enabled() and snapshot.connected:
+                    decision = decide_actions(snapshot, config, self._agent_memory)
+                    notes = (decision.p1_note, decision.p2_note)
+                    if not decision.steady and (decision.p1_mask or decision.p2_mask):
+                        # Blocking hold for N frames; remote ORs with physical pad.
+                        self._client.press_buttons(
+                            player1=decision.p1_mask,
+                            player2=decision.p2_mask,
+                            frames=config.hold_frames,
+                        )
+                        self._was_agent_active = True
+                    elif self._was_agent_active:
+                        try:
+                            self._client.release_buttons()
+                        except Exception:  # noqa: BLE001
+                            pass
+                        self._was_agent_active = False
+                elif self._was_agent_active:
+                    try:
+                        self._client.release_buttons()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._was_agent_active = False
+
                 with self._lock:
                     self._latest = snapshot
+                    self._agent_notes = notes
 
-                # Wall-clock cadence: sleep the remainder of the poll period.
-                # No wait_vsync — sampling is independent of the host frame clock.
-                elapsed = time.monotonic() - started
-                remaining = poll_s - elapsed
-                if remaining > 0:
-                    self._stop.wait(remaining)
+                # When agents drove press_buttons, that already paced ~hold frames.
+                # Otherwise sleep the remainder of the wall-clock poll period.
+                if not (config.any_enabled() and snapshot.connected):
+                    elapsed = time.monotonic() - started
+                    remaining = poll_s - elapsed
+                    if remaining > 0:
+                        self._stop.wait(remaining)
             except Exception as exc:  # noqa: BLE001 - surface any link failure in HUD
                 with self._lock:
                     self._latest = disconnected_snapshot(str(exc))
+                    self._agent_notes = ("", "")
                 if self._client is not None:
+                    try:
+                        self._client.release_buttons()
+                    except Exception:  # noqa: BLE001
+                        pass
                     try:
                         self._client.close()
                     except Exception:  # noqa: BLE001
                         pass
                     self._client = None
+                self._was_agent_active = False
                 self._stop.wait(backoff_s)
                 backoff_s = min(2.0, backoff_s * 1.5)
 
     def stop(self) -> None:
         self._stop.set()
         if self._client is not None:
+            try:
+                self._client.release_buttons()
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 self._client.close()
             except Exception:  # noqa: BLE001
@@ -229,7 +332,10 @@ class ObserverApp:
         approx_frames = self.poll_ms * ASSUMED_HZ / 1000.0
         self._hud = ObserverHud(
             on_close=self.stop,
-            subtitle=f"poll {self.poll_ms}ms (~{approx_frames:.1f} frames @{ASSUMED_HZ}Hz)",
+            subtitle=f"poll {self.poll_ms}ms (~{approx_frames:.1f}f) · std controls",
+            on_toggle_agent=self.toggle_agent,
+            agent_config_provider=self.agent_config,
+            agent_notes_provider=self.agent_notes,
         )
 
         def tick() -> None:
@@ -272,6 +378,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         port=args.port,
         poll_ms=args.poll_ms,
         hud_ms=args.hud_ms,
+        agent_p1=args.agent_p1,
+        agent_p2=args.agent_p2,
+        agent_hold_frames=args.agent_hold_frames,
     )
     if args.once:
         return app.run_once()

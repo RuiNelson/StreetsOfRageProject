@@ -60,6 +60,17 @@ ADDR_PAUSE_TEXT_FLAG = 0xFFFA46
 # pause_text_flag: 0 = running; nonzero = paused (3 on enter, then often 1).
 PAUSE_FLAG_PAUSED = 0x03
 
+# Mr. X final offer (round 8); see story-mode-and-campaign-flow.md.
+ADDR_MR_X_OFFER_FLAG = 0xFFDE00
+ADDR_MR_X_OFFER_STATE = 0xFFDE04
+ADDR_BAD_ENDING_SELECTED = 0xFFDE10
+
+# OPTIONS control layout (0 = standard A=special, B=attack, C=jump).
+ADDR_CONTROL_SCHEME = 0xFFFFC8
+
+# Object field used by Mr. X choice UI (bit3 = side, bit4 = choice active).
+OBJ_PLAYER_FLAGS_59 = 0x59
+
 # Offsets within a player / generic object
 OBJ_TYPE = 0x00
 OBJ_FLAGS = 0x01  # bit0 set => hidden from SAT (see enqueue_object_render_bucket)

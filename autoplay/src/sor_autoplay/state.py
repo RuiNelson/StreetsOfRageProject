@@ -223,6 +223,8 @@ def snapshot_from_memory_blocks(
     police_special_caller_byte: int = 0,
     collision_map: bytes | None = None,
     blockmap_stride: int = 0,
+    mr_x_offer_flag: int = 0,
+    mr_x_offer_state: int = 0,
     connected: bool = True,
     error: str | None = None,
 ) -> GameSnapshot:
@@ -322,6 +324,14 @@ def snapshot_from_memory_blocks(
             camera_x=world.camera_x,
         )
 
+    # Player object +$59 (Mr. X choice bits) when actors/objects available.
+    p1_obj59 = 0
+    p2_obj59 = 0
+    if len(objects_block) >= mm.OBJECT_SLOT_SIZE:
+        p1_obj59 = _u8(objects_block, mm.OBJ_PLAYER_FLAGS_59)
+    if len(objects_block) >= mm.OBJECT_SLOT_SIZE * 2:
+        p2_obj59 = _u8(objects_block, mm.OBJECT_SLOT_SIZE + mm.OBJ_PLAYER_FLAGS_59)
+
     return GameSnapshot(
         connected=connected,
         game_state=game_state,
@@ -359,6 +369,10 @@ def snapshot_from_memory_blocks(
             "police_special_active": police_special_active_byte & 0xFF,
             "floor_holes": len(holes),
             "blockmap_stride": blockmap_stride,
+            "mr_x_offer_flag": mr_x_offer_flag & 0xFF,
+            "mr_x_offer_state": mr_x_offer_state & 0xFF,
+            "p1_obj59": p1_obj59 & 0xFF,
+            "p2_obj59": p2_obj59 & 0xFF,
         },
     )
 
@@ -396,6 +410,7 @@ def read_snapshot(client: MemorySource) -> GameSnapshot:
     stop_clock = client.read_memory(mm.ADDR_STOP_CLOCK, 1)[0]
     pause_text_flag = client.read_memory(mm.ADDR_PAUSE_TEXT_FLAG, 1)[0]
     police_blob = client.read_memory(mm.ADDR_POLICE_SPECIAL_ACTIVE, 3)
+    mr_x_blob = client.read_memory(mm.ADDR_MR_X_OFFER_FLAG, 5)
     stride = int.from_bytes(
         client.read_memory(mm.ADDR_PRIMARY_BLOCKMAP_STRIDE, 2), "big"
     )
@@ -419,6 +434,8 @@ def read_snapshot(client: MemorySource) -> GameSnapshot:
         police_special_caller_byte=police_blob[2],
         collision_map=collision_map,
         blockmap_stride=stride,
+        mr_x_offer_flag=mr_x_blob[0],
+        mr_x_offer_state=mr_x_blob[4],
         connected=True,
     )
 
