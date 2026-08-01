@@ -196,6 +196,9 @@ class ObserverApp:
         self._agent_memory = AgentState()
         self._agent_notes: tuple[str, str] = ("", "")
         self._was_agent_active = False
+        # True once we know the host supports HOLD_BUTTONS (0x14).
+        # False once the host NAKs UNKNOWN_COMMAND — fall back to press_buttons.
+        self._sticky_hold: bool | None = None
 
     def agent_config(self) -> AgentConfig:
         with self._lock:
@@ -230,6 +233,48 @@ class ObserverApp:
     def start_poller(self) -> None:
         thread = threading.Thread(target=self._poll_loop, name="sor-remote-poll", daemon=True)
         thread.start()
+
+    def _apply_agent_buttons(
+        self,
+        p1_mask: int,
+        p2_mask: int,
+        *,
+        hold_frames: int,
+    ) -> None:
+        """Latch or pulse controller masks for the agent.
+
+        Prefers sticky ``hold_buttons`` (needs a host rebuilt with MDE that
+        understands command 0x14). On UNKNOWN_COMMAND / missing method, falls
+        back to ``press_buttons`` and remembers that for the rest of the
+        session so the HUD is not spammed with errors.
+        """
+
+        assert self._client is not None
+        use_sticky = self._sticky_hold is not False
+        if use_sticky and hasattr(self._client, "hold_buttons"):
+            try:
+                self._client.hold_buttons(player1=p1_mask, player2=p2_mask)
+                self._sticky_hold = True
+                return
+            except Exception as exc:  # noqa: BLE001
+                # ServerError UNKNOWN_COMMAND when sor is older than HOLD_BUTTONS.
+                msg = str(exc).upper()
+                code = getattr(exc, "code", None)
+                name = getattr(code, "name", "") if code is not None else ""
+                if (
+                    "UNKNOWN_COMMAND" in msg
+                    or name == "UNKNOWN_COMMAND"
+                    or type(exc).__name__ == "AttributeError"
+                ):
+                    self._sticky_hold = False
+                else:
+                    raise
+
+        self._client.press_buttons(
+            player1=p1_mask,
+            player2=p2_mask,
+            frames=max(hold_frames, 4),
+        )
 
     def _poll_loop(self) -> None:
         from megadrive_remote import MegaDriveClient
@@ -268,21 +313,11 @@ class ObserverApp:
                                 pass
                             self._was_agent_active = False
                     else:
-                        # Sticky latch: directions stay held across polls so the
-                        # game sees continuous walking (PRESS_BUTTONS always
-                        # released after N frames and produced walk-taps).
-                        try:
-                            self._client.hold_buttons(
-                                player1=decision.p1_mask,
-                                player2=decision.p2_mask,
-                            )
-                        except AttributeError:
-                            # Older megadrive_remote without HOLD_BUTTONS.
-                            self._client.press_buttons(
-                                player1=decision.p1_mask,
-                                player2=decision.p2_mask,
-                                frames=max(config.hold_frames, 4),
-                            )
+                        self._apply_agent_buttons(
+                            decision.p1_mask,
+                            decision.p2_mask,
+                            hold_frames=config.hold_frames,
+                        )
                         self._was_agent_active = bool(
                             decision.p1_mask or decision.p2_mask
                         )
