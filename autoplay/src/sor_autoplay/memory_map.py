@@ -77,8 +77,23 @@ OBJ_FLAGS = 0x01  # bit0 set => hidden from SAT (see enqueue_object_render_bucke
 OBJ_POS_X = 0x10  # long 16.16 world X; integer is the high word (unsigned)
 OBJ_POS_Y = 0x14  # long 16.16 lane / depth Y
 OBJ_POS_Z = 0x18  # long 16.16 height
+OBJ_ACTION_STATE = 0x30  # player action byte; ordinary enemy primary state (word hi)
 OBJ_HEALTH = 0x32
+OBJ_OUTGOING_DAMAGE = 0x34  # active hit descriptor low nibble when attacking
 OBJ_CHARACTER_ID = 0x50
+OBJ_COMBO_STATE = 0x5D  # player combo / action chain (see player_normal_attack_input)
+OBJ_HELD_PTR = 0x5E  # word pointer to grabbed/held object
+OBJ_HELD_TYPE = 0x60  # nonzero while holding weapon or grab target type
+
+# Player action-state families (bit0 often facing; compare with & ~1).
+ACTION_IDLE = 0x02
+ACTION_JUMP = 0x10
+ACTION_ATTACK = 0x18
+ACTION_REAR = 0x20
+ACTION_GRAB = 0x28
+ACTION_GRAB_THROW = 0x44
+ACTION_HURT_MIN = 0x50
+ACTION_HURT_MAX = 0x5F
 
 # Match update_objects / enqueue_object_render_bucket: bit 0 of +$01 means
 # "do not draw". ordinary_enemy_activate sets it while waiting off-screen.

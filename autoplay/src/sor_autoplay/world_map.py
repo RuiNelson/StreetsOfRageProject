@@ -90,6 +90,12 @@ class MapEntity:
     map_y: float
     health: int | None
     slot: str
+    # Agent combat fields (defaults keep older call sites valid).
+    action_state: int = 0  # object +$30 (player action / enemy primary)
+    held_type: int = 0  # player +$60; nonzero while holding weapon/grab target
+    held_ptr: int = 0  # player +$5E low word
+    outgoing_damage: int = 0  # +$34 active hit frame damage nibble
+    combo_state: int = 0  # player +$5D
 
     # Back-compat aliases used by HUD/app during the rename.
     @property
@@ -99,6 +105,37 @@ class MapEntity:
     @property
     def screen_y(self) -> float:
         return self.map_y
+
+    @property
+    def action_base(self) -> int:
+        """Action family with facing bit cleared (player convention)."""
+
+        return self.action_state & 0xFE
+
+    @property
+    def is_holding(self) -> bool:
+        return self.held_type != 0
+
+    @property
+    def is_airborne(self) -> bool:
+        return self.world_z >= 8
+
+    @property
+    def is_grabbing(self) -> bool:
+        base = self.action_base
+        return self.is_holding and (
+            0x28 <= base <= 0x2F or 0x44 <= base <= 0x4F or base == 0x4A
+        )
+
+    @property
+    def is_holding_weapon(self) -> bool:
+        # Weapon object types $08-$0C (knife..pepper); grab targets are enemy types.
+        return 0x08 <= (self.held_type & 0xFF) <= 0x0C
+
+    @property
+    def is_hurt(self) -> bool:
+        base = self.action_base
+        return 0x50 <= base <= 0x5F
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +248,11 @@ def _entity_from_object(
         health = _u16(slot, mm.OBJ_HEALTH)
     else:
         health = None
+    action_state = _u8(slot, mm.OBJ_ACTION_STATE)
+    held_type = _u8(slot, mm.OBJ_HELD_TYPE) if style.kind == "player" else 0
+    held_ptr = _u16(slot, mm.OBJ_HELD_PTR) if style.kind == "player" else 0
+    outgoing = _u8(slot, mm.OBJ_OUTGOING_DAMAGE)
+    combo = _u8(slot, mm.OBJ_COMBO_STATE) if style.kind == "player" else 0
     return MapEntity(
         kind=style.kind,
         family=style.family,
@@ -225,6 +267,11 @@ def _entity_from_object(
         map_y=map_y,
         health=health,
         slot=slot_name,
+        action_state=action_state,
+        held_type=held_type,
+        held_ptr=held_ptr,
+        outgoing_damage=outgoing,
+        combo_state=combo,
     )
 
 
@@ -356,7 +403,7 @@ def parse_world_map(
         style = player_style(index, char_id)
         entity = _entity_from_object(
             slot,
-            slot_name=f"p{index}",
+            slot_name=f"P{index}",
             style=style,
             type_id=type_id,
             camera_x=camera_x,

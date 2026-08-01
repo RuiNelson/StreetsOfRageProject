@@ -6,11 +6,9 @@ import math
 from dataclasses import dataclass
 
 from ..world_map import MapEntity
+from . import enemies as enemy_ai
 from .characters import CharacterProfile
-
-
-# Horizontal distance at which we consider ourselves "in strike range".
-DEFAULT_STRIKE = 28.0
+from .enemies import CounterPlan
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,17 +18,7 @@ class TargetChoice:
     dx: float
     dy: float
     dist: float
-
-
-def _threat_weight(entity: MapEntity) -> float:
-    if entity.kind == "boss":
-        return 3.0
-    # Signal (throws) and Jack (projectiles) slightly higher priority.
-    if entity.family in ("Signal", "Jack", "Haku-Ro"):
-        return 1.6
-    if entity.family == "Nora":
-        return 1.3
-    return 1.0
+    plan: CounterPlan
 
 
 def select_target(
@@ -39,35 +27,48 @@ def select_target(
     profile: CharacterProfile,
     *,
     prefer_forward: bool = True,
+    include_projectiles: bool = True,
 ) -> TargetChoice | None:
-    """Pick the most urgent combatant to engage."""
+    """Pick the most urgent combatant (or dodge-critical projectile)."""
 
     best: TargetChoice | None = None
     for entity in entities:
-        if entity.kind not in ("enemy", "boss"):
+        if entity.kind not in ("enemy", "boss", "projectile"):
             continue
-        if entity.health is not None and entity.health <= 0:
+        if entity.kind == "projectile" and not include_projectiles:
             continue
+        if entity.kind != "projectile" and entity.health is not None and entity.health <= 0:
+            continue
+        # Nora feint: still target low-health Noras (distrust_downed).
+        plan = enemy_ai.plan_for(entity)
         dx = entity.map_x - me.map_x
         dy = entity.map_y - me.map_y
         dist = math.hypot(dx, dy)
-        # Soft ignore far off-screen dormant spawns unless no closer targets.
-        if dist > 360:
+        if dist > 360 and entity.kind != "projectile":
             continue
-        # Prefer same-lane targets; lane mismatch costs score.
+        if entity.kind == "projectile" and dist > 120:
+            continue
+
         lane_pen = abs(dy) / max(1.0, profile.lane_align)
-        # Prefer on-screen and slightly ahead in progress direction.
         forward_bonus = 0.0
         if prefer_forward and dx > 0:
             forward_bonus = 0.4
         elif not prefer_forward and dx < 0:
             forward_bonus = 0.4
-        weight = _threat_weight(entity)
+
+        weight = plan.priority
         # Lower score is better.
-        score = (dist / weight) + lane_pen * 8.0 - forward_bonus * 20.0
+        score = (dist / max(0.5, weight)) + lane_pen * 8.0 - forward_bonus * 20.0
         if entity.kind == "boss":
             score -= 40.0
-        choice = TargetChoice(entity=entity, score=score, dx=dx, dy=dy, dist=dist)
+        if entity.kind == "projectile":
+            score -= 30.0  # dodge now
+        if plan.distrust_downed and entity.health is not None and entity.health <= 3:
+            score -= 5.0  # still finish Nora, don't ignore
+
+        choice = TargetChoice(
+            entity=entity, score=score, dx=dx, dy=dy, dist=dist, plan=plan
+        )
         if best is None or choice.score < best.score:
             best = choice
     return best
@@ -79,36 +80,12 @@ def approach_vector(
     profile: CharacterProfile,
     *,
     low_health: bool = False,
-) -> tuple[float, float, bool]:
-    """Return (dx_sign, dy_sign, in_range) toward a good strike position.
+) -> tuple[float, float, bool, CounterPlan]:
+    """Return (dx_sign, dy_sign, in_range, plan) with family-specific spacing."""
 
-    Signs are -1 / 0 / +1 in map space (dx>0 means target is to the right).
-    """
-
-    # Stand slightly to the side of the target at approach_offset.
-    desired_x = target.entity.map_x
-    if abs(target.dx) > 4:
-        side = -1.0 if target.dx > 0 else 1.0  # stand on the side we approach from
-        offset = profile.approach_offset
-        if low_health:
-            offset = profile.caution_range
-        desired_x = target.entity.map_x + side * offset
-
-    err_x = desired_x - me.map_x
-    err_y = target.entity.map_y - me.map_y
-
-    dx = 0.0
-    dy = 0.0
-    if abs(err_x) > 6:
-        dx = 1.0 if err_x > 0 else -1.0
-    if abs(err_y) > profile.lane_align:
-        dy = 1.0 if err_y > 0 else -1.0
-
-    in_range = (
-        abs(target.dx) <= profile.strike_range + 6
-        and abs(target.dy) <= profile.lane_align + 6
+    return enemy_ai.adjust_approach(
+        me, target.entity, profile, low_health=low_health
     )
-    return dx, dy, in_range
 
 
 def peril_vector(
@@ -134,7 +111,6 @@ def peril_vector(
         count += 1
     if count < 2:
         return 0.0, 0.0
-    # Normalize to signs.
     sx = 0.0 if abs(push_x) < 0.05 else (1.0 if push_x > 0 else -1.0)
     sy = 0.0 if abs(push_y) < 0.05 else (1.0 if push_y > 0 else -1.0)
     return sx, sy
@@ -148,6 +124,7 @@ def select_pickup(
     allow_special_life: bool,
     allow_weapons: bool = True,
     max_dist: float = 160.0,
+    already_holding_weapon: bool = False,
 ) -> MapEntity | None:
     """Nearest acceptable ground item (pickup or free weapon)."""
 
@@ -155,7 +132,7 @@ def select_pickup(
     best_d = max_dist
     for entity in entities:
         if entity.kind == "weapon":
-            if not allow_weapons:
+            if not allow_weapons or already_holding_weapon:
                 continue
         elif entity.kind == "pickup":
             fam = entity.family
@@ -164,9 +141,26 @@ def select_pickup(
             if fam in ("Life", "Special") and not allow_special_life:
                 continue
             if fam == "Score":
-                # Score items are free for anyone nearby.
                 pass
         else:
+            continue
+        d = math.hypot(entity.map_x - me.map_x, entity.map_y - me.map_y)
+        if d < best_d:
+            best_d = d
+            best = entity
+    return best
+
+
+def nearest_foe(
+    me: MapEntity,
+    entities: tuple[MapEntity, ...],
+) -> MapEntity | None:
+    best: MapEntity | None = None
+    best_d = 1e9
+    for entity in entities:
+        if entity.kind not in ("enemy", "boss"):
+            continue
+        if entity.health is not None and entity.health <= 0:
             continue
         d = math.hypot(entity.map_x - me.map_x, entity.map_y - me.map_y)
         if d < best_d:

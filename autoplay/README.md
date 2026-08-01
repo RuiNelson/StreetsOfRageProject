@@ -26,7 +26,10 @@ Agent goals and rules: [`AgentSpecs.md`](AgentSpecs.md).
 
 Per-player toggle (HUD button or keys **1** / **2**):
 
-- Fight nearby enemies/bosses; character-tuned ranges (Axel / Adam / Blaze)
+- Fight nearby enemies/bosses with **family-specific counters** (Signal, Haku-Ro,
+  Nora, Jack projectiles, Abadede/Antonio/Souther/Bongo/twins, Mr. X)
+- **Grab/throw trees**: knees → directional throw; weapon swing/throw by type
+- Character-tuned ranges (Axel / Adam / Blaze) including grab bias
 - Call police special under pressure (many enemies, low HP)
 - Pick up weapons/items; co-op fairness on health/life/special pickups
 - Stage rules: avoid holes (4), elevator edges (7), move left (8)
@@ -131,6 +134,8 @@ autoplay/
       controls.py       # standard button mapping
       policy.py         # decide_actions()
       combat.py         # targeting / approach
+      enemies.py        # family/boss counter plans
+      grabs.py          # hold / knee / throw / weapon trees
       pressure.py       # police special score
       stage.py          # holes, elevator, stage 8, Mr. X
       coop.py           # item fairness + 2P assist

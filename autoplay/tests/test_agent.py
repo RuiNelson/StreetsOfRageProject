@@ -206,7 +206,10 @@ class PolicyTests(unittest.TestCase):
                 saw_attack = True
                 break
         self.assertTrue(saw_attack, "agent should punch when enemy is in range")
-        self.assertIn("fight", decision.p1_note)
+        self.assertTrue(
+            any(k in decision.p1_note for k in ("fight", "punch", "grab", "rear", "jump")),
+            msg=decision.p1_note,
+        )
 
     def test_steady_when_paused(self) -> None:
         p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")

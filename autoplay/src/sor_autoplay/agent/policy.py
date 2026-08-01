@@ -5,13 +5,14 @@ Standard controls only (see ``controls.py``). No host ``--altControls``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..state import GameSnapshot, PlayerSnapshot
 from ..world_map import MapEntity
-from . import combat, coop, pressure, stage
+from . import combat, coop, enemies as enemy_ai, grabs, pressure, stage
 from .characters import profile_for
 from .controls import Intent, mask_from_intent
+from .grabs import GrabMemory
 
 
 # game_state values where live combat/progression input makes sense.
@@ -46,14 +47,14 @@ class AgentState:
     """Per-session mutable policy memory (not ROM state)."""
 
     tick: int = 0
-    # Simple phase counters for multi-tick sequences (Mr. X, rear attack).
     p1_phase: int = 0
     p2_phase: int = 0
     p1_last_note: str = ""
     p2_last_note: str = ""
-    # Stagger attack so B is not held every frame (edge-friendly combos).
     p1_attack_cd: int = 0
     p2_attack_cd: int = 0
+    p1_grab: GrabMemory = field(default_factory=GrabMemory)
+    p2_grab: GrabMemory = field(default_factory=GrabMemory)
 
     def phase(self, player_index: int) -> int:
         return self.p1_phase if player_index == 1 else self.p2_phase
@@ -72,6 +73,9 @@ class AgentState:
             self.p1_attack_cd = value
         else:
             self.p2_attack_cd = value
+
+    def grab_mem(self, player_index: int) -> GrabMemory:
+        return self.p1_grab if player_index == 1 else self.p2_grab
 
     def set_note(self, player_index: int, note: str) -> None:
         if player_index == 1:
@@ -94,9 +98,8 @@ class AgentDecision:
 def _player_entity(snapshot: GameSnapshot, index: int) -> MapEntity | None:
     slot = f"P{index}"
     for entity in snapshot.world_map.entities:
-        if entity.kind == "player" and entity.slot == slot:
+        if entity.kind == "player" and entity.slot.upper() == slot:
             return entity
-    # Fallback: symbol match.
     for entity in snapshot.world_map.entities:
         if entity.kind == "player" and entity.symbol == str(index):
             return entity
@@ -124,11 +127,9 @@ def decide_actions(
     if not config.any_enabled() or not snapshot.connected:
         return AgentDecision(0, 0, steady=True)
 
-    # Steady: do not fight the pause/special scripts.
     if snapshot.paused or snapshot.police_special_active:
         return AgentDecision(0, 0, p1_note="steady", p2_note="steady", steady=True)
 
-    # Outside gameplay: leave menus to the human (agents only play rounds).
     if snapshot.game_state not in _INGAME_STATES:
         return AgentDecision(0, 0, p1_note="menu idle", p2_note="menu idle", steady=True)
 
@@ -136,7 +137,6 @@ def decide_actions(
     p2_mask = 0
     p1_note = ""
     p2_note = ""
-
     both = config.p1_enabled and config.p2_enabled
 
     if config.p1_enabled and (snapshot.p1.is_playable or snapshot.p1.mode_active):
@@ -165,7 +165,6 @@ def decide_actions(
         p2_note = intent.note
         memory.set_note(2, intent.note)
 
-    # Decay attack cooldowns.
     for idx in (1, 2):
         cd = memory.attack_cd(idx)
         if cd > 0:
@@ -212,12 +211,11 @@ def _decide_one(
         return _mr_x_intent(snapshot, player_index, memory)
 
     if me is None or not player_snap.is_playable:
-        # Not spawned (continue screen etc.) — face button / start left to human.
         return Intent(note="not playable")
 
-    # --- Police special under pressure ---
+    # Skip self-hurt lock: still allow input but avoid special spam.
     press = pressure.compute_pressure(snapshot, player_snap, me)
-    if pressure.should_call_police(
+    if not me.is_hurt and pressure.should_call_police(
         press,
         player_snap.specials,
         threshold=config.police_threshold,
@@ -225,14 +223,29 @@ def _decide_one(
     ):
         return Intent(special=True, note=f"police ({press.reason})")
 
+    # --- Grab / weapon hold tree (highest combat priority) ---
+    gctx = grabs.context_from_player(me)
+    gmem = memory.grab_mem(player_index)
+    foe_near = combat.nearest_foe(me, snapshot.world_map.entities)
+    held_intent = grabs.decide_held(
+        me,
+        gctx,
+        gmem,
+        tick=memory.tick,
+        foe=foe_near,
+        progress_right=advice.progress_right,
+        crowd=press.enemy_count,
+    )
+    if held_intent is not None:
+        return _apply_stage_geometry(held_intent, me, snapshot, advice)
+
     # --- 2P mid-air assist ---
     if both_agents and coop.partner_throw_opportunity(me, coop_ctx.partner):
-        # Jump under partner + attack chord.
         return Intent(jump=True, attack=True, note="2P air assist")
 
     low_hp = (player_snap.health_percent or 100.0) < 40.0
 
-    # --- Pickups / weapons ---
+    # --- Pickups / weapons (skip if already holding a weapon) ---
     allow_hp = coop.should_take_health_pickup(player_snap, coop_ctx)
     allow_star = coop.should_take_special_or_life(player_snap, coop_ctx)
     item = combat.select_pickup(
@@ -241,6 +254,7 @@ def _decide_one(
         allow_health=allow_hp,
         allow_special_life=allow_star,
         allow_weapons=True,
+        already_holding_weapon=me.is_holding_weapon,
     )
     if item is not None:
         dx = item.map_x - me.map_x
@@ -251,12 +265,12 @@ def _decide_one(
             right=dx > 4,
             up=dy < -profile.lane_align,
             down=dy > profile.lane_align,
-            attack=close,  # B near item → pickup priority in ROM
+            attack=close,
             note=f"loot {item.label}",
         )
         return _apply_stage_geometry(intent, me, snapshot, advice)
 
-    # --- Combat target ---
+    # --- Combat target with family counters ---
     target = combat.select_target(
         me,
         snapshot.world_map.entities,
@@ -264,11 +278,11 @@ def _decide_one(
         prefer_forward=advice.progress_right,
     )
     if target is not None:
-        dx, dy, in_range = combat.approach_vector(
+        dx, dy, in_range, plan = combat.approach_vector(
             me, target, profile, low_health=low_hp
         )
         # Crowd relief when surrounded and not yet in a clean strike.
-        if not in_range and press.enemy_count >= 3:
+        if not in_range and press.enemy_count >= 3 and not plan.sidestep:
             px, py = combat.peril_vector(me, snapshot.world_map.entities)
             if px != 0:
                 dx = px
@@ -278,21 +292,57 @@ def _decide_one(
         attack = False
         jump = False
         rear = False
+        note = f"fight {target.entity.label}"
         cd = memory.attack_cd(player_index)
-        if in_range and cd == 0:
-            # Mix attacks by character bias and tick.
-            phase = memory.tick + player_index * 3
-            roll = (phase % 100) / 100.0
-            if press.enemy_count >= 3 and roll < profile.rear_attack_bias:
+
+        # Projectile: pure evade (no attack).
+        if target.entity.kind == "projectile" or plan.kind == enemy_ai.ThreatKind.PROJECTILE:
+            note = f"dodge {target.entity.label}"
+            intent = Intent(
+                left=dx < 0,
+                right=dx > 0,
+                up=dy < 0,
+                down=dy > 0,
+                note=note,
+            )
+            return _apply_stage_geometry(intent, me, snapshot, advice)
+
+        if in_range and cd == 0 and not me.is_hurt:
+            mix = enemy_ai.attack_mix(
+                plan,
+                profile,
+                tick=memory.tick + player_index * 3,
+                in_range=in_range,
+                crowd=press.enemy_count,
+            )
+            # Blend character grab bias with plan.
+            if mix == "grab_walk" or (
+                grabs.want_grab_approach(
+                    me,
+                    target.entity,
+                    grab_bias=max(plan.grab_bias, profile.grab_bias),
+                )
+                and (memory.tick + player_index) % 4 == 0
+            ):
+                # Walk into foe without B so contact can start a grab.
+                attack = False
+                note = f"grab setup {target.entity.label}"
+                memory.set_attack_cd(player_index, 2)
+            elif mix == "rear":
                 rear = True
+                note = f"rear {target.entity.label}"
                 memory.set_attack_cd(player_index, 4)
-            elif roll < profile.jump_attack_bias:
+            elif mix == "jump":
                 jump = True
                 attack = True
+                note = f"jump {target.entity.label}"
                 memory.set_attack_cd(player_index, 5)
             else:
                 attack = True
+                note = f"punch {target.entity.label} ({plan.note})"
                 memory.set_attack_cd(player_index, 3)
+        elif not in_range:
+            note = f"close {target.entity.label} ({plan.note})"
 
         intent = Intent(
             left=dx < 0,
@@ -302,14 +352,13 @@ def _decide_one(
             attack=attack,
             jump=jump,
             rear_attack=rear,
-            note=f"fight {target.entity.label}",
+            note=note,
         )
         return _apply_stage_geometry(intent, me, snapshot, advice)
 
     # --- No enemies: progress the stage ---
     dx = 1.0 if advice.progress_right else -1.0
     dy = 0.0
-    # Prefer mid-lane for safety on hole stages.
     if advice.avoid_holes or advice.elevator:
         mid = 0x40 if snapshot.level_index != 6 else 0x50
         if me.world_y < mid - 12:
@@ -365,12 +414,7 @@ def _mr_x_intent(
     player_index: int,
     memory: AgentState,
 ) -> Intent:
-    """Always answer NO (refuse Mr. X) then confirm.
-
-    Selection uses Left/Right; face button confirms. We pulse RIGHT for a few
-    ticks, then press attack to confirm. Bit flags from RAM (when present)
-    short-circuit the pulse.
-    """
+    """Always answer NO (refuse Mr. X) then confirm."""
 
     flags = snapshot.raw.get(f"p{player_index}_obj59", None)
     choice_active = True
@@ -379,7 +423,6 @@ def _mr_x_intent(
         choice_active = bool(flags & 0x10)  # bit 4
         choice_bit = flags
         if not choice_active:
-            # Offer machine running but this seat is not choosing yet.
             return Intent(note="mr.x wait")
 
     action = stage.mr_x_choice_intent(

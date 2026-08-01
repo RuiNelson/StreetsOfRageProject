@@ -60,11 +60,20 @@ that layout yet.
 1. Steady (no input) while paused or police special is active
 2. Mr. X offer: always select **NO** (refuse) then confirm
 3. Police special when pressure score ≥ threshold and specials remain (not round 8)
-4. 2P mid-air assist when both agents and partner is airborne nearby
-5. Pick up weapons freely; health/life/special only if co-op fairness allows
-6. Engage nearest threat (bosses preferred); character-tuned range/jump/rear mix
-7. Avoid floor holes (stage 4) and elevator edges (stage 7)
-8. Progress right (stage 8: left) when the screen is clear
+4. **Grab / weapon hold tree** (`agent/grabs.py`): knee → throw; bat/pipe swing;
+   knife/bottle/pepper throw at mid-range
+5. 2P mid-air assist when both agents and partner is airborne nearby
+6. Pick up weapons freely; health/life/special only if co-op fairness allows
+7. Engage threats with **family-specific counters** (`agent/enemies.py`):
+   Signal face/rear, Haku jump intercept, Nora no-rush feint, Jack projectile
+   lane-dodge, Abadede/Bongo sidestep charges, Souther grounded only, Antonio
+   outside boomerang band, twins mobile, Mr. X pressure
+8. Grab setup (walk-in without attack) on grab-friendly foes
+9. Avoid floor holes (stage 4) and elevator edges (stage 7)
+10. Progress right (stage 8: left) when the screen is clear
+
+Map entities now carry `action_state`, `held_type`, `held_ptr`, `outgoing_damage`,
+`combo_state` for the agent (plot still ignores them).
 
 ### UI
 
@@ -122,8 +131,7 @@ See `src/sor_autoplay/memory_map.py` and
 
 ## Next milestones
 
-- Stronger enemy-specific counters (Signal throws, Nora feints, boss patterns)
-- Full move tables per character (grab combos, weapon throws)
-- Optional `--altControls` mapping
+- Optional `--altControls` mapping (deferred)
+- Frame-tighter boss phase reads from object `+$30`/`+$67` tactical substates
 - Attract-vs-real-play discrimination if needed
 - Optional transparent overlay instead of black stage

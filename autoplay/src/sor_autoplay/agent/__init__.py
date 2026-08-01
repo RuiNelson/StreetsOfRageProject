@@ -12,6 +12,7 @@ Agents may be toggled per player from the HUD at any time.
 """
 
 from .controls import STANDARD_CONTROLS, Buttons, mask_from_intent
+from .enemies import CounterPlan, plan_for
 from .policy import AgentConfig, AgentDecision, AgentState, decide_actions
 
 __all__ = [
@@ -20,6 +21,8 @@ __all__ = [
     "AgentDecision",
     "AgentState",
     "Buttons",
+    "CounterPlan",
     "decide_actions",
     "mask_from_intent",
+    "plan_for",
 ]
