@@ -206,6 +206,33 @@ class WorkRamTests(unittest.TestCase):
 
 
 class LockstepEvaluatorTests(unittest.TestCase):
+    def test_ground_attack_start_acceptance_detects_input_boundary_failures(self) -> None:
+        idle = _game_ram(item=False, enemy_health=4)
+        attacking = bytearray(idle)
+        _put_u8(attacking, ADDR_P1_OBJECT + OBJ_ACTION_STATE, 0x18)
+
+        accepted = LockstepEvaluator(
+            _FakeClient([idle, bytes(attacking)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(0x20, 0, p1_note="punch Garcia"),
+            criteria=EvaluationCriteria(max_failed_ground_attack_starts=0),
+        ).run()
+        self.assertEqual(accepted.metrics.ground_attack_attempts, 1)
+        self.assertEqual(accepted.metrics.ground_attack_starts, 1)
+        self.assertEqual(accepted.metrics.failed_ground_attack_starts, 0)
+        self.assertTrue(accepted.passed, accepted.failures)
+
+        ignored = LockstepEvaluator(
+            _FakeClient([idle, idle]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(0x20, 0, p1_note="punch Garcia"),
+            criteria=EvaluationCriteria(max_failed_ground_attack_starts=0),
+        ).run()
+        self.assertEqual(ignored.metrics.ground_attack_attempts, 1)
+        self.assertEqual(ignored.metrics.ground_attack_starts, 0)
+        self.assertEqual(ignored.metrics.failed_ground_attack_starts, 1)
+        self.assertFalse(ignored.passed)
+
     def test_enemy_grab_escape_protocol_metrics_and_acceptance(self) -> None:
         grabbed = _enemy_hold_ram(action=0x7A)
         crossover = _enemy_hold_ram(action=0x7C)

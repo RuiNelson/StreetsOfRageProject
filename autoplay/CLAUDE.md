@@ -39,6 +39,7 @@ PYTHONPATH=src python3.11 -m unittest discover -s tests -q
 PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.evaluation \
   --restart-character axel --decisions 600 --max-damage 12 \
   --max-damage-events 3 --max-lives-lost 0 --max-failed-pickups 0 \
+  --max-failed-ground-attack-starts 0 \
   --min-enemy-damage 15 --min-forward-progress 600 \
   --trace /tmp/sor-autoplay-eval.jsonl
 ```
@@ -251,12 +252,17 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
   pulsed for three frames and released for the remaining frame in every exact
   four-frame decision step. JSONL traces belong outside the repository.
   `weapon_attack_edges`, `weapon_air_attack_edges`, `signal_sweep_jumps`,
+  `ground_attack_attempts`, `ground_attack_starts`,
+  `failed_ground_attack_starts`,
   `jack_armed_ground_attacks`, `jack_armed_jump_starts`, and
   `jack_throw_window_ground_attacks`
   are first-class metrics; Stage-2 runs can enforce
   `--max-weapon-air-attacks 0 --min-signal-sweep-jumps 1`. A controlled Jack
   encounter can enforce `--min-jack-armed-ground-attacks 1` to prove that
   armed-body attacks remain legal for scripted or future learned policies.
+  Enforce `--max-failed-ground-attack-starts 0` to catch cases where the policy
+  emits B from an input-ready ground action but the ROM action handler never
+  leaves an input-ready state.
   Back protection is likewise observable through
   `back_exposed_grab_opportunities`, `missed_back_exposure_responses`,
   `crossover_suplex_starts`, and `suplexes`; enforce it with

@@ -148,6 +148,9 @@ class EpisodeMetrics:
     pickups_collected: int = 0
     failed_pickup_attempts: int = 0
     jumps: int = 0
+    ground_attack_attempts: int = 0
+    ground_attack_starts: int = 0
+    failed_ground_attack_starts: int = 0
     weapon_attack_edges: int = 0
     weapon_air_attack_edges: int = 0
     signal_sweep_jumps: int = 0
@@ -219,6 +222,23 @@ class EpisodeMetrics:
             self.jumps += 1
 
         before_entity = _player_entity(before, self.player_index)
+        after_entity = _player_entity(after, self.player_index)
+        ground_attack_attempt = bool(
+            (mask & 0x60) == 0x20
+            and not note.startswith("loot ")
+            and before_entity is not None
+            and player_can_start_ground_action(before_entity)
+        )
+        if ground_attack_attempt:
+            self.ground_attack_attempts += 1
+            if (
+                after_entity is not None
+                and not player_can_start_ground_action(after_entity)
+            ):
+                self.ground_attack_starts += 1
+            else:
+                self.failed_ground_attack_starts += 1
+
         weapon_attack = bool(
             mask & 0x20
             and before_entity is not None
@@ -528,7 +548,6 @@ class EpisodeMetrics:
                 self.failed_pickup_attempts += 1
 
         progress = 0
-        after_entity = _player_entity(after, self.player_index)
         if after_entity is not None:
             if self._last_x is not None:
                 raw_progress = after_entity.world_x - self._last_x
@@ -563,6 +582,9 @@ class EpisodeMetrics:
             "pickups_collected": self.pickups_collected,
             "failed_pickup_attempts": self.failed_pickup_attempts,
             "jumps": self.jumps,
+            "ground_attack_attempts": self.ground_attack_attempts,
+            "ground_attack_starts": self.ground_attack_starts,
+            "failed_ground_attack_starts": self.failed_ground_attack_starts,
             "weapon_attack_edges": self.weapon_attack_edges,
             "weapon_air_attack_edges": self.weapon_air_attack_edges,
             "signal_sweep_jumps": self.signal_sweep_jumps,
@@ -596,6 +618,7 @@ class EvaluationCriteria:
     max_damage_events: int | None = None
     max_lives_lost: int | None = None
     max_failed_pickups: int | None = None
+    max_failed_ground_attack_starts: int | None = None
     max_weapon_air_attacks: int | None = None
     max_missed_back_exposures: int | None = None
     min_pickups: int | None = None
@@ -632,6 +655,12 @@ class EvaluationCriteria:
                 self.max_failed_pickups,
                 metrics.failed_pickup_attempts,
                 "failed pickup attempts",
+                "at most",
+            ),
+            (
+                self.max_failed_ground_attack_starts,
+                metrics.failed_ground_attack_starts,
+                "failed ground-attack starts",
                 "at most",
             ),
             (
@@ -1046,6 +1075,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-damage-events", type=int)
     parser.add_argument("--max-lives-lost", type=int)
     parser.add_argument("--max-failed-pickups", type=int)
+    parser.add_argument("--max-failed-ground-attack-starts", type=int)
     parser.add_argument("--max-weapon-air-attacks", type=int)
     parser.add_argument("--max-missed-back-exposures", type=int)
     parser.add_argument("--min-pickups", type=int)
@@ -1081,6 +1111,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_damage_events=args.max_damage_events,
         max_lives_lost=args.max_lives_lost,
         max_failed_pickups=args.max_failed_pickups,
+        max_failed_ground_attack_starts=args.max_failed_ground_attack_starts,
         max_weapon_air_attacks=args.max_weapon_air_attacks,
         max_missed_back_exposures=args.max_missed_back_exposures,
         min_pickups=args.min_pickups,

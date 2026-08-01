@@ -151,9 +151,9 @@ The evaluator is the regression and future-learning boundary. It runs any
 `GameSnapshot -> AgentDecision` policy in remote lockstep, advances exactly four
 emulated frames per decision, and reads one coherent 64 KiB work-RAM image after
 each step. It reports damage and damage events, lives lost, enemy damage and
-defeats, pickup attempts/success/failure, jumps, progress, action counts, and a
-baseline reward. Optional thresholds make the command exit `2` on a gameplay
-regression.
+defeats, pickup attempts/success/failure, ground-attack attempts/starts/failures,
+jumps, progress, action counts, and a baseline reward. Optional thresholds make
+the command exit `2` on a gameplay regression.
 
 Start the host, then let the evaluator restart the ROM, navigate the menus, and
 freeze the verified Round-1 start on the same connection it will evaluate. Once
@@ -170,6 +170,7 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.eva
   --max-damage-events 3 \
   --max-lives-lost 0 \
   --max-failed-pickups 0 \
+  --max-failed-ground-attack-starts 0 \
   --max-weapon-air-attacks 0 \
   --max-missed-back-exposures 0 \
   --max-invalid-grab-attacks 0 \
