@@ -123,8 +123,8 @@ class AgentState:
         self.p2_planner.reset()
 
     def clear_nav(self) -> None:
-        self.p1_nav.clear()
-        self.p2_nav.clear()
+        self.p1_nav.clear_all()
+        self.p2_nav.clear_all()
 
     def goal(self, player_index: int) -> GoalMemory:
         return self.p1_goal if player_index == 1 else self.p2_goal
@@ -1089,7 +1089,10 @@ def _decide_one(
     )
     if prop is not None:
         fl, fr = combat.face_intent_dirs(me, prop)
-        side_ready = navigation.breakable_side_ready(me, prop, profile)
+        holes = snapshot.floor_holes if advice.avoid_holes else ()
+        side_ready = navigation.breakable_side_ready(
+            me, prop, profile, holes=holes
+        )
         punch_ok = (
             side_ready
             and combat.can_break(me, prop, profile, require_facing=True)
@@ -1098,7 +1101,6 @@ def _decide_one(
             side_ready
             and combat.can_break(me, prop, profile, require_facing=False)
         )
-        holes = snapshot.floor_holes if advice.avoid_holes else ()
         jump_ok = (
             side_ready
             and combat.can_jump_kick(me, prop, profile, loose_lane=True)
@@ -1164,6 +1166,8 @@ def _decide_one(
             prop,
             profile,
             progress_right=advice.progress_right,
+            holes=holes,
+            memory=nav,
         )
         return _walk_toward(
             walk,
@@ -1174,7 +1178,9 @@ def _decide_one(
             snapshot=snapshot,
             advice=advice,
             nav=nav,
-            eps_x=6.0,
+            # Always commit break approaches so walk/hole routing cannot
+            # re-pick the void side of a pit-adjacent crate every poll.
+            eps_x=5.0,
             eps_y=5.0,
         )
 

@@ -8,7 +8,9 @@ Design (explainable production-style planner):
    Recomputing the detour side every poll caused UP/DOWN shakiness.
 3. **Side-only breakable approach**: SoR smash boxes require horizontal
    facing in the same lane. Walking onto a crate from pure top/bottom never
-   lands a grounded B — approach the side X first, then match lane.
+   lands a grounded B — approach the side X first, then match lane. When a
+   hole sits beside the prop, score both stand-offs and **latch** the only
+   safe side (e.g. hole left of crate → approach from the right).
 4. **Jump landing safety**: refuse jump-kicks whose arc or landing cell is a
    pit (observed stage-4 death: jump into a hole while chasing).
 
@@ -34,12 +36,16 @@ _HOLE_APPROACH_MARGIN = 16.0
 # Breakables: horizontal stand-off; never park on the prop's X from off-lane.
 _BREAK_SIDE_MIN = 18.0
 _BREAK_TOP_BOTTOM_X = 14.0  # |dx| below this with large |dy| = top/bottom
+# Stand must stay outside hole AABBs by this margin (body + animation drift).
+_BREAK_STAND_HOLE_MARGIN = 16.0
 # Jump arc samples from takeoff → landing.
 _JUMP_SAMPLES = (0.35, 0.55, 0.75, 0.95, 1.0)
 _JUMP_LAND_MARGIN = 16.0
 # Detour lane hysteresis: stick with a side unless it becomes illegal.
 _DETOUR_ARRIVE_EPS = 7.0
 _DETOUR_STALE_TICKS = 90
+# Illegal stand utility (in a pit): never choose unless both sides fail.
+_STAND_ILLEGAL = -10_000.0
 
 
 class NavPhase(Enum):
@@ -62,7 +68,11 @@ class NavWaypoint:
 
 @dataclass
 class NavMemory:
-    """Persistent navigation plan so hole routing does not oscillate."""
+    """Persistent navigation plan so hole routing does not oscillate.
+
+    Hole detours and breakable-side choice are separate latches: finishing a
+    pit route must not forget which side of a crate is the only solid stand.
+    """
 
     phase: NavPhase = NavPhase.IDLE
     # Identity of the hole we are routing (AABB key).
@@ -74,8 +84,15 @@ class NavMemory:
     # +1 = progress right, -1 = left (locked with the hole plan).
     progress_sign: int = 1
     age: int = 0
+    # Breakable approach latch: which side of ``break_slot`` to stand on.
+    # -1 = stand left of prop (approach from left), +1 = stand right.
+    break_slot: str = ""
+    break_side: int = 0
+    break_age: int = 0
 
     def clear(self) -> None:
+        """Clear hole-detour state only; keep breakable side commitment."""
+
         self.phase = NavPhase.IDLE
         self.hole_x = -1
         self.hole_y = -1
@@ -84,6 +101,15 @@ class NavMemory:
         self.detour_lane = None
         self.progress_sign = 1
         self.age = 0
+
+    def clear_break(self) -> None:
+        self.break_slot = ""
+        self.break_side = 0
+        self.break_age = 0
+
+    def clear_all(self) -> None:
+        self.clear()
+        self.clear_break()
 
     def matches_hole(self, hole: FloorHole) -> bool:
         return (
@@ -102,6 +128,15 @@ class NavMemory:
         self.detour_lane = float(detour_lane)
         self.progress_sign = 1 if progress_sign >= 0 else -1
         self.age = 0
+
+    def latch_break_side(self, slot: str, side: int) -> None:
+        side_i = -1 if side < 0 else 1
+        if self.break_slot == slot and self.break_side == side_i:
+            self.break_age += 1
+            return
+        self.break_slot = slot
+        self.break_side = side_i
+        self.break_age = 0
 
     @property
     def hole_key(self) -> FloorHole | None:
@@ -381,41 +416,182 @@ def route_to_goal(
     return NavWaypoint(gx, gy, reason)
 
 
+def _break_side_dist(profile: CharacterProfile) -> float:
+    return max(_BREAK_SIDE_MIN, profile.approach_offset * 0.7)
+
+
+def stand_point_for_side(
+    prop: MapEntity,
+    side: int,
+    profile: CharacterProfile,
+) -> tuple[float, float]:
+    """World stand-off on the left (side<0) or right (side>0) of ``prop``."""
+
+    dist = _break_side_dist(profile)
+    sign = -1.0 if side < 0 else 1.0
+    return float(prop.world_x) + sign * dist, float(prop.world_y)
+
+
+def score_breakable_stand(
+    me: MapEntity,
+    stand_x: float,
+    stand_y: float,
+    holes: tuple[FloorHole, ...],
+    *,
+    side: int,
+    progress_right: bool,
+) -> float:
+    """Higher is better. Illegal stands (in a pit) score ``_STAND_ILLEGAL``."""
+
+    if point_in_hole(
+        stand_x, stand_y, holes, margin=_BREAK_STAND_HOLE_MARGIN
+    ) is not None:
+        return _STAND_ILLEGAL
+    # Also reject stands whose lane-match point is solid but a short step
+    # toward the prop face drops into the hole (hole abuts the crate).
+    face_x = stand_x + (8.0 if side < 0 else -8.0)
+    if point_in_hole(
+        face_x, stand_y, holes, margin=_BREAK_STAND_HOLE_MARGIN * 0.75
+    ) is not None:
+        return _STAND_ILLEGAL
+
+    wx, wy = float(me.world_x), float(me.world_y)
+    utility = 0.0
+    # Prefer a clear straight path; detours are still possible but cost more.
+    if segment_hits_hole(
+        wx, wy, stand_x, stand_y, holes, margin=_HOLE_MARGIN, samples=8
+    ) is not None:
+        utility -= 80.0
+    else:
+        utility += 40.0
+    # Travel cost.
+    utility -= 0.35 * (abs(stand_x - wx) + abs(stand_y - wy))
+    # Mild progress bias when both sides are otherwise equal.
+    if progress_right and side < 0:
+        utility += 4.0
+    elif not progress_right and side > 0:
+        utility += 4.0
+    # Prefer the side we already occupy (reduces thrash) — only if solid.
+    if (me.world_x < stand_x and side > 0) or (me.world_x > stand_x and side < 0):
+        # Already on the outer side of this stand.
+        utility += 6.0
+    elif (side < 0 and me.world_x <= stand_x + 4) or (
+        side > 0 and me.world_x >= stand_x - 4
+    ):
+        utility += 12.0
+    return utility
+
+
+def choose_breakable_side(
+    me: MapEntity,
+    prop: MapEntity,
+    profile: CharacterProfile,
+    holes: tuple[FloorHole, ...],
+    memory: NavMemory | None,
+    *,
+    progress_right: bool = True,
+) -> int:
+    """Pick -1 (left stand) or +1 (right stand) with hole safety + hysteresis."""
+
+    left_x, left_y = stand_point_for_side(prop, -1, profile)
+    right_x, right_y = stand_point_for_side(prop, 1, profile)
+    scores = {
+        -1: score_breakable_stand(
+            me, left_x, left_y, holes, side=-1, progress_right=progress_right
+        ),
+        1: score_breakable_stand(
+            me, right_x, right_y, holes, side=1, progress_right=progress_right
+        ),
+    }
+
+    # Hysteresis: keep the latched side while it remains legal.
+    if (
+        memory is not None
+        and memory.break_slot == prop.slot
+        and memory.break_side in (-1, 1)
+        and scores[memory.break_side] > _STAND_ILLEGAL / 2
+    ):
+        return memory.break_side
+
+    # Prefer any legal side; if both illegal, pick the less-bad (still solidest).
+    legal = {s: u for s, u in scores.items() if u > _STAND_ILLEGAL / 2}
+    pool = legal if legal else scores
+    best = max(pool.items(), key=lambda item: (item[1], item[0]))[0]
+    return best
+
+
 def breakable_side_approach(
     me: MapEntity,
     prop: MapEntity,
     profile: CharacterProfile,
     *,
     progress_right: bool = True,
+    holes: tuple[FloorHole, ...] = (),
+    memory: NavMemory | None = None,
 ) -> NavWaypoint:
-    """Waypoint that approaches a breakable from the left/right only.
+    """Waypoint that approaches a breakable from a **safe** left/right stand.
 
-    Grounded smash needs same-lane facing. Pure top/bottom walks (same X,
-    different Y) never produce a legal B hit, so when stacked on the prop's
-    X we first slide to a side stand-off at the **current** lane, then drop
-    onto the prop's lane at that side X.
+    Grounded smash needs same-lane facing. Pure top/bottom walks never land B.
+    When a hole sits on one side of the prop (classic stage-4: pit left of
+    crate), only the solid side is latched so the agent does not thrash between
+    the void stand and a hole detour.
     """
 
-    side_dist = max(_BREAK_SIDE_MIN, profile.approach_offset * 0.7)
+    side = choose_breakable_side(
+        me,
+        prop,
+        profile,
+        holes,
+        memory,
+        progress_right=progress_right,
+    )
+    if memory is not None:
+        memory.latch_break_side(prop.slot, side)
+
+    stand_x, stand_y = stand_point_for_side(prop, side, profile)
     abs_dx = abs(float(prop.world_x) - float(me.world_x))
     abs_dy = abs(float(prop.world_y) - float(me.world_y))
+    side_name = "L" if side < 0 else "R"
 
-    if abs_dx <= _BREAK_TOP_BOTTOM_X:
-        # Stacked vertically on the prop — pick a side (prefer progress face).
-        side = -1.0 if progress_right else 1.0
-    else:
-        # Stay on the side we already occupy.
-        side = -1.0 if me.world_x < prop.world_x else 1.0
+    # If the chosen stand is still illegal (both sides over pits), retreat to a
+    # solid lane offset rather than walk into the void.
+    if point_in_hole(
+        stand_x, stand_y, holes, margin=_BREAK_STAND_HOLE_MARGIN
+    ) is not None:
+        escape_y = float(me.world_y)
+        for delta in (24.0, -24.0, 40.0, -40.0):
+            trial = float(me.world_y) + delta
+            if point_in_hole(
+                float(me.world_x), trial, holes, margin=10.0
+            ) is None:
+                escape_y = trial
+                break
+        return NavWaypoint(
+            float(me.world_x),
+            escape_y,
+            f"break retreat hole {prop.label}",
+            committed=True,
+        )
 
-    stand_x = float(prop.world_x) + side * side_dist
-    stand_y = float(prop.world_y)
-
-    # Phase A: get off the top/bottom stack — horizontal first at current Y.
+    # Phase A: leave a top/bottom stack — move to side X first at current Y,
+    # but only if that intermediate point is not a pit.
     if abs_dx <= _BREAK_TOP_BOTTOM_X and abs_dy > 10.0:
+        mid_y = float(me.world_y)
+        if point_in_hole(
+            stand_x, mid_y, holes, margin=_BREAK_STAND_HOLE_MARGIN
+        ) is None:
+            return NavWaypoint(
+                stand_x,
+                mid_y,
+                f"break side-align {side_name} {prop.label}",
+                committed=True,
+            )
+        # Intermediate at current Y is void — go straight to stand (router
+        # will detour around the hole).
         return NavWaypoint(
             stand_x,
-            float(me.world_y),
-            f"break side-align {prop.label}",
+            stand_y,
+            f"break safe {side_name} {prop.label}",
             committed=True,
         )
 
@@ -424,14 +600,16 @@ def breakable_side_approach(
         return NavWaypoint(
             stand_x,
             stand_y,
-            f"break lane {prop.label}",
+            f"break lane {side_name} {prop.label}",
+            committed=True,
         )
 
     # Phase C: fine close at side stand-off.
     return NavWaypoint(
         stand_x,
         stand_y,
-        f"break close {prop.label}",
+        f"break close {side_name} {prop.label}",
+        committed=True,
     )
 
 
@@ -439,17 +617,28 @@ def breakable_side_ready(
     me: MapEntity,
     prop: MapEntity,
     profile: CharacterProfile,
+    *,
+    holes: tuple[FloorHole, ...] = (),
 ) -> bool:
-    """True when geometry is a side smash, not a top/bottom stack."""
+    """True when geometry is a side smash on solid ground, not top/bottom."""
 
     abs_dx = abs(float(prop.map_x) - float(me.map_x))
     abs_dy = abs(float(prop.map_y) - float(me.map_y))
     if abs_dy > 12.0:
         return False
-    # Must not be sitting on the prop's X.
     if abs_dx < _BREAK_SIDE_MIN * 0.55:
         return False
-    return abs_dx <= profile.strike_range + 4.0
+    if abs_dx > profile.strike_range + 4.0:
+        return False
+    # Refuse to "ready" a smash while standing in/over a pit.
+    if point_in_hole(
+        float(me.world_x),
+        float(me.world_y),
+        holes,
+        margin=_BREAK_STAND_HOLE_MARGIN,
+    ) is not None:
+        return False
+    return True
 
 
 def jump_landing_safe(

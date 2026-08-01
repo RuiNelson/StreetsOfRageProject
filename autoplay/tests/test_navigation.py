@@ -251,6 +251,114 @@ class BreakableSideTests(unittest.TestCase):
         wp = breakable_side_approach(me, prop, profile, progress_right=True)
         self.assertLess(wp.goal_x, float(prop.world_x))
 
+    def test_hole_left_of_crate_forces_right_approach(self) -> None:
+        """Stage-4 style: pit abuts crate from the left → stand on the right."""
+        from sor_autoplay.agent.navigation import choose_breakable_side
+
+        # Hole: x=60..100, crate at x=110, left stand (~78) is in the pit.
+        hole = FloorHole(world_x=60, lane_y=48, width=44, height=40)
+        prop = _entity(
+            kind="breakable",
+            map_x=110,
+            map_y=64,
+            world_x=110,
+            world_y=64,
+            slot="crate",
+            label="Crate",
+            family="Crate",
+            type_id=0x11,
+        )
+        # Player is left of the hole — old code stayed on the left side forever.
+        me = _entity(
+            kind="player",
+            map_x=40,
+            map_y=64,
+            world_x=40,
+            world_y=64,
+            slot="P1",
+            family="Player",
+        )
+        profile = profile_for(0)
+        memory = NavMemory()
+        side = choose_breakable_side(
+            me, prop, profile, (hole,), memory, progress_right=True
+        )
+        self.assertEqual(side, 1, "must approach from the solid right side")
+        wp = breakable_side_approach(
+            me,
+            prop,
+            profile,
+            progress_right=True,
+            holes=(hole,),
+            memory=memory,
+        )
+        self.assertGreater(wp.goal_x, float(prop.world_x))
+        self.assertEqual(memory.break_side, 1)
+        # Hysteresis: even from the left, keep the right commitment.
+        side2 = choose_breakable_side(
+            me, prop, profile, (hole,), memory, progress_right=True
+        )
+        self.assertEqual(side2, 1)
+        self.assertIn("R", wp.reason)
+
+    def test_hole_crate_policy_does_not_flip_side(self) -> None:
+        hole = FloorHole(world_x=60, lane_y=48, width=44, height=40)
+        p1 = _entity(
+            kind="player",
+            map_x=40,
+            map_y=64,
+            world_x=40,
+            world_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+        )
+        crate = _entity(
+            kind="breakable",
+            map_x=110,
+            map_y=64,
+            world_x=110,
+            world_y=64,
+            slot="obj01",
+            label="Crate",
+            family="Crate",
+            type_id=0x11,
+        )
+        memory = AgentState()
+        sides: list[str] = []
+        x, y = 40.0, 64.0
+        for _ in range(8):
+            p1 = _entity(
+                kind="player",
+                map_x=x,
+                map_y=y,
+                world_x=int(x),
+                world_y=int(y),
+                slot="P1",
+                label="P1 Axel",
+                family="Player",
+            )
+            snap = _snapshot((p1, crate), level_index=3, holes=(hole,))
+            decision = decide_actions(
+                snap, AgentConfig(p1_enabled=True), memory
+            )
+            sides.append(decision.p1_note)
+            if decision.p1_mask & 0x08:
+                x += 10
+            if decision.p1_mask & 0x04:
+                x -= 10
+            if decision.p1_mask & 0x02:
+                y += 10
+            if decision.p1_mask & 0x01:
+                y -= 10
+        self.assertEqual(memory.p1_nav.break_side, 1, sides)
+        # Notes must not alternate L/R break sides.
+        break_notes = [n for n in sides if "break" in n]
+        if break_notes:
+            has_l = any(" L " in n or "side-align L" in n or "close L" in n for n in break_notes)
+            has_r = any(" R " in n or "side-align R" in n or "close R" in n or "safe R" in n or "lane R" in n for n in break_notes)
+            self.assertFalse(has_l and has_r, break_notes)
+
     def test_policy_does_not_walk_vertically_onto_crate_x(self) -> None:
         p1 = _entity(
             kind="player",

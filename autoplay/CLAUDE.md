@@ -93,7 +93,9 @@ that layout yet.
    Emergency escape only rewrites input when already inside a pit AABB.
    Breakables: side-only approach (`breakable_side_approach`) — when stacked
    on the prop's X, first move to a horizontal stand-off at the current lane,
-   then match lane; never smash from pure top/bottom. Jump starts (combat,
+   then match lane; never smash from pure top/bottom. Both stand-offs are
+   scored against holes; a pit on one side (e.g. hole left of crate) latches
+   the solid side only so the agent does not thrash. Jump starts (combat,
    Signal sweep, jump-break) require `jump_landing_safe` so kick arcs do not
    land in holes.
 5. Police special when fuzzy pressure score ≥ threshold and specials remain

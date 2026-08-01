@@ -19,7 +19,9 @@ The main goals is to defeat the enemies as fast as they can, take the least dama
     pit on that lane — no per-frame UP/DOWN flip-flop
   - never jump-kick when the arc or landing crosses a hole
   - breakables smash only from the **sides** (same lane, horizontal stand-off);
-    top/bottom approaches first slide to a side X at the current lane
+    top/bottom approaches first slide to a side X at the current lane; if a
+    hole abuts one side of the prop, approach only from the solid side and
+    keep that choice latched (no L/R shake)
 - pick up weapons and items
 - be steady when the police special is in action or the game is paused
 
