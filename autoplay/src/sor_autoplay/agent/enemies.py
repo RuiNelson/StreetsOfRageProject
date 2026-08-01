@@ -339,28 +339,25 @@ def attack_mix(
     if phase_name in ("charge", "attacking") and plan.sidestep and not in_range:
         return "wait"
 
-    if band == "jump" and can_jump and not plan.no_jump and plan.jump_bias >= 0.3:
-        # Only high jump-bias families (Haku) auto-jump at mid range.
-        return "jump"
-
-    if band == "jump" and can_jump and not plan.no_jump and profile.jump_attack_bias >= 0.5:
-        # Blaze-style: jump kick is a primary tool in the window.
+    # Mid-range jump window: jump-kick is the correct tool (C then B later).
+    if band == "jump" and can_jump and not plan.no_jump:
         return "jump"
 
     if not in_range:
+        # Approach band: jump if character/plan likes air and geometry allows.
+        if (
+            band == "approach"
+            and can_jump
+            and not plan.no_jump
+            and (plan.jump_bias >= 0.25 or profile.jump_attack_bias >= 0.35)
+        ):
+            return "jump"
         return "wait"
 
     if not facing_ok:
         return "wait"
 
-    # Grounded punch is the default connect. Occasional jump only if plan
-    # strongly wants it and geometry allows (can_jump at close is rare).
-    if can_jump and not plan.no_jump and plan.jump_bias >= 0.4 and band != "close":
-        return "jump"
-
     if plan.grab_bias >= 0.3 and phase_name == "normal" and band == "close":
-        # Grab setup is walking without attack; caller handles walk-in.
-        # Still prefer punch if already tight enough to hit.
         return "punch"
 
     return "punch"

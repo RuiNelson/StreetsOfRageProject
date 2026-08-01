@@ -136,7 +136,15 @@ class MapEntity:
 
     @property
     def is_airborne(self) -> bool:
-        return self.world_z >= 8
+        """True while in a jump action family.
+
+        Live SoR stores ground elevation around ``+$18`` high-word ``$A0`` for
+        standing players, so a ``world_z >= 8`` test is always true and broke
+        grounded combat. Use action ``$10–$17`` only.
+        """
+
+        base = self.action_base
+        return 0x10 <= base <= 0x17
 
     @property
     def is_grabbing(self) -> bool:

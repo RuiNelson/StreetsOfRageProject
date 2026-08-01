@@ -266,11 +266,49 @@ def _decide_one(
 
     if both_agents and coop.partner_throw_opportunity(me, coop_ctx.partner):
         walk.clear()
+        # Co-op air throw is the one intentional B+C mid-air chord.
         return Intent(jump=True, attack=True, note="2P air assist")
 
     low_hp = (player_snap.health_percent or 100.0) < 40.0
 
-    # --- Pickups ---
+    # --- Airborne first (must beat loot/walk) ---
+    # Jump-kick = C on ground, then B while action $10–$17. Never loot mid-jump.
+    if combat.player_airborne_action(me):
+        walk.clear()
+        aim = combat.select_target(
+            me,
+            snapshot.world_map.entities,
+            profile,
+            prefer_forward=advice.progress_right,
+            my_seat=player_index,
+        )
+        aim_e = aim.entity if aim is not None else None
+        if aim_e is None:
+            aim_e = combat.select_breakable(
+                me,
+                snapshot.world_map.entities,
+                prefer_forward=advice.progress_right,
+            )
+        if aim_e is not None:
+            fl, fr = combat.face_intent_dirs(me, aim_e)
+        else:
+            fl = combat.player_facing_left(me)
+            fr = not fl
+        if combat.player_jump_rising(me) or not combat.player_jump_attacking(me):
+            memory.set_attack_cd(player_index, 2)
+            return Intent(
+                left=fl,
+                right=fr,
+                attack=True,
+                note=f"air attack {aim_e.label if aim_e else ''}".strip(),
+            )
+        return Intent(
+            left=fl,
+            right=fr,
+            note=f"air {aim_e.label if aim_e else 'follow'}".strip(),
+        )
+
+    # --- Pickups (after breakables spill weapons/food) ---
     allow_hp = coop.should_take_health_pickup(player_snap, coop_ctx)
     allow_star = coop.should_take_special_or_life(player_snap, coop_ctx)
     item = combat.select_pickup(
@@ -298,8 +336,8 @@ def _decide_one(
         )
 
     # --- Combat ---
-    # Face-then-hit pipeline. Never punch unless lane-aligned and (after a turn)
-    # facing the foe. Player facing is action-state bit 0 (set = left).
+    # Face-then-hit. Jump-kick is C, then B while airborne — NEVER C+B together
+    # (that is rear attack on the ground).
     target = combat.select_target(
         me,
         snapshot.world_map.entities,
@@ -316,7 +354,6 @@ def _decide_one(
             face_right=not combat.player_facing_left(me),
             max_dist=min(profile.rear_range_max + 4, combat.REAR_REACT_RANGE),
         )
-        # Only back-attack a second foe at our back — not the primary we face.
         if rear_foe is not None and (
             target is None or rear_foe.slot != target.entity.slot
         ):
@@ -329,7 +366,6 @@ def _decide_one(
             ):
                 walk.clear()
                 memory.set_attack_cd(player_index, 4)
-                # Keep current face; B+C is the rear/escape family.
                 return Intent(
                     left=face_left_now,
                     right=not face_left_now,
@@ -382,9 +418,6 @@ def _decide_one(
                 advice=advice,
             )
 
-        # Already in an attack animation: hold face, do not re-press B (edge
-        # spam = air punches / cancelled windups). Combo edge only when still
-        # aligned and cooldown expired.
         if combat.player_busy_attacking(me):
             walk.clear()
             if punch_ok and cd == 0 and is_punishable(phase):
@@ -401,27 +434,10 @@ def _decide_one(
                 note=f"atk anim {foe.label} [{tag}]",
             )
 
-        # Mid-air: only jump-kick if still in window; else wait to land.
-        if combat.player_airborne_action(me):
-            walk.clear()
-            if jump_ok and cd == 0 and not plan.no_jump:
-                memory.set_attack_cd(player_index, 3)
-                return Intent(
-                    left=face_left,
-                    right=face_right_now,
-                    attack=True,
-                    note=f"air kick {foe.label}",
-                )
-            return Intent(
-                left=face_left,
-                right=face_right_now,
-                note=f"air {foe.label}",
-            )
-
-        # --- Face first: wrong-direction punches are the #1 complaint ---
+        # Face first when about to punch.
         if punch_geom and not facing_ok and cd == 0:
             walk.clear()
-            memory.set_attack_cd(player_index, 1)  # one tick turn, then hit
+            memory.set_attack_cd(player_index, 1)
             return Intent(
                 left=face_left,
                 right=face_right_now,
@@ -459,7 +475,6 @@ def _decide_one(
                         attack=True,
                         note=f"punish {foe.label} [{tag}]",
                     )
-                # Geometry almost ready but need lane/face: fall through to walk.
 
             if mix == "rear" and combat.can_rear_hit(
                 me, foe, profile, face_right=not combat.player_facing_left(me)
@@ -475,15 +490,15 @@ def _decide_one(
                     note=f"back atk {profile.name} {foe.label}",
                 )
 
-            if mix == "jump" and jump_ok and facing_ok:
+            # Jump start: C only + face. Attack comes next ticks while airborne.
+            if mix == "jump" and jump_ok and facing_ok and not plan.no_jump:
                 walk.clear()
-                memory.set_attack_cd(player_index, 5)
+                memory.set_attack_cd(player_index, 1)
                 return Intent(
                     left=face_left,
                     right=face_right_now,
                     jump=True,
-                    attack=True,
-                    note=f"jump-in {foe.label} [{tag}]",
+                    note=f"jump start {foe.label} [{tag}]",
                 )
 
             if mix == "punch" and punch_ok:
@@ -496,7 +511,6 @@ def _decide_one(
                     note=f"punch {foe.label} [{tag}]",
                 )
 
-        # Hold face during attack cooldown while already on target.
         if punch_geom and cd > 0:
             walk.clear()
             return Intent(
@@ -505,14 +519,12 @@ def _decide_one(
                 note=f"face {foe.label} cd={cd}",
             )
 
-        # Walk to stand-off: match lane first, then strike gap on X.
         stand_x, stand_y = _stand_point(me, target, profile, low_health=low_hp)
         if is_dangerous(phase) and plan.sidestep and band != "close":
             stand_y = float(me.world_y) + (16 if dy >= 0 else -16)
             stand_x = float(me.world_x) + (-28 if dx > 0 else 28)
             reason = f"evade {foe.label} [{tag}]"
         elif not lane_ok:
-            # Priority: get on lane before closing X (prevents air punches).
             stand_x = float(me.world_x)
             stand_y = float(foe.world_y)
             reason = f"lane {foe.label} [{tag}]"
@@ -528,6 +540,78 @@ def _decide_one(
             goal_x=stand_x,
             goal_y=stand_y,
             reason=reason,
+            snapshot=snapshot,
+            advice=advice,
+            eps_x=8.0,
+            eps_y=6.0,
+        )
+
+    # --- Breakables (crates / phone booths → loot) when no combat target ---
+    prop = combat.select_breakable(
+        me,
+        snapshot.world_map.entities,
+        prefer_forward=advice.progress_right,
+    )
+    if prop is not None:
+        fl, fr = combat.face_intent_dirs(me, prop)
+        abs_dx = abs(prop.map_x - me.map_x)
+        abs_dy = abs(prop.map_y - me.map_y)
+        lane_ok = combat.lane_aligned(me, prop)
+        punch_ok = combat.can_break(me, prop, profile, require_facing=True)
+        punch_geom = combat.can_break(me, prop, profile, require_facing=False)
+        jump_ok = combat.can_jump_kick(me, prop, profile, loose_lane=True)
+        cd = memory.attack_cd(player_index)
+
+        if combat.player_busy_attacking(me):
+            walk.clear()
+            return Intent(left=fl, right=fr, note=f"atk anim {prop.label}")
+
+        if punch_geom and not combat.facing_toward(me, prop) and cd == 0:
+            walk.clear()
+            return Intent(left=fl, right=fr, note=f"face {prop.label}")
+
+        if not me.is_hurt and cd == 0:
+            if punch_ok:
+                walk.clear()
+                memory.set_attack_cd(player_index, 3)
+                return Intent(
+                    left=fl,
+                    right=fr,
+                    attack=True,
+                    note=f"smash {prop.label}",
+                )
+            # Mid-range booth/crate: jump-kick (C now, B while airborne).
+            if jump_ok and combat.facing_toward(me, prop):
+                walk.clear()
+                memory.set_attack_cd(player_index, 1)
+                return Intent(
+                    left=fl,
+                    right=fr,
+                    jump=True,
+                    note=f"jump-break {prop.label}",
+                )
+
+        if not lane_ok:
+            return _walk_toward(
+                walk,
+                me,
+                goal_x=float(me.world_x),
+                goal_y=float(prop.world_y),
+                reason=f"lane {prop.label}",
+                snapshot=snapshot,
+                advice=advice,
+                eps_x=12.0,
+                eps_y=6.0,
+            )
+        # Walk to punch range stand-off.
+        side = -1.0 if (prop.world_x - me.world_x) > 0 else 1.0
+        stand_x = float(prop.world_x) + side * max(18.0, profile.approach_offset * 0.7)
+        return _walk_toward(
+            walk,
+            me,
+            goal_x=stand_x,
+            goal_y=float(prop.world_y),
+            reason=f"break {prop.label}",
             snapshot=snapshot,
             advice=advice,
             eps_x=8.0,

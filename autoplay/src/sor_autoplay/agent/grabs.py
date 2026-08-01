@@ -381,5 +381,9 @@ def notes_need_attack_pulse(note: str) -> bool:
             "weapon throw",
             "dump weapon",
             "hold weapon",
+            "air attack",
+            "jump start",
+            "jump-break",
+            "smash",
         )
     )

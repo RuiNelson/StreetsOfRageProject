@@ -21,7 +21,7 @@ from sor_autoplay.agent.policy import AgentConfig, AgentState, decide_actions
 from sor_autoplay.memory_map import MAX_HEALTH, OBJ_CHARACTER_ID, OBJ_HEALTH, OBJ_POS_X, OBJ_POS_Y, OBJ_TYPE
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.state import snapshot_from_memory_blocks
-from sor_autoplay.world_map import MapEntity, WorldMap
+from sor_autoplay.world_map import MapEntity, WorldMap  # noqa: F401 — MapEntity used in breakable test
 
 
 def _e(**kwargs) -> MapEntity:
@@ -320,7 +320,9 @@ class PolicyAggressionTests(unittest.TestCase):
             d.p1_note,
         )
 
-    def test_blaze_jump_in_at_mid_range(self) -> None:
+    def test_jump_start_is_c_only_not_rear(self) -> None:
+        """Jump-kick is C then B later — never B+C (rear) on the same tick."""
+
         p1 = _e(
             kind="player",
             family="Player",
@@ -334,11 +336,68 @@ class PolicyAggressionTests(unittest.TestCase):
         )
         foe = _e(map_x=150, world_x=150, map_y=64, label="Garcia")
         snap = self._snap((p1, foe), char_id=2)  # Blaze
-        # Entity still says player; policy uses snapshot character_id for profile.
         d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
-        self.assertIn("jump", d.p1_note)
-        self.assertTrue(d.p1_mask & 0x20, msg=f"jump-in needs attack: {d.p1_note}")
-        self.assertTrue(d.p1_mask & 0x40, msg=f"jump-in needs C: {d.p1_mask:#x}")
+        self.assertIn("jump start", d.p1_note)
+        self.assertTrue(d.p1_mask & 0x40, msg=f"needs C: {d.p1_mask:#x} {d.p1_note}")
+        self.assertFalse(
+            d.p1_mask & 0x20,
+            msg=f"must NOT attack on jump start (B+C=rear): {d.p1_mask:#x}",
+        )
+
+    def test_airborne_fires_b_only(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x11,  # jump rising
+        )
+        foe = _e(map_x=150, world_x=150, map_y=64, label="Garcia")
+        snap = self._snap((p1, foe), char_id=2)
+        d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
+        self.assertIn("air attack", d.p1_note)
+        self.assertTrue(d.p1_mask & 0x20, msg=f"needs B: {d.p1_mask:#x}")
+        self.assertFalse(d.p1_mask & 0x40, msg=f"no C while air attacking: {d.p1_mask:#x}")
+
+    def test_smashes_breakable(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        crate = MapEntity(
+            kind="breakable",
+            family="Breakable",
+            symbol="#",
+            color="#aaa",
+            label="Phone booth",
+            type_id=0x11,
+            world_x=120,
+            world_y=64,
+            world_z=0,
+            map_x=120.0,
+            map_y=64.0,
+            health=None,
+            slot="B0",
+        )
+        snap = self._snap((p1, crate))
+        d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
+        self.assertTrue(
+            "smash" in d.p1_note or "break" in d.p1_note or "jump-break" in d.p1_note,
+            d.p1_note,
+        )
+        if "smash" in d.p1_note:
+            self.assertTrue(d.p1_mask & 0x20, d.p1_note)
 
     def test_rear_when_enemy_behind(self) -> None:
         p1 = _e(

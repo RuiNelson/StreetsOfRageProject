@@ -142,11 +142,18 @@ def can_jump_kick(
     me: MapEntity,
     foe: MapEntity,
     profile: CharacterProfile,
+    *,
+    loose_lane: bool = False,
 ) -> bool:
-    """Jump-kick only in the character's mid X window and same lane."""
+    """Jump-kick only in the character's mid X window and same lane.
+
+    Live: jump is action ``$10/$11``, air attack ``$12/$13``. Must be
+    **C then B on later frames** — simultaneous B+C is the rear attack.
+    """
 
     abs_dx, abs_dy = abs_dx_dy(me, foe)
-    if abs_dy > LANE_HIT_HALF:
+    lane = LANE_HIT_HALF + (6.0 if loose_lane else 0.0)
+    if abs_dy > lane:
         return False
     if not (profile.jump_kick_min <= abs_dx <= profile.jump_kick_max):
         return False
@@ -183,8 +190,24 @@ def player_busy_attacking(me: MapEntity) -> bool:
 
 
 def player_airborne_action(me: MapEntity) -> bool:
+    """True only in jump action family (``$10–$17``). Not world_z."""
+
     base = me.action_base
-    return me.is_airborne or (0x10 <= base <= 0x17)
+    return 0x10 <= base <= 0x17
+
+
+def player_jump_rising(me: MapEntity) -> bool:
+    """Jump started, air-attack not yet selected (``$10/$11``)."""
+
+    base = me.action_base
+    return base == 0x10 or base == 0x11
+
+
+def player_jump_attacking(me: MapEntity) -> bool:
+    """Air attack animation (``$12/$13``)."""
+
+    base = me.action_base
+    return base == 0x12 or base == 0x13
 
 
 def select_target(
@@ -388,6 +411,50 @@ def peril_vector(
     sx = 0.0 if abs(push_x) < 0.05 else (1.0 if push_x > 0 else -1.0)
     sy = 0.0 if abs(push_y) < 0.05 else (1.0 if push_y > 0 else -1.0)
     return sx, sy
+
+
+def select_breakable(
+    me: MapEntity,
+    entities: tuple[MapEntity, ...],
+    *,
+    max_dist: float = 200.0,
+    prefer_forward: bool = True,
+) -> MapEntity | None:
+    """Nearest on-screen breakable (phone booth / crate) to smash for loot."""
+
+    best: MapEntity | None = None
+    best_score = 1e9
+    for entity in entities:
+        if entity.kind != "breakable":
+            continue
+        if not is_on_screen(entity, soft=True):
+            continue
+        dx = entity.map_x - me.map_x
+        dy = entity.map_y - me.map_y
+        dist = math.hypot(dx, dy)
+        if dist > max_dist:
+            continue
+        score = dist + abs(dy) * 2.0
+        if prefer_forward and dx > 0:
+            score -= 15.0
+        elif not prefer_forward and dx < 0:
+            score -= 15.0
+        if score < best_score:
+            best_score = score
+            best = entity
+    return best
+
+
+def can_break(
+    me: MapEntity,
+    prop: MapEntity,
+    profile: CharacterProfile,
+    *,
+    require_facing: bool = True,
+) -> bool:
+    """Grounded punch range vs a breakable (same box scale as enemy punch)."""
+
+    return can_punch(me, prop, profile, require_facing=require_facing)
 
 
 def select_pickup(

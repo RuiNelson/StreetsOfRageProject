@@ -75,8 +75,11 @@ that layout yet.
    - Match lane **before** closing X (off-lane "close" was the air-punch bug)
    - Stand at ``approach_offset`` (~24–28, outer strike) — not body-grab range
      (~≤18); retreat when closer so enemies cannot free-hit
-   - Deterministic attack choice (no tick RNG jump spam)
-   - Family counters: Signal rear, Haku jump, Nora no-rush, Jack dodge, bosses
+   - **Jump-kick = C then B** (never C+B together — that is rear attack).
+     Airborne is action ``$10–$17`` only (not world_z; ground Z is ~$A0).
+   - Breakables (phone booth / crate): walk in → smash (B) or mid-range
+     jump-break; then loot spilled pickups/weapons
+   - Deterministic attack choice; family counters for bosses/specials
 8. Avoid floor holes (stage 4) and elevator edges (stage 7)
 9. Progress right (stage 8: left) when the screen is clear
 
