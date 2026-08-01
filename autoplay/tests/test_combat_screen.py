@@ -1,4 +1,4 @@
-"""On-screen targeting, jump-in, and rear-reaction behaviour."""
+"""On-screen targeting, hit geometry, and face-then-hit behaviour."""
 
 from __future__ import annotations
 
@@ -6,10 +6,14 @@ import unittest
 
 from sor_autoplay.agent.characters import PROFILES
 from sor_autoplay.agent.combat import (
-    JUMP_KICK_MAX,
+    can_jump_kick,
+    can_punch,
     closest_behind,
     engagement_band,
+    face_intent_dirs,
+    facing_toward,
     is_on_screen,
+    player_facing_left,
     select_target,
 )
 from sor_autoplay.agent.enemies import attack_mix, plan_for
@@ -36,10 +40,13 @@ def _e(**kwargs) -> MapEntity:
         health=10,
         slot="E0",
         combat_phase=CombatPhase.NORMAL,
+        action_state=0x02,  # even = face right
     )
     d.update(kwargs)
     if "map_x" in kwargs and "world_x" not in kwargs:
         d["world_x"] = int(kwargs["map_x"])
+    if "map_y" in kwargs and "world_y" not in kwargs:
+        d["world_y"] = int(kwargs["map_y"])
     return MapEntity(**d)  # type: ignore[arg-type]
 
 
@@ -58,13 +65,52 @@ class ScreenAndBandTests(unittest.TestCase):
         self.assertEqual(engagement_band(20, 4, PROFILES[0]), "close")
         self.assertEqual(engagement_band(120, 4, PROFILES[0]), "far")
 
-    def test_attack_mix_jump_at_mid(self) -> None:
+    def test_off_lane_is_not_close(self) -> None:
+        # |dy| > 12 must not count as close — air-punch prevention.
+        self.assertEqual(engagement_band(20, 20, PROFILES[0]), "approach")
+
+    def test_attack_mix_jump_only_when_can_jump(self) -> None:
         plan = plan_for(_e())
         self.assertEqual(
             attack_mix(
-                plan, PROFILES[0], tick=0, in_range=False, crowd=1, band="jump"
+                plan,
+                PROFILES[0],
+                tick=0,
+                in_range=False,
+                crowd=1,
+                band="jump",
+                can_jump=False,
+            ),
+            "wait",
+        )
+        # Blaze has high jump bias and can_jump true → jump.
+        self.assertEqual(
+            attack_mix(
+                plan,
+                PROFILES[2],
+                tick=0,
+                in_range=False,
+                crowd=1,
+                band="jump",
+                can_jump=True,
+                lane_ok=True,
+                facing_ok=True,
             ),
             "jump",
+        )
+
+    def test_attack_mix_never_punches_off_lane(self) -> None:
+        plan = plan_for(_e())
+        self.assertEqual(
+            attack_mix(
+                plan,
+                PROFILES[0],
+                in_range=True,
+                band="close",
+                lane_ok=False,
+                facing_ok=True,
+            ),
+            "wait",
         )
 
     def test_attack_mix_rear_when_behind(self) -> None:
@@ -92,8 +138,65 @@ class ScreenAndBandTests(unittest.TestCase):
         self.assertEqual(hit.label, "Back")
 
 
+class GeometryTests(unittest.TestCase):
+    def test_player_facing_bit0(self) -> None:
+        right = _e(kind="player", family="Player", slot="P1", action_state=0x02)
+        left = _e(kind="player", family="Player", slot="P1", action_state=0x03)
+        self.assertFalse(player_facing_left(right))
+        self.assertTrue(player_facing_left(left))
+
+    def test_can_punch_requires_lane_and_range(self) -> None:
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            map_y=64,
+            action_state=0x02,
+            type_id=1,
+        )
+        near = _e(map_x=118, map_y=64)
+        off_lane = _e(map_x=118, map_y=90)
+        far = _e(map_x=160, map_y=64)
+        self.assertTrue(can_punch(me, near, PROFILES[0], require_facing=True))
+        self.assertFalse(can_punch(me, off_lane, PROFILES[0], require_facing=False))
+        self.assertFalse(can_punch(me, far, PROFILES[0], require_facing=False))
+
+    def test_can_punch_requires_facing(self) -> None:
+        # Face right (even action) but foe on the left.
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            map_y=64,
+            action_state=0x02,
+            type_id=1,
+        )
+        left_foe = _e(map_x=82, map_y=64)
+        self.assertFalse(facing_toward(me, left_foe))
+        self.assertFalse(can_punch(me, left_foe, PROFILES[0], require_facing=True))
+        self.assertTrue(can_punch(me, left_foe, PROFILES[0], require_facing=False))
+
+    def test_face_intent_always_picks_a_side(self) -> None:
+        me = _e(kind="player", family="Player", slot="P1", map_x=100, action_state=0x02)
+        foe = _e(map_x=120)
+        fl, fr = face_intent_dirs(me, foe)
+        self.assertTrue(fr and not fl)
+        foe_l = _e(map_x=80)
+        fl, fr = face_intent_dirs(me, foe_l)
+        self.assertTrue(fl and not fr)
+
+    def test_jump_kick_window(self) -> None:
+        me = _e(kind="player", family="Player", slot="P1", map_x=100, map_y=64)
+        mid = _e(map_x=145, map_y=64)
+        self.assertTrue(can_jump_kick(me, mid, PROFILES[2]))  # Blaze long jump
+        off = _e(map_x=145, map_y=90)
+        self.assertFalse(can_jump_kick(me, off, PROFILES[2]))
+
+
 class PolicyAggressionTests(unittest.TestCase):
-    def _snap(self, entities: tuple[MapEntity, ...]):
+    def _snap(self, entities: tuple[MapEntity, ...], *, char_id: int = 0):
         from dataclasses import replace
 
         def put_u8(b: bytearray, o: int, v: int) -> None:
@@ -105,13 +208,13 @@ class PolicyAggressionTests(unittest.TestCase):
         g, t, o = bytearray(0x40), bytearray(4), bytearray(0x100)
         put_u16(g, 0x00, 0x0016)
         put_u8(g, 0x18, 0x01)
-        put_u8(g, 0x1E, 0x00)
+        put_u8(g, 0x1E, char_id)
         put_u8(g, 0x20, 0x03)
         put_u8(g, 0x21, 0x02)
         put_u16(t, 0, 0x0040)
         put_u8(o, OBJ_TYPE, 0x01)
         put_u16(o, OBJ_HEALTH, MAX_HEALTH)
-        put_u8(o, OBJ_CHARACTER_ID, 0x00)
+        put_u8(o, OBJ_CHARACTER_ID, char_id)
         put_u16(o, OBJ_POS_X, 100)
         put_u16(o, OBJ_POS_Y, 0x40)
         snap = snapshot_from_memory_blocks(
@@ -132,31 +235,107 @@ class PolicyAggressionTests(unittest.TestCase):
         )
         return replace(snap, world_map=world)
 
-    def test_jump_in_at_mid_range(self) -> None:
-        p1 = _e(kind="player", family="Player", slot="P1", map_x=100, world_x=100, type_id=1, label="P1")
-        foe = _e(map_x=100 + 50, world_x=150, label="Garcia")  # jump band
+    def test_faces_before_punch_when_wrong_way(self) -> None:
+        # Face right (action 0x02) but foe on the left and in range → face first.
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        foe = _e(map_x=82, world_x=82, map_y=64, label="Lefty")
         snap = self._snap((p1, foe))
         d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
-        # Jump+attack chord = B|C
-        self.assertTrue(d.p1_mask & 0x20, msg=f"jump bit missing {d.p1_mask:#x} {d.p1_note}")
-        self.assertTrue(d.p1_mask & 0x40 or d.p1_mask & 0x20)  # C jump
+        self.assertIn("face", d.p1_note)
+        self.assertFalse(d.p1_mask & 0x20, msg=f"must not punch yet: {d.p1_note}")
+        self.assertTrue(d.p1_mask & 0x04, msg=f"expected LEFT: {d.p1_mask:#x}")
+
+    def test_punches_when_facing_and_in_range(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,  # face right
+        )
+        foe = _e(map_x=120, world_x=120, map_y=64, label="Garcia")
+        snap = self._snap((p1, foe))
+        d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
+        self.assertTrue(d.p1_mask & 0x20, msg=f"expected attack: {d.p1_note}")
+        self.assertTrue(d.p1_mask & 0x08, msg=f"expected RIGHT face: {d.p1_mask:#x}")
+        self.assertIn("punch", d.p1_note)
+
+    def test_no_punch_off_lane(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        foe = _e(map_x=118, world_x=118, map_y=90, label="OffLane")
+        snap = self._snap((p1, foe))
+        d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
+        self.assertFalse(d.p1_mask & 0x20, msg=f"air punch: {d.p1_note}")
+        self.assertTrue(
+            "lane" in d.p1_note or "walk" in d.p1_note or "close" in d.p1_note,
+            d.p1_note,
+        )
+
+    def test_blaze_jump_in_at_mid_range(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        foe = _e(map_x=150, world_x=150, map_y=64, label="Garcia")
+        snap = self._snap((p1, foe), char_id=2)  # Blaze
+        # Entity still says player; policy uses snapshot character_id for profile.
+        d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
         self.assertIn("jump", d.p1_note)
+        self.assertTrue(d.p1_mask & 0x20, msg=f"jump-in needs attack: {d.p1_note}")
+        self.assertTrue(d.p1_mask & 0x40, msg=f"jump-in needs C: {d.p1_mask:#x}")
 
     def test_rear_when_enemy_behind(self) -> None:
-        p1 = _e(kind="player", family="Player", slot="P1", map_x=100, world_x=100, type_id=1, label="P1")
-        # Progress is right by default; foe behind on the left.
-        foe = _e(map_x=70, world_x=70, label="Backstab")
-        snap = self._snap((p1, foe))
-        mem = AgentState()
-        # Pretend we were walking right.
-        mem.p1_walk.active = True
-        mem.p1_walk.dir_x = 1
-        d = decide_actions(snap, AgentConfig(p1_enabled=True), mem)
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,  # face right
+        )
+        # Primary must be the closer front foe; rear is a second threat at our back.
+        front = _e(map_x=118, world_x=118, map_y=64, label="Front", slot="E0")
+        back = _e(map_x=78, world_x=78, map_y=64, label="Backstab", slot="E1")
+        snap = self._snap((p1, front, back))
+        d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
         self.assertTrue(
             "rear" in d.p1_note or "back atk" in d.p1_note,
             d.p1_note,
         )
-        # Rear = B|C
         self.assertEqual(d.p1_mask & 0x60, 0x60, msg=hex(d.p1_mask))
 
 

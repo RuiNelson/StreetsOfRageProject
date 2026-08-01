@@ -234,10 +234,16 @@ def _weapon_tree(
     in_melee = mid = False
     if foe is not None:
         dx = foe.map_x - me.map_x
-        face_left = dx < -6
-        face_right = dx > 6
-        in_melee = abs(dx) <= 36 and abs(foe.map_y - me.map_y) <= 14
-        mid = 24 <= abs(dx) <= 100
+        # Always hold a face dir so weapon swings don't go the wrong way.
+        if dx < 0:
+            face_left, face_right = True, False
+        elif dx > 0:
+            face_left, face_right = False, True
+        else:
+            face_left = bool(me.action_state & 0x01)
+            face_right = not face_left
+        in_melee = abs(dx) <= 32 and abs(foe.map_y - me.map_y) <= 12
+        mid = 20 <= abs(dx) <= 100
 
     pulse = (tick % 2) == 0
 

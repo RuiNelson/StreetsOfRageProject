@@ -17,6 +17,9 @@ Family behaviours (``ai-analysis/enemy-ai.md``):
 | Mr. X | Charge / fire (type $35) | Mid-close pressure, rear escape when charged |
 
 These are **heuristics** for the autoplay agent, not frame-perfect TAS scripts.
+
+Attack choice is **deterministic** (no tick RNG). Random jump/punch rolls were
+the main source of air punches and wrong-direction swings.
 """
 
 from __future__ import annotations
@@ -89,7 +92,7 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
     "Haku-Ro": CounterPlan(
         ThreatKind.MOBILE,
         range_scale=1.1,
-        jump_bias=0.35,
+        jump_bias=0.45,
         grab_bias=0.10,
         priority=1.5,
         note="haku jump intercept",
@@ -97,7 +100,7 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
     "Nora": CounterPlan(
         ThreatKind.WHIP,
         range_scale=1.15,
-        jump_bias=0.05,
+        jump_bias=0.0,
         grab_bias=0.25,
         distrust_downed=True,
         priority=1.3,
@@ -107,7 +110,7 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
         ThreatKind.PROJECTILE,
         range_scale=0.85,
         prefer_lane_delta=1.0,
-        jump_bias=0.10,
+        jump_bias=0.05,
         grab_bias=0.20,
         sidestep=True,
         priority=1.6,
@@ -136,7 +139,7 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
     "Antonio": CounterPlan(
         ThreatKind.MIDRANGE,
         range_scale=1.35,
-        jump_bias=0.08,
+        jump_bias=0.0,
         grab_bias=0.05,
         sidestep=True,
         priority=2.5,
@@ -155,7 +158,7 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
     "Onihime/Yasha": CounterPlan(
         ThreatKind.JUMP_GRAB,
         range_scale=1.1,
-        jump_bias=0.05,
+        jump_bias=0.0,
         rear_bias=0.30,
         grab_bias=0.10,
         sidestep=True,
@@ -233,8 +236,8 @@ def adjust_approach(
 ) -> tuple[float, float, bool, CounterPlan]:
     """Compute (dx_sign, dy_sign, in_range, plan).
 
-    Stand at about ``strike_range`` on X (not on top of the foe). Match lane
-    only when clearly off-line; do not micro-chase Y.
+    Stand at about ``strike_range * 0.7`` on X so we face them with a gap for
+    punches (not chest-to-chest). Match lane first — off-lane is air-punch land.
     """
 
     plan = plan_for(foe)
@@ -242,10 +245,10 @@ def adjust_approach(
     dy = foe.map_y - me.map_y
 
     strike = profile.strike_range * plan.range_scale
-    # Comfortable fight distance ≈ strike range (pickup box is ~±$14 X / ±$10 Y).
-    stand_dist = max(20.0, strike * 0.85)
+    # Comfortable fight distance slightly inside strike so we can connect.
+    stand_dist = max(16.0, strike * 0.65)
     if low_health:
-        stand_dist = max(stand_dist, profile.caution_range * 0.7)
+        stand_dist = max(stand_dist, profile.caution_range * 0.65)
 
     if plan.kind == ThreatKind.PROJECTILE or foe.kind == "projectile":
         evade_x = -1.0 if dx > 0 else 1.0
@@ -254,7 +257,8 @@ def adjust_approach(
 
     side = -1.0 if dx > 0 else 1.0 if dx < 0 else -1.0
     desired_x = foe.map_x + side * stand_dist
-    lane_slop = max(10.0, profile.lane_align)
+    # Always prefer matching lane before X micro-adjust.
+    lane_slop = 8.0
     if abs(dy) > lane_slop:
         desired_y = foe.map_y
     else:
@@ -272,17 +276,22 @@ def adjust_approach(
     err_y = desired_y - me.map_y
     out_dx = 0.0
     out_dy = 0.0
-    if abs(err_x) > 8:
-        out_dx = 1.0 if err_x > 0 else -1.0
+    # Lane first when badly off.
     if abs(err_y) > lane_slop:
         out_dy = 1.0 if err_y > 0 else -1.0
+        # Small X only if already somewhat close on Y path.
+        if abs(dy) <= 20 and abs(err_x) > 10:
+            out_dx = 1.0 if err_x > 0 else -1.0
+    else:
+        if abs(err_x) > 6:
+            out_dx = 1.0 if err_x > 0 else -1.0
 
     abs_dx = abs(dx)
-    # Too close on X: create space instead of walking into them.
-    if abs_dx < stand_dist - 6 and abs(dy) <= lane_slop + 4:
+    # Too close on X while on-lane: step back to faceable gap.
+    if abs_dx < 10 and abs(dy) <= lane_slop + 2:
         out_dx = -1.0 if dx > 0 else 1.0 if dx < 0 else out_dx
 
-    in_range = abs_dx <= strike + 4 and abs(dy) <= lane_slop + 4
+    in_range = abs_dx <= strike and abs(dy) <= 12.0
     return out_dx, out_dy, in_range, plan
 
 
@@ -290,53 +299,65 @@ def attack_mix(
     plan: CounterPlan,
     profile: CharacterProfile,
     *,
-    tick: int,
+    tick: int = 0,
     in_range: bool,
-    crowd: int,
+    crowd: int = 1,
     phase_name: str = "normal",
     band: str = "close",
     behind: bool = False,
+    lane_ok: bool = True,
+    facing_ok: bool = True,
+    can_jump: bool = False,
 ) -> str:
     """Return 'punch' | 'jump' | 'rear' | 'grab_walk' | 'wait'.
 
-    **rear only when ``behind``** — B+C is a back attack for foes at our back.
+    Deterministic rules (``tick`` kept for API compat, unused for rolls):
+
+    - **rear** only when ``behind`` and we would otherwise punch.
+    - **punch** only when ``in_range`` and ``lane_ok`` (and ideally facing).
+    - **jump** only when ``can_jump`` (geometry already validated) and plan
+      allows it — never as a default for "not in range".
+    - Otherwise **wait** (caller walks).
     """
+
+    del tick, crowd  # reserved / unused
 
     if behind:
         return "rear"
 
-    if phase_name in ("knockdown", "blocked", "recovery"):
-        return "punch" if in_range or band == "close" else "jump"
+    if not lane_ok:
+        return "wait"
 
-    if band == "jump" and not plan.no_jump:
-        return "jump"
-    if band == "approach" and not plan.no_jump:
-        roll = ((tick * 17) % 100) / 100.0
-        if roll < 0.50 + profile.jump_attack_bias * 0.35:
-            return "jump"
+    if phase_name in ("knockdown", "blocked", "recovery"):
+        if in_range and facing_ok:
+            return "punch"
         return "wait"
 
     if phase_name in ("charge", "attacking") and plan.sidestep and not in_range:
         return "wait"
 
-    if not in_range and band == "far":
-        return "wait"
+    if band == "jump" and can_jump and not plan.no_jump and plan.jump_bias >= 0.3:
+        # Only high jump-bias families (Haku) auto-jump at mid range.
+        return "jump"
+
+    if band == "jump" and can_jump and not plan.no_jump and profile.jump_attack_bias >= 0.5:
+        # Blaze-style: jump kick is a primary tool in the window.
+        return "jump"
 
     if not in_range:
-        return "jump" if not plan.no_jump else "wait"
+        return "wait"
 
-    roll = ((tick * 17) % 100) / 100.0
-    jump_p = profile.jump_attack_bias + plan.jump_bias
-    combo_p = profile.combo_bias
-    grab_p = plan.grab_bias * 0.25 + profile.grab_bias * 0.15
+    if not facing_ok:
+        return "wait"
 
-    if plan.no_jump:
-        jump_p = 0.0
-
-    if roll < jump_p:
+    # Grounded punch is the default connect. Occasional jump only if plan
+    # strongly wants it and geometry allows (can_jump at close is rare).
+    if can_jump and not plan.no_jump and plan.jump_bias >= 0.4 and band != "close":
         return "jump"
-    if roll < jump_p + combo_p:
+
+    if plan.grab_bias >= 0.3 and phase_name == "normal" and band == "close":
+        # Grab setup is walking without attack; caller handles walk-in.
+        # Still prefer punch if already tight enough to hit.
         return "punch"
-    if roll < jump_p + combo_p + grab_p * 0.25 and phase_name == "normal":
-        return "grab_walk"
+
     return "punch"

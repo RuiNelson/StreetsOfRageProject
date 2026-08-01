@@ -52,7 +52,6 @@ class MoveListProfileTests(unittest.TestCase):
     def test_axel_rear_band_is_close_only(self) -> None:
         ax = PROFILES[0]
         self.assertEqual(engagement_band(24, 4, ax), "close")
-        # 40px is outside Axel rear max 32 → jump or approach
         band = engagement_band(40, 4, ax)
         self.assertIn(band, ("jump", "approach", "rear"))
 
@@ -66,7 +65,14 @@ class MoveListProfileTests(unittest.TestCase):
         # Distance alone must NOT force rear.
         self.assertNotEqual(
             attack_mix(
-                plan, PROFILES[1], tick=0, in_range=True, crowd=1, band="close"
+                plan,
+                PROFILES[1],
+                tick=0,
+                in_range=True,
+                crowd=1,
+                band="close",
+                lane_ok=True,
+                facing_ok=True,
             ),
             "rear",
         )
@@ -88,9 +94,37 @@ class MoveListProfileTests(unittest.TestCase):
         self.assertEqual(engagement_band(70, 4, bl), "jump")
         plan = plan_for(_foe())
         self.assertEqual(
-            attack_mix(plan, bl, tick=1, in_range=False, crowd=1, band="jump"),
+            attack_mix(
+                plan,
+                bl,
+                tick=1,
+                in_range=False,
+                crowd=1,
+                band="jump",
+                can_jump=True,
+                lane_ok=True,
+                facing_ok=True,
+            ),
             "jump",
         )
+
+    def test_no_random_jump_when_out_of_range(self) -> None:
+        plan = plan_for(_foe())
+        # Old bug: attack_mix returned "jump" for any not-in-range case.
+        for t in range(20):
+            self.assertEqual(
+                attack_mix(
+                    plan,
+                    PROFILES[0],
+                    tick=t,
+                    in_range=False,
+                    band="approach",
+                    can_jump=False,
+                    lane_ok=True,
+                    facing_ok=True,
+                ),
+                "wait",
+            )
 
 
 if __name__ == "__main__":

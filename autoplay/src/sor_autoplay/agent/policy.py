@@ -291,13 +291,8 @@ def _decide_one(
         )
 
     # --- Combat ---
-    # Facing for rear detection: only from an active walk latch or aim at target.
-    # Do NOT default to "progress right" — that treated every left-side foe as
-    # "behind" and spammed back attacks.
-    face_right: bool | None = None
-    if walk.active and walk.dir_x != 0:
-        face_right = walk.dir_x > 0
-
+    # Face-then-hit pipeline. Never punch unless lane-aligned and (after a turn)
+    # facing the foe. Player facing is action-state bit 0 (set = left).
     target = combat.select_target(
         me,
         snapshot.world_map.entities,
@@ -306,53 +301,55 @@ def _decide_one(
         my_seat=player_index,
     )
 
-    # Once we have a primary target in front, face them; only then can "behind"
-    # mean a second foe at our back.
-    if target is not None and face_right is None:
-        face_right = target.dx >= 0
-
-    if face_right is not None and not me.is_hurt:
+    # ROM facing: bit0 set = face left. Rear threats use current ROM face.
+    if not me.is_hurt:
         rear_foe = combat.closest_behind(
             me,
             snapshot.world_map.entities,
-            face_right=face_right,
-            max_dist=min(profile.rear_range_max + 8, combat.REAR_REACT_RANGE),
+            face_right=not combat.player_facing_left(me),
+            max_dist=min(profile.rear_range_max + 4, combat.REAR_REACT_RANGE),
         )
-        # Only back-attack if that foe is not the one we're already facing.
+        # Only back-attack a second foe at our back — not the primary we face.
         if rear_foe is not None and (
             target is None or rear_foe.slot != target.entity.slot
         ):
-            walk.clear()
-            toward_right = rear_foe.map_x > me.map_x
-            memory.set_attack_cd(player_index, 3)
-            return Intent(
-                left=not toward_right,
-                right=toward_right,
-                rear_attack=True,
-                note=f"turn rear {rear_foe.label}",
-            )
+            face_left_now = combat.player_facing_left(me)
+            if combat.can_rear_hit(
+                me,
+                rear_foe,
+                profile,
+                face_right=not face_left_now,
+            ):
+                walk.clear()
+                memory.set_attack_cd(player_index, 4)
+                # Keep current face; B+C is the rear/escape family.
+                return Intent(
+                    left=face_left_now,
+                    right=not face_left_now,
+                    rear_attack=True,
+                    note=f"rear {rear_foe.label}",
+                )
 
     if target is not None:
-        dx, dy, in_range, plan = combat.approach_vector(
+        foe = target.entity
+        dx, dy, _geom, plan = combat.approach_vector(
             me, target, profile, low_health=low_hp
         )
-        phase = target.entity.combat_phase
+        phase = foe.combat_phase
         phase_name = phase.name.lower()
-        tag = target.entity.phase_tag
+        tag = foe.phase_tag
         cd = memory.attack_cd(player_index)
         abs_dx = abs(target.dx)
         abs_dy = abs(target.dy)
         band = combat.engagement_band(abs_dx, abs_dy, profile)
-        # Behind only vs our movement facing (walk latch), not vs "facing the target".
-        behind = False
-        if walk.active and walk.dir_x != 0:
-            behind = combat.enemy_is_behind(
-                me,
-                target.entity,
-                face_right=walk.dir_x > 0,
-            )
+        lane_ok = combat.lane_aligned(me, foe)
+        facing_ok = combat.facing_toward(me, foe)
+        punch_ok = combat.can_punch(me, foe, profile, require_facing=True)
+        punch_geom = combat.can_punch(me, foe, profile, require_facing=False)
+        jump_ok = combat.can_jump_kick(me, foe, profile)
+        face_left, face_right_now = combat.face_intent_dirs(me, foe)
 
-        if target.entity.kind == "projectile" or plan.kind == enemy_ai.ThreatKind.PROJECTILE:
+        if foe.kind == "projectile" or plan.kind == enemy_ai.ThreatKind.PROJECTILE:
             evade_x = me.world_x - 40 if dx > 0 else me.world_x + 40
             evade_y = me.world_y + (18 if (me.world_x + me.world_y) % 2 == 0 else -18)
             return _walk_toward(
@@ -360,7 +357,7 @@ def _decide_one(
                 me,
                 goal_x=evade_x,
                 goal_y=evade_y,
-                reason=f"dodge {target.entity.label}",
+                reason=f"dodge {foe.label}",
                 snapshot=snapshot,
                 advice=advice,
             )
@@ -373,83 +370,150 @@ def _decide_one(
                 me,
                 goal_x=float(me.world_x) + lead,
                 goal_y=float(me.world_y),
-                reason=f"skip held {target.entity.label}",
+                reason=f"skip held {foe.label}",
                 snapshot=snapshot,
                 advice=advice,
             )
 
-        # Face toward target for attacks (not necessarily walk into them).
-        face_left = target.dx < -6
-        face_right_now = target.dx > 6
-
-        if not me.is_hurt and band in ("close", "jump", "approach") and cd == 0:
-            mix = enemy_ai.attack_mix(
-                plan,
-                profile,
-                tick=memory.tick + player_index * 3,
-                in_range=in_range or band == "close",
-                crowd=press.enemy_count,
-                phase_name=phase_name,
-                band=band,
-                behind=behind,
-            )
-            if is_punishable(phase) and phase != CombatPhase.GRABBED:
-                walk.clear()
+        # Already in an attack animation: hold face, do not re-press B (edge
+        # spam = air punches / cancelled windups). Combo edge only when still
+        # aligned and cooldown expired.
+        if combat.player_busy_attacking(me):
+            walk.clear()
+            if punch_ok and cd == 0 and is_punishable(phase):
                 memory.set_attack_cd(player_index, 2)
                 return Intent(
                     left=face_left,
                     right=face_right_now,
                     attack=True,
-                    note=f"punish {target.entity.label} [{tag}]",
+                    note=f"combo {foe.label} [{tag}]",
                 )
-            if mix == "rear":
-                walk.clear()
+            return Intent(
+                left=face_left,
+                right=face_right_now,
+                note=f"atk anim {foe.label} [{tag}]",
+            )
+
+        # Mid-air: only jump-kick if still in window; else wait to land.
+        if combat.player_airborne_action(me):
+            walk.clear()
+            if jump_ok and cd == 0 and not plan.no_jump:
                 memory.set_attack_cd(player_index, 3)
                 return Intent(
                     left=face_left,
                     right=face_right_now,
-                    rear_attack=True,
-                    note=f"back atk {profile.name} {target.entity.label}",
+                    attack=True,
+                    note=f"air kick {foe.label}",
                 )
-            if mix == "jump":
+            return Intent(
+                left=face_left,
+                right=face_right_now,
+                note=f"air {foe.label}",
+            )
+
+        # --- Face first: wrong-direction punches are the #1 complaint ---
+        if punch_geom and not facing_ok and cd == 0:
+            walk.clear()
+            memory.set_attack_cd(player_index, 1)  # one tick turn, then hit
+            return Intent(
+                left=face_left,
+                right=face_right_now,
+                note=f"face {foe.label} [{tag}]",
+            )
+
+        behind = combat.enemy_is_behind(
+            me,
+            foe,
+            face_right=not combat.player_facing_left(me),
+        )
+
+        if not me.is_hurt and cd == 0:
+            mix = enemy_ai.attack_mix(
+                plan,
+                profile,
+                tick=memory.tick + player_index * 3,
+                in_range=punch_geom,
+                crowd=press.enemy_count,
+                phase_name=phase_name,
+                band=band,
+                behind=behind and combat.rear_in_band(abs_dx, profile),
+                lane_ok=lane_ok,
+                facing_ok=facing_ok,
+                can_jump=jump_ok,
+            )
+
+            if is_punishable(phase) and phase != CombatPhase.GRABBED:
+                if punch_ok:
+                    walk.clear()
+                    memory.set_attack_cd(player_index, 2)
+                    return Intent(
+                        left=face_left,
+                        right=face_right_now,
+                        attack=True,
+                        note=f"punish {foe.label} [{tag}]",
+                    )
+                # Geometry almost ready but need lane/face: fall through to walk.
+
+            if mix == "rear" and combat.can_rear_hit(
+                me, foe, profile, face_right=not combat.player_facing_left(me)
+            ):
                 walk.clear()
                 memory.set_attack_cd(player_index, 4)
+                return Intent(
+                    left=face_left if face_left else combat.player_facing_left(me),
+                    right=face_right_now
+                    if face_right_now
+                    else (not combat.player_facing_left(me)),
+                    rear_attack=True,
+                    note=f"back atk {profile.name} {foe.label}",
+                )
+
+            if mix == "jump" and jump_ok and facing_ok:
+                walk.clear()
+                memory.set_attack_cd(player_index, 5)
                 return Intent(
                     left=face_left,
                     right=face_right_now,
                     jump=True,
                     attack=True,
-                    note=f"jump-in {target.entity.label} [{tag}]",
+                    note=f"jump-in {foe.label} [{tag}]",
                 )
-            if mix == "punch" and (in_range or band == "close"):
+
+            if mix == "punch" and punch_ok:
                 walk.clear()
-                memory.set_attack_cd(player_index, 2)
+                memory.set_attack_cd(player_index, 3)
                 return Intent(
                     left=face_left,
                     right=face_right_now,
                     attack=True,
-                    note=f"punch {target.entity.label} [{tag}]",
+                    note=f"punch {foe.label} [{tag}]",
                 )
 
-        # Walk to stand-off point at strike distance (not enemy origin).
-        stand_x, stand_y = _stand_point(me, target, profile, low_health=low_hp)
-        if is_dangerous(phase) and plan.sidestep and band != "close":
-            stand_y = float(me.world_y) + (16 if dy >= 0 else -16)
-            stand_x = float(me.world_x) + (-28 if dx > 0 else 28)
-            reason = f"evade {target.entity.label} [{tag}]"
-        elif is_punishable(phase):
-            stand_x, stand_y = _stand_point(me, target, profile, low_health=False)
-            reason = f"chase punish {target.entity.label} [{tag}]"
-        else:
-            reason = f"close {target.entity.label} [{tag}]"
-
-        if (in_range or band == "close") and cd > 0:
+        # Hold face during attack cooldown while already on target.
+        if punch_geom and cd > 0:
             walk.clear()
             return Intent(
                 left=face_left,
                 right=face_right_now,
-                note=f"face {target.entity.label} cd={cd}",
+                note=f"face {foe.label} cd={cd}",
             )
+
+        # Walk to stand-off: match lane first, then strike gap on X.
+        stand_x, stand_y = _stand_point(me, target, profile, low_health=low_hp)
+        if is_dangerous(phase) and plan.sidestep and band != "close":
+            stand_y = float(me.world_y) + (16 if dy >= 0 else -16)
+            stand_x = float(me.world_x) + (-28 if dx > 0 else 28)
+            reason = f"evade {foe.label} [{tag}]"
+        elif not lane_ok:
+            # Priority: get on lane before closing X (prevents air punches).
+            stand_x = float(me.world_x)
+            stand_y = float(foe.world_y)
+            reason = f"lane {foe.label} [{tag}]"
+        elif is_punishable(phase):
+            stand_x, stand_y = _stand_point(me, target, profile, low_health=False)
+            reason = f"chase punish {foe.label} [{tag}]"
+        else:
+            reason = f"close {foe.label} [{tag}]"
 
         return _walk_toward(
             walk,
@@ -459,8 +523,8 @@ def _decide_one(
             reason=reason,
             snapshot=snapshot,
             advice=advice,
-            eps_x=10.0,
-            eps_y=12.0,
+            eps_x=8.0,
+            eps_y=6.0,
         )
 
     # --- Progress ---
@@ -489,25 +553,21 @@ def _stand_point(
     *,
     low_health: bool,
 ) -> tuple[float, float]:
-    """World-space stand-off: strike distance on X, match lane only if needed.
+    """World-space stand-off: same lane, strike gap on X (faceable, not stacked).
 
-    ROM pickup interaction is about ±$14 X / ±$10 Y from the player; combat
-    punches are in a similar order of magnitude. We stand at ~0.85×strike_range
-    on X and do not force exact Y equality.
+    ROM front-interaction Y band is about ±12. Standing off-lane was a primary
+    cause of air punches.
     """
 
     foe = target.entity
     side = -1.0 if (foe.world_x - me.world_x) > 0 else 1.0
-    dist = profile.strike_range * 0.85
+    dist = profile.strike_range * 0.55
     if low_health:
-        dist = max(dist, profile.caution_range * 0.7)
-    dist = max(20.0, dist)
+        dist = max(dist, profile.caution_range * 0.55)
+    dist = max(14.0, min(dist, profile.strike_range - 4.0))
     stand_x = float(foe.world_x) + side * dist
-    # Keep current lane if already close enough on Y.
-    if abs(foe.world_y - me.world_y) <= max(10, profile.lane_align):
-        stand_y = float(me.world_y)
-    else:
-        stand_y = float(foe.world_y)
+    # Always aim at the foe's lane — never "keep current Y" when off-line.
+    stand_y = float(foe.world_y)
     return stand_x, stand_y
 
 

@@ -26,14 +26,17 @@ Agent goals and rules: [`AgentSpecs.md`](AgentSpecs.md).
 
 Per-player toggle (HUD button or keys **1** / **2**):
 
-- **Phase-aware combat** from live RAM: knockdown punish, charge sidestep,
-  ignore dead/scripted, prefer foes hunting this player (`+$42` / boss target)
+- **Face-then-hit combat**: punch only when same lane (±12 Y), in strike range,
+  and facing the foe (player action-state bit 0). Turn one tick if wrong-way.
+- No air punches: match lane before closing X; no B while mid-attack animation;
+  no RNG jump spam from out of range
+- Phase-aware targeting: knockdown punish, charge sidestep, ignore dead/scripted,
+  prefer hunters (`+$42` / boss target)
 - Family-specific counters (Signal, Haku-Ro, Nora, Jack, all bosses, Mr. X)
-- **Grab/throw trees**: knees → throw; weapon swing/throw by type
-- Character-tuned ranges (Axel / Adam / Blaze) including grab bias
-- Police special under pressure (pack, hunters, chargers, low HP)
-- Pickups with co-op fairness; stage rules (holes / elevator / stage 8 left)
-- Mr. X dialog: always **NO**; steady on pause / police special
+- **Grab/throw trees**: always throw; weapon swing/throw facing the foe
+- Character-tuned ranges (Axel / Adam / Blaze)
+- Police special under pressure; pickups with co-op fairness
+- Stage rules (holes / elevator / stage 8 left); Mr. X always **NO**
 
 **Standard control mapping** (OPTIONS scheme 0):
 

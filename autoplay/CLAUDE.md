@@ -60,17 +60,20 @@ that layout yet.
 1. Steady (no input) while paused or police special is active
 2. Mr. X offer: always select **NO** (refuse) then confirm
 3. Police special when pressure score ≥ threshold and specials remain (not round 8)
-4. **Grab / weapon hold tree** (`agent/grabs.py`): knee → throw; bat/pipe swing;
-   knife/bottle/pepper throw at mid-range
+4. **Grab / weapon hold tree** (`agent/grabs.py`): always throw; bat/pipe swing;
+   knife/bottle/pepper throw at mid-range (always face the foe first)
 5. 2P mid-air assist when both agents and partner is airborne nearby
 6. Pick up weapons freely; health/life/special only if co-op fairness allows
-7. Engage threats with **family-specific counters** (`agent/enemies.py`):
-   Signal face/rear, Haku jump intercept, Nora no-rush feint, Jack projectile
-   lane-dodge, Abadede/Bongo sidestep charges, Souther grounded only, Antonio
-   outside boomerang band, twins mobile, Mr. X pressure
-8. Grab setup (walk-in without attack) on grab-friendly foes
-9. Avoid floor holes (stage 4) and elevator edges (stage 7)
-10. Progress right (stage 8: left) when the screen is clear
+7. **Face-then-hit combat** (`agent/combat.py` + `enemies.py`):
+   - Player facing = action-state `+$30` **bit 0** (set = face left)
+   - Punch only when same lane (Y ≤ ±12), within strike range, and facing foe
+   - Turn one tick before attack if facing the wrong way (no air / reverse punches)
+   - Never attack while already in attack animation (except rare punish combo edge)
+   - Match lane **before** closing X (off-lane "close" was the air-punch bug)
+   - Deterministic attack choice (no tick RNG jump spam)
+   - Family counters: Signal rear, Haku jump, Nora no-rush, Jack dodge, bosses
+8. Avoid floor holes (stage 4) and elevator edges (stage 7)
+9. Progress right (stage 8: left) when the screen is clear
 
 Map entities carry full combat RAM for agents:
 

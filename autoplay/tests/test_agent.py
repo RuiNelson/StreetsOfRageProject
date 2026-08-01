@@ -194,20 +194,22 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(decision.p1_mask & 0x04, msg=f"expected LEFT, got {decision.p1_mask:#x}")
 
     def test_attacks_nearby_enemy(self) -> None:
+        # Face right (default action_state 0) toward foe on the right.
         p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")
         foe = _entity(kind="enemy", map_x=118, map_y=64, slot="E0", label="Garcia")
         snap = _snapshot_with_map((p1, foe))
         memory = AgentState()
-        # Run a few ticks until attack cooldown allows a hit.
         saw_attack = False
+        notes: list[str] = []
         for _ in range(8):
             decision = decide_actions(snap, AgentConfig(p1_enabled=True), memory)
+            notes.append(decision.p1_note)
             if decision.p1_mask & int(ATTACK):
                 saw_attack = True
                 break
-        self.assertTrue(saw_attack, "agent should punch when enemy is in range")
+        self.assertTrue(saw_attack, f"agent should punch when enemy is in range: {notes}")
         self.assertTrue(
-            any(k in decision.p1_note for k in ("fight", "punch", "grab", "rear", "jump")),
+            any(k in decision.p1_note for k in ("punch", "punish", "combo")),
             msg=decision.p1_note,
         )
 

@@ -296,6 +296,7 @@ def _entity_from_object(
     primary_state = _u16(slot, mm.OBJ_PRIMARY_STATE)
     action_state = primary_state & 0xFF
     outgoing = _u8(slot, mm.OBJ_OUTGOING_DAMAGE)
+    # Ordinary enemies: +$09 bit1. Players: action-state +$30 bit0 (set = left).
     facing_left = bool(_u8(slot, mm.OBJ_FACING) & 0x02)
 
     held_type = 0
@@ -312,6 +313,7 @@ def _entity_from_object(
         held_type = _u8(slot, mm.OBJ_HELD_TYPE)
         held_ptr = _u16(slot, mm.OBJ_HELD_PTR)
         combo = _u8(slot, mm.OBJ_COMBO_STATE)
+        facing_left = bool(action_state & 0x01)
         phase = player_phase(action_byte=action_state, held_type=held_type)
     elif style.kind == "enemy":
         target_ptr = _u16(slot, mm.OBJ_TARGET_PTR)

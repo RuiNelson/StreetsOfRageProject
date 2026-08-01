@@ -79,12 +79,23 @@ class EnemyCounterTests(unittest.TestCase):
         from sor_autoplay.agent.characters import PROFILES
 
         plan = plan_for(_e(kind="boss", family="Souther", type_id=0x55))
-        # Many rolls should never produce jump when no_jump.
+        # Souther plan.no_jump: never jump even if geometry allows.
         mixes = {
-            attack_mix(plan, PROFILES[0], tick=t, in_range=True, crowd=1)
-            for t in range(40)
+            attack_mix(
+                plan,
+                PROFILES[0],
+                tick=t,
+                in_range=True,
+                crowd=1,
+                band="jump",
+                can_jump=True,
+                lane_ok=True,
+                facing_ok=True,
+            )
+            for t in range(20)
         }
         self.assertNotIn("jump", mixes)
+        self.assertIn("punch", mixes)
 
 
 class GrabTreeTests(unittest.TestCase):
