@@ -155,8 +155,8 @@ class GeometryTests(unittest.TestCase):
             action_state=0x02,
             type_id=1,
         )
-        near = _e(map_x=118, map_y=64)
-        off_lane = _e(map_x=118, map_y=90)
+        near = _e(map_x=122, map_y=64)  # within Axel strike_range 30
+        off_lane = _e(map_x=122, map_y=90)
         far = _e(map_x=160, map_y=64)
         self.assertTrue(can_punch(me, near, PROFILES[0], require_facing=True))
         self.assertFalse(can_punch(me, off_lane, PROFILES[0], require_facing=False))
@@ -267,12 +267,37 @@ class PolicyAggressionTests(unittest.TestCase):
             label="P1",
             action_state=0x02,  # face right
         )
-        foe = _e(map_x=120, world_x=120, map_y=64, label="Garcia")
+        foe = _e(map_x=124, world_x=124, map_y=64, label="Garcia")
         snap = self._snap((p1, foe))
         d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
         self.assertTrue(d.p1_mask & 0x20, msg=f"expected attack: {d.p1_note}")
         self.assertTrue(d.p1_mask & 0x08, msg=f"expected RIGHT face: {d.p1_mask:#x}")
         self.assertIn("punch", d.p1_note)
+
+    def test_does_not_park_chest_to_chest(self) -> None:
+        """Stand goal stays near approach_offset, not body-grab range."""
+        from sor_autoplay.agent.policy import _stand_point
+        from sor_autoplay.agent.combat import TargetChoice
+        from sor_autoplay.agent.enemies import plan_for
+
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+        )
+        foe = _e(map_x=140, world_x=140, map_y=64, label="Garcia")
+        choice = TargetChoice(
+            entity=foe, score=0, dx=40, dy=0, dist=40, plan=plan_for(foe)
+        )
+        sx, sy = _stand_point(me, choice, PROFILES[0], low_health=False)
+        gap = abs(sx - foe.world_x)
+        self.assertGreaterEqual(gap, 22.0, msg=f"stand gap {gap} too close")
+        self.assertLessEqual(gap, PROFILES[0].strike_range)
+        self.assertEqual(sy, float(foe.world_y))
 
     def test_no_punch_off_lane(self) -> None:
         p1 = _e(

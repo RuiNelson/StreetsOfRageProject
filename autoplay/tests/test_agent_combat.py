@@ -99,24 +99,40 @@ class EnemyCounterTests(unittest.TestCase):
 
 
 class GrabTreeTests(unittest.TestCase):
-    def test_throw_away_from_foe(self) -> None:
-        from sor_autoplay.agent.characters import PROFILES
+    def test_throw_is_b_plus_back(self) -> None:
+        """Throw direction is opposite facing, not 'away from nearest foe'."""
 
+        from sor_autoplay.agent.characters import PROFILES
+        from sor_autoplay.agent.grabs import throw_back_direction
+
+        # Face right (even action) → back = left.
         me = _e(
             kind="player",
             family="Player",
             slot="P1",
             held_type=0x20,
-            action_state=0x28,
+            action_state=0x28,  # grab family, face right
             map_x=100,
             map_y=64,
         )
-        # Foe on the right → throw away = left (GameFAQs B+away).
-        foe = _e(map_x=120, map_y=64, family="Garcia")
+        self.assertEqual(throw_back_direction(me), -1)
+        # Face left (odd) → back = right.
+        me_l = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            held_type=0x20,
+            action_state=0x29,
+            map_x=100,
+            map_y=64,
+        )
+        self.assertEqual(throw_back_direction(me_l), 1)
+
         ctx = context_from_player(me)
         self.assertTrue(ctx.enemy_grab)
         mem = GrabMemory()
-        # Blaze: no knees, go straight to throw face.
+        # Nearest foe BEHIND us must not flip throw toward the held enemy.
+        foe_behind = _e(map_x=70, map_y=64, family="Garcia")
         notes: list[str] = []
         saw_throw = False
         for t in range(16):
@@ -125,7 +141,7 @@ class GrabTreeTests(unittest.TestCase):
                 ctx,
                 mem,
                 tick=t,
-                foe=foe,
+                foe=foe_behind,
                 progress_right=True,
                 crowd=1,
                 profile=PROFILES[2],
@@ -134,6 +150,7 @@ class GrabTreeTests(unittest.TestCase):
             notes.append(intent.note)
             if "throw" in intent.note and intent.attack:
                 saw_throw = True
+                # Face right → B+left (back), not right toward front.
                 self.assertTrue(intent.left, msg=notes)
                 self.assertFalse(intent.right)
         self.assertTrue(saw_throw, notes)
@@ -230,9 +247,10 @@ class GrabTreeTests(unittest.TestCase):
 
     def test_want_grab_when_close(self) -> None:
         me = _e(kind="player", family="Player", map_x=100, map_y=64)
-        foe = _e(map_x=120, map_y=64)  # 20px in band 16..28
-        self.assertTrue(want_grab_approach(me, foe, grab_bias=0.3))
+        foe = _e(map_x=120, map_y=64)  # 20px in band 18..26
+        self.assertTrue(want_grab_approach(me, foe, grab_bias=0.4))
         self.assertFalse(want_grab_approach(me, foe, grab_bias=0.05))
+        self.assertFalse(want_grab_approach(me, foe, grab_bias=0.3))  # threshold 0.35
 
 
 class PolicyIntegrationTests(unittest.TestCase):

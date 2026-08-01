@@ -1,14 +1,22 @@
 """Grab / hold / throw decision trees for standard controls.
 
-GameFAQs: prefer **throw (B + away)** over knee mash. Vault/suplex only when
-explicitly armed and safe — default path is always throw so we never stall
-while holding an enemy.
+ROM (``loc_00002D20`` / ``player_held_object_attack_input``):
+
+- While holding, **attack edge** (``+$55`` bit4) enters grab-attack family ``$44``
+  via ``player_held_object_attack_input``.
+- Throw is **B + away/back** (GameFAQs): away is **opposite player facing**,
+  not "away from nearest free enemy". Using nearest-foe flipped the stick to
+  *toward* the held target and produced endless knees / freezes.
+- Player facing is action-state bit 0 (set = face left).
+
+Default path: always throw (B+back with clean edges). Never idle while holding.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..phases import CombatPhase
 from ..world_map import MapEntity
 from .characters import CharacterProfile, DEFAULT_PROFILE
 from .controls import Intent
@@ -20,9 +28,10 @@ WEAPON_BAT = 0x0A
 WEAPON_PIPE = 0x0B
 WEAPON_PEPPER = 0x0C
 
-# Keep sequences short so sticky hold still produces attack edges.
+# Sticky hold_buttons needs a real off frame so +$55 sees an attack edge.
 FACE_TICKS = 1
-THROW_PULSES = 5  # attack on/off cycles
+# throw_on (B held) / throw_off (B released) pairs.
+THROW_PULSES = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,9 +49,10 @@ def context_from_player(me: MapEntity) -> GrabContext:
     held_type = me.held_type & 0xFF
     held_ptr = me.held_ptr & 0xFFFF
     action_grab = is_grab_family(me.action_base)
-    holding = held_type != 0 or held_ptr != 0 or action_grab
+    # Also treat player combat phase HOLDING as holding (held_type path).
+    phase_hold = me.combat_phase == CombatPhase.HOLDING
+    holding = held_type != 0 or held_ptr != 0 or action_grab or phase_hold
     weapon = 0x08 <= held_type <= 0x0C
-    # Enemy grab if holding non-weapon, or grab action with any hold.
     enemy_grab = holding and (not weapon)
     if action_grab and not weapon:
         enemy_grab = True
@@ -58,11 +68,13 @@ def context_from_player(me: MapEntity) -> GrabContext:
 
 
 def is_grab_family(action_base: int) -> bool:
+    """Player action families used while acquiring/holding/throwing."""
+
     return (
         0x28 <= action_base <= 0x2F
+        or 0x30 <= action_base <= 0x3F
         or 0x44 <= action_base <= 0x4F
         or action_base == 0x4A
-        or 0x30 <= action_base <= 0x3F
     )
 
 
@@ -71,7 +83,7 @@ class GrabMemory:
     phase: str = "idle"  # idle | face | throw_on | throw_off
     face_ticks: int = 0
     throw_pulses: int = 0
-    throw_dir: int = -1  # +1 right, -1 left (away from foe)
+    throw_dir: int = -1  # +1 right, -1 left (back / away)
 
     def reset(self) -> None:
         self.phase = "idle"
@@ -115,26 +127,23 @@ def decide_held(
     )
 
 
-def _throw_away_direction(
+def throw_back_direction(
     me: MapEntity,
-    foe: MapEntity | None,
     *,
-    progress_right: bool,
-    crowd: int,
+    progress_right: bool = True,
+    crowd: int = 0,
 ) -> int:
-    """B+away from bad guy (GameFAQs).
+    """B+away direction: opposite of player facing (ROM bit0 set = face left).
 
-    If we know the held foe position, throw opposite them. With a crowd, throw
-    toward stage progress to hit packs.
+    Crowd override: throw toward stage progress so the body hits packs.
     """
 
-    if crowd >= 2:
+    if crowd >= 3:
         return 1 if progress_right else -1
-    if foe is not None:
-        # Away from foe.
-        return -1 if foe.map_x >= me.map_x else 1
-    # No foe entity: throw opposite stage progress (over the shoulder).
-    return -1 if progress_right else 1
+    # Facing left → back is right (+1); facing right → back is left (−1).
+    if me.action_state & 0x01:
+        return 1
+    return -1
 
 
 def _enemy_grab_tree(
@@ -148,22 +157,31 @@ def _enemy_grab_tree(
     crowd: int,
     profile: CharacterProfile,
 ) -> Intent:
-    """Always throw — never idle while holding.
+    """Always throw with B+back — never idle while holding an enemy.
 
-    Sequence: face (hold away 1 tick) → pulse B+away until release or timeout.
-    No vault path here (it was stalling holds without completing throws).
+    Sequence: hold away 1 tick → pulse B+away (on/off) until release.
+    ``foe`` is ignored for direction (was the stall bug); kept for API compat.
     """
+
+    del foe  # direction is face-relative, not nearest-foe
 
     if memory.phase == "idle":
         memory.phase = "face"
         memory.face_ticks = 0
         memory.throw_pulses = 0
-        memory.throw_dir = _throw_away_direction(
-            me, foe, progress_right=progress_right, crowd=crowd
+        memory.throw_dir = throw_back_direction(
+            me, progress_right=progress_right, crowd=crowd
+        )
+
+    # Refresh throw_dir each cycle in case facing flipped during the grab.
+    if memory.phase == "face":
+        memory.throw_dir = throw_back_direction(
+            me, progress_right=progress_right, crowd=crowd
         )
 
     left = memory.throw_dir < 0
     right = memory.throw_dir > 0
+    side = "L" if left else "R"
 
     if memory.phase == "face":
         memory.face_ticks += 1
@@ -173,7 +191,7 @@ def _enemy_grab_tree(
         return Intent(
             left=left,
             right=right,
-            note=f"throw aim ({profile.name}) " + ("L" if left else "R"),
+            note=f"throw aim ({profile.name}) {side}",
         )
 
     if memory.phase == "throw_on":
@@ -183,35 +201,34 @@ def _enemy_grab_tree(
             left=left,
             right=right,
             attack=True,
-            note=f"throw ({profile.name}) " + ("L" if left else "R"),
+            note=f"throw ({profile.name}) {side}",
         )
 
     if memory.phase == "throw_off":
         memory.throw_pulses += 1
         if memory.throw_pulses >= THROW_PULSES * 2:
-            # Still holding? restart throw cycle immediately (do not rear-escape).
             memory.phase = "face"
             memory.face_ticks = 0
-            memory.throw_dir = _throw_away_direction(
-                me, foe, progress_right=progress_right, crowd=crowd
+            memory.throw_dir = throw_back_direction(
+                me, progress_right=progress_right, crowd=crowd
             )
         else:
             memory.phase = "throw_on"
         return Intent(
             left=left,
             right=right,
-            note=f"throw hold ({profile.name})",
+            note=f"throw hold ({profile.name}) {side}",
         )
 
-    # Safety net: always throw, never rear while grappling.
     memory.phase = "face"
     memory.face_ticks = 0
-    memory.throw_dir = _throw_away_direction(
-        me, foe, progress_right=progress_right, crowd=crowd
+    memory.throw_dir = throw_back_direction(
+        me, progress_right=progress_right, crowd=crowd
     )
     return Intent(
         left=memory.throw_dir < 0,
         right=memory.throw_dir > 0,
+        attack=True,  # hard edge immediately on recover
         note=f"throw recover ({profile.name})",
     )
 
@@ -234,7 +251,6 @@ def _weapon_tree(
     in_melee = mid = False
     if foe is not None:
         dx = foe.map_x - me.map_x
-        # Always hold a face dir so weapon swings don't go the wrong way.
         if dx < 0:
             face_left, face_right = True, False
         elif dx > 0:
@@ -242,8 +258,12 @@ def _weapon_tree(
         else:
             face_left = bool(me.action_state & 0x01)
             face_right = not face_left
-        in_melee = abs(dx) <= 32 and abs(foe.map_y - me.map_y) <= 12
+        in_melee = abs(dx) <= 36 and abs(foe.map_y - me.map_y) <= 12
         mid = 20 <= abs(dx) <= 100
+    else:
+        # Keep current face.
+        face_left = bool(me.action_state & 0x01)
+        face_right = not face_left
 
     pulse = (tick % 2) == 0
 
@@ -280,7 +300,17 @@ def _weapon_tree(
             return Intent(left=face_left, right=face_right, note="weapon close")
         return Intent(note=f"hold weapon ${held:02X}")
 
-    return Intent(attack=pulse, note=f"hold ${held:02X}")
+    # Unknown held type (enemy type id left in +$60): treat as grab throw.
+    return _enemy_grab_tree(
+        me,
+        ctx,
+        memory,
+        tick=tick,
+        foe=foe,
+        progress_right=True,
+        crowd=0,
+        profile=profile,
+    )
 
 
 def want_grab_approach(
@@ -289,9 +319,41 @@ def want_grab_approach(
     *,
     grab_bias: float,
 ) -> bool:
-    if grab_bias < 0.20:
+    """Grab-walk is usually worse than punching from spacing — keep rare."""
+
+    if grab_bias < 0.35:
         return False
-    # Only when already almost in strike range — do not walk into their chest.
     dx = abs(foe.map_x - me.map_x)
     dy = abs(foe.map_y - me.map_y)
-    return 16 <= dx <= 28 and dy <= 12
+    return 18 <= dx <= 26 and dy <= 10
+
+
+def held_enemy_entity(
+    me: MapEntity,
+    entities: tuple[MapEntity, ...],
+) -> MapEntity | None:
+    """Best entity representing the foe we are currently holding."""
+
+    best: MapEntity | None = None
+    best_d = 1e9
+    for entity in entities:
+        if entity.kind not in ("enemy", "boss"):
+            continue
+        if entity.combat_phase == CombatPhase.GRABBED:
+            d = abs(entity.map_x - me.map_x) + abs(entity.map_y - me.map_y)
+            if d < best_d:
+                best_d = d
+                best = entity
+    if best is not None:
+        return best
+    # Fallback: very close combatant (body-overlap grab without phase yet).
+    for entity in entities:
+        if entity.kind not in ("enemy", "boss"):
+            continue
+        if entity.health is not None and entity.health <= 0:
+            continue
+        d = abs(entity.map_x - me.map_x) + abs(entity.map_y - me.map_y) * 0.5
+        if d < 28 and d < best_d:
+            best_d = d
+            best = entity
+    return best

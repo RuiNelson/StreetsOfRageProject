@@ -194,9 +194,9 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(decision.p1_mask & 0x04, msg=f"expected LEFT, got {decision.p1_mask:#x}")
 
     def test_attacks_nearby_enemy(self) -> None:
-        # Face right (default action_state 0) toward foe on the right.
+        # Face right (default action_state 0) toward foe on the right, in strike range.
         p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")
-        foe = _entity(kind="enemy", map_x=118, map_y=64, slot="E0", label="Garcia")
+        foe = _entity(kind="enemy", map_x=124, map_y=64, slot="E0", label="Garcia")
         snap = _snapshot_with_map((p1, foe))
         memory = AgentState()
         saw_attack = False

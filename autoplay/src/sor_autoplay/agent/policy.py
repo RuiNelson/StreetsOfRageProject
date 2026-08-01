@@ -240,9 +240,12 @@ def _decide_one(
         return Intent(special=True, note=f"police ({press.reason})")
 
     # --- Grab / weapon hold ---
+    # Throw is B+back (face-relative). Do not aim "away from nearest free foe"
+    # — that pointed toward the held enemy and stalled grabs as endless knees.
     gctx = grabs.context_from_player(me)
     gmem = memory.grab_mem(player_index)
-    foe_near = combat.nearest_foe(me, snapshot.world_map.entities)
+    held_foe = grabs.held_enemy_entity(me, snapshot.world_map.entities)
+    foe_near = held_foe or combat.nearest_foe(me, snapshot.world_map.entities)
     held_intent = grabs.decide_held(
         me,
         gctx,
@@ -553,20 +556,21 @@ def _stand_point(
     *,
     low_health: bool,
 ) -> tuple[float, float]:
-    """World-space stand-off: same lane, strike gap on X (faceable, not stacked).
+    """World-space stand-off: same lane, outer strike gap on X.
 
-    ROM front-interaction Y band is about ±12. Standing off-lane was a primary
-    cause of air punches.
+    ROM pickup box is ~±20 X; body-grabs happen closer. We park at
+    ``approach_offset`` (~24–28) so punches still reach but enemies do not
+    free-hit us. Always match the foe's lane (off-lane = air punches).
     """
 
     foe = target.entity
     side = -1.0 if (foe.world_x - me.world_x) > 0 else 1.0
-    dist = profile.strike_range * 0.55
+    dist = float(profile.approach_offset)
     if low_health:
-        dist = max(dist, profile.caution_range * 0.55)
-    dist = max(14.0, min(dist, profile.strike_range - 4.0))
+        dist = max(dist, profile.caution_range * 0.65)
+    # Never closer than the body-contact band.
+    dist = max(22.0, min(dist, profile.strike_range - 2.0))
     stand_x = float(foe.world_x) + side * dist
-    # Always aim at the foe's lane — never "keep current Y" when off-line.
     stand_y = float(foe.world_y)
     return stand_x, stand_y
 

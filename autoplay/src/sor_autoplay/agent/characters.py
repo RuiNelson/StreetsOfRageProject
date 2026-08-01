@@ -51,12 +51,16 @@ _BAT_PIPE = frozenset({0x0A, 0x0B})
 _ALL_WEAPONS = frozenset({0x08, 0x09, 0x0A, 0x0B, 0x0C})
 _KNIFE_BOTTLE = frozenset({0x08, 0x09})
 
-# Strike ranges are intentionally tight: air punches came from over-wide bands.
-# ROM front-interaction Y band is ~±12; we treat lane_align as soft approach only.
+# Spacing (ROM-backed):
+# - Pickup box is playerX−20 .. playerX+20 (SoRInteractions objectInsidePickupBox).
+# - Body-overlap grabs happen closer than that (~≤16–18). Standing at 14px invited
+#   free enemy punches/grabs.
+# - Stand near outer strike range (approach_offset); step in only to connect.
+# - Lane hit band ~±12 (hasNearbyObjectInFront Y window).
 PROFILES: dict[int, CharacterProfile] = {
     0: CharacterProfile(  # Axel Stone — strong but slow; short fast backfist
         name="Axel",
-        strike_range=28.0,
+        strike_range=30.0,
         lane_align=12.0,
         jump_kick_min=28.0,
         jump_kick_max=50.0,  # shortest jump range of the three
@@ -65,18 +69,18 @@ PROFILES: dict[int, CharacterProfile] = {
         jump_attack_bias=0.18,  # prefer grounded combo
         rear_attack_bias=0.40,  # fast backfist — use in its band
         combo_bias=0.55,  # strong combo ****
-        grab_bias=0.20,
-        grab_knees=1,
+        grab_bias=0.10,  # prefer spaced punches over walk-in grabs
+        grab_knees=0,
         prefer_throw=True,
         prefer_vault=False,
-        approach_offset=18.0,
-        caution_range=40.0,
+        approach_offset=26.0,  # stand just inside max punch, outside body-grab
+        caution_range=48.0,
         preferred_weapons=_ALL_WEAPONS,
         weak_weapons=frozenset(),
     ),
     1: CharacterProfile(  # Adam Hunter — balanced; best back-attack range; pipes/bats
         name="Adam",
-        strike_range=32.0,
+        strike_range=34.0,
         lane_align=12.0,
         jump_kick_min=30.0,
         jump_kick_max=72.0,  # good jumpkick range
@@ -85,18 +89,18 @@ PROFILES: dict[int, CharacterProfile] = {
         jump_attack_bias=0.30,
         rear_attack_bias=0.32,
         combo_bias=0.40,
-        grab_bias=0.18,
+        grab_bias=0.10,
         grab_knees=0,  # FAQ: knees not worth it vs throw
         prefer_throw=True,
         prefer_vault=True,  # vault → back suplex when safe
-        approach_offset=20.0,
-        caution_range=44.0,
+        approach_offset=28.0,
+        caution_range=52.0,
         preferred_weapons=_BAT_PIPE,
         weak_weapons=frozenset(),
     ),
     2: CharacterProfile(  # Blaze Fielding — fast; weak combo; jumpkick + throws shine
         name="Blaze",
-        strike_range=26.0,
+        strike_range=28.0,
         lane_align=12.0,
         jump_kick_min=28.0,
         jump_kick_max=78.0,  # FAQ: best jumpkick range
@@ -105,12 +109,12 @@ PROFILES: dict[int, CharacterProfile] = {
         jump_attack_bias=0.52,  # jump kick is her power tool
         rear_attack_bias=0.28,
         combo_bias=0.18,  # FAQ: worst combo — avoid mashing
-        grab_bias=0.28,  # throws are her power
+        grab_bias=0.15,  # throws strong but spacing still preferred
         grab_knees=0,
         prefer_throw=True,
         prefer_vault=True,
-        approach_offset=16.0,
-        caution_range=44.0,
+        approach_offset=24.0,
+        caution_range=48.0,
         preferred_weapons=_BAT_PIPE,
         weak_weapons=_KNIFE_BOTTLE,  # short range for her
     ),

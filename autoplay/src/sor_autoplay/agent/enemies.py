@@ -245,10 +245,13 @@ def adjust_approach(
     dy = foe.map_y - me.map_y
 
     strike = profile.strike_range * plan.range_scale
-    # Comfortable fight distance slightly inside strike so we can connect.
-    stand_dist = max(16.0, strike * 0.65)
+    # Stand near outer strike range (approach_offset). Old 0.55×strike (~15px)
+    # was chest-to-chest and let enemies free-punch / body-grab us.
+    stand_dist = max(profile.approach_offset, strike * 0.85)
     if low_health:
-        stand_dist = max(stand_dist, profile.caution_range * 0.65)
+        stand_dist = max(stand_dist, profile.caution_range * 0.7)
+    # Body-grab / contact danger band — never park inside this on X.
+    too_close = max(18.0, profile.approach_offset * 0.7)
 
     if plan.kind == ThreatKind.PROJECTILE or foe.kind == "projectile":
         evade_x = -1.0 if dx > 0 else 1.0
@@ -287,8 +290,8 @@ def adjust_approach(
             out_dx = 1.0 if err_x > 0 else -1.0
 
     abs_dx = abs(dx)
-    # Too close on X while on-lane: step back to faceable gap.
-    if abs_dx < 10 and abs(dy) <= lane_slop + 2:
+    # Inside body-contact band: back out first (do not walk further in).
+    if abs_dx < too_close and abs(dy) <= lane_slop + 4:
         out_dx = -1.0 if dx > 0 else 1.0 if dx < 0 else out_dx
 
     in_range = abs_dx <= strike and abs(dy) <= 12.0

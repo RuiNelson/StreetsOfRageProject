@@ -60,8 +60,9 @@ that layout yet.
 1. Steady (no input) while paused or police special is active
 2. Mr. X offer: always select **NO** (refuse) then confirm
 3. Police special when pressure score ≥ threshold and specials remain (not round 8)
-4. **Grab / weapon hold tree** (`agent/grabs.py`): always throw; bat/pipe swing;
-   knife/bottle/pepper throw at mid-range (always face the foe first)
+4. **Grab / weapon hold tree** (`agent/grabs.py`): always **B+back throw**
+   (away = opposite action-state facing bit0 — not nearest-foe); bat/pipe swing;
+   knife/bottle/pepper throw at mid-range
 5. 2P mid-air assist when both agents and partner is airborne nearby
 6. Pick up weapons freely; health/life/special only if co-op fairness allows
 7. **Face-then-hit combat** (`agent/combat.py` + `enemies.py`):
@@ -70,6 +71,8 @@ that layout yet.
    - Turn one tick before attack if facing the wrong way (no air / reverse punches)
    - Never attack while already in attack animation (except rare punish combo edge)
    - Match lane **before** closing X (off-lane "close" was the air-punch bug)
+   - Stand at ``approach_offset`` (~24–28, outer strike) — not body-grab range
+     (~≤18); retreat when closer so enemies cannot free-hit
    - Deterministic attack choice (no tick RNG jump spam)
    - Family counters: Signal rear, Haku jump, Nora no-rush, Jack dodge, bosses
 8. Avoid floor holes (stage 4) and elevator edges (stage 7)

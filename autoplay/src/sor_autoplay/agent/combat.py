@@ -312,11 +312,11 @@ def approach_vector(
 
     if is_punishable(phase) and phase != CombatPhase.GRABBED:
         abs_dx = abs(target.dx)
-        stand = max(14.0, profile.strike_range * 0.55)
+        # Still keep a punchable gap on knockdowns — do not mount the corpse.
+        stand = max(profile.approach_offset * 0.75, profile.strike_range * 0.7)
         if abs_dx > stand + 4:
             dx = 1.0 if target.dx > 0 else -1.0
-        elif abs_dx < 8:
-            # Almost on top — create a tiny faceable gap.
+        elif abs_dx < 16:
             dx = -1.0 if target.dx > 0 else 1.0
         else:
             dx = 0.0
