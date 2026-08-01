@@ -260,20 +260,37 @@ class ObserverApp:
                 if config.any_enabled() and snapshot.connected:
                     decision = decide_actions(snapshot, config, self._agent_memory)
                     notes = (decision.p1_note, decision.p2_note)
-                    if not decision.steady and (decision.p1_mask or decision.p2_mask):
-                        # Blocking hold for N frames; remote ORs with physical pad.
-                        self._client.press_buttons(
-                            player1=decision.p1_mask,
-                            player2=decision.p2_mask,
-                            frames=config.hold_frames,
-                        )
-                        self._was_agent_active = True
-                    elif self._was_agent_active:
+                    if decision.steady:
+                        if self._was_agent_active:
+                            try:
+                                self._client.release_buttons()
+                            except Exception:  # noqa: BLE001
+                                pass
+                            self._was_agent_active = False
+                    else:
+                        # Sticky latch: directions stay held across polls so the
+                        # game sees continuous walking (PRESS_BUTTONS always
+                        # released after N frames and produced walk-taps).
                         try:
-                            self._client.release_buttons()
-                        except Exception:  # noqa: BLE001
-                            pass
-                        self._was_agent_active = False
+                            self._client.hold_buttons(
+                                player1=decision.p1_mask,
+                                player2=decision.p2_mask,
+                            )
+                        except AttributeError:
+                            # Older megadrive_remote without HOLD_BUTTONS.
+                            self._client.press_buttons(
+                                player1=decision.p1_mask,
+                                player2=decision.p2_mask,
+                                frames=max(config.hold_frames, 4),
+                            )
+                        self._was_agent_active = bool(
+                            decision.p1_mask or decision.p2_mask
+                        )
+                        if not self._was_agent_active:
+                            try:
+                                self._client.release_buttons()
+                            except Exception:  # noqa: BLE001
+                                pass
                 elif self._was_agent_active:
                     try:
                         self._client.release_buttons()
@@ -285,13 +302,11 @@ class ObserverApp:
                     self._latest = snapshot
                     self._agent_notes = notes
 
-                # When agents drove press_buttons, that already paced ~hold frames.
-                # Otherwise sleep the remainder of the wall-clock poll period.
-                if not (config.any_enabled() and snapshot.connected):
-                    elapsed = time.monotonic() - started
-                    remaining = poll_s - elapsed
-                    if remaining > 0:
-                        self._stop.wait(remaining)
+                # Wall-clock cadence always (hold_buttons is non-blocking).
+                elapsed = time.monotonic() - started
+                remaining = poll_s - elapsed
+                if remaining > 0:
+                    self._stop.wait(remaining)
             except Exception as exc:  # noqa: BLE001 - surface any link failure in HUD
                 with self._lock:
                     self._latest = disconnected_snapshot(str(exc))

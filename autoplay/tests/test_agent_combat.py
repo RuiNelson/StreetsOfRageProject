@@ -7,8 +7,6 @@ import unittest
 from sor_autoplay.agent.controls import ATTACK, JUMP, Intent, mask_from_intent
 from sor_autoplay.agent.enemies import ThreatKind, attack_mix, plan_for
 from sor_autoplay.agent.grabs import (
-    DEFAULT_KNEE_TICKS,
-    GrabContext,
     GrabMemory,
     context_from_player,
     decide_held,
@@ -104,20 +102,28 @@ class GrabTreeTests(unittest.TestCase):
         self.assertTrue(ctx.enemy_grab)
         mem = GrabMemory()
         notes: list[str] = []
-        for t in range(DEFAULT_KNEE_TICKS + 2):
+        saw_knee_attack = False
+        saw_throw_attack = False
+        saw_face = False
+        for t in range(20):
             intent = decide_held(
                 me, ctx, mem, tick=t, foe=None, progress_right=True, crowd=1
             )
             assert intent is not None
             notes.append(intent.note)
-            if "knee" in intent.note:
-                self.assertTrue(intent.attack)
+            if "knee" in intent.note and intent.attack:
+                saw_knee_attack = True
                 self.assertFalse(intent.left or intent.right)
-            if "throw" in intent.note:
-                self.assertTrue(intent.attack)
+            if "face" in intent.note:
+                saw_face = True
+                self.assertTrue(intent.right)
+                self.assertFalse(intent.attack)
+            if "throw" in intent.note and intent.attack:
+                saw_throw_attack = True
                 self.assertTrue(intent.right or intent.up)
-        self.assertTrue(any("knee" in n for n in notes))
-        self.assertTrue(any("throw" in n for n in notes))
+        self.assertTrue(saw_knee_attack, notes)
+        self.assertTrue(saw_face, notes)
+        self.assertTrue(saw_throw_attack, notes)
 
     def test_weapon_bat_swings(self) -> None:
         me = _e(
@@ -132,10 +138,13 @@ class GrabTreeTests(unittest.TestCase):
         foe = _e(map_x=120, map_y=64, family="Garcia")
         ctx = context_from_player(me)
         self.assertTrue(ctx.weapon)
-        intent = decide_held(me, ctx, GrabMemory(), tick=1, foe=foe, crowd=1)
-        assert intent is not None
-        self.assertTrue(intent.attack)
-        self.assertIn("swing", intent.note)
+        mem = GrabMemory()
+        # Pulse: one of two consecutive ticks must swing with attack.
+        a = decide_held(me, ctx, mem, tick=1, foe=foe, crowd=1)
+        b = decide_held(me, ctx, mem, tick=2, foe=foe, crowd=1)
+        assert a is not None and b is not None
+        self.assertTrue(a.attack or b.attack)
+        self.assertTrue("swing" in a.note or "swing" in b.note)
 
     def test_knife_throw_at_midrange(self) -> None:
         me = _e(
@@ -147,13 +156,28 @@ class GrabTreeTests(unittest.TestCase):
             map_y=64,
         )
         foe = _e(map_x=150, map_y=64)
-        intent = decide_held(
-            me, context_from_player(me), GrabMemory(), tick=1, foe=foe, crowd=1
+        mem = GrabMemory()
+        a = decide_held(me, context_from_player(me), mem, tick=1, foe=foe, crowd=1)
+        b = decide_held(me, context_from_player(me), mem, tick=2, foe=foe, crowd=1)
+        assert a is not None and b is not None
+        self.assertTrue(a.right and b.right)
+        self.assertTrue(a.attack or b.attack)
+        self.assertTrue("throw" in a.note or "throw" in b.note)
+
+    def test_holding_detected_from_action_only(self) -> None:
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            held_type=0,
+            held_ptr=0,
+            action_state=0x28,
+            map_x=100,
+            map_y=64,
         )
-        assert intent is not None
-        self.assertTrue(intent.attack)
-        self.assertTrue(intent.right)
-        self.assertIn("throw", intent.note)
+        ctx = context_from_player(me)
+        self.assertTrue(ctx.holding)
+        self.assertTrue(ctx.enemy_grab)
 
     def test_want_grab_when_close(self) -> None:
         me = _e(kind="player", family="Player", map_x=100, map_y=64)

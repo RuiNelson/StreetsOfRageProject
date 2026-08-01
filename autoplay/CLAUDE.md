@@ -90,8 +90,14 @@ phase tallies in the map meta line.
 - CLI: `--agent-p1`, `--agent-p2`, `--agent-hold-frames N`
 
 Input is applied on the same remote poll thread as RAM reads (one client
-connection). When an agent is active, `press_buttons(..., frames=hold)` paces
-the loop; when off, wall-clock `--poll-ms` is used.
+connection). Agents use sticky **`hold_buttons`** (remote command `0x14`) so
+D-pad directions stay latched between polls — continuous walking. Face buttons
+are pulsed by the policy (on one tick, off the next) so the ROM still sees
+attack edges. `press_buttons` is only a fallback for older hosts; it always
+releases after N frames and produces walk-taps.
+
+**Rebuild** `MegaDriveEnvironment` + `sor` after pulling so the host serves
+`HOLD_BUTTONS`. Without it the client falls back to `press_buttons`.
 
 ## Design constraints
 
