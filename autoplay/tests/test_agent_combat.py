@@ -10,9 +10,11 @@ from sor_autoplay.agent.grabs import (
     GrabMemory,
     context_from_player,
     decide_held,
+    is_grab_family,
     want_grab_approach,
 )
 from sor_autoplay.agent.policy import AgentConfig, AgentState, decide_actions
+from sor_autoplay.agent.controls import ATTACK
 from sor_autoplay.world_map import MapEntity, WorldMap
 
 
@@ -185,7 +187,7 @@ class GrabTreeTests(unittest.TestCase):
             profile=PROFILES[0],
         )
         assert a is not None and a.attack
-        # One frame without held_type must still throw (latched).
+        # One frame without held_type must still attack (latched).
         b = decide_held(
             me_drop,
             context_from_player(me_drop),
@@ -196,6 +198,118 @@ class GrabTreeTests(unittest.TestCase):
         assert b is not None
         self.assertTrue(b.attack)
         self.assertTrue(mem.latched)
+
+    def test_live_hold_action_60_without_held_type(self) -> None:
+        """Regression: live Axel hold was action $60, held_type 0, enemy GRABBED."""
+
+        from sor_autoplay.agent.characters import PROFILES
+        from sor_autoplay.agent.policy import AgentConfig, AgentState, decide_actions
+        from sor_autoplay.phases import CombatPhase, player_phase
+        from sor_autoplay.world_map import WorldMap
+        from dataclasses import replace
+        from sor_autoplay.memory_map import (
+            MAX_HEALTH,
+            OBJ_CHARACTER_ID,
+            OBJ_HEALTH,
+            OBJ_POS_X,
+            OBJ_POS_Y,
+            OBJ_TYPE,
+        )
+        from sor_autoplay.state import snapshot_from_memory_blocks
+
+        self.assertEqual(player_phase(action_byte=0x60, held_type=0).name, "HOLDING")
+        self.assertTrue(is_grab_family(0x60))
+
+        me = MapEntity(
+            kind="player",
+            family="Player",
+            symbol="1",
+            color="#fff",
+            label="P1",
+            type_id=1,
+            world_x=1295,
+            world_y=64,
+            world_z=0,
+            map_x=176,
+            map_y=64,
+            health=72,
+            slot="P1",
+            action_state=0x60,
+            held_type=0,
+            held_ptr=0,
+            contact_ptr=0xBA00,
+            combat_phase=CombatPhase.HOLDING,
+        )
+        foe = MapEntity(
+            kind="enemy",
+            family="Signal",
+            symbol="S",
+            color="#fff",
+            label="Signal",
+            type_id=0x24,
+            world_x=1327,
+            world_y=64,
+            world_z=0,
+            map_x=208,
+            map_y=64,
+            health=4,
+            slot="E2",
+            primary_state=0x0500,
+            combat_phase=CombatPhase.GRABBED,
+            attacker_ptr=0xB800,
+            target_ptr=0xB800,
+        )
+        ctx = context_from_player(me, (me, foe), player_index=1)
+        self.assertTrue(ctx.holding)
+        self.assertTrue(ctx.enemy_grab)
+        intent = decide_held(me, ctx, GrabMemory(), tick=0, profile=PROFILES[0])
+        assert intent is not None
+        self.assertTrue(intent.attack)
+
+        def put_u8(b, o, v):
+            b[o] = v & 0xFF
+
+        def put_u16(b, o, v):
+            b[o : o + 2] = (v & 0xFFFF).to_bytes(2, "big")
+
+        g, t, o = bytearray(0x40), bytearray(4), bytearray(0x100)
+        put_u16(g, 0x00, 0x0016)
+        put_u8(g, 0x18, 0x01)
+        put_u8(g, 0x1E, 0x00)
+        put_u8(g, 0x20, 0x03)
+        put_u8(g, 0x21, 0x01)
+        put_u16(t, 0, 0x0040)
+        put_u8(o, OBJ_TYPE, 0x01)
+        put_u16(o, OBJ_HEALTH, MAX_HEALTH)
+        put_u8(o, OBJ_CHARACTER_ID, 0x00)
+        put_u16(o, OBJ_POS_X, 100)
+        put_u16(o, OBJ_POS_Y, 0x40)
+        snap = snapshot_from_memory_blocks(
+            globals_block=bytes(g), timer_block=bytes(t), objects_block=bytes(o)
+        )
+        world = WorldMap(
+            camera_x=0,
+            camera_y=0,
+            camera_left=0.0,
+            camera_right=320.0,
+            camera_top=0.0,
+            camera_bottom=112.0,
+            view_left=-40.0,
+            view_right=360.0,
+            view_top=-16.0,
+            view_bottom=128.0,
+            entities=(me, foe),
+        )
+        d = decide_actions(
+            replace(snap, world_map=world),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertTrue(d.p1_mask & int(ATTACK), d.p1_note)
+        self.assertTrue(
+            "knee" in d.p1_note or "throw" in d.p1_note,
+            d.p1_note,
+        )
 
     def test_grab_always_throws(self) -> None:
         from sor_autoplay.agent.characters import PROFILES

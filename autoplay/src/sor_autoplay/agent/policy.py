@@ -240,9 +240,13 @@ def _decide_one(
         return Intent(special=True, note=f"police ({press.reason})")
 
     # --- Grab / weapon hold ---
-    # Throw is B+back (face-relative). Do not aim "away from nearest free foe"
-    # — that pointed toward the held enemy and stalled grabs as endless knees.
-    gctx = grabs.context_from_player(me)
+    # Live: hold uses action $60 with held_type often 0; detect via action,
+    # contact_ptr, and GRABBED enemies linked to this seat. Then knee/throw.
+    gctx = grabs.context_from_player(
+        me,
+        snapshot.world_map.entities,
+        player_index=player_index,
+    )
     gmem = memory.grab_mem(player_index)
     held_foe = grabs.held_enemy_entity(me, snapshot.world_map.entities)
     foe_near = held_foe or combat.nearest_foe(me, snapshot.world_map.entities)

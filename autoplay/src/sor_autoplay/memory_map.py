@@ -78,23 +78,32 @@ OBJ_FACING = 0x09  # ordinary enemies: bit1 left/right (enemy-ai.md)
 OBJ_POS_X = 0x10  # long 16.16 world X; integer is the high word (unsigned)
 OBJ_POS_Y = 0x14  # long 16.16 lane / depth Y
 OBJ_POS_Z = 0x18  # long 16.16 height
-# Primary state: player uses low byte action; ordinary enemies use a *word*
-# in $0100 steps ($0100 normal … $0700 blocked). Bosses use a *byte* index.
+# Primary state at +$30:
+# - Players: **byte** action/facing at +$30 (bit0 = face left). Live dump while
+#   holding is $60 (grab/throw family), NOT the low byte of a BE word.
+# - Ordinary enemies: **word** in $0100 steps ($0100 normal … $0700 blocked).
+# - Bosses: **byte** primary index at +$30.
 OBJ_PRIMARY_STATE = 0x30
-OBJ_ACTION_STATE = 0x30  # alias (player action byte = low of word)
+OBJ_ACTION_STATE = 0x30  # player/boss: read as **byte** at +$30
 OBJ_HEALTH = 0x32
 OBJ_OUTGOING_DAMAGE = 0x34  # active hit descriptor low nibble when attacking
 # Ordinary enemy: target player object pointer (low 16 bits of address).
 OBJ_TARGET_PTR = 0x42
+# Contact/grab partner pointer (word). Live hold used +$4C = enemy slot while
+# +$5E held_ptr was zero — both must be checked.
+OBJ_CONTACT_PTR = 0x4C
 # Later bosses ($55-$58): abs X distance to target (word), pair role, tactical.
 OBJ_BOSS_DIST_X = 0x50  # also Abadede linked helper / character id on players
 OBJ_CHARACTER_ID = 0x50  # player character id (same offset, different meaning)
 OBJ_BOSS_DIST_LANE = 0x52
 OBJ_PAIR_ROLE = 0x5D  # later-boss pair role 1/2; player combo state reuses $5D
 OBJ_COMBO_STATE = 0x5D  # player combo / action chain
-OBJ_HELD_PTR = 0x5E  # word pointer to grabbed/held object
+OBJ_HELD_PTR = 0x5E  # word pointer to grabbed/held object (weapons / some grabs)
 OBJ_HELD_TYPE = 0x60  # nonzero while holding weapon or grab target type
 OBJ_BOSS_TACTICAL = 0x67  # later-boss tactical substate (and Abadede police latch)
+# Ordinary enemy: attacker/contact object pointer (low 16). Grabbed Signal had
+# +$3E = $B800 (P1) while player +$60 was still zero.
+OBJ_ATTACKER_PTR = 0x3E
 # Abadede / Mr. X selected player pointer.
 OBJ_BESPOKE_TARGET = 0x5C
 # Later-boss selected player pointer word.
@@ -118,6 +127,9 @@ ACTION_GRAB = 0x28
 ACTION_GRAB_THROW = 0x44
 ACTION_HURT_MIN = 0x50
 ACTION_HURT_MAX = 0x5F
+# Grab/throw reaction family used while holding an enemy (live: Axel $60/$6A/$6C).
+ACTION_HOLD_REACT = 0x60
+ACTION_HOLD_REACT_MAX = 0x6F
 
 # Fixed object bases (for decoding target pointers).
 ADDR_P1_OBJECT_LO = 0xB800  # low 16 of $FFB800

@@ -114,7 +114,12 @@ def player_phase(
         return CombatPhase.HOLDING
     if 0x18 <= base <= 0x1F or 0x20 <= base <= 0x27:
         return CombatPhase.ATTACKING
-    if 0x28 <= base <= 0x2F or 0x44 <= base <= 0x4F:
+    # $28 grab acquire, $30–$3F hold moves, $44 throw family, $60 hold/react.
+    if (
+        0x28 <= base <= 0x3F
+        or 0x44 <= base <= 0x4F
+        or 0x60 <= base <= 0x6F
+    ):
         return CombatPhase.HOLDING
     if 0x10 <= base <= 0x17:
         return CombatPhase.NORMAL  # jump — still actionable

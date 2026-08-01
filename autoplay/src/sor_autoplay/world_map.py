@@ -103,12 +103,14 @@ class MapEntity:
     primary_state: int = 0  # full word at +$30 (ordinary enemy $0100 steps)
     held_type: int = 0  # player +$60; nonzero while holding weapon/grab target
     held_ptr: int = 0  # player +$5E low word
+    contact_ptr: int = 0  # player +$4C contact/grab partner (live hold uses this)
     outgoing_damage: int = 0  # +$34 active hit frame damage nibble
     combo_state: int = 0  # player +$5D
     tactical: int = 0  # boss +$67
     pair_role: int = 0  # later-boss +$5D (1/2) when kind==boss
     target_ptr: int = 0  # ordinary +$42 / boss target low word
-    facing_left: bool = False  # ordinary +$09 bit1
+    attacker_ptr: int = 0  # ordinary +$3E attacker/holder low word
+    facing_left: bool = False  # ordinary +$09 bit1; player action bit0
     boss_dist_x: int = 0  # later-boss +$50 abs X to target
     boss_dist_lane: int = 0  # later-boss +$52 abs lane to target
     combat_phase: CombatPhase = CombatPhase.UNKNOWN
@@ -130,7 +132,7 @@ class MapEntity:
 
     @property
     def is_holding(self) -> bool:
-        return self.held_type != 0
+        return self.held_type != 0 or self.held_ptr != 0 or self.contact_ptr != 0
 
     @property
     def is_airborne(self) -> bool:
@@ -139,9 +141,14 @@ class MapEntity:
     @property
     def is_grabbing(self) -> bool:
         base = self.action_base
-        return self.is_holding and (
-            0x28 <= base <= 0x2F or 0x44 <= base <= 0x4F or base == 0x4A
-        )
+        if 0x28 <= base <= 0x2F or 0x44 <= base <= 0x4F or base == 0x4A:
+            return True
+        # Live hold: Axel stays in $60–$6F while enemy is GRABBED; +$60 often 0.
+        if 0x60 <= base <= 0x6F:
+            return True
+        if 0x30 <= base <= 0x3F:
+            return True
+        return self.held_type != 0 or self.held_ptr != 0 or self.contact_ptr != 0
 
     @property
     def is_holding_weapon(self) -> bool:
@@ -294,17 +301,21 @@ def _entity_from_object(
         health = None
 
     primary_state = _u16(slot, mm.OBJ_PRIMARY_STATE)
-    action_state = primary_state & 0xFF
+    # Byte at +$30 is the player/boss action/primary index. Do NOT use
+    # primary_state & 0xFF (that is +$31) — live hold was $60 read as $00.
+    action_state = _u8(slot, mm.OBJ_ACTION_STATE)
     outgoing = _u8(slot, mm.OBJ_OUTGOING_DAMAGE)
     # Ordinary enemies: +$09 bit1. Players: action-state +$30 bit0 (set = left).
     facing_left = bool(_u8(slot, mm.OBJ_FACING) & 0x02)
 
     held_type = 0
     held_ptr = 0
+    contact_ptr = 0
     combo = 0
     tactical = 0
     pair_role = 0
     target_ptr = 0
+    attacker_ptr = 0
     boss_dist_x = 0
     boss_dist_lane = 0
     phase = CombatPhase.UNKNOWN
@@ -312,11 +323,13 @@ def _entity_from_object(
     if style.kind == "player":
         held_type = _u8(slot, mm.OBJ_HELD_TYPE)
         held_ptr = _u16(slot, mm.OBJ_HELD_PTR)
+        contact_ptr = _u16(slot, mm.OBJ_CONTACT_PTR)
         combo = _u8(slot, mm.OBJ_COMBO_STATE)
         facing_left = bool(action_state & 0x01)
         phase = player_phase(action_byte=action_state, held_type=held_type)
     elif style.kind == "enemy":
         target_ptr = _u16(slot, mm.OBJ_TARGET_PTR)
+        attacker_ptr = _u16(slot, mm.OBJ_ATTACKER_PTR)
         phase = ordinary_enemy_phase(primary_state)
     elif style.kind == "boss":
         tactical = _u8(slot, mm.OBJ_BOSS_TACTICAL)
@@ -352,11 +365,13 @@ def _entity_from_object(
         primary_state=primary_state,
         held_type=held_type,
         held_ptr=held_ptr,
+        contact_ptr=contact_ptr,
         outgoing_damage=outgoing,
         combo_state=combo,
         tactical=tactical,
         pair_role=pair_role,
         target_ptr=target_ptr,
+        attacker_ptr=attacker_ptr,
         facing_left=facing_left,
         boss_dist_x=boss_dist_x,
         boss_dist_lane=boss_dist_lane,
