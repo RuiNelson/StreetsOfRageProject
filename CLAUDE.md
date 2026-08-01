@@ -23,6 +23,7 @@ This public meta-repository pins the repositories that make up the workspace:
 | `MegaDriveEnvironmentSampleGame/` | Dual-target sample for PC and real Mega Drive hardware | Project-owned; editable |
 | `RageDecompiler/` | Python disassembly and recompilation tools | Project-owned; editable |
 | `StreetsOfRageRecompilation/` | Streets of Rage analysis, generated C++, native overrides, and host executable | Project-owned; editable |
+| `autoplay/` | Python remote observer / future SoR autoplay agent (`megadrive_remote`) | Project-owned; editable |
 | `Genesis-Plus-GX/` | Upstream emulator used only as a behavioral reference | Upstream; never edit |
 
 `Genesis-Plus-GX` is reference material only. Do not modify files, create

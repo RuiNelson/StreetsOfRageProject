@@ -1,0 +1,84 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+# Launch the SoR Autoplay observer (maximized window) against a running
+# StreetsOfRageRecompilation host via MegaDriveEnvironment remote access.
+#
+# Prerequisites:
+#   - sor listening with --debugUtils (default port 6969), e.g.:
+#       ./scripts/run --debugUtils --port 6969
+#   - Python 3.11+ with Tk (_tkinter); this machine prefers python3.11
+#
+# Usage:
+#   ./scripts/autoplay
+#   ./scripts/autoplay --host 127.0.0.1 --port 6969
+#   ./scripts/autoplay --once
+#   ./scripts/autoplay --poll-ms 33
+
+SCRIPT_DIR="${0:A:h}"
+META_ROOT="${SCRIPT_DIR:h}"
+AUTOPLAY_ROOT="$META_ROOT/autoplay"
+MDE_PYTHON_SRC="$META_ROOT/MegaDriveEnvironment/python/src"
+AUTOPLAY_SRC="$AUTOPLAY_ROOT/src"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    print "Usage: $0 [sor-autoplay options...]"
+    print ""
+    print "Attach the SoR Autoplay observer to a running sor remote server."
+    print "Default: --host 127.0.0.1 --port 6969"
+    print ""
+    print "Examples:"
+    print "  $0"
+    print "  $0 --port 6969 --poll-ms 33"
+    print "  $0 --once"
+    print ""
+    print "Start the game host first, for example:"
+    print "  ./scripts/run --debugUtils --port 6969"
+    exit 0
+fi
+
+if [[ ! -d "$AUTOPLAY_SRC/sor_autoplay" ]]; then
+    print -u2 "autoplay package not found: $AUTOPLAY_SRC/sor_autoplay"
+    exit 1
+fi
+if [[ ! -d "$MDE_PYTHON_SRC/megadrive_remote" ]]; then
+    print -u2 "megadrive_remote not found: $MDE_PYTHON_SRC/megadrive_remote"
+    print -u2 "Ensure MegaDriveEnvironment is checked out as a sibling submodule."
+    exit 1
+fi
+
+# Prefer a Python with Tk. Homebrew/uv 3.13+ on this host often lacks _tkinter.
+PYTHON=""
+for candidate in python3.11 python3.12 python3 "${PYTHON:-}"; do
+    [[ -n "$candidate" ]] || continue
+    if command -v "$candidate" >/dev/null 2>&1; then
+        if "$candidate" -c 'import tkinter' >/dev/null 2>&1; then
+            PYTHON="$candidate"
+            break
+        fi
+    fi
+done
+
+if [[ -z "$PYTHON" ]]; then
+    print -u2 "No Python with Tk (_tkinter) found."
+    print -u2 "Install python@3.11 (or another build with Tk) and retry."
+    exit 1
+fi
+
+export PYTHONPATH="${AUTOPLAY_SRC}:${MDE_PYTHON_SRC}${PYTHONPATH:+:$PYTHONPATH}"
+
+# Defaults only when the user did not pass host/port.
+typeset -a args
+args=("$@")
+has_host=0
+has_port=0
+for arg in "${args[@]:-}"; do
+    case "$arg" in
+        --host|--host=*) has_host=1 ;;
+        --port|--port=*) has_port=1 ;;
+    esac
+done
+(( has_host )) || args=(--host 127.0.0.1 "${args[@]}")
+(( has_port )) || args=(--port 6969 "${args[@]}")
+
+exec "$PYTHON" -m sor_autoplay "${args[@]}"

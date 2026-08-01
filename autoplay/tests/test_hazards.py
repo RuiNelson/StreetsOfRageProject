@@ -1,0 +1,82 @@
+import unittest
+
+from sor_autoplay.hazards import (
+    collision_class_at,
+    find_floor_holes,
+    is_paused,
+    is_police_special_active,
+)
+
+
+class PauseSpecialTests(unittest.TestCase):
+    def test_pause_flag(self) -> None:
+        self.assertFalse(is_paused(0))
+        # Fresh pause write is 3; after first paused frame bit1 is cleared → 1.
+        self.assertTrue(is_paused(3))
+        self.assertTrue(is_paused(1))
+        self.assertTrue(is_paused(2))
+
+    def test_police_special(self) -> None:
+        self.assertFalse(is_police_special_active(0))
+        self.assertTrue(is_police_special_active(1))
+        self.assertTrue(is_police_special_active(0x01))
+
+
+class CollisionHoleTests(unittest.TestCase):
+    def test_nibble_select(self) -> None:
+        # One row, stride 2: bytes [0x10, 0x01] → classes high/low 1,0 then 0,1
+        cmap = bytes([0x10, 0x01])
+        stride = 2
+        self.assertEqual(collision_class_at(cmap, stride=stride, world_x=0, lane_y=0), 1)
+        self.assertEqual(collision_class_at(cmap, stride=stride, world_x=8, lane_y=0), 0)
+        self.assertEqual(collision_class_at(cmap, stride=stride, world_x=16, lane_y=0), 0)
+        self.assertEqual(collision_class_at(cmap, stride=stride, world_x=24, lane_y=0), 1)
+
+    def test_find_and_merge_holes(self) -> None:
+        # One connected L-shaped hole must become a single bounding box.
+        # stride=4 bytes (64px wide), a few rows.
+        stride = 4
+        rows = 4
+        cmap = bytearray([0x11] * (stride * rows))  # solid (class 1 both nibbles)
+        # 16px-wide column cells: byte index = world_x>>4
+        # Hole: wide bar on row0 cols 2-3, plus stem on row1 col2
+        cmap[2] = 0x00
+        cmap[3] = 0x00
+        cmap[stride + 2] = 0x00
+        holes = find_floor_holes(
+            bytes(cmap),
+            stride=stride,
+            lane_max=24,
+            world_x_min=0,
+            world_x_max=64,
+        )
+        self.assertEqual(len(holes), 1, holes)
+        hole = holes[0]
+        self.assertEqual(hole.world_x, 32)
+        self.assertEqual(hole.width, 32)
+        self.assertEqual(hole.lane_y, 0)
+        self.assertEqual(hole.height, 16)
+
+    def test_two_separate_holes(self) -> None:
+        stride = 8
+        rows = 3
+        cmap = bytearray([0x11] * (stride * rows))
+        # Two separate 16px pits on row 1 (lane 8), far apart so they stay separate.
+        cmap[stride + 1] = 0x00  # x=16..32
+        cmap[stride + 6] = 0x00  # x=96..112
+        holes = find_floor_holes(
+            bytes(cmap),
+            stride=stride,
+            lane_max=24,
+            world_x_min=0,
+            world_x_max=128,
+        )
+        xs = sorted(h.world_x for h in holes)
+        self.assertIn(16, xs)
+        self.assertIn(96, xs)
+        # Must not explode into a tile staircase.
+        self.assertLessEqual(len(holes), 3)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -26,12 +26,13 @@ study.
  <img src="docs/firstlevel.webp" width="400">
 </p>
 
-| Submodule | Purpose |
+| Submodule / directory | Purpose |
 | --- | --- |
 | [`MegaDriveEnvironment/`](MegaDriveEnvironment/) | SDL3-based Mega Drive host runtime and reusable C++ library |
 | [`StreetsOfRageRecompilation/`](StreetsOfRageRecompilation/) | Generated and hand-written C++, analysis data, build scripts, and the `sor` executable |
 | [`RageDecompiler/`](RageDecompiler/) | Python tools for disassembly, recompilation, label generation, and runtime discovery |
 | [`MegaDriveEnvironmentSampleGame/`](MegaDriveEnvironmentSampleGame/) | A small game targeting both the PC runtime and real Mega Drive hardware |
+| [`autoplay/`](autoplay/) | Python app that attaches to a running `sor` via remote access; live HUD observer today, autoplay agent later |
 
 The playable host expects `MegaDriveEnvironment`, `RageDecompiler`, and
 `StreetsOfRageRecompilation` to remain sibling directories. This is the layout
