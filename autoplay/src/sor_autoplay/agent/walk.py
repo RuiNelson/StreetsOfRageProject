@@ -20,8 +20,9 @@ from .controls import Intent
 # Arrival band in world/map units (pixels-ish).
 DEFAULT_EPS_X = 10.0
 DEFAULT_EPS_Y = 8.0
-# If still active this many ticks without progress, re-aim.
-STUCK_TICKS = 45
+# If still active this many ticks without progress, try a perpendicular re-aim.
+# Navigation.NavMemory also tracks stuck independently and can override goals.
+STUCK_TICKS = 20
 # Ignore tiny goal updates while walking (don't reset latch).
 GOAL_UPDATE_SLACK = 14.0
 
@@ -67,14 +68,25 @@ class WalkState:
         """Arm or refresh a walk goal from the player's current world pose."""
 
         gx, gy = float(goal_x), float(goal_y)
-        if (
+        same_neighbourhood = (
             self.active
-            and not force
             and abs(gx - self.goal_x) <= GOAL_UPDATE_SLACK
             and abs(gy - self.goal_y) <= GOAL_UPDATE_SLACK
-        ):
+        )
+        if same_neighbourhood and not force:
             # Same neighbourhood — keep latched directions; only refresh label.
             self.reason = reason
+            return
+        if same_neighbourhood and force:
+            # Forced refresh of a committed nav waypoint: update coordinates
+            # but **preserve stuck counters**. Resetting stuck every poll was
+            # why recovery never fired during hole detours.
+            self.goal_x = gx
+            self.goal_y = gy
+            self.reason = reason
+            self.eps_x = eps_x
+            self.eps_y = eps_y
+            self._reaim(me)
             return
 
         self.active = True
@@ -89,11 +101,26 @@ class WalkState:
         self.last_y = float(me.world_y)
         self._reaim(me)
 
-    def _reaim(self, me: MapEntity) -> None:
+    def _reaim(self, me: MapEntity, *, prefer_perpendicular: bool = False) -> None:
         err_x = self.goal_x - float(me.world_x)
         err_y = self.goal_y - float(me.world_y)
-        self.dir_x = 0 if abs(err_x) <= self.eps_x else (1 if err_x > 0 else -1)
-        self.dir_y = 0 if abs(err_y) <= self.eps_y else (1 if err_y > 0 else -1)
+        dx = 0 if abs(err_x) <= self.eps_x else (1 if err_x > 0 else -1)
+        dy = 0 if abs(err_y) <= self.eps_y else (1 if err_y > 0 else -1)
+        if prefer_perpendicular and dx != 0 and dy != 0:
+            # Stuck while diagonal: try the longer remaining axis alone first.
+            if abs(err_y) >= abs(err_x):
+                dx = 0
+            else:
+                dy = 0
+        elif prefer_perpendicular and dx != 0 and dy == 0:
+            # Stuck on pure X toward an unreachable goal: probe lane change.
+            dy = 1 if (int(me.world_x) + int(me.world_y)) % 2 == 0 else -1
+            dx = 0
+        elif prefer_perpendicular and dy != 0 and dx == 0:
+            dx = 1 if err_x >= 0 else -1
+            dy = 0
+        self.dir_x = dx
+        self.dir_y = dy
         if self.dir_x == 0 and self.dir_y == 0:
             # Already on the goal band — treat as finished (not an active walk).
             self.active = False
@@ -155,7 +182,9 @@ class WalkState:
             self.last_y = y
 
         if self.stuck_ticks >= STUCK_TICKS:
-            self._reaim(me)
+            # Do not only re-point at the same goal axes — try a perpendicular
+            # bias so we leave a wall/pit edge instead of freezing.
+            self._reaim(me, prefer_perpendicular=True)
             self.stuck_ticks = 0
             if not self.active:
                 return None

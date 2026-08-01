@@ -22,6 +22,8 @@ The main goals is to defeat the enemies as fast as they can, take the least dama
     top/bottom approaches first slide to a side X at the current lane; if a
     hole abuts one side of the prop, approach only from the solid side and
     keep that choice latched (no L/R shake)
+  - if walking makes no progress for a short time, detect stuck and try another
+    **safe** direction (do not keep re-aiming into the same void or wall)
 - pick up weapons and items
 - be steady when the police special is in action or the game is paused
 

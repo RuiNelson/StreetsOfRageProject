@@ -13,6 +13,10 @@ Design (explainable production-style planner):
    safe side (e.g. hole left of crate → approach from the right).
 4. **Jump landing safety**: refuse jump-kicks whose arc or landing cell is a
    pit (observed stage-4 death: jump into a hole while chasing).
+5. **Stuck recovery**: observe world motion independently of walk latches.
+   When position does not change for several polls, abandon the failed micro-
+   plan and try another safe direction (alternate detour lane, other crate
+   side, or solid cardinal/diagonal step).
 
 This module does not emit controller edges; it returns waypoints and booleans
 that policy/walk consume.
@@ -20,7 +24,7 @@ that policy/walk consume.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 
 from ..hazards import FloorHole
@@ -46,12 +50,37 @@ _DETOUR_ARRIVE_EPS = 7.0
 _DETOUR_STALE_TICKS = 90
 # Illegal stand utility (in a pit): never choose unless both sides fail.
 _STAND_ILLEGAL = -10_000.0
+# Stuck recovery (poll ticks ≈ 30–60 ms each in the observer).
+_STUCK_TICKS = 14
+_STUCK_MOVE_EPS = 1.5
+_ESCAPE_HOLD_TICKS = 28
+_BAN_DIR_TTL = 36
+# Offsets tried when recovering from a stuck pose (world units).
+_RECOVERY_STEPS: tuple[tuple[float, float], ...] = (
+    (28.0, 0.0),
+    (-28.0, 0.0),
+    (0.0, 22.0),
+    (0.0, -22.0),
+    (24.0, 18.0),
+    (24.0, -18.0),
+    (-24.0, 18.0),
+    (-24.0, -18.0),
+    (40.0, 0.0),
+    (-40.0, 0.0),
+    (0.0, 36.0),
+    (0.0, -36.0),
+    (36.0, 28.0),
+    (36.0, -28.0),
+    (-36.0, 28.0),
+    (-36.0, -28.0),
+)
 
 
 class NavPhase(Enum):
     IDLE = auto()
     DETOUR = auto()  # move to latched safe lane (vertical first)
     ADVANCE = auto()  # hold safe lane while clearing the hole on X
+    ESCAPE = auto()  # temporary stuck-recovery waypoint
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +101,8 @@ class NavMemory:
 
     Hole detours and breakable-side choice are separate latches: finishing a
     pit route must not forget which side of a crate is the only solid stand.
+    Stuck recovery tracks world motion outside WalkState (which resets on
+    forced goal refresh and otherwise only re-aims at the same goal).
     """
 
     phase: NavPhase = NavPhase.IDLE
@@ -89,9 +120,24 @@ class NavMemory:
     break_slot: str = ""
     break_side: int = 0
     break_age: int = 0
+    # Motion / stuck observation (world space).
+    track_x: float = 0.0
+    track_y: float = 0.0
+    track_init: bool = False
+    stuck_ticks: int = 0
+    # Active escape override after a stuck event.
+    escape_x: float | None = None
+    escape_y: float | None = None
+    escape_age: int = 0
+    escape_reason: str = ""
+    # Recently failed micro-directions (sign of step), with TTL.
+    banned_dirs: list[tuple[int, int, int]] = field(default_factory=list)
+    # Detour lane that failed while stuck (prefer the other side next time).
+    failed_detour_y: float | None = None
+    recovery_index: int = 0
 
     def clear(self) -> None:
-        """Clear hole-detour state only; keep breakable side commitment."""
+        """Clear hole-detour state only; keep breakable side + stuck bans."""
 
         self.phase = NavPhase.IDLE
         self.hole_x = -1
@@ -107,9 +153,26 @@ class NavMemory:
         self.break_side = 0
         self.break_age = 0
 
+    def clear_escape(self) -> None:
+        self.escape_x = None
+        self.escape_y = None
+        self.escape_age = 0
+        self.escape_reason = ""
+        if self.phase == NavPhase.ESCAPE:
+            self.phase = NavPhase.IDLE
+
+    def clear_stuck_tracking(self) -> None:
+        self.track_init = False
+        self.stuck_ticks = 0
+        self.clear_escape()
+        self.banned_dirs.clear()
+        self.failed_detour_y = None
+        self.recovery_index = 0
+
     def clear_all(self) -> None:
         self.clear()
         self.clear_break()
+        self.clear_stuck_tracking()
 
     def matches_hole(self, hole: FloorHole) -> bool:
         return (
@@ -138,9 +201,41 @@ class NavMemory:
         self.break_side = side_i
         self.break_age = 0
 
+    def latch_escape(self, goal_x: float, goal_y: float, reason: str) -> None:
+        self.escape_x = float(goal_x)
+        self.escape_y = float(goal_y)
+        self.escape_age = 0
+        self.escape_reason = reason
+        self.phase = NavPhase.ESCAPE
+        self.stuck_ticks = 0
+
+    def ban_direction(self, dx: int, dy: int) -> None:
+        sx = 0 if dx == 0 else (1 if dx > 0 else -1)
+        sy = 0 if dy == 0 else (1 if dy > 0 else -1)
+        if sx == 0 and sy == 0:
+            return
+        # Refresh TTL if already banned.
+        for i, (bx, by, _ttl) in enumerate(self.banned_dirs):
+            if bx == sx and by == sy:
+                self.banned_dirs[i] = (bx, by, _BAN_DIR_TTL)
+                return
+        self.banned_dirs.append((sx, sy, _BAN_DIR_TTL))
+
+    def tick_bans(self) -> None:
+        self.banned_dirs = [
+            (dx, dy, ttl - 1)
+            for dx, dy, ttl in self.banned_dirs
+            if ttl > 1
+        ]
+
+    def is_banned(self, dx: float, dy: float) -> bool:
+        sx = 0 if abs(dx) < 1.0 else (1 if dx > 0 else -1)
+        sy = 0 if abs(dy) < 1.0 else (1 if dy > 0 else -1)
+        return any(bx == sx and by == sy for bx, by, _ in self.banned_dirs)
+
     @property
     def hole_key(self) -> FloorHole | None:
-        if self.phase == NavPhase.IDLE or self.hole_x < 0:
+        if self.phase not in (NavPhase.DETOUR, NavPhase.ADVANCE) or self.hole_x < 0:
             return None
         return FloorHole(
             world_x=self.hole_x,
@@ -277,6 +372,214 @@ def escape_hole_waypoint(
     return NavWaypoint(gx, gy, "nav escape hole", committed=True)
 
 
+def _lane_bounds(level_index: int) -> tuple[float, float]:
+    return float(LANE_Y_MIN + 4), float(lane_y_max_for_level(level_index) - 4)
+
+
+def _solid_point(
+    world_x: float,
+    lane_y: float,
+    holes: tuple[FloorHole, ...],
+    *,
+    level_index: int,
+    margin: float = _HOLE_MARGIN,
+) -> bool:
+    lane_min, lane_max = _lane_bounds(level_index)
+    if not lane_min <= lane_y <= lane_max:
+        return False
+    return point_in_hole(world_x, lane_y, holes, margin=margin) is None
+
+
+def observe_motion(memory: NavMemory, me: MapEntity) -> None:
+    """Update stuck counters from world motion (independent of walk latches)."""
+
+    wx, wy = float(me.world_x), float(me.world_y)
+    memory.tick_bans()
+    if not memory.track_init:
+        memory.track_x = wx
+        memory.track_y = wy
+        memory.track_init = True
+        memory.stuck_ticks = 0
+        return
+    moved = abs(wx - memory.track_x) + abs(wy - memory.track_y)
+    if moved < _STUCK_MOVE_EPS:
+        memory.stuck_ticks += 1
+    else:
+        memory.stuck_ticks = 0
+        memory.track_x = wx
+        memory.track_y = wy
+
+
+def _recovery_candidates(
+    me: MapEntity,
+    goal_x: float,
+    goal_y: float,
+    holes: tuple[FloorHole, ...],
+    memory: NavMemory,
+    *,
+    level_index: int,
+    progress_right: bool,
+) -> list[tuple[float, float, float, str]]:
+    """Return scored solid recovery targets (utility, x, y, reason)."""
+
+    wx, wy = float(me.world_x), float(me.world_y)
+    gx, gy = float(goal_x), float(goal_y)
+    scored: list[tuple[float, float, float, str]] = []
+
+    # 1) Alternate detour lane if a hole plan was failing.
+    if memory.detour_lane is not None and memory.hole_key is not None:
+        hole = memory.hole_key
+        trial_x = wx + (_STEP_X if progress_right else -_STEP_X)
+        for candidate in safe_detour_lanes(
+            wx, trial_x, hole, holes, level_index=level_index
+        ):
+            if memory.failed_detour_y is not None and abs(
+                candidate - memory.failed_detour_y
+            ) < 4.0:
+                continue
+            if abs(candidate - (memory.detour_lane or 0.0)) < 4.0:
+                continue
+            if not _solid_point(wx, candidate, holes, level_index=level_index):
+                continue
+            util = 120.0 - abs(candidate - wy)
+            scored.append(
+                (util, wx, candidate, f"nav unstuck detour {candidate:.0f}")
+            )
+
+    # 2) Flip breakable side if the latched stand is unreachable.
+    if memory.break_slot and memory.break_side in (-1, 1):
+        other = -memory.break_side
+        # Approximate stand using default profile spacing; exact prop X is
+        # goal when reason is break — use goal as prop proxy when close.
+        prop_x = gx if abs(gx - wx) < 80 else wx + 40.0 * memory.break_side
+        stand_x = prop_x + other * _BREAK_SIDE_MIN * 1.5
+        stand_y = gy
+        if _solid_point(
+            stand_x,
+            stand_y,
+            holes,
+            level_index=level_index,
+            margin=_BREAK_STAND_HOLE_MARGIN,
+        ):
+            util = 100.0 - 0.2 * (abs(stand_x - wx) + abs(stand_y - wy))
+            scored.append(
+                (util, stand_x, stand_y, f"nav unstuck break side {other:+d}")
+            )
+
+    # 3) Local solid steps in other directions.
+    for dx, dy in _RECOVERY_STEPS:
+        if memory.is_banned(dx, dy):
+            continue
+        nx, ny = wx + dx, wy + dy
+        if not _solid_point(nx, ny, holes, level_index=level_index):
+            continue
+        # Immediate step must also be solid (don't skim the pit rim).
+        mid_x, mid_y = wx + dx * 0.45, wy + dy * 0.45
+        if not _solid_point(mid_x, mid_y, holes, level_index=level_index, margin=10.0):
+            continue
+        # Prefer steps that reduce distance to the original goal.
+        before = abs(gx - wx) + abs(gy - wy)
+        after = abs(gx - nx) + abs(gy - ny)
+        util = 50.0 + (before - after) * 0.8
+        # Slight bias for progress-forward escapes.
+        if progress_right and dx > 0:
+            util += 6.0
+        elif not progress_right and dx < 0:
+            util += 6.0
+        # Prefer lateral when stuck against a forward void.
+        if abs(dy) > abs(dx):
+            util += 8.0
+        scored.append((util, nx, ny, f"nav unstuck step ({dx:.0f},{dy:.0f})"))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return scored
+
+
+def recover_when_stuck(
+    me: MapEntity,
+    goal_x: float,
+    goal_y: float,
+    holes: tuple[FloorHole, ...],
+    memory: NavMemory,
+    *,
+    level_index: int,
+    progress_right: bool,
+) -> NavWaypoint | None:
+    """If motion has stalled, latch a different safe waypoint.
+
+    Returns an override waypoint, or None when not stuck / still holding a
+    previous escape. Call after ``observe_motion``.
+    """
+
+    wx, wy = float(me.world_x), float(me.world_y)
+
+    # Hold an active escape until arrival or timeout.
+    if memory.escape_x is not None and memory.escape_y is not None:
+        memory.escape_age += 1
+        arrived = (
+            abs(wx - memory.escape_x) <= 10.0
+            and abs(wy - memory.escape_y) <= 10.0
+        )
+        if arrived or memory.escape_age >= _ESCAPE_HOLD_TICKS:
+            # Ban the direction we just finished so we do not immediately
+            # re-pick a dead-end step.
+            memory.ban_direction(memory.escape_x - wx, memory.escape_y - wy)
+            memory.clear_escape()
+        else:
+            return NavWaypoint(
+                memory.escape_x,
+                memory.escape_y,
+                memory.escape_reason or "nav unstuck",
+                committed=True,
+            )
+
+    if memory.stuck_ticks < _STUCK_TICKS:
+        return None
+
+    # Record the failed plan elements so the next planner does not re-loop.
+    if memory.detour_lane is not None:
+        memory.failed_detour_y = memory.detour_lane
+    # Ban the direction of the goal we could not reach.
+    memory.ban_direction(goal_x - wx, goal_y - wy)
+    # Drop the stuck hole latch so a new detour side can be chosen.
+    if memory.phase in (NavPhase.DETOUR, NavPhase.ADVANCE):
+        memory.clear()
+
+    candidates = _recovery_candidates(
+        me,
+        goal_x,
+        goal_y,
+        holes,
+        memory,
+        level_index=level_index,
+        progress_right=progress_right,
+    )
+    if not candidates:
+        # Last resort: reverse along progress for a short retreat on a solid
+        # lane sample above/below.
+        retreat = -36.0 if progress_right else 36.0
+        for lane_delta in (0.0, 20.0, -20.0, 36.0, -36.0):
+            nx, ny = wx + retreat, wy + lane_delta
+            if _solid_point(nx, ny, holes, level_index=level_index):
+                candidates = [
+                    (1.0, nx, ny, "nav unstuck retreat"),
+                ]
+                break
+    if not candidates:
+        memory.stuck_ticks = 0
+        return None
+
+    # Rotate through good options if we keep getting stuck.
+    index = memory.recovery_index % len(candidates)
+    memory.recovery_index += 1
+    _util, nx, ny, why = candidates[index]
+    memory.latch_escape(nx, ny, why)
+    # If we chose an alternate break side, flip the latch.
+    if "break side" in why and memory.break_side in (-1, 1):
+        memory.break_side = -memory.break_side
+    return NavWaypoint(nx, ny, why, committed=True)
+
+
 def route_to_goal(
     me: MapEntity,
     goal_x: float,
@@ -292,31 +595,54 @@ def route_to_goal(
 
     Without holes, returns the requested goal. With holes, commits to
     DETOUR → ADVANCE so stage-4 progress does not flicker UP/DOWN.
+    Always runs stuck observation; recovery can override any plan.
     """
 
     wx, wy = float(me.world_x), float(me.world_y)
     gx, gy = float(goal_x), float(goal_y)
+    observe_motion(memory, me)
+
+    if progress_right is None:
+        progress_right = gx >= wx
+
+    # Stuck recovery works with or without holes (walls/breakables also pin).
+    stuck = recover_when_stuck(
+        me,
+        gx,
+        gy,
+        holes,
+        memory,
+        level_index=level_index,
+        progress_right=progress_right,
+    )
+    if stuck is not None:
+        return stuck
+
     if not holes:
-        memory.clear()
+        # Keep break/stuck memory; only clear hole detours.
+        if memory.phase in (NavPhase.DETOUR, NavPhase.ADVANCE):
+            memory.clear()
         return NavWaypoint(gx, gy, reason)
 
     # Emergency: already inside a pit.
     current = point_in_hole(wx, wy, holes, margin=0.0)
     if current is not None:
         memory.clear()
+        memory.clear_escape()
         return escape_hole_waypoint(wx, wy, current, level_index=level_index)
 
-    if progress_right is None:
-        progress_right = gx >= wx
     progress_sign = 1 if progress_right else -1
     trial_x = wx + (_STEP_X if progress_right else -_STEP_X)
 
     memory.age += 1
-    if memory.age > _DETOUR_STALE_TICKS and memory.phase != NavPhase.IDLE:
+    if memory.age > _DETOUR_STALE_TICKS and memory.phase in (
+        NavPhase.DETOUR,
+        NavPhase.ADVANCE,
+    ):
         memory.clear()
 
     # Continue a latched plan for the same hole.
-    if memory.phase != NavPhase.IDLE and memory.detour_lane is not None:
+    if memory.phase in (NavPhase.DETOUR, NavPhase.ADVANCE) and memory.detour_lane is not None:
         hole = memory.hole_key
         if hole is None:
             memory.clear()
@@ -390,6 +716,14 @@ def route_to_goal(
         candidates = safe_detour_lanes(
             wx, trial_x, blocked, holes, level_index=level_index
         )
+        if memory.failed_detour_y is not None:
+            filtered = tuple(
+                c
+                for c in candidates
+                if abs(c - memory.failed_detour_y) > 4.0
+            )
+            if filtered:
+                candidates = filtered
         preferred = (
             memory.detour_lane if memory.matches_hole(blocked) else None
         )

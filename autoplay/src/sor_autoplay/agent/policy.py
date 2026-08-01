@@ -1295,7 +1295,9 @@ def _walk_toward(
     """
 
     holes = snapshot.floor_holes if advice.avoid_holes else ()
-    if nav is not None and holes:
+    if nav is not None:
+        # Always route through the navigator: hole detours when present, and
+        # stuck recovery even when the hole map is empty (walls / crates).
         waypoint = navigation.route_to_goal(
             me,
             goal_x,
@@ -1308,8 +1310,8 @@ def _walk_toward(
         )
         goal_x, goal_y = waypoint.goal_x, waypoint.goal_y
         reason = waypoint.reason
-        # Committed detours need a tighter refresh so walk does not keep an
-        # old progress X latch that fights the vertical waypoint.
+        # Committed detours / unstuck escapes need a tighter refresh so walk
+        # does not keep an old progress X latch that fights the waypoint.
         if waypoint.committed:
             eps_x = min(eps_x, 6.0)
             eps_y = min(eps_y, 5.0)
@@ -1332,8 +1334,6 @@ def _walk_toward(
                 eps_y=eps_y,
             )
     else:
-        if nav is not None and not holes:
-            nav.clear()
         walk.set_goal(
             me,
             goal_x,

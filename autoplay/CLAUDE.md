@@ -97,7 +97,11 @@ that layout yet.
    scored against holes; a pit on one side (e.g. hole left of crate) latches
    the solid side only so the agent does not thrash. Jump starts (combat,
    Signal sweep, jump-break) require `jump_landing_safe` so kick arcs do not
-   land in holes.
+   land in holes. **Stuck recovery**: `observe_motion` tracks world position
+   independently of walk latches; after ~14 polls with no movement, ban the
+   failed direction and latch an alternate solid step (other detour lane,
+   other crate side, or lateral/diagonal offset) for several polls so the AI
+   leaves dead-ends instead of re-aiming at the same blocked goal.
 5. Police special when fuzzy pressure score ≥ threshold and specials remain
    (not round 8). Pressure combines crowd size, hunters, active attacks,
    surrounding geometry, bosses, and health and retains its fired-rule trace.

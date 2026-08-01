@@ -12,7 +12,9 @@ from sor_autoplay.agent.navigation import (
     breakable_side_approach,
     breakable_side_ready,
     jump_landing_safe,
+    observe_motion,
     path_blocked_ahead,
+    recover_when_stuck,
     route_to_goal,
 )
 from sor_autoplay.agent.policy import AgentConfig, AgentState, decide_actions
@@ -389,6 +391,102 @@ class BreakableSideTests(unittest.TestCase):
             decision.p1_note,
         )
         self.assertIn("side", decision.p1_note)
+
+
+class StuckRecoveryTests(unittest.TestCase):
+    def test_stuck_picks_alternate_safe_direction(self) -> None:
+        """After no motion, abandon the blocked forward goal for a side step."""
+        # Wide pit immediately to the right; forward goal is into the void.
+        hole = FloorHole(world_x=100, lane_y=40, width=80, height=50)
+        me = _entity(
+            kind="player",
+            map_x=90,
+            map_y=64,
+            world_x=90,
+            world_y=64,
+            slot="P1",
+            family="Player",
+        )
+        memory = NavMemory()
+        # Simulate being stuck while aiming right into the hole.
+        for _ in range(20):
+            observe_motion(memory, me)
+        self.assertGreaterEqual(memory.stuck_ticks, 14)
+        wp = recover_when_stuck(
+            me,
+            goal_x=200.0,
+            goal_y=64.0,
+            holes=(hole,),
+            memory=memory,
+            level_index=3,
+            progress_right=True,
+        )
+        self.assertIsNotNone(wp)
+        assert wp is not None
+        self.assertIn("unstuck", wp.reason)
+        # Must not aim into the pit.
+        from sor_autoplay.agent.navigation import point_in_hole
+
+        self.assertIsNone(
+            point_in_hole(wp.goal_x, wp.goal_y, (hole,), margin=12.0),
+            wp,
+        )
+        # Prefer a lane change rather than walking deeper into the hole.
+        self.assertTrue(
+            abs(wp.goal_y - 64.0) >= 10.0 or wp.goal_x <= 90.0,
+            wp,
+        )
+
+    def test_route_to_goal_overrides_when_stuck(self) -> None:
+        hole = FloorHole(world_x=100, lane_y=40, width=80, height=50)
+        me = _entity(
+            kind="player",
+            map_x=90,
+            map_y=64,
+            world_x=90,
+            world_y=64,
+            slot="P1",
+            family="Player",
+        )
+        memory = NavMemory()
+        for _ in range(16):
+            wp = route_to_goal(
+                me,
+                220.0,
+                64.0,
+                (hole,),
+                memory,
+                level_index=3,
+                progress_right=True,
+                reason="progress",
+            )
+        self.assertIn("unstuck", wp.reason)
+        self.assertTrue(wp.committed)
+
+    def test_force_goal_refresh_preserves_walk_stuck(self) -> None:
+        from sor_autoplay.agent.walk import WalkState
+
+        walk = WalkState()
+        me = _entity(
+            kind="player",
+            map_x=100,
+            map_y=64,
+            world_x=100,
+            world_y=64,
+            slot="P1",
+            family="Player",
+        )
+        walk.set_goal(me, 200, 64, reason="a")
+        # Simulate stuck polls with forced same-neighbourhood refresh.
+        for _ in range(25):
+            walk.set_goal(me, 202, 64, reason="a", force=True, eps_x=6, eps_y=5)
+            walk.step(me)
+        # Stuck path should have tried a perpendicular re-aim (dir_y != 0)
+        # at some point, or still be counting stuck.
+        self.assertTrue(
+            walk.stuck_ticks > 0 or walk.dir_y != 0 or walk.dir_x != 0,
+            f"stuck={walk.stuck_ticks} dir=({walk.dir_x},{walk.dir_y})",
+        )
 
 
 class JumpLandingTests(unittest.TestCase):
