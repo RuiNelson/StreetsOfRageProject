@@ -29,39 +29,39 @@ class CharacterProfile:
     grab_knees: int
 
 
-# Tuned for classic SoR feel, not frame-perfect TAS.
+# Aggressive defaults: more jump-ins and rear reactions, shorter stand-off.
 PROFILES: dict[int, CharacterProfile] = {
-    0: CharacterProfile(  # Axel — solid mid-range punches, Grand Upper (rear), good grabs
+    0: CharacterProfile(  # Axel — Grand Upper (rear) + solid jump-ins
         name="Axel",
-        strike_range=28.0,
+        strike_range=30.0,
         lane_align=10.0,
-        jump_attack_bias=0.12,
-        rear_attack_bias=0.22,
-        grab_bias=0.30,
-        approach_offset=18.0,
-        caution_range=40.0,
-        grab_knees=3,
-    ),
-    1: CharacterProfile(  # Adam — longer reach, jump kicks, fewer grabs
-        name="Adam",
-        strike_range=34.0,
-        lane_align=12.0,
-        jump_attack_bias=0.30,
-        rear_attack_bias=0.10,
-        grab_bias=0.18,
-        approach_offset=22.0,
-        caution_range=44.0,
+        jump_attack_bias=0.38,
+        rear_attack_bias=0.35,
+        grab_bias=0.22,
+        approach_offset=14.0,
+        caution_range=36.0,
         grab_knees=2,
     ),
-    2: CharacterProfile(  # Blaze — fast, kiting, jump-heavy, quick throws
-        name="Blaze",
-        strike_range=26.0,
-        lane_align=10.0,
-        jump_attack_bias=0.24,
-        rear_attack_bias=0.16,
-        grab_bias=0.28,
+    1: CharacterProfile(  # Adam — long jump kicks
+        name="Adam",
+        strike_range=36.0,
+        lane_align=12.0,
+        jump_attack_bias=0.50,
+        rear_attack_bias=0.22,
+        grab_bias=0.12,
         approach_offset=16.0,
-        caution_range=48.0,
+        caution_range=40.0,
+        grab_knees=2,
+    ),
+    2: CharacterProfile(  # Blaze — fast jump-ins and rear escapes
+        name="Blaze",
+        strike_range=28.0,
+        lane_align=10.0,
+        jump_attack_bias=0.45,
+        rear_attack_bias=0.30,
+        grab_bias=0.20,
+        approach_offset=12.0,
+        caution_range=42.0,
         grab_knees=2,
     ),
 }

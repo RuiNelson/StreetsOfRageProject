@@ -255,16 +255,10 @@ def adjust_approach(
 
     desired_x = foe.map_x + side * offset
 
-    # Antonio: stay outside the $28-$78 attack band when possible, then step in.
-    if plan.kind == ThreatKind.MIDRANGE:
-        abs_dx = abs(dx)
-        if 0x28 <= abs_dx <= 0x78 and abs(dy) < 20:
-            # Step out of the danger band first.
-            desired_x = foe.map_x + side * 0x80
-        elif abs_dx > 0x78:
-            desired_x = foe.map_x + side * strike
+    # Antonio: only pull in from outside the far band; jump-ins handle mid.
+    if plan.kind == ThreatKind.MIDRANGE and abs(dx) > 0x78:
+        desired_x = foe.map_x + side * strike
 
-    # Projectiles: pure evade — move opposite X and change lane.
     if plan.kind == ThreatKind.PROJECTILE or foe.kind == "projectile":
         evade_x = -1.0 if dx > 0 else 1.0
         evade_y = 1.0 if (me.map_y + me.world_x) % 2 == 0 else -1.0
@@ -279,14 +273,11 @@ def adjust_approach(
     if abs(err_y) > profile.lane_align:
         out_dy = 1.0 if err_y > 0 else -1.0
 
-    # Signal: if they are nearly same X and we're "behind" relative to progress,
-    # face them (reverse walk) so they cannot throw from the back.
-    if plan.kind == ThreatKind.FLANKER and abs(dx) < 36 and abs(dy) < 16:
+    # Always face the foe when close — never stroll past their back.
+    if abs(dx) < 50 and abs(dy) < 20:
         out_dx = 1.0 if dx > 0 else -1.0 if dx < 0 else out_dx
 
-    in_range = abs(dx) <= strike + 6 and abs(dy) <= profile.lane_align + 8
-    # Nora feint: if "hurt-looking" but distrust_downed, still treat as in fight
-    # (caller still attacks; we just don't skip them in target select).
+    in_range = abs(dx) <= strike + 10 and abs(dy) <= profile.lane_align + 10
     return out_dx, out_dy, in_range, plan
 
 
@@ -298,44 +289,53 @@ def attack_mix(
     in_range: bool,
     crowd: int,
     phase_name: str = "normal",
+    band: str = "close",
+    behind: bool = False,
 ) -> str:
-    """Return one of: 'punch', 'jump', 'rear', 'grab_walk', 'wait'.
+    """Return 'punch' | 'jump' | 'rear' | 'grab_walk' | 'wait'."""
 
-    ``grab_walk`` means close without attacking so collision can start a hold.
-    ``phase_name`` is a CombatPhase.name lowercased (e.g. knockdown, charge).
-    """
+    if behind:
+        return "rear"
 
-    # Free punish: always mash grounded attacks, never jump into recovery.
     if phase_name in ("knockdown", "blocked", "recovery"):
-        if not in_range:
-            return "wait"
-        return "punch"
+        return "punch" if in_range or band == "close" else "jump"
+
+    # Mid-range: jump+attack is the efficient opener.
+    if band == "jump" and not plan.no_jump:
+        return "jump"
+    if band == "approach" and not plan.no_jump:
+        roll = ((tick * 17) % 100) / 100.0
+        if roll < 0.55 + profile.jump_attack_bias * 0.3:
+            return "jump"
+        return "wait"
 
     if phase_name in ("charge", "attacking") and plan.sidestep and not in_range:
-        return "wait"  # position first
+        return "rear" if tick % 3 == 0 else "wait"
+
+    if not in_range and band == "far":
+        return "wait"
 
     if not in_range:
-        if plan.grab_bias >= 0.25 and phase_name == "normal":
+        if plan.grab_bias >= 0.35 and phase_name == "normal":
             return "grab_walk"
-        return "wait"
+        return "jump" if not plan.no_jump else "wait"
 
     roll = ((tick * 17) % 100) / 100.0
     jump_p = profile.jump_attack_bias + plan.jump_bias
     rear_p = profile.rear_attack_bias + plan.rear_bias
-    grab_p = plan.grab_bias
+    grab_p = plan.grab_bias * 0.5
 
-    if plan.no_jump or phase_name in ("charge", "attacking"):
+    if plan.no_jump:
         jump_p = 0.0
     if crowd >= 3:
-        rear_p += 0.15
-    # Escape / anti-air feel: rear when they commit an attack in close.
+        rear_p += 0.20
     if phase_name == "attacking":
-        rear_p += 0.25
+        rear_p += 0.30
 
-    if roll < grab_p * 0.5 and phase_name == "normal":
-        return "grab_walk"
-    if roll < grab_p * 0.5 + rear_p:
+    if roll < rear_p:
         return "rear"
-    if roll < grab_p * 0.5 + rear_p + jump_p:
+    if roll < rear_p + jump_p:
         return "jump"
+    if roll < rear_p + jump_p + grab_p * 0.35 and phase_name == "normal":
+        return "grab_walk"
     return "punch"

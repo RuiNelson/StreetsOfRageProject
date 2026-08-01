@@ -289,6 +289,29 @@ def _decide_one(
         )
 
     # --- Combat ---
+    # Face from current walk latch (or progress) for rear detection.
+    face_right = True
+    if walk.active and walk.dir_x != 0:
+        face_right = walk.dir_x > 0
+    elif not advice.progress_right:
+        face_right = False
+
+    # Immediate rear reaction: foe behind → face + rear attack (B+C).
+    rear_foe = combat.closest_behind(
+        me, snapshot.world_map.entities, face_right=face_right
+    )
+    if rear_foe is not None and not me.is_hurt:
+        walk.clear()
+        # Face them (toward rear_foe) while firing rear attack.
+        toward_right = rear_foe.map_x > me.map_x
+        memory.set_attack_cd(player_index, 3)
+        return Intent(
+            left=not toward_right,
+            right=toward_right,
+            rear_attack=True,
+            note=f"turn rear {rear_foe.label}",
+        )
+
     target = combat.select_target(
         me,
         snapshot.world_map.entities,
@@ -304,8 +327,14 @@ def _decide_one(
         phase_name = phase.name.lower()
         tag = target.entity.phase_tag
         cd = memory.attack_cd(player_index)
+        abs_dx = abs(target.dx)
+        abs_dy = abs(target.dy)
+        band = combat.engagement_band(abs_dx, abs_dy, profile)
+        behind = combat.enemy_is_behind(
+            me, target.entity, face_right=face_right
+        )
 
-        # Projectile: walk to a sidestep point, not into the projectile.
+        # Projectile: sidestep, don't chase.
         if target.entity.kind == "projectile" or plan.kind == enemy_ai.ThreatKind.PROJECTILE:
             evade_x = me.world_x - 40 if dx > 0 else me.world_x + 40
             evade_y = me.world_y + (18 if (me.world_x + me.world_y) % 2 == 0 else -18)
@@ -332,81 +361,98 @@ def _decide_one(
                 advice=advice,
             )
 
-        # Desired stand point for approach (world space).
-        stand_x, stand_y = _stand_point(me, target, profile, low_health=low_hp)
+        # Face the target on X always when fighting.
+        face_left = target.dx < -4
+        face_right_now = target.dx > 4
 
-        if in_range and not me.is_hurt:
-            walk.clear()
-            attack = False
-            jump = False
-            rear = False
-            note = f"{target.entity.label} [{tag}]"
-            if cd == 0:
-                mix = enemy_ai.attack_mix(
-                    plan,
-                    profile,
-                    tick=memory.tick + player_index * 3,
-                    in_range=True,
-                    crowd=press.enemy_count,
-                    phase_name=phase_name,
+        # Fight bands: close punch / mid jump-kick / approach jump-in.
+        # Do NOT walk passively into their fists — attack while closing.
+        if not me.is_hurt and band in ("close", "jump", "approach") and cd == 0:
+            mix = enemy_ai.attack_mix(
+                plan,
+                profile,
+                tick=memory.tick + player_index * 3,
+                in_range=in_range or band == "close",
+                crowd=press.enemy_count,
+                phase_name=phase_name,
+                band=band,
+                behind=behind,
+            )
+            if is_punishable(phase) and phase != CombatPhase.GRABBED:
+                walk.clear()
+                memory.set_attack_cd(player_index, 2)
+                return Intent(
+                    left=face_left,
+                    right=face_right_now,
+                    attack=True,
+                    note=f"punish {target.entity.label} [{tag}]",
                 )
-                if is_punishable(phase) and phase != CombatPhase.GRABBED:
-                    attack = True
-                    note = f"punish {target.entity.label} [{tag}]"
-                    memory.set_attack_cd(player_index, 2)
-                elif mix == "grab_walk" or (
-                    grabs.want_grab_approach(
-                        me,
-                        target.entity,
-                        grab_bias=max(plan.grab_bias, profile.grab_bias),
-                    )
-                    and phase_name == "normal"
-                ):
-                    # Walk a hair into them for collision grab.
-                    return _walk_toward(
-                        walk,
-                        me,
-                        goal_x=float(target.entity.world_x),
-                        goal_y=float(target.entity.world_y),
-                        reason=f"grab setup {target.entity.label}",
-                        snapshot=snapshot,
-                        advice=advice,
-                        eps_x=6.0,
-                        eps_y=6.0,
-                    )
-                elif mix == "rear":
-                    rear = True
-                    note = f"rear {target.entity.label} [{tag}]"
-                    memory.set_attack_cd(player_index, 4)
-                elif mix == "jump":
-                    jump = True
-                    attack = True
-                    note = f"jump {target.entity.label} [{tag}]"
-                    memory.set_attack_cd(player_index, 5)
-                else:
-                    attack = True
-                    note = f"punch {target.entity.label} [{tag}]"
-                    memory.set_attack_cd(player_index, 3)
-            return Intent(attack=attack, jump=jump, rear_attack=rear, note=note)
+            if mix == "rear" or behind:
+                walk.clear()
+                memory.set_attack_cd(player_index, 3)
+                return Intent(
+                    left=face_left,
+                    right=face_right_now,
+                    rear_attack=True,
+                    note=f"rear {target.entity.label} [{tag}]",
+                )
+            if mix == "jump":
+                # Jump+attack chord while holding direction toward foe.
+                walk.clear()
+                memory.set_attack_cd(player_index, 4)
+                return Intent(
+                    left=face_left,
+                    right=face_right_now,
+                    up=target.dy < -profile.lane_align,
+                    down=target.dy > profile.lane_align,
+                    jump=True,
+                    attack=True,
+                    note=f"jump-in {target.entity.label} [{tag}]",
+                )
+            if mix == "punch" and (in_range or band == "close"):
+                walk.clear()
+                memory.set_attack_cd(player_index, 2)
+                return Intent(
+                    left=face_left,
+                    right=face_right_now,
+                    attack=True,
+                    note=f"punch {target.entity.label} [{tag}]",
+                )
+            if mix == "grab_walk" and band == "close":
+                return _walk_toward(
+                    walk,
+                    me,
+                    goal_x=float(target.entity.world_x),
+                    goal_y=float(target.entity.world_y),
+                    reason=f"grab setup {target.entity.label}",
+                    snapshot=snapshot,
+                    advice=advice,
+                    eps_x=6.0,
+                    eps_y=6.0,
+                )
 
-        # Out of range: latch walk to stand point; optional face buttons later.
-        hunters = combat.count_hunters(snapshot.world_map.entities, player_index)
-        if is_dangerous(phase) and plan.sidestep:
-            # Sidestep goal: same X-ish, different lane.
+        # Still closing from far / between attack cooldowns: walk to stand, but
+        # keep facing and do not overshoot past the foe.
+        stand_x, stand_y = _stand_point(me, target, profile, low_health=low_hp)
+        if is_dangerous(phase) and plan.sidestep and band != "close":
             stand_y = float(me.world_y) + (20 if dy >= 0 else -20)
-            stand_x = float(me.world_x) + (-30 if dx > 0 else 30)
+            stand_x = float(me.world_x) + (-24 if dx > 0 else 24)
             reason = f"evade {target.entity.label} [{tag}]"
         elif is_punishable(phase):
             stand_x = float(target.entity.world_x)
             stand_y = float(target.entity.world_y)
             reason = f"chase punish {target.entity.label} [{tag}]"
-        elif press.enemy_count >= 3 or hunters >= 2:
-            px, py = combat.peril_vector(me, snapshot.world_map.entities)
-            stand_x = float(me.world_x) + px * 40
-            stand_y = float(me.world_y) + py * 24
-            reason = f"space {target.entity.label}"
         else:
             reason = f"close {target.entity.label} [{tag}]"
+
+        # On cooldown but in punch range: face and hold still (or micro-adjust).
+        if band == "close" and cd > 0:
+            walk.clear()
+            return Intent(
+                left=face_left,
+                right=face_right_now,
+                note=f"face {target.entity.label} cd={cd}",
+            )
 
         return _walk_toward(
             walk,
@@ -416,6 +462,8 @@ def _decide_one(
             reason=reason,
             snapshot=snapshot,
             advice=advice,
+            eps_x=8.0,
+            eps_y=6.0,
         )
 
     # --- Progress ---
