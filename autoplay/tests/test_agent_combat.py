@@ -127,7 +127,7 @@ class GrabTreeTests(unittest.TestCase):
                 self.assertFalse(intent.right)
         self.assertTrue(saw_throw, notes)
 
-    def test_axel_may_knee_before_throw(self) -> None:
+    def test_grab_always_throws(self) -> None:
         from sor_autoplay.agent.characters import PROFILES
 
         me = _e(
@@ -142,7 +142,8 @@ class GrabTreeTests(unittest.TestCase):
         ctx = context_from_player(me)
         mem = GrabMemory()
         notes = []
-        for t in range(12):
+        saw_atk = False
+        for t in range(8):
             intent = decide_held(
                 me,
                 ctx,
@@ -155,10 +156,10 @@ class GrabTreeTests(unittest.TestCase):
             )
             assert intent is not None
             notes.append(intent.note)
-        self.assertTrue(
-            any("knee" in n or "throw" in n for n in notes),
-            notes,
-        )
+            if intent.attack:
+                saw_atk = True
+        self.assertTrue(saw_atk, notes)
+        self.assertTrue(any("throw" in n for n in notes), notes)
 
     def test_weapon_bat_swings(self) -> None:
         me = _e(
@@ -197,7 +198,9 @@ class GrabTreeTests(unittest.TestCase):
         assert a is not None and b is not None
         self.assertTrue(a.right and b.right)
         self.assertTrue(a.attack or b.attack)
-        self.assertTrue("throw" in a.note or "throw" in b.note)
+        self.assertTrue(
+            any(k in a.note or k in b.note for k in ("weapon", "dump", "use"))
+        )
 
     def test_holding_detected_from_action_only(self) -> None:
         me = _e(
@@ -216,7 +219,7 @@ class GrabTreeTests(unittest.TestCase):
 
     def test_want_grab_when_close(self) -> None:
         me = _e(kind="player", family="Player", map_x=100, map_y=64)
-        foe = _e(map_x=112, map_y=64)
+        foe = _e(map_x=120, map_y=64)  # 20px in band 16..28
         self.assertTrue(want_grab_approach(me, foe, grab_bias=0.3))
         self.assertFalse(want_grab_approach(me, foe, grab_bias=0.05))
 
@@ -293,7 +296,7 @@ class PolicyIntegrationTests(unittest.TestCase):
         # Should move, not special.
         self.assertFalse(decision.p1_mask & 0x10)  # not A alone as special priority
 
-    def test_grab_hold_produces_knee(self) -> None:
+    def test_grab_hold_throws(self) -> None:
         p1 = _e(
             kind="player",
             family="Player",
@@ -305,9 +308,16 @@ class PolicyIntegrationTests(unittest.TestCase):
             label="P1",
         )
         snap = self._snap((p1,))
-        decision = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
-        self.assertTrue(decision.p1_mask & int(ATTACK))
-        self.assertIn("grab", decision.p1_note)
+        mem = AgentState()
+        notes = []
+        saw_attack = False
+        for _ in range(6):
+            decision = decide_actions(snap, AgentConfig(p1_enabled=True), mem)
+            notes.append(decision.p1_note)
+            if decision.p1_mask & int(ATTACK):
+                saw_attack = True
+        self.assertTrue(saw_attack, notes)
+        self.assertTrue(any("throw" in n for n in notes), notes)
 
     def test_signal_priority_over_far_garcia(self) -> None:
         from sor_autoplay.agent.combat import select_target

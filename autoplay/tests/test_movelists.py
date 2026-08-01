@@ -56,23 +56,29 @@ class MoveListProfileTests(unittest.TestCase):
         band = engagement_band(40, 4, ax)
         self.assertIn(band, ("jump", "approach", "rear"))
 
-    def test_rear_sweet_spots(self) -> None:
+    def test_rear_only_when_behind(self) -> None:
         from sor_autoplay.agent.combat import rear_in_band
 
-        # Axel short rear; Adam longer.
         self.assertTrue(rear_in_band(24, PROFILES[0]))
         self.assertFalse(rear_in_band(48, PROFILES[0]))
         self.assertTrue(rear_in_band(48, PROFILES[1]))
         plan = plan_for(_foe())
+        # Distance alone must NOT force rear.
+        self.assertNotEqual(
+            attack_mix(
+                plan, PROFILES[1], tick=0, in_range=True, crowd=1, band="close"
+            ),
+            "rear",
+        )
         self.assertEqual(
             attack_mix(
                 plan,
                 PROFILES[1],
                 tick=0,
-                in_range=False,
+                in_range=True,
                 crowd=1,
-                band="jump",
-                rear_sweet=True,
+                band="close",
+                behind=True,
             ),
             "rear",
         )

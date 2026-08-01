@@ -132,21 +132,28 @@ def select_target(
     return best
 
 
-def enemy_is_behind(me: MapEntity, foe: MapEntity, *, face_right: bool | None = None) -> bool:
-    """True if the foe is on our rear side.
+def enemy_is_behind(
+    me: MapEntity,
+    foe: MapEntity,
+    *,
+    face_right: bool,
+    max_dist: float = REAR_REACT_RANGE,
+) -> bool:
+    """True if the foe is on our **rear** side and close enough for a back attack.
 
-    Without a reliable facing bit on players, infer from relative X: if we have
-    a preferred face (last walk dir), use that; else treat "behind" as the side
-    opposite stage progress is not used here — pure geometry for reaction.
+    Requires an explicit facing (from walk latch or last aim). Foes in front are
+    never "behind" — that was causing random B+C while approaching.
     """
 
     dx = foe.map_x - me.map_x
-    if face_right is None:
-        # Symmetric: not used alone; callers pass walk dir when known.
+    dy = abs(foe.map_y - me.map_y)
+    if dy > 16:
         return False
-    if face_right and dx < -8:
+    if abs(dx) > max_dist or abs(dx) < 6:
+        return False
+    if face_right and dx < -10:
         return True
-    if not face_right and dx > 8:
+    if not face_right and dx > 10:
         return True
     return False
 
@@ -164,38 +171,29 @@ def approach_vector(
         me, target.entity, profile, low_health=low_health
     )
     phase = target.entity.combat_phase
-
-    # Wider "in range" so we stop passive walking and start fighting sooner.
-    abs_dx = abs(target.dx)
-    abs_dy = abs(target.dy)
-    punch_range = profile.strike_range + 10
-    if abs_dx <= punch_range and abs_dy <= profile.lane_align + 10:
-        in_range = True
+    lane_slop = max(10.0, profile.lane_align)
 
     if is_punishable(phase) and phase != CombatPhase.GRABBED:
-        err_x = target.entity.map_x - me.map_x
-        err_y = target.entity.map_y - me.map_y
-        dx = 0.0 if abs(err_x) <= 6 else (1.0 if err_x > 0 else -1.0)
-        dy = 0.0 if abs(err_y) <= profile.lane_align else (1.0 if err_y > 0 else -1.0)
-        in_range = abs(err_x) <= punch_range and abs(err_y) <= profile.lane_align + 8
+        # Close to punish distance, not on top of them.
+        stand = max(18.0, profile.strike_range * 0.7)
+        err_x = (target.entity.map_x - (stand if target.dx > 0 else -stand)) - me.map_x
+        # Simpler: move toward foe until in_range, stop at strike.
+        abs_dx = abs(target.dx)
+        if abs_dx > profile.strike_range:
+            dx = 1.0 if target.dx > 0 else -1.0
+        elif abs_dx < profile.strike_range * 0.6:
+            dx = -1.0 if target.dx > 0 else 1.0
+        else:
+            dx = 0.0
+        dy = 0.0 if abs(target.dy) <= lane_slop else (1.0 if target.dy > 0 else -1.0)
+        in_range = abs_dx <= profile.strike_range + 4 and abs(target.dy) <= lane_slop + 4
         return dx, dy, in_range, plan
 
     if is_dangerous(phase) and plan.sidestep:
-        if abs(target.dy) < 20:
+        if abs(target.dy) < 18:
             dy = 1.0 if (me.map_y + me.world_x) % 2 == 0 else -1.0
         if phase == CombatPhase.CHARGE and abs(target.dx) < 100:
-            if abs(target.dx) < 40:
-                dx = -1.0 if target.dx >= 0 else 1.0
-            else:
-                dx = -1.0 if target.dx > 0 else 1.0
-
-    if target.entity.type_id == 0x56 and target.entity.boss_dist_x:
-        dist_x = target.entity.boss_dist_x
-        if 0x28 <= dist_x <= 0x78 and abs(target.dy) < 20:
-            dx = -1.0 if target.dx > 0 else 1.0
-            in_range = False
-        elif dist_x > 0x78:
-            dx = 1.0 if target.dx > 0 else -1.0
+            dx = -1.0 if target.dx >= 0 else 1.0
 
     return dx, dy, in_range, plan
 
@@ -339,7 +337,7 @@ def closest_behind(
     face_right: bool,
     max_dist: float = REAR_REACT_RANGE,
 ) -> MapEntity | None:
-    """Nearest on-screen foe on our rear side (for turn-and-strike)."""
+    """Nearest on-screen foe truly behind us (for turn + back attack)."""
 
     best: MapEntity | None = None
     best_d = max_dist
@@ -352,9 +350,9 @@ def closest_behind(
             continue
         if not is_on_screen(entity, soft=False):
             continue
-        if not enemy_is_behind(me, entity, face_right=face_right):
-            continue
-        if abs(entity.map_y - me.map_y) > 20:
+        if not enemy_is_behind(
+            me, entity, face_right=face_right, max_dist=max_dist
+        ):
             continue
         d = abs(entity.map_x - me.map_x)
         if d < best_d:

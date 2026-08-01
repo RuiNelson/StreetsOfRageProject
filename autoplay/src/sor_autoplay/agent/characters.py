@@ -67,8 +67,8 @@ PROFILES: dict[int, CharacterProfile] = {
         grab_knees=1,
         prefer_throw=True,
         prefer_vault=False,
-        approach_offset=14.0,
-        caution_range=36.0,
+        approach_offset=26.0,  # stand-off ≈ strike (not chest-to-chest)
+        caution_range=40.0,
         preferred_weapons=_ALL_WEAPONS,
         weak_weapons=frozenset(),
     ),
@@ -86,9 +86,9 @@ PROFILES: dict[int, CharacterProfile] = {
         grab_bias=0.18,
         grab_knees=0,  # FAQ: knees not worth it vs throw
         prefer_throw=True,
-        prefer_vault=True,  # vault → back surplex when safe
-        approach_offset=16.0,
-        caution_range=40.0,
+        prefer_vault=True,  # vault → back suplex when safe
+        approach_offset=30.0,
+        caution_range=44.0,
         preferred_weapons=_BAT_PIPE,
         weak_weapons=frozenset(),
     ),
@@ -107,8 +107,8 @@ PROFILES: dict[int, CharacterProfile] = {
         grab_knees=0,
         prefer_throw=True,
         prefer_vault=True,
-        approach_offset=12.0,
-        caution_range=42.0,
+        approach_offset=24.0,
+        caution_range=44.0,
         preferred_weapons=_BAT_PIPE,
         weak_weapons=_KNIFE_BOTTLE,  # short range for her
     ),

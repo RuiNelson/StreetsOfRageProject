@@ -152,7 +152,10 @@ class PolicyAggressionTests(unittest.TestCase):
         mem.p1_walk.active = True
         mem.p1_walk.dir_x = 1
         d = decide_actions(snap, AgentConfig(p1_enabled=True), mem)
-        self.assertIn("rear", d.p1_note)
+        self.assertTrue(
+            "rear" in d.p1_note or "back atk" in d.p1_note,
+            d.p1_note,
+        )
         # Rear = B|C
         self.assertEqual(d.p1_mask & 0x60, 0x60, msg=hex(d.p1_mask))
 

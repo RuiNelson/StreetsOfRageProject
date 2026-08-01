@@ -231,9 +231,10 @@ def adjust_approach(
     *,
     low_health: bool = False,
 ) -> tuple[float, float, bool, CounterPlan]:
-    """Compute (dx_sign, dy_sign, in_range, plan) with family-specific spacing.
+    """Compute (dx_sign, dy_sign, in_range, plan).
 
-    Signs are -1 / 0 / +1 in map space.
+    Stand at about ``strike_range`` on X (not on top of the foe). Match lane
+    only when clearly off-line; do not micro-chase Y.
     """
 
     plan = plan_for(foe)
@@ -241,43 +242,47 @@ def adjust_approach(
     dy = foe.map_y - me.map_y
 
     strike = profile.strike_range * plan.range_scale
+    # Comfortable fight distance ≈ strike range (pickup box is ~±$14 X / ±$10 Y).
+    stand_dist = max(20.0, strike * 0.85)
     if low_health:
-        strike = max(strike, profile.caution_range * 0.85)
-
-    # Stand slightly off the foe on the side we approach from.
-    side = -1.0 if dx > 0 else 1.0 if dx < 0 else -1.0
-    offset = profile.approach_offset * plan.range_scale
-    if plan.sidestep and abs(dx) < strike + 40:
-        # Prefer a lane offset rather than head-on for chargers/flankers.
-        desired_y = foe.map_y + (18.0 if plan.prefer_lane_delta >= 0 else -18.0)
-    else:
-        desired_y = foe.map_y + plan.prefer_lane_delta * 10.0
-
-    desired_x = foe.map_x + side * offset
-
-    # Antonio: only pull in from outside the far band; jump-ins handle mid.
-    if plan.kind == ThreatKind.MIDRANGE and abs(dx) > 0x78:
-        desired_x = foe.map_x + side * strike
+        stand_dist = max(stand_dist, profile.caution_range * 0.7)
 
     if plan.kind == ThreatKind.PROJECTILE or foe.kind == "projectile":
         evade_x = -1.0 if dx > 0 else 1.0
         evade_y = 1.0 if (me.map_y + me.world_x) % 2 == 0 else -1.0
         return evade_x, evade_y, False, plan
 
+    side = -1.0 if dx > 0 else 1.0 if dx < 0 else -1.0
+    desired_x = foe.map_x + side * stand_dist
+    lane_slop = max(10.0, profile.lane_align)
+    if abs(dy) > lane_slop:
+        desired_y = foe.map_y
+    else:
+        desired_y = me.map_y
+
+    if plan.sidestep and plan.kind in (
+        ThreatKind.CHARGER,
+        ThreatKind.FLANKER,
+        ThreatKind.CLAWER,
+    ):
+        if abs(dx) < strike + 50:
+            desired_y = foe.map_y + (14.0 if plan.prefer_lane_delta >= 0 else -14.0)
+
     err_x = desired_x - me.map_x
     err_y = desired_y - me.map_y
     out_dx = 0.0
     out_dy = 0.0
-    if abs(err_x) > 6:
+    if abs(err_x) > 8:
         out_dx = 1.0 if err_x > 0 else -1.0
-    if abs(err_y) > profile.lane_align:
+    if abs(err_y) > lane_slop:
         out_dy = 1.0 if err_y > 0 else -1.0
 
-    # Always face the foe when close — never stroll past their back.
-    if abs(dx) < 50 and abs(dy) < 20:
-        out_dx = 1.0 if dx > 0 else -1.0 if dx < 0 else out_dx
+    abs_dx = abs(dx)
+    # Too close on X: create space instead of walking into them.
+    if abs_dx < stand_dist - 6 and abs(dy) <= lane_slop + 4:
+        out_dx = -1.0 if dx > 0 else 1.0 if dx < 0 else out_dx
 
-    in_range = abs(dx) <= strike + 10 and abs(dy) <= profile.lane_align + 10
+    in_range = abs_dx <= strike + 4 and abs(dy) <= lane_slop + 4
     return out_dx, out_dy, in_range, plan
 
 
@@ -291,20 +296,18 @@ def attack_mix(
     phase_name: str = "normal",
     band: str = "close",
     behind: bool = False,
-    rear_sweet: bool = False,
 ) -> str:
-    """Return 'punch' | 'jump' | 'rear' | 'grab_walk' | 'wait'."""
+    """Return 'punch' | 'jump' | 'rear' | 'grab_walk' | 'wait'.
+
+    **rear only when ``behind``** — B+C is a back attack for foes at our back.
+    """
 
     if behind:
-        return "rear"
-    # Adam/Blaze/Axel back-attack distance (FAQ ranges differ).
-    if rear_sweet and phase_name == "normal":
         return "rear"
 
     if phase_name in ("knockdown", "blocked", "recovery"):
         return "punch" if in_range or band == "close" else "jump"
 
-    # Character jump-kick window (GameFAQs: Blaze best, Adam good, Axel short).
     if band == "jump" and not plan.no_jump:
         return "jump"
     if band == "approach" and not plan.no_jump:
@@ -314,37 +317,26 @@ def attack_mix(
         return "wait"
 
     if phase_name in ("charge", "attacking") and plan.sidestep and not in_range:
-        return "rear" if tick % 3 == 0 else "wait"
+        return "wait"
 
     if not in_range and band == "far":
         return "wait"
 
     if not in_range:
-        if plan.grab_bias >= 0.35 and phase_name == "normal":
-            return "grab_walk"
         return "jump" if not plan.no_jump else "wait"
 
     roll = ((tick * 17) % 100) / 100.0
     jump_p = profile.jump_attack_bias + plan.jump_bias
-    rear_p = profile.rear_attack_bias + plan.rear_bias
     combo_p = profile.combo_bias
-    grab_p = plan.grab_bias * 0.4 + profile.grab_bias * 0.2
+    grab_p = plan.grab_bias * 0.25 + profile.grab_bias * 0.15
 
     if plan.no_jump:
         jump_p = 0.0
-    if crowd >= 3:
-        rear_p += 0.15
-    if phase_name == "attacking":
-        rear_p += 0.25
 
-    # Order: rear reaction → jump → combo punch → rare grab setup.
-    # Blaze has low combo_bias so she leans jump/throw rather than mashing B.
-    if roll < rear_p * 0.85:
-        return "rear"
-    if roll < rear_p * 0.85 + jump_p:
+    if roll < jump_p:
         return "jump"
-    if roll < rear_p * 0.85 + jump_p + combo_p:
+    if roll < jump_p + combo_p:
         return "punch"
-    if roll < rear_p * 0.85 + jump_p + combo_p + grab_p * 0.3 and phase_name == "normal":
+    if roll < jump_p + combo_p + grab_p * 0.25 and phase_name == "normal":
         return "grab_walk"
     return "punch"

@@ -291,28 +291,12 @@ def _decide_one(
         )
 
     # --- Combat ---
-    # Face from current walk latch (or progress) for rear detection.
-    face_right = True
+    # Facing for rear detection: only from an active walk latch or aim at target.
+    # Do NOT default to "progress right" — that treated every left-side foe as
+    # "behind" and spammed back attacks.
+    face_right: bool | None = None
     if walk.active and walk.dir_x != 0:
         face_right = walk.dir_x > 0
-    elif not advice.progress_right:
-        face_right = False
-
-    # Immediate rear reaction: foe behind → face + rear attack (B+C).
-    rear_foe = combat.closest_behind(
-        me, snapshot.world_map.entities, face_right=face_right
-    )
-    if rear_foe is not None and not me.is_hurt:
-        walk.clear()
-        # Face them (toward rear_foe) while firing rear attack.
-        toward_right = rear_foe.map_x > me.map_x
-        memory.set_attack_cd(player_index, 3)
-        return Intent(
-            left=not toward_right,
-            right=toward_right,
-            rear_attack=True,
-            note=f"turn rear {rear_foe.label}",
-        )
 
     target = combat.select_target(
         me,
@@ -321,6 +305,33 @@ def _decide_one(
         prefer_forward=advice.progress_right,
         my_seat=player_index,
     )
+
+    # Once we have a primary target in front, face them; only then can "behind"
+    # mean a second foe at our back.
+    if target is not None and face_right is None:
+        face_right = target.dx >= 0
+
+    if face_right is not None and not me.is_hurt:
+        rear_foe = combat.closest_behind(
+            me,
+            snapshot.world_map.entities,
+            face_right=face_right,
+            max_dist=min(profile.rear_range_max + 8, combat.REAR_REACT_RANGE),
+        )
+        # Only back-attack if that foe is not the one we're already facing.
+        if rear_foe is not None and (
+            target is None or rear_foe.slot != target.entity.slot
+        ):
+            walk.clear()
+            toward_right = rear_foe.map_x > me.map_x
+            memory.set_attack_cd(player_index, 3)
+            return Intent(
+                left=not toward_right,
+                right=toward_right,
+                rear_attack=True,
+                note=f"turn rear {rear_foe.label}",
+            )
+
     if target is not None:
         dx, dy, in_range, plan = combat.approach_vector(
             me, target, profile, low_health=low_hp
@@ -332,11 +343,15 @@ def _decide_one(
         abs_dx = abs(target.dx)
         abs_dy = abs(target.dy)
         band = combat.engagement_band(abs_dx, abs_dy, profile)
-        behind = combat.enemy_is_behind(
-            me, target.entity, face_right=face_right
-        )
+        # Behind only vs our movement facing (walk latch), not vs "facing the target".
+        behind = False
+        if walk.active and walk.dir_x != 0:
+            behind = combat.enemy_is_behind(
+                me,
+                target.entity,
+                face_right=walk.dir_x > 0,
+            )
 
-        # Projectile: sidestep, don't chase.
         if target.entity.kind == "projectile" or plan.kind == enemy_ai.ThreatKind.PROJECTILE:
             evade_x = me.world_x - 40 if dx > 0 else me.world_x + 40
             evade_y = me.world_y + (18 if (me.world_x + me.world_y) % 2 == 0 else -18)
@@ -363,12 +378,10 @@ def _decide_one(
                 advice=advice,
             )
 
-        # Face the target on X always when fighting.
-        face_left = target.dx < -4
-        face_right_now = target.dx > 4
+        # Face toward target for attacks (not necessarily walk into them).
+        face_left = target.dx < -6
+        face_right_now = target.dx > 6
 
-        # Fight bands: close punch / mid jump-kick / approach jump-in.
-        # Do NOT walk passively into their fists — attack while closing.
         if not me.is_hurt and band in ("close", "jump", "approach") and cd == 0:
             mix = enemy_ai.attack_mix(
                 plan,
@@ -379,7 +392,6 @@ def _decide_one(
                 phase_name=phase_name,
                 band=band,
                 behind=behind,
-                rear_sweet=combat.rear_in_band(abs_dx, profile),
             )
             if is_punishable(phase) and phase != CombatPhase.GRABBED:
                 walk.clear()
@@ -390,8 +402,7 @@ def _decide_one(
                     attack=True,
                     note=f"punish {target.entity.label} [{tag}]",
                 )
-            if mix == "rear" or behind:
-                # Axel short/fast; Adam long/slow — band gated by rear_sweet.
+            if mix == "rear":
                 walk.clear()
                 memory.set_attack_cd(player_index, 3)
                 return Intent(
@@ -401,14 +412,11 @@ def _decide_one(
                     note=f"back atk {profile.name} {target.entity.label}",
                 )
             if mix == "jump":
-                # Jump+attack chord while holding direction toward foe.
                 walk.clear()
                 memory.set_attack_cd(player_index, 4)
                 return Intent(
                     left=face_left,
                     right=face_right_now,
-                    up=target.dy < -profile.lane_align,
-                    down=target.dy > profile.lane_align,
                     jump=True,
                     attack=True,
                     note=f"jump-in {target.entity.label} [{tag}]",
@@ -422,35 +430,20 @@ def _decide_one(
                     attack=True,
                     note=f"punch {target.entity.label} [{tag}]",
                 )
-            if mix == "grab_walk" and band == "close":
-                return _walk_toward(
-                    walk,
-                    me,
-                    goal_x=float(target.entity.world_x),
-                    goal_y=float(target.entity.world_y),
-                    reason=f"grab setup {target.entity.label}",
-                    snapshot=snapshot,
-                    advice=advice,
-                    eps_x=6.0,
-                    eps_y=6.0,
-                )
 
-        # Still closing from far / between attack cooldowns: walk to stand, but
-        # keep facing and do not overshoot past the foe.
+        # Walk to stand-off point at strike distance (not enemy origin).
         stand_x, stand_y = _stand_point(me, target, profile, low_health=low_hp)
         if is_dangerous(phase) and plan.sidestep and band != "close":
-            stand_y = float(me.world_y) + (20 if dy >= 0 else -20)
-            stand_x = float(me.world_x) + (-24 if dx > 0 else 24)
+            stand_y = float(me.world_y) + (16 if dy >= 0 else -16)
+            stand_x = float(me.world_x) + (-28 if dx > 0 else 28)
             reason = f"evade {target.entity.label} [{tag}]"
         elif is_punishable(phase):
-            stand_x = float(target.entity.world_x)
-            stand_y = float(target.entity.world_y)
+            stand_x, stand_y = _stand_point(me, target, profile, low_health=False)
             reason = f"chase punish {target.entity.label} [{tag}]"
         else:
             reason = f"close {target.entity.label} [{tag}]"
 
-        # On cooldown but in punch range: face and hold still (or micro-adjust).
-        if band == "close" and cd > 0:
+        if (in_range or band == "close") and cd > 0:
             walk.clear()
             return Intent(
                 left=face_left,
@@ -466,8 +459,8 @@ def _decide_one(
             reason=reason,
             snapshot=snapshot,
             advice=advice,
-            eps_x=8.0,
-            eps_y=6.0,
+            eps_x=10.0,
+            eps_y=12.0,
         )
 
     # --- Progress ---
@@ -496,12 +489,26 @@ def _stand_point(
     *,
     low_health: bool,
 ) -> tuple[float, float]:
-    """World-space point to stand for a good strike."""
+    """World-space stand-off: strike distance on X, match lane only if needed.
+
+    ROM pickup interaction is about ±$14 X / ±$10 Y from the player; combat
+    punches are in a similar order of magnitude. We stand at ~0.85×strike_range
+    on X and do not force exact Y equality.
+    """
 
     foe = target.entity
     side = -1.0 if (foe.world_x - me.world_x) > 0 else 1.0
-    offset = profile.caution_range if low_health else profile.approach_offset
-    return float(foe.world_x) + side * offset, float(foe.world_y)
+    dist = profile.strike_range * 0.85
+    if low_health:
+        dist = max(dist, profile.caution_range * 0.7)
+    dist = max(20.0, dist)
+    stand_x = float(foe.world_x) + side * dist
+    # Keep current lane if already close enough on Y.
+    if abs(foe.world_y - me.world_y) <= max(10, profile.lane_align):
+        stand_y = float(me.world_y)
+    else:
+        stand_y = float(foe.world_y)
+    return stand_x, stand_y
 
 
 def _walk_toward(
