@@ -284,11 +284,13 @@ autoplay/
     phases.py           # ordinary/boss/player combat phase decode
     agent/
       controls.py       # standard button mapping
-      policy.py         # decide_actions()
+      policy.py         # decide_actions(); mode → skills → free path
+      context.py        # DecisionContext, PlayerMode, SeatMemory
+      skills.py         # Skill protocol, Commitment, grab-family skills
       inference.py      # generic production-rule forward chaining
       expert.py         # tactical facts, rules, and explainable goals
-      autoplanner.py     # persistent guarded multi-step combat plans
-      bosses.py          # Souther/twin lane tactics
+      autoplanner.py    # persistent guarded multi-step combat plans
+      bosses.py         # Souther/twin lane tactics
       fuzzy.py          # dependency-free fuzzy memberships + Sugeno rules
       knowledge.py      # typed entity/relation tactical knowledge graph
       arbiter.py        # constrained fight / loot / progress utility solver

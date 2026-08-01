@@ -2,6 +2,10 @@
 
 Standard controls only (see ``controls.py``). No host ``--altControls``.
 
+Pipeline per seat (see ``context.py`` / ``skills.py``)::
+
+    mode → exclusive skills → crossover plan → police → hold skill → free
+
 Movement uses a latched **walk-to-(x,y)** state (``walk.py``): D-pad directions
 stay held until the world-space goal is reached or passed through.
 """
@@ -14,15 +18,13 @@ from dataclasses import dataclass, field
 from ..phases import CombatPhase, is_dangerous, is_punishable
 from ..state import GameSnapshot, PlayerSnapshot
 from ..world_map import MapEntity
-from . import bosses, combat, coop, enemies as enemy_ai, grabs, navigation, pressure, stage
-from .arbiter import GoalKind, GoalMemory, solve_goal
-from .autoplanner import AutoPlanner
-from .characters import profile_for
+from . import bosses, combat, coop, enemies as enemy_ai, navigation, pressure, stage
+from .arbiter import GoalKind, solve_goal
+from .context import DecisionContext, PlayerMode, SeatMemory, build_decision_context
 from .controls import Intent, mask_from_intent
-from .expert import DEFAULT_COMBAT_EXPERT
-from .grabs import EnemyGrabEscapeMemory, GrabMemory
-from .knowledge import Relation, build_tactical_graph
+from .knowledge import Relation
 from .navigation import NavMemory
+from .skills import try_crossover_suplex, try_hold_resolve, try_start_mode_skill
 from .walk import WalkState, blend_walk_with_actions
 
 
@@ -55,89 +57,120 @@ class AgentConfig:
 
 @dataclass
 class AgentState:
-    """Per-session mutable policy memory (not ROM state)."""
+    """Per-session mutable policy memory (not ROM state).
+
+    Per-seat state lives in :class:`SeatMemory`. Attribute aliases
+    (``p1_walk``, ``p1_nav``, …) remain for tests and the HUD.
+    """
 
     tick: int = 0
-    p1_phase: int = 0
-    p2_phase: int = 0
-    p1_last_note: str = ""
-    p2_last_note: str = ""
-    p1_attack_cd: int = 0
-    p2_attack_cd: int = 0
-    p1_grab: GrabMemory = field(default_factory=GrabMemory)
-    p2_grab: GrabMemory = field(default_factory=GrabMemory)
-    p1_enemy_grab_escape: EnemyGrabEscapeMemory = field(
-        default_factory=EnemyGrabEscapeMemory
-    )
-    p2_enemy_grab_escape: EnemyGrabEscapeMemory = field(
-        default_factory=EnemyGrabEscapeMemory
-    )
-    p1_walk: WalkState = field(default_factory=WalkState)
-    p2_walk: WalkState = field(default_factory=WalkState)
-    p1_nav: NavMemory = field(default_factory=NavMemory)
-    p2_nav: NavMemory = field(default_factory=NavMemory)
-    p1_planner: AutoPlanner = field(default_factory=AutoPlanner)
-    p2_planner: AutoPlanner = field(default_factory=AutoPlanner)
-    p1_goal: GoalMemory = field(default_factory=GoalMemory)
-    p2_goal: GoalMemory = field(default_factory=GoalMemory)
+    p1: SeatMemory = field(default_factory=SeatMemory)
+    p2: SeatMemory = field(default_factory=SeatMemory)
+
+    def seat(self, player_index: int) -> SeatMemory:
+        return self.p1 if player_index == 1 else self.p2
+
+    # --- Backward-compatible accessors (tests / HUD) ---
+
+    @property
+    def p1_phase(self) -> int:
+        return self.p1.phase
+
+    @p1_phase.setter
+    def p1_phase(self, value: int) -> None:
+        self.p1.phase = value
+
+    @property
+    def p2_phase(self) -> int:
+        return self.p2.phase
+
+    @p2_phase.setter
+    def p2_phase(self, value: int) -> None:
+        self.p2.phase = value
+
+    @property
+    def p1_last_note(self) -> str:
+        return self.p1.last_note
+
+    @p1_last_note.setter
+    def p1_last_note(self, value: str) -> None:
+        self.p1.last_note = value
+
+    @property
+    def p2_last_note(self) -> str:
+        return self.p2.last_note
+
+    @p2_last_note.setter
+    def p2_last_note(self, value: str) -> None:
+        self.p2.last_note = value
+
+    @property
+    def p1_walk(self) -> WalkState:
+        return self.p1.walk
+
+    @property
+    def p2_walk(self) -> WalkState:
+        return self.p2.walk
+
+    @property
+    def p1_nav(self) -> NavMemory:
+        return self.p1.nav
+
+    @property
+    def p2_nav(self) -> NavMemory:
+        return self.p2.nav
 
     def phase(self, player_index: int) -> int:
-        return self.p1_phase if player_index == 1 else self.p2_phase
+        return self.seat(player_index).phase
 
     def set_phase(self, player_index: int, value: int) -> None:
-        if player_index == 1:
-            self.p1_phase = value
-        else:
-            self.p2_phase = value
+        self.seat(player_index).phase = value
 
     def attack_cd(self, player_index: int) -> int:
-        return self.p1_attack_cd if player_index == 1 else self.p2_attack_cd
+        return self.seat(player_index).attack_cd
 
     def set_attack_cd(self, player_index: int, value: int) -> None:
-        if player_index == 1:
-            self.p1_attack_cd = value
-        else:
-            self.p2_attack_cd = value
+        self.seat(player_index).attack_cd = value
 
-    def grab_mem(self, player_index: int) -> GrabMemory:
-        return self.p1_grab if player_index == 1 else self.p2_grab
+    def grab_mem(self, player_index: int):
+        return self.seat(player_index).grab
 
-    def enemy_grab_escape_mem(self, player_index: int) -> EnemyGrabEscapeMemory:
-        return (
-            self.p1_enemy_grab_escape
-            if player_index == 1
-            else self.p2_enemy_grab_escape
-        )
+    def enemy_grab_escape_mem(self, player_index: int):
+        return self.seat(player_index).enemy_grab_escape
 
     def walk(self, player_index: int) -> WalkState:
-        return self.p1_walk if player_index == 1 else self.p2_walk
+        return self.seat(player_index).walk
 
     def nav(self, player_index: int) -> NavMemory:
-        return self.p1_nav if player_index == 1 else self.p2_nav
+        return self.seat(player_index).nav
 
-    def planner(self, player_index: int) -> AutoPlanner:
-        return self.p1_planner if player_index == 1 else self.p2_planner
+    def planner(self, player_index: int):
+        return self.seat(player_index).planner
 
     def clear_planners(self) -> None:
-        self.p1_planner.reset()
-        self.p2_planner.reset()
+        self.p1.planner.reset()
+        self.p2.planner.reset()
+        assert self.p1.commitment is not None and self.p2.commitment is not None
+        self.p1.commitment.clear()
+        self.p2.commitment.clear()
 
     def clear_nav(self) -> None:
-        self.p1_nav.clear_all()
-        self.p2_nav.clear_all()
+        self.p1.nav.clear_all()
+        self.p2.nav.clear_all()
 
-    def goal(self, player_index: int) -> GoalMemory:
-        return self.p1_goal if player_index == 1 else self.p2_goal
+    def goal(self, player_index: int):
+        return self.seat(player_index).goal
 
     def clear_goals(self) -> None:
-        self.p1_goal.clear()
-        self.p2_goal.clear()
+        self.p1.goal.clear()
+        self.p2.goal.clear()
 
     def set_note(self, player_index: int, note: str) -> None:
-        if player_index == 1:
-            self.p1_last_note = note
-        else:
-            self.p2_last_note = note
+        self.seat(player_index).last_note = note
+
+    def clear_tactical(self) -> None:
+        self.p1.clear_tactical()
+        self.p2.clear_tactical()
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,25 +209,15 @@ def decide_actions(
     memory.tick += 1
 
     if not config.any_enabled() or not snapshot.connected:
-        memory.clear_planners()
-        memory.clear_goals()
-        memory.clear_nav()
+        memory.clear_tactical()
         return AgentDecision(0, 0, steady=True)
 
     if snapshot.paused or snapshot.police_special_active:
-        memory.p1_walk.clear()
-        memory.p2_walk.clear()
-        memory.clear_planners()
-        memory.clear_goals()
-        memory.clear_nav()
+        memory.clear_tactical()
         return AgentDecision(0, 0, p1_note="steady", p2_note="steady", steady=True)
 
     if snapshot.game_state not in _INGAME_STATES:
-        memory.p1_walk.clear()
-        memory.p2_walk.clear()
-        memory.clear_planners()
-        memory.clear_goals()
-        memory.clear_nav()
+        memory.clear_tactical()
         return AgentDecision(0, 0, p1_note="menu idle", p2_note="menu idle", steady=True)
 
     p1_mask = 0
@@ -268,9 +291,8 @@ def _decide_one(
     memory: AgentState,
     both_agents: bool,
 ) -> Intent:
-    me = _player_entity(snapshot, player_index)
-    walk = memory.walk(player_index)
-    nav = memory.nav(player_index)
+    """Mode → commitment skills → police → free tactical path."""
+
     other_i = _other_index(player_index)
     partner = _player_entity(snapshot, other_i)
     partner_player = snapshot.players[other_i - 1]
@@ -279,136 +301,98 @@ def _decide_one(
         partner = None
         partner_snap = None
 
-    coop_ctx = coop.build_coop(
-        me=me,
-        me_snap=player_snap,
+    ctx = build_decision_context(
+        snapshot,
+        player_index=player_index,
+        player_snap=player_snap,
+        both_agents=both_agents,
+        police_threshold=config.police_threshold,
+        tick=memory.tick,
+        seat=memory.seat(player_index),
+        me=_player_entity(snapshot, player_index),
         partner=partner,
         partner_snap=partner_snap,
-        both_agents=both_agents,
+        is_mr_x=stage.is_mr_x_offer(snapshot),
     )
-    advice = stage.stage_advice(snapshot.level_index)
-    profile = profile_for(player_snap.character_id)
 
-    # --- Mr. X dialog ---
-    if stage.is_mr_x_offer(snapshot):
-        walk.clear()
-        memory.planner(player_index).reset()
-        memory.goal(player_index).clear()
+    # --- Exclusive modes (dialog / not playable / enemy-held / hurt) ---
+    if ctx.mode == PlayerMode.DIALOG:
+        ctx.walk.clear()
+        ctx.planner.reset()
+        ctx.goal_memory.clear()
+        assert ctx.seat.commitment is not None
+        ctx.seat.commitment.clear(ctx)
         return _mr_x_intent(snapshot, player_index, memory)
 
-    if me is None or not player_snap.is_playable:
-        walk.clear()
-        memory.planner(player_index).reset()
-        memory.goal(player_index).clear()
+    if ctx.mode == PlayerMode.NOT_PLAYABLE:
+        ctx.walk.clear()
+        ctx.planner.reset()
+        ctx.goal_memory.clear()
+        assert ctx.seat.commitment is not None
+        ctx.seat.commitment.clear(ctx)
         return Intent(note="not playable")
 
-    # Enemy-held player is a closed, ROM-guarded two-edge plan. $7A accepts C
-    # to cross over; $7C creates an eight-tick +$58.bit7 window and returns to
-    # $7A, where B starts the $7E counter throw. Own these states before all
-    # hurt/combat/loot arbitration so another rule cannot freeze or interrupt.
-    escape_intent = grabs.decide_enemy_grab_escape(
-        me,
-        memory.enemy_grab_escape_mem(player_index),
-        tick=memory.tick,
-    )
-    if escape_intent is not None:
-        walk.clear()
-        memory.planner(player_index).reset()
-        memory.goal(player_index).clear()
-        memory.grab_mem(player_index).reset()
-        return escape_intent
+    mode_intent = try_start_mode_skill(ctx)
+    if mode_intent is not None:
+        return mode_intent
 
-    if me.is_hurt:
-        walk.clear()
-        memory.planner(player_index).reset()
-        memory.goal(player_index).clear()
-        return Intent(note="hurt")
+    # Live player from here on.
+    assert ctx.me is not None
+    ctx.ensure_perception()
+    assert ctx.graph is not None and ctx.press is not None
 
-    graph = build_tactical_graph(
-        me,
-        snapshot.world_map.entities,
-        level_index=snapshot.level_index,
-        player_index=player_index,
-    )
-    press = pressure.compute_pressure(snapshot, player_snap, me, graph=graph)
-
-    # --- Expert inference + persistent grab plan ---
-    # A production rule recognizes a live threat behind a front hold. The
-    # autoplanner then owns the ROM-confirmed $60 -> C -> $76 -> $66 -> B ->
-    # $68 sequence across observations, so police/ordinary grab heuristics
-    # cannot interrupt it or inject buttons into its animations.
-    gctx = grabs.context_from_player(
-        me,
-        snapshot.world_map.entities,
-        player_index=player_index,
-    )
-    gmem = memory.grab_mem(player_index)
-    held_foe = grabs.held_enemy_entity(me, snapshot.world_map.entities)
-    assessment = DEFAULT_COMBAT_EXPERT.assess(
-        me,
-        snapshot.world_map.entities,
-        held_enemy=held_foe if gctx.enemy_grab else None,
-        graph=graph,
-    )
-    planned_intent = memory.planner(player_index).decide(
-        assessment,
-        me,
-        gctx,
-        held_foe,
-    )
-    if planned_intent is not None:
-        walk.clear()
-        gmem.reset()
-        return planned_intent
+    # --- Crossover-suplex commitment (before police / ordinary hold) ---
+    planned = try_crossover_suplex(ctx)
+    if planned is not None:
+        return planned
 
     if pressure.should_call_police(
-        press,
+        ctx.press,
         player_snap.specials,
         threshold=config.police_threshold,
         level_index=snapshot.level_index,
-    ) and combat.player_can_start_ground_action(me):
-        walk.clear()
-        return Intent(special=True, note=f"police ({press.reason})")
+    ) and combat.player_can_start_ground_action(ctx.me):
+        ctx.walk.clear()
+        assert ctx.seat.commitment is not None
+        ctx.seat.commitment.clear(ctx)
+        return Intent(special=True, note=f"police ({ctx.press.reason})")
 
-    # --- Grab / weapon hold ---
-    # Live: hold uses action $60 with held_type often 0; detect via action,
-    # contact_ptr, and GRABBED enemies linked to this seat. Then knee/throw.
-    foe_near = held_foe or combat.nearest_foe(
-        me,
-        snapshot.world_map.entities,
-        graph=graph,
-    )
-    held_intent = grabs.decide_held(
-        me,
-        gctx,
-        gmem,
-        tick=memory.tick,
-        foe=foe_near,
-        progress_right=advice.progress_right,
-        crowd=press.enemy_count,
-        profile=profile,
-        ally=coop_ctx.partner,
-    )
-    if held_intent is not None:
-        walk.clear()
-        return held_intent
-
-    # Contact, reciprocal-link and held-item fields clear on different ROM
-    # frames.  The $62-$6E grab/recovery states are nevertheless closed
-    # animations, so do not let later combat or loot rules inject B while an
-    # evidence-dependent grab context is briefly empty.
-    if me.action_base in grabs.GRAB_ANIMATION_ACTIONS:
-        walk.clear()
-        return Intent(note=f"grab anim ${me.action_state:02X}")
+    # --- Hold / weapon tree + closed grab animations ---
+    held = try_hold_resolve(ctx)
+    if held is not None:
+        return held
 
     # Only when the partner is in a jump action family — never world_z
     # (standing elevation is always large and falsely enabled this forever).
-    if both_agents and coop.partner_throw_opportunity(me, coop_ctx.partner):
-        walk.clear()
+    if both_agents and coop.partner_throw_opportunity(ctx.me, ctx.coop.partner):
+        ctx.walk.clear()
         return Intent(jump=True, attack=True, note="2P air assist")
 
+    return _decide_free(ctx)
+
+
+def _decide_free(ctx: DecisionContext) -> Intent:
+    """Grounded free tactical path: air, props, arbiter, combat, progress.
+
+    Future migration steps lift more of this into skills; behavior is preserved
+    from the pre-migration priority ladder.
+    """
+
+    me = ctx.me
+    assert me is not None
+    assert ctx.graph is not None and ctx.press is not None
+    snapshot = ctx.snapshot
+    walk = ctx.walk
+    nav = ctx.nav
+    profile = ctx.profile
+    advice = ctx.advice
+    coop_ctx = ctx.coop
+    graph = ctx.graph
+    press = ctx.press
+    player_snap = ctx.player_snap
+    player_index = ctx.player_index
+    goal_memory = ctx.goal_memory
     low_hp = (player_snap.health_percent or 100.0) < 40.0
-    goal_memory = memory.goal(player_index)
 
     # --- Airborne first (must beat loot/walk) ---
     # ROM state sequence is $10 launch -> $12 free flight -> $16 air attack ->
@@ -447,7 +431,7 @@ def _decide_one(
                     right=fr,
                     note="air hold clear of ally",
                 )
-            memory.set_attack_cd(player_index, 2)
+            ctx.set_attack_cd(2)
             return Intent(
                 left=fl,
                 right=fr,
@@ -496,7 +480,7 @@ def _decide_one(
         if (
             combat.can_break(me, prop, profile, require_facing=True)
             and combat.player_can_start_ground_action(me)
-            and memory.attack_cd(player_index) == 0
+            and ctx.attack_cd == 0
         ):
             if coop.attack_would_hit_ally(
                     me, coop_ctx.partner, face_left=fl
@@ -508,7 +492,7 @@ def _decide_one(
                     note=f"ally blocks smash {prop.label}",
                 )
             walk.clear()
-            memory.set_attack_cd(player_index, 3)
+            ctx.set_attack_cd(3)
             return Intent(
                 left=fl,
                 right=fr,
@@ -644,7 +628,7 @@ def _decide_one(
                         nav=nav,
                     )
                 walk.clear()
-                memory.set_attack_cd(player_index, 4)
+                ctx.set_attack_cd(4)
                 return Intent(
                     left=face_left_now,
                     right=not face_left_now,
@@ -660,7 +644,7 @@ def _decide_one(
         phase = foe.combat_phase
         phase_name = phase.name.lower()
         tag = foe.phase_tag
-        cd = memory.attack_cd(player_index)
+        cd = ctx.attack_cd
         abs_dx = abs(target.dx)
         abs_dy = abs(target.dy)
         band = combat.engagement_band(abs_dx, abs_dy, profile)
@@ -757,7 +741,7 @@ def _decide_one(
                 combat.player_can_start_ground_action(me)
                 and navigation.jump_landing_safe(me, foe, holes)
             ):
-                memory.set_attack_cd(player_index, 1)
+                ctx.set_attack_cd(1)
                 return Intent(
                     left=face_left,
                     right=face_right_now,
@@ -849,7 +833,7 @@ def _decide_one(
                         nav=nav,
                         )
                     walk.clear()
-                    memory.set_attack_cd(player_index, 3)
+                    ctx.set_attack_cd(3)
                     return Intent(
                         left=face_left,
                         right=face_right_now,
@@ -883,7 +867,7 @@ def _decide_one(
                         nav=nav,
                     )
                 walk.clear()
-                memory.set_attack_cd(player_index, 3)
+                ctx.set_attack_cd(3)
                 return Intent(
                     left=face_left,
                     right=face_right_now,
@@ -902,7 +886,7 @@ def _decide_one(
         # Face first when about to punch.
         if punch_geom and not facing_ok and cd == 0:
             walk.clear()
-            memory.set_attack_cd(player_index, 1)
+            ctx.set_attack_cd(1)
             return Intent(
                 left=face_left,
                 right=face_right_now,
@@ -919,7 +903,7 @@ def _decide_one(
             mix = enemy_ai.attack_mix(
                 plan,
                 profile,
-                tick=memory.tick + player_index * 3,
+                tick=ctx.tick + player_index * 3,
                 in_range=punch_geom,
                 crowd=press.enemy_count,
                 phase_name=phase_name,
@@ -945,7 +929,7 @@ def _decide_one(
                         nav=nav,
                         )
                     walk.clear()
-                    memory.set_attack_cd(player_index, 2)
+                    ctx.set_attack_cd(2)
                     return Intent(
                         left=face_left,
                         right=face_right_now,
@@ -970,7 +954,7 @@ def _decide_one(
                         nav=nav,
                     )
                 walk.clear()
-                memory.set_attack_cd(player_index, 4)
+                ctx.set_attack_cd(4)
                 return Intent(
                     left=face_left if face_left else face_now,
                     right=face_right_now
@@ -1005,7 +989,7 @@ def _decide_one(
                         nav=nav,
                     )
                 walk.clear()
-                memory.set_attack_cd(player_index, 1)
+                ctx.set_attack_cd(1)
                 return Intent(
                     left=face_left,
                     right=face_right_now,
@@ -1027,7 +1011,7 @@ def _decide_one(
                         nav=nav,
                     )
                 walk.clear()
-                memory.set_attack_cd(player_index, 3)
+                ctx.set_attack_cd(3)
                 return Intent(
                     left=face_left,
                     right=face_right_now,
@@ -1106,7 +1090,7 @@ def _decide_one(
             and combat.can_jump_kick(me, prop, profile, loose_lane=True)
             and navigation.jump_landing_safe(me, prop, holes)
         )
-        cd = memory.attack_cd(player_index)
+        cd = ctx.attack_cd
 
         if combat.player_busy_attacking(me):
             walk.clear()
@@ -1131,7 +1115,7 @@ def _decide_one(
                         nav=nav,
                     )
                 walk.clear()
-                memory.set_attack_cd(player_index, 3)
+                ctx.set_attack_cd(3)
                 return Intent(
                     left=fl,
                     right=fr,
@@ -1153,7 +1137,7 @@ def _decide_one(
                         nav=nav,
                     )
                 walk.clear()
-                memory.set_attack_cd(player_index, 1)
+                ctx.set_attack_cd(1)
                 return Intent(
                     left=fl,
                     right=fr,

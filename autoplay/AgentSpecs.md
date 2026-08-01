@@ -43,7 +43,16 @@ geometry, cross over the held enemy with C, wait until the game confirms the
 back-hold state, then press B once to suplex. Never mash C or B through the
 transition animations.
 
-Combat intelligence is split into three reusable layers:
+Combat intelligence is organized as **mode → commitment (skill) → free path**:
+
+- exclusive `PlayerMode` partitions (dialog, enemy-held, hurt, airborne, free…);
+- a single per-seat `Commitment` owns at most one multi-frame skill;
+- grab-family skills wrap the expert knowledge base, inference engine, and
+  autoplanner (exposed-back crossover/suplex) plus the ordinary hold tree;
+- free combat still uses the knowledge graph, fuzzy scores, and arbiter until
+  those tactics are lifted into skills.
+
+Under the skill layer, three reusable pieces remain:
 
 - an expert knowledge base expresses named tactical facts and production rules;
 - a deterministic inference engine derives explainable goals and records which

@@ -63,18 +63,36 @@ Specs live in `AgentSpecs.md`. Implementation under `src/sor_autoplay/agent/`.
 `--altControls` remaps A/X/Y and splits pickup from attack; agents do not support
 that layout yet.
 
-### Behaviour (priority)
+### Behaviour pipeline (mode → skill → free)
+
+Architecture migration in progress. Per seat, each decision is:
+
+1. **`DecisionContext`** (`agent/context.py`) — one bag of snapshot, seat
+   memory, profile, stage advice, coop, mode, graph, pressure.
+2. **`PlayerMode`** (exclusive ROM partition) — `DIALOG`, `NOT_PLAYABLE`,
+   `ENEMY_HELD`, `HURT`, `GRAB_ANIM`, `AIRBORNE`, `HOLDING`, `FREE`.
+3. **`Commitment` / skills** (`agent/skills.py`) — at most one multi-frame
+   skill owns the seat. First skills:
+   - `EnemyGrabEscape` — `$78–$7E` C then B counter window
+   - `CrossoverSuplex` — expert + `AutoPlanner` for exposed-back hold
+   - `HoldResolve` — ordinary hold/weapon tree + grab-animation lockout
+4. **Police special** (after crossover plan, before ordinary hold)
+5. **`_decide_free`** — airborne, moving props, arbiter fight/loot/progress,
+   combat, breakables, navigation (still a ladder; lift to skills later)
+
+`AgentState` holds `SeatMemory` per seat (`p1`/`p2`) with walk, nav, planner,
+goal, grab latches, and `commitment`. Attribute aliases (`p1_walk`, …) remain
+for tests/HUD.
+
+### Behaviour (priority — same outcomes as before the pipeline)
 
 1. Steady (no input) while paused or police special is active
 2. Mr. X offer: always select **NO** (refuse) then confirm
-3. **Expert inference + autoplanner** (`agent/inference.py`, `expert.py`,
-   `autoplanner.py`): facts and salience-ordered production rules turn observed
-   combat geometry into explainable tactical goals. If a front hold (`$60/$61`)
-   leaves another live, on-screen hostile behind the player, protect the exposed
-   back with the ROM-confirmed plan **C → wait → B**. C enters crossover
-   `$76/$77` (or `$80/$81`), the planner waits without injecting more input,
-   and B is emitted exactly once after the ROM reports the back hold `$66/$67`,
-   entering suplex `$68/$69`. A pre-existing back hold is a direct suplex goal.
+3. **Enemy-held skill** then **expert + crossover-suplex skill**
+   (`agent/skills.py` → `inference.py`, `expert.py`, `autoplanner.py`):
+   If a front hold (`$60/$61`) leaves another live hostile behind the player,
+   protect the back with **C → wait → B**. C enters crossover `$76/$77` (or
+   `$80/$81`); B at confirmed back hold `$66/$67` enters suplex `$68/$69`.
    Plans persist across snapshots, tolerate one missing hold observation, time
    out safely, and take ownership before police and ordinary grab heuristics.
 4. **Knowledge graph + fuzzy inference + constrained solver**
@@ -109,7 +127,7 @@ that layout yet.
    crowd of at least four, health at or below 40% with a reachable threat, or
    any reachable live boss; a boss forces maximum pressure and the first legal
    grounded A edge immediately.
-6. **Grab / weapon hold tree** (`agent/grabs.py`): normally **B+back throw**
+6. **Hold-resolve skill** (`agent/skills.py` → `grabs.py`): normally **B+back throw**
    (away = opposite action-state facing bit0). A hold needs a dedicated held
    field or the grabbed enemy's reciprocal player link; the latch bridges only
    one missing observer sample so stale contact/reaction state cannot create an
@@ -414,10 +432,10 @@ See `src/sor_autoplay/memory_map.py` and
 - Mr. X offer: `$FFDE00` flag, `$FFDE04` state; player object `+$59` bit3=side,
   bit4=choice UI active (initial refuse path wants bit3=1 = NO)
 - Styles live in `object_catalog.py`; extraction in `world_map.py`
-- Agent modules: `agent/policy.py`, `inference.py`, `expert.py`,
-  `autoplanner.py`, `knowledge.py`, `fuzzy.py`, `arbiter.py`, `combat.py`,
-  `pressure.py`, `stage.py`, `navigation.py`, `coop.py`, `characters.py`,
-  `controls.py`
+- Agent modules: `agent/policy.py`, `context.py`, `skills.py`, `inference.py`,
+  `expert.py`, `autoplanner.py`, `knowledge.py`, `fuzzy.py`, `arbiter.py`,
+  `combat.py`, `pressure.py`, `stage.py`, `navigation.py`, `coop.py`,
+  `characters.py`, `controls.py`
 - Deterministic evaluator: `evaluation.py` (metrics, JSONL trace, acceptance
   criteria, injectable policy callable)
 
