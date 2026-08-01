@@ -51,24 +51,30 @@ _DETOUR_STALE_TICKS = 90
 # Illegal stand utility (in a pit): never choose unless both sides fail.
 _STAND_ILLEGAL = -10_000.0
 # Stuck recovery (poll ticks ≈ 30–60 ms each in the observer).
-_STUCK_TICKS = 14
-_STUCK_MOVE_EPS = 1.5
-_ESCAPE_HOLD_TICKS = 28
-_BAN_DIR_TTL = 36
-# Offsets tried when recovering from a stuck pose (world units).
+# Keep this short: holding into a wall forever looks like a frozen AI.
+_STUCK_TICKS = 8
+# Only *real* movement clears the stuck counter (ignore 1px jitter).
+_STUCK_MOVE_EPS = 3.0
+_ESCAPE_HOLD_TICKS = 18
+_BAN_DIR_TTL = 48
+# Open-loop cardinals first — works even when collision is a crate/wall that
+# is not represented on the hole map.
+_CARDINAL_ESCAPES: tuple[tuple[float, float, str], ...] = (
+    (0.0, -32.0, "up"),
+    (0.0, 32.0, "down"),
+    (-32.0, 0.0, "left"),
+    (32.0, 0.0, "right"),
+    (0.0, -48.0, "up2"),
+    (0.0, 48.0, "down2"),
+    (-48.0, 0.0, "left2"),
+    (48.0, 0.0, "right2"),
+)
+# Extra diagonals after cardinals.
 _RECOVERY_STEPS: tuple[tuple[float, float], ...] = (
-    (28.0, 0.0),
-    (-28.0, 0.0),
-    (0.0, 22.0),
-    (0.0, -22.0),
     (24.0, 18.0),
     (24.0, -18.0),
     (-24.0, 18.0),
     (-24.0, -18.0),
-    (40.0, 0.0),
-    (-40.0, 0.0),
-    (0.0, 36.0),
-    (0.0, -36.0),
     (36.0, 28.0),
     (36.0, -28.0),
     (-36.0, 28.0),
@@ -403,6 +409,8 @@ def observe_motion(memory: NavMemory, me: MapEntity) -> None:
         return
     moved = abs(wx - memory.track_x) + abs(wy - memory.track_y)
     if moved < _STUCK_MOVE_EPS:
+        # Not really moving (or only jitter). Keep the anchor so oscillation
+        # 100↔101 cannot look like continuous travel.
         memory.stuck_ticks += 1
     else:
         memory.stuck_ticks = 0
@@ -420,11 +428,31 @@ def _recovery_candidates(
     level_index: int,
     progress_right: bool,
 ) -> list[tuple[float, float, float, str]]:
-    """Return scored solid recovery targets (utility, x, y, reason)."""
+    """Return scored recovery targets (utility, x, y, reason).
+
+    Cardinal open-loop steps come first: stage collision is often a wall or
+    breakable, not a hole tile, so pure hole scoring still freezes the agent.
+    """
 
     wx, wy = float(me.world_x), float(me.world_y)
     gx, gy = float(goal_x), float(goal_y)
     scored: list[tuple[float, float, float, str]] = []
+
+    # 0) Open-loop cardinals — highest priority, rotated via recovery_index.
+    for i, (dx, dy, name) in enumerate(_CARDINAL_ESCAPES):
+        if memory.is_banned(dx, dy):
+            continue
+        nx, ny = wx + dx, wy + dy
+        if not _solid_point(nx, ny, holes, level_index=level_index):
+            continue
+        # High base utility; slight rotation bias so index cycles naturally.
+        util = 200.0 - (i * 3.0)
+        # Prefer sideways when the failed goal is mostly horizontal.
+        if abs(gx - wx) >= abs(gy - wy) and abs(dy) > abs(dx):
+            util += 25.0
+        if abs(gy - wy) > abs(gx - wx) and abs(dx) > abs(dy):
+            util += 25.0
+        scored.append((util, nx, ny, f"nav unstuck {name}"))
 
     # 1) Alternate detour lane if a hole plan was failing.
     if memory.detour_lane is not None and memory.hole_key is not None:
@@ -441,7 +469,7 @@ def _recovery_candidates(
                 continue
             if not _solid_point(wx, candidate, holes, level_index=level_index):
                 continue
-            util = 120.0 - abs(candidate - wy)
+            util = 150.0 - abs(candidate - wy)
             scored.append(
                 (util, wx, candidate, f"nav unstuck detour {candidate:.0f}")
             )
@@ -449,8 +477,6 @@ def _recovery_candidates(
     # 2) Flip breakable side if the latched stand is unreachable.
     if memory.break_slot and memory.break_side in (-1, 1):
         other = -memory.break_side
-        # Approximate stand using default profile spacing; exact prop X is
-        # goal when reason is break — use goal as prop proxy when close.
         prop_x = gx if abs(gx - wx) < 80 else wx + 40.0 * memory.break_side
         stand_x = prop_x + other * _BREAK_SIDE_MIN * 1.5
         stand_y = gy
@@ -461,34 +487,24 @@ def _recovery_candidates(
             level_index=level_index,
             margin=_BREAK_STAND_HOLE_MARGIN,
         ):
-            util = 100.0 - 0.2 * (abs(stand_x - wx) + abs(stand_y - wy))
+            util = 140.0 - 0.2 * (abs(stand_x - wx) + abs(stand_y - wy))
             scored.append(
                 (util, stand_x, stand_y, f"nav unstuck break side {other:+d}")
             )
 
-    # 3) Local solid steps in other directions.
+    # 3) Diagonals.
     for dx, dy in _RECOVERY_STEPS:
         if memory.is_banned(dx, dy):
             continue
         nx, ny = wx + dx, wy + dy
         if not _solid_point(nx, ny, holes, level_index=level_index):
             continue
-        # Immediate step must also be solid (don't skim the pit rim).
         mid_x, mid_y = wx + dx * 0.45, wy + dy * 0.45
         if not _solid_point(mid_x, mid_y, holes, level_index=level_index, margin=10.0):
             continue
-        # Prefer steps that reduce distance to the original goal.
         before = abs(gx - wx) + abs(gy - wy)
         after = abs(gx - nx) + abs(gy - ny)
-        util = 50.0 + (before - after) * 0.8
-        # Slight bias for progress-forward escapes.
-        if progress_right and dx > 0:
-            util += 6.0
-        elif not progress_right and dx < 0:
-            util += 6.0
-        # Prefer lateral when stuck against a forward void.
-        if abs(dy) > abs(dx):
-            util += 8.0
+        util = 40.0 + (before - after) * 0.8
         scored.append((util, nx, ny, f"nav unstuck step ({dx:.0f},{dy:.0f})"))
 
     scored.sort(key=lambda item: item[0], reverse=True)
@@ -513,18 +529,32 @@ def recover_when_stuck(
 
     wx, wy = float(me.world_x), float(me.world_y)
 
-    # Hold an active escape until arrival or timeout.
+    # Hold an active escape until we actually move, arrive, or time out.
     if memory.escape_x is not None and memory.escape_y is not None:
         memory.escape_age += 1
+        moved = abs(wx - memory.track_x) + abs(wy - memory.track_y)
         arrived = (
-            abs(wx - memory.escape_x) <= 10.0
-            and abs(wy - memory.escape_y) <= 10.0
+            abs(wx - memory.escape_x) <= 12.0
+            and abs(wy - memory.escape_y) <= 12.0
         )
-        if arrived or memory.escape_age >= _ESCAPE_HOLD_TICKS:
-            # Ban the direction we just finished so we do not immediately
-            # re-pick a dead-end step.
-            memory.ban_direction(memory.escape_x - wx, memory.escape_y - wy)
+        # If still glued to the same pixel while escaping, abort early and
+        # try the next cardinal instead of holding a dead escape for the full TTL.
+        escape_stuck = (
+            memory.escape_age >= 6
+            and moved < _STUCK_MOVE_EPS
+            and memory.stuck_ticks >= 4
+        )
+        if arrived or memory.escape_age >= _ESCAPE_HOLD_TICKS or escape_stuck:
+            memory.ban_direction(
+                int(memory.escape_x - wx), int(memory.escape_y - wy)
+            )
             memory.clear_escape()
+            # Keep stuck_ticks high so we immediately pick another direction.
+            if escape_stuck or not arrived:
+                memory.stuck_ticks = max(memory.stuck_ticks, _STUCK_TICKS)
+            else:
+                memory.stuck_ticks = 0
+                memory.track_x, memory.track_y = wx, wy
         else:
             return NavWaypoint(
                 memory.escape_x,
@@ -539,9 +569,7 @@ def recover_when_stuck(
     # Record the failed plan elements so the next planner does not re-loop.
     if memory.detour_lane is not None:
         memory.failed_detour_y = memory.detour_lane
-    # Ban the direction of the goal we could not reach.
-    memory.ban_direction(goal_x - wx, goal_y - wy)
-    # Drop the stuck hole latch so a new detour side can be chosen.
+    memory.ban_direction(int(goal_x - wx), int(goal_y - wy))
     if memory.phase in (NavPhase.DETOUR, NavPhase.ADVANCE):
         memory.clear()
 
@@ -555,26 +583,32 @@ def recover_when_stuck(
         progress_right=progress_right,
     )
     if not candidates:
-        # Last resort: reverse along progress for a short retreat on a solid
-        # lane sample above/below.
-        retreat = -36.0 if progress_right else 36.0
-        for lane_delta in (0.0, 20.0, -20.0, 36.0, -36.0):
-            nx, ny = wx + retreat, wy + lane_delta
-            if _solid_point(nx, ny, holes, level_index=level_index):
-                candidates = [
-                    (1.0, nx, ny, "nav unstuck retreat"),
-                ]
-                break
+        # Absolute last resort: cycle cardinals even into unknown geometry
+        # (still skip known holes). Caller needs *some* motion intent.
+        for dx, dy, name in _CARDINAL_ESCAPES:
+            if memory.is_banned(dx, dy):
+                continue
+            nx, ny = wx + dx, wy + dy
+            if holes and not _solid_point(nx, ny, holes, level_index=level_index):
+                continue
+            candidates = [(1.0, nx, ny, f"nav unstuck force {name}")]
+            break
     if not candidates:
-        memory.stuck_ticks = 0
-        return None
+        # Still nothing: reverse progress blindly.
+        retreat = -40.0 if progress_right else 40.0
+        candidates = [(0.0, wx + retreat, wy, "nav unstuck reverse")]
 
-    # Rotate through good options if we keep getting stuck.
     index = memory.recovery_index % len(candidates)
     memory.recovery_index += 1
     _util, nx, ny, why = candidates[index]
+    # Guarantee the escape is far enough from the current pose that WalkState
+    # treats it as a new goal (not same-neighbourhood) and re-aims.
+    if abs(nx - wx) < 16.0 and abs(ny - wy) < 16.0:
+        nx = wx + (32.0 if nx >= wx else -32.0)
+        if not _solid_point(nx, ny, holes, level_index=level_index):
+            ny = wy + (32.0 if (memory.recovery_index % 2) == 0 else -32.0)
+            nx = wx
     memory.latch_escape(nx, ny, why)
-    # If we chose an alternate break side, flip the latch.
     if "break side" in why and memory.break_side in (-1, 1):
         memory.break_side = -memory.break_side
     return NavWaypoint(nx, ny, why, committed=True)

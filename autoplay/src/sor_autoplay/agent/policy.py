@@ -1310,9 +1310,21 @@ def _walk_toward(
         )
         goal_x, goal_y = waypoint.goal_x, waypoint.goal_y
         reason = waypoint.reason
-        # Committed detours / unstuck escapes need a tighter refresh so walk
-        # does not keep an old progress X latch that fights the waypoint.
-        if waypoint.committed:
+        # Unstuck escapes must re-arm the walk latch from scratch so D-pad
+        # dirs actually change (same-neighbourhood refresh keeps old dirs).
+        if "unstuck" in reason:
+            walk.clear()
+            walk.set_goal(
+                me,
+                goal_x,
+                goal_y,
+                reason=reason,
+                eps_x=min(eps_x, 6.0),
+                eps_y=min(eps_y, 5.0),
+                force=True,
+            )
+        elif waypoint.committed:
+            # Committed detours: refresh coords without wiping dirs every poll.
             eps_x = min(eps_x, 6.0)
             eps_y = min(eps_y, 5.0)
             walk.set_goal(

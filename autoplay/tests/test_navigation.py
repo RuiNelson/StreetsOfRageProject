@@ -409,9 +409,9 @@ class StuckRecoveryTests(unittest.TestCase):
         )
         memory = NavMemory()
         # Simulate being stuck while aiming right into the hole.
-        for _ in range(20):
+        for _ in range(12):
             observe_motion(memory, me)
-        self.assertGreaterEqual(memory.stuck_ticks, 14)
+        self.assertGreaterEqual(memory.stuck_ticks, 8)
         wp = recover_when_stuck(
             me,
             goal_x=200.0,
@@ -449,7 +449,7 @@ class StuckRecoveryTests(unittest.TestCase):
             family="Player",
         )
         memory = NavMemory()
-        for _ in range(16):
+        for _ in range(12):
             wp = route_to_goal(
                 me,
                 220.0,
@@ -463,7 +463,8 @@ class StuckRecoveryTests(unittest.TestCase):
         self.assertIn("unstuck", wp.reason)
         self.assertTrue(wp.committed)
 
-    def test_force_goal_refresh_preserves_walk_stuck(self) -> None:
+    def test_force_goal_refresh_keeps_walk_dirs(self) -> None:
+        """force=True same goal must not re-aim every poll (that froze walks)."""
         from sor_autoplay.agent.walk import WalkState
 
         walk = WalkState()
@@ -477,15 +478,46 @@ class StuckRecoveryTests(unittest.TestCase):
             family="Player",
         )
         walk.set_goal(me, 200, 64, reason="a")
-        # Simulate stuck polls with forced same-neighbourhood refresh.
-        for _ in range(25):
+        self.assertEqual(walk.dir_x, 1)
+        self.assertEqual(walk.dir_y, 0)
+        # Manually switch to a recovery heading; force refresh must keep it.
+        walk.dir_x = 0
+        walk.dir_y = -1
+        for _ in range(5):
             walk.set_goal(me, 202, 64, reason="a", force=True, eps_x=6, eps_y=5)
-            walk.step(me)
-        # Stuck path should have tried a perpendicular re-aim (dir_y != 0)
-        # at some point, or still be counting stuck.
+        self.assertEqual(walk.dir_x, 0)
+        self.assertEqual(walk.dir_y, -1)
+
+    def test_walk_unstuck_changes_direction_when_frozen(self) -> None:
+        from sor_autoplay.agent.walk import WalkState
+
+        walk = WalkState()
+        me = _entity(
+            kind="player",
+            map_x=100,
+            map_y=64,
+            world_x=100,
+            world_y=64,
+            slot="P1",
+            family="Player",
+        )
+        walk.set_goal(me, 200, 64, reason="progress")
+        notes: list[str] = []
+        for _ in range(20):
+            # Match policy order: set_goal then step; position never changes.
+            walk.set_goal(me, 200, 64, reason="progress", force=True)
+            intent = walk.step(me)
+            assert intent is not None
+            notes.append(intent.note)
         self.assertTrue(
-            walk.stuck_ticks > 0 or walk.dir_y != 0 or walk.dir_x != 0,
-            f"stuck={walk.stuck_ticks} dir=({walk.dir_x},{walk.dir_y})",
+            any("unstuck" in n for n in notes),
+            notes,
+        )
+        # After unstuck, same-neighbourhood force refresh must keep the new
+        # heading (not re-aim RIGHT into the wall).
+        self.assertTrue(
+            walk.dir_y != 0 or walk.dir_x <= 0,
+            f"dirs stuck going right: ({walk.dir_x},{walk.dir_y}) notes={notes[-5:]}",
         )
 
 

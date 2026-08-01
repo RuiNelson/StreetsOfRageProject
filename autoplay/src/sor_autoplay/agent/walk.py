@@ -20,9 +20,11 @@ from .controls import Intent
 # Arrival band in world/map units (pixels-ish).
 DEFAULT_EPS_X = 10.0
 DEFAULT_EPS_Y = 8.0
-# If still active this many ticks without progress, try a perpendicular re-aim.
-# Navigation.NavMemory also tracks stuck independently and can override goals.
-STUCK_TICKS = 20
+# If still active this many ticks without real movement, try a perpendicular
+# re-aim. Navigation.NavMemory also tracks stuck and can override goals.
+STUCK_TICKS = 12
+# Movement below this (world units) counts as "not moving".
+STUCK_MOVE_EPS = 2.0
 # Ignore tiny goal updates while walking (don't reset latch).
 GOAL_UPDATE_SLACK = 14.0
 
@@ -73,20 +75,15 @@ class WalkState:
             and abs(gx - self.goal_x) <= GOAL_UPDATE_SLACK
             and abs(gy - self.goal_y) <= GOAL_UPDATE_SLACK
         )
-        if same_neighbourhood and not force:
-            # Same neighbourhood — keep latched directions; only refresh label.
-            self.reason = reason
-            return
-        if same_neighbourhood and force:
-            # Forced refresh of a committed nav waypoint: update coordinates
-            # but **preserve stuck counters**. Resetting stuck every poll was
-            # why recovery never fired during hole detours.
+        if same_neighbourhood:
+            # Same neighbourhood — keep latched directions. Especially important
+            # with force=True committed nav goals: re-aiming every poll wiped
+            # perpendicular unstuck dirs and kept walking into the same wall.
             self.goal_x = gx
             self.goal_y = gy
             self.reason = reason
             self.eps_x = eps_x
             self.eps_y = eps_y
-            self._reaim(me)
             return
 
         self.active = True
@@ -172,9 +169,10 @@ class WalkState:
             self.clear()
             return Intent(note=f"walk done ({reason})")
 
-        # Stuck: little movement while buttons held — re-aim once.
+        # Stuck: little *real* movement while buttons held. Tiny 1px jitter
+        # must not reset the counter or we never unstick against a wall.
         moved = abs(x - self.last_x) + abs(y - self.last_y)
-        if moved < 0.5:
+        if moved < STUCK_MOVE_EPS:
             self.stuck_ticks += 1
         else:
             self.stuck_ticks = 0
@@ -182,22 +180,40 @@ class WalkState:
             self.last_y = y
 
         if self.stuck_ticks >= STUCK_TICKS:
-            # Do not only re-point at the same goal axes — try a perpendicular
-            # bias so we leave a wall/pit edge instead of freezing.
+            # Change heading only — do not move the goal. Parent set_goal often
+            # re-asserts the same world target; if we nudged the goal, the next
+            # poll treated it as a new target and re-aimed back into the wall.
             self._reaim(me, prefer_perpendicular=True)
             self.stuck_ticks = 0
+            self.last_x = x
+            self.last_y = y
             if not self.active:
                 return None
+            return Intent(
+                left=self.dir_x < 0,
+                right=self.dir_x > 0,
+                up=self.dir_y < 0,
+                down=self.dir_y > 0,
+                note=(
+                    f"walk unstuck ({self.dir_x:+d},{self.dir_y:+d}) "
+                    f"{self.reason}"
+                ),
+            )
 
         # If we overshot one axis only, zero that latch so we don't reverse-spam.
-        if self.dir_x > 0 and x >= self.goal_x - self.eps_x:
-            self.dir_x = 0
-        elif self.dir_x < 0 and x <= self.goal_x + self.eps_x:
-            self.dir_x = 0
-        if self.dir_y > 0 and y >= self.goal_y - self.eps_y:
-            self.dir_y = 0
-        elif self.dir_y < 0 and y <= self.goal_y + self.eps_y:
-            self.dir_y = 0
+        # Important: when the goal already lies on our current X or Y (common for
+        # progress goals that only need another lane), do **not** clear a
+        # perpendicular unstuck heading — that immediately re-aimed into the wall.
+        if abs(self.goal_x - x) > self.eps_x:
+            if self.dir_x > 0 and x >= self.goal_x - self.eps_x:
+                self.dir_x = 0
+            elif self.dir_x < 0 and x <= self.goal_x + self.eps_x:
+                self.dir_x = 0
+        if abs(self.goal_y - y) > self.eps_y:
+            if self.dir_y > 0 and y >= self.goal_y - self.eps_y:
+                self.dir_y = 0
+            elif self.dir_y < 0 and y <= self.goal_y + self.eps_y:
+                self.dir_y = 0
 
         if self.dir_x == 0 and self.dir_y == 0:
             # Re-aim remaining error or finish.
