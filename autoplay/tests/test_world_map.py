@@ -7,6 +7,7 @@ from sor_autoplay.memory_map import (
     OBJ_POS_X,
     OBJ_POS_Y,
     OBJ_POS_Z,
+    OBJ_PRIMARY_STATE,
     OBJ_TYPE,
     OBJECT_SLOT_SIZE,
 )
@@ -131,6 +132,7 @@ class WorldMapParseTests(unittest.TestCase):
             _put_fixed16(actors, base + OBJ_POS_X, 800)  # map_x = 32
             _put_fixed16(actors, base + OBJ_POS_Y, 0x40)
             _put_fixed16(actors, base + OBJ_POS_Z, 160)
+            _put_u16(actors, base + OBJ_PRIMARY_STATE, 0x0100)
             _put_u16(actors, base + OBJ_HEALTH, 6)
 
         put_enemy(flags=0x0C)  # visible frame
@@ -141,16 +143,25 @@ class WorldMapParseTests(unittest.TestCase):
         w2 = parse_world_map(actors_block=bytes(actors), camera_block=bytes(camera))
         self.assertTrue(any(e.type_id == 0x20 for e in w2.entities))
 
-        # Off-screen dormant spawn with hidden bit must still appear on the map.
+    def test_stage2_hidden_uninitialized_enemy_is_not_observed(self) -> None:
+        """Exact Stage-2-start signature must not become a phantom target."""
+
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+
         base = 0x100
-        _put_u8(actors, base + OBJ_FLAGS, 0x01)
-        _put_fixed16(actors, base + OBJ_POS_X, 768 + 400)  # map_x = 400
-        w3 = parse_world_map(actors_block=bytes(actors), camera_block=bytes(camera))
-        dormant = [e for e in w3.entities if e.type_id == 0x20]
-        self.assertEqual(len(dormant), 1)
-        self.assertGreater(dormant[0].map_x, SCREEN_WIDTH)
-        # View expands so the dormant spawn is not clipped off the plot.
-        self.assertGreaterEqual(w3.view_right, dormant[0].map_x)
+        _put_u8(actors, base + OBJ_TYPE, 0x21)
+        _put_u8(actors, base + OBJ_FLAGS, 0x09)
+        _put_fixed16(actors, base + OBJ_POS_X, 848)  # camera-relative X = 80
+        _put_fixed16(actors, base + OBJ_POS_Y, 80)
+        _put_fixed16(actors, base + OBJ_POS_Z, 160)
+        _put_u16(actors, base + OBJ_PRIMARY_STATE, 0x0000)
+        _put_u16(actors, base + OBJ_HEALTH, 0)
+
+        world = parse_world_map(actors_block=bytes(actors), camera_block=bytes(camera))
+
+        self.assertFalse(any(e.kind == "enemy" for e in world.entities))
 
 
 if __name__ == "__main__":

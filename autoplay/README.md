@@ -31,8 +31,9 @@ Per-player toggle (HUD button or keys **1** / **2**):
 - No air punches: match lane before closing X; queue ordinary combo hits through
   the ROM's action flag; jump-kick B only in the `$12/$13` free-flight state
 - No generic jump-ins: jumps are reserved for explicit enemy-family counters
-- Strict on-screen targeting: dormant enemies outside camera X `0..320` remain
-  visible on the HUD but are not chased and do not inflate police pressure
+- Strict live targeting: dormant enemies are excluded from observations; live
+  enemies outside camera X `0..320` may appear on the HUD but are not chased
+  and do not inflate police pressure
 - Phase-aware targeting: knockdown punish, charge sidestep, ignore dead/scripted,
   prefer hunters (`+$42` / boss target)
 - Family-specific counters (Signal, Haku-Ro, Nora, Jack, all bosses, Mr. X)

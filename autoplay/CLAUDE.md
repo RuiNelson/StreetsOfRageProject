@@ -202,11 +202,17 @@ See `src/sor_autoplay/memory_map.py` and
 - Sprite CRT formula (`lane/2 + z`) lives in `project_to_screen()` for later use.
 - Playable lane from `clamp_players_to_gameplay_bounds`: Y ∈ `[$02,$70]`  
   (or `[$02,$A0]` on level index 6). Camera box height uses that max.
-- Dormant off-screen enemy spawns (flags bit0 held) stay on the map; the
-  **view** expands to include them while the **camera** rect stays the
-  visible 320×lane band. Agent targeting, danger, pickups, and police pressure
-  use the strict camera-relative `0..320` X band. The ROM's wider `-16..336`
-  activation band (`$A59C` / `$97E6`) is not player visibility.
+- Dormant ordinary enemies are not observations or agent targets. At the start
+  of round 2, for example, object 0 is type `$21`, flags `$09`, state `$0000`,
+  health 0, and camera-relative X 80: RAM has a future spawn, but the renderer
+  and player do not have an enemy. ROM activation `$937A/$A59C` holds flags
+  bit0 while waiting; `$B1D6` advances +$30 to `$0100` on activation. Hidden
+  enemies with nonzero state remain observed so hit-flash frames do not make a
+  live target flicker out. Live off-screen actors can expand the **view** while
+  the **camera** rect remains the visible 320×lane band. Agent targeting,
+  danger, pickups, and police pressure use the strict camera-relative
+  `0..320` X band; the ROM's wider `-16..336` activation band (`$A59C` /
+  `$97E6`) is not player visibility.
 - apple = type `$4B`
 - Pause: `$FFFA46 (pause_text_flag)` **nonzero** (written as 3, then often 1
   after `bclr #1` on the first paused frame)

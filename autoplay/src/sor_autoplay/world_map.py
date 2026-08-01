@@ -406,6 +406,29 @@ def _is_hidden(slot: bytes) -> bool:
     return bool(_u8(slot, mm.OBJ_FLAGS) & mm.OBJ_FLAG_HIDDEN)
 
 
+def _is_dormant_combatant(entity: MapEntity, slot: bytes) -> bool:
+    """Return whether a hidden combatant has not entered live gameplay yet.
+
+    Ordinary enemies start at primary state ``$0000``.  Their activation entry
+    (ROM ``$937A``) sets the SAT-hidden bit while testing eligibility; once the
+    check succeeds, ``$B1D6`` advances +$30 to ``$0100`` and the hidden bit is
+    cleared.  Active enemies can later toggle the hidden bit while flashing, so
+    the state word—not visibility alone—is the stable discriminator.
+
+    Boss families do not share that state machine.  A hidden boss with neither
+    state nor health has no evidence of activation and should likewise stay out
+    of observations until its handler initializes it.
+    """
+
+    if not _is_hidden(slot):
+        return False
+    if entity.kind == "enemy":
+        return entity.primary_state == 0
+    if entity.kind == "boss":
+        return entity.primary_state == 0 and not entity.health
+    return False
+
+
 def _near_camera_map(map_x: float, map_y: float, *, lane_max: int) -> bool:
     return (
         -INCLUDE_MARGIN_X <= map_x <= SCREEN_WIDTH + INCLUDE_MARGIN_X
@@ -418,8 +441,12 @@ def _include_entity(entity: MapEntity, slot: bytes, *, lane_max: int) -> bool:
         return False
     if not _near_camera_map(entity.map_x, entity.map_y, lane_max=lane_max):
         return False
-    # Hitstun flash toggles flags bit0; combatants must still plot.
-    # Dormant off-screen spawns also hold bit0 — they are kept on the map too.
+    # A dormant ordinary enemy is real RAM data but not a live game object yet.
+    # Keeping it here creates a phantom target for both the HUD and the agent.
+    if _is_dormant_combatant(entity, slot):
+        return False
+    # Active combatants survive a one-frame SAT flash; other hidden objects do
+    # not represent something the player can currently interact with.
     if _is_hidden(slot) and entity.kind not in ("player", "enemy", "boss"):
         return False
     return True
@@ -450,11 +477,11 @@ def _framed_view(
     lane_max: int,
     entities: tuple[MapEntity, ...] | list[MapEntity] = (),
 ) -> tuple[float, float, float, float, float, float, float, float]:
-    """Camera = visible playfield; view grows to include dormant spawns etc.
+    """Camera = visible playfield; view grows to include observed entities.
 
     Camera rectangle stays 0..320 × 0..lane_max (what the player sees).
-    The wider view expands so off-screen waiting enemies remain visible outside
-    that rectangle while preserving the same aspect ratio.
+    The wider view can expand for live off-screen actors while preserving the
+    same aspect ratio. Dormant, uninitialized enemies are not observations.
     """
 
     cam_left = 0.0

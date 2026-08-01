@@ -5,7 +5,12 @@ from __future__ import annotations
 import unittest
 from dataclasses import dataclass
 
-from sor_autoplay.agent import AgentDecision
+from sor_autoplay.agent import (
+    AgentConfig,
+    AgentDecision,
+    AgentState,
+    decide_actions,
+)
 from sor_autoplay.evaluation import (
     EvaluationCriteria,
     EvaluationStep,
@@ -26,6 +31,7 @@ from sor_autoplay.memory_map import (
     MAX_HEALTH,
     OBJ_ACTION_STATE,
     OBJ_CHARACTER_ID,
+    OBJ_FLAGS,
     OBJ_HEALTH,
     OBJ_POS_X,
     OBJ_POS_Y,
@@ -137,6 +143,28 @@ class WorkRamTests(unittest.TestCase):
             source.read_memory(0xFEFFFF, 1)
         with self.assertRaises(ValueError):
             WorkRamSource(bytes(10))
+
+    def test_stage2_phantom_is_absent_from_coherent_observation(self) -> None:
+        ram = bytearray(_game_ram(item=False, enemy_health=0, enemy_primary=0))
+        _put_u16(ram, ADDR_LEVEL, 1)
+        _put_u16(ram, ADDR_CAM_X, 768)
+        _put_fixed(ram, ADDR_P1_OBJECT + OBJ_POS_X, 800)
+        _put_fixed(ram, OBJECT_TABLE + OBJ_POS_X, 848)
+        _put_fixed(ram, OBJECT_TABLE + OBJ_POS_Y, 80)
+        _put_u8(ram, OBJECT_TABLE + OBJ_TYPE, 0x21)
+        _put_u8(ram, OBJECT_TABLE + OBJ_FLAGS, 0x09)
+
+        snapshot = snapshot_from_work_ram(bytes(ram))
+
+        self.assertFalse(
+            any(entity.kind == "enemy" for entity in snapshot.world_map.entities)
+        )
+        decision = decide_actions(
+            snapshot,
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertEqual(decision.p1_mask & 0x20, 0, decision.p1_note)
 
 
 class LockstepEvaluatorTests(unittest.TestCase):
