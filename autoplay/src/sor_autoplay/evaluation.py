@@ -18,6 +18,8 @@ from typing import Callable, Protocol, Sequence, TextIO
 
 from .agent import AgentConfig, AgentDecision, AgentState, decide_actions
 from .agent.combat import signal_sweep_threat
+from .agent.expert import DEFAULT_COMBAT_EXPERT, TacticalGoal
+from .agent.grabs import context_from_player, held_enemy_entity
 from .state import GameSnapshot, read_snapshot
 from .world_map import MapEntity
 
@@ -134,6 +136,10 @@ class EpisodeMetrics:
     weapon_attack_edges: int = 0
     weapon_air_attack_edges: int = 0
     signal_sweep_jumps: int = 0
+    back_exposed_grab_opportunities: int = 0
+    missed_back_exposure_responses: int = 0
+    crossover_suplex_starts: int = 0
+    suplexes: int = 0
     face_actions: int = 0
     forward_progress: int = 0
     total_reward: float = 0.0
@@ -207,6 +213,31 @@ class EpisodeMetrics:
                 for entity in before.world_map.entities
             ):
                 self.signal_sweep_jumps += 1
+
+        if before_entity is not None:
+            grab = context_from_player(
+                before_entity,
+                before.world_map.entities,
+                player_index=self.player_index,
+            )
+            held_enemy = (
+                held_enemy_entity(before_entity, before.world_map.entities)
+                if grab.enemy_grab
+                else None
+            )
+            assessment = DEFAULT_COMBAT_EXPERT.assess(
+                before_entity,
+                before.world_map.entities,
+                held_enemy=held_enemy,
+            )
+            if assessment.goal == TacticalGoal.CROSSOVER_SUPLEX:
+                self.back_exposed_grab_opportunities += 1
+                if mask & 0x40:
+                    self.crossover_suplex_starts += 1
+                else:
+                    self.missed_back_exposure_responses += 1
+            if grab.enemy_grab and before_entity.action_base == 0x66 and mask & 0x20:
+                self.suplexes += 1
 
         lives_lost = max(0, before_player.lives - after_player.lives)
         self.lives_lost += lives_lost
@@ -317,6 +348,10 @@ class EpisodeMetrics:
             "weapon_attack_edges": self.weapon_attack_edges,
             "weapon_air_attack_edges": self.weapon_air_attack_edges,
             "signal_sweep_jumps": self.signal_sweep_jumps,
+            "back_exposed_grab_opportunities": self.back_exposed_grab_opportunities,
+            "missed_back_exposure_responses": self.missed_back_exposure_responses,
+            "crossover_suplex_starts": self.crossover_suplex_starts,
+            "suplexes": self.suplexes,
             "face_actions": self.face_actions,
             "forward_progress": self.forward_progress,
             "total_reward": round(self.total_reward, 3),
@@ -331,10 +366,12 @@ class EvaluationCriteria:
     max_lives_lost: int | None = None
     max_failed_pickups: int | None = None
     max_weapon_air_attacks: int | None = None
+    max_missed_back_exposures: int | None = None
     min_pickups: int | None = None
     min_enemy_damage: int | None = None
     min_forward_progress: int | None = None
     min_signal_sweep_jumps: int | None = None
+    min_suplexes: int | None = None
 
     def failures(self, metrics: EpisodeMetrics) -> tuple[str, ...]:
         failures: list[str] = []
@@ -359,6 +396,12 @@ class EvaluationCriteria:
                 "weapon air attacks",
                 "at most",
             ),
+            (
+                self.max_missed_back_exposures,
+                metrics.missed_back_exposure_responses,
+                "missed back-exposure responses",
+                "at most",
+            ),
         )
         for limit, observed, label, wording in checks:
             if limit is not None and observed > limit:
@@ -376,6 +419,7 @@ class EvaluationCriteria:
                 metrics.signal_sweep_jumps,
                 "Signal sweep jumps",
             ),
+            (self.min_suplexes, metrics.suplexes, "suplexes"),
         )
         for limit, observed, label in minimums:
             if limit is not None and observed < limit:
@@ -672,10 +716,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-lives-lost", type=int)
     parser.add_argument("--max-failed-pickups", type=int)
     parser.add_argument("--max-weapon-air-attacks", type=int)
+    parser.add_argument("--max-missed-back-exposures", type=int)
     parser.add_argument("--min-pickups", type=int)
     parser.add_argument("--min-enemy-damage", type=int)
     parser.add_argument("--min-forward-progress", type=int)
     parser.add_argument("--min-signal-sweep-jumps", type=int)
+    parser.add_argument("--min-suplexes", type=int)
     return parser
 
 
@@ -692,10 +738,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_lives_lost=args.max_lives_lost,
         max_failed_pickups=args.max_failed_pickups,
         max_weapon_air_attacks=args.max_weapon_air_attacks,
+        max_missed_back_exposures=args.max_missed_back_exposures,
         min_pickups=args.min_pickups,
         min_enemy_damage=args.min_enemy_damage,
         min_forward_progress=args.min_forward_progress,
         min_signal_sweep_jumps=args.min_signal_sweep_jumps,
+        min_suplexes=args.min_suplexes,
     )
     trace_stream: TextIO | None = None
     try:

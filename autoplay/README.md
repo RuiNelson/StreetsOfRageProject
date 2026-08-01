@@ -152,6 +152,7 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.eva
   --max-lives-lost 0 \
   --max-failed-pickups 0 \
   --max-weapon-air-attacks 0 \
+  --max-missed-back-exposures 0 \
   --min-enemy-damage 15 \
   --min-forward-progress 600 \
   --report /tmp/sor-autoplay-report.json \
@@ -167,6 +168,16 @@ actor state for replay analysis. A learned policy can be passed to
 `LockstepEvaluator(policy=...)` while retaining the same measurements and
 acceptance criteria, so improvements remain comparable with the scripted
 baseline.
+
+The combat policy has an explainable intelligence pipeline: a generic
+forward-chaining inference engine evaluates expert production rules, then a
+persistent autoplanner executes multi-frame tactics only when ROM action-state
+guards permit each input. The first plan protects an exposed back during a
+grab: C crosses over the held enemy, the planner waits through `$76/$77`, and B
+is pressed once at the confirmed back hold `$66/$67` to enter suplex `$68/$69`.
+Evaluator metrics expose the opportunity, response, and completion; use
+`--max-missed-back-exposures 0` and `--min-suplexes 1` for a controlled scenario
+that is known to present it.
 
 For a Stage 2 cheat episode, also require
 `--min-signal-sweep-jumps 1`. Together with
@@ -196,6 +207,9 @@ autoplay/
     agent/
       controls.py       # standard button mapping
       policy.py         # decide_actions()
+      inference.py      # generic production-rule forward chaining
+      expert.py         # tactical facts, rules, and explainable goals
+      autoplanner.py     # persistent guarded multi-step combat plans
       combat.py         # phase-aware targeting / approach
       enemies.py        # family/boss counter plans
       grabs.py          # hold / knee / throw / weapon trees

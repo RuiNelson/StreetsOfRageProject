@@ -26,12 +26,33 @@ Read the game code for understanding the AIs and beat them.
 
 Position themselves in a least perilous position.
 
+In particular, do not remain in a front grab while another live enemy can
+attack the player's back. Infer that tactical condition from facing and enemy
+geometry, cross over the held enemy with C, wait until the game confirms the
+back-hold state, then press B once to suplex. Never mash C or B through the
+transition animations.
+
+Combat intelligence is split into three reusable layers:
+
+- an expert knowledge base expresses named tactical facts and production rules;
+- a deterministic inference engine derives explainable goals and records which
+  rules fired;
+- a persistent autoplanner turns a goal into guarded controller steps across
+  multiple observations, cancelling safely if its preconditions disappear.
+
+This boundary must remain usable by future learning: learned components may
+propose facts, goals, rule weights, or plan selection, while ROM-state guards
+and the evaluator continue to enforce legal and reproducible execution.
+
 ## Testing and learning contract
 
 Gameplay changes must be measurable in controlled lockstep, not judged only
 from a real-time run. The common evaluator records damage, lives, enemy damage,
 item collection failures, progress, jumps, actions, and reward from coherent
 RAM snapshots, and supports explicit pass/fail thresholds plus per-step traces.
+It also records exposed-back grab opportunities, missed responses, crossover
+starts, and suplexes so tactical positioning is measurable rather than judged
+only from video.
 
 Future scripted or learned policies must use the same snapshot-to-decision
 interface and evaluation metrics. Learning may replace policy selection and

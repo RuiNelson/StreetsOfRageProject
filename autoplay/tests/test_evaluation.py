@@ -30,7 +30,9 @@ from sor_autoplay.memory_map import (
     ADDR_WAVE,
     MAX_HEALTH,
     OBJ_ACTION_STATE,
+    OBJ_ATTACKER_PTR,
     OBJ_CHARACTER_ID,
+    OBJ_CONTACT_PTR,
     OBJ_FLAGS,
     OBJ_HEALTH,
     OBJ_HELD_TYPE,
@@ -38,6 +40,7 @@ from sor_autoplay.memory_map import (
     OBJ_POS_Y,
     OBJ_POS_Z,
     OBJ_PRIMARY_STATE,
+    OBJ_TARGET_PTR,
     OBJ_TYPE,
 )
 
@@ -106,6 +109,23 @@ def _game_ram(
     return bytes(ram)
 
 
+def _grab_threat_ram(*, action: int = 0x60) -> bytes:
+    ram = bytearray(_game_ram(item=False, enemy_health=4, enemy_primary=0x0500))
+    _put_u8(ram, ADDR_P1_OBJECT + OBJ_ACTION_STATE, action)
+    _put_u16(ram, ADDR_P1_OBJECT + OBJ_CONTACT_PTR, 0xB900)
+    _put_u16(ram, OBJECT_TABLE + OBJ_ATTACKER_PTR, 0xB800)
+    _put_u16(ram, OBJECT_TABLE + OBJ_TARGET_PTR, 0xB800)
+
+    rear = OBJECT_TABLE + 0x80
+    _put_u8(ram, rear + OBJ_TYPE, 0x22)
+    _put_u16(ram, rear + OBJ_PRIMARY_STATE, 0x0100)
+    _put_u16(ram, rear + OBJ_HEALTH, 4)
+    _put_fixed(ram, rear + OBJ_POS_X, 70)
+    _put_fixed(ram, rear + OBJ_POS_Y, 64)
+    _put_fixed(ram, rear + OBJ_POS_Z, 160)
+    return bytes(ram)
+
+
 @dataclass
 class _Result:
     frame: int
@@ -169,6 +189,50 @@ class WorkRamTests(unittest.TestCase):
 
 
 class LockstepEvaluatorTests(unittest.TestCase):
+    def test_back_exposure_and_suplex_acceptance_metrics(self) -> None:
+        front_hold = _grab_threat_ram()
+        crossover = LockstepEvaluator(
+            _FakeClient([front_hold, front_hold]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                p1_mask=0x40,
+                p2_mask=0,
+                p1_note="plan crossover Held Garcia",
+            ),
+            criteria=EvaluationCriteria(max_missed_back_exposures=0),
+        ).run()
+        self.assertEqual(crossover.metrics.back_exposed_grab_opportunities, 1)
+        self.assertEqual(crossover.metrics.crossover_suplex_starts, 1)
+        self.assertEqual(crossover.metrics.missed_back_exposure_responses, 0)
+        self.assertTrue(crossover.passed)
+
+        missed = LockstepEvaluator(
+            _FakeClient([front_hold, front_hold]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                p1_mask=0x20,
+                p2_mask=0,
+                p1_note="knee Held Garcia",
+            ),
+            criteria=EvaluationCriteria(max_missed_back_exposures=0),
+        ).run()
+        self.assertEqual(missed.metrics.missed_back_exposure_responses, 1)
+        self.assertFalse(missed.passed)
+
+        back_hold = _grab_threat_ram(action=0x67)
+        suplex = LockstepEvaluator(
+            _FakeClient([back_hold, back_hold]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                p1_mask=0x20,
+                p2_mask=0,
+                p1_note="plan suplex Held Garcia",
+            ),
+            criteria=EvaluationCriteria(min_suplexes=1),
+        ).run()
+        self.assertEqual(suplex.metrics.suplexes, 1)
+        self.assertTrue(suplex.passed)
+
     def test_weapon_air_attack_and_signal_counter_metrics(self) -> None:
         weapon_ram = bytearray(_game_ram(item=False))
         _put_u8(weapon_ram, ADDR_P1_OBJECT + OBJ_ACTION_STATE, 0x32)

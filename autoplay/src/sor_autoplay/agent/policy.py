@@ -14,8 +14,10 @@ from ..phases import CombatPhase, is_dangerous, is_punishable
 from ..state import GameSnapshot, PlayerSnapshot
 from ..world_map import MapEntity
 from . import combat, coop, enemies as enemy_ai, grabs, pressure, stage
+from .autoplanner import AutoPlanner
 from .characters import profile_for
 from .controls import Intent, mask_from_intent
+from .expert import DEFAULT_COMBAT_EXPERT
 from .grabs import GrabMemory
 from .walk import WalkState, blend_walk_with_actions
 
@@ -62,6 +64,8 @@ class AgentState:
     p2_grab: GrabMemory = field(default_factory=GrabMemory)
     p1_walk: WalkState = field(default_factory=WalkState)
     p2_walk: WalkState = field(default_factory=WalkState)
+    p1_planner: AutoPlanner = field(default_factory=AutoPlanner)
+    p2_planner: AutoPlanner = field(default_factory=AutoPlanner)
 
     def phase(self, player_index: int) -> int:
         return self.p1_phase if player_index == 1 else self.p2_phase
@@ -86,6 +90,13 @@ class AgentState:
 
     def walk(self, player_index: int) -> WalkState:
         return self.p1_walk if player_index == 1 else self.p2_walk
+
+    def planner(self, player_index: int) -> AutoPlanner:
+        return self.p1_planner if player_index == 1 else self.p2_planner
+
+    def clear_planners(self) -> None:
+        self.p1_planner.reset()
+        self.p2_planner.reset()
 
     def set_note(self, player_index: int, note: str) -> None:
         if player_index == 1:
@@ -130,16 +141,19 @@ def decide_actions(
     memory.tick += 1
 
     if not config.any_enabled() or not snapshot.connected:
+        memory.clear_planners()
         return AgentDecision(0, 0, steady=True)
 
     if snapshot.paused or snapshot.police_special_active:
         memory.p1_walk.clear()
         memory.p2_walk.clear()
+        memory.clear_planners()
         return AgentDecision(0, 0, p1_note="steady", p2_note="steady", steady=True)
 
     if snapshot.game_state not in _INGAME_STATES:
         memory.p1_walk.clear()
         memory.p2_walk.clear()
+        memory.clear_planners()
         return AgentDecision(0, 0, p1_note="menu idle", p2_note="menu idle", steady=True)
 
     p1_mask = 0
@@ -219,17 +233,49 @@ def _decide_one(
     # --- Mr. X dialog ---
     if stage.is_mr_x_offer(snapshot):
         walk.clear()
+        memory.planner(player_index).reset()
         return _mr_x_intent(snapshot, player_index, memory)
 
     if me is None or not player_snap.is_playable:
         walk.clear()
+        memory.planner(player_index).reset()
         return Intent(note="not playable")
 
     if me.is_hurt:
         walk.clear()
+        memory.planner(player_index).reset()
         return Intent(note="hurt")
 
     press = pressure.compute_pressure(snapshot, player_snap, me)
+
+    # --- Expert inference + persistent grab plan ---
+    # A production rule recognizes a live threat behind a front hold. The
+    # autoplanner then owns the ROM-confirmed $60 -> C -> $76 -> $66 -> B ->
+    # $68 sequence across observations, so police/ordinary grab heuristics
+    # cannot interrupt it or inject buttons into its animations.
+    gctx = grabs.context_from_player(
+        me,
+        snapshot.world_map.entities,
+        player_index=player_index,
+    )
+    gmem = memory.grab_mem(player_index)
+    held_foe = grabs.held_enemy_entity(me, snapshot.world_map.entities)
+    assessment = DEFAULT_COMBAT_EXPERT.assess(
+        me,
+        snapshot.world_map.entities,
+        held_enemy=held_foe if gctx.enemy_grab else None,
+    )
+    planned_intent = memory.planner(player_index).decide(
+        assessment,
+        me,
+        gctx,
+        held_foe,
+    )
+    if planned_intent is not None:
+        walk.clear()
+        gmem.reset()
+        return planned_intent
+
     if pressure.should_call_police(
         press,
         player_snap.specials,
@@ -242,13 +288,6 @@ def _decide_one(
     # --- Grab / weapon hold ---
     # Live: hold uses action $60 with held_type often 0; detect via action,
     # contact_ptr, and GRABBED enemies linked to this seat. Then knee/throw.
-    gctx = grabs.context_from_player(
-        me,
-        snapshot.world_map.entities,
-        player_index=player_index,
-    )
-    gmem = memory.grab_mem(player_index)
-    held_foe = grabs.held_enemy_entity(me, snapshot.world_map.entities)
     foe_near = held_foe or combat.nearest_foe(me, snapshot.world_map.entities)
     held_intent = grabs.decide_held(
         me,

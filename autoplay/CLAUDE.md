@@ -66,8 +66,18 @@ that layout yet.
 
 1. Steady (no input) while paused or police special is active
 2. Mr. X offer: always select **NO** (refuse) then confirm
-3. Police special when pressure score ≥ threshold and specials remain (not round 8)
-4. **Grab / weapon hold tree** (`agent/grabs.py`): always **B+back throw**
+3. **Expert inference + autoplanner** (`agent/inference.py`, `expert.py`,
+   `autoplanner.py`): facts and salience-ordered production rules turn observed
+   combat geometry into explainable tactical goals. If a front hold (`$60/$61`)
+   leaves another live, on-screen hostile behind the player, protect the exposed
+   back with the ROM-confirmed plan **C → wait → B**. C enters crossover
+   `$76/$77` (or `$80/$81`), the planner waits without injecting more input,
+   and B is emitted exactly once after the ROM reports the back hold `$66/$67`,
+   entering suplex `$68/$69`. A pre-existing back hold is a direct suplex goal.
+   Plans persist across snapshots, tolerate one missing hold observation, time
+   out safely, and take ownership before police and ordinary grab heuristics.
+4. Police special when pressure score ≥ threshold and specials remain (not round 8)
+5. **Grab / weapon hold tree** (`agent/grabs.py`): normally **B+back throw**
    (away = opposite action-state facing bit0). A hold needs a dedicated held
    field or the grabbed enemy's reciprocal player link; the latch bridges only
    one missing observer sample so stale contact/reaction state cannot create an
@@ -82,12 +92,12 @@ that layout yet.
    After pepper spray fires, `+$60` clears but `+$5E` can keep pointing at its
    projectile; `+$5E` alone is therefore not enemy-grab evidence. Enemy holds
    require a reciprocal GRABBED link or a non-weapon `+$60` type.
-5. 2P mid-air assist when both agents and partner is airborne nearby
-6. Pick up weapons freely; health/life/special only if co-op fairness allows
+6. 2P mid-air assist when both agents and partner is airborne nearby
+7. Pick up weapons freely; health/life/special only if co-op fairness allows
    - ROM routine `$3136` accepts only X ±20, Y ±16, Z ±8. Walk inside a
      conservative X ±16, Y ±12, Z ±6 box, and emit B only from a grounded
      action state; otherwise wait for the current animation to finish
-7. **Face-then-hit combat** (`agent/combat.py` + `enemies.py`):
+8. **Face-then-hit combat** (`agent/combat.py` + `enemies.py`):
    - Player facing = action-state `+$30` **bit 0** (set = face left)
    - Punch only when same lane (Y ≤ ±12), within strike range, and facing foe
    - Turn one tick before attack if facing the wrong way (no air / reverse punches)
@@ -191,7 +201,11 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
   `weapon_attack_edges`, `weapon_air_attack_edges`, and `signal_sweep_jumps`
   are first-class metrics; Stage-2 runs can enforce
   `--max-weapon-air-attacks 0 --min-signal-sweep-jumps 1` for scripted or
-  future learned policies.
+  future learned policies. Back protection is likewise observable through
+  `back_exposed_grab_opportunities`, `missed_back_exposure_responses`,
+  `crossover_suplex_starts`, and `suplexes`; enforce it with
+  `--max-missed-back-exposures 0` and, in a scenario known to contain the
+  opportunity, `--min-suplexes 1`.
 - Use evaluator `--restart-character` for comparable episodes. It restarts,
   navigates menus, verifies the player/health/game state, and enables lockstep
   on the same connection before returning control; a separate setup process
@@ -241,8 +255,9 @@ See `src/sor_autoplay/memory_map.py` and
 - Mr. X offer: `$FFDE00` flag, `$FFDE04` state; player object `+$59` bit3=side,
   bit4=choice UI active (initial refuse path wants bit3=1 = NO)
 - Styles live in `object_catalog.py`; extraction in `world_map.py`
-- Agent modules: `agent/policy.py`, `combat.py`, `pressure.py`, `stage.py`,
-  `coop.py`, `characters.py`, `controls.py`
+- Agent modules: `agent/policy.py`, `inference.py`, `expert.py`,
+  `autoplanner.py`, `combat.py`, `pressure.py`, `stage.py`, `coop.py`,
+  `characters.py`, `controls.py`
 - Deterministic evaluator: `evaluation.py` (metrics, JSONL trace, acceptance
   criteria, injectable policy callable)
 
