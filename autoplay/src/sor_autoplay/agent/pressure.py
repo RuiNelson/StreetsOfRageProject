@@ -66,11 +66,7 @@ def nearby_threats(
             continue
         if graph is not None and not graph.entity_has(entity, Relation.REACHABLE):
             continue
-        if (
-            entity.health is not None
-            and entity.health >= 0x8000
-            and not is_dangerous(entity.combat_phase)
-        ):
+        if entity.is_defeated:
             continue
         if entity.combat_phase in (CombatPhase.DEATH, CombatPhase.SCRIPTED):
             continue

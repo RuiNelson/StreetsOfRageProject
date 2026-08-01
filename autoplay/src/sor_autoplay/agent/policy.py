@@ -19,7 +19,7 @@ from .autoplanner import AutoPlanner
 from .characters import profile_for
 from .controls import Intent, mask_from_intent
 from .expert import DEFAULT_COMBAT_EXPERT
-from .grabs import GrabMemory
+from .grabs import EnemyGrabEscapeMemory, GrabMemory
 from .knowledge import Relation, build_tactical_graph
 from .walk import WalkState, blend_walk_with_actions
 
@@ -64,6 +64,12 @@ class AgentState:
     p2_attack_cd: int = 0
     p1_grab: GrabMemory = field(default_factory=GrabMemory)
     p2_grab: GrabMemory = field(default_factory=GrabMemory)
+    p1_enemy_grab_escape: EnemyGrabEscapeMemory = field(
+        default_factory=EnemyGrabEscapeMemory
+    )
+    p2_enemy_grab_escape: EnemyGrabEscapeMemory = field(
+        default_factory=EnemyGrabEscapeMemory
+    )
     p1_walk: WalkState = field(default_factory=WalkState)
     p2_walk: WalkState = field(default_factory=WalkState)
     p1_planner: AutoPlanner = field(default_factory=AutoPlanner)
@@ -91,6 +97,13 @@ class AgentState:
 
     def grab_mem(self, player_index: int) -> GrabMemory:
         return self.p1_grab if player_index == 1 else self.p2_grab
+
+    def enemy_grab_escape_mem(self, player_index: int) -> EnemyGrabEscapeMemory:
+        return (
+            self.p1_enemy_grab_escape
+            if player_index == 1
+            else self.p2_enemy_grab_escape
+        )
 
     def walk(self, player_index: int) -> WalkState:
         return self.p1_walk if player_index == 1 else self.p2_walk
@@ -256,6 +269,22 @@ def _decide_one(
         memory.planner(player_index).reset()
         memory.goal(player_index).clear()
         return Intent(note="not playable")
+
+    # Enemy-held player is a closed, ROM-guarded two-edge plan. $7A accepts C
+    # to cross over; $7C creates an eight-tick +$58.bit7 window and returns to
+    # $7A, where B starts the $7E counter throw. Own these states before all
+    # hurt/combat/loot arbitration so another rule cannot freeze or interrupt.
+    escape_intent = grabs.decide_enemy_grab_escape(
+        me,
+        memory.enemy_grab_escape_mem(player_index),
+        tick=memory.tick,
+    )
+    if escape_intent is not None:
+        walk.clear()
+        memory.planner(player_index).reset()
+        memory.goal(player_index).clear()
+        memory.grab_mem(player_index).reset()
+        return escape_intent
 
     if me.is_hurt:
         walk.clear()

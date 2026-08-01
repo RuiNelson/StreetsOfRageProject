@@ -100,6 +100,25 @@ class KnowledgeGraphTests(unittest.TestCase):
         self.assertFalse(graph.entity_has(staged, Relation.BLOCKS_PROGRESS))
         self.assertTrue(graph.entity_has(live, Relation.REACHABLE))
 
+    def test_signed_negative_corpse_is_a_hard_defeated_graph_node(self) -> None:
+        me = _player()
+        corpse = _entity(
+            slot="E0",
+            map_x=130,
+            world_x=130,
+            health=0xFFFF,
+            primary_state=0x0B00,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+        graph = build_tactical_graph(
+            me, (me, corpse), level_index=0, player_index=1
+        )
+        self.assertTrue(graph.entity_has(corpse, Relation.DEFEATED))
+        self.assertFalse(graph.entity_has(corpse, Relation.REACHABLE))
+        self.assertFalse(graph.entity_has(corpse, Relation.DANGEROUS))
+        self.assertFalse(graph.entity_has(corpse, Relation.PUNISHABLE))
+        self.assertFalse(graph.entity_has(corpse, Relation.BLOCKS_PROGRESS))
+
     def test_boss_just_beyond_viewport_still_blocks_progress(self) -> None:
         me = _player(x=288, y=37)
         antonio = _entity(
@@ -174,6 +193,63 @@ class FuzzyTargetTests(unittest.TestCase):
         choice = select_target(me, (antonio,), PROFILES[0])
         assert choice is not None
         self.assertEqual(choice.entity.label, "Antonio")
+
+
+class EnemyGrabEscapeTests(unittest.TestCase):
+    def test_policy_executes_rom_guarded_c_then_b_counter(self) -> None:
+        memory = AgentState()
+        config = AgentConfig(p1_enabled=True)
+        held = replace(
+            _player(action=0x7A),
+            combat_phase=CombatPhase.HELD_BY_ENEMY,
+        )
+
+        acquiring = replace(held, action_state=0x78)
+        acquire_wait = decide_actions(_snapshot((acquiring,)), config, memory)
+        self.assertEqual(acquire_wait.p1_mask, 0)
+        self.assertIn("enemy grab acquire", acquire_wait.p1_note)
+
+        jump = decide_actions(_snapshot((held,)), config, memory)
+        self.assertEqual(jump.p1_mask & 0x60, 0x40)
+        self.assertIn("escape enemy grab crossover", jump.p1_note)
+
+        retry_guard = decide_actions(_snapshot((held,)), config, memory)
+        self.assertEqual(retry_guard.p1_mask, 0)
+        self.assertIn("await enemy grab jump", retry_guard.p1_note)
+
+        crossover = replace(held, action_state=0x7C)
+        crossing = decide_actions(_snapshot((crossover,)), config, memory)
+        self.assertEqual(crossing.p1_mask, 0)
+        self.assertIn("enemy grab crossover", crossing.p1_note)
+
+        counter_window = replace(held, action_flags=0x80)
+        throw = decide_actions(_snapshot((counter_window,)), config, memory)
+        self.assertEqual(throw.p1_mask & 0x60, 0x20)
+        self.assertIn("escape enemy grab counter throw", throw.p1_note)
+
+        throwing = replace(held, action_state=0x7E, action_flags=0)
+        wait = decide_actions(_snapshot((throwing,)), config, memory)
+        self.assertEqual(wait.p1_mask, 0)
+        self.assertIn("enemy grab counter throw", wait.p1_note)
+
+    def test_policy_progresses_past_signed_negative_floor_corpse(self) -> None:
+        me = _player()
+        corpse = _entity(
+            slot="E0",
+            map_x=130,
+            world_x=130,
+            health=0xFFFF,
+            primary_state=0x0300,
+            combat_phase=CombatPhase.KNOCKDOWN,
+        )
+        decision = decide_actions(
+            _snapshot((me, corpse)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertEqual(decision.p1_mask & 0x60, 0)
+        self.assertTrue(decision.p1_mask & 0x08, decision.p1_note)
+        self.assertIn("progress", decision.p1_note)
 
 
 class TacticalSolverTests(unittest.TestCase):

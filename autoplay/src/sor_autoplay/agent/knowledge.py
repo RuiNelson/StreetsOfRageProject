@@ -20,6 +20,7 @@ _BOSS_ACTIVATION_MARGIN_X = 64.0
 
 class Relation(Enum):
     REACHABLE = auto()
+    DEFEATED = auto()
     TARGETS_PLAYER = auto()
     DANGEROUS = auto()
     PUNISHABLE = auto()
@@ -70,11 +71,9 @@ class TacticalKnowledgeGraph:
 
 
 def _combatant_alive(entity: MapEntity) -> bool:
-    if should_ignore_as_target(entity.combat_phase):
+    if entity.is_defeated or should_ignore_as_target(entity.combat_phase):
         return False
-    if entity.health is None or entity.health < 0x8000:
-        return True
-    return is_dangerous(entity.combat_phase)
+    return True
 
 
 def entity_reachable(entity: MapEntity, *, level_index: int) -> bool:
@@ -111,6 +110,9 @@ def build_tactical_graph(
     for entity in entities:
         if entity.slot == player.slot:
             continue
+        defeated = entity.is_defeated
+        if defeated:
+            edges.add(Edge(entity.slot, Relation.DEFEATED))
         reachable = entity_reachable(entity, level_index=level_index)
         if reachable:
             edges.add(Edge(entity.slot, Relation.REACHABLE))
@@ -124,6 +126,12 @@ def build_tactical_graph(
             edges.add(Edge(entity.slot, Relation.SAME_LANE))
         if (face_left and dx > 8.0) or (not face_left and dx < -8.0):
             edges.add(Edge(entity.slot, Relation.BEHIND_PLAYER))
+
+        if entity.kind in ("enemy", "boss") and defeated:
+            # Signed-negative health/death is a hard lifecycle constraint.
+            # Do not re-derive danger, punish, blocking, or affordances from a
+            # stale family state while the corpse is still allocated.
+            continue
 
         if entity.kind in ("enemy", "boss", "projectile"):
             if entity.targets_player == player_index:

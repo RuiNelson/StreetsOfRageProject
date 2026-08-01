@@ -22,6 +22,7 @@ from .phases import (
     decode_target_seat,
     ordinary_enemy_phase,
     phase_label,
+    player_is_held_by_enemy_action,
     player_phase,
 )
 
@@ -105,7 +106,7 @@ class MapEntity:
     held_ptr: int = 0  # player +$5E low word
     contact_ptr: int = 0  # player +$4C contact/grab partner (live hold uses this)
     outgoing_damage: int = 0  # +$34 active hit frame damage nibble
-    action_flags: int = 0  # player +$58; bit5 queues normal-combo continuation
+    action_flags: int = 0  # player +$58; bit5 combo queue, bit7 grab-counter window
     combo_state: int = 0  # player +$5D
     tactical: int = 0  # boss +$67
     pair_role: int = 0  # later-boss +$5D (1/2) when kind==boss
@@ -181,7 +182,31 @@ class MapEntity:
         return 0x50 <= base <= 0x5F
 
     @property
+    def is_held_by_enemy(self) -> bool:
+        """True while the ROM is running the enemy-grab counter sequence."""
+
+        return player_is_held_by_enemy_action(self.action_state)
+
+    @property
+    def is_defeated(self) -> bool:
+        """Hard enemy lifecycle fact, independent of a stale action family.
+
+        Ordinary-enemy lethal checks are signed: zero health is still alive
+        and needs a finishing hit, while $8000-$FFFF has already crossed the
+        lethal boundary. The explicit death phase covers boss/death layouts
+        whose health word is not useful.
+        """
+
+        if self.kind not in ("enemy", "boss"):
+            return False
+        if self.combat_phase == CombatPhase.DEATH:
+            return True
+        return self.health is not None and self.health >= 0x8000
+
+    @property
     def phase_tag(self) -> str:
+        if self.is_defeated:
+            return phase_label(CombatPhase.DEATH)
         return phase_label(self.combat_phase)
 
     @property
@@ -236,7 +261,9 @@ class WorldMap:
         return tuple(
             e
             for e in self.entities
-            if e.kind in ("enemy", "boss") and e.targets_player == player_index
+            if e.kind in ("enemy", "boss")
+            and not e.is_defeated
+            and e.targets_player == player_index
         )
 
     def phase_counts(self) -> dict[str, int]:

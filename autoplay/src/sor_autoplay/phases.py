@@ -30,6 +30,16 @@ class CombatPhase(Enum):
     CHARGE = auto()  # boss charge / clothesline commit
     HURT_PLAYER = auto()  # player hurt states
     HOLDING = auto()  # player holding weapon/enemy
+    HELD_BY_ENEMY = auto()  # enemy has grabbed the player ($78-$7E)
+
+
+# Player action dispatcher entries $78/$7A/$7C/$7E form the enemy-grab
+# counter sequence. Facing occupies bit 0, so compare the even base action.
+PLAYER_HELD_BY_ENEMY_ACTIONS = frozenset({0x78, 0x7A, 0x7C, 0x7E})
+
+
+def player_is_held_by_enemy_action(action_byte: int) -> bool:
+    return (action_byte & 0xFE) in PLAYER_HELD_BY_ENEMY_ACTIONS
 
 
 _GARCIA_MOVE_PHASES: dict[int, dict[int, CombatPhase]] = {
@@ -164,6 +174,8 @@ def player_phase(
     held_type: int,
 ) -> CombatPhase:
     base = action_byte & 0xFE
+    if player_is_held_by_enemy_action(action_byte):
+        return CombatPhase.HELD_BY_ENEMY
     if 0x50 <= base <= 0x5F:
         return CombatPhase.HURT_PLAYER
     if held_type:
@@ -196,6 +208,7 @@ def phase_label(phase: CombatPhase) -> str:
         CombatPhase.CHARGE: "charge",
         CombatPhase.HURT_PLAYER: "hurt",
         CombatPhase.HOLDING: "hold",
+        CombatPhase.HELD_BY_ENEMY: "enemy-hold",
     }.get(phase, "?")
 
 
@@ -211,6 +224,7 @@ def phase_color(phase: CombatPhase) -> str | None:
         CombatPhase.RECOVERY: "#ffd60a",
         CombatPhase.DEATH: "#636366",
         CombatPhase.SCRIPTED: "#8e8e93",
+        CombatPhase.HELD_BY_ENEMY: "#ff375f",
     }.get(phase)
 
 

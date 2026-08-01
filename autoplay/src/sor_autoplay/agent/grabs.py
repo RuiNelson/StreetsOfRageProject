@@ -44,6 +44,23 @@ GRAB_INPUT_RETRY_TICKS = 4
 HOLD_INPUT_ACTIONS = frozenset({0x28, 0x4A, 0x60, 0x66})
 GRAB_ANIMATION_ACTIONS = frozenset({0x62, 0x64, 0x68, 0x6A, 0x6C, 0x6E})
 
+# Enemy-held player sequence, indexed by player action +$30:
+# $78 acquire -> $7A held -> C -> $7C crossover -> $7A with +$58.bit7 ->
+# B -> $7E counter throw. This is a two-edge protocol, not a B+C chord.
+ENEMY_HOLD_ACQUIRE_ACTION = 0x78
+ENEMY_HOLD_ACTION = 0x7A
+ENEMY_HOLD_CROSSOVER_ACTION = 0x7C
+ENEMY_HOLD_COUNTER_THROW_ACTION = 0x7E
+ENEMY_HOLD_ACTIONS = frozenset(
+    {
+        ENEMY_HOLD_ACQUIRE_ACTION,
+        ENEMY_HOLD_ACTION,
+        ENEMY_HOLD_CROSSOVER_ACTION,
+        ENEMY_HOLD_COUNTER_THROW_ACTION,
+    }
+)
+ENEMY_GRAB_COUNTER_WINDOW = 0x80  # player +$58 bit 7
+
 
 @dataclass(frozen=True, slots=True)
 class GrabContext:
@@ -113,6 +130,8 @@ def _player_has_grabbed_enemy(
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
             continue
+        if entity.is_defeated:
+            continue
         if entity.combat_phase != CombatPhase.GRABBED:
             continue
         # Attacker/holder low word points at player object.
@@ -140,6 +159,55 @@ class GrabMemory:
         self.clear_ticks = 0
         self.pulse = 0
         self.last_input_tick = -10_000
+
+
+@dataclass
+class EnemyGrabEscapeMemory:
+    """Retry guard for the ROM-confirmed enemy-grab counter protocol."""
+
+    active: bool = False
+    last_command: str = ""
+    last_input_tick: int = -10_000
+
+    def reset(self) -> None:
+        self.active = False
+        self.last_command = ""
+        self.last_input_tick = -10_000
+
+
+def decide_enemy_grab_escape(
+    me: MapEntity,
+    memory: EnemyGrabEscapeMemory,
+    *,
+    tick: int,
+) -> Intent | None:
+    """Own $78-$7E and execute C, then B in the eight-tick counter window."""
+
+    action = me.action_base
+    if action not in ENEMY_HOLD_ACTIONS:
+        memory.reset()
+        return None
+
+    memory.active = True
+    if action == ENEMY_HOLD_ACQUIRE_ACTION:
+        return Intent(note=f"enemy grab acquire ${me.action_state:02X}")
+    if action == ENEMY_HOLD_CROSSOVER_ACTION:
+        return Intent(note=f"enemy grab crossover ${me.action_state:02X}")
+    if action == ENEMY_HOLD_COUNTER_THROW_ACTION:
+        return Intent(note=f"enemy grab counter throw ${me.action_state:02X}")
+
+    command = "throw" if me.action_flags & ENEMY_GRAB_COUNTER_WINDOW else "jump"
+    if (
+        command == memory.last_command
+        and tick - memory.last_input_tick < GRAB_INPUT_RETRY_TICKS
+    ):
+        return Intent(note=f"await enemy grab {command} ${me.action_state:02X}")
+
+    memory.last_command = command
+    memory.last_input_tick = tick
+    if command == "throw":
+        return Intent(attack=True, note="escape enemy grab counter throw")
+    return Intent(jump=True, note="escape enemy grab crossover")
 
 
 def decide_held(
@@ -389,6 +457,8 @@ def held_enemy_entity(
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
             continue
+        if entity.is_defeated:
+            continue
         if entity.combat_phase == CombatPhase.GRABBED:
             d = abs(entity.map_x - me.map_x) + abs(entity.map_y - me.map_y)
             if d < best_d:
@@ -399,7 +469,7 @@ def held_enemy_entity(
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
             continue
-        if entity.health is not None and entity.health <= 0:
+        if entity.is_defeated or entity.health == 0:
             continue
         d = abs(entity.map_x - me.map_x) + abs(entity.map_y - me.map_y) * 0.5
         if d < 28 and d < best_d:

@@ -155,7 +155,15 @@ that layout yet.
      and is dangerous; live it retained outgoing damage `$04` at zero health.
      Enemy health uses a signed lethal check: `0` is still active and needs a
      finishing hit to underflow to `$FFFF`. Keep zero-health objects visible
-     and targetable until their attack ends and the lethal/death state appears
+     and targetable until their attack ends and the lethal/death state appears.
+     Once health is signed-negative (`$8000-$FFFF`), treat the allocated floor
+     object as the hard graph fact `DEFEATED` regardless of any stale action
+     family: it is never reachable, dangerous, blocking, selected, or chased
+   - Enemy-held player actions are `$78/$7A/$7C/$7E`. ROM handlers
+     `$2606` and `$26B0` prove the counter protocol: C in `$7A` starts `$7C`;
+     `$7C` sets `+$58.bit7`, an eight-tick `+$62` window, and returns to `$7A`;
+     B in that window enters counter throw `$7E`. Own the complete sequence,
+     emit the two edges separately, and wait through the closed animations
    - A committed attacker can be turned toward and punched in the same input;
      a separate four-frame facing decision is too slow. Lane evasion respects
      the ordinary-enemy `$02-$70` bounds and retreats on X at either edge
@@ -246,8 +254,13 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
   opportunity, `--min-suplexes 1`.
   Symbolic arbitration/execution regressions are first-class too:
   `invalid_grab_animation_attacks`, `unreachable_enemy_stall_steps`,
-  `loot_under_threat_steps`, and `boss_progress_steps`; normally enforce all
-  their corresponding `--max-*` thresholds at zero.
+  `loot_under_threat_steps`, `boss_progress_steps`,
+  `missed_enemy_grab_escape_responses`, `defeated_enemy_attack_edges`, and
+  `defeated_enemy_pursuit_steps`;
+  normally enforce all their corresponding `--max-*` thresholds at zero.
+  Enemy-held-player scenarios additionally expose
+  `enemy_grab_escape_jump_edges` and `enemy_grab_counter_throw_edges`, gated by
+  `--min-enemy-grab-escape-jumps` and `--min-enemy-grab-counter-throws`.
   `boss_stall_steps` begins after eight consecutive input-ready `guard lane`
   decisions against a blocking boss; enforce `--max-boss-stalls 0` to catch
   the Antonio cross-lane fixed point without rejecting a brief guard.

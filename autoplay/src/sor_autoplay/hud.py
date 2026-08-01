@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 from typing import Callable
 
-from .phases import phase_color
+from .phases import CombatPhase, phase_color
 from .state import GameSnapshot, PlayerSnapshot
 from .world_map import MAP_ASPECT, WorldMap
 
@@ -580,7 +580,9 @@ class ObserverHud:
             disc_id, text_id = self._markers[drawn]
             r = boss_r if entity.kind in ("player", "boss") else marker_r
             canvas.coords(disc_id, cx - r, cy - r, cx + r, cy + r)
-            outline = phase_color(entity.combat_phase)
+            outline = phase_color(
+                CombatPhase.DEATH if entity.is_defeated else entity.combat_phase
+            )
             canvas.itemconfigure(
                 disc_id,
                 state="normal",

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from ..phases import CombatPhase, is_dangerous
+from ..phases import CombatPhase
 from ..world_map import SCREEN_WIDTH, MapEntity
 from .inference import InferenceEngine, Rule
 from .knowledge import Relation, TacticalKnowledgeGraph
@@ -141,11 +141,7 @@ def _nearest_hostile_behind(
             CombatPhase.GRABBED,
         ):
             continue
-        if (
-            entity.health is not None
-            and entity.health >= 0x8000
-            and not is_dangerous(entity.combat_phase)
-        ):
+        if entity.is_defeated:
             continue
         if not 0.0 <= entity.map_x <= float(SCREEN_WIDTH):
             continue

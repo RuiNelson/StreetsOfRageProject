@@ -36,6 +36,10 @@ Per-player toggle (HUD button or keys **1** / **2**):
   cannot become combat goals. Round-1 enemies staged at lane Y `0` are ignored
   until the ROM materializes them. Boss activation points get a narrow X
   margin because they can lock scrolling just outside the 320 px viewport.
+  Signed-negative-health floor objects are marked `DEFEATED` and cannot be
+  revived as targets by a stale attack-family byte; exact zero health remains
+  targetable for the ROM-required finishing hit. Allocated corpses remain
+  visible for diagnosis with the gray death outline instead of green punish.
 - Fuzzy, phase-aware target utility balances distance, lane access, immediate
   peril, ranged attacks, punish windows, bosses, and who is targeting the
   player. Goal/target hysteresis prevents indecisive switching.
@@ -53,7 +57,8 @@ Per-player toggle (HUD button or keys **1** / **2**):
   separate thrown helper is treated as a projectile
 - **Grab/throw trees**: guarded input windows, bounded orphan recovery, and a
   crossover/suplex plan; stale weapon/contact fields cannot leak B into closed
-  `$62-$6E` animations
+  `$62-$6E` animations. If an enemy holds the player, `$7A` emits C, `$7C`
+  waits, and the returned `$7A` `+$58.bit7` counter window emits B for `$7E`.
 - Character-tuned ranges (Axel / Adam / Blaze), measured from the live attack
   hitboxes rather than estimated sprite distance
 - Police special under pressure; pickups use the ROM's X/Y/Z interaction box
@@ -168,6 +173,9 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.eva
   --max-jack-armed-ground-attacks 0 \
   --max-missed-back-exposures 0 \
   --max-invalid-grab-attacks 0 \
+  --max-missed-enemy-grab-escapes 0 \
+  --max-defeated-enemy-attacks 0 \
+  --max-defeated-enemy-pursuit 0 \
   --max-unreachable-enemy-stalls 0 \
   --max-loot-under-threat 0 \
   --max-boss-progress 0 \
@@ -203,7 +211,7 @@ Evaluator metrics expose the opportunity, response, and completion; use
 `--max-missed-back-exposures 0` and `--min-suplexes 1` for a controlled scenario
 that is known to present it.
 
-Five additional symbolic-policy gates make the reported behavior executable
+Additional symbolic-policy gates make the reported behavior executable
 as a regression contract: invalid B edges during grab animations, stalls on
 observed-but-unreachable enemies, loot decisions under immediate threat, and
 progress decisions while a boss blocks the arena. Enforce them with
@@ -212,6 +220,11 @@ progress decisions while a boss blocks the arena. Enforce them with
 `--max-boss-stalls 0` rejects continued no-input `guard lane`
 behavior after an eight-decision grace window, while allowing brief defensive
 guards.
+
+Enemy-held-player scenarios can additionally require
+`--min-enemy-grab-escape-jumps 1 --min-enemy-grab-counter-throws 1`. The trace
+includes the player action byte and `+$58` action flags, so a missed crossover
+or eight-tick B window is reproducible rather than inferred from video.
 
 For a Stage 2 cheat episode, also require
 `--min-signal-sweep-jumps 1`. Together with

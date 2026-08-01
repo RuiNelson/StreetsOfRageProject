@@ -20,6 +20,7 @@ from sor_autoplay.phases import (
     boss_phase,
     decode_target_seat,
     ordinary_enemy_phase,
+    player_phase,
     should_ignore_as_target,
 )
 from sor_autoplay.world_map import MapEntity, WorldMap
@@ -107,6 +108,14 @@ class PhaseDecodeTests(unittest.TestCase):
         self.assertEqual(decode_target_seat(0xB800), 1)
         self.assertEqual(decode_target_seat(0xB880), 2)
         self.assertIsNone(decode_target_seat(0xB900))
+
+    def test_enemy_held_player_actions_have_a_distinct_phase(self) -> None:
+        for action in range(0x78, 0x80):
+            with self.subTest(action=action):
+                self.assertEqual(
+                    player_phase(action_byte=action, held_type=0),
+                    CombatPhase.HELD_BY_ENEMY,
+                )
 
     def test_ignore_death(self) -> None:
         self.assertTrue(should_ignore_as_target(CombatPhase.DEATH))
@@ -228,6 +237,32 @@ class PhaseAwareCombatTests(unittest.TestCase):
         choice = select_target(me, (zero,), PROFILES[0], my_seat=1)
         assert choice is not None
         self.assertEqual(choice.entity.label, "Needs lethal underflow")
+
+    def test_signed_negative_health_is_never_revived_by_stale_attack_state(self) -> None:
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            map_y=64,
+            type_id=1,
+        )
+        corpse = _e(
+            map_x=120,
+            map_y=64,
+            slot="E0",
+            primary_state=0x0B00,
+            combat_phase=CombatPhase.ATTACKING,
+            health=0xFFFF,
+            type_id=0x22,
+            label="Stale attacking corpse",
+        )
+        live = _e(map_x=180, map_y=64, slot="E1", label="Live")
+        choice = select_target(me, (corpse, live), PROFILES[0], my_seat=1)
+        assert choice is not None
+        self.assertEqual(choice.entity.label, "Live")
+        self.assertTrue(corpse.is_defeated)
+        self.assertEqual(corpse.phase_tag, "die")
 
     def test_punish_mix_is_punch(self) -> None:
         from sor_autoplay.agent.enemies import plan_for

@@ -122,7 +122,9 @@ def is_mr_x_offer(snapshot: GameSnapshot) -> bool:
     if not snapshot.clock_stopped:
         return False
     threats = sum(
-        1 for e in snapshot.world_map.entities if e.kind in ("enemy", "boss")
+        1
+        for e in snapshot.world_map.entities
+        if e.kind in ("enemy", "boss") and not e.is_defeated
     )
     return threats == 0 and snapshot.timer_valid
 

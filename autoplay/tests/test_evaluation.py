@@ -30,6 +30,7 @@ from sor_autoplay.memory_map import (
     ADDR_WAVE,
     MAX_HEALTH,
     OBJ_ACTION_STATE,
+    OBJ_ACTION_FLAGS,
     OBJ_ATTACKER_PTR,
     OBJ_CHARACTER_ID,
     OBJ_CONTACT_PTR,
@@ -127,6 +128,13 @@ def _grab_threat_ram(*, action: int = 0x60) -> bytes:
     return bytes(ram)
 
 
+def _enemy_hold_ram(*, action: int, action_flags: int = 0) -> bytes:
+    ram = bytearray(_game_ram(item=False))
+    _put_u8(ram, ADDR_P1_OBJECT + OBJ_ACTION_STATE, action)
+    _put_u8(ram, ADDR_P1_OBJECT + OBJ_ACTION_FLAGS, action_flags)
+    return bytes(ram)
+
+
 @dataclass
 class _Result:
     frame: int
@@ -198,6 +206,78 @@ class WorkRamTests(unittest.TestCase):
 
 
 class LockstepEvaluatorTests(unittest.TestCase):
+    def test_enemy_grab_escape_protocol_metrics_and_acceptance(self) -> None:
+        grabbed = _enemy_hold_ram(action=0x7A)
+        crossover = _enemy_hold_ram(action=0x7C)
+        counter_window = _enemy_hold_ram(action=0x7A, action_flags=0x80)
+        throwing = _enemy_hold_ram(action=0x7E)
+        report = LockstepEvaluator(
+            _FakeClient(
+                [grabbed, crossover, counter_window, throwing, throwing]
+            ),
+            decisions=2,
+            criteria=EvaluationCriteria(
+                min_enemy_grab_escape_jumps=1,
+                min_enemy_grab_counter_throws=1,
+                max_missed_enemy_grab_escapes=0,
+            ),
+        ).run()
+        self.assertEqual(report.metrics.enemy_grab_escape_jump_edges, 1)
+        self.assertEqual(report.metrics.enemy_grab_counter_throw_edges, 1)
+        self.assertEqual(report.metrics.missed_enemy_grab_escape_responses, 0)
+        self.assertTrue(report.passed, report.failures)
+
+        missed = LockstepEvaluator(
+            _FakeClient([grabbed, grabbed]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(0, 0, p1_note="freeze"),
+            criteria=EvaluationCriteria(max_missed_enemy_grab_escapes=0),
+        ).run()
+        self.assertEqual(missed.metrics.missed_enemy_grab_escape_responses, 1)
+        self.assertFalse(missed.passed)
+
+    def test_defeated_enemy_attack_metric_rejects_corpse_hits(self) -> None:
+        corpse = _game_ram(
+            item=False,
+            enemy_health=0xFFFF,
+            enemy_primary=0x0300,
+        )
+        bad = LockstepEvaluator(
+            _FakeClient([corpse, corpse, corpse]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                0x20, 0, p1_note="attack floor corpse"
+            ),
+            criteria=EvaluationCriteria(max_defeated_enemy_attacks=0),
+        ).run()
+        self.assertEqual(bad.metrics.defeated_enemy_attack_edges, 1)
+        self.assertFalse(bad.passed)
+
+        corpse_behind = bytearray(corpse)
+        _put_fixed(corpse_behind, OBJECT_TABLE + OBJ_POS_X, 70)
+        pursuit = LockstepEvaluator(
+            _FakeClient([bytes(corpse_behind), bytes(corpse_behind)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                0x04, 0, p1_note="chase floor corpse"
+            ),
+            criteria=EvaluationCriteria(max_defeated_enemy_pursuit=0),
+        ).run()
+        self.assertEqual(pursuit.metrics.defeated_enemy_pursuit_steps, 1)
+        self.assertFalse(pursuit.passed)
+
+        baseline = LockstepEvaluator(
+            _FakeClient([corpse, corpse]),
+            decisions=1,
+            criteria=EvaluationCriteria(
+                max_defeated_enemy_attacks=0,
+                max_defeated_enemy_pursuit=0,
+            ),
+        ).run()
+        self.assertEqual(baseline.metrics.defeated_enemy_attack_edges, 0)
+        self.assertEqual(baseline.metrics.defeated_enemy_pursuit_steps, 0)
+        self.assertTrue(baseline.passed, baseline.failures)
+
     def test_jack_affordance_acceptance_metrics(self) -> None:
         armed = bytearray(_game_ram(item=False, enemy_health=10))
         _put_u8(armed, OBJECT_TABLE + OBJ_TYPE, 0x27)

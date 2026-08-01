@@ -360,12 +360,7 @@ def select_target(
             continue
         if entity.kind == "projectile" and not include_projectiles:
             continue
-        if (
-            entity.kind != "projectile"
-            and entity.health is not None
-            and entity.health >= 0x8000
-            and not is_dangerous(entity.combat_phase)
-        ):
+        if entity.kind != "projectile" and entity.is_defeated:
             continue
         if should_ignore_as_target(entity.combat_phase):
             continue
@@ -566,6 +561,8 @@ def peril_vector(
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
             continue
+        if entity.is_defeated:
+            continue
         if should_ignore_as_target(entity.combat_phase):
             continue
         if not is_on_screen(entity):
@@ -694,11 +691,7 @@ def nearest_foe(
             continue
         if graph is not None and not graph.entity_has(entity, Relation.REACHABLE):
             continue
-        if (
-            entity.health is not None
-            and entity.health >= 0x8000
-            and not is_dangerous(entity.combat_phase)
-        ):
+        if entity.is_defeated:
             continue
         if should_ignore_as_target(entity.combat_phase):
             continue
@@ -716,6 +709,8 @@ def count_hunters(entities: tuple[MapEntity, ...], seat: int) -> int:
         1
         for e in entities
         if e.kind in ("enemy", "boss")
+        and not e.is_defeated
+        and not should_ignore_as_target(e.combat_phase)
         and e.targets_player == seat
         and is_on_screen(e)
     )
@@ -738,11 +733,7 @@ def closest_behind(
             continue
         if graph is not None and not graph.entity_has(entity, Relation.REACHABLE):
             continue
-        if (
-            entity.health is not None
-            and entity.health >= 0x8000
-            and not is_dangerous(entity.combat_phase)
-        ):
+        if entity.is_defeated:
             continue
         if should_ignore_as_target(entity.combat_phase):
             continue

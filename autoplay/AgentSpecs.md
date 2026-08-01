@@ -44,9 +44,9 @@ The tactical choice layer uses complementary symbolic forms rather than a
 single priority chain:
 
 - a typed knowledge graph records `REACHABLE`, `DANGEROUS`, `PUNISHABLE`,
-  `TARGETS_PLAYER`, `BEHIND_PLAYER`, `COLLECTIBLE`, `BLOCKS_PROGRESS`, and
-  enemy interaction affordances such as `ARMED`, `THROWING`, `GRABBABLE`, and
-  `AIR_ATTACK_ONLY` from each coherent snapshot;
+  `DEFEATED`, `TARGETS_PLAYER`, `BEHIND_PLAYER`, `COLLECTIBLE`,
+  `BLOCKS_PROGRESS`, and enemy interaction affordances such as `ARMED`,
+  `THROWING`, `GRABBABLE`, and `AIR_ATTACK_ONLY` from each coherent snapshot;
 - fuzzy inference represents graded concepts such as special-attack pressure,
   target peril versus proximity, item value, safety, and travel cost;
 - a deterministic constrained optimizer enumerates legal fight, loot, and
@@ -62,6 +62,12 @@ are unreachable until the player advances through their activation trigger.
 Antonio remains a blocker when his activation point is just beyond the visible
 screen edge.
 
+Enemy lifecycle is also a hard fact. Ordinary enemies use a signed lethal
+check: health `0` remains alive and needs a finishing hit, while
+`$8000-$FFFF` is already defeated even if a stale attack state remains in the
+same observation. A defeated object may stay allocated on the floor, but it
+must never be reachable, dangerous, blocking, selected, chased, or attacked.
+
 Jack (`$27`) has a hard, state-dependent interaction rule. While his carried
 weapon latch is set he cannot be grabbed or hit with the ordinary grounded
 approach; line up at jump-kick range and execute C followed by airborne B. His
@@ -74,6 +80,12 @@ input-ready hold states, never through `$62-$6E` transition/throw animations.
 The reciprocal grabbed-enemy relationship overrides stale weapon fields. If a
 crossover is rejected, retry it a bounded number of times and fall back to a
 direct strike/throw instead of waiting indefinitely.
+
+When an enemy holds the player, the player action sequence `$78-$7E` has its
+own guarded escape plan. At `$7A`, press C to enter crossover `$7C`; wait for
+the ROM to return to `$7A` with action flag `+$58.bit7`, then press B within
+that eight-tick window to enter the `$7E` counter throw. Do not send B+C as a
+chord, and do not inject input during `$78`, `$7C`, or `$7E` animations.
 
 This boundary must remain usable by future learning: learned components may
 propose facts, goals, rule weights, or plan selection, while ROM-state guards
@@ -99,6 +111,9 @@ legitimate defensive pause remains possible but a tactical fixed point fails.
 It records grounded attacks against armed Jack, valid armed-Jack jump starts,
 and grounded counters during Jack's throw window so this family rule remains
 an acceptance gate for future learned policies.
+Enemy-grab crossover/throw edges, missed escape responses, and attacks or
+off-route pursuit toward defeated floor objects are also first-class metrics
+and acceptance gates.
 
 Future scripted or learned policies must use the same snapshot-to-decision
 interface and evaluation metrics. Learning may replace policy selection and

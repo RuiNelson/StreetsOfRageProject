@@ -25,7 +25,13 @@ from .agent.combat import (
     signal_sweep_threat,
 )
 from .agent.expert import DEFAULT_COMBAT_EXPERT, TacticalGoal
-from .agent.grabs import context_from_player, held_enemy_entity
+from .agent.grabs import (
+    ENEMY_GRAB_COUNTER_WINDOW,
+    ENEMY_HOLD_ACTION,
+    ENEMY_HOLD_ACTIONS,
+    context_from_player,
+    held_enemy_entity,
+)
 from .agent.knowledge import Relation, build_tactical_graph
 from .phases import should_ignore_as_target
 from .state import GameSnapshot, read_snapshot
@@ -153,6 +159,11 @@ class EpisodeMetrics:
     crossover_suplex_starts: int = 0
     suplexes: int = 0
     invalid_grab_animation_attacks: int = 0
+    enemy_grab_escape_jump_edges: int = 0
+    enemy_grab_counter_throw_edges: int = 0
+    missed_enemy_grab_escape_responses: int = 0
+    defeated_enemy_attack_edges: int = 0
+    defeated_enemy_pursuit_steps: int = 0
     unreachable_enemy_stall_steps: int = 0
     loot_under_threat_steps: int = 0
     boss_progress_steps: int = 0
@@ -164,6 +175,10 @@ class EpisodeMetrics:
     _last_x: int | None = field(default=None, repr=False)
     _zero_health_foes: set[str] = field(default_factory=set, repr=False)
     _boss_stall_streak: int = field(default=0, repr=False)
+    _last_enemy_grab_signature: tuple[int, bool] | None = field(
+        default=None,
+        repr=False,
+    )
 
     @classmethod
     def start(cls, snapshot: GameSnapshot, player_index: int) -> "EpisodeMetrics":
@@ -218,7 +233,8 @@ class EpisodeMetrics:
             live_foe_on_screen = any(
                 entity.kind in ("enemy", "boss")
                 and 0 <= entity.map_x <= 320
-                and (entity.health is None or entity.health < 0x8000)
+                and not entity.is_defeated
+                and not should_ignore_as_target(entity.combat_phase)
                 for entity in before.world_map.entities
             )
             if not live_foe_on_screen:
@@ -227,6 +243,7 @@ class EpisodeMetrics:
         if mask & 0x40 and before_entity is not None:
             if any(
                 entity.kind in ("enemy", "boss")
+                and not entity.is_defeated
                 and signal_sweep_threat(before_entity, entity)
                 for entity in before.world_map.entities
             ):
@@ -306,6 +323,95 @@ class EpisodeMetrics:
             ):
                 self.invalid_grab_animation_attacks += 1
 
+            if before_entity.action_base == ENEMY_HOLD_ACTION:
+                counter_window = bool(
+                    before_entity.action_flags & ENEMY_GRAB_COUNTER_WINDOW
+                )
+                signature = (before_entity.action_base, counter_window)
+                expected_mask = 0x20 if counter_window else 0x40
+                if mask & expected_mask:
+                    if counter_window:
+                        self.enemy_grab_counter_throw_edges += 1
+                    else:
+                        self.enemy_grab_escape_jump_edges += 1
+                elif signature != self._last_enemy_grab_signature:
+                    self.missed_enemy_grab_escape_responses += 1
+                self._last_enemy_grab_signature = signature
+            elif before_entity.action_base not in ENEMY_HOLD_ACTIONS:
+                self._last_enemy_grab_signature = None
+
+            live_combatants = tuple(
+                entity
+                for entity in graph.entities_with(Relation.REACHABLE)
+                if entity.kind in ("enemy", "boss", "projectile")
+            )
+            defeated_in_punch_range = any(
+                0.0 <= entity.map_x <= 320.0
+                and can_punch(
+                    before_entity,
+                    entity,
+                    profile,
+                    require_facing=False,
+                )
+                for entity in graph.entities_with(Relation.DEFEATED)
+            )
+            if (
+                mask & 0x20
+                and player_can_start_ground_action(before_entity)
+                and defeated_in_punch_range
+                and not live_combatants
+            ):
+                self.defeated_enemy_attack_edges += 1
+
+            defeated_on_screen = tuple(
+                entity
+                for entity in graph.entities_with(Relation.DEFEATED)
+                if 0.0 <= entity.map_x <= 320.0
+            )
+            other_objectives = tuple(
+                entity
+                for entity in graph.entities_with(Relation.REACHABLE)
+                if entity.kind in ("pickup", "weapon", "breakable")
+            )
+            # Note-independent pursuit signal for controlled empty-arena
+            # scenarios. Normal horizontal stage progress is allowed; moving
+            # against it or changing lane toward an allocated corpse is not.
+            if (
+                defeated_on_screen
+                and not live_combatants
+                and not other_objectives
+            ):
+                against_progress = (
+                    before.level_index != 7
+                    and bool(mask & 0x04)
+                    and any(
+                        e.map_x < before_entity.map_x - 8
+                        for e in defeated_on_screen
+                    )
+                ) or (
+                    before.level_index == 7
+                    and bool(mask & 0x08)
+                    and any(
+                        e.map_x > before_entity.map_x + 8
+                        for e in defeated_on_screen
+                    )
+                )
+                toward_lane = (
+                    bool(mask & 0x01)
+                    and any(
+                        e.map_y < before_entity.map_y - 4
+                        for e in defeated_on_screen
+                    )
+                ) or (
+                    bool(mask & 0x02)
+                    and any(
+                        e.map_y > before_entity.map_y + 4
+                        for e in defeated_on_screen
+                    )
+                )
+                if against_progress or toward_lane:
+                    self.defeated_enemy_pursuit_steps += 1
+
             blocking = graph.entities_with(Relation.BLOCKS_PROGRESS)
             unreachable = tuple(
                 entity
@@ -313,6 +419,7 @@ class EpisodeMetrics:
                 if entity.kind in ("enemy", "boss")
                 and 0.0 <= entity.map_x <= 320.0
                 and not graph.entity_has(entity, Relation.REACHABLE)
+                and not entity.is_defeated
                 and not should_ignore_as_target(entity.combat_phase)
             )
             if (
@@ -467,6 +574,11 @@ class EpisodeMetrics:
             "crossover_suplex_starts": self.crossover_suplex_starts,
             "suplexes": self.suplexes,
             "invalid_grab_animation_attacks": self.invalid_grab_animation_attacks,
+            "enemy_grab_escape_jump_edges": self.enemy_grab_escape_jump_edges,
+            "enemy_grab_counter_throw_edges": self.enemy_grab_counter_throw_edges,
+            "missed_enemy_grab_escape_responses": self.missed_enemy_grab_escape_responses,
+            "defeated_enemy_attack_edges": self.defeated_enemy_attack_edges,
+            "defeated_enemy_pursuit_steps": self.defeated_enemy_pursuit_steps,
             "unreachable_enemy_stall_steps": self.unreachable_enemy_stall_steps,
             "loot_under_threat_steps": self.loot_under_threat_steps,
             "boss_progress_steps": self.boss_progress_steps,
@@ -495,6 +607,11 @@ class EvaluationCriteria:
     min_jack_throw_counters: int | None = None
     min_suplexes: int | None = None
     max_invalid_grab_attacks: int | None = None
+    min_enemy_grab_escape_jumps: int | None = None
+    min_enemy_grab_counter_throws: int | None = None
+    max_missed_enemy_grab_escapes: int | None = None
+    max_defeated_enemy_attacks: int | None = None
+    max_defeated_enemy_pursuit: int | None = None
     max_unreachable_enemy_stalls: int | None = None
     max_loot_under_threat: int | None = None
     max_boss_progress: int | None = None
@@ -539,6 +656,24 @@ class EvaluationCriteria:
                 self.max_invalid_grab_attacks,
                 metrics.invalid_grab_animation_attacks,
                 "invalid grab-animation attacks",
+                "at most",
+            ),
+            (
+                self.max_missed_enemy_grab_escapes,
+                metrics.missed_enemy_grab_escape_responses,
+                "missed enemy-grab escape responses",
+                "at most",
+            ),
+            (
+                self.max_defeated_enemy_attacks,
+                metrics.defeated_enemy_attack_edges,
+                "defeated-enemy attack edges",
+                "at most",
+            ),
+            (
+                self.max_defeated_enemy_pursuit,
+                metrics.defeated_enemy_pursuit_steps,
+                "defeated-enemy pursuit steps",
                 "at most",
             ),
             (
@@ -592,6 +727,16 @@ class EvaluationCriteria:
                 metrics.jack_throw_window_ground_attacks,
                 "Jack throw-window ground counters",
             ),
+            (
+                self.min_enemy_grab_escape_jumps,
+                metrics.enemy_grab_escape_jump_edges,
+                "enemy-grab crossover jumps",
+            ),
+            (
+                self.min_enemy_grab_counter_throws,
+                metrics.enemy_grab_counter_throw_edges,
+                "enemy-grab counter throws",
+            ),
             (self.min_suplexes, metrics.suplexes, "suplexes"),
         )
         for limit, observed, label in minimums:
@@ -616,6 +761,7 @@ class EvaluationStep:
     note: str
     outcome: StepOutcome
     actors: tuple[dict[str, object], ...] = ()
+    player_action_flags: int = 0
     player_contact: int = 0
     player_held_type: int = 0
     player_held_ptr: int = 0
@@ -635,6 +781,7 @@ class EvaluationStep:
             "mask": self.mask,
             "note": self.note,
             "actors": list(self.actors),
+            "player_action_flags": self.player_action_flags,
             "player_contact": self.player_contact,
             "player_held_type": self.player_held_type,
             "player_held_ptr": self.player_held_ptr,
@@ -829,6 +976,9 @@ class LockstepEvaluator:
                             note=note,
                             outcome=outcome,
                             actors=actors,
+                            player_action_flags=(
+                                0 if player is None else player.action_flags
+                            ),
                             player_contact=0 if player is None else player.contact_ptr,
                             player_held_type=0 if player is None else player.held_type,
                             player_held_ptr=0 if player is None else player.held_ptr,
@@ -908,6 +1058,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-jack-throw-counters", type=int)
     parser.add_argument("--min-suplexes", type=int)
     parser.add_argument("--max-invalid-grab-attacks", type=int)
+    parser.add_argument("--min-enemy-grab-escape-jumps", type=int)
+    parser.add_argument("--min-enemy-grab-counter-throws", type=int)
+    parser.add_argument("--max-missed-enemy-grab-escapes", type=int)
+    parser.add_argument("--max-defeated-enemy-attacks", type=int)
+    parser.add_argument("--max-defeated-enemy-pursuit", type=int)
     parser.add_argument("--max-unreachable-enemy-stalls", type=int)
     parser.add_argument("--max-loot-under-threat", type=int)
     parser.add_argument("--max-boss-progress", type=int)
@@ -938,6 +1093,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         min_jack_throw_counters=args.min_jack_throw_counters,
         min_suplexes=args.min_suplexes,
         max_invalid_grab_attacks=args.max_invalid_grab_attacks,
+        min_enemy_grab_escape_jumps=args.min_enemy_grab_escape_jumps,
+        min_enemy_grab_counter_throws=args.min_enemy_grab_counter_throws,
+        max_missed_enemy_grab_escapes=args.max_missed_enemy_grab_escapes,
+        max_defeated_enemy_attacks=args.max_defeated_enemy_attacks,
+        max_defeated_enemy_pursuit=args.max_defeated_enemy_pursuit,
         max_unreachable_enemy_stalls=args.max_unreachable_enemy_stalls,
         max_loot_under_threat=args.max_loot_under_threat,
         max_boss_progress=args.max_boss_progress,
