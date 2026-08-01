@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from sor_autoplay.agent.controls import ATTACK, JUMP, Intent, mask_from_intent
 from sor_autoplay.agent.enemies import ThreatKind, attack_mix, plan_for
@@ -368,6 +369,28 @@ class GrabTreeTests(unittest.TestCase):
         self.assertTrue(a.attack or b.attack)
         self.assertTrue("swing" in a.note or "swing" in b.note)
 
+    def test_grab_throws_immediately_when_an_enemy_can_interrupt(self) -> None:
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            held_type=0x20,
+            action_state=0x60,
+            map_x=100,
+            map_y=64,
+        )
+        intent = decide_held(
+            me,
+            context_from_player(me),
+            GrabMemory(),
+            tick=1,
+            foe=_e(map_x=140, map_y=64),
+            crowd=2,
+        )
+        assert intent is not None
+        self.assertTrue(intent.attack)
+        self.assertIn("throw", intent.note)
+
     def test_knife_throw_at_midrange(self) -> None:
         me = _e(
             kind="player",
@@ -424,6 +447,21 @@ class GrabTreeTests(unittest.TestCase):
         ctx = context_from_player(me)
         self.assertFalse(ctx.holding)
         self.assertFalse(ctx.enemy_grab)
+
+        intent = decide_held(me, ctx, GrabMemory(), tick=0)
+        assert intent is not None
+        self.assertTrue(intent.attack)
+        self.assertIn("release stale contact", intent.note)
+
+        transitioning = replace(me, action_state=0x6A)
+        self.assertIsNone(
+            decide_held(
+                transitioning,
+                context_from_player(transitioning),
+                GrabMemory(),
+                tick=1,
+            )
+        )
 
     def test_hold_latch_expires_even_if_reaction_action_persists(self) -> None:
         from sor_autoplay.agent.characters import PROFILES

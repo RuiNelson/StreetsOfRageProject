@@ -43,6 +43,7 @@ def _entity(
     family: str = "Garcia",
     health: int | None = 10,
     type_id: int = 0x20,
+    action_state: int = 0,
 ) -> MapEntity:
     wx = int(world_x if world_x is not None else map_x)
     wy = int(world_y if world_y is not None else map_y)
@@ -60,6 +61,7 @@ def _entity(
         map_y=map_y,
         health=health,
         slot=slot,
+        action_state=action_state,
     )
 
 
@@ -194,8 +196,16 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(decision.p1_mask & 0x04, msg=f"expected LEFT, got {decision.p1_mask:#x}")
 
     def test_attacks_nearby_enemy(self) -> None:
-        # Face right (default action_state 0) toward foe on the right, in strike range.
-        p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")
+        # Face right in grounded idle toward a foe inside strike range.
+        p1 = _entity(
+            kind="player",
+            map_x=100,
+            map_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+            action_state=0x02,
+        )
         foe = _entity(kind="enemy", map_x=124, map_y=64, slot="E0", label="Garcia")
         snap = _snapshot_with_map((p1, foe))
         memory = AgentState()
@@ -209,7 +219,10 @@ class PolicyTests(unittest.TestCase):
                 break
         self.assertTrue(saw_attack, f"agent should punch when enemy is in range: {notes}")
         self.assertTrue(
-            any(k in decision.p1_note for k in ("punch", "punish", "combo")),
+            any(
+                k in decision.p1_note
+                for k in ("punch", "punish", "combo", "intercept")
+            ),
             msg=decision.p1_note,
         )
 

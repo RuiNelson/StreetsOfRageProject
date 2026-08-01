@@ -6,10 +6,12 @@ import unittest
 
 from sor_autoplay.agent.characters import PROFILES
 from sor_autoplay.agent.combat import (
+    can_collect_pickup,
     can_jump_kick,
     can_punch,
     can_queue_normal_combo,
     closest_behind,
+    enemy_attack_committed,
     engagement_band,
     face_intent_dirs,
     facing_toward,
@@ -69,7 +71,7 @@ class ScreenAndBandTests(unittest.TestCase):
         self.assertIsNone(select_target(me, (waiting,), PROFILES[0], my_seat=1))
 
     def test_jump_band(self) -> None:
-        self.assertEqual(engagement_band(50, 4, PROFILES[0]), "jump")
+        self.assertEqual(engagement_band(65, 4, PROFILES[1]), "jump")
         self.assertEqual(engagement_band(20, 4, PROFILES[0]), "close")
         self.assertEqual(engagement_band(120, 4, PROFILES[0]), "far")
 
@@ -176,7 +178,7 @@ class GeometryTests(unittest.TestCase):
             action_state=0x02,
             type_id=1,
         )
-        near = _e(map_x=122, map_y=64)  # within Axel strike_range 30
+        near = _e(map_x=122, map_y=64)  # within Axel's measured strike range
         off_lane = _e(map_x=122, map_y=90)
         far = _e(map_x=160, map_y=64)
         self.assertTrue(can_punch(me, near, PROFILES[0], require_facing=True))
@@ -238,6 +240,42 @@ class GeometryTests(unittest.TestCase):
         )
         self.assertFalse(can_queue_normal_combo(pending, foe, PROFILES[0]))
 
+    def test_pickup_uses_safe_three_axis_rom_box(self) -> None:
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            world_x=100,
+            world_y=64,
+            world_z=160,
+        )
+        safe = _e(kind="pickup", world_x=116, world_y=76, world_z=166)
+        one_pixel_too_far = _e(kind="pickup", world_x=121, world_y=64, world_z=160)
+        still_falling = _e(kind="weapon", world_x=110, world_y=64, world_z=167)
+        self.assertTrue(can_collect_pickup(me, safe))
+        self.assertFalse(can_collect_pickup(me, one_pixel_too_far))
+        self.assertFalse(can_collect_pickup(me, still_falling))
+
+    def test_committed_attack_is_recognized_inside_reaction_distance(self) -> None:
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            world_x=100,
+            world_y=64,
+            map_x=100,
+            map_y=64,
+        )
+        foe = _e(
+            type_id=0x22,
+            world_x=170,
+            world_y=64,
+            map_x=170,
+            map_y=64,
+            combat_phase=CombatPhase.CHARGE,
+        )
+        self.assertTrue(enemy_attack_committed(me, foe))
+
 
 class PolicyAggressionTests(unittest.TestCase):
     def _snap(self, entities: tuple[MapEntity, ...], *, char_id: int = 0):
@@ -279,8 +317,9 @@ class PolicyAggressionTests(unittest.TestCase):
         )
         return replace(snap, world_map=world)
 
-    def test_faces_before_punch_when_wrong_way(self) -> None:
-        # Face right (action 0x02) but foe on the left and in range → face first.
+    def test_turns_and_intercepts_basic_enemy_when_wrong_way(self) -> None:
+        # Direction+B turns and attacks in the same sample; a separate turn
+        # costs four frames, enough for a close Garcia punch to land.
         p1 = _e(
             kind="player",
             family="Player",
@@ -295,8 +334,8 @@ class PolicyAggressionTests(unittest.TestCase):
         foe = _e(map_x=82, world_x=82, map_y=64, label="Lefty")
         snap = self._snap((p1, foe))
         d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
-        self.assertIn("face", d.p1_note)
-        self.assertFalse(d.p1_mask & 0x20, msg=f"must not punch yet: {d.p1_note}")
+        self.assertIn("intercept", d.p1_note)
+        self.assertTrue(d.p1_mask & 0x20, msg=d.p1_note)
         self.assertTrue(d.p1_mask & 0x04, msg=f"expected LEFT: {d.p1_mask:#x}")
 
     def test_punches_when_facing_and_in_range(self) -> None:
@@ -316,7 +355,10 @@ class PolicyAggressionTests(unittest.TestCase):
         d = decide_actions(snap, AgentConfig(p1_enabled=True), AgentState())
         self.assertTrue(d.p1_mask & 0x20, msg=f"expected attack: {d.p1_note}")
         self.assertTrue(d.p1_mask & 0x08, msg=f"expected RIGHT face: {d.p1_mask:#x}")
-        self.assertIn("punch", d.p1_note)
+        self.assertTrue(
+            "punch" in d.p1_note or "intercept" in d.p1_note,
+            d.p1_note,
+        )
 
     def test_does_not_park_chest_to_chest(self) -> None:
         """Stand goal stays near approach_offset, not body-grab range."""
@@ -355,9 +397,9 @@ class PolicyAggressionTests(unittest.TestCase):
             label="P1",
             action_state=0x02,
         )
-        # Axel strike range is 30.  The old stand goal/tolerance considered
-        # dx=34 "arrived" and emitted no input while the foe could attack.
-        foe = _e(map_x=134, world_x=134, map_y=64, label="Garcia")
+        # Axel's measured safe strike range is 52. The stand goal/tolerance
+        # must not consider dx=56 "arrived" outside that hit box.
+        foe = _e(map_x=156, world_x=156, map_y=64, label="Garcia")
         d = decide_actions(
             self._snap((p1, foe)),
             AgentConfig(p1_enabled=True),
@@ -365,6 +407,254 @@ class PolicyAggressionTests(unittest.TestCase):
         )
         self.assertTrue(d.p1_mask & 0x08, d.p1_note)
         self.assertNotIn("walk idle", d.p1_note)
+
+    def test_walks_inside_pickup_box_before_pressing_b(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            world_y=64,
+            world_z=160,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        apple = _e(
+            kind="pickup",
+            family="Score",
+            slot="I0",
+            label="Apple",
+            type_id=0x3F,
+            map_x=121,
+            world_x=121,
+            map_y=64,
+            world_y=64,
+            world_z=160,
+            health=None,
+        )
+        far = decide_actions(
+            self._snap((p1, apple)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertFalse(far.p1_mask & 0x20, far.p1_note)
+        self.assertTrue(far.p1_mask & 0x08, far.p1_note)
+        self.assertIn("loot", far.p1_note)
+
+        close_apple = _e(
+            kind="pickup",
+            family="Score",
+            slot="I0",
+            label="Apple",
+            type_id=0x3F,
+            map_x=116,
+            world_x=116,
+            map_y=64,
+            world_y=64,
+            world_z=160,
+            health=None,
+        )
+        close = decide_actions(
+            self._snap((p1, close_apple)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertTrue(close.p1_mask & 0x20, close.p1_note)
+
+    def test_does_not_press_pickup_during_reaction_state(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            world_y=64,
+            world_z=160,
+            type_id=1,
+            label="P1",
+            action_state=0x74,
+        )
+        apple = _e(
+            kind="pickup",
+            family="Score",
+            slot="I0",
+            label="Apple",
+            type_id=0x3F,
+            map_x=110,
+            world_x=110,
+            map_y=64,
+            world_y=64,
+            world_z=160,
+            health=None,
+        )
+        decision = decide_actions(
+            self._snap((p1, apple)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertEqual(decision.p1_mask, 0, decision.p1_note)
+        self.assertIn("await loot", decision.p1_note)
+
+    def test_preemptively_punches_round1_garcia_windup(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            world_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        foe = _e(
+            type_id=0x22,
+            map_x=170,
+            world_x=170,
+            map_y=64,
+            world_y=64,
+            label="Garcia",
+            primary_state=0x0901,
+            action_state=0x09,
+            combat_phase=CombatPhase.CHARGE,
+            target_ptr=0xB800,
+        )
+        decision = decide_actions(
+            self._snap((p1, foe)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertIn("interrupt", decision.p1_note)
+        self.assertTrue(decision.p1_mask & 0x20, decision.p1_note)
+        self.assertFalse(decision.p1_mask & 0x40, decision.p1_note)
+
+    def test_escapes_enemy_lane_during_garcia_windup(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            world_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        foe = _e(
+            type_id=0x22,
+            map_x=170,
+            world_x=170,
+            map_y=84,
+            world_y=84,
+            label="Garcia",
+            primary_state=0x0901,
+            action_state=0x09,
+            combat_phase=CombatPhase.CHARGE,
+            target_ptr=0xB800,
+        )
+        decision = decide_actions(
+            self._snap((p1, foe)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertTrue(decision.p1_mask & 0x01, decision.p1_note)
+        self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
+        self.assertIn("escape lane", decision.p1_note)
+
+    def test_retreats_horizontally_when_lane_escape_hits_stage_edge(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=2,
+            world_y=2,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        foe = _e(
+            type_id=0x24,
+            family="Signal",
+            map_x=140,
+            world_x=140,
+            map_y=22,
+            world_y=22,
+            label="Signal",
+            primary_state=0x0901,
+            action_state=0x09,
+            combat_phase=CombatPhase.ATTACKING,
+            target_ptr=0xB800,
+        )
+        decision = decide_actions(
+            self._snap((p1, foe)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertEqual(decision.p1_mask & 0x0F, 0x04, decision.p1_note)
+        self.assertIn("retreat edge", decision.p1_note)
+
+    def test_turns_and_interrupts_in_one_decision(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            world_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        foe = _e(
+            type_id=0x22,
+            map_x=45,
+            world_x=45,
+            map_y=64,
+            world_y=64,
+            label="Garcia",
+            primary_state=0x0A01,
+            action_state=0x0A,
+            combat_phase=CombatPhase.ATTACKING,
+            target_ptr=0xB800,
+        )
+        decision = decide_actions(
+            self._snap((p1, foe)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertTrue(decision.p1_mask & 0x20, decision.p1_note)
+        self.assertTrue(decision.p1_mask & 0x04, decision.p1_note)
+        self.assertIn("interrupt", decision.p1_note)
+
+    def test_intercepts_signal_before_unsampled_slide_attack(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            world_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        foe = _e(
+            type_id=0x24,
+            family="Signal",
+            map_x=170,
+            world_x=170,
+            map_y=64,
+            world_y=64,
+            label="Signal",
+            primary_state=0x0101,
+            action_state=0x01,
+            combat_phase=CombatPhase.NORMAL,
+            target_ptr=0xB800,
+        )
+        decision = decide_actions(
+            self._snap((p1, foe)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertTrue(decision.p1_mask & 0x20, decision.p1_note)
+        self.assertFalse(decision.p1_mask & 0x40, decision.p1_note)
+        self.assertIn("intercept", decision.p1_note)
 
     def test_no_punch_off_lane(self) -> None:
         p1 = _e(
@@ -402,8 +692,8 @@ class PolicyAggressionTests(unittest.TestCase):
             action_state=0x02,
         )
         foe = _e(
-            map_x=150,
-            world_x=150,
+            map_x=170,
+            world_x=170,
             map_y=64,
             label="Haku-Ro",
             family="Haku-Ro",

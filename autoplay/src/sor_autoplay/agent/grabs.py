@@ -152,6 +152,15 @@ def decide_held(
         memory.reset()
         return None
 
+    # Live orphan-contact recovery: after a defeated enemy disappears, action
+    # $60 can retain only its stale +$4C pointer. Movement leaves the player
+    # frozen indefinitely; one B edge selects $6A and returns to idle $02.
+    # Restrict this to exact $60 so the resulting $6A transition is not fed
+    # another artificial knee/throw pulse.
+    if not ctx.holding and me.action_base == 0x60 and me.contact_ptr:
+        memory.reset()
+        return Intent(attack=True, note="release stale contact")
+
     if ctx.holding:
         memory.latched = True
         memory.clear_ticks = 0
@@ -220,7 +229,7 @@ def _enemy_grab_tree(
         me, progress_right=progress_right, crowd=crowd, foe=foe
     )
     # Mostly knees (proven to deal damage). Every Nth pulse: B+back throw.
-    if memory.pulse % THROW_EVERY == 0:
+    if crowd >= 2 or memory.pulse % THROW_EVERY == 0:
         left = back < 0
         right = back > 0
         side = "L" if left else "R"

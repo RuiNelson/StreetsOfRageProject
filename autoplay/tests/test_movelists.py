@@ -53,8 +53,7 @@ class MoveListProfileTests(unittest.TestCase):
     def test_axel_rear_band_is_close_only(self) -> None:
         ax = PROFILES[0]
         self.assertEqual(engagement_band(24, 4, ax), "close")
-        band = engagement_band(40, 4, ax)
-        self.assertIn(band, ("jump", "approach", "rear"))
+        self.assertEqual(engagement_band(40, 4, ax), "close")
 
     def test_rear_only_when_behind(self) -> None:
         from sor_autoplay.agent.combat import rear_in_band

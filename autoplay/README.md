@@ -37,8 +37,10 @@ Per-player toggle (HUD button or keys **1** / **2**):
   prefer hunters (`+$42` / boss target)
 - Family-specific counters (Signal, Haku-Ro, Nora, Jack, all bosses, Mr. X)
 - **Grab/throw trees**: always throw; weapon swing/throw facing the foe
-- Character-tuned ranges (Axel / Adam / Blaze)
-- Police special under pressure; pickups with co-op fairness
+- Character-tuned ranges (Axel / Adam / Blaze), measured from the live attack
+  hitboxes rather than estimated sprite distance
+- Police special under pressure; pickups use the ROM's X/Y/Z interaction box
+  with co-op fairness
 - Stage rules (holes / elevator / stage 8 left); Mr. X always **NO**
 
 **Standard control mapping** (OPTIONS scheme 0):
@@ -120,6 +122,47 @@ cd autoplay
 PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m unittest discover -s tests -q
 ```
 
+### Deterministic gameplay evaluation
+
+The evaluator is the regression and future-learning boundary. It runs any
+`GameSnapshot -> AgentDecision` policy in remote lockstep, advances exactly four
+emulated frames per decision, and reads one coherent 64 KiB work-RAM image after
+each step. It reports damage and damage events, lives lost, enemy damage and
+defeats, pickup attempts/success/failure, jumps, progress, action counts, and a
+baseline reward. Optional thresholds make the command exit `2` on a gameplay
+regression.
+
+Start the host, then let the evaluator restart the ROM, navigate the menus, and
+freeze the verified Round-1 start on the same connection it will evaluate. Once
+lockstep is active, the setup seeds the ROM RNG and its frame-phase counter and
+records a SHA-256 of the starting work RAM. This pins and exposes the ROM-side
+episode inputs while thresholds remain robust to host state outside work RAM:
+
+```bash
+cd autoplay
+PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.evaluation \
+  --restart-character axel \
+  --decisions 600 \
+  --max-damage 12 \
+  --max-damage-events 3 \
+  --max-lives-lost 0 \
+  --max-failed-pickups 0 \
+  --min-enemy-damage 15 \
+  --min-forward-progress 600 \
+  --report /tmp/sor-autoplay-report.json \
+  --trace /tmp/sor-autoplay-eval.jsonl
+```
+
+`--restart-character` prevents uncontrolled frames between setup and decision
+zero; omit it only when deliberately evaluating the current live state. Use
+`--scenario-seed` and `--scenario-frame-phase` to select another controlled
+enemy pattern. The JSON report is suitable for CI artifacts. The compact
+JSON-lines trace contains each observation, action, note, outcome, and visible
+actor state for replay analysis. A learned policy can be passed to
+`LockstepEvaluator(policy=...)` while retaining the same measurements and
+acceptance criteria, so improvements remain comparable with the scripted
+baseline.
+
 ## Layout
 
 ```text
@@ -130,6 +173,8 @@ autoplay/
   CLAUDE.md
   src/sor_autoplay/
     app.py              # CLI + poll loop + agent I/O
+    evaluation.py       # deterministic lockstep metrics + acceptance CLI
+    scenarios.py        # restart/menu navigation + frozen scenario starts
     hud.py              # maximized Tk: status + map + AI toggles
     state.py            # RAM → snapshot
     world_map.py        # camera + actors → map entities

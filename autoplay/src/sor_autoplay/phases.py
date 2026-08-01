@@ -1,7 +1,9 @@
 """Decode live combat phases from object RAM (ordinary enemies + bosses).
 
-Ordinary-enemy primary state is a **word** at ``+$30`` in ``$0100`` steps
-(``ordinary_enemy_apply_contact_damage`` writes ``$0100/$0300/$0400/$0500``).
+Ordinary-enemy primary state is a **byte** at ``+$30`` followed by flags at
+``+$31``. Code commonly writes both at once as words such as
+``$0100/$0300/$0400/$0500``; family dispatch tables also use states above
+``$07`` for approach and attack moves.
 
 Bosses use a **byte** at ``+$30`` (primary) and ``+$67`` (tactical substate).
 """
@@ -30,14 +32,64 @@ class CombatPhase(Enum):
     HOLDING = auto()  # player holding weapon/enemy
 
 
-def ordinary_enemy_phase(primary_state_word: int) -> CombatPhase:
-    """Map ordinary-enemy word state at ``+$30`` to a combat phase."""
+_GARCIA_MOVE_PHASES: dict[int, dict[int, CombatPhase]] = {
+    # ROM dispatcher tables at $D60E, $D9A2, $DD80 and $E32E. In particular,
+    # type $22 state $09 runs $E124 (attack approach) and state $0A runs
+    # $E190 (the active punch). Leaving these as UNKNOWN made the agent walk
+    # directly into Round-1 Garcia punches.
+    0x20: {
+        0x09: CombatPhase.ATTACKING,
+        0x0A: CombatPhase.ATTACKING,
+        0x0C: CombatPhase.CHARGE,
+    },
+    0x21: {
+        0x0A: CombatPhase.ATTACKING,
+        0x0B: CombatPhase.CHARGE,
+    },
+    0x22: {
+        0x09: CombatPhase.CHARGE,
+        0x0A: CombatPhase.ATTACKING,
+        # Dispatcher table $DD80 entry $0B -> $E20A. Live Round-1 RAM kept
+        # outgoing damage $04 here even after health reached zero.
+        0x0B: CombatPhase.ATTACKING,
+        # $0F/$10 lead into $11 ($DF0A attack animation/contact path).
+        # $13 ($DDE6) is the damaging special entry observed in Round 1.
+        0x0F: CombatPhase.CHARGE,
+        0x10: CombatPhase.CHARGE,
+        0x11: CombatPhase.ATTACKING,
+        0x13: CombatPhase.ATTACKING,
+    },
+    0x23: {
+        0x09: CombatPhase.ATTACKING,
+        0x0C: CombatPhase.CHARGE,
+    },
+    # Signal $24: $08 selects the attack, $09/$0A are its moving strike,
+    # $0B/$0C are contact/throw paths, and $0D is recovery.
+    0x24: {
+        0x08: CombatPhase.CHARGE,
+        0x09: CombatPhase.ATTACKING,
+        0x0A: CombatPhase.ATTACKING,
+        0x0B: CombatPhase.ATTACKING,
+        0x0C: CombatPhase.ATTACKING,
+        0x0D: CombatPhase.RECOVERY,
+    },
+}
+
+
+def ordinary_enemy_phase(
+    primary_state_word: int,
+    *,
+    type_id: int | None = None,
+) -> CombatPhase:
+    """Map ordinary-enemy state/flags at ``+$30/$31`` to a combat phase."""
 
     hi = primary_state_word & 0xFF00
     if hi == mm.ENEMY_ST_NORMAL or hi == 0x0000:
         return CombatPhase.NORMAL
     if hi == mm.ENEMY_ST_ALT:
-        return CombatPhase.ATTACKING  # type-specific attack/approach variant
+        # Shared $9B36 contact/reaction handling. It is a good follow-up window,
+        # but not evidence that the enemy is starting another family move.
+        return CombatPhase.RECOVERY
     if hi == mm.ENEMY_ST_KNOCKDOWN:
         return CombatPhase.KNOCKDOWN
     if hi == mm.ENEMY_ST_SCRIPTED:
@@ -48,6 +100,10 @@ def ordinary_enemy_phase(primary_state_word: int) -> CombatPhase:
         return CombatPhase.DEATH
     if hi == mm.ENEMY_ST_BLOCKED:
         return CombatPhase.BLOCKED
+    if type_id is not None:
+        family = _GARCIA_MOVE_PHASES.get(type_id & 0xFF)
+        if family is not None:
+            return family.get((primary_state_word >> 8) & 0xFF, CombatPhase.NORMAL)
     return CombatPhase.UNKNOWN
 
 

@@ -26,6 +26,18 @@ Read the game code for understanding the AIs and beat them.
 
 Position themselves in a least perilous position.
 
+## Testing and learning contract
+
+Gameplay changes must be measurable in controlled lockstep, not judged only
+from a real-time run. The common evaluator records damage, lives, enemy damage,
+item collection failures, progress, jumps, actions, and reward from coherent
+RAM snapshots, and supports explicit pass/fail thresholds plus per-step traces.
+
+Future scripted or learned policies must use the same snapshot-to-decision
+interface and evaluation metrics. Learning may replace policy selection and
+reward shaping, but must not bypass the controlled scenarios or acceptance
+criteria used to catch gameplay regressions.
+
 ## Two player interaction
 
 The agents must be able to play the game alone, but must also be able to play the game cooperatively with another agent or with an human.
@@ -33,4 +45,3 @@ The agents must be able to play the game alone, but must also be able to play th
 - be able to do the move that only two player can do (grapple/jump/attack mid-air)
 - don't be greedy in life and special attack items, let the other player take them if the other player has less health
 - get weapons from the floor if a better weapons is found, don't wait for the other player to pick up them
-

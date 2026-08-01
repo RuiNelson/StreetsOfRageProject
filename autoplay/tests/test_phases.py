@@ -44,9 +44,9 @@ def _e(**kwargs) -> MapEntity:
         combat_phase=CombatPhase.NORMAL,
     )
     defaults.update(kwargs)
-    # Keep action_state low byte in sync with primary_state when set.
+    # +$30 is the high byte of the combined state/flags word.
     if "primary_state" in kwargs and "action_state" not in kwargs:
-        defaults["action_state"] = kwargs["primary_state"] & 0xFF
+        defaults["action_state"] = (kwargs["primary_state"] >> 8) & 0xFF
     if "combat_phase" not in kwargs and "primary_state" in kwargs:
         defaults["combat_phase"] = ordinary_enemy_phase(kwargs["primary_state"])
     return MapEntity(**defaults)  # type: ignore[arg-type]
@@ -59,6 +59,37 @@ class PhaseDecodeTests(unittest.TestCase):
         self.assertEqual(ordinary_enemy_phase(ENEMY_ST_GRABBED), CombatPhase.GRABBED)
         self.assertEqual(ordinary_enemy_phase(ENEMY_ST_DEATH), CombatPhase.DEATH)
         self.assertEqual(ordinary_enemy_phase(ENEMY_ST_BLOCKED), CombatPhase.BLOCKED)
+
+    def test_round1_garcia_attack_states(self) -> None:
+        self.assertEqual(
+            ordinary_enemy_phase(0x0901, type_id=0x22), CombatPhase.CHARGE
+        )
+        self.assertEqual(
+            ordinary_enemy_phase(0x0A01, type_id=0x22), CombatPhase.ATTACKING
+        )
+        self.assertEqual(
+            ordinary_enemy_phase(0x0B09, type_id=0x22), CombatPhase.ATTACKING
+        )
+        self.assertEqual(
+            ordinary_enemy_phase(0x1101, type_id=0x22), CombatPhase.ATTACKING
+        )
+        self.assertEqual(
+            ordinary_enemy_phase(0x1301, type_id=0x22), CombatPhase.ATTACKING
+        )
+
+    def test_signal_attack_family_states(self) -> None:
+        self.assertEqual(
+            ordinary_enemy_phase(0x0801, type_id=0x24), CombatPhase.CHARGE
+        )
+        self.assertEqual(
+            ordinary_enemy_phase(0x0A01, type_id=0x24), CombatPhase.ATTACKING
+        )
+        self.assertEqual(
+            ordinary_enemy_phase(0x0D01, type_id=0x24), CombatPhase.RECOVERY
+        )
+
+    def test_common_state_two_is_contact_recovery(self) -> None:
+        self.assertEqual(ordinary_enemy_phase(0x0203), CombatPhase.RECOVERY)
 
     def test_abadede_police_recovery(self) -> None:
         self.assertEqual(
@@ -105,6 +136,35 @@ class PhaseAwareCombatTests(unittest.TestCase):
         assert choice is not None
         self.assertEqual(choice.entity.label, "Downed")
 
+    def test_active_attacker_beats_blocked_target_in_another_lane(self) -> None:
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            map_y=64,
+            type_id=1,
+        )
+        blocked = _e(
+            map_x=54,
+            map_y=94,
+            slot="E0",
+            combat_phase=CombatPhase.BLOCKED,
+            label="Blocked",
+        )
+        attacker = _e(
+            map_x=141,
+            map_y=89,
+            slot="E1",
+            type_id=0x22,
+            combat_phase=CombatPhase.CHARGE,
+            target_ptr=0xB800,
+            label="Attacker",
+        )
+        choice = select_target(me, (blocked, attacker), PROFILES[0], my_seat=1)
+        assert choice is not None
+        self.assertEqual(choice.entity.label, "Attacker")
+
     def test_prefer_hunter_targeting_me(self) -> None:
         me = _e(kind="player", family="Player", slot="P1", map_x=100, map_y=64, type_id=1)
         hunter = _e(
@@ -138,6 +198,36 @@ class PhaseAwareCombatTests(unittest.TestCase):
         choice = select_target(me, (dead, live), PROFILES[0], my_seat=1)
         assert choice is not None
         self.assertEqual(choice.entity.label, "Live")
+
+    def test_zero_health_attacker_remains_a_target_until_attack_ends(self) -> None:
+        me = _e(kind="player", family="Player", slot="P1", map_x=100, map_y=64, type_id=1)
+        active = _e(
+            map_x=135,
+            map_y=64,
+            primary_state=0x0B00,
+            combat_phase=CombatPhase.ATTACKING,
+            health=0,
+            type_id=0x22,
+            label="Active at zero HP",
+        )
+        choice = select_target(me, (active,), PROFILES[0], my_seat=1)
+        assert choice is not None
+        self.assertEqual(choice.entity.label, "Active at zero HP")
+
+    def test_zero_health_normal_enemy_remains_a_target_for_finishing_hit(self) -> None:
+        me = _e(kind="player", family="Player", slot="P1", map_x=100, map_y=64, type_id=1)
+        zero = _e(
+            map_x=135,
+            map_y=64,
+            primary_state=0x0100,
+            combat_phase=CombatPhase.NORMAL,
+            health=0,
+            type_id=0x22,
+            label="Needs lethal underflow",
+        )
+        choice = select_target(me, (zero,), PROFILES[0], my_seat=1)
+        assert choice is not None
+        self.assertEqual(choice.entity.label, "Needs lethal underflow")
 
     def test_punish_mix_is_punch(self) -> None:
         from sor_autoplay.agent.enemies import plan_for

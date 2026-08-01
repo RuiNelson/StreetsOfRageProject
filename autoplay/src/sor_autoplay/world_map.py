@@ -344,7 +344,7 @@ def _entity_from_object(
     elif style.kind == "enemy":
         target_ptr = _u16(slot, mm.OBJ_TARGET_PTR)
         attacker_ptr = _u16(slot, mm.OBJ_ATTACKER_PTR)
-        phase = ordinary_enemy_phase(primary_state)
+        phase = ordinary_enemy_phase(primary_state, type_id=type_id)
     elif style.kind == "boss":
         tactical = _u8(slot, mm.OBJ_BOSS_TACTICAL)
         pair_role = _u8(slot, mm.OBJ_PAIR_ROLE)
@@ -418,9 +418,6 @@ def _include_entity(entity: MapEntity, slot: bytes, *, lane_max: int) -> bool:
         return False
     if not _near_camera_map(entity.map_x, entity.map_y, lane_max=lane_max):
         return False
-    if entity.kind in ("enemy", "boss") and entity.health is not None and entity.health == 0:
-        return False
-
     # Hitstun flash toggles flags bit0; combatants must still plot.
     # Dormant off-screen spawns also hold bit0 — they are kept on the map too.
     if _is_hidden(slot) and entity.kind not in ("player", "enemy", "boss"):

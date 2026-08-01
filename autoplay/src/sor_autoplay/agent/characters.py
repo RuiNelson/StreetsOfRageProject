@@ -55,12 +55,15 @@ _KNIFE_BOTTLE = frozenset({0x08, 0x09})
 # - Pickup box is playerX−20 .. playerX+20 (SoRInteractions objectInsidePickupBox).
 # - Body-overlap grabs happen closer than that (~≤16–18). Standing at 14px invited
 #   free enemy punches/grabs.
+# - Live lockstep traces of the generated +$64 attack box on the first damaging
+#   normal-punch frame reach 57px Axel, 54px Adam, and 68px Blaze when facing
+#   right. Policy ranges keep a 4–6px safety margin inside those exact boxes.
 # - Stand near outer strike range (approach_offset); step in only to connect.
 # - Lane hit band ~±12 (hasNearbyObjectInFront Y window).
 PROFILES: dict[int, CharacterProfile] = {
     0: CharacterProfile(  # Axel Stone — strong but slow; short fast backfist
         name="Axel",
-        strike_range=30.0,
+        strike_range=52.0,
         lane_align=12.0,
         jump_kick_min=28.0,
         jump_kick_max=50.0,  # shortest jump range of the three
@@ -73,14 +76,14 @@ PROFILES: dict[int, CharacterProfile] = {
         grab_knees=0,
         prefer_throw=True,
         prefer_vault=False,
-        approach_offset=26.0,  # stand just inside max punch, outside body-grab
+        approach_offset=46.0,  # measured first-punch box reaches 57px
         caution_range=48.0,
         preferred_weapons=_ALL_WEAPONS,
         weak_weapons=frozenset(),
     ),
     1: CharacterProfile(  # Adam Hunter — balanced; best back-attack range; pipes/bats
         name="Adam",
-        strike_range=34.0,
+        strike_range=50.0,
         lane_align=12.0,
         jump_kick_min=30.0,
         jump_kick_max=72.0,  # good jumpkick range
@@ -93,14 +96,14 @@ PROFILES: dict[int, CharacterProfile] = {
         grab_knees=0,  # FAQ: knees not worth it vs throw
         prefer_throw=True,
         prefer_vault=True,  # vault → back suplex when safe
-        approach_offset=28.0,
+        approach_offset=44.0,  # measured first-punch box reaches 54px
         caution_range=52.0,
         preferred_weapons=_BAT_PIPE,
         weak_weapons=frozenset(),
     ),
     2: CharacterProfile(  # Blaze Fielding — fast; weak combo; jumpkick + throws shine
         name="Blaze",
-        strike_range=28.0,
+        strike_range=62.0,
         lane_align=12.0,
         jump_kick_min=28.0,
         jump_kick_max=78.0,  # FAQ: best jumpkick range
@@ -113,7 +116,7 @@ PROFILES: dict[int, CharacterProfile] = {
         grab_knees=0,
         prefer_throw=True,
         prefer_vault=True,
-        approach_offset=24.0,
+        approach_offset=56.0,  # measured first-punch box reaches 68px
         caution_range=48.0,
         preferred_weapons=_BAT_PIPE,
         weak_weapons=_KNIFE_BOTTLE,  # short range for her

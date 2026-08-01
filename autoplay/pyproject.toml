@@ -17,6 +17,7 @@ dev = ["pytest>=7.0"]
 
 [project.scripts]
 sor-autoplay = "sor_autoplay.app:main"
+sor-autoplay-eval = "sor_autoplay.evaluation:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

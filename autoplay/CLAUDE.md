@@ -34,6 +34,13 @@ that inject standard-control input through `press_buttons`.
 cd autoplay
 PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay
 PYTHONPATH=src python3.11 -m unittest discover -s tests -q
+
+# Deterministic live evaluation (host must already be running)
+PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.evaluation \
+  --restart-character axel --decisions 600 --max-damage 12 \
+  --max-damage-events 3 --max-lives-lost 0 --max-failed-pickups 0 \
+  --min-enemy-damage 15 --min-forward-progress 600 \
+  --trace /tmp/sor-autoplay-eval.jsonl
 ```
 
 Use Python 3.11+ with Tk (`_tkinter`). System/Homebrew 3.13/3.14 builds on this
@@ -64,9 +71,14 @@ that layout yet.
    (away = opposite action-state facing bit0). A hold needs a dedicated held
    field or the grabbed enemy's reciprocal player link; the latch bridges only
    one missing observer sample so stale contact/reaction state cannot create an
-   empty knee/throw loop. Also knee fallback; bat/pipe swing; throwable weapons
+   empty knee/throw loop. Exact orphan state `$60` with only a stale `+$4C`
+   pointer gets one B edge; live this transitions `$60 -> $6A -> $02` in 16
+   frames. Also knee fallback; bat/pipe swing; throwable weapons
 5. 2P mid-air assist when both agents and partner is airborne nearby
 6. Pick up weapons freely; health/life/special only if co-op fairness allows
+   - ROM routine `$3136` accepts only X ±20, Y ±16, Z ±8. Walk inside a
+     conservative X ±16, Y ±12, Z ±6 box, and emit B only from a grounded
+     action state; otherwise wait for the current animation to finish
 7. **Face-then-hit combat** (`agent/combat.py` + `enemies.py`):
    - Player facing = action-state `+$30` **bit 0** (set = face left)
    - Punch only when same lane (Y ≤ ±12), within strike range, and facing foe
@@ -74,8 +86,28 @@ that layout yet.
    - During normal action `$18`, queue the next combo B edge only while player
      `+$58` bit 5 is clear; stop sending B after the ROM has accepted the edge
    - Match lane **before** closing X (off-lane "close" was the air-punch bug)
-   - Stand at ``approach_offset`` (~24–28, outer strike) — not body-grab range
-     (~≤18); retreat when closer so enemies cannot free-hit
+   - First-punch live hitboxes reach 57 px Axel, 54 px Adam, 68 px Blaze;
+     policy strike ranges retain a 4–6 px inner margin and stand at
+     `approach_offset` 44–56 rather than body-grab range (~≤18)
+   - Ordinary enemy `+$30` is a byte state, with flags in `+$31`. Round-1
+     Garcia type `$22` uses `$09` for approach/wind-up and `$0A` for its active
+     punch. Decode both as dangerous: when aligned, start a grounded interrupt
+     up to 24 px before static hitbox overlap so the closing enemy enters the
+     active frame; at 13–20 px lane separation, move toward a fixed escape goal
+     because enemy punches still connect there, then wait once safely off-lane
+   - Type `$22` states `$0F/$10/$11/$13` and Signal `$24` states `$08-$0C`
+     are also family charge/attack paths. Shared state `$02` is contact
+     recovery, not a new attack. Basic enemies inside the 24 px startup lead
+     are intercepted even if a whole short attack transition falls between
+     four-frame observations
+   - Type `$22` state `$0B` dispatches through ROM table `$DD80` to `$E20A`
+     and is dangerous; live it retained outgoing damage `$04` at zero health.
+     Enemy health uses a signed lethal check: `0` is still active and needs a
+     finishing hit to underflow to `$FFFF`. Keep zero-health objects visible
+     and targetable until their attack ends and the lethal/death state appears
+   - A committed attacker can be turned toward and punched in the same input;
+     a separate four-frame facing decision is too slow. Lane evasion respects
+     the ordinary-enemy `$02-$70` bounds and retreats on X at either edge
    - **Jump-kick = C, then B specifically in free-flight `$12/$13`** (never
      C+B together — that is rear attack). The ROM sequence is `$10` launch,
      `$12` free flight, `$16` air attack, `$14` landing. Do not send B during
@@ -134,6 +166,23 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
 - Do not commit ROMs, captures, or build artifacts.
 - Never leave a background `sor` process running after local experiments; use
   `timeout -k` when scripting launches.
+- Robust deterministic gameplay regression testing is a project requirement
+  and the foundation for future learning. `evaluation.py` owns the stable
+  lockstep boundary: policies consume `GameSnapshot` and return
+  `AgentDecision`; tests and learned policies must retain its metrics and
+  scenario thresholds so results remain directly comparable. Face buttons are
+  pulsed for three frames and released for the remaining frame in every exact
+  four-frame decision step. JSONL traces belong outside the repository.
+- Use evaluator `--restart-character` for comparable episodes. It restarts,
+  navigates menus, verifies the player/health/game state, and enables lockstep
+  on the same connection before returning control; a separate setup process
+  leaves an uncontrolled frame gap and is not a comparable scenario start.
+- Round-1 evaluation seeds the ROM RNG long at `$FFFFFF40` and the VBlank frame
+  phase word at `$FFFFFB08` after enabling lockstep. These writes are test
+  setup only; the evaluated AI still acts solely through controller inputs.
+  Reports include the starting 64 KiB work-RAM SHA-256. Use acceptance
+  thresholds across episodes rather than assuming host state outside work RAM
+  is bit-identical.
 
 ## Key RAM (verified from analysis)
 
@@ -169,6 +218,8 @@ See `src/sor_autoplay/memory_map.py` and
 - Styles live in `object_catalog.py`; extraction in `world_map.py`
 - Agent modules: `agent/policy.py`, `combat.py`, `pressure.py`, `stage.py`,
   `coop.py`, `characters.py`, `controls.py`
+- Deterministic evaluator: `evaluation.py` (metrics, JSONL trace, acceptance
+  criteria, injectable policy callable)
 
 ## Next milestones
 

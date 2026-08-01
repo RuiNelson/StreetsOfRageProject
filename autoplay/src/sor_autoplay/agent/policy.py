@@ -332,10 +332,13 @@ def _decide_one(
         profile=profile,
     )
     if item is not None:
-        close = abs(item.world_x - me.world_x) < 22 and abs(item.world_y - me.world_y) < 14
-        if close:
+        close = combat.can_collect_pickup(me, item)
+        if close and combat.player_can_start_ground_action(me):
             walk.clear()
             return Intent(attack=True, note=f"loot {item.label}")
+        if close:
+            walk.clear()
+            return Intent(note=f"await loot {item.label}")
         return _walk_toward(
             walk,
             me,
@@ -344,6 +347,8 @@ def _decide_one(
             reason=f"loot {item.label}",
             snapshot=snapshot,
             advice=advice,
+            eps_x=3.0,
+            eps_y=3.0,
         )
 
     # --- Combat ---
@@ -449,6 +454,88 @@ def _decide_one(
                 right=face_right_now,
                 note=f"atk anim {foe.label} [{tag}]",
             )
+
+        # Ordinary Garcia states above $07 are family moves, not UNKNOWN: for
+        # the common Round-1 type $22, $09 is the approach/wind-up and $0A is
+        # the active punch. The measured normal-punch boxes now let us strike
+        # first; an already-safe off-lane player must not walk back into it.
+        if combat.enemy_attack_committed(me, foe):
+            if not lane_ok:
+                if abs_dy <= combat.THREAT_LANE_REACT_HALF:
+                    escape_y = float(me.world_y) + (
+                        -combat.THREAT_LANE_ESCAPE
+                        if target.dy >= 0
+                        else combat.THREAT_LANE_ESCAPE
+                    )
+                    # Ordinary enemy movement clamps the lane to $02-$70.
+                    # At an edge, holding farther outward does nothing while
+                    # Signal/Garcia closes the gap; retreat in X instead.
+                    if not combat.ENEMY_LANE_MIN <= escape_y <= combat.ENEMY_LANE_MAX:
+                        escape_x = float(me.world_x) + (
+                            -40.0 if target.dx >= 0 else 40.0
+                        )
+                        return _walk_toward(
+                            walk,
+                            me,
+                            goal_x=escape_x,
+                            goal_y=float(me.world_y),
+                            reason=f"retreat edge {foe.label} [{tag}]",
+                            snapshot=snapshot,
+                            advice=advice,
+                            eps_x=3.0,
+                            eps_y=3.0,
+                        )
+                    return _walk_toward(
+                        walk,
+                        me,
+                        goal_x=float(me.world_x),
+                        goal_y=escape_y,
+                        reason=f"escape lane {foe.label} [{tag}]",
+                        snapshot=snapshot,
+                        advice=advice,
+                        eps_x=3.0,
+                        eps_y=3.0,
+                    )
+                walk.clear()
+                return Intent(note=f"guard lane {foe.label} [{tag}]")
+            if abs_dx <= profile.strike_range + combat.PREEMPTIVE_PUNCH_LEAD:
+                walk.clear()
+                if cd == 0 and combat.player_can_start_ground_action(me):
+                    memory.set_attack_cd(player_index, 3)
+                    return Intent(
+                        left=face_left,
+                        right=face_right_now,
+                        attack=True,
+                        note=f"interrupt {foe.label} [{tag}]",
+                    )
+                if not facing_ok:
+                    return Intent(
+                        left=face_left,
+                        right=face_right_now,
+                        note=f"face threat {foe.label} [{tag}]",
+                    )
+                return Intent(note=f"guard threat {foe.label} [{tag}]")
+
+        # State transitions can start and finish between four-frame samples
+        # (notably Signal's easy slide). Meet nearby basic enemies during their
+        # approach instead of waiting for the first dangerous-state sample.
+        if combat.should_intercept_basic_enemy(me, foe, profile):
+            walk.clear()
+            if cd == 0 and combat.player_can_start_ground_action(me):
+                memory.set_attack_cd(player_index, 3)
+                return Intent(
+                    left=face_left,
+                    right=face_right_now,
+                    attack=True,
+                    note=f"intercept {foe.label} [{tag}]",
+                )
+            if not facing_ok:
+                return Intent(
+                    left=face_left,
+                    right=face_right_now,
+                    note=f"face approach {foe.label} [{tag}]",
+                )
+            return Intent(note=f"hold range {foe.label} [{tag}]")
 
         # Face first when about to punch.
         if punch_geom and not facing_ok and cd == 0:
@@ -665,7 +752,7 @@ def _stand_point(
     """World-space stand-off: same lane, outer strike gap on X.
 
     ROM pickup box is ~±20 X; body-grabs happen closer. We park at
-    ``approach_offset`` (~24–28) so punches still reach but enemies do not
+    ``approach_offset`` (44–56) so measured punches still reach but enemies do not
     free-hit us. Always match the foe's lane (off-lane = air punches).
     """
 

@@ -39,6 +39,12 @@ def nearby_threats(
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
             continue
+        if (
+            entity.health is not None
+            and entity.health >= 0x8000
+            and not is_dangerous(entity.combat_phase)
+        ):
+            continue
         if entity.combat_phase in (CombatPhase.DEATH, CombatPhase.SCRIPTED):
             continue
         if not 0.0 <= entity.map_x <= float(SCREEN_WIDTH):

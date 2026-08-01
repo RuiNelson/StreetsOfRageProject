@@ -42,6 +42,27 @@ ACTIVATION_RIGHT = float(SCREEN_WIDTH) + 16.0
 LANE_HIT_HALF = 12.0
 # Slightly looser when walking to a foe so we still approach.
 LANE_APPROACH_HALF = 16.0
+# ROM $3136 interaction box is ±$14 X, ±$10 lane Y and ±$08 height Z.
+# Stay a few units inside it so polling/animation movement cannot leave the
+# player one pixel outside when the B edge reaches the game.
+PICKUP_SAFE_X = 16.0
+PICKUP_SAFE_Y = 12.0
+PICKUP_SAFE_Z = 6.0
+DANGER_REACT_X = 100.0
+# A closing enemy covers roughly 20 px during the player's punch startup in
+# the Round-1 lockstep trace. Begin a grounded interrupt before the static
+# hitbox overlaps; by its active frame the enemy has entered strike range.
+PREEMPTIVE_PUNCH_LEAD = 24.0
+# Enemy collision lanes are wider than the player's conservative ±12 punch
+# lane. Live Round-1 punches still connected at 14–15 px lane separation.
+ENEMY_PUNCH_LANE_HALF = 20.0
+# Garcia moved roughly 13 lane units in one four-frame observation. React
+# before it reaches the actual collision lane instead of waiting at ±20.
+THREAT_LANE_REACT_HALF = ENEMY_PUNCH_LANE_HALF + 16.0
+THREAT_LANE_ESCAPE = 24.0
+ENEMY_LANE_MIN = 2.0
+ENEMY_LANE_MAX = 112.0
+BASIC_ENEMY_TYPES = frozenset(range(0x20, 0x25))
 # Minimum |dx| to decide "left vs right" (avoid flip-flop on top of foe).
 FACE_DEADZONE = 4.0
 # Rear-react distance (B+C back attack family).
@@ -139,6 +160,47 @@ def can_punch(
     if require_facing and not facing_toward(me, foe):
         return False
     return True
+
+
+def can_collect_pickup(me: MapEntity, item: MapEntity) -> bool:
+    """Whether B is safely inside the ROM's three-axis pickup search box."""
+
+    return (
+        abs(item.world_x - me.world_x) <= PICKUP_SAFE_X
+        and abs(item.world_y - me.world_y) <= PICKUP_SAFE_Y
+        and abs(item.world_z - me.world_z) <= PICKUP_SAFE_Z
+    )
+
+
+def player_can_start_ground_action(me: MapEntity) -> bool:
+    """True in ordinary grounded idle/walk states that accept a new B edge."""
+
+    return 0x02 <= me.action_base <= 0x0E
+
+
+def enemy_attack_committed(me: MapEntity, foe: MapEntity) -> bool:
+    """True while a nearby foe is in a decoded attack/wind-up state."""
+
+    return (
+        is_dangerous(foe.combat_phase)
+        and abs(foe.map_x - me.map_x) <= DANGER_REACT_X
+    )
+
+
+def should_intercept_basic_enemy(
+    me: MapEntity,
+    foe: MapEntity,
+    profile: CharacterProfile,
+) -> bool:
+    """Meet a nearby Garcia/Signal with a punch before its approach connects."""
+
+    return (
+        foe.type_id in BASIC_ENEMY_TYPES
+        and not is_punishable(foe.combat_phase)
+        and abs(foe.map_x - me.map_x)
+        <= profile.strike_range + PREEMPTIVE_PUNCH_LEAD
+        and lane_aligned(me, foe)
+    )
 
 
 def can_jump_kick(
@@ -266,7 +328,12 @@ def select_target(
             continue
         if entity.kind == "projectile" and not include_projectiles:
             continue
-        if entity.kind != "projectile" and entity.health is not None and entity.health <= 0:
+        if (
+            entity.kind != "projectile"
+            and entity.health is not None
+            and entity.health >= 0x8000
+            and not is_dangerous(entity.combat_phase)
+        ):
             continue
         if should_ignore_as_target(entity.combat_phase):
             continue
@@ -305,9 +372,12 @@ def select_target(
         if is_punishable(phase):
             score -= 80.0
         if is_dangerous(phase):
-            score -= 18.0
+            # An active attacker must beat a tempting knockdown/blocked target
+            # in another lane. Round-1 Garcia can cross ~13 lane units between
+            # observations, so late target switching costs a full punch.
+            score -= 120.0
             if phase == CombatPhase.CHARGE and dist < 80:
-                score -= 12.0
+                score -= 30.0
         if entity.targets_player == my_seat:
             score -= 30.0
         if abs(dx) < REAR_REACT_RANGE and abs(dy) < LANE_HIT_HALF + 4:
@@ -545,7 +615,11 @@ def nearest_foe(
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
             continue
-        if entity.health is not None and entity.health <= 0:
+        if (
+            entity.health is not None
+            and entity.health >= 0x8000
+            and not is_dangerous(entity.combat_phase)
+        ):
             continue
         if should_ignore_as_target(entity.combat_phase):
             continue
@@ -582,7 +656,11 @@ def closest_behind(
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
             continue
-        if entity.health is not None and entity.health <= 0:
+        if (
+            entity.health is not None
+            and entity.health >= 0x8000
+            and not is_dangerous(entity.combat_phase)
+        ):
             continue
         if should_ignore_as_target(entity.combat_phase):
             continue
