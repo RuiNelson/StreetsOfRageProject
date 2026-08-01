@@ -13,6 +13,13 @@ The main goals is to defeat the enemies as fast as they can, take the least dama
   - know it's an elevator in stage 7 and not fall from it
   - know they have to move left in stage 8
   - know to handle Mr. X dialog (always choose "NO")
+- **navigation** is a symbolic planner (`agent/navigation.py`), not pure
+  reactive steering:
+  - floor holes: latch a detour lane (vertical first), then advance past the
+    pit on that lane — no per-frame UP/DOWN flip-flop
+  - never jump-kick when the arc or landing crosses a hole
+  - breakables smash only from the **sides** (same lane, horizontal stand-off);
+    top/bottom approaches first slide to a side X at the current lane
 - pick up weapons and items
 - be steady when the police special is in action or the game is paused
 

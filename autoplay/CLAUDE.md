@@ -85,6 +85,17 @@ that layout yet.
    Target and goal hysteresis add a small persistence bonus. Keep this boundary
    explainable and injectable so future learned models can propose weights or
    candidates without bypassing ROM-state guards.
+4b. **Symbolic navigation** (`agent/navigation.py` + `NavMemory` in policy):
+   terrain facts from the collision-class hole map drive a latched plan
+   `DETOUR → ADVANCE` around pits (stage 4). Once a hole blocks progress,
+   commit to one safe lane and finish vertical motion before resuming X —
+   never recompute the detour side every poll (that caused UP/DOWN shakiness).
+   Emergency escape only rewrites input when already inside a pit AABB.
+   Breakables: side-only approach (`breakable_side_approach`) — when stacked
+   on the prop's X, first move to a horizontal stand-off at the current lane,
+   then match lane; never smash from pure top/bottom. Jump starts (combat,
+   Signal sweep, jump-break) require `jump_landing_safe` so kick arcs do not
+   land in holes.
 5. Police special when fuzzy pressure score ≥ threshold and specials remain
    (not round 8). Pressure combines crowd size, hunters, active attacks,
    surrounding geometry, bosses, and health and retains its fired-rule trace.
@@ -399,7 +410,8 @@ See `src/sor_autoplay/memory_map.py` and
 - Styles live in `object_catalog.py`; extraction in `world_map.py`
 - Agent modules: `agent/policy.py`, `inference.py`, `expert.py`,
   `autoplanner.py`, `knowledge.py`, `fuzzy.py`, `arbiter.py`, `combat.py`,
-  `pressure.py`, `stage.py`, `coop.py`, `characters.py`, `controls.py`
+  `pressure.py`, `stage.py`, `navigation.py`, `coop.py`, `characters.py`,
+  `controls.py`
 - Deterministic evaluator: `evaluation.py` (metrics, JSONL trace, acceptance
   criteria, injectable policy callable)
 

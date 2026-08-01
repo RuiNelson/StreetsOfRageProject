@@ -297,6 +297,7 @@ autoplay/
       grabs.py          # hold / knee / throw / weapon trees
       pressure.py       # fuzzy police-special pressure
       stage.py          # holes, elevator, stage 8, Mr. X
+      navigation.py     # symbolic hole detours, side breakables, jump safety
       coop.py           # item fairness + 2P assist
       characters.py     # Axel / Adam / Blaze profiles
   tests/

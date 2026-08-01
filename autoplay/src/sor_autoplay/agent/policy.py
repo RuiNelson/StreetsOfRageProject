@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from ..phases import CombatPhase, is_dangerous, is_punishable
 from ..state import GameSnapshot, PlayerSnapshot
 from ..world_map import MapEntity
-from . import bosses, combat, coop, enemies as enemy_ai, grabs, pressure, stage
+from . import bosses, combat, coop, enemies as enemy_ai, grabs, navigation, pressure, stage
 from .arbiter import GoalKind, GoalMemory, solve_goal
 from .autoplanner import AutoPlanner
 from .characters import profile_for
@@ -22,6 +22,7 @@ from .controls import Intent, mask_from_intent
 from .expert import DEFAULT_COMBAT_EXPERT
 from .grabs import EnemyGrabEscapeMemory, GrabMemory
 from .knowledge import Relation, build_tactical_graph
+from .navigation import NavMemory
 from .walk import WalkState, blend_walk_with_actions
 
 
@@ -73,6 +74,8 @@ class AgentState:
     )
     p1_walk: WalkState = field(default_factory=WalkState)
     p2_walk: WalkState = field(default_factory=WalkState)
+    p1_nav: NavMemory = field(default_factory=NavMemory)
+    p2_nav: NavMemory = field(default_factory=NavMemory)
     p1_planner: AutoPlanner = field(default_factory=AutoPlanner)
     p2_planner: AutoPlanner = field(default_factory=AutoPlanner)
     p1_goal: GoalMemory = field(default_factory=GoalMemory)
@@ -109,12 +112,19 @@ class AgentState:
     def walk(self, player_index: int) -> WalkState:
         return self.p1_walk if player_index == 1 else self.p2_walk
 
+    def nav(self, player_index: int) -> NavMemory:
+        return self.p1_nav if player_index == 1 else self.p2_nav
+
     def planner(self, player_index: int) -> AutoPlanner:
         return self.p1_planner if player_index == 1 else self.p2_planner
 
     def clear_planners(self) -> None:
         self.p1_planner.reset()
         self.p2_planner.reset()
+
+    def clear_nav(self) -> None:
+        self.p1_nav.clear()
+        self.p2_nav.clear()
 
     def goal(self, player_index: int) -> GoalMemory:
         return self.p1_goal if player_index == 1 else self.p2_goal
@@ -168,6 +178,7 @@ def decide_actions(
     if not config.any_enabled() or not snapshot.connected:
         memory.clear_planners()
         memory.clear_goals()
+        memory.clear_nav()
         return AgentDecision(0, 0, steady=True)
 
     if snapshot.paused or snapshot.police_special_active:
@@ -175,6 +186,7 @@ def decide_actions(
         memory.p2_walk.clear()
         memory.clear_planners()
         memory.clear_goals()
+        memory.clear_nav()
         return AgentDecision(0, 0, p1_note="steady", p2_note="steady", steady=True)
 
     if snapshot.game_state not in _INGAME_STATES:
@@ -182,6 +194,7 @@ def decide_actions(
         memory.p2_walk.clear()
         memory.clear_planners()
         memory.clear_goals()
+        memory.clear_nav()
         return AgentDecision(0, 0, p1_note="menu idle", p2_note="menu idle", steady=True)
 
     p1_mask = 0
@@ -257,6 +270,7 @@ def _decide_one(
 ) -> Intent:
     me = _player_entity(snapshot, player_index)
     walk = memory.walk(player_index)
+    nav = memory.nav(player_index)
     other_i = _other_index(player_index)
     partner = _player_entity(snapshot, other_i)
     partner_player = snapshot.players[other_i - 1]
@@ -517,6 +531,7 @@ def _decide_one(
                     reason=f"evade moving threat {prop.label}",
                     snapshot=snapshot,
                     advice=advice,
+                    nav=nav,
                     eps_x=3.0,
                     eps_y=5.0,
                 )
@@ -589,6 +604,7 @@ def _decide_one(
             reason=f"{loot_verb} {item.label}",
             snapshot=snapshot,
             advice=advice,
+            nav=nav,
             eps_x=3.0,
             eps_y=3.0,
         )
@@ -625,6 +641,7 @@ def _decide_one(
                         reason=f"ally blocks rear {rear_foe.label}",
                         snapshot=snapshot,
                         advice=advice,
+                        nav=nav,
                     )
                 walk.clear()
                 memory.set_attack_cd(player_index, 4)
@@ -665,6 +682,7 @@ def _decide_one(
                 reason=f"dodge {foe.label}",
                 snapshot=snapshot,
                 advice=advice,
+                nav=nav,
             )
 
         if phase == CombatPhase.GRABBED and not me.is_grabbing:
@@ -678,6 +696,7 @@ def _decide_one(
                 reason=f"skip held {foe.label}",
                 snapshot=snapshot,
                 advice=advice,
+                nav=nav,
             )
 
         if combat.player_busy_attacking(me):
@@ -722,6 +741,7 @@ def _decide_one(
                 reason=boss_tactic.note,
                 snapshot=snapshot,
                 advice=advice,
+                nav=nav,
                 eps_x=3.0,
                 eps_y=5.0,
             )
@@ -729,10 +749,14 @@ def _decide_one(
         # Signal's state $08 can select the state-$0B low sliding sweep. The
         # latter starts animation $18 at 7 px/frame, so a grounded punch is a
         # poor generic interrupt. Start C now; the airborne branch emits B only
-        # after the ROM reaches free-flight $12/$13.
+        # after the ROM reaches free-flight $12/$13. Never jump into a pit.
         if combat.signal_sweep_threat(me, foe):
             walk.clear()
-            if combat.player_can_start_ground_action(me):
+            holes = snapshot.floor_holes if advice.avoid_holes else ()
+            if (
+                combat.player_can_start_ground_action(me)
+                and navigation.jump_landing_safe(me, foe, holes)
+            ):
                 memory.set_attack_cd(player_index, 1)
                 return Intent(
                     left=face_left,
@@ -767,6 +791,7 @@ def _decide_one(
                         reason=f"reengage boss {foe.label} [{tag}]",
                         snapshot=snapshot,
                         advice=advice,
+                        nav=nav,
                         eps_x=3.0,
                         eps_y=6.0,
                     )
@@ -791,6 +816,7 @@ def _decide_one(
                             reason=f"retreat edge {foe.label} [{tag}]",
                             snapshot=snapshot,
                             advice=advice,
+                            nav=nav,
                             eps_x=3.0,
                             eps_y=3.0,
                         )
@@ -802,6 +828,7 @@ def _decide_one(
                         reason=f"escape lane {foe.label} [{tag}]",
                         snapshot=snapshot,
                         advice=advice,
+                        nav=nav,
                         eps_x=3.0,
                         eps_y=3.0,
                     )
@@ -819,6 +846,7 @@ def _decide_one(
                             reason=f"ally blocks interrupt {foe.label}",
                             snapshot=snapshot,
                             advice=advice,
+                        nav=nav,
                         )
                     walk.clear()
                     memory.set_attack_cd(player_index, 3)
@@ -852,6 +880,7 @@ def _decide_one(
                         reason=f"ally blocks intercept {foe.label}",
                         snapshot=snapshot,
                         advice=advice,
+                        nav=nav,
                     )
                 walk.clear()
                 memory.set_attack_cd(player_index, 3)
@@ -913,6 +942,7 @@ def _decide_one(
                             reason=f"ally blocks punish {foe.label}",
                             snapshot=snapshot,
                             advice=advice,
+                        nav=nav,
                         )
                     walk.clear()
                     memory.set_attack_cd(player_index, 2)
@@ -937,6 +967,7 @@ def _decide_one(
                         reason=f"ally blocks back {foe.label}",
                         snapshot=snapshot,
                         advice=advice,
+                        nav=nav,
                     )
                 walk.clear()
                 memory.set_attack_cd(player_index, 4)
@@ -952,7 +983,15 @@ def _decide_one(
             # Jump start: C only + face. Attack comes next ticks while airborne.
             # Still refuse the approach when the partner already sits in the
             # eventual kick box — the airborne branch will also gate B.
-            if mix == "jump" and jump_ok and facing_ok and not plan.no_jump:
+            # Refuse jumps whose arc/landing crosses a floor hole (stage 4).
+            holes = snapshot.floor_holes if advice.avoid_holes else ()
+            if (
+                mix == "jump"
+                and jump_ok
+                and facing_ok
+                and not plan.no_jump
+                and navigation.jump_landing_safe(me, foe, holes)
+            ):
                 if coop.attack_would_hit_ally(
                     me, coop_ctx.partner, face_left=face_left
                 ):
@@ -963,6 +1002,7 @@ def _decide_one(
                         reason=f"ally blocks jump {foe.label}",
                         snapshot=snapshot,
                         advice=advice,
+                        nav=nav,
                     )
                 walk.clear()
                 memory.set_attack_cd(player_index, 1)
@@ -984,6 +1024,7 @@ def _decide_one(
                         reason=f"ally blocks punch {foe.label}",
                         snapshot=snapshot,
                         advice=advice,
+                        nav=nav,
                     )
                 walk.clear()
                 memory.set_attack_cd(player_index, 3)
@@ -1030,6 +1071,7 @@ def _decide_one(
             reason=reason,
             snapshot=snapshot,
             advice=advice,
+            nav=nav,
             # The stand point is only 2–6 px inside character strike range.
             # An 8 px arrival tolerance can stop outside the hit box forever.
             eps_x=3.0,
@@ -1037,6 +1079,8 @@ def _decide_one(
         )
 
     # --- Breakables (crates / phone booths → loot) when no combat target ---
+    # Symbolic rule: smash only from the sides. Top/bottom approaches never
+    # land a grounded B; route side-align → lane → close via navigation.
     prop = combat.select_breakable(
         me,
         snapshot.world_map.entities,
@@ -1045,12 +1089,21 @@ def _decide_one(
     )
     if prop is not None:
         fl, fr = combat.face_intent_dirs(me, prop)
-        abs_dx = abs(prop.map_x - me.map_x)
-        abs_dy = abs(prop.map_y - me.map_y)
-        lane_ok = combat.lane_aligned(me, prop)
-        punch_ok = combat.can_break(me, prop, profile, require_facing=True)
-        punch_geom = combat.can_break(me, prop, profile, require_facing=False)
-        jump_ok = combat.can_jump_kick(me, prop, profile, loose_lane=True)
+        side_ready = navigation.breakable_side_ready(me, prop, profile)
+        punch_ok = (
+            side_ready
+            and combat.can_break(me, prop, profile, require_facing=True)
+        )
+        punch_geom = (
+            side_ready
+            and combat.can_break(me, prop, profile, require_facing=False)
+        )
+        holes = snapshot.floor_holes if advice.avoid_holes else ()
+        jump_ok = (
+            side_ready
+            and combat.can_jump_kick(me, prop, profile, loose_lane=True)
+            and navigation.jump_landing_safe(me, prop, holes)
+        )
         cd = memory.attack_cd(player_index)
 
         if combat.player_busy_attacking(me):
@@ -1073,6 +1126,7 @@ def _decide_one(
                         reason=f"ally blocks smash {prop.label}",
                         snapshot=snapshot,
                         advice=advice,
+                        nav=nav,
                     )
                 walk.clear()
                 memory.set_attack_cd(player_index, 3)
@@ -1082,7 +1136,7 @@ def _decide_one(
                     attack=True,
                     note=f"smash {prop.label}",
                 )
-            # Mid-range booth/crate: jump-kick (C now, B while airborne).
+            # Jump-break only from a side stand-off with a safe landing.
             if jump_ok and combat.facing_toward(me, prop):
                 if coop.attack_would_hit_ally(
                     me, coop_ctx.partner, face_left=fl
@@ -1094,6 +1148,7 @@ def _decide_one(
                         reason=f"ally blocks jump-break {prop.label}",
                         snapshot=snapshot,
                         advice=advice,
+                        nav=nav,
                     )
                 walk.clear()
                 memory.set_attack_cd(player_index, 1)
@@ -1104,58 +1159,54 @@ def _decide_one(
                     note=f"jump-break {prop.label}",
                 )
 
-        if not lane_ok:
-            return _walk_toward(
-                walk,
-                me,
-                goal_x=float(me.world_x),
-                goal_y=float(prop.world_y),
-                reason=f"lane {prop.label}",
-                snapshot=snapshot,
-                advice=advice,
-                eps_x=12.0,
-                eps_y=6.0,
-            )
-        # Walk to punch range stand-off.
-        side = -1.0 if (prop.world_x - me.world_x) > 0 else 1.0
-        stand_x = float(prop.world_x) + side * max(18.0, profile.approach_offset * 0.7)
+        approach = navigation.breakable_side_approach(
+            me,
+            prop,
+            profile,
+            progress_right=advice.progress_right,
+        )
         return _walk_toward(
             walk,
             me,
-            goal_x=stand_x,
-            goal_y=float(prop.world_y),
-            reason=f"break {prop.label}",
+            goal_x=approach.goal_x,
+            goal_y=approach.goal_y,
+            reason=approach.reason,
             snapshot=snapshot,
             advice=advice,
-            eps_x=8.0,
-            eps_y=6.0,
+            nav=nav,
+            eps_x=6.0,
+            eps_y=5.0,
         )
 
-    # --- Progress ---
+    # --- Progress (symbolic hole routing via NavMemory) ---
     lead = _PROGRESS_LEAD if advice.progress_right else -_PROGRESS_LEAD
-    goal_x = (
-        float(me.world_x) + lead
-        if advice.horizontal_progress
-        else float(me.world_x)
-    )
-    goal_y = float(me.world_y)
+    preferred_lane = None
     if advice.avoid_holes or advice.elevator:
-        mid = 0x40 if snapshot.level_index != 6 else 0x50
-        goal_y = float(mid)
+        preferred_lane = float(0x40 if snapshot.level_index != 6 else 0x50)
     if not advice.horizontal_progress:
         # Discard a progress/approach latch left by the preceding elevator
         # wave.  Even if its old X goal is within WalkState's refresh slack,
         # the clear platform must never inherit LEFT/RIGHT.
         walk.clear()
+    progress = navigation.progress_goal(
+        me,
+        progress_right=advice.progress_right,
+        horizontal=advice.horizontal_progress,
+        lead=lead,
+        preferred_lane=preferred_lane,
+        note=advice.note,
+    )
     return _walk_toward(
         walk,
         me,
-        goal_x=goal_x,
-        goal_y=goal_y,
-        reason=f"progress ({advice.note})",
+        goal_x=progress.goal_x,
+        goal_y=progress.goal_y,
+        reason=progress.reason,
         snapshot=snapshot,
         advice=advice,
-        eps_x=24.0,  # refresh progress goal as we move
+        nav=nav,
+        eps_x=24.0,
+        eps_y=8.0,
     )
 
 
@@ -1167,6 +1218,7 @@ def _clear_ally_lane(
     reason: str,
     snapshot: GameSnapshot,
     advice: stage.StageAdvice,
+    nav: NavMemory | None = None,
 ) -> Intent:
     """Step off the partner's lane instead of friendly-firing through them."""
 
@@ -1182,6 +1234,7 @@ def _clear_ally_lane(
         reason=reason,
         snapshot=snapshot,
         advice=advice,
+        nav=nav,
         eps_x=3.0,
         eps_y=4.0,
     )
@@ -1222,38 +1275,77 @@ def _walk_toward(
     reason: str,
     snapshot: GameSnapshot,
     advice: stage.StageAdvice,
+    nav: NavMemory | None = None,
     eps_x: float = 10.0,
     eps_y: float = 8.0,
     attack: bool = False,
     jump: bool = False,
     rear: bool = False,
 ) -> Intent:
-    """Set/refresh walk goal and return held-direction intent until arrival."""
+    """Set/refresh walk goal and return held-direction intent until arrival.
 
-    # Nudge goal out of floor holes when relevant.
-    if advice.avoid_holes and snapshot.floor_holes:
-        goal_x, goal_y = _nudge_goal_from_holes(
-            goal_x, goal_y, snapshot.floor_holes, level_index=snapshot.level_index
+    Hole stages route through the symbolic navigator: a latched DETOUR→ADVANCE
+    plan replaces per-tick UP/DOWN flips that shook stage 4.
+    """
+
+    holes = snapshot.floor_holes if advice.avoid_holes else ()
+    if nav is not None and holes:
+        waypoint = navigation.route_to_goal(
+            me,
+            goal_x,
+            goal_y,
+            holes,
+            nav,
+            level_index=snapshot.level_index,
+            progress_right=advice.progress_right,
+            reason=reason,
+        )
+        goal_x, goal_y = waypoint.goal_x, waypoint.goal_y
+        reason = waypoint.reason
+        # Committed detours need a tighter refresh so walk does not keep an
+        # old progress X latch that fights the vertical waypoint.
+        if waypoint.committed:
+            eps_x = min(eps_x, 6.0)
+            eps_y = min(eps_y, 5.0)
+            walk.set_goal(
+                me,
+                goal_x,
+                goal_y,
+                reason=reason,
+                eps_x=eps_x,
+                eps_y=eps_y,
+                force=True,
+            )
+        else:
+            walk.set_goal(
+                me,
+                goal_x,
+                goal_y,
+                reason=reason,
+                eps_x=eps_x,
+                eps_y=eps_y,
+            )
+    else:
+        if nav is not None and not holes:
+            nav.clear()
+        walk.set_goal(
+            me,
+            goal_x,
+            goal_y,
+            reason=reason,
+            eps_x=eps_x,
+            eps_y=eps_y,
         )
 
-    walk.set_goal(
-        me,
-        goal_x,
-        goal_y,
-        reason=reason,
-        eps_x=eps_x,
-        eps_y=eps_y,
-    )
     intent = walk.step(me)
     if intent is None:
         return Intent(note=f"walk idle ({reason})")
 
-    # Hole steer on latched dirs (may zero one axis without flipping every tick).
-    intent = _apply_stage_geometry(intent, me, snapshot, advice)
-    # Geometry steering is a temporary waypoint around the obstacle.  Keep the
-    # original WalkState signs latched so horizontal progress resumes as soon
-    # as the selected detour lane is clear; persisting the temporary UP/DOWN
-    # signs was the Stage-4 edge stall.
+    # Emergency only: if we are already overlapping a pit, escape. Do not
+    # re-steer every frame while a latched nav plan is active — that was the
+    # stage-4 shakiness (detour side flipped each poll).
+    if advice.avoid_holes and holes:
+        intent = _emergency_hole_escape(intent, me, holes, snapshot.level_index)
 
     if attack or jump or rear:
         return blend_walk_with_actions(
@@ -1262,62 +1354,38 @@ def _walk_toward(
     return intent
 
 
-def _nudge_goal_from_holes(
-    goal_x: float,
-    goal_y: float,
-    holes: tuple,
-    *,
-    level_index: int,
-) -> tuple[float, float]:
-    from ..hazards import FloorHole
-
-    gx, gy = goal_x, goal_y
-    for _ in range(4):
-        hit: FloorHole | None = stage.point_in_hole(gx, gy, holes, margin=8.0)
-        if hit is None:
-            break
-        # Push goal toward nearest horizontal edge of the hole.
-        mid = (hit.world_x + hit.world_x_end) / 2.0
-        gx = hit.world_x - 12.0 if gx >= mid else hit.world_x_end + 12.0
-        mid_y = (hit.lane_y + hit.lane_y_end) / 2.0
-        gy = hit.lane_y - 8.0 if gy >= mid_y else hit.lane_y_end + 8.0
-    return gx, gy
-
-
-def _apply_stage_geometry(
+def _emergency_hole_escape(
     intent: Intent,
     me: MapEntity,
-    snapshot: GameSnapshot,
-    advice: stage.StageAdvice,
+    holes: tuple,
+    level_index: int,
 ) -> Intent:
-    # Collision class 0 is meaningful as a pit only on stages that opt into
-    # hole avoidance.  In particular, Round 7's moving elevator floor is not
-    # encoded in this static map; treating its zero cells as holes produced
-    # phantom rectangles and false horizontal escape/progression.
-    if not advice.avoid_holes:
-        return intent
+    """Only rewrite movement when already inside a pit AABB."""
 
-    desired_dx = (-1.0 if intent.left else 1.0 if intent.right else 0.0)
-    desired_dy = (-1.0 if intent.up else 1.0 if intent.down else 0.0)
-    dx, dy = stage.steer_away_from_holes(
+    hit = navigation.point_in_hole(
+        float(me.world_x), float(me.world_y), holes, margin=0.0
+    )
+    if hit is None:
+        return intent
+    escape = navigation.escape_hole_waypoint(
         float(me.world_x),
         float(me.world_y),
-        desired_dx,
-        desired_dy,
-        snapshot.floor_holes,
-        level_index=snapshot.level_index,
+        hit,
+        level_index=level_index,
     )
+    dx = escape.goal_x - float(me.world_x)
+    dy = escape.goal_y - float(me.world_y)
     return Intent(
-        left=dx < 0,
-        right=dx > 0,
-        up=dy < 0,
-        down=dy > 0,
+        left=dx < -2.0,
+        right=dx > 2.0,
+        up=dy < -2.0,
+        down=dy > 2.0,
         attack=intent.attack,
-        jump=intent.jump,
+        jump=False,  # never jump while escaping a pit
         special=intent.special,
-        rear_attack=intent.rear_attack,
+        rear_attack=False,
         confirm=intent.confirm,
-        note=intent.note + (" [hole]" if (dx, dy) != (desired_dx, desired_dy) else ""),
+        note=intent.note + " [escape hole]",
     )
 
 
