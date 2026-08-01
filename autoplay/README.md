@@ -36,6 +36,9 @@ Per-player toggle (HUD button or keys **1** / **2**):
   and do not inflate police pressure
 - Phase-aware targeting: knockdown punish, charge sidestep, ignore dead/scripted,
   prefer hunters (`+$42` / boss target)
+- Held weapons are conserved until a live foe is in the weapon's usable lane
+  and range, without repeated B during weapon animations; Signal's low sweep
+  is countered by jumping (and by an airborne B attack when unarmed)
 - Family-specific counters (Signal, Haku-Ro, Nora, Jack, all bosses, Mr. X)
 - **Grab/throw trees**: always throw; weapon swing/throw facing the foe
 - Character-tuned ranges (Axel / Adam / Blaze), measured from the live attack
@@ -148,6 +151,7 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.eva
   --max-damage-events 3 \
   --max-lives-lost 0 \
   --max-failed-pickups 0 \
+  --max-weapon-air-attacks 0 \
   --min-enemy-damage 15 \
   --min-forward-progress 600 \
   --report /tmp/sor-autoplay-report.json \
@@ -163,6 +167,11 @@ actor state for replay analysis. A learned policy can be passed to
 `LockstepEvaluator(policy=...)` while retaining the same measurements and
 acceptance criteria, so improvements remain comparable with the scripted
 baseline.
+
+For a Stage 2 cheat episode, also require
+`--min-signal-sweep-jumps 1`. Together with
+`--max-weapon-air-attacks 0`, the report directly rejects both regressions
+instead of relying on visual trace inspection.
 
 ## Layout
 

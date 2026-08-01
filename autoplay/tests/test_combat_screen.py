@@ -17,6 +17,8 @@ from sor_autoplay.agent.combat import (
     facing_toward,
     is_on_screen,
     player_facing_left,
+    player_airborne_action,
+    player_can_start_ground_action,
     select_target,
 )
 from sor_autoplay.agent.enemies import attack_mix, plan_for
@@ -216,6 +218,14 @@ class GeometryTests(unittest.TestCase):
         self.assertTrue(can_jump_kick(me, mid, PROFILES[2]))  # Blaze long jump
         off = _e(map_x=145, map_y=90)
         self.assertFalse(can_jump_kick(me, off, PROFILES[2]))
+
+    def test_held_weapon_ground_and_jump_action_families(self) -> None:
+        ready = _e(kind="player", family="Player", slot="P1", action_state=0x32)
+        airborne = _e(kind="player", family="Player", slot="P1", action_state=0x3E)
+        self.assertTrue(player_can_start_ground_action(ready))
+        self.assertFalse(player_airborne_action(ready))
+        self.assertTrue(player_airborne_action(airborne))
+        self.assertTrue(airborne.is_airborne)
 
     def test_combo_queue_uses_rom_pending_flag(self) -> None:
         me = _e(
@@ -655,6 +665,106 @@ class PolicyAggressionTests(unittest.TestCase):
         self.assertTrue(decision.p1_mask & 0x20, decision.p1_note)
         self.assertFalse(decision.p1_mask & 0x40, decision.p1_note)
         self.assertIn("intercept", decision.p1_note)
+
+    def test_jumps_signal_sweep_then_attacks_in_free_flight(self) -> None:
+        for state, phase in (
+            (0x08, CombatPhase.CHARGE),
+            (0x0B, CombatPhase.ATTACKING),
+        ):
+            with self.subTest(state=state):
+                p1 = _e(
+                    kind="player",
+                    family="Player",
+                    slot="P1",
+                    map_x=100,
+                    world_x=100,
+                    map_y=64,
+                    world_y=64,
+                    type_id=1,
+                    label="P1",
+                    action_state=0x32,
+                    # A held weapon must not pre-empt the sweep counter.
+                    held_type=0x0A,
+                    held_ptr=0xBA00,
+                )
+                signal = _e(
+                    type_id=0x24,
+                    family="Signal",
+                    map_x=160,
+                    world_x=160,
+                    map_y=64,
+                    world_y=64,
+                    label="Signal",
+                    primary_state=state << 8,
+                    action_state=state,
+                    combat_phase=phase,
+                    target_ptr=0xB800,
+                )
+                decision = decide_actions(
+                    self._snap((p1, signal)),
+                    AgentConfig(p1_enabled=True),
+                    AgentState(),
+                )
+                self.assertTrue(decision.p1_mask & 0x40, decision.p1_note)
+                self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
+                self.assertIn("jump Signal sweep", decision.p1_note)
+
+                airborne = _e(
+                    kind="player",
+                    family="Player",
+                    slot="P1",
+                    map_x=100,
+                    world_x=100,
+                    map_y=64,
+                    world_y=64,
+                    type_id=1,
+                    label="P1",
+                    action_state=0x3E,
+                    held_type=0x0A,
+                    held_ptr=0xBA00,
+                )
+                follow = decide_actions(
+                    self._snap((airborne, signal)),
+                    AgentConfig(p1_enabled=True),
+                    AgentState(),
+                )
+                self.assertFalse(follow.p1_mask & 0x20, follow.p1_note)
+                self.assertFalse(follow.p1_mask & 0x40, follow.p1_note)
+                self.assertIn("air air Signal", follow.p1_note)
+
+        # Unarmed free flight accepts B, so the counter becomes a jump attack.
+        airborne = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            world_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x12,
+        )
+        signal = _e(
+            type_id=0x24,
+            family="Signal",
+            map_x=160,
+            world_x=160,
+            map_y=64,
+            world_y=64,
+            label="Signal",
+            primary_state=0x0B00,
+            action_state=0x0B,
+            combat_phase=CombatPhase.ATTACKING,
+            target_ptr=0xB800,
+        )
+        follow = decide_actions(
+            self._snap((airborne, signal)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertTrue(follow.p1_mask & 0x20, follow.p1_note)
+        self.assertIn("air attack Signal", follow.p1_note)
 
     def test_no_punch_off_lane(self) -> None:
         p1 = _e(

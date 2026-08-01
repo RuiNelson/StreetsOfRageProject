@@ -33,6 +33,7 @@ from sor_autoplay.memory_map import (
     OBJ_CHARACTER_ID,
     OBJ_FLAGS,
     OBJ_HEALTH,
+    OBJ_HELD_TYPE,
     OBJ_POS_X,
     OBJ_POS_Y,
     OBJ_POS_Z,
@@ -168,6 +169,40 @@ class WorkRamTests(unittest.TestCase):
 
 
 class LockstepEvaluatorTests(unittest.TestCase):
+    def test_weapon_air_attack_and_signal_counter_metrics(self) -> None:
+        weapon_ram = bytearray(_game_ram(item=False))
+        _put_u8(weapon_ram, ADDR_P1_OBJECT + OBJ_ACTION_STATE, 0x32)
+        _put_u8(weapon_ram, ADDR_P1_OBJECT + OBJ_HELD_TYPE, 0x0A)
+        weapon_report = LockstepEvaluator(
+            _FakeClient([bytes(weapon_ram), bytes(weapon_ram)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                p1_mask=0x20,
+                p2_mask=0,
+                p1_note="weapon swing $0A",
+            ),
+            criteria=EvaluationCriteria(max_weapon_air_attacks=0),
+        ).run()
+        self.assertEqual(weapon_report.metrics.weapon_attack_edges, 1)
+        self.assertEqual(weapon_report.metrics.weapon_air_attack_edges, 1)
+        self.assertFalse(weapon_report.passed)
+
+        signal_ram = bytearray(_game_ram(item=False, enemy_health=4))
+        _put_u8(signal_ram, OBJECT_TABLE + OBJ_TYPE, 0x24)
+        _put_u16(signal_ram, OBJECT_TABLE + OBJ_PRIMARY_STATE, 0x0800)
+        signal_report = LockstepEvaluator(
+            _FakeClient([bytes(signal_ram), bytes(signal_ram)]),
+            decisions=1,
+            policy=lambda _snapshot: AgentDecision(
+                p1_mask=0x40,
+                p2_mask=0,
+                p1_note="jump Signal sweep",
+            ),
+            criteria=EvaluationCriteria(min_signal_sweep_jumps=1),
+        ).run()
+        self.assertEqual(signal_report.metrics.signal_sweep_jumps, 1)
+        self.assertTrue(signal_report.passed)
+
     def test_exact_face_pulse_metrics_trace_and_acceptance(self) -> None:
         before = _game_ram(health=80, item=True)
         after = _game_ram(health=76, item=False)

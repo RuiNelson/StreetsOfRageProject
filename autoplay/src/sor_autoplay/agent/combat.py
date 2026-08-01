@@ -63,6 +63,12 @@ THREAT_LANE_ESCAPE = 24.0
 ENEMY_LANE_MIN = 2.0
 ENEMY_LANE_MAX = 112.0
 BASIC_ENEMY_TYPES = frozenset(range(0x20, 0x25))
+# Signal's dispatcher table at ROM $E4DA maps state $08 to the sweep selector
+# ($E5EC) and state $0B to the actual low sliding kick ($E80A): animation $18,
+# X velocity $00070000. Jump before generic grounded-interrupt logic handles it.
+SIGNAL_TYPE = 0x24
+SIGNAL_SWEEP_STATES = frozenset({0x08, 0x0B})
+SIGNAL_SWEEP_REACT_X = 120.0
 # Minimum |dx| to decide "left vs right" (avoid flip-flop on top of foe).
 FACE_DEADZONE = 4.0
 # Rear-react distance (B+C back attack family).
@@ -173,9 +179,15 @@ def can_collect_pickup(me: MapEntity, item: MapEntity) -> bool:
 
 
 def player_can_start_ground_action(me: MapEntity) -> bool:
-    """True in ordinary grounded idle/walk states that accept a new B edge."""
+    """True in grounded idle/walk states that accept a new action edge.
 
-    return 0x02 <= me.action_base <= 0x0E
+    Holding a weapon moves the player from the ordinary ``$02–$0E`` family
+    into ``$30–$3A``. The latter dispatches through ROM routine ``$2D20``,
+    which accepts both weapon attack and the ``$3010`` jump input.
+    """
+
+    base = me.action_base
+    return 0x02 <= base <= 0x0E or 0x30 <= base <= 0x3A
 
 
 def enemy_attack_committed(me: MapEntity, foe: MapEntity) -> bool:
@@ -184,6 +196,19 @@ def enemy_attack_committed(me: MapEntity, foe: MapEntity) -> bool:
     return (
         is_dangerous(foe.combat_phase)
         and abs(foe.map_x - me.map_x) <= DANGER_REACT_X
+    )
+
+
+def signal_sweep_threat(me: MapEntity, foe: MapEntity) -> bool:
+    """True while a nearby Signal is selecting or executing its low sweep."""
+
+    state = (foe.primary_state >> 8) & 0xFF
+    abs_dx, abs_dy = abs_dx_dy(me, foe)
+    return (
+        foe.type_id == SIGNAL_TYPE
+        and state in SIGNAL_SWEEP_STATES
+        and abs_dx <= SIGNAL_SWEEP_REACT_X
+        and abs_dy <= ENEMY_PUNCH_LANE_HALF
     )
 
 
@@ -255,17 +280,17 @@ def player_busy_attacking(me: MapEntity) -> bool:
 
 
 def player_airborne_action(me: MapEntity) -> bool:
-    """True only in jump action family (``$10–$17``). Not world_z."""
+    """True in normal or held-weapon jump actions. Not ``world_z``."""
 
     base = me.action_base
-    return 0x10 <= base <= 0x17
+    return 0x10 <= base <= 0x17 or 0x3C <= base <= 0x42
 
 
 def player_jump_starting(me: MapEntity) -> bool:
-    """Jump launch state (``$10/$11``); an attack edge is too early here."""
+    """Jump launch state; an attack edge is too early here."""
 
     base = me.action_base
-    return base == 0x10 or base == 0x11
+    return base in (0x10, 0x3C)
 
 
 def player_jump_attack_ready(me: MapEntity) -> bool:
@@ -275,9 +300,9 @@ def player_jump_attack_ready(me: MapEntity) -> bool:
 
 
 def player_jump_landing(me: MapEntity) -> bool:
-    """Landing state (``$14/$15``); do not turn it into a ground attack."""
+    """Landing state; do not turn it into a ground attack."""
 
-    return me.action_base == 0x14
+    return me.action_base in (0x14, 0x40)
 
 
 def player_jump_attacking(me: MapEntity) -> bool:

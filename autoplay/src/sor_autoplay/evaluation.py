@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Callable, Protocol, Sequence, TextIO
 
 from .agent import AgentConfig, AgentDecision, AgentState, decide_actions
+from .agent.combat import signal_sweep_threat
 from .state import GameSnapshot, read_snapshot
 from .world_map import MapEntity
 
@@ -130,6 +131,9 @@ class EpisodeMetrics:
     pickups_collected: int = 0
     failed_pickup_attempts: int = 0
     jumps: int = 0
+    weapon_attack_edges: int = 0
+    weapon_air_attack_edges: int = 0
+    signal_sweep_jumps: int = 0
     face_actions: int = 0
     forward_progress: int = 0
     total_reward: float = 0.0
@@ -174,6 +178,35 @@ class EpisodeMetrics:
             self.face_actions += 1
         if mask & 0x40:
             self.jumps += 1
+
+        before_entity = _player_entity(before, self.player_index)
+        weapon_attack = bool(
+            mask & 0x20
+            and before_entity is not None
+            and before_entity.is_holding_weapon
+            and (
+                note.startswith("weapon ")
+                or note.startswith("dump weapon ")
+            )
+        )
+        if weapon_attack:
+            self.weapon_attack_edges += 1
+            live_foe_on_screen = any(
+                entity.kind in ("enemy", "boss")
+                and 0 <= entity.map_x <= 320
+                and (entity.health is None or entity.health < 0x8000)
+                for entity in before.world_map.entities
+            )
+            if not live_foe_on_screen:
+                self.weapon_air_attack_edges += 1
+
+        if mask & 0x40 and before_entity is not None:
+            if any(
+                entity.kind in ("enemy", "boss")
+                and signal_sweep_threat(before_entity, entity)
+                for entity in before.world_map.entities
+            ):
+                self.signal_sweep_jumps += 1
 
         lives_lost = max(0, before_player.lives - after_player.lives)
         self.lives_lost += lives_lost
@@ -281,6 +314,9 @@ class EpisodeMetrics:
             "pickups_collected": self.pickups_collected,
             "failed_pickup_attempts": self.failed_pickup_attempts,
             "jumps": self.jumps,
+            "weapon_attack_edges": self.weapon_attack_edges,
+            "weapon_air_attack_edges": self.weapon_air_attack_edges,
+            "signal_sweep_jumps": self.signal_sweep_jumps,
             "face_actions": self.face_actions,
             "forward_progress": self.forward_progress,
             "total_reward": round(self.total_reward, 3),
@@ -294,9 +330,11 @@ class EvaluationCriteria:
     max_damage_events: int | None = None
     max_lives_lost: int | None = None
     max_failed_pickups: int | None = None
+    max_weapon_air_attacks: int | None = None
     min_pickups: int | None = None
     min_enemy_damage: int | None = None
     min_forward_progress: int | None = None
+    min_signal_sweep_jumps: int | None = None
 
     def failures(self, metrics: EpisodeMetrics) -> tuple[str, ...]:
         failures: list[str] = []
@@ -315,6 +353,12 @@ class EvaluationCriteria:
                 "failed pickup attempts",
                 "at most",
             ),
+            (
+                self.max_weapon_air_attacks,
+                metrics.weapon_air_attack_edges,
+                "weapon air attacks",
+                "at most",
+            ),
         )
         for limit, observed, label, wording in checks:
             if limit is not None and observed > limit:
@@ -326,6 +370,11 @@ class EvaluationCriteria:
                 self.min_forward_progress,
                 metrics.forward_progress,
                 "forward progress",
+            ),
+            (
+                self.min_signal_sweep_jumps,
+                metrics.signal_sweep_jumps,
+                "Signal sweep jumps",
             ),
         )
         for limit, observed, label in minimums:
@@ -622,9 +671,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-damage-events", type=int)
     parser.add_argument("--max-lives-lost", type=int)
     parser.add_argument("--max-failed-pickups", type=int)
+    parser.add_argument("--max-weapon-air-attacks", type=int)
     parser.add_argument("--min-pickups", type=int)
     parser.add_argument("--min-enemy-damage", type=int)
     parser.add_argument("--min-forward-progress", type=int)
+    parser.add_argument("--min-signal-sweep-jumps", type=int)
     return parser
 
 
@@ -640,9 +691,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_damage_events=args.max_damage_events,
         max_lives_lost=args.max_lives_lost,
         max_failed_pickups=args.max_failed_pickups,
+        max_weapon_air_attacks=args.max_weapon_air_attacks,
         min_pickups=args.min_pickups,
         min_enemy_damage=args.min_enemy_damage,
         min_forward_progress=args.min_forward_progress,
+        min_signal_sweep_jumps=args.min_signal_sweep_jumps,
     )
     trace_stream: TextIO | None = None
     try:

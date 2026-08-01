@@ -455,6 +455,26 @@ def _decide_one(
                 note=f"atk anim {foe.label} [{tag}]",
             )
 
+        # Signal's state $08 can select the state-$0B low sliding sweep. The
+        # latter starts animation $18 at 7 px/frame, so a grounded punch is a
+        # poor generic interrupt. Start C now; the airborne branch emits B only
+        # after the ROM reaches free-flight $12/$13.
+        if combat.signal_sweep_threat(me, foe):
+            walk.clear()
+            if combat.player_can_start_ground_action(me):
+                memory.set_attack_cd(player_index, 1)
+                return Intent(
+                    left=face_left,
+                    right=face_right_now,
+                    jump=True,
+                    note=f"jump Signal sweep [{tag}]",
+                )
+            return Intent(
+                left=face_left,
+                right=face_right_now,
+                note=f"brace Signal sweep [{tag}]",
+            )
+
         # Ordinary Garcia states above $07 are family moves, not UNKNOWN: for
         # the common Round-1 type $22, $09 is the approach/wind-up and $0A is
         # the active punch. The measured normal-punch boxes now let us strike

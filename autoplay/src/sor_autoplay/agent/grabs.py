@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..memory_map import ADDR_P1_OBJECT_LO, ADDR_P2_OBJECT_LO
-from ..phases import CombatPhase
+from ..phases import CombatPhase, is_dangerous
 from ..world_map import MapEntity
 from .characters import CharacterProfile, DEFAULT_PROFILE
 from .controls import Intent
@@ -71,19 +71,17 @@ def context_from_player(
     player_index: int = 1,
 ) -> GrabContext:
     held_type = me.held_type & 0xFF
-    held_ptr = me.held_ptr & 0xFFFF
     linked = False
     if entities is not None:
         linked = _player_has_grabbed_enemy(me, entities, player_index=player_index)
 
     weapon = 0x08 <= held_type <= 0x0C
-    # Strong evidence only.  +$4C is a general contact pointer and the
-    # $28-$6F action families include pickup/recovery states; either one alone
-    # can be stale after combat.  The live $60 hold is still recognized by the
-    # GRABBED enemy's reciprocal link.
-    enemy_grab = linked or (held_type != 0 and not weapon) or (
-        held_ptr != 0 and not weapon
-    )
+    # Strong evidence only. +$4C is a general contact pointer, while +$5E
+    # remains a pointer to the projectile after pepper spray/other weapons are
+    # released and +$60 has already cleared. Neither pointer alone proves an
+    # enemy hold. The live $60 hold is recognized by the GRABBED enemy's
+    # reciprocal link; other grab layouts retain a non-weapon held_type.
+    enemy_grab = linked or (held_type != 0 and not weapon)
     holding = weapon or enemy_grab
 
     return GrabContext(
@@ -161,7 +159,16 @@ def decide_held(
         memory.reset()
         return Intent(attack=True, note="release stale contact")
 
-    if ctx.holding:
+    prof = profile if profile is not None else DEFAULT_PROFILE
+
+    # Player +$60 is a stable carried-weapon type, unlike the transient enemy
+    # grab evidence that the latch exists to bridge. Never feed a missing
+    # weapon sample through the enemy knee/throw tree.
+    if ctx.weapon:
+        memory.reset()
+        return _weapon_tree(me, ctx, tick=tick, foe=foe, profile=prof)
+
+    if ctx.enemy_grab:
         memory.latched = True
         memory.clear_ticks = 0
     elif memory.latched:
@@ -173,11 +180,7 @@ def decide_held(
         memory.reset()
         return None
 
-    prof = profile if profile is not None else DEFAULT_PROFILE
     memory.pulse += 1
-
-    if ctx.weapon and ctx.holding:
-        return _weapon_tree(me, ctx, memory, tick=tick, foe=foe, profile=prof)
 
     return _enemy_grab_tree(
         me,
@@ -254,42 +257,54 @@ def _enemy_grab_tree(
 def _weapon_tree(
     me: MapEntity,
     ctx: GrabContext,
-    memory: GrabMemory,
     *,
     tick: int,
     foe: MapEntity | None,
     profile: CharacterProfile,
-) -> Intent:
-    del memory, tick
+) -> Intent | None:
+    del tick
     held = ctx.held_type
     melee = held in (WEAPON_BAT, WEAPON_PIPE)
     throwable = held in (WEAPON_KNIFE, WEAPON_BOTTLE, WEAPON_PEPPER)
     blaze_weak = held in profile.weak_weapons
 
-    face_left = face_right = False
-    in_melee = mid = False
-    if foe is not None:
-        dx = foe.map_x - me.map_x
-        if dx < 0:
-            face_left, face_right = True, False
-        elif dx > 0:
-            face_left, face_right = False, True
-        else:
-            face_left = bool(me.action_state & 0x01)
-            face_right = not face_left
-        in_melee = abs(dx) <= 36 and abs(foe.map_y - me.map_y) <= 12
-        mid = 20 <= abs(dx) <= 100
+    # A carried weapon is inventory, not an instruction to attack every poll.
+    # Let normal stage/combat policy run until a live foe is in a usable box.
+    # Dangerous attacks also return to combat policy so family counters (for
+    # example jumping Signal's sweep) take priority over a weapon swing.
+    if foe is None or is_dangerous(foe.combat_phase):
+        return None
+
+    dx = foe.map_x - me.map_x
+    dy = foe.map_y - me.map_y
+    if abs(dy) > 12:
+        return None
+    if dx < 0:
+        face_left, face_right = True, False
+    elif dx > 0:
+        face_left, face_right = False, True
     else:
         face_left = bool(me.action_state & 0x01)
         face_right = not face_left
+    in_melee = abs(dx) <= 36
+    mid = 20 <= abs(dx) <= 100
+
+    # A held weapon's input loop is active only in ordinary ground actions or
+    # its ROM-specific ready family ($30-$3A). Do not hammer B throughout
+    # $44/$6x attack animations: besides being useless, that was the visible
+    # "furious" repeated attack behaviour.
+    action = me.action_base
+    input_ready = 0x02 <= action <= 0x0E or 0x30 <= action <= 0x3A
+    if not input_ready:
+        return Intent(
+            left=face_left,
+            right=face_right,
+            note=f"weapon anim ${held:02X} act=${me.action_state:02X}",
+        )
 
     if melee:
-        if not in_melee and foe is not None:
-            return Intent(
-                left=face_left,
-                right=face_right,
-                note=f"weapon approach ${held:02X}",
-            )
+        if not in_melee:
+            return None
         return Intent(
             left=face_left,
             right=face_right,
@@ -298,28 +313,23 @@ def _weapon_tree(
         )
 
     if throwable:
-        if blaze_weak and foe is not None:
+        if not (mid or in_melee):
+            return None
+        if blaze_weak:
             return Intent(
                 left=face_left,
                 right=face_right,
                 attack=True,
                 note=f"dump weapon ${held:02X}",
             )
-        if foe is not None and (mid or in_melee):
-            return Intent(
-                left=face_left,
-                right=face_right,
-                attack=True,
-                note=f"weapon use ${held:02X}",
-            )
         return Intent(
             left=face_left,
             right=face_right,
             attack=True,
-            note=f"weapon throw ${held:02X}",
+            note=f"weapon use ${held:02X}",
         )
 
-    return Intent(attack=True, note=f"hold weapon ${held:02X}")
+    return None
 
 
 def want_grab_approach(

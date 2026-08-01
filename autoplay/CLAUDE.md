@@ -73,7 +73,15 @@ that layout yet.
    one missing observer sample so stale contact/reaction state cannot create an
    empty knee/throw loop. Exact orphan state `$60` with only a stale `+$4C`
    pointer gets one B edge; live this transitions `$60 -> $6A -> $02` in 16
-   frames. Also knee fallback; bat/pipe swing; throwable weapons
+   frames. Also knee fallback; bat/pipe swing; throwable weapons. A carried
+   weapon is not a combat target or a reason to press B: with no live foe, or
+   with a foe outside the weapon lane/range, weapon policy returns control to
+   normal stage/combat movement. Weapon holds never enter the enemy-grab latch,
+   and B is emitted only from input-ready ground actions (ordinary `$02–$0E`
+   or held-weapon `$30–$3A`), never repeatedly through `$44/$6x` animations.
+   After pepper spray fires, `+$60` clears but `+$5E` can keep pointing at its
+   projectile; `+$5E` alone is therefore not enemy-grab evidence. Enemy holds
+   require a reciprocal GRABBED link or a non-weapon `+$60` type.
 5. 2P mid-air assist when both agents and partner is airborne nearby
 6. Pick up weapons freely; health/life/special only if co-op fairness allows
    - ROM routine `$3136` accepts only X ±20, Y ±16, Z ±8. Walk inside a
@@ -100,6 +108,13 @@ that layout yet.
      recovery, not a new attack. Basic enemies inside the 24 px startup lead
      are intercepted even if a whole short attack transition falls between
      four-frame observations
+   - Signal state `$08` at `$E5EC` selects its attack and can enter the low
+     sweep at state `$0B`; `$E80A` starts animation `$18` with X velocity
+     `$00070000`. When lane-aligned within 120 px, start C before the generic
+     punch interrupt. Unarmed `$12/$13` free flight then emits B for a jump
+     kick. A held weapon changes grounded idle to `$30–$3A`; ROM routine `$3010`
+     accepts C there and enters the `$3C–$42` weapon-jump family, which evades
+     the sweep without injecting unsupported airborne weapon attacks
    - Type `$22` state `$0B` dispatches through ROM table `$DD80` to `$E20A`
      and is dangerous; live it retained outgoing damage `$04` at zero health.
      Enemy health uses a signed lethal check: `0` is still active and needs a
@@ -173,6 +188,10 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
   scenario thresholds so results remain directly comparable. Face buttons are
   pulsed for three frames and released for the remaining frame in every exact
   four-frame decision step. JSONL traces belong outside the repository.
+  `weapon_attack_edges`, `weapon_air_attack_edges`, and `signal_sweep_jumps`
+  are first-class metrics; Stage-2 runs can enforce
+  `--max-weapon-air-attacks 0 --min-signal-sweep-jumps 1` for scripted or
+  future learned policies.
 - Use evaluator `--restart-character` for comparable episodes. It restarts,
   navigates menus, verifies the player/health/game state, and enables lockstep
   on the same connection before returning control; a separate setup process

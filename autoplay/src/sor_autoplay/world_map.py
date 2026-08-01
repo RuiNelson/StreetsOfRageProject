@@ -133,10 +133,10 @@ class MapEntity:
 
     @property
     def is_holding(self) -> bool:
-        # +$4C is a general contact pointer and can remain nonzero outside a
-        # hold.  Treat only the dedicated held fields as standalone evidence;
-        # enemy-link evidence is resolved with the full entity list in grabs.py.
-        return self.held_type != 0 or self.held_ptr != 0
+        # +$4C is a general contact pointer. +$5E can remain pointed at a
+        # released weapon projectile after +$60 clears. Reciprocal enemy-link
+        # evidence is resolved with the full entity list in grabs.py.
+        return self.held_type != 0
 
     @property
     def is_airborne(self) -> bool:
@@ -144,23 +144,30 @@ class MapEntity:
 
         Live SoR stores ground elevation around ``+$18`` high-word ``$A0`` for
         standing players, so a ``world_z >= 8`` test is always true and broke
-        grounded combat. Use action ``$10–$17`` only.
+        grounded combat. Normal jumps use ``$10–$17``. ROM input routine
+        ``$3010`` starts a held-weapon jump at ``$3C`` and its handlers run
+        through ``$42``.
         """
 
         base = self.action_base
-        return 0x10 <= base <= 0x17
+        return 0x10 <= base <= 0x17 or 0x3C <= base <= 0x42
 
     @property
     def is_grabbing(self) -> bool:
+        # +$5E/+$60 also represent a carried weapon. A weapon hold must not be
+        # mistaken for an enemy grapple by policy branches using this helper.
+        if self.is_holding_weapon:
+            return False
         base = self.action_base
-        if 0x28 <= base <= 0x2F or 0x44 <= base <= 0x4F or base == 0x4A:
-            return True
-        # Live hold: Axel stays in $60–$6F while enemy is GRABBED; +$60 often 0.
-        if 0x60 <= base <= 0x6F:
-            return True
-        if 0x30 <= base <= 0x3F:
-            return True
-        return self.held_type != 0 or self.held_ptr != 0 or self.contact_ptr != 0
+        grab_action = (
+            0x28 <= base <= 0x3F
+            or 0x44 <= base <= 0x4F
+            or 0x60 <= base <= 0x6F
+        )
+        # These action ranges overlap weapon pickup/use states, so an action
+        # byte alone is not proof. Live $60 enemy holds retain +$4C contact;
+        # other layouts may retain a non-weapon +$60 held type.
+        return self.held_type != 0 or (grab_action and self.contact_ptr != 0)
 
     @property
     def is_holding_weapon(self) -> bool:

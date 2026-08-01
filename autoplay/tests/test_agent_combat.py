@@ -354,7 +354,7 @@ class GrabTreeTests(unittest.TestCase):
             family="Player",
             slot="P1",
             held_type=0x0A,  # bat
-            action_state=0x02,
+            action_state=0x32,
             map_x=100,
             map_y=64,
         )
@@ -368,6 +368,99 @@ class GrabTreeTests(unittest.TestCase):
         assert a is not None and b is not None
         self.assertTrue(a.attack or b.attack)
         self.assertTrue("swing" in a.note or "swing" in b.note)
+
+    def test_weapon_without_foe_does_not_attack_or_latch_as_grab(self) -> None:
+        for held_type in (0x08, 0x0A):  # throwable and melee
+            with self.subTest(held_type=held_type):
+                me = _e(
+                    kind="player",
+                    family="Player",
+                    slot="P1",
+                    held_type=held_type,
+                    held_ptr=0xBA00,
+                    action_state=0x32,
+                )
+                memory = GrabMemory()
+                self.assertFalse(me.is_grabbing)
+                self.assertIsNone(
+                    decide_held(
+                        me,
+                        context_from_player(me),
+                        memory,
+                        tick=1,
+                        foe=None,
+                    )
+                )
+                self.assertFalse(memory.latched)
+
+    def test_throwable_weapon_waits_for_live_usable_range(self) -> None:
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            held_type=0x08,
+            action_state=0x32,
+            map_x=100,
+            map_y=64,
+        )
+        far = _e(map_x=230, map_y=64)
+        off_lane = _e(map_x=150, map_y=90)
+        for foe in (far, off_lane):
+            with self.subTest(foe=foe.map_x, lane=foe.map_y):
+                self.assertIsNone(
+                    decide_held(
+                        me,
+                        context_from_player(me),
+                        GrabMemory(),
+                        tick=1,
+                        foe=foe,
+                    )
+                )
+
+    def test_weapon_does_not_repeat_attack_during_weapon_animation(self) -> None:
+        foe = _e(map_x=120, map_y=64)
+        for action in (0x44, 0x6A):
+            with self.subTest(action=action):
+                me = _e(
+                    kind="player",
+                    family="Player",
+                    slot="P1",
+                    held_type=0x0A,
+                    held_ptr=0xBA00,
+                    action_state=action,
+                    map_x=100,
+                    map_y=64,
+                )
+                intent = decide_held(
+                    me,
+                    context_from_player(me),
+                    GrabMemory(),
+                    tick=1,
+                    foe=foe,
+                )
+                assert intent is not None
+                self.assertFalse(intent.attack, intent.note)
+                self.assertIn("weapon anim", intent.note)
+
+    def test_released_weapon_pointer_is_not_an_enemy_grab(self) -> None:
+        # Live pepper spray clears +$60 while action $45 still leaves +$5E
+        # pointing at its projectile. That pointer previously latched the
+        # knee/throw tree and generated hundreds of B presses into empty air.
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            held_type=0,
+            held_ptr=0xCD00,
+            action_state=0x45,
+        )
+        ctx = context_from_player(me)
+        self.assertFalse(ctx.weapon)
+        self.assertFalse(ctx.enemy_grab)
+        self.assertFalse(ctx.holding)
+        self.assertFalse(me.is_holding)
+        self.assertFalse(me.is_grabbing)
+        self.assertIsNone(decide_held(me, ctx, GrabMemory(), tick=1))
 
     def test_grab_throws_immediately_when_an_enemy_can_interrupt(self) -> None:
         me = _e(
@@ -594,6 +687,24 @@ class PolicyIntegrationTests(unittest.TestCase):
                 saw_attack = True
         self.assertTrue(saw_attack, notes)
         self.assertTrue(any("throw" in n for n in notes), notes)
+
+    def test_holding_weapon_on_clear_screen_progresses_without_attacking(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            map_y=64,
+            held_type=0x0A,
+            held_ptr=0xBA00,
+            action_state=0x32,
+            label="P1",
+        )
+        decision = decide_actions(
+            self._snap((p1,)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertFalse(decision.p1_mask & int(ATTACK), decision.p1_note)
+        self.assertTrue(decision.p1_mask & 0x08, decision.p1_note)
 
     def test_signal_priority_over_far_garcia(self) -> None:
         from sor_autoplay.agent.combat import select_target
