@@ -1,6 +1,9 @@
 """Pure agent policy: GameSnapshot → per-player button masks.
 
 Standard controls only (see ``controls.py``). No host ``--altControls``.
+
+Movement uses a latched **walk-to-(x,y)** state (``walk.py``): D-pad directions
+stay held until the world-space goal is reached or passed through.
 """
 
 from __future__ import annotations
@@ -14,12 +17,14 @@ from . import combat, coop, enemies as enemy_ai, grabs, pressure, stage
 from .characters import profile_for
 from .controls import Intent, mask_from_intent
 from .grabs import GrabMemory
+from .walk import WalkState, blend_walk_with_actions
 
 
 # game_state values where live combat/progression input makes sense.
 _INGAME_STATES = frozenset({0x14, 0x16})
-# Pressure threshold for police special (see pressure.py).
 _POLICE_THRESHOLD = 4.5
+# How far ahead (world X) to aim when progressing an empty screen.
+_PROGRESS_LEAD = 160.0
 
 
 @dataclass
@@ -28,7 +33,6 @@ class AgentConfig:
 
     p1_enabled: bool = False
     p2_enabled: bool = False
-    # Hold frames when applying input (standard ~2 frames @ 60 Hz).
     hold_frames: int = 2
     police_threshold: float = _POLICE_THRESHOLD
 
@@ -56,6 +60,8 @@ class AgentState:
     p2_attack_cd: int = 0
     p1_grab: GrabMemory = field(default_factory=GrabMemory)
     p2_grab: GrabMemory = field(default_factory=GrabMemory)
+    p1_walk: WalkState = field(default_factory=WalkState)
+    p2_walk: WalkState = field(default_factory=WalkState)
 
     def phase(self, player_index: int) -> int:
         return self.p1_phase if player_index == 1 else self.p2_phase
@@ -78,6 +84,9 @@ class AgentState:
     def grab_mem(self, player_index: int) -> GrabMemory:
         return self.p1_grab if player_index == 1 else self.p2_grab
 
+    def walk(self, player_index: int) -> WalkState:
+        return self.p1_walk if player_index == 1 else self.p2_walk
+
     def set_note(self, player_index: int, note: str) -> None:
         if player_index == 1:
             self.p1_last_note = note
@@ -93,7 +102,7 @@ class AgentDecision:
     p2_mask: int
     p1_note: str = ""
     p2_note: str = ""
-    steady: bool = False  # paused / police special — no input
+    steady: bool = False
 
 
 def _player_entity(snapshot: GameSnapshot, index: int) -> MapEntity | None:
@@ -116,11 +125,6 @@ def decide_actions(
     config: AgentConfig,
     memory: AgentState | None = None,
 ) -> AgentDecision:
-    """Compute button masks for the current snapshot.
-
-    Pure with respect to the game: only ``memory`` is mutated for timing.
-    """
-
     if memory is None:
         memory = AgentState()
     memory.tick += 1
@@ -129,9 +133,13 @@ def decide_actions(
         return AgentDecision(0, 0, steady=True)
 
     if snapshot.paused or snapshot.police_special_active:
+        memory.p1_walk.clear()
+        memory.p2_walk.clear()
         return AgentDecision(0, 0, p1_note="steady", p2_note="steady", steady=True)
 
     if snapshot.game_state not in _INGAME_STATES:
+        memory.p1_walk.clear()
+        memory.p2_walk.clear()
         return AgentDecision(0, 0, p1_note="menu idle", p2_note="menu idle", steady=True)
 
     p1_mask = 0
@@ -189,6 +197,7 @@ def _decide_one(
     both_agents: bool,
 ) -> Intent:
     me = _player_entity(snapshot, player_index)
+    walk = memory.walk(player_index)
     other_i = _other_index(player_index)
     partner = _player_entity(snapshot, other_i)
     partner_player = snapshot.players[other_i - 1]
@@ -207,24 +216,30 @@ def _decide_one(
     advice = stage.stage_advice(snapshot.level_index)
     profile = profile_for(player_snap.character_id)
 
-    # --- Mr. X dialog: always choose NO (refuse) ---
+    # --- Mr. X dialog ---
     if stage.is_mr_x_offer(snapshot):
+        walk.clear()
         return _mr_x_intent(snapshot, player_index, memory)
 
     if me is None or not player_snap.is_playable:
+        walk.clear()
         return Intent(note="not playable")
 
-    # Skip self-hurt lock: still allow input but avoid special spam.
+    if me.is_hurt:
+        walk.clear()
+        return Intent(note="hurt")
+
     press = pressure.compute_pressure(snapshot, player_snap, me)
-    if not me.is_hurt and pressure.should_call_police(
+    if pressure.should_call_police(
         press,
         player_snap.specials,
         threshold=config.police_threshold,
         level_index=snapshot.level_index,
     ):
+        walk.clear()
         return Intent(special=True, note=f"police ({press.reason})")
 
-    # --- Grab / weapon hold tree (highest combat priority) ---
+    # --- Grab / weapon hold ---
     gctx = grabs.context_from_player(me)
     gmem = memory.grab_mem(player_index)
     foe_near = combat.nearest_foe(me, snapshot.world_map.entities)
@@ -238,15 +253,16 @@ def _decide_one(
         crowd=press.enemy_count,
     )
     if held_intent is not None:
-        return _apply_stage_geometry(held_intent, me, snapshot, advice)
+        walk.clear()
+        return held_intent
 
-    # --- 2P mid-air assist ---
     if both_agents and coop.partner_throw_opportunity(me, coop_ctx.partner):
+        walk.clear()
         return Intent(jump=True, attack=True, note="2P air assist")
 
     low_hp = (player_snap.health_percent or 100.0) < 40.0
 
-    # --- Pickups / weapons (skip if already holding a weapon) ---
+    # --- Pickups ---
     allow_hp = coop.should_take_health_pickup(player_snap, coop_ctx)
     allow_star = coop.should_take_special_or_life(player_snap, coop_ctx)
     item = combat.select_pickup(
@@ -258,20 +274,21 @@ def _decide_one(
         already_holding_weapon=me.is_holding_weapon,
     )
     if item is not None:
-        dx = item.map_x - me.map_x
-        dy = item.map_y - me.map_y
-        close = abs(dx) < 22 and abs(dy) < 14
-        intent = Intent(
-            left=dx < -4,
-            right=dx > 4,
-            up=dy < -profile.lane_align,
-            down=dy > profile.lane_align,
-            attack=close,
-            note=f"loot {item.label}",
+        close = abs(item.world_x - me.world_x) < 22 and abs(item.world_y - me.world_y) < 14
+        if close:
+            walk.clear()
+            return Intent(attack=True, note=f"loot {item.label}")
+        return _walk_toward(
+            walk,
+            me,
+            goal_x=float(item.world_x),
+            goal_y=float(item.world_y),
+            reason=f"loot {item.label}",
+            snapshot=snapshot,
+            advice=advice,
         )
-        return _apply_stage_geometry(intent, me, snapshot, advice)
 
-    # --- Combat target with family counters + live ROM phases ---
+    # --- Combat ---
     target = combat.select_target(
         me,
         snapshot.world_map.entities,
@@ -285,123 +302,228 @@ def _decide_one(
         )
         phase = target.entity.combat_phase
         phase_name = phase.name.lower()
-
-        # Crowd / multi-hunter relief when not in a free punish.
-        hunters = combat.count_hunters(snapshot.world_map.entities, player_index)
-        if (
-            not in_range
-            and not is_punishable(phase)
-            and (press.enemy_count >= 3 or hunters >= 2)
-        ):
-            px, py = combat.peril_vector(me, snapshot.world_map.entities)
-            if px != 0 and not is_dangerous(phase):
-                dx = px
-            if py != 0 and abs(dy) < 0.5:
-                dy = py
-
-        attack = False
-        jump = False
-        rear = False
         tag = target.entity.phase_tag
-        note = f"{target.entity.label} [{tag}]"
         cd = memory.attack_cd(player_index)
 
-        # Projectile: pure evade (no attack).
+        # Projectile: walk to a sidestep point, not into the projectile.
         if target.entity.kind == "projectile" or plan.kind == enemy_ai.ThreatKind.PROJECTILE:
-            note = f"dodge {target.entity.label}"
-            intent = Intent(
-                left=dx < 0,
-                right=dx > 0,
-                up=dy < 0,
-                down=dy > 0,
-                note=note,
+            evade_x = me.world_x - 40 if dx > 0 else me.world_x + 40
+            evade_y = me.world_y + (18 if (me.world_x + me.world_y) % 2 == 0 else -18)
+            return _walk_toward(
+                walk,
+                me,
+                goal_x=evade_x,
+                goal_y=evade_y,
+                reason=f"dodge {target.entity.label}",
+                snapshot=snapshot,
+                advice=advice,
             )
-            return _apply_stage_geometry(intent, me, snapshot, advice)
 
-        # Don't punch a foe already held by someone else (unless it's us).
         if phase == CombatPhase.GRABBED and not me.is_grabbing:
-            note = f"skip held {target.entity.label}"
-            # Re-target by treating as ignore next tick: step past toward progress.
-            dx = 1.0 if advice.progress_right else -1.0
-            intent = Intent(left=dx < 0, right=dx > 0, note=note)
-            return _apply_stage_geometry(intent, me, snapshot, advice)
-
-        if in_range and cd == 0 and not me.is_hurt:
-            mix = enemy_ai.attack_mix(
-                plan,
-                profile,
-                tick=memory.tick + player_index * 3,
-                in_range=in_range,
-                crowd=press.enemy_count,
-                phase_name=phase_name,
+            walk.clear()
+            lead = _PROGRESS_LEAD if advice.progress_right else -_PROGRESS_LEAD
+            return _walk_toward(
+                walk,
+                me,
+                goal_x=float(me.world_x) + lead,
+                goal_y=float(me.world_y),
+                reason=f"skip held {target.entity.label}",
+                snapshot=snapshot,
+                advice=advice,
             )
-            if is_punishable(phase) and phase != CombatPhase.GRABBED:
-                attack = True
-                note = f"punish {target.entity.label} [{tag}]"
-                memory.set_attack_cd(player_index, 2)
-            elif mix == "grab_walk" or (
-                grabs.want_grab_approach(
-                    me,
-                    target.entity,
-                    grab_bias=max(plan.grab_bias, profile.grab_bias),
+
+        # Desired stand point for approach (world space).
+        stand_x, stand_y = _stand_point(me, target, profile, low_health=low_hp)
+
+        if in_range and not me.is_hurt:
+            walk.clear()
+            attack = False
+            jump = False
+            rear = False
+            note = f"{target.entity.label} [{tag}]"
+            if cd == 0:
+                mix = enemy_ai.attack_mix(
+                    plan,
+                    profile,
+                    tick=memory.tick + player_index * 3,
+                    in_range=True,
+                    crowd=press.enemy_count,
+                    phase_name=phase_name,
                 )
-                and (memory.tick + player_index) % 4 == 0
-                and phase_name == "normal"
-            ):
-                attack = False
-                note = f"grab setup {target.entity.label}"
-                memory.set_attack_cd(player_index, 2)
-            elif mix == "rear":
-                rear = True
-                note = f"rear {target.entity.label} [{tag}]"
-                memory.set_attack_cd(player_index, 4)
-            elif mix == "jump":
-                jump = True
-                attack = True
-                note = f"jump {target.entity.label} [{tag}]"
-                memory.set_attack_cd(player_index, 5)
-            else:
-                attack = True
-                note = f"punch {target.entity.label} [{tag}]"
-                memory.set_attack_cd(player_index, 3)
-        elif not in_range:
-            if is_dangerous(phase):
-                note = f"evade {target.entity.label} [{tag}]"
-            elif is_punishable(phase):
-                note = f"chase punish {target.entity.label} [{tag}]"
-            else:
-                note = f"close {target.entity.label} [{tag}]"
+                if is_punishable(phase) and phase != CombatPhase.GRABBED:
+                    attack = True
+                    note = f"punish {target.entity.label} [{tag}]"
+                    memory.set_attack_cd(player_index, 2)
+                elif mix == "grab_walk" or (
+                    grabs.want_grab_approach(
+                        me,
+                        target.entity,
+                        grab_bias=max(plan.grab_bias, profile.grab_bias),
+                    )
+                    and phase_name == "normal"
+                ):
+                    # Walk a hair into them for collision grab.
+                    return _walk_toward(
+                        walk,
+                        me,
+                        goal_x=float(target.entity.world_x),
+                        goal_y=float(target.entity.world_y),
+                        reason=f"grab setup {target.entity.label}",
+                        snapshot=snapshot,
+                        advice=advice,
+                        eps_x=6.0,
+                        eps_y=6.0,
+                    )
+                elif mix == "rear":
+                    rear = True
+                    note = f"rear {target.entity.label} [{tag}]"
+                    memory.set_attack_cd(player_index, 4)
+                elif mix == "jump":
+                    jump = True
+                    attack = True
+                    note = f"jump {target.entity.label} [{tag}]"
+                    memory.set_attack_cd(player_index, 5)
+                else:
+                    attack = True
+                    note = f"punch {target.entity.label} [{tag}]"
+                    memory.set_attack_cd(player_index, 3)
+            return Intent(attack=attack, jump=jump, rear_attack=rear, note=note)
 
-        intent = Intent(
-            left=dx < 0,
-            right=dx > 0,
-            up=dy < 0,
-            down=dy > 0,
-            attack=attack,
-            jump=jump,
-            rear_attack=rear,
-            note=note,
+        # Out of range: latch walk to stand point; optional face buttons later.
+        hunters = combat.count_hunters(snapshot.world_map.entities, player_index)
+        if is_dangerous(phase) and plan.sidestep:
+            # Sidestep goal: same X-ish, different lane.
+            stand_y = float(me.world_y) + (20 if dy >= 0 else -20)
+            stand_x = float(me.world_x) + (-30 if dx > 0 else 30)
+            reason = f"evade {target.entity.label} [{tag}]"
+        elif is_punishable(phase):
+            stand_x = float(target.entity.world_x)
+            stand_y = float(target.entity.world_y)
+            reason = f"chase punish {target.entity.label} [{tag}]"
+        elif press.enemy_count >= 3 or hunters >= 2:
+            px, py = combat.peril_vector(me, snapshot.world_map.entities)
+            stand_x = float(me.world_x) + px * 40
+            stand_y = float(me.world_y) + py * 24
+            reason = f"space {target.entity.label}"
+        else:
+            reason = f"close {target.entity.label} [{tag}]"
+
+        return _walk_toward(
+            walk,
+            me,
+            goal_x=stand_x,
+            goal_y=stand_y,
+            reason=reason,
+            snapshot=snapshot,
+            advice=advice,
         )
-        return _apply_stage_geometry(intent, me, snapshot, advice)
 
-    # --- No enemies: progress the stage ---
-    dx = 1.0 if advice.progress_right else -1.0
-    dy = 0.0
+    # --- Progress ---
+    lead = _PROGRESS_LEAD if advice.progress_right else -_PROGRESS_LEAD
+    goal_x = float(me.world_x) + lead
+    goal_y = float(me.world_y)
     if advice.avoid_holes or advice.elevator:
         mid = 0x40 if snapshot.level_index != 6 else 0x50
-        if me.world_y < mid - 12:
-            dy = 1.0
-        elif me.world_y > mid + 12:
-            dy = -1.0
-
-    intent = Intent(
-        left=dx < 0,
-        right=dx > 0,
-        up=dy < 0,
-        down=dy > 0,
-        note=f"progress ({advice.note})",
+        goal_y = float(mid)
+    return _walk_toward(
+        walk,
+        me,
+        goal_x=goal_x,
+        goal_y=goal_y,
+        reason=f"progress ({advice.note})",
+        snapshot=snapshot,
+        advice=advice,
+        eps_x=24.0,  # refresh progress goal as we move
     )
-    return _apply_stage_geometry(intent, me, snapshot, advice)
+
+
+def _stand_point(
+    me: MapEntity,
+    target: combat.TargetChoice,
+    profile,
+    *,
+    low_health: bool,
+) -> tuple[float, float]:
+    """World-space point to stand for a good strike."""
+
+    foe = target.entity
+    side = -1.0 if (foe.world_x - me.world_x) > 0 else 1.0
+    offset = profile.caution_range if low_health else profile.approach_offset
+    return float(foe.world_x) + side * offset, float(foe.world_y)
+
+
+def _walk_toward(
+    walk: WalkState,
+    me: MapEntity,
+    *,
+    goal_x: float,
+    goal_y: float,
+    reason: str,
+    snapshot: GameSnapshot,
+    advice: stage.StageAdvice,
+    eps_x: float = 10.0,
+    eps_y: float = 8.0,
+    attack: bool = False,
+    jump: bool = False,
+    rear: bool = False,
+) -> Intent:
+    """Set/refresh walk goal and return held-direction intent until arrival."""
+
+    # Nudge goal out of floor holes when relevant.
+    if advice.avoid_holes and snapshot.floor_holes:
+        goal_x, goal_y = _nudge_goal_from_holes(
+            goal_x, goal_y, snapshot.floor_holes, level_index=snapshot.level_index
+        )
+
+    walk.set_goal(
+        me,
+        goal_x,
+        goal_y,
+        reason=reason,
+        eps_x=eps_x,
+        eps_y=eps_y,
+    )
+    intent = walk.step(me)
+    if intent is None:
+        return Intent(note=f"walk idle ({reason})")
+
+    # Hole steer on latched dirs (may zero one axis without flipping every tick).
+    intent = _apply_stage_geometry(intent, me, snapshot, advice)
+    # If hole steer flipped a direction, re-lock walk dirs to match.
+    if walk.active:
+        new_dx = (-1 if intent.left else 1 if intent.right else 0)
+        new_dy = (-1 if intent.up else 1 if intent.down else 0)
+        if new_dx != walk.dir_x or new_dy != walk.dir_y:
+            walk.dir_x = new_dx
+            walk.dir_y = new_dy
+
+    if attack or jump or rear:
+        return blend_walk_with_actions(
+            intent, attack=attack, jump=jump, rear_attack=rear
+        )
+    return intent
+
+
+def _nudge_goal_from_holes(
+    goal_x: float,
+    goal_y: float,
+    holes: tuple,
+    *,
+    level_index: int,
+) -> tuple[float, float]:
+    from ..hazards import FloorHole
+
+    gx, gy = goal_x, goal_y
+    for _ in range(4):
+        hit: FloorHole | None = stage.point_in_hole(gx, gy, holes, margin=8.0)
+        if hit is None:
+            break
+        # Push goal toward nearest horizontal edge of the hole.
+        mid = (hit.world_x + hit.world_x_end) / 2.0
+        gx = hit.world_x - 12.0 if gx >= mid else hit.world_x_end + 12.0
+        mid_y = (hit.lane_y + hit.lane_y_end) / 2.0
+        gy = hit.lane_y - 8.0 if gy >= mid_y else hit.lane_y_end + 8.0
+    return gx, gy
 
 
 def _apply_stage_geometry(
@@ -442,13 +564,11 @@ def _mr_x_intent(
     player_index: int,
     memory: AgentState,
 ) -> Intent:
-    """Always answer NO (refuse Mr. X) then confirm."""
-
     flags = snapshot.raw.get(f"p{player_index}_obj59", None)
     choice_active = True
     choice_bit = None
     if flags is not None:
-        choice_active = bool(flags & 0x10)  # bit 4
+        choice_active = bool(flags & 0x10)
         choice_bit = flags
         if not choice_active:
             return Intent(note="mr.x wait")

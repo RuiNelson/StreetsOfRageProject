@@ -99,6 +99,14 @@ releases after N frames and produces walk-taps.
 **Rebuild** `MegaDriveEnvironment` + `sor` after pulling so the host serves
 `HOLD_BUTTONS`. Without it the client falls back to `press_buttons`.
 
+### Walk-to-(x, y)
+
+`agent/walk.py` latches a **world-space** goal per player. While active, the
+same D-pad signs are held every tick until the player is on the goal band or
+has **passed through** it on both axes. Combat in range, grabs, police, and
+hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
+(nearby refreshes keep the latch).
+
 ## Design constraints
 
 - Prefer small multi-byte `read_memory` windows over many single-byte reads.
