@@ -16,6 +16,8 @@ description: >
 
 # Control a MegaDriveEnvironment game
 
+First: prefer static game assembly files analysis/game ROM file inspection/call stack analysis than running the game and controlling it remotely. Only use this skill if you have no other option.
+
 Create focused Python scripts around the in-repository `megadrive_remote`
 client. Prefer a short, explicit experiment over a generic automation framework.
 
