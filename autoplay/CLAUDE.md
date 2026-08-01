@@ -146,11 +146,21 @@ that layout yet.
      helper uses the projectile-dodge plan. Dispatcher `$F27E` uses the table
      at ROM `$1037C`. Jack state `$0C` (`$F55E`) sets bit 0 of object `+$52`
      and creates/attaches a `$28` helper when needed. State `$0E` (`$F410`)
-     clears `+$52` before launching the helper. Treat this as a hard symbolic
-     affordance: `+$52.bit0` means `ARMED` and `AIR_ATTACK_ONLY`, so align and
-     space into the character's measured jump-kick band, press C, then B only
-     in free flight. State `$0E` means `THROWING`/`GRABBABLE` even if a sample
-     catches the old latch; ordinary B/grab pressure is legal in that window
+     clears `+$52` before launching the helper. The user confirms Jack is
+     always vulnerable like other ordinary enemies, including while armed.
+     ROM common handler `$9B88` confirms this: it does not test type `$27` or
+     `+$52` before subtracting attack damage, and collision result `d7=$03`
+     still enters common grabbed state `$0500`. Therefore `ARMED` and
+     `THROWING` are descriptive helper-phase facts only; all Jack phases are
+     `GRABBABLE` and use normal punch/grab combat. Never restore an
+     `AIR_ATTACK_ONLY` rule. The type-`$28` dispatcher table at `$103A2` maps
+     primary state `$01` to the `$FCB6` attached/juggling handler and states
+     `$02-$04` to launched handlers `$FE46/$FED6/$FEE4`. Symbolically, state
+     `$01` is `ATTACHED` but not `DANGEROUS`; only `$02-$04` are `LAUNCHED` and
+     `DANGEROUS`. Otherwise the juggling helpers permanently outrank Jack's
+     vulnerable body and the policy only dodges. A controlled live Round-2
+     regression observed armed Jack 182 times, issued 11 ordinary ground
+     attacks, and stopped after the ROM reduced Jack's health by 2.
    - Type `$22` state `$0B` dispatches through ROM table `$DD80` to `$E20A`
      and is dangerous; live it retained outgoing damage `$04` at zero health.
      Enemy health uses a signed lethal check: `0` is still active and needs a
@@ -244,10 +254,10 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
   `jack_armed_ground_attacks`, `jack_armed_jump_starts`, and
   `jack_throw_window_ground_attacks`
   are first-class metrics; Stage-2 runs can enforce
-  `--max-weapon-air-attacks 0 --min-signal-sweep-jumps 1`, plus
-  `--max-jack-armed-ground-attacks 0 --min-jack-armed-jumps 1
-  --min-jack-throw-counters 1`, for scripted or
-  future learned policies. Back protection is likewise observable through
+  `--max-weapon-air-attacks 0 --min-signal-sweep-jumps 1`. A controlled Jack
+  encounter can enforce `--min-jack-armed-ground-attacks 1` to prove that
+  armed-body attacks remain legal for scripted or future learned policies.
+  Back protection is likewise observable through
   `back_exposed_grab_opportunities`, `missed_back_exposure_responses`,
   `crossover_suplex_starts`, and `suplexes`; enforce it with
   `--max-missed-back-exposures 0` and, in a scenario known to contain the

@@ -46,7 +46,8 @@ single priority chain:
 - a typed knowledge graph records `REACHABLE`, `DANGEROUS`, `PUNISHABLE`,
   `DEFEATED`, `TARGETS_PLAYER`, `BEHIND_PLAYER`, `COLLECTIBLE`,
   `BLOCKS_PROGRESS`, and enemy interaction affordances such as `ARMED`,
-  `THROWING`, `GRABBABLE`, and `AIR_ATTACK_ONLY` from each coherent snapshot;
+  `THROWING`, `GRABBABLE`, `ATTACHED`, and `LAUNCHED` from each coherent
+  snapshot;
 - fuzzy inference represents graded concepts such as special-attack pressure,
   target peril versus proximity, item value, safety, and travel cost;
 - a deterministic constrained optimizer enumerates legal fight, loot, and
@@ -68,12 +69,14 @@ check: health `0` remains alive and needs a finishing hit, while
 same observation. A defeated object may stay allocated on the floor, but it
 must never be reachable, dangerous, blocking, selected, chased, or attacked.
 
-Jack (`$27`) has a hard, state-dependent interaction rule. While his carried
-weapon latch is set he cannot be grabbed or hit with the ordinary grounded
-approach; line up at jump-kick range and execute C followed by airborne B. His
-weapon-throw state makes him temporarily grabbable and punchable, while the
-separate thrown helper (`$28`) remains a projectile to evade. This legality
-constraint must override fuzzy target and attack preferences.
+Jack (`$27`) is always vulnerable like the other ordinary enemies. His carried
+weapon latch records whether the separate type-`$28` helper is attached; it is
+not armor and must never prohibit normal punches or grabs. `ARMED` and
+`THROWING` remain useful descriptive facts, while `GRABBABLE` is true in every
+Jack weapon phase. Only the independent thrown helper is a projectile to evade.
+The helper's own ROM state is symbolic too: state `$01` adds `ATTACHED` but not
+`DANGEROUS`, while launched states `$02-$04` add `LAUNCHED` and `DANGEROUS`.
+This prevents juggling props from outranking Jack's vulnerable body.
 
 A grab must always resolve. Controller inputs are issued only in confirmed
 input-ready hold states, never through `$62-$6E` transition/throw animations.
@@ -108,9 +111,10 @@ acceptance threshold so symbolic rules remain testable as later learned
 components are introduced.
 Prolonged no-input boss guarding is measured after a short grace window, so a
 legitimate defensive pause remains possible but a tactical fixed point fails.
-It records grounded attacks against armed Jack, valid armed-Jack jump starts,
-and grounded counters during Jack's throw window so this family rule remains
-an acceptance gate for future learned policies.
+It records valid grounded attacks against armed Jack, armed-Jack jump starts,
+and grounded attacks during Jack's throw window. Ground attacks are positive
+capability evidence, never a regression, so controlled scenarios can require
+`min_jack_armed_ground_attacks` for future learned policies.
 Enemy-grab crossover/throw edges, missed escape responses, and attacks or
 off-route pursuit toward defeated floor objects are also first-class metrics
 and acceptance gates.

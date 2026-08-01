@@ -8,7 +8,13 @@ from enum import Enum, auto
 
 from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
 from ..world_map import LANE_Y_MIN, SCREEN_WIDTH, MapEntity, lane_y_max_for_level
-from .enemies import JackWeaponPhase, jack_weapon_phase
+from .enemies import (
+    JackProjectilePhase,
+    JackWeaponPhase,
+    dangerous_projectile,
+    jack_projectile_phase,
+    jack_weapon_phase,
+)
 
 
 # Boss sprites/activation points may sit just beyond the 320 px viewport while
@@ -32,7 +38,8 @@ class Relation(Enum):
     ARMED = auto()
     THROWING = auto()
     GRABBABLE = auto()
-    AIR_ATTACK_ONLY = auto()
+    ATTACHED = auto()
+    LAUNCHED = auto()
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,8 +145,15 @@ def build_tactical_graph(
                 edges.add(
                     Edge(entity.slot, Relation.TARGETS_PLAYER, player.slot)
                 )
-            if entity.kind == "projectile" or is_dangerous(entity.combat_phase):
+            if dangerous_projectile(entity) or (
+                entity.kind != "projectile" and is_dangerous(entity.combat_phase)
+            ):
                 edges.add(Edge(entity.slot, Relation.DANGEROUS))
+            jack_helper_phase = jack_projectile_phase(entity)
+            if jack_helper_phase == JackProjectilePhase.ATTACHED:
+                edges.add(Edge(entity.slot, Relation.ATTACHED))
+            elif jack_helper_phase == JackProjectilePhase.LAUNCHED:
+                edges.add(Edge(entity.slot, Relation.LAUNCHED))
             if is_punishable(entity.combat_phase):
                 edges.add(Edge(entity.slot, Relation.PUNISHABLE))
             if (
@@ -153,7 +167,7 @@ def build_tactical_graph(
             jack_phase = jack_weapon_phase(entity)
             if jack_phase == JackWeaponPhase.ARMED:
                 edges.add(Edge(entity.slot, Relation.ARMED))
-                edges.add(Edge(entity.slot, Relation.AIR_ATTACK_ONLY))
+                edges.add(Edge(entity.slot, Relation.GRABBABLE))
             elif jack_phase == JackWeaponPhase.THROWING:
                 edges.add(Edge(entity.slot, Relation.THROWING))
                 edges.add(Edge(entity.slot, Relation.GRABBABLE))

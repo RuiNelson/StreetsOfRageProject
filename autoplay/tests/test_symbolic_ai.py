@@ -75,11 +75,30 @@ class KnowledgeGraphTests(unittest.TestCase):
             me, (me, armed, throwing), level_index=0, player_index=1
         )
         self.assertTrue(graph.entity_has(armed, Relation.ARMED))
-        self.assertTrue(graph.entity_has(armed, Relation.AIR_ATTACK_ONLY))
-        self.assertFalse(graph.entity_has(armed, Relation.GRABBABLE))
+        self.assertTrue(graph.entity_has(armed, Relation.GRABBABLE))
         self.assertTrue(graph.entity_has(throwing, Relation.THROWING))
         self.assertTrue(graph.entity_has(throwing, Relation.GRABBABLE))
-        self.assertFalse(graph.entity_has(throwing, Relation.AIR_ATTACK_ONLY))
+
+    def test_jack_attached_helpers_are_not_dangerous_until_launched(self) -> None:
+        me = _player()
+        attached = _entity(
+            kind="projectile",
+            family="Jack",
+            label="attached axe",
+            slot="H0",
+            type_id=0x28,
+            health=None,
+            primary_state=0x0101,
+        )
+        launched = replace(attached, slot="H1", primary_state=0x0300)
+        graph = build_tactical_graph(
+            me, (me, attached, launched), level_index=0, player_index=1
+        )
+        self.assertTrue(graph.entity_has(attached, Relation.ATTACHED))
+        self.assertFalse(graph.entity_has(attached, Relation.DANGEROUS))
+        self.assertFalse(graph.entity_has(attached, Relation.LAUNCHED))
+        self.assertTrue(graph.entity_has(launched, Relation.LAUNCHED))
+        self.assertTrue(graph.entity_has(launched, Relation.DANGEROUS))
 
     def test_round1_lane_zero_actor_is_not_reachable(self) -> None:
         me = _player()

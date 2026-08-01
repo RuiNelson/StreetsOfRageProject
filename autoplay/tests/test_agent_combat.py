@@ -7,9 +7,12 @@ from dataclasses import replace
 
 from sor_autoplay.agent.controls import ATTACK, JUMP, Intent, mask_from_intent
 from sor_autoplay.agent.enemies import (
+    JackProjectilePhase,
     JackWeaponPhase,
     ThreatKind,
     attack_mix,
+    dangerous_projectile,
+    jack_projectile_phase,
     jack_weapon_phase,
     plan_for,
 )
@@ -74,8 +77,32 @@ class EnemyCounterTests(unittest.TestCase):
         self.assertTrue(plan.sidestep)
 
     def test_jack_projectile_is_dodge(self) -> None:
-        plan = plan_for(_e(kind="projectile", family="Jack", type_id=0x28, health=None))
+        projectile = _e(
+            kind="projectile",
+            family="Jack",
+            type_id=0x28,
+            health=None,
+            primary_state=0x0300,
+        )
+        plan = plan_for(projectile)
         self.assertEqual(plan.kind, ThreatKind.PROJECTILE)
+        self.assertEqual(
+            jack_projectile_phase(projectile), JackProjectilePhase.LAUNCHED
+        )
+        self.assertTrue(dangerous_projectile(projectile))
+
+    def test_attached_jack_helper_is_not_a_launched_threat(self) -> None:
+        helper = _e(
+            kind="projectile",
+            family="Jack",
+            type_id=0x28,
+            health=None,
+            primary_state=0x0101,
+        )
+        self.assertEqual(
+            jack_projectile_phase(helper), JackProjectilePhase.ATTACHED
+        )
+        self.assertFalse(dangerous_projectile(helper))
 
     def test_jack_body_is_not_mistaken_for_its_projectile(self) -> None:
         plan = plan_for(_e(family="Jack", type_id=0x27))
@@ -698,12 +725,50 @@ class PolicyIntegrationTests(unittest.TestCase):
             map_y=64,
             health=None,
             label="axe",
+            primary_state=0x0300,
         )
         snap = self._snap((p1, proj))
         decision = decide_actions(snap, AgentConfig(p1_enabled=True))
         self.assertIn("dodge", decision.p1_note)
         # Should move, not special.
         self.assertFalse(decision.p1_mask & 0x10)  # not A alone as special priority
+
+    def test_attached_jack_helpers_do_not_suppress_attack_on_body(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            map_y=64,
+            label="P1",
+        )
+        jack = _e(
+            family="Jack",
+            type_id=0x27,
+            slot="E0",
+            map_x=124,
+            map_y=64,
+            family_state=0x01,
+            primary_state=0x0C01,
+            label="Jack",
+        )
+        helper = _e(
+            kind="projectile",
+            family="Jack",
+            type_id=0x28,
+            slot="E1",
+            map_x=120,
+            map_y=64,
+            health=None,
+            primary_state=0x0101,
+            label="Jack attached axe",
+        )
+        decision = decide_actions(
+            self._snap((p1, jack, helper)), AgentConfig(p1_enabled=True)
+        )
+        self.assertTrue(decision.p1_mask & int(ATTACK), decision.p1_note)
+        self.assertNotIn("dodge", decision.p1_note)
+        self.assertIn("Jack", decision.p1_note)
 
     def test_grab_hold_throws(self) -> None:
         p1 = _e(

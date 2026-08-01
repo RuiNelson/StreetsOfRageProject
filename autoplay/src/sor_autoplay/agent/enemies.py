@@ -8,7 +8,7 @@ Family behaviours (``ai-analysis/enemy-ai.md``):
 | Signal | Slide, get behind, throw | Face them; rear-attack when flanking; don't stay still |
 | Haku-Ro | Fast ninja, jump-ins | Pre-empt with jump kick; don't chase teleports |
 | Nora | Whip + feign injury | Mid-range then burst; don't rush "downed" poses |
-| Jack | Armed guard + axe/torch projectiles | Jump-kick armed body; rush throw window; lane-dodge helper |
+| Jack | Axe/torch projectile helper | Normal combat against body; lane-dodge helper |
 | Abadede | Clothesline charge | Sidestep charge, punish recovery |
 | Antonio | Boomerang / mid spacing | Stay just outside $28-$78 attack window, then burst |
 | Souther | Claws, punishes jumps | Prefer grounded combos; avoid jump-ins |
@@ -46,11 +46,19 @@ class ThreatKind(Enum):
 
 
 class JackWeaponPhase(Enum):
-    """ROM-backed interaction phase for enemy type $27."""
+    """ROM-backed attached/helper phase for enemy type $27."""
 
     ARMED = auto()
     THROWING = auto()
     UNARMED = auto()
+
+
+class JackProjectilePhase(Enum):
+    """ROM dispatcher phase for Jack's type-$28 helper objects."""
+
+    ATTACHED = auto()
+    LAUNCHED = auto()
+    INACTIVE = auto()
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,15 +86,43 @@ class CounterPlan:
 
 
 # Jack's type-$27 state $0E clears +$52 before creating/launching its type-$28
-# helper. While bit 0 remains set the weapon is attached and Jack rejects the
-# ordinary ground grab/strike interaction; an air kick is the legal counter.
+# helper. The latch describes helper ownership only: common damage/grab code
+# never tests it, so Jack's body remains normally vulnerable in every phase.
 JACK_TYPE = 0x27
 JACK_THROW_STATE = 0x0E
 _JACK_PROJECTILE = 0x28
 
 
+def jack_projectile_phase(entity: MapEntity) -> JackProjectilePhase | None:
+    """Distinguish juggling helpers from weapons that are actually in flight.
+
+    The type-$28 dispatcher table at ROM $103A2 maps state $01 to $FCB6,
+    which keeps the two helpers attached to Jack's body. States $02-$04 map
+    to the launch, ballistic, and special thrown handlers at $FE46/$FED6/$FEE4.
+    Other states are initialization/spawn bookkeeping and are not attacks.
+    """
+
+    if entity.type_id != _JACK_PROJECTILE or entity.kind != "projectile":
+        return None
+    primary = (entity.primary_state >> 8) & 0xFF
+    if primary == 0x01:
+        return JackProjectilePhase.ATTACHED
+    if 0x02 <= primary <= 0x04:
+        return JackProjectilePhase.LAUNCHED
+    return JackProjectilePhase.INACTIVE
+
+
+def dangerous_projectile(entity: MapEntity) -> bool:
+    """Return whether a projectile object represents an active attack."""
+
+    if entity.kind != "projectile":
+        return False
+    phase = jack_projectile_phase(entity)
+    return phase is None or phase == JackProjectilePhase.LAUNCHED
+
+
 def jack_weapon_phase(entity: MapEntity) -> JackWeaponPhase | None:
-    """Decode Jack's weapon affordance from his dispatcher state and +$52.
+    """Decode Jack's attached/helper phase from his dispatcher state and +$52.
 
     State $0E wins over the latch because the state transition and byte clear
     can straddle an observation boundary. Non-Jack entities return ``None`` so
@@ -142,7 +178,7 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
         jump_bias=0.0,
         grab_bias=0.35,
         priority=1.6,
-        note="jack armed jump / throw-window rush",
+        note="jack normal vulnerable / helper dodge",
     ),
     "Abadede": CounterPlan(
         ThreatKind.CHARGER,

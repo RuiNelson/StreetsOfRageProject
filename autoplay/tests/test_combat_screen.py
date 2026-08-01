@@ -818,7 +818,7 @@ class PolicyAggressionTests(unittest.TestCase):
             msg=f"must NOT attack on jump start (B+C=rear): {d.p1_mask:#x}",
         )
 
-    def test_armed_jack_forces_jump_kick_instead_of_ground_attack(self) -> None:
+    def test_armed_jack_is_ground_attackable(self) -> None:
         p1 = _e(
             kind="player",
             family="Player",
@@ -845,11 +845,11 @@ class PolicyAggressionTests(unittest.TestCase):
         d = decide_actions(
             self._snap((p1, jack)), AgentConfig(p1_enabled=True), AgentState()
         )
-        self.assertTrue(d.p1_mask & 0x40, d.p1_note)
-        self.assertFalse(d.p1_mask & 0x20, d.p1_note)
-        self.assertIn("jump armed Jack", d.p1_note)
+        self.assertTrue(d.p1_mask & 0x20, d.p1_note)
+        self.assertFalse(d.p1_mask & 0x40, d.p1_note)
+        self.assertIn("punch Jack", d.p1_note)
 
-    def test_armed_jack_too_close_is_spaced_without_punch_or_grab(self) -> None:
+    def test_armed_jack_remains_attackable_at_close_range(self) -> None:
         p1 = _e(
             kind="player",
             family="Player",
@@ -876,9 +876,9 @@ class PolicyAggressionTests(unittest.TestCase):
         d = decide_actions(
             self._snap((p1, jack)), AgentConfig(p1_enabled=True), AgentState()
         )
-        self.assertFalse(d.p1_mask & 0x60, d.p1_note)
-        self.assertTrue(d.p1_mask & 0x04, d.p1_note)
-        self.assertIn("space armed Jack", d.p1_note)
+        self.assertTrue(d.p1_mask & 0x20, d.p1_note)
+        self.assertFalse(d.p1_mask & 0x40, d.p1_note)
+        self.assertIn("punch Jack", d.p1_note)
 
     def test_throwing_jack_is_ground_attackable_even_if_latch_sample_is_stale(self) -> None:
         p1 = _e(

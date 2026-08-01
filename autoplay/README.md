@@ -52,9 +52,10 @@ Per-player toggle (HUD button or keys **1** / **2**):
   and range, without repeated B during weapon animations; Signal's low sweep
   is countered by jumping (and by an airborne B attack when unarmed)
 - Family-specific counters (Signal, Haku-Ro, Nora, Jack, all bosses, Mr. X)
-  include a ROM-backed Jack affordance: attached weapons require C then an
-  airborne B; his throw window allows grounded punches/grabs, and only the
-  separate thrown helper is treated as a projectile
+  preserve Jack's normal vulnerability in every weapon phase: punches, grabs,
+  and jump kicks can hit his body while `+$52.bit0` describes only the attached
+  helper. Type-`$28` state `$01` is attached/juggling and cannot distract the
+  target solver; only its launched states `$02-$04` are projectile threats.
 - **Grab/throw trees**: guarded input windows, bounded orphan recovery, and a
   crossover/suplex plan; stale weapon/contact fields cannot leak B into closed
   `$62-$6E` animations. If an enemy holds the player, `$7A` emits C, `$7C`
@@ -170,7 +171,6 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.eva
   --max-lives-lost 0 \
   --max-failed-pickups 0 \
   --max-weapon-air-attacks 0 \
-  --max-jack-armed-ground-attacks 0 \
   --max-missed-back-exposures 0 \
   --max-invalid-grab-attacks 0 \
   --max-missed-enemy-grab-escapes 0 \
@@ -180,8 +180,6 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay.eva
   --max-loot-under-threat 0 \
   --max-boss-progress 0 \
   --max-boss-stalls 0 \
-  --min-jack-armed-jumps 1 \
-  --min-jack-throw-counters 1 \
   --min-enemy-damage 15 \
   --min-forward-progress 600 \
   --report /tmp/sor-autoplay-report.json \
@@ -225,6 +223,11 @@ Enemy-held-player scenarios can additionally require
 `--min-enemy-grab-escape-jumps 1 --min-enemy-grab-counter-throws 1`. The trace
 includes the player action byte and `+$58` action flags, so a missed crossover
 or eight-tick B window is reproducible rather than inferred from video.
+
+In a controlled Jack encounter, `--min-jack-armed-ground-attacks 1` verifies
+that the policy does not invent armor from the weapon latch. Armed jump starts
+and throw-phase ground attacks remain separately observable metrics, but both
+weapon phases use the normal combat and grab rules.
 
 For a Stage 2 cheat episode, also require
 `--min-signal-sweep-jumps 1`. Together with

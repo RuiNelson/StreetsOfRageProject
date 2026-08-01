@@ -257,7 +257,7 @@ class EpisodeMetrics:
                 player_index=self.player_index,
             )
             profile = profile_for(before_player.character_id)
-            armed_jacks = graph.entities_with(Relation.AIR_ATTACK_ONLY)
+            armed_jacks = graph.entities_with(Relation.ARMED)
             throwing_jacks = graph.entities_with(Relation.THROWING)
             if (
                 mask & 0x20
@@ -602,7 +602,7 @@ class EvaluationCriteria:
     min_enemy_damage: int | None = None
     min_forward_progress: int | None = None
     min_signal_sweep_jumps: int | None = None
-    max_jack_armed_ground_attacks: int | None = None
+    min_jack_armed_ground_attacks: int | None = None
     min_jack_armed_jumps: int | None = None
     min_jack_throw_counters: int | None = None
     min_suplexes: int | None = None
@@ -644,12 +644,6 @@ class EvaluationCriteria:
                 self.max_missed_back_exposures,
                 metrics.missed_back_exposure_responses,
                 "missed back-exposure responses",
-                "at most",
-            ),
-            (
-                self.max_jack_armed_ground_attacks,
-                metrics.jack_armed_ground_attacks,
-                "armed-Jack ground attacks",
                 "at most",
             ),
             (
@@ -716,6 +710,11 @@ class EvaluationCriteria:
                 self.min_signal_sweep_jumps,
                 metrics.signal_sweep_jumps,
                 "Signal sweep jumps",
+            ),
+            (
+                self.min_jack_armed_ground_attacks,
+                metrics.jack_armed_ground_attacks,
+                "armed-Jack ground attacks",
             ),
             (
                 self.min_jack_armed_jumps,
@@ -1053,7 +1052,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-enemy-damage", type=int)
     parser.add_argument("--min-forward-progress", type=int)
     parser.add_argument("--min-signal-sweep-jumps", type=int)
-    parser.add_argument("--max-jack-armed-ground-attacks", type=int)
+    parser.add_argument("--min-jack-armed-ground-attacks", type=int)
     parser.add_argument("--min-jack-armed-jumps", type=int)
     parser.add_argument("--min-jack-throw-counters", type=int)
     parser.add_argument("--min-suplexes", type=int)
@@ -1088,7 +1087,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         min_enemy_damage=args.min_enemy_damage,
         min_forward_progress=args.min_forward_progress,
         min_signal_sweep_jumps=args.min_signal_sweep_jumps,
-        max_jack_armed_ground_attacks=args.max_jack_armed_ground_attacks,
+        min_jack_armed_ground_attacks=args.min_jack_armed_ground_attacks,
         min_jack_armed_jumps=args.min_jack_armed_jumps,
         min_jack_throw_counters=args.min_jack_throw_counters,
         min_suplexes=args.min_suplexes,

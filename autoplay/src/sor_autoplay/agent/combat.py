@@ -358,6 +358,14 @@ def select_target(
     for entity in entities:
         if entity.kind not in ("enemy", "boss", "projectile"):
             continue
+        # Jack's state-$01 type-$28 objects are the axes/torches visibly
+        # juggling around him, not launched threats. Do not let those helpers
+        # outrank Jack's vulnerable body forever.
+        if (
+            entity.kind == "projectile"
+            and not enemy_ai.dangerous_projectile(entity)
+        ):
+            continue
         if entity.kind == "projectile" and not include_projectiles:
             continue
         if entity.kind != "projectile" and entity.is_defeated:

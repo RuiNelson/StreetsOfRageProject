@@ -284,18 +284,18 @@ class LockstepEvaluatorTests(unittest.TestCase):
         _put_u16(armed, OBJECT_TABLE + OBJ_PRIMARY_STATE, 0x0C00)
         _put_u8(armed, OBJECT_TABLE + OBJ_JACK_WEAPON_ATTACHED, 0x01)
 
-        bad_ground = LockstepEvaluator(
+        valid_ground = LockstepEvaluator(
             _FakeClient([bytes(armed), bytes(armed)]),
             decisions=1,
             policy=lambda _snapshot: AgentDecision(
                 p1_mask=0x20,
                 p2_mask=0,
-                p1_note="bad ground hit Jack",
+                p1_note="punch armed Jack",
             ),
-            criteria=EvaluationCriteria(max_jack_armed_ground_attacks=0),
+            criteria=EvaluationCriteria(min_jack_armed_ground_attacks=1),
         ).run()
-        self.assertEqual(bad_ground.metrics.jack_armed_ground_attacks, 1)
-        self.assertFalse(bad_ground.passed)
+        self.assertEqual(valid_ground.metrics.jack_armed_ground_attacks, 1)
+        self.assertTrue(valid_ground.passed)
 
         jump = LockstepEvaluator(
             _FakeClient([bytes(armed), bytes(armed)]),
