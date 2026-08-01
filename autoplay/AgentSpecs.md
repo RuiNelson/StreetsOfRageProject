@@ -131,3 +131,9 @@ The agents must be able to play the game alone, but must also be able to play th
 - be able to do the move that only two player can do (grapple/jump/attack mid-air)
 - don't be greedy in life and special attack items, let the other player take them if the other player has less health
 - get weapons from the floor if a better weapons is found, don't wait for the other player to pick up them
+- **never attack other players**. Streets of Rage 1 has friendly fire. While
+  fighting enemies, do not punch, rear-attack, jump-kick, swing a weapon, or
+  throw a weapon through a live partner (human or AI). If the partner stands
+  in the attack cone, step off their lane or wait. Grab throws should prefer
+  the side away from the partner. The only intentional attack near a partner
+  is the co-op mid-air assist when both seats are agents.

@@ -454,6 +454,170 @@ class PolicyTests(unittest.TestCase):
         ctx = CoopContext(partner=None, partner_snap=partner, both_agents=True, partner_hp=25.0)
         self.assertFalse(should_take_health_pickup(me, ctx))
 
+    def test_never_punches_through_partner_at_enemy(self) -> None:
+        """SoR1 friendly fire: do not emit B when the partner is in the strike cone."""
+
+        p1 = _entity(
+            kind="player",
+            map_x=100,
+            map_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+            action_state=0x02,
+        )
+        # Partner stands between P1 and the foe in the same lane.
+        p2 = _entity(
+            kind="player",
+            map_x=130,
+            map_y=64,
+            slot="P2",
+            label="P2 Blaze",
+            family="Player",
+            action_state=0x02,
+        )
+        foe = _entity(
+            kind="enemy",
+            map_x=150,
+            map_y=64,
+            slot="E0",
+            label="Garcia",
+            family="Garcia",
+            type_id=0x20,
+            action_state=0x00,
+        )
+        snap = _snapshot_with_map((p1, p2, foe), p2=True)
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertEqual(
+            decision.p1_mask & int(ATTACK),
+            0,
+            msg=f"attacked through partner: {decision.p1_note} mask={decision.p1_mask:#x}",
+        )
+        self.assertTrue(
+            "ally" in decision.p1_note or "clear" in decision.p1_note,
+            msg=decision.p1_note,
+        )
+
+    def test_punches_enemy_when_partner_is_clear(self) -> None:
+        p1 = _entity(
+            kind="player",
+            map_x=100,
+            map_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+            action_state=0x02,
+        )
+        # Partner is off-lane so punches cannot hit them.
+        p2 = _entity(
+            kind="player",
+            map_x=130,
+            map_y=20,
+            slot="P2",
+            label="P2 Blaze",
+            family="Player",
+            action_state=0x02,
+        )
+        foe = _entity(
+            kind="enemy",
+            map_x=140,
+            map_y=64,
+            slot="E0",
+            label="Garcia",
+            family="Garcia",
+            type_id=0x20,
+            action_state=0x00,
+        )
+        snap = _snapshot_with_map((p1, p2, foe), p2=True)
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertEqual(
+            decision.p1_mask & int(ATTACK),
+            int(ATTACK),
+            msg=f"expected punch with clear partner: {decision.p1_note}",
+        )
+
+    def test_never_swings_weapon_through_partner(self) -> None:
+        from dataclasses import replace
+
+        p1 = _entity(
+            kind="player",
+            map_x=100,
+            map_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+            action_state=0x30,
+        )
+        p1 = replace(p1, held_type=0x0A)  # bat
+        p2 = _entity(
+            kind="player",
+            map_x=120,
+            map_y=64,
+            slot="P2",
+            label="P2 Blaze",
+            family="Player",
+            action_state=0x02,
+        )
+        foe = _entity(
+            kind="enemy",
+            map_x=130,
+            map_y=64,
+            slot="E0",
+            label="Garcia",
+            family="Garcia",
+            type_id=0x20,
+        )
+        snap = _snapshot_with_map((p1, p2, foe), p2=True)
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertEqual(
+            decision.p1_mask & int(ATTACK),
+            0,
+            msg=f"weapon swing through partner: {decision.p1_note}",
+        )
+
+
+class AllySafetyUnitTests(unittest.TestCase):
+    def test_attack_would_hit_ally_front_and_rear(self) -> None:
+        from sor_autoplay.agent.coop import attack_would_hit_ally
+
+        me = _entity(
+            kind="player",
+            map_x=100,
+            map_y=64,
+            slot="P1",
+            action_state=0x02,  # facing right
+        )
+        ally_front = _entity(
+            kind="player", map_x=130, map_y=64, slot="P2", action_state=0x02
+        )
+        ally_rear = _entity(
+            kind="player", map_x=70, map_y=64, slot="P2", action_state=0x02
+        )
+        ally_offlane = _entity(
+            kind="player", map_x=130, map_y=20, slot="P2", action_state=0x02
+        )
+        self.assertTrue(
+            attack_would_hit_ally(me, ally_front, face_left=False)
+        )
+        self.assertFalse(
+            attack_would_hit_ally(me, ally_rear, face_left=False)
+        )
+        self.assertTrue(
+            attack_would_hit_ally(me, ally_rear, face_left=False, rear=True)
+        )
+        self.assertFalse(
+            attack_would_hit_ally(me, ally_offlane, face_left=False)
+        )
+
+    def test_throw_direction_avoids_ally(self) -> None:
+        from sor_autoplay.agent.coop import throw_direction_away_from_ally
+
+        me = _entity(kind="player", map_x=100, map_y=64, slot="P1")
+        ally = _entity(kind="player", map_x=140, map_y=64, slot="P2")
+        self.assertEqual(
+            throw_direction_away_from_ally(me, ally, default_dir=1), -1
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

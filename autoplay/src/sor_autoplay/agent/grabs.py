@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from ..memory_map import ADDR_P1_OBJECT_LO, ADDR_P2_OBJECT_LO
 from ..phases import CombatPhase, is_dangerous
 from ..world_map import MapEntity
+from . import coop
 from .characters import CharacterProfile, DEFAULT_PROFILE
 from .controls import Intent
 
@@ -220,6 +221,7 @@ def decide_held(
     progress_right: bool = True,
     crowd: int = 0,
     profile: CharacterProfile | None = None,
+    ally: MapEntity | None = None,
 ) -> Intent | None:
     # Do not abort on is_hurt during hold-react ($60) — that state is not hurt.
     if ctx.hurt and not is_grab_family(me.action_base):
@@ -249,7 +251,9 @@ def decide_held(
     # weapon sample through the enemy knee/throw tree.
     if ctx.weapon:
         memory.reset()
-        return _weapon_tree(me, ctx, tick=tick, foe=foe, profile=prof)
+        return _weapon_tree(
+            me, ctx, tick=tick, foe=foe, profile=prof, ally=ally
+        )
 
     if ctx.enemy_grab:
         memory.latched = True
@@ -272,6 +276,7 @@ def decide_held(
         progress_right=progress_right,
         crowd=crowd,
         profile=prof,
+        ally=ally,
     )
 
 
@@ -281,15 +286,24 @@ def throw_back_direction(
     progress_right: bool = True,
     crowd: int = 0,
     foe: MapEntity | None = None,
+    ally: MapEntity | None = None,
 ) -> int:
-    """B+away: opposite of facing (bit0 set = face left)."""
+    """B+away: opposite of facing (bit0 set = face left).
+
+    When a live co-op partner sits nearby, prefer the side that does not
+    fling the held body into them (SoR1 friendly fire on throws).
+    """
 
     del foe
     if crowd >= 3:
-        return 1 if progress_right else -1
-    if me.action_state & 0x01:
-        return 1
-    return -1
+        default = 1 if progress_right else -1
+    elif me.action_state & 0x01:
+        default = 1
+    else:
+        default = -1
+    return coop.throw_direction_away_from_ally(
+        me, ally, default_dir=default
+    )
 
 
 def _enemy_grab_tree(
@@ -302,6 +316,7 @@ def _enemy_grab_tree(
     progress_right: bool,
     crowd: int,
     profile: CharacterProfile,
+    ally: MapEntity | None = None,
 ) -> Intent:
     """Live: B alone knees the held foe. Mix B+back for throws."""
 
@@ -322,21 +337,35 @@ def _enemy_grab_tree(
         )
 
     back = throw_back_direction(
-        me, progress_right=progress_right, crowd=crowd, foe=foe
+        me,
+        progress_right=progress_right,
+        crowd=crowd,
+        foe=foe,
+        ally=ally,
     )
     # Mostly knees (proven to deal damage). Every Nth pulse: B+back throw.
-    if crowd >= 2 or memory.pulse % THROW_EVERY == 0:
+    # If a co-op partner is body-overlapped on the hold, prefer an immediate
+    # away throw rather than kneeing into them (SoR1 friendly fire).
+    force_throw = coop.attack_would_hit_ally(
+        me, ally, max_range=coop.ALLY_BODY_X + 2.0
+    )
+    if force_throw or crowd >= 2 or memory.pulse % THROW_EVERY == 0:
         left = back < 0
         right = back > 0
         side = "L" if left else "R"
+        note = (
+            f"throw clear of ally {side}"
+            if force_throw
+            else (
+                f"throw ({profile.name}) {side} "
+                f"act=${me.action_state:02X} hold=${ctx.held_type:02X}"
+            )
+        )
         return Intent(
             left=left,
             right=right,
             attack=True,
-            note=(
-                f"throw ({profile.name}) {side} "
-                f"act=${me.action_state:02X} hold=${ctx.held_type:02X}"
-            ),
+            note=note,
         )
     return Intent(
         attack=True,
@@ -354,6 +383,7 @@ def _weapon_tree(
     tick: int,
     foe: MapEntity | None,
     profile: CharacterProfile,
+    ally: MapEntity | None = None,
 ) -> Intent | None:
     del tick
     held = ctx.held_type
@@ -404,6 +434,16 @@ def _weapon_tree(
         face_right = not face_left
     in_melee = abs(dx) <= 36
     mid = 20 <= abs(dx) <= 100
+
+    # Never swing or throw a weapon through a co-op partner (SoR1 friendly fire).
+    if coop.attack_would_hit_ally(
+        me,
+        ally,
+        face_left=face_left,
+        thrown=throwable,
+        max_range=coop.ALLY_THROWN_RANGE if throwable else coop.ALLY_MELEE_RANGE,
+    ):
+        return None
 
     if melee:
         if not in_melee:

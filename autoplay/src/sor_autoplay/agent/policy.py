@@ -356,6 +356,7 @@ def _decide_one(
         progress_right=advice.progress_right,
         crowd=press.enemy_count,
         profile=profile,
+        ally=coop_ctx.partner,
     )
     if held_intent is not None:
         walk.clear()
@@ -406,6 +407,14 @@ def _decide_one(
             fl = combat.player_facing_left(me)
             fr = not fl
         if combat.player_jump_attack_ready(me):
+            if coop.attack_would_hit_ally(
+                me, coop_ctx.partner, face_left=fl
+            ):
+                return Intent(
+                    left=fl,
+                    right=fr,
+                    note="air hold clear of ally",
+                )
             memory.set_attack_cd(player_index, 2)
             return Intent(
                 left=fl,
@@ -457,6 +466,13 @@ def _decide_one(
             and combat.player_can_start_ground_action(me)
             and memory.attack_cd(player_index) == 0
         ):
+            if coop.attack_would_hit_ally(me, coop_ctx.partner, face_left=fl):
+                walk.clear()
+                return Intent(
+                    left=fl,
+                    right=fr,
+                    note=f"ally blocks smash {prop.label}",
+                )
             walk.clear()
             memory.set_attack_cd(player_index, 3)
             return Intent(
@@ -536,6 +552,12 @@ def _decide_one(
         )
         close = combat.can_collect_pickup(me, item)
         if close and combat.player_can_start_ground_action(me):
+            # Pickup uses B; body-overlap with a partner can still friendly-fire.
+            if coop.attack_would_hit_ally(
+                me, coop_ctx.partner, max_range=coop.ALLY_BODY_X + 4.0
+            ):
+                walk.clear()
+                return Intent(note=f"ally blocks {loot_verb} {item.label}")
             walk.clear()
             return Intent(attack=True, note=f"{loot_verb} {item.label}")
         if close:
@@ -575,6 +597,20 @@ def _decide_one(
                 profile,
                 face_right=not face_left_now,
             ):
+                if coop.attack_would_hit_ally(
+                    me,
+                    coop_ctx.partner,
+                    face_left=face_left_now,
+                    rear=True,
+                ):
+                    return _clear_ally_lane(
+                        walk,
+                        me,
+                        coop_ctx.partner,
+                        reason=f"ally blocks rear {rear_foe.label}",
+                        snapshot=snapshot,
+                        advice=advice,
+                    )
                 walk.clear()
                 memory.set_attack_cd(player_index, 4)
                 return Intent(
@@ -632,12 +668,15 @@ def _decide_one(
         if combat.player_busy_attacking(me):
             walk.clear()
             if combat.can_queue_normal_combo(me, foe, profile):
-                return Intent(
-                    left=face_left,
-                    right=face_right_now,
-                    attack=True,
-                    note=f"combo queue {foe.label} [{tag}]",
-                )
+                if not coop.attack_would_hit_ally(
+                    me, coop_ctx.partner, face_left=face_left
+                ):
+                    return Intent(
+                        left=face_left,
+                        right=face_right_now,
+                        attack=True,
+                        note=f"combo queue {foe.label} [{tag}]",
+                    )
             if me.action_base == 0x18 and me.action_flags & 0x20:
                 return Intent(
                     left=face_left,
@@ -754,8 +793,19 @@ def _decide_one(
                 walk.clear()
                 return Intent(note=f"guard lane {foe.label} [{tag}]")
             if abs_dx <= profile.strike_range + combat.PREEMPTIVE_PUNCH_LEAD:
-                walk.clear()
                 if cd == 0 and combat.player_can_start_ground_action(me):
+                    if coop.attack_would_hit_ally(
+                        me, coop_ctx.partner, face_left=face_left
+                    ):
+                        return _clear_ally_lane(
+                            walk,
+                            me,
+                            coop_ctx.partner,
+                            reason=f"ally blocks interrupt {foe.label}",
+                            snapshot=snapshot,
+                            advice=advice,
+                        )
+                    walk.clear()
                     memory.set_attack_cd(player_index, 3)
                     return Intent(
                         left=face_left,
@@ -763,6 +813,7 @@ def _decide_one(
                         attack=True,
                         note=f"interrupt {foe.label} [{tag}]",
                     )
+                walk.clear()
                 if not facing_ok:
                     return Intent(
                         left=face_left,
@@ -775,8 +826,19 @@ def _decide_one(
         # (notably Signal's easy slide). Meet nearby basic enemies during their
         # approach instead of waiting for the first dangerous-state sample.
         if combat.should_intercept_basic_enemy(me, foe, profile):
-            walk.clear()
             if cd == 0 and combat.player_can_start_ground_action(me):
+                if coop.attack_would_hit_ally(
+                    me, coop_ctx.partner, face_left=face_left
+                ):
+                    return _clear_ally_lane(
+                        walk,
+                        me,
+                        coop_ctx.partner,
+                        reason=f"ally blocks intercept {foe.label}",
+                        snapshot=snapshot,
+                        advice=advice,
+                    )
+                walk.clear()
                 memory.set_attack_cd(player_index, 3)
                 return Intent(
                     left=face_left,
@@ -784,6 +846,7 @@ def _decide_one(
                     attack=True,
                     note=f"intercept {foe.label} [{tag}]",
                 )
+            walk.clear()
             if not facing_ok:
                 return Intent(
                     left=face_left,
@@ -825,6 +888,17 @@ def _decide_one(
 
             if is_punishable(phase) and phase != CombatPhase.GRABBED:
                 if punch_ok:
+                    if coop.attack_would_hit_ally(
+                        me, coop_ctx.partner, face_left=face_left
+                    ):
+                        return _clear_ally_lane(
+                            walk,
+                            me,
+                            coop_ctx.partner,
+                            reason=f"ally blocks punish {foe.label}",
+                            snapshot=snapshot,
+                            advice=advice,
+                        )
                     walk.clear()
                     memory.set_attack_cd(player_index, 2)
                     return Intent(
@@ -837,19 +911,44 @@ def _decide_one(
             if mix == "rear" and combat.can_rear_hit(
                 me, foe, profile, face_right=not combat.player_facing_left(me)
             ):
+                face_now = combat.player_facing_left(me)
+                if coop.attack_would_hit_ally(
+                    me, coop_ctx.partner, face_left=face_now, rear=True
+                ):
+                    return _clear_ally_lane(
+                        walk,
+                        me,
+                        coop_ctx.partner,
+                        reason=f"ally blocks back {foe.label}",
+                        snapshot=snapshot,
+                        advice=advice,
+                    )
                 walk.clear()
                 memory.set_attack_cd(player_index, 4)
                 return Intent(
-                    left=face_left if face_left else combat.player_facing_left(me),
+                    left=face_left if face_left else face_now,
                     right=face_right_now
                     if face_right_now
-                    else (not combat.player_facing_left(me)),
+                    else (not face_now),
                     rear_attack=True,
                     note=f"back atk {profile.name} {foe.label}",
                 )
 
             # Jump start: C only + face. Attack comes next ticks while airborne.
+            # Still refuse the approach when the partner already sits in the
+            # eventual kick box — the airborne branch will also gate B.
             if mix == "jump" and jump_ok and facing_ok and not plan.no_jump:
+                if coop.attack_would_hit_ally(
+                    me, coop_ctx.partner, face_left=face_left
+                ):
+                    return _clear_ally_lane(
+                        walk,
+                        me,
+                        coop_ctx.partner,
+                        reason=f"ally blocks jump {foe.label}",
+                        snapshot=snapshot,
+                        advice=advice,
+                    )
                 walk.clear()
                 memory.set_attack_cd(player_index, 1)
                 return Intent(
@@ -860,6 +959,17 @@ def _decide_one(
                 )
 
             if mix == "punch" and punch_ok:
+                if coop.attack_would_hit_ally(
+                    me, coop_ctx.partner, face_left=face_left
+                ):
+                    return _clear_ally_lane(
+                        walk,
+                        me,
+                        coop_ctx.partner,
+                        reason=f"ally blocks punch {foe.label}",
+                        snapshot=snapshot,
+                        advice=advice,
+                    )
                 walk.clear()
                 memory.set_attack_cd(player_index, 3)
                 return Intent(
@@ -938,6 +1048,17 @@ def _decide_one(
 
         if not me.is_hurt and cd == 0:
             if punch_ok:
+                if coop.attack_would_hit_ally(
+                    me, coop_ctx.partner, face_left=fl
+                ):
+                    return _clear_ally_lane(
+                        walk,
+                        me,
+                        coop_ctx.partner,
+                        reason=f"ally blocks smash {prop.label}",
+                        snapshot=snapshot,
+                        advice=advice,
+                    )
                 walk.clear()
                 memory.set_attack_cd(player_index, 3)
                 return Intent(
@@ -948,6 +1069,17 @@ def _decide_one(
                 )
             # Mid-range booth/crate: jump-kick (C now, B while airborne).
             if jump_ok and combat.facing_toward(me, prop):
+                if coop.attack_would_hit_ally(
+                    me, coop_ctx.partner, face_left=fl
+                ):
+                    return _clear_ally_lane(
+                        walk,
+                        me,
+                        coop_ctx.partner,
+                        reason=f"ally blocks jump-break {prop.label}",
+                        snapshot=snapshot,
+                        advice=advice,
+                    )
                 walk.clear()
                 memory.set_attack_cd(player_index, 1)
                 return Intent(
@@ -1009,6 +1141,34 @@ def _decide_one(
         snapshot=snapshot,
         advice=advice,
         eps_x=24.0,  # refresh progress goal as we move
+    )
+
+
+def _clear_ally_lane(
+    walk: WalkState,
+    me: MapEntity,
+    ally: MapEntity | None,
+    *,
+    reason: str,
+    snapshot: GameSnapshot,
+    advice: stage.StageAdvice,
+) -> Intent:
+    """Step off the partner's lane instead of friendly-firing through them."""
+
+    if ally is None:
+        walk.clear()
+        return Intent(note=reason)
+    delta = coop.ally_clear_lane_delta(me, ally)
+    return _walk_toward(
+        walk,
+        me,
+        goal_x=float(me.world_x),
+        goal_y=float(me.world_y) + delta,
+        reason=reason,
+        snapshot=snapshot,
+        advice=advice,
+        eps_x=3.0,
+        eps_y=4.0,
     )
 
 
