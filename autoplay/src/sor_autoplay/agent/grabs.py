@@ -1,19 +1,11 @@
 """Grab / hold / throw decision trees for standard controls.
 
-ROM notes (``player-health-lives-and-combat.md``, ``sor.asm`` ``$2D20``):
+GameFAQs + ROM (``$2D20`` / held attack path):
 
-- Holding: player ``+$60`` (type) and ``+$5E`` (pointer) non-zero.
-- While holding, idle path is ``loc_00002D20`` (not the free-move path).
-- Attack while holding goes through ``player_held_object_attack_input`` and
-  selects actions ``$44/$46/$48`` for swings/throws of weapons or grabs.
-- Direction low nibble of held input ``+$54`` selects grab strike/throw via
-  the ``$2D6C`` table when the held target is in the grab-ready state.
-- Face buttons are **edge-triggered**; directions must be **held** continuously.
-
-With sticky ``hold_buttons``, this module:
-
-- keeps throw direction latched across ticks;
-- **pulses** attack (on one tick, off the next) so the ROM sees new edges.
+- Front grapple: **throw** = B + away from enemy (preferred over knee mash).
+- **Vault** = C while grappling (flip behind), then **B** for back suplex.
+- Grapple combo (B mash) is weaker / leaves you open — use sparingly.
+- Face buttons are edge-triggered; directions stay held (sticky hold).
 """
 
 from __future__ import annotations
@@ -21,26 +13,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..world_map import MapEntity
+from .characters import CharacterProfile, DEFAULT_PROFILE
 from .controls import Intent
 
 
-# Weapon type ids.
 WEAPON_KNIFE = 0x08
 WEAPON_BOTTLE = 0x09
 WEAPON_BAT = 0x0A
 WEAPON_PIPE = 0x0B
 WEAPON_PEPPER = 0x0C
 
-# Grab sequence timing (agent decision ticks @ ~30 Hz with sticky hold).
-KNEE_PULSES = 2  # attack edges while grabbing
-THROW_FACE_TICKS = 2  # hold direction only so facing settles
-THROW_ATTACK_TICKS = 3  # direction + pulsed attack
+THROW_FACE_TICKS = 2
+THROW_ATTACK_TICKS = 4
+VAULT_TICKS = 3
+BACK_SUPLEX_TICKS = 4
 
 
 @dataclass(frozen=True, slots=True)
 class GrabContext:
-    """What the player is currently holding, if anything."""
-
     holding: bool
     weapon: bool
     enemy_grab: bool
@@ -53,7 +43,6 @@ class GrabContext:
 def context_from_player(me: MapEntity) -> GrabContext:
     held_type = me.held_type & 0xFF
     held_ptr = me.held_ptr & 0xFFFF
-    # Be liberal: any of type/ptr/action family means we own a hold.
     action_grab = is_grab_family(me.action_base)
     holding = held_type != 0 or held_ptr != 0 or action_grab
     weapon = 0x08 <= held_type <= 0x0C
@@ -76,26 +65,30 @@ def is_grab_family(action_base: int) -> bool:
         0x28 <= action_base <= 0x2F
         or 0x44 <= action_base <= 0x4F
         or action_base == 0x4A
-        or 0x30 <= action_base <= 0x3F  # grab strike variants in table $2D8C+
+        or 0x30 <= action_base <= 0x3F
     )
 
 
 @dataclass
 class GrabMemory:
-    """Per-player multi-tick grab/throw sequencer."""
+    """Phases: idle → [knee_*] → face → throw_*  OR  vault → suplex_*."""
 
-    phase: str = "idle"  # idle | knee_on | knee_off | face | throw_on | throw_off
+    phase: str = "idle"
     knee_pulses: int = 0
     face_ticks: int = 0
     throw_ticks: int = 0
-    throw_dir: int = 1  # +1 right, -1 left, 0 up
-    attack_gate: bool = False  # alternate for edge generation
+    vault_ticks: int = 0
+    suplex_ticks: int = 0
+    throw_dir: int = 1  # +1 right, -1 left (away from foe)
+    attack_gate: bool = False
 
     def reset(self) -> None:
         self.phase = "idle"
         self.knee_pulses = 0
         self.face_ticks = 0
         self.throw_ticks = 0
+        self.vault_ticks = 0
+        self.suplex_ticks = 0
         self.throw_dir = 1
         self.attack_gate = False
 
@@ -109,19 +102,21 @@ def decide_held(
     foe: MapEntity | None = None,
     progress_right: bool = True,
     crowd: int = 0,
+    profile: CharacterProfile | None = None,
 ) -> Intent | None:
-    """If holding something, return an intent; else None (caller continues)."""
-
     if ctx.hurt:
         memory.reset()
         return None
-
     if not ctx.holding:
         memory.reset()
         return None
 
+    prof = profile if profile is not None else DEFAULT_PROFILE
+
     if ctx.weapon:
-        return _weapon_tree(me, ctx, memory, tick=tick, foe=foe, crowd=crowd)
+        return _weapon_tree(
+            me, ctx, memory, tick=tick, foe=foe, crowd=crowd, profile=prof
+        )
 
     return _enemy_grab_tree(
         me,
@@ -131,27 +126,19 @@ def decide_held(
         foe=foe,
         progress_right=progress_right,
         crowd=crowd,
+        profile=prof,
     )
 
 
-def _throw_direction(
-    me: MapEntity,
-    *,
-    foe: MapEntity | None,
-    progress_right: bool,
-    crowd: int,
-) -> int:
-    """+1 right, -1 left, 0 up."""
+def _throw_away_direction(me: MapEntity, foe: MapEntity | None) -> int:
+    """B+away from bad guy: direction opposite the foe relative to us."""
 
-    if crowd >= 3:
-        return 0  # up-throw to clear pack
-    # Prefer throw toward stage progress.
-    direction = 1 if progress_right else -1
-    # Face away from densest nearby threat if known.
-    if foe is not None and abs(foe.map_x - me.map_x) > 8:
-        # Throw *along* progress, not necessarily toward the foe.
-        pass
-    return direction
+    if foe is None:
+        return -1  # default throw left
+    # Away from foe X.
+    if foe.map_x >= me.map_x:
+        return -1  # foe on right → throw left (away)
+    return 1
 
 
 def _enemy_grab_tree(
@@ -163,40 +150,69 @@ def _enemy_grab_tree(
     foe: MapEntity | None,
     progress_right: bool,
     crowd: int,
+    profile: CharacterProfile,
 ) -> Intent:
-    """Grabbed enemy: a couple of knee pulses, then face + throw with edges.
-
-    Attack is pulsed (on/off) so sticky ``hold_buttons`` still produces
-    press-edges. Direction for the throw stays held across the sequence.
-    """
+    """Prefer throw (and optional vault→suplex); knees only if profile allows."""
 
     if memory.phase == "idle":
-        memory.phase = "knee_on"
-        memory.knee_pulses = 0
-        memory.attack_gate = True
-
-    # --- Knee pulses: attack edge, no direction ---
-    if memory.phase in ("knee_on", "knee_off"):
-        if memory.knee_pulses >= KNEE_PULSES:
+        # Safe vault for back suplex (Adam/Blaze FAQ) when not crowded.
+        if profile.prefer_vault and crowd <= 1 and (tick + me.world_x) % 5 == 0:
+            memory.phase = "vault"
+            memory.vault_ticks = 0
+        elif profile.grab_knees > 0 and crowd < 2:
+            memory.phase = "knee_on"
+            memory.knee_pulses = 0
+        else:
             memory.phase = "face"
             memory.face_ticks = 0
-            memory.throw_dir = _throw_direction(
-                me, foe=foe, progress_right=progress_right, crowd=crowd
-            )
+            memory.throw_dir = _throw_away_direction(me, foe)
+
+    # --- Vault (C) then back-suplex (B) ---
+    if memory.phase == "vault":
+        memory.vault_ticks += 1
+        if memory.vault_ticks >= VAULT_TICKS:
+            memory.phase = "suplex_on"
+            memory.suplex_ticks = 0
+        return Intent(jump=True, note=f"vault ({profile.name})")
+
+    if memory.phase in ("suplex_on", "suplex_off"):
+        memory.suplex_ticks += 1
+        if memory.suplex_ticks > BACK_SUPLEX_TICKS * 2:
+            memory.reset()
+            return Intent(note="suplex done")
+        if memory.phase == "suplex_on":
+            memory.phase = "suplex_off"
+            return Intent(attack=True, note=f"back suplex ({profile.name})")
+        memory.phase = "suplex_on"
+        return Intent(note="suplex gap")
+
+    # --- Optional knee pulses (mostly Axel) ---
+    if memory.phase in ("knee_on", "knee_off"):
+        if memory.knee_pulses >= profile.grab_knees:
+            memory.phase = "face"
+            memory.face_ticks = 0
+            memory.throw_dir = _throw_away_direction(me, foe)
         elif memory.phase == "knee_on":
             memory.phase = "knee_off"
             memory.knee_pulses += 1
             return Intent(attack=True, note=f"grab knee {memory.knee_pulses}")
         else:
-            # Release attack one tick so the next knee is a fresh edge.
             memory.phase = "knee_on"
             return Intent(note="grab knee gap")
 
     left = memory.throw_dir < 0
     right = memory.throw_dir > 0
-    up = memory.throw_dir == 0
 
-    # --- Face settle: hold direction only ---
+    # Crowd: hurl toward densest progress direction instead of pure away.
+    if crowd >= 3 and memory.phase in ("face", "throw_on", "throw_off", "idle"):
+        # Prefer throwing into stage progress to hit packs.
+        if progress_right:
+            left, right = False, True
+            memory.throw_dir = 1
+        else:
+            left, right = True, False
+            memory.throw_dir = -1
+
     if memory.phase == "face":
         memory.face_ticks += 1
         if memory.face_ticks >= THROW_FACE_TICKS:
@@ -205,39 +221,25 @@ def _enemy_grab_tree(
         return Intent(
             left=left,
             right=right,
-            up=up,
-            note="grab face " + ("U" if up else ("L" if left else "R")),
+            note=f"throw face ({profile.name}) " + ("L" if left else "R"),
         )
 
-    # --- Throw: direction held + pulsed attack ---
     if memory.phase in ("throw_on", "throw_off"):
         memory.throw_ticks += 1
         if memory.throw_ticks > THROW_ATTACK_TICKS * 2:
-            # Finished sequence; if still holding next tick, restart.
             memory.reset()
-            # Keep facing so we don't spin.
-            return Intent(
-                left=left,
-                right=right,
-                up=up,
-                note="grab throw done",
-            )
+            return Intent(left=left, right=right, note="throw done")
         if memory.phase == "throw_on":
             memory.phase = "throw_off"
+            # B + away = shoulder throw / Blaze flip throw.
             return Intent(
                 left=left,
                 right=right,
-                up=up,
                 attack=True,
-                note="grab throw " + ("U" if up else ("L" if left else "R")),
+                note=f"throw ({profile.name}) " + ("L" if left else "R"),
             )
         memory.phase = "throw_on"
-        return Intent(
-            left=left,
-            right=right,
-            up=up,
-            note="grab throw gap",
-        )
+        return Intent(left=left, right=right, note="throw gap")
 
     memory.reset()
     return Intent(rear_attack=True, note="grab rear escape")
@@ -251,19 +253,17 @@ def _weapon_tree(
     tick: int,
     foe: MapEntity | None,
     crowd: int,
+    profile: CharacterProfile,
 ) -> Intent:
-    """Swing melee weapons; throw consumables at range. Pulse attack edges."""
-
     held = ctx.held_type
     melee = held in (WEAPON_BAT, WEAPON_PIPE)
     throwable = held in (WEAPON_KNIFE, WEAPON_BOTTLE, WEAPON_PEPPER)
 
-    face_left = False
-    face_right = False
-    face_up = False
-    face_down = False
-    in_melee = False
-    mid = False
+    # Blaze: weak with knife/bottle — prefer throwing them ASAP at mid range.
+    blaze_weak = held in profile.weak_weapons
+
+    face_left = face_right = face_up = face_down = False
+    in_melee = mid = False
     if foe is not None:
         dx = foe.map_x - me.map_x
         dy = foe.map_y - me.map_y
@@ -272,29 +272,37 @@ def _weapon_tree(
         face_up = dy < -8
         face_down = dy > 8
         in_melee = abs(dx) <= 36 and abs(dy) <= 14
-        mid = 20 <= abs(dx) <= 90
+        mid = 20 <= abs(dx) <= 100
 
-    # Alternate attack gate so sticky hold still makes edges.
     memory.attack_gate = not memory.attack_gate
     pulse = memory.attack_gate
 
     if melee:
+        # Adam/Blaze shine with bat/pipe — close and swing.
         if not in_melee and foe is not None:
             return Intent(
                 left=face_left,
                 right=face_right,
                 up=face_up,
                 down=face_down,
-                note=f"weapon approach ${held:02X}",
+                note=f"weapon approach ${held:02X} ({profile.name})",
             )
         return Intent(
             left=face_left,
             right=face_right,
             attack=pulse,
-            note=f"weapon swing ${held:02X}",
+            note=f"weapon swing ${held:02X} ({profile.name})",
         )
 
     if throwable:
+        if blaze_weak and foe is not None:
+            # Get rid of weak weapons quickly via throw.
+            return Intent(
+                left=face_left,
+                right=face_right,
+                attack=pulse,
+                note=f"dump weapon ${held:02X}",
+            )
         if foe is not None and in_melee and held == WEAPON_PEPPER:
             return Intent(attack=pulse, note="pepper spray")
         if foe is not None and mid:
@@ -325,8 +333,6 @@ def want_grab_approach(
     *,
     grab_bias: float,
 ) -> bool:
-    """True when we should walk into the foe without punching (grab setup)."""
-
     if grab_bias < 0.15:
         return False
     dx = abs(foe.map_x - me.map_x)

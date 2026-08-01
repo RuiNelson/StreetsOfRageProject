@@ -291,21 +291,25 @@ def attack_mix(
     phase_name: str = "normal",
     band: str = "close",
     behind: bool = False,
+    rear_sweet: bool = False,
 ) -> str:
     """Return 'punch' | 'jump' | 'rear' | 'grab_walk' | 'wait'."""
 
     if behind:
         return "rear"
+    # Adam/Blaze/Axel back-attack distance (FAQ ranges differ).
+    if rear_sweet and phase_name == "normal":
+        return "rear"
 
     if phase_name in ("knockdown", "blocked", "recovery"):
         return "punch" if in_range or band == "close" else "jump"
 
-    # Mid-range: jump+attack is the efficient opener.
+    # Character jump-kick window (GameFAQs: Blaze best, Adam good, Axel short).
     if band == "jump" and not plan.no_jump:
         return "jump"
     if band == "approach" and not plan.no_jump:
         roll = ((tick * 17) % 100) / 100.0
-        if roll < 0.55 + profile.jump_attack_bias * 0.3:
+        if roll < 0.50 + profile.jump_attack_bias * 0.35:
             return "jump"
         return "wait"
 
@@ -323,19 +327,24 @@ def attack_mix(
     roll = ((tick * 17) % 100) / 100.0
     jump_p = profile.jump_attack_bias + plan.jump_bias
     rear_p = profile.rear_attack_bias + plan.rear_bias
-    grab_p = plan.grab_bias * 0.5
+    combo_p = profile.combo_bias
+    grab_p = plan.grab_bias * 0.4 + profile.grab_bias * 0.2
 
     if plan.no_jump:
         jump_p = 0.0
     if crowd >= 3:
-        rear_p += 0.20
+        rear_p += 0.15
     if phase_name == "attacking":
-        rear_p += 0.30
+        rear_p += 0.25
 
-    if roll < rear_p:
+    # Order: rear reaction → jump → combo punch → rare grab setup.
+    # Blaze has low combo_bias so she leans jump/throw rather than mashing B.
+    if roll < rear_p * 0.85:
         return "rear"
-    if roll < rear_p + jump_p:
+    if roll < rear_p * 0.85 + jump_p:
         return "jump"
-    if roll < rear_p + jump_p + grab_p * 0.35 and phase_name == "normal":
+    if roll < rear_p * 0.85 + jump_p + combo_p:
+        return "punch"
+    if roll < rear_p * 0.85 + jump_p + combo_p + grab_p * 0.3 and phase_name == "normal":
         return "grab_walk"
     return "punch"

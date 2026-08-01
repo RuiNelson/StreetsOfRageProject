@@ -25,7 +25,7 @@ ON_SCREEN_RIGHT = float(SCREEN_WIDTH) + 24.0
 LOOKAHEAD_RIGHT = float(SCREEN_WIDTH) + 80.0
 LOOKAHEAD_LEFT = -48.0
 
-# Horizontal bands for attack choice (map/world units ≈ pixels).
+# Defaults if a profile omits bands (should not happen).
 PUNCH_RANGE = 32.0
 JUMP_KICK_MIN = 28.0
 JUMP_KICK_MAX = 72.0
@@ -201,17 +201,27 @@ def approach_vector(
 
 
 def engagement_band(abs_dx: float, abs_dy: float, profile: CharacterProfile) -> str:
-    """Classify distance: 'close' | 'jump' | 'approach' | 'far'."""
+    """Classify distance: 'close' | 'jump' | 'approach' | 'far'.
+
+    Jump windows are per character (GameFAQs). Back-attack range is checked
+    separately via ``rear_in_band`` because it overlaps jump for Adam/Blaze.
+    """
 
     if abs_dy > profile.lane_align + 16:
         return "approach"
     if abs_dx <= profile.strike_range + 8:
         return "close"
-    if JUMP_KICK_MIN <= abs_dx <= JUMP_KICK_MAX:
+    if profile.jump_kick_min <= abs_dx <= profile.jump_kick_max:
         return "jump"
-    if abs_dx <= JUMP_KICK_MAX + 40:
+    if abs_dx <= profile.jump_kick_max + 40:
         return "approach"
     return "far"
+
+
+def rear_in_band(abs_dx: float, profile: CharacterProfile) -> bool:
+    """True when distance matches this character's back-attack sweet spot."""
+
+    return profile.rear_range_min <= abs_dx <= profile.rear_range_max
 
 
 def peril_vector(
@@ -255,26 +265,37 @@ def select_pickup(
     allow_weapons: bool = True,
     max_dist: float = 160.0,
     already_holding_weapon: bool = False,
+    profile: CharacterProfile | None = None,
 ) -> MapEntity | None:
     best: MapEntity | None = None
-    best_d = max_dist
+    best_score = 1e9
     for entity in entities:
         if entity.kind == "weapon":
             if not allow_weapons or already_holding_weapon:
                 continue
+            # Prefer character-strong weapons; deprioritize weak ones (Blaze knives).
+            w_bonus = 0.0
+            if profile is not None:
+                tid = entity.type_id & 0xFF
+                if tid in profile.weak_weapons:
+                    w_bonus = 80.0  # almost ignore unless very close
+                elif tid in profile.preferred_weapons:
+                    w_bonus = -20.0
         elif entity.kind == "pickup":
             fam = entity.family
             if fam in ("Health",) and not allow_health:
                 continue
             if fam in ("Life", "Special") and not allow_special_life:
                 continue
+            w_bonus = 0.0
         else:
             continue
         if not is_on_screen(entity, soft=True):
             continue
         d = math.hypot(entity.map_x - me.map_x, entity.map_y - me.map_y)
-        if d < best_d:
-            best_d = d
+        score = d + w_bonus
+        if score < best_score and d <= max_dist + 40:
+            best_score = score
             best = entity
     return best
 

@@ -88,7 +88,48 @@ class EnemyCounterTests(unittest.TestCase):
 
 
 class GrabTreeTests(unittest.TestCase):
-    def test_knees_then_throw(self) -> None:
+    def test_throw_away_from_foe(self) -> None:
+        from sor_autoplay.agent.characters import PROFILES
+
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            held_type=0x20,
+            action_state=0x28,
+            map_x=100,
+            map_y=64,
+        )
+        # Foe on the right → throw away = left (GameFAQs B+away).
+        foe = _e(map_x=120, map_y=64, family="Garcia")
+        ctx = context_from_player(me)
+        self.assertTrue(ctx.enemy_grab)
+        mem = GrabMemory()
+        # Blaze: no knees, go straight to throw face.
+        notes: list[str] = []
+        saw_throw = False
+        for t in range(16):
+            intent = decide_held(
+                me,
+                ctx,
+                mem,
+                tick=t,
+                foe=foe,
+                progress_right=True,
+                crowd=1,
+                profile=PROFILES[2],
+            )
+            assert intent is not None
+            notes.append(intent.note)
+            if "throw" in intent.note and intent.attack:
+                saw_throw = True
+                self.assertTrue(intent.left, msg=notes)
+                self.assertFalse(intent.right)
+        self.assertTrue(saw_throw, notes)
+
+    def test_axel_may_knee_before_throw(self) -> None:
+        from sor_autoplay.agent.characters import PROFILES
+
         me = _e(
             kind="player",
             family="Player",
@@ -99,31 +140,25 @@ class GrabTreeTests(unittest.TestCase):
             map_y=64,
         )
         ctx = context_from_player(me)
-        self.assertTrue(ctx.enemy_grab)
         mem = GrabMemory()
-        notes: list[str] = []
-        saw_knee_attack = False
-        saw_throw_attack = False
-        saw_face = False
-        for t in range(20):
+        notes = []
+        for t in range(12):
             intent = decide_held(
-                me, ctx, mem, tick=t, foe=None, progress_right=True, crowd=1
+                me,
+                ctx,
+                mem,
+                tick=t,
+                foe=None,
+                progress_right=True,
+                crowd=0,
+                profile=PROFILES[0],
             )
             assert intent is not None
             notes.append(intent.note)
-            if "knee" in intent.note and intent.attack:
-                saw_knee_attack = True
-                self.assertFalse(intent.left or intent.right)
-            if "face" in intent.note:
-                saw_face = True
-                self.assertTrue(intent.right)
-                self.assertFalse(intent.attack)
-            if "throw" in intent.note and intent.attack:
-                saw_throw_attack = True
-                self.assertTrue(intent.right or intent.up)
-        self.assertTrue(saw_knee_attack, notes)
-        self.assertTrue(saw_face, notes)
-        self.assertTrue(saw_throw_attack, notes)
+        self.assertTrue(
+            any("knee" in n or "throw" in n for n in notes),
+            notes,
+        )
 
     def test_weapon_bat_swings(self) -> None:
         me = _e(

@@ -251,6 +251,7 @@ def _decide_one(
         foe=foe_near,
         progress_right=advice.progress_right,
         crowd=press.enemy_count,
+        profile=profile,
     )
     if held_intent is not None:
         walk.clear()
@@ -272,6 +273,7 @@ def _decide_one(
         allow_special_life=allow_star,
         allow_weapons=True,
         already_holding_weapon=me.is_holding_weapon,
+        profile=profile,
     )
     if item is not None:
         close = abs(item.world_x - me.world_x) < 22 and abs(item.world_y - me.world_y) < 14
@@ -377,6 +379,7 @@ def _decide_one(
                 phase_name=phase_name,
                 band=band,
                 behind=behind,
+                rear_sweet=combat.rear_in_band(abs_dx, profile),
             )
             if is_punishable(phase) and phase != CombatPhase.GRABBED:
                 walk.clear()
@@ -388,13 +391,14 @@ def _decide_one(
                     note=f"punish {target.entity.label} [{tag}]",
                 )
             if mix == "rear" or behind:
+                # Axel short/fast; Adam long/slow — band gated by rear_sweet.
                 walk.clear()
                 memory.set_attack_cd(player_index, 3)
                 return Intent(
                     left=face_left,
                     right=face_right_now,
                     rear_attack=True,
-                    note=f"rear {target.entity.label} [{tag}]",
+                    note=f"back atk {profile.name} {target.entity.label}",
                 )
             if mix == "jump":
                 # Jump+attack chord while holding direction toward foe.
