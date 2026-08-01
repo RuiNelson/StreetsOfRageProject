@@ -26,15 +26,14 @@ Agent goals and rules: [`AgentSpecs.md`](AgentSpecs.md).
 
 Per-player toggle (HUD button or keys **1** / **2**):
 
-- Fight nearby enemies/bosses with **family-specific counters** (Signal, Haku-Ro,
-  Nora, Jack projectiles, Abadede/Antonio/Souther/Bongo/twins, Mr. X)
-- **Grab/throw trees**: knees → directional throw; weapon swing/throw by type
+- **Phase-aware combat** from live RAM: knockdown punish, charge sidestep,
+  ignore dead/scripted, prefer foes hunting this player (`+$42` / boss target)
+- Family-specific counters (Signal, Haku-Ro, Nora, Jack, all bosses, Mr. X)
+- **Grab/throw trees**: knees → throw; weapon swing/throw by type
 - Character-tuned ranges (Axel / Adam / Blaze) including grab bias
-- Call police special under pressure (many enemies, low HP)
-- Pick up weapons/items; co-op fairness on health/life/special pickups
-- Stage rules: avoid holes (4), elevator edges (7), move left (8)
-- Mr. X dialog: always answer **NO**
-- Steady (no input) while paused or during police special
+- Police special under pressure (pack, hunters, chargers, low HP)
+- Pickups with co-op fairness; stage rules (holes / elevator / stage 8 left)
+- Mr. X dialog: always **NO**; steady on pause / police special
 
 **Standard control mapping** (OPTIONS scheme 0):
 
@@ -130,10 +129,11 @@ autoplay/
     memory_map.py       # addresses / names
     hazards.py          # pause, police, floor holes
     bcd.py              # packed-BCD helpers
+    phases.py           # ordinary/boss/player combat phase decode
     agent/
       controls.py       # standard button mapping
       policy.py         # decide_actions()
-      combat.py         # targeting / approach
+      combat.py         # phase-aware targeting / approach
       enemies.py        # family/boss counter plans
       grabs.py          # hold / knee / throw / weapon trees
       pressure.py       # police special score

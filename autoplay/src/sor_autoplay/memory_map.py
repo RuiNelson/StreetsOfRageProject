@@ -74,16 +74,40 @@ OBJ_PLAYER_FLAGS_59 = 0x59
 # Offsets within a player / generic object
 OBJ_TYPE = 0x00
 OBJ_FLAGS = 0x01  # bit0 set => hidden from SAT (see enqueue_object_render_bucket)
+OBJ_FACING = 0x09  # ordinary enemies: bit1 left/right (enemy-ai.md)
 OBJ_POS_X = 0x10  # long 16.16 world X; integer is the high word (unsigned)
 OBJ_POS_Y = 0x14  # long 16.16 lane / depth Y
 OBJ_POS_Z = 0x18  # long 16.16 height
-OBJ_ACTION_STATE = 0x30  # player action byte; ordinary enemy primary state (word hi)
+# Primary state: player uses low byte action; ordinary enemies use a *word*
+# in $0100 steps ($0100 normal … $0700 blocked). Bosses use a *byte* index.
+OBJ_PRIMARY_STATE = 0x30
+OBJ_ACTION_STATE = 0x30  # alias (player action byte = low of word)
 OBJ_HEALTH = 0x32
 OBJ_OUTGOING_DAMAGE = 0x34  # active hit descriptor low nibble when attacking
-OBJ_CHARACTER_ID = 0x50
-OBJ_COMBO_STATE = 0x5D  # player combo / action chain (see player_normal_attack_input)
+# Ordinary enemy: target player object pointer (low 16 bits of address).
+OBJ_TARGET_PTR = 0x42
+# Later bosses ($55-$58): abs X distance to target (word), pair role, tactical.
+OBJ_BOSS_DIST_X = 0x50  # also Abadede linked helper / character id on players
+OBJ_CHARACTER_ID = 0x50  # player character id (same offset, different meaning)
+OBJ_BOSS_DIST_LANE = 0x52
+OBJ_PAIR_ROLE = 0x5D  # later-boss pair role 1/2; player combo state reuses $5D
+OBJ_COMBO_STATE = 0x5D  # player combo / action chain
 OBJ_HELD_PTR = 0x5E  # word pointer to grabbed/held object
 OBJ_HELD_TYPE = 0x60  # nonzero while holding weapon or grab target type
+OBJ_BOSS_TACTICAL = 0x67  # later-boss tactical substate (and Abadede police latch)
+# Abadede / Mr. X selected player pointer.
+OBJ_BESPOKE_TARGET = 0x5C
+# Later-boss selected player pointer word.
+OBJ_LATER_BOSS_TARGET = 0x72
+
+# Ordinary-enemy primary state words (high byte = family index).
+ENEMY_ST_NORMAL = 0x0100
+ENEMY_ST_ALT = 0x0200
+ENEMY_ST_KNOCKDOWN = 0x0300
+ENEMY_ST_SCRIPTED = 0x0400
+ENEMY_ST_GRABBED = 0x0500
+ENEMY_ST_DEATH = 0x0600
+ENEMY_ST_BLOCKED = 0x0700
 
 # Player action-state families (bit0 often facing; compare with & ~1).
 ACTION_IDLE = 0x02
@@ -94,6 +118,10 @@ ACTION_GRAB = 0x28
 ACTION_GRAB_THROW = 0x44
 ACTION_HURT_MIN = 0x50
 ACTION_HURT_MAX = 0x5F
+
+# Fixed object bases (for decoding target pointers).
+ADDR_P1_OBJECT_LO = 0xB800  # low 16 of $FFB800
+ADDR_P2_OBJECT_LO = 0xB880
 
 # Match update_objects / enqueue_object_render_bucket: bit 0 of +$01 means
 # "do not draw". ordinary_enemy_activate sets it while waiting off-screen.

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..phases import CombatPhase, is_dangerous
 from ..state import GameSnapshot, PlayerSnapshot
 from ..world_map import MapEntity
 
@@ -20,6 +21,8 @@ class PressureReport:
     enemy_count: int
     boss_present: bool
     reason: str
+    hunters: int = 0
+    charging: int = 0
 
 
 def nearby_threats(
@@ -35,6 +38,8 @@ def nearby_threats(
     bosses: list[MapEntity] = []
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
+            continue
+        if entity.combat_phase in (CombatPhase.DEATH, CombatPhase.SCRIPTED):
             continue
         if abs(entity.map_x - player.map_x) > x_radius:
             continue
@@ -58,8 +63,12 @@ def compute_pressure(
         return PressureReport(0.0, 0, False, "no player")
 
     enemies, bosses = nearby_threats(player_entity, snapshot.world_map.entities)
+    all_near = enemies + bosses
     enemy_count = len(enemies)
     boss_present = bool(bosses)
+    seat = player_snap.index
+    hunters = sum(1 for e in all_near if e.targets_player == seat)
+    charging = sum(1 for e in all_near if is_dangerous(e.combat_phase))
 
     hp = player_snap.health_percent if player_snap.health_percent is not None else 100.0
     score = 0.0
@@ -78,6 +87,20 @@ def compute_pressure(
         score += 2.5
         reasons.append("boss")
 
+    if hunters >= 3:
+        score += 2.0
+        reasons.append(f"{hunters} hunting me")
+    elif hunters >= 2:
+        score += 1.0
+        reasons.append(f"{hunters} hunting")
+
+    if charging >= 2:
+        score += 2.0
+        reasons.append(f"{charging} charging")
+    elif charging == 1 and hp <= 50:
+        score += 1.2
+        reasons.append("charge + mid hp")
+
     if hp <= 25.0:
         score += 3.5
         reasons.append(f"hp {hp:.0f}%")
@@ -88,7 +111,6 @@ def compute_pressure(
         score += 1.0
         reasons.append("mid hp + pack")
 
-    # Extra weight when surrounded (enemies on both sides).
     left = sum(1 for e in enemies if e.map_x < player_entity.map_x - 8)
     right = sum(1 for e in enemies if e.map_x > player_entity.map_x + 8)
     if left >= 1 and right >= 1 and enemy_count >= 3:
@@ -100,6 +122,8 @@ def compute_pressure(
         enemy_count=enemy_count,
         boss_present=boss_present,
         reason=", ".join(reasons) if reasons else "calm",
+        hunters=hunters,
+        charging=charging,
     )
 
 

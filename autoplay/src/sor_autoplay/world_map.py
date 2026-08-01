@@ -16,6 +16,14 @@ from dataclasses import dataclass
 
 from . import memory_map as mm
 from .object_catalog import EntityStyle, player_style, style_for_type
+from .phases import (
+    CombatPhase,
+    boss_phase,
+    decode_target_seat,
+    ordinary_enemy_phase,
+    phase_label,
+    player_phase,
+)
 
 # Horizontal span of one Mega Drive screen in world-X units.
 SCREEN_WIDTH = 320
@@ -91,11 +99,19 @@ class MapEntity:
     health: int | None
     slot: str
     # Agent combat fields (defaults keep older call sites valid).
-    action_state: int = 0  # object +$30 (player action / enemy primary)
+    action_state: int = 0  # low byte of +$30 (player action / boss primary)
+    primary_state: int = 0  # full word at +$30 (ordinary enemy $0100 steps)
     held_type: int = 0  # player +$60; nonzero while holding weapon/grab target
     held_ptr: int = 0  # player +$5E low word
     outgoing_damage: int = 0  # +$34 active hit frame damage nibble
     combo_state: int = 0  # player +$5D
+    tactical: int = 0  # boss +$67
+    pair_role: int = 0  # later-boss +$5D (1/2) when kind==boss
+    target_ptr: int = 0  # ordinary +$42 / boss target low word
+    facing_left: bool = False  # ordinary +$09 bit1
+    boss_dist_x: int = 0  # later-boss +$50 abs X to target
+    boss_dist_lane: int = 0  # later-boss +$52 abs lane to target
+    combat_phase: CombatPhase = CombatPhase.UNKNOWN
 
     # Back-compat aliases used by HUD/app during the rename.
     @property
@@ -137,6 +153,16 @@ class MapEntity:
         base = self.action_base
         return 0x50 <= base <= 0x5F
 
+    @property
+    def phase_tag(self) -> str:
+        return phase_label(self.combat_phase)
+
+    @property
+    def targets_player(self) -> int | None:
+        """1 or 2 if this combatant is targeting that player seat."""
+
+        return decode_target_seat(self.target_ptr)
+
 
 @dataclass(frozen=True, slots=True)
 class WorldMap:
@@ -175,6 +201,24 @@ class WorldMap:
         counts: dict[str, int] = {}
         for entity in self.entities:
             counts[entity.kind] = counts.get(entity.kind, 0) + 1
+        return counts
+
+    def threats_targeting(self, player_index: int) -> tuple[MapEntity, ...]:
+        """Combatants whose ROM target pointer points at this player seat."""
+
+        return tuple(
+            e
+            for e in self.entities
+            if e.kind in ("enemy", "boss") and e.targets_player == player_index
+        )
+
+    def phase_counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for entity in self.entities:
+            if entity.kind not in ("enemy", "boss"):
+                continue
+            tag = entity.phase_tag
+            counts[tag] = counts.get(tag, 0) + 1
         return counts
 
 
@@ -248,11 +292,46 @@ def _entity_from_object(
         health = _u16(slot, mm.OBJ_HEALTH)
     else:
         health = None
-    action_state = _u8(slot, mm.OBJ_ACTION_STATE)
-    held_type = _u8(slot, mm.OBJ_HELD_TYPE) if style.kind == "player" else 0
-    held_ptr = _u16(slot, mm.OBJ_HELD_PTR) if style.kind == "player" else 0
+
+    primary_state = _u16(slot, mm.OBJ_PRIMARY_STATE)
+    action_state = primary_state & 0xFF
     outgoing = _u8(slot, mm.OBJ_OUTGOING_DAMAGE)
-    combo = _u8(slot, mm.OBJ_COMBO_STATE) if style.kind == "player" else 0
+    facing_left = bool(_u8(slot, mm.OBJ_FACING) & 0x02)
+
+    held_type = 0
+    held_ptr = 0
+    combo = 0
+    tactical = 0
+    pair_role = 0
+    target_ptr = 0
+    boss_dist_x = 0
+    boss_dist_lane = 0
+    phase = CombatPhase.UNKNOWN
+
+    if style.kind == "player":
+        held_type = _u8(slot, mm.OBJ_HELD_TYPE)
+        held_ptr = _u16(slot, mm.OBJ_HELD_PTR)
+        combo = _u8(slot, mm.OBJ_COMBO_STATE)
+        phase = player_phase(action_byte=action_state, held_type=held_type)
+    elif style.kind == "enemy":
+        target_ptr = _u16(slot, mm.OBJ_TARGET_PTR)
+        phase = ordinary_enemy_phase(primary_state)
+    elif style.kind == "boss":
+        tactical = _u8(slot, mm.OBJ_BOSS_TACTICAL)
+        pair_role = _u8(slot, mm.OBJ_PAIR_ROLE)
+        boss_dist_x = _u16(slot, mm.OBJ_BOSS_DIST_X)
+        boss_dist_lane = _u16(slot, mm.OBJ_BOSS_DIST_LANE)
+        # Target pointer location differs by boss generation.
+        if type_id in (0x30, 0x35):
+            target_ptr = _u16(slot, mm.OBJ_BESPOKE_TARGET)
+        else:
+            target_ptr = _u16(slot, mm.OBJ_LATER_BOSS_TARGET)
+        phase = boss_phase(
+            type_id=type_id, primary_byte=action_state, tactical=tactical
+        )
+    elif style.kind == "projectile":
+        phase = CombatPhase.ATTACKING
+
     return MapEntity(
         kind=style.kind,
         family=style.family,
@@ -268,10 +347,18 @@ def _entity_from_object(
         health=health,
         slot=slot_name,
         action_state=action_state,
+        primary_state=primary_state,
         held_type=held_type,
         held_ptr=held_ptr,
         outgoing_damage=outgoing,
         combo_state=combo,
+        tactical=tactical,
+        pair_role=pair_role,
+        target_ptr=target_ptr,
+        facing_left=facing_left,
+        boss_dist_x=boss_dist_x,
+        boss_dist_lane=boss_dist_lane,
+        combat_phase=phase,
     )
 
 

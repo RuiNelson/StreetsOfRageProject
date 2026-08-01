@@ -373,6 +373,18 @@ def snapshot_from_memory_blocks(
             "mr_x_offer_state": mr_x_offer_state & 0xFF,
             "p1_obj59": p1_obj59 & 0xFF,
             "p2_obj59": p2_obj59 & 0xFF,
+            "p1_hunters": len(world.threats_targeting(1)),
+            "p2_hunters": len(world.threats_targeting(2)),
+            "phase_knockdown": sum(
+                1
+                for e in world.entities
+                if e.kind in ("enemy", "boss") and e.phase_tag == "down"
+            ),
+            "phase_charge": sum(
+                1
+                for e in world.entities
+                if e.kind in ("enemy", "boss") and e.phase_tag == "charge"
+            ),
         },
     )
 

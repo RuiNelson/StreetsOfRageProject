@@ -72,8 +72,16 @@ that layout yet.
 9. Avoid floor holes (stage 4) and elevator edges (stage 7)
 10. Progress right (stage 8: left) when the screen is clear
 
-Map entities now carry `action_state`, `held_type`, `held_ptr`, `outgoing_damage`,
-`combo_state` for the agent (plot still ignores them).
+Map entities carry full combat RAM for agents:
+
+- `primary_state` (word +$30): ordinary `$0100` normal / `$0300` knockdown /
+  `$0500` grabbed / `$0600` death / `$0700` blocked
+- `tactical` (boss +$67), `pair_role` (+$5D), `target_ptr` (who they hunt)
+- `boss_dist_x` / `boss_dist_lane` (later-boss geometry)
+- `combat_phase` decoded in `phases.py` → map outline colours + agent punish/evade
+
+HUD map: phase outline (green=down, orange=charge, red=atk…), hunt counts,
+phase tallies in the map meta line.
 
 ### UI
 
@@ -132,6 +140,6 @@ See `src/sor_autoplay/memory_map.py` and
 ## Next milestones
 
 - Optional `--altControls` mapping (deferred)
-- Frame-tighter boss phase reads from object `+$30`/`+$67` tactical substates
+- Per-family named move tables from animation callbacks (deeper TAS path)
 - Attract-vs-real-play discrimination if needed
 - Optional transparent overlay instead of black stage

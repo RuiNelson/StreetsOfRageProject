@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ..phases import CombatPhase, is_dangerous, is_punishable
 from ..state import GameSnapshot, PlayerSnapshot
 from ..world_map import MapEntity
 from . import combat, coop, enemies as enemy_ai, grabs, pressure, stage
@@ -270,21 +271,30 @@ def _decide_one(
         )
         return _apply_stage_geometry(intent, me, snapshot, advice)
 
-    # --- Combat target with family counters ---
+    # --- Combat target with family counters + live ROM phases ---
     target = combat.select_target(
         me,
         snapshot.world_map.entities,
         profile,
         prefer_forward=advice.progress_right,
+        my_seat=player_index,
     )
     if target is not None:
         dx, dy, in_range, plan = combat.approach_vector(
             me, target, profile, low_health=low_hp
         )
-        # Crowd relief when surrounded and not yet in a clean strike.
-        if not in_range and press.enemy_count >= 3 and not plan.sidestep:
+        phase = target.entity.combat_phase
+        phase_name = phase.name.lower()
+
+        # Crowd / multi-hunter relief when not in a free punish.
+        hunters = combat.count_hunters(snapshot.world_map.entities, player_index)
+        if (
+            not in_range
+            and not is_punishable(phase)
+            and (press.enemy_count >= 3 or hunters >= 2)
+        ):
             px, py = combat.peril_vector(me, snapshot.world_map.entities)
-            if px != 0:
+            if px != 0 and not is_dangerous(phase):
                 dx = px
             if py != 0 and abs(dy) < 0.5:
                 dy = py
@@ -292,7 +302,8 @@ def _decide_one(
         attack = False
         jump = False
         rear = False
-        note = f"fight {target.entity.label}"
+        tag = target.entity.phase_tag
+        note = f"{target.entity.label} [{tag}]"
         cd = memory.attack_cd(player_index)
 
         # Projectile: pure evade (no attack).
@@ -307,6 +318,14 @@ def _decide_one(
             )
             return _apply_stage_geometry(intent, me, snapshot, advice)
 
+        # Don't punch a foe already held by someone else (unless it's us).
+        if phase == CombatPhase.GRABBED and not me.is_grabbing:
+            note = f"skip held {target.entity.label}"
+            # Re-target by treating as ignore next tick: step past toward progress.
+            dx = 1.0 if advice.progress_right else -1.0
+            intent = Intent(left=dx < 0, right=dx > 0, note=note)
+            return _apply_stage_geometry(intent, me, snapshot, advice)
+
         if in_range and cd == 0 and not me.is_hurt:
             mix = enemy_ai.attack_mix(
                 plan,
@@ -314,35 +333,44 @@ def _decide_one(
                 tick=memory.tick + player_index * 3,
                 in_range=in_range,
                 crowd=press.enemy_count,
+                phase_name=phase_name,
             )
-            # Blend character grab bias with plan.
-            if mix == "grab_walk" or (
+            if is_punishable(phase) and phase != CombatPhase.GRABBED:
+                attack = True
+                note = f"punish {target.entity.label} [{tag}]"
+                memory.set_attack_cd(player_index, 2)
+            elif mix == "grab_walk" or (
                 grabs.want_grab_approach(
                     me,
                     target.entity,
                     grab_bias=max(plan.grab_bias, profile.grab_bias),
                 )
                 and (memory.tick + player_index) % 4 == 0
+                and phase_name == "normal"
             ):
-                # Walk into foe without B so contact can start a grab.
                 attack = False
                 note = f"grab setup {target.entity.label}"
                 memory.set_attack_cd(player_index, 2)
             elif mix == "rear":
                 rear = True
-                note = f"rear {target.entity.label}"
+                note = f"rear {target.entity.label} [{tag}]"
                 memory.set_attack_cd(player_index, 4)
             elif mix == "jump":
                 jump = True
                 attack = True
-                note = f"jump {target.entity.label}"
+                note = f"jump {target.entity.label} [{tag}]"
                 memory.set_attack_cd(player_index, 5)
             else:
                 attack = True
-                note = f"punch {target.entity.label} ({plan.note})"
+                note = f"punch {target.entity.label} [{tag}]"
                 memory.set_attack_cd(player_index, 3)
         elif not in_range:
-            note = f"close {target.entity.label} ({plan.note})"
+            if is_dangerous(phase):
+                note = f"evade {target.entity.label} [{tag}]"
+            elif is_punishable(phase):
+                note = f"chase punish {target.entity.label} [{tag}]"
+            else:
+                note = f"close {target.entity.label} [{tag}]"
 
         intent = Intent(
             left=dx < 0,

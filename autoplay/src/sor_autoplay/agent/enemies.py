@@ -297,15 +297,25 @@ def attack_mix(
     tick: int,
     in_range: bool,
     crowd: int,
+    phase_name: str = "normal",
 ) -> str:
     """Return one of: 'punch', 'jump', 'rear', 'grab_walk', 'wait'.
 
     ``grab_walk`` means close without attacking so collision can start a hold.
+    ``phase_name`` is a CombatPhase.name lowercased (e.g. knockdown, charge).
     """
 
+    # Free punish: always mash grounded attacks, never jump into recovery.
+    if phase_name in ("knockdown", "blocked", "recovery"):
+        if not in_range:
+            return "wait"
+        return "punch"
+
+    if phase_name in ("charge", "attacking") and plan.sidestep and not in_range:
+        return "wait"  # position first
+
     if not in_range:
-        # When almost in grab range for grab-biased foes, walk in without punch.
-        if plan.grab_bias >= 0.25:
+        if plan.grab_bias >= 0.25 and phase_name == "normal":
             return "grab_walk"
         return "wait"
 
@@ -314,13 +324,15 @@ def attack_mix(
     rear_p = profile.rear_attack_bias + plan.rear_bias
     grab_p = plan.grab_bias
 
-    if plan.no_jump:
+    if plan.no_jump or phase_name in ("charge", "attacking"):
         jump_p = 0.0
     if crowd >= 3:
         rear_p += 0.15
+    # Escape / anti-air feel: rear when they commit an attack in close.
+    if phase_name == "attacking":
+        rear_p += 0.25
 
-    # Normalize loosely.
-    if roll < grab_p * 0.5:
+    if roll < grab_p * 0.5 and phase_name == "normal":
         return "grab_walk"
     if roll < grab_p * 0.5 + rear_p:
         return "rear"

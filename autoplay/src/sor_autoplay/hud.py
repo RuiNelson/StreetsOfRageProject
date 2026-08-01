@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 from typing import Callable
 
+from .phases import phase_color
 from .state import GameSnapshot, PlayerSnapshot
 from .world_map import MAP_ASPECT, WorldMap
 
@@ -179,9 +180,9 @@ class ObserverHud:
         self._map_legend = tk.Label(
             self._map_frame,
             text=(
-                "1/2 players (blue Axel · yellow Adam · red Blaze)   "
-                "G Garcia  S Signal  H Haku-Ro  N Nora  J Jack   "
-                "B boss   k/b/|/p weapons   a apple  + food  $ score  ♥ life  ★ special   #/□ breakables"
+                "1/2 players   G Garcia  S Signal  H Haku-Ro  N Nora  J Jack   B boss   "
+                "outline: green=down  orange=charge  red=atk  cyan=block  purple=held   "
+                "symbol suffix = phase (d/c/a/…)   k/b weapons  a/+ food"
             ),
             fg=_DIM,
             bg=_CARD,
@@ -406,8 +407,16 @@ class ObserverHud:
         notes = ("", "")
         if self._agent_notes_provider is not None:
             notes = self._agent_notes_provider()
-        self._p1_agent_note.configure(text=f"AI: {notes[0]}" if notes[0] else "AI: —")
-        self._p2_agent_note.configure(text=f"AI: {notes[1]}" if notes[1] else "AI: —")
+        h1 = len(snapshot.world_map.threats_targeting(1))
+        h2 = len(snapshot.world_map.threats_targeting(2))
+        p1_ai = notes[0] if notes[0] else "—"
+        p2_ai = notes[1] if notes[1] else "—"
+        self._p1_agent_note.configure(
+            text=f"AI: {p1_ai}" + (f"  ·  hunted×{h1}" if h1 else "")
+        )
+        self._p2_agent_note.configure(
+            text=f"AI: {p2_ai}" + (f"  ·  hunted×{h2}" if h2 else "")
+        )
 
         self._latest_map = snapshot.world_map
         self._latest_holes = snapshot.floor_holes
@@ -456,14 +465,20 @@ class ObserverHud:
         canvas = self._canvas
         counts = world.counts_by_kind()
         count_bits = "  ".join(f"{k}:{n}" for k, n in sorted(counts.items()) if n)
+        phases = world.phase_counts()
+        phase_bits = "  ".join(f"{k}:{n}" for k, n in sorted(phases.items()) if n)
         cam_aspect = world.camera_width / world.camera_height
         hole_note = f"  holes:{len(holes)}" if holes else ""
+        hunt1 = len(world.threats_targeting(1))
+        hunt2 = len(world.threats_targeting(2))
+        hunt_note = ""
+        if hunt1 or hunt2:
+            hunt_note = f"  hunt P1:{hunt1} P2:{hunt2}"
         meta = (
             f"cam X={world.camera_x}  "
             f"lane 0..{world.camera_bottom:.0f}  "
-            f"cam {world.camera_width:.0f}x{world.camera_height:.0f} "
-            f"(w/h={cam_aspect:.3f})   "
-            f"{count_bits or 'empty'}{hole_note}"
+            f"{count_bits or 'empty'}  "
+            f"{phase_bits}{hole_note}{hunt_note}"
         )
         if meta != self._last_meta_text:
             self._last_meta_text = meta
@@ -565,12 +580,26 @@ class ObserverHud:
             disc_id, text_id = self._markers[drawn]
             r = boss_r if entity.kind in ("player", "boss") else marker_r
             canvas.coords(disc_id, cx - r, cy - r, cx + r, cy + r)
-            canvas.itemconfigure(disc_id, state="normal")
+            outline = phase_color(entity.combat_phase)
+            canvas.itemconfigure(
+                disc_id,
+                state="normal",
+                fill=entity.color,
+                outline=outline if outline else "#1a1b22",
+                width=3 if outline else 1,
+            )
             canvas.coords(text_id, cx, cy)
+            # Symbol; combatants append a 1-char phase hint when not idle.
+            symbol = entity.symbol
+            if entity.kind in ("enemy", "boss") and entity.phase_tag not in (
+                "idle",
+                "?",
+            ):
+                symbol = f"{entity.symbol}{entity.phase_tag[0]}"
             canvas.itemconfigure(
                 text_id,
                 state="normal",
-                text=entity.symbol,
+                text=symbol,
                 fill=entity.color,
             )
             # Markers above holes and camera.
