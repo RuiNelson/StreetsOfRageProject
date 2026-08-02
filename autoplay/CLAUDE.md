@@ -10,6 +10,30 @@
 specials, timer, level, scores, 2D world map) **plus** optional scripted agents
 that inject standard-control input through `press_buttons`.
 
+## AISpec.md — living AI behaviour contract
+
+**Read `AISpec.md` before changing agent behaviour.** It is the full
+plain-English specification of the scripted AI (pipeline, modes, skills,
+combat, grabs, co-op, navigation, police, evaluation contract). Implementation
+lives under `src/sor_autoplay/agent/`.
+
+`AISpec.md` and the agent code are a **bidirectional source of truth**:
+
+| Change | Also update |
+| --- | --- |
+| Edit intended behaviour in `AISpec.md` | Implement the same rule in `src/sor_autoplay/agent/` (and tests when practical) |
+| Change agent code behaviour | Update the matching section(s) of `AISpec.md` in the **same** change set |
+
+Do not leave the document and code describing different priorities, modes, or
+button rules. Prefer editing `AISpec.md` first when the user describes a
+behaviour change in plain language; prefer code first when fixing a
+ROM-verified edge, then reflect the fix in the spec.
+
+This file (`CLAUDE.md`) keeps operator notes, RAM maps, commands, and
+implementation checkpoints. **Authoritative player-facing / design behaviour
+belongs in `AISpec.md`.** When they disagree, fix the mismatch rather than
+silently following only one side.
+
 ## Ownership
 
 - Project-owned directory in the StreetsOfRageProject workspace.
@@ -49,8 +73,9 @@ machine may lack Tk.
 
 ## Agent design (standard controls only)
 
-Specs live in `AISpec.md` (living plain-English AI document; keep in sync with
-code). Implementation under `src/sor_autoplay/agent/`.
+Full behaviour: **`AISpec.md`** (see section above). Code:
+`src/sor_autoplay/agent/`. The notes below are a quick checkpoint for agents
+working in this tree; they must stay consistent with `AISpec.md`.
 
 **Controls assumption:** OPTIONS scheme 0 and **no** host `--altControls`.
 

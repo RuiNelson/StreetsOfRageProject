@@ -25,12 +25,12 @@ HUD can run without agents; agents are optional and toggled per seat.
 
 ### 1.1 What the AI may and may not do
 
-| Allowed | Forbidden |
-| --- | --- |
-| Press D-pad, A, B, C (standard layout) | Press Start (agents never pause) |
-| Hold directions between polls | Use host `--altControls` layout |
-| Pulse face buttons for ROM input edges | Cheat via direct RAM writes for play |
-| Read RAM for perception | Invent button sequences illegal for the current ROM action |
+| Allowed                                | Forbidden                                                  |
+| -------------------------------------- | ---------------------------------------------------------- |
+| Press D-pad, A, B, C (standard layout) | Press Start (agents never pause)                           |
+| Hold directions between polls          | Use host `--altControls` layout                            |
+| Pulse face buttons for ROM input edges | Cheat via direct RAM writes for play                       |
+| Read RAM for perception                | Invent button sequences illegal for the current ROM action |
 
 **Evaluation lockstep** may seed RNG and frame phase for comparable tests;
 those writes are test setup only. Live play uses controller inputs alone.
@@ -39,13 +39,13 @@ those writes are test setup only. Live play uses controller inputs alone.
 
 OPTIONS control scheme **0**. Host must **not** use `--altControls`.
 
-| Physical button | Meaning |
-| --- | --- |
-| **B** | Attack, pickup, knee while holding, weapon swing/throw |
-| **C** | Jump; crossover vault while holding an enemy |
-| **A** | Call the police special |
-| **B + C together** | Rear / back attack (never used as a jump-kick) |
-| **D-pad** | Move (up = back of stage / smaller lane Y) |
+| Physical button    | Meaning                                                |
+| ------------------ | ------------------------------------------------------ |
+| **B**              | Attack, pickup, knee while holding, weapon swing/throw |
+| **C**              | Jump; crossover vault while holding an enemy           |
+| **A**              | Call the police special                                |
+| **B + C together** | Rear / back attack (never used as a jump-kick)         |
+| **D-pad**          | Move (up = back of stage / smaller lane Y)             |
 
 Jump-kick is **C first, then B on a later decision while airborne** — never
 C and B on the same tick (that is the rear attack).
@@ -110,16 +110,16 @@ Emit empty masks when:
 
 ### 3.2 Per-seat exclusive modes
 
-| Mode | When | Behaviour |
-| --- | --- | --- |
-| **Dialog** | Mr. X end offer is live | Always select **NO**, then confirm |
-| **Not playable** | No player entity or seat not playable | Idle |
-| **Enemy held** | Player actions in the enemy-grab family (`$78–$7E`) | Own the full escape: C to cross, wait, B in the counter window |
-| **Hurt** | Player is in a hurt reaction | Clear plans and walk; wait (no input mash) |
-| **Grab animation** | Closed throw/knee anims | Hold ownership with empty input (do not re-fire B) |
-| **Airborne** | Jump action family | Aim toward target; B only in free-flight, never launch/land |
-| **Holding** | Player holds a weapon or an enemy | Hold-resolve skill (after police when applicable) |
-| **Free** | Grounded, not held, not exclusive above | Full free tactical path |
+| Mode               | When                                                | Behaviour                                                      |
+| ------------------ | --------------------------------------------------- | -------------------------------------------------------------- |
+| **Dialog**         | Mr. X end offer is live                             | Always select **NO**, then confirm                             |
+| **Not playable**   | No player entity or seat not playable               | Idle                                                           |
+| **Enemy held**     | Player actions in the enemy-grab family (`$78–$7E`) | Own the full escape: C to cross, wait, B in the counter window |
+| **Hurt**           | Player is in a hurt reaction                        | Clear plans and walk; wait (no input mash)                     |
+| **Grab animation** | Closed throw/knee anims                             | Hold ownership with empty input (do not re-fire B)             |
+| **Airborne**       | Jump action family                                  | Aim toward target; B only in free-flight, never launch/land    |
+| **Holding**        | Player holds a weapon or an enemy                   | Hold-resolve skill (after police when applicable)              |
+| **Free**           | Grounded, not held, not exclusive above             | Full free tactical path                                        |
 
 Mode classification order: dialog → not playable → enemy held → hurt → grab
 animation → airborne → holding → free.
@@ -228,20 +228,20 @@ marks impossible.
 
 ### 4.1 Relations (hard facts)
 
-| Relation | Meaning |
-| --- | --- |
-| **Reachable** | Can interact: on-screen (or boss margin), playable lane, alive if combatant |
-| **Defeated** | Signed-negative health / death — never target, chase, or treat as danger |
-| **Targets player** | Enemy AI is hunting this seat |
-| **Dangerous** | Decoded attack / wind-up phase (or launched projectile) |
-| **Punishable** | Downed / open for free hits |
-| **Behind player** | On the player’s rear arc relative to facing |
-| **Same lane** | Lane Y within ±12 |
-| **Near player** | Distance ≤ 160 |
-| **Blocks progress** | Live combatant that should stop forward scroll chase |
-| **Collectible** | Free ground weapon/pickup in loot camera band |
-| **Armed / Throwing / Grabbable** | Jack weapon phases and grab affordances |
-| **Attached / Launched** | Jack helper object phases |
+| Relation                         | Meaning                                                                     |
+| -------------------------------- | --------------------------------------------------------------------------- |
+| **Reachable**                    | Can interact: on-screen (or boss margin), playable lane, alive if combatant |
+| **Defeated**                     | Signed-negative health / death — never target, chase, or treat as danger    |
+| **Targets player**               | Enemy AI is hunting this seat                                               |
+| **Dangerous**                    | Decoded attack / wind-up phase (or launched projectile)                     |
+| **Punishable**                   | Downed / open for free hits                                                 |
+| **Behind player**                | On the player’s rear arc relative to facing                                 |
+| **Same lane**                    | Lane Y within ±12                                                           |
+| **Near player**                  | Distance ≤ 160                                                              |
+| **Blocks progress**              | Live combatant that should stop forward scroll chase                        |
+| **Collectible**                  | Free ground weapon/pickup in loot camera band                               |
+| **Armed / Throwing / Grabbable** | Jack weapon phases and grab affordances                                     |
+| **Attached / Launched**          | Jack helper object phases                                                   |
 
 ### 4.2 Visibility and targeting rules
 
@@ -271,11 +271,11 @@ utility** with hysteresis.
 
 ### 5.1 Feasibility
 
-| Goal | Feasible when |
-| --- | --- |
-| **Fight** | A reachable combat target exists (or a blocker without a fresh target) |
-| **Loot** | Collectible item exists **and** no boss blocks the arena **and** no near dangerous foe |
-| **Progress** | Nothing blocks progress on the graph |
+| Goal         | Feasible when                                                                          |
+| ------------ | -------------------------------------------------------------------------------------- |
+| **Fight**    | A reachable combat target exists (or a blocker without a fresh target)                 |
+| **Loot**     | Collectible item exists **and** no boss blocks the arena **and** no near dangerous foe |
+| **Progress** | Nothing blocks progress on the graph                                                   |
 
 ### 5.2 Utility ideas (plain English)
 
@@ -319,15 +319,15 @@ air-punch bug.
 
 ### 6.2 Character profiles
 
-| | Axel | Adam | Blaze |
-| --- | --- | --- | --- |
-| Identity | Strong combo, slower, short rear | Balanced, best rear range, loves bat/pipe | Fast, weak ground combo, best jump kick |
-| Strike range (policy) | ~52 | ~50 | ~62 |
-| Stand-off approach | ~46 | ~44 | ~56 |
-| Jump kick | Short window | Good | Best — prefer often |
-| Rear (B+C) | Short/fast only when close | Long range | Mid |
-| Grab | Prefer spaced punches | Prefer throw / vault | Prefer throw / vault |
-| Weapons | Average all | Prefer bat/pipe | Prefer bat/pipe; knife/bottle weak |
+|                       | Axel                             | Adam                                      | Blaze                                   |
+| --------------------- | -------------------------------- | ----------------------------------------- | --------------------------------------- |
+| Identity              | Strong combo, slower, short rear | Balanced, best rear range, loves bat/pipe | Fast, weak ground combo, best jump kick |
+| Strike range (policy) | ~52                              | ~50                                       | ~62                                     |
+| Stand-off approach    | ~46                              | ~44                                       | ~56                                     |
+| Jump kick             | Short window                     | Good                                      | Best — prefer often                     |
+| Rear (B+C)            | Short/fast only when close       | Long range                                | Mid                                     |
+| Grab                  | Prefer spaced punches            | Prefer throw / vault                      | Prefer throw / vault                    |
+| Weapons               | Average all                      | Prefer bat/pipe                           | Prefer bat/pipe; knife/bottle weak      |
 
 Measured first-punch live boxes reach about 57 / 54 / 68 px; policy keeps 4–6 px
 inner margin. Stand at approach offset, not body-grab range (~≤18).
@@ -362,18 +362,18 @@ Airborne branch later emits B only in free-flight states.
 
 ### 6.6 Family counters (summary)
 
-| Family | Prefer |
-| --- | --- |
-| **Garcia** | Close combo / grab; intercept wind-ups early |
-| **Signal** | Mid/far spacing; C→B jump kicks; jump early on low sweep |
-| **Haku-Ro** | Jump intercept; do not chase teleports |
-| **Nora** | Close for grab → knee/throw; distrust “downed” feints |
-| **Jack** | Punch while armed; **do not grab** until throw window or unarmed; dodge launched helpers only |
-| **Abadede / Bongo** | Sidestep charge/flame; no jump into them |
-| **Antonio** | Outside mid attack window; re-align to boss lane if charging far away |
-| **Souther** | Stay grounded; leave committed claw lane |
-| **Onihime/Yasha** | Stay mobile; leave shared lane when both bracket the player |
-| **Mr. X** | Mid-close pressure; rear escape when charged |
+| Family              | Prefer                                                                                        |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| **Garcia**          | Close combo / grab; intercept wind-ups early                                                  |
+| **Signal**          | Mid/far spacing; C→B jump kicks; jump early on low sweep                                      |
+| **Haku-Ro**         | Jump intercept; do not chase teleports                                                        |
+| **Nora**            | Close for grab → knee/throw; distrust “downed” feints                                         |
+| **Jack**            | Punch while armed; **do not grab** until throw window or unarmed; dodge launched helpers only |
+| **Abadede / Bongo** | Sidestep charge/flame; no jump into them                                                      |
+| **Antonio**         | Outside mid attack window; re-align to boss lane if charging far away                         |
+| **Souther**         | Stay grounded; leave committed claw lane                                                      |
+| **Onihime/Yasha**   | Stay mobile; leave shared lane when both bracket the player                                   |
+| **Mr. X**           | Mid-close pressure; rear escape when charged                                                  |
 
 ### 6.7 Back security (free combat)
 
@@ -491,13 +491,13 @@ latches must not keep re-aiming into the same wall.
 
 ### 9.5 Stage special cases
 
-| Stage | Rule |
-| --- | --- |
-| **Most stages** | Progress right when no blocker |
-| **Stage 4** | Hole detours as above |
-| **Stage 7 (elevator)** | No horizontal progress; center lane `$50`; no LEFT/RIGHT progression; class-0 cells are not holes |
-| **Stage 8** | Progress **left**; Mr. X offer always **NO** |
-| **Round 8 moving props** | Evade then smash only in range (see free path) |
+| Stage                    | Rule                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------- |
+| **Most stages**          | Progress right when no blocker                                                                    |
+| **Stage 4**              | Hole detours as above                                                                             |
+| **Stage 7 (elevator)**   | No horizontal progress; center lane `$50`; no LEFT/RIGHT progression; class-0 cells are not holes |
+| **Stage 8**              | Progress **left**; Mr. X offer always **NO**                                                      |
+| **Round 8 moving props** | Evade then smash only in range (see free path)                                                    |
 
 ### 9.6 Mr. X dialog
 
@@ -546,30 +546,30 @@ frame gap between setup and measure.
 
 ## 12. Module map (code ↔ this document)
 
-| Topic | Module(s) |
-| --- | --- |
-| Pipeline entry, free path | `agent/policy.py` |
-| Modes, seat memory, decision bag | `agent/context.py` |
-| Skills / commitment | `agent/skills.py` |
-| Buttons and Intent | `agent/controls.py` |
-| Knowledge graph | `agent/knowledge.py` |
-| Fight/loot/progress solver | `agent/arbiter.py` |
-| Fuzzy primitives | `agent/fuzzy.py` |
-| Combat geometry & selection | `agent/combat.py` |
-| Family counters | `agent/enemies.py` |
-| Boss movement | `agent/bosses.py` |
-| Grabs / weapons / enemy escape | `agent/grabs.py` |
-| Expert back-protection goals | `agent/expert.py` |
-| Crossover plan state machine | `agent/autoplanner.py` |
-| Police pressure | `agent/pressure.py` |
-| Co-op safety & fairness | `agent/coop.py` |
-| Character ranges & biases | `agent/characters.py` |
-| Stage advice, Mr. X | `agent/stage.py` |
-| Holes, breakables, stuck | `agent/navigation.py` |
-| Walk latch | `agent/walk.py` |
-| Rule inference engine | `agent/inference.py` |
-| Snapshot / RAM map | `state.py`, `memory_map.py`, `world_map.py`, `phases.py` |
-| Evaluator | `evaluation.py` |
+| Topic                            | Module(s)                                                |
+| -------------------------------- | -------------------------------------------------------- |
+| Pipeline entry, free path        | `agent/policy.py`                                        |
+| Modes, seat memory, decision bag | `agent/context.py`                                       |
+| Skills / commitment              | `agent/skills.py`                                        |
+| Buttons and Intent               | `agent/controls.py`                                      |
+| Knowledge graph                  | `agent/knowledge.py`                                     |
+| Fight/loot/progress solver       | `agent/arbiter.py`                                       |
+| Fuzzy primitives                 | `agent/fuzzy.py`                                         |
+| Combat geometry & selection      | `agent/combat.py`                                        |
+| Family counters                  | `agent/enemies.py`                                       |
+| Boss movement                    | `agent/bosses.py`                                        |
+| Grabs / weapons / enemy escape   | `agent/grabs.py`                                         |
+| Expert back-protection goals     | `agent/expert.py`                                        |
+| Crossover plan state machine     | `agent/autoplanner.py`                                   |
+| Police pressure                  | `agent/pressure.py`                                      |
+| Co-op safety & fairness          | `agent/coop.py`                                          |
+| Character ranges & biases        | `agent/characters.py`                                    |
+| Stage advice, Mr. X              | `agent/stage.py`                                         |
+| Holes, breakables, stuck         | `agent/navigation.py`                                    |
+| Walk latch                       | `agent/walk.py`                                          |
+| Rule inference engine            | `agent/inference.py`                                     |
+| Snapshot / RAM map               | `state.py`, `memory_map.py`, `world_map.py`, `phases.py` |
+| Evaluator                        | `evaluation.py`                                          |
 
 ---
 
