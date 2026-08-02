@@ -33,6 +33,11 @@ from . import enemies as enemy_ai
 from .characters import CharacterProfile
 from .enemies import CounterPlan
 from .fuzzy import clamp01, falling
+from .jump_kick import (
+    JumpKickPlan,
+    can_jump_kick_solved,
+    solve_jump_kick,
+)
 from .knowledge import Relation, TacticalKnowledgeGraph
 
 
@@ -257,20 +262,61 @@ def can_jump_kick(
     profile: CharacterProfile,
     *,
     loose_lane: bool = False,
+    entities: tuple[MapEntity, ...] | None = None,
+    partner: MapEntity | None = None,
+    plan_out: list[JumpKickPlan] | None = None,
 ) -> bool:
-    """Jump-kick only in the character's mid X window and same lane.
+    """Whether a C→B jump-kick can hit ``foe`` (solver-backed when possible).
 
-    Live: jump is action ``$10/$11``, air attack ``$12/$13``. Must be
-    **C then B on later frames** — simultaneous B+C is the rear attack.
+    Live: jump is action ``$10/$11``, free flight ``$12/$13``, kick ``$16``.
+    Must be **C then B on later frames** — simultaneous B+C is the rear attack.
+
+    When ``entities`` is provided, the ROM physics solver decides connectability
+    and multi-hit value. Without it, a soft FAQ distance band is used (tests /
+    coarse callers). Optional ``plan_out`` receives the winning :class:`JumpKickPlan`.
     """
 
     abs_dx, abs_dy = abs_dx_dy(me, foe)
     lane = LANE_HIT_HALF + (6.0 if loose_lane else 0.0)
     if abs_dy > lane:
         return False
+
+    if entities is not None:
+        ok, plan = can_jump_kick_solved(
+            me,
+            foe,
+            profile,
+            entities=entities,
+            partner=partner,
+            loose_lane=loose_lane,
+        )
+        if plan is not None and plan_out is not None:
+            plan_out.clear()
+            plan_out.append(plan)
+        return ok
+
     if not (profile.jump_kick_min <= abs_dx <= profile.jump_kick_max):
         return False
     return True
+
+
+def evaluate_jump_kick(
+    me: MapEntity,
+    entities: tuple[MapEntity, ...],
+    profile: CharacterProfile,
+    *,
+    primary: MapEntity | None = None,
+    partner: MapEntity | None = None,
+) -> JumpKickPlan | None:
+    """Full jump-kick solve: parameters + predicted hits (multi-enemy aware)."""
+
+    return solve_jump_kick(
+        me,
+        entities,
+        profile,
+        primary=primary,
+        partner=partner,
+    )
 
 
 def can_rear_hit(

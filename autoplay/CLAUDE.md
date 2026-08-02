@@ -254,7 +254,10 @@ for tests/HUD.
      C+B together — that is rear attack). The ROM sequence is `$10` launch,
      `$12` free flight, `$16` air attack, `$14` landing. Do not send B during
      launch or landing. Airborne is action `$10–$17` (not world_z; ground Z is
-     about `$A0`).
+     about `$A0`). Solver: `agent/jump_kick.py` predicts multi-enemy hits and
+     arms seat `jump_kick` memory so free flight fires B on the solved delay;
+     `attack_mix` prefers packs when the plan scores ≥2 hits.
+
    - Breakables (phone booth / crate): walk in → smash (B) or mid-range
      jump-break; then loot spilled pickups/weapons
      - Later rounds use distinct ROM object families rather than the early

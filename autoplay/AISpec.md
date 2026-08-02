@@ -78,6 +78,18 @@ Hard bans:
 | Same decision: **B and C**                                   | Rear attack |
 | Decision N: **C only**; later decision: **B** in free-flight | Jump-kick   |
 
+Jump-kick decisions are **solver-backed** (`agent/jump_kick.py`): a discrete
+ROM physics model (5-frame crouch, character \(v_z\), air steer, lighter fall
+gravity while kicking, per-character attack boxes) predicts:
+
+- launch direction and facing;
+- free-flight frame to press **B** (mapped onto agent decision delays);
+- landing world X;
+- which live enemies the kick AABB will hit (multi-enemy packs score higher).
+
+Policy **must** use the predicted effect (hit count, total damage, ally clip,
+landing) when choosing jump vs punch/grab — not FAQ distance bands alone.
+
 ### 1.4 Grab mechanics (ROM rules)
 
 Players and enemies can grab each other (player↔enemy, player↔partner, enemy→player).
@@ -596,7 +608,8 @@ Measured first-punch boxes ≈ 57 / 54 / 68; policy keeps 4–6 px inside.
 | Lane hit           | \|Δmap_y\| ≤ **12**                                                         |
 | Lane approach      | \|Δmap_y\| ≤ **16**                                                         |
 | can_punch          | lane hit ∧ \|Δx\| ≤ strike_range ∧ (facing if required)                     |
-| can_jump_kick      | jump_kick_min ≤ \|Δx\| ≤ jump_kick_max ∧ lane (optional +6 loose)           |
+| can_jump_kick      | Solver predicts primary hit (lane + arc + kick box); soft FAQ band is fallback only when no entity list is passed |
+| jump_kick plan     | `solve_jump_kick` → hold_dir, kick_free_frame, landing_x, hits[], score; multi-hit (+1.35 per extra foe) drives attack_mix |
 | can_rear_hit       | enemy behind ∧ rear_range_min ≤ \|Δx\| ≤ rear_range_max                     |
 | behind             | same lane hit Y; 6 &lt; \|Δx\| ≤ max; on rear side of facing (±10 deadzone) |
 | input-ready ground | base ∈ [0x02,0x0E] ∪ [0x30,0x3A]                                            |
@@ -671,12 +684,14 @@ Order:
 1. If `behind` → `rear`.
 2. If not `lane_ok` → `wait`.
 3. `grab_pressure = max(plan.grab_bias, 0.9 if back_exposed and grabbable else 0)`.
-4. Phase knockdown/blocked/recovery: grab_walk if grab_pressure≥0.5; else punch if in_range∧facing; else wait.
-5. Phase charge/attacking with sidestep and not in_range: jump if jump_bias≥0.5 and band in {jump,approach} and can_jump and not no_jump; else wait.
-6. Jump if can_jump ∧ ¬no_jump ∧ jump_bias≥0.25 ∧ band in {jump,approach} ∧ grab_pressure&lt;0.7.
-7. grab_walk if grab_pressure≥0.5 ∧ grabbable ∧ phase in {normal,recovery,knockdown,unknown}.
-8. If not in_range or not facing → `wait`.
-9. Else `punch`.
+4. Phase knockdown/blocked/recovery: grab_walk if grab_pressure≥0.5; else **jump if solver hit_count≥2**; else punch if in_range∧facing; else wait.
+5. Phase charge/attacking with sidestep and not in_range: jump if (jump_bias≥0.5 ∨ hit_count≥1) and band in {jump,approach} and can_jump and not no_jump; else wait.
+6. **Multi-enemy solver jump**: can_jump ∧ ¬no_jump ∧ hit_count≥2 ∧ score≥1.5 ∧ grab_pressure&lt;0.7 ∧ band in {jump,approach,close} → `jump`.
+7. **Solved single/pack jump**: can_jump ∧ hit_count≥1 ∧ score≥1.2 ∧ grab_pressure&lt;0.7 ∧ band in {jump,approach} ∧ (jump_bias≥0.20 ∨ hit_count≥2 ∨ crowd≥2) → `jump`.
+8. Jump if can_jump ∧ ¬no_jump ∧ jump_bias≥0.25 ∧ band in {jump,approach} ∧ grab_pressure&lt;0.7.
+9. grab_walk if grab_pressure≥0.5 ∧ grabbable ∧ phase in {normal,recovery,knockdown,unknown}.
+10. If not in_range or not facing → `wait`.
+11. Else `punch`.
 
 Engagement band:
 
@@ -719,13 +734,17 @@ Type `$24`, primary states `$08` (selector) and `$0B` (low slide, anim `$18`, ve
 
 | action_base   | Phase                      | B?                     |
 | ------------- | -------------------------- | ---------------------- |
-| `$10` / `$3C` | launch                     | no                     |
-| `$12`         | free flight (attack ready) | **yes** if ally-safe   |
+| `$10` / `$3C` | launch                     | no; hold solver dir    |
+| `$12`         | free flight (attack ready) | **yes** at solved delay if ally-safe |
 | `$16`         | air attack anim            | no (already attacking) |
-| `$14` / `$40` | landing                    | no                     |
-| other air     | hold face                  | no                     |
+| `$14` / `$40` | landing                    | no; clear jump plan    |
+| other air     | hold face / solver dir     | no                     |
 
-Also weapon jump family `$3C–$42`. Aim face toward combat or breakable target.
+Also weapon jump family `$3C–$42`. When a jump was started from a
+`JumpKickPlan`, seat memory keeps `hold_dir`, `kick_free_frame`, and expected
+hit count: launch holds that direction; free flight waits `0` or `1` agent
+decision (from the solved free-flight frame) before B. Aim face toward combat
+or breakable target when no plan is armed.
 
 ### 9.9 Boss movement guards
 

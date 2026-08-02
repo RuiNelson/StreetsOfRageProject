@@ -32,6 +32,7 @@ from .grabs import (
     GrabMemory,
     context_from_player,
 )
+from .jump_kick import JumpKickPending
 from .knowledge import TacticalKnowledgeGraph, build_tactical_graph
 from .navigation import NavMemory
 from .pressure import PressureReport, compute_pressure
@@ -71,6 +72,7 @@ class SeatMemory:
     nav: NavMemory = field(default_factory=NavMemory)
     planner: AutoPlanner = field(default_factory=AutoPlanner)
     goal: GoalMemory = field(default_factory=GoalMemory)
+    jump_kick: JumpKickPending = field(default_factory=JumpKickPending)
     commitment: Commitment | None = None
 
     def __post_init__(self) -> None:
@@ -89,6 +91,7 @@ class SeatMemory:
         self.nav.clear_all()
         self.grab.reset()
         self.enemy_grab_escape.reset()
+        self.jump_kick.clear()
         assert self.commitment is not None
         self.commitment.clear()
 

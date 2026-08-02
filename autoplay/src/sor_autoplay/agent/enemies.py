@@ -473,19 +473,25 @@ def attack_mix(
     can_jump: bool = False,
     grabbable: bool = True,
     back_exposed: bool = False,
+    jump_hits: int = 0,
+    jump_score: float = 0.0,
 ) -> str:
     """Return 'punch' | 'jump' | 'rear' | 'grab_walk' | 'wait'.
 
     Deterministic rules (``tick`` kept for API compat, unused for rolls):
 
     - **rear** only when ``behind`` and we would otherwise punch.
-    - **jump** for family jump counters (Signal, Haku-Ro) in jump/approach.
+    - **jump** when the math solver predicts a connect (especially multi-hit
+      packs), or for family jump counters (Signal, Haku-Ro) in jump/approach.
     - **grab_walk** when grab_bias is high (Nora) or back security demands it.
     - **punch** only when ``in_range`` and ``lane_ok`` (and ideally facing).
     - Otherwise **wait** (caller walks).
+
+    ``jump_hits`` / ``jump_score`` come from ``jump_kick.solve_jump_kick`` and
+    are the predicted effect of committing to C→B now.
     """
 
-    del tick, crowd, profile  # reserved / unused
+    del tick, profile  # reserved / unused
 
     if behind:
         return "rear"
@@ -502,6 +508,14 @@ def attack_mix(
     if phase_name in ("knockdown", "blocked", "recovery"):
         if grab_pressure >= 0.5 and grabbable:
             return "grab_walk"
+        # Solver multi-kick on a downed pack is still excellent.
+        if (
+            can_jump
+            and not plan.no_jump
+            and jump_hits >= 2
+            and grab_pressure < 0.7
+        ):
+            return "jump"
         if in_range and facing_ok:
             return "punch"
         return "wait"
@@ -511,11 +525,35 @@ def attack_mix(
         if (
             can_jump
             and not plan.no_jump
-            and plan.jump_bias >= 0.5
+            and (plan.jump_bias >= 0.5 or jump_hits >= 1)
             and band in ("jump", "approach")
         ):
             return "jump"
         return "wait"
+
+    # Predicted multi-enemy kick: prefer C→B even with modest family jump_bias.
+    # Same-lane packs are the strongest jump-kick use case.
+    if (
+        can_jump
+        and not plan.no_jump
+        and grab_pressure < 0.7
+        and jump_hits >= 2
+        and jump_score >= 1.5
+        and band in ("jump", "approach", "close")
+    ):
+        return "jump"
+
+    # Single-target solver hit with strong score / family jump tools.
+    if (
+        can_jump
+        and not plan.no_jump
+        and jump_hits >= 1
+        and jump_score >= 1.2
+        and grab_pressure < 0.7
+        and band in ("jump", "approach")
+        and (plan.jump_bias >= 0.20 or jump_hits >= 2 or crowd >= 2)
+    ):
+        return "jump"
 
     # Family jump counters (Signal mid-air, Haku-Ro intercept): prefer C→B
     # from the jump window rather than walking into grounded trade range.

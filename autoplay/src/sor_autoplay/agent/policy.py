@@ -23,6 +23,7 @@ from .arbiter import GoalKind, solve_goal
 from .context import DecisionContext, PlayerMode, SeatMemory, build_decision_context
 from .controls import Intent, mask_from_intent
 from .expert import DEFAULT_COMBAT_EXPERT
+from .jump_kick import JumpKickPlan
 from .knowledge import Relation
 from .navigation import NavMemory
 from .skills import try_crossover_suplex, try_hold_resolve, try_start_mode_skill
@@ -399,8 +400,11 @@ def _decide_free(ctx: DecisionContext) -> Intent:
     # ROM state sequence is $10 launch -> $12 free flight -> $16 air attack ->
     # $14 landing.  B is accepted in $12, not in $10; pressing it during $14
     # starts an unrelated ground action on landing.
+    # When a jump-kick plan is armed, hold its launch direction and delay B
+    # until the solved free-flight frame (multi-enemy Z/X timing).
     if combat.player_airborne_action(me):
         walk.clear()
+        jk = ctx.seat.jump_kick
         aim = combat.select_target(
             me,
             snapshot.world_map.entities,
@@ -418,27 +422,82 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 prefer_forward=advice.progress_right,
                 graph=graph,
             )
-        if aim_e is not None:
+        if jk.active:
+            fl = jk.face_left
+            fr = not jk.face_left
+            hold_l = jk.hold_dir < 0
+            hold_r = jk.hold_dir > 0
+        elif aim_e is not None:
             fl, fr = combat.face_intent_dirs(me, aim_e)
+            hold_l, hold_r = fl, fr
         else:
             fl = combat.player_facing_left(me)
             fr = not fl
+            hold_l, hold_r = fl, fr
+
+        if combat.player_jump_landing(me) or combat.player_jump_attacking(me):
+            if combat.player_jump_landing(me):
+                jk.clear()
+            return Intent(
+                left=hold_l or fl,
+                right=hold_r or fr,
+                note=(
+                    f"air kick {aim_e.label if aim_e else ''}".strip()
+                    if combat.player_jump_attacking(me)
+                    else f"air land {aim_e.label if aim_e else 'follow'}".strip()
+                ),
+            )
+
+        if combat.player_jump_starting(me):
+            return Intent(
+                left=hold_l or fl,
+                right=hold_r or fr,
+                note=f"air launch {aim_e.label if aim_e else 'follow'}".strip(),
+            )
+
+        # Free flight $12/$13: fire B on the solved schedule.
+        # Agent decisions span multiple ROM frames (hold_frames / poll), so map
+        # fine-grained free-flight frame indices onto decision delays:
+        #   kick_free_frame ≤ 3 → B on first free-flight decision
+        #   else               → wait one free-flight decision (mid-arc)
         if combat.player_jump_attack_ready(me):
-            if coop.attack_would_hit_ally(
+            if jk.active:
+                jk.free_frames_seen += 1
+                delay = 0 if jk.kick_free_frame <= 3 else 1
+                ready_to_kick = jk.free_frames_seen > delay
+            else:
+                ready_to_kick = True
+            if ready_to_kick:
+                if coop.attack_would_hit_ally(
                     me, coop_ctx.partner, face_left=fl
                 ):
+                    return Intent(
+                        left=hold_l or fl,
+                        right=hold_r or fr,
+                        note="air hold clear of ally",
+                    )
+                ctx.set_attack_cd(2)
+                hit_n = jk.expected_hits if jk.active else 0
+                jk.clear()
                 return Intent(
-                    left=fl,
-                    right=fr,
-                    note="air hold clear of ally",
+                    left=hold_l or fl,
+                    right=hold_r or fr,
+                    attack=True,
+                    note=(
+                        f"air kick×{hit_n} {aim_e.label if aim_e else ''}".strip()
+                        if hit_n
+                        else f"air attack {aim_e.label if aim_e else ''}".strip()
+                    ),
                 )
-            ctx.set_attack_cd(2)
             return Intent(
-                left=fl,
-                right=fr,
-                attack=True,
-                note=f"air attack {aim_e.label if aim_e else ''}".strip(),
+                left=hold_l or fl,
+                right=hold_r or fr,
+                note=(
+                    f"air wait B@{jk.kick_free_frame} "
+                    f"{aim_e.label if aim_e else ''}"
+                ).strip(),
             )
+
         state = (
             "launch"
             if combat.player_jump_starting(me)
@@ -449,10 +508,14 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             else "air"
         )
         return Intent(
-            left=fl,
-            right=fr,
+            left=hold_l or fl,
+            right=hold_r or fr,
             note=f"air {state} {aim_e.label if aim_e else 'follow'}".strip(),
         )
+
+    # Left the air without consuming the plan (interrupted / unexpected).
+    if ctx.seat.jump_kick.active and not combat.player_airborne_action(me):
+        ctx.seat.jump_kick.clear()
 
     # Round-8 type-$45 props can cross the screen at roughly 12 px per
     # four-frame decision while carrying damage.  Treating them like static
@@ -702,8 +765,49 @@ def _decide_free(ctx: DecisionContext) -> Intent:
         facing_ok = combat.facing_toward(me, foe)
         punch_ok = combat.can_punch(me, foe, profile, require_facing=True)
         punch_geom = combat.can_punch(me, foe, profile, require_facing=False)
-        jump_ok = combat.can_jump_kick(me, foe, profile)
+        # Mathematical jump-kick solve over the full entity list: predicts
+        # multi-enemy hits and the optimal free-flight frame for B.
+        jk_plan_box: list[JumpKickPlan] = []
+        jump_ok = combat.can_jump_kick(
+            me,
+            foe,
+            profile,
+            entities=snapshot.world_map.entities,
+            partner=coop_ctx.partner,
+            plan_out=jk_plan_box,
+        )
+        jk_plan = jk_plan_box[0] if jk_plan_box else None
+        if jk_plan is None and jump_ok:
+            jk_plan = combat.evaluate_jump_kick(
+                me,
+                snapshot.world_map.entities,
+                profile,
+                primary=foe,
+                partner=coop_ctx.partner,
+            )
+        # Pack kick even when primary is slightly outside soft FAQ band.
+        if not jump_ok and not plan.no_jump:
+            pack_plan = combat.evaluate_jump_kick(
+                me,
+                snapshot.world_map.entities,
+                profile,
+                primary=foe,
+                partner=coop_ctx.partner,
+            )
+            if (
+                pack_plan is not None
+                and pack_plan.hit_count >= 2
+                and pack_plan.primary_hit
+                and not pack_plan.ally_hit
+            ):
+                jump_ok = True
+                jk_plan = pack_plan
+        jump_hits = jk_plan.hit_count if jk_plan is not None else 0
+        jump_score = jk_plan.score if jk_plan is not None else 0.0
         face_left, face_right_now = combat.face_intent_dirs(me, foe)
+        if jk_plan is not None and jk_plan.hold_dir != 0:
+            face_left = jk_plan.face_left
+            face_right_now = not jk_plan.face_left
 
         if foe.kind == "projectile" or plan.kind == enemy_ai.ThreatKind.PROJECTILE:
             evade_x = me.world_x - 40 if dx > 0 else me.world_x + 40
@@ -1023,6 +1127,8 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 can_jump=jump_ok,
                 grabbable=grabbable,
                 back_exposed=back_exposed,
+                jump_hits=jump_hits,
+                jump_score=jump_score,
             )
 
             if is_punishable(phase) and phase != CombatPhase.GRABBED:
@@ -1125,17 +1231,24 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                     eps_y=6.0,
                 )
 
-            # Jump start: C only + face. Attack comes next ticks while airborne.
-            # Still refuse the approach when the partner already sits in the
-            # eventual kick box — the airborne branch will also gate B.
+            # Jump start: C only + face/dir from the solver. B is deferred to
+            # free flight at the solved frame (multi-enemy timing).
             # Refuse jumps whose arc/landing crosses a floor hole (stage 4).
             holes = snapshot.floor_holes if advice.avoid_holes else ()
+            land_x = (
+                jk_plan.landing_world_x
+                if jk_plan is not None
+                else None
+            )
+            land_safe = navigation.jump_landing_safe(
+                me, foe, holes, land_x=land_x, land_y=float(me.world_y)
+            )
             if (
                 mix == "jump"
                 and jump_ok
                 and facing_ok
                 and not plan.no_jump
-                and navigation.jump_landing_safe(me, foe, holes)
+                and land_safe
             ):
                 if coop.attack_would_hit_ally(
                     me, coop_ctx.partner, face_left=face_left
@@ -1151,6 +1264,24 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                     )
                 walk.clear()
                 ctx.set_attack_cd(1)
+                if jk_plan is not None:
+                    ctx.seat.jump_kick.arm(jk_plan, primary_slot=foe.slot)
+                    hold_l = jk_plan.hold_dir < 0 or (
+                        jk_plan.hold_dir == 0 and face_left
+                    )
+                    hold_r = jk_plan.hold_dir > 0 or (
+                        jk_plan.hold_dir == 0 and face_right_now
+                    )
+                    family = foe.family or foe.label
+                    return Intent(
+                        left=hold_l,
+                        right=hold_r,
+                        jump=True,
+                        note=(
+                            f"jump start×{jk_plan.hit_count} "
+                            f"{family} [{tag}] {jk_plan.note}"
+                        ),
+                    )
                 family = foe.family or foe.label
                 return Intent(
                     left=face_left,
@@ -1194,12 +1325,19 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             stand_x = float(foe.world_x)
             stand_y = float(foe.world_y)
             reason = f"close grab {foe.label} [{tag}]"
-        elif plan.jump_bias >= 0.5:
+        elif plan.jump_bias >= 0.5 or jump_hits >= 2:
             side = -1.0 if target.dx > 0 else 1.0
+            # Prefer a stand-off near half the solved range, else FAQ mid band.
             mid = (profile.jump_kick_min + profile.jump_kick_max) * 0.5
+            if jk_plan is not None and jk_plan.range_x > 20:
+                mid = min(mid, max(28.0, jk_plan.range_x * 0.55))
             stand_x = float(foe.world_x) + side * mid
             stand_y = float(foe.world_y)
-            reason = f"jump range {foe.label} [{tag}]"
+            reason = (
+                f"jump range×{jump_hits} {foe.label} [{tag}]"
+                if jump_hits
+                else f"jump range {foe.label} [{tag}]"
+            )
         else:
             stand_x, stand_y = _stand_point(me, target, profile, low_health=low_hp)
             reason = f"close {foe.label} [{tag}]"
