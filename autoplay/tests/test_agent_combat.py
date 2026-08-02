@@ -23,6 +23,7 @@ from sor_autoplay.agent.grabs import (
     decide_held,
     is_grab_family,
     want_grab_approach,
+    want_partner_boost,
 )
 from sor_autoplay.agent.policy import AgentConfig, AgentState, decide_actions
 from sor_autoplay.agent.controls import ATTACK
@@ -593,10 +594,86 @@ class GrabTreeTests(unittest.TestCase):
         ctx = context_from_player(me)
         self.assertFalse(ctx.weapon)
         self.assertFalse(ctx.enemy_grab)
+        self.assertFalse(ctx.partner_grab)
         self.assertFalse(ctx.holding)
         self.assertFalse(me.is_holding)
         self.assertFalse(me.is_grabbing)
         self.assertIsNone(decide_held(me, ctx, GrabMemory(), tick=1))
+
+    def test_partner_hold_releases_by_walking_away(self) -> None:
+        """AISpec §1.4.2–§1.4.3: default partner hold is release, not knee."""
+
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            action_state=0x60,
+            map_x=100,
+            map_y=64,
+        )
+        partner = _e(
+            kind="player",
+            family="Player",
+            slot="P2",
+            type_id=1,
+            action_state=0x02,
+            map_x=124,
+            map_y=64,
+            health=20,
+        )
+        entities = (me, partner)
+        ctx = context_from_player(me, entities, player_index=1)
+        self.assertTrue(ctx.partner_grab)
+        self.assertFalse(ctx.enemy_grab)
+        intent = decide_held(
+            me,
+            ctx,
+            GrabMemory(),
+            tick=0,
+            ally=partner,
+            both_agents=True,
+        )
+        assert intent is not None
+        self.assertFalse(intent.attack)
+        self.assertFalse(intent.jump)
+        self.assertTrue(intent.left, intent.note)
+        self.assertIn("release grab", intent.note)
+
+    def test_partner_boost_starts_with_crossover(self) -> None:
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            action_state=0x60,
+            map_x=100,
+            map_y=64,
+        )
+        partner = _e(
+            kind="player",
+            family="Player",
+            slot="P2",
+            type_id=1,
+            map_x=120,
+            map_y=64,
+            health=20,
+        )
+        foe = _e(map_x=170, map_y=64, health=8)
+        self.assertTrue(want_partner_boost(me, foe, both_agents=True))
+        ctx = context_from_player(me, (me, partner, foe), player_index=1)
+        self.assertTrue(ctx.partner_grab)
+        intent = decide_held(
+            me,
+            ctx,
+            GrabMemory(),
+            tick=0,
+            foe=foe,
+            ally=partner,
+            both_agents=True,
+        )
+        assert intent is not None
+        self.assertTrue(intent.jump, intent.note)
+        self.assertFalse(intent.attack)
+        self.assertIn("partner boost crossover", intent.note)
 
     def test_grab_throws_immediately_when_an_enemy_can_interrupt(self) -> None:
         me = _e(

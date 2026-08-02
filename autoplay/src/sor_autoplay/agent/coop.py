@@ -257,6 +257,10 @@ def guard_attack_intent(
         and is_intentional_air_assist(intent, me, ally)
     ):
         return intent
+    # Partner vault → high jump-kick (AISpec §1.4.3) is an intentional
+    # partner-hold tool; the final gate must not strip its B edge.
+    if (intent.note or "").startswith("partner boost"):
+        return intent
 
     face_left = face_left_from_intent(intent, me)
     # Holding a throwable weapon is not always visible on the intent; use the

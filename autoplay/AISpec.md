@@ -264,8 +264,12 @@ Expert facts (`CombatExpert` + rule engine):
 | `BACK_HOLD`             | we hold and `action_base == 0x66`                                                                            |
 | `HOSTILE_BEHIND`        | nearest live enemy/boss behind facing, \|dx\|≤160, \|dy\|≤36, on-screen, not defeated/grabbed/death/scripted |
 | `BACK_EXPOSED`          | inferred from `HOSTILE_BEHIND`                                                                               |
-| Goal `CROSSOVER_SUPLEX` | grabbed + front hold + back exposed                                                                          |
+| `CROWD_PRESSURE`        | holding enemy and live enemy count ≥ **2**                                                                   |
+| Goal `CROSSOVER_SUPLEX` | grabbed + front hold + (`BACK_EXPOSED` **or** `CROWD_PRESSURE`)                                              |
 | Goal `SUPLEX`           | grabbed + back hold                                                                                          |
+
+Crowd path uses vault→suplex so the throw launch helps clear multiple foes
+(§1.4.2), not only back-shield.
 
 Planner state machine (`AutoPlanner`):
 
@@ -294,11 +298,12 @@ commitment.
 | Evidence                                                                                                                 | Result                                                               |
 | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
 | Reciprocal GRABBED enemy linked to this seat (`attacker_ptr`/`target_ptr` low word = seat object, or close grabbed body) | `enemy_grab=True`; `weapon=False` even if `+$60` looks like a weapon |
-| `held_type` in `$08–$0C` and not linked                                                                                  | `weapon=True`                                                        |
-| `held_type ≠ 0` and not weapon type                                                                                      | `enemy_grab=True`                                                    |
-| `+$4C` or post-pepper `+$5E` alone                                                                                       | **not** enemy grab                                                   |
+| Other player body within \|Δx\|≤48, \|Δy\|≤20 while grab-family, and **no** linked enemy                                 | `partner_grab=True`                                                  |
+| `held_type` in `$08–$0C` and not linked / partner                                                                        | `weapon=True`                                                        |
+| `held_type ≠ 0` and not weapon type and not partner                                                                      | `enemy_grab=True`                                                    |
+| `+$4C` or post-pepper `+$5E` alone                                                                                       | **not** enemy/partner grab                                           |
 
-`holding = weapon ∨ enemy_grab`.
+`holding = weapon ∨ enemy_grab ∨ partner_grab`. Enemy link wins over partner.
 
 #### 4.3.2 Closed animations
 
@@ -326,7 +331,27 @@ Throw direction:
 
 Latch: proven hold stays active through **1** missing observation sample only (`HOLD_LATCH_TICKS=2` clear ticks). Longer latch caused empty knee loops.
 
-#### 4.3.5 Weapon tree
+#### 4.3.5 Partner hold tree
+
+When `partner_grab` (not enemy):
+
+| Case | Intent |
+| ---- | ------ |
+| Default | Walk **away** from partner body (release grab, §1.4.2). No knee/throw. |
+| Both agents + live foe with 36≤\|Δx\|≤110, \|Δy\|≤28, or boost SM already active | **Partner boost** (§1.4.3) |
+
+Partner boost state machine (`GrabMemory.partner_boost_phase`):
+
+| Phase | Condition | Emit |
+| ----- | --------- | ---- |
+| crossover | front hold `$60` | **C** |
+| await_back | vault `$76`/`$80` | wait |
+| jump | back hold `$66` | **C** (jump off) |
+| air_kick | airborne | **B** |
+
+Co-op gate allows intents whose note starts with `partner boost` (intentional tool).
+
+#### 4.3.6 Weapon tree
 
 | Condition                                         | Behaviour                                          |
 | ------------------------------------------------- | -------------------------------------------------- |
@@ -612,10 +637,10 @@ Family priority membership (equal geometry):
 | ---------- | ---------- |
 | projectile | 1.00       |
 | boss       | 0.96       |
-| Jack       | 0.84       |
-| Nora       | 0.68       |
-| Signal     | 0.52       |
-| Haku-Ro    | 0.36       |
+| Jack       | 0.90       |
+| Nora       | 0.40       |
+| Signal     | 0.50       |
+| Haku-Ro    | 0.80       |
 | Garcia     | 0.20       |
 | other      | 0.28       |
 
@@ -625,17 +650,17 @@ Hysteresis: keep current target unless challenger utility ≥ current + **0.12**
 
 | Family / type | range_scale | jump_bias | grab_bias | sidestep | no_jump | notes                 |
 | ------------- | ----------- | --------- | --------- | -------- | ------- | --------------------- |
-| Garcia        | 1.0         | 0         | 0.35      |          |         | pack                  |
-| Signal        | 1.15        | **0.85**  | 0.05      | yes      |         | mid/far C→B           |
-| Haku-Ro       | 1.1         | 0.45      | 0.10      |          |         | jump intercept        |
-| Nora          | 0.75        | 0         | **0.85**  |          |         | grab; distrust downed |
-| Jack          | 0.9         | 0         | phase     |          |         | see §7.3              |
+| Garcia        | 1.0         | 0         | 0.50      |          |         | pack                  |
+| Signal        | 1.15        | **0.85**  | 0.00      | yes      |         | mid/far C→B           |
+| Haku-Ro       | 1.1         | 0.50      | 0.50      |          |         | jump intercept        |
+| Nora          | 0.75        | 0.50      | **0.85**  |          |         | grab; distrust downed |
+| Jack          | 0.9         | 0.90      | phase     |          |         | see §7.3              |
 | Abadede `$30` | 1.2         | 0         | 0.05      | yes      | yes     | charge                |
 | Souther `$55` | 1.05        | 0         | 0.10      |          | yes     | grounded              |
-| Antonio `$56` | 1.35        | 0         | 0.05      | yes      |         | midrange              |
-| Bongo `$57`   | 1.25        | 0         | 0         | yes      | yes     | flame                 |
-| Twins `$58`   | 1.1         | 0         | 0.10      | yes      |         | mobility              |
-| Mr. X `$35`   | 1.0         | 0         | 0         | yes      |         | final                 |
+| Antonio `$56` | 1.35        | 0         | 0.85      | yes      |         | midrange              |
+| Bongo `$57`   | 1.25        | 0.90      | 0         | yes      | yes     | flame                 |
+| Twins `$58`   | 1.1         | 0.50      | 0.50      | yes      |         | mobility              |
+| Mr. X `$35`   | 1.0         | 0.50      | 0.50      | yes      |         | final                 |
 
 ### 9.5 Attack mix (`attack_mix`) — deterministic
 

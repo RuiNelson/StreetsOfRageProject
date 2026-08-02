@@ -16,12 +16,18 @@ BACK_THREAT_LANE = 36.0
 BACK_DEADZONE = 8.0
 
 
+# Crowd size that makes a vault→suplex throw preferable to front knees
+# (AISpec §1.4.2: suplex launches help clear multiple enemies).
+CROWD_SUPLEX_THRESHOLD = 2
+
+
 class TacticalFact(Enum):
     ENEMY_GRABBED = auto()
     FRONT_HOLD = auto()
     BACK_HOLD = auto()
     HOSTILE_BEHIND = auto()
     BACK_EXPOSED = auto()
+    CROWD_PRESSURE = auto()
     GOAL_CROSSOVER_SUPLEX = auto()
     GOAL_SUPLEX = auto()
 
@@ -61,6 +67,18 @@ _GRAB_RULES = (
         salience=90,
     ),
     Rule(
+        name="crowd-suplex-setup",
+        required=frozenset(
+            {
+                TacticalFact.ENEMY_GRABBED,
+                TacticalFact.FRONT_HOLD,
+                TacticalFact.CROWD_PRESSURE,
+            }
+        ),
+        conclusions=frozenset({TacticalFact.GOAL_CROSSOVER_SUPLEX}),
+        salience=85,
+    ),
+    Rule(
         name="finish-back-hold-with-suplex",
         required=frozenset(
             {TacticalFact.ENEMY_GRABBED, TacticalFact.BACK_HOLD}
@@ -84,6 +102,7 @@ class CombatExpert:
         *,
         held_enemy: MapEntity | None,
         graph: TacticalKnowledgeGraph | None = None,
+        crowd: int = 0,
     ) -> ExpertAssessment:
         facts: set[TacticalFact] = set()
         if held_enemy is not None:
@@ -92,6 +111,8 @@ class CombatExpert:
                 facts.add(TacticalFact.FRONT_HOLD)
             elif me.action_base == 0x66:
                 facts.add(TacticalFact.BACK_HOLD)
+            if crowd >= CROWD_SUPLEX_THRESHOLD:
+                facts.add(TacticalFact.CROWD_PRESSURE)
 
         rear = _nearest_hostile_behind(
             me,

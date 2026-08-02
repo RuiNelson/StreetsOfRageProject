@@ -148,11 +148,13 @@ class CrossoverSuplexSkill:
             player_index=ctx.player_index,
         )
         held_foe = grabs.held_enemy_entity(me, ctx.snapshot.world_map.entities)
+        crowd = ctx.press.enemy_count if ctx.press is not None else 0
         assessment = DEFAULT_COMBAT_EXPERT.assess(
             me,
             ctx.snapshot.world_map.entities,
             held_enemy=held_foe if gctx.enemy_grab else None,
             graph=ctx.graph,
+            crowd=crowd,
         )
         intent = ctx.planner.decide(assessment, me, gctx, held_foe)
         if intent is not None:
@@ -177,11 +179,13 @@ class CrossoverSuplexSkill:
         held_foe = grabs.held_enemy_entity(me, ctx.snapshot.world_map.entities)
         if held_foe is None or not gctx.enemy_grab:
             return False
+        crowd = ctx.press.enemy_count if ctx.press is not None else 0
         assessment = DEFAULT_COMBAT_EXPERT.assess(
             me,
             ctx.snapshot.world_map.entities,
             held_enemy=held_foe,
             graph=ctx.graph,
+            crowd=crowd,
         )
         if assessment.goal == TacticalGoal.CROSSOVER_SUPLEX and me.action_base == 0x60:
             return True
@@ -239,8 +243,11 @@ class HoldResolveSkill:
             crowd=ctx.press.enemy_count,
             profile=ctx.profile,
             ally=ctx.coop.partner,
+            both_agents=ctx.both_agents,
         )
         if intent is not None:
+            # Keep walk ownership empty for button edges; release-grab walks are
+            # pure D-pad and still clear sticky nav so we do not fight it.
             ctx.walk.clear()
         return intent
 

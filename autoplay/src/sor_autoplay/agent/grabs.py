@@ -63,11 +63,26 @@ ENEMY_HOLD_ACTIONS = frozenset(
 ENEMY_GRAB_COUNTER_WINDOW = 0x80  # player +$58 bit 7
 
 
+# Partner-boost multi-frame phases (GrabMemory.partner_boost_phase).
+PARTNER_BOOST_CROSSOVER = "crossover"
+PARTNER_BOOST_AWAIT_BACK = "await_back"
+PARTNER_BOOST_JUMP = "jump"
+PARTNER_BOOST_AIR = "air_kick"
+
+# Geometry for the higher co-op jump-kick after a partner vault (AISpec §1.4.3).
+PARTNER_BOOST_FOE_DX_MIN = 36.0
+PARTNER_BOOST_FOE_DX_MAX = 110.0
+PARTNER_BOOST_FOE_LANE = 28.0
+PARTNER_HOLD_BODY_X = 48.0
+PARTNER_HOLD_BODY_Y = 20.0
+
+
 @dataclass(frozen=True, slots=True)
 class GrabContext:
     holding: bool
     weapon: bool
     enemy_grab: bool
+    partner_grab: bool
     held_type: int
     action_base: int
     airborne: bool
@@ -93,8 +108,13 @@ def context_from_player(
 ) -> GrabContext:
     held_type = me.held_type & 0xFF
     linked = False
+    partner_grab = False
     if entities is not None:
         linked = _player_has_grabbed_enemy(me, entities, player_index=player_index)
+        # Partner holds use the same action family as enemy holds. Detect the
+        # other player body only when no reciprocal GRABBED enemy is linked.
+        if not linked:
+            partner_grab = held_partner_entity(me, entities) is not None
 
     weapon_type = 0x08 <= held_type <= 0x0C
     # Strong evidence only. +$4C is a general contact pointer, while +$5E
@@ -102,16 +122,21 @@ def context_from_player(
     # released and +$60 has already cleared. Neither pointer alone proves an
     # enemy hold. The live $60 hold is recognized by the GRABBED enemy's
     # reciprocal link; other grab layouts retain a non-weapon held_type.
-    enemy_grab = linked or (held_type != 0 and not weapon_type)
+    # Partner holds must not be classified as enemy_grab via a non-weapon
+    # held_type residue.
+    enemy_grab = linked or (
+        held_type != 0 and not weapon_type and not partner_grab
+    )
     # A live reciprocal GRABBED link is stronger evidence than +$60, which can
     # retain the previously carried weapon type after the player grabs a foe.
-    weapon = weapon_type and not linked
-    holding = weapon or enemy_grab
+    weapon = weapon_type and not linked and not partner_grab
+    holding = weapon or enemy_grab or partner_grab
 
     return GrabContext(
         holding=holding,
         weapon=weapon,
         enemy_grab=enemy_grab,
+        partner_grab=partner_grab,
         held_type=held_type,
         action_base=me.action_base,
         airborne=me.is_airborne,
@@ -154,12 +179,15 @@ class GrabMemory:
     clear_ticks: int = 0
     pulse: int = 0
     last_input_tick: int = -10_000
+    # Partner-boost SM (AISpec §1.4.3): C vault → C jump → B air kick.
+    partner_boost_phase: str = ""
 
     def reset(self) -> None:
         self.latched = False
         self.clear_ticks = 0
         self.pulse = 0
         self.last_input_tick = -10_000
+        self.partner_boost_phase = ""
 
 
 @dataclass
@@ -222,6 +250,7 @@ def decide_held(
     crowd: int = 0,
     profile: CharacterProfile | None = None,
     ally: MapEntity | None = None,
+    both_agents: bool = False,
 ) -> Intent | None:
     # Do not abort on is_hurt during hold-react ($60) — that state is not hurt.
     if ctx.hurt and not is_grab_family(me.action_base):
@@ -234,6 +263,7 @@ def decide_held(
     # Restrict this to exact $60 so the resulting $6A transition is not fed
     # another artificial knee/throw pulse.
     if not ctx.holding and me.action_base in HOLD_INPUT_ACTIONS:
+        memory.partner_boost_phase = ""
         if tick - memory.last_input_tick < GRAB_INPUT_RETRY_TICKS:
             return Intent(note=f"await orphan grab ${me.action_state:02X}")
         memory.last_input_tick = tick
@@ -255,9 +285,23 @@ def decide_held(
             me, ctx, tick=tick, foe=foe, profile=prof, ally=ally
         )
 
+    # Partner hold (AISpec §1.4.3): never treat as enemy knee/throw by default.
+    if ctx.partner_grab:
+        memory.latched = True
+        memory.clear_ticks = 0
+        return _partner_hold_tree(
+            me,
+            memory,
+            tick=tick,
+            foe=foe,
+            ally=ally,
+            both_agents=both_agents,
+        )
+
     if ctx.enemy_grab:
         memory.latched = True
         memory.clear_ticks = 0
+        memory.partner_boost_phase = ""
     elif memory.latched:
         memory.clear_ticks += 1
         if memory.clear_ticks >= HOLD_LATCH_TICKS:
@@ -278,6 +322,179 @@ def decide_held(
         profile=prof,
         ally=ally,
     )
+
+
+def held_partner_entity(
+    me: MapEntity,
+    entities: tuple[MapEntity, ...],
+) -> MapEntity | None:
+    """Other player body latched in a hold with this seat (AISpec §1.4.3)."""
+
+    if not is_grab_family(me.action_base) and me.action_base not in HOLD_INPUT_ACTIONS:
+        # Still recognize mid-vault / air-boost frames if phase is active elsewhere.
+        if not (0x76 <= me.action_base <= 0x80 or me.is_airborne):
+            return None
+    best: MapEntity | None = None
+    best_d = 1e9
+    for entity in entities:
+        if entity.kind != "player":
+            continue
+        if entity.slot == me.slot:
+            continue
+        dx = abs(entity.map_x - me.map_x)
+        dy = abs(entity.map_y - me.map_y)
+        if dx > PARTNER_HOLD_BODY_X or dy > PARTNER_HOLD_BODY_Y:
+            continue
+        d = dx + dy * 0.5
+        if d < best_d:
+            best_d = d
+            best = entity
+    return best
+
+
+def release_grab_intent(
+    me: MapEntity,
+    held_body: MapEntity | None,
+) -> Intent:
+    """Walk away from the held body to drop the grab (AISpec §1.4.2)."""
+
+    if held_body is not None:
+        dx = held_body.map_x - me.map_x
+    else:
+        # Held body is usually in front; walk opposite of facing.
+        dx = -1.0 if bool(me.action_state & 0x01) else 1.0
+    if dx >= 0:
+        return Intent(left=True, note="release grab away L")
+    return Intent(right=True, note="release grab away R")
+
+
+def want_partner_boost(
+    me: MapEntity,
+    foe: MapEntity | None,
+    *,
+    both_agents: bool,
+) -> bool:
+    """True when a partner vault → high jump-kick is tactically useful."""
+
+    if not both_agents:
+        return False
+    if foe is None or foe.kind not in ("enemy", "boss"):
+        return False
+    if foe.is_defeated or foe.health == 0:
+        return False
+    dx = abs(foe.map_x - me.map_x)
+    dy = abs(foe.map_y - me.map_y)
+    return (
+        PARTNER_BOOST_FOE_DX_MIN <= dx <= PARTNER_BOOST_FOE_DX_MAX
+        and dy <= PARTNER_BOOST_FOE_LANE
+    )
+
+
+def is_intentional_partner_hold_attack(intent: Intent) -> bool:
+    """Co-op gate allowlist for intentional partner-hold tools (boost kick)."""
+
+    note = intent.note or ""
+    return note.startswith("partner boost")
+
+
+def _partner_hold_tree(
+    me: MapEntity,
+    memory: GrabMemory,
+    *,
+    tick: int,
+    foe: MapEntity | None,
+    ally: MapEntity | None,
+    both_agents: bool,
+) -> Intent:
+    """Partner body hold: release by walking away, or high jump-kick boost."""
+
+    # Continue an in-flight boost even if hold evidence flickered one sample.
+    if memory.partner_boost_phase == PARTNER_BOOST_AIR or (
+        memory.partner_boost_phase and me.is_airborne
+    ):
+        memory.partner_boost_phase = PARTNER_BOOST_AIR
+        if me.is_airborne:
+            if tick - memory.last_input_tick < GRAB_INPUT_RETRY_TICKS:
+                return Intent(note="await partner boost kick")
+            memory.last_input_tick = tick
+            return Intent(attack=True, note="partner boost air kick")
+        memory.partner_boost_phase = ""
+        return release_grab_intent(me, ally)
+
+    boost = bool(memory.partner_boost_phase) or want_partner_boost(
+        me, foe, both_agents=both_agents
+    )
+    if boost:
+        return _partner_boost_step(me, memory, tick=tick, foe=foe, ally=ally)
+
+    # Default: abandon the grab without damaging the partner (walk away).
+    memory.partner_boost_phase = ""
+    return release_grab_intent(me, ally)
+
+
+def _partner_boost_step(
+    me: MapEntity,
+    memory: GrabMemory,
+    *,
+    tick: int,
+    foe: MapEntity | None,
+    ally: MapEntity | None,
+) -> Intent:
+    """C vault to opposite side → C jump off → B in free-flight."""
+
+    del foe
+    action = me.action_base
+    phase = memory.partner_boost_phase
+
+    if phase == "" or phase == PARTNER_BOOST_CROSSOVER:
+        if action == 0x66:
+            memory.partner_boost_phase = PARTNER_BOOST_JUMP
+        elif action in (0x76, 0x80):
+            memory.partner_boost_phase = PARTNER_BOOST_AWAIT_BACK
+            return Intent(note="partner boost vault")
+        elif action == 0x60:
+            if tick - memory.last_input_tick < GRAB_INPUT_RETRY_TICKS:
+                return Intent(note="await partner boost crossover")
+            memory.last_input_tick = tick
+            memory.partner_boost_phase = PARTNER_BOOST_AWAIT_BACK
+            return Intent(jump=True, note="partner boost crossover")
+        else:
+            # Unexpected frame: fall back to release rather than knee the ally.
+            memory.partner_boost_phase = ""
+            return release_grab_intent(me, ally)
+
+    if phase == PARTNER_BOOST_AWAIT_BACK:
+        if action in (0x76, 0x80):
+            return Intent(note="partner boost vault")
+        if action == 0x66:
+            memory.partner_boost_phase = PARTNER_BOOST_JUMP
+        elif action == 0x60:
+            if tick - memory.last_input_tick < GRAB_INPUT_RETRY_TICKS:
+                return Intent(note="await partner boost crossover")
+            memory.last_input_tick = tick
+            return Intent(jump=True, note="partner boost crossover retry")
+        else:
+            memory.partner_boost_phase = ""
+            return release_grab_intent(me, ally)
+
+    if phase == PARTNER_BOOST_JUMP or action == 0x66:
+        if me.is_airborne:
+            memory.partner_boost_phase = PARTNER_BOOST_AIR
+            if tick - memory.last_input_tick < GRAB_INPUT_RETRY_TICKS:
+                return Intent(note="await partner boost kick")
+            memory.last_input_tick = tick
+            return Intent(attack=True, note="partner boost air kick")
+        if action == 0x66 or action in HOLD_INPUT_ACTIONS:
+            if tick - memory.last_input_tick < GRAB_INPUT_RETRY_TICKS:
+                return Intent(note="await partner boost jump")
+            memory.last_input_tick = tick
+            memory.partner_boost_phase = PARTNER_BOOST_AIR
+            return Intent(jump=True, note="partner boost jump")
+        memory.partner_boost_phase = ""
+        return release_grab_intent(me, ally)
+
+    memory.partner_boost_phase = ""
+    return release_grab_intent(me, ally)
 
 
 def throw_back_direction(

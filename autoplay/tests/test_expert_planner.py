@@ -171,6 +171,22 @@ class CombatExpertTests(unittest.TestCase):
         )
         self.assertEqual(assessment.goal, TacticalGoal.SUPLEX)
 
+    def test_crowd_pressure_triggers_crossover_suplex(self) -> None:
+        """AISpec §1.4.2 / §4.2: multi-enemy holds vault for a throw launch."""
+
+        me, held, _ = _grab_scene()
+        front = _entity(label="Front", slot="E1", map_x=170, world_x=170)
+        alone = DEFAULT_COMBAT_EXPERT.assess(
+            me, (me, held, front), held_enemy=held, crowd=1
+        )
+        self.assertEqual(alone.goal, TacticalGoal.NONE)
+        crowded = DEFAULT_COMBAT_EXPERT.assess(
+            me, (me, held, front), held_enemy=held, crowd=2
+        )
+        self.assertEqual(crowded.goal, TacticalGoal.CROSSOVER_SUPLEX)
+        self.assertIn(TacticalFact.CROWD_PRESSURE, crowded.facts)
+        self.assertIn("crowd-suplex-setup", crowded.fired_rules)
+
 
 class AutoPlannerTests(unittest.TestCase):
     def test_rom_guarded_crossover_then_one_suplex_edge(self) -> None:
