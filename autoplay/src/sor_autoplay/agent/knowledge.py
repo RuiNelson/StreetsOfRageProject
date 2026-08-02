@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
-from ..world_map import LANE_Y_MIN, SCREEN_WIDTH, MapEntity, lane_y_max_for_level
+from ..world_map import (
+    LANE_Y_MIN,
+    SCREEN_WIDTH,
+    MapEntity,
+    is_in_loot_camera,
+    lane_y_max_for_level,
+)
 from .enemies import (
     JackProjectilePhase,
     JackWeaponPhase,
@@ -90,13 +96,21 @@ def entity_reachable(entity: MapEntity, *, level_index: int) -> bool:
     Round 1 pre-creates enemies at lane Y=0.  They can carry active-looking AI
     states but cannot be reached until the level trigger moves/materializes
     them.  X-only visibility made the old policy wait on those actors forever.
+
+    Free ground loot is tighter than combat: only the walk-band camera ± the
+    ROM pickup box (see ``is_in_loot_camera``). Combatants still use the full
+    CRT 0..320 band (bosses get a small right margin).
     """
 
-    right_edge = float(SCREEN_WIDTH)
-    if entity.kind == "boss":
-        right_edge += _BOSS_ACTIVATION_MARGIN_X
-    if not 0.0 <= entity.map_x <= right_edge:
-        return False
+    if entity.kind in ("pickup", "weapon"):
+        if not is_in_loot_camera(entity.map_x):
+            return False
+    else:
+        right_edge = float(SCREEN_WIDTH)
+        if entity.kind == "boss":
+            right_edge += _BOSS_ACTIVATION_MARGIN_X
+        if not 0.0 <= entity.map_x <= right_edge:
+            return False
     lane_max = float(lane_y_max_for_level(level_index))
     if not float(LANE_Y_MIN) <= entity.map_y <= lane_max:
         return False

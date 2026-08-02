@@ -51,14 +51,35 @@ CAMERA_WORLD_HEIGHT = float(LANE_BAND_HEIGHT)
 
 # Soft padding around the camera for the *view* (full map plate). The HUD maps
 # the view and draws the true camera as a subset: camera stays exactly
-# 32..288 × 0..lane_max (player walk clamp). Agent reachability/loot still use
-# the full CRT-relative 0..320 X band (SCREEN_WIDTH).
+# 32..288 × 0..lane_max (player walk clamp). Combat targeting still uses the
+# full CRT-relative 0..320 X band (SCREEN_WIDTH). Loot uses the walk band plus
+# the ROM pickup half-width so the agent never walks toward dim/off-camera
+# collectables stranded past the clamp.
 VIEW_MARGIN_X = 40.0
 VIEW_MARGIN_Y = 16.0
 # How far outside the visible screen (in map_x) we still list actors so they
-# appear in the off-camera map ring. Loot/combat still require map_x in 0..320.
+# appear in the off-camera map ring. Combat still requires map_x in 0..320;
+# loot is tighter (see LOOT_CAMERA_*).
 INCLUDE_MARGIN_X = SCREEN_WIDTH * 2
 INCLUDE_MARGIN_Y = LANE_BAND_HEIGHT // 2
+# ROM $3136 pickup search is about ±$14 on X. Match combat.PICKUP_SAFE_X so a
+# free ground item is only COLLECTIBLE when some legal player stand point in
+# the walk band can reach it without forcing a camera scroll.
+LOOT_REACH_X = 16.0
+LOOT_CAMERA_LEFT = CAMERA_WORLD_LEFT - LOOT_REACH_X  # 16
+LOOT_CAMERA_RIGHT = CAMERA_WORLD_RIGHT + LOOT_REACH_X  # 304
+
+
+def is_in_loot_camera(map_x: float) -> bool:
+    """True when map_x is within walk-band camera ± pickup reach.
+
+    Items outside this band may still be drawn dim on the diagnostic map (view
+    ring / CRT letterbox), but the player cannot stand close enough for B to
+    collect them without a scroll the agent cannot force (locked waves, left
+    camera edge).
+    """
+
+    return LOOT_CAMERA_LEFT <= float(map_x) <= LOOT_CAMERA_RIGHT
 
 # HUD letterbox uses the same aspect as the lane camera band.
 SCREEN_HEIGHT = LANE_BAND_HEIGHT

@@ -79,6 +79,57 @@ class KnowledgeGraphTests(unittest.TestCase):
         self.assertFalse(graph.entity_has(held, Relation.COLLECTIBLE))
         self.assertFalse(graph.entity_has(worn, Relation.COLLECTIBLE))
 
+    def test_off_camera_pickups_are_not_collectible(self) -> None:
+        """Loot only inside walk-band camera ± pickup reach (not CRT / view ring)."""
+
+        me = _player(x=160)
+        on_camera = _entity(
+            kind="pickup",
+            family="Score",
+            type_id=0x3F,
+            slot="I0",
+            label="On",
+            map_x=200,
+            world_x=200,
+            map_y=64,
+            world_y=64,
+            health=None,
+            combat_phase=CombatPhase.UNKNOWN,
+            interaction=0,
+        )
+        # CRT letterbox left of the walk clamp: player min map_x=32, pickup ±16
+        # cannot reach map_x=5 without scrolling the camera left.
+        stranded_left = replace(on_camera, slot="I1", label="Left", map_x=5, world_x=5)
+        # Past walk+pickup on the right (and often still dimmed on the HUD).
+        stranded_right = replace(
+            on_camera, slot="I2", label="Right", map_x=320, world_x=320
+        )
+        # Diagnostic view ring — well outside the CRT.
+        off_view = replace(on_camera, slot="I3", label="Far", map_x=400, world_x=400)
+        # Just inside walk edge + pickup reach: still legal from map_x=288.
+        edge_ok = replace(on_camera, slot="I4", label="Edge", map_x=300, world_x=300)
+        graph = build_tactical_graph(
+            me,
+            (me, on_camera, stranded_left, stranded_right, off_view, edge_ok),
+            level_index=0,
+            player_index=1,
+        )
+        self.assertTrue(graph.entity_has(on_camera, Relation.COLLECTIBLE))
+        self.assertTrue(graph.entity_has(edge_ok, Relation.COLLECTIBLE))
+        self.assertFalse(graph.entity_has(stranded_left, Relation.COLLECTIBLE))
+        self.assertFalse(graph.entity_has(stranded_right, Relation.COLLECTIBLE))
+        self.assertFalse(graph.entity_has(off_view, Relation.COLLECTIBLE))
+        self.assertIs(
+            select_pickup(
+                me,
+                (on_camera, stranded_left, stranded_right, off_view, edge_ok),
+                allow_health=True,
+                allow_special_life=True,
+                graph=graph,
+            ),
+            on_camera,
+        )
+
     def test_jack_affordances_follow_weapon_latch_and_throw_state(self) -> None:
         me = _player()
         armed = _entity(
@@ -480,6 +531,32 @@ class TacticalSolverTests(unittest.TestCase):
 
 
 class PolicyRegressionTests(unittest.TestCase):
+    def test_does_not_loot_off_camera_collectable(self) -> None:
+        me = _player(x=200)
+        # Dim / off-camera on the HUD map ring and outside loot camera.
+        off = _entity(
+            kind="pickup",
+            family="Score",
+            type_id=0x3F,
+            slot="I0",
+            label="Score",
+            map_x=360,
+            world_x=360,
+            map_y=64,
+            world_y=64,
+            world_z=160,
+            health=None,
+            combat_phase=CombatPhase.UNKNOWN,
+            interaction=0,
+        )
+        decision = decide_actions(
+            _snapshot((me, off)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertNotIn("loot", decision.p1_note)
+        self.assertNotIn("Score", decision.p1_note)
+
     def test_staged_lane_zero_enemy_allows_progress(self) -> None:
         me = _player()
         staged = _entity(

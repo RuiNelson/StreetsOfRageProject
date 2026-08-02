@@ -410,7 +410,8 @@ See `src/sor_autoplay/memory_map.py` and
   check: `world_x - cam_x == 32`. Agent on-screen checks still use `0..320`.
 - Ground weapons/pickups: ROM `$3136` requires free objects — weapon `+$51==0`
   and `+$50<3`, pickup `+$51==0`. Exposed as `MapEntity.interaction` /
-  `item_param` and `is_free_ground_item`; only those get `COLLECTIBLE`.
+  `item_param` and `is_free_ground_item`; only free items inside
+  `is_in_loot_camera` (walk band 32..288 ± 16) get `COLLECTIBLE`.
 - Dormant ordinary enemies are not observations or agent targets. At the start
   of round 2, for example, object 0 is type `$21`, flags `$09`, state `$0000`,
   health 0, and camera-relative X 80: RAM has a future spawn, but the renderer
@@ -419,9 +420,12 @@ See `src/sor_autoplay/memory_map.py` and
   enemies with nonzero state remain observed so hit-flash frames do not make a
   live target flicker out. Live off-screen actors can expand the **view** while
   the **camera** rect remains the player walk band (32..288 × lane). Agent
-  targeting, danger, pickups, and police pressure use the strict CRT-relative
+  combat targeting, danger, and police pressure use the strict CRT-relative
   `0..320` X band; the ROM's wider `-16..336` activation band (`$A59C` /
-  `$97E6`) is not player visibility. The tactical graph additionally rejects
+  `$97E6`) is not player visibility. **Loot** is tighter: free ground
+  weapons/pickups are only `COLLECTIBLE` inside the walk band ± pickup reach
+  (`map_x ∈ [16, 304]` via `is_in_loot_camera`), so dim/off-camera markers on
+  the map ring are never loot goals. The tactical graph additionally rejects
   actors outside the level's playable lane. This fixes the Round-1 actors
   pre-created at lane Y `0`: keep them on the diagnostic map, but do not target
   or wait for them before their walk-through activation. Bosses are the narrow

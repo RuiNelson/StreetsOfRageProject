@@ -23,7 +23,12 @@ from ..phases import (
     is_punishable,
     should_ignore_as_target,
 )
-from ..world_map import SCREEN_WIDTH, MapEntity
+from ..world_map import (
+    LOOT_REACH_X,
+    SCREEN_WIDTH,
+    MapEntity,
+    is_in_loot_camera,
+)
 from . import enemies as enemy_ai
 from .characters import CharacterProfile
 from .enemies import CounterPlan
@@ -47,7 +52,7 @@ LANE_APPROACH_HALF = 16.0
 # ROM $3136 interaction box is ±$14 X, ±$10 lane Y and ±$08 height Z.
 # Stay a few units inside it so polling/animation movement cannot leave the
 # player one pixel outside when the B edge reaches the game.
-PICKUP_SAFE_X = 16.0
+PICKUP_SAFE_X = LOOT_REACH_X
 PICKUP_SAFE_Y = 12.0
 PICKUP_SAFE_Z = 6.0
 DANGER_REACT_X = 100.0
@@ -100,13 +105,20 @@ def is_on_screen(entity: MapEntity, *, soft: bool = False) -> bool:
     """True if the entity is in the camera band (or ROM activation if soft).
 
     Strict mode matches the 320 px Mega Drive viewport in camera-relative X.
-    Soft mode uses the ROM activation margin (-16..336) for diagnostics only;
-    loot and combat goals always use strict mode.
+    Soft mode uses the ROM activation margin (-16..336) for diagnostics only.
+    Combat goals use strict mode. Loot goals use ``is_loot_on_camera`` (walk
+    band ± pickup reach), which is tighter than the full CRT.
     """
 
     left = ACTIVATION_LEFT if soft else ON_SCREEN_LEFT
     right = ACTIVATION_RIGHT if soft else ON_SCREEN_RIGHT
     return left <= entity.map_x <= right
+
+
+def is_loot_on_camera(entity: MapEntity) -> bool:
+    """True when a ground item is inside the walk-band camera ± pickup box."""
+
+    return is_in_loot_camera(entity.map_x)
 
 
 def player_facing_left(me: MapEntity) -> bool:
@@ -748,7 +760,8 @@ def select_pickup(
             # Without a graph, still enforce ROM free-ground rules and camera.
             if not entity.is_free_ground_item:
                 continue
-        if not is_on_screen(entity):
+        # Walk-band ± pickup reach — not the full CRT or the diagnostic view ring.
+        if not is_loot_on_camera(entity):
             continue
         d = math.hypot(entity.map_x - me.map_x, entity.map_y - me.map_y)
         score = d + w_bonus

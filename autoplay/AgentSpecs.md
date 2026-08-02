@@ -77,7 +77,9 @@ single priority chain:
 
 Hard game facts always dominate fuzzy preference. An actor outside the playable
 lane cannot be attacked even if RAM makes it look dangerous; a boss blocking
-the arena forbids progress and loot; immediate danger forbids an item detour.
+the arena forbids progress and loot; immediate danger forbids an item detour;
+a collectable outside the walk-band camera ± pickup reach (dim/off-camera on
+the HUD, or stranded past the player clamp) is not a loot goal.
 In Round 1, enemies pre-created at lane Y `0` are observed for diagnosis but
 are unreachable until the player advances through their activation trigger.
 Antonio remains a blocker when his activation point is just beyond the visible

@@ -33,9 +33,12 @@ Per-player toggle (HUD button or keys **1** / **2**):
 - No generic jump-ins: jumps are reserved for explicit enemy-family counters
 - A typed tactical knowledge graph separates observation from actionability:
   dormant, off-camera, and out-of-lane actors may remain visible on the HUD but
-  cannot become combat goals. Round-1 enemies staged at lane Y `0` are ignored
-  until the ROM materializes them. Boss activation points get a narrow X
-  margin because they can lock scrolling just outside the 320 px viewport.
+  cannot become combat or loot goals. Free ground pickups/weapons must sit in
+  the walk-band camera ± the ROM pickup box (`map_x` 16..304), not merely on
+  the CRT letterbox or the diagnostic view ring. Round-1 enemies staged at
+  lane Y `0` are ignored until the ROM materializes them. Boss activation
+  points get a narrow X margin because they can lock scrolling just outside
+  the 320 px viewport.
   Signed-negative-health floor objects are marked `DEFEATED` and cannot be
   revived as targets by a stale attack-family byte; exact zero health remains
   targetable for the ROM-required finishing hit. Allocated corpses remain
