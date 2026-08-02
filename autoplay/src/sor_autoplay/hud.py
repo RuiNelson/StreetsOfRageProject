@@ -506,8 +506,8 @@ class ObserverHud:
             self._last_plot_geom = plot_geom
             self._ensure_static_plate(w, h, ox, oy, plot_w, plot_h)
 
-        # Map plate = wide *view* (camera + off-screen ring). True MD viewport
-        # is the inner camera rect at exactly 0..320 × 0..lane in map space.
+        # Map plate = wide *view* (camera + off-screen ring). Inner camera rect
+        # is the player walk band (32..288 × 0..lane), not the full 320 CRT.
         x0 = _map_x(world.camera_left, world, ox, plot_w)
         x1 = _map_x(world.camera_right, world, ox, plot_w)
         y0 = _map_y(world.camera_top, world, oy, plot_h)

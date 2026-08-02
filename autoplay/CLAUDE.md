@@ -398,12 +398,16 @@ See `src/sor_autoplay/memory_map.py` and
   `map_x = world_x - cam_x`, `map_y = lane_y` (`+$10` / `+$14`)  
   Elevation `world_z` (`+$18`) is stored for agents but **not** used on the map.
   HUD maps the wider **view** (camera + off-screen ring) and draws the true
-  **camera** as a dashed 0..320 × 0..lane_max subset. Off-camera markers stay
-  visible (dim letters). Markers are a single letter plus a square **outline**
-  for combat/item state (no filled discs, no phase letter suffix).
+  **camera** as a dashed 32..288 × 0..lane_max subset (ROM walk clamp, not the
+  full 320 CRT). Off-camera markers stay visible (dim letters). Markers are a
+  single letter plus a square **outline** for combat/item state (no filled
+  discs, no phase letter suffix).
 - Sprite CRT formula (`lane/2 + z`) lives in `project_to_screen()` for later use.
-- Playable lane from `clamp_players_to_gameplay_bounds`: Y ∈ `[$02,$70]`  
-  (or `[$02,$A0]` on level index 6). Camera box height uses that max.
+- Playable bounds from `clamp_players_to_gameplay_bounds` (`$43AA`):
+  - X: `map_x ∈ [$20, $20+$100]` = `[32, 288]` (left = `cam_x+$20`, span `$100`)
+  - Y: ∈ `[$02,$70]` (or `[$02,$A0]` on level index 6)
+  Camera box uses that X band and the lane max for height. Live left-limit
+  check: `world_x - cam_x == 32`. Agent on-screen checks still use `0..320`.
 - Ground weapons/pickups: ROM `$3136` requires free objects — weapon `+$51==0`
   and `+$50<3`, pickup `+$51==0`. Exposed as `MapEntity.interaction` /
   `item_param` and `is_free_ground_item`; only those get `COLLECTIBLE`.
@@ -414,8 +418,8 @@ See `src/sor_autoplay/memory_map.py` and
   bit0 while waiting; `$B1D6` advances +$30 to `$0100` on activation. Hidden
   enemies with nonzero state remain observed so hit-flash frames do not make a
   live target flicker out. Live off-screen actors can expand the **view** while
-  the **camera** rect remains the visible 320×lane band. Agent targeting,
-  danger, pickups, and police pressure use the strict camera-relative
+  the **camera** rect remains the player walk band (32..288 × lane). Agent
+  targeting, danger, pickups, and police pressure use the strict CRT-relative
   `0..320` X band; the ROM's wider `-16..336` activation band (`$A59C` /
   `$97E6`) is not player visibility. The tactical graph additionally rejects
   actors outside the level's playable lane. This fixes the Round-1 actors

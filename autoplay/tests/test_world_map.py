@@ -22,6 +22,8 @@ from sor_autoplay.phases import CombatPhase
 from sor_autoplay.world_map import (
     ACTORS_BYTES,
     CAMERA_BYTES,
+    CAMERA_X_MIN,
+    CAMERA_X_SPAN,
     LANE_Y_MAX_DEFAULT,
     LANE_Y_MAX_ROUND7,
     OBJECT_TABLE_BYTES,
@@ -222,16 +224,23 @@ class WorldMapParseTests(unittest.TestCase):
         )
         p1 = world.entities[0]
         self.assertEqual(world.camera_bottom, float(0x70))
-        self.assertEqual(world.camera_left, 0.0)
-        self.assertEqual(world.camera_right, float(SCREEN_WIDTH))
+        self.assertEqual(world.camera_left, float(CAMERA_X_MIN))
+        self.assertEqual(world.camera_right, float(CAMERA_X_MIN + CAMERA_X_SPAN))
         self.assertEqual(p1.map_y, 112.0)
+        # world_x 800, cam 768 → map_x 32 = left walk limit (ROM $43AA).
+        self.assertEqual(p1.map_x, float(CAMERA_X_MIN))
+        # At left walk limit → left edge of camera box.
+        self.assertAlmostEqual(
+            (p1.map_x - world.camera_left) / world.camera_width, 0.0
+        )
         # At bottom of playable lane → bottom edge of camera box.
         frac = (p1.map_y - world.camera_top) / world.camera_height
         self.assertAlmostEqual(frac, 1.0)
-        # Camera is always the true 320×lane viewport; view pads outside it.
+        # Camera is the walk band; view pads outside it. CRT is still 320 wide.
         self.assertLess(world.view_left, world.camera_left)
         self.assertGreater(world.view_right, world.camera_right)
-        self.assertEqual(world.camera_right - world.camera_left, float(SCREEN_WIDTH))
+        self.assertEqual(world.camera_right - world.camera_left, float(CAMERA_X_SPAN))
+        self.assertEqual(SCREEN_WIDTH, 320)
 
     def test_held_or_exhausted_weapons_are_not_free_ground_items(self) -> None:
         actors = bytearray(ACTORS_BYTES)
@@ -307,7 +316,9 @@ class WorldMapParseTests(unittest.TestCase):
             level_index=6,
         )
         self.assertEqual(world.camera_bottom, float(0xA0))
-        self.assertAlmostEqual(world.camera_width / world.camera_height, SCREEN_WIDTH / 0xA0)
+        self.assertAlmostEqual(
+            world.camera_width / world.camera_height, CAMERA_X_SPAN / 0xA0
+        )
 
     def test_hitstun_flash_does_not_drop_on_screen_enemy(self) -> None:
         """SAT blink toggles flags bit0; on-screen enemies must stay on the map."""

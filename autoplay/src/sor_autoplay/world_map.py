@@ -6,8 +6,9 @@ Visualization is a **top-down stage map** (not CRT sprite projection):
     map_y = lane_y                   # depth (+$14); small = back of stage
 
 Elevation ``world_z`` (+$18) is kept on each entity for future agent use but is
-**not** applied to the plot. The camera rectangle is 320 × 224 in that space
-(MD width × a fixed lane band with the same aspect).
+**not** applied to the plot. The camera rectangle is the player walk band
+(32..288 × 0..lane_max from ``clamp_players_to_gameplay_bounds``), not the full
+320 px CRT — so a player at the left/right walk limit sits on the box rim.
 """
 
 from __future__ import annotations
@@ -26,23 +27,32 @@ from .phases import (
     player_phase,
 )
 
-# Horizontal span of one Mega Drive screen in world-X units.
+# Horizontal span of one Mega Drive screen in world-X units (CRT viewport).
+# Agent on-screen / activation checks still use this full 320 band.
 SCREEN_WIDTH = 320
-# Playable lane Y from clamp_players_to_gameplay_bounds ($43AA):
-#   min = $02, max = $70 (most rounds), max = $A0 on level index 6 (round 7).
+# Playable walk band from clamp_players_to_gameplay_bounds ($43AA):
+#   X: min = cam_x + $20, span = $100 → map_x ∈ [32, 288]
+#   Y: min = $02, max = $70 (most rounds), max = $A0 on level index 6 (round 7).
+# Live check (player held at left limit): world_x - cam_x == 32.
 LANE_Y_MIN = 0x02
 LANE_Y_MAX_DEFAULT = 0x70
 LANE_Y_MAX_ROUND7 = 0xA0  # level_index == 6
+CAMERA_X_MIN = 0x20  # left walk limit relative to camera
+CAMERA_X_SPAN = 0x100  # walkable width (not the full 320 px CRT)
 # Default camera height for aspect / empty maps (most rounds).
 LANE_BAND_HEIGHT = LANE_Y_MAX_DEFAULT  # 112
-MAP_ASPECT = SCREEN_WIDTH / LANE_BAND_HEIGHT  # 320/112 ≈ 2.857
+# Camera box aspect = walk band, not full CRT (player min X sits on the left rim).
+MAP_ASPECT = CAMERA_X_SPAN / LANE_BAND_HEIGHT  # 256/112 ≈ 2.286
 
-CAMERA_WORLD_WIDTH = float(SCREEN_WIDTH)
+CAMERA_WORLD_LEFT = float(CAMERA_X_MIN)
+CAMERA_WORLD_WIDTH = float(CAMERA_X_SPAN)
+CAMERA_WORLD_RIGHT = CAMERA_WORLD_LEFT + CAMERA_WORLD_WIDTH  # 288
 CAMERA_WORLD_HEIGHT = float(LANE_BAND_HEIGHT)
 
 # Soft padding around the camera for the *view* (full map plate). The HUD maps
 # the view and draws the true camera as a subset: camera stays exactly
-# 0..320 × 0..lane_max. Agent reachability/loot still use strict camera X.
+# 32..288 × 0..lane_max (player walk clamp). Agent reachability/loot still use
+# the full CRT-relative 0..320 X band (SCREEN_WIDTH).
 VIEW_MARGIN_X = 40.0
 VIEW_MARGIN_Y = 16.0
 # How far outside the visible screen (in map_x) we still list actors so they
@@ -560,18 +570,18 @@ def _framed_view(
     lane_max: int,
     entities: tuple[MapEntity, ...] | list[MapEntity] = (),
 ) -> tuple[float, float, float, float, float, float, float, float]:
-    """Camera = visible playfield; view grows to include observed entities.
+    """Camera = player walk band; view grows to include observed entities.
 
-    Camera rectangle stays 0..320 × 0..lane_max (what the player sees).
+    Camera rectangle stays 32..288 × 0..lane_max (ROM $43AA X clamp + lane max).
     The wider view can expand for live off-screen actors while preserving the
     same aspect ratio. Dormant, uninitialized enemies are not observations.
     """
 
-    cam_left = 0.0
-    cam_right = CAMERA_WORLD_WIDTH
+    cam_left = CAMERA_WORLD_LEFT
+    cam_right = CAMERA_WORLD_RIGHT
     cam_top = 0.0
     cam_bottom = float(lane_max)
-    aspect = cam_right / cam_bottom
+    aspect = (cam_right - cam_left) / cam_bottom
 
     raw_left = cam_left - VIEW_MARGIN_X
     raw_right = cam_right + VIEW_MARGIN_X
