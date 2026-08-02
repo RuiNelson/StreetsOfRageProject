@@ -182,6 +182,7 @@ class ObserverHud:
             text=(
                 "letters only · square outline = state  "
                 "(green=down  orange=charge  red=atk  cyan=block  purple=held  gray=dead)  "
+                "dashed box = camera · dim letters = off-camera  "
                 "1/2  G/S/H/N/J  B boss  k/b/|/p weapons  a/+ food"
             ),
             fg=_DIM,
@@ -460,14 +461,16 @@ class ObserverHud:
         score.configure(text=f"Score   {player.score_text}")
 
     def _draw_map(self, world: WorldMap, holes: tuple = ()) -> None:
-        """Update the map in place (letterboxed to the live camera aspect)."""
+        """Update the map in place (letterboxed to the live *view* aspect)."""
 
         canvas = self._canvas
         counts = world.counts_by_kind()
         count_bits = "  ".join(f"{k}:{n}" for k, n in sorted(counts.items()) if n)
         phases = world.phase_counts()
         phase_bits = "  ".join(f"{k}:{n}" for k, n in sorted(phases.items()) if n)
-        cam_aspect = world.camera_width / world.camera_height
+        # View is aspect-locked to the camera band; letterbox the full view so
+        # the true camera rect is a correct subset (not the whole plate).
+        view_aspect = world.view_width / world.view_height
         hole_note = f"  holes:{len(holes)}" if holes else ""
         hunt1 = len(world.threats_targeting(1))
         hunt2 = len(world.threats_targeting(2))
@@ -490,7 +493,7 @@ class ObserverHud:
             return
 
         pad = MAP_INNER_PAD
-        ox, oy, plot_w, plot_h = _letterboxed_plot(w, h, pad, aspect=cam_aspect)
+        ox, oy, plot_w, plot_h = _letterboxed_plot(w, h, pad, aspect=view_aspect)
 
         size = (w, h)
         plot_geom = (ox, oy, plot_w, plot_h)
@@ -503,11 +506,12 @@ class ObserverHud:
             self._last_plot_geom = plot_geom
             self._ensure_static_plate(w, h, ox, oy, plot_w, plot_h)
 
-        # Plot space *is* the camera rectangle (0..320 × 0..lane). Draw a thin
-        # edge so the true viewport is obvious; do not map against the wider
-        # diagnostic view (that made the camera box look oversized).
-        x0, y0 = ox, oy
-        x1, y1 = ox + plot_w, oy + plot_h
+        # Map plate = wide *view* (camera + off-screen ring). True MD viewport
+        # is the inner camera rect at exactly 0..320 × 0..lane in map space.
+        x0 = _map_x(world.camera_left, world, ox, plot_w)
+        x1 = _map_x(world.camera_right, world, ox, plot_w)
+        y0 = _map_y(world.camera_top, world, oy, plot_h)
+        y1 = _map_y(world.camera_bottom, world, oy, plot_h)
         if self._cam_rect is None:
             self._cam_rect = canvas.create_rectangle(
                 x0,
@@ -517,6 +521,7 @@ class ObserverHud:
                 fill="#161a28",
                 outline="#5a6484",
                 width=2,
+                dash=(4, 2),
                 tags=("cam",),
             )
             self._cam_label = canvas.create_text(
@@ -570,13 +575,8 @@ class ObserverHud:
         drawn = 0
 
         for entity in entities:
-            # Strict camera band only — matches agent on-screen / COLLECTIBLE.
-            if not (
-                world.camera_left <= entity.map_x <= world.camera_right
-                and world.camera_top <= entity.map_y <= world.camera_bottom
-            ):
-                continue
             # map_x = cam-relative X; map_y = absolute lane (top-down, Z ignored).
+            # Draw on-camera *and* off-camera actors that fall inside the view.
             cx = _map_x(entity.map_x, world, ox, plot_w)
             cy = _map_y(entity.map_y, world, oy, plot_h)
             if not (plot_left <= cx <= plot_right and plot_top <= cy <= plot_bottom):
@@ -592,12 +592,18 @@ class ObserverHud:
             if not outline:
                 # Idle / non-combat: use the family colour as a thin outline.
                 outline = entity.color
+            # Dim letters slightly when outside the true camera rectangle.
+            in_camera = (
+                world.camera_left <= entity.map_x <= world.camera_right
+                and world.camera_top <= entity.map_y <= world.camera_bottom
+            )
+            letter_fill = entity.color if in_camera else _DIM
             canvas.itemconfigure(
                 square_id,
                 state="normal",
                 fill="",  # letter only — state is the square outline
                 outline=outline,
-                width=2 if entity.kind in ("player", "boss") else 2,
+                width=2,
             )
             canvas.coords(text_id, cx, cy)
             # Single letter/symbol — no phase suffix (outline carries state).
@@ -605,7 +611,7 @@ class ObserverHud:
                 text_id,
                 state="normal",
                 text=entity.symbol,
-                fill=entity.color,
+                fill=letter_fill,
             )
             # Markers above holes and camera.
             canvas.tag_raise(square_id)
@@ -752,16 +758,16 @@ def _letterboxed_plot(
 
 
 def _map_x(map_x: float, world: WorldMap, ox: float, plot_w: float) -> float:
-    """Project camera-relative map X into the plot (camera = full plate)."""
+    """Project camera-relative map X into the full *view* plate."""
 
-    t = (map_x - world.camera_left) / world.camera_width
+    t = (map_x - world.view_left) / world.view_width
     return ox + t * plot_w
 
 
 def _map_y(map_y: float, world: WorldMap, oy: float, plot_h: float) -> float:
-    """Project lane Y into the plot. Larger lane Y → front of stage (down)."""
+    """Project lane Y into the full *view* plate. Larger Y → front (down)."""
 
-    t = (map_y - world.camera_top) / world.camera_height
+    t = (map_y - world.view_top) / world.view_height
     return oy + t * plot_h
 
 

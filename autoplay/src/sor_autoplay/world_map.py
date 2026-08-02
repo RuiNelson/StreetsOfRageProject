@@ -40,16 +40,15 @@ MAP_ASPECT = SCREEN_WIDTH / LANE_BAND_HEIGHT  # 320/112 ≈ 2.857
 CAMERA_WORLD_WIDTH = float(SCREEN_WIDTH)
 CAMERA_WORLD_HEIGHT = float(LANE_BAND_HEIGHT)
 
-# Soft diagnostic padding around the camera for the stored *view* bounds only.
-# The HUD plots against the camera rectangle itself (0..320 × 0..lane_max), not
-# this expanded view — a previous wide view made the drawn "camera" look wrong
-# relative to what agents treat as on-screen.
-VIEW_MARGIN_X = 8.0
-VIEW_MARGIN_Y = 4.0
-# How far outside the visible screen (in map_x) we still *list* actors for the
-# diagnostic entity table. Agent reachability/loot still use strict 0..320.
-INCLUDE_MARGIN_X = SCREEN_WIDTH // 2
-INCLUDE_MARGIN_Y = LANE_BAND_HEIGHT // 4
+# Soft padding around the camera for the *view* (full map plate). The HUD maps
+# the view and draws the true camera as a subset: camera stays exactly
+# 0..320 × 0..lane_max. Agent reachability/loot still use strict camera X.
+VIEW_MARGIN_X = 40.0
+VIEW_MARGIN_Y = 16.0
+# How far outside the visible screen (in map_x) we still list actors so they
+# appear in the off-camera map ring. Loot/combat still require map_x in 0..320.
+INCLUDE_MARGIN_X = SCREEN_WIDTH * 2
+INCLUDE_MARGIN_Y = LANE_BAND_HEIGHT // 2
 
 # HUD letterbox uses the same aspect as the lane camera band.
 SCREEN_HEIGHT = LANE_BAND_HEIGHT

@@ -17,10 +17,10 @@ Agent goals and rules: [`AgentSpecs.md`](AgentSpecs.md).
 - game mode, level, wave, timer
 - P1/P2 character, health %, lives, specials, scores
 - pause / police-special flags, floor holes
-- **2D world map** (true camera 320×lane band):
+- **2D world map** (wide view + exact camera box):
   - letter-only markers with a square **outline** for state
   - players `1`/`2`, enemies `G/S/H/N/J`, bosses `B`, weapons/pickups
-  - plot maps the camera rectangle (not a padded overscan box)
+  - dashed camera rect = true 320×lane viewport; off-camera actors still drawn
 
 ### Agents
 

@@ -228,9 +228,10 @@ class WorldMapParseTests(unittest.TestCase):
         # At bottom of playable lane → bottom edge of camera box.
         frac = (p1.map_y - world.camera_top) / world.camera_height
         self.assertAlmostEqual(frac, 1.0)
-        # Camera is always the true 320×lane viewport; view may pad slightly.
-        self.assertGreaterEqual(world.view_left, world.camera_left - 24.0)
-        self.assertLessEqual(world.view_right, world.camera_right + 24.0)
+        # Camera is always the true 320×lane viewport; view pads outside it.
+        self.assertLess(world.view_left, world.camera_left)
+        self.assertGreater(world.view_right, world.camera_right)
+        self.assertEqual(world.camera_right - world.camera_left, float(SCREEN_WIDTH))
 
     def test_held_or_exhausted_weapons_are_not_free_ground_items(self) -> None:
         actors = bytearray(ACTORS_BYTES)

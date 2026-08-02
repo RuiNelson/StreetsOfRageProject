@@ -397,8 +397,9 @@ See `src/sor_autoplay/memory_map.py` and
 - Map plot (top-down visualization):  
   `map_x = world_x - cam_x`, `map_y = lane_y` (`+$10` / `+$14`)  
   Elevation `world_z` (`+$18`) is stored for agents but **not** used on the map.
-  HUD maps against the **camera** rectangle (0..320 × 0..lane_max), not the
-  wider diagnostic view. Markers are a single letter plus a square **outline**
+  HUD maps the wider **view** (camera + off-screen ring) and draws the true
+  **camera** as a dashed 0..320 × 0..lane_max subset. Off-camera markers stay
+  visible (dim letters). Markers are a single letter plus a square **outline**
   for combat/item state (no filled discs, no phase letter suffix).
 - Sprite CRT formula (`lane/2 + z`) lives in `project_to_screen()` for later use.
 - Playable lane from `clamp_players_to_gameplay_bounds`: Y ∈ `[$02,$70]`  
