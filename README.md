@@ -175,7 +175,7 @@ navigation rules. Agents are toggled independently for Player 1 and Player 2
 and must not be used with the host's `--altControls` layout.
 
 Agent goals, combat policy, and stage rules are documented in
-`autoplay/AgentSpecs.md`. Launch instructions and CLI options are in
+`autoplay/AISpec.md`. Launch instructions and CLI options are in
 `autoplay/README.md`.
 
 ## How to build

@@ -49,7 +49,8 @@ machine may lack Tk.
 
 ## Agent design (standard controls only)
 
-Specs live in `AgentSpecs.md`. Implementation under `src/sor_autoplay/agent/`.
+Specs live in `AISpec.md` (living plain-English AI document; keep in sync with
+code). Implementation under `src/sor_autoplay/agent/`.
 
 **Controls assumption:** OPTIONS scheme 0 and **no** host `--altControls`.
 

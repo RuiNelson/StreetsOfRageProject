@@ -8,7 +8,7 @@ Python app that attaches to a running
 **Current milestone:** live observer HUD **and** optional scripted agents that
 play with **standard controls only** (no host `--altControls`).
 
-Agent goals and rules: [`AgentSpecs.md`](AgentSpecs.md).
+Agent goals and rules (living AI spec): [`AISpec.md`](AISpec.md).
 
 ## Features
 
@@ -270,7 +270,7 @@ instead of relying on visual trace inspection.
 
 ```text
 autoplay/
-  AgentSpecs.md
+  AISpec.md            # living plain-English AI specification
   pyproject.toml
   README.md
   CLAUDE.md
