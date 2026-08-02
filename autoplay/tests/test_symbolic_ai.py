@@ -55,6 +55,30 @@ class FuzzyInferenceTests(unittest.TestCase):
 
 
 class KnowledgeGraphTests(unittest.TestCase):
+    def test_held_weapons_are_not_collectible(self) -> None:
+        me = _player()
+        free = _entity(
+            kind="weapon",
+            family="Weapon",
+            label="bat",
+            slot="W0",
+            type_id=0x0A,
+            map_x=120,
+            world_x=120,
+            map_y=64,
+            world_y=64,
+            interaction=0,
+            item_param=0,
+        )
+        held = replace(free, slot="W1", interaction=1)
+        worn = replace(free, slot="W2", item_param=3)
+        graph = build_tactical_graph(
+            me, (me, free, held, worn), level_index=0, player_index=1
+        )
+        self.assertTrue(graph.entity_has(free, Relation.COLLECTIBLE))
+        self.assertFalse(graph.entity_has(held, Relation.COLLECTIBLE))
+        self.assertFalse(graph.entity_has(worn, Relation.COLLECTIBLE))
+
     def test_jack_affordances_follow_weapon_latch_and_throw_state(self) -> None:
         me = _player()
         armed = _entity(

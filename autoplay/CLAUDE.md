@@ -397,9 +397,15 @@ See `src/sor_autoplay/memory_map.py` and
 - Map plot (top-down visualization):  
   `map_x = world_x - cam_x`, `map_y = lane_y` (`+$10` / `+$14`)  
   Elevation `world_z` (`+$18`) is stored for agents but **not** used on the map.
+  HUD maps against the **camera** rectangle (0..320 × 0..lane_max), not the
+  wider diagnostic view. Markers are a single letter plus a square **outline**
+  for combat/item state (no filled discs, no phase letter suffix).
 - Sprite CRT formula (`lane/2 + z`) lives in `project_to_screen()` for later use.
 - Playable lane from `clamp_players_to_gameplay_bounds`: Y ∈ `[$02,$70]`  
   (or `[$02,$A0]` on level index 6). Camera box height uses that max.
+- Ground weapons/pickups: ROM `$3136` requires free objects — weapon `+$51==0`
+  and `+$50<3`, pickup `+$51==0`. Exposed as `MapEntity.interaction` /
+  `item_param` and `is_free_ground_item`; only those get `COLLECTIBLE`.
 - Dormant ordinary enemies are not observations or agent targets. At the start
   of round 2, for example, object 0 is type `$21`, flags `$09`, state `$0000`,
   health 0, and camera-relative X 80: RAM has a future spawn, but the renderer

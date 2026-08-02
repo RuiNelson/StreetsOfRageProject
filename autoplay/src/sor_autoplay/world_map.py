@@ -40,12 +40,16 @@ MAP_ASPECT = SCREEN_WIDTH / LANE_BAND_HEIGHT  # 320/112 ≈ 2.857
 CAMERA_WORLD_WIDTH = float(SCREEN_WIDTH)
 CAMERA_WORLD_HEIGHT = float(LANE_BAND_HEIGHT)
 
-VIEW_MARGIN_X = 40.0
-VIEW_MARGIN_Y = 16.0
-# How far outside the visible screen (in map_x) we still list actors.
-# Dormant wave spawns often sit ~one screen ahead; keep two screens of lookahead.
-INCLUDE_MARGIN_X = SCREEN_WIDTH * 2
-INCLUDE_MARGIN_Y = LANE_BAND_HEIGHT // 2
+# Soft diagnostic padding around the camera for the stored *view* bounds only.
+# The HUD plots against the camera rectangle itself (0..320 × 0..lane_max), not
+# this expanded view — a previous wide view made the drawn "camera" look wrong
+# relative to what agents treat as on-screen.
+VIEW_MARGIN_X = 8.0
+VIEW_MARGIN_Y = 4.0
+# How far outside the visible screen (in map_x) we still *list* actors for the
+# diagnostic entity table. Agent reachability/loot still use strict 0..320.
+INCLUDE_MARGIN_X = SCREEN_WIDTH // 2
+INCLUDE_MARGIN_Y = LANE_BAND_HEIGHT // 4
 
 # HUD letterbox uses the same aspect as the lane camera band.
 SCREEN_HEIGHT = LANE_BAND_HEIGHT
@@ -115,10 +119,29 @@ class MapEntity:
     family_state: int = 0  # ordinary +$52; Jack bit0 = weapon attached
     subtype: int = 0  # generic +$0B family-local subtype/debris selector
     script_param: int = 0  # generic +$40 ELC parameter; type $45 motion selector
+    # Weapon wear (+$50, usable when < 3) / pickup effect index. Shared offset
+    # with player character id and boss distances — only meaningful for
+    # weapon/pickup kinds.
+    item_param: int = 0
+    # Weapon/pickup +$51: zero = free ground object; nonzero = held/thrown/
+    # reserved/mid-collect. ROM will not start a pickup when this is set.
+    interaction: int = 0
     facing_left: bool = False  # ordinary +$09 bit1; player action bit0
     boss_dist_x: int = 0  # later-boss +$50 abs X to target
     boss_dist_lane: int = 0  # later-boss +$52 abs lane to target
     combat_phase: CombatPhase = CombatPhase.UNKNOWN
+
+    @property
+    def is_free_ground_item(self) -> bool:
+        """True when the ROM would accept this object as a B-pickup target."""
+
+        if self.kind == "weapon":
+            # $3136: type $08-$0C, +$51 == 0, +$50 < 3.
+            return self.interaction == 0 and (self.item_param & 0xFF) < 3
+        if self.kind == "pickup":
+            # Already-linked consumables set +$51 before delete.
+            return self.interaction == 0
+        return False
 
     # Back-compat aliases used by HUD/app during the rename.
     @property
@@ -369,6 +392,8 @@ def _entity_from_object(
     target_ptr = 0
     attacker_ptr = 0
     family_state = 0
+    item_param = 0
+    interaction = 0
     boss_dist_x = 0
     boss_dist_lane = 0
     phase = CombatPhase.UNKNOWN
@@ -398,6 +423,14 @@ def _entity_from_object(
             target_ptr = _u16(slot, mm.OBJ_LATER_BOSS_TARGET)
         phase = boss_phase(
             type_id=type_id, primary_byte=action_state, tactical=tactical
+        )
+    elif style.kind in ("weapon", "pickup"):
+        item_param = _u8(slot, mm.OBJ_ITEM_PARAM)
+        interaction = _u8(slot, mm.OBJ_INTERACTION)
+        phase = (
+            CombatPhase.NORMAL
+            if interaction == 0 and (style.kind != "weapon" or item_param < 3)
+            else CombatPhase.SCRIPTED
         )
     elif style.kind == "projectile":
         phase = CombatPhase.ATTACKING
@@ -436,6 +469,8 @@ def _entity_from_object(
         family_state=family_state,
         subtype=subtype,
         script_param=script_param,
+        item_param=item_param,
+        interaction=interaction,
         facing_left=facing_left,
         boss_dist_x=boss_dist_x,
         boss_dist_lane=boss_dist_lane,

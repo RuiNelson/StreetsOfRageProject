@@ -4,6 +4,8 @@ from sor_autoplay.memory_map import (
     OBJ_CHARACTER_ID,
     OBJ_FLAGS,
     OBJ_HEALTH,
+    OBJ_INTERACTION,
+    OBJ_ITEM_PARAM,
     OBJ_JACK_WEAPON_ATTACHED,
     OBJ_POS_X,
     OBJ_POS_Y,
@@ -220,10 +222,59 @@ class WorldMapParseTests(unittest.TestCase):
         )
         p1 = world.entities[0]
         self.assertEqual(world.camera_bottom, float(0x70))
+        self.assertEqual(world.camera_left, 0.0)
+        self.assertEqual(world.camera_right, float(SCREEN_WIDTH))
         self.assertEqual(p1.map_y, 112.0)
         # At bottom of playable lane → bottom edge of camera box.
         frac = (p1.map_y - world.camera_top) / world.camera_height
         self.assertAlmostEqual(frac, 1.0)
+        # Camera is always the true 320×lane viewport; view may pad slightly.
+        self.assertGreaterEqual(world.view_left, world.camera_left - 24.0)
+        self.assertLessEqual(world.view_right, world.camera_right + 24.0)
+
+    def test_held_or_exhausted_weapons_are_not_free_ground_items(self) -> None:
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+
+        free_base = 0x100
+        _put_u8(actors, free_base + OBJ_TYPE, 0x0A)  # bat
+        _put_u8(actors, free_base + OBJ_FLAGS, 0x00)
+        _put_fixed16(actors, free_base + OBJ_POS_X, 800)
+        _put_fixed16(actors, free_base + OBJ_POS_Y, 0x40)
+        _put_fixed16(actors, free_base + OBJ_POS_Z, 0xA0)
+        _put_u8(actors, free_base + OBJ_ITEM_PARAM, 0)
+        _put_u8(actors, free_base + OBJ_INTERACTION, 0)
+
+        held_base = 0x100 + OBJECT_SLOT_SIZE
+        _put_u8(actors, held_base + OBJ_TYPE, 0x0B)  # pipe
+        _put_u8(actors, held_base + OBJ_FLAGS, 0x00)
+        _put_fixed16(actors, held_base + OBJ_POS_X, 820)
+        _put_fixed16(actors, held_base + OBJ_POS_Y, 0x40)
+        _put_fixed16(actors, held_base + OBJ_POS_Z, 0xA0)
+        _put_u8(actors, held_base + OBJ_ITEM_PARAM, 0)
+        _put_u8(actors, held_base + OBJ_INTERACTION, 1)  # reserved/held
+
+        worn_base = 0x100 + 2 * OBJECT_SLOT_SIZE
+        _put_u8(actors, worn_base + OBJ_TYPE, 0x08)  # knife
+        _put_u8(actors, worn_base + OBJ_FLAGS, 0x00)
+        _put_fixed16(actors, worn_base + OBJ_POS_X, 840)
+        _put_fixed16(actors, worn_base + OBJ_POS_Y, 0x40)
+        _put_fixed16(actors, worn_base + OBJ_POS_Z, 0xA0)
+        _put_u8(actors, worn_base + OBJ_ITEM_PARAM, 3)  # exhausted
+        _put_u8(actors, worn_base + OBJ_INTERACTION, 0)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+        by_type = {
+            entity.type_id: entity
+            for entity in world.entities
+            if entity.kind == "weapon"
+        }
+        self.assertTrue(by_type[0x0A].is_free_ground_item)
+        self.assertFalse(by_type[0x0B].is_free_ground_item)
+        self.assertFalse(by_type[0x08].is_free_ground_item)
 
     def test_top_of_lane_near_top(self) -> None:
         actors = bytearray(ACTORS_BYTES)

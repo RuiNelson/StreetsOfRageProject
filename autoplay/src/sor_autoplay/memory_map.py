@@ -102,6 +102,13 @@ OBJ_CONTACT_PTR = 0x4C
 # Later bosses ($55-$58): abs X distance to target (word), pair role, tactical.
 OBJ_BOSS_DIST_X = 0x50  # also Abadede linked helper / character id on players
 OBJ_CHARACTER_ID = 0x50  # player character id (same offset, different meaning)
+# Ground weapons: wear/exhaust counter (+$50 < 3 is still usable). Consumable
+# pickups store their effect index here. Same offset, different meanings.
+OBJ_ITEM_PARAM = 0x50
+# Weapons/pickups: nonzero means reserved, held, thrown, or mid-collect
+# (ROM find_close_interaction_target at $3136 requires zero for a free ground
+# weapon). Not the same as ordinary enemy family_state at +$52.
+OBJ_INTERACTION = 0x51
 OBJ_BOSS_DIST_LANE = 0x52
 # Ordinary family-private byte at the same offset. Jack ($27) uses bit 0 as
 # the weapon-attached latch: set while an axe/torch is in his hands and clear

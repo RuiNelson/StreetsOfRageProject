@@ -179,7 +179,14 @@ def build_tactical_graph(
             ):
                 edges.add(Edge(entity.slot, Relation.GRABBABLE))
 
-        if reachable and entity.kind in ("pickup", "weapon"):
+        # ROM $3136 only accepts free ground weapons (+$51==0, +$50<3) and
+        # unlinked pickups. Held/thrown/exhausted objects must not be loot goals
+        # even when they still appear in the object table on-camera.
+        if (
+            reachable
+            and entity.kind in ("pickup", "weapon")
+            and entity.is_free_ground_item
+        ):
             edges.add(Edge(entity.slot, Relation.COLLECTIBLE))
 
     return TacticalKnowledgeGraph(

@@ -64,7 +64,7 @@ class ObserverHud:
         self._cam_rect: int | None = None
         self._cam_label: int | None = None
         self._empty_label: int | None = None
-        self._markers: list[tuple[int, int]] = []  # (disc_id, text_id)
+        self._markers: list[tuple[int, int]] = []  # (square_id, text_id)
         self._hole_rects: list[int] = []
         self._last_canvas_size: tuple[int, int] = (0, 0)
         self._last_plot_geom: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
@@ -180,9 +180,9 @@ class ObserverHud:
         self._map_legend = tk.Label(
             self._map_frame,
             text=(
-                "1/2 players   G Garcia  S Signal  H Haku-Ro  N Nora  J Jack   B boss   "
-                "outline: green=down  orange=charge  red=atk  cyan=block  purple=held   "
-                "symbol suffix = phase (d/c/a/…)   k/b weapons  a/+ food"
+                "letters only · square outline = state  "
+                "(green=down  orange=charge  red=atk  cyan=block  purple=held  gray=dead)  "
+                "1/2  G/S/H/N/J  B boss  k/b/|/p weapons  a/+ food"
             ),
             fg=_DIM,
             bg=_CARD,
@@ -503,11 +503,11 @@ class ObserverHud:
             self._last_plot_geom = plot_geom
             self._ensure_static_plate(w, h, ox, oy, plot_w, plot_h)
 
-        # Camera frustum: fixed world aspect MAP_ASPECT → same on screen after letterbox.
-        x0 = _map_x(world.camera_left, world, ox, plot_w)
-        x1 = _map_x(world.camera_right, world, ox, plot_w)
-        y0 = _map_y(world.camera_top, world, oy, plot_h)
-        y1 = _map_y(world.camera_bottom, world, oy, plot_h)
+        # Plot space *is* the camera rectangle (0..320 × 0..lane). Draw a thin
+        # edge so the true viewport is obvious; do not map against the wider
+        # diagnostic view (that made the camera box look oversized).
+        x0, y0 = ox, oy
+        x1, y1 = ox + plot_w, oy + plot_h
         if self._cam_rect is None:
             self._cam_rect = canvas.create_rectangle(
                 x0,
@@ -515,8 +515,8 @@ class ObserverHud:
                 x1,
                 y1,
                 fill="#161a28",
-                outline="#3d4663",
-                dash=(3, 2),
+                outline="#5a6484",
+                width=2,
                 tags=("cam",),
             )
             self._cam_label = canvas.create_text(
@@ -554,8 +554,8 @@ class ObserverHud:
         for index in range(len(holes), len(self._hole_rects)):
             canvas.itemconfigure(self._hole_rects[index], state="hidden")
 
-        marker_r = max(6, min(14, int(min(plot_w, plot_h) / 48)))
-        boss_r = marker_r + 2
+        half = max(7, min(16, int(min(plot_w, plot_h) / 40)))
+        boss_half = half + 2
 
         entities = sorted(
             world.entities,
@@ -570,6 +570,12 @@ class ObserverHud:
         drawn = 0
 
         for entity in entities:
+            # Strict camera band only — matches agent on-screen / COLLECTIBLE.
+            if not (
+                world.camera_left <= entity.map_x <= world.camera_right
+                and world.camera_top <= entity.map_y <= world.camera_bottom
+            ):
+                continue
             # map_x = cam-relative X; map_y = absolute lane (top-down, Z ignored).
             cx = _map_x(entity.map_x, world, ox, plot_w)
             cy = _map_y(entity.map_y, world, oy, plot_h)
@@ -577,41 +583,38 @@ class ObserverHud:
                 continue
             if drawn >= len(self._markers):
                 self._ensure_marker_pool(drawn + 1)
-            disc_id, text_id = self._markers[drawn]
-            r = boss_r if entity.kind in ("player", "boss") else marker_r
-            canvas.coords(disc_id, cx - r, cy - r, cx + r, cy + r)
+            square_id, text_id = self._markers[drawn]
+            r = boss_half if entity.kind in ("player", "boss") else half
+            canvas.coords(square_id, cx - r, cy - r, cx + r, cy + r)
             outline = phase_color(
                 CombatPhase.DEATH if entity.is_defeated else entity.combat_phase
             )
+            if not outline:
+                # Idle / non-combat: use the family colour as a thin outline.
+                outline = entity.color
             canvas.itemconfigure(
-                disc_id,
+                square_id,
                 state="normal",
-                fill=entity.color,
-                outline=outline if outline else "#1a1b22",
-                width=3 if outline else 1,
+                fill="",  # letter only — state is the square outline
+                outline=outline,
+                width=2 if entity.kind in ("player", "boss") else 2,
             )
             canvas.coords(text_id, cx, cy)
-            # Symbol; combatants append a 1-char phase hint when not idle.
-            symbol = entity.symbol
-            if entity.kind in ("enemy", "boss") and entity.phase_tag not in (
-                "idle",
-                "?",
-            ):
-                symbol = f"{entity.symbol}{entity.phase_tag[0]}"
+            # Single letter/symbol — no phase suffix (outline carries state).
             canvas.itemconfigure(
                 text_id,
                 state="normal",
-                text=symbol,
+                text=entity.symbol,
                 fill=entity.color,
             )
             # Markers above holes and camera.
-            canvas.tag_raise(disc_id)
+            canvas.tag_raise(square_id)
             canvas.tag_raise(text_id)
             drawn += 1
 
         for index in range(drawn, len(self._markers)):
-            disc_id, text_id = self._markers[index]
-            canvas.itemconfigure(disc_id, state="hidden")
+            square_id, text_id = self._markers[index]
+            canvas.itemconfigure(square_id, state="hidden")
             canvas.itemconfigure(text_id, state="hidden")
 
         empty_cx = ox + plot_w / 2
@@ -697,17 +700,18 @@ class ObserverHud:
             )
 
     def _ensure_marker_pool(self, count: int) -> None:
-        """Grow the reusable disc/text pool to at least ``count`` markers."""
+        """Grow the reusable square-outline/text pool to at least ``count``."""
 
         canvas = self._canvas
         while len(self._markers) < count:
-            disc_id = canvas.create_oval(
+            square_id = canvas.create_rectangle(
                 0,
                 0,
                 0,
                 0,
-                fill="#050508",
-                outline="",
+                fill="",
+                outline="#888",
+                width=2,
                 state="hidden",
                 tags=("marker",),
             )
@@ -720,7 +724,7 @@ class ObserverHud:
                 state="hidden",
                 tags=("marker",),
             )
-            self._markers.append((disc_id, text_id))
+            self._markers.append((square_id, text_id))
 
 
 def _letterboxed_plot(
@@ -748,13 +752,16 @@ def _letterboxed_plot(
 
 
 def _map_x(map_x: float, world: WorldMap, ox: float, plot_w: float) -> float:
-    t = (map_x - world.view_left) / world.view_width
+    """Project camera-relative map X into the plot (camera = full plate)."""
+
+    t = (map_x - world.camera_left) / world.camera_width
     return ox + t * plot_w
 
 
 def _map_y(map_y: float, world: WorldMap, oy: float, plot_h: float) -> float:
-    # Larger lane Y → lower on the canvas (front of the stage).
-    t = (map_y - world.view_top) / world.view_height
+    """Project lane Y into the plot. Larger lane Y → front of stage (down)."""
+
+    t = (map_y - world.camera_top) / world.camera_height
     return oy + t * plot_h
 
 

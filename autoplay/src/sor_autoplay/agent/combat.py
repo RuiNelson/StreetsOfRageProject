@@ -97,7 +97,12 @@ class TargetChoice:
 
 
 def is_on_screen(entity: MapEntity, *, soft: bool = False) -> bool:
-    """True if the entity is visible, or in the ROM activation band if soft."""
+    """True if the entity is in the camera band (or ROM activation if soft).
+
+    Strict mode matches the 320 px Mega Drive viewport in camera-relative X.
+    Soft mode uses the ROM activation margin (-16..336) for diagnostics only;
+    loot and combat goals always use strict mode.
+    """
 
     left = ACTIVATION_LEFT if soft else ON_SCREEN_LEFT
     right = ACTIVATION_RIGHT if soft else ON_SCREEN_RIGHT
@@ -739,6 +744,10 @@ def select_pickup(
             continue
         if graph is not None and not graph.entity_has(entity, Relation.COLLECTIBLE):
             continue
+        elif graph is None:
+            # Without a graph, still enforce ROM free-ground rules and camera.
+            if not entity.is_free_ground_item:
+                continue
         if not is_on_screen(entity):
             continue
         d = math.hypot(entity.map_x - me.map_x, entity.map_y - me.map_y)
