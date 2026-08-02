@@ -1,604 +1,789 @@
 # Streets of Rage Autoplay — AI Specification
 
 **Living document.** This file and the code under `src/sor_autoplay/agent/`
-describe the same agent. When behaviour changes, update both:
+are the same contract. Every behaviour change must update both in the same
+change set.
 
-- Edit this document to define intended behaviour; implement that change in code.
-- Change code only when the new behaviour is reflected here.
+| If you… | Then you must… |
+| --- | --- |
+| Edit a rule, threshold, or priority here | Implement it in the listed module |
+| Change agent code behaviour | Update the matching section here |
 
-Prefer plain English here. Code identifiers appear only where they help map a
-rule to a module. Implementation lives under `src/sor_autoplay/agent/`.
+Numbers, action bytes, and orderings below are **normative**. Soft language is
+only for readability; when a number and a sentence conflict, the number wins.
 
----
-
-## 1. Purpose and scope
-
-The autoplay AI is a **scripted, deterministic policy** that plays *Streets of
-Rage* on a live recompilation host. It is **not** a neural network. It:
-
-1. Reads a coherent snapshot of game state (players, map entities, flags).
-2. Decides controller input for one or both seats (P1 and/or P2).
-3. Emits an explainable note string for the HUD and traces.
-
-It attaches through `megadrive_remote` to a running `sor` process. The observer
-HUD can run without agents; agents are optional and toggled per seat.
-
-### 1.1 What the AI may and may not do
-
-| Allowed                                | Forbidden                                                  |
-| -------------------------------------- | ---------------------------------------------------------- |
-| Press D-pad, A, B, C (standard layout) | Press Start (agents never pause)                           |
-| Hold directions between polls          | Use host `--altControls` layout                            |
-| Pulse face buttons for ROM input edges | Cheat via direct RAM writes for play                       |
-| Read RAM for perception                | Invent button sequences illegal for the current ROM action |
-
-**Evaluation lockstep** may seed RNG and frame phase for comparable tests;
-those writes are test setup only. Live play uses controller inputs alone.
-
-### 1.2 Control scheme (standard only)
-
-OPTIONS control scheme **0**. Host must **not** use `--altControls`.
-
-| Physical button    | Meaning                                                |
-| ------------------ | ------------------------------------------------------ |
-| **B**              | Attack, pickup, knee while holding, weapon swing/throw |
-| **C**              | Jump; crossover vault while holding an enemy           |
-| **A**              | Call the police special                                |
-| **B + C together** | Rear / back attack (never used as a jump-kick)         |
-| **D-pad**          | Move (up = back of stage / smaller lane Y)             |
-
-Jump-kick is **C first, then B on a later decision while airborne** — never
-C and B on the same tick (that is the rear attack).
+Implementation root: `src/sor_autoplay/agent/`.
 
 ---
 
-## 2. Architecture overview
+## 0. Glossary
 
-Each enabled seat, each decision tick:
+| Term | Meaning |
+| --- | --- |
+| **Decision** | One call to `decide_actions` → one `AgentDecision` (P1/P2 masks + notes) |
+| **Seat** | Player 1 or player 2 independently |
+| **map_x / map_y** | Camera-relative X; lane Y from object `+$14` (world lane) |
+| **world_x / world_y** | Absolute world position used for walk goals |
+| **action_base** | Player `+$30` action byte with facing bit cleared (`value & 0xFE` where noted) |
+| **action_state** | Full player action byte; **bit 0 set = face left** |
+| **Intent** | High-level buttons for one decision before mask conversion |
+| **Hard constraint** | Boolean that forbids an action; fuzzy scores cannot override it |
+| **Commitment** | At most one multi-frame skill owning a seat |
+
+Coordinate conventions:
+
+- **Up** on D-pad = smaller lane Y (back of stage).
+- **Down** = larger lane Y (front of stage).
+- CRT width = **320**. Player walk band camera X = **[32, 288]**.
+- Lane Y playable band: **[2, 112]** default; **[2, 160]** on level index 6.
+
+---
+
+## 1. Purpose and I/O contract
+
+### 1.1 Role
+
+Scripted, **deterministic** policy (not learned). Per enabled seat:
+
+1. Read one coherent `GameSnapshot`.
+2. Produce an `Intent` with a human-readable `note`.
+3. Convert to a standard-control button mask.
+4. Apply co-op attack gate, then send to the host.
+
+### 1.2 Allowed actuators
+
+| Physical | Mask bit | Role |
+| --- | --- | --- |
+| LEFT/RIGHT/UP/DOWN | D-pad | Move |
+| **B** | attack / confirm | Punch, pickup, knee, weapon, menu confirm |
+| **C** | jump | Jump; hold-vault crossover |
+| **A** | special | Police call |
+| **B+C** | rear_attack | Rear attack only (never jump-kick) |
+
+Hard bans:
+
+- Never press **Start**.
+- Never use host `--altControls` (scheme ≠ 0 / remapped A–Y).
+- Never write play-state RAM to “win”; evaluation may seed RNG/frame only as
+  **test setup** (`$FFFFFF40`, `$FFFFFB08`).
+
+### 1.3 Jump-kick vs rear attack
+
+| Chord | Meaning |
+| --- | --- |
+| Same decision: **B and C** | Rear attack |
+| Decision N: **C only**; later decision: **B** in free-flight | Jump-kick |
+
+### 1.4 Session config (`AgentConfig`)
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `p1_enabled` / `p2_enabled` | false | Seat driven by AI |
+| `hold_frames` | 2 | Fallback press length on old hosts |
+| `police_threshold` | **4.5** | Min pressure score (0–10) for A, after eligibility |
+
+Toggles: HUD, keys `1`/`2`, CLI `--agent-p1` / `--agent-p2`.
+
+### 1.5 Session-level steady (no seat input)
+
+Clear all tactical seat memory and emit mask `0` when any of:
+
+| Condition | Note |
+| --- | --- |
+| No seat enabled, or `not snapshot.connected` | — |
+| `snapshot.paused` | `steady` |
+| `snapshot.police_special_active` | `steady` |
+| `snapshot.game_state ∉ {0x14, 0x16}` | `menu idle` |
+
+---
+
+## 2. Pipeline (exact order)
+
+Per enabled seat, one decision:
 
 ```text
-GameSnapshot
-  → DecisionContext (perception bag + seat memory)
-  → PlayerMode (exclusive ROM partition)
-  → Commitment / multi-frame skills (at most one per seat)
-  → police special (when free enough)
-  → free tactical path (air, props, fight/loot/progress, combat, nav)
-  → Intent
-  → co-op attack gate
-  → button mask → host (hold_buttons / press_buttons)
+1. build DecisionContext + classify PlayerMode
+2. if DIALOG        → Mr. X NO path; return
+3. if NOT_PLAYABLE  → idle; return
+4. try_start_mode_skill   # ENEMY_HELD → EnemyGrabEscape; HURT → clear+idle
+5. ensure_perception()    # tactical graph + pressure (requires live entity)
+6. try_crossover_suplex   # commitment; before police
+7. police special?        # A if eligible + grounded-ready
+8. try_hold_resolve       # HOLDING / GRAB_ANIM / weapon tree
+9. 2P air assist?         # both agents + partner jump-family nearby → B+C
+10. _decide_free          # free tactical ladder
+11. coop.guard_attack_intent  # strip B/B+C if partner hit risk
+12. mask_from_intent
 ```
 
-### 2.1 Session configuration
+`decide_actions` also decrements each seat’s `attack_cd` once per decision
+after both seats are resolved.
 
-- **P1 / P2 enabled**: independent toggles (HUD buttons or keys `1` / `2`, or
-  CLI `--agent-p1` / `--agent-p2`).
-- **Police threshold**: default pressure score **4.5** (0–10 scale) before A
-  is considered, subject to hard eligibility rules below.
-- **Hold frames**: fallback pulse length for older hosts without sticky holds.
+### 2.1 Free ladder (`_decide_free`) — exact sub-order
 
-### 2.2 Per-seat memory (not ROM state)
-
-Each seat keeps mutable policy memory:
-
-- **Walk latch** — world-space goal and locked D-pad signs until arrival.
-- **Nav memory** — hole detours, breakable side choice, stuck recovery.
-- **Goal memory** — last fight/loot/progress choice and target (hysteresis).
-- **Grab / enemy-grab-escape latches** — bridge one missing observation sample.
-- **Auto-planner** — multi-step crossover → suplex plan.
-- **Commitment** — which multi-frame skill currently owns the seat.
-- **Attack cooldown** — short tick counters so B is not spammed every poll.
-- **Last note** — human-readable reason for the last decision.
-
-When agents are off, the game is paused, a police special is already playing,
-or the game is outside live combat states, tactical memory is cleared and the
-agent emits **no input** (steady).
-
----
-
-## 3. Decision pipeline (priority order)
-
-The following is the **authoritative behaviour order**. Higher items win.
-
-### 3.1 Session-level steady (no seat logic)
-
-Emit empty masks when:
-
-- neither agent is enabled, or remote is disconnected; or
-- the game is **paused**; or
-- a **police special** is already active; or
-- game state is not a live in-game combat/progression state.
-
-### 3.2 Per-seat exclusive modes
-
-| Mode               | When                                                | Behaviour                                                      |
-| ------------------ | --------------------------------------------------- | -------------------------------------------------------------- |
-| **Dialog**         | Mr. X end offer is live                             | Always select **NO**, then confirm                             |
-| **Not playable**   | No player entity or seat not playable               | Idle                                                           |
-| **Enemy held**     | Player actions in the enemy-grab family (`$78–$7E`) | Own the full escape: C to cross, wait, B in the counter window |
-| **Hurt**           | Player is in a hurt reaction                        | Clear plans and walk; wait (no input mash)                     |
-| **Grab animation** | Closed throw/knee anims                             | Hold ownership with empty input (do not re-fire B)             |
-| **Airborne**       | Jump action family                                  | Aim toward target; B only in free-flight, never launch/land    |
-| **Holding**        | Player holds a weapon or an enemy                   | Hold-resolve skill (after police when applicable)              |
-| **Free**           | Grounded, not held, not exclusive above             | Full free tactical path                                        |
-
-Mode classification order: dialog → not playable → enemy held → hurt → grab
-animation → airborne → holding → free.
-
-### 3.3 Multi-frame skills (commitment)
-
-At most **one** skill owns a seat at a time. A skill keeps ownership until it
-finishes or its preconditions fail. Soft preference scores never start an
-illegal skill; hard ROM state gates ownership.
-
-#### Enemy grab escape
-
-When an enemy holds the player:
-
-1. Wait through acquire / closed animations.
-2. In the held state, press **C** to start the crossover.
-3. Wait through the crossover animation.
-4. When the counter window flag is set, press **B** for the counter throw.
-5. Never press B and C on the same tick for this protocol.
-
-Retries are rate-limited so a rejected edge is not re-fired every poll.
-
-#### Crossover suplex (back protection while *we* hold)
-
-When **we** hold an enemy from the front and another live hostile is **behind**
-us:
-
-1. Expert rules infer goal “crossover suplex”.
-2. Planner presses **C** (vault to the enemy’s back).
-3. Wait until back-hold is confirmed.
-4. Press **B** for the suplex.
-5. Plan times out safely; tolerates **one** missing hold observation; retries
-   crossover at most **twice**, then falls back to a direct B strike.
-
-This skill runs **before** police special and ordinary hold resolve so back
-protection is not delayed by A or knee spam.
-
-#### Hold resolve (ordinary hold / weapon)
-
-After police special check:
-
-- **Enemy hold**: mostly **B** knees; every third pulse (or under crowd /
-  partner pressure) **B + away** for a throw. Away = opposite of facing.
-  Prefer throw side that does not fling the body into a co-op partner.
-- **Back hold** (`$66`): B for suplex.
-- **Weapon hold**: only attack when a live foe is in usable lane/range;
-  otherwise return control to free movement. No B spam through weapon anims.
-  Bat/pipe = melee swing; knife/bottle/pepper = throw (Blaze dumps weak weapons).
-- **Closed grab animations**: empty input lockout even if pointers clear.
-- **Orphan contact**: exact front-hold with only a stale contact pointer gets
-  one B to release, then idle.
-
-Hold detection requires strong evidence: a reciprocal grabbed-enemy link to this
-player, or a non-weapon held type. Contact pointer or weapon projectile pointer
-alone is **not** enemy-grab evidence. A reciprocal grab overrides a stale weapon
-type.
-
-### 3.4 Police special
-
-After crossover planning, before ordinary hold:
-
-Call **A** only when **all** of:
-
-1. Special stock remaining (and not round 8 / level index ≥ 7).
-2. Player can start a grounded action (input-ready ground or weapon-ready).
-3. Situation is **eligible**:
-   - any reachable live **boss**, or
-   - at least **four** nearby enemies, or
-   - health ≤ **40%** with at least one nearby enemy;
-4. Fuzzy pressure **score ≥ threshold** (default 4.5).
-
-Boss presence forces maximum pressure urgency. Conserve specials in small
-full-health skirmishes even if the fuzzy score is noisy.
-
-Pressure factors (fuzzy, with fired-rule trace): crowd size, hunters targeting
-this seat, active attacks, surrounded geometry, bosses, low/critical health.
-
-### 3.5 Two-player air assist
-
-When **both** seats are agent-controlled and the partner is in a **jump action
-family** nearby: emit **B+C** intentionally for the co-op air throw.
-
-**Never** use elevation (`world_z`) for this test — standing ground Z is always
-large and would false-trigger forever.
-
-### 3.6 Free tactical path
-
-When no exclusive skill owns the seat:
-
-1. **Airborne** handling (if still airborne in free path — same rules as mode).
-2. **Moving damaging breakables** (round 8 type `$45`): evade lane within 220 px;
-   smash only when already in grounded punch range; never chase like a static crate.
-3. **Arbitrate goal**: fight vs loot vs progress (constrained utility).
-4. If **loot** wins: walk into ROM pickup box, B only when grounded and ready.
-5. **Combat** against selected target (face-then-hit, family counters, back security).
-6. **Static breakables** when no combat target (side approach only).
-7. **Stage progress** (right by default; left on stage 8; elevator hold on stage 7).
-
----
-
-## 4. Perception: knowledge graph
-
-Every free decision builds a **tactical knowledge graph** from one snapshot:
-typed entities and hard relations. Soft scores never expand what the graph
-marks impossible.
-
-### 4.1 Relations (hard facts)
-
-| Relation                         | Meaning                                                                     |
-| -------------------------------- | --------------------------------------------------------------------------- |
-| **Reachable**                    | Can interact: on-screen (or boss margin), playable lane, alive if combatant |
-| **Defeated**                     | Signed-negative health / death — never target, chase, or treat as danger    |
-| **Targets player**               | Enemy AI is hunting this seat                                               |
-| **Dangerous**                    | Decoded attack / wind-up phase (or launched projectile)                     |
-| **Punishable**                   | Downed / open for free hits                                                 |
-| **Behind player**                | On the player’s rear arc relative to facing                                 |
-| **Same lane**                    | Lane Y within ±12                                                           |
-| **Near player**                  | Distance ≤ 160                                                              |
-| **Blocks progress**              | Live combatant that should stop forward scroll chase                        |
-| **Collectible**                  | Free ground weapon/pickup in loot camera band                               |
-| **Armed / Throwing / Grabbable** | Jack weapon phases and grab affordances                                     |
-| **Attached / Launched**          | Jack helper object phases                                                   |
-
-### 4.2 Visibility and targeting rules
-
-- **Combat / danger / pressure**: camera-relative X in **0..320** (strict CRT).
-  Bosses get a small right margin (~64 px) because they can lock scroll just
-  outside the viewport (Antonio observed ~328).
-- **Loot**: only free ground items in the walk band ± pickup reach
-  (`map_x` roughly **16..304**). Off-camera map markers are never loot goals.
-- **Playable lane**: entities outside the level’s lane band are not reachable.
-- **Dormant spawns** (e.g. round 1 actors at lane Y 0 with inactive state) stay
-  on the diagnostic map but are **not** targets until the ROM activates them.
-- **Zero health** remains targetable until the finishing hit / death state
-  (ROM needs the underflow). **Signed-negative** health is hard **Defeated**.
-
-### 4.3 Fuzzy scores vs hard guards
-
-Fuzzy membership is used only for graded concepts (near, low health, crowd,
-target utility). **Hard constraints always win**: unreachable, defeated, grab
-windows, input-ready actions, co-op friendly-fire geometry.
-
----
-
-## 5. Goal arbitration (fight / loot / progress)
-
-From the graph, enumerate legal goals and pick the **deterministic maximum
-utility** with hysteresis.
-
-### 5.1 Feasibility
-
-| Goal         | Feasible when                                                                          |
-| ------------ | -------------------------------------------------------------------------------------- |
-| **Fight**    | A reachable combat target exists (or a blocker without a fresh target)                 |
-| **Loot**     | Collectible item exists **and** no boss blocks the arena **and** no near dangerous foe |
-| **Progress** | Nothing blocks progress on the graph                                                   |
-
-### 5.2 Utility ideas (plain English)
-
-- **Fight**: target utility from combat scoring + pressure urgency; bosses and
-  dangerous foes push utility very high; hunting the player adds a bonus.
-- **Loot**: base value (life > special > weapon > health-need-scaled food) ×
-  closeness × safety (inverse pressure).
-- **Progress**: modest baseline when the screen is clear.
-- **Hysteresis**: keep the same goal/target unless a challenger is materially
-  better (~0.08 utility stickiness).
-
-### 5.3 Loot and weapons
-
-- ROM pickup box is about **±20 X, ±16 Y, ±8 Z**. The agent walks inside a
-  slightly tighter box and only presses B when grounded and input-ready.
-- Health / life / special pickups obey **co-op fairness** (see §8).
-- Weapons always free for either player in fairness terms, but:
-  - Only **free ground** weapons (not held/thrown/exhausted).
-  - Fuzzy weapon value uses damage/range/control plus character preference.
-  - Armed players pick a ground weapon only when it is a **material upgrade**.
-  - Fight constraints outrank upgrades.
-
----
-
-## 6. Combat
-
-### 6.1 Face-then-hit (core rule)
-
-A grounded punch is legal only when:
-
-1. **Same lane** — |ΔY| ≤ 12 (ROM front-interaction band).
-2. **In strike range** on X for the character (with a small safety margin inside
-   measured live hitboxes).
-3. **Facing the foe** — action state bit 0 set means face left.
-
-If geometry is ready but facing is wrong: **turn one tick** (D-pad only), then
-punch. Do not reverse-punch or air-punch by closing X while off-lane.
-
-**Match lane before closing X.** Off-lane “close enough” was the historical
-air-punch bug.
-
-### 6.2 Character profiles
-
-|                       | Axel                             | Adam                                      | Blaze                                   |
-| --------------------- | -------------------------------- | ----------------------------------------- | --------------------------------------- |
-| Identity              | Strong combo, slower, short rear | Balanced, best rear range, loves bat/pipe | Fast, weak ground combo, best jump kick |
-| Strike range (policy) | ~52                              | ~50                                       | ~62                                     |
-| Stand-off approach    | ~46                              | ~44                                       | ~56                                     |
-| Jump kick             | Short window                     | Good                                      | Best — prefer often                     |
-| Rear (B+C)            | Short/fast only when close       | Long range                                | Mid                                     |
-| Grab                  | Prefer spaced punches            | Prefer throw / vault                      | Prefer throw / vault                    |
-| Weapons               | Average all                      | Prefer bat/pipe                           | Prefer bat/pipe; knife/bottle weak      |
-
-Measured first-punch live boxes reach about 57 / 54 / 68 px; policy keeps 4–6 px
-inner margin. Stand at approach offset, not body-grab range (~≤18).
-
-### 6.3 Target selection
-
-Fuzzy target utility weighs: distance, lane access, danger/ranged attacks,
-punish windows, boss status, who is targeting the player, and family tier.
-
-At equal geometry, preferred tier is:
-
-**Boss > Jack > Nora > Signal > Haku-Ro/ninja > Garcia**
-
-A much closer or actively attacking lower-tier foe can still win. Stick with
-the current target unless a challenger wins by a material margin.
-
-### 6.4 Attack mix (deterministic)
-
-Attack choice is **deterministic** (no random tick rolls). Mix labels include
-punch, jump, grab walk, rear, hold. Jump-ins only when an enemy-family counter
-explicitly asks (e.g. Signal, Haku-Ro), not from character reach alone.
-
-Jump start: **C only** while facing, with **safe landing** (no pit under arc).
-Airborne branch later emits B only in free-flight states.
-
-### 6.5 Combo and busy states
-
-- While the player is mid-attack animation: face the foe; queue next combo B only
-  when the ROM still accepts an edge (ordinary `$18` with action flag clear).
-- Do not spam B after the ROM has accepted the edge.
-- Attack cooldown ticks prevent every-poll re-presses.
-
-### 6.6 Family counters (summary)
-
-| Family              | Prefer                                                                                        |
-| ------------------- | --------------------------------------------------------------------------------------------- |
-| **Garcia**          | Close combo / grab; intercept wind-ups early                                                  |
-| **Signal**          | Mid/far spacing; C→B jump kicks; jump early on low sweep                                      |
-| **Haku-Ro**         | Jump intercept; do not chase teleports                                                        |
-| **Nora**            | Close for grab → knee/throw; distrust “downed” feints                                         |
-| **Jack**            | Punch while armed; **do not grab** until throw window or unarmed; dodge launched helpers only |
-| **Abadede / Bongo** | Sidestep charge/flame; no jump into them                                                      |
-| **Antonio**         | Outside mid attack window; re-align to boss lane if charging far away                         |
-| **Souther**         | Stay grounded; leave committed claw lane                                                      |
-| **Onihime/Yasha**   | Stay mobile; leave shared lane when both bracket the player                                   |
-| **Mr. X**           | Mid-close pressure; rear escape when charged                                                  |
-
-### 6.7 Back security (free combat)
-
-If a second live hostile is behind the player:
-
-1. Prefer **grab a legal front target** and convert to crossover-suplex.
-2. Only use **rear B+C** when there is no grabbable front shield.
-3. Never restore “air attack only” rules that block armed-body punches on Jack.
-
-### 6.8 Preemptive defense
-
-- Committed enemy attacks within ~100 px: interrupt with punch when aligned, or
-  leave the lane; at lane edge retreat on X.
-- Basic pack enemies: intercept during approach within strike + ~24 px lead.
-- Signal low sweep: start C within ~120 px when lane-aligned (if landing safe).
-- Projectiles (launched): walk evade, do not punch the helper as a body.
-- Charge/sidestep retreat only inside the reaction radius; distant bosses are
-  approached, not fled.
-
-### 6.9 Boss movement guards
-
-Souther and the twins own special **leave the attack lane** movement even when
-generic pursuit would walk back into the claw/grab choreography. Hold the safe
-lane once clearance is enough.
-
-### 6.10 Airborne sequence (ROM)
+Only reached when steps 2–9 did not return:
 
 ```text
-$10 launch → $12 free flight → $16 air attack → $14 landing
+A. if airborne action family → air branch; return
+B. if reachable breakable with outgoing_damage > 0 → moving-prop branch; return
+C. select_pickup + select_target + solve_goal (fight|loot|progress)
+D. if LOOT wins and item set → loot walk/B; return
+E. combat vs target (if any) → may return
+F. static breakable (if any) → may return
+G. progress_goal + walk
 ```
 
-B is accepted in free flight, not during launch or landing. Airborne is the
-action family `$10–$17`, not world elevation.
+### 2.2 Per-seat memory (`SeatMemory`)
+
+| Field | Role | Key constants |
+| --- | --- | --- |
+| `walk` | Latched world goal + dir signs | eps default 10×8; stuck 12 ticks / 2 px; goal refresh slack 14 |
+| `nav` | Hole detour, break side, unstuck | stuck 8 ticks / 3 px; escape hold 18; ban TTL 48 |
+| `goal` | Last GoalKind + target_slot + age | +0.08 utility if retained |
+| `grab` | Hold latch | HOLD_LATCH_TICKS=2; THROW_EVERY=3; retry 4 ticks |
+| `enemy_grab_escape` | Escape edge rate-limit | retry 4 ticks |
+| `planner` | Crossover→suplex SM | timeout 24; lost hold 2; max crossover attempts 2 |
+| `commitment` | Active skill name | at most one |
+| `attack_cd` | Suppress re-B | set 1–4 on attacks |
+| `last_note` | HUD / trace | — |
+
+`clear_tactical()` clears walk, planner, goal, nav, grab latches, commitment.
 
 ---
 
-## 7. Grabs, weapons, and holds
+## 3. Mode classification (`classify_mode`)
 
-### 7.1 When we hold an enemy
+First matching wins:
 
-See §3.3 Hold resolve and Crossover suplex.
+| Order | Mode | Predicate |
+| --- | --- | --- |
+| 1 | `DIALOG` | `is_mr_x_offer(snapshot)` |
+| 2 | `NOT_PLAYABLE` | `me is None` or `not player_snap.is_playable` |
+| 3 | `ENEMY_HELD` | `action_base ∈ {0x78,0x7A,0x7C,0x7E}` |
+| 4 | `HURT` | `me.is_hurt` |
+| 5 | `GRAB_ANIM` | `action_base ∈ {0x62,0x64,0x68,0x6A,0x6C,0x6E}` |
+| 6 | `AIRBORNE` | `action_base ∈ [0x10,0x17] ∪ [0x3C,0x42]` |
+| 7 | `HOLDING` | grab context `holding` true (weapon or enemy grab) |
+| 8 | `FREE` | else |
 
-### 7.2 When an enemy holds us
-
-See §3.3 Enemy grab escape. Own the full sequence; do not mash random buttons.
-
-### 7.3 Weapons as inventory
-
-A carried weapon is **not** a permanent combat target and **not** a reason to
-press B every poll. With no live foe, or a foe outside weapon lane/range,
-weapon policy yields to normal movement/combat. Dangerous enemy phases also
-yield so family counters (e.g. jump Signal sweep) win over a swing.
-
----
-
-## 8. Co-op (two players)
-
-Streets of Rage 1 has **friendly fire**. Agents must never intentionally hit
-another live player.
-
-### 8.1 Safety layers
-
-1. **Body bubble** — partner very close: any B risks contact.
-2. **Directional cone** — partner on the attack side in-lane for punch/throw/rear.
-3. **Final gate** — every seat strips B / B+C after the policy if the attack
-   would hit the partner (except intentional air assist).
-
-When blocked, **clear the partner’s lane** (step vertically) rather than wait
-forever or fire through them. Grab throws prefer the side away from the partner.
-
-### 8.2 Item fairness
-
-- Do not take health when nearly full.
-- Prefer leaving life/special/health to a partner who is materially more hurt.
-- Critical health overrides fairness for the needy player.
-- Weapons are not rationed by fairness (still subject to upgrade rules).
+`STEADY` is session-level only (pause/police/menu), not seat classification.
 
 ---
 
-## 9. Navigation and stages
+## 4. Skills (commitment)
 
-### 9.1 Walk latch
+Protocol: `valid` → keep ownership; `step` → Intent or None (done); `cancel` on fail.
 
-Movement uses a **latched world-space goal**. The same D-pad signs are held
-until the player arrives in the goal band or **passes through** the goal on
-both axes. Combat in range, grabs, police, and hurt clear the walk.
+Same-named active commitment is **continued**, not restarted, so latches survive.
 
-Nearby goal refreshes must **not** re-aim every poll (that caused wall thrash).
+### 4.1 EnemyGrabEscape (`enemy_grab_escape`)
 
-### 9.2 Hole routing (stage 4)
+**Valid when** `action_base ∈ ENEMY_HOLD_ACTIONS`.
 
-Terrain facts from the collision-class map (class 0 = pit):
+ROM sequence (player `+$30` base):
 
-1. When horizontal progress meets a hole: **latch one safe detour lane**.
-2. Finish vertical motion (**DETOUR**), then advance past the pit on X
-   (**ADVANCE**).
-3. Never recompute detour side every poll (UP/DOWN shakiness).
-4. Emergency rewrite only when **already inside** a pit AABB.
-5. Jump starts require **safe landing** cells under the arc.
+| Action | Name | Input |
+| --- | --- | --- |
+| `$78` | acquire | wait (empty) |
+| `$7A` | held | **C** if `+(+$58) bit7 clear`; **B** if bit7 set |
+| `$7C` | crossover | wait |
+| `$7E` | counter throw | wait |
 
-### 9.3 Breakable approach
+Rules:
 
-Smash boxes need **horizontal facing in the same lane**. Never approach pure
-top/bottom:
+- Never emit B+C on the same decision.
+- Same command may not re-fire within **4** decision ticks.
+- Clears walk, planner, goal memory, ordinary grab latch on step.
 
-1. Move to a horizontal stand-off at the current lane.
-2. Then match the prop’s lane.
-3. Score both stand-offs against holes; latch the only solid side.
+### 4.2 CrossoverSuplex (`crossover_suplex`)
 
-### 9.4 Stuck recovery
+**Before police and hold resolve.**
 
-If world position does not move by ~3 px for ~8 polls: cycle open-loop cardinal
-escapes, ban failed headings, try the other crate side / detour lane. Walk
-latches must not keep re-aiming into the same wall.
+Expert facts (`CombatExpert` + rule engine):
 
-### 9.5 Stage special cases
+| Fact | Source |
+| --- | --- |
+| `ENEMY_GRABBED` | held enemy entity present |
+| `FRONT_HOLD` | we hold and `action_base == 0x60` |
+| `BACK_HOLD` | we hold and `action_base == 0x66` |
+| `HOSTILE_BEHIND` | nearest live enemy/boss behind facing, \|dx\|≤160, \|dy\|≤36, on-screen, not defeated/grabbed/death/scripted |
+| `BACK_EXPOSED` | inferred from `HOSTILE_BEHIND` |
+| Goal `CROSSOVER_SUPLEX` | grabbed + front hold + back exposed |
+| Goal `SUPLEX` | grabbed + back hold |
 
-| Stage                    | Rule                                                                                              |
-| ------------------------ | ------------------------------------------------------------------------------------------------- |
-| **Most stages**          | Progress right when no blocker                                                                    |
-| **Stage 4**              | Hole detours as above                                                                             |
-| **Stage 7 (elevator)**   | No horizontal progress; center lane `$50`; no LEFT/RIGHT progression; class-0 cells are not holes |
-| **Stage 8**              | Progress **left**; Mr. X offer always **NO**                                                      |
-| **Round 8 moving props** | Evade then smash only in range (see free path)                                                    |
+Planner state machine (`AutoPlanner`):
 
-### 9.6 Mr. X dialog
+| Phase | Condition | Emit |
+| --- | --- | --- |
+| start CROSSOVER | goal CROSSOVER_SUPLEX and action `$60` | enter ISSUE_CROSSOVER |
+| ISSUE_CROSSOVER | still `$60` | **C**; go WAIT_CROSSOVER; attempts=1 |
+| WAIT_CROSSOVER | action in `{0x76,0x80}` | wait (`saw_crossover`) |
+| WAIT_CROSSOVER | saw crossover and action `$66` | **B**; go WAIT_SUPLEX_FINISH |
+| WAIT_CROSSOVER | still `$60`, age≥2, attempts&lt;2 | **C** retry |
+| WAIT_CROSSOVER | still `$60`, attempts exhausted | **B** fallback; reset plan |
+| WAIT_SUPLEX_FINISH | action `$68` | wait until leave |
+| any | age &gt; **24** ticks | reset |
+| any | hold observation lost **2** consecutive ticks | reset |
 
-When the final offer UI is live: move selection to **NO**, then confirm. Never
-accept the “join Mr. X” path.
+### 4.3 HoldResolve (`hold_resolve`)
 
----
+Runs **after** police. Does not interrupt active crossover commitment.
 
-## 10. Input delivery
+**Valid when** closed grab anim **or** grab context `holding`.
 
-Agents run on the same remote poll thread as RAM reads (one connection).
+#### 4.3.1 Hold detection (`context_from_player`)
 
-- **D-pad only**: sticky `hold_buttons` so walking is continuous between polls.
-- **Any mask with A/B/C**: blocking VSync `press_buttons` pulse so the ROM sees
-  a fresh input edge; then re-latch D-pad component.
-- Older hosts without hold support fall back to press-only (walk taps).
+| Evidence | Result |
+| --- | --- |
+| Reciprocal GRABBED enemy linked to this seat (`attacker_ptr`/`target_ptr` low word = seat object, or close grabbed body) | `enemy_grab=True`; `weapon=False` even if `+$60` looks like a weapon |
+| `held_type` in `$08–$0C` and not linked | `weapon=True` |
+| `held_type ≠ 0` and not weapon type | `enemy_grab=True` |
+| `+$4C` or post-pepper `+$5E` alone | **not** enemy grab |
 
-Notes never select the transport. Rebuild the host so it serves `HOLD_BUTTONS`.
+`holding = weapon ∨ enemy_grab`.
 
-Default observer poll when agents are off: wall-clock ~33 ms (not VSync waits).
+#### 4.3.2 Closed animations
 
----
+`action_base ∈ {0x62,0x64,0x68,0x6A,0x6C,0x6E}`: empty Intent (lockout), even if pointers clear.
 
-## 11. Evaluation and regression contract
+#### 4.3.3 Orphan contact
 
-`evaluation.py` is the stable boundary for tests and future learned policies:
+Not holding, but `action_base ∈ {0x28,0x4A,0x60,0x66}`: one **B** after 4-tick spacing (exact `$60` + stale contact → “release stale contact”). Live path: `$60 → $6A → $02`.
 
-- Policy type: **GameSnapshot → AgentDecision** (masks + notes).
-- Lockstep: **four emulated frames per decision**; face buttons pulsed three
-  frames and released one frame inside that step.
-- Metrics and thresholds must remain comparable across episodes.
-- Traces (JSONL) live outside the repository.
+#### 4.3.4 Enemy hold tree
 
-First-class failure modes (normally enforce at zero or scenario minimums)
-include: failed pickups, failed ground-attack starts, weapon air attacks,
-missed back-exposure responses, invalid grab-animation attacks, enemy-grab
-escape misses, defeated-enemy attacks/pursuit, loot under threat, boss
-progress while blocked, boss stall, wasteful specials, missed boss specials,
-elevator horizontal progress, missed moving breakables, and related counters.
+Input-ready hold actions only: `{0x28, 0x4A, 0x60, 0x66}`.
 
-Comparable episodes use evaluator restart paths (character/level) that freeze
-setup on the same connection before evaluation; do not leave an uncontrolled
-frame gap between setup and measure.
+| Case | Intent |
+| --- | --- |
+| action `$66` | B (suplex) |
+| pulse % 3 == 0, **or** crowd ≥ 2, **or** ally in body bubble | B + throw direction |
+| else | B alone (knee) |
 
----
+Throw direction:
 
-## 12. Module map (code ↔ this document)
+1. Default away from facing (bit0 set → throw right = +X intent).
+2. If crowd ≥ 3: prefer progress direction (+1 if progress right else −1).
+3. If ally nearby in lane: flip to side **away** from ally.
 
-| Topic                            | Module(s)                                                |
-| -------------------------------- | -------------------------------------------------------- |
-| Pipeline entry, free path        | `agent/policy.py`                                        |
-| Modes, seat memory, decision bag | `agent/context.py`                                       |
-| Skills / commitment              | `agent/skills.py`                                        |
-| Buttons and Intent               | `agent/controls.py`                                      |
-| Knowledge graph                  | `agent/knowledge.py`                                     |
-| Fight/loot/progress solver       | `agent/arbiter.py`                                       |
-| Fuzzy primitives                 | `agent/fuzzy.py`                                         |
-| Combat geometry & selection      | `agent/combat.py`                                        |
-| Family counters                  | `agent/enemies.py`                                       |
-| Boss movement                    | `agent/bosses.py`                                        |
-| Grabs / weapons / enemy escape   | `agent/grabs.py`                                         |
-| Expert back-protection goals     | `agent/expert.py`                                        |
-| Crossover plan state machine     | `agent/autoplanner.py`                                   |
-| Police pressure                  | `agent/pressure.py`                                      |
-| Co-op safety & fairness          | `agent/coop.py`                                          |
-| Character ranges & biases        | `agent/characters.py`                                    |
-| Stage advice, Mr. X              | `agent/stage.py`                                         |
-| Holes, breakables, stuck         | `agent/navigation.py`                                    |
-| Walk latch                       | `agent/walk.py`                                          |
-| Rule inference engine            | `agent/inference.py`                                     |
-| Snapshot / RAM map               | `state.py`, `memory_map.py`, `world_map.py`, `phases.py` |
-| Evaluator                        | `evaluation.py`                                          |
+Latch: proven hold stays active through **1** missing observation sample only (`HOLD_LATCH_TICKS=2` clear ticks). Longer latch caused empty knee loops.
+
+#### 4.3.5 Weapon tree
+
+| Condition | Behaviour |
+| --- | --- |
+| Airborne | return None → free path owns jump family `$3C–$42` |
+| Not input-ready (`not (0x02–0x0E or 0x30–0x3A)`) | face foe; no B |
+| No foe, or foe `DANGEROUS` | return None → free path / family counters |
+| \|ΔY\| &gt; 12 | return None |
+| Ally in attack bubble (throw range if throwable) | return None |
+| Bat/pipe (`$0A/$0B`) and \|ΔX\| ≤ 36 | B swing |
+| Knife/bottle/pepper and (mid 20–100 or melee ≤36) | B throw; Blaze on weak weapon still B (“dump”) |
+
+Weapon types: knife `$08`, bottle `$09`, bat `$0A`, pipe `$0B`, pepper `$0C`.
 
 ---
 
-## 13. Design principles (do not violate lightly)
+## 5. Police special
 
-1. **Explainable**: every decision has a note; graphs and fired rules retain
-   traces for pressure and expert goals.
-2. **Hard ROM guards first**: soft scores cannot make illegal actions legal.
-3. **Deterministic**: no random combat mixes; evaluation episodes comparable.
-4. **Face-then-hit**: no air punches, no reverse punches, lane before X.
-5. **Jump-kick is sequenced C then B**, never C+B (rear).
-6. **Back security over greed**: protect rear before optimal front DPS.
-7. **Never friendly-fire**: final co-op gate on every seat.
-8. **Latched navigation**: no per-poll detour thrash or walk re-aim flicker.
-9. **Injectable boundary**: future learned models may propose weights or
-   candidates, but must not bypass ROM-state guards or this pipeline’s
-   feasibility rules.
-10. **This document tracks behaviour**: if you change a rule in code, change
-    the matching section here in the same change set.
+Checked after crossover plan, before hold resolve.
+
+### 5.1 Hard gates (all required)
+
+1. `specials > 0`
+2. `level_index < 7` (round 8 has no usable specials)
+3. `player_can_start_ground_action(me)` → base in `[0x02,0x0E] ∪ [0x30,0x3A]`
+4. **Eligible**:
+   - `boss_present` (any reachable live boss), **or**
+   - `enemy_count ≥ 4` (local threats), **or**
+   - `health_percent ≤ 40` and `enemy_count > 0`
+5. `pressure.score ≥ police_threshold` (default **4.5**)
+
+On fire: clear walk + commitment; Intent `special=True`.
+
+### 5.2 Pressure score (`compute_pressure`)
+
+Nearby threat window: \|ΔX\| ≤ **200**, \|ΔY\| ≤ **48**, strict on-screen X, REACHABLE if graph present.
+
+Fuzzy facts (Sugeno, value 0–1 then ×10 for score):
+
+| Fact | Membership |
+| --- | --- |
+| `crowd` | rising(enemy_count, 2 → 6) |
+| `hunters` | rising(hunters, 0.5 → 3) |
+| `active_attacks` | rising(charging, 0 → 2) |
+| `boss` | 1 if any reachable live boss else 0 |
+| `surrounded` | 1 if enemies both left and right of player and count ≥ 3 |
+| `low_health` | falling(hp%, 30 → 75) |
+| `critical_health` | falling(hp%, 12 → 35) |
+| `any_threat` | 1 if any near enemy/boss |
+
+Rules (name → consequent): baseline 0; crowd 0.85; hunters 0.60; active-attacks 0.60; boss 0.55; surrounded 0.80; critical-health∧any_threat 0.85; low-health∧any_threat 0.80; crowd∧low_health 1.0; attack∧low_health 1.0; boss∧low_health 0.95.
+
+If any reachable live boss: **urgency forced to 1.0** (`score = 10`).
 
 ---
 
-## 14. Out of scope / deferred
+## 6. Co-op
 
-- Host `--altControls` (split pickup / remapped face buttons).
-- Frame-perfect TAS scripts and full per-animation move tables.
-- Neural policy training (evaluator is the intended future boundary).
-- Attract-mode discrimination beyond current game-state gates.
+### 6.1 Geometry constants
+
+| Name | Value | Use |
+| --- | --- | --- |
+| `ALLY_LANE_HALF` | 28 | Shared lane band |
+| `ALLY_BODY_X` | 24 | Any B damages regardless of face |
+| `ALLY_MELEE_RANGE` | 80 | Front punch / bat cone |
+| `ALLY_THROWN_RANGE` | 140 | Knife/bottle/pepper |
+| `ALLY_REAR_RANGE` | 48 | B+C rear |
+| `ALLY_CLEAR_LANE` | 30 | Vertical step off partner |
+
+### 6.2 `attack_would_hit_ally`
+
+True if partner is a live other player, \|ΔY\| ≤ lane_half, \|ΔX\| ≤ range, and:
+
+- \|ΔX\| ≤ body X, **or**
+- partner is on the attack side (front for punch; rear side for rear_attack).
+
+### 6.3 Final gate `guard_attack_intent`
+
+Runs on **every** seat after policy. Strips `attack` and `rear_attack` if risky.
+
+Exceptions:
+
+- Intent is confirm-only (menu).
+- Intentional 2P air assist (both agents, B+C, partner in jump **action** family within ΔX≤28, ΔY≤14). **Never** use `world_z`.
+
+### 6.4 Item fairness
+
+Health/food (`should_take_health_pickup`):
+
+- My HP ≥ **95%** → false.
+- No partner HP → true.
+- My HP ≤ **30%** → true.
+- Partner HP + 8 &lt; my HP → false (leave it).
+- else true.
+
+Life/special: same with critical threshold **40%**.
+
+Weapons: not fairness-gated (still upgrade + graph COLLECTIBLE rules).
+
+### 6.5 Throw away from ally
+
+If ally in lane (±36 Y) and \|ΔX\| ≤ 100: throw direction is sign opposite ally X.
 
 ---
 
-*End of AI specification. Keep in sync with `src/sor_autoplay/agent/`.*
+## 7. Knowledge graph
+
+Built once per seat after exclusive modes when `me` exists (`build_tactical_graph`).
+
+### 7.1 Reachability (`entity_reachable`)
+
+| Kind | X rule | Y rule | Extra |
+| --- | --- | --- | --- |
+| pickup / weapon | `map_x ∈ [16, 304]` (loot camera) | lane in [LANE_Y_MIN, lane_max(level)] | — |
+| enemy / boss | `map_x ∈ [0, 320]` (+64 right for boss) | same lane band | not defeated / not ignore-as-target |
+| projectile / breakable | combat X band | lane band | — |
+
+Boss margin exists because Antonio can lock scroll near map X ≈ 328.
+
+### 7.2 Relations (emit when true)
+
+| Relation | Definition |
+| --- | --- |
+| `DEFEATED` | `entity.is_defeated` (signed-negative health / death lifecycle) |
+| `REACHABLE` | `entity_reachable` |
+| `NEAR_PLAYER` | hypot(Δx,Δy) ≤ **160** |
+| `SAME_LANE` | \|Δy\| ≤ **12** |
+| `BEHIND_PLAYER` | behind facing with \|Δx\| deadzone 8 |
+| `TARGETS_PLAYER` | `targets_player == seat` |
+| `DANGEROUS` | dangerous projectile **or** (non-projectile and phase dangerous) |
+| `PUNISHABLE` | phase punishable |
+| `BLOCKS_PROGRESS` | reachable enemy/boss, not GRABBED, (boss or dist≤220) |
+| `COLLECTIBLE` | reachable free ground pickup/weapon (`is_free_ground_item`) |
+| `ARMED` / `THROWING` | Jack type `$27` phases |
+| `GRABBABLE` | enemy/boss, `is_enemy_grabbable`, not GRABBED |
+| `ATTACHED` / `LAUNCHED` | Jack helper type `$28` states `$01` vs `$02–$04` |
+
+If `DEFEATED`, do **not** also emit danger/punish/block/grab edges from stale family state.
+
+### 7.3 Jack hard rules
+
+| Phase | Punch | Grab | Helper |
+| --- | --- | --- | --- |
+| ARMED (`+$52` bit0, not state `$0E`) | allowed | **forbidden** | — |
+| THROWING (primary `$0E`) | allowed | preferred (grab_bias 0.75) | about to launch |
+| UNARMED | allowed | allowed (grab_bias 0.40) | — |
+| Helper `$01` ATTACHED | not a combat target | — | not dangerous |
+| Helper `$02–$04` LAUNCHED | dodge plan | — | dangerous projectile |
+
+---
+
+## 8. Goal arbitration (`solve_goal`)
+
+Candidates: FIGHT, LOOT, PROGRESS. Winner = max (utility, priority) where priority FIGHT=3, LOOT=2, PROGRESS=1.
+
+### 8.1 FIGHT
+
+Requires selected target REACHABLE.
+
+```text
+utility = min(1, target_utility + 0.25 * pressure_urgency)
+if boss: utility = max(utility, 0.98)
+if DANGEROUS: utility = max(utility, 0.94)
+if TARGETS_PLAYER: utility = min(1, utility + 0.10)
+```
+
+Fallback if no candidates: FIGHT utility 0.50 (“blocker-without-target”).
+
+### 8.2 LOOT
+
+Requires item COLLECTIBLE and **not** hard threat:
+
+- any BLOCKS_PROGRESS boss, **or**
+- any DANGEROUS entity that is NEAR_PLAYER
+
+```text
+base = weapon 0.58 | life 0.92 | special 0.78 | health 0.35+0.60*falling(hp,30,90) | other 0.25
+closeness = falling(dist, 8, 180)
+safety = 1 - pressure_urgency
+utility = 0.52*base + 0.28*closeness + 0.20*safety
+```
+
+### 8.3 PROGRESS
+
+Only if no BLOCKS_PROGRESS entities. Fixed utility **0.30**.
+
+### 8.4 Hysteresis
+
+If candidate matches memory kind + target_slot: utility += **0.08** (capped 1.0). Memory age increments when retained.
+
+### 8.5 Loot execution
+
+Pickup geometry (safe inside ROM `$3136` box ±20/±16/±8):
+
+| Axis | Agent safe box |
+| --- | --- |
+| X | \|Δworld_x\| ≤ **16** |
+| Y | \|Δworld_y\| ≤ **12** |
+| Z | \|Δworld_z\| ≤ **6** |
+
+- Inside box + ground-ready → B (unless ally body-blocks).
+- Inside box not ready → wait.
+- Else walk to item world position (eps 3×3).
+
+Weapon upgrade only if `weapon_value(candidate) ≥ weapon_value(held) + 0.08`.
+
+Base weapon values: knife 0.62, bottle 0.32, bat/pipe 0.82, pepper 0.52; +0.12 preferred; −0.20 weak.
+
+---
+
+## 9. Combat
+
+### 9.1 Character profiles (normative numbers)
+
+Character IDs: 0 Axel, 1 Adam, 2 Blaze.
+
+| Field | Axel | Adam | Blaze |
+| --- | --- | --- | --- |
+| strike_range | 52 | 50 | 62 |
+| lane_align | 12 | 12 | 12 |
+| jump_kick_min..max | 28–50 | 30–72 | 28–78 |
+| rear_range_min..max | 8–30 | 18–52 | 12–40 |
+| jump_attack_bias | 0.40 | 0.45 | 0.60 |
+| rear_attack_bias | 0.40 | 0.32 | 0.28 |
+| combo_bias | 0.55 | 0.40 | 0.18 |
+| grab_bias | 0.10 | 0.10 | 0.15 |
+| grab_knees | 0 | 0 | 0 |
+| prefer_throw | true | true | true |
+| prefer_vault | false | true | true |
+| approach_offset | 46 | 44 | 56 |
+| caution_range | 48 | 52 | 48 |
+| preferred_weapons | all | bat/pipe | bat/pipe |
+| weak_weapons | ∅ | ∅ | knife/bottle |
+
+Measured first-punch boxes ≈ 57 / 54 / 68; policy keeps 4–6 px inside.
+
+### 9.2 Face-then-hit geometry
+
+| Check | Formula |
+| --- | --- |
+| Facing left | `action_state & 1 ≠ 0` |
+| Face deadzone | \|Δmap_x\| ≤ **4** → facing already OK |
+| Lane hit | \|Δmap_y\| ≤ **12** |
+| Lane approach | \|Δmap_y\| ≤ **16** |
+| can_punch | lane hit ∧ \|Δx\| ≤ strike_range ∧ (facing if required) |
+| can_jump_kick | jump_kick_min ≤ \|Δx\| ≤ jump_kick_max ∧ lane (optional +6 loose) |
+| can_rear_hit | enemy behind ∧ rear_range_min ≤ \|Δx\| ≤ rear_range_max |
+| behind | same lane hit Y; 6 &lt; \|Δx\| ≤ max; on rear side of facing (±10 deadzone) |
+| input-ready ground | base ∈ [0x02,0x0E] ∪ [0x30,0x3A] |
+| busy attacking | base ∈ [0x18,0x1F] ∪ [0x20,0x27] ∪ ([0x44,0x4F] except 0x4A) |
+| combo queue | base==0x18 ∧ `+(+$58) bit5` clear ∧ lane≤18 ∧ dx≤strike+20 ∧ facing |
+
+Stand-off for approach:
+
+```text
+dist = clamp(approach_offset, 22, strike_range - 2)
+if low_hp: dist = max(dist, caution_range * 0.65)
+stand_x = foe.world_x + side * dist   # side = away from foe
+stand_y = foe.world_y                 # always match lane first
+```
+
+### 9.3 Target utility (`select_target`)
+
+Only REACHABLE combatants; ignore non-dangerous Jack helpers; ordinary enemies dist≤220 (bosses unlimited in arena; projectiles ≤140).
+
+```text
+closeness = falling(dist, 20, 220|260 boss)
+lane_access = falling(|dy|, 8, 72)
+peril ∈ {0.15 baseline; 1.0 projectile/attacking; ≥0.82 targets-me; ≥0.70 boss; ≥0.62 contact band}
+punish = 1 if punishable else 0
+boss = 1 if boss else 0
+forward = 1 if on progress side else 0
+strike = 1 if can_punch(no face) else 0
+priority = family membership (below)
+utility = 0.24*closeness + 0.25*peril + 0.10*lane_access
+        + 0.22*punish + 0.10*boss + 0.03*forward + 0.03*strike
+        + 0.22*priority
+floors: projectile ≥0.98; dangerous ≥0.82; boss ≥0.94
+```
+
+Family priority membership (equal geometry):
+
+| Class | Membership |
+| --- | --- |
+| projectile | 1.00 |
+| boss | 0.96 |
+| Jack | 0.84 |
+| Nora | 0.68 |
+| Signal | 0.52 |
+| Haku-Ro | 0.36 |
+| Garcia | 0.20 |
+| other | 0.28 |
+
+Hysteresis: keep current target unless challenger utility ≥ current + **0.12**, or challenger is dangerous/projectile while current is not, or family priority jumps by ≥ **0.12**.
+
+### 9.4 Family counter plans (biases)
+
+| Family / type | range_scale | jump_bias | grab_bias | sidestep | no_jump | notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Garcia | 1.0 | 0 | 0.35 | | | pack |
+| Signal | 1.15 | **0.85** | 0.05 | yes | | mid/far C→B |
+| Haku-Ro | 1.1 | 0.45 | 0.10 | | | jump intercept |
+| Nora | 0.75 | 0 | **0.85** | | | grab; distrust downed |
+| Jack | 0.9 | 0 | phase | | | see §7.3 |
+| Abadede `$30` | 1.2 | 0 | 0.05 | yes | yes | charge |
+| Souther `$55` | 1.05 | 0 | 0.10 | | yes | grounded |
+| Antonio `$56` | 1.35 | 0 | 0.05 | yes | | midrange |
+| Bongo `$57` | 1.25 | 0 | 0 | yes | yes | flame |
+| Twins `$58` | 1.1 | 0 | 0.10 | yes | | mobility |
+| Mr. X `$35` | 1.0 | 0 | 0 | yes | | final |
+
+### 9.5 Attack mix (`attack_mix`) — deterministic
+
+Returns exactly one of: `rear` | `jump` | `grab_walk` | `punch` | `wait`.
+
+Order:
+
+1. If `behind` → `rear`.
+2. If not `lane_ok` → `wait`.
+3. `grab_pressure = max(plan.grab_bias, 0.9 if back_exposed and grabbable else 0)`.
+4. Phase knockdown/blocked/recovery: grab_walk if grab_pressure≥0.5; else punch if in_range∧facing; else wait.
+5. Phase charge/attacking with sidestep and not in_range: jump if jump_bias≥0.5 and band in {jump,approach} and can_jump and not no_jump; else wait.
+6. Jump if can_jump ∧ ¬no_jump ∧ jump_bias≥0.25 ∧ band in {jump,approach} ∧ grab_pressure&lt;0.7.
+7. grab_walk if grab_pressure≥0.5 ∧ grabbable ∧ phase in {normal,recovery,knockdown,unknown}.
+8. If not in_range or not facing → `wait`.
+9. Else `punch`.
+
+Engagement band:
+
+| Band | Condition |
+| --- | --- |
+| far / approach | off-lane rules first |
+| close | on-lane and \|Δx\| ≤ strike_range |
+| jump | on-lane and jump_kick window |
+| approach | on-lane and beyond jump window up to jump_max+40 |
+| far | else |
+
+### 9.6 Free-combat branch order (when target set)
+
+Normative order inside combat (after LOOT lost arbitration):
+
+1. **Rear threat without grab shield**: if closest_behind within min(rear_max+4, 44) and no grabbable distinct front → rear B+C if can_rear_hit; else clear ally / walk.
+2. Evaluate back_exposed via expert rear_threat_slot ≠ current foe; grabbable from graph/Jack rules.
+3. Projectile / PROJECTILE plan → evade walk (±40 X, ±18 Y).
+4. Target GRABBED and we are not grabbing → skip progress walk.
+5. Busy attacking → combo queue B or face-hold.
+6. **Back-shield grab**: if back_exposed ∧ grabbable: walk to body; B when \|Δx\|≤24 ∧ lane ∧ face ∧ cd=0 ∧ ground-ready.
+7. Boss tactical move (Souther / twins) if any.
+8. Signal sweep threat (type `$24`, state `$08` or `$0B`, \|Δx\|≤120, \|Δy\|≤20): C if ground-ready and jump_landing_safe; else brace.
+9. enemy_attack_committed (dangerous ∧ \|Δx\|≤100):
+   - off-lane boss → reengage boss lane;
+   - off-lane ordinary within react half 36: escape lane ±24 Y or X retreat at lane edge [2,112];
+   - on-lane within strike+24: interrupt B.
+10. should_intercept_basic_enemy (types `$20–$23`, not punishable, within strike+24, lane): B or face.
+11. punch geometry, wrong face → face tick (cd=1).
+12. attack_mix → rear / grab_walk / jump (safe landing) / punch.
+13. Else walk to stand point (grab body / jump mid / approach_offset), with sidestep evade when dangerous∧sidestep∧band≠close∧\|Δx\|≤100; lane-first when off-lane.
+
+Attack cooldowns commonly set: punch/interrupt 3; rear 4; jump start 1; combo 2.
+
+### 9.7 Signal sweep
+
+Type `$24`, primary states `$08` (selector) and `$0B` (low slide, anim `$18`, vel ≈7 px/frame). React at 120 X, 20 Y. Unarmed free-flight later emits B; held weapon may jump via `$3C–$42` without airborne weapon B spam.
+
+### 9.8 Airborne branch
+
+| action_base | Phase | B? |
+| --- | --- | --- |
+| `$10` / `$3C` | launch | no |
+| `$12` | free flight (attack ready) | **yes** if ally-safe |
+| `$16` | air attack anim | no (already attacking) |
+| `$14` / `$40` | landing | no |
+| other air | hold face | no |
+
+Also weapon jump family `$3C–$42`. Aim face toward combat or breakable target.
+
+### 9.9 Boss movement guards
+
+| Boss | Trigger | Response |
+| --- | --- | --- |
+| Souther `$55` | dangerous phase | leave attack lane by ≥28 Y or hold if already clear |
+| Twins `$58` | two nearby bracket player (±150 X, ±36 Y) or dangerous target | leave shared/attack lane same way |
+
+### 9.10 Moving breakables (before arbiter)
+
+REACHABLE breakable with `outgoing_damage > 0` (round-8 type `$45` ≈ 12 px per 4-frame decision):
+
+- can_break + ground-ready + cd=0 → B smash.
+- else if \|ΔX\| ≤ 220 and \|ΔY\| &lt; 28 → walk to safer lane Y (prefer max distance from prop lane within [14, camera_bottom−12]).
+- else if \|ΔX\| ≤ 220 → hold safe lane (no chase).
+
+### 9.11 Static breakables (after combat)
+
+Side-only approach (`navigation.breakable_side_approach`):
+
+1. Horizontal stand-off first (never pure top/bottom smash).
+2. Match lane.
+3. Score both sides vs holes; latch solid side.
+4. Punch when side_ready ∧ can_break ∧ facing; jump-break only side_ready ∧ jump window ∧ safe landing.
+
+---
+
+## 10. Navigation and stages
+
+### 10.1 Walk latch (`WalkState`)
+
+- Goals in **world** coordinates.
+- Latch dir_x/dir_y ∈ {−1,0,+1} until arrived or **passed through** goal on both axes.
+- Same-neighbourhood refresh (Δgoal ≤ **14** on both axes): update coords, **do not re-aim** (preserves unstuck dirs).
+- Default arrival eps: 10×8; combat often 3×6; progress 24×8.
+- Walk stuck: move &lt; 2 px for 12 ticks → perpendicular re-aim (goal unchanged).
+
+### 10.2 Symbolic nav (`NavMemory`)
+
+Phases: IDLE → DETOUR (vertical to latched safe lane) → ADVANCE (hold lane, clear hole on X) → ESCAPE (unstuck).
+
+Hole rules (stage advice `avoid_holes`):
+
+- Collision class 0 = pit; margins 12–16 px.
+- Latch one detour lane; do not recompute side each poll.
+- Emergency input rewrite **only** if already inside hole AABB (margin 0).
+- `jump_landing_safe`: sample arc at t ∈ {0.35,0.55,0.75,0.95,1.0}; refuse pit landings.
+
+Nav stuck (independent of walk): move &lt; **3** px for **8** polls → cardinal escapes, ban failed dirs (TTL 48), alternate detour/crate side.
+
+### 10.3 Stage advice (`stage_advice`)
+
+| level_index | Round | progress_right | horizontal_progress | avoid_holes | elevator | note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3 | 4 | true | true | **true** | false | holes |
+| 6 | 7 | true | **false** | false | **true** | elevator; preferred lane `$50` |
+| 7 | 8 | **false** | true | false | false | leftward |
+| other | — | true | true | false* | false | default |
+
+\* Default `avoid_holes` is false except stages that set it true above. Elevator: class-0 cells are **not** holes; clear walk latch so no inherited LEFT/RIGHT; no horizontal progress goals.
+
+Progress lead when empty: **±160** world X.
+
+### 10.4 Mr. X dialog
+
+`is_mr_x_offer`: flag `$FFDE00` or (level 7 ∧ clock stopped ∧ no live threats ∧ timer valid).
+
+Choice: object `+$59` bit4 = UI active; bit3 = side (**1 = NO**).
+
+Policy: hold RIGHT until NO selected (phase counter), then confirm (B). Never accept YES.
+
+---
+
+## 11. Input delivery (host)
+
+| Intent content | Transport |
+| --- | --- |
+| D-pad only | sticky `hold_buttons` (0x14) between polls |
+| Any A/B/C | VSync `press_buttons` for edge (≥3 frames in evaluator lockstep), then re-latch D-pad |
+| Old host | press-only fallback (walk taps) |
+
+Agents share the remote poll connection with RAM reads. Notes do not select transport.
+
+Observer without agents: wall-clock poll default **33 ms** (not VSync-locked).
+
+---
+
+## 12. Evaluation contract (`evaluation.py`)
+
+| Item | Value |
+| --- | --- |
+| Policy type | `GameSnapshot → AgentDecision` |
+| Step | exactly **4** emulated frames per decision |
+| Face buttons | pulse **3** frames, release **1** |
+| Traces | JSONL outside repo |
+| Setup | `--restart-character` / `--restart-level` on same connection; seed RNG long `$FFFFFF40` and phase `$FFFFFB08` after lockstep; report work-RAM SHA-256 |
+
+First-class metrics (enforce at 0 / scenario mins as appropriate): damage events, failed pickups, failed ground-attack starts, weapon air attacks, missed back exposures, invalid grab-animation attacks, enemy-grab escape miss, defeated-enemy attack/pursuit, unreachable stalls, loot under threat, boss progress, boss stalls (after 8 consecutive input-ready “guard lane”), wasteful specials, missed boss specials, elevator horizontal progress, missed moving breakables, crossover/suplex counters, etc.
+
+---
+
+## 13. Module ownership
+
+| Spec section | Code |
+| --- | --- |
+| §1–2 pipeline | `policy.py`, `context.py`, `controls.py` |
+| §3 modes | `context.py` |
+| §4 skills | `skills.py`, `grabs.py`, `expert.py`, `autoplanner.py`, `inference.py` |
+| §5 police | `pressure.py`, `fuzzy.py` |
+| §6 co-op | `coop.py` |
+| §7 graph | `knowledge.py`, `phases.py`, `world_map.py` |
+| §8 arbiter | `arbiter.py` |
+| §9 combat | `combat.py`, `enemies.py`, `characters.py`, `bosses.py` |
+| §10 nav/stage | `navigation.py`, `walk.py`, `stage.py`, `hazards.py` |
+| §11 I/O | `app.py` + `megadrive_remote` |
+| §12 eval | `evaluation.py`, `scenarios.py` |
+
+---
+
+## 14. Non-negotiable principles
+
+1. Hard ROM guards beat fuzzy scores.
+2. Deterministic attack mix (no tick RNG).
+3. Face-then-hit; lane before X; no reverse punches.
+4. Jump-kick is C then later B; B+C is rear only.
+5. Back security (crossover-suplex / grab shield) before greedy front DPS.
+6. Final co-op gate on every seat.
+7. Latched nav/walk — no per-poll detour thrash.
+8. Explainable notes and retained fired-rule traces.
+9. Future learned policies may propose weights/candidates only inside this feasibility shell.
+10. This file and the code must describe the same behaviour after every change.
+
+---
+
+## 15. Out of scope
+
+- `--altControls`
+- Full TAS animation tables
+- Neural training (evaluator is the boundary)
+- Attract-mode heuristics beyond current game_state gates
+
+---
+
+*Normative AI specification for `src/sor_autoplay/agent/`.*
