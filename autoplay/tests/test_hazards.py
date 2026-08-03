@@ -114,6 +114,8 @@ class CollisionBarrierTests(unittest.TestCase):
         self.assertEqual(wall.width, 32)
         self.assertEqual(wall.lane_y, 0)
         self.assertEqual(wall.height, 16)
+        self.assertEqual(wall.kind, "barrier")
+        self.assertFalse(wall.is_pit)
 
 
 if __name__ == "__main__":

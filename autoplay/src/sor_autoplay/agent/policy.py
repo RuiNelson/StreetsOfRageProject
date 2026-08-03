@@ -1571,6 +1571,9 @@ def _decide_free(ctx: DecisionContext) -> Intent:
     preferred_lane = None
     if advice.avoid_holes or advice.elevator:
         preferred_lane = float(0x40 if snapshot.level_index != 6 else 0x50)
+    elif snapshot.level_index == 5 and snapshot.floor_barriers:
+        # Round-6 free walk is the lower class-1 floor (upper = class-2 walls).
+        preferred_lane = float(0x60)
     if not advice.horizontal_progress:
         # Discard a progress/approach latch left by the preceding elevator
         # wave.  Even if its old X goal is within WalkState's refresh slack,
@@ -1753,9 +1756,9 @@ def _walk_toward(
     if intent is None:
         return Intent(note=f"walk idle ({reason})")
 
-    # Emergency only: if we are already overlapping a pit or press solid, escape.
-    # Do not re-steer every frame while a latched nav plan is active — that was
-    # the stage-4 shakiness (detour side flipped each poll).
+    # Emergency only for real pits (class-0). Barrier/press AABBs over-estimate
+    # walls; standing inside them is legal free floor and must not rewrite the
+    # D-pad every poll (stage-6 permanent shake regression).
     if holes:
         intent = _emergency_hole_escape(intent, me, holes, snapshot.level_index)
 
@@ -1772,12 +1775,13 @@ def _emergency_hole_escape(
     holes: tuple,
     level_index: int,
 ) -> Intent:
-    """Only rewrite movement when already inside a pit AABB."""
+    """Only rewrite movement when already inside a real pit AABB."""
 
     hit = navigation.point_in_hole(
         float(me.world_x), float(me.world_y), holes, margin=0.0
     )
-    if hit is None:
+    # Barrier/press AABBs over-estimate solids — never emergency-escape them.
+    if hit is None or not hit.is_pit:
         return intent
     escape = navigation.escape_hole_waypoint(
         float(me.world_x),

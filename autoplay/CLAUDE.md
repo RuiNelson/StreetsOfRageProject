@@ -317,9 +317,13 @@ for tests/HUD.
       `floor_barriers` is always merged into nav solids (except elevator).
       Also avoid standing in the `$42` crush band (`press_bypass_goal`):
       crusher body half-Y is **20** (not 36 — that covered the band and forced
-      detours onto the upper rim into class-2 walls, which looked like the AI
-      shaking and refusing to advance). Prefer the **lower** free edge; once
-      free of the crusher body on Y, advance past on that lane.
+      detours onto the upper rim into class-2 walls). Prefer the **lower** free
+      edge; once free of the crusher body on Y, advance past on that lane.
+      **Critical:** `FloorHole.kind` must distinguish `pit` vs `barrier`/`press`.
+      Emergency `[escape hole]` is **pit-only**. Barrier/press AABBs over-estimate
+      walls — treating mid-lane stand-inside as a pit rewrote D-pad every poll
+      (the remaining stage-6 shake). Stage-6 unstuck prefers down/right; empty
+      progress prefers lane `$60` when barriers are present.
     - Round 7 (level index 6) is a fixed moving elevator/gauntlet. Its platform
       is not represented by the static collision-class map, so class-0 cells
       are not holes. With no combat target, clear any old horizontal walk
