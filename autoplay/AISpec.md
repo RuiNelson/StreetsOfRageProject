@@ -191,12 +191,12 @@ Only reached when steps 2–9 did not return:
 ```text
 A. if airborne action family → air branch; return
 B. if reachable breakable with outgoing_damage > 0 → moving-prop branch; return
-B2. if type-$42 press is crush / same-lane threat → pure-Y leave; return
+B2. if type-$42 press is crush threat or blocks progress corridor → detour then advance past housing; return
 C. select_pickup + select_target + solve_goal (fight|loot|progress)
 D. if LOOT wins and item set → loot walk/B; return
 E. combat vs target (if any) → may return
 F. static breakable (if any) → may return
-G. progress_goal + walk  # pits only in routing holes; stage-6 prefers lane $60
+G. progress_goal + walk  # press solids always in routing holes
 ```
 
 ### 2.2 Per-seat memory (`SeatMemory`)
@@ -872,13 +872,15 @@ Round-6 type `$42` (ROM `$7A6C` family, label **Press**):
 - **Avoid-only**: no player-hit destruction path; never smash/target as combat.
 - Outgoing damage `$14`; vertical Z state machine `$40` ↔ `$A0`.
 - ROM arming gate: player X in **[press_x − 48, press_x + 96]**.
-- **Crush leave only** (`select_crush_press` + `press_leave_goal`):
-  - **Stand-under**: \|ΔX\| ≤ **48** and \|ΔY\| ≤ **16** → pure Y leave (hold X).
-  - **Same-lane approach**: \|ΔX\| ≤ **100** and \|ΔY\| ≤ **20** → pure Y leave.
-  - Prefer the **lower** free edge on round 6 (class-1 floor).
-- **Do not** merge press bodies or class-2 barrier AABBs into routing holes — over-estimates caused permanent shake (detour ↔ unstuck when RIGHT blocked).
-- **Do not** force “advance past press” through nav.
-- Empty progress on level index 5 prefers lane **$60** (lower free floor).
+- **Crusher body AABB** (supplement, not the wall model): X = **[press_x − 48, press_x + 64]**, lane Y = press_y ± **20**. Merged into routing holes so walks do not path through the crusher. Must **not** cover the whole playable band — half-Y 36 left only the upper rim free and the agent shook into class-2 walls.
+- **Path walls** are collision-class **2** on the upper lanes (`floor_barriers`); free walk is lower class-1 floor.
+- **Committed bypass** (`press_bypass_goal`), not leave-lane-only:
+  1. `leave press` / `detour press` — pure Y off the crush band (hold X while under). On round 6 prefer the **lower** free edge.
+  2. `advance past press` — once free of the crusher body on Y, walk to solid far edge + **24** X on that free lane (do not re-detour to the upper rim).
+- **Crush / stand-under**: \|ΔX\| ≤ **48** and \|ΔY\| ≤ **16** → step 1.
+- **Same-lane approach**: \|ΔX\| ≤ **100** and \|ΔY\| ≤ **20** → step 1 then 2.
+- **Corridor block**: press ahead within **160** X / **28** Y of the progress probe, or goal segment hits the crusher body → same bypass. Seats already free of the body on Y are **not** corridor-blocked by `$42` (class-2 owns walls).
+- Safer lane = free edge outside body ± clearance; **round 6 always prefers lower** free edge (class-1 floor).
 - Exclude type `$42` from `select_target` so weak projectile dodge does not thrash under the frame.
 
 ### 9.11 Static breakables (after combat)
@@ -927,9 +929,9 @@ Nav stuck (independent of walk): move &lt; **3** px for **8** polls → cardinal
 
 \* Default `avoid_holes` is false except stages that set it true above. Elevator: class-0 cells are **not** holes; clear walk latch so no inherited LEFT/RIGHT; no horizontal progress goals.
 
-**Collision barriers (class ≥ 2):** still detected into `floor_barriers` for HUD/diagnostics, but **not** merged into agent routing holes (AABB over-estimates shook stage 6). Free path on round 6 is preferred lane **$60** + crush-only press leave. Stuck recovery on level index 5 prefers **down/right**.
+**Collision barriers (class ≥ 2):** always merged into routing solids (except elevator index 6). Live stage-6 factory: class **2** columns are the machine housing walls — they block RIGHT on the upper lanes while type-`$42` crushers sit on a different Y. The navigator detours to a free class-1 lane then advances past the barrier AABB. Type-`$42` AABBs remain a crush-zone supplement, not the path model.
 
-**Hole kinds:** `FloorHole.kind` is `pit` | `barrier` | `press`. Emergency `[escape hole]` is **pit-only**.
+**Hole kinds:** `FloorHole.kind` is `pit` | `barrier` | `press`. Emergency `[escape hole]` D-pad rewrite runs **only** for `pit`. Barrier/press boxes over-estimate solids; standing inside them is legal free floor — treating them as pits caused permanent stage-6 shake. Stuck recovery on level index 5 prefers **down/right**. Progress on stage 6 with barriers prefers lane **$60** (lower free floor).
 
 Progress lead when empty: **±160** world X.
 

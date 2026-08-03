@@ -76,25 +76,11 @@ _CARDINAL_ESCAPES_STAGE6: tuple[tuple[float, float, str], ...] = (
     (32.0, 0.0, "right"),
     (0.0, 48.0, "down2"),
     (48.0, 0.0, "right2"),
-    (-32.0, 0.0, "left"),
-    (-48.0, 0.0, "left2"),
     (0.0, -32.0, "up"),
+    (-32.0, 0.0, "left"),
     (0.0, -48.0, "up2"),
-)
-# Already on the free lower band (≈ lane $50+): horizontal only. Going UP
-# re-enters the press same-lane band and loops forever (detour press ↔ unstuck).
-_CARDINAL_ESCAPES_STAGE6_LOW: tuple[tuple[float, float, str], ...] = (
-    (32.0, 0.0, "right"),
-    (-32.0, 0.0, "left"),
-    (48.0, 0.0, "right2"),
     (-48.0, 0.0, "left2"),
-    (24.0, 18.0, "diag_rd"),
-    (-24.0, 18.0, "diag_ld"),
-    (0.0, 24.0, "down"),
-    # UP is last-resort only — almost always wrong on the free floor.
-    (0.0, -32.0, "up"),
 )
-_STAGE6_LOW_LANE = 0x50  # 80 — treat as free lower band
 # Extra diagonals after cardinals.
 _RECOVERY_STEPS: tuple[tuple[float, float], ...] = (
     (24.0, 18.0),
@@ -242,14 +228,6 @@ class NavMemory:
         self.stuck_ticks = 0
 
     def ban_direction(self, dx: int, dy: int) -> None:
-        # If one axis dominates the failed goal, ban only that axis. Otherwise a
-        # progress goal (160, +8) banned diagonal (1,1) and left pure RIGHT free
-        # while recovery_index cycled into UP — stage-6 press thrash.
-        adx, ady = abs(int(dx)), abs(int(dy))
-        if adx >= 2 * max(ady, 1) and adx > 0:
-            dy = 0
-        elif ady >= 2 * max(adx, 1) and ady > 0:
-            dx = 0
         sx = 0 if dx == 0 else (1 if dx > 0 else -1)
         sy = 0 if dy == 0 else (1 if dy > 0 else -1)
         if sx == 0 and sy == 0:
@@ -552,20 +530,11 @@ def _recovery_candidates(
     scored: list[tuple[float, float, float, str]] = []
 
     # 0) Open-loop cardinals — highest priority, rotated via recovery_index.
-    if level_index == 5:
-        cardinals = (
-            _CARDINAL_ESCAPES_STAGE6_LOW
-            if wy >= _STAGE6_LOW_LANE
-            else _CARDINAL_ESCAPES_STAGE6
-        )
-    else:
-        cardinals = _CARDINAL_ESCAPES
+    cardinals = (
+        _CARDINAL_ESCAPES_STAGE6 if level_index == 5 else _CARDINAL_ESCAPES
+    )
     for i, (dx, dy, name) in enumerate(cardinals):
         if memory.is_banned(dx, dy):
-            continue
-        # Never unstuck UP while already on the free lower factory floor —
-        # that re-enters the press same-lane band and loops with leave press.
-        if level_index == 5 and wy >= _STAGE6_LOW_LANE and dy < 0:
             continue
         nx, ny = wx + dx, wy + dy
         if not _solid_point(nx, ny, holes, level_index=level_index):
@@ -619,8 +588,6 @@ def _recovery_candidates(
     # 3) Diagonals.
     for dx, dy in _RECOVERY_STEPS:
         if memory.is_banned(dx, dy):
-            continue
-        if level_index == 5 and wy >= _STAGE6_LOW_LANE and dy < 0:
             continue
         nx, ny = wx + dx, wy + dy
         if not _solid_point(nx, ny, holes, level_index=level_index):
@@ -711,14 +678,9 @@ def recover_when_stuck(
     if not candidates:
         # Absolute last resort: cycle cardinals even into unknown geometry
         # (still skip known holes). Caller needs *some* motion intent.
-        if level_index == 5:
-            force_cardinals = (
-                _CARDINAL_ESCAPES_STAGE6_LOW
-                if wy >= _STAGE6_LOW_LANE
-                else _CARDINAL_ESCAPES_STAGE6
-            )
-        else:
-            force_cardinals = _CARDINAL_ESCAPES
+        force_cardinals = (
+            _CARDINAL_ESCAPES_STAGE6 if level_index == 5 else _CARDINAL_ESCAPES
+        )
         for dx, dy, name in force_cardinals:
             if memory.is_banned(dx, dy):
                 continue

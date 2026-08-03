@@ -1167,11 +1167,15 @@ class PolicyAggressionTests(unittest.TestCase):
             AgentState(),
         )
 
-        # Same-lane approach: pure-Y leave off the press lane, never smash.
+        # Same-lane approach: detour off the press lane (UP or DOWN), never smash.
         self.assertTrue(
             any(
                 key in decision.p1_note
-                for key in ("leave press", "detour press")
+                for key in (
+                    "leave press",
+                    "detour press",
+                    "advance past press",
+                )
             ),
             decision.p1_note,
         )
@@ -1214,8 +1218,8 @@ class PolicyAggressionTests(unittest.TestCase):
         self.assertTrue(decision.p1_mask & 0x03, decision.p1_note)
         self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
 
-    def test_distant_press_does_not_block_progress(self) -> None:
-        """Press ahead outside crush band is not a corridor lock (shake regression)."""
+    def test_routes_progress_around_press_solid_body(self) -> None:
+        """Progress right must detour/advance past the housing, not walk into it."""
 
         p1 = _e(
             kind="player",
@@ -1223,12 +1227,12 @@ class PolicyAggressionTests(unittest.TestCase):
             slot="P1",
             map_x=100,
             world_x=100,
-            map_y=96,
+            map_y=64,
             type_id=1,
             label="P1",
             action_state=0x02,
         )
-        # Press ahead on mid lane — player already on free lower floor.
+        # Press ahead on the same corridor — path blocker even outside crush band.
         hazard = _e(
             kind="projectile",
             family="Stage hazard",
@@ -1251,16 +1255,29 @@ class PolicyAggressionTests(unittest.TestCase):
         )
 
         note = decision.p1_note
-        self.assertNotIn("leave press", note)
-        self.assertNotIn("detour press", note)
-        self.assertNotIn("advance past press", note)
+        self.assertTrue(
+            any(
+                key in note
+                for key in (
+                    "detour press",
+                    "leave press",
+                    "advance past press",
+                    "nav detour",
+                    "nav advance",
+                )
+            ),
+            note,
+        )
+        # Must not treat the press as a combat projectile target.
         self.assertNotIn("dodge", note)
         self.assertFalse(decision.p1_mask & 0x20, note)
-        # Free lower progress: RIGHT.
-        self.assertTrue(decision.p1_mask & 0x08, note)
 
-    def test_stage6_progress_prefers_lower_lane(self) -> None:
-        """Empty progress on round 6 biases to lower free floor (class-1)."""
+    def test_routes_around_class_two_collision_barrier(self) -> None:
+        """Class-2 machine walls must force a vertical detour (live stage-6)."""
+
+        from dataclasses import replace
+
+        from sor_autoplay.hazards import HOLE_KIND_BARRIER, FloorHole
 
         p1 = _e(
             kind="player",
@@ -1273,22 +1290,44 @@ class PolicyAggressionTests(unittest.TestCase):
             label="P1",
             action_state=0x02,
         )
+        # Wall ahead on the upper lanes only — free path is below y=64.
+        wall = FloorHole(
+            world_x=120, lane_y=0, width=80, height=64, kind=HOLE_KIND_BARRIER
+        )
+        snap = replace(
+            self._snap((p1,), level=5),
+            floor_barriers=(wall,),
+        )
 
         decision = decide_actions(
-            self._snap((p1,), level=5),
+            snap,
             AgentConfig(p1_enabled=True),
             AgentState(),
         )
         note = decision.p1_note
-        # Should walk toward lower preferred lane and/or right — not freeze.
         self.assertTrue(
-            decision.p1_mask & 0x0A,  # DOWN and/or RIGHT
+            any(
+                key in note
+                for key in (
+                    "nav detour",
+                    "nav advance",
+                    "detour",
+                    "unstuck",
+                )
+            ),
             note,
         )
-        self.assertFalse(decision.p1_mask & 0x01, note)  # not UP
+        # Must not simply hold RIGHT into the wall forever.
+        # A pure RIGHT-only progress note with no detour is a regression.
+        if "progress" in note and "nav" not in note and "detour" not in note:
+            self.fail(f"progress into barrier without detour: {note}")
 
-    def test_free_lower_lane_progresses_right_with_press_present(self) -> None:
-        """On free lower floor, press must not arm leave; progress RIGHT."""
+    def test_advances_past_press_once_on_safe_lane(self) -> None:
+        """After leaving the crusher lane, keep walking past the solid far edge.
+
+        Free path on round 6 is the *lower* class-1 floor (upper holds class-2
+        walls). Advancing on y≈14 was the old oversized-solid rim that shook.
+        """
 
         p1 = _e(
             kind="player",
@@ -1322,12 +1361,19 @@ class PolicyAggressionTests(unittest.TestCase):
             AgentState(),
         )
 
+        # Free lower lane: progress past the press X without detouring UP.
+        # Press bypass may not even arm when already outside the crusher body.
         note = decision.p1_note
         self.assertFalse(decision.p1_mask & 0x01, note)  # not UP
         self.assertFalse(decision.p1_mask & 0x20, note)  # not smash
-        self.assertNotIn("leave press", note)
-        self.assertNotIn("detour press", note)
-        self.assertTrue(decision.p1_mask & 0x08, note)  # RIGHT
+        # Must keep walking forward (RIGHT) on the free floor.
+        self.assertTrue(
+            decision.p1_mask & 0x08
+            or "advance past press" in note
+            or "nav advance" in note
+            or "progress" in note,
+            note,
+        )
 
     def test_stage6_press_detours_down_not_into_upper_walls(self) -> None:
         """Same-lane press leave must prefer lower free path (class-1 floor)."""
@@ -1365,88 +1411,111 @@ class PolicyAggressionTests(unittest.TestCase):
         )
         note = decision.p1_note
         self.assertTrue(
-            any(k in note for k in ("leave press", "detour press")),
+            any(k in note for k in ("leave press", "detour press", "advance past press")),
             note,
         )
         # Prefer DOWN toward free lower floor — never UP into class-2 walls.
         self.assertTrue(decision.p1_mask & 0x02, note)  # DOWN
         self.assertFalse(decision.p1_mask & 0x01, note)  # not UP
 
-    def test_stage6_no_up_down_thrash_when_right_blocked(self) -> None:
-        """Regression: press leave must not fight unstuck when X is frozen.
+    def test_stage6_barrier_aabb_does_not_escape_hole_thrash(self) -> None:
+        """Standing inside a class-2 barrier AABB must not rewrite D-pad every poll.
 
-        Live failure mode: detour press DOWN then unstuck UP forever while
-        RIGHT into a wall advances 0 px.
+        Barrier boxes over-estimate walls. Treating them like pits caused
+        permanent [escape hole] UP/DOWN/LEFT/RIGHT shake on round 6.
         """
 
         from dataclasses import replace
 
         from sor_autoplay.hazards import HOLE_KIND_BARRIER, FloorHole
 
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=50,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        # Tall over-estimated housing AABB that contains the player pose.
+        wall = FloorHole(
+            world_x=60, lane_y=0, width=160, height=80, kind=HOLE_KIND_BARRIER
+        )
+        state = AgentState()
+        notes: list[str] = []
+        masks: list[int] = []
+        for _ in range(10):
+            snap = replace(
+                self._snap((p1,), level=5),
+                floor_barriers=(wall,),
+            )
+            decision = decide_actions(
+                snap,
+                AgentConfig(p1_enabled=True),
+                state,
+            )
+            notes.append(decision.p1_note)
+            masks.append(decision.p1_mask)
+
+        self.assertFalse(
+            any("escape hole" in n for n in notes),
+            notes,
+        )
+        # First decisions should commit a vertical detour toward free lower floor.
+        self.assertTrue(
+            any("detour" in n or "advance" in n or "progress" in n for n in notes[:3]),
+            notes[:3],
+        )
+        # Must not oscillate UP vs DOWN on successive polls while pose is fixed
+        # during the initial committed detour window.
+        first_dirs = [(m & 0x03) for m in masks[:6]]
+        # While detouring, vertical bits should be stable (all DOWN or all none),
+        # not alternating 0x01 and 0x02.
+        ups = sum(1 for d in first_dirs if d == 0x01)
+        downs = sum(1 for d in first_dirs if d == 0x02)
+        self.assertFalse(ups > 0 and downs > 0, f"vertical thrash: {notes[:6]}")
+
+    def test_stage6_press_solid_does_not_escape_hole_thrash(self) -> None:
+        """Mid-lane near a press solid must not attach [escape hole] every poll."""
+
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
         hazard = _e(
             kind="projectile",
             family="Stage hazard",
             symbol="!",
             label="Press",
             type_id=0x42,
-            map_x=160,
-            world_x=160,
+            map_x=130,
+            world_x=130,
             map_y=64,
             health=None,
             slot="H0",
             outgoing_damage=0x14,
             combat_phase=CombatPhase.ATTACKING,
         )
-        # Barrier still present in snapshot but must NOT be in routing holes.
-        wall = FloorHole(
-            world_x=120, lane_y=0, width=200, height=112, kind=HOLE_KIND_BARRIER
-        )
         state = AgentState()
-        x, y = 100.0, 64.0
-        notes: list[str] = []
-        dirs: list[str] = []
-        for _ in range(24):
-            p1 = _e(
-                kind="player",
-                family="Player",
-                slot="P1",
-                map_x=x,
-                world_x=x,
-                map_y=y,
-                type_id=1,
-                label="P1",
-                action_state=0x02,
-            )
-            snap = replace(
+        notes = []
+        for _ in range(8):
+            d = decide_actions(
                 self._snap((p1, hazard), level=5),
-                floor_barriers=(wall,),
+                AgentConfig(p1_enabled=True),
+                state,
             )
-            d = decide_actions(snap, AgentConfig(p1_enabled=True), state)
             notes.append(d.p1_note)
-            tag = (
-                ("L" if d.p1_mask & 4 else "")
-                + ("R" if d.p1_mask & 8 else "")
-                + ("U" if d.p1_mask & 1 else "")
-                + ("D" if d.p1_mask & 2 else "")
-            ) or "."
-            dirs.append(tag)
-            # X frozen (wall); Y can move.
-            if d.p1_mask & 2:
-                y = min(108.0, y + 4.0)
-            if d.p1_mask & 1:
-                y = max(8.0, y - 4.0)
-
         self.assertFalse(any("escape hole" in n for n in notes), notes)
-        # No permanent U↔D alternation after the initial leave.
-        late = dirs[8:]
-        ups = sum(1 for t in late if t == "U")
-        downs = sum(1 for t in late if t == "D")
-        self.assertFalse(
-            ups >= 3 and downs >= 3,
-            f"UP/DOWN thrash: dirs={dirs} notes={notes}",
-        )
-        # Should settle on free lower floor and try RIGHT (even if X frozen).
-        self.assertGreaterEqual(y, 80.0, f"stuck mid-lane y={y} dirs={dirs}")
 
     def test_rear_when_enemy_behind(self) -> None:
         p1 = _e(

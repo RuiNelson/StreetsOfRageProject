@@ -43,11 +43,13 @@ def _routing_holes(
 ) -> tuple:
     """Terrain solids the navigator must detour around.
 
-    Only **real pits** (class 0, when stage advice asks). Class-2 barrier AABBs
-    and type-``$42`` press bodies are over-estimates of walls/crushers: merging
-    them into hole routing caused permanent stage-6 shake (detour press ↔
-    unstuck ↔ retreat hole). Stage-6 free path is handled by preferred lower
-    lane + crush-only press leave, not by fake hole AABBs.
+    - Pit holes (class 0) when stage advice asks (stage 4).
+    - Collision barriers (class ≥ 2): factory machine walls, etc. Always on
+      (except elevator, which never populates ``floor_barriers``).
+    - Type-``$42`` press object AABBs as a crush-zone supplement.
+
+    Live stage-6 sampling: class-2 columns block RIGHT on the upper lanes while
+    the crusher object sits at a different Y; barriers are the path blocker.
     """
 
     from ..hazards import FloorHole
@@ -55,6 +57,8 @@ def _routing_holes(
     holes: list[FloorHole] = []
     if advice.avoid_holes:
         holes.extend(snapshot.floor_holes)
+    holes.extend(snapshot.floor_barriers)
+    holes.extend(stage.press_solid_holes(snapshot.world_map.entities))
     return tuple(holes)
 
 
@@ -607,39 +611,62 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             walk.clear()
             return Intent(note=f"hold safe lane {prop.label}")
 
-    # Round-6 type-$42 hydraulic presses: crush avoid-only.
-    # ONLY leave the crush / same-lane band (pure Y). Never force "advance past"
-    # through nav — that fought stuck recovery when RIGHT was blocked by a real
-    # wall and produced permanent UP/DOWN shake (detour press ↔ unstuck).
+    # Round-6 type-$42 hydraulic presses: solid housing + crushing, never smashable.
+    # The machine blocks the walk path — not only the crusher lane. Commit to
+    # detour (Y) → advance past the solid far edge (X) before combat/progress
+    # can re-aim through the housing.
     # (Do not name the local ``press`` — that shadows the pressure report.)
     presses = stage.stage_press_entities(snapshot.world_map.entities)
     if presses:
-        press_entity = stage.select_crush_press(me, presses)
+        lead = _PROGRESS_LEAD if advice.progress_right else -_PROGRESS_LEAD
+        probe_x = float(me.world_x) + lead
+        probe_y = float(me.world_y)
+        press_entity = stage.select_blocking_press(
+            me,
+            presses,
+            goal_x=probe_x,
+            goal_y=probe_y,
+            progress_right=advice.progress_right,
+        )
         if press_entity is not None:
-            gx, gy, reason = stage.press_leave_goal(
+            gx, gy, reason = stage.press_bypass_goal(
                 me,
                 press_entity,
+                progress_right=advice.progress_right,
                 level_index=snapshot.level_index,
                 camera_bottom=float(snapshot.world_map.camera_bottom),
             )
-            # Drop any nav escape that was walking back into the crush band.
-            if nav is not None:
-                nav.clear_escape()
-                nav.stuck_ticks = 0
-            walk.clear()
-            walk.set_goal(
+            # While leaving the crush band, force a pure lane walk so hole
+            # escape does not rewrite the note to "escape hole". Once on the
+            # safe lane, route through nav so solid AABBs keep the advance
+            # committed past the housing.
+            if "leave press" in reason or "detour press" in reason:
+                walk.clear()
+                walk.set_goal(
+                    me,
+                    gx,
+                    gy,
+                    reason=reason,
+                    eps_x=3.0,
+                    eps_y=5.0,
+                    force=True,
+                )
+                intent = walk.step(me)
+                if intent is None:
+                    return Intent(note=f"walk idle ({reason})")
+                return intent
+            return _walk_toward(
+                walk,
                 me,
-                gx,
-                gy,
+                goal_x=gx,
+                goal_y=gy,
                 reason=reason,
-                eps_x=3.0,
+                snapshot=snapshot,
+                advice=advice,
+                nav=nav,
+                eps_x=6.0,
                 eps_y=5.0,
-                force=True,
             )
-            intent = walk.step(me)
-            if intent is None:
-                return Intent(note=f"walk idle ({reason})")
-            return intent
 
     # --- Symbolic/fuzzy tactical arbitration ---
     # Generate legal fight/loot/progress goals from the knowledge graph, then
@@ -1548,9 +1575,8 @@ def _decide_free(ctx: DecisionContext) -> Intent:
     preferred_lane = None
     if advice.avoid_holes or advice.elevator:
         preferred_lane = float(0x40 if snapshot.level_index != 6 else 0x50)
-    elif snapshot.level_index == 5:
+    elif snapshot.level_index == 5 and snapshot.floor_barriers:
         # Round-6 free walk is the lower class-1 floor (upper = class-2 walls).
-        # Always bias progress here — do not depend on barrier AABBs.
         preferred_lane = float(0x60)
     if not advice.horizontal_progress:
         # Discard a progress/approach latch left by the preceding elevator
