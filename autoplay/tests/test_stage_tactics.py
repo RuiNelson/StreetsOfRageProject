@@ -154,6 +154,9 @@ class StagePressTests(unittest.TestCase):
         )
         self.assertNotAlmostEqual(goal_y, float(self.press.world_y))
         self.assertGreater(abs(goal_y - float(self.press.world_y)), 20.0)
+        # Round 6 free path is the lower class-1 floor, not the upper rim
+        # (upper holds class-2 machine walls that block RIGHT).
+        self.assertGreater(goal_y, float(self.press.world_y))
 
     def test_solid_housing_blocks_progress_goal(self) -> None:
         """Progress straight through a press X on its lane must be blocked."""
@@ -161,16 +164,16 @@ class StagePressTests(unittest.TestCase):
         self.assertTrue(
             press_blocks_goal(self.me, self.press, goal_x=260.0, goal_y=64.0)
         )
-        # Already past on a free lane is not a block for a further goal.
+        # Free lower lane past the crusher body is not a block for progress.
         past = _entity(
             kind="player",
             type_id=1,
             world_x=220,
-            world_y=14,
+            world_y=96,
             slot="P1",
         )
         self.assertFalse(
-            press_blocks_goal(past, self.press, goal_x=300.0, goal_y=14.0)
+            press_blocks_goal(past, self.press, goal_x=300.0, goal_y=96.0)
         )
 
     def test_bypass_detours_then_advances_past_housing(self) -> None:
@@ -181,10 +184,10 @@ class StagePressTests(unittest.TestCase):
             level_index=5,
             camera_bottom=112.0,
         )
-        # First phase: leave the solid lane at current X.
+        # First phase: leave the solid lane at current X toward lower free path.
         self.assertIn("press", reason)
         self.assertEqual(gx, float(self.me.world_x))
-        self.assertNotAlmostEqual(gy, float(self.press.world_y))
+        self.assertGreater(gy, float(self.press.world_y))
 
         # Second phase: once on the safe lane, advance past the solid far edge.
         on_safe = _entity(
@@ -205,6 +208,39 @@ class StagePressTests(unittest.TestCase):
         self.assertGreater(gx2, float(self.press.world_x))
         self.assertAlmostEqual(gy2, gy, delta=1.0)
 
+    def test_free_lower_lane_does_not_detour_to_upper_rim(self) -> None:
+        """Regression: oversized solid + upper-only free edge caused stage-6 shake."""
+
+        free_lower = _entity(
+            kind="player",
+            type_id=1,
+            world_x=100,
+            world_y=96,
+            slot="P1",
+        )
+        # Free of the crusher body on Y — not a corridor block.
+        self.assertIsNone(
+            select_blocking_press(
+                free_lower,
+                (self.press,),
+                goal_x=260.0,
+                goal_y=96.0,
+                progress_right=True,
+            )
+        )
+        # If bypass is asked anyway, advance on the free lower lane (not UP).
+        gx, gy, reason = press_bypass_goal(
+            free_lower,
+            self.press,
+            progress_right=True,
+            level_index=5,
+            camera_bottom=112.0,
+        )
+        self.assertIn("advance past press", reason)
+        self.assertGreater(gx, float(self.press.world_x))
+        self.assertGreater(gy, float(self.press.world_y))
+        self.assertGreaterEqual(gy, 90.0)
+
     def test_select_blocking_press_on_corridor(self) -> None:
         chosen = select_blocking_press(
             self.me,
@@ -214,7 +250,6 @@ class StagePressTests(unittest.TestCase):
             progress_right=True,
         )
         self.assertIs(chosen, self.press)
-
 
 class BossPhaseTests(unittest.TestCase):
     def test_souther_primary_two_is_claw_attack_without_tactical_byte(self) -> None:

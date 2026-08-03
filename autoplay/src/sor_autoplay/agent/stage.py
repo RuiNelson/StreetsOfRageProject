@@ -18,26 +18,29 @@ LEVEL_STAGE8_LEFT = 7  # round 8 — reverse scroll / Mr. X
 # Round-6 type-$42 hydraulic press (ROM $7A6C family).
 # Init writes outgoing damage $14 and a vertical Z state machine ($40 ↔ $A0).
 # Proximity gate ($7AA4) arms when a player X is in [press_x-48, press_x+96].
-# There is no player-hit destruction path — avoid-only solid obstacle that also
-# blocks the walk path (machine housing). Treat as a corridor blocker: detour
-# on Y, then advance past the solid X before resuming normal goals.
+# There is no player-hit destruction path — avoid-only crush hazard. Path walls
+# are collision-class 2 on the *upper* lanes; class-1 floor stays free below.
+# Type-$42 AABBs model the crusher body only (not the whole factory height).
 STAGE_PRESS_TYPE = 0x42
-# Solid machine housing the player cannot walk through.
-# X matches the ROM arming band [press_x-48, press_x+96] (asymmetric).
+# Crusher body AABB on X (asymmetric, from the ROM arming band).
 PRESS_SOLID_LEFT = 48
 PRESS_SOLID_RIGHT = 64
-# Lane half-height of the housing. The crusher sits on one lane but the frame
-# occupies a wide middle band; half of 36 leaves only the top/bottom edges free.
-PRESS_SOLID_HALF_Y = 36
+# Lane half-height of the crusher body. Must stay well under half the playable
+# band (default max Y = $70): half of 36 covered Y 28..100 and left only the
+# thin upper rim free — which is exactly where class-2 machine walls block
+# RIGHT, so the agent detoured up and shook instead of walking the free lower
+# floor. Keep this near the crush/same-lane band so lower class-1 stays open.
+PRESS_SOLID_HALF_Y = 20
 # Crush / stand-under band (covers the ROM arming X gate and same-lane body).
 PRESS_CRUSH_HALF_X = 48
 PRESS_CRUSH_LANE = 16
 # Crush-lane approach react (leave / bypass when still on the crusher lane).
 PRESS_REACT_X = 100.0
 PRESS_REACT_LANE = 20.0
-# Corridor react for path-block selection (wider Y than crush-only).
+# Corridor react for path-block selection (wider Y than crush-only, but not so
+# wide that a free lower-lane walk still looks "blocked" by a mid-lane press).
 PRESS_BLOCK_REACT_X = 160.0
-PRESS_BLOCK_REACT_LANE = 56.0
+PRESS_BLOCK_REACT_LANE = 28.0
 # Clearance past the solid far edge before the bypass is complete.
 PRESS_CLEAR_X = 24.0
 PRESS_LANE_CLEAR = 10.0
@@ -254,6 +257,16 @@ def press_same_lane_threat(me: MapEntity, press: MapEntity) -> bool:
     )
 
 
+def _outside_press_housing_y(me: MapEntity, press: MapEntity) -> bool:
+    """True when the seat's lane is clear of the crusher body (+ clearance)."""
+
+    solid = press_solid_aabb(press)
+    y = float(me.world_y)
+    return y <= float(solid.lane_y) - PRESS_LANE_CLEAR or y >= float(
+        solid.lane_y_end
+    ) + PRESS_LANE_CLEAR
+
+
 def safer_lane_from_press(
     me: MapEntity,
     press: MapEntity,
@@ -261,10 +274,12 @@ def safer_lane_from_press(
     level_index: int,
     camera_bottom: float,
 ) -> float:
-    """Lane Y outside the solid housing, preferring the nearer free edge.
+    """Lane Y outside the crusher body, preferring the free factory path.
 
-    Extreme band edges are used so the seat is clear of both the crusher lane
-    and the machine frame AABB (plus a small clearance).
+    Extreme band edges are used so the seat is clear of the crush band (plus a
+    small clearance). On round 6 the free walk path is the **lower** class-1
+    floor — upper lanes hold class-2 machine walls — so prefer the lower free
+    edge there. Elsewhere, keep the side the seat already occupies.
     """
 
     solid = press_solid_aabb(press)
@@ -285,6 +300,12 @@ def safer_lane_from_press(
         candidates = [lane_low, lane_high]
     me_y = float(me.world_y)
     press_y = float(press.world_y)
+    # Round-6 factory: free path is below the crusher (class-1 floor). Pulling
+    # to the upper rim put the agent into class-2 walls → stuck / shake.
+    if level_index == LEVEL_STAGE6_FACTORY:
+        lower = [c for c in candidates if c > press_y]
+        if lower:
+            return min(lower, key=lambda y: (abs(y - me_y), -y))
     # Keep the side we already occupy when both are free.
     if me_y < press_y:
         preferred_side = [c for c in candidates if c < press_y]
@@ -328,6 +349,12 @@ def press_blocks_goal(
         return False
     if gx <= wx and wx <= solid.world_x - 8:
         return False
+    # Already free on Y and the goal stays free on Y — do not block progress.
+    if (
+        (wy <= solid.lane_y - PRESS_LANE_CLEAR or wy >= solid.lane_y_end + PRESS_LANE_CLEAR)
+        and (gy <= solid.lane_y - PRESS_LANE_CLEAR or gy >= solid.lane_y_end + PRESS_LANE_CLEAR)
+    ):
+        return False
     # Sample the segment (same idea as navigation.segment_hits_hole).
     samples = 8
     margin = 10.0
@@ -365,6 +392,8 @@ def select_blocking_press(
     Crush / same-lane threats always win. Otherwise a press only counts when the
     goal segment (or short progress step) crosses its solid housing, or when it
     sits on the progress corridor ahead inside ``PRESS_BLOCK_REACT_*``.
+    Free lower/upper lanes outside the crusher body are not corridor blocks —
+    class-2 collision barriers own the wall model on stage 6.
     """
 
     if not presses:
@@ -376,6 +405,10 @@ def select_blocking_press(
         threat = under_stage_press(me, press) or press_same_lane_threat(me, press)
         blocks = press_blocks_goal(me, press, goal_x, goal_y)
         if not threat and not blocks:
+            # Free of the crusher body on Y: walls (if any) are class-2 barriers,
+            # not this object. Do not yank the seat onto the upper rim.
+            if _outside_press_housing_y(me, press):
+                continue
             dx = float(press.world_x) - float(me.world_x)
             if progress_right and not (0.0 < dx <= PRESS_BLOCK_REACT_X):
                 continue
@@ -383,8 +416,7 @@ def select_blocking_press(
                 continue
             if abs(float(me.world_y) - float(press.world_y)) > PRESS_BLOCK_REACT_LANE:
                 continue
-            # On the corridor ahead: the housing is a path blocker even when the
-            # current goal Y already skims past a thin AABB sample.
+            # On the corridor ahead on the crusher's Y band.
             blocks = True
         if threat or blocks:
             dist = abs(float(press.world_x) - float(me.world_x)) + 0.25 * abs(
@@ -418,7 +450,21 @@ def press_bypass_goal(
         me, press, level_index=level_index, camera_bottom=camera_bottom
     )
     under = under_stage_press(me, press)
-    on_safe_lane = abs(float(me.world_y) - safe_y) <= 8.0
+    me_y = float(me.world_y)
+    on_safe_lane = abs(me_y - safe_y) <= 8.0
+    free_of_housing = _outside_press_housing_y(me, press)
+    # Already clear of the crusher body: advance on the current free lane
+    # (do not re-detour to a preferred edge that can fight class-2 walls).
+    if free_of_housing and not under:
+        past = press_past_x(press, progress_right=progress_right)
+        lane = me_y if abs(me_y - safe_y) > 8.0 else safe_y
+        # Stage 6: if we are free but still on the wrong side of the factory
+        # (upper rim), pull to the preferred lower free path first.
+        if level_index == LEVEL_STAGE6_FACTORY and me_y < float(press.world_y):
+            if not on_safe_lane:
+                return float(me.world_x), safe_y, f"detour press {press.label}"
+            lane = safe_y
+        return past, lane, f"advance past press {press.label}"
     if under or not on_safe_lane:
         # Pure vertical first so we never push X into the housing while leaving.
         reason = (
