@@ -245,16 +245,19 @@ class ObserverApp:
 
         Prefers sticky ``hold_buttons`` for continuous D-pad walking. Every
         face-button action uses blocking ``press_buttons`` for a few VSync
-        frames so ROM +$55 sees a fresh edge, then directions are re-latched.
+        frames so ROM +$55 sees a fresh edge.
+
+        After a face-button pulse, **clear** sticky D-pad (do not re-latch the
+        dirs from the same mask). Grab-throws use B+away; re-latching away
+        after the edge made the player walk off the held body and **release**
+        the grab (ROM: walk away from hold = drop). Pure walk decisions
+        re-assert D-pad on the next poll.
         """
 
         assert self._client is not None
-        # D-pad bits only (re-latch after a face-button press pulse).
-        DIRS = 0x0F
         FACE_BUTTONS = 0x70
         # All gameplay actions are edge-sensitive in +$55.  Never infer input
-        # transport from human-readable notes: pulse any A/B/C mask, then keep
-        # only its D-pad component latched for movement/facing.
+        # transport from human-readable notes: pulse any A/B/C mask.
         if (p1_mask | p2_mask) & FACE_BUTTONS:
             frames = max(3, hold_frames)
             try:
@@ -263,13 +266,11 @@ class ObserverApp:
                     player2=p2_mask,
                     frames=frames,
                 )
-                # Keep D-pad latched after auto-release so we stay on back/face.
+                # Clear sticky dirs after the face pulse so B+away throws do
+                # not leave LEFT/RIGHT held and cancel the grab.
                 if hasattr(self._client, "hold_buttons"):
                     try:
-                        self._client.hold_buttons(
-                            player1=p1_mask & DIRS,
-                            player2=p2_mask & DIRS,
-                        )
+                        self._client.hold_buttons(player1=0, player2=0)
                         self._sticky_hold = True
                     except Exception:  # noqa: BLE001
                         pass
