@@ -731,34 +731,57 @@ only the selected target. Classification (`twin_composition`):
 
 Living = `kind==boss`, `type_id==$58`, not `is_defeated`.
 
+**Pair doctrine:** finish **one** twin first. ROM has no enrage table — the
+visible “phase 2” is simply the survivor without pair constraints, and it is
+much easier. Combat **focus-fires the lowest-HP** twin; partner jump/grab
+commits are **evaded then returned to** (lane tactics), never used to retarget
+damage onto the partner.
+
 #### Pair plan (both present)
 
 | Field | Value | Rationale |
 | ----- | ----- | --------- |
-| range_scale | **1.25** | Wider stand-off between two jump-grabbers |
+| range_scale | **1.20** | Stand-off that still allows grounded strike when closed |
 | jump_bias | **0** | Do not jump into grab commit |
 | grab_bias | **0.05** | Do not walk into body between twins |
 | rear_bias | 0.35 | Rear B+C when one flanks |
 | sidestep | **true** | Lane mobility |
 | no_jump | **true** | Hard ban on jump-kick while pair is up |
 | priority | 2.9 | Slightly above static twin |
-| note | `twins pair — isolate, stay mobile` | |
+| note | `twins pair — focus-fire lowest HP, stay mobile` | |
 
-Target isolation bonus (`twin_focus_bonus`, added to utility, cap **0.12**):
+Target focus-fire bonus (`twin_focus_bonus`, added to utility, cap **0.18**).
+Uses `twin_effective_hp` (defeated/lethal → `0x7FFF`; `health is None` → base
+`$20` from `$17EDC`):
 
 | Condition | Δ utility |
 | --------- | --------- |
-| twin is DANGEROUS (phase) | +0.08 |
-| `pair_role == 2` (grab-seed path) | +0.04 |
-| `targets_player == seat` | +0.04 |
+| unique lowest HP among live twins | **+0.18** |
+| tied for lowest HP (e.g. both full) | **+0.10** |
+| higher HP than another live twin | **0** |
+
+**Not scored:** DANGEROUS phase, `pair_role`, `targets_player`. Those used to
+thrash between bodies; partner commits are movement-only (§ below).
+
+Target hysteresis while **PAIR** (`twin_pair_should_stick` in `select_target`):
+
+1. Preferred combat target is a living twin → **stick** unless the challenger
+   twin has **strictly lower** effective HP.
+2. Strictly lower-HP twin challenger → **force switch** (bypass `switch_margin`;
+   boss utility floors would otherwise hide the gap).
+3. Partner twin DANGEROUS does **not** override stickiness or inflate peril to
+   full attack weight (pair-twin peril cap **0.40**; no `utility ≥ 0.82`
+   danger floor on pair twins).
+4. Non-projectile non-twin challengers do not steal focus while both twins live.
+5. Projectiles still may interrupt (dodge).
 
 Boss movement while **PAIR** (`bosses.tactical_move` / `_twin_pair_tactic`):
 
 1. Nearby twins **bracket** player on X (ΔX≤150, ΔY≤36, one left + one right) → evade **shared** lane; note `twins pair surround`.
-2. Else ≥2 nearby and any twin DANGEROUS (or focused twin DANGEROUS) → evade focused twin lane; note `twins pair pressure`.
+2. Else any nearby twin DANGEROUS → evade **that** twin's lane (`most_urgent_dangerous_twin`); note `twins pair pressure`. Combat target unchanged.
 3. Else ≥2 nearby and \|Δlane\| &lt; 18 → lane offset isolate (clearance **24**); note `twins pair isolate`.
 4. Else focused twin DANGEROUS alone nearby → evade its lane; note `twins pair jump/grab`.
-5. Else no boss tactic (free combat uses pair plan).
+5. Else no boss tactic (free combat punches the focus via pair plan).
 
 #### Survivor plan (only one remains)
 

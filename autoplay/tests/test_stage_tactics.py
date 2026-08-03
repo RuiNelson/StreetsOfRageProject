@@ -326,6 +326,44 @@ class BossTacticTests(unittest.TestCase):
         self.assertIn("pair", move.note)
         self.assertIn("isolate", move.note)
 
+    def test_twin_pair_evades_partner_commit_lane_not_focus_lane(self) -> None:
+        """Partner DANGEROUS: leave the commit lane; combat focus stays separate."""
+        focus = _entity(
+            kind="boss",
+            type_id=0x58,
+            world_x=160,
+            world_y=40,
+            slot="B0",
+            phase=CombatPhase.NORMAL,
+        )
+        partner = _entity(
+            kind="boss",
+            type_id=0x58,
+            world_x=130,
+            world_y=90,
+            slot="B1",
+            phase=CombatPhase.ATTACKING,
+        )
+        # Player shares the partner's attack lane (would get grabbed).
+        me = _entity(
+            kind="player",
+            type_id=1,
+            world_x=120,
+            world_y=90,
+            slot="P1",
+        )
+        move = tactical_move(
+            me,
+            focus,
+            (me, focus, partner),
+            level_index=4,
+        )
+        self.assertIsNotNone(move)
+        assert move is not None
+        self.assertIn("pressure", move.note)
+        # Must leave partner lane (90), not park on focus lane (40) only by chance.
+        self.assertNotAlmostEqual(move.goal_y, 90.0, delta=4.0)
+
     def test_twin_survivor_no_tactic_when_idle(self) -> None:
         survivor = _entity(
             kind="boss",

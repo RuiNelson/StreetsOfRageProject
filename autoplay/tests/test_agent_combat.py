@@ -17,10 +17,13 @@ from sor_autoplay.agent.enemies import (
     jack_weapon_phase,
     plan_for,
 )
+from sor_autoplay.agent.combat import select_target
 from sor_autoplay.agent.scene import (
     TwinComposition,
     twin_composition,
+    twin_effective_hp,
     twin_focus_bonus,
+    twin_pair_should_stick,
 )
 from sor_autoplay.agent.grabs import (
     GrabMemory,
@@ -304,30 +307,147 @@ class EnemyCounterTests(unittest.TestCase):
             ),
             "grab_walk",
         )
+        self.assertIn("focus-fire", pair.note)
 
-        # Isolation prefers the grab-role / dangerous twin.
-        grabber = _e(
-            kind="boss",
-            family="Onihime/Yasha",
-            type_id=0x58,
-            slot="B1",
-            map_x=180,
-            pair_role=2,
-            combat_phase=CombatPhase.ATTACKING,
-        )
-        approacher = _e(
+    def test_twin_focus_fire_prefers_lowest_hp_not_danger(self) -> None:
+        """Pair doctrine: damage the wounded twin; ignore partner DANGEROUS."""
+
+        from sor_autoplay.phases import CombatPhase
+
+        wounded = _e(
             kind="boss",
             family="Onihime/Yasha",
             type_id=0x58,
             slot="B0",
             map_x=140,
+            health=8,
             pair_role=1,
             combat_phase=CombatPhase.NORMAL,
         )
-        self.assertGreater(
-            twin_focus_bonus(grabber, (approacher, grabber)),
-            twin_focus_bonus(approacher, (approacher, grabber)),
+        full_attacker = _e(
+            kind="boss",
+            family="Onihime/Yasha",
+            type_id=0x58,
+            slot="B1",
+            map_x=180,
+            health=0x20,
+            pair_role=2,
+            combat_phase=CombatPhase.ATTACKING,
         )
+        entities = (wounded, full_attacker)
+        self.assertGreater(
+            twin_focus_bonus(wounded, entities),
+            twin_focus_bonus(full_attacker, entities),
+        )
+        self.assertAlmostEqual(twin_focus_bonus(wounded, entities), 0.18)
+        self.assertEqual(twin_focus_bonus(full_attacker, entities), 0.0)
+        self.assertTrue(
+            twin_pair_should_stick(wounded, full_attacker, entities)
+        )
+        # Lower HP challenger may take focus.
+        more_wounded = _e(
+            kind="boss",
+            family="Onihime/Yasha",
+            type_id=0x58,
+            slot="B1",
+            map_x=180,
+            health=4,
+            pair_role=2,
+        )
+        self.assertFalse(
+            twin_pair_should_stick(wounded, more_wounded, (wounded, more_wounded))
+        )
+
+    def test_twin_select_target_sticks_through_partner_attack(self) -> None:
+        """select_target must not thrash onto a DANGEROUS full-HP partner."""
+
+        from sor_autoplay.phases import CombatPhase
+
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=120,
+            map_y=64,
+            type_id=1,
+            health=0x50,
+            action_state=0x02,
+        )
+        focus = _e(
+            kind="boss",
+            family="Onihime/Yasha",
+            type_id=0x58,
+            slot="B0",
+            map_x=150,
+            map_y=64,
+            health=10,
+            pair_role=1,
+            combat_phase=CombatPhase.NORMAL,
+        )
+        partner = _e(
+            kind="boss",
+            family="Onihime/Yasha",
+            type_id=0x58,
+            slot="B1",
+            map_x=100,
+            map_y=64,
+            health=0x20,
+            pair_role=2,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+        choice = select_target(
+            me,
+            (me, focus, partner),
+            PROFILES[0],
+            preferred_slot="B0",
+        )
+        self.assertIsNotNone(choice)
+        assert choice is not None
+        self.assertEqual(choice.entity.slot, "B0")
+
+    def test_twin_select_target_switches_to_lower_hp(self) -> None:
+        """Focus-fire may retarget when the other twin is strictly lower HP."""
+
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=120,
+            map_y=64,
+            type_id=1,
+            health=0x50,
+            action_state=0x02,
+        )
+        a = _e(
+            kind="boss",
+            family="Onihime/Yasha",
+            type_id=0x58,
+            slot="B0",
+            map_x=150,
+            map_y=64,
+            health=12,
+            pair_role=1,
+        )
+        b = _e(
+            kind="boss",
+            family="Onihime/Yasha",
+            type_id=0x58,
+            slot="B1",
+            map_x=160,
+            map_y=64,
+            health=6,
+            pair_role=2,
+        )
+        choice = select_target(
+            me,
+            (me, a, b),
+            PROFILES[0],
+            preferred_slot="B0",
+        )
+        self.assertIsNotNone(choice)
+        assert choice is not None
+        self.assertEqual(choice.entity.slot, "B1")
+        self.assertEqual(twin_effective_hp(b), 6)
 
 
 class GrabTreeTests(unittest.TestCase):

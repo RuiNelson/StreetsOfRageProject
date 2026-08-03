@@ -7,8 +7,10 @@ already committed attack lane.
 
 Twin movement branches on Level-C scene composition (``agent/scene.py``):
 
-* **PAIR** — two living type-``$58``: bracket escape, and when not bracketed
-  but both nearby, leave a shared attack lane / isolate.
+* **PAIR** — two living type-``$58``: focus-fire lowest HP (scoring), but
+  movement evades *any* nearby DANGEROUS twin's lane (partner jump/grab)
+  without retargeting combat. Bracket escape and isolate when not under
+  attack commit.
 * **SURVIVOR** — one living twin: only leave the lane on a committed jump/grab
   (primary ``$02`` / dangerous phase); otherwise free combat owns the tree.
 """
@@ -93,7 +95,12 @@ def _twin_pair_tactic(
     *,
     level_index: int,
 ) -> BossTactic | None:
-    """Movement tree while both Onihime and Yasha are alive."""
+    """Movement tree while both Onihime and Yasha are alive.
+
+    Combat focus stays on the lowest-HP twin (``scene.twin_focus_bonus``).
+    This tree only relocates the seat: when *any* nearby twin is DANGEROUS,
+    leave **that** twin's attack lane, then free combat resumes on the focus.
+    """
 
     nearby = scene_ai.nearby_twins(me, entities)
     if scene_ai.twins_bracket_player(me, entities):
@@ -105,21 +112,21 @@ def _twin_pair_tactic(
             family="twins pair surround",
         )
 
-    # Both nearby (same side or stacked lanes): leave the target's attack lane
-    # so the partner cannot finish a rear grab on the same depth.
+    # Partner (or focus) jump/grab commit: evade the commit lane, not the
+    # combat-focus body if they differ.
+    urgent = scene_ai.most_urgent_dangerous_twin(me, entities)
+    if urgent is not None:
+        return _evade_attack_lane(
+            me,
+            attack_lane=float(urgent.world_y),
+            level_index=level_index,
+            family="twins pair pressure",
+        )
+
+    # Both nearby, neither committing: hold a lane offset rather than walking
+    # between them (isolate stand-off keeps grounded punches on focus).
     if len(nearby) >= 2:
         attack_lane = float(target.world_y)
-        if is_dangerous(target.combat_phase) or any(
-            is_dangerous(twin.combat_phase) for twin in nearby
-        ):
-            return _evade_attack_lane(
-                me,
-                attack_lane=attack_lane,
-                level_index=level_index,
-                family="twins pair pressure",
-            )
-        # Non-attacking pair still nearby: hold a lane offset rather than
-        # walking between them (isolate stand-off is combat's job).
         lane_gap = abs(float(me.world_y) - attack_lane)
         if lane_gap < 18.0:
             return _evade_attack_lane(
@@ -136,7 +143,7 @@ def _twin_pair_tactic(
             note="hold safe lane twins pair isolate",
         )
 
-    # Only the focused twin is nearby: leave lane on committed grab/jump.
+    # Only the focused twin is nearby: leave lane on its committed grab/jump.
     if is_dangerous(target.combat_phase):
         return _evade_attack_lane(
             me,
