@@ -424,8 +424,13 @@ def select_target(
     graph: TacticalKnowledgeGraph | None = None,
     preferred_slot: str | None = None,
     switch_margin: float = 0.12,
+    twin_focus_slot: str | None = None,
 ) -> TargetChoice | None:
-    """Choose a reachable combatant by fuzzy peril/value with hysteresis."""
+    """Choose a reachable combatant by fuzzy peril/value with hysteresis.
+
+    ``twin_focus_slot`` hard-prefers one Onihime/Yasha body while both live
+    (focus-fire until she is defeated).
+    """
 
     choices: list[TargetChoice] = []
     for entity in entities:
@@ -458,7 +463,9 @@ def select_target(
         if not reachable:
             continue
 
-        plan = enemy_ai.plan_for(entity, entities)
+        plan = enemy_ai.plan_for(
+            entity, entities, focus_slot=twin_focus_slot
+        )
         dx = entity.map_x - me.map_x
         dy = entity.map_y - me.map_y
         dist = math.hypot(dx, dy)
@@ -497,10 +504,13 @@ def select_target(
         priority = enemy_ai.target_priority_membership(entity)
         reasons.append(f"family-priority={priority:.2f}")
         twin_focus = scene_ai.twin_focus_bonus(
-            entity, entities, my_seat=my_seat
+            entity,
+            entities,
+            focus_slot=twin_focus_slot,
+            my_seat=my_seat,
         )
-        if twin_focus > 0.0:
-            reasons.append(f"twin-isolate={twin_focus:.2f}")
+        if twin_focus != 0.0:
+            reasons.append(f"twin-focus={twin_focus:+.2f}")
         utility = (
             0.24 * closeness
             + 0.25 * peril
@@ -537,6 +547,26 @@ def select_target(
     if not choices:
         return None
     best = max(choices, key=lambda choice: choice.utility)
+
+    # Hard focus-fire: while both twins live, never leave the latched twin for
+    # her partner (a single body is much easier). Projectiles may still win.
+    if twin_focus_slot is not None:
+        focus_choice = next(
+            (
+                choice
+                for choice in choices
+                if choice.entity.slot == twin_focus_slot
+            ),
+            None,
+        )
+        if (
+            focus_choice is not None
+            and best.entity.slot != twin_focus_slot
+            and scene_ai.is_twin(best.entity)
+            and best.entity.kind != "projectile"
+        ):
+            return focus_choice
+
     current = next(
         (choice for choice in choices if choice.entity.slot == preferred_slot),
         None,
@@ -591,13 +621,15 @@ def approach_vector(
     *,
     low_health: bool = False,
     entities: tuple[MapEntity, ...] | list[MapEntity] | None = None,
+    focus_slot: str | None = None,
 ) -> tuple[float, float, bool, CounterPlan]:
     """Return (dx_sign, dy_sign, in_range, plan) with phase-aware spacing.
 
     ``in_range`` here means **geometry for a grounded punch** (facing optional
     so approach still reports readiness before the turn completes).
 
-    Pass ``entities`` so twin pair/survivor stand-off uses the scene plan.
+    Pass ``entities`` / ``focus_slot`` so twin focus-fire stand-off uses the
+    ROM-backed plan.
     """
 
     dx, dy, _old_in, plan = enemy_ai.adjust_approach(
@@ -606,6 +638,7 @@ def approach_vector(
         profile,
         low_health=low_health,
         entities=entities,
+        focus_slot=focus_slot,
     )
     phase = target.entity.combat_phase
     in_range = can_punch(me, target.entity, profile, require_facing=False)

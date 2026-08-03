@@ -210,6 +210,7 @@ G. progress_goal + walk  # pits only in routing holes; stage-6 prefers lane $60
 | `enemy_grab_escape` | Escape edge rate-limit            | retry 4 ticks                                                  |
 | `planner`           | Crossover→suplex SM               | timeout 24; lost hold 2; max crossover attempts 2              |
 | `commitment`        | Active skill name                 | at most one                                                    |
+| `twin_focus`        | Onihime/Yasha focus-fire latch    | `focus_slot` sticky until that twin dies (§9.4b)               |
 | `attack_cd`         | Suppress re-B                     | set 1–4 on attacks                                             |
 | `last_note`         | HUD / trace                       | —                                                              |
 
@@ -738,64 +739,98 @@ Static fallback when no entity list is passed (unit helpers only): range 1.1,
 jump 0, grab 0.10, sidestep, priority 2.6. Live combat always passes the world
 entity list so §9.4b applies.
 
-### 9.4b Scene composition — Onihime/Yasha (`agent/scene.py`)
+### 9.4b Onihime/Yasha — ROM routines + focus-fire (`agent/twins.py`)
 
-Level-C layer: behaviour depends on the **set** of live type-`$58` bosses, not
-only the selected target. Classification (`twin_composition`):
+Source: `StreetsOfRageRecompilation/ai-analysis/enemy-ai.md` (type `$58`,
+`$158C4`). Two independent objects; role `+$5D` seeds grab vs approach AI;
+**no enrage** — one body left is the entire second phase.
+
+#### Strategy (normative)
+
+1. **Focus-fire one twin until she is defeated**, then fight the survivor.
+   A single twin is much easier than the linked pair.
+2. Latch `SeatMemory.twin_focus.focus_slot` on first contact; never switch to
+   the partner while the focus still lives (hard lock in `select_target`).
+3. Evade the partner’s commit/jump, then **return DPS to the focus**.
+4. Deny ROM distance windows (below) with spacing + lane leaves; never jump
+   into grab commit while the pair is up.
+
+#### Composition
 
 | Composition | Predicate | ROM meaning |
 | ----------- | --------- | ----------- |
-| `PAIR` | ≥ 2 living type-`$58` bosses | Linked pair (`+$5D` roles 1/2); split grab vs approach AI |
-| `SURVIVOR` | exactly 1 living type-`$58` | Unpaired after `$17F9C` unlink (`+$5D=0`); can promote grab AI |
-| `ABSENT` | 0 | No twin scene overlay |
+| `PAIR` | ≥ 2 living type-`$58` | Linked (`+$5D` 1/2); split grab/approach |
+| `SURVIVOR` | exactly 1 | Unpaired after `$17F9C` (`+$5D=0`) |
+| `ABSENT` | 0 | Clear focus latch |
 
-Living = `kind==boss`, `type_id==$58`, not `is_defeated`.
+#### Focus pick (when latch empty and PAIR)
 
-#### Pair plan (both present)
+Score (higher wins): lower HP, closer (X + 0.5·Y), slight bias to `pair_role==1`
+(approach path). Sticky until that slot is defeated; survivor auto-latches.
 
-| Field | Value | Rationale |
-| ----- | ----- | --------- |
-| range_scale | **1.25** | Wider stand-off between two jump-grabbers |
-| jump_bias | **0** | Do not jump into grab commit |
-| grab_bias | **0.05** | Do not walk into body between twins |
-| rear_bias | 0.35 | Rear B+C when one flanks |
-| sidestep | **true** | Lane mobility |
-| no_jump | **true** | Hard ban on jump-kick while pair is up |
-| priority | 2.9 | Slightly above static twin |
-| note | `twins pair — isolate, stay mobile` | |
+Utility while PAIR (`twin_focus_bonus`):
 
-Target isolation bonus (`twin_focus_bonus`, added to utility, cap **0.12**):
+| Target | Δ utility |
+| ------ | --------- |
+| Focus twin | **+0.55** (+0.05 if HP &lt; `$10`) |
+| Other twin | **−0.35** (−0.05 if she is mid commit/jump — still below focus) |
 
-| Condition | Δ utility |
-| --------- | --------- |
-| twin is DANGEROUS (phase) | +0.08 |
-| `pair_role == 2` (grab-seed path) | +0.04 |
-| `targets_player == seat` | +0.04 |
+Hard lock: if best target is the non-focus twin, return focus instead (unless
+projectile).
 
-Boss movement while **PAIR** (`bosses.tactical_move` / `_twin_pair_tactic`):
+#### ROM windows (deny / react)
 
-1. Nearby twins **bracket** player on X (ΔX≤150, ΔY≤36, one left + one right) → evade **shared** lane; note `twins pair surround`.
-2. Else ≥2 nearby and any twin DANGEROUS (or focused twin DANGEROUS) → evade focused twin lane; note `twins pair pressure`.
-3. Else ≥2 nearby and \|Δlane\| &lt; 18 → lane offset isolate (clearance **24**); note `twins pair isolate`.
-4. Else focused twin DANGEROUS alone nearby → evade its lane; note `twins pair jump/grab`.
-5. Else no boss tactic (free combat uses pair plan).
+| Window | Threshold | ROM | Agent response |
+| ------ | --------- | --- | -------------- |
+| Jump arm | abs X &lt; **`$60`** (96) | `$15A64` | Leave lane / stand outside via `range_scale` |
+| Approach commit | lane ∈ [`$10`,`$20`), X &lt; **`$70`** | state1 → primary `$02` | Lane leave before commit |
+| Grab commit | X &lt; **`$90`** (144) | `$15BE8` | Deny grab-hunt X; back off from partner grabber |
+| Grab jump-in | X &lt; `$40` or `$40–$70` | `$15C72` | Treat as jump arm / leap evade |
+| Commit throw | primary **`$02`** | `$15D0C` | Always leave attack lane |
 
-#### Survivor plan (only one remains)
+#### Routine decode (`decode_routine`)
 
-| Field | Value | Rationale |
-| ----- | ----- | --------- |
-| range_scale | **1.05** | Closer pressure once partner is gone |
-| jump_bias | **0.15** | Light jump only via normal mix thresholds |
-| grab_bias | **0.50** | Body grab / hold tree is legal and useful |
-| rear_bias | 0.25 | |
-| sidestep | **true** | Still leave jump-grab lane |
-| no_jump | **false** | Jump allowed (solver / mix may still pick punch) |
-| priority | 2.6 | |
-| note | `twin survivor — pressure/grab` | |
+| Routine | Detect | Counter overlay |
+| ------- | ------ | --------------- |
+| `COMMIT` | primary `$02` | max range, no grab/jump, sidestep |
+| `APPROACH_JUMP` | state1, `+$67==$02`, not grab role | jump-arm evade |
+| `GRAB_LEAP` | `+$67==$03` or grab role + jump sub | leap evade |
+| `GRAB_HUNT` | `pair_role==2`, state1 | range ≥ deny `$90` |
+| `APPROACH_IDLE` / `CHASE` | `+$67` 0/1, approach | deny jump arm spacing |
+| `RECOVERY` | primary `$03`/`$04`/`$0A` or punish phase | collapse range, grab_bias up |
 
-Boss movement while **SURVIVOR**: only when focused twin is DANGEROUS → evade attack lane; note `twin survivor jump/grab`. Otherwise free combat owns the tree (grab_walk / punch via survivor plan).
+#### Pair focus plan / other plan / survivor plan
 
-Module: `plan_for(entity, entities=…)` applies the overlay; `select_target` and approach pass the full entity tuple.
+| Plan | range_scale | jump | grab | no_jump | note |
+| ---- | ----------- | ---- | ---- | ------- | ---- |
+| Pair **focus** | **1.35** | 0 | 0 | yes | `twins pair focus — finish one` |
+| Pair **other** | **1.45** | 0 | 0 | yes | `twins pair other — disengage` |
+| **Survivor** | **1.08** | 0.10 | **0.55** | no | `twin survivor — pressure/grab` |
+
+Routine overlays may raise `range_scale` further (commit 1.5, jump 1.4).
+
+#### Boss movement (`twins.tactical_move` via `bosses.tactical_move`)
+
+**PAIR** order:
+
+1. Bracket (nearby, opposite X) → leave **shared** lane (`twins pair surround`).
+2. Any nearby twin in COMMIT / jump / leap → leave **that** lane
+   (`focus-evade` or `partner-evade`).
+3. Partner nearby same lane (&lt;16 Y) → isolate from partner lane.
+4. Partner `GRAB_HUNT` inside grab X → walk away on X (`deny grab X`).
+5. Focus in approach idle/chase inside jump-arm or commit window → lane leave
+   (`deny commit window`).
+6. Else free combat on focus.
+
+**SURVIVOR:** leave lane on COMMIT/jump/leap; if chase/hunt inside jump-arm or
+grab window and same lane → small lane leave (`deny window`); else free combat
+(pressure/grab).
+
+Nearby window: \|Δworld_x\| ≤ **150**, \|Δworld_y\| ≤ **36**. Default clearance
+**28** (deny windows use 20–26).
+
+Modules: `twins.py` (logic), `scene.py` (re-exports), `plan_for(..., focus_slot=)`,
+`select_target(..., twin_focus_slot=)`, `SeatMemory.twin_focus`.
 
 ### 9.5 Attack mix (`attack_mix`) — deterministic
 
@@ -835,7 +870,7 @@ Normative order inside combat (after LOOT lost arbitration):
 4. Target GRABBED and we are not grabbing → skip progress walk.
 5. Busy attacking → combo queue B or face-hold.
 6. **Back-shield grab**: if back_exposed ∧ grabbable: walk to body; B when \|Δx\|≤24 ∧ lane ∧ face ∧ cd=0 ∧ ground-ready.
-7. Boss tactical move (Souther / twins pair|survivor, §9.4b) if any.
+7. Boss tactical move (Souther / twins focus-fire §9.4b) if any.
 8. Signal sweep threat (type `$24`, state `$08` or `$0B`, \|Δx\|≤120, \|Δy\|≤20): C if ground-ready and jump_landing_safe; else brace.
 9. enemy_attack_committed (dangerous ∧ \|Δx\|≤100):
    - off-lane boss → reengage boss lane;
@@ -873,9 +908,9 @@ or breakable target when no plan is armed.
 | Boss          | Trigger                                                       | Response                                            |
 | ------------- | ------------------------------------------------------------- | --------------------------------------------------- |
 | Souther `$55` | dangerous phase                                               | leave attack lane by ≥28 Y or hold if already clear |
-| Twins `$58`   | scene **PAIR** / **SURVIVOR** (normative detail §9.4b)        | pair: surround / pressure / isolate trees; survivor: only on DANGEROUS |
+| Twins `$58`   | ROM routines + **focus-fire** (§9.4b)                         | pair: finish one + partner evade; survivor: pressure/grab |
 
-Twins nearby window: \|Δworld_x\| ≤ **150**, \|Δworld_y\| ≤ **36**. Default lane clearance **28** (pair isolate uses **24**).
+Twins nearby window: \|Δworld_x\| ≤ **150**, \|Δworld_y\| ≤ **36**. Default lane clearance **28**.
 
 ### 9.10 Moving breakables (before arbiter)
 
@@ -1002,7 +1037,7 @@ First-class metrics (enforce at 0 / scenario mins as appropriate): damage events
 | §6 co-op      | `coop.py`                                                              |
 | §7 graph      | `knowledge.py`, `phases.py`, `world_map.py`                            |
 | §8 arbiter    | `arbiter.py`                                                           |
-| §9 combat     | `combat.py`, `enemies.py`, `characters.py`, `bosses.py`, `scene.py`    |
+| §9 combat     | `combat.py`, `enemies.py`, `characters.py`, `bosses.py`, `twins.py`, `scene.py` |
 | §10 nav/stage | `navigation.py`, `walk.py`, `stage.py`, `hazards.py`                   |
 | §11 I/O       | `app.py` + `megadrive_remote`                                          |
 | §12 eval      | `evaluation.py`, `scenarios.py`                                        |

@@ -37,6 +37,7 @@ from .knowledge import TacticalKnowledgeGraph, build_tactical_graph
 from .navigation import NavMemory
 from .pressure import PressureReport, compute_pressure
 from .stage import StageAdvice, stage_advice
+from .twins import TwinFocusMemory
 from .walk import WalkState
 
 if TYPE_CHECKING:
@@ -73,6 +74,7 @@ class SeatMemory:
     planner: AutoPlanner = field(default_factory=AutoPlanner)
     goal: GoalMemory = field(default_factory=GoalMemory)
     jump_kick: JumpKickPending = field(default_factory=JumpKickPending)
+    twin_focus: TwinFocusMemory = field(default_factory=TwinFocusMemory)
     commitment: Commitment | None = None
 
     def __post_init__(self) -> None:
@@ -92,6 +94,8 @@ class SeatMemory:
         self.grab.reset()
         self.enemy_grab_escape.reset()
         self.jump_kick.clear()
+        # Keep twin focus across short tactical clears so focus-fire survives
+        # walk resets; cleared only when the pair is gone (update_focus).
         assert self.commitment is not None
         self.commitment.clear()
 
