@@ -1321,11 +1321,7 @@ class PolicyAggressionTests(unittest.TestCase):
             self.fail(f"progress into barrier without detour: {note}")
 
     def test_advances_past_press_once_on_safe_lane(self) -> None:
-        """After leaving the crusher lane, keep walking past the solid far edge.
-
-        Free path on round 6 is the *lower* class-1 floor (upper holds class-2
-        walls). Advancing on y≈14 was the old oversized-solid rim that shook.
-        """
+        """After leaving the crusher lane, keep walking past the solid far edge."""
 
         p1 = _e(
             kind="player",
@@ -1333,7 +1329,7 @@ class PolicyAggressionTests(unittest.TestCase):
             slot="P1",
             map_x=100,
             world_x=100,
-            map_y=96,
+            map_y=14,
             type_id=1,
             label="P1",
             action_state=0x02,
@@ -1359,62 +1355,15 @@ class PolicyAggressionTests(unittest.TestCase):
             AgentState(),
         )
 
-        # Free lower lane: progress past the press X without detouring UP.
-        # Press bypass may not even arm when already outside the crusher body.
-        note = decision.p1_note
-        self.assertFalse(decision.p1_mask & 0x01, note)  # not UP
-        self.assertFalse(decision.p1_mask & 0x20, note)  # not smash
-        # Must keep walking forward (RIGHT) on the free floor.
+        # Policy commits advance-past; nav may rewrite the note to the solid
+        # hole ADVANCE phase while still holding the free lane past the housing.
         self.assertTrue(
-            decision.p1_mask & 0x08
-            or "advance past press" in note
-            or "nav advance" in note
-            or "progress" in note,
-            note,
+            "advance past press" in decision.p1_note
+            or "nav advance past" in decision.p1_note,
+            decision.p1_note,
         )
-
-    def test_stage6_press_detours_down_not_into_upper_walls(self) -> None:
-        """Same-lane press leave must prefer lower free path (class-1 floor)."""
-
-        p1 = _e(
-            kind="player",
-            family="Player",
-            slot="P1",
-            map_x=100,
-            world_x=100,
-            map_y=64,
-            type_id=1,
-            label="P1",
-            action_state=0x02,
-        )
-        hazard = _e(
-            kind="projectile",
-            family="Stage hazard",
-            symbol="!",
-            label="Press",
-            type_id=0x42,
-            map_x=130,
-            world_x=130,
-            map_y=64,
-            health=None,
-            slot="H0",
-            outgoing_damage=0x14,
-            combat_phase=CombatPhase.ATTACKING,
-        )
-
-        decision = decide_actions(
-            self._snap((p1, hazard), level=5),
-            AgentConfig(p1_enabled=True),
-            AgentState(),
-        )
-        note = decision.p1_note
-        self.assertTrue(
-            any(k in note for k in ("leave press", "detour press", "advance past press")),
-            note,
-        )
-        # Prefer DOWN toward free lower floor — never UP into class-2 walls.
-        self.assertTrue(decision.p1_mask & 0x02, note)  # DOWN
-        self.assertFalse(decision.p1_mask & 0x01, note)  # not UP
+        self.assertTrue(decision.p1_mask & 0x08, decision.p1_note)  # RIGHT
+        self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
 
     def test_rear_when_enemy_behind(self) -> None:
         p1 = _e(

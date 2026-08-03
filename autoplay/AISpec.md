@@ -872,15 +872,14 @@ Round-6 type `$42` (ROM `$7A6C` family, label **Press**):
 - **Avoid-only**: no player-hit destruction path; never smash/target as combat.
 - Outgoing damage `$14`; vertical Z state machine `$40` ↔ `$A0`.
 - ROM arming gate: player X in **[press_x − 48, press_x + 96]**.
-- **Crusher body AABB** (supplement, not the wall model): X = **[press_x − 48, press_x + 64]**, lane Y = press_y ± **20**. Merged into routing holes so walks do not path through the crusher. Must **not** cover the whole playable band — half-Y 36 left only the upper rim free and the agent shook into class-2 walls.
-- **Path walls** are collision-class **2** on the upper lanes (`floor_barriers`); free walk is lower class-1 floor.
+- **Solid housing (path blocker)**: AABB X = **[press_x − 48, press_x + 64]**, lane Y = press_y ± **36**. Merged into routing holes so progress/combat walks **cannot path through** the machine frame.
 - **Committed bypass** (`press_bypass_goal`), not leave-lane-only:
-  1. `leave press` / `detour press` — pure Y off the crush band (hold X while under). On round 6 prefer the **lower** free edge.
-  2. `advance past press` — once free of the crusher body on Y, walk to solid far edge + **24** X on that free lane (do not re-detour to the upper rim).
+  1. `leave press` / `detour press` — pure Y off the solid/crush band (hold X while under).
+  2. `advance past press` — once on a free lane, walk to solid far edge + **24** X on that lane.
 - **Crush / stand-under**: \|ΔX\| ≤ **48** and \|ΔY\| ≤ **16** → step 1.
 - **Same-lane approach**: \|ΔX\| ≤ **100** and \|ΔY\| ≤ **20** → step 1 then 2.
-- **Corridor block**: press ahead within **160** X / **28** Y of the progress probe, or goal segment hits the crusher body → same bypass. Seats already free of the body on Y are **not** corridor-blocked by `$42` (class-2 owns walls).
-- Safer lane = free edge outside body ± clearance; **round 6 always prefers lower** free edge (class-1 floor).
+- **Corridor block**: press ahead within **160** X / **56** Y of the progress probe, or goal segment hits solid → same bypass.
+- Safer lane = free edge outside solid ± clearance (prefer the side already occupied).
 - Exclude type `$42` from `select_target` so weak projectile dodge does not thrash under the frame.
 
 ### 9.11 Static breakables (after combat)

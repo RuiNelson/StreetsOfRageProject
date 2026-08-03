@@ -282,9 +282,8 @@ for tests/HUD.
        phase while damage is active. Round-6 type `$42` is different: its
        moving vertical state machine exposes damage `$14` but has no
        player-hit destruction path, so observe it as an avoid-only **press**.
-       The crusher body is a modest navigation AABB (half-Y 20; cannot walk
-       through on its lane); same-lane approach or stand-under forces a leave
-       toward the lower free floor before progress.
+       The machine body is a solid navigation AABB (cannot walk through);
+       same-lane approach or stand-under forces a lane leave before progress.
        Presses are excluded from combat targeting. A seeded live trace measured
        `$45` advancing 12 px per four-frame decision. Leave its lane inside
        220 px, hold the safe lane until it passes, and smash only when already
@@ -317,11 +316,7 @@ for tests/HUD.
       The **path** is blocked by collision-class **2** machine walls on the
       upper lanes (class 1 floor stays free on lower lanes). Snapshot field
       `floor_barriers` is always merged into nav solids (except elevator).
-      Also avoid standing in the `$42` crush band (`press_bypass_goal`):
-      crusher body half-Y is **20** (not 36 — that covered the band and forced
-      detours onto the upper rim into class-2 walls, which looked like the AI
-      shaking and refusing to advance). Prefer the **lower** free edge; once
-      free of the crusher body on Y, advance past on that lane.
+      Also avoid standing in the `$42` crush band (`press_bypass_goal`).
     - Round 7 (level index 6) is a fixed moving elevator/gauntlet. Its platform
       is not represented by the static collision-class map, so class-0 cells
       are not holes. With no combat target, clear any old horizontal walk
