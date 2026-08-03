@@ -48,20 +48,21 @@ class TwinComposition(Enum):
     SURVIVOR = auto()
 
 
-# Normative pair plan: focus-fire one body with grounded punches, stay mobile,
-# do not walk into body grabs between two jump-grabbers, never jump into grab
-# commit. Range is a stand-off that still allows strike when closed.
+# Normative pair plan: focus-fire one body with grounded punches.
+# range_scale MUST stay ≤1.0 so stand-off stays inside measured punch boxes
+# (scale>1 parked past strike_range and never pressed B). Never jump into
+# grab commit; body-grab between two twins is still a trap.
 _TWIN_PAIR_PLAN = CounterPlan(
     ThreatKind.JUMP_GRAB,
-    range_scale=1.20,
-    prefer_lane_delta=1.0,
+    range_scale=1.0,
+    prefer_lane_delta=0.0,
     jump_bias=0.0,
-    rear_bias=0.35,
+    rear_bias=0.40,
     grab_bias=0.05,
     sidestep=True,
     no_jump=True,
     priority=2.9,
-    note="twins pair — focus-fire lowest HP, stay mobile",
+    note="twins pair — focus-fire lowest HP, grounded punches",
 )
 
 # Survivor (unpaired): pair constraints gone; can promote to grab AI. Pressure

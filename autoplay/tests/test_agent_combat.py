@@ -275,8 +275,9 @@ class EnemyCounterTests(unittest.TestCase):
         pair = plan_for(a, (a, b))
         self.assertTrue(pair.no_jump)
         self.assertLess(pair.grab_bias, 0.2)
-        self.assertGreaterEqual(pair.range_scale, 1.2)
+        self.assertLessEqual(pair.range_scale, 1.0)
         self.assertIn("pair", pair.note)
+        self.assertIn("focus-fire", pair.note)
         self.assertEqual(
             attack_mix(
                 pair,
@@ -307,8 +308,6 @@ class EnemyCounterTests(unittest.TestCase):
             ),
             "grab_walk",
         )
-        self.assertIn("focus-fire", pair.note)
-
     def test_twin_focus_fire_prefers_lowest_hp_not_danger(self) -> None:
         """Pair doctrine: damage the wounded twin; ignore partner DANGEROUS."""
 

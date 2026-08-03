@@ -741,14 +741,14 @@ damage onto the partner.
 
 | Field | Value | Rationale |
 | ----- | ----- | --------- |
-| range_scale | **1.20** | Stand-off that still allows grounded strike when closed |
+| range_scale | **1.0** | Must stay ≤1.0 so stand-off stays inside measured punch boxes |
 | jump_bias | **0** | Do not jump into grab commit |
 | grab_bias | **0.05** | Do not walk into body between twins |
-| rear_bias | 0.35 | Rear B+C when one flanks |
-| sidestep | **true** | Lane mobility |
+| rear_bias | 0.40 | Rear B+C when one flanks |
+| sidestep | **true** | Lane mobility on commits only |
 | no_jump | **true** | Hard ban on jump-kick while pair is up |
 | priority | 2.9 | Slightly above static twin |
-| note | `twins pair — focus-fire lowest HP, stay mobile` | |
+| note | `twins pair — focus-fire lowest HP, grounded punches` | |
 
 Target focus-fire bonus (`twin_focus_bonus`, added to utility, cap **0.18**).
 Uses `twin_effective_hp` (defeated/lethal → `0x7FFF`; `health is None` → base
@@ -777,11 +777,20 @@ Target hysteresis while **PAIR** (`twin_pair_should_stick` in `select_target`):
 
 Boss movement while **PAIR** (`bosses.tactical_move` / `_twin_pair_tactic`):
 
-1. Nearby twins **bracket** player on X (ΔX≤150, ΔY≤36, one left + one right) → evade **shared** lane; note `twins pair surround`.
-2. Else any nearby twin DANGEROUS → evade **that** twin's lane (`most_urgent_dangerous_twin`); note `twins pair pressure`. Combat target unchanged.
-3. Else ≥2 nearby and \|Δlane\| &lt; 18 → lane offset isolate (clearance **24**); note `twins pair isolate`.
-4. Else focused twin DANGEROUS alone nearby → evade its lane; note `twins pair jump/grab`.
-5. Else no boss tactic (free combat punches the focus via pair plan).
+Threats only — idle proximity must **not** freeze free combat (a previous
+isolate/hold path parked the agent off-lane forever and never pressed B).
+
+1. Nearby twins **bracket** player on X (ΔX≤150, ΔY≤36, one left + one right) **and** player still on shared depth → sidestep shared lane; note `twins pair surround`. Already clear of shared depth → **None**.
+2. Else any nearby twin DANGEROUS **and** player on that twin's depth (clearance **28**) → sidestep **that** lane (`most_urgent_dangerous_twin`); note `twins pair pressure`. Already clear → **None** (do not hold).
+3. Else non-focus twin coplanar (ΔX≤**56**, ΔY≤**14**) → sidestep partner lane (clearance **22**); note `twins pair isolate`.
+4. Else **None** — free combat owns grounded punches on the focus twin.
+
+Policy free-combat also short-circuits a legal focus punch (`twin focus punch`)
+when geometry/facing allow and the focus is not DANGEROUS, so a soft tactic
+cannot starve damage.
+
+Stand point while PAIR: park on the side of the focus **opposite** the partner
+(`_twin_partner_side`) so the second twin has a longer path into grab range.
 
 #### Survivor plan (only one remains)
 

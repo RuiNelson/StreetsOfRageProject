@@ -299,8 +299,16 @@ class BossTacticTests(unittest.TestCase):
         self.assertIn("pair", move.note)
         self.assertNotEqual(move.goal_y, self.me.world_y)
 
-    def test_twin_pair_same_side_nearby_still_isolates_lane(self) -> None:
-        """Both twins on the same side of the player (not bracketed)."""
+    def test_twin_pair_idle_nearby_does_not_freeze_combat(self) -> None:
+        """Idle twins at mid range must not emit a hold/isolate freeze."""
+        # Player far from both bodies — free combat should own punches.
+        me = _entity(
+            kind="player",
+            type_id=1,
+            world_x=100,
+            world_y=40,
+            slot="P1",
+        )
         a = _entity(
             kind="boss",
             type_id=0x58,
@@ -311,20 +319,51 @@ class BossTacticTests(unittest.TestCase):
         b = _entity(
             kind="boss",
             type_id=0x58,
-            world_x=180,
+            world_x=200,
+            world_y=80,
+            slot="B1",
+        )
+        move = tactical_move(
+            me,
+            a,
+            (me, a, b),
+            level_index=4,
+        )
+        self.assertIsNone(move)
+
+    def test_twin_pair_partner_intrusion_isolates(self) -> None:
+        """Non-focus twin coplanar and close → leave their depth only."""
+        me = _entity(
+            kind="player",
+            type_id=1,
+            world_x=120,
+            world_y=64,
+            slot="P1",
+        )
+        focus = _entity(
+            kind="boss",
+            type_id=0x58,
+            world_x=170,
+            world_y=40,
+            slot="B0",
+        )
+        partner = _entity(
+            kind="boss",
+            type_id=0x58,
+            world_x=150,
             world_y=66,
             slot="B1",
         )
         move = tactical_move(
-            self.me,
-            a,
-            (self.me, a, b),
+            me,
+            focus,
+            (me, focus, partner),
             level_index=4,
         )
         self.assertIsNotNone(move)
         assert move is not None
-        self.assertIn("pair", move.note)
         self.assertIn("isolate", move.note)
+        self.assertFalse(move.hold)
 
     def test_twin_pair_evades_partner_commit_lane_not_focus_lane(self) -> None:
         """Partner DANGEROUS: leave the commit lane; combat focus stays separate."""

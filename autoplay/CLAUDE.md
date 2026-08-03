@@ -305,11 +305,13 @@ for tests/HUD.
      damaging jump/grab choreography. Keep grounded against Souther; leave a
      committed boss attack lane. Twins use **Level-C scene composition**
      (`agent/scene.py`, AISpec §9.4b): **PAIR** (both live) → **focus-fire
-     lowest HP** until one dies (no thrash onto partner DANGEROUS; evade then
-     return), no-jump grounded punches, surround/pressure/isolate boss tactics
-     that leave the *commit* lane; **SURVIVOR** (one live) → pressure/grab plan
-     and lane evade only on DANGEROUS. ROM has no enrage: one body left is the
-     entire second phase and is much easier.
+     lowest HP** until one dies; **grounded punches must land** (`range_scale`
+     ≤1.0; idle pair proximity must not freeze combat). Boss tactics only on
+     real threats (bracket, DANGEROUS commit on our depth, partner coplanar
+     intrusion) then return to free combat; partner DANGEROUS does not retarget.
+     Policy short-circuits `twin focus punch` when geometry allows. **SURVIVOR**
+     (one live) → pressure/grab plan and lane evade only on DANGEROUS. ROM has
+     no enrage: one body left is the entire second phase and is much easier.
 10. Route around floor holes (stage 4), factory presses (stage 6), and hold
     the elevator (stage 7)
     - Stage-4 horizontal progression must turn into a persistent vertical

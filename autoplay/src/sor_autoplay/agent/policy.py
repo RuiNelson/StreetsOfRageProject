@@ -18,7 +18,16 @@ from dataclasses import dataclass, field, replace as dc_replace
 from ..phases import CombatPhase, is_dangerous, is_punishable
 from ..state import GameSnapshot, PlayerSnapshot
 from ..world_map import MapEntity
-from . import bosses, combat, coop, enemies as enemy_ai, navigation, pressure, stage
+from . import (
+    bosses,
+    combat,
+    coop,
+    enemies as enemy_ai,
+    navigation,
+    pressure,
+    scene as scene_ai,
+    stage,
+)
 from .arbiter import GoalKind, solve_goal
 from .context import DecisionContext, PlayerMode, SeatMemory, build_decision_context
 from .controls import Intent, mask_from_intent
@@ -1006,13 +1015,30 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 eps_y=6.0,
             )
 
+        # Twin pair: a clean grounded hit on the focus twin outranks soft
+        # movement. Boss tactics still own real jump/grab commits (DANGEROUS
+        # on our depth) and bracket surrounds; they return None when idle so
+        # free combat can press B. Extra guard: never freeze on a hold while
+        # punch geometry is already legal and the focus is not committing.
         boss_tactic = bosses.tactical_move(
             me,
             foe,
             snapshot.world_map.entities,
             level_index=snapshot.level_index,
         )
-        if boss_tactic is not None:
+        twin_pair = (
+            scene_ai.is_twin(foe)
+            and scene_ai.twin_composition(snapshot.world_map.entities)
+            is scene_ai.TwinComposition.PAIR
+        )
+        twin_can_strike = (
+            twin_pair
+            and punch_ok
+            and not is_dangerous(phase)
+            and combat.player_can_start_ground_action(me)
+            and cd == 0
+        )
+        if boss_tactic is not None and not twin_can_strike:
             if boss_tactic.hold:
                 walk.clear()
                 return Intent(note=boss_tactic.note)
@@ -1027,6 +1053,27 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 nav=nav,
                 eps_x=3.0,
                 eps_y=5.0,
+            )
+        if twin_can_strike:
+            if coop.attack_would_hit_ally(
+                me, coop_ctx.partner, face_left=face_left
+            ):
+                return _clear_ally_lane(
+                    walk,
+                    me,
+                    coop_ctx.partner,
+                    reason=f"ally blocks twin focus {foe.label}",
+                    snapshot=snapshot,
+                    advice=advice,
+                    nav=nav,
+                )
+            walk.clear()
+            ctx.set_attack_cd(3)
+            return Intent(
+                left=face_left,
+                right=face_right_now,
+                attack=True,
+                note=f"twin focus punch {foe.label} [{tag}]",
             )
 
         # Signal's state $08 can select the state-$0B low sliding sweep. The
@@ -1429,7 +1476,13 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 else f"jump range {foe.label} [{tag}]"
             )
         else:
-            stand_x, stand_y = _stand_point(me, target, profile, low_health=low_hp)
+            stand_x, stand_y = _stand_point(
+                me,
+                target,
+                profile,
+                low_health=low_hp,
+                entities=snapshot.world_map.entities,
+            )
             reason = f"close {foe.label} [{tag}]"
         if (
             is_dangerous(phase)
@@ -1446,7 +1499,13 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             stand_y = float(foe.world_y)
             reason = f"lane {foe.label} [{tag}]"
         elif is_punishable(phase) and plan.grab_bias < 0.5:
-            stand_x, stand_y = _stand_point(me, target, profile, low_health=False)
+            stand_x, stand_y = _stand_point(
+                me,
+                target,
+                profile,
+                low_health=False,
+                entities=snapshot.world_map.entities,
+            )
             reason = f"chase punish {foe.label} [{tag}]"
 
         return _walk_toward(
@@ -1638,6 +1697,7 @@ def _stand_point(
     profile,
     *,
     low_health: bool,
+    entities: tuple[MapEntity, ...] | list[MapEntity] | None = None,
 ) -> tuple[float, float]:
     """World-space stand-off: same lane, outer strike gap on X.
 
@@ -1647,6 +1707,9 @@ def _stand_point(
     pepper / bat keep their reach advantage instead of walking into punch range.
     Scene plans (twin pair/survivor) scale stand-off via ``target.plan``.
     Always match the foe's lane (off-lane = air punches).
+
+    Twin **PAIR**: stand on the side of the focus opposite the partner so the
+    second twin has a longer path to coplanar grab setup.
     """
 
     from . import weapons as W
@@ -1654,6 +1717,15 @@ def _stand_point(
     foe = target.entity
     plan = target.plan
     side = -1.0 if (foe.world_x - me.world_x) > 0 else 1.0
+    if (
+        entities is not None
+        and scene_ai.is_twin(foe)
+        and scene_ai.twin_composition(entities) is scene_ai.TwinComposition.PAIR
+    ):
+        partner_side = _twin_partner_side(foe, entities)
+        if partner_side is not None:
+            # Stand opposite the partner relative to the focus body.
+            side = -partner_side
     if me.is_holding_weapon and W.is_weapon_type(me.held_type):
         dist = W.approach_stand_dx(me.held_type, profile)
         if low_health:
@@ -1676,10 +1748,34 @@ def _stand_point(
         if plan.grab_bias >= 0.5:
             dist = min(dist, 20.0)
         else:
-            dist = max(22.0, min(dist, strike - 2.0))
+            # Keep stand strictly inside measured punch box (strike - 4).
+            dist = max(22.0, min(dist, strike - 4.0))
     stand_x = float(foe.world_x) + side * dist
     stand_y = float(foe.world_y)
     return stand_x, stand_y
+
+
+def _twin_partner_side(
+    focus: MapEntity,
+    entities: tuple[MapEntity, ...] | list[MapEntity],
+) -> float | None:
+    """Sign of (partner.x - focus.x): +1 partner is right of focus, else -1."""
+
+    partners = [
+        twin
+        for twin in scene_ai.live_twins(entities)
+        if twin.slot != focus.slot
+    ]
+    if not partners:
+        return None
+    partner = min(
+        partners,
+        key=lambda twin: abs(float(twin.world_x) - float(focus.world_x)),
+    )
+    dx = float(partner.world_x) - float(focus.world_x)
+    if abs(dx) < 8.0:
+        return None
+    return 1.0 if dx > 0 else -1.0
 
 
 def _walk_toward(

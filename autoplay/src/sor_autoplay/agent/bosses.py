@@ -7,10 +7,10 @@ already committed attack lane.
 
 Twin movement branches on Level-C scene composition (``agent/scene.py``):
 
-* **PAIR** — two living type-``$58``: focus-fire lowest HP (scoring), but
-  movement evades *any* nearby DANGEROUS twin's lane (partner jump/grab)
-  without retargeting combat. Bracket escape and isolate when not under
-  attack commit.
+* **PAIR** — focus-fire lowest HP (scoring). Movement only intervenes on real
+  threats: bracket surround, a DANGEROUS jump/grab on our depth, or a partner
+  coplanar intrusion. Idle pair proximity must **not** freeze combat — free
+  combat owns grounded punches on the focus twin.
 * **SURVIVOR** — one living twin: only leave the lane on a committed jump/grab
   (primary ``$02`` / dangerous phase); otherwise free combat owns the tree.
 """
@@ -26,6 +26,12 @@ from . import scene as scene_ai
 
 SOUTHER_TYPE = 0x55
 TWIN_TYPE = scene_ai.TWIN_TYPE
+
+# Leave a commit lane by this much before free combat may re-enter.
+_TWIN_COMMIT_CLEARANCE = 28.0
+# Partner body intrusion (grab setup window is ROM X < $90; act earlier).
+_TWIN_INTRUDE_X = 56.0
+_TWIN_INTRUDE_Y = 14.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,63 +101,100 @@ def _twin_pair_tactic(
     *,
     level_index: int,
 ) -> BossTactic | None:
-    """Movement tree while both Onihime and Yasha are alive.
+    """Movement while both twins live — threats only; else free combat damages.
 
-    Combat focus stays on the lowest-HP twin (``scene.twin_focus_bonus``).
-    This tree only relocates the seat: when *any* nearby twin is DANGEROUS,
-    leave **that** twin's attack lane, then free combat resumes on the focus.
+    Previous behaviour isolated/held whenever two twins were nearby (ΔX≤150),
+    which is the entire fight. That blocked ``attack_mix`` punches forever.
     """
 
     nearby = scene_ai.nearby_twins(me, entities)
-    if scene_ai.twins_bracket_player(me, entities):
+
+    # 1) Bracketed on X: leave the shared depth (real surround).
+    if scene_ai.twins_bracket_player(me, entities) and nearby:
         shared_lane = sum(float(twin.world_y) for twin in nearby) / len(nearby)
-        return _evade_attack_lane(
+        return _evade_if_on_lane(
             me,
             attack_lane=shared_lane,
             level_index=level_index,
             family="twins pair surround",
+            clearance=_TWIN_COMMIT_CLEARANCE,
         )
 
-    # Partner (or focus) jump/grab commit: evade the commit lane, not the
-    # combat-focus body if they differ.
+    # 2) Any nearby jump/grab commit: leave *that* twin's lane if we share it.
+    #    Already clear → None so free combat can keep hitting the focus.
     urgent = scene_ai.most_urgent_dangerous_twin(me, entities)
     if urgent is not None:
-        return _evade_attack_lane(
+        return _evade_if_on_lane(
             me,
             attack_lane=float(urgent.world_y),
             level_index=level_index,
             family="twins pair pressure",
+            clearance=_TWIN_COMMIT_CLEARANCE,
         )
 
-    # Both nearby, neither committing: hold a lane offset rather than walking
-    # between them (isolate stand-off keeps grounded punches on focus).
-    if len(nearby) >= 2:
-        attack_lane = float(target.world_y)
-        lane_gap = abs(float(me.world_y) - attack_lane)
-        if lane_gap < 18.0:
-            return _evade_attack_lane(
-                me,
-                attack_lane=attack_lane,
-                level_index=level_index,
-                family="twins pair isolate",
-                clearance=24.0,
-            )
-        return BossTactic(
-            goal_x=float(me.world_x),
-            goal_y=float(me.world_y),
-            hold=True,
-            note="hold safe lane twins pair isolate",
-        )
-
-    # Only the focused twin is nearby: leave lane on its committed grab/jump.
-    if is_dangerous(target.combat_phase):
-        return _evade_attack_lane(
+    # 3) Non-focus twin coplanar and close (grab setup): step off *their*
+    #    lane only. Idle partner far away must not cancel focus-fire.
+    partner = _closest_partner_intrusion(me, target, nearby)
+    if partner is not None:
+        return _evade_if_on_lane(
             me,
-            attack_lane=float(target.world_y),
+            attack_lane=float(partner.world_y),
             level_index=level_index,
-            family="twins pair jump/grab",
+            family="twins pair isolate",
+            clearance=22.0,
         )
+
+    # Focus alone committing is covered by (2). Idle focus → free combat.
     return None
+
+
+def _closest_partner_intrusion(
+    me: MapEntity,
+    focus: MapEntity,
+    nearby: tuple[MapEntity, ...],
+) -> MapEntity | None:
+    """Partner twin on the player's depth inside grab-setup range, if any."""
+
+    candidates = []
+    for twin in nearby:
+        if twin.slot == focus.slot or twin.is_defeated:
+            continue
+        if is_dangerous(twin.combat_phase):
+            continue  # handled by urgent path
+        dx = abs(float(twin.world_x) - float(me.world_x))
+        dy = abs(float(twin.world_y) - float(me.world_y))
+        if dx <= _TWIN_INTRUDE_X and dy <= _TWIN_INTRUDE_Y:
+            candidates.append((dx, twin))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
+
+
+def _evade_if_on_lane(
+    me: MapEntity,
+    *,
+    attack_lane: float,
+    level_index: int,
+    family: str,
+    clearance: float,
+) -> BossTactic | None:
+    """Sidestep when on the attack depth; return None when already clear.
+
+    Returning a hold tactic here would freeze free combat (no punches) while
+    the AI believes it is "safe" — deadly against a second twin approaching.
+    """
+
+    lane_gap = abs(float(me.world_y) - attack_lane)
+    if lane_gap >= clearance - 4.0:
+        return None
+    return _evade_attack_lane(
+        me,
+        attack_lane=attack_lane,
+        level_index=level_index,
+        family=family,
+        clearance=clearance,
+    )
 
 
 def _evade_attack_lane(
