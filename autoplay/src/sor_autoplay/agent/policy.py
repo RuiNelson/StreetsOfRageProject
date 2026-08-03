@@ -41,11 +41,15 @@ def _routing_holes(
     snapshot: GameSnapshot,
     advice: stage.StageAdvice,
 ) -> tuple:
-    """Pit holes (when stage advice asks) plus solid stage-press AABBs.
+    """Terrain solids the navigator must detour around.
 
-    Presses are never pits, but they block the same navigator: detour on Y,
-    then resume X. Always merge them so stage-6 progress cannot aim through a
-    machine frame even when ``avoid_holes`` is false.
+    - Pit holes (class 0) when stage advice asks (stage 4).
+    - Collision barriers (class ≥ 2): factory machine walls, etc. Always on
+      (except elevator, which never populates ``floor_barriers``).
+    - Type-``$42`` press object AABBs as a crush-zone supplement.
+
+    Live stage-6 sampling: class-2 columns block RIGHT on the upper lanes while
+    the crusher object sits at a different Y; barriers are the path blocker.
     """
 
     from ..hazards import FloorHole
@@ -53,6 +57,7 @@ def _routing_holes(
     holes: list[FloorHole] = []
     if advice.avoid_holes:
         holes.extend(snapshot.floor_holes)
+    holes.extend(snapshot.floor_barriers)
     holes.extend(stage.press_solid_holes(snapshot.world_map.entities))
     return tuple(holes)
 

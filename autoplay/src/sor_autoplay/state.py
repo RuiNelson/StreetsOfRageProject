@@ -8,6 +8,7 @@ from typing import Protocol
 from . import memory_map as mm
 from .bcd import bcd_nibble_byte, bcd_word, bcd_long_digits, format_score
 from .hazards import (
+    barriers_for_level,
     FloorHole,
     holes_for_level,
     is_paused,
@@ -96,6 +97,8 @@ class GameSnapshot:
     police_special_active: bool = False
     police_special_caller: int | None = None  # 0=P1, 1=P2 while special active
     floor_holes: tuple[FloorHole, ...] = ()
+    # Collision-class ≥ 2 walls / machine housings (always used for nav).
+    floor_barriers: tuple[FloorHole, ...] = ()
     players: tuple[PlayerSnapshot, PlayerSnapshot] = ()
     world_map: WorldMap = field(default_factory=empty_world_map)
     error: str | None = None
@@ -311,6 +314,7 @@ def snapshot_from_memory_blocks(
 
     special_on = is_police_special_active(police_special_active_byte)
     holes: tuple[FloorHole, ...] = ()
+    barriers: tuple[FloorHole, ...] = ()
     if (
         collision_map is not None
         and blockmap_stride > 0
@@ -323,6 +327,16 @@ def snapshot_from_memory_blocks(
             level_index=level_index,
             camera_x=world.camera_x,
         )
+        # Elevator stages use a moving platform not represented by class-0/2
+        # the same way; skip barrier solids there so class map noise cannot
+        # invent walls on the lift.
+        if level_index != 6:
+            barriers = barriers_for_level(
+                collision_map,
+                stride=blockmap_stride,
+                level_index=level_index,
+                camera_x=world.camera_x,
+            )
 
     # Player object +$59 (Mr. X choice bits) when actors/objects available.
     p1_obj59 = 0
@@ -349,6 +363,7 @@ def snapshot_from_memory_blocks(
         police_special_active=special_on,
         police_special_caller=(police_special_caller_byte & 0xFF) if special_on else None,
         floor_holes=holes,
+        floor_barriers=barriers,
         players=(p1, p2),
         world_map=world,
         error=error,
@@ -368,6 +383,7 @@ def snapshot_from_memory_blocks(
             "pause_text_flag": pause_text_flag & 0xFF,
             "police_special_active": police_special_active_byte & 0xFF,
             "floor_holes": len(holes),
+            "floor_barriers": len(barriers),
             "blockmap_stride": blockmap_stride,
             "mr_x_offer_flag": mr_x_offer_flag & 0xFF,
             "mr_x_offer_state": mr_x_offer_state & 0xFF,
@@ -502,6 +518,7 @@ def disconnected_snapshot(error: str | None = None) -> GameSnapshot:
         police_special_active=False,
         police_special_caller=None,
         floor_holes=(),
+        floor_barriers=(),
         players=(empty_player, p2),
         world_map=empty_world_map(),
         error=error,

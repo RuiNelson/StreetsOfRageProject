@@ -1272,6 +1272,54 @@ class PolicyAggressionTests(unittest.TestCase):
         self.assertNotIn("dodge", note)
         self.assertFalse(decision.p1_mask & 0x20, note)
 
+    def test_routes_around_class_two_collision_barrier(self) -> None:
+        """Class-2 machine walls must force a vertical detour (live stage-6)."""
+
+        from dataclasses import replace
+
+        from sor_autoplay.hazards import FloorHole
+
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=40,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        # Wall ahead on the upper lanes only — free path is below y=64.
+        wall = FloorHole(world_x=120, lane_y=0, width=80, height=64)
+        snap = replace(
+            self._snap((p1,), level=5),
+            floor_barriers=(wall,),
+        )
+
+        decision = decide_actions(
+            snap,
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        note = decision.p1_note
+        self.assertTrue(
+            any(
+                key in note
+                for key in (
+                    "nav detour",
+                    "nav advance",
+                    "detour",
+                    "unstuck",
+                )
+            ),
+            note,
+        )
+        # Must not simply hold RIGHT into the wall forever.
+        # A pure RIGHT-only progress note with no detour is a regression.
+        if "progress" in note and "nav" not in note and "detour" not in note:
+            self.fail(f"progress into barrier without detour: {note}")
+
     def test_advances_past_press_once_on_safe_lane(self) -> None:
         """After leaving the crusher lane, keep walking past the solid far edge."""
 

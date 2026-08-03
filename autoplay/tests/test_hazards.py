@@ -2,6 +2,7 @@ import unittest
 
 from sor_autoplay.hazards import (
     collision_class_at,
+    find_collision_barriers,
     find_floor_holes,
     is_paused,
     is_police_special_active,
@@ -76,6 +77,43 @@ class CollisionHoleTests(unittest.TestCase):
         self.assertIn(96, xs)
         # Must not explode into a tile staircase.
         self.assertLessEqual(len(holes), 3)
+
+
+class CollisionBarrierTests(unittest.TestCase):
+    def test_class_two_wall_is_a_barrier_not_a_hole(self) -> None:
+        """Round-6 factory housing is class 2; class 0 remains the pit class."""
+
+        stride = 4
+        rows = 4
+        # Class 1 floor everywhere.
+        cmap = bytearray([0x11] * (stride * rows))
+        # Class 2 wall block on row0-1, cols 2-3 (x=32..64, y=0..16).
+        cmap[2] = 0x22
+        cmap[3] = 0x22
+        cmap[stride + 2] = 0x22
+        cmap[stride + 3] = 0x22
+
+        holes = find_floor_holes(
+            bytes(cmap),
+            stride=stride,
+            lane_max=24,
+            world_x_min=0,
+            world_x_max=64,
+        )
+        barriers = find_collision_barriers(
+            bytes(cmap),
+            stride=stride,
+            lane_max=24,
+            world_x_min=0,
+            world_x_max=64,
+        )
+        self.assertEqual(holes, ())
+        self.assertEqual(len(barriers), 1, barriers)
+        wall = barriers[0]
+        self.assertEqual(wall.world_x, 32)
+        self.assertEqual(wall.width, 32)
+        self.assertEqual(wall.lane_y, 0)
+        self.assertEqual(wall.height, 16)
 
 
 if __name__ == "__main__":

@@ -861,7 +861,9 @@ Nav stuck (independent of walk): move &lt; **3** px for **8** polls → cardinal
 | 7           | 8     | **false**      | true                | false       | false    | leftward                       |
 | other       | —     | true           | true                | false*      | false    | default                        |
 
-\* Default `avoid_holes` is false except stages that set it true above. Elevator: class-0 cells are **not** holes; clear walk latch so no inherited LEFT/RIGHT; no horizontal progress goals. Round-6 presses are always merged into routing holes whenever type `$42` is live (independent of `avoid_holes`).
+\* Default `avoid_holes` is false except stages that set it true above. Elevator: class-0 cells are **not** holes; clear walk latch so no inherited LEFT/RIGHT; no horizontal progress goals.
+
+**Collision barriers (class ≥ 2):** always merged into routing solids (except elevator index 6). Live stage-6 factory: class **2** columns are the machine housing walls — they block RIGHT on the upper lanes while type-`$42` crushers sit on a different Y. The navigator detours to a free class-1 lane then advances past the barrier AABB. Type-`$42` AABBs remain a crush-zone supplement, not the path model.
 
 Progress lead when empty: **±160** world X.
 

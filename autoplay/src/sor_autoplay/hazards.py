@@ -1,4 +1,4 @@
-"""Pause, police-special, and floor-hole detection."""
+"""Pause, police-special, floor-hole, and collision-barrier detection."""
 
 from __future__ import annotations
 
@@ -8,14 +8,21 @@ from dataclasses import dataclass
 from . import memory_map as mm
 from .world_map import LANE_Y_MAX_DEFAULT, lane_y_max_for_level
 
+# Live round-4 sampling: class 0 = pit/open, class 1 = solid walkable floor.
+# Live round-6 factory sampling: class 2 = solid wall / machine housing that
+# blocks horizontal walk at standing height (RIGHT into a class-2 column
+# advances 0 px). Classes ≥ 2 are treated as navigation barriers.
+WALKABLE_COLLISION_CLASS = 1
+BARRIER_COLLISION_MIN_CLASS = 2
+
 
 @dataclass(frozen=True, slots=True)
 class FloorHole:
-    """One connected open-floor / pit region (axis-aligned bounding box).
+    """One connected terrain region as an axis-aligned bounding box.
 
-    Built by scanning the collision-class map and merging adjacent class-0
-    cells into a single rectangle per connected component so the map does not
-    draw a staircase of tiny tiles.
+    Used for pits (class 0) and for solid barriers (class ≥ 2). Adjacent matching
+    cells form one component; we store the bounding box so the map and navigator
+    do not thrash on a tile staircase.
     """
 
     world_x: int
@@ -83,27 +90,21 @@ def collision_class_at(
     return raw & 0x0F
 
 
-def find_floor_holes(
+def _find_class_regions(
     cmap: bytes,
     *,
     stride: int,
-    lane_max: int = LANE_Y_MAX_DEFAULT,
-    world_x_min: int = 0,
-    world_x_max: int | None = None,
-    hole_class: int = 0,
+    lane_max: int,
+    world_x_min: int,
+    world_x_max: int,
+    match,
+    min_width: int = 16,
+    min_height: int = 16,
 ) -> tuple[FloorHole, ...]:
-    """Scan for open/hole cells and return one AABB per connected component.
-
-    Live round-4 sampling: class ``0`` = pit/open, class ``1`` = solid floor.
-    Cells are 8×8 (half of a 16px collision column × lane>>3). Adjacent hole
-    cells (4-connected) form one hole; we store the bounding box only so the
-    HUD draws a single clean rectangle per gap instead of a tile staircase.
-    """
+    """Connected AABBs for cells where ``match(class)`` is true."""
 
     if stride <= 0 or not cmap:
         return ()
-    if world_x_max is None:
-        world_x_max = stride * 16
 
     cell_w = 8
     cell_h = 8
@@ -117,17 +118,17 @@ def find_floor_holes(
             break
         for col in range(cols):
             wx = world_x_min + col * cell_w
-            if collision_class_at(cmap, stride=stride, world_x=wx, lane_y=lane) == hole_class:
+            klass = collision_class_at(cmap, stride=stride, world_x=wx, lane_y=lane)
+            if match(klass):
                 grid[row][col] = True
 
     visited = [[False] * cols for _ in range(rows)]
-    holes: list[FloorHole] = []
+    regions: list[FloorHole] = []
 
     for row in range(rows):
         for col in range(cols):
             if not grid[row][col] or visited[row][col]:
                 continue
-            # BFS connected component (4-neighbour).
             q: deque[tuple[int, int]] = deque([(row, col)])
             visited[row][col] = True
             min_r = max_r = row
@@ -149,10 +150,9 @@ def find_floor_holes(
 
             width = (max_c - min_c + 1) * cell_w
             height = (max_r - min_r + 1) * cell_h
-            # Drop single-cell noise (smaller than half a metatile column).
-            if width < 16 and height < 16:
+            if width < min_width and height < min_height:
                 continue
-            holes.append(
+            regions.append(
                 FloorHole(
                     world_x=world_x_min + min_c * cell_w,
                     lane_y=min_r * cell_h,
@@ -161,9 +161,69 @@ def find_floor_holes(
                 )
             )
 
-    # Stable left-to-right order for the HUD.
-    holes.sort(key=lambda h: (h.world_x, h.lane_y))
-    return tuple(holes)
+    regions.sort(key=lambda h: (h.world_x, h.lane_y))
+    return tuple(regions)
+
+
+def find_floor_holes(
+    cmap: bytes,
+    *,
+    stride: int,
+    lane_max: int = LANE_Y_MAX_DEFAULT,
+    world_x_min: int = 0,
+    world_x_max: int | None = None,
+    hole_class: int = 0,
+) -> tuple[FloorHole, ...]:
+    """Scan for open/hole cells and return one AABB per connected component.
+
+    Live round-4 sampling: class ``0`` = pit/open, class ``1`` = solid floor.
+    Cells are 8×8 (half of a 16px collision column × lane>>3). Adjacent hole
+    cells (4-connected) form one hole; we store the bounding box only so the
+    HUD draws a single clean rectangle per gap instead of a tile staircase.
+    """
+
+    if world_x_max is None:
+        world_x_max = stride * 16 if stride > 0 else 0
+    return _find_class_regions(
+        cmap,
+        stride=stride,
+        lane_max=lane_max,
+        world_x_min=world_x_min,
+        world_x_max=world_x_max,
+        match=lambda klass: klass == hole_class,
+    )
+
+
+def find_collision_barriers(
+    cmap: bytes,
+    *,
+    stride: int,
+    lane_max: int = LANE_Y_MAX_DEFAULT,
+    world_x_min: int = 0,
+    world_x_max: int | None = None,
+    min_class: int = BARRIER_COLLISION_MIN_CLASS,
+) -> tuple[FloorHole, ...]:
+    """Scan for solid wall / machine-housing cells (class ≥ ``min_class``).
+
+    Round-6 factory presses sit as type-``$42`` crushers, but the walk path is
+    blocked by collision-class **2** columns on the upper lanes. Class 1 remains
+    walkable floor past the housing on the lower lanes. These AABBs feed the
+    same hole-detour navigator so progress does not hold RIGHT into a wall.
+    """
+
+    if world_x_max is None:
+        world_x_max = stride * 16 if stride > 0 else 0
+    return _find_class_regions(
+        cmap,
+        stride=stride,
+        lane_max=lane_max,
+        world_x_min=world_x_min,
+        world_x_max=world_x_max,
+        match=lambda klass: klass >= min_class,
+        # Keep modest walls (a thin pillar) — drop only tiny noise.
+        min_width=16,
+        min_height=8,
+    )
 
 
 def holes_for_level(
@@ -186,4 +246,26 @@ def holes_for_level(
         world_x_min=x0,
         world_x_max=x1,
         hole_class=0,
+    )
+
+
+def barriers_for_level(
+    cmap: bytes,
+    *,
+    stride: int,
+    level_index: int,
+    camera_x: int,
+    margin_x: int = 512,
+) -> tuple[FloorHole, ...]:
+    """Return solid collision barriers near the camera for navigation."""
+
+    lane_max = lane_y_max_for_level(level_index)
+    x0 = max(0, camera_x - margin_x)
+    x1 = camera_x + 320 + margin_x
+    return find_collision_barriers(
+        cmap,
+        stride=stride,
+        lane_max=lane_max,
+        world_x_min=x0,
+        world_x_max=x1,
     )
