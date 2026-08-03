@@ -501,26 +501,6 @@ Weapons: not fairness-gated (still upgrade + graph COLLECTIBLE rules).
 
 If ally in lane (±36 Y) and \|ΔX\| ≤ 100: throw direction is sign opposite ally X.
 
-### 6.6 Partner body separation (walk-into-grab)
-
-SoR1 grab is **contact-based** (not only B). Co-op gate strips attack buttons
-but progress/combat walks can still plow into a human partner and latch a hold.
-
-| Name                   | Value | Use                                      |
-| ---------------------- | ----- | ---------------------------------------- |
-| `ALLY_GRAB_SEPARATE_X` | 36    | Body shell: stop walking into partner    |
-| `ALLY_GRAB_SEPARATE_Y` | 22    | Same-lane grab risk                      |
-| `ALLY_GRAB_BACKOFF_X`  | 40    | Horizontal back-off when Y is full       |
-
-Rules:
-
-1. Free ladder (before combat/loot/progress): if partner in grab shell →
-   `separate_from_ally_goal` (prefer **lane** first; stage 6 prefers lower free
-   floor; else back off on X).
-2. Every `_walk_toward` goal whose segment crosses the partner body is rewritten
-   to the same separation goal (notes containing `separate ally` are left alone).
-3. Hold tree still releases accidental partner grabs by walking away (§4.3.5).
-
 ---
 
 ## 7. Knowledge graph
