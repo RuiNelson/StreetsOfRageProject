@@ -206,7 +206,7 @@ G. progress_goal + walk  # pits only in routing holes; stage-6 prefers lane $60
 | `walk`              | Latched world goal + dir signs    | eps default 10×8; stuck 12 ticks / 2 px; goal refresh slack 14 |
 | `nav`               | Hole detour, break side, unstuck  | stuck 8 ticks / 3 px; escape hold 18; ban TTL 48               |
 | `goal`              | Last GoalKind + target_slot + age | +0.08 utility if retained                                      |
-| `grab`              | Hold latch                        | HOLD_LATCH_TICKS=4; THROW_EVERY=5; retry 4 ticks               |
+| `grab`              | Hold latch                        | HOLD_LATCH_TICKS=2; THROW_EVERY=3; retry 4 ticks               |
 | `enemy_grab_escape` | Escape edge rate-limit            | retry 4 ticks                                                  |
 | `planner`           | Crossover→suplex SM               | timeout 24; lost hold 2; max crossover attempts 2              |
 | `commitment`        | Active skill name                 | at most one                                                    |
@@ -329,33 +329,21 @@ Not holding, but `action_base ∈ {0x28,0x4A,0x60,0x66}`: one **B** after 4-tick
 
 #### 4.3.4 Enemy hold tree
 
-Input-ready hold actions: `{0x28, 0x4A, 0x60, 0x66}`. Stable front/back:
-`{0x60, 0x66}`.
+Input-ready hold actions only: `{0x28, 0x4A, 0x60, 0x66}`.
 
-| Case | Intent |
-| ---- | ------ |
-| action `$66` | **B only** (suplex). No D-pad (walk-away releases). |
-| action `$28` / `$4A` (acquire) | **B only** (knee settle). No D-pad — direction cancels grab. |
-| action `$60`, ally in body bubble | B + throw direction (clear of partner) |
-| action `$60`, crowd ≥ **3**, or (crowd ≥ **2** and pulse % **5** == 0) | B + throw direction |
-| action `$60` else | **B only** (knee) — default damage loop |
+| Case                                                         | Intent              |
+| ------------------------------------------------------------ | ------------------- |
+| action `$66`                                                 | B (suplex)          |
+| pulse % 3 == 0, **or** crowd ≥ 2, **or** ally in body bubble | B + throw direction |
+| else                                                         | B alone (knee)      |
 
-Throw direction (only on the same face-button pulse as B):
+Throw direction:
 
 1. Default away from facing (bit0 set → throw right = +X intent).
 2. If crowd ≥ 3: prefer progress direction (+1 if progress right else −1).
 3. If ally nearby in lane: flip to side **away** from ally.
 
-**Do not leave D-pad latched after a throw.** Host re-latches dirs to **0**
-after every face-button pulse (`app._apply_agent_buttons`). Sticky away after
-B+away was walking out of holds (ROM: walk away from held body = release).
-
-Hold detection: GRABBED link **or** (player already in hold action and close
-body / pointer link) so phase lag does not drop `enemy_grab` and free-path
-walk-release the body.
-
-Latch: proven hold survives **3** missing observation samples
-(`HOLD_LATCH_TICKS=4` clear ticks).
+Latch: proven hold stays active through **1** missing observation sample only (`HOLD_LATCH_TICKS=2` clear ticks). Longer latch caused empty knee loops.
 
 #### 4.3.5 Partner hold tree
 
@@ -1015,12 +1003,8 @@ Policy: hold RIGHT until NO selected (phase counter), then confirm (B). Never ac
 | Intent content | Transport                                                                             |
 | -------------- | ------------------------------------------------------------------------------------- |
 | D-pad only     | sticky `hold_buttons` (0x14) between polls                                            |
-| Any A/B/C      | VSync `press_buttons` for edge (≥3 frames), then **clear** sticky D-pad (dirs = 0)   |
+| Any A/B/C      | VSync `press_buttons` for edge (≥3 frames in evaluator lockstep), then re-latch D-pad |
 | Old host       | press-only fallback (walk taps)                                                       |
-
-Clearing sticky D-pad after face buttons is required so grab throws (B+away)
-do not keep walking away and release the hold. Walk intents re-assert dirs on
-the next decision.
 
 Agents share the remote poll connection with RAM reads. Notes do not select transport.
 

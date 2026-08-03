@@ -36,18 +36,14 @@ WEAPON_BAT = W.WEAPON_BAT
 WEAPON_PIPE = W.WEAPON_PIPE
 WEAPON_PEPPER = W.WEAPON_PEPPER
 
-# Keep treating a proven hold as active through a few missed observer samples.
-# Too long → empty knee loops on corpses; too short → free-path walks away and
-# **releases** a still-live hold when GRABBED phase flickers.
-HOLD_LATCH_TICKS = 4
-# Live: B alone knees. Throw (B+away) is secondary — sticky away after a throw
-# used to walk-release the grab; prefer knees, throw only for crowd / spacing.
-THROW_EVERY = 5
+# Keep treating a proven hold as active through one missed observer sample.
+# A longer latch feeds its own B presses back into the $60-$6F reaction family
+# after the held enemy has died, producing an empty knee/throw loop.
+HOLD_LATCH_TICKS = 2
+# Live: B alone knees; mix B+back for throws after a few knees.
+THROW_EVERY = 3
 GRAB_INPUT_RETRY_TICKS = 4
 HOLD_INPUT_ACTIONS = frozenset({0x28, 0x4A, 0x60, 0x66})
-# Stable holds that accept knee/suplex/throw edges. Acquire $28 / $4A are
-# still "holding" but D-pad away here cancels the grab before it settles.
-STABLE_HOLD_ACTIONS = frozenset({0x60, 0x66})
 GRAB_ANIMATION_ACTIONS = frozenset({0x62, 0x64, 0x68, 0x6A, 0x6C, 0x6E})
 
 # Enemy-held player sequence, indexed by player action +$30:
@@ -155,41 +151,23 @@ def _player_has_grabbed_enemy(
     *,
     player_index: int,
 ) -> bool:
-    """True if an enemy is held by this seat (GRABBED link or close body).
-
-    Also treats a close combatant as held when the player is already in a
-    stable hold action (``$60``/``$66``): GRABBED phase can lag one poll and
-    used to drop ``enemy_grab``, sending free-path walks that **release** the
-    body.
-    """
+    """True if an enemy is in GRABBED phase and linked to this player seat."""
 
     seat_lo = ADDR_P1_OBJECT_LO if player_index == 1 else ADDR_P2_OBJECT_LO
-    # Only true hold/acquire actions — not the full is_grab_family band
-    # ($30–$3A is also weapon-ready ground idle and must not false-hold).
-    player_in_hold = (
-        me.action_base in HOLD_INPUT_ACTIONS
-        or me.action_base in GRAB_ANIMATION_ACTIONS
-    )
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
             continue
         if entity.is_defeated:
             continue
-        close = (
-            abs(entity.map_x - me.map_x) < 48
-            and abs(entity.map_y - me.map_y) < 20
-        )
-        # Attacker/holder low word points at player object.
-        linked = (entity.attacker_ptr & 0xFFFF) == seat_lo or (
-            entity.target_ptr & 0xFFFF
-        ) == seat_lo
-        if entity.combat_phase == CombatPhase.GRABBED:
-            if linked or close:
-                return True
+        if entity.combat_phase != CombatPhase.GRABBED:
             continue
-        # Phase not yet GRABBED: still count as held while we own a hold
-        # action and the body is chest-to-chest (or pointer-linked).
-        if player_in_hold and (linked or close):
+        # Attacker/holder low word points at player object.
+        if (entity.attacker_ptr & 0xFFFF) == seat_lo:
+            return True
+        if (entity.target_ptr & 0xFFFF) == seat_lo:
+            return True
+        # Very close + grabbed (partner pointer may not be decoded yet).
+        if abs(entity.map_x - me.map_x) < 48 and abs(entity.map_y - me.map_y) < 20:
             return True
     return False
 
@@ -558,14 +536,11 @@ def _enemy_grab_tree(
     profile: CharacterProfile,
     ally: MapEntity | None = None,
 ) -> Intent:
-    """Live: B alone knees the held foe. Occasional B+away throw on front hold.
+    """Live: B alone knees the held foe. Mix B+back for throws."""
 
-    Critical: do **not** emit D-pad alone or leave away-dir sticky after a
-    throw. ROM walk-away from the held body **releases** the grab. Acquire
-    actions ``$28``/``$4A`` only get B (no D-pad) so we do not cancel the grab.
-    """
-
-    # B/C edges are accepted only in hold-input actions. Closed anims wait.
+    # B/C edges are accepted only in the stable front/back hold actions. The
+    # baseline trace showed repeated B presses through $6A/$63 animations,
+    # keeping the player stuck after the enemy was already dead.
     if me.action_base not in HOLD_INPUT_ACTIONS:
         return Intent(note=f"grab anim ${me.action_state:02X}")
     if tick - memory.last_input_tick < GRAB_INPUT_RETRY_TICKS:
@@ -573,39 +548,26 @@ def _enemy_grab_tree(
     memory.last_input_tick = tick
     memory.pulse += 1
 
-    # Back hold: B alone is suplex (no D-pad — D-pad can release).
     if me.action_base == 0x66:
         return Intent(
             attack=True,
             note=f"suplex ({profile.name}) act=${me.action_state:02X}",
         )
 
-    # Front acquire / settle ($28, $4A): only B. Direction cancels the grab.
-    if me.action_base not in STABLE_HOLD_ACTIONS:
-        return Intent(
-            attack=True,
-            note=(
-                f"knee settle ({profile.name}) "
-                f"act=${me.action_state:02X} hold=${ctx.held_type:02X}"
-            ),
-        )
-
-    # Stable front hold $60: knees by default. Throw only for crowd clear /
-    # ally safety / every Nth pulse (B+away on the *same* edge only).
+    back = throw_back_direction(
+        me,
+        progress_right=progress_right,
+        crowd=crowd,
+        foe=foe,
+        ally=ally,
+    )
+    # Mostly knees (proven to deal damage). Every Nth pulse: B+back throw.
+    # If a co-op partner is body-overlapped on the hold, prefer an immediate
+    # away throw rather than kneeing into them (SoR1 friendly fire).
     force_throw = coop.ally_in_attack_bubble(
         me, ally, max_x=coop.ALLY_BODY_X + 2.0, max_y=coop.ALLY_LANE_HALF
     )
-    want_throw = force_throw or crowd >= 3 or (
-        memory.pulse % THROW_EVERY == 0 and crowd >= 2
-    )
-    if want_throw:
-        back = throw_back_direction(
-            me,
-            progress_right=progress_right,
-            crowd=crowd,
-            foe=foe,
-            ally=ally,
-        )
+    if force_throw or crowd >= 2 or memory.pulse % THROW_EVERY == 0:
         left = back < 0
         right = back > 0
         side = "L" if left else "R"

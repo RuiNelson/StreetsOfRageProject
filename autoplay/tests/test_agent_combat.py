@@ -313,8 +313,8 @@ class EnemyCounterTests(unittest.TestCase):
 
 
 class GrabTreeTests(unittest.TestCase):
-    def test_stable_front_hold_prefers_knee_not_walk_away(self) -> None:
-        """Front $60 hold: B-only knees; no D-pad that would release the grab."""
+    def test_throw_is_b_plus_back(self) -> None:
+        """A ready hold emits a guarded B+back throw input."""
 
         from sor_autoplay.agent.characters import PROFILES
         from sor_autoplay.agent.grabs import throw_back_direction
@@ -325,24 +325,37 @@ class GrabTreeTests(unittest.TestCase):
             family="Player",
             slot="P1",
             held_type=0x20,
-            action_state=0x60,  # stable front hold
+            action_state=0x28,  # grab family, face right
             map_x=100,
             map_y=64,
         )
         self.assertEqual(throw_back_direction(me), -1)
+        me_l = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            held_type=0x20,
+            action_state=0x29,
+            map_x=100,
+            map_y=64,
+        )
+        self.assertEqual(throw_back_direction(me_l), 1)
 
         ctx = context_from_player(me)
         self.assertTrue(ctx.enemy_grab)
         mem = GrabMemory()
-        foe = _e(map_x=120, map_y=64, family="Garcia")
+        # Foe behind must not flip throw dir (facing-only).
+        foe_behind = _e(map_x=70, map_y=64, family="Garcia")
         notes: list[str] = []
-        for t in range(12):
+        saw_throw = False
+        attack_pulses = 0
+        for t in range(10):
             intent = decide_held(
                 me,
                 ctx,
                 mem,
                 tick=t,
-                foe=foe,
+                foe=foe_behind,
                 progress_right=True,
                 crowd=1,
                 profile=PROFILES[2],
@@ -350,73 +363,14 @@ class GrabTreeTests(unittest.TestCase):
             assert intent is not None
             notes.append(intent.note)
             if intent.attack:
-                # Solo foe: never emit D-pad on knee (walk-away releases).
-                self.assertFalse(intent.left, msg=notes)
-                self.assertFalse(intent.right, msg=notes)
-        self.assertTrue(any("knee" in note for note in notes), notes)
-        self.assertTrue(any("await grab input" in note for note in notes), notes)
-
-    def test_acquire_hold_knees_without_direction(self) -> None:
-        """Acquire $28: B only — D-pad would cancel the grab."""
-
-        from sor_autoplay.agent.characters import PROFILES
-
-        me = _e(
-            kind="player",
-            family="Player",
-            slot="P1",
-            held_type=0x20,
-            action_state=0x28,
-            map_x=100,
-            map_y=64,
-        )
-        intent = decide_held(
-            me,
-            context_from_player(me),
-            GrabMemory(),
-            tick=0,
-            crowd=5,
-            profile=PROFILES[0],
-        )
-        assert intent is not None
-        self.assertTrue(intent.attack)
-        self.assertFalse(intent.left)
-        self.assertFalse(intent.right)
-        self.assertIn("settle", intent.note)
-
-    def test_crowd_throw_only_on_stable_front_hold(self) -> None:
-        """Crowd throw is B+away only when action is stable $60."""
-
-        from sor_autoplay.agent.characters import PROFILES
-
-        me = _e(
-            kind="player",
-            family="Player",
-            slot="P1",
-            held_type=0x20,
-            action_state=0x60,
-            map_x=100,
-            map_y=64,
-        )
-        mem = GrabMemory()
-        notes: list[str] = []
-        saw_throw = False
-        for t in range(20):
-            intent = decide_held(
-                me,
-                context_from_player(me),
-                mem,
-                tick=t,
-                progress_right=True,
-                crowd=3,
-                profile=PROFILES[0],
-            )
-            assert intent is not None
-            notes.append(intent.note)
-            if intent.attack and "throw" in intent.note:
+                attack_pulses += 1
+            if "throw" in intent.note:
                 saw_throw = True
-                self.assertTrue(intent.left or intent.right, msg=notes)
+                self.assertTrue(intent.left, msg=notes)
+                self.assertFalse(intent.right)
         self.assertTrue(saw_throw, notes)
+        self.assertEqual(attack_pulses, 3, notes)
+        self.assertTrue(any("await grab input" in note for note in notes), notes)
 
     def test_hold_latch_survives_brief_ram_drop(self) -> None:
         from sor_autoplay.agent.characters import PROFILES
@@ -572,9 +526,7 @@ class GrabTreeTests(unittest.TestCase):
             d.p1_note,
         )
 
-    def test_grab_knees_on_acquire_without_throw_dir(self) -> None:
-        """Acquire $28 always knees with B only (no throw D-pad)."""
-
+    def test_grab_always_throws(self) -> None:
         from sor_autoplay.agent.characters import PROFILES
 
         me = _e(
@@ -605,11 +557,8 @@ class GrabTreeTests(unittest.TestCase):
             notes.append(intent.note)
             if intent.attack:
                 saw_atk = True
-                self.assertFalse(intent.left)
-                self.assertFalse(intent.right)
         self.assertTrue(saw_atk, notes)
-        self.assertTrue(any("knee" in n for n in notes), notes)
-        self.assertFalse(any("throw" in n for n in notes), notes)
+        self.assertTrue(any("throw" in n for n in notes), notes)
 
     def test_weapon_bat_swings(self) -> None:
         me = _e(
@@ -840,9 +789,7 @@ class GrabTreeTests(unittest.TestCase):
         self.assertFalse(intent.attack)
         self.assertIn("partner boost crossover", intent.note)
 
-    def test_grab_throws_when_crowd_is_heavy(self) -> None:
-        """Crowd ≥ 3 on stable $60: B+away throw. Crowd 2 alone still knees."""
-
+    def test_grab_throws_immediately_when_an_enemy_can_interrupt(self) -> None:
         me = _e(
             kind="player",
             family="Player",
@@ -852,7 +799,7 @@ class GrabTreeTests(unittest.TestCase):
             map_x=100,
             map_y=64,
         )
-        knee = decide_held(
+        intent = decide_held(
             me,
             context_from_player(me),
             GrabMemory(),
@@ -860,22 +807,9 @@ class GrabTreeTests(unittest.TestCase):
             foe=_e(map_x=140, map_y=64),
             crowd=2,
         )
-        assert knee is not None
-        self.assertTrue(knee.attack)
-        self.assertIn("knee", knee.note)
-
-        throw = decide_held(
-            me,
-            context_from_player(me),
-            GrabMemory(),
-            tick=1,
-            foe=_e(map_x=140, map_y=64),
-            crowd=3,
-        )
-        assert throw is not None
-        self.assertTrue(throw.attack)
-        self.assertIn("throw", throw.note)
-        self.assertTrue(throw.left or throw.right)
+        assert intent is not None
+        self.assertTrue(intent.attack)
+        self.assertIn("throw", intent.note)
 
     def test_knife_melee_at_midrange_without_walk_in(self) -> None:
         me = _e(
@@ -975,14 +909,11 @@ class GrabTreeTests(unittest.TestCase):
         self.assertIsNotNone(
             decide_held(strong, context_from_player(strong), mem, tick=0, profile=PROFILES[0])
         )
-        # Latch survives several missed samples (HOLD_LATCH_TICKS=4), then drops.
-        for t in range(1, 4):
-            intent = decide_held(
-                stale, context_from_player(stale), mem, tick=t, profile=PROFILES[0]
-            )
-            self.assertIsNotNone(intent, t)
+        self.assertIsNotNone(
+            decide_held(stale, context_from_player(stale), mem, tick=1, profile=PROFILES[0])
+        )
         self.assertIsNone(
-            decide_held(stale, context_from_player(stale), mem, tick=4, profile=PROFILES[0])
+            decide_held(stale, context_from_player(stale), mem, tick=2, profile=PROFILES[0])
         )
         self.assertFalse(mem.latched)
 
@@ -1104,7 +1035,7 @@ class PolicyIntegrationTests(unittest.TestCase):
         self.assertNotIn("dodge", decision.p1_note)
         self.assertIn("Jack", decision.p1_note)
 
-    def test_grab_hold_knees_on_acquire(self) -> None:
+    def test_grab_hold_throws(self) -> None:
         p1 = _e(
             kind="player",
             family="Player",
@@ -1124,10 +1055,8 @@ class PolicyIntegrationTests(unittest.TestCase):
             notes.append(decision.p1_note)
             if decision.p1_mask & int(ATTACK):
                 saw_attack = True
-                # Acquire: B only (no walk-away throw dirs).
-                self.assertEqual(decision.p1_mask & 0x0F, 0, decision.p1_note)
         self.assertTrue(saw_attack, notes)
-        self.assertTrue(any("knee" in n for n in notes), notes)
+        self.assertTrue(any("throw" in n for n in notes), notes)
 
     def test_holding_weapon_on_clear_screen_progresses_without_attacking(self) -> None:
         p1 = _e(
