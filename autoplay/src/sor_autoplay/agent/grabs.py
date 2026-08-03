@@ -606,8 +606,8 @@ def _weapon_tree(
     """Use held weapons with ROM range/damage geometry (see ``weapons``).
 
     - Bat/pipe: B only when ``|ΔX| ≤ 36`` and lane ``|ΔY| ≤ 12``.
-    - Knife: B throw when foe is in the throw corridor (up to 160 px) so
-      far-but-hittable enemies are thrown at; no punch while armed.
+    - Knife: **melee** (ROM action ``$46``) when foe in front within 144 px;
+      **throw** (``$44``) when 144 < |ΔX| ≤ 160 — far but hittable.
     - Pepper: B throw in a shorter corridor (≤100 px) + immobilize value.
     - Bottle: not attack-thrown; dump only at melee body range.
     """
@@ -671,18 +671,19 @@ def _weapon_tree(
     face_ok = W.facing_toward(dx, current_face_left)
     face_left, face_right = want_left, want_right
 
-    # Never swing or throw a weapon near a co-op partner (SoR1 friendly fire).
-    # Omnidirectional bubble: thrown knives pass partners behind as well.
-    if coop.ally_in_attack_bubble(
-        me,
-        ally,
-        max_x=coop.ALLY_THROWN_RANGE if throwable else coop.ALLY_MELEE_RANGE,
-    ):
-        return None
+    def _ally_blocks(*, thrown: bool) -> bool:
+        # Never swing or throw near a co-op partner (SoR1 friendly fire).
+        return coop.ally_in_attack_bubble(
+            me,
+            ally,
+            max_x=coop.ALLY_THROWN_RANGE if thrown else coop.ALLY_MELEE_RANGE,
+        )
 
     # --- Bat / steel pipe: origin reach 36 px (live Axel) ---
     if melee:
         if not W.melee_can_connect(abs_dx, abs_dy):
+            return None
+        if _ally_blocks(thrown=False):
             return None
         if not face_ok:
             return Intent(
@@ -697,33 +698,45 @@ def _weapon_tree(
             note=f"weapon swing ${held:02X} d={dmg} r≤{W.MELEE_ORIGIN_REACH:.0f}",
         )
 
-    # --- Knife: throw when far-but-hittable (and any in-envelope) ---
+    # --- Knife: melee ($46) in ROM scan cone, throw ($44) beyond it ---
     if held == W.WEAPON_KNIFE:
-        if not W.knife_should_throw(abs_dx, abs_dy):
+        mode = W.knife_mode(abs_dx, abs_dy)
+        if mode is None:
+            return None
+        if _ally_blocks(thrown=(mode == "throw")):
             return None
         if not face_ok:
-            # Turn toward foe first so the ±48 launch and +vx aim correctly.
             return Intent(
                 left=face_left,
                 right=face_right,
                 note=f"weapon face knife d={dmg}",
             )
-        far = abs_dx >= W.KNIFE_THROW_MIN
-        note = (
-            f"weapon throw knife d={dmg} dx={abs_dx:.0f}≤{W.KNIFE_THROW_MAX:.0f}"
-            if far
-            else f"weapon throw knife d={dmg} close"
-        )
+        if mode == "melee":
+            return Intent(
+                left=face_left,
+                right=face_right,
+                attack=True,
+                note=(
+                    f"weapon attack knife d={dmg} "
+                    f"dx={abs_dx:.0f}≤{W.KNIFE_MELEE_SCAN_X}"
+                ),
+            )
+        # throw: past $90 scan, within flight envelope
         return Intent(
             left=face_left,
             right=face_right,
             attack=True,
-            note=note,
+            note=(
+                f"weapon throw knife d={dmg} "
+                f"dx={abs_dx:.0f}≤{W.KNIFE_THROW_MAX:.0f}"
+            ),
         )
 
     # --- Pepper: throw corridor + immobilize ---
     if held == W.WEAPON_PEPPER:
         if not W.pepper_should_throw(abs_dx, abs_dy):
+            return None
+        if _ally_blocks(thrown=True):
             return None
         if not face_ok:
             return Intent(
@@ -744,6 +757,8 @@ def _weapon_tree(
     # --- Bottle: not attack-thrown; dump only at melee ---
     if held == W.WEAPON_BOTTLE:
         if not W.bottle_should_dump(abs_dx, abs_dy):
+            return None
+        if _ally_blocks(thrown=False):
             return None
         if not face_ok:
             return Intent(

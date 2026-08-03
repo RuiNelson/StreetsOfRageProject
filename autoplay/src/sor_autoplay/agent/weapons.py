@@ -13,8 +13,14 @@ Hits to kill an ordinary enemy with health H::
 
     hits = ceil(H / D)
 
-Attack-throw launch (knife ``$08``, pepper ``$0C`` only; bottle is **not**
-attack-thrown)::
+Knife ``$08`` is **both** melee and throw. ``player_held_object_attack_input``
+(``$3084``) picks the action family on attack edge:
+
+- action **``$46``** (stab/melee) if any object is in front within **``$90`` (144)**
+  px and lane ``[Y−12, Y+12]``;
+- action **``$44``** (throw) otherwise.
+
+Throw release (``$21E6``) only fires on family **``$44``** for knife/pepper:
 
     X_launch = X_hold ± 48
     Z_launch = Z_hold + 16
@@ -25,16 +31,10 @@ Knife bounce on ground impact::
 
     vx := -vx / 4
 
-Bat/pipe connecting band (Axel live, weapon origin vs player origin while the
-weapon is on the ``$FFFB22`` attacker list)::
+Bat/pipe connecting band (Axel live)::
 
     |w_x − p_x| ≤ MELEE_ORIGIN_REACH (36)
     |ΔY| ≤ WEAPON_LANE (12)
-
-Knife/pepper engagement envelope (policy from launch + live flight ≥160 px)::
-
-    knife throw when  KNIFE_THROW_MIN ≤ |ΔX| ≤ KNIFE_THROW_MAX  and lane OK
-    (also throw in the inner band — B only throws; there is no knife punch)
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ WEAPON_TYPES = frozenset(
     {WEAPON_KNIFE, WEAPON_BOTTLE, WEAPON_BAT, WEAPON_PIPE, WEAPON_PEPPER}
 )
 MELEE_WEAPONS = frozenset({WEAPON_BAT, WEAPON_PIPE})
-# Attack-button projectiles only (player_release_thrown_weapon $21E6).
+# Can become airborne projectiles via attack family $44 + $21E6.
 THROW_WEAPONS = frozenset({WEAPON_KNIFE, WEAPON_PEPPER})
 # Held impact / dump only — not attack-thrown.
 BOTTLE_WEAPONS = frozenset({WEAPON_BOTTLE})
@@ -80,12 +80,14 @@ MELEE_ORIGIN_REACH = 36.0  # Axel live bat/pipe |w_x−p_x| on hit frames
 THROW_LAUNCH_DX = 48.0  # |ΔX| spawn vs hold origin
 THROW_LAUNCH_DZ = 16.0  # ΔZ spawn vs hold origin (Z down-positive in ROM)
 
-# Knife: vx=±16; natural flight sample ≥160 px from launch at constant Z.
+# Knife: ROM $3084 picks action $46 if foe in front within $90 (144) px.
 KNIFE_VX = 16.0
-KNIFE_THROW_MIN = 28.0  # prefer throw once beyond short body band
+KNIFE_MELEE_SCAN_X = 0x90  # 144 — selects stab family $46 vs throw $44
+KNIFE_MELEE_REACH = 48.0  # policy: prefer stab inside this (inside scan cone)
+KNIFE_THROW_MIN = float(KNIFE_MELEE_SCAN_X)  # throw when beyond melee-scan cone
 KNIFE_THROW_MAX = 160.0  # engage envelope; walk closer if farther
 
-# Pepper: vx=±6, arc; shorter practical corridor.
+# Pepper: primarily thrown ($44); vx=±6, arc.
 PEPPER_VX = 6.0
 PEPPER_THROW_MIN = 24.0
 PEPPER_THROW_MAX = 100.0
@@ -101,7 +103,7 @@ class WeaponSpec:
     type_id: int
     name: str
     damage: int
-    kind: str  # "melee" | "throw" | "dump"
+    kind: str  # "melee" | "throw" | "hybrid" | "dump"
     # Absolute |ΔX| band where B is useful (lane already filtered).
     use_min_dx: float
     use_max_dx: float
@@ -115,11 +117,11 @@ SPECS: dict[int, WeaponSpec] = {
         WEAPON_KNIFE,
         "knife",
         5,
-        "throw",
+        "hybrid",  # melee $46 in cone, throw $44 outside
         0.0,
         KNIFE_THROW_MAX,
         range_score=0.95,
-        control_score=0.35,
+        control_score=0.45,
     ),
     WEAPON_BOTTLE: WeaponSpec(
         WEAPON_BOTTLE,
@@ -248,22 +250,37 @@ def melee_can_connect(abs_dx: float, abs_dy: float) -> bool:
 
 
 def knife_can_hit(abs_dx: float, abs_dy: float) -> bool:
-    """Enemy is inside the knife throw engagement envelope."""
+    """Enemy is inside knife engage range (melee scan or throw flight)."""
 
     return abs_dy <= WEAPON_LANE and 0.0 < abs_dx <= KNIFE_THROW_MAX
 
 
-def knife_should_throw(abs_dx: float, abs_dy: float) -> bool:
-    """Throw when the foe is in lane and within flight envelope.
+def knife_should_melee(abs_dx: float, abs_dy: float) -> bool:
+    """ROM selects stab family ``$46`` when a front target is within ``$90`` X.
 
-    Far but hittable (user user request): mid/long band up to ``KNIFE_THROW_MAX``.
-    Inside melee the knife still only throws (no punch while armed).
+    Policy uses the same scan limit so B produces a melee attack, not a throw.
     """
 
-    if not knife_can_hit(abs_dx, abs_dy):
+    return abs_dy <= WEAPON_LANE and 0.0 < abs_dx <= float(KNIFE_MELEE_SCAN_X)
+
+
+def knife_should_throw(abs_dx: float, abs_dy: float) -> bool:
+    """Throw family ``$44`` when foe is past the melee-scan cone but still hittable.
+
+    ``$3084`` only picks ``$44`` when no object is found in the front ``$90``
+    box; enemies beyond 144 px and within ~160 px are the intentional throw
+    band.
+    """
+
+    if abs_dy > WEAPON_LANE:
         return False
-    # Always throw if hittable — B is only the throw for type $08.
-    return True
+    return float(KNIFE_MELEE_SCAN_X) < abs_dx <= KNIFE_THROW_MAX
+
+
+def knife_should_use(abs_dx: float, abs_dy: float) -> bool:
+    """True when B is useful for knife (stab or throw)."""
+
+    return knife_should_melee(abs_dx, abs_dy) or knife_should_throw(abs_dx, abs_dy)
 
 
 def pepper_should_throw(abs_dx: float, abs_dy: float) -> bool:
@@ -290,6 +307,16 @@ def use_range_for(type_id: int) -> tuple[float, float]:
     if tid == WEAPON_BOTTLE:
         return (0.0, BOTTLE_DUMP_REACH)
     return (0.0, 0.0)
+
+
+def knife_mode(abs_dx: float, abs_dy: float) -> str | None:
+    """``\"melee\"``, ``\"throw\"``, or None if out of band."""
+
+    if knife_should_melee(abs_dx, abs_dy):
+        return "melee"
+    if knife_should_throw(abs_dx, abs_dy):
+        return "throw"
+    return None
 
 
 def expected_damage_over_hits(type_id: int, hits: int) -> int:

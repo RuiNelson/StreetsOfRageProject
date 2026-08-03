@@ -369,7 +369,7 @@ ROM math (see `StreetsOfRageRecompilation/ai-analysis/weapons-range-and-damage.m
 
 | Type | D | Kind | Connect when |
 | ---: | ---: | --- | --- |
-| Knife `$08` | **5** | attack throw | \|ΔY\|≤12 and **0 &lt; \|ΔX\| ≤ 160**; face foe first |
+| Knife `$08` | **5** | **melee or throw** | ROM `$3084`: **stab `$46`** if foe in front \|ΔX\|≤**144** (`$90`); else **throw `$44`** if 144&lt;\|ΔX\|≤**160**; face foe first |
 | Bottle `$09` | **3** | dump only (not attack-thrown) | \|ΔY\|≤12 and \|ΔX\| ≤ 36 |
 | Bat/pipe `$0A/$0B` | **4** | melee | \|ΔY\|≤12 and \|ΔX\| ≤ **36** (live origin reach) |
 | Pepper `$0C` | **2** | attack throw + immobilize 160 f | \|ΔY\|≤12 and (\|ΔX\|≤36 or 24–100) |
@@ -391,11 +391,12 @@ Hits to kill: `ceil(H / D)`.
 | \|ΔY\| &gt; 12 | return None |
 | Ally in attack bubble (throw range if knife/pepper) | return None |
 | Bat/pipe and \|ΔX\| ≤ 36 and facing | B swing |
-| **Knife** and \|ΔX\| ≤ **160** (far but hittable) and facing | **B throw** (only attack while armed) |
+| **Knife** and \|ΔX\| ≤ **144** and facing | **B melee/stab** (ROM action `$46`) |
+| **Knife** and **144 &lt; \|ΔX\| ≤ 160** and facing | **B throw** (ROM action `$44`) |
 | Knife and facing wrong way | face only (no B) |
 | Pepper in corridor and facing | B throw |
 | Bottle and \|ΔX\| ≤ 36 | B dump (not a projectile throw) |
-| Knife/pepper beyond max envelope | return None (walk closer via free combat) |
+| Knife beyond 160 / pepper beyond band | return None (walk closer via free combat) |
 
 ---
 

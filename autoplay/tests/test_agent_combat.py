@@ -554,19 +554,33 @@ class GrabTreeTests(unittest.TestCase):
                         foe=foe,
                     )
                 )
-        # Far-but-hittable: knife must throw (ROM envelope ≤160).
-        hittable = _e(map_x=230, map_y=64)  # |dx|=130
-        intent = decide_held(
+        # Inside ROM $90 (144) front scan: knife melee/stab, not throw.
+        close = _e(map_x=180, map_y=64)  # |dx|=80
+        intent_m = decide_held(
             me,
             context_from_player(me),
             GrabMemory(),
             tick=1,
-            foe=hittable,
+            foe=close,
         )
-        self.assertIsNotNone(intent)
-        assert intent is not None
-        self.assertTrue(intent.attack)
-        self.assertIn("throw knife", intent.note)
+        self.assertIsNotNone(intent_m)
+        assert intent_m is not None
+        self.assertTrue(intent_m.attack)
+        self.assertIn("attack knife", intent_m.note)
+
+        # Past scan cone, within flight envelope: throw.
+        far_hit = _e(map_x=250, map_y=64)  # |dx|=150
+        intent_t = decide_held(
+            me,
+            context_from_player(me),
+            GrabMemory(),
+            tick=1,
+            foe=far_hit,
+        )
+        self.assertIsNotNone(intent_t)
+        assert intent_t is not None
+        self.assertTrue(intent_t.attack)
+        self.assertIn("throw knife", intent_t.note)
 
     def test_weapon_does_not_repeat_attack_during_weapon_animation(self) -> None:
         foe = _e(map_x=120, map_y=64)

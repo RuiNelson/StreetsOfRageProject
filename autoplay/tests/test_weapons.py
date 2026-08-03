@@ -130,22 +130,39 @@ class WeaponTreeGeometryTests(unittest.TestCase):
         intent_far = _weapon_tree(me, _ctx(me), tick=0, foe=far, profile=profile)
         self.assertIsNone(intent_far)
 
-    def test_knife_throws_at_far_hittable_range(self) -> None:
+    def test_knife_melees_inside_rom_scan_cone(self) -> None:
         me = _player(held=W.WEAPON_KNIFE, x=100, act=0x30)
-        foe = _entity(map_x=100 + 120, map_y=64, health=6)
+        # |dx|=80 < $90 (144) → ROM action $46 melee/stab
+        foe = _entity(map_x=100 + 80, map_y=64, health=6)
+        intent = _weapon_tree(me, _ctx(me), tick=0, foe=foe, profile=PROFILES[0])
+        self.assertIsNotNone(intent)
+        assert intent is not None
+        self.assertTrue(intent.attack)
+        self.assertIn("attack knife", intent.note)
+        self.assertNotIn("throw", intent.note)
+
+    def test_knife_throws_beyond_melee_scan(self) -> None:
+        me = _player(held=W.WEAPON_KNIFE, x=100, act=0x30)
+        # |dx|=150 → past $90 scan, within 160 flight envelope
+        foe = _entity(map_x=100 + 150, map_y=64, health=6)
         intent = _weapon_tree(me, _ctx(me), tick=0, foe=foe, profile=PROFILES[0])
         self.assertIsNotNone(intent)
         assert intent is not None
         self.assertTrue(intent.attack)
         self.assertIn("throw knife", intent.note)
         self.assertTrue(intent.right)
-        self.assertFalse(intent.left)
 
     def test_knife_does_not_throw_beyond_envelope(self) -> None:
         me = _player(held=W.WEAPON_KNIFE, x=100, act=0x30)
         foe = _entity(map_x=100 + 200, map_y=64)
         intent = _weapon_tree(me, _ctx(me), tick=0, foe=foe, profile=PROFILES[0])
         self.assertIsNone(intent)
+
+    def test_knife_mode_helpers(self) -> None:
+        self.assertEqual(W.knife_mode(40, 0), "melee")
+        self.assertEqual(W.knife_mode(150, 0), "throw")
+        self.assertIsNone(W.knife_mode(200, 0))
+        self.assertIsNone(W.knife_mode(50, 20))
 
     def test_knife_faces_before_throwing_wrong_way(self) -> None:
         me = _player(held=W.WEAPON_KNIFE, x=100, act=0x30)
