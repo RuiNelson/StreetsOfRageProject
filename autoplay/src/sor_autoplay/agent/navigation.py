@@ -69,18 +69,6 @@ _CARDINAL_ESCAPES: tuple[tuple[float, float, str], ...] = (
     (-48.0, 0.0, "left2"),
     (48.0, 0.0, "right2"),
 )
-# Round-6 factory: free path is lower class-1 floor; upper holds class-2 walls.
-# Prefer down/right so stuck recovery does not walk back into the machine rim.
-_CARDINAL_ESCAPES_STAGE6: tuple[tuple[float, float, str], ...] = (
-    (0.0, 32.0, "down"),
-    (32.0, 0.0, "right"),
-    (0.0, 48.0, "down2"),
-    (48.0, 0.0, "right2"),
-    (0.0, -32.0, "up"),
-    (-32.0, 0.0, "left"),
-    (0.0, -48.0, "up2"),
-    (-48.0, 0.0, "left2"),
-)
 # Extra diagonals after cardinals.
 _RECOVERY_STEPS: tuple[tuple[float, float], ...] = (
     (24.0, 18.0),
@@ -318,33 +306,6 @@ def path_blocked_ahead(
     return point_in_hole(trial_x, lane_y, holes, margin=margin)
 
 
-def _point_in_pit(
-    world_x: float,
-    lane_y: float,
-    holes: tuple[FloorHole, ...],
-    *,
-    margin: float,
-) -> FloorHole | None:
-    """Like ``point_in_hole`` but only real pits (voids)."""
-
-    for hole in holes:
-        if not hole.is_pit:
-            continue
-        if (
-            hole.world_x - margin <= world_x <= hole.world_x_end + margin
-            and hole.lane_y - margin <= lane_y <= hole.lane_y_end + margin
-        ):
-            return hole
-    return None
-
-
-def _outside_solid_y(lane_y: float, hole: FloorHole, *, clearance: float) -> bool:
-    return (
-        lane_y <= float(hole.lane_y) - clearance
-        or lane_y >= float(hole.lane_y_end) + clearance
-    )
-
-
 def safe_detour_lanes(
     world_x: float,
     trial_x: float,
@@ -354,60 +315,23 @@ def safe_detour_lanes(
     level_index: int,
     clearance: float = 14.0,
 ) -> tuple[float, ...]:
-    """Candidate lanes above/below ``hole`` that are free at current and trial X.
-
-    Barrier/press AABBs over-estimate real solids. Edge-only candidates can miss
-    the free corridor, so also sample the playable band. Never accept a lane
-    that sits in a real pit; for the blocking solid, require clearance outside
-    its Y span.
-    """
+    """Candidate lanes above/below ``hole`` that are free at current and trial X."""
 
     lane_min = float(LANE_Y_MIN + 4)
     lane_max = float(lane_y_max_for_level(level_index) - 4)
-    raw: list[float] = [
+    raw = (
         float(hole.lane_y) - clearance,
         float(hole.lane_y_end) + clearance,
-        lane_min + 8.0,
-        lane_max - 8.0,
-    ]
-    y = lane_min
-    while y <= lane_max:
-        raw.append(y)
-        y += 12.0
-
+    )
     out: list[float] = []
-    seen: set[int] = set()
     for candidate in raw:
         if not lane_min <= candidate <= lane_max:
             continue
-        key = int(round(candidate))
-        if key in seen:
+        if point_in_hole(world_x, candidate, holes, margin=8.0) is not None:
             continue
-        # Real voids are always illegal.
-        if _point_in_pit(world_x, candidate, holes, margin=8.0) is not None:
+        if point_in_hole(trial_x, candidate, holes, margin=12.0) is not None:
             continue
-        if _point_in_pit(trial_x, candidate, holes, margin=12.0) is not None:
-            continue
-        # Stay outside the blocking solid's Y span (with clearance).
-        if not _outside_solid_y(candidate, hole, clearance=4.0):
-            continue
-        # Also stay outside other barrier/press boxes at both X samples.
-        blocked = False
-        for other in holes:
-            if other.is_pit:
-                continue
-            if not _outside_solid_y(candidate, other, clearance=4.0):
-                # Only care when this X is in the other solid's X span.
-                if (
-                    other.world_x - 8 <= world_x <= other.world_x_end + 8
-                    or other.world_x - 12 <= trial_x <= other.world_x_end + 12
-                ):
-                    blocked = True
-                    break
-        if blocked:
-            continue
-        seen.add(key)
-        out.append(float(candidate))
+        out.append(candidate)
     return tuple(out)
 
 
@@ -416,12 +340,8 @@ def choose_detour_lane(
     candidates: tuple[float, ...],
     *,
     preferred: float | None = None,
-    prefer_high_y: bool = False,
 ) -> float | None:
-    """Pick a detour lane with hysteresis on ``preferred``.
-
-    ``prefer_high_y`` (stage-6 factory): free walk is the lower class-1 floor.
-    """
+    """Pick a detour lane with hysteresis on ``preferred``."""
 
     if not candidates:
         return None
@@ -436,13 +356,8 @@ def choose_detour_lane(
         # Keep preferred if it is still the closest option.
         if abs(nearest_pref - preferred) <= 10.0:
             return nearest_pref
-    if prefer_high_y:
-        # Prefer the free lower floor (larger lane Y).
-        mid = (min(candidates) + max(candidates)) / 2.0
-        high = [c for c in candidates if c >= mid]
-        pool = high if high else list(candidates)
-        return min(pool, key=lambda c: (abs(c - lane_y), -c))
     return min(candidates, key=lambda c: (abs(c - lane_y), c))
+
 
 def escape_hole_waypoint(
     world_x: float,
@@ -475,16 +390,10 @@ def _solid_point(
     level_index: int,
     margin: float = _HOLE_MARGIN,
 ) -> bool:
-    """True when a recovery step is legal (lane bounds + not a real pit).
-
-    Barrier/press AABBs are over-estimates — do not treat standing inside them
-    as illegal, or stuck recovery bans every direction and shakes forever.
-    """
-
     lane_min, lane_max = _lane_bounds(level_index)
     if not lane_min <= lane_y <= lane_max:
         return False
-    return _point_in_pit(world_x, lane_y, holes, margin=margin) is None
+    return point_in_hole(world_x, lane_y, holes, margin=margin) is None
 
 
 def observe_motion(memory: NavMemory, me: MapEntity) -> None:
@@ -530,10 +439,7 @@ def _recovery_candidates(
     scored: list[tuple[float, float, float, str]] = []
 
     # 0) Open-loop cardinals — highest priority, rotated via recovery_index.
-    cardinals = (
-        _CARDINAL_ESCAPES_STAGE6 if level_index == 5 else _CARDINAL_ESCAPES
-    )
-    for i, (dx, dy, name) in enumerate(cardinals):
+    for i, (dx, dy, name) in enumerate(_CARDINAL_ESCAPES):
         if memory.is_banned(dx, dy):
             continue
         nx, ny = wx + dx, wy + dy
@@ -547,6 +453,7 @@ def _recovery_candidates(
         if abs(gy - wy) > abs(gx - wx) and abs(dx) > abs(dy):
             util += 25.0
         scored.append((util, nx, ny, f"nav unstuck {name}"))
+
     # 1) Alternate detour lane if a hole plan was failing.
     if memory.detour_lane is not None and memory.hole_key is not None:
         hole = memory.hole_key
@@ -678,10 +585,7 @@ def recover_when_stuck(
     if not candidates:
         # Absolute last resort: cycle cardinals even into unknown geometry
         # (still skip known holes). Caller needs *some* motion intent.
-        force_cardinals = (
-            _CARDINAL_ESCAPES_STAGE6 if level_index == 5 else _CARDINAL_ESCAPES
-        )
-        for dx, dy, name in force_cardinals:
+        for dx, dy, name in _CARDINAL_ESCAPES:
             if memory.is_banned(dx, dy):
                 continue
             nx, ny = wx + dx, wy + dy
@@ -754,18 +658,15 @@ def route_to_goal(
             memory.clear()
         return NavWaypoint(gx, gy, reason)
 
-    # Emergency: already inside a *real pit* only.
-    # Barrier/press AABBs over-estimate solids; standing inside them is normal
-    # free floor (stage-6 shake regression: permanent escape-hole thrash).
+    # Emergency: already inside a pit.
     current = point_in_hole(wx, wy, holes, margin=0.0)
-    if current is not None and current.is_pit:
+    if current is not None:
         memory.clear()
         memory.clear_escape()
         return escape_hole_waypoint(wx, wy, current, level_index=level_index)
 
     progress_sign = 1 if progress_right else -1
     trial_x = wx + (_STEP_X if progress_right else -_STEP_X)
-    prefer_high_y = level_index == 5  # round 6 factory: free path is lower
 
     memory.age += 1
     if memory.age > _DETOUR_STALE_TICKS and memory.phase in (
@@ -860,12 +761,7 @@ def route_to_goal(
         preferred = (
             memory.detour_lane if memory.matches_hole(blocked) else None
         )
-        detour = choose_detour_lane(
-            wy,
-            candidates,
-            preferred=preferred,
-            prefer_high_y=prefer_high_y,
-        )
+        detour = choose_detour_lane(wy, candidates, preferred=preferred)
         if detour is not None:
             memory.latch_hole(blocked, detour, progress_sign)
             if abs(wy - detour) > _DETOUR_ARRIVE_EPS:

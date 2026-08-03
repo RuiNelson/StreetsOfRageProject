@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..hazards import HOLE_KIND_PRESS, FloorHole
+from ..hazards import FloorHole
 from ..state import GameSnapshot
 from ..world_map import LANE_Y_MIN, MapEntity, lane_y_max_for_level
 
@@ -223,7 +223,6 @@ def press_solid_aabb(press: MapEntity) -> FloorHole:
         lane_y=int(press.world_y) - PRESS_SOLID_HALF_Y,
         width=PRESS_SOLID_LEFT + PRESS_SOLID_RIGHT,
         height=PRESS_SOLID_HALF_Y * 2,
-        kind=HOLE_KIND_PRESS,
     )
 
 

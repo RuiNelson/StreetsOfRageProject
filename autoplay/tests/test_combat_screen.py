@@ -1277,7 +1277,7 @@ class PolicyAggressionTests(unittest.TestCase):
 
         from dataclasses import replace
 
-        from sor_autoplay.hazards import HOLE_KIND_BARRIER, FloorHole
+        from sor_autoplay.hazards import FloorHole
 
         p1 = _e(
             kind="player",
@@ -1291,9 +1291,7 @@ class PolicyAggressionTests(unittest.TestCase):
             action_state=0x02,
         )
         # Wall ahead on the upper lanes only — free path is below y=64.
-        wall = FloorHole(
-            world_x=120, lane_y=0, width=80, height=64, kind=HOLE_KIND_BARRIER
-        )
+        wall = FloorHole(world_x=120, lane_y=0, width=80, height=64)
         snap = replace(
             self._snap((p1,), level=5),
             floor_barriers=(wall,),
@@ -1417,105 +1415,6 @@ class PolicyAggressionTests(unittest.TestCase):
         # Prefer DOWN toward free lower floor — never UP into class-2 walls.
         self.assertTrue(decision.p1_mask & 0x02, note)  # DOWN
         self.assertFalse(decision.p1_mask & 0x01, note)  # not UP
-
-    def test_stage6_barrier_aabb_does_not_escape_hole_thrash(self) -> None:
-        """Standing inside a class-2 barrier AABB must not rewrite D-pad every poll.
-
-        Barrier boxes over-estimate walls. Treating them like pits caused
-        permanent [escape hole] UP/DOWN/LEFT/RIGHT shake on round 6.
-        """
-
-        from dataclasses import replace
-
-        from sor_autoplay.hazards import HOLE_KIND_BARRIER, FloorHole
-
-        p1 = _e(
-            kind="player",
-            family="Player",
-            slot="P1",
-            map_x=100,
-            world_x=100,
-            map_y=50,
-            type_id=1,
-            label="P1",
-            action_state=0x02,
-        )
-        # Tall over-estimated housing AABB that contains the player pose.
-        wall = FloorHole(
-            world_x=60, lane_y=0, width=160, height=80, kind=HOLE_KIND_BARRIER
-        )
-        state = AgentState()
-        notes: list[str] = []
-        masks: list[int] = []
-        for _ in range(10):
-            snap = replace(
-                self._snap((p1,), level=5),
-                floor_barriers=(wall,),
-            )
-            decision = decide_actions(
-                snap,
-                AgentConfig(p1_enabled=True),
-                state,
-            )
-            notes.append(decision.p1_note)
-            masks.append(decision.p1_mask)
-
-        self.assertFalse(
-            any("escape hole" in n for n in notes),
-            notes,
-        )
-        # First decisions should commit a vertical detour toward free lower floor.
-        self.assertTrue(
-            any("detour" in n or "advance" in n or "progress" in n for n in notes[:3]),
-            notes[:3],
-        )
-        # Must not oscillate UP vs DOWN on successive polls while pose is fixed
-        # during the initial committed detour window.
-        first_dirs = [(m & 0x03) for m in masks[:6]]
-        # While detouring, vertical bits should be stable (all DOWN or all none),
-        # not alternating 0x01 and 0x02.
-        ups = sum(1 for d in first_dirs if d == 0x01)
-        downs = sum(1 for d in first_dirs if d == 0x02)
-        self.assertFalse(ups > 0 and downs > 0, f"vertical thrash: {notes[:6]}")
-
-    def test_stage6_press_solid_does_not_escape_hole_thrash(self) -> None:
-        """Mid-lane near a press solid must not attach [escape hole] every poll."""
-
-        p1 = _e(
-            kind="player",
-            family="Player",
-            slot="P1",
-            map_x=100,
-            world_x=100,
-            map_y=64,
-            type_id=1,
-            label="P1",
-            action_state=0x02,
-        )
-        hazard = _e(
-            kind="projectile",
-            family="Stage hazard",
-            symbol="!",
-            label="Press",
-            type_id=0x42,
-            map_x=130,
-            world_x=130,
-            map_y=64,
-            health=None,
-            slot="H0",
-            outgoing_damage=0x14,
-            combat_phase=CombatPhase.ATTACKING,
-        )
-        state = AgentState()
-        notes = []
-        for _ in range(8):
-            d = decide_actions(
-                self._snap((p1, hazard), level=5),
-                AgentConfig(p1_enabled=True),
-                state,
-            )
-            notes.append(d.p1_note)
-        self.assertFalse(any("escape hole" in n for n in notes), notes)
 
     def test_rear_when_enemy_behind(self) -> None:
         p1 = _e(

@@ -931,8 +931,6 @@ Nav stuck (independent of walk): move &lt; **3** px for **8** polls → cardinal
 
 **Collision barriers (class ≥ 2):** always merged into routing solids (except elevator index 6). Live stage-6 factory: class **2** columns are the machine housing walls — they block RIGHT on the upper lanes while type-`$42` crushers sit on a different Y. The navigator detours to a free class-1 lane then advances past the barrier AABB. Type-`$42` AABBs remain a crush-zone supplement, not the path model.
 
-**Hole kinds:** `FloorHole.kind` is `pit` | `barrier` | `press`. Emergency `[escape hole]` D-pad rewrite runs **only** for `pit`. Barrier/press boxes over-estimate solids; standing inside them is legal free floor — treating them as pits caused permanent stage-6 shake. Stuck recovery on level index 5 prefers **down/right**. Progress on stage 6 with barriers prefers lane **$60** (lower free floor).
-
 Progress lead when empty: **±160** world X.
 
 ### 10.4 Mr. X dialog

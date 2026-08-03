@@ -16,33 +16,19 @@ WALKABLE_COLLISION_CLASS = 1
 BARRIER_COLLISION_MIN_CLASS = 2
 
 
-# Terrain solid kinds for routing. Only real pits use "standing inside → escape"
-# rewrites. Barriers and presses are AABB over-estimates of walls/crushers:
-# the player can legally stand inside those AABBs (free cells inside the box),
-# so treating them as pits caused stage-6 UP/DOWN/LEFT/RIGHT shake.
-HOLE_KIND_PIT = "pit"
-HOLE_KIND_BARRIER = "barrier"
-HOLE_KIND_PRESS = "press"
-
-
 @dataclass(frozen=True, slots=True)
 class FloorHole:
     """One connected terrain region as an axis-aligned bounding box.
 
-    Used for pits (class 0), solid barriers (class ≥ 2), and press bodies.
-    Adjacent matching cells form one component; we store the bounding box so
-    the map and navigator do not thrash on a tile staircase.
-
-    ``kind``:
-      - ``pit``: open void — emergency escape when standing inside is correct.
-      - ``barrier`` / ``press``: path blockers only — never "escape hole" thrash.
+    Used for pits (class 0) and for solid barriers (class ≥ 2). Adjacent matching
+    cells form one component; we store the bounding box so the map and navigator
+    do not thrash on a tile staircase.
     """
 
     world_x: int
     lane_y: int
     width: int
     height: int
-    kind: str = HOLE_KIND_PIT
 
     @property
     def world_x_end(self) -> int:
@@ -51,10 +37,6 @@ class FloorHole:
     @property
     def lane_y_end(self) -> int:
         return self.lane_y + self.height
-
-    @property
-    def is_pit(self) -> bool:
-        return self.kind == HOLE_KIND_PIT
 
 
 def is_paused(pause_text_flag: int) -> bool:
@@ -118,7 +100,6 @@ def _find_class_regions(
     match,
     min_width: int = 16,
     min_height: int = 16,
-    kind: str = HOLE_KIND_PIT,
 ) -> tuple[FloorHole, ...]:
     """Connected AABBs for cells where ``match(class)`` is true."""
 
@@ -177,7 +158,6 @@ def _find_class_regions(
                     lane_y=min_r * cell_h,
                     width=width,
                     height=height,
-                    kind=kind,
                 )
             )
 
@@ -211,7 +191,6 @@ def find_floor_holes(
         world_x_min=world_x_min,
         world_x_max=world_x_max,
         match=lambda klass: klass == hole_class,
-        kind=HOLE_KIND_PIT,
     )
 
 
@@ -230,9 +209,6 @@ def find_collision_barriers(
     blocked by collision-class **2** columns on the upper lanes. Class 1 remains
     walkable floor past the housing on the lower lanes. These AABBs feed the
     same hole-detour navigator so progress does not hold RIGHT into a wall.
-
-    Tagged ``kind=barrier`` so standing inside the (over-estimated) AABB never
-    triggers pit-style emergency escape thrash.
     """
 
     if world_x_max is None:
@@ -247,7 +223,6 @@ def find_collision_barriers(
         # Keep modest walls (a thin pillar) — drop only tiny noise.
         min_width=16,
         min_height=8,
-        kind=HOLE_KIND_BARRIER,
     )
 
 
