@@ -310,10 +310,11 @@ for tests/HUD.
     - Stage-4 horizontal progression must turn into a persistent vertical
       detour at a pit, cross beside it, then resume X; never reverse X forever
       at the first blocked collision cell
-    - Round 6 (level index 5) type-`$42` hydraulic presses are solid + crushing.
-      Do not path through the machine; do not stay in the crush band. Leave the
-      press lane first, then resume X on a clear lane (`stage.py` helpers +
-      press AABBs merged into nav holes).
+    - Round 6 (level index 5) type-`$42` hydraulic presses are solid housing +
+      crushing. Do not path through the machine frame; do not stay in the crush
+      band. Committed bypass: detour off the solid lane, then advance past the
+      far X edge (`press_bypass_goal`) before combat/progress re-aims through
+      the housing. Large press AABBs are also merged into nav holes.
     - Round 7 (level index 6) is a fixed moving elevator/gauntlet. Its platform
       is not represented by the static collision-class map, so class-0 cells
       are not holes. With no combat target, clear any old horizontal walk

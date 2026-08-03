@@ -191,7 +191,7 @@ Only reached when steps 2–9 did not return:
 ```text
 A. if airborne action family → air branch; return
 B. if reachable breakable with outgoing_damage > 0 → moving-prop branch; return
-B2. if reachable type-$42 stage press in crush/same-lane band → leave-lane; return
+B2. if type-$42 press is crush threat or blocks progress corridor → detour then advance past housing; return
 C. select_pickup + select_target + solve_goal (fight|loot|progress)
 D. if LOOT wins and item set → loot walk/B; return
 E. combat vs target (if any) → may return
@@ -807,10 +807,14 @@ Round-6 type `$42` (ROM `$7A6C` family, label **Press**):
 - **Avoid-only**: no player-hit destruction path; never smash/target as combat.
 - Outgoing damage `$14`; vertical Z state machine `$40` ↔ `$A0`.
 - ROM arming gate: player X in **[press_x − 48, press_x + 96]**.
-- **Solid body**: treat as navigation AABB (half-width **28** X, half-height **14** Y) merged into hole routing so progress/combat walks **cannot path through** the machine.
-- **Crush / stand-under**: \|ΔX\| ≤ **48** and \|ΔY\| ≤ **16** → urgent leave-lane (`leave press`).
-- **Same-lane approach**: \|ΔX\| ≤ **100** and \|ΔY\| ≤ **20** → leave press lane first (`avoid press`), hold X.
-- Safer lane = extreme playable band edge farthest from press Y (same idea as `$45`).
+- **Solid housing (path blocker)**: AABB X = **[press_x − 48, press_x + 64]**, lane Y = press_y ± **36**. Merged into routing holes so progress/combat walks **cannot path through** the machine frame.
+- **Committed bypass** (`press_bypass_goal`), not leave-lane-only:
+  1. `leave press` / `detour press` — pure Y off the solid/crush band (hold X while under).
+  2. `advance past press` — once on a free lane, walk to solid far edge + **24** X on that lane.
+- **Crush / stand-under**: \|ΔX\| ≤ **48** and \|ΔY\| ≤ **16** → step 1.
+- **Same-lane approach**: \|ΔX\| ≤ **100** and \|ΔY\| ≤ **20** → step 1 then 2.
+- **Corridor block**: press ahead within **160** X / **56** Y of the progress probe, or goal segment hits solid → same bypass.
+- Safer lane = free edge outside solid ± clearance (prefer the side already occupied).
 - Exclude type `$42` from `select_target` so weak projectile dodge does not thrash under the frame.
 
 ### 9.11 Static breakables (after combat)

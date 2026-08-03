@@ -7,9 +7,12 @@ import unittest
 from sor_autoplay.agent.bosses import tactical_move
 from sor_autoplay.agent.stage import (
     is_stage_press,
+    press_blocks_goal,
+    press_bypass_goal,
     press_same_lane_threat,
     press_solid_holes,
     safer_lane_from_press,
+    select_blocking_press,
     stage_advice,
     steer_away_from_holes,
     under_stage_press,
@@ -151,6 +154,66 @@ class StagePressTests(unittest.TestCase):
         )
         self.assertNotAlmostEqual(goal_y, float(self.press.world_y))
         self.assertGreater(abs(goal_y - float(self.press.world_y)), 20.0)
+
+    def test_solid_housing_blocks_progress_goal(self) -> None:
+        """Progress straight through a press X on its lane must be blocked."""
+
+        self.assertTrue(
+            press_blocks_goal(self.me, self.press, goal_x=260.0, goal_y=64.0)
+        )
+        # Already past on a free lane is not a block for a further goal.
+        past = _entity(
+            kind="player",
+            type_id=1,
+            world_x=220,
+            world_y=14,
+            slot="P1",
+        )
+        self.assertFalse(
+            press_blocks_goal(past, self.press, goal_x=300.0, goal_y=14.0)
+        )
+
+    def test_bypass_detours_then_advances_past_housing(self) -> None:
+        gx, gy, reason = press_bypass_goal(
+            self.me,
+            self.press,
+            progress_right=True,
+            level_index=5,
+            camera_bottom=112.0,
+        )
+        # First phase: leave the solid lane at current X.
+        self.assertIn("press", reason)
+        self.assertEqual(gx, float(self.me.world_x))
+        self.assertNotAlmostEqual(gy, float(self.press.world_y))
+
+        # Second phase: once on the safe lane, advance past the solid far edge.
+        on_safe = _entity(
+            kind="player",
+            type_id=1,
+            world_x=100,
+            world_y=int(gy),
+            slot="P1",
+        )
+        gx2, gy2, reason2 = press_bypass_goal(
+            on_safe,
+            self.press,
+            progress_right=True,
+            level_index=5,
+            camera_bottom=112.0,
+        )
+        self.assertIn("advance past press", reason2)
+        self.assertGreater(gx2, float(self.press.world_x))
+        self.assertAlmostEqual(gy2, gy, delta=1.0)
+
+    def test_select_blocking_press_on_corridor(self) -> None:
+        chosen = select_blocking_press(
+            self.me,
+            (self.press,),
+            goal_x=260.0,
+            goal_y=64.0,
+            progress_right=True,
+        )
+        self.assertIs(chosen, self.press)
 
 
 class BossPhaseTests(unittest.TestCase):

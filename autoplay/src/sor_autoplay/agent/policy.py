@@ -606,57 +606,62 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             walk.clear()
             return Intent(note=f"hold safe lane {prop.label}")
 
-    # Round-6 type-$42 hydraulic presses: solid + crushing, never smashable.
-    # Do not walk through the machine body; do not stand in the crush band.
-    # Leave the press lane first, then resume progress on a clear lane.
+    # Round-6 type-$42 hydraulic presses: solid housing + crushing, never smashable.
+    # The machine blocks the walk path — not only the crusher lane. Commit to
+    # detour (Y) → advance past the solid far edge (X) before combat/progress
+    # can re-aim through the housing.
     # (Do not name the local ``press`` — that shadows the pressure report.)
-    presses = tuple(
-        entity
-        for entity in stage.stage_press_entities(snapshot.world_map.entities)
-        if graph.entity_has(entity, Relation.REACHABLE)
-        or stage.is_stage_press(entity)
-    )
+    presses = stage.stage_press_entities(snapshot.world_map.entities)
     if presses:
-        press_entity = min(
+        lead = _PROGRESS_LEAD if advice.progress_right else -_PROGRESS_LEAD
+        probe_x = float(me.world_x) + lead
+        probe_y = float(me.world_y)
+        press_entity = stage.select_blocking_press(
+            me,
             presses,
-            key=lambda entity: math.hypot(
-                entity.map_x - me.map_x,
-                entity.map_y - me.map_y,
-            ),
+            goal_x=probe_x,
+            goal_y=probe_y,
+            progress_right=advice.progress_right,
         )
-        if stage.under_stage_press(me, press_entity) or stage.press_same_lane_threat(
-            me, press_entity
-        ):
-            goal_y = stage.safer_lane_from_press(
+        if press_entity is not None:
+            gx, gy, reason = stage.press_bypass_goal(
                 me,
                 press_entity,
+                progress_right=advice.progress_right,
                 level_index=snapshot.level_index,
                 camera_bottom=float(snapshot.world_map.camera_bottom),
             )
-            # When already under the press, hold X and evacuate Y. On approach,
-            # still prefer a pure lane change so we never walk into the frame.
-            reason = (
-                f"leave press {press_entity.label}"
-                if stage.under_stage_press(me, press_entity)
-                else f"avoid press {press_entity.label}"
-            )
-            # Bypass solid re-route of the same press body: the goal is already
-            # a pure lane escape. route_to_goal would rewrite the note to
-            # "escape hole" while we are still overlapping the machine AABB.
-            walk.clear()
-            walk.set_goal(
+            # While leaving the crush band, force a pure lane walk so hole
+            # escape does not rewrite the note to "escape hole". Once on the
+            # safe lane, route through nav so solid AABBs keep the advance
+            # committed past the housing.
+            if "leave press" in reason or "detour press" in reason:
+                walk.clear()
+                walk.set_goal(
+                    me,
+                    gx,
+                    gy,
+                    reason=reason,
+                    eps_x=3.0,
+                    eps_y=5.0,
+                    force=True,
+                )
+                intent = walk.step(me)
+                if intent is None:
+                    return Intent(note=f"walk idle ({reason})")
+                return intent
+            return _walk_toward(
+                walk,
                 me,
-                float(me.world_x),
-                goal_y,
+                goal_x=gx,
+                goal_y=gy,
                 reason=reason,
-                eps_x=3.0,
+                snapshot=snapshot,
+                advice=advice,
+                nav=nav,
+                eps_x=6.0,
                 eps_y=5.0,
-                force=True,
             )
-            intent = walk.step(me)
-            if intent is None:
-                return Intent(note=f"walk idle ({reason})")
-            return intent
 
     # --- Symbolic/fuzzy tactical arbitration ---
     # Generate legal fight/loot/progress goals from the knowledge graph, then

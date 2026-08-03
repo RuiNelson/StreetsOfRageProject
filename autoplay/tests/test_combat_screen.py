@@ -1167,13 +1167,18 @@ class PolicyAggressionTests(unittest.TestCase):
             AgentState(),
         )
 
-        # Same-lane approach: leave the press lane (UP or DOWN), never smash.
+        # Same-lane approach: detour off the press lane (UP or DOWN), never smash.
         self.assertTrue(
-            "avoid press" in decision.p1_note or "leave press" in decision.p1_note,
+            any(
+                key in decision.p1_note
+                for key in (
+                    "leave press",
+                    "detour press",
+                    "advance past press",
+                )
+            ),
             decision.p1_note,
         )
-        self.assertTrue(decision.p1_mask & 0x03, decision.p1_note)  # UP or DOWN
-        self.assertFalse(decision.p1_mask & 0x0C, decision.p1_note)  # no LEFT/RIGHT into frame
         self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
 
     def test_leaves_press_when_standing_under_it(self) -> None:
@@ -1214,7 +1219,7 @@ class PolicyAggressionTests(unittest.TestCase):
         self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
 
     def test_routes_progress_around_press_solid_body(self) -> None:
-        """Progress right must detour on Y instead of holding into the frame."""
+        """Progress right must detour/advance past the housing, not walk into it."""
 
         p1 = _e(
             kind="player",
@@ -1227,8 +1232,7 @@ class PolicyAggressionTests(unittest.TestCase):
             label="P1",
             action_state=0x02,
         )
-        # Press just ahead on the same lane, outside same-lane react (|dx|>100)
-        # so the early leave-lane branch does not fire — solid routing must.
+        # Press ahead on the same corridor — path blocker even outside crush band.
         hazard = _e(
             kind="projectile",
             family="Stage hazard",
@@ -1250,15 +1254,68 @@ class PolicyAggressionTests(unittest.TestCase):
             AgentState(),
         )
 
-        # Navigator should detour around the solid AABB rather than only RIGHT.
         note = decision.p1_note
         self.assertTrue(
-            "nav" in note or "detour" in note or "progress" in note or "unstuck" in note,
+            any(
+                key in note
+                for key in (
+                    "detour press",
+                    "leave press",
+                    "advance past press",
+                    "nav detour",
+                    "nav advance",
+                )
+            ),
             note,
         )
         # Must not treat the press as a combat projectile target.
         self.assertNotIn("dodge", note)
         self.assertFalse(decision.p1_mask & 0x20, note)
+
+    def test_advances_past_press_once_on_safe_lane(self) -> None:
+        """After leaving the crusher lane, keep walking past the solid far edge."""
+
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=14,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        hazard = _e(
+            kind="projectile",
+            family="Stage hazard",
+            symbol="!",
+            label="Press",
+            type_id=0x42,
+            map_x=160,
+            world_x=160,
+            map_y=64,
+            health=None,
+            slot="H0",
+            outgoing_damage=0x14,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+
+        decision = decide_actions(
+            self._snap((p1, hazard), level=5),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+
+        # Policy commits advance-past; nav may rewrite the note to the solid
+        # hole ADVANCE phase while still holding the free lane past the housing.
+        self.assertTrue(
+            "advance past press" in decision.p1_note
+            or "nav advance past" in decision.p1_note,
+            decision.p1_note,
+        )
+        self.assertTrue(decision.p1_mask & 0x08, decision.p1_note)  # RIGHT
+        self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
 
     def test_rear_when_enemy_behind(self) -> None:
         p1 = _e(
