@@ -1015,30 +1015,90 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 eps_y=6.0,
             )
 
-        # Twin pair: a clean grounded hit on the focus twin outranks soft
-        # movement. Boss tactics still own real jump/grab commits (DANGEROUS
-        # on our depth) and bracket surrounds; they return None when idle so
-        # free combat can press B. Extra guard: never freeze on a hold while
-        # punch geometry is already legal and the focus is not committing.
+        # Twins / Souther boss movement. For twins, holds are ignored (they
+        # froze free combat); only active sidesteps on real commits run.
+        # Full attack mix for twins is evaluated *before* soft movement so
+        # punch/jump/grab/rear are not starved by isolate walks.
         boss_tactic = bosses.tactical_move(
             me,
             foe,
             snapshot.world_map.entities,
             level_index=snapshot.level_index,
         )
-        twin_pair = (
-            scene_ai.is_twin(foe)
-            and scene_ai.twin_composition(snapshot.world_map.entities)
-            is scene_ai.TwinComposition.PAIR
-        )
-        twin_can_strike = (
-            twin_pair
-            and punch_ok
-            and not is_dangerous(phase)
-            and combat.player_can_start_ground_action(me)
-            and cd == 0
-        )
-        if boss_tactic is not None and not twin_can_strike:
+        is_twin_foe = scene_ai.is_twin(foe)
+        if is_twin_foe:
+            twin_intent = _twin_attack_intent(
+                me=me,
+                foe=foe,
+                plan=plan,
+                profile=profile,
+                walk=walk,
+                ctx=ctx,
+                snapshot=snapshot,
+                advice=advice,
+                nav=nav,
+                coop_ctx=coop_ctx,
+                press=press,
+                face_left=face_left,
+                face_right_now=face_right_now,
+                punch_ok=punch_ok,
+                punch_geom=punch_geom,
+                lane_ok=lane_ok,
+                facing_ok=facing_ok,
+                jump_ok=jump_ok,
+                jk_plan=jk_plan,
+                jump_hits=jump_hits,
+                jump_score=jump_score,
+                grabbable=grabbable,
+                back_exposed=back_exposed,
+                band=band,
+                abs_dx=abs_dx,
+                phase=phase,
+                phase_name=phase_name,
+                tag=tag,
+                cd=cd,
+                player_index=player_index,
+            )
+            if twin_intent is not None:
+                return twin_intent
+            # Real commit sidestep only (never hold-freeze).
+            if (
+                boss_tactic is not None
+                and not boss_tactic.hold
+                and is_dangerous(phase)
+            ):
+                return _walk_toward(
+                    walk,
+                    me,
+                    goal_x=boss_tactic.goal_x,
+                    goal_y=boss_tactic.goal_y,
+                    reason=boss_tactic.note,
+                    snapshot=snapshot,
+                    advice=advice,
+                    nav=nav,
+                    eps_x=3.0,
+                    eps_y=5.0,
+                )
+            # Partner surround / intrusion sidestep when we cannot strike yet.
+            if (
+                boss_tactic is not None
+                and not boss_tactic.hold
+                and not punch_ok
+                and not (jump_ok and jump_hits >= 1)
+            ):
+                return _walk_toward(
+                    walk,
+                    me,
+                    goal_x=boss_tactic.goal_x,
+                    goal_y=boss_tactic.goal_y,
+                    reason=boss_tactic.note,
+                    snapshot=snapshot,
+                    advice=advice,
+                    nav=nav,
+                    eps_x=3.0,
+                    eps_y=5.0,
+                )
+        elif boss_tactic is not None:
             if boss_tactic.hold:
                 walk.clear()
                 return Intent(note=boss_tactic.note)
@@ -1053,27 +1113,6 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 nav=nav,
                 eps_x=3.0,
                 eps_y=5.0,
-            )
-        if twin_can_strike:
-            if coop.attack_would_hit_ally(
-                me, coop_ctx.partner, face_left=face_left
-            ):
-                return _clear_ally_lane(
-                    walk,
-                    me,
-                    coop_ctx.partner,
-                    reason=f"ally blocks twin focus {foe.label}",
-                    snapshot=snapshot,
-                    advice=advice,
-                    nav=nav,
-                )
-            walk.clear()
-            ctx.set_attack_cd(3)
-            return Intent(
-                left=face_left,
-                right=face_right_now,
-                attack=True,
-                note=f"twin focus punch {foe.label} [{tag}]",
             )
 
         # Signal's state $08 can select the state-$0B low sliding sweep. The
@@ -1104,7 +1143,9 @@ def _decide_free(ctx: DecisionContext) -> Intent:
         # the common Round-1 type $22, $09 is the approach/wind-up and $0A is
         # the active punch. The measured normal-punch boxes now let us strike
         # first; an already-safe off-lane player must not walk back into it.
-        if combat.enemy_attack_committed(me, foe):
+        # Twins: never "reengage" into a jump/grab commit lane (that walks
+        # straight into $15D0C). Twin free combat owns the tree above.
+        if combat.enemy_attack_committed(me, foe) and not is_twin_foe:
             if not lane_ok:
                 # Boss phase decoders can report CHARGE while the boss is
                 # actually waiting for the player to enter its lane. Ordinary
@@ -1689,6 +1730,212 @@ def _clear_ally_lane(
         eps_x=3.0,
         eps_y=4.0,
     )
+
+
+def _twin_attack_intent(
+    *,
+    me: MapEntity,
+    foe: MapEntity,
+    plan,
+    profile,
+    walk: WalkState,
+    ctx: DecisionContext,
+    snapshot: GameSnapshot,
+    advice: stage.StageAdvice,
+    nav: NavMemory | None,
+    coop_ctx,
+    press,
+    face_left: bool,
+    face_right_now: bool,
+    punch_ok: bool,
+    punch_geom: bool,
+    lane_ok: bool,
+    facing_ok: bool,
+    jump_ok: bool,
+    jk_plan: JumpKickPlan | None,
+    jump_hits: int,
+    jump_score: float,
+    grabbable: bool,
+    back_exposed: bool,
+    band: str,
+    abs_dx: float,
+    phase: CombatPhase,
+    phase_name: str,
+    tag: str,
+    cd: int,
+    player_index: int,
+) -> Intent | None:
+    """Full attack suite vs Onihime/Yasha while free combat owns the tree.
+
+    Returns an Intent for rear / jump / grab / punch, or None to walk/evade.
+    Real jump/grab *commits* are still DANGEROUS (primary $02 or tactical
+    $02/$03); chase/idle is NORMAL and must be struck.
+    """
+
+    if me.is_hurt or cd != 0:
+        return None
+    if not combat.player_can_start_ground_action(me):
+        return None
+
+    behind = combat.enemy_is_behind(
+        me,
+        foe,
+        face_right=not combat.player_facing_left(me),
+    )
+    mix = enemy_ai.attack_mix(
+        plan,
+        profile,
+        tick=ctx.tick + player_index * 3,
+        in_range=punch_geom,
+        crowd=max(press.enemy_count, 2),  # pair counts as crowd for jump bias
+        phase_name=phase_name,
+        band=band,
+        behind=behind and combat.rear_in_band(abs_dx, profile),
+        lane_ok=lane_ok,
+        facing_ok=facing_ok,
+        can_jump=jump_ok and not plan.no_jump,
+        grabbable=grabbable,
+        back_exposed=back_exposed,
+        jump_hits=jump_hits,
+        jump_score=jump_score,
+    )
+
+    # Punish recovery/hitstun even if mix waited for range.
+    if is_punishable(phase) and phase != CombatPhase.GRABBED and punch_ok:
+        mix = "punch"
+
+    # Commit jump/grab on our depth: do not trade into active damage frames.
+    if is_dangerous(phase) and lane_ok and abs_dx <= profile.strike_range + 28:
+        if mix not in ("rear",):
+            return None
+
+    def _ally_block(kind: str, *, rear: bool = False) -> Intent | None:
+        if coop.attack_would_hit_ally(
+            me, coop_ctx.partner, face_left=face_left, rear=rear
+        ):
+            return _clear_ally_lane(
+                walk,
+                me,
+                coop_ctx.partner,
+                reason=f"ally blocks twin {kind} {foe.label}",
+                snapshot=snapshot,
+                advice=advice,
+                nav=nav,
+            )
+        return None
+
+    if mix == "rear" and combat.can_rear_hit(
+        me, foe, profile, face_right=not combat.player_facing_left(me)
+    ):
+        blocked = _ally_block("rear", rear=True)
+        if blocked is not None:
+            return blocked
+        face_now = combat.player_facing_left(me)
+        walk.clear()
+        ctx.set_attack_cd(4)
+        return Intent(
+            left=face_left if face_left else face_now,
+            right=face_right_now if face_right_now else (not face_now),
+            rear_attack=True,
+            note=f"twin rear {foe.label} [{tag}]",
+        )
+
+    if mix == "jump" and jump_ok and facing_ok:
+        holes = _routing_holes(snapshot, advice)
+        land_x = jk_plan.landing_world_x if jk_plan is not None else None
+        if navigation.jump_landing_safe(
+            me, foe, holes, land_x=land_x, land_y=float(me.world_y)
+        ):
+            blocked = _ally_block("jump")
+            if blocked is not None:
+                return blocked
+            walk.clear()
+            ctx.set_attack_cd(1)
+            if jk_plan is not None:
+                ctx.seat.jump_kick.arm(jk_plan, primary_slot=foe.slot)
+                hold_l = jk_plan.hold_dir < 0 or (
+                    jk_plan.hold_dir == 0 and face_left
+                )
+                hold_r = jk_plan.hold_dir > 0 or (
+                    jk_plan.hold_dir == 0 and face_right_now
+                )
+                return Intent(
+                    left=hold_l,
+                    right=hold_r,
+                    jump=True,
+                    note=(
+                        f"twin jump×{jk_plan.hit_count} {foe.label} "
+                        f"[{tag}] {jk_plan.note}"
+                    ),
+                )
+            return Intent(
+                left=face_left,
+                right=face_right_now,
+                jump=True,
+                note=f"twin jump {foe.label} [{tag}]",
+            )
+
+    if mix == "grab_walk" and grabbable:
+        if (
+            abs_dx <= 24.0
+            and lane_ok
+            and facing_ok
+        ):
+            blocked = _ally_block("grab")
+            if blocked is not None:
+                return blocked
+            walk.clear()
+            ctx.set_attack_cd(3)
+            return Intent(
+                left=face_left,
+                right=face_right_now,
+                attack=True,
+                note=f"twin grab {foe.label} [{tag}]",
+            )
+        if not facing_ok and abs_dx <= 40.0:
+            walk.clear()
+            return Intent(
+                left=face_left,
+                right=face_right_now,
+                note=f"twin face grab {foe.label} [{tag}]",
+            )
+        return _walk_toward(
+            walk,
+            me,
+            goal_x=float(foe.world_x),
+            goal_y=float(foe.world_y),
+            reason=f"twin close grab {foe.label} [{tag}]",
+            snapshot=snapshot,
+            advice=advice,
+            nav=nav,
+            eps_x=4.0,
+            eps_y=6.0,
+        )
+
+    if mix == "punch" and punch_ok:
+        blocked = _ally_block("punch")
+        if blocked is not None:
+            return blocked
+        walk.clear()
+        ctx.set_attack_cd(3)
+        return Intent(
+            left=face_left,
+            right=face_right_now,
+            attack=True,
+            note=f"twin punch {foe.label} [{tag}]",
+        )
+
+    # Geometry ready but wrong face: face then next tick punches.
+    if punch_geom and not facing_ok and lane_ok and not is_dangerous(phase):
+        walk.clear()
+        ctx.set_attack_cd(1)
+        return Intent(
+            left=face_left,
+            right=face_right_now,
+            note=f"twin face {foe.label} [{tag}]",
+        )
+
+    return None
 
 
 def _stand_point(

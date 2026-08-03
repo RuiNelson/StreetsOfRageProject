@@ -304,14 +304,13 @@ for tests/HUD.
      `$16118` is Souther's claw/contact state and `$15D0C` is the twins'
      damaging jump/grab choreography. Keep grounded against Souther; leave a
      committed boss attack lane. Twins use **Level-C scene composition**
-     (`agent/scene.py`, AISpec §9.4b): **PAIR** (both live) → **focus-fire
-     lowest HP** until one dies; **grounded punches must land** (`range_scale`
-     ≤1.0; idle pair proximity must not freeze combat). Boss tactics only on
-     real threats (bracket, DANGEROUS commit on our depth, partner coplanar
-     intrusion) then return to free combat; partner DANGEROUS does not retarget.
-     Policy short-circuits `twin focus punch` when geometry allows. **SURVIVOR**
-     (one live) → pressure/grab plan and lane evade only on DANGEROUS. ROM has
-     no enrage: one body left is the entire second phase and is much easier.
+     (`agent/scene.py`, AISpec §9.4b): **PAIR** → focus-fire lowest HP with
+     **full attack mix** (punch/jump/grab/rear). Twin phase decode: only
+     primary `$02` or tactical `$02`/`$03` is DANGEROUS — chase `$01` is
+     NORMAL and must be struck (a prior `t!=0→ATTACKING` bug caused perpetual
+     evade). Policy `_twin_attack_intent` before soft sidesteps. Never
+     reengage into a twin commit lane. **SURVIVOR** → full pressure/grab.
+     ROM has no enrage: one body left is much easier.
 10. Route around floor holes (stage 4), factory presses (stage 6), and hold
     the elevator (stage 7)
     - Stage-4 horizontal progression must turn into a persistent vertical

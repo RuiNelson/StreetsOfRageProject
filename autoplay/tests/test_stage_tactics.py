@@ -229,6 +229,33 @@ class BossPhaseTests(unittest.TestCase):
             CombatPhase.ATTACKING,
         )
 
+    def test_twin_chase_is_not_dangerous(self) -> None:
+        """State-1 tactical $01 is walk/chase, not a jump/grab commit."""
+        self.assertEqual(
+            boss_phase(type_id=0x58, primary_byte=0x01, tactical=0x00),
+            CombatPhase.NORMAL,
+        )
+        self.assertEqual(
+            boss_phase(type_id=0x58, primary_byte=0x01, tactical=0x01),
+            CombatPhase.NORMAL,
+        )
+
+    def test_twin_jump_and_leap_tacticals_are_attacking(self) -> None:
+        self.assertEqual(
+            boss_phase(type_id=0x58, primary_byte=0x01, tactical=0x02),
+            CombatPhase.ATTACKING,
+        )
+        self.assertEqual(
+            boss_phase(type_id=0x58, primary_byte=0x01, tactical=0x03),
+            CombatPhase.ATTACKING,
+        )
+
+    def test_twin_hit_reaction_is_punishable_recovery(self) -> None:
+        self.assertEqual(
+            boss_phase(type_id=0x58, primary_byte=0x03, tactical=0),
+            CombatPhase.RECOVERY,
+        )
+
 
 class BossTacticTests(unittest.TestCase):
     def setUp(self) -> None:

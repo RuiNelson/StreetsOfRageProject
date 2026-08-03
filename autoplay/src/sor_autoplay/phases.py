@@ -152,15 +152,33 @@ def boss_phase(
             return CombatPhase.ATTACKING
         return CombatPhase.NORMAL
 
-    # Souther and Onihime/Yasha both use primary state $02 for their live
-    # attack choreography even when tactical +$67 is zero.  The state tables
-    # dispatch Souther $02 to $16118 (claw/contact) and the twins $02 to
-    # $15D0C (jump/grab with outgoing damage).  Treating these as NORMAL made
-    # the policy walk back into Stage-2 claws and Stage-5 twin grabs.
-    if type_id in (0x55, 0x58) and p == 0x02:
+    # Souther primary $02 is claw/contact even when +$67 is zero.
+    if type_id == 0x55 and p == 0x02:
         return CombatPhase.ATTACKING
 
-    # Later bosses $55-$58: police reaction shared state $0A
+    # Onihime/Yasha (type $58) — ROM tables at $158D8 / $15A5E / $15BE0:
+    #   primary $01 active combat: +$67 $00 idle, $01 chase/walk, $02 jump
+    #   attack, $03 leap-to-grab. Only $02/$03 (and primary $02 commit) are
+    #   damaging commits. Treating chase ($01) as ATTACKING made the agent
+    #   perpetual-evade and never punch/jump/grab.
+    if type_id == 0x58:
+        if p == 0x02:
+            return CombatPhase.ATTACKING  # $15D0C grab/throw commit
+        if p == 0x0A:
+            return CombatPhase.RECOVERY  # police special
+        if p == 0x05 or p >= 0x0C:
+            return CombatPhase.DEATH
+        if p in (0x03, 0x04):
+            return CombatPhase.RECOVERY  # hit reaction / recover → punish
+        if p in (0x06, 0x07, 0x08, 0x09):
+            return CombatPhase.RECOVERY  # shared grabbee / airborne cleanup
+        if p == 0x01:
+            if t in (0x02, 0x03):
+                return CombatPhase.ATTACKING  # jump attack / leap-to-grab
+            return CombatPhase.NORMAL  # idle $00 or chase $01 — free to strike
+        return CombatPhase.NORMAL
+
+    # Later bosses $55-$58 (non-twin paths above): police reaction shared $0A
     if p == 0x0A:
         return CombatPhase.RECOVERY
     if p >= 0x0C:

@@ -13,7 +13,7 @@ Family behaviours (``ai-analysis/enemy-ai.md``):
 | Antonio | Boomerang / mid spacing | Stay just outside $28-$78 attack window, then burst |
 | Souther | Claws, punishes jumps | Prefer grounded combos; avoid jump-ins |
 | Bongo | Lane circle + charge/flame | Sidestep charge lane, punish after breath |
-| Onihime/Yasha | Jump grabs / twin split | PAIR: focus-fire lowest HP, no jump; SURVIVOR: pressure/grab |
+| Onihime/Yasha | Jump grabs / twin split | PAIR: focus-fire full mix; SURVIVOR: full pressure |
 | Mr. X | Charge / fire (type $35) | Mid-close pressure, rear escape when charged |
 
 These are **heuristics** for the autoplay agent, not frame-perfect TAS scripts.

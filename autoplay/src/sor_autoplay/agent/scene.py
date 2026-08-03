@@ -48,36 +48,36 @@ class TwinComposition(Enum):
     SURVIVOR = auto()
 
 
-# Normative pair plan: focus-fire one body with grounded punches.
-# range_scale MUST stay ≤1.0 so stand-off stays inside measured punch boxes
-# (scale>1 parked past strike_range and never pressed B). Never jump into
-# grab commit; body-grab between two twins is still a trap.
+# Pair plan: focus-fire lowest HP with the **full** attack toolkit.
+# range_scale ≤1.0 keeps stand-off inside measured punch boxes.
+# jump/grab/rear enabled — a prior no_jump + grab_bias≈0 plan never mixed.
+# grab_bias stays below 0.5 so punches still win in-range (Nora-level grab
+# would starve B punches); back-shield and close walk still elevate grabs.
 _TWIN_PAIR_PLAN = CounterPlan(
     ThreatKind.JUMP_GRAB,
     range_scale=1.0,
     prefer_lane_delta=0.0,
-    jump_bias=0.0,
-    rear_bias=0.40,
-    grab_bias=0.05,
+    jump_bias=0.55,
+    rear_bias=0.55,
+    grab_bias=0.35,
     sidestep=True,
-    no_jump=True,
+    no_jump=False,
     priority=2.9,
-    note="twins pair — focus-fire lowest HP, grounded punches",
+    note="twins pair — focus-fire full mix (punch/jump/grab/rear)",
 )
 
-# Survivor (unpaired): pair constraints gone; can promote to grab AI. Pressure
-# with grounded tools and optional body grab; light jump only on punish.
+# Survivor (unpaired): drop pair constraints; promote grabs + pressure.
 _TWIN_SURVIVOR_PLAN = CounterPlan(
     ThreatKind.JUMP_GRAB,
-    range_scale=1.05,
+    range_scale=1.0,
     prefer_lane_delta=0.0,
-    jump_bias=0.15,
-    rear_bias=0.25,
-    grab_bias=0.50,
+    jump_bias=0.45,
+    rear_bias=0.45,
+    grab_bias=0.55,
     sidestep=True,
     no_jump=False,
     priority=2.6,
-    note="twin survivor — pressure/grab",
+    note="twin survivor — full pressure (grab/punch/jump)",
 )
 
 

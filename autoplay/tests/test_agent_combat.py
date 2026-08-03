@@ -273,11 +273,14 @@ class EnemyCounterTests(unittest.TestCase):
             twin_composition((a, b)), TwinComposition.PAIR
         )
         pair = plan_for(a, (a, b))
-        self.assertTrue(pair.no_jump)
-        self.assertLess(pair.grab_bias, 0.2)
+        self.assertFalse(pair.no_jump)
+        self.assertGreaterEqual(pair.jump_bias, 0.5)
+        self.assertGreaterEqual(pair.rear_bias, 0.5)
+        self.assertLess(pair.grab_bias, 0.5)  # punches still win in-range
         self.assertLessEqual(pair.range_scale, 1.0)
         self.assertIn("pair", pair.note)
         self.assertIn("focus-fire", pair.note)
+        # Mid-range jump window must request a jump kick, not wait.
         self.assertEqual(
             attack_mix(
                 pair,
@@ -287,8 +290,34 @@ class EnemyCounterTests(unittest.TestCase):
                 can_jump=True,
                 lane_ok=True,
                 facing_ok=True,
+                jump_hits=1,
+                jump_score=1.5,
             ),
-            "wait",
+            "jump",
+        )
+        self.assertEqual(
+            attack_mix(
+                pair,
+                PROFILES[0],
+                in_range=True,
+                band="close",
+                can_jump=True,
+                lane_ok=True,
+                facing_ok=True,
+            ),
+            "punch",
+        )
+        self.assertEqual(
+            attack_mix(
+                pair,
+                PROFILES[0],
+                in_range=True,
+                band="close",
+                lane_ok=True,
+                facing_ok=True,
+                behind=True,
+            ),
+            "rear",
         )
 
         self.assertEqual(twin_composition((a,)), TwinComposition.SURVIVOR)

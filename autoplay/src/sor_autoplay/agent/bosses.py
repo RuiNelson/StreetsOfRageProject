@@ -29,9 +29,10 @@ TWIN_TYPE = scene_ai.TWIN_TYPE
 
 # Leave a commit lane by this much before free combat may re-enter.
 _TWIN_COMMIT_CLEARANCE = 28.0
-# Partner body intrusion (grab setup window is ROM X < $90; act earlier).
-_TWIN_INTRUDE_X = 56.0
-_TWIN_INTRUDE_Y = 14.0
+# Partner body intrusion — only when almost on top of us (not mid-range chase).
+# Wider windows stole every free-combat decision and starved attacks.
+_TWIN_INTRUDE_X = 36.0
+_TWIN_INTRUDE_Y = 12.0
 
 
 @dataclass(frozen=True, slots=True)

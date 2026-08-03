@@ -711,7 +711,7 @@ Hysteresis: keep current target unless challenger utility ≥ current + **0.12**
 | Souther `$55` | 1.05        | 0         | 0.10      |          | yes     | grounded              |
 | Antonio `$56` | 1.35        | 0         | 0.85      | yes      |         | midrange              |
 | Bongo `$57`   | 1.25        | 0.90      | 0         | yes      | yes     | flame                 |
-| Twins `$58`   | scene       | scene     | scene     | yes      | scene   | **§9.4b** pair/survivor |
+| Twins `$58`   | scene       | scene     | scene     | yes      | scene   | **§9.4b** full attack mix |
 | Mr. X `$35`   | 1.0         | 0.50      | 0.50      | yes      |         | final                 |
 
 Static fallback when no entity list is passed (unit helpers only): range 1.1,
@@ -733,22 +733,36 @@ Living = `kind==boss`, `type_id==$58`, not `is_defeated`.
 
 **Pair doctrine:** finish **one** twin first. ROM has no enrage table — the
 visible “phase 2” is simply the survivor without pair constraints, and it is
-much easier. Combat **focus-fires the lowest-HP** twin; partner jump/grab
-commits are **evaded then returned to** (lane tactics), never used to retarget
-damage onto the partner.
+much easier. Combat **focus-fires the lowest-HP** twin with the **full attack
+toolkit** (punch / jump-kick / grab / rear); partner jump/grab commits are
+**evaded then returned to**, never used to retarget damage onto the partner.
+
+#### Twin phase decode (`phases.boss_phase` type `$58`)
+
+| Primary `+$30` | Tactical `+$67` | Phase | Meaning |
+| --- | --- | --- | --- |
+| `$02` | any | **ATTACKING** | Grab/throw commit `$15D0C` |
+| `$01` | `$02` or `$03` | **ATTACKING** | Jump attack / leap-to-grab |
+| `$01` | `$00` or `$01` | **NORMAL** | Idle / **chase walk** — free to strike |
+| `$03`/`$04` | any | **RECOVERY** | Hit reaction — **punish** |
+| `$0A` | any | RECOVERY | Police special |
+| `$05` / ≥`$0C` | any | DEATH | |
+
+**Critical:** chase (`+$67=$01`) must **not** be DANGEROUS. A prior generic
+`t != 0 → ATTACKING` rule made the agent perpetual-evade and never attack.
 
 #### Pair plan (both present)
 
 | Field | Value | Rationale |
 | ----- | ----- | --------- |
-| range_scale | **1.0** | Must stay ≤1.0 so stand-off stays inside measured punch boxes |
-| jump_bias | **0** | Do not jump into grab commit |
-| grab_bias | **0.05** | Do not walk into body between twins |
-| rear_bias | 0.40 | Rear B+C when one flanks |
-| sidestep | **true** | Lane mobility on commits only |
-| no_jump | **true** | Hard ban on jump-kick while pair is up |
+| range_scale | **1.0** | Stand inside measured punch boxes |
+| jump_bias | **0.55** | Jump-kick mid range / pack |
+| grab_bias | **0.35** | &lt;0.5 so punches win in-range; grabs via close walk / back-shield |
+| rear_bias | **0.55** | Rear B+C when twin is behind |
+| sidestep | **true** | Lane leave only on real commits |
+| no_jump | **false** | Full C→B toolkit enabled |
 | priority | 2.9 | Slightly above static twin |
-| note | `twins pair — focus-fire lowest HP, grounded punches` | |
+| note | `twins pair — focus-fire full mix (punch/jump/grab/rear)` | |
 
 Target focus-fire bonus (`twin_focus_bonus`, added to utility, cap **0.18**).
 Uses `twin_effective_hp` (defeated/lethal → `0x7FFF`; `health is None` → base
@@ -777,33 +791,34 @@ Target hysteresis while **PAIR** (`twin_pair_should_stick` in `select_target`):
 
 Boss movement while **PAIR** (`bosses.tactical_move` / `_twin_pair_tactic`):
 
-Threats only — idle proximity must **not** freeze free combat (a previous
-isolate/hold path parked the agent off-lane forever and never pressed B).
+Threats only — and only **true** DANGEROUS commits (see phase table). Chase
+walk is NORMAL and must not trigger pressure evade.
 
-1. Nearby twins **bracket** player on X (ΔX≤150, ΔY≤36, one left + one right) **and** player still on shared depth → sidestep shared lane; note `twins pair surround`. Already clear of shared depth → **None**.
-2. Else any nearby twin DANGEROUS **and** player on that twin's depth (clearance **28**) → sidestep **that** lane (`most_urgent_dangerous_twin`); note `twins pair pressure`. Already clear → **None** (do not hold).
-3. Else non-focus twin coplanar (ΔX≤**56**, ΔY≤**14**) → sidestep partner lane (clearance **22**); note `twins pair isolate`.
-4. Else **None** — free combat owns grounded punches on the focus twin.
+1. Bracket on X **and** still on shared depth → sidestep; note `twins pair surround`. Clear → **None**.
+2. Nearby twin with real commit **and** on that depth (clearance **28**) → sidestep; note `twins pair pressure`. Clear → **None** (never hold-freeze).
+3. Non-focus twin almost on top of player (ΔX≤**36**, ΔY≤**12**) → sidestep partner; note `twins pair isolate`.
+4. Else **None**.
 
-Policy free-combat also short-circuits a legal focus punch (`twin focus punch`)
-when geometry/facing allow and the focus is not DANGEROUS, so a soft tactic
-cannot starve damage.
+Policy free combat (`_twin_attack_intent`) runs **before** soft sidesteps and
+emits the full mix with notes `twin punch` / `twin jump` / `twin grab` /
+`twin rear` / `twin face`. Never reengage into a twin commit lane
+(`enemy_attack_committed` reengage is disabled for type `$58`).
 
 Stand point while PAIR: park on the side of the focus **opposite** the partner
-(`_twin_partner_side`) so the second twin has a longer path into grab range.
+(`_twin_partner_side`).
 
 #### Survivor plan (only one remains)
 
 | Field | Value | Rationale |
 | ----- | ----- | --------- |
-| range_scale | **1.05** | Closer pressure once partner is gone |
-| jump_bias | **0.15** | Light jump only via normal mix thresholds |
-| grab_bias | **0.50** | Body grab / hold tree is legal and useful |
-| rear_bias | 0.25 | |
-| sidestep | **true** | Still leave jump-grab lane |
-| no_jump | **false** | Jump allowed (solver / mix may still pick punch) |
+| range_scale | **1.0** | Punch range |
+| jump_bias | **0.45** | Jump still useful solo |
+| grab_bias | **0.55** | Body grab / hold tree preferred |
+| rear_bias | **0.45** | |
+| sidestep | **true** | Leave jump-grab lane on commit |
+| no_jump | **false** | Full toolkit |
 | priority | 2.6 | |
-| note | `twin survivor — pressure/grab` | |
+| note | `twin survivor — full pressure (grab/punch/jump)` | |
 
 Boss movement while **SURVIVOR**: only when focused twin is DANGEROUS → evade attack lane; note `twin survivor jump/grab`. Otherwise free combat owns the tree (grab_walk / punch via survivor plan).
 
