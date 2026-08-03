@@ -301,6 +301,7 @@ autoplay/
       combat.py         # fuzzy phase-aware targeting / approach
       enemies.py        # family/boss counter plans
       grabs.py          # hold / knee / throw / weapon trees
+      weapons.py        # ROM damage/range equations + utility
       pressure.py       # fuzzy police-special pressure
       stage.py          # holes, elevator, stage 8, Mr. X
       navigation.py     # symbolic hole detours, side breakables, jump safety

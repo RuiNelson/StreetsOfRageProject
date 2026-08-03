@@ -25,15 +25,16 @@ from ..memory_map import ADDR_P1_OBJECT_LO, ADDR_P2_OBJECT_LO
 from ..phases import CombatPhase, is_dangerous
 from ..world_map import MapEntity
 from . import coop
+from . import weapons as W
 from .characters import CharacterProfile, DEFAULT_PROFILE
 from .controls import Intent
 
 
-WEAPON_KNIFE = 0x08
-WEAPON_BOTTLE = 0x09
-WEAPON_BAT = 0x0A
-WEAPON_PIPE = 0x0B
-WEAPON_PEPPER = 0x0C
+WEAPON_KNIFE = W.WEAPON_KNIFE
+WEAPON_BOTTLE = W.WEAPON_BOTTLE
+WEAPON_BAT = W.WEAPON_BAT
+WEAPON_PIPE = W.WEAPON_PIPE
+WEAPON_PEPPER = W.WEAPON_PEPPER
 
 # Keep treating a proven hold as active through one missed observer sample.
 # A longer latch feeds its own B presses back into the $60-$6F reaction family
@@ -602,11 +603,24 @@ def _weapon_tree(
     profile: CharacterProfile,
     ally: MapEntity | None = None,
 ) -> Intent | None:
+    """Use held weapons with ROM range/damage geometry (see ``weapons``).
+
+    - Bat/pipe: B only when ``|ΔX| ≤ 36`` and lane ``|ΔY| ≤ 12``.
+    - Knife: B throw when foe is in the throw corridor (up to 160 px) so
+      far-but-hittable enemies are thrown at; no punch while armed.
+    - Pepper: B throw in a shorter corridor (≤100 px) + immobilize value.
+    - Bottle: not attack-thrown; dump only at melee body range.
+    """
+
     del tick
-    held = ctx.held_type
-    melee = held in (WEAPON_BAT, WEAPON_PIPE)
-    throwable = held in (WEAPON_KNIFE, WEAPON_BOTTLE, WEAPON_PEPPER)
+    held = ctx.held_type & 0xFF
+    if not W.is_weapon_type(held):
+        return None
+
+    melee = W.is_melee_weapon(held)
+    throwable = W.is_throw_weapon(held)
     blaze_weak = held in profile.weak_weapons
+    dmg = W.damage_of(held)
 
     # The ROM's held-weapon jump family ($3C-$42) is owned by the airborne
     # policy. It steers the evasion without manufacturing an unsupported
@@ -640,17 +654,22 @@ def _weapon_tree(
 
     dx = foe.map_x - me.map_x
     dy = foe.map_y - me.map_y
-    if abs(dy) > 12:
+    abs_dx = abs(dx)
+    abs_dy = abs(dy)
+    if not W.in_weapon_lane(dy):
         return None
+    # Desired facing toward the foe (Intent will turn if needed).
     if dx < 0:
-        face_left, face_right = True, False
+        want_left, want_right = True, False
     elif dx > 0:
-        face_left, face_right = False, True
+        want_left, want_right = False, True
     else:
-        face_left = bool(me.action_state & 0x01)
-        face_right = not face_left
-    in_melee = abs(dx) <= 36
-    mid = 20 <= abs(dx) <= 100
+        want_left = bool(me.action_state & 0x01)
+        want_right = not want_left
+    # ROM facing: action +$30 bit 0 set = facing left.
+    current_face_left = bool(me.action_state & 0x01)
+    face_ok = W.facing_toward(dx, current_face_left)
+    face_left, face_right = want_left, want_right
 
     # Never swing or throw a weapon near a co-op partner (SoR1 friendly fire).
     # Omnidirectional bubble: thrown knives pass partners behind as well.
@@ -661,31 +680,83 @@ def _weapon_tree(
     ):
         return None
 
+    # --- Bat / steel pipe: origin reach 36 px (live Axel) ---
     if melee:
-        if not in_melee:
+        if not W.melee_can_connect(abs_dx, abs_dy):
             return None
-        return Intent(
-            left=face_left,
-            right=face_right,
-            attack=True,
-            note=f"weapon swing ${held:02X}",
-        )
-
-    if throwable:
-        if not (mid or in_melee):
-            return None
-        if blaze_weak:
+        if not face_ok:
             return Intent(
                 left=face_left,
                 right=face_right,
-                attack=True,
-                note=f"dump weapon ${held:02X}",
+                note=f"weapon face ${held:02X} d={dmg}",
             )
         return Intent(
             left=face_left,
             right=face_right,
             attack=True,
-            note=f"weapon use ${held:02X}",
+            note=f"weapon swing ${held:02X} d={dmg} r≤{W.MELEE_ORIGIN_REACH:.0f}",
+        )
+
+    # --- Knife: throw when far-but-hittable (and any in-envelope) ---
+    if held == W.WEAPON_KNIFE:
+        if not W.knife_should_throw(abs_dx, abs_dy):
+            return None
+        if not face_ok:
+            # Turn toward foe first so the ±48 launch and +vx aim correctly.
+            return Intent(
+                left=face_left,
+                right=face_right,
+                note=f"weapon face knife d={dmg}",
+            )
+        far = abs_dx >= W.KNIFE_THROW_MIN
+        note = (
+            f"weapon throw knife d={dmg} dx={abs_dx:.0f}≤{W.KNIFE_THROW_MAX:.0f}"
+            if far
+            else f"weapon throw knife d={dmg} close"
+        )
+        return Intent(
+            left=face_left,
+            right=face_right,
+            attack=True,
+            note=note,
+        )
+
+    # --- Pepper: throw corridor + immobilize ---
+    if held == W.WEAPON_PEPPER:
+        if not W.pepper_should_throw(abs_dx, abs_dy):
+            return None
+        if not face_ok:
+            return Intent(
+                left=face_left,
+                right=face_right,
+                note=f"weapon face pepper d={dmg}",
+            )
+        return Intent(
+            left=face_left,
+            right=face_right,
+            attack=True,
+            note=(
+                f"weapon throw pepper d={dmg} "
+                f"stun={W.PEPPER_IMMOBILIZE_FRAMES}f"
+            ),
+        )
+
+    # --- Bottle: not attack-thrown; dump only at melee ---
+    if held == W.WEAPON_BOTTLE:
+        if not W.bottle_should_dump(abs_dx, abs_dy):
+            return None
+        if not face_ok:
+            return Intent(
+                left=face_left,
+                right=face_right,
+                note=f"weapon face bottle d={dmg}",
+            )
+        tag = "dump" if blaze_weak else "use"
+        return Intent(
+            left=face_left,
+            right=face_right,
+            attack=True,
+            note=f"weapon {tag} bottle d={dmg}",
         )
 
     return None

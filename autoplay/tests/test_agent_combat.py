@@ -540,7 +540,8 @@ class GrabTreeTests(unittest.TestCase):
             map_x=100,
             map_y=64,
         )
-        far = _e(map_x=230, map_y=64)
+        # Beyond knife envelope (160) or off-lane: do not throw.
+        far = _e(map_x=280, map_y=64)  # |dx|=180 > 160
         off_lane = _e(map_x=150, map_y=90)
         for foe in (far, off_lane):
             with self.subTest(foe=foe.map_x, lane=foe.map_y):
@@ -553,6 +554,19 @@ class GrabTreeTests(unittest.TestCase):
                         foe=foe,
                     )
                 )
+        # Far-but-hittable: knife must throw (ROM envelope ≤160).
+        hittable = _e(map_x=230, map_y=64)  # |dx|=130
+        intent = decide_held(
+            me,
+            context_from_player(me),
+            GrabMemory(),
+            tick=1,
+            foe=hittable,
+        )
+        self.assertIsNotNone(intent)
+        assert intent is not None
+        self.assertTrue(intent.attack)
+        self.assertIn("throw knife", intent.note)
 
     def test_weapon_does_not_repeat_attack_during_weapon_animation(self) -> None:
         foe = _e(map_x=120, map_y=64)

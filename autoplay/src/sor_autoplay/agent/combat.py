@@ -38,6 +38,12 @@ from .jump_kick import (
     can_jump_kick_solved,
     solve_jump_kick,
 )
+from .weapons import (
+    SPECS as _WEAPON_SPECS,
+    is_weapon_upgrade,
+    weapon_utility,
+    weapon_value,
+)
 from .knowledge import Relation, TacticalKnowledgeGraph
 
 
@@ -714,48 +720,8 @@ def can_break(
     return can_punch(me, prop, profile, require_facing=require_facing)
 
 
-# ROM values from ai-analysis/items-and-weapons.md: bottle damage 3, knife 5,
-# bat/pipe 4 with long melee reach, and pepper damage 2 plus immobilization.
-# Values deliberately include control/range rather than sorting by damage only.
-_WEAPON_BASE_VALUE: dict[int, float] = {
-    0x08: 0.62,  # knife
-    0x09: 0.32,  # one-way bottle/shards
-    0x0A: 0.82,  # baseball bat, long melee
-    0x0B: 0.82,  # steel pipe, long melee
-    0x0C: 0.52,  # pepper spray, low damage but immobilizes
-}
-
-
-def weapon_value(type_id: int, profile: CharacterProfile | None = None) -> float:
-    """Fuzzy usefulness of a carried weapon for one character profile."""
-
-    tid = type_id & 0xFF
-    value = _WEAPON_BASE_VALUE.get(tid, 0.0)
-    if profile is not None:
-        if tid in profile.preferred_weapons:
-            value += 0.12
-        if tid in profile.weak_weapons:
-            value -= 0.20
-    return clamp01(value)
-
-
-def is_weapon_upgrade(
-    current_type: int,
-    candidate_type: int,
-    profile: CharacterProfile | None,
-    *,
-    margin: float = 0.08,
-) -> bool:
-    """Whether replacing the held weapon is a material fuzzy improvement."""
-
-    current = current_type & 0xFF
-    candidate = candidate_type & 0xFF
-    if current not in _WEAPON_BASE_VALUE:
-        return candidate in _WEAPON_BASE_VALUE
-    return (
-        weapon_value(candidate, profile)
-        >= weapon_value(current, profile) + margin
-    )
+# Legacy name: known weapon types for pickup upgrade gates.
+_WEAPON_BASE_VALUE = {tid: weapon_utility(tid) for tid in _WEAPON_SPECS}
 
 
 def select_pickup(

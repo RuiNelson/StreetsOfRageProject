@@ -153,7 +153,7 @@ for tests/HUD.
    crowd of at least four, health at or below 40% with a reachable threat, or
    any reachable live boss; a boss forces maximum pressure and the first legal
    grounded A edge immediately.
-6. **Hold-resolve skill** (`agent/skills.py` → `grabs.py`): normally **B+back throw**
+6. **Hold-resolve skill** (`agent/skills.py` → `grabs.py`, `weapons.py`): normally **B+back throw**
    (away = opposite action-state facing bit0). A hold needs a dedicated held
    field or the grabbed enemy's reciprocal player link; the latch bridges only
    one missing observer sample so stale contact/reaction state cannot create an
@@ -161,8 +161,12 @@ for tests/HUD.
    pointer gets one B edge; live this transitions `$60 -> $6A -> $02` in 16
    frames. Also knee fallback; bat/pipe swing; throwable weapons. A carried
    weapon is not a combat target or a reason to press B: with no live foe, or
-   with a foe outside the weapon lane/range, weapon policy returns control to
-   normal stage/combat movement. Weapon holds never enter the enemy-grab latch,
+   with a foe outside the ROM range band, weapon policy returns control to
+   free combat (walk closer). Math lives in `agent/weapons.py`: damage
+   5/3/4/4/2, bat/pipe origin reach 36, knife throw envelope ≤160 (throw when
+   far-but-hittable), pepper stun 160 frames, bottle not attack-thrown.
+   Utility `U = 0.45·(D/5)+0.35·range+0.20·control` drives pickup upgrades;
+   otherwise free stage/combat movement closes the gap. Weapon holds never enter the enemy-grab latch,
    and B is emitted only from input-ready ground actions (ordinary `$02–$0E`
    or held-weapon `$30–$3A`), never repeatedly through `$44/$6x` animations.
    After pepper spray fires, `+$60` clears but `+$5E` can keep pointing at its

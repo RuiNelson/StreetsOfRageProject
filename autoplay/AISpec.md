@@ -363,19 +363,39 @@ Partner boost state machine (`GrabMemory.partner_boost_phase`):
 
 Co-op gate allows intents whose note starts with `partner boost` (intentional tool).
 
-#### 4.3.6 Weapon tree
+#### 4.3.6 Weapon tree (`agent/weapons.py` + `grabs._weapon_tree`)
 
-| Condition                                         | Behaviour                                          |
-| ------------------------------------------------- | -------------------------------------------------- |
-| Airborne                                          | return None → free path owns jump family `$3C–$42` |
-| Not input-ready (`not (0x02–0x0E or 0x30–0x3A)`)  | face foe; no B                                     |
-| No foe, or foe `DANGEROUS`                        | return None → free path / family counters          |
-| \|ΔY\| &gt; 12                                    | return None                                        |
-| Ally in attack bubble (throw range if throwable)  | return None                                        |
-| Bat/pipe (`$0A/$0B`) and \|ΔX\| ≤ 36              | B swing                                            |
-| Knife/bottle/pepper and (mid 20–100 or melee ≤36) | B throw; Blaze on weak weapon still B (“dump”)     |
+ROM math (see `StreetsOfRageRecompilation/ai-analysis/weapons-range-and-damage.md`):
 
-Weapon types: knife `$08`, bottle `$09`, bat `$0A`, pipe `$0B`, pepper `$0C`.
+| Type | D | Kind | Connect when |
+| ---: | ---: | --- | --- |
+| Knife `$08` | **5** | attack throw | \|ΔY\|≤12 and **0 &lt; \|ΔX\| ≤ 160**; face foe first |
+| Bottle `$09` | **3** | dump only (not attack-thrown) | \|ΔY\|≤12 and \|ΔX\| ≤ 36 |
+| Bat/pipe `$0A/$0B` | **4** | melee | \|ΔY\|≤12 and \|ΔX\| ≤ **36** (live origin reach) |
+| Pepper `$0C` | **2** | attack throw + immobilize 160 f | \|ΔY\|≤12 and (\|ΔX\|≤36 or 24–100) |
+
+Utility for pickup/upgrade::
+
+```text
+U = 0.45·(D/5) + 0.35·range_score + 0.20·control_score
+  ± profile preferred/weak; clamp 01
+```
+
+Hits to kill: `ceil(H / D)`.
+
+| Condition | Behaviour |
+| --- | --- |
+| Airborne | return None → free path owns jump family `$3C–$42` |
+| Not input-ready (`not (0x02–0x0E or 0x30–0x3A)`) | face foe; no B |
+| No foe, or foe `DANGEROUS` | return None → free path / family counters |
+| \|ΔY\| &gt; 12 | return None |
+| Ally in attack bubble (throw range if knife/pepper) | return None |
+| Bat/pipe and \|ΔX\| ≤ 36 and facing | B swing |
+| **Knife** and \|ΔX\| ≤ **160** (far but hittable) and facing | **B throw** (only attack while armed) |
+| Knife and facing wrong way | face only (no B) |
+| Pepper in corridor and facing | B throw |
+| Bottle and \|ΔX\| ≤ 36 | B dump (not a projectile throw) |
+| Knife/pepper beyond max envelope | return None (walk closer via free combat) |
 
 ---
 
