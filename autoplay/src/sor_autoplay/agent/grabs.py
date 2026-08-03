@@ -606,8 +606,10 @@ def _weapon_tree(
     """Use held weapons with ROM range/damage geometry (see ``weapons``).
 
     - Bat/pipe: B only when ``|ΔX| ≤ 36`` and lane ``|ΔY| ≤ 12``.
-    - Knife: **melee** (ROM action ``$46``) when foe in front within 144 px;
-      **throw** (``$44``) when 144 < |ΔX| ≤ 160 — far but hittable.
+    - Knife: same B; ROM ``$3084`` picks melee ``$46`` if foe in front ≤144 px,
+      else throw ``$44``. Policy stabs in-cone; throws only when past the cone
+      and a one-shot kill (or we are not conserving the knife); otherwise walks
+      in for multi-hit stabs.
     - Pepper: B throw in a shorter corridor (≤100 px) + immobilize value.
     - Bottle: not attack-thrown; dump only at melee body range.
     """
@@ -698,10 +700,12 @@ def _weapon_tree(
             note=f"weapon swing ${held:02X} d={dmg} r≤{W.MELEE_ORIGIN_REACH:.0f}",
         )
 
-    # --- Knife: melee ($46) in ROM scan cone, throw ($44) beyond it ---
+    # --- Knife: same B → ROM $46 melee in cone, $44 throw outside ---
     if held == W.WEAPON_KNIFE:
-        mode = W.knife_mode(abs_dx, abs_dy)
+        foe_hp = foe.health if foe.health is not None else None
+        mode = W.knife_mode(abs_dx, abs_dy, foe_health=foe_hp)
         if mode is None:
+            # Out of band, or past cone with multi-hit foe: free combat closes.
             return None
         if _ally_blocks(thrown=(mode == "throw")):
             return None
@@ -712,6 +716,7 @@ def _weapon_tree(
                 note=f"weapon face knife d={dmg}",
             )
         if mode == "melee":
+            hits = W.hits_to_kill(foe_hp, held) if foe_hp else 0
             return Intent(
                 left=face_left,
                 right=face_right,
@@ -719,9 +724,10 @@ def _weapon_tree(
                 note=(
                     f"weapon attack knife d={dmg} "
                     f"dx={abs_dx:.0f}≤{W.KNIFE_MELEE_SCAN_X}"
+                    + (f" hits≈{hits}" if hits else "")
                 ),
             )
-        # throw: past $90 scan, within flight envelope
+        # throw: past $90 scan, within flight envelope, preferably one-shot
         return Intent(
             left=face_left,
             right=face_right,

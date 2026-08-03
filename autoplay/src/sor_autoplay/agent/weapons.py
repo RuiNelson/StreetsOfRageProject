@@ -283,6 +283,38 @@ def knife_should_use(abs_dx: float, abs_dy: float) -> bool:
     return knife_should_melee(abs_dx, abs_dy) or knife_should_throw(abs_dx, abs_dy)
 
 
+def knife_decide(
+    abs_dx: float,
+    abs_dy: float,
+    *,
+    foe_health: int | None = None,
+    prefer_keep_knife: bool = True,
+) -> str | None:
+    """Choose ``\"melee\"``, ``\"throw\"``, or None (walk / free combat).
+
+    Same **B** always; ROM picks ``$46`` vs ``$44`` from the front cone. Policy:
+
+    - **Melee** when the cone would select ``$46`` (keeps the knife for more hits).
+    - **Throw** when past the cone but within flight envelope **and** either the
+      foe dies to one knife hit (``H ≤ 5``) or we are not conserving the weapon.
+    - If past the cone, multi-hit foe, and ``prefer_keep_knife``: return None so
+      free combat closes into the stab cone instead of sacrificing the knife.
+    """
+
+    if abs_dy > WEAPON_LANE:
+        return None
+    if knife_should_melee(abs_dx, abs_dy):
+        return "melee"
+    if not knife_should_throw(abs_dx, abs_dy):
+        return None
+    d = DAMAGE[WEAPON_KNIFE]
+    one_shot = foe_health is not None and 0 < foe_health <= d
+    if one_shot or not prefer_keep_knife:
+        return "throw"
+    # Multi-hit target just outside stab cone: close for melee, keep knife.
+    return None
+
+
 def pepper_should_throw(abs_dx: float, abs_dy: float) -> bool:
     return (
         abs_dy <= WEAPON_LANE
@@ -309,14 +341,21 @@ def use_range_for(type_id: int) -> tuple[float, float]:
     return (0.0, 0.0)
 
 
-def knife_mode(abs_dx: float, abs_dy: float) -> str | None:
-    """``\"melee\"``, ``\"throw\"``, or None if out of band."""
+def knife_mode(
+    abs_dx: float,
+    abs_dy: float,
+    *,
+    foe_health: int | None = None,
+    prefer_keep_knife: bool = True,
+) -> str | None:
+    """``\"melee\"``, ``\"throw\"``, or None if out of band / approach preferred."""
 
-    if knife_should_melee(abs_dx, abs_dy):
-        return "melee"
-    if knife_should_throw(abs_dx, abs_dy):
-        return "throw"
-    return None
+    return knife_decide(
+        abs_dx,
+        abs_dy,
+        foe_health=foe_health,
+        prefer_keep_knife=prefer_keep_knife,
+    )
 
 
 def expected_damage_over_hits(type_id: int, hits: int) -> int:

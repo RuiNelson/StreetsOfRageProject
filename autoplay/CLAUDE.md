@@ -163,8 +163,10 @@ for tests/HUD.
    weapon is not a combat target or a reason to press B: with no live foe, or
    with a foe outside the ROM range band, weapon policy returns control to
    free combat (walk closer). Math lives in `agent/weapons.py`: damage
-   5/3/4/4/2, bat/pipe origin reach 36, knife **melee within 144 px** (ROM `$46`)
-   or **throw 144–160** (`$44`), pepper stun 160 frames, bottle not attack-thrown.
+   5/3/4/4/2, bat/pipe origin reach 36. Knife same B: ROM `$3084` picks melee
+   `$46` if front ≤144 px else throw `$44`; policy stabs in-cone, throws past
+   cone only for one-shot kills (else walks in). Pepper stun 160f; bottle not
+   attack-thrown.
    Utility `U = 0.45·(D/5)+0.35·range+0.20·control` drives pickup upgrades;
    otherwise free stage/combat movement closes the gap. Weapon holds never enter the enemy-grab latch,
    and B is emitted only from input-ready ground actions (ordinary `$02–$0E`

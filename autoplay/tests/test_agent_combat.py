@@ -568,8 +568,8 @@ class GrabTreeTests(unittest.TestCase):
         self.assertTrue(intent_m.attack)
         self.assertIn("attack knife", intent_m.note)
 
-        # Past scan cone, within flight envelope: throw.
-        far_hit = _e(map_x=250, map_y=64)  # |dx|=150
+        # Past scan cone, one-shot: throw.
+        far_hit = _e(map_x=250, map_y=64, health=4)  # |dx|=150
         intent_t = decide_held(
             me,
             context_from_player(me),
@@ -581,6 +581,17 @@ class GrabTreeTests(unittest.TestCase):
         assert intent_t is not None
         self.assertTrue(intent_t.attack)
         self.assertIn("throw knife", intent_t.note)
+        # Multi-hit at same range: approach for stabs (keep knife).
+        tough = _e(map_x=250, map_y=64, health=9)
+        self.assertIsNone(
+            decide_held(
+                me,
+                context_from_player(me),
+                GrabMemory(),
+                tick=1,
+                foe=tough,
+            )
+        )
 
     def test_weapon_does_not_repeat_attack_during_weapon_animation(self) -> None:
         foe = _e(map_x=120, map_y=64)
