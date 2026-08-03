@@ -17,6 +17,11 @@ from sor_autoplay.agent.enemies import (
     jack_weapon_phase,
     plan_for,
 )
+from sor_autoplay.agent.scene import (
+    TwinComposition,
+    twin_composition,
+    twin_focus_bonus,
+)
 from sor_autoplay.agent.grabs import (
     GrabMemory,
     context_from_player,
@@ -47,8 +52,10 @@ def _e(
     held_ptr: int = 0,
     primary_state: int = 0,
     family_state: int = 0,
+    pair_role: int = 0,
+    combat_phase=None,
 ) -> MapEntity:
-    return MapEntity(
+    kwargs: dict = dict(
         kind=kind,
         family=family,
         symbol="X",
@@ -68,7 +75,11 @@ def _e(
         held_ptr=held_ptr,
         primary_state=primary_state,
         family_state=family_state,
+        pair_role=pair_role,
     )
+    if combat_phase is not None:
+        kwargs["combat_phase"] = combat_phase
+    return MapEntity(**kwargs)
 
 
 class EnemyCounterTests(unittest.TestCase):
@@ -235,6 +246,88 @@ class EnemyCounterTests(unittest.TestCase):
         }
         self.assertNotIn("jump", mixes)
         self.assertIn("punch", mixes)
+
+    def test_twin_pair_vs_survivor_scene_plans(self) -> None:
+        from sor_autoplay.phases import CombatPhase
+
+        a = _e(
+            kind="boss",
+            family="Onihime/Yasha",
+            type_id=0x58,
+            slot="B0",
+            map_x=140,
+            pair_role=1,
+        )
+        b = _e(
+            kind="boss",
+            family="Onihime/Yasha",
+            type_id=0x58,
+            slot="B1",
+            map_x=180,
+            pair_role=2,
+        )
+        self.assertEqual(
+            twin_composition((a, b)), TwinComposition.PAIR
+        )
+        pair = plan_for(a, (a, b))
+        self.assertTrue(pair.no_jump)
+        self.assertLess(pair.grab_bias, 0.2)
+        self.assertGreaterEqual(pair.range_scale, 1.2)
+        self.assertIn("pair", pair.note)
+        self.assertEqual(
+            attack_mix(
+                pair,
+                PROFILES[0],
+                in_range=False,
+                band="jump",
+                can_jump=True,
+                lane_ok=True,
+                facing_ok=True,
+            ),
+            "wait",
+        )
+
+        self.assertEqual(twin_composition((a,)), TwinComposition.SURVIVOR)
+        survivor = plan_for(a, (a,))
+        self.assertFalse(survivor.no_jump)
+        self.assertGreaterEqual(survivor.grab_bias, 0.45)
+        self.assertIn("survivor", survivor.note)
+        self.assertEqual(
+            attack_mix(
+                survivor,
+                PROFILES[0],
+                in_range=False,
+                band="approach",
+                lane_ok=True,
+                facing_ok=True,
+                grabbable=True,
+            ),
+            "grab_walk",
+        )
+
+        # Isolation prefers the grab-role / dangerous twin.
+        grabber = _e(
+            kind="boss",
+            family="Onihime/Yasha",
+            type_id=0x58,
+            slot="B1",
+            map_x=180,
+            pair_role=2,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+        approacher = _e(
+            kind="boss",
+            family="Onihime/Yasha",
+            type_id=0x58,
+            slot="B0",
+            map_x=140,
+            pair_role=1,
+            combat_phase=CombatPhase.NORMAL,
+        )
+        self.assertGreater(
+            twin_focus_bonus(grabber, (approacher, grabber)),
+            twin_focus_bonus(approacher, (approacher, grabber)),
+        )
 
 
 class GrabTreeTests(unittest.TestCase):

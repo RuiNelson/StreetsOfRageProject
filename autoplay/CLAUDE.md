@@ -307,9 +307,11 @@ for tests/HUD.
    - Souther (type `$55`) and Onihime/Yasha (type `$58`) both use primary
      state `$02` for live attacks even when tactical `+$67` is zero:
      `$16118` is Souther's claw/contact state and `$15D0C` is the twins'
-     damaging jump/grab choreography. Keep grounded against Souther, leave a
-     committed boss attack lane, and escape vertically when the twins bracket
-     the player so focusing either one does not expose the player's back
+     damaging jump/grab choreography. Keep grounded against Souther; leave a
+     committed boss attack lane. Twins use **Level-C scene composition**
+     (`agent/scene.py`, AISpec §9.4b): **PAIR** (both live) → no-jump mobile
+     isolate + surround/pressure/isolate boss tactics; **SURVIVOR** (one live)
+     → pressure/grab plan and lane evade only on DANGEROUS
 10. Route around floor holes (stage 4), factory presses (stage 6), and hold
     the elevator (stage 7)
     - Stage-4 horizontal progression must turn into a persistent vertical

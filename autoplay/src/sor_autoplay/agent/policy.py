@@ -829,7 +829,11 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             grabbable = False
 
         dx, dy, _geom, plan = combat.approach_vector(
-            me, target, profile, low_health=low_hp
+            me,
+            target,
+            profile,
+            low_health=low_hp,
+            entities=snapshot.world_map.entities,
         )
         if back_exposed and grabbable:
             plan = dc_replace(
@@ -1643,12 +1647,14 @@ def _stand_point(
     ``approach_offset`` (44–56) so measured punches still reach but enemies do
     not free-hit us. Armed seats use ``weapon.approach_stand_dx`` so knife /
     pepper / bat keep their reach advantage instead of walking into punch range.
+    Scene plans (twin pair/survivor) scale stand-off via ``target.plan``.
     Always match the foe's lane (off-lane = air punches).
     """
 
     from . import weapons as W
 
     foe = target.entity
+    plan = target.plan
     side = -1.0 if (foe.world_x - me.world_x) > 0 else 1.0
     if me.is_holding_weapon and W.is_weapon_type(me.held_type):
         dist = W.approach_stand_dx(me.held_type, profile)
@@ -1658,11 +1664,21 @@ def _stand_point(
         # would pull a knife stand (96) down into punch range (~50).
         dist = max(W.too_close_dx(me.held_type) + 4.0, dist)
     else:
-        dist = float(profile.approach_offset)
+        strike = profile.strike_range * plan.range_scale
+        dist = max(float(profile.approach_offset), strike * 0.85)
         if low_health:
             dist = max(dist, profile.caution_range * 0.65)
-        # Never closer than the body-contact band.
-        dist = max(22.0, min(dist, profile.strike_range - 2.0))
+        # Jump-in counters: park in kick window (not used for twin pair).
+        if plan.jump_bias >= 0.5:
+            dist = max(
+                dist,
+                (profile.jump_kick_min + profile.jump_kick_max) * 0.5,
+            )
+        # Grab pressure (survivor twin, Nora): collapse to body range.
+        if plan.grab_bias >= 0.5:
+            dist = min(dist, 20.0)
+        else:
+            dist = max(22.0, min(dist, strike - 2.0))
     stand_x = float(foe.world_x) + side * dist
     stand_y = float(foe.world_y)
     return stand_x, stand_y

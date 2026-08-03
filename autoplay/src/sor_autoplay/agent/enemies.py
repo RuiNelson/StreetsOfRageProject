@@ -13,7 +13,7 @@ Family behaviours (``ai-analysis/enemy-ai.md``):
 | Antonio | Boomerang / mid spacing | Stay just outside $28-$78 attack window, then burst |
 | Souther | Claws, punishes jumps | Prefer grounded combos; avoid jump-ins |
 | Bongo | Lane circle + charge/flame | Sidestep charge lane, punish after breath |
-| Onihime/Yasha | Jump grabs / twin split | Keep mobile; isolate survivor |
+| Onihime/Yasha | Jump grabs / twin split | PAIR: mobile isolate, no jump; SURVIVOR: pressure/grab |
 | Mr. X | Charge / fire (type $35) | Mid-close pressure, rear escape when charged |
 
 These are **heuristics** for the autoplay agent, not frame-perfect TAS scripts.
@@ -223,6 +223,8 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
         priority=2.5,
         note="bongo sidestep flame",
     ),
+    # Static fallback when no entity list is available. Live combat prefers
+    # scene.py pair/survivor overlays via plan_for(..., entities=...).
     "Onihime/Yasha": CounterPlan(
         ThreatKind.JUMP_GRAB,
         range_scale=1.1,
@@ -231,7 +233,7 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
         grab_bias=0.10,
         sidestep=True,
         priority=2.6,
-        note="twins stay mobile",
+        note="twins (static; prefer scene pair/survivor)",
     ),
 }
 
@@ -297,8 +299,16 @@ def is_enemy_grabbable(entity: MapEntity) -> bool:
     return True
 
 
-def plan_for(entity: MapEntity) -> CounterPlan:
-    """Return the counter plan for one combatant (or projectile)."""
+def plan_for(
+    entity: MapEntity,
+    entities: tuple[MapEntity, ...] | list[MapEntity] | None = None,
+) -> CounterPlan:
+    """Return the counter plan for one combatant (or projectile).
+
+    When ``entities`` is provided, Level-C scene composition may override the
+    static family plan (today: Onihime/Yasha pair vs survivor). Single-entity
+    call sites keep the static table.
+    """
 
     if entity.type_id in _TYPE_PLANS:
         plan = _TYPE_PLANS[entity.type_id]
@@ -346,6 +356,16 @@ def plan_for(entity: MapEntity) -> CounterPlan:
             grab_bias=0.40,
             note="jack unarmed — grab ok",
         )
+
+    # Twin scene overlay (pair vs survivor). Lazy import avoids cycle with
+    # scene.py which reuses CounterPlan/ThreatKind.
+    if entities is not None and entity.kind == "boss" and entity.type_id == 0x58:
+        from . import scene as scene_ai
+
+        if not entity.is_defeated:
+            overlay = scene_ai.twin_scene_plan(scene_ai.twin_composition(entities))
+            if overlay is not None:
+                return overlay
     return plan
 
 
@@ -375,6 +395,7 @@ def adjust_approach(
     profile: CharacterProfile,
     *,
     low_health: bool = False,
+    entities: tuple[MapEntity, ...] | list[MapEntity] | None = None,
 ) -> tuple[float, float, bool, CounterPlan]:
     """Compute (dx_sign, dy_sign, in_range, plan).
 
@@ -382,11 +403,13 @@ def adjust_approach(
     punches (not chest-to-chest). Armed seats use weapon stand-off so free
     combat does not pull a knife/pepper into unarmed range. Match lane first —
     off-lane is air-punch land.
+
+    Pass ``entities`` so twin pair/survivor stand-off uses the scene plan.
     """
 
     from . import weapons as W
 
-    plan = plan_for(foe)
+    plan = plan_for(foe, entities)
     dx = foe.map_x - me.map_x
     dy = foe.map_y - me.map_y
 

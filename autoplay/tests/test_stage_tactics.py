@@ -299,7 +299,72 @@ class BossTacticTests(unittest.TestCase):
         assert move is not None
         self.assertFalse(move.hold)
         self.assertIn("surround", move.note)
+        self.assertIn("pair", move.note)
         self.assertNotEqual(move.goal_y, self.me.world_y)
+
+    def test_twin_pair_same_side_nearby_still_isolates_lane(self) -> None:
+        """Both twins on the same side of the player (not bracketed)."""
+        a = _entity(
+            kind="boss",
+            type_id=0x58,
+            world_x=160,
+            world_y=64,
+            slot="B0",
+        )
+        b = _entity(
+            kind="boss",
+            type_id=0x58,
+            world_x=180,
+            world_y=66,
+            slot="B1",
+        )
+        move = tactical_move(
+            self.me,
+            a,
+            (self.me, a, b),
+            level_index=4,
+        )
+        self.assertIsNotNone(move)
+        assert move is not None
+        self.assertIn("pair", move.note)
+        self.assertIn("isolate", move.note)
+
+    def test_twin_survivor_no_tactic_when_idle(self) -> None:
+        survivor = _entity(
+            kind="boss",
+            type_id=0x58,
+            world_x=160,
+            world_y=64,
+            slot="B0",
+            phase=CombatPhase.NORMAL,
+        )
+        move = tactical_move(
+            self.me,
+            survivor,
+            (self.me, survivor),
+            level_index=4,
+        )
+        self.assertIsNone(move)
+
+    def test_twin_survivor_evades_dangerous_commit(self) -> None:
+        survivor = _entity(
+            kind="boss",
+            type_id=0x58,
+            world_x=160,
+            world_y=64,
+            slot="B0",
+            phase=CombatPhase.ATTACKING,
+        )
+        move = tactical_move(
+            self.me,
+            survivor,
+            (self.me, survivor),
+            level_index=4,
+        )
+        self.assertIsNotNone(move)
+        assert move is not None
+        self.assertIn("survivor", move.note)
+        self.assertFalse(move.hold)
 
 
 if __name__ == "__main__":

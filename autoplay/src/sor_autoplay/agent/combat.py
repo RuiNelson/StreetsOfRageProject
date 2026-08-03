@@ -30,6 +30,7 @@ from ..world_map import (
     is_in_loot_camera,
 )
 from . import enemies as enemy_ai
+from . import scene as scene_ai
 from . import stage as stage_rules
 from .characters import CharacterProfile
 from .enemies import CounterPlan
@@ -457,7 +458,7 @@ def select_target(
         if not reachable:
             continue
 
-        plan = enemy_ai.plan_for(entity)
+        plan = enemy_ai.plan_for(entity, entities)
         dx = entity.map_x - me.map_x
         dy = entity.map_y - me.map_y
         dist = math.hypot(dx, dy)
@@ -495,6 +496,11 @@ def select_target(
         strike = 1.0 if can_punch(me, entity, profile, require_facing=False) else 0.0
         priority = enemy_ai.target_priority_membership(entity)
         reasons.append(f"family-priority={priority:.2f}")
+        twin_focus = scene_ai.twin_focus_bonus(
+            entity, entities, my_seat=my_seat
+        )
+        if twin_focus > 0.0:
+            reasons.append(f"twin-isolate={twin_focus:.2f}")
         utility = (
             0.24 * closeness
             + 0.25 * peril
@@ -504,6 +510,7 @@ def select_target(
             + 0.03 * forward
             + 0.03 * strike
             + 0.22 * priority
+            + twin_focus
         )
         if entity.kind == "projectile":
             utility = max(utility, 0.98)
@@ -583,15 +590,22 @@ def approach_vector(
     profile: CharacterProfile,
     *,
     low_health: bool = False,
+    entities: tuple[MapEntity, ...] | list[MapEntity] | None = None,
 ) -> tuple[float, float, bool, CounterPlan]:
     """Return (dx_sign, dy_sign, in_range, plan) with phase-aware spacing.
 
     ``in_range`` here means **geometry for a grounded punch** (facing optional
     so approach still reports readiness before the turn completes).
+
+    Pass ``entities`` so twin pair/survivor stand-off uses the scene plan.
     """
 
     dx, dy, _old_in, plan = enemy_ai.adjust_approach(
-        me, target.entity, profile, low_health=low_health
+        me,
+        target.entity,
+        profile,
+        low_health=low_health,
+        entities=entities,
     )
     phase = target.entity.combat_phase
     in_range = can_punch(me, target.entity, profile, require_facing=False)

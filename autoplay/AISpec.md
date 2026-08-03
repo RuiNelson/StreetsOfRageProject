@@ -731,8 +731,71 @@ Hysteresis: keep current target unless challenger utility ≥ current + **0.12**
 | Souther `$55` | 1.05        | 0         | 0.10      |          | yes     | grounded              |
 | Antonio `$56` | 1.35        | 0         | 0.85      | yes      |         | midrange              |
 | Bongo `$57`   | 1.25        | 0.90      | 0         | yes      | yes     | flame                 |
-| Twins `$58`   | 1.1         | 0.50      | 0.50      | yes      |         | mobility              |
+| Twins `$58`   | scene       | scene     | scene     | yes      | scene   | **§9.4b** pair/survivor |
 | Mr. X `$35`   | 1.0         | 0.50      | 0.50      | yes      |         | final                 |
+
+Static fallback when no entity list is passed (unit helpers only): range 1.1,
+jump 0, grab 0.10, sidestep, priority 2.6. Live combat always passes the world
+entity list so §9.4b applies.
+
+### 9.4b Scene composition — Onihime/Yasha (`agent/scene.py`)
+
+Level-C layer: behaviour depends on the **set** of live type-`$58` bosses, not
+only the selected target. Classification (`twin_composition`):
+
+| Composition | Predicate | ROM meaning |
+| ----------- | --------- | ----------- |
+| `PAIR` | ≥ 2 living type-`$58` bosses | Linked pair (`+$5D` roles 1/2); split grab vs approach AI |
+| `SURVIVOR` | exactly 1 living type-`$58` | Unpaired after `$17F9C` unlink (`+$5D=0`); can promote grab AI |
+| `ABSENT` | 0 | No twin scene overlay |
+
+Living = `kind==boss`, `type_id==$58`, not `is_defeated`.
+
+#### Pair plan (both present)
+
+| Field | Value | Rationale |
+| ----- | ----- | --------- |
+| range_scale | **1.25** | Wider stand-off between two jump-grabbers |
+| jump_bias | **0** | Do not jump into grab commit |
+| grab_bias | **0.05** | Do not walk into body between twins |
+| rear_bias | 0.35 | Rear B+C when one flanks |
+| sidestep | **true** | Lane mobility |
+| no_jump | **true** | Hard ban on jump-kick while pair is up |
+| priority | 2.9 | Slightly above static twin |
+| note | `twins pair — isolate, stay mobile` | |
+
+Target isolation bonus (`twin_focus_bonus`, added to utility, cap **0.12**):
+
+| Condition | Δ utility |
+| --------- | --------- |
+| twin is DANGEROUS (phase) | +0.08 |
+| `pair_role == 2` (grab-seed path) | +0.04 |
+| `targets_player == seat` | +0.04 |
+
+Boss movement while **PAIR** (`bosses.tactical_move` / `_twin_pair_tactic`):
+
+1. Nearby twins **bracket** player on X (ΔX≤150, ΔY≤36, one left + one right) → evade **shared** lane; note `twins pair surround`.
+2. Else ≥2 nearby and any twin DANGEROUS (or focused twin DANGEROUS) → evade focused twin lane; note `twins pair pressure`.
+3. Else ≥2 nearby and \|Δlane\| &lt; 18 → lane offset isolate (clearance **24**); note `twins pair isolate`.
+4. Else focused twin DANGEROUS alone nearby → evade its lane; note `twins pair jump/grab`.
+5. Else no boss tactic (free combat uses pair plan).
+
+#### Survivor plan (only one remains)
+
+| Field | Value | Rationale |
+| ----- | ----- | --------- |
+| range_scale | **1.05** | Closer pressure once partner is gone |
+| jump_bias | **0.15** | Light jump only via normal mix thresholds |
+| grab_bias | **0.50** | Body grab / hold tree is legal and useful |
+| rear_bias | 0.25 | |
+| sidestep | **true** | Still leave jump-grab lane |
+| no_jump | **false** | Jump allowed (solver / mix may still pick punch) |
+| priority | 2.6 | |
+| note | `twin survivor — pressure/grab` | |
+
+Boss movement while **SURVIVOR**: only when focused twin is DANGEROUS → evade attack lane; note `twin survivor jump/grab`. Otherwise free combat owns the tree (grab_walk / punch via survivor plan).
+
+Module: `plan_for(entity, entities=…)` applies the overlay; `select_target` and approach pass the full entity tuple.
 
 ### 9.5 Attack mix (`attack_mix`) — deterministic
 
@@ -772,7 +835,7 @@ Normative order inside combat (after LOOT lost arbitration):
 4. Target GRABBED and we are not grabbing → skip progress walk.
 5. Busy attacking → combo queue B or face-hold.
 6. **Back-shield grab**: if back_exposed ∧ grabbable: walk to body; B when \|Δx\|≤24 ∧ lane ∧ face ∧ cd=0 ∧ ground-ready.
-7. Boss tactical move (Souther / twins) if any.
+7. Boss tactical move (Souther / twins pair|survivor, §9.4b) if any.
 8. Signal sweep threat (type `$24`, state `$08` or `$0B`, \|Δx\|≤120, \|Δy\|≤20): C if ground-ready and jump_landing_safe; else brace.
 9. enemy_attack_committed (dangerous ∧ \|Δx\|≤100):
    - off-lane boss → reengage boss lane;
@@ -810,7 +873,9 @@ or breakable target when no plan is armed.
 | Boss          | Trigger                                                       | Response                                            |
 | ------------- | ------------------------------------------------------------- | --------------------------------------------------- |
 | Souther `$55` | dangerous phase                                               | leave attack lane by ≥28 Y or hold if already clear |
-| Twins `$58`   | two nearby bracket player (±150 X, ±36 Y) or dangerous target | leave shared/attack lane same way                   |
+| Twins `$58`   | scene **PAIR** / **SURVIVOR** (normative detail §9.4b)        | pair: surround / pressure / isolate trees; survivor: only on DANGEROUS |
+
+Twins nearby window: \|Δworld_x\| ≤ **150**, \|Δworld_y\| ≤ **36**. Default lane clearance **28** (pair isolate uses **24**).
 
 ### 9.10 Moving breakables (before arbiter)
 
@@ -937,7 +1002,7 @@ First-class metrics (enforce at 0 / scenario mins as appropriate): damage events
 | §6 co-op      | `coop.py`                                                              |
 | §7 graph      | `knowledge.py`, `phases.py`, `world_map.py`                            |
 | §8 arbiter    | `arbiter.py`                                                           |
-| §9 combat     | `combat.py`, `enemies.py`, `characters.py`, `bosses.py`                |
+| §9 combat     | `combat.py`, `enemies.py`, `characters.py`, `bosses.py`, `scene.py`    |
 | §10 nav/stage | `navigation.py`, `walk.py`, `stage.py`, `hazards.py`                   |
 | §11 I/O       | `app.py` + `megadrive_remote`                                          |
 | §12 eval      | `evaluation.py`, `scenarios.py`                                        |
