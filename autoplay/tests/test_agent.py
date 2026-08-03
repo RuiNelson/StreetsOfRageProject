@@ -494,8 +494,47 @@ class PolicyTests(unittest.TestCase):
             msg=f"attacked through partner: {decision.p1_note} mask={decision.p1_mask:#x}",
         )
         self.assertTrue(
-            "ally" in decision.p1_note or "clear" in decision.p1_note,
+            "ally" in decision.p1_note or "clear" in decision.p1_note or "separate" in decision.p1_note,
             msg=decision.p1_note,
+        )
+
+    def test_separates_from_partner_instead_of_walking_into_grab(self) -> None:
+        """Body contact latches a partner grab; free walks must leave the shell.
+
+        Stage-6 free-path funnel made the AI look like it always grabbed a
+        human partner while only holding RIGHT for progress.
+        """
+
+        p1 = _entity(
+            kind="player",
+            map_x=100,
+            map_y=96,
+            world_x=100,
+            world_y=96,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+            action_state=0x02,
+        )
+        # Human partner standing in the progress path on the free lower floor.
+        p2 = _entity(
+            kind="player",
+            map_x=120,
+            map_y=96,
+            world_x=120,
+            world_y=96,
+            slot="P2",
+            label="P2 Blaze",
+            family="Player",
+            action_state=0x02,
+        )
+        snap = _snapshot_with_map((p1, p2), p2=True, level_index=5)
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertIn("separate ally", decision.p1_note)
+        # Must not just hold RIGHT into the partner body.
+        self.assertFalse(
+            decision.p1_mask & 0x08 and not (decision.p1_mask & 0x03),
+            msg=f"progressed through partner: {decision.p1_note}",
         )
 
     def test_punches_enemy_when_partner_is_clear(self) -> None:

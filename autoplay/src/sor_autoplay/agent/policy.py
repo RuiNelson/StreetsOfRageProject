@@ -641,6 +641,31 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 return Intent(note=f"walk idle ({reason})")
             return intent
 
+    # Human/AI partner body: SoR grabs on contact. Co-op only strips B, so free
+    # progress on a funnelled stage-6 lane plows into the partner and latches a
+    # grab every few steps. Separate before combat/loot/progress walks.
+    partner = coop_ctx.partner
+    if partner is not None and coop.ally_grab_collision_risk(me, partner):
+        gx, gy, reason = coop.separate_from_ally_goal(
+            me,
+            partner,
+            level_index=snapshot.level_index,
+            camera_bottom=float(snapshot.world_map.camera_bottom),
+            progress_right=advice.progress_right,
+        )
+        return _walk_toward(
+            walk,
+            me,
+            goal_x=gx,
+            goal_y=gy,
+            reason=reason,
+            snapshot=snapshot,
+            advice=advice,
+            nav=nav,
+            eps_x=4.0,
+            eps_y=5.0,
+        )
+
     # --- Symbolic/fuzzy tactical arbitration ---
     # Generate legal fight/loot/progress goals from the knowledge graph, then
     # solve a constrained utility problem. This replaces the old unconditional
@@ -1664,6 +1689,30 @@ def _walk_toward(
     Hole stages route through the symbolic navigator: a latched DETOUR→ADVANCE
     plan replaces per-tick UP/DOWN flips that shook stage 4.
     """
+
+    # Do not walk through a live co-op partner (ROM body-grab latch).
+    # Separation notes already chose an off-body goal — leave them alone.
+    if "separate ally" not in reason:
+        partner = next(
+            (
+                entity
+                for entity in snapshot.world_map.entities
+                if entity.kind == "player" and entity.slot != me.slot
+            ),
+            None,
+        )
+        if partner is not None and coop.partner_blocks_goal(
+            me, partner, goal_x, goal_y
+        ):
+            goal_x, goal_y, reason = coop.separate_from_ally_goal(
+                me,
+                partner,
+                level_index=snapshot.level_index,
+                camera_bottom=float(snapshot.world_map.camera_bottom),
+                progress_right=advice.progress_right,
+            )
+            eps_x = min(eps_x, 4.0)
+            eps_y = min(eps_y, 5.0)
 
     holes = _routing_holes(snapshot, advice)
     if nav is not None:

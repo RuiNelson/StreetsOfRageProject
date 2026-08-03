@@ -36,6 +36,13 @@ ALLY_THROWN_RANGE = 140.0
 ALLY_REAR_RANGE = 48.0
 # Lane step used when the partner blocks a straight-line attack.
 ALLY_CLEAR_LANE = 30.0
+# Walk-into-grab shell (SoR latch is contact, not only B). Keep a margin past
+# ALLY_BODY_X so free progress does not re-plow into a human partner every poll.
+# Stage-6 free-path funnel (lane $60) made this constant collision obvious.
+ALLY_GRAB_SEPARATE_X = 36.0
+ALLY_GRAB_SEPARATE_Y = 22.0
+# Horizontal back-off when Y separation is unavailable.
+ALLY_GRAB_BACKOFF_X = 40.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +105,109 @@ def ally_in_body_range(
         return False
     dx, dy = geom
     return abs(dx) <= max_x and abs(dy) <= max_y
+
+
+def ally_grab_collision_risk(
+    me: MapEntity,
+    ally: MapEntity | None,
+    *,
+    max_x: float = ALLY_GRAB_SEPARATE_X,
+    max_y: float = ALLY_GRAB_SEPARATE_Y,
+) -> bool:
+    """True when walking any closer risks a ROM body-grab latch on the partner.
+
+    Co-op gate only strips B; SoR1 grab is contact-based. Progress/combat walks
+    that plow into a human partner look like the AI is "trying to grab" them.
+    """
+
+    return ally_in_body_range(me, ally, max_x=max_x, max_y=max_y)
+
+
+def partner_blocks_goal(
+    me: MapEntity,
+    ally: MapEntity | None,
+    goal_x: float,
+    goal_y: float,
+    *,
+    margin_x: float = ALLY_GRAB_SEPARATE_X,
+    margin_y: float = ALLY_GRAB_SEPARATE_Y,
+) -> bool:
+    """True if the straight walk to ``(goal_x, goal_y)`` crosses the partner body."""
+
+    geom = _ally_geometry(me, ally)
+    if geom is None or ally is None:
+        return False
+    wx, wy = float(me.world_x), float(me.world_y)
+    ax, ay = float(ally.world_x), float(ally.world_y)
+    gx, gy = float(goal_x), float(goal_y)
+    samples = 8
+    for i in range(samples + 1):
+        t = i / samples
+        x = wx + (gx - wx) * t
+        y = wy + (gy - wy) * t
+        if abs(x - ax) <= margin_x and abs(y - ay) <= margin_y:
+            return True
+    return False
+
+
+def separate_from_ally_goal(
+    me: MapEntity,
+    ally: MapEntity,
+    *,
+    level_index: int = 0,
+    camera_bottom: float = 112.0,
+    progress_right: bool = True,
+) -> tuple[float, float, str]:
+    """World goal that leaves the partner's grab shell (prefer lane first).
+
+    Round 6 free floor is lower (larger Y). Prefer separating toward the free
+    lower path when both options are legal, so we do not shove the partner into
+    upper class-2 walls / presses.
+    """
+
+    del progress_right
+    lane_min = 14.0
+    lane_max = max(lane_min, min(float(camera_bottom) - 12.0, 108.0))
+    if level_index == 6:
+        lane_max = max(lane_max, 148.0)
+    me_y = float(me.world_y)
+    ally_y = float(ally.world_y)
+    me_x = float(me.world_x)
+    ally_x = float(ally.world_x)
+
+    # Prefer vertical separation so progress can resume past them.
+    up = max(lane_min, ally_y - ALLY_CLEAR_LANE - 8.0)
+    down = min(lane_max, ally_y + ALLY_CLEAR_LANE + 8.0)
+    candidates: list[float] = []
+    for y in (up, down, lane_min, lane_max):
+        if lane_min <= y <= lane_max and abs(y - ally_y) > ALLY_GRAB_SEPARATE_Y:
+            candidates.append(y)
+    if candidates:
+        # Stage 6 (index 5): prefer the lower free floor.
+        if level_index == 5:
+            lower = [y for y in candidates if y >= ally_y]
+            pool = lower if lower else candidates
+            goal_y = min(pool, key=lambda y: (abs(y - me_y), -y))
+        else:
+            # Keep the side we already occupy when possible.
+            same_side = (
+                [y for y in candidates if (y - ally_y) * (me_y - ally_y) >= 0]
+                if me_y != ally_y
+                else candidates
+            )
+            pool = same_side if same_side else candidates
+            goal_y = min(pool, key=lambda y: abs(y - me_y))
+        if abs(me_y - ally_y) <= ALLY_GRAB_SEPARATE_Y + 2.0:
+            return me_x, goal_y, "separate ally lane"
+        # Already off-lane enough: hold Y, back off on X if still too close on X.
+        if abs(me_x - ally_x) <= ALLY_GRAB_SEPARATE_X:
+            away = -1.0 if me_x >= ally_x else 1.0
+            return me_x + away * ALLY_GRAB_BACKOFF_X, me_y, "separate ally x"
+        return me_x, goal_y, "separate ally lane"
+
+    # No free Y: back away on X.
+    away = -1.0 if me_x >= ally_x else 1.0
+    return me_x + away * ALLY_GRAB_BACKOFF_X, me_y, "separate ally x"
 
 
 def ally_in_attack_bubble(

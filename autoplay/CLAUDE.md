@@ -146,6 +146,11 @@ for tests/HUD.
    ban failed headings. Walk latches no longer re-aim every `force` refresh
    (that kept holding into the same wall). Perpendicular unstuck headings are
    not cleared just because the goal shares the current lane Y/X.
+5a. Co-op partner body: SoR grab is contact-based. Before combat/progress, and
+    inside every walk goal, separate from a live partner inside the grab shell
+    (lane first, stage-6 prefers lower free floor). Attack gate only strips B —
+    without this, stage-6 free-path funnel made the AI look like it was always
+    trying to grab a human partner.
 5. Police special when fuzzy pressure score ≥ threshold and specials remain
    (not round 8). Pressure combines crowd size, hunters, active attacks,
    surrounding geometry, bosses, and health and retains its fired-rule trace.
