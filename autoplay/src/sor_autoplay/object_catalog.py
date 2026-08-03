@@ -87,11 +87,12 @@ _BREAKABLE_STYLES: dict[int, EntityStyle] = {
     0x45: EntityStyle("breakable", "Breakable", "◆", "#d97706", "Moving prop"),
 }
 
-# Type $42 is a separate Round-6 moving collision object.  Its initializer
-# writes outgoing damage $14 and its state machine repeatedly moves it on Z;
+# Type $42 is a Round-6 hydraulic press.  Its initializer writes outgoing
+# damage $14 and its state machine repeatedly moves it on Z ($40 ↔ $A0);
 # unlike the prop families above, it has no player-hit destruction path.
+# Treat as an avoid-only solid obstacle (cannot walk through; do not stand under).
 _HAZARD_STYLES: dict[int, EntityStyle] = {
-    0x42: EntityStyle("projectile", "Stage hazard", "!", "#ef4444", "Moving hazard"),
+    0x42: EntityStyle("projectile", "Stage hazard", "!", "#ef4444", "Press"),
 }
 
 # Consumable pickups (types with shared effect index at +$50).

@@ -281,11 +281,13 @@ for tests/HUD.
        They remain smashable breakables but carry an ATTACKING observation
        phase while damage is active. Round-6 type `$42` is different: its
        moving vertical state machine exposes damage `$14` but has no
-       player-hit destruction path, so observe it as an avoid-only hazard.
-       A seeded live trace measured `$45` advancing 12 px per four-frame
-       decision. Leave its lane inside 220 px, hold the safe lane until it
-       passes, and smash only when already in grounded punch range; never chase
-       it with the static-crate stand point.
+       player-hit destruction path, so observe it as an avoid-only **press**.
+       The machine body is a solid navigation AABB (cannot walk through);
+       same-lane approach or stand-under forces a lane leave before progress.
+       Presses are excluded from combat targeting. A seeded live trace measured
+       `$45` advancing 12 px per four-frame decision. Leave its lane inside
+       220 px, hold the safe lane until it passes, and smash only when already
+       in grounded punch range; never chase it with the static-crate stand point.
    - Deterministic attack choice; jump-ins only when an enemy-family counter
      explicitly asks for one (for example Haku-Ro), not from character reach
    - Fuzzy target utility weighs proximity, lane access, danger/ranged attacks,
@@ -303,10 +305,15 @@ for tests/HUD.
      damaging jump/grab choreography. Keep grounded against Souther, leave a
      committed boss attack lane, and escape vertically when the twins bracket
      the player so focusing either one does not expose the player's back
-10. Route around floor holes (stage 4) and hold the elevator (stage 7)
+10. Route around floor holes (stage 4), factory presses (stage 6), and hold
+    the elevator (stage 7)
     - Stage-4 horizontal progression must turn into a persistent vertical
       detour at a pit, cross beside it, then resume X; never reverse X forever
       at the first blocked collision cell
+    - Round 6 (level index 5) type-`$42` hydraulic presses are solid + crushing.
+      Do not path through the machine; do not stay in the crush band. Leave the
+      press lane first, then resume X on a clear lane (`stage.py` helpers +
+      press AABBs merged into nav holes).
     - Round 7 (level index 6) is a fixed moving elevator/gauntlet. Its platform
       is not represented by the static collision-class map, so class-0 cells
       are not holes. With no combat target, clear any old horizontal walk

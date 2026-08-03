@@ -30,6 +30,7 @@ from ..world_map import (
     is_in_loot_camera,
 )
 from . import enemies as enemy_ai
+from . import stage as stage_rules
 from .characters import CharacterProfile
 from .enemies import CounterPlan
 from .fuzzy import clamp01, falling
@@ -428,6 +429,10 @@ def select_target(
     choices: list[TargetChoice] = []
     for entity in entities:
         if entity.kind not in ("enemy", "boss", "projectile"):
+            continue
+        # Round-6 type-$42 presses are solid avoid-only hazards (no smash path).
+        # Policy routes around them; they must not steal combat targeting.
+        if stage_rules.is_stage_press(entity):
             continue
         # Jack's state-$01 type-$28 objects are the axes/torches visibly
         # juggling around him, not launched threats. Do not let those helpers

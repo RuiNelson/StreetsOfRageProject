@@ -1150,7 +1150,7 @@ class PolicyAggressionTests(unittest.TestCase):
             kind="projectile",
             family="Stage hazard",
             symbol="!",
-            label="Moving hazard",
+            label="Press",
             type_id=0x42,
             map_x=130,
             world_x=130,
@@ -1167,8 +1167,98 @@ class PolicyAggressionTests(unittest.TestCase):
             AgentState(),
         )
 
-        self.assertIn("dodge Moving hazard", decision.p1_note)
+        # Same-lane approach: leave the press lane (UP or DOWN), never smash.
+        self.assertTrue(
+            "avoid press" in decision.p1_note or "leave press" in decision.p1_note,
+            decision.p1_note,
+        )
+        self.assertTrue(decision.p1_mask & 0x03, decision.p1_note)  # UP or DOWN
+        self.assertFalse(decision.p1_mask & 0x0C, decision.p1_note)  # no LEFT/RIGHT into frame
         self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
+
+    def test_leaves_press_when_standing_under_it(self) -> None:
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=160,
+            world_x=160,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        hazard = _e(
+            kind="projectile",
+            family="Stage hazard",
+            symbol="!",
+            label="Press",
+            type_id=0x42,
+            map_x=160,
+            world_x=160,
+            map_y=64,
+            health=None,
+            slot="H0",
+            outgoing_damage=0x14,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+
+        decision = decide_actions(
+            self._snap((p1, hazard), level=5),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+
+        self.assertIn("leave press", decision.p1_note)
+        self.assertTrue(decision.p1_mask & 0x03, decision.p1_note)
+        self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
+
+    def test_routes_progress_around_press_solid_body(self) -> None:
+        """Progress right must detour on Y instead of holding into the frame."""
+
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        # Press just ahead on the same lane, outside same-lane react (|dx|>100)
+        # so the early leave-lane branch does not fire — solid routing must.
+        hazard = _e(
+            kind="projectile",
+            family="Stage hazard",
+            symbol="!",
+            label="Press",
+            type_id=0x42,
+            map_x=220,
+            world_x=220,
+            map_y=64,
+            health=None,
+            slot="H0",
+            outgoing_damage=0x14,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+
+        decision = decide_actions(
+            self._snap((p1, hazard), level=5),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+
+        # Navigator should detour around the solid AABB rather than only RIGHT.
+        note = decision.p1_note
+        self.assertTrue(
+            "nav" in note or "detour" in note or "progress" in note or "unstuck" in note,
+            note,
+        )
+        # Must not treat the press as a combat projectile target.
+        self.assertNotIn("dodge", note)
+        self.assertFalse(decision.p1_mask & 0x20, note)
 
     def test_rear_when_enemy_behind(self) -> None:
         p1 = _e(

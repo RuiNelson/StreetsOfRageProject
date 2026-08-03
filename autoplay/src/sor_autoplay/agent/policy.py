@@ -37,6 +37,26 @@ _POLICE_THRESHOLD = 4.5
 _PROGRESS_LEAD = 160.0
 
 
+def _routing_holes(
+    snapshot: GameSnapshot,
+    advice: stage.StageAdvice,
+) -> tuple:
+    """Pit holes (when stage advice asks) plus solid stage-press AABBs.
+
+    Presses are never pits, but they block the same navigator: detour on Y,
+    then resume X. Always merge them so stage-6 progress cannot aim through a
+    machine frame even when ``avoid_holes`` is false.
+    """
+
+    from ..hazards import FloorHole
+
+    holes: list[FloorHole] = []
+    if advice.avoid_holes:
+        holes.extend(snapshot.floor_holes)
+    holes.extend(stage.press_solid_holes(snapshot.world_map.entities))
+    return tuple(holes)
+
+
 @dataclass
 class AgentConfig:
     """Which seats the AI currently drives."""
@@ -586,6 +606,58 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             walk.clear()
             return Intent(note=f"hold safe lane {prop.label}")
 
+    # Round-6 type-$42 hydraulic presses: solid + crushing, never smashable.
+    # Do not walk through the machine body; do not stand in the crush band.
+    # Leave the press lane first, then resume progress on a clear lane.
+    # (Do not name the local ``press`` — that shadows the pressure report.)
+    presses = tuple(
+        entity
+        for entity in stage.stage_press_entities(snapshot.world_map.entities)
+        if graph.entity_has(entity, Relation.REACHABLE)
+        or stage.is_stage_press(entity)
+    )
+    if presses:
+        press_entity = min(
+            presses,
+            key=lambda entity: math.hypot(
+                entity.map_x - me.map_x,
+                entity.map_y - me.map_y,
+            ),
+        )
+        if stage.under_stage_press(me, press_entity) or stage.press_same_lane_threat(
+            me, press_entity
+        ):
+            goal_y = stage.safer_lane_from_press(
+                me,
+                press_entity,
+                level_index=snapshot.level_index,
+                camera_bottom=float(snapshot.world_map.camera_bottom),
+            )
+            # When already under the press, hold X and evacuate Y. On approach,
+            # still prefer a pure lane change so we never walk into the frame.
+            reason = (
+                f"leave press {press_entity.label}"
+                if stage.under_stage_press(me, press_entity)
+                else f"avoid press {press_entity.label}"
+            )
+            # Bypass solid re-route of the same press body: the goal is already
+            # a pure lane escape. route_to_goal would rewrite the note to
+            # "escape hole" while we are still overlapping the machine AABB.
+            walk.clear()
+            walk.set_goal(
+                me,
+                float(me.world_x),
+                goal_y,
+                reason=reason,
+                eps_x=3.0,
+                eps_y=5.0,
+                force=True,
+            )
+            intent = walk.step(me)
+            if intent is None:
+                return Intent(note=f"walk idle ({reason})")
+            return intent
+
     # --- Symbolic/fuzzy tactical arbitration ---
     # Generate legal fight/loot/progress goals from the knowledge graph, then
     # solve a constrained utility problem. This replaces the old unconditional
@@ -949,7 +1021,7 @@ def _decide_free(ctx: DecisionContext) -> Intent:
         # after the ROM reaches free-flight $12/$13. Never jump into a pit.
         if combat.signal_sweep_threat(me, foe):
             walk.clear()
-            holes = snapshot.floor_holes if advice.avoid_holes else ()
+            holes = _routing_holes(snapshot, advice)
             if (
                 combat.player_can_start_ground_action(me)
                 and navigation.jump_landing_safe(me, foe, holes)
@@ -1237,8 +1309,8 @@ def _decide_free(ctx: DecisionContext) -> Intent:
 
             # Jump start: C only + face/dir from the solver. B is deferred to
             # free flight at the solved frame (multi-enemy timing).
-            # Refuse jumps whose arc/landing crosses a floor hole (stage 4).
-            holes = snapshot.floor_holes if advice.avoid_holes else ()
+            # Refuse jumps whose arc/landing crosses a pit or press solid.
+            holes = _routing_holes(snapshot, advice)
             land_x = (
                 jk_plan.landing_world_x
                 if jk_plan is not None
@@ -1389,7 +1461,7 @@ def _decide_free(ctx: DecisionContext) -> Intent:
     )
     if prop is not None:
         fl, fr = combat.face_intent_dirs(me, prop)
-        holes = snapshot.floor_holes if advice.avoid_holes else ()
+        holes = _routing_holes(snapshot, advice)
         side_ready = navigation.breakable_side_ready(
             me, prop, profile, holes=holes
         )
@@ -1606,7 +1678,7 @@ def _walk_toward(
     plan replaces per-tick UP/DOWN flips that shook stage 4.
     """
 
-    holes = snapshot.floor_holes if advice.avoid_holes else ()
+    holes = _routing_holes(snapshot, advice)
     if nav is not None:
         # Always route through the navigator: hole detours when present, and
         # stuck recovery even when the hole map is empty (walls / crates).
@@ -1671,10 +1743,10 @@ def _walk_toward(
     if intent is None:
         return Intent(note=f"walk idle ({reason})")
 
-    # Emergency only: if we are already overlapping a pit, escape. Do not
-    # re-steer every frame while a latched nav plan is active — that was the
-    # stage-4 shakiness (detour side flipped each poll).
-    if advice.avoid_holes and holes:
+    # Emergency only: if we are already overlapping a pit or press solid, escape.
+    # Do not re-steer every frame while a latched nav plan is active — that was
+    # the stage-4 shakiness (detour side flipped each poll).
+    if holes:
         intent = _emergency_hole_escape(intent, me, holes, snapshot.level_index)
 
     if attack or jump or rear:

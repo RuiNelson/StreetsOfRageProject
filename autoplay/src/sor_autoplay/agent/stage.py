@@ -1,4 +1,4 @@
-"""Stage-specific rules: holes, elevator, reverse scroll, Mr. X dialog."""
+"""Stage-specific rules: holes, elevator, reverse scroll, Mr. X dialog, presses."""
 
 from __future__ import annotations
 
@@ -11,8 +11,24 @@ from ..world_map import LANE_Y_MIN, MapEntity, lane_y_max_for_level
 
 # Campaign level indices (0-based).
 LEVEL_STAGE4_HOLES = 3  # round 4
+LEVEL_STAGE6_FACTORY = 5  # round 6 — hydraulic presses (type $42)
 LEVEL_STAGE7_ELEVATOR = 6  # round 7
 LEVEL_STAGE8_LEFT = 7  # round 8 — reverse scroll / Mr. X
+
+# Round-6 type-$42 hydraulic press (ROM $7A6C family).
+# Init writes outgoing damage $14 and a vertical Z state machine ($40 ↔ $A0).
+# Proximity gate ($7AA4) arms when a player X is in [press_x-48, press_x+96].
+# There is no player-hit destruction path — avoid-only solid obstacle.
+STAGE_PRESS_TYPE = 0x42
+# Solid machine frame the player cannot walk through (body width + frame).
+PRESS_SOLID_HALF_X = 28
+PRESS_SOLID_HALF_Y = 14
+# Crush / stand-under band (covers the ROM arming X gate and same-lane body).
+PRESS_CRUSH_HALF_X = 48
+PRESS_CRUSH_LANE = 16
+# Approach react distance: leave the press lane before walking under it.
+PRESS_REACT_X = 100.0
+PRESS_REACT_LANE = 20.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +186,80 @@ def _nearest_safe_detour_lane(
     if not safe:
         return None
     return min(safe, key=lambda candidate: (abs(candidate - lane_y), candidate))
+
+
+def is_stage_press(entity: MapEntity) -> bool:
+    """True for round-6 type-$42 hydraulic presses (avoid-only stage hazards)."""
+
+    return entity.type_id == STAGE_PRESS_TYPE and entity.kind == "projectile"
+
+
+def stage_press_entities(entities: tuple[MapEntity, ...]) -> tuple[MapEntity, ...]:
+    """Live type-$42 press machines in the current entity list."""
+
+    return tuple(entity for entity in entities if is_stage_press(entity))
+
+
+def press_solid_holes(entities: tuple[MapEntity, ...]) -> tuple[FloorHole, ...]:
+    """Axis-aligned solid bodies for presses so navigation cannot path through them.
+
+    Reuses the hole-routing AABB machinery: a press is not a pit, but it is a
+    hard geometric blocker on its lane. Detour vertically, then resume X.
+    """
+
+    solids: list[FloorHole] = []
+    for entity in stage_press_entities(entities):
+        solids.append(
+            FloorHole(
+                world_x=int(entity.world_x) - PRESS_SOLID_HALF_X,
+                lane_y=int(entity.world_y) - PRESS_SOLID_HALF_Y,
+                width=PRESS_SOLID_HALF_X * 2,
+                height=PRESS_SOLID_HALF_Y * 2,
+            )
+        )
+    solids.sort(key=lambda hole: (hole.world_x, hole.lane_y))
+    return tuple(solids)
+
+
+def under_stage_press(me: MapEntity, press: MapEntity) -> bool:
+    """True when the seat is in the crush / stand-under band of ``press``."""
+
+    return (
+        abs(float(me.world_x) - float(press.world_x)) <= PRESS_CRUSH_HALF_X
+        and abs(float(me.world_y) - float(press.world_y)) <= PRESS_CRUSH_LANE
+    )
+
+
+def press_same_lane_threat(me: MapEntity, press: MapEntity) -> bool:
+    """True when the seat is approaching a press on (or near) its lane."""
+
+    return (
+        abs(float(me.world_x) - float(press.world_x)) <= PRESS_REACT_X
+        and abs(float(me.world_y) - float(press.world_y)) <= PRESS_REACT_LANE
+    )
+
+
+def safer_lane_from_press(
+    me: MapEntity,
+    press: MapEntity,
+    *,
+    level_index: int,
+    camera_bottom: float,
+) -> float:
+    """Lane Y that maximises distance from the press lane inside the playable band."""
+
+    lane_low = float(LANE_Y_MIN + 12)
+    lane_high = float(max(lane_low, min(lane_y_max_for_level(level_index) - 4, camera_bottom - 12.0)))
+    press_y = float(press.world_y)
+    # Prefer the extreme band edge farthest from the press (same idea as $45).
+    candidates = (lane_low, lane_high)
+    best = max(candidates, key=lambda lane: (abs(lane - press_y), lane))
+    # If the seat is already past one edge, keep pushing that way.
+    if abs(float(me.world_y) - press_y) >= 18.0:
+        if float(me.world_y) < press_y:
+            return lane_low
+        return lane_high
+    return best
 
 
 def is_mr_x_offer(snapshot: GameSnapshot) -> bool:

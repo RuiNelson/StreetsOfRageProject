@@ -191,11 +191,12 @@ Only reached when steps 2–9 did not return:
 ```text
 A. if airborne action family → air branch; return
 B. if reachable breakable with outgoing_damage > 0 → moving-prop branch; return
+B2. if reachable type-$42 stage press in crush/same-lane band → leave-lane; return
 C. select_pickup + select_target + solve_goal (fight|loot|progress)
 D. if LOOT wins and item set → loot walk/B; return
 E. combat vs target (if any) → may return
 F. static breakable (if any) → may return
-G. progress_goal + walk
+G. progress_goal + walk  # press solids always in routing holes
 ```
 
 ### 2.2 Per-seat memory (`SeatMemory`)
@@ -799,6 +800,19 @@ REACHABLE breakable with `outgoing_damage > 0` (round-8 type `$45` ≈ 12 px per
 - else if \|ΔX\| ≤ 220 and \|ΔY\| &lt; 28 → walk to safer lane Y (prefer max distance from prop lane within [14, camera_bottom−12]).
 - else if \|ΔX\| ≤ 220 → hold safe lane (no chase).
 
+### 9.10b Stage presses / hydraulic machines (before arbiter)
+
+Round-6 type `$42` (ROM `$7A6C` family, label **Press**):
+
+- **Avoid-only**: no player-hit destruction path; never smash/target as combat.
+- Outgoing damage `$14`; vertical Z state machine `$40` ↔ `$A0`.
+- ROM arming gate: player X in **[press_x − 48, press_x + 96]**.
+- **Solid body**: treat as navigation AABB (half-width **28** X, half-height **14** Y) merged into hole routing so progress/combat walks **cannot path through** the machine.
+- **Crush / stand-under**: \|ΔX\| ≤ **48** and \|ΔY\| ≤ **16** → urgent leave-lane (`leave press`).
+- **Same-lane approach**: \|ΔX\| ≤ **100** and \|ΔY\| ≤ **20** → leave press lane first (`avoid press`), hold X.
+- Safer lane = extreme playable band edge farthest from press Y (same idea as `$45`).
+- Exclude type `$42` from `select_target` so weak projectile dodge does not thrash under the frame.
+
 ### 9.11 Static breakables (after combat)
 
 Side-only approach (`navigation.breakable_side_approach`):
@@ -838,11 +852,12 @@ Nav stuck (independent of walk): move &lt; **3** px for **8** polls → cardinal
 | level_index | Round | progress_right | horizontal_progress | avoid_holes | elevator | note                           |
 | ----------- | ----- | -------------- | ------------------- | ----------- | -------- | ------------------------------ |
 | 3           | 4     | true           | true                | **true**    | false    | holes                          |
+| 5           | 6     | true           | true                | false       | false    | type-`$42` presses (solid nav) |
 | 6           | 7     | true           | **false**           | false       | **true** | elevator; preferred lane `$50` |
 | 7           | 8     | **false**      | true                | false       | false    | leftward                       |
 | other       | —     | true           | true                | false*      | false    | default                        |
 
-\* Default `avoid_holes` is false except stages that set it true above. Elevator: class-0 cells are **not** holes; clear walk latch so no inherited LEFT/RIGHT; no horizontal progress goals.
+\* Default `avoid_holes` is false except stages that set it true above. Elevator: class-0 cells are **not** holes; clear walk latch so no inherited LEFT/RIGHT; no horizontal progress goals. Round-6 presses are always merged into routing holes whenever type `$42` is live (independent of `avoid_holes`).
 
 Progress lead when empty: **±160** world X.
 

@@ -5,7 +5,15 @@ from __future__ import annotations
 import unittest
 
 from sor_autoplay.agent.bosses import tactical_move
-from sor_autoplay.agent.stage import stage_advice, steer_away_from_holes
+from sor_autoplay.agent.stage import (
+    is_stage_press,
+    press_same_lane_threat,
+    press_solid_holes,
+    safer_lane_from_press,
+    stage_advice,
+    steer_away_from_holes,
+    under_stage_press,
+)
 from sor_autoplay.hazards import FloorHole
 from sor_autoplay.phases import CombatPhase, boss_phase
 from sor_autoplay.world_map import MapEntity
@@ -71,6 +79,78 @@ class StageGeometryTests(unittest.TestCase):
         self.assertTrue(advice.elevator)
         self.assertFalse(advice.horizontal_progress)
         self.assertFalse(advice.avoid_holes)
+
+
+class StagePressTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.me = _entity(
+            kind="player",
+            type_id=1,
+            world_x=100,
+            world_y=64,
+            slot="P1",
+        )
+        self.press = MapEntity(
+            kind="projectile",
+            family="Stage hazard",
+            symbol="!",
+            color="#ef4444",
+            label="Press",
+            type_id=0x42,
+            world_x=130,
+            world_y=64,
+            world_z=0x40,
+            map_x=130.0,
+            map_y=64.0,
+            health=None,
+            slot="H0",
+            outgoing_damage=0x14,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+
+    def test_type_42_is_stage_press(self) -> None:
+        self.assertTrue(is_stage_press(self.press))
+        self.assertFalse(is_stage_press(self.me))
+
+    def test_solid_body_aabb_blocks_press_lane(self) -> None:
+        solids = press_solid_holes((self.press,))
+        self.assertEqual(len(solids), 1)
+        solid = solids[0]
+        # Press centre sits inside the solid AABB.
+        self.assertLessEqual(solid.world_x, self.press.world_x)
+        self.assertGreaterEqual(solid.world_x_end, self.press.world_x)
+        self.assertLessEqual(solid.lane_y, self.press.world_y)
+        self.assertGreaterEqual(solid.lane_y_end, self.press.world_y)
+
+    def test_under_and_approach_bands(self) -> None:
+        # me at 100, press at 130: |dx|=30 is inside the crush half-X (48).
+        self.assertTrue(press_same_lane_threat(self.me, self.press))
+        self.assertTrue(under_stage_press(self.me, self.press))
+        # Approach-only: inside react X (100) but outside crush half-X (48).
+        approach = _entity(
+            kind="player",
+            type_id=1,
+            world_x=70,
+            world_y=64,
+            slot="P1",
+        )
+        self.assertTrue(press_same_lane_threat(approach, self.press))
+        self.assertFalse(under_stage_press(approach, self.press))
+        under = _entity(
+            kind="player",
+            type_id=1,
+            world_x=130,
+            world_y=64,
+            slot="P1",
+        )
+        self.assertTrue(under_stage_press(under, self.press))
+
+    def test_safer_lane_leaves_press_lane(self) -> None:
+        goal_y = safer_lane_from_press(
+            self.me, self.press, level_index=5, camera_bottom=112.0
+        )
+        self.assertNotAlmostEqual(goal_y, float(self.press.world_y))
+        self.assertGreater(abs(goal_y - float(self.press.world_y)), 20.0)
 
 
 class BossPhaseTests(unittest.TestCase):
