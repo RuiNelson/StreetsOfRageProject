@@ -282,9 +282,8 @@ for tests/HUD.
        phase while damage is active. Round-6 type `$42` is different: its
        moving vertical state machine exposes damage `$14` but has no
        player-hit destruction path, so observe it as an avoid-only **press**.
-       The crusher body is a modest navigation AABB (half-Y 20; cannot walk
-       through on its lane); same-lane approach or stand-under forces a leave
-       toward the lower free floor before progress.
+       Same-lane approach or stand-under forces a pure-Y leave toward the lower
+       free floor; no advance-past nav plan and no barrier-AABB routing.
        Presses are excluded from combat targeting. A seeded live trace measured
        `$45` advancing 12 px per four-frame decision. Leave its lane inside
        220 px, hold the safe lane until it passes, and smash only when already
@@ -311,19 +310,13 @@ for tests/HUD.
     - Stage-4 horizontal progression must turn into a persistent vertical
       detour at a pit, cross beside it, then resume X; never reverse X forever
       at the first blocked collision cell
-    - Round 6 (level index 5): type-`$42` is the crusher (damage / Z motion).
-      The **path** is blocked by collision-class **2** machine walls on the
-      upper lanes (class 1 floor stays free on lower lanes). Snapshot field
-      `floor_barriers` is always merged into nav solids (except elevator).
-      Also avoid standing in the `$42` crush band (`press_bypass_goal`):
-      crusher body half-Y is **20** (not 36 — that covered the band and forced
-      detours onto the upper rim into class-2 walls). Prefer the **lower** free
-      edge; once free of the crusher body on Y, advance past on that lane.
-      **Critical:** `FloorHole.kind` must distinguish `pit` vs `barrier`/`press`.
-      Emergency `[escape hole]` is **pit-only**. Barrier/press AABBs over-estimate
-      walls — treating mid-lane stand-inside as a pit rewrote D-pad every poll
-      (the remaining stage-6 shake). Stage-6 unstuck prefers down/right; empty
-      progress prefers lane `$60` when barriers are present.
+    - Round 6 (level index 5): type-`$42` is crush avoid-only. Leave the crush /
+      same-lane band with pure Y (`select_crush_press` / `press_leave_goal`);
+      prefer the **lower** free edge. Do **not** put class-2 barrier AABBs or
+      press solids into routing holes, and do **not** force “advance past”
+      through nav — that looped with unstuck when RIGHT hit a real wall
+      (permanent UP/DOWN shake). Empty progress always prefers lane `$60`.
+      Emergency `[escape hole]` remains **pit-only**.
     - Round 7 (level index 6) is a fixed moving elevator/gauntlet. Its platform
       is not represented by the static collision-class map, so class-0 cells
       are not holes. With no combat target, clear any old horizontal walk

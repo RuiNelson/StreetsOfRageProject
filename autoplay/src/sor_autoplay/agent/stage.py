@@ -380,56 +380,67 @@ def press_blocks_goal(
     return False
 
 
-def select_blocking_press(
+def select_crush_press(
     me: MapEntity,
     presses: tuple[MapEntity, ...],
-    *,
-    goal_x: float,
-    goal_y: float,
-    progress_right: bool,
 ) -> MapEntity | None:
-    """Nearest press that is a crush threat or blocks the walk to the goal.
+    """Nearest press that is an active crush / same-lane threat.
 
-    Crush / same-lane threats always win. Otherwise a press only counts when the
-    goal segment (or short progress step) crosses its solid housing, or when it
-    sits on the progress corridor ahead inside ``PRESS_BLOCK_REACT_*``.
-    Free lower/upper lanes outside the crusher body are not corridor blocks —
-    class-2 collision barriers own the wall model on stage 6.
+    Corridor / path-block selection was removed: forcing "advance past" through
+    nav while RIGHT was blocked by a real wall thrased forever against unstuck
+    (detour press ↔ unstuck up/down). Crush leave is pure Y only.
     """
 
     if not presses:
         return None
     candidates: list[tuple[float, MapEntity]] = []
     for press in presses:
-        if press_cleared(me, press, progress_right=progress_right):
+        if not (under_stage_press(me, press) or press_same_lane_threat(me, press)):
             continue
-        threat = under_stage_press(me, press) or press_same_lane_threat(me, press)
-        blocks = press_blocks_goal(me, press, goal_x, goal_y)
-        if not threat and not blocks:
-            # Free of the crusher body on Y: walls (if any) are class-2 barriers,
-            # not this object. Do not yank the seat onto the upper rim.
-            if _outside_press_housing_y(me, press):
-                continue
-            dx = float(press.world_x) - float(me.world_x)
-            if progress_right and not (0.0 < dx <= PRESS_BLOCK_REACT_X):
-                continue
-            if not progress_right and not (-PRESS_BLOCK_REACT_X <= dx < 0.0):
-                continue
-            if abs(float(me.world_y) - float(press.world_y)) > PRESS_BLOCK_REACT_LANE:
-                continue
-            # On the corridor ahead on the crusher's Y band.
-            blocks = True
-        if threat or blocks:
-            dist = abs(float(press.world_x) - float(me.world_x)) + 0.25 * abs(
-                float(press.world_y) - float(me.world_y)
-            )
-            # Prefer crush threats over distant corridor blockers.
-            if threat:
-                dist -= 200.0
-            candidates.append((dist, press))
+        dist = abs(float(press.world_x) - float(me.world_x)) + 0.25 * abs(
+            float(press.world_y) - float(me.world_y)
+        )
+        if under_stage_press(me, press):
+            dist -= 200.0
+        candidates.append((dist, press))
     if not candidates:
         return None
     return min(candidates, key=lambda item: item[0])[1]
+
+
+# Back-compat alias used by older tests / docs.
+def select_blocking_press(
+    me: MapEntity,
+    presses: tuple[MapEntity, ...],
+    *,
+    goal_x: float = 0.0,
+    goal_y: float = 0.0,
+    progress_right: bool = True,
+) -> MapEntity | None:
+    del goal_x, goal_y, progress_right
+    return select_crush_press(me, presses)
+
+
+def press_leave_goal(
+    me: MapEntity,
+    press: MapEntity,
+    *,
+    level_index: int,
+    camera_bottom: float,
+) -> tuple[float, float, str]:
+    """Pure vertical leave of the crush / same-lane band (hold X).
+
+    Does **not** plan advance-past on X — that path fought stuck recovery.
+    """
+
+    safe_y = safer_lane_from_press(
+        me, press, level_index=level_index, camera_bottom=camera_bottom
+    )
+    under = under_stage_press(me, press)
+    reason = (
+        f"leave press {press.label}" if under else f"detour press {press.label}"
+    )
+    return float(me.world_x), safe_y, reason
 
 
 def press_bypass_goal(
@@ -440,42 +451,12 @@ def press_bypass_goal(
     level_index: int,
     camera_bottom: float,
 ) -> tuple[float, float, str]:
-    """Committed detour → advance-past plan for one blocking press.
+    """Back-compat wrapper: leave-only (ignores progress_right advance-past)."""
 
-    Returns ``(goal_x, goal_y, reason)``:
-    1. Leave the solid / crush lane first (hold X while under the crusher).
-    2. Once on a free lane, walk past the solid far edge on that lane.
-    """
-
-    safe_y = safer_lane_from_press(
+    del progress_right
+    return press_leave_goal(
         me, press, level_index=level_index, camera_bottom=camera_bottom
     )
-    under = under_stage_press(me, press)
-    me_y = float(me.world_y)
-    on_safe_lane = abs(me_y - safe_y) <= 8.0
-    free_of_housing = _outside_press_housing_y(me, press)
-    # Already clear of the crusher body: advance on the current free lane
-    # (do not re-detour to a preferred edge that can fight class-2 walls).
-    if free_of_housing and not under:
-        past = press_past_x(press, progress_right=progress_right)
-        lane = me_y if abs(me_y - safe_y) > 8.0 else safe_y
-        # Stage 6: if we are free but still on the wrong side of the factory
-        # (upper rim), pull to the preferred lower free path first.
-        if level_index == LEVEL_STAGE6_FACTORY and me_y < float(press.world_y):
-            if not on_safe_lane:
-                return float(me.world_x), safe_y, f"detour press {press.label}"
-            lane = safe_y
-        return past, lane, f"advance past press {press.label}"
-    if under or not on_safe_lane:
-        # Pure vertical first so we never push X into the housing while leaving.
-        reason = (
-            f"detour press {press.label}"
-            if not under
-            else f"leave press {press.label}"
-        )
-        return float(me.world_x), safe_y, reason
-    past = press_past_x(press, progress_right=progress_right)
-    return past, safe_y, f"advance past press {press.label}"
 
 
 def is_mr_x_offer(snapshot: GameSnapshot) -> bool:
