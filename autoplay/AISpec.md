@@ -383,21 +383,33 @@ U = 0.45·(D/5) + 0.35·range_score + 0.20·control_score
 
 Hits to kill: `ceil(H / D)`.
 
+Weapon stand-off (normative; free combat + weapon tree share these):
+
+| Type | approach_stand_dx | too_close_dx | Notes |
+| ---: | ---: | ---: | --- |
+| Knife `$08` | **96** | **52** | Deep in ROM `$90` (144) stab cone; never park at punch range |
+| Pepper `$0C` | **72** | **32** | Mid throw corridor |
+| Bat/pipe `$0A/$0B` | **30** | **18** | Just inside origin reach 36 |
+| Bottle `$09` | **28** | **14** | Dump needs body proximity |
+
 | Condition | Behaviour |
 | --- | --- |
 | Airborne | return None → free path owns jump family `$3C–$42` |
-| Not input-ready (`not (0x02–0x0E or 0x30–0x3A)`) | face foe; no B |
+| Not input-ready (`not (0x02–0x0E or 0x30–0x3A)`) | hold still if already facing; else face only (**no** walk-in D-pad) |
 | No foe, or foe `DANGEROUS` | return None → free path / family counters |
 | \|ΔY\| &gt; 12 | return None |
+| Same lane and \|ΔX\| &lt; too_close_dx | D-pad **away** (reopen stand-off); no B |
 | Ally in attack bubble (throw range if knife/pepper) | return None |
-| Bat/pipe and \|ΔX\| ≤ 36 and facing | B swing |
-| **Knife** and \|ΔX\| ≤ **144** and facing | **B melee/stab** (ROM `$46`; keeps knife) |
-| **Knife** and **144 &lt; \|ΔX\| ≤ 160**, one-shot, facing | **B throw** (ROM `$44`) |
-| **Knife** and **144 &lt; \|ΔX\| ≤ 160**, multi-hit foe | return None → walk into stab cone |
+| Bat/pipe and \|ΔX\| ≤ 36 and facing | **B only** (no D-pad toward foe) |
+| **Knife** and too_close ≤ \|ΔX\| ≤ **144** and facing | **B melee/stab** (ROM `$46`; keeps knife); no walk-in D-pad |
+| **Knife** and **144 &lt; \|ΔX\| ≤ 160**, one-shot, facing | **B throw** (ROM `$44`); no walk-in D-pad |
+| **Knife** and **144 &lt; \|ΔX\| ≤ 160**, multi-hit foe | return None → free combat walks to knife stand (96), not punch range |
 | Knife and facing wrong way | face only (no B) |
-| Pepper in corridor and facing | B throw |
-| Bottle and \|ΔX\| ≤ 36 | B dump (not a projectile throw) |
-| Knife beyond 160 / pepper beyond band | return None (walk closer via free combat) |
+| Pepper in corridor and facing | **B only** (no walk-in D-pad) |
+| Bottle and \|ΔX\| ≤ 36 | **B dump** (not a projectile throw); no walk-in D-pad |
+| Knife beyond 160 / pepper beyond band | return None (walk to weapon stand via free combat) |
+
+Armed free combat: `_stand_point` / `adjust_approach` use `approach_stand_dx` (not unarmed `approach_offset`); `grabbable=False` while holding a weapon (no body-grab walk-in).
 
 ---
 
@@ -641,7 +653,11 @@ Measured first-punch boxes ≈ 57 / 54 / 68; policy keeps 4–6 px inside.
 Stand-off for approach:
 
 ```text
-dist = clamp(approach_offset, 22, strike_range - 2)
+if holding weapon type $08–$0C:
+  dist = max(too_close_dx(held) + 4, approach_stand_dx(held))
+  # knife 96, pepper 72, bat/pipe 30, bottle 28 — not unarmed punch range
+else:
+  dist = clamp(approach_offset, 22, strike_range - 2)
 if low_hp: dist = max(dist, caution_range * 0.65)
 stand_x = foe.world_x + side * dist   # side = away from foe
 stand_y = foe.world_y                 # always match lane first

@@ -162,13 +162,17 @@ for tests/HUD.
    frames. Also knee fallback; bat/pipe swing; throwable weapons. A carried
    weapon is not a combat target or a reason to press B: with no live foe, or
    with a foe outside the ROM range band, weapon policy returns control to
-   free combat (walk closer). Math lives in `agent/weapons.py`: damage
-   5/3/4/4/2, bat/pipe origin reach 36. Knife same B: ROM `$3084` picks melee
-   `$46` if front ≤144 px else throw `$44`; policy stabs in-cone, throws past
-   cone only for one-shot kills (else walks in). Pepper stun 160f; bottle not
-   attack-thrown.
+   free combat (walk to weapon stand-off). Math lives in `agent/weapons.py`:
+   damage 5/3/4/4/2, bat/pipe origin reach 36, preferred stand
+   `approach_stand_dx` (knife 96, pepper 72, bat/pipe 30, bottle 28). Armed
+   B is planted without D-pad walk-in; same-lane `too_close_dx` backs out
+   before re-engaging. Free combat never parks armed seats at unarmed punch
+   range or body-grab walks. Knife same B: ROM `$3084` picks melee `$46` if
+   front ≤144 px else throw `$44`; policy stabs in-cone, throws past cone only
+   for one-shot kills (else walks to knife stand 96). Pepper stun 160f; bottle
+   not attack-thrown.
    Utility `U = 0.45·(D/5)+0.35·range+0.20·control` drives pickup upgrades;
-   otherwise free stage/combat movement closes the gap. Weapon holds never enter the enemy-grab latch,
+   otherwise free stage/combat movement closes to the weapon stand. Weapon holds never enter the enemy-grab latch,
    and B is emitted only from input-ready ground actions (ordinary `$02–$0E`
    or held-weapon `$30–$3A`), never repeatedly through `$44/$6x` animations.
    After pepper spray fires, `+$60` clears but `+$5E` can keep pointing at its

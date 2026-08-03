@@ -743,6 +743,10 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             foe, Relation.THROWING
         ):
             grabbable = False
+        # Carried weapon owns B: body-grab walks collapse the stand-off and
+        # fire the weapon at punch range. Keep reach advantage while armed.
+        if me.is_holding_weapon:
+            grabbable = False
 
         dx, dy, _geom, plan = combat.approach_vector(
             me, target, profile, low_health=low_hp
@@ -1551,18 +1555,30 @@ def _stand_point(
 ) -> tuple[float, float]:
     """World-space stand-off: same lane, outer strike gap on X.
 
-    ROM pickup box is ~±20 X; body-grabs happen closer. We park at
-    ``approach_offset`` (44–56) so measured punches still reach but enemies do not
-    free-hit us. Always match the foe's lane (off-lane = air punches).
+    ROM pickup box is ~±20 X; body-grabs happen closer. Unarmed seats park at
+    ``approach_offset`` (44–56) so measured punches still reach but enemies do
+    not free-hit us. Armed seats use ``weapon.approach_stand_dx`` so knife /
+    pepper / bat keep their reach advantage instead of walking into punch range.
+    Always match the foe's lane (off-lane = air punches).
     """
+
+    from . import weapons as W
 
     foe = target.entity
     side = -1.0 if (foe.world_x - me.world_x) > 0 else 1.0
-    dist = float(profile.approach_offset)
-    if low_health:
-        dist = max(dist, profile.caution_range * 0.65)
-    # Never closer than the body-contact band.
-    dist = max(22.0, min(dist, profile.strike_range - 2.0))
+    if me.is_holding_weapon and W.is_weapon_type(me.held_type):
+        dist = W.approach_stand_dx(me.held_type, profile)
+        if low_health:
+            dist = max(dist, profile.caution_range * 0.65)
+        # Keep at least the weapon's too-close shell; no unarmed clamp that
+        # would pull a knife stand (96) down into punch range (~50).
+        dist = max(W.too_close_dx(me.held_type) + 4.0, dist)
+    else:
+        dist = float(profile.approach_offset)
+        if low_health:
+            dist = max(dist, profile.caution_range * 0.65)
+        # Never closer than the body-contact band.
+        dist = max(22.0, min(dist, profile.strike_range - 2.0))
     stand_x = float(foe.world_x) + side * dist
     stand_y = float(foe.world_y)
     return stand_x, stand_y

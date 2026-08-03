@@ -403,6 +403,33 @@ class PolicyAggressionTests(unittest.TestCase):
         self.assertLessEqual(gap, PROFILES[0].strike_range)
         self.assertEqual(sy, float(foe.world_y))
 
+    def test_armed_stand_keeps_weapon_reach(self) -> None:
+        """Knife stand-off is deep in the stab cone, not unarmed punch range."""
+        from sor_autoplay.agent.policy import _stand_point
+        from sor_autoplay.agent.combat import TargetChoice
+        from sor_autoplay.agent.enemies import plan_for
+        from sor_autoplay.agent import weapons as W
+
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            held_type=W.WEAPON_KNIFE,
+        )
+        foe = _e(map_x=200, world_x=200, map_y=64, label="Garcia")
+        choice = TargetChoice(
+            entity=foe, score=0, dx=100, dy=0, dist=100, plan=plan_for(foe)
+        )
+        sx, sy = _stand_point(me, choice, PROFILES[0], low_health=False)
+        gap = abs(sx - foe.world_x)
+        self.assertGreaterEqual(gap, W.WEAPON_APPROACH_DX[W.WEAPON_KNIFE] - 1.0)
+        self.assertGreater(gap, PROFILES[0].strike_range)
+        self.assertEqual(sy, float(foe.world_y))
+
     def test_approach_does_not_stop_just_outside_strike_range(self) -> None:
         p1 = _e(
             kind="player",

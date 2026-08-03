@@ -736,25 +736,30 @@ class GrabTreeTests(unittest.TestCase):
         self.assertTrue(intent.attack)
         self.assertIn("throw", intent.note)
 
-    def test_knife_throw_at_midrange(self) -> None:
+    def test_knife_melee_at_midrange_without_walk_in(self) -> None:
         me = _e(
             kind="player",
             family="Player",
             slot="P1",
             held_type=0x08,
+            action_state=0x30,  # facing right, input-ready
             map_x=100,
             map_y=64,
         )
-        foe = _e(map_x=150, map_y=64)
+        # |dx|=80: inside stab cone, past too_close (52) → plant B, no D-pad.
+        foe = _e(map_x=180, map_y=64)
         mem = GrabMemory()
         a = decide_held(me, context_from_player(me), mem, tick=1, foe=foe, crowd=1)
         b = decide_held(me, context_from_player(me), mem, tick=2, foe=foe, crowd=1)
         assert a is not None and b is not None
-        self.assertTrue(a.right and b.right)
         self.assertTrue(a.attack or b.attack)
         self.assertTrue(
-            any(k in a.note or k in b.note for k in ("weapon", "dump", "use"))
+            any(k in a.note or k in b.note for k in ("weapon", "attack knife"))
         )
+        for intent in (a, b):
+            if intent.attack:
+                self.assertFalse(intent.left, intent.note)
+                self.assertFalse(intent.right, intent.note)
 
     def test_action_family_alone_is_not_a_hold(self) -> None:
         me = _e(

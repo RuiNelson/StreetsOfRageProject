@@ -95,6 +95,27 @@ PEPPER_THROW_MAX = 100.0
 # Bottle: no attack throw; only dump/B when body-close.
 BOTTLE_DUMP_REACH = MELEE_ORIGIN_REACH
 
+# Preferred |ΔX| stand-off while carrying. Keep weapons' reach advantage:
+# free combat must not walk armed seats into unarmed punch/body range.
+# Knife parks deep in the ROM $90 (144) stab cone; bat/pipe just inside
+# origin reach 36; pepper mid throw corridor; bottle near dump reach.
+WEAPON_APPROACH_DX: dict[int, float] = {
+    WEAPON_KNIFE: 96.0,
+    WEAPON_BOTTLE: 28.0,
+    WEAPON_BAT: 30.0,
+    WEAPON_PIPE: 30.0,
+    WEAPON_PEPPER: 72.0,
+}
+# Back out when closer than this (same lane) so multi-hit stabs / swings do
+# not end chest-to-chest. Still allows B once space is reopened.
+WEAPON_TOO_CLOSE_DX: dict[int, float] = {
+    WEAPON_KNIFE: 52.0,
+    WEAPON_BOTTLE: 14.0,
+    WEAPON_BAT: 18.0,
+    WEAPON_PIPE: 18.0,
+    WEAPON_PEPPER: 32.0,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class WeaponSpec:
@@ -339,6 +360,36 @@ def use_range_for(type_id: int) -> tuple[float, float]:
     if tid == WEAPON_BOTTLE:
         return (0.0, BOTTLE_DUMP_REACH)
     return (0.0, 0.0)
+
+
+def approach_stand_dx(type_id: int, profile: CharacterProfile | None = None) -> float:
+    """World |ΔX| stand-off while carrying ``type_id``.
+
+    Falls back to the character's unarmed ``approach_offset`` for unknown types.
+    """
+
+    tid = type_id & 0xFF
+    stand = WEAPON_APPROACH_DX.get(tid)
+    if stand is not None:
+        return stand
+    if profile is not None:
+        return float(profile.approach_offset)
+    return 46.0
+
+
+def too_close_dx(type_id: int) -> float:
+    """|ΔX| below which an armed seat should back out before re-engaging."""
+
+    tid = type_id & 0xFF
+    return WEAPON_TOO_CLOSE_DX.get(tid, 18.0)
+
+
+def should_back_out(type_id: int, abs_dx: float, abs_dy: float) -> bool:
+    """True when same-lane spacing is tighter than the weapon's stand band."""
+
+    if abs(abs_dy) > WEAPON_LANE:
+        return False
+    return 0.0 < abs_dx < too_close_dx(type_id)
 
 
 def knife_mode(

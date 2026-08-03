@@ -379,32 +379,45 @@ def adjust_approach(
     """Compute (dx_sign, dy_sign, in_range, plan).
 
     Stand at about ``strike_range * 0.7`` on X so we face them with a gap for
-    punches (not chest-to-chest). Match lane first — off-lane is air-punch land.
+    punches (not chest-to-chest). Armed seats use weapon stand-off so free
+    combat does not pull a knife/pepper into unarmed range. Match lane first —
+    off-lane is air-punch land.
     """
+
+    from . import weapons as W
 
     plan = plan_for(foe)
     dx = foe.map_x - me.map_x
     dy = foe.map_y - me.map_y
 
     strike = profile.strike_range * plan.range_scale
-    # Stand near outer strike range (approach_offset). Old 0.55×strike (~15px)
-    # was chest-to-chest and let enemies free-punch / body-grab us.
-    stand_dist = max(profile.approach_offset, strike * 0.85)
-    if low_health:
-        stand_dist = max(stand_dist, profile.caution_range * 0.7)
+    armed = me.is_holding_weapon and W.is_weapon_type(me.held_type)
+    if armed:
+        # Weapon reach advantage: park at weapon stand, not punch offset.
+        stand_dist = W.approach_stand_dx(me.held_type, profile)
+        if low_health:
+            stand_dist = max(stand_dist, profile.caution_range * 0.7)
+        too_close = W.too_close_dx(me.held_type)
+    else:
+        # Stand near outer strike range (approach_offset). Old 0.55×strike (~15px)
+        # was chest-to-chest and let enemies free-punch / body-grab us.
+        stand_dist = max(profile.approach_offset, strike * 0.85)
+        if low_health:
+            stand_dist = max(stand_dist, profile.caution_range * 0.7)
+        # Body-grab / contact danger band — never park inside this on X unless
+        # we are deliberately grabbing.
+        too_close = max(18.0, profile.approach_offset * 0.7)
     # Jump-in counters (Signal, Haku-Ro): park in the kick window, not punch.
-    if plan.jump_bias >= 0.5:
+    # Skip when armed — weapon B is preferred over jump-kick stand.
+    if not armed and plan.jump_bias >= 0.5:
         stand_dist = max(
             stand_dist,
             (profile.jump_kick_min + profile.jump_kick_max) * 0.5,
         )
     # Grab pressure (Nora, throw-window Jack, back-shield): walk to body range.
-    if plan.grab_bias >= 0.5:
+    # Holding a weapon: never collapse to body range (weapon tree owns B).
+    if not armed and plan.grab_bias >= 0.5:
         stand_dist = min(stand_dist, 20.0)
-    # Body-grab / contact danger band — never park inside this on X unless
-    # we are deliberately grabbing.
-    too_close = max(18.0, profile.approach_offset * 0.7)
-    if plan.grab_bias >= 0.5:
         too_close = 10.0
 
     if plan.kind == ThreatKind.PROJECTILE or foe.kind == "projectile":

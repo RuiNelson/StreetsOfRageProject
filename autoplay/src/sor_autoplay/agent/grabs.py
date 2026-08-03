@@ -612,6 +612,11 @@ def _weapon_tree(
       in for multi-hit stabs.
     - Pepper: B throw in a shorter corridor (≤100 px) + immobilize value.
     - Bottle: not attack-thrown; dump only at melee body range.
+
+    Spacing: free combat parks at ``weapon.approach_stand_dx``. While attacking
+    or recovering, never hold D-pad toward the foe (that walks armed seats
+    chest-to-chest). When already inside ``too_close_dx``, step back before
+    re-engaging unless the foe is mid-attack (then connect without walking in).
     """
 
     del tick
@@ -620,7 +625,6 @@ def _weapon_tree(
         return None
 
     melee = W.is_melee_weapon(held)
-    throwable = W.is_throw_weapon(held)
     blaze_weak = held in profile.weak_weapons
     dmg = W.damage_of(held)
 
@@ -633,16 +637,24 @@ def _weapon_tree(
     # A held weapon's input loop is active only in ordinary ground actions or
     # its ROM-specific ready family ($30-$3A). Do not hammer B throughout
     # $44/$6x attack animations: besides being useless, that was the visible
-    # "furious" repeated attack behaviour.
+    # "furious" repeated attack behaviour. Hold still while already facing —
+    # pressing toward the foe during recovery was the main "walk into them
+    # while armed" bug.
     action = me.action_base
     input_ready = 0x02 <= action <= 0x0E or 0x30 <= action <= 0x3A
     if not input_ready:
-        dx = 0.0 if foe is None else foe.map_x - me.map_x
-        face_left = dx < 0 or (dx == 0 and bool(me.action_state & 0x01))
-        face_right = not face_left
+        if foe is None:
+            return Intent(note=f"weapon anim ${held:02X} act=${me.action_state:02X}")
+        dx_anim = foe.map_x - me.map_x
+        face_left_now = bool(me.action_state & 0x01)
+        if W.facing_toward(dx_anim, face_left_now) or dx_anim == 0:
+            return Intent(
+                note=f"weapon anim ${held:02X} act=${me.action_state:02X}",
+            )
+        want_left = dx_anim < 0
         return Intent(
-            left=face_left,
-            right=face_right,
+            left=want_left,
+            right=not want_left,
             note=f"weapon anim ${held:02X} act=${me.action_state:02X}",
         )
 
@@ -668,10 +680,11 @@ def _weapon_tree(
     else:
         want_left = bool(me.action_state & 0x01)
         want_right = not want_left
+    # Away from the foe on X (reopen weapon stand-off).
+    away_left, away_right = want_right, want_left
     # ROM facing: action +$30 bit 0 set = facing left.
     current_face_left = bool(me.action_state & 0x01)
     face_ok = W.facing_toward(dx, current_face_left)
-    face_left, face_right = want_left, want_right
 
     def _ally_blocks(*, thrown: bool) -> bool:
         # Never swing or throw near a co-op partner (SoR1 friendly fire).
@@ -681,6 +694,25 @@ def _weapon_tree(
             max_x=coop.ALLY_THROWN_RANGE if thrown else coop.ALLY_MELEE_RANGE,
         )
 
+    def _face_only(note: str) -> Intent:
+        return Intent(left=want_left, right=want_right, note=note)
+
+    def _attack_planted(note: str) -> Intent:
+        # No D-pad toward the foe: B alone keeps the current stand-off.
+        return Intent(attack=True, note=note)
+
+    def _space_out(note: str) -> Intent:
+        return Intent(left=away_left, right=away_right, note=note)
+
+    # Reopen range when chest-to-chest with a long/mid weapon. Melee bat/pipe
+    # and bottle need body proximity, so their too-close band is only the
+    # grab/punch contact shell.
+    if W.should_back_out(held, abs_dx, abs_dy):
+        return _space_out(
+            f"weapon space ${held:02X} dx={abs_dx:.0f}"
+            f"<{W.too_close_dx(held):.0f}"
+        )
+
     # --- Bat / steel pipe: origin reach 36 px (live Axel) ---
     if melee:
         if not W.melee_can_connect(abs_dx, abs_dy):
@@ -688,16 +720,9 @@ def _weapon_tree(
         if _ally_blocks(thrown=False):
             return None
         if not face_ok:
-            return Intent(
-                left=face_left,
-                right=face_right,
-                note=f"weapon face ${held:02X} d={dmg}",
-            )
-        return Intent(
-            left=face_left,
-            right=face_right,
-            attack=True,
-            note=f"weapon swing ${held:02X} d={dmg} r≤{W.MELEE_ORIGIN_REACH:.0f}",
+            return _face_only(f"weapon face ${held:02X} d={dmg}")
+        return _attack_planted(
+            f"weapon swing ${held:02X} d={dmg} r≤{W.MELEE_ORIGIN_REACH:.0f}"
         )
 
     # --- Knife: same B → ROM $46 melee in cone, $44 throw outside ---
@@ -705,37 +730,24 @@ def _weapon_tree(
         foe_hp = foe.health if foe.health is not None else None
         mode = W.knife_mode(abs_dx, abs_dy, foe_health=foe_hp)
         if mode is None:
-            # Out of band, or past cone with multi-hit foe: free combat closes.
+            # Out of band, or past cone with multi-hit foe: free combat closes
+            # only to the knife stand-off (not unarmed punch range).
             return None
         if _ally_blocks(thrown=(mode == "throw")):
             return None
         if not face_ok:
-            return Intent(
-                left=face_left,
-                right=face_right,
-                note=f"weapon face knife d={dmg}",
-            )
+            return _face_only(f"weapon face knife d={dmg}")
         if mode == "melee":
             hits = W.hits_to_kill(foe_hp, held) if foe_hp else 0
-            return Intent(
-                left=face_left,
-                right=face_right,
-                attack=True,
-                note=(
-                    f"weapon attack knife d={dmg} "
-                    f"dx={abs_dx:.0f}≤{W.KNIFE_MELEE_SCAN_X}"
-                    + (f" hits≈{hits}" if hits else "")
-                ),
+            return _attack_planted(
+                f"weapon attack knife d={dmg} "
+                f"dx={abs_dx:.0f}≤{W.KNIFE_MELEE_SCAN_X}"
+                + (f" hits≈{hits}" if hits else "")
             )
         # throw: past $90 scan, within flight envelope, preferably one-shot
-        return Intent(
-            left=face_left,
-            right=face_right,
-            attack=True,
-            note=(
-                f"weapon throw knife d={dmg} "
-                f"dx={abs_dx:.0f}≤{W.KNIFE_THROW_MAX:.0f}"
-            ),
+        return _attack_planted(
+            f"weapon throw knife d={dmg} "
+            f"dx={abs_dx:.0f}≤{W.KNIFE_THROW_MAX:.0f}"
         )
 
     # --- Pepper: throw corridor + immobilize ---
@@ -745,19 +757,10 @@ def _weapon_tree(
         if _ally_blocks(thrown=True):
             return None
         if not face_ok:
-            return Intent(
-                left=face_left,
-                right=face_right,
-                note=f"weapon face pepper d={dmg}",
-            )
-        return Intent(
-            left=face_left,
-            right=face_right,
-            attack=True,
-            note=(
-                f"weapon throw pepper d={dmg} "
-                f"stun={W.PEPPER_IMMOBILIZE_FRAMES}f"
-            ),
+            return _face_only(f"weapon face pepper d={dmg}")
+        return _attack_planted(
+            f"weapon throw pepper d={dmg} "
+            f"stun={W.PEPPER_IMMOBILIZE_FRAMES}f"
         )
 
     # --- Bottle: not attack-thrown; dump only at melee ---
@@ -767,18 +770,9 @@ def _weapon_tree(
         if _ally_blocks(thrown=False):
             return None
         if not face_ok:
-            return Intent(
-                left=face_left,
-                right=face_right,
-                note=f"weapon face bottle d={dmg}",
-            )
+            return _face_only(f"weapon face bottle d={dmg}")
         tag = "dump" if blaze_weak else "use"
-        return Intent(
-            left=face_left,
-            right=face_right,
-            attack=True,
-            note=f"weapon {tag} bottle d={dmg}",
-        )
+        return _attack_planted(f"weapon {tag} bottle d={dmg}")
 
     return None
 

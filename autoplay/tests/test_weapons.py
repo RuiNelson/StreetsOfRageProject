@@ -150,7 +150,9 @@ class WeaponTreeGeometryTests(unittest.TestCase):
         assert intent is not None
         self.assertTrue(intent.attack)
         self.assertIn("throw knife", intent.note)
-        self.assertTrue(intent.right)
+        # Planted throw: no walk-in D-pad (facing already correct for act $30).
+        self.assertFalse(intent.left)
+        self.assertFalse(intent.right)
 
     def test_knife_approaches_instead_of_throw_on_multi_hit(self) -> None:
         me = _player(held=W.WEAPON_KNIFE, x=100, act=0x30)
@@ -213,6 +215,47 @@ class WeaponTreeGeometryTests(unittest.TestCase):
         assert intent is not None
         self.assertTrue(intent.attack)
         self.assertIn("160", intent.note)
+
+    def test_approach_stand_keeps_weapon_reach(self) -> None:
+        self.assertAlmostEqual(W.approach_stand_dx(W.WEAPON_KNIFE), 96.0)
+        self.assertAlmostEqual(W.approach_stand_dx(W.WEAPON_PEPPER), 72.0)
+        self.assertAlmostEqual(W.approach_stand_dx(W.WEAPON_PIPE), 30.0)
+        self.assertLess(W.too_close_dx(W.WEAPON_KNIFE), W.approach_stand_dx(W.WEAPON_KNIFE))
+        self.assertGreater(W.approach_stand_dx(W.WEAPON_KNIFE), PROFILES[0].approach_offset)
+
+    def test_knife_backs_out_when_too_close(self) -> None:
+        me = _player(held=W.WEAPON_KNIFE, x=100, act=0x30)
+        # |dx|=30 is a valid stab but inside too_close (52) — reopen range.
+        foe = _entity(map_x=130, map_y=64, health=10)
+        intent = _weapon_tree(me, _ctx(me), tick=0, foe=foe, profile=PROFILES[0])
+        self.assertIsNotNone(intent)
+        assert intent is not None
+        self.assertFalse(intent.attack)
+        self.assertTrue(intent.left)  # foe is to the right → step left
+        self.assertFalse(intent.right)
+        self.assertIn("weapon space", intent.note)
+
+    def test_knife_attack_does_not_walk_in(self) -> None:
+        me = _player(held=W.WEAPON_KNIFE, x=100, act=0x30)
+        # Preferred knife band: past too_close, inside stab cone.
+        foe = _entity(map_x=100 + 80, map_y=64, health=10)
+        intent = _weapon_tree(me, _ctx(me), tick=0, foe=foe, profile=PROFILES[0])
+        self.assertIsNotNone(intent)
+        assert intent is not None
+        self.assertTrue(intent.attack)
+        self.assertFalse(intent.left)
+        self.assertFalse(intent.right)
+
+    def test_weapon_anim_holds_still_when_facing(self) -> None:
+        me = _player(held=W.WEAPON_PIPE, x=100, act=0x44)
+        foe = _entity(map_x=130, map_y=64)
+        intent = _weapon_tree(me, _ctx(me), tick=0, foe=foe, profile=PROFILES[0])
+        self.assertIsNotNone(intent)
+        assert intent is not None
+        self.assertFalse(intent.attack)
+        self.assertFalse(intent.left)
+        self.assertFalse(intent.right)
+        self.assertIn("weapon anim", intent.note)
 
 
 if __name__ == "__main__":
