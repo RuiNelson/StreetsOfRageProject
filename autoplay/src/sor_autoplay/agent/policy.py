@@ -19,7 +19,6 @@ from ..phases import CombatPhase, is_dangerous, is_punishable
 from ..state import GameSnapshot, PlayerSnapshot
 from ..world_map import MapEntity
 from . import bosses, combat, coop, enemies as enemy_ai, navigation, pressure, stage
-from . import twins as twin_ai
 from .arbiter import GoalKind, solve_goal
 from .context import DecisionContext, PlayerMode, SeatMemory, build_decision_context
 from .controls import Intent, mask_from_intent
@@ -418,12 +417,6 @@ def _decide_free(ctx: DecisionContext) -> Intent:
     goal_memory = ctx.goal_memory
     low_hp = (player_snap.health_percent or 100.0) < 40.0
 
-    # Onihime/Yasha: latch focus-fire on one twin until she dies (pair → one
-    # body is much easier). Survivor inherits the same latch.
-    twin_focus_slot = twin_ai.update_focus(
-        me, snapshot.world_map.entities, ctx.seat.twin_focus
-    )
-
     # --- Airborne first (must beat loot/walk) ---
     # ROM state sequence is $10 launch -> $12 free flight -> $16 air attack ->
     # $14 landing.  B is accepted in $12, not in $10; pressing it during $14
@@ -441,7 +434,6 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             my_seat=player_index,
             graph=graph,
             preferred_slot=goal_memory.target_slot,
-            twin_focus_slot=twin_focus_slot,
         )
         aim_e = aim.entity if aim is not None else None
         if aim_e is None:
@@ -699,15 +691,10 @@ def _decide_free(ctx: DecisionContext) -> Intent:
         my_seat=player_index,
         graph=graph,
         preferred_slot=(
-            twin_focus_slot
-            if twin_focus_slot is not None
-            else (
-                goal_memory.target_slot
-                if goal_memory.kind == GoalKind.FIGHT
-                else None
-            )
+            goal_memory.target_slot
+            if goal_memory.kind == GoalKind.FIGHT
+            else None
         ),
-        twin_focus_slot=twin_focus_slot,
     )
     arbitration = solve_goal(
         graph,
@@ -847,7 +834,6 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             profile,
             low_health=low_hp,
             entities=snapshot.world_map.entities,
-            focus_slot=twin_focus_slot,
         )
         if back_exposed and grabbable:
             plan = dc_replace(
@@ -1023,7 +1009,6 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             foe,
             snapshot.world_map.entities,
             level_index=snapshot.level_index,
-            focus_slot=twin_focus_slot,
         )
         if boss_tactic is not None:
             if boss_tactic.hold:

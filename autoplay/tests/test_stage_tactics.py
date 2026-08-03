@@ -30,17 +30,7 @@ def _entity(
     world_y: int,
     slot: str,
     phase: CombatPhase = CombatPhase.NORMAL,
-    action_state: int | None = None,
 ) -> MapEntity:
-    # Bosses: action_state is primary +$30. Default $02 only when phase is
-    # ATTACKING (commit choreography); otherwise $01 active combat.
-    if action_state is None:
-        if kind == "boss" and phase == CombatPhase.ATTACKING:
-            action_state = 0x02
-        elif kind == "boss":
-            action_state = 0x01
-        else:
-            action_state = 0x02
     return MapEntity(
         kind=kind,
         family="Player" if kind == "player" else "Boss",
@@ -55,7 +45,7 @@ def _entity(
         map_y=float(world_y),
         health=0x20,
         slot=slot,
-        action_state=action_state,
+        action_state=0x02,
         combat_phase=phase,
     )
 
@@ -312,12 +302,38 @@ class BossTacticTests(unittest.TestCase):
         self.assertIn("pair", move.note)
         self.assertNotEqual(move.goal_y, self.me.world_y)
 
-    def test_twin_survivor_no_tactic_when_idle_far(self) -> None:
-        """Far survivor outside jump-arm window needs no forced leave."""
+    def test_twin_pair_same_side_nearby_still_isolates_lane(self) -> None:
+        """Both twins on the same side of the player (not bracketed)."""
+        a = _entity(
+            kind="boss",
+            type_id=0x58,
+            world_x=160,
+            world_y=64,
+            slot="B0",
+        )
+        b = _entity(
+            kind="boss",
+            type_id=0x58,
+            world_x=180,
+            world_y=66,
+            slot="B1",
+        )
+        move = tactical_move(
+            self.me,
+            a,
+            (self.me, a, b),
+            level_index=4,
+        )
+        self.assertIsNotNone(move)
+        assert move is not None
+        self.assertIn("pair", move.note)
+        self.assertIn("isolate", move.note)
+
+    def test_twin_survivor_no_tactic_when_idle(self) -> None:
         survivor = _entity(
             kind="boss",
             type_id=0x58,
-            world_x=260,
+            world_x=160,
             world_y=64,
             slot="B0",
             phase=CombatPhase.NORMAL,
@@ -339,8 +355,6 @@ class BossTacticTests(unittest.TestCase):
             slot="B0",
             phase=CombatPhase.ATTACKING,
         )
-        # primary $02 is set via phase ATTACKING only if action is $02 —
-        # entity helper uses default action 0x02 for all entities.
         move = tactical_move(
             self.me,
             survivor,
@@ -350,6 +364,7 @@ class BossTacticTests(unittest.TestCase):
         self.assertIsNotNone(move)
         assert move is not None
         self.assertIn("survivor", move.note)
+        self.assertFalse(move.hold)
 
 
 if __name__ == "__main__":

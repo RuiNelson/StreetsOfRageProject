@@ -302,14 +302,12 @@ def is_enemy_grabbable(entity: MapEntity) -> bool:
 def plan_for(
     entity: MapEntity,
     entities: tuple[MapEntity, ...] | list[MapEntity] | None = None,
-    *,
-    focus_slot: str | None = None,
 ) -> CounterPlan:
     """Return the counter plan for one combatant (or projectile).
 
     When ``entities`` is provided, Level-C scene composition may override the
-    static family plan (today: Onihime/Yasha focus-fire / survivor / routines).
-    Single-entity call sites keep the static table.
+    static family plan (today: Onihime/Yasha pair vs survivor). Single-entity
+    call sites keep the static table.
     """
 
     if entity.type_id in _TYPE_PLANS:
@@ -359,16 +357,13 @@ def plan_for(
             note="jack unarmed — grab ok",
         )
 
-    # Twin ROM-backed plan (pair focus-fire / survivor / routine overlays).
+    # Twin scene overlay (pair vs survivor). Lazy import avoids cycle with
+    # scene.py which reuses CounterPlan/ThreatKind.
     if entities is not None and entity.kind == "boss" and entity.type_id == 0x58:
-        from . import twins as twin_ai
+        from . import scene as scene_ai
 
         if not entity.is_defeated:
-            overlay = twin_ai.plan_for_twin(
-                entity,
-                entities,
-                focus_slot=focus_slot,
-            )
+            overlay = scene_ai.twin_scene_plan(scene_ai.twin_composition(entities))
             if overlay is not None:
                 return overlay
     return plan
@@ -401,7 +396,6 @@ def adjust_approach(
     *,
     low_health: bool = False,
     entities: tuple[MapEntity, ...] | list[MapEntity] | None = None,
-    focus_slot: str | None = None,
 ) -> tuple[float, float, bool, CounterPlan]:
     """Compute (dx_sign, dy_sign, in_range, plan).
 
@@ -410,13 +404,12 @@ def adjust_approach(
     combat does not pull a knife/pepper into unarmed range. Match lane first —
     off-lane is air-punch land.
 
-    Pass ``entities`` / ``focus_slot`` so twin focus-fire stand-off uses the
-    ROM-backed plan.
+    Pass ``entities`` so twin pair/survivor stand-off uses the scene plan.
     """
 
     from . import weapons as W
 
-    plan = plan_for(foe, entities, focus_slot=focus_slot)
+    plan = plan_for(foe, entities)
     dx = foe.map_x - me.map_x
     dy = foe.map_y - me.map_y
 

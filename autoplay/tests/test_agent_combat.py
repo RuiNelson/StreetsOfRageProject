@@ -248,6 +248,8 @@ class EnemyCounterTests(unittest.TestCase):
         self.assertIn("punch", mixes)
 
     def test_twin_pair_vs_survivor_scene_plans(self) -> None:
+        from sor_autoplay.phases import CombatPhase
+
         a = _e(
             kind="boss",
             family="Onihime/Yasha",
@@ -255,7 +257,6 @@ class EnemyCounterTests(unittest.TestCase):
             slot="B0",
             map_x=140,
             pair_role=1,
-            action_state=0x01,
         )
         b = _e(
             kind="boss",
@@ -264,16 +265,15 @@ class EnemyCounterTests(unittest.TestCase):
             slot="B1",
             map_x=180,
             pair_role=2,
-            action_state=0x01,
         )
         self.assertEqual(
             twin_composition((a, b)), TwinComposition.PAIR
         )
-        pair = plan_for(a, (a, b), focus_slot="B0")
+        pair = plan_for(a, (a, b))
         self.assertTrue(pair.no_jump)
         self.assertLess(pair.grab_bias, 0.2)
         self.assertGreaterEqual(pair.range_scale, 1.2)
-        self.assertIn("focus", pair.note)
+        self.assertIn("pair", pair.note)
         self.assertEqual(
             attack_mix(
                 pair,
@@ -288,7 +288,7 @@ class EnemyCounterTests(unittest.TestCase):
         )
 
         self.assertEqual(twin_composition((a,)), TwinComposition.SURVIVOR)
-        survivor = plan_for(a, (a,), focus_slot="B0")
+        survivor = plan_for(a, (a,))
         self.assertFalse(survivor.no_jump)
         self.assertGreaterEqual(survivor.grab_bias, 0.45)
         self.assertIn("survivor", survivor.note)
@@ -305,10 +305,28 @@ class EnemyCounterTests(unittest.TestCase):
             "grab_walk",
         )
 
-        # Focus utility dominates the other twin.
+        # Isolation prefers the grab-role / dangerous twin.
+        grabber = _e(
+            kind="boss",
+            family="Onihime/Yasha",
+            type_id=0x58,
+            slot="B1",
+            map_x=180,
+            pair_role=2,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+        approacher = _e(
+            kind="boss",
+            family="Onihime/Yasha",
+            type_id=0x58,
+            slot="B0",
+            map_x=140,
+            pair_role=1,
+            combat_phase=CombatPhase.NORMAL,
+        )
         self.assertGreater(
-            twin_focus_bonus(a, (a, b), focus_slot="B0"),
-            twin_focus_bonus(b, (a, b), focus_slot="B0") + 0.5,
+            twin_focus_bonus(grabber, (approacher, grabber)),
+            twin_focus_bonus(approacher, (approacher, grabber)),
         )
 
 
