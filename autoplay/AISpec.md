@@ -1056,6 +1056,34 @@ Damage dealt is still **0**. What remains is the coincidence problem: the swing
 needs `frames <= 8`, in-band, seat actionable and facing correct on the same
 decision, and those still rarely line up.
 
+#### Community doctrine: stand *under* the landing
+
+The long-standing player answer to this pair (GameFAQs board 454496, thread
+66063634) is the Street Fighter crossup counter — "walk straight under the one
+who jump kicks you and grab her as she lands", tech thrown throws by mashing
+up+jump, and one poster's stronger claim: "use only the back attack for the
+whole fight; one will always jump right into it".
+
+The ROM supports that geometry over punch spacing: the back attack's box
+`+$70` is player X −7..+3 by Y ±8 — **centred on our own body**, so it covers
+the spot we are standing on — and it carries 3 damage over 10 damaging frames
+against the punch's 1. `intercept_point` therefore aims at the landing point
+itself (zero stand-off) and the swing is `rear_attack`, with no facing input
+because the box is symmetric.
+
+**Measured: still 0 damage, and worse survival.** 700 decisions at 2-frame
+cadence: 0 dealt, 112 taken (against 80 for punch-band posting), 1 death, 3
+intercept swings. The mechanism of failure is precise — **0 of 24 landings had
+the player under the body**; touchdowns sat at dx 16, 44, 44, 44, 90+. The
+agent never arrives, and the time it spends trying to stand on the landing spot
+walks it into the grab instead: 245 decisions in hitstun (up from 155) and 30
+enemy-grab acquisitions.
+
+Two of the three intercept swings also fired while the player was already held
+(`$79`), which means the twin-fight skill is owning the seat in a state the
+enemy-grab escape skill should have taken — worth checking `PlayerMode`
+classification for `$79` before tuning anything else here.
+
 #### Twin evaluation metrics
 
 `evaluation.py` measures the doctrine directly: `twin_throw_band_steps` and

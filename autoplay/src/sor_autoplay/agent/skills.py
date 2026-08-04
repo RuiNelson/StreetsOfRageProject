@@ -368,6 +368,11 @@ class TwinFightSkill:
     # `+$34`). Decisions are four frames apart, so press once touchdown is
     # inside that window.
     SWING_LEAD_FRAMES = 8
+    # "Walk straight under the one who jump kicks you." The back attack box is
+    # player X -7..+3 by Y +-8, so being roughly on her landing spot is the
+    # whole requirement; allow a little slack for the last decision's drift.
+    UNDER_PX = 14.0
+    UNDER_LANE_PX = 12.0
 
     def __init__(self) -> None:
         # slot -> last observed (x, y). The commitment keeps one instance
@@ -511,24 +516,17 @@ class TwinFightSkill:
         # its damaging frames (3..12 after the edge) straddle touchdown.
         intercept = self._best_intercept(me, entities, profile)
         if intercept is not None:
-            lo, hi = twins_ai.punch_band(profile)
-            # What matters at touchdown is our distance to the *landing point*,
-            # not to the post — asking to be parked on the post exactly is a
-            # much tighter condition and it never came true live.
             reach = abs(intercept.x - float(me.world_x))
             lane_gap = abs(float(intercept.twin.world_y) - float(me.world_y))
-            in_band = lo <= reach <= hi and lane_gap <= combat.LANE_HIT_HALF
-            if intercept.frames <= self.SWING_LEAD_FRAMES and in_band:
-                # Face the landing on the same intent. Reaching the post means
-                # walking *away* from where the body will come down, so by the
-                # time it lands we are facing the wrong way and a bare B swings
-                # backwards. The runner applies direction for `face_frames`
-                # before the button, which is exactly this case.
-                toward_right = intercept.x > float(me.world_x)
+            under = reach <= self.UNDER_PX and lane_gap <= self.UNDER_LANE_PX
+            if intercept.frames <= self.SWING_LEAD_FRAMES and under:
+                # B+C, not B. The back attack's box is centred on our own body,
+                # so it covers the spot we are standing on — which is exactly
+                # where the arc puts her. No facing input: the box is symmetric
+                # about the player and a direction press here only walks us off
+                # the landing spot we spent the whole arc reaching.
                 return Intent(
-                    attack=True,
-                    left=not toward_right,
-                    right=toward_right,
+                    rear_attack=True,
                     note=f"twin skill intercept {intercept.twin.label}",
                 )
             goal = twins_ai.intercept_point(me, intercept, profile)

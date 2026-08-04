@@ -199,19 +199,17 @@ class ArcPredictionTests(unittest.TestCase):
         twin = _twin_arc(world_x=5200, world_z=160, vel_z=0.0)
         self.assertIsNone(twins_ai.predict_landing(twin))
 
-    def test_intercept_stands_inside_the_punch_band(self) -> None:
+    def test_intercept_stands_under_the_landing(self) -> None:
         from sor_autoplay.agent.characters import PROFILES
 
         me = _player(world_x=5100, world_y=64)
         twin = _twin_arc(world_x=5126, world_z=152, vel_z=-7.25)
         forecast = twins_ai.predict_landing(twin)
-        goal_x, _ = twins_ai.intercept_point(me, forecast, PROFILES[0])
-        gap = abs(forecast.x - goal_x)
-        lo, hi = twins_ai.punch_band(PROFILES[0])
-        self.assertGreaterEqual(gap, lo)
-        self.assertLessEqual(gap, hi)
-        # Approach from the side we are already on, not across the body.
-        self.assertLess(goal_x, forecast.x)
+        goal_x, goal_y = twins_ai.intercept_point(me, forecast, PROFILES[0])
+        # Stand *under* the landing: the back attack's box is body-centred, so
+        # spacing off at punch range is the wrong geometry for it.
+        self.assertAlmostEqual(goal_x, forecast.x, delta=1.0)
+        self.assertAlmostEqual(goal_y, float(forecast.twin.world_y), delta=1.0)
 
 
 class DoctrineTests(unittest.TestCase):

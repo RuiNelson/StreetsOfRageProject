@@ -383,6 +383,18 @@ for tests/HUD.
      attack swings backwards; adding the direction cut damage taken 112 → 80.
      Damage dealt is still 0: the swing needs in-band, actionable, facing and
      `frames <= 8` on the same decision, which rarely coincides.
+     **Community doctrine (GameFAQs 454496/66063634): stand *under* the
+     landing**, not at punch range — "walk straight under the one who jump
+     kicks you and grab her as she lands", or "use only the back attack for the
+     whole fight". The ROM agrees on geometry: the back attack box `+$70` is
+     player X −7..+3 by Y ±8, centred on our own body, 3 damage over 10 frames.
+     `intercept_point` now aims at the landing itself and the swing is B+C.
+     Measured: 0 dealt, 112 taken (vs 80 for punch-band posting), 1 death —
+     **0 of 24 landings had the player under the body** (touchdowns at dx 16,
+     44, 44, 44, 90+), and standing there invites the grab (245 hitstun
+     decisions, 30 grab acquisitions). Also: 2 of 3 intercept swings fired
+     while the player was already held (`$79`) — check `PlayerMode`
+     classification for `$79` before tuning this further.
      Fixture: restore `twins-state.bin` (64 KiB work RAM at the encounter)
      instead of replaying the stage; probes in the session scratchpad
      (`probe_reach.py`, `probe_moves.py`) reproduce the numbers above.

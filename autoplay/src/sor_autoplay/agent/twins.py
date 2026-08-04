@@ -184,15 +184,17 @@ def intercept_point(
     moving for the rest of the arc.
     """
 
-    lo, hi = punch_band(profile)
-    # Aim at the OUTER edge, not the middle. Live: posts aimed at the midpoint
-    # put us at dx 23 and 27 when the body actually touched down — both just
-    # inside the dead zone — because we keep walking during the four frames of
-    # a decision and the body keeps closing. Standing off by the far edge
-    # leaves room for that drift and lands inside the band.
-    stand_off = hi - 2.0
-    side = -1.0 if float(me.world_x) <= forecast.x else 1.0
-    return forecast.x + side * stand_off, float(forecast.twin.world_y)
+    # Stand ON the landing spot, not off it. The long-standing community
+    # answer to this pair is the Street Fighter crossup counter: walk straight
+    # under the twin that jump-kicks and meet her as she lands, either with a
+    # grab or with the back attack ("one will always jump right into it").
+    #
+    # The ROM agrees. The back attack's box `+$70` is player X -7..+3 by Y +-8
+    # — body-centred, not reaching — and it carries 3 damage over 10 damaging
+    # frames against the punch's 1. Posting off at punch range was the wrong
+    # geometry for the only move that pays here.
+    del profile  # spacing is deliberately zero; kept for signature stability
+    return forecast.x, float(forecast.twin.world_y)
 
 
 def is_twin(entity: MapEntity) -> bool:
