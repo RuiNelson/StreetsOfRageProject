@@ -2181,22 +2181,24 @@ def _seat_drivable(player: PlayerSnapshot) -> bool:
 def _continue_ui_intent(player: PlayerSnapshot) -> Intent:
     """Drive type-$0F continue Yes/No and optional high-score name entry.
 
-    ROM (``$5218`` / ``$56E6``):
+    ROM (``$5218`` / ``$56E6`` / ``$57D2``):
 
-    - ``object+$4B`` bit7 set → name entry (``$57D2``). Face buttons place the
-      current glyph; three placements (or END) finish and clear bit7.
+    - ``object+$4B`` bit7 set → name entry (``$57D2``). On the remapped edge
+      byte ``object+$55``: **B** (attack, bit4) is *backspace*; **C** or **A**
+      (jump/special, bits 5|6) *places* the current glyph. Three placements
+      (or place while glyph is END ``$1A``) finish and clear bit7.
     - bit7 clear → continue Yes/No. ``object+$63`` is 0=YES / nonzero=NO;
-      UP/DOWN toggle; face buttons confirm. YES consumes a continue and
-      rebuilds the active player.
+      UP/DOWN toggle; any face button (``$F0`` on the global press buffer)
+      confirms. YES consumes a continue and rebuilds the active player.
 
-    Policy: finish name entry with **B**, force YES, then confirm with **B**.
-    Never refuse a continue while continues remain.
+    Policy: place three name glyphs with **C**, force YES, then confirm with
+    **B**. Never refuse a continue while continues remain.
     """
 
     if player.name_entry_active:
-        # Held B places one letter per frame; a short pulse fills three slots
-        # and exits. Glyphs are irrelevant for autoplay.
-        return Intent(confirm=True, note="name entry B")
+        # $57D2: B = backspace, C/A = place. Default cursor glyphs are fine;
+        # three place edges fill the three slots and exit name entry.
+        return Intent(jump=True, note="name entry place C")
 
     if player.continues <= 0 or player.out_flag:
         return Intent(note="continue out / game over")

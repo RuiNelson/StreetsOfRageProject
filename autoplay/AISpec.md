@@ -248,18 +248,33 @@ type `$0F`. If the score beats the current 10th-place entry, `object+$4B` bit7
 is set and `$56E6 (high_score_name_entry_dispatcher)` runs first; otherwise the
 normal continue table at `$5236` runs immediately.
 
+Name-entry input is **not** the same as continue confirm. `$5218` remaps the
+joypad into `object+$54/+55`, then `$57D2` reads the press-edge byte:
+
+| `+$55` bit | Role on name entry |
+| ---------- | ------------------ |
+| bit 4 (attack / **B**) | **Backspace** (only if a letter is already placed) |
+| bit 5 or 6 (jump **C** / special **A**) | **Place** current glyph |
+| bits 2–3 (LEFT/RIGHT) | Cycle glyph index `0…$1A` (END is `$1A`) |
+| bit 7 (Start) | Finish early (agent never presses Start) |
+
+Three successful places advance the slot cursor to `$06` and finish; placing
+while the glyph is END also finishes. Completing clears bit7 so the continue
+table can run.
+
 | Phase | ROM signal | Agent action | Note |
 | ----- | ---------- | ------------ | ---- |
-| Name entry | type `$0F`, `+$4B` bit7 set | **B** (`confirm`) | Places current glyph; three placements (or END) clear bit7 and hand off to continue |
+| Name entry | type `$0F`, `+$4B` bit7 set | **C** (`jump`) | Place glyph; **not** B (B is backspace and stalls at empty name) |
 | Continue Yes/No, NO selected | type `$0F`, bit7 clear, `+$63 ≠ 0`, continues > 0 | **UP** | UP/DOWN toggle `+$63`; 0 = YES, nonzero = NO |
-| Continue Yes/No, YES selected | type `$0F`, bit7 clear, `+$63 == 0`, continues > 0 | **B** (`confirm`) | Consumes one continue and rebuilds the active player |
+| Continue Yes/No, YES selected | type `$0F`, bit7 clear, `+$63 == 0`, continues > 0 | **B** (`confirm`) | Any face button works on the global press buffer; agent uses B |
 | Out / no continues | continues ≤ 0 or `out_flag` set | idle | Game over / out for that seat |
 
 Rules:
 
 - Always accept continue (**YES**) while continues remain. Never select **NO**.
 - Name glyphs are irrelevant; any three letters (default cursor) are fine.
-- Face-button confirms use the standard **B** pulse path (fresh edge).
+- Name entry places with **C** (or **A**); never **B**.
+- Continue confirm uses the standard **B** pulse path (fresh edge).
 - Clear walk / planner / goal / commitment on entry (same as dialog / not-playable).
 - Session-level `police_special_active` already idles all seats; the ROM also
   freezes type-`$0F` updates while a police special is running.

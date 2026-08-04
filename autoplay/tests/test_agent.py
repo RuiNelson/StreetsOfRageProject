@@ -430,7 +430,9 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(decision.p1_mask & 0x01, msg=decision.p1_note)  # UP
         self.assertIn("continue select YES", decision.p1_note)
 
-    def test_name_entry_presses_b(self) -> None:
+    def test_name_entry_places_with_c_not_b(self) -> None:
+        """Name entry ($57D2): C/A place glyphs; B is backspace and stalls."""
+
         globals_block, timer_block, objects = _base_ingame_blocks()
         _put_u8(globals_block, 0x18, 0x00)
         _put_u16(globals_block, 0x1A, 0x0003)
@@ -443,7 +445,11 @@ class PolicyTests(unittest.TestCase):
         )
         self.assertTrue(snap.p1.name_entry_active)
         decision = decide_actions(snap, AgentConfig(p1_enabled=True))
-        self.assertTrue(decision.p1_mask & int(ATTACK), msg=decision.p1_note)
+        self.assertTrue(decision.p1_mask & int(JUMP), msg=decision.p1_note)
+        self.assertFalse(
+            decision.p1_mask & int(ATTACK),
+            msg=f"B is backspace on name entry: {decision.p1_note}",
+        )
         self.assertIn("name entry", decision.p1_note)
 
     def test_continue_ui_idles_when_no_continues(self) -> None:

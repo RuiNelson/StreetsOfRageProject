@@ -97,9 +97,9 @@ Architecture migration in progress. Per seat, each decision is:
    memory, profile, stage advice, coop, mode, graph, pressure.
 2. **`PlayerMode`** (exclusive ROM partition) — `DIALOG`, `CONTINUE_UI`,
    `NOT_PLAYABLE`, `ENEMY_HELD`, `HURT`, `GRAB_ANIM`, `AIRBORNE`, `HOLDING`,
-   `FREE`. `CONTINUE_UI` drives type-`$0F` name entry (B) then continue Yes
-   (UP if needed, then B); seats remain drivable after the player-mode bit
-   is cleared on death.
+   `FREE`. `CONTINUE_UI` drives type-`$0F` high-score name entry (**C** to
+   place; B is backspace in `$57D2`) then continue Yes (UP if needed, then
+   B); seats remain drivable after the player-mode bit is cleared on death.
 3. **`Commitment` / skills** (`agent/skills.py`) — at most one multi-frame
    skill owns the seat. First skills:
    - `EnemyGrabEscape` — `$78–$7E` C then B counter window
