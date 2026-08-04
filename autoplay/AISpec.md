@@ -975,13 +975,23 @@ ground snapshot `+$4C` (exposed as `MapEntity.ground_z`). The player's
 elevation is the wrong reference — a standing twin does not share the player's
 plane. Attacking mid-arc whiffs.
 
-**Status: not working.** Live episodes still deal 0-3 damage against 22 HP per
-body. The seat now attacks, spaces and feigns correctly, but hits rarely
-register, and roughly a quarter of decisions are spent in hitstun. The open
-question is timing: at 4-frame decision granularity the target has moved by the
-active frame, so the next attempt should drive attacks from the ROM's own
-punish windows (post-landing idle after `$15ABA`, `+$78` throw timeline)
-instead of opportunistic range checks.
+**Timing:** decisions are four frames apart, so a range check describes where
+a body already is, not where the punch lands. The skill therefore leads the
+target by one decision (`_will_be_in_range`, velocity from the previous
+observation, clamped to 26 px) and keeps the combo alive by pressing B during
+attack action `$18` while `+$58` bit 5 is clear, rather than waiting for idle.
+
+**Status: still not working.** Measured over 495 live decisions: 0 damage
+dealt, 128 taken, 2 deaths, 3 ground attacks. The distribution is the real
+finding — 152 decisions in hitstun, 94 in animation lockout, 123 approaching,
+47 spacing, 23 feigning, 13 combo continuations. The seat is being hit far more
+often than it acts, so timing refinements cannot show up yet.
+
+Next attempt should invert the engagement trigger: approach **only** into a
+ROM punish window (hit reaction `$03`/`$04`, the ~10-tick post-landing idle
+after `$15ABA`, or a whiffed `$15D0C` throw whose `+$78` timeline is still
+running) and otherwise hold outside `$60`, where `$15A64` cannot arm at all.
+Approaching whenever geometry allows is what feeds the hitstun.
 
 #### Twin evaluation metrics
 

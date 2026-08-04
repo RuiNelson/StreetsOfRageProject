@@ -357,6 +357,47 @@ class TwinFightSkill:
 
     name = "twin-fight"
 
+    # One decision is four frames. A twin closing at chase speed covers real
+    # ground in that window, so a range check made *now* describes where the
+    # body already is, not where the punch will land. Lead it by one decision.
+    LEAD_DECISIONS = 1.0
+    # Cap the extrapolation so a leaping body cannot pull the swing wildly.
+    MAX_LEAD_PX = 26.0
+
+    def __init__(self) -> None:
+        # slot -> last observed (x, y). The commitment keeps one instance
+        # alive across decisions, so this is a real velocity estimate.
+        self._last: dict[str, tuple[float, float]] = {}
+
+    def _velocity(self, twin: MapEntity) -> tuple[float, float]:
+        """Per-decision movement of this body, from the previous observation."""
+
+        now = (float(twin.world_x), float(twin.world_y))
+        prev = self._last.get(twin.slot)
+        if prev is None:
+            return 0.0, 0.0
+        vx = max(-self.MAX_LEAD_PX, min(self.MAX_LEAD_PX, now[0] - prev[0]))
+        vy = max(-self.MAX_LEAD_PX, min(self.MAX_LEAD_PX, now[1] - prev[1]))
+        return vx, vy
+
+    def _will_be_in_range(
+        self,
+        me: MapEntity,
+        twin: MapEntity,
+        profile,
+        vel: dict[str, tuple[float, float]],
+    ) -> bool:
+        """True when this body arrives inside the strike box next decision.
+
+        Swinging on the prediction is the whole point: reacting to a body that
+        is already in range means the ROM applies B after it has moved on.
+        """
+
+        vx, vy = vel.get(twin.slot, (0.0, 0.0))
+        dx = abs(float(twin.world_x) + vx * self.LEAD_DECISIONS - float(me.world_x))
+        dy = abs(float(twin.world_y) + vy * self.LEAD_DECISIONS - float(me.world_y))
+        return dx <= profile.strike_range and dy <= combat.LANE_HIT_HALF
+
     def valid(self, ctx: DecisionContext) -> bool:
         me = ctx.me
         if me is None or ctx.mode != PlayerMode.FREE:
@@ -373,6 +414,12 @@ class TwinFightSkill:
         if me is None:
             return None
         entities = ctx.snapshot.world_map.entities
+        live = twins_ai.live_twins(entities)
+        # Estimate velocity against the previous decision, then re-baseline.
+        vel = {twin.slot: self._velocity(twin) for twin in live}
+        self._last = {
+            twin.slot: (float(twin.world_x), float(twin.world_y)) for twin in live
+        }
         doctrine = twins_ai.scene(me, entities)
         if doctrine.focus is None:
             return None
@@ -390,6 +437,12 @@ class TwinFightSkill:
             return self._move(
                 me, (float(me.world_x), lane), "twin skill leave throw band"
             )
+
+        # Keep the combo alive. During normal attack action `$18` the ROM
+        # accepts the next hit while `+$58` bit 5 is clear; waiting for idle
+        # drops the chain and was ~15% of all decisions in live episodes.
+        if me.action_base == 0x18 and not (me.action_flags & 0x20):
+            return Intent(attack=True, note="twin skill combo")
 
         if not combat.player_can_start_ground_action(me):
             return Intent(note="twin skill wait anim")
@@ -414,8 +467,14 @@ class TwinFightSkill:
         for twin in twins_ai.live_twins(entities):
             if twins_ai.is_airborne(twin, me):
                 continue
+            if not combat.facing_toward(me, twin):
+                continue
             if combat.can_punch(me, twin, profile, require_facing=True):
                 return Intent(attack=True, note=f"twin skill punch {twin.label}")
+            if self._will_be_in_range(me, twin, profile, vel):
+                return Intent(
+                    attack=True, note=f"twin skill lead {twin.label}"
+                )
 
         focus = doctrine.focus
         if twins_ai.is_airborne(focus, me):

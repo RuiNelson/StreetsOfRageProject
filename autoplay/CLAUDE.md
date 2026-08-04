@@ -347,10 +347,13 @@ for tests/HUD.
      engage with direct D-pad steering. Attacks require a **grounded** body:
      `$15ABA` compares `+$18` against the body's own ground snapshot `+$4C`
      (`MapEntity.ground_z`), not the player's elevation.
-     **STATUS: still failing.** Live episodes deal 0-3 damage against 22 HP per
-     body. The seat attacks/spaces/feigns correctly but hits rarely register.
-     Next attempt should drive attacks from ROM punish windows (post-landing
-     idle, `+$78` throw timeline) rather than opportunistic range checks.
+     Attacks lead the target by one decision (four frames) and continue the
+     combo during action `$18` while `+$58` bit 5 is clear.
+     **STATUS: still failing.** 495 live decisions: 0 damage dealt, 128 taken,
+     3 attacks; 152 decisions in hitstun and 94 in animation lockout. The seat
+     is hit far more often than it acts. Next: approach **only** into a ROM
+     punish window (`$03`/`$04` hit reaction, post-landing idle, whiffed
+     `$15D0C`) and otherwise hold outside `$60` where `$15A64` cannot arm.
      Fixture: restore `twins-state.bin` (64 KiB work RAM at the encounter)
      instead of replaying the stage.
 10. Route around floor holes (stage 4), factory presses (stage 6), and hold
