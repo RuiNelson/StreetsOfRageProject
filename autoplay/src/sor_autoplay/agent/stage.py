@@ -460,13 +460,18 @@ def mr_x_choice_intent(
 
     ``object+$59`` bit 3 = selected side; bit 4 = choice UI active.
     For the initial offer, bit 3 = 1 is refuse ("NO") / continue the fight.
+
+    ROM ``$120EC (poll_mr_x_offer_player_choice_input)`` reads *held*
+    ``object+$54``: UP (bit0) clears bit3 (YES), DOWN (bit1) sets bit3 (NO);
+    any face button held in bits 4–6 (``$70``) registers the choice. Agent
+    policy uses DOWN then **A**.
     """
 
     if not choice_active:
         return None
     if choice_bit is None:
-        # No object flag: press right then confirm over a few ticks via state.
+        # No object flag: hold DOWN then confirm over a few ticks via state.
         return "select_no"
     if (choice_bit & 0x08) == 0:
-        return "select_no"  # need RIGHT to move selection to NO
+        return "select_no"  # need DOWN to move selection to NO
     return "confirm"

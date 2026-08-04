@@ -466,7 +466,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(decision.p1_mask, 0)
         self.assertIn("game over", decision.p1_note)
 
-    def test_mr_x_selects_no(self) -> None:
+    def test_mr_x_selects_no_with_down(self) -> None:
         from dataclasses import replace
 
         p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")
@@ -476,11 +476,32 @@ class PolicyTests(unittest.TestCase):
         raw["p1_obj59"] = 0x10
         snap = replace(snap, raw=raw)
         decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        # Buttons.DOWN = 1 << 1
         self.assertTrue(
-            decision.p1_mask & 0x08 or decision.p1_mask & int(ATTACK),
-            msg=f"expected RIGHT or confirm, got {decision.p1_mask:#x} {decision.p1_note}",
+            decision.p1_mask & 0x02,
+            msg=f"expected DOWN to select NO, got {decision.p1_mask:#x} {decision.p1_note}",
         )
-        self.assertIn("mr.x", decision.p1_note)
+        self.assertIn("select NO", decision.p1_note)
+
+    def test_mr_x_confirms_no_with_a(self) -> None:
+        from dataclasses import replace
+
+        p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")
+        snap = _snapshot_with_map((p1,), level_index=7, mr_x=1)
+        # bit4 UI active + bit3 NO already selected.
+        raw = dict(snap.raw)
+        raw["p1_obj59"] = 0x18
+        snap = replace(snap, raw=raw)
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertTrue(
+            decision.p1_mask & int(SPECIAL),
+            msg=f"expected A (special) to register, got {decision.p1_mask:#x} {decision.p1_note}",
+        )
+        self.assertFalse(
+            decision.p1_mask & int(ATTACK),
+            msg=f"confirm should be A not B: {decision.p1_note}",
+        )
+        self.assertIn("confirm NO", decision.p1_note)
 
     def test_mr_x_waits_until_choice_ui(self) -> None:
         p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")

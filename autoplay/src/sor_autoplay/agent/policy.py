@@ -2215,6 +2215,12 @@ def _mr_x_intent(
     player_index: int,
     memory: AgentState,
 ) -> Intent:
+    """Refuse Mr. X: hold DOWN to select NO, then hold A to register.
+
+    ROM ``$120EC``: held UP/DOWN toggle ``object+$59`` bit3 (0=YES, 1=NO);
+    held face bits ``$70`` confirm. Never accept YES.
+    """
+
     flags = snapshot.raw.get(f"p{player_index}_obj59", None)
     choice_active = True
     choice_bit = None
@@ -2232,6 +2238,6 @@ def _mr_x_intent(
     phase = memory.phase(player_index)
     if action == "select_no" or (action is None and phase < 4):
         memory.set_phase(player_index, phase + 1)
-        return Intent(right=True, note="mr.x select NO")
+        return Intent(down=True, note="mr.x select NO")
     memory.set_phase(player_index, 0)
-    return Intent(confirm=True, note="mr.x confirm NO")
+    return Intent(special=True, note="mr.x confirm NO")

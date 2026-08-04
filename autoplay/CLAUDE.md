@@ -116,7 +116,8 @@ for tests/HUD.
 ### Behaviour (priority — same outcomes as before the pipeline)
 
 1. Steady (no input) while paused or police special is active
-2. Mr. X offer: always select **NO** (refuse) then confirm
+2. Mr. X offer: hold **DOWN** for **NO**, then hold **A** to register
+   (refuse; never YES)
 3. **Enemy-held skill** then **expert + crossover-suplex skill**
    (`agent/skills.py` → `inference.py`, `expert.py`, `autoplanner.py`):
    If a front hold (`$60/$61`) leaves another live hostile behind the player,
@@ -494,8 +495,9 @@ See `src/sor_autoplay/memory_map.py` and
 - Police special: `$FFFA1A` nonzero (+ caller `$FFFA1C`)
 - Floor holes: `$FFA000` collision-class map, class 0 = open/pit
   (query matches `sub_0000AD30`: x>>4, lane>>3, stride `$FFE02E`)
-- Mr. X offer: `$FFDE00` flag, `$FFDE04` state; player object `+$59` bit3=side,
-  bit4=choice UI active (initial refuse path wants bit3=1 = NO)
+- Mr. X offer: `$FFDE00` flag, `$FFDE04` state; player object `+$59` bit3=side
+  (DOWN sets NO / bit3=1, UP clears to YES), bit4=choice UI active; held face
+  bits `$70` on `+$54` register the choice (agent uses A)
 - Styles live in `object_catalog.py`; extraction in `world_map.py`
 - Agent modules: `agent/policy.py`, `context.py`, `skills.py`, `inference.py`,
   `expert.py`, `autoplanner.py`, `knowledge.py`, `fuzzy.py`, `arbiter.py`,

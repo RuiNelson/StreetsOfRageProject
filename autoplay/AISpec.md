@@ -1028,9 +1028,19 @@ Progress lead when empty: **±160** world X.
 
 `is_mr_x_offer`: flag `$FFDE00` or (level 7 ∧ clock stopped ∧ no live threats ∧ timer valid).
 
-Choice: object `+$59` bit4 = UI active; bit3 = side (**1 = NO**).
+Choice UI: object `+$59` bit4 = active; bit3 = side (**1 = NO**, 0 = YES).
 
-Policy: hold RIGHT until NO selected (phase counter), then confirm (B). Never accept YES.
+ROM `$120EC (poll_mr_x_offer_player_choice_input)` reads **held** `object+$54`
+(then clears that word):
+
+| Held input | Effect |
+| ---------- | ------ |
+| **UP** (bit 0) | Clear bit3 → YES |
+| **DOWN** (bit 1) | Set bit3 → NO |
+| Face bits `$70` (A/B/C after remap) | Register choice; bit5 latches “answered” |
+
+Policy: hold **DOWN** until NO is selected (phase counter / bit3 set), then
+hold **A** (`special`) to register. Never accept YES.
 
 ---
 
