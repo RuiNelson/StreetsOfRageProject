@@ -565,7 +565,6 @@ chords are not handled by these host-side cheats.
 | `Alt/Option+K` | Kill all instantiated enemies, including bosses, through their normal lethal states |
 | `Alt/Option+W` | Call the police for the active player without consuming a special attack |
 | `Alt/Option+1`–`8` | Jump to levels 1–8 and enter the corresponding level-intro state |
-| `Alt/Option+T` | Jump to Round 5 (Onihime/Yasha twins) level intro |
 | `Alt/Option+G` | Start the good ending |
 | `Alt/Option+B` | Start the bad ending |
 
@@ -584,7 +583,6 @@ with MegaDriveClient("127.0.0.1", 6969) as game:
     game.trigger_option_hotkey("l")  # add a P1 life
     game.trigger_option_hotkey("p")  # toggle P1 punch power
     game.trigger_option_hotkey("3")  # load level 3
-    game.trigger_option_hotkey("t")  # Round 5 twins (Onihime/Yasha)
 ```
 
 #### Startup flags
