@@ -16,6 +16,7 @@ from typing import Protocol, runtime_checkable
 
 from ..world_map import MapEntity
 from . import combat, grabs
+from . import twins as twins_ai
 from .context import DecisionContext, PlayerMode
 from .controls import Intent
 from .expert import DEFAULT_COMBAT_EXPERT, TacticalGoal
@@ -329,3 +330,184 @@ def try_hold_resolve(ctx: DecisionContext) -> Intent | None:
             commitment.clear(ctx)
         return None
     return _continue_or_start(commitment, hold, ctx)
+
+
+class TwinFightSkill:
+    """Exclusive seat ownership for the Onihime/Yasha pair (AISpec §9.4b).
+
+    The free-decision ladder has many independent movement controllers, and a
+    live twin pair triggers most of them at once. Measured across nine live
+    Round-5 episodes, they preempted each other every other decision — 129
+    approaches against 82 pressure sidesteps — so the seat never closed to
+    punch range and landed **zero** melee hits in hundreds of decisions.
+
+    This skill takes the whole fight instead, in one fixed order:
+
+    1. ROM gate denial (armed leap escape, `$159F8` throw-band exit)
+    2. back attack when a twin is inside the rear band
+    3. feign — hold the back turned to a twin closing from behind, because
+       `$15C72` needs us facing and closing (the speedrun tactic)
+    4. punch when coplanar, in range and facing
+    5. turn to face, when nothing is behind us
+    6. converge on coplanar strike distance of the *reachable* body
+
+    Grabs are deliberately left to the hold tree: once a twin is held, the
+    knee/throw skill owns the seat.
+    """
+
+    name = "twin-fight"
+
+    def valid(self, ctx: DecisionContext) -> bool:
+        me = ctx.me
+        if me is None or ctx.mode != PlayerMode.FREE:
+            return False
+        if me.is_grabbing or me.is_holding_weapon:
+            return False  # hold tree owns knee / throw
+        return bool(twins_ai.live_twins(ctx.snapshot.world_map.entities))
+
+    def cancel(self, ctx: DecisionContext) -> None:
+        ctx.walk.clear()
+
+    def step(self, ctx: DecisionContext) -> Intent | None:
+        me = ctx.me
+        if me is None:
+            return None
+        entities = ctx.snapshot.world_map.entities
+        doctrine = twins_ai.scene(me, entities)
+        if doctrine.focus is None:
+            return None
+        profile = ctx.profile
+        level_index = ctx.snapshot.level_index
+
+        # 1) Gate denial outranks damage: a landed throw costs ~40% of the bar.
+        if doctrine.retreat_from is not None:
+            goal = twins_ai.retreat_goal(
+                me, doctrine.retreat_from, level_index=level_index, entities=entities
+            )
+            return self._move(me, goal, "twin skill leap escape")
+        if doctrine.lane_unsafe:
+            lane = twins_ai.safe_lane(me, entities, level_index=level_index)
+            return self._move(
+                me, (float(me.world_x), lane), "twin skill leave throw band"
+            )
+
+        if not combat.player_can_start_ground_action(me):
+            return Intent(note="twin skill wait anim")
+
+        face_right = not combat.player_facing_left(me)
+
+        # 2) Back attack: the pair's own geometry hands us this constantly.
+        for twin in twins_ai.live_twins(entities):
+            if twins_ai.is_airborne(twin, me):
+                continue
+            if combat.can_rear_hit(me, twin, profile, face_right=face_right):
+                return Intent(rear_attack=True, note=f"twin skill rear {twin.label}")
+
+        # 3) Feign: never turn to meet a twin closing on our back.
+        bait = twins_ai.rear_bait_target(
+            me, entities, face_right=face_right, rear_min=profile.rear_range_max
+        )
+
+        # Attack whichever body is grounded and legal right now. The pair
+        # alternates jump arcs constantly, so waiting for one chosen focus to
+        # land forfeits the openings the other one is handing us.
+        for twin in twins_ai.live_twins(entities):
+            if twins_ai.is_airborne(twin, me):
+                continue
+            if combat.can_punch(me, twin, profile, require_facing=True):
+                return Intent(attack=True, note=f"twin skill punch {twin.label}")
+
+        focus = doctrine.focus
+        if twins_ai.is_airborne(focus, me):
+            grounded = [
+                twin
+                for twin in twins_ai.live_twins(entities)
+                if not twins_ai.is_airborne(twin, me)
+            ]
+            if grounded:
+                focus = min(
+                    grounded,
+                    key=lambda twin: abs(float(twin.world_x) - float(me.world_x)),
+                )
+        dx = float(focus.world_x) - float(me.world_x)
+        dy = float(focus.world_y) - float(me.world_y)
+
+        # 4) Punch a grounded body only. The pair spends much of the fight in
+        # jump arcs, and a punch at an airborne twin passes under it.
+        grounded_focus = not twins_ai.is_airborne(focus, me)
+        if grounded_focus and combat.can_punch(
+            me, focus, profile, require_facing=True
+        ):
+            return Intent(attack=True, note=f"twin skill punch {focus.label}")
+
+        # Its landing is the ROM's own punish window: after the jump attack
+        # lands, `$15ABA` resets `+$67 = 0, +$30 = 1` and idles ~10 ticks.
+        if not grounded_focus and combat.can_punch(
+            me, focus, profile, require_facing=False
+        ):
+            return Intent(
+                left=dx < 0, right=dx > 0, note=f"twin skill await land {focus.label}"
+            )
+
+        if bait is not None:
+            return Intent(note=f"twin skill feign {bait.label}")
+
+        # 5) In range but facing away (and nothing behind): turn.
+        if combat.can_punch(me, focus, profile, require_facing=False):
+            return Intent(
+                left=dx < 0, right=dx > 0, note=f"twin skill face {focus.label}"
+            )
+
+        # 6) Converge — but never into a live commit. `$15A64` arms the jump
+        # attack at X < `$60` with no other condition, so walking at a
+        # committed body is the one approach the gates cannot protect. Hold
+        # spacing until it resolves (measured: engaging through commits cost 9
+        # deaths in a single 700-decision episode).
+        for threat in doctrine.threats:
+            if threat.committed and threat.dx < twins_ai.JUMP_ATTACK_X:
+                lane = twins_ai.safe_lane(
+                    me, entities, level_index=level_index, prefer=float(me.world_y)
+                )
+                side = -1.0 if float(threat.twin.world_x) > float(me.world_x) else 1.0
+                hold_x = float(me.world_x) + side * 12.0
+                return self._move(
+                    me, (hold_x, lane), f"twin skill space {threat.twin.label}"
+                )
+
+        engage = max(20.0, profile.strike_range - 8.0)
+        goal_x = float(focus.world_x) - (engage if dx > 0 else -engage)
+        return self._move(
+            me, (goal_x, float(focus.world_y)), f"twin skill engage {focus.label}"
+        )
+
+    @staticmethod
+    def _move(me: MapEntity, goal: tuple[float, float], note: str) -> Intent:
+        """Direct D-pad steering — deliberately not the walk latch.
+
+        The latch is refreshed by other controllers and was a source of the
+        approach/evade oscillation this skill exists to end.
+        """
+
+        gx, gy = goal
+        dx = gx - float(me.world_x)
+        dy = gy - float(me.world_y)
+        return Intent(
+            left=dx < -3.0,
+            right=dx > 3.0,
+            up=dy < -3.0,
+            down=dy > 3.0,
+            note=note,
+        )
+
+
+def try_twin_fight(ctx: DecisionContext) -> Intent | None:
+    """Own the seat while any type-$58 boss is alive."""
+
+    assert ctx.seat.commitment is not None
+    commitment = ctx.seat.commitment
+    skill = TwinFightSkill()
+    if not skill.valid(ctx):
+        if commitment.name == TwinFightSkill.name:
+            commitment.clear(ctx)
+        return None
+    return _continue_or_start(commitment, skill, ctx)

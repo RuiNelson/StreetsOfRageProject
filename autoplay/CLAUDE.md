@@ -341,6 +341,18 @@ for tests/HUD.
      twins is still ~0 live; the remaining blocker is in target-selection
      utility, not in `twins.py`. Reproduce in seconds with
      `tests/test_twins.py::PolicyEngagementTests` rather than a live episode.
+   - **Twin fight skill** (`skills.TwinFightSkill`, AISpec §9.4b): while any
+     type-`$58` boss lives the skill owns the seat (after police, before the
+     hold tree) and runs gate denial → rear attack → feign → punch → space →
+     engage with direct D-pad steering. Attacks require a **grounded** body:
+     `$15ABA` compares `+$18` against the body's own ground snapshot `+$4C`
+     (`MapEntity.ground_z`), not the player's elevation.
+     **STATUS: still failing.** Live episodes deal 0-3 damage against 22 HP per
+     body. The seat attacks/spaces/feigns correctly but hits rarely register.
+     Next attempt should drive attacks from ROM punish windows (post-landing
+     idle, `+$78` throw timeline) rather than opportunistic range checks.
+     Fixture: restore `twins-state.bin` (64 KiB work RAM at the encounter)
+     instead of replaying the stage.
 10. Route around floor holes (stage 4), factory presses (stage 6), and hold
     the elevator (stage 7)
     - Stage-4 horizontal progression must turn into a persistent vertical

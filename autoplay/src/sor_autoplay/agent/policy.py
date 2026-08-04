@@ -36,7 +36,12 @@ from .expert import DEFAULT_COMBAT_EXPERT
 from .jump_kick import JumpKickPlan
 from .knowledge import Relation
 from .navigation import NavMemory
-from .skills import try_crossover_suplex, try_hold_resolve, try_start_mode_skill
+from .skills import (
+    try_crossover_suplex,
+    try_hold_resolve,
+    try_start_mode_skill,
+    try_twin_fight,
+)
 from .walk import WalkState, blend_walk_with_actions
 
 
@@ -405,6 +410,14 @@ def _decide_one(
         assert ctx.seat.commitment is not None
         ctx.seat.commitment.clear(ctx)
         return Intent(special=True, note=f"police ({ctx.press.reason})")
+
+    # Twins own the seat outright: the free ladder's controllers preempted
+    # each other every other decision and never landed a hit (AISpec §9.4b).
+    # Runs after police (the special is worth 10 per boss) and before the
+    # hold tree so a successful grab still converts to knee/throw.
+    twin_fight = try_twin_fight(ctx)
+    if twin_fight is not None:
+        return twin_fight
 
     # --- Hold / weapon tree + closed grab animations ---
     held = try_hold_resolve(ctx)
@@ -1858,11 +1871,9 @@ def _twin_attack_intent(
     hold_target = doctrine.hold_for_walk_in
     if hold_target is not None and hold_target.slot == foe.slot and not punch_ok:
         walk.clear()
-        return Intent(
-            left=face_left,
-            right=face_right_now,
-            note=f"twin bait walk-in {foe.label} [{tag}]",
-        )
+        # No facing input: turning toward it satisfies $15C72's facing test,
+        # which is the gate the bait exists to keep shut.
+        return Intent(note=f"twin bait walk-in {foe.label} [{tag}]")
 
     def _ally_block(kind: str, *, rear: bool = False) -> Intent | None:
         if coop.attack_would_hit_ally(
@@ -1979,6 +1990,20 @@ def _twin_attack_intent(
             attack=True,
             note=f"twin punch {foe.label} [{tag}]",
         )
+
+    # Speedrun feign: keep the back turned to a twin closing from behind. Its
+    # jump-in ($15C72) needs us facing and closing, so a turned back denies it
+    # outright, and the body walks into back-attack range on its own. Turning to
+    # meet it would arm the gate and waste the decision.
+    bait = twins_ai.rear_bait_target(
+        me,
+        snapshot.world_map.entities,
+        face_right=not combat.player_facing_left(me),
+        rear_min=profile.rear_range_max,
+    )
+    if bait is not None and not punch_ok:
+        walk.clear()
+        return Intent(note=f"twin feign back {bait.label} [{tag}]")
 
     # Geometry ready but wrong face: face then next tick punches.
     if punch_geom and not facing_ok and lane_ok and not is_dangerous(phase):

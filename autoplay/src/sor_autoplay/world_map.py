@@ -162,6 +162,7 @@ class MapEntity:
     mode_flags: int = 0  # later-boss +$7B; twin bit1 = grab/throw AI path
     target_unavailable: int = 0  # later-boss +$77 from $179F8
     phase_timer: int = 0  # later-boss +$78 jump/throw timeline counter
+    ground_z: int | None = None  # later-boss +$4C ground/landing height
     combat_phase: CombatPhase = CombatPhase.UNKNOWN
 
     @property
@@ -432,6 +433,7 @@ def _entity_from_object(
     mode_flags = 0
     target_unavailable = 0
     phase_timer = 0
+    ground_z = None
     phase = CombatPhase.UNKNOWN
 
     if style.kind == "player":
@@ -455,6 +457,7 @@ def _entity_from_object(
         mode_flags = _u8(slot, mm.OBJ_BOSS_MODE_FLAGS)
         target_unavailable = _u8(slot, mm.OBJ_BOSS_TARGET_UNAVAIL)
         phase_timer = _u8(slot, mm.OBJ_BOSS_PHASE_TIMER)
+        ground_z = fixed16_lane_y(slot, mm.OBJ_BOSS_GROUND_Z)
         # Target pointer location differs by boss generation.
         if type_id in (0x30, 0x35):
             target_ptr = _u16(slot, mm.OBJ_BESPOKE_TARGET)
@@ -515,6 +518,7 @@ def _entity_from_object(
         mode_flags=mode_flags,
         target_unavailable=target_unavailable,
         phase_timer=phase_timer,
+        ground_z=ground_z,
         boss_dist_lane=boss_dist_lane,
         combat_phase=phase,
     )

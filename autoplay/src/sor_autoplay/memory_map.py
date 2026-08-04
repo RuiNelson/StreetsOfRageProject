@@ -126,6 +126,9 @@ OBJ_PAIR_ROLE = 0x5D  # later-boss pair role 1/2; player combo state reuses $5D
 OBJ_COMBO_STATE = 0x5D  # player combo / action chain
 OBJ_HELD_PTR = 0x5E  # word pointer to grabbed/held object (weapons / some grabs)
 OBJ_HELD_TYPE = 0x60  # nonzero while holding weapon or grab target type
+# Later bosses ($55-$58): ground/landing height snapshot. $15ABA tests the
+# live height +$18 against this to decide "still airborne".
+OBJ_BOSS_GROUND_Z = 0x4C
 OBJ_BOSS_TACTICAL = 0x67  # later-boss tactical substate (and Abadede police latch)
 # Later bosses ($55-$58): $179F8 writes 1 here when the selected player is
 # unavailable (hurt/knockdown $5A-$5F or +$59/+$4B bit1 interaction flags).

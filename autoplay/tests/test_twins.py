@@ -314,3 +314,40 @@ class PolicyEngagementTests(unittest.TestCase):
         )
         decision = self._decide((me, focus, far_committed))
         self.assertTrue(decision.p1_mask & self.ATTACK, decision.p1_note)
+
+
+class FeignTests(unittest.TestCase):
+    """Speedrun tactic: show the back, then back-attack.
+
+    `$15C72` only arms against a player who is facing the boss and closing on
+    it, so a turned back denies the grab twin's jump-in outright and the body
+    walks into back-attack range under its own power.
+    """
+
+    def _decide(self, entities):
+        from sor_autoplay.agent.policy import AgentConfig, AgentState, decide_actions
+        from tests.test_agent_combat import PolicyIntegrationTests
+
+        helper = PolicyIntegrationTests("run")
+        return decide_actions(
+            helper._snap(entities),
+            AgentConfig(p1_enabled=True, allow_police_special=False),
+            AgentState(),
+        )
+
+    def _behind(self, dx: int):
+        me = _player(world_x=100, world_y=64, action_state=0x02)  # facing right
+        rear = _twin(world_x=100 - dx, world_y=64, slot="B0", mode_flags=2, pair_role=2)
+        far = _twin(world_x=400, world_y=64, slot="B1", mode_flags=1)
+        return self._decide((me, rear, far))
+
+    def test_never_turns_toward_a_twin_closing_on_our_back(self) -> None:
+        for dx in (90, 70, 55, 40):
+            decision = self._behind(dx)
+            # LEFT (0x04) would turn to meet it and arm the jump-in.
+            self.assertFalse(decision.p1_mask & 0x04, f"dx={dx}: {decision.p1_note}")
+
+    def test_back_attacks_once_the_rear_twin_arrives(self) -> None:
+        decision = self._behind(28)
+        self.assertEqual(decision.p1_mask & 0x60, 0x60, decision.p1_note)
+        self.assertIn("rear", decision.p1_note)

@@ -54,6 +54,9 @@ JUMP_IN_FAR_X = 0x70  # 112
 LANE_SAFE_CLEARANCE = 40.0
 # Coplanar attack band. Must stay under THROW_LANE_MIN with sample margin.
 LANE_COPLANAR_MAX = 12.0
+# Elevation slack before a body counts as airborne.
+AIRBORNE_Z_MARGIN = 12.0
+
 # Lane scan step when searching for a safe depth.
 _LANE_STEP = 2.0
 
@@ -101,6 +104,23 @@ def effective_hp(twin: MapEntity) -> int:
     if twin.health >= 0x8000:
         return 0x7FFF
     return int(twin.health)
+
+
+def is_airborne(twin: MapEntity, me: MapEntity) -> bool:
+    """True while the twin is off the ground (jump arc / leap / throw).
+
+    `$15ABA` decides this exactly the same way: compare live height `+$18`
+    against the body's own ground snapshot `+$4C`. The player's elevation is
+    the wrong reference — a standing twin does not share the player's plane,
+    and using it classified every body as airborne.
+
+    Punching an airborne twin whiffs: ten live punches at dx 5-43, dy 1-7
+    dealt zero damage while the target was mid-arc.
+    """
+
+    if twin.ground_z is None:
+        return False
+    return abs(float(twin.world_z) - float(twin.ground_z)) > AIRBORNE_Z_MARGIN
 
 
 def in_throw_band(lane_delta: float) -> bool:
@@ -175,6 +195,13 @@ def assess(me: MapEntity, twin: MapEntity) -> TwinThreat:
     )
 
 
+# Expert feign window. $15C72 needs the player *facing* the boss and closing,
+# so a turned back closes the grab twin's jump-in outright and an approach twin
+# has nothing but its lane-crossing hop. Let a rear twin walk into back-attack
+# range instead of turning to meet it.
+REAR_BAIT_MAX = 110.0
+
+
 @dataclass(frozen=True, slots=True)
 class TwinScene:
     """Doctrine for the whole twin fight this frame."""
@@ -184,6 +211,7 @@ class TwinScene:
     lane_unsafe: bool
     retreat_from: MapEntity | None
     hold_for_walk_in: MapEntity | None
+    bait_rear: MapEntity | None
 
     @property
     def active(self) -> bool:
@@ -205,7 +233,7 @@ def scene(me: MapEntity, entities) -> TwinScene:
 
     threats = tuple(assess(me, twin) for twin in live_twins(entities))
     if not threats:
-        return TwinScene((), None, False, None, None)
+        return TwinScene((), None, False, None, None, None)
 
     focus = _focus(threats)
     # Only an *armed* gate is worth a decision. Using raw geometry here fired
@@ -233,7 +261,40 @@ def scene(me: MapEntity, entities) -> TwinScene:
         ):
             hold = focus
 
-    return TwinScene(threats, focus, lane_unsafe, retreat, hold)
+    return TwinScene(threats, focus, lane_unsafe, retreat, hold, None)
+
+
+def rear_bait_target(
+    me: MapEntity,
+    entities,
+    *,
+    face_right: bool,
+    rear_min: float,
+) -> MapEntity | None:
+    """A twin closing on our back that we should let arrive.
+
+    Keeping the back turned denies `$15C72` (its facing/closing test) and sets
+    up the rear attack, which is the speedrun answer to this pair. Only twins
+    that are still outside the back-attack band qualify — once inside it, the
+    attack itself fires.
+    """
+
+    best = None
+    for twin in live_twins(entities):
+        if is_dangerous(twin.combat_phase):
+            continue
+        dx = float(twin.world_x) - float(me.world_x)
+        if abs(float(twin.world_y) - float(me.world_y)) > LANE_COPLANAR_MAX:
+            continue
+        behind = dx < 0 if face_right else dx > 0
+        if not behind:
+            continue
+        distance = abs(dx)
+        if distance <= rear_min or distance > REAR_BAIT_MAX:
+            continue
+        if best is None or distance < abs(float(best.world_x) - float(me.world_x)):
+            best = twin
+    return best
 
 
 def _focus(threats: tuple[TwinThreat, ...]) -> MapEntity | None:

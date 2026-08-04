@@ -951,6 +951,38 @@ recomputing "opposite the partner" every decision made the seat orbit the focus.
 special spend; it exists to isolate melee competence in measurement, since the
 special's flat 10-per-boss otherwise masks whether melee lands at all.
 
+#### Twin fight skill (`skills.TwinFightSkill`) — exclusive ownership
+
+The free-decision ladder holds many independent movement controllers, and a
+live pair triggers most of them simultaneously; measured live they preempted
+each other every other decision (129 approaches vs 82 pressure sidesteps) and
+the seat never closed to punch range. While any type-`$58` boss is alive the
+twin skill owns the seat instead, in fixed order:
+
+1. ROM gate denial (armed leap escape, throw-band exit)
+2. back attack on a **grounded** twin inside the rear band
+3. feign — hold the back turned to a twin closing from behind (`$15C72`)
+4. punch any **grounded** twin in range (either body, not a fixed focus)
+5. space out of a committed twin inside `$60` (`$15A64` cannot be denied)
+6. converge on coplanar strike distance
+
+It runs after the police special and before the hold tree, so a successful
+grab still converts to knee/throw. Steering is direct D-pad, not the walk
+latch, which other controllers refresh.
+
+**Airborne test:** `$15ABA` compares live height `+$18` against the body's own
+ground snapshot `+$4C` (exposed as `MapEntity.ground_z`). The player's
+elevation is the wrong reference — a standing twin does not share the player's
+plane. Attacking mid-arc whiffs.
+
+**Status: not working.** Live episodes still deal 0-3 damage against 22 HP per
+body. The seat now attacks, spaces and feigns correctly, but hits rarely
+register, and roughly a quarter of decisions are spent in hitstun. The open
+question is timing: at 4-frame decision granularity the target has moved by the
+active frame, so the next attempt should drive attacks from the ROM's own
+punish windows (post-landing idle after `$15ABA`, `+$78` throw timeline)
+instead of opportunistic range checks.
+
 #### Twin evaluation metrics
 
 `evaluation.py` measures the doctrine directly: `twin_throw_band_steps` and

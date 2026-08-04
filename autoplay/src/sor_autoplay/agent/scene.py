@@ -37,6 +37,11 @@ TWIN_NEAR_Y = 36.0
 # twin has no readable health word so equal-unknown twins stay comparable.
 TWIN_BASE_HEALTH = 0x20
 
+# Equal-HP tie-break weight for the reachable body. Large enough to beat
+# target hysteresis, which otherwise pinned the seat to a body that had
+# walked away.
+TWIN_REACH_TIEBREAK = 0.12
+
 # A body this close is worth switching to at equal HP: it is inside every
 # character's measured punch box (54-68 px).
 TWIN_REACHABLE_DX = 56.0
@@ -163,7 +168,6 @@ def twin_focus_bonus(
     not use sticky player-hunt bias.
     """
 
-    del my_seat  # reserved; pair doctrine is HP-first, not who hunts whom
     if twin_composition(entities) is not TwinComposition.PAIR:
         return 0.0
     if not is_twin(entity) or entity.is_defeated:
@@ -188,11 +192,27 @@ def twin_focus_bonus(
     elif entity_hp == min_other:
         # Tied for lowest (typical full-health open): mild preference so
         # geometry / stickiness can break the tie without splitting fire.
-        # Flat: a mode-based tie-break here (grab twin first) is ROM-correct
-        # in theory but measured worse — it pulled the target onto the far
-        # body while the near twin stood in punch range, and the seat walked
-        # past it. Proximity utility decides equal-HP ties.
+        # Equal HP is the whole opening of the fight, so this tie decides where
+        # the damage goes. Expert play alternates onto whichever body is in
+        # front rather than chasing one: a mode-based tie-break (grab twin
+        # first) is ROM-correct in theory but measured worse — the seat walked
+        # past a twin standing in punch range to chase a distant focus and
+        # landed nothing in six live episodes. Make reachability decisive.
         bonus = 0.10
+        me = next(
+            (
+                actor
+                for actor in entities
+                if actor.kind == "player" and actor.slot.upper() == f"P{my_seat}"
+            ),
+            None,
+        )
+        if me is not None:
+            here = abs(float(entity.world_x) - float(me.world_x))
+            nearest = min(
+                abs(float(twin.world_x) - float(me.world_x)) for twin in twins
+            )
+            bonus += TWIN_REACH_TIEBREAK if here <= nearest else -TWIN_REACH_TIEBREAK
     # Higher-HP twin gets 0 — never pull fire off a wounded focus.
     return min(TWIN_FOCUS_BONUS_CAP, bonus)
 
@@ -272,9 +292,20 @@ def twins_bracket_player(
     )
 
 
+# A committed twin beyond this X cannot connect on the decision we are about
+# to take, so evading it only cancels our own approach. Measured: the 150 px
+# window fired 82 sidesteps against 129 approaches and the seat never closed
+# to punch range at all.
+TWIN_PRESSURE_REACH_X = 64.0
+TWIN_PRESSURE_REACH_Y = 16.0
+
+
 def most_urgent_dangerous_twin(
     me: MapEntity,
     entities: tuple[MapEntity, ...] | list[MapEntity],
+    *,
+    max_dx: float = TWIN_PRESSURE_REACH_X,
+    max_dy: float = TWIN_PRESSURE_REACH_Y,
 ) -> MapEntity | None:
     """Nearest nearby twin in a DANGEROUS combat phase, if any.
 
@@ -286,7 +317,7 @@ def most_urgent_dangerous_twin(
 
     dangerous = tuple(
         twin
-        for twin in nearby_twins(me, entities)
+        for twin in nearby_twins(me, entities, max_dx=max_dx, max_dy=max_dy)
         if is_dangerous(twin.combat_phase)
     )
     if not dangerous:
