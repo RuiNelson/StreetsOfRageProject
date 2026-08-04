@@ -686,6 +686,18 @@ class PolicyTests(unittest.TestCase):
 
 
 class AllySafetyUnitTests(unittest.TestCase):
+    def test_rear_range_covers_blazes_measured_chord_box(self) -> None:
+        # Blaze's own +$64 rear box reaches -53..-5; the ally exclusion zone
+        # must cover it plus an ally body width or a Blaze chord can clear an
+        # ally standing just past the old (undersized) 48 px cutoff.
+        from sor_autoplay.agent.coop import attack_would_hit_ally
+
+        me = _entity(kind="player", map_x=100, map_y=64, slot="P1", action_state=0x02)
+        ally = _entity(kind="player", map_x=45, map_y=64, slot="P2", action_state=0x02)
+        self.assertTrue(
+            attack_would_hit_ally(me, ally, face_left=False, rear=True)
+        )
+
     def test_directional_hit_and_body_range(self) -> None:
         from sor_autoplay.agent.coop import (
             ally_in_body_range,

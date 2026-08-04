@@ -32,8 +32,11 @@ ALLY_BODY_X = 24.0
 ALLY_MELEE_RANGE = 80.0
 # Knife/bottle/pepper travel.
 ALLY_THROWN_RANGE = 140.0
-# Rear (B+C) band with margin past the longest rear profile.
-ALLY_REAR_RANGE = 48.0
+# Rear (B+C) band with margin past the longest measured chord box (Blaze
+# -53..-5, see characters.py): far edge + an ally body half-width + margin.
+# The old 48 predates the live +$64 remeasurement and undershot Blaze's own
+# box before any closing lead — it could clear an ally standing at 49-60 px.
+ALLY_REAR_RANGE = 68.0
 # Lane step used when the partner blocks a straight-line attack.
 ALLY_CLEAR_LANE = 30.0
 
