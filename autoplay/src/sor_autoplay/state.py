@@ -460,7 +460,8 @@ def read_snapshot(client: MemorySource) -> GameSnapshot:
     stop_clock = client.read_memory(mm.ADDR_STOP_CLOCK, 1)[0]
     pause_text_flag = client.read_memory(mm.ADDR_PAUSE_TEXT_FLAG, 1)[0]
     police_blob = client.read_memory(mm.ADDR_POLICE_SPECIAL_ACTIVE, 3)
-    mr_x_blob = client.read_memory(mm.ADDR_MR_X_OFFER_FLAG, 5)
+    # DE00 flag (B), DE04 state (W big-endian). Need 6 bytes to include DE05.
+    mr_x_blob = client.read_memory(mm.ADDR_MR_X_OFFER_FLAG, 6)
     stride = int.from_bytes(
         client.read_memory(mm.ADDR_PRIMARY_BLOCKMAP_STRIDE, 2), "big"
     )
@@ -485,7 +486,7 @@ def read_snapshot(client: MemorySource) -> GameSnapshot:
         collision_map=collision_map,
         blockmap_stride=stride,
         mr_x_offer_flag=mr_x_blob[0],
-        mr_x_offer_state=mr_x_blob[4],
+        mr_x_offer_state=int.from_bytes(mr_x_blob[4:6], "big"),
         connected=True,
     )
 

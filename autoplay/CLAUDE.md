@@ -116,8 +116,8 @@ for tests/HUD.
 ### Behaviour (priority — same outcomes as before the pipeline)
 
 1. Steady (no input) while paused or police special is active
-2. Mr. X offer: hold **DOWN** for **NO**, then hold **A** to register
-   (refuse; never YES)
+2. Mr. X offer: always hold **DOWN+A** to refuse (never idle on bit4 /
+   “mr.x wait”; never YES)
 3. **Enemy-held skill** then **expert + crossover-suplex skill**
    (`agent/skills.py` → `inference.py`, `expert.py`, `autoplanner.py`):
    If a front hold (`$60/$61`) leaves another live hostile behind the player,
@@ -495,9 +495,9 @@ See `src/sor_autoplay/memory_map.py` and
 - Police special: `$FFFA1A` nonzero (+ caller `$FFFA1C`)
 - Floor holes: `$FFA000` collision-class map, class 0 = open/pit
   (query matches `sub_0000AD30`: x>>4, lane>>3, stride `$FFE02E`)
-- Mr. X offer: `$FFDE00` flag, `$FFDE04` state; player object `+$59` bit3=side
-  (DOWN sets NO / bit3=1, UP clears to YES), bit4=choice UI active; held face
-  bits `$70` on `+$54` register the choice (agent uses A)
+- Mr. X offer: `$FFDE00` flag, `$FFDE04` word state; player object `+$59`
+  bit3=side (DOWN=NO, UP=YES), bit4=lock/choice enable (not an agent wait
+  gate); held face bits `$70` register (agent holds DOWN+A every dialog tick)
 - Styles live in `object_catalog.py`; extraction in `world_map.py`
 - Agent modules: `agent/policy.py`, `context.py`, `skills.py`, `inference.py`,
   `expert.py`, `autoplanner.py`, `knowledge.py`, `fuzzy.py`, `arbiter.py`,

@@ -466,49 +466,39 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(decision.p1_mask, 0)
         self.assertIn("game over", decision.p1_note)
 
-    def test_mr_x_selects_no_with_down(self) -> None:
+    def test_mr_x_refuses_with_down_and_a(self) -> None:
+        """Always DOWN+A while offer is live — never idle on bit4 clear."""
+
         from dataclasses import replace
 
         p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")
+        # bit4 clear used to force "mr.x wait" and stuck the agent forever.
         snap = _snapshot_with_map((p1,), level_index=7, mr_x=1)
-        # object+$59 bit4 = choice UI active; bit3 clear = still on YES side.
         raw = dict(snap.raw)
-        raw["p1_obj59"] = 0x10
+        raw["p1_obj59"] = 0x00
         snap = replace(snap, raw=raw)
         decision = decide_actions(snap, AgentConfig(p1_enabled=True))
-        # Buttons.DOWN = 1 << 1
-        self.assertTrue(
-            decision.p1_mask & 0x02,
-            msg=f"expected DOWN to select NO, got {decision.p1_mask:#x} {decision.p1_note}",
-        )
-        self.assertIn("select NO", decision.p1_note)
-
-    def test_mr_x_confirms_no_with_a(self) -> None:
-        from dataclasses import replace
-
-        p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")
-        snap = _snapshot_with_map((p1,), level_index=7, mr_x=1)
-        # bit4 UI active + bit3 NO already selected.
-        raw = dict(snap.raw)
-        raw["p1_obj59"] = 0x18
-        snap = replace(snap, raw=raw)
-        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertTrue(decision.p1_mask & 0x02, msg=decision.p1_note)  # DOWN
         self.assertTrue(
             decision.p1_mask & int(SPECIAL),
-            msg=f"expected A (special) to register, got {decision.p1_mask:#x} {decision.p1_note}",
+            msg=f"expected A with DOWN, got {decision.p1_mask:#x} {decision.p1_note}",
         )
-        self.assertFalse(
-            decision.p1_mask & int(ATTACK),
-            msg=f"confirm should be A not B: {decision.p1_note}",
-        )
-        self.assertIn("confirm NO", decision.p1_note)
+        self.assertFalse(decision.p1_mask & int(ATTACK), msg=decision.p1_note)
+        self.assertIn("refuse NO", decision.p1_note)
+        self.assertNotIn("wait", decision.p1_note)
 
-    def test_mr_x_waits_until_choice_ui(self) -> None:
+    def test_mr_x_refuses_when_choice_bits_already_set(self) -> None:
+        from dataclasses import replace
+
         p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")
         snap = _snapshot_with_map((p1,), level_index=7, mr_x=1)
+        raw = dict(snap.raw)
+        raw["p1_obj59"] = 0x18  # bit4 + NO
+        snap = replace(snap, raw=raw)
         decision = decide_actions(snap, AgentConfig(p1_enabled=True))
-        self.assertEqual(decision.p1_mask, 0)
-        self.assertIn("wait", decision.p1_note)
+        self.assertTrue(decision.p1_mask & 0x02, msg=decision.p1_note)
+        self.assertTrue(decision.p1_mask & int(SPECIAL), msg=decision.p1_note)
+        self.assertIn("refuse NO", decision.p1_note)
 
     def test_coop_yields_health_to_hurt_partner(self) -> None:
         from sor_autoplay.agent.coop import CoopContext, should_take_health_pickup

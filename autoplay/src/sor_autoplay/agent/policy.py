@@ -2215,29 +2215,14 @@ def _mr_x_intent(
     player_index: int,
     memory: AgentState,
 ) -> Intent:
-    """Refuse Mr. X: hold DOWN to select NO, then hold A to register.
+    """Refuse Mr. X: hold DOWN + A for the whole offer.
 
-    ROM ``$120EC``: held UP/DOWN toggle ``object+$59`` bit3 (0=YES, 1=NO);
-    held face bits ``$70`` confirm. Never accept YES.
+    ROM ``$120EC`` reads held ``object+$54`` and processes **DOWN before** face
+    bits in the same poll, so one frame can set bit3 (NO) and register. Input is
+    ignored outside the choice window; previously we idled on ``+$59`` bit4 clear
+    ("mr.x wait") and never advanced when that bit stayed clear between phases.
+    Never hold UP (YES).
     """
 
-    flags = snapshot.raw.get(f"p{player_index}_obj59", None)
-    choice_active = True
-    choice_bit = None
-    if flags is not None:
-        choice_active = bool(flags & 0x10)
-        choice_bit = flags
-        if not choice_active:
-            return Intent(note="mr.x wait")
-
-    action = stage.mr_x_choice_intent(
-        _player_entity(snapshot, player_index),
-        choice_bit=choice_bit,
-        choice_active=choice_active,
-    )
-    phase = memory.phase(player_index)
-    if action == "select_no" or (action is None and phase < 4):
-        memory.set_phase(player_index, phase + 1)
-        return Intent(down=True, note="mr.x select NO")
-    memory.set_phase(player_index, 0)
-    return Intent(special=True, note="mr.x confirm NO")
+    del snapshot, player_index, memory  # refuse path is stateless
+    return Intent(down=True, special=True, note="mr.x refuse NO (DOWN+A)")

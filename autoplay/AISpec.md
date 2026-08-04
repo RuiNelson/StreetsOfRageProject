@@ -1028,10 +1028,12 @@ Progress lead when empty: **±160** world X.
 
 `is_mr_x_offer`: flag `$FFDE00` or (level 7 ∧ clock stopped ∧ no live threats ∧ timer valid).
 
-Choice UI: object `+$59` bit4 = active; bit3 = side (**1 = NO**, 0 = YES).
+Choice UI: object `+$59` bit4 set while the offer control table locks / enables
+choice; bit3 = side (**1 = NO**, 0 = YES). Do **not** idle when bit4 is clear —
+that stuck the agent on `mr.x wait` between phases.
 
 ROM `$120EC (poll_mr_x_offer_player_choice_input)` reads **held** `object+$54`
-(then clears that word):
+(then clears that word). Direction is applied **before** face confirm:
 
 | Held input | Effect |
 | ---------- | ------ |
@@ -1039,8 +1041,9 @@ ROM `$120EC (poll_mr_x_offer_player_choice_input)` reads **held** `object+$54`
 | **DOWN** (bit 1) | Set bit3 → NO |
 | Face bits `$70` (A/B/C after remap) | Register choice; bit5 latches “answered” |
 
-Policy: hold **DOWN** until NO is selected (phase counter / bit3 set), then
-hold **A** (`special`) to register. Never accept YES.
+Policy: every decision while the offer is live, hold **DOWN + A** (note
+`mr.x refuse NO (DOWN+A)`). Same-frame DOWN+A is safe (NO is set before
+confirm). Never hold UP. ROM ignores the pads outside choice-enabled states.
 
 ---
 

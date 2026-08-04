@@ -456,22 +456,23 @@ def mr_x_choice_intent(
     choice_bit: int | None,
     choice_active: bool,
 ) -> str | None:
-    """Return 'select_no', 'confirm', or None.
+    """Return 'select_no', 'confirm', or None (informational helper).
 
-    ``object+$59`` bit 3 = selected side; bit 4 = choice UI active.
+    ``object+$59`` bit 3 = selected side; bit 4 is set while the offer control
+    table locks/choice-enables the seat (not a hard agent wait gate).
     For the initial offer, bit 3 = 1 is refuse ("NO") / continue the fight.
 
-    ROM ``$120EC (poll_mr_x_offer_player_choice_input)`` reads *held*
-    ``object+$54``: UP (bit0) clears bit3 (YES), DOWN (bit1) sets bit3 (NO);
-    any face button held in bits 4–6 (``$70``) registers the choice. Agent
-    policy uses DOWN then **A**.
+    ROM ``$120EC``: held UP→YES, DOWN→NO, face bits ``$70`` confirm. Policy
+    always drives DOWN+A while the offer flag is live; the ROM ignores input
+    outside choice-enabled states.
     """
 
-    if not choice_active:
-        return None
+    del player  # seat body unused; flags carry the choice
     if choice_bit is None:
-        # No object flag: hold DOWN then confirm over a few ticks via state.
+        return "select_no"
+    if not choice_active:
+        # Still refuse — do not idle; ROM drops input until the window opens.
         return "select_no"
     if (choice_bit & 0x08) == 0:
-        return "select_no"  # need DOWN to move selection to NO
+        return "select_no"
     return "confirm"
