@@ -500,6 +500,7 @@ See `src/sor_autoplay/memory_map.py` and
   bit3=side (DOWN=NO, UP=YES), bit4=lock/choice enable (not a wait gate);
   agent holds DOWN+A every dialog tick
 - Styles live in `object_catalog.py`; extraction in `world_map.py`
+- Final Mr. X body is object type `$35` (boss); office `$33`/`$34` are skipped
 - Agent modules: `agent/policy.py`, `context.py`, `skills.py`, `inference.py`,
   `expert.py`, `autoplanner.py`, `knowledge.py`, `fuzzy.py`, `arbiter.py`,
   `combat.py`, `pressure.py`, `stage.py`, `navigation.py`, `coop.py`,
