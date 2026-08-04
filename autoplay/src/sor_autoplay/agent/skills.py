@@ -364,10 +364,54 @@ class TwinFightSkill:
     # Cap the extrapolation so a leaping body cannot pull the swing wildly.
     MAX_LEAD_PX = 26.0
 
+    # The punch is damaging on frames 3..12 after the button edge (measured on
+    # `+$34`). Decisions are four frames apart, so press once touchdown is
+    # inside that window.
+    SWING_LEAD_FRAMES = 8
+
     def __init__(self) -> None:
         # slot -> last observed (x, y). The commitment keeps one instance
         # alive across decisions, so this is a real velocity estimate.
         self._last: dict[str, tuple[float, float]] = {}
+        # Slot of the arc we committed to intercept, held until it lands.
+        self._locked: str | None = None
+
+    # Measured player walk speed at the encounter: ~6 world px per decision,
+    # i.e. 1.5 px per frame. Used to reject landings we cannot reach in time.
+    WALK_PX_PER_FRAME = 1.5
+
+    def _best_intercept(self, me: MapEntity, entities, profile):
+        """Landing we should set up on, latched for the life of the arc.
+
+        Re-choosing every decision made the seat chase whichever body happened
+        to be nearer to touchdown, so it walked between two arcs and arrived at
+        neither (live: 135 posts, 3 swings). Once an arc is chosen, keep it
+        until it lands or its forecast disappears.
+        """
+
+        forecasts = {
+            twin.slot: forecast
+            for twin, forecast in (
+                (twin, twins_ai.predict_landing(twin))
+                for twin in twins_ai.live_twins(entities)
+            )
+            if forecast is not None
+        }
+        if not forecasts:
+            self._locked = None
+            return None
+
+        # No latch: locking onto an arc for its whole life scored 0 swings
+        # against 3 for re-choosing, because a locked far arc kept the seat
+        # walking past the body that was actually about to land on it.
+        lo, hi = twins_ai.punch_band(profile)
+        def reachable(forecast) -> bool:
+            gap = abs(forecast.x - float(me.world_x))
+            # We only need to reach the *band*, not the landing point itself.
+            return max(0.0, gap - hi) <= forecast.frames * self.WALK_PX_PER_FRAME
+
+        candidates = [f for f in forecasts.values() if reachable(f)]
+        return min(candidates or list(forecasts.values()), key=lambda f: f.ticks)
 
     def _velocity(self, twin: MapEntity) -> tuple[float, float]:
         """Per-decision movement of this body, from the previous observation."""
@@ -456,6 +500,31 @@ class TwinFightSkill:
                 continue
             if combat.can_rear_hit(me, twin, profile, face_right=face_right):
                 return Intent(rear_attack=True, note=f"twin skill rear {twin.label}")
+
+        # 2b) Ballistic intercept — the core of the fight.
+        #
+        # `$15ABA` cannot steer: the arc is fixed at phase timer 4 and the body
+        # covers its last ~80 px airborne, landing on top of us. Reacting to
+        # where it *is* therefore yields ~3 punchable frames per 500 decisions
+        # (measured). Instead solve the arc from its own velocity fields, walk
+        # to the landing point offset by the punch band, and start the swing so
+        # its damaging frames (3..12 after the edge) straddle touchdown.
+        intercept = self._best_intercept(me, entities, profile)
+        if intercept is not None:
+            lo, hi = twins_ai.punch_band(profile)
+            # What matters at touchdown is our distance to the *landing point*,
+            # not to the post — asking to be parked on the post exactly is a
+            # much tighter condition and it never came true live.
+            reach = abs(intercept.x - float(me.world_x))
+            lane_gap = abs(float(intercept.twin.world_y) - float(me.world_y))
+            in_band = lo <= reach <= hi and lane_gap <= combat.LANE_HIT_HALF
+            if intercept.frames <= self.SWING_LEAD_FRAMES and in_band:
+                return Intent(
+                    attack=True,
+                    note=f"twin skill intercept {intercept.twin.label}",
+                )
+            goal = twins_ai.intercept_point(me, intercept, profile)
+            return self._move(me, goal, f"twin skill post {intercept.twin.label}")
 
         # 3) Feign: never turn to meet a twin closing on our back.
         bait = twins_ai.rear_bait_target(

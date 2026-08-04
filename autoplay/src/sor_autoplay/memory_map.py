@@ -81,6 +81,14 @@ OBJ_SUBTYPE = 0x0B
 OBJ_POS_X = 0x10  # long 16.16 world X; integer is the high word (unsigned)
 OBJ_POS_Y = 0x14  # long 16.16 lane / depth Y
 OBJ_POS_Z = 0x18  # long 16.16 height
+# Live velocities, signed 16.16, integrated by $17AB8. $15ABA writes them
+# directly for the twins' jump attack: +$20 = +-$00010000 (X, sign from the
+# lane byte +$61) and +$24 = $FFF8C000 (Z, -7.25) at phase timer 4, then adds
+# $0000C000 (+0.75) to +$24 every later tick until +$18 meets +$4C.
+OBJ_VEL_X = 0x20
+OBJ_VEL_Z = 0x24
+# Lane sign latched at jump launch; selects the X velocity direction.
+OBJ_BOSS_LANE_SIGN = 0x61
 # Primary state at +$30:
 # - Players: **byte** action/facing at +$30 (bit0 = face left). Live dump while
 #   holding is $60 (grab/throw family), NOT the low byte of a BE word.

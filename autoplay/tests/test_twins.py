@@ -7,6 +7,7 @@ commit.
 
 from __future__ import annotations
 
+import dataclasses
 import unittest
 
 from sor_autoplay.agent import twins as twins_ai
@@ -140,6 +141,77 @@ class GateModelTests(unittest.TestCase):
                 _twin(world_x=0, world_y=0, slot="B0", mode_flags=0, pair_role=2)
             )
         )
+
+
+def _twin_arc(
+    *,
+    world_x: int,
+    world_z: int,
+    vel_z: float,
+    vel_x: float = 1.0,
+    ground_z: int = 160,
+    world_y: int = 64,
+    slot: str = "B0",
+) -> MapEntity:
+    """A twin mid jump-attack, with the ROM's own live velocity fields."""
+
+    base = _twin(world_x=world_x, world_y=world_y, slot=slot)
+    return dataclasses.replace(
+        base,
+        world_z=world_z,
+        ground_z=ground_z,
+        vel_x=vel_x,
+        vel_z=vel_z,
+        tactical=twins_ai.JUMP_ATTACK_TACTICAL,
+    )
+
+
+class ArcPredictionTests(unittest.TestCase):
+    """`$15ABA` is ballistic and cannot steer, so the landing is computable.
+
+    Reference sample captured live at the Round-5 encounter (phase timer, z,
+    x, vz), ground plane 160, vx +1.0 throughout:
+
+        timer  4  z 152  x 5126  vz -7.250
+        timer  5  z 146  x 5130  vz -6.500
+        ...      (vz steps +0.75 per tick)
+        apex   ~z 121 around timer 13-14
+    """
+
+    def test_landing_is_predicted_from_the_launch_frame(self) -> None:
+        twin = _twin_arc(world_x=5126, world_z=152, vel_z=-7.25)
+        forecast = twins_ai.predict_landing(twin)
+        self.assertIsNotNone(forecast)
+        # -7.25 with +0.75/tick returns to the plane after ~19 more ticks.
+        self.assertGreaterEqual(forecast.ticks, 16)
+        self.assertLessEqual(forecast.ticks, 22)
+        # Travelling right at 4 px/tick, it lands well ahead of where it is.
+        self.assertGreater(forecast.x, float(twin.world_x) + 60)
+
+    def test_descending_body_lands_soon_and_close(self) -> None:
+        # Past apex, most of the drop already spent.
+        twin = _twin_arc(world_x=5200, world_z=150, vel_z=+3.0)
+        forecast = twins_ai.predict_landing(twin)
+        self.assertIsNotNone(forecast)
+        self.assertLessEqual(forecast.ticks, 4)
+
+    def test_grounded_body_has_no_forecast(self) -> None:
+        twin = _twin_arc(world_x=5200, world_z=160, vel_z=0.0)
+        self.assertIsNone(twins_ai.predict_landing(twin))
+
+    def test_intercept_stands_inside_the_punch_band(self) -> None:
+        from sor_autoplay.agent.characters import PROFILES
+
+        me = _player(world_x=5100, world_y=64)
+        twin = _twin_arc(world_x=5126, world_z=152, vel_z=-7.25)
+        forecast = twins_ai.predict_landing(twin)
+        goal_x, _ = twins_ai.intercept_point(me, forecast, PROFILES[0])
+        gap = abs(forecast.x - goal_x)
+        lo, hi = twins_ai.punch_band(PROFILES[0])
+        self.assertGreaterEqual(gap, lo)
+        self.assertLessEqual(gap, hi)
+        # Approach from the side we are already on, not across the body.
+        self.assertLess(goal_x, forecast.x)
 
 
 class DoctrineTests(unittest.TestCase):

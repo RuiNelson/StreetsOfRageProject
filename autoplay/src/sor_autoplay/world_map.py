@@ -163,6 +163,8 @@ class MapEntity:
     target_unavailable: int = 0  # later-boss +$77 from $179F8
     phase_timer: int = 0  # later-boss +$78 jump/throw timeline counter
     ground_z: int | None = None  # later-boss +$4C ground/landing height
+    vel_x: float = 0.0  # +$20 signed 16.16, ROM units per tick
+    vel_z: float = 0.0  # +$24 signed 16.16, ROM units per tick
     combat_phase: CombatPhase = CombatPhase.UNKNOWN
 
     @property
@@ -351,6 +353,15 @@ def fixed16_lane_y(data: bytes, offset: int) -> int:
     return _u16(data, offset)
 
 
+def fixed1616_signed(data: bytes, offset: int) -> float:
+    """Signed 16.16 fixed-point long (ROM velocity fields +$20 / +$24)."""
+
+    raw = int.from_bytes(data[offset : offset + 4], "big")
+    if raw >= 0x8000_0000:
+        raw -= 0x1_0000_0000
+    return raw / 65536.0
+
+
 def project_to_map(
     world_x: int,
     lane_y: int,
@@ -434,6 +445,8 @@ def _entity_from_object(
     target_unavailable = 0
     phase_timer = 0
     ground_z = None
+    vel_x = 0.0
+    vel_z = 0.0
     phase = CombatPhase.UNKNOWN
 
     if style.kind == "player":
@@ -458,6 +471,8 @@ def _entity_from_object(
         target_unavailable = _u8(slot, mm.OBJ_BOSS_TARGET_UNAVAIL)
         phase_timer = _u8(slot, mm.OBJ_BOSS_PHASE_TIMER)
         ground_z = fixed16_lane_y(slot, mm.OBJ_BOSS_GROUND_Z)
+        vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X)
+        vel_z = fixed1616_signed(slot, mm.OBJ_VEL_Z)
         # Target pointer location differs by boss generation.
         if type_id in (0x30, 0x35):
             target_ptr = _u16(slot, mm.OBJ_BESPOKE_TARGET)
@@ -519,6 +534,8 @@ def _entity_from_object(
         target_unavailable=target_unavailable,
         phase_timer=phase_timer,
         ground_z=ground_z,
+        vel_x=vel_x,
+        vel_z=vel_z,
         boss_dist_lane=boss_dist_lane,
         combat_phase=phase,
     )

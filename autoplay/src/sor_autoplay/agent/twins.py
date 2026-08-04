@@ -107,6 +107,94 @@ WALK_BAND_MIN = 40.0
 WALK_BAND_MAX = 280.0
 
 
+# --- Ballistic jump-attack model ($15ABA) ---------------------------------
+# The twins draw no RNG and their jump attack cannot steer: at phase timer 4
+# the ROM writes X velocity +$20 = +-1.0 (sign from the lane byte +$61) and Z
+# velocity +$24 = -7.25, then adds +0.75 to +$24 every later tick until the
+# live height +$18 meets the ground snapshot +$4C. So the landing point and the
+# landing time are both known the instant the arc starts.
+#
+# Verified live at the Round-5 encounter: timer 0-3 are pure wind-up with zero
+# velocity, timer 4 reads vx +1.000 / vz -7.250, and vz then steps -6.500,
+# -5.750, -5.000 ... exactly +0.75 per tick.
+JUMP_GRAVITY = 0.75
+# `+$67` substate that means "jump attack in flight" ($15A64 sets it to 2).
+JUMP_ATTACK_TACTICAL = 0x02
+# One AI tick is two frames (the phase timer advances every second frame).
+TICK_FRAMES = 2
+# Observed integration scale: at vx 1.0 the body covers 4 world px per tick.
+# Calibrated from live samples rather than derived, because $17AB8 applies its
+# own step; keep it a named knob.
+JUMP_X_PX_PER_UNIT = 4.0
+# Guard against a runaway simulation if the fields are ever read mid-write.
+_MAX_ARC_TICKS = 64
+
+
+@dataclass(frozen=True, slots=True)
+class LandingForecast:
+    """Where and when an airborne twin will touch down."""
+
+    twin: MapEntity
+    x: float
+    ticks: int
+
+    @property
+    def frames(self) -> int:
+        return self.ticks * TICK_FRAMES
+
+
+def predict_landing(twin: MapEntity) -> LandingForecast | None:
+    """Integrate `$15ABA`'s arc forward to touchdown, or None if grounded.
+
+    Uses the body's own live velocity fields, so it is correct from any point
+    in the arc — no need to catch the launch frame.
+    """
+
+    if twin.ground_z is None:
+        return None
+    # Only the jump attack has a locked X velocity. Live: during `+$67 == 2`
+    # the forecast is rock stable (landing x 5314.0 held from launch to
+    # touchdown); on other airborne arcs `+$20` keeps changing and the
+    # prediction drifts ~3 px per tick, which walked the intercept post away
+    # faster than the player could follow it.
+    if twin.tactical != JUMP_ATTACK_TACTICAL:
+        return None
+    drop = float(twin.ground_z) - float(twin.world_z)
+    if drop <= 0.0 and twin.vel_z >= 0.0:
+        return None  # already down (or below the plane): nothing to intercept
+
+    vz = float(twin.vel_z)
+    travelled = 0.0
+    for tick in range(1, _MAX_ARC_TICKS + 1):
+        vz += JUMP_GRAVITY
+        travelled += vz
+        if travelled >= drop:
+            x = float(twin.world_x) + twin.vel_x * JUMP_X_PX_PER_UNIT * tick
+            return LandingForecast(twin=twin, x=x, ticks=tick)
+    return None
+
+
+def intercept_point(
+    me: MapEntity, forecast: LandingForecast, profile
+) -> tuple[float, float]:
+    """Stand point that puts the landing inside the measured punch band.
+
+    Picks the side we are already on so the walk is the short one, and aims at
+    the middle of 28-52 rather than its edge, because both the body and we keep
+    moving for the rest of the arc.
+    """
+
+    lo, hi = punch_band(profile)
+    # Aim at the OUTER edge, not the middle. Live: posts aimed at the midpoint
+    # put us at dx 23 and 27 when the body actually touched down — both just
+    # inside the dead zone — because we keep walking during the four frames of
+    # a decision and the body keeps closing. Standing off by the far edge
+    # leaves room for that drift and lands inside the band.
+    stand_off = hi - 2.0
+    side = -1.0 if float(me.world_x) <= forecast.x else 1.0
+    return forecast.x + side * stand_off, float(forecast.twin.world_y)
+
+
 def is_twin(entity: MapEntity) -> bool:
     """True for a live-or-dead type-`$58` boss object."""
 

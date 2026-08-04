@@ -360,13 +360,25 @@ for tests/HUD.
      Move values from the player `+$34` descriptor: punch **1**, back attack
      (`$20`) **3** over 10 frames, back-attack box `+$70` = X −7..+3, Y ±8
      (contact, not reach). Twins: 22 HP each, 32 damage per hit.
-     **STATUS: survives, does not kill.** With the band fix a 500-decision
-     live episode took 48 damage / 1 death (was 128 / 2) and dealt 20 — first
-     damage ever recorded on this pair — but all 20 was the police special.
-     Melee is still ~0 because a *grounded* twin inside 28-52 px basically
-     never happens: their loop is land → idle ~20 frames → walk to ~94 px →
-     jump. Next: make the post-landing idle (grounded, `+$67 == 0`) the **only**
-     approach trigger, close into 28-52 during it, and swing there.
+     **Ballistic intercept.** `$15ABA` cannot steer, so the landing is solved
+     rather than awaited: `MapEntity.vel_x`/`vel_z` expose `+$20`/`+$24` as
+     signed 16.16 and `twins.predict_landing` integrates them with the ROM's
+     own `+0.75`/tick gravity to a landing X and ETA. Verified live — the
+     forecast held landing x 5314.0 constant across a whole 20-tick arc.
+     Only forecast while `+$67 == 2` (other arcs do not lock `+$20` and the
+     prediction drifts); aim the post at the band's **outer** edge (midpoint
+     posts landed at dx 23/27, inside the dead zone); do **not** latch one arc
+     (latching scored 0 swings vs 3 for re-choosing).
+     **ALWAYS test twins with `--no-police-special`.** A previous "damage taken
+     128 → 48" result was an artifact of the special freezing the game for 310
+     of 500 decisions.
+     **STATUS: predictor correct, conversion zero.** Melee-only every variant
+     scores 0 dealt / 128 taken / 2 deaths. The binding constraint is now
+     actuation granularity, not knowledge: ~30 landings per 500 decisions, and
+     converting one needs a 20 px X band, a 24 px lane band and a ~6-frame
+     press window while ~45% of decisions sit in hitstun/lockout. Next: retry
+     at `--step-frames 2` to isolate granularity from doctrine — that flag
+     currently yields no decisions in 9 minutes and needs investigating first.
      Fixture: restore `twins-state.bin` (64 KiB work RAM at the encounter)
      instead of replaying the stage; probes in the session scratchpad
      (`probe_reach.py`, `probe_moves.py`) reproduce the numbers above.

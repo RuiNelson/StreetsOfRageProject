@@ -997,19 +997,51 @@ back attack (`$20`) **3** over 10 damaging frames, back-attack box `+$70` is
 player X −7..+3 by Y ±8 — a contact move, not a reaching one. Twins hold 22 HP
 each and deal 32 per hit against an 80 HP bar.
 
-**Status: survives, does not yet kill.** With the band fix, one live 500-
-decision episode took 48 damage and 1 death (previously 128 and 2) and dealt
-20 — the first damage ever recorded against this pair — but all 20 came from
-the police special, not melee. Root cause of the remaining zero: a grounded
-twin inside 28-52 px essentially never occurs. Their loop is land → idle ~20
-frames → walk to ~94 px → jump, so they never *walk* into punch range, and 75
-of 189 free decisions were spent in hitstun.
+#### Ballistic intercept (`twins.predict_landing` / `intercept_point`)
 
-Next attempt should build the engagement entirely around the post-landing idle
-after `$15ABA` (grounded, `+$67 == 0`): treat it as the only approach trigger,
-close into 28-52 during it, and swing there. Every other approach — including
-"geometry allows it" — feeds the hitstun. The police special is not a bonus
-here but 20 of the 44 total HP; keep it enabled outside measurement runs.
+A grounded twin inside the punch band essentially never occurs by waiting:
+their loop is land → idle ~20 frames → walk to ~94 px → jump, so the last
+stretch of every approach is airborne and ends on top of the player. Reacting
+to where a body *is* yielded 3 punchable configurations per 500 decisions.
+
+`$15ABA` is ballistic and cannot steer, so the landing is computable instead.
+At phase timer 4 the ROM writes `+$20 = ±1.0` (sign from the lane byte `+$61`)
+and `+$24 = -7.25`, then adds `+0.75` to `+$24` every tick until `+$18` meets
+`+$4C`. `MapEntity.vel_x` / `vel_z` expose those fields (signed 16.16), and
+`predict_landing` integrates them forward to touchdown. Verified live: from
+launch to landing the forecast held **landing x 5314.0 constant** across the
+whole arc, 20 ticks out.
+
+Guards learned from live runs:
+
+* Forecast **only** while `+$67 == 2`. On other airborne arcs `+$20` keeps
+  changing and the prediction drifts ~3 px/tick, walking the post away faster
+  than the player follows it.
+* Aim the post at the **outer** band edge, not the middle — midpoint posts put
+  the player at dx 23 and 27 at touchdown, both inside the dead zone, because
+  the player keeps walking during the four frames of a decision.
+* Do **not** latch one arc for its whole life: locking scored 0 swings against
+  3 for re-choosing, because a locked far arc kept the seat walking past the
+  body actually about to land on it.
+
+**Status: predictor correct, conversion still zero.** All measurements below
+use `--no-police-special`, which is mandatory for twin runs — an earlier
+"128 → 48 damage taken" result was an artifact of the special freezing the game
+for 310 of 500 decisions, not a real improvement. Melee-only, every variant
+scores 0 damage dealt, 128 taken, 2 deaths.
+
+The binding constraint is no longer knowledge but **actuation granularity**.
+Per 500 decisions there are ~30 landings; converting one needs the seat inside
+a 20 px X band and a 24 px lane band with B pressed in a ~6-frame window before
+touchdown, while ~45% of decisions are spent in hitstun or animation lockout.
+At four frames per decision the agent gets one or two chances inside each
+window and positions to about ±6 px. Two landings per episode now arrive inside
+the band, up from one.
+
+Next: run this fight at a finer cadence (`--step-frames 2`) and see whether the
+intercept converts; that isolates granularity from doctrine. Note that
+`--step-frames 2` currently produced no decisions within a 9-minute budget and
+needs investigating before it can be used as evidence.
 
 #### Twin evaluation metrics
 
