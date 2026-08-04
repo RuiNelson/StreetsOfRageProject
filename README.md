@@ -565,7 +565,7 @@ chords are not handled by these host-side cheats.
 | `Alt/Option+K` | Kill all instantiated enemies, including bosses, through their normal lethal states |
 | `Alt/Option+W` | Call the police for the active player without consuming a special attack |
 | `Alt/Option+1`–`8` | Jump to levels 1–8 and enter the corresponding level-intro state |
-| `Alt/Option+T` | Jump to Round 5 then **warp to the Onihime/Yasha twins boss** (skips stage corridors) |
+| `Alt/Option+T` | Jump to Round 5 (Onihime/Yasha twins) level intro |
 | `Alt/Option+G` | Start the good ending |
 | `Alt/Option+B` | Start the bad ending |
 
