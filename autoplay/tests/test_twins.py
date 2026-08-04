@@ -379,6 +379,33 @@ class PolicyEngagementTests(unittest.TestCase):
         self.assertFalse(decision.p1_mask & self.ATTACK, decision.p1_note)
         self.assertIn("reset", decision.p1_note)
 
+    def test_enemy_hold_actions_own_the_seat_over_the_twin_skill(self) -> None:
+        """`$78`-`$7F` must reach the enemy-grab escape skill, not twin combat.
+
+        A live twin trace appeared to show the twin skill swinging while the
+        player was held in `$79`. It was a trace artifact — every state column
+        is sampled *after* the input, so the row paired a note decided while
+        free with the grab that landed during those frames. The partition is
+        correct, and this pins it so the question is not reopened.
+        """
+
+        from types import SimpleNamespace
+
+        from sor_autoplay.agent.context import PlayerMode, classify_mode
+
+        playable = SimpleNamespace(is_playable=True, is_continue_ui=False)
+        for action in (0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F):
+            me = _player(action_state=action)
+            mode = classify_mode(
+                me=me,
+                player_snap=playable,
+                is_mr_x=False,
+                entities=(me,),
+                player_index=1,
+            )
+            self.assertIs(mode, PlayerMode.ENEMY_HELD, f"action ${action:02X}")
+            self.assertTrue(me.is_held_by_enemy, f"action ${action:02X}")
+
     def test_strike_band_matches_the_sweep(self) -> None:
         from sor_autoplay.agent.characters import PROFILES
 

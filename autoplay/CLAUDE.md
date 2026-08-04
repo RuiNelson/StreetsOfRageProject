@@ -392,9 +392,13 @@ for tests/HUD.
      Measured: 0 dealt, 112 taken (vs 80 for punch-band posting), 1 death —
      **0 of 24 landings had the player under the body** (touchdowns at dx 16,
      44, 44, 44, 90+), and standing there invites the grab (245 hitstun
-     decisions, 30 grab acquisitions). Also: 2 of 3 intercept swings fired
-     while the player was already held (`$79`) — check `PlayerMode`
-     classification for `$79` before tuning this further.
+     decisions, 30 grab acquisitions). The apparent `$79` "mode leak" (2 of 3 swings
+     seeming to fire while held) was a **trace artifact**: `EvaluationStep`
+     sampled state after the input while `note`/`mask` came from the decision
+     before it. `classify_mode` handles `$78`-`$7F` correctly and
+     `TwinFightSkill.valid` requires FREE; a test pins both. Traces now also
+     carry `decided_action`/`decided_x`/`decided_y` (pre-input state) so
+     note-to-state analysis is self-consistent.
      **Back-attack spam, measured** (scripted probe, 1200 frames, B+C on every
      actionable frame): standing still 6 dealt / 80 taken; lane-tracking 6 / 80;
      chasing 0 / 112. First melee damage ever recorded on the pair — it

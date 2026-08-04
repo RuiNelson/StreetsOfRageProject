@@ -1079,10 +1079,18 @@ agent never arrives, and the time it spends trying to stand on the landing spot
 walks it into the grab instead: 245 decisions in hitstun (up from 155) and 30
 enemy-grab acquisitions.
 
-Two of the three intercept swings also fired while the player was already held
-(`$79`), which means the twin-fight skill is owning the seat in a state the
-enemy-grab escape skill should have taken — worth checking `PlayerMode`
-classification for `$79` before tuning anything else here.
+Two of the three intercept swings appeared to fire while the player was already
+held (`$79`). **That was a trace artifact, not a mode leak.** `EvaluationStep`
+sampled every state column from the snapshot *after* the input was applied
+while `note`/`mask` came from the decision made before it, so the row paired a
+swing decided while free with the grab that landed during those two frames.
+`classify_mode` handles the whole `$78`-`$7F` family correctly and
+`TwinFightSkill.valid` requires `PlayerMode.FREE`; a test now pins both.
+
+Traces therefore also record `decided_action` / `decided_x` / `decided_y` — the
+state the decision was actually made on — so note-to-state analysis is
+self-consistent. Analyses that compare post-step player state against post-step
+actor state (band occupancy, landing geometry) were never affected.
 
 ##### Continuous back-attack spam, measured
 

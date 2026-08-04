@@ -980,6 +980,14 @@ class EvaluationStep:
     player_contact: int = 0
     player_held_type: int = 0
     player_held_ptr: int = 0
+    # State the decision was actually made on. Every other field here comes
+    # from the snapshot *after* the input was applied, so pairing `note` with
+    # `player_action` reads as if the agent acted from a state it never saw —
+    # it misled a live twin analysis into reporting a mode leak that did not
+    # exist (a swing decided while free, logged after the twin's grab landed).
+    decided_action: int | None = None
+    decided_x: int | None = None
+    decided_y: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -1000,6 +1008,9 @@ class EvaluationStep:
             "player_contact": self.player_contact,
             "player_held_type": self.player_held_type,
             "player_held_ptr": self.player_held_ptr,
+            "decided_action": self.decided_action,
+            "decided_x": self.decided_x,
+            "decided_y": self.decided_y,
             "outcome": {
                 "damage_taken": self.outcome.damage_taken,
                 "enemy_damage": self.outcome.enemy_damage,
@@ -1142,6 +1153,7 @@ class LockstepEvaluator:
                 )
                 if self.trace_sink is not None:
                     player = _player_entity(next_snapshot, self.player_index)
+                    decided = _player_entity(snapshot, self.player_index)
                     mask = (
                         decision.p1_mask
                         if self.player_index == 1
@@ -1207,6 +1219,11 @@ class LockstepEvaluator:
                             player_contact=0 if player is None else player.contact_ptr,
                             player_held_type=0 if player is None else player.held_type,
                             player_held_ptr=0 if player is None else player.held_ptr,
+                            decided_action=(
+                                None if decided is None else decided.action_state
+                            ),
+                            decided_x=None if decided is None else decided.world_x,
+                            decided_y=None if decided is None else decided.world_y,
                         )
                     )
                 snapshot = next_snapshot
