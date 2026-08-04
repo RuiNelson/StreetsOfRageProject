@@ -431,23 +431,37 @@ def press_bypass_goal(
     return past, safe_y, f"advance past press {press.label}"
 
 
-def is_mr_x_offer(snapshot: GameSnapshot) -> bool:
-    """True when the final Mr. X dialogue / choice machine is live."""
+def _live_combat_threats(snapshot: GameSnapshot) -> int:
+    """Count non-defeated enemy/boss entities on the world map."""
 
-    raw = snapshot.raw.get("mr_x_offer_flag", 0)
-    if raw:
-        return True
-    # Fallback: stage 8, clock stopped, no combat threats — choice phase.
-    if snapshot.level_index != LEVEL_STAGE8_LEFT:
-        return False
-    if not snapshot.clock_stopped:
-        return False
-    threats = sum(
+    return sum(
         1
         for e in snapshot.world_map.entities
         if e.kind in ("enemy", "boss") and not e.is_defeated
     )
-    return threats == 0 and snapshot.timer_valid
+
+
+def is_mr_x_offer(snapshot: GameSnapshot) -> bool:
+    """True when the final Mr. X dialogue / choice machine is live.
+
+    ``$FFDE00 (mr_x_offer_flag)`` is set when the scene starts and is *not*
+    cleared as soon as the player refuses — combat (Mr. X / adds) can resume
+    with the flag still set. Live enemies/bosses mean the dialog seat mode must
+    end so the free combat ladder runs again.
+    """
+
+    if _live_combat_threats(snapshot) > 0:
+        return False
+
+    raw = snapshot.raw.get("mr_x_offer_flag", 0)
+    if raw:
+        return True
+    # Fallback: stage 8, clock stopped, empty map — choice / talk phase.
+    if snapshot.level_index != LEVEL_STAGE8_LEFT:
+        return False
+    if not snapshot.clock_stopped:
+        return False
+    return snapshot.timer_valid
 
 
 def mr_x_choice_intent(

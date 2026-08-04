@@ -495,9 +495,10 @@ See `src/sor_autoplay/memory_map.py` and
 - Police special: `$FFFA1A` nonzero (+ caller `$FFFA1C`)
 - Floor holes: `$FFA000` collision-class map, class 0 = open/pit
   (query matches `sub_0000AD30`: x>>4, lane>>3, stride `$FFE02E`)
-- Mr. X offer: `$FFDE00` flag, `$FFDE04` word state; player object `+$59`
-  bit3=side (DOWN=NO, UP=YES), bit4=lock/choice enable (not an agent wait
-  gate); held face bits `$70` register (agent holds DOWN+A every dialog tick)
+- Mr. X offer: `$FFDE00` flag (can stay set after refuse), `$FFDE04` word
+  state; dialog mode only while **no live enemy/boss**; player `+$59`
+  bit3=side (DOWN=NO, UP=YES), bit4=lock/choice enable (not a wait gate);
+  agent holds DOWN+A every dialog tick
 - Styles live in `object_catalog.py`; extraction in `world_map.py`
 - Agent modules: `agent/policy.py`, `context.py`, `skills.py`, `inference.py`,
   `expert.py`, `autoplanner.py`, `knowledge.py`, `fuzzy.py`, `arbiter.py`,

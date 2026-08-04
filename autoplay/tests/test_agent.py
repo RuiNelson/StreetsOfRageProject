@@ -8,7 +8,12 @@ from dataclasses import replace
 from sor_autoplay.agent.controls import ATTACK, JUMP, SPECIAL, Intent, mask_from_intent
 from sor_autoplay.agent.policy import AgentConfig, AgentState, decide_actions
 from sor_autoplay.agent.pressure import PressureReport, should_call_police
-from sor_autoplay.agent.stage import point_in_hole, stage_advice, steer_away_from_holes
+from sor_autoplay.agent.stage import (
+    is_mr_x_offer,
+    point_in_hole,
+    stage_advice,
+    steer_away_from_holes,
+)
 from sor_autoplay.hazards import FloorHole
 from sor_autoplay.memory_map import (
     MAX_HEALTH,
@@ -499,6 +504,25 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(decision.p1_mask & 0x02, msg=decision.p1_note)
         self.assertTrue(decision.p1_mask & int(SPECIAL), msg=decision.p1_note)
         self.assertIn("refuse NO", decision.p1_note)
+
+    def test_mr_x_dialog_ends_when_enemies_spawn(self) -> None:
+        """Offer flag can stay set after refuse; live threats leave DIALOG."""
+
+        p1 = _entity(kind="player", map_x=100, map_y=64, slot="P1", label="P1 Axel", family="Player")
+        foe = _entity(
+            kind="enemy",
+            map_x=160,
+            map_y=64,
+            slot="E1",
+            label="Galsia",
+            family="Galsia",
+            type_id=0x20,
+        )
+        snap = _snapshot_with_map((p1, foe), level_index=7, mr_x=1)
+        self.assertFalse(is_mr_x_offer(snap))
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertNotIn("mr.x", decision.p1_note)
+        self.assertNotIn("refuse NO", decision.p1_note)
 
     def test_coop_yields_health_to_hurt_partner(self) -> None:
         from sor_autoplay.agent.coop import CoopContext, should_take_health_pickup

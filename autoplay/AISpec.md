@@ -1026,7 +1026,13 @@ Progress lead when empty: **±160** world X.
 
 ### 10.4 Mr. X dialog
 
-`is_mr_x_offer`: flag `$FFDE00` or (level 7 ∧ clock stopped ∧ no live threats ∧ timer valid).
+`is_mr_x_offer` (all must hold for dialog seat mode):
+
+1. **No live enemies/bosses** on the world map (defeated bodies ignored). After
+   refuse, combat spawns can resume while `$FFDE00` is still set — threats
+   force the agent out of `DIALOG` into free combat.
+2. And either `$FFDE00 (mr_x_offer_flag)` **or** (level 7 ∧ clock stopped ∧
+   timer valid).
 
 Choice UI: object `+$59` bit4 set while the offer control table locks / enables
 choice; bit3 = side (**1 = NO**, 0 = YES). Do **not** idle when bit4 is clear —
