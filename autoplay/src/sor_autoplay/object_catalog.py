@@ -51,8 +51,12 @@ _ENEMY_STYLES: dict[int, EntityStyle] = {
 }
 
 # Boss families: symbol always "B", colours differ by type.
+# Mr. X is type $35 (bespoke final boss; $1306A). Office controller $33 and
+# linked scene $34 are presentation-only — leave them uncatalogued so they
+# never become combat targets.
 _BOSS_STYLES: dict[int, EntityStyle] = {
     0x30: EntityStyle("boss", "Abadede", "B", "#ff2d55", "Abadede"),
+    0x35: EntityStyle("boss", "Mr. X", "B", "#ff453a", "Mr. X"),
     0x55: EntityStyle("boss", "Souther", "B", "#ff9500", "Souther"),
     0x56: EntityStyle("boss", "Antonio", "B", "#af52de", "Antonio"),
     0x57: EntityStyle("boss", "Bongo", "B", "#34c759", "Bongo"),
@@ -113,6 +117,9 @@ _SKIP_TYPES = frozenset(
         0x06,  # menu/char-select cursor
         0x0F,  # continue/game-over UI object
         0x29,  # police-special enemy-sweep controller
+        0x31,  # Abadede helper body (not a separate hunt target)
+        0x33,  # Mr. X office controller (spawns type $35)
+        0x34,  # Mr. X office scene object
         0x48,  # wave GO prompt
         0x49,  # contact VFX
         0x4A,  # related short-lived effect (not a collectable)
@@ -166,7 +173,7 @@ def style_for_type(type_id: int) -> EntityStyle | None:
     # map so ambient/effect objects cannot look like phantom enemies.
     if 0x20 <= type_id <= 0x2A:
         return EntityStyle("enemy", "Unknown", "?", "#9ca3af", f"Enemy ${type_id:02X}")
-    if type_id in (0x30, 0x55, 0x56, 0x57, 0x58):
+    if type_id in (0x30, 0x35, 0x55, 0x56, 0x57, 0x58):
         return EntityStyle("boss", "Boss", "B", "#ff453a", f"Boss ${type_id:02X}")
     return None
 

@@ -75,6 +75,18 @@ class ObjectCatalogTests(unittest.TestCase):
         self.assertIsNotNone(style)
         self.assertEqual(style.kind, "projectile")
 
+    def test_mr_x_type_35_is_boss(self) -> None:
+        """Final Mr. X body ($1306A) must plot and be hunt-able as a boss."""
+
+        style = style_for_type(0x35)
+        self.assertIsNotNone(style)
+        assert style is not None
+        self.assertEqual(style.kind, "boss")
+        self.assertEqual(style.family, "Mr. X")
+        # Office presentation objects must not masquerade as combatants.
+        self.assertIsNone(style_for_type(0x33))
+        self.assertIsNone(style_for_type(0x34))
+
     def test_same_type_debris_is_not_a_live_breakable(self) -> None:
         self.assertIsNotNone(
             style_for_object(0x18, action_state=1, subtype=0)
