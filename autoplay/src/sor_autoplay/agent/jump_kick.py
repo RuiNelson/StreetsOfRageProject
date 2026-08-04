@@ -39,10 +39,13 @@ ENEMY_BODY_Z1 = 0.0
 
 # Attack AABB relative to player origin: (x0, x1, y0, y1, z0, z1)
 # Facing right (action bit0 clear). Left facing mirrors X.
+# Measured live from the attack box `+$64` during action $16 (ROM $450C
+# compares attacker +$64 against victim +$70). The earlier values here were
+# read from +$70 — the body box — and were roughly a third of the real reach.
 _KICK_BOX_RIGHT: tuple[tuple[float, float, float, float, float, float], ...] = (
-    (6.0, 16.0, -8.0, 8.0, -52.0, -38.0),  # Axel
-    (10.0, 21.0, -8.0, 8.0, -49.0, -33.0),  # Adam
-    (-8.0, 3.0, -8.0, 8.0, -48.0, -28.0),  # Blaze
+    (14.0, 42.0, -8.0, 8.0, -46.0, -19.0),  # Axel
+    (17.0, 72.0, -8.0, 8.0, -43.0, -14.0),  # Adam
+    (3.0, 49.0, -8.0, 8.0, -38.0, -6.0),  # Blaze
 )
 
 # Blaze kick anim bank c=$16 frame durations until active damage (f2/f3).

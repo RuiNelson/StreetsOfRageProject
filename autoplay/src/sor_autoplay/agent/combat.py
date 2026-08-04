@@ -92,19 +92,17 @@ SIGNAL_SWEEP_STATES = frozenset({0x08, 0x0B})
 SIGNAL_SWEEP_REACT_X = 120.0
 # Minimum |dx| to decide "left vs right" (avoid flip-flop on top of foe).
 FACE_DEADZONE = 4.0
-# Rear (B+C) chord geometry, measured in ai-analysis/controls-and-input.md:
-# attack box +$70 is player X −7..+3 by Y ±8 — a contact move on the player's
-# own body, not a reaching one. Add an enemy body half-width for the overlap.
-REAR_BOX_HALF_X = 7.0
-REAR_BODY_HALF_X = 9.0
-REAR_REACH_X = REAR_BOX_HALF_X + REAR_BODY_HALF_X
-REAR_LANE_HALF = 10.0  # box Y ±8 plus enemy body slack
+# Attack boxes live at object +$64 and are tested against the victim's body
+# box at +$70 (ROM $450C). Both measured live; see `characters` for the
+# per-character punch and B+C rear boxes. Half-width of a standing body box.
+BODY_HALF_X = 7.0
+REAR_LANE_HALF = 10.0  # attack box Y ±8 plus body slack
 # ROM chase walk; the chord has no positional history to measure against.
 REAR_CLOSE_SPEED = 1.2
 # Frames a grounded enemy needs from body contact to its own damaging frame.
 ENEMY_STRIKE_FRAMES = 12
-# Rear-react distance (widest per-character window: Adam's 23+21 frames).
-REAR_REACT_RANGE = 72.0
+# Rear-react distance (widest per-character window: Adam's 42 px + 39 frames).
+REAR_REACT_RANGE = 96.0
 
 # Legacy aliases used by older tests.
 PUNCH_RANGE = 28.0
@@ -215,6 +213,9 @@ def can_punch(
     abs_dx, abs_dy = abs_dx_dy(me, foe)
     if abs_dy > LANE_HIT_HALF:
         return False
+    # The punch box has an inner edge too (+16 Axel, +8 Adam, +18 Blaze); a
+    # body that closed inside it is never hit, whatever the caller passes.
+    min_range = max(min_range, profile.punch_inner - BODY_HALF_X)
     if abs_dx > profile.strike_range or abs_dx < min_range:
         return False
     if require_facing and not facing_toward(me, foe):
@@ -368,23 +369,26 @@ def rear_hit_window(
 ) -> tuple[float, float]:
     """Inclusive |dx| band in which a B+C issued **now** still connects.
 
-    The chord's attack box `+$70` is the player's own body (X −7..+3, Y ±8),
-    so nothing is hit at arm's length: the foe has to be inside that box on
-    one of the damaging frames. With per-character startup S and active span
-    A (3/10 Axel, 23/21 Adam, 7/17 Blaze) and closing speed v:
+    Measured rear boxes (facing right, so behind is negative X): Axel
+    −40..−8, Adam −42..+14, Blaze −53..−5, all Y ±8. Add a body half-width
+    for the overlap test, then extend the far edge by how far a closing foe
+    walks during startup + active frames (S/A = 3/10, 21/18, 7/16).
 
-        far  = REAR_REACH_X + v·(S + A)   farther out it never walks in.
-        near = 0 while S beats the foe's own strike, otherwise the distance
-               it must still cover so it cannot hit us during our wind-up.
-
-    Adam's 23-frame startup is the whole reason for ``near``: his chord loses
-    the race against anything already standing on his back.
+    ``near`` is a risk gate rather than geometry: Adam's 21-frame wind-up
+    loses the race against anything already standing on his back, so he needs
+    the foe to still have ground to cover.
     """
 
     speed = rear_closing_speed(me, foe)
-    far = REAR_REACH_X + speed * (profile.rear_startup + profile.rear_active)
+    far = (
+        profile.rear_range_max
+        + BODY_HALF_X
+        + speed * (profile.rear_startup + profile.rear_active)
+    )
+    near = max(0.0, profile.rear_range_min - BODY_HALF_X)
     lead = profile.rear_startup - ENEMY_STRIKE_FRAMES
-    near = 0.0 if lead <= 0 else min(REAR_REACH_X + speed * lead, far)
+    if lead > 0:
+        near = min(max(near, BODY_HALF_X + speed * lead), far)
     return near, far
 
 

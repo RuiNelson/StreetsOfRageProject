@@ -37,9 +37,13 @@ class MoveListProfileTests(unittest.TestCase):
         self.assertEqual(PROFILES[1].name, "Adam")
         self.assertEqual(PROFILES[2].name, "Blaze")
 
-    def test_adam_rear_starts_farther_than_axel(self) -> None:
+    def test_measured_rear_boxes(self) -> None:
+        # Live +$64 trace: Axel -40..-8, Adam -42..+14, Blaze -53..-5.
         self.assertGreater(PROFILES[1].rear_range_max, PROFILES[0].rear_range_max)
-        self.assertGreater(PROFILES[1].rear_range_min, PROFILES[0].rear_range_min)
+        self.assertGreater(PROFILES[2].rear_range_max, PROFILES[1].rear_range_max)
+        # Adam pays for that reach in wind-up, not in geometry.
+        self.assertGreater(PROFILES[1].rear_startup, PROFILES[2].rear_startup)
+        self.assertGreater(PROFILES[2].rear_startup, PROFILES[0].rear_startup)
 
     def test_blaze_jump_longer_axel_shorter(self) -> None:
         self.assertGreater(PROFILES[2].jump_kick_max, PROFILES[0].jump_kick_max)
@@ -60,7 +64,7 @@ class MoveListProfileTests(unittest.TestCase):
 
         self.assertTrue(rear_in_band(24, PROFILES[0]))
         self.assertFalse(rear_in_band(48, PROFILES[0]))
-        self.assertTrue(rear_in_band(48, PROFILES[1]))
+        self.assertTrue(rear_in_band(40, PROFILES[1]))
         plan = plan_for(_foe())
         # Distance alone must NOT force rear.
         self.assertNotEqual(
@@ -158,21 +162,24 @@ class RearChordTimingTests(unittest.TestCase):
         )
         return me, foe
 
-    def test_stationary_foe_only_hit_inside_the_body_box(self) -> None:
-        from sor_autoplay.agent.combat import REAR_REACH_X, rear_hit_window
+    def test_stationary_foe_only_hit_inside_the_measured_box(self) -> None:
+        from sor_autoplay.agent.combat import BODY_HALF_X, rear_hit_window
 
         me, foe = self._pair(40.0, closing=False)
-        self.assertEqual(rear_hit_window(me, foe, PROFILES[0]), (0.0, REAR_REACH_X))
+        near, far = rear_hit_window(me, foe, PROFILES[0])
+        # Axel's box is -40..-8; no closing lead when the foe stands still.
+        self.assertEqual(near, PROFILES[0].rear_range_min - BODY_HALF_X)
+        self.assertEqual(far, PROFILES[0].rear_range_max + BODY_HALF_X)
 
     def test_closing_foe_extends_the_window_by_startup_plus_active(self) -> None:
         from sor_autoplay.agent.combat import can_rear_hit, rear_hit_window
 
-        me, foe = self._pair(28.0)
+        me, foe = self._pair(60.0)
         _, far = rear_hit_window(me, foe, PROFILES[0])
-        self.assertGreater(far, 28.0)
+        self.assertGreater(far, PROFILES[0].rear_range_max)
         self.assertTrue(can_rear_hit(me, foe, PROFILES[0], face_right=True))
-        # Axel cannot reach a foe that never walks into the box.
-        me, still = self._pair(28.0, closing=False)
+        # Past the box, a foe that never walks in is never hit.
+        me, still = self._pair(60.0, closing=False)
         self.assertFalse(can_rear_hit(me, still, PROFILES[0], face_right=True))
 
     def test_adam_never_chords_a_foe_already_on_his_back(self) -> None:
@@ -180,7 +187,7 @@ class RearChordTimingTests(unittest.TestCase):
 
         me, foe = self._pair(14.0)
         self.assertTrue(can_rear_hit(me, foe, PROFILES[0], face_right=True))
-        # 23-frame startup loses the race at contact range.
+        # 21-frame startup loses the race at contact range.
         self.assertFalse(can_rear_hit(me, foe, PROFILES[1], face_right=True))
         me, far_foe = self._pair(50.0)
         self.assertTrue(can_rear_hit(me, far_foe, PROFILES[1], face_right=True))
@@ -191,3 +198,26 @@ class RearChordTimingTests(unittest.TestCase):
         me, foe = self._pair(24.0)
         off_lane = replace(foe, map_y=foe.map_y + 14.0)
         self.assertFalse(can_rear_hit(me, off_lane, PROFILES[0], face_right=True))
+
+
+class PunchBoxTests(unittest.TestCase):
+    """Measured punch attack box +$64 (facing right, Y ±8)."""
+
+    def test_measured_outer_reach(self) -> None:
+        self.assertEqual(
+            [(p.punch_inner, p.punch_outer) for p in PROFILES.values()],
+            [(16.0, 57.0), (8.0, 54.0), (18.0, 68.0)],
+        )
+        # Policy strike ranges stay inside the measured outer edge.
+        for profile in PROFILES.values():
+            self.assertLess(profile.strike_range, profile.punch_outer)
+
+    def test_body_inside_the_inner_edge_is_not_punchable(self) -> None:
+        from sor_autoplay.agent.combat import can_punch
+
+        me = replace(_foe(), kind="player", slot="P1", map_x=100.0, map_y=64.0)
+        for profile in PROFILES.values():
+            close = replace(_foe(), map_x=100.0 + profile.punch_inner - 8.0, map_y=64.0)
+            ok = replace(_foe(), map_x=100.0 + profile.punch_inner + 8.0, map_y=64.0)
+            self.assertFalse(can_punch(me, close, profile, require_facing=False))
+            self.assertTrue(can_punch(me, ok, profile, require_facing=False))
