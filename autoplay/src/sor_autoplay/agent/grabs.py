@@ -145,21 +145,58 @@ def context_from_player(
     )
 
 
+def _boss_looks_grabbed(entity: MapEntity) -> bool:
+    """Boss grabbee evidence without ordinary-enemy primary ``$0500``.
+
+    Later bosses (``$55``–``$58``) share grabbee / throw cleanup primaries
+    ``$06``–``$09``. Abadede / Mr. X keep bespoke bytes, so they rely on the
+    player hold-family + body-overlap path below.
+    """
+
+    if entity.kind != "boss":
+        return False
+    if entity.combat_phase == CombatPhase.GRABBED:
+        return True
+    primary = entity.action_state & 0xFF
+    if entity.type_id in (0x55, 0x56, 0x57, 0x58) and 0x06 <= primary <= 0x09:
+        return True
+    return False
+
+
 def _player_has_grabbed_enemy(
     me: MapEntity,
     entities: tuple[MapEntity, ...],
     *,
     player_index: int,
 ) -> bool:
-    """True if an enemy is in GRABBED phase and linked to this player seat."""
+    """True if a foe is held by this seat (ordinary GRABBED or boss grabbee).
+
+    Ordinary enemies latch primary ``$0500`` (``CombatPhase.GRABBED``). Bosses
+    do not share that word machine — without a separate path, ``enemy_grab``
+    stayed false after a successful boss grab and the knee/suplex tree never
+    ran (player froze in ``$60``/``$66`` with no B).
+    """
 
     seat_lo = ADDR_P1_OBJECT_LO if player_index == 1 else ADDR_P2_OBJECT_LO
+    player_holding = (
+        me.action_base in HOLD_INPUT_ACTIONS or is_grab_family(me.action_base)
+    )
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
             continue
         if entity.is_defeated:
             continue
-        if entity.combat_phase != CombatPhase.GRABBED:
+        ordinary_grabbed = entity.combat_phase == CombatPhase.GRABBED
+        boss_grabbed = _boss_looks_grabbed(entity)
+        body_close = (
+            abs(entity.map_x - me.map_x) < 48
+            and abs(entity.map_y - me.map_y) < 20
+        )
+        # Bosses: player already in hold-react + body overlap is enough even
+        # when the boss primary has not been decoded as grabbee yet.
+        if entity.kind == "boss" and player_holding and body_close:
+            boss_grabbed = True
+        if not ordinary_grabbed and not boss_grabbed:
             continue
         # Attacker/holder low word points at player object.
         if (entity.attacker_ptr & 0xFFFF) == seat_lo:
@@ -167,7 +204,7 @@ def _player_has_grabbed_enemy(
         if (entity.target_ptr & 0xFFFF) == seat_lo:
             return True
         # Very close + grabbed (partner pointer may not be decoded yet).
-        if abs(entity.map_x - me.map_x) < 48 and abs(entity.map_y - me.map_y) < 20:
+        if body_close:
             return True
     return False
 
@@ -804,13 +841,27 @@ def held_enemy_entity(
             continue
         if entity.is_defeated:
             continue
-        if entity.combat_phase == CombatPhase.GRABBED:
+        if entity.combat_phase == CombatPhase.GRABBED or _boss_looks_grabbed(entity):
             d = abs(entity.map_x - me.map_x) + abs(entity.map_y - me.map_y)
             if d < best_d:
                 best_d = d
                 best = entity
     if best is not None:
         return best
+    # Player already in hold-react: prefer the body-overlapped combatant even
+    # when boss phase has not been decoded as grabbee yet.
+    if me.action_base in HOLD_INPUT_ACTIONS or is_grab_family(me.action_base):
+        for entity in entities:
+            if entity.kind not in ("enemy", "boss"):
+                continue
+            if entity.is_defeated or entity.health == 0:
+                continue
+            d = abs(entity.map_x - me.map_x) + abs(entity.map_y - me.map_y) * 0.5
+            if d < 48 and d < best_d:
+                best_d = d
+                best = entity
+        if best is not None:
+            return best
     for entity in entities:
         if entity.kind not in ("enemy", "boss"):
             continue

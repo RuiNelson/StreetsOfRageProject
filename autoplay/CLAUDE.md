@@ -501,6 +501,9 @@ See `src/sor_autoplay/memory_map.py` and
   agent holds DOWN+A every dialog tick
 - Styles live in `object_catalog.py`; extraction in `world_map.py`
 - Final Mr. X body is object type `$35` (boss); office `$33`/`$34` are skipped
+- Boss holds: ordinary `$0500` GRABBED does not apply — detect via later-boss
+  grabbee primaries `$06–$09` or player hold-family + body overlap, else
+  knee/suplex never runs after a successful boss grab
 - Agent modules: `agent/policy.py`, `context.py`, `skills.py`, `inference.py`,
   `expert.py`, `autoplanner.py`, `knowledge.py`, `fuzzy.py`, `arbiter.py`,
   `combat.py`, `pressure.py`, `stage.py`, `navigation.py`, `coop.py`,

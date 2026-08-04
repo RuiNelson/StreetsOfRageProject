@@ -580,6 +580,68 @@ class GrabTreeTests(unittest.TestCase):
         self.assertFalse(b.attack)
         self.assertTrue(mem.latched)
 
+    def test_boss_hold_without_ordinary_grabbed_phase_knees(self) -> None:
+        """Bosses never use $0500 GRABBED — hold must still run knee/suplex."""
+
+        from sor_autoplay.phases import CombatPhase
+
+        me = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            type_id=1,
+            map_x=160,
+            map_y=64,
+            action_state=0x60,
+            held_type=0,
+            combat_phase=CombatPhase.HOLDING,
+        )
+        # Mr. X: NORMAL phase (no $0500), body-overlapped while player holds.
+        boss = _e(
+            kind="boss",
+            family="Mr. X",
+            type_id=0x35,
+            slot="B0",
+            map_x=175,
+            map_y=64,
+            health=80,
+            action_state=0x01,
+            combat_phase=CombatPhase.NORMAL,
+        )
+        ctx = context_from_player(me, (me, boss), player_index=1)
+        self.assertTrue(ctx.enemy_grab, "boss body hold must set enemy_grab")
+        self.assertTrue(ctx.holding)
+        intent = decide_held(me, ctx, GrabMemory(), tick=0, profile=PROFILES[0], foe=boss)
+        assert intent is not None
+        self.assertTrue(intent.attack, intent.note)
+        self.assertTrue(
+            "knee" in intent.note or "throw" in intent.note or "suplex" in intent.note,
+            intent.note,
+        )
+
+        # Back hold → suplex B.
+        me_back = replace(me, action_state=0x66)
+        ctx_back = context_from_player(me_back, (me_back, boss), player_index=1)
+        self.assertTrue(ctx_back.enemy_grab)
+        suplex = decide_held(
+            me_back, ctx_back, GrabMemory(), tick=0, profile=PROFILES[0], foe=boss
+        )
+        assert suplex is not None
+        self.assertTrue(suplex.attack, suplex.note)
+        self.assertIn("suplex", suplex.note)
+
+    def test_later_boss_grabbee_primary_is_grabbed_phase(self) -> None:
+        from sor_autoplay.phases import CombatPhase, boss_phase
+
+        self.assertEqual(
+            boss_phase(type_id=0x55, primary_byte=0x07, tactical=0),
+            CombatPhase.GRABBED,
+        )
+        self.assertEqual(
+            boss_phase(type_id=0x58, primary_byte=0x06, tactical=0),
+            CombatPhase.GRABBED,
+        )
+
     def test_live_hold_action_60_without_held_type(self) -> None:
         """Regression: live Axel hold was action $60, held_type 0, enemy GRABBED."""
 

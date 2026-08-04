@@ -356,12 +356,16 @@ commitment.
 | Evidence                                                                                                                 | Result                                                               |
 | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
 | Reciprocal GRABBED enemy linked to this seat (`attacker_ptr`/`target_ptr` low word = seat object, or close grabbed body) | `enemy_grab=True`; `weapon=False` even if `+$60` looks like a weapon |
+| **Boss** grabbee: later-boss primary `$06–$09`, **or** player hold-family (`$60/$66`/grab anim) + body overlap (≤48×20) | `enemy_grab=True` (bosses never use ordinary `$0500` GRABBED)        |
 | Other player body within \|Δx\|≤48, \|Δy\|≤20 while grab-family, and **no** linked enemy                                 | `partner_grab=True`                                                  |
 | `held_type` in `$08–$0C` and not linked / partner                                                                        | `weapon=True`                                                        |
 | `held_type ≠ 0` and not weapon type and not partner                                                                      | `enemy_grab=True`                                                    |
 | `+$4C` or post-pepper `+$5E` alone                                                                                       | **not** enemy/partner grab                                           |
 
 `holding = weapon ∨ enemy_grab ∨ partner_grab`. Enemy link wins over partner.
+
+Boss note: without the boss path above, a successful boss grab left the seat in
+`$60`/`$66` with `holding=false`, so the knee/suplex tree never ran.
 
 #### 4.3.2 Closed animations
 

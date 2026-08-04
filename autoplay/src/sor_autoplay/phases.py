@@ -170,8 +170,9 @@ def boss_phase(
             return CombatPhase.DEATH
         if p in (0x03, 0x04):
             return CombatPhase.RECOVERY  # hit reaction / recover → punish
+        # Shared later-boss grabbee / throw cleanup — player is holding them.
         if p in (0x06, 0x07, 0x08, 0x09):
-            return CombatPhase.RECOVERY  # shared grabbee / airborne cleanup
+            return CombatPhase.GRABBED
         if p == 0x01:
             if t in (0x02, 0x03):
                 return CombatPhase.ATTACKING  # jump attack / leap-to-grab
@@ -183,6 +184,10 @@ def boss_phase(
         return CombatPhase.RECOVERY
     if p >= 0x0C:
         return CombatPhase.DEATH
+    # Shared grabbee / throw cleanup while a player holds the boss body.
+    # Must be GRABBED (not CHARGE) so hold detection / knee-suplex run.
+    if type_id in (0x55, 0x56, 0x57, 0x58) and 0x06 <= p <= 0x09:
+        return CombatPhase.GRABBED
     # Higher primary indices are usually attack/airborne families.
     if p >= 0x06:
         return CombatPhase.ATTACKING if t != 0 else CombatPhase.CHARGE
