@@ -374,11 +374,15 @@ for tests/HUD.
      of 500 decisions.
      **STATUS: predictor correct, conversion zero.** Melee-only every variant
      scores 0 dealt / 128 taken / 2 deaths. The binding constraint is now
-     actuation granularity, not knowledge: ~30 landings per 500 decisions, and
-     converting one needs a 20 px X band, a 24 px lane band and a ~6-frame
-     press window while ~45% of decisions sit in hitstun/lockout. Next: retry
-     at `--step-frames 2` to isolate granularity from doctrine — that flag
-     currently yields no decisions in 9 minutes and needs investigating first.
+     actuation granularity, not knowledge. Run twin evaluations as
+     `--step-frames 2 --face-frames 1 --no-police-special`; `--step-frames 2`
+     alone fails validation because the default `--face-frames 3` must be
+     less than `step_frames`. At that cadence 4 of 17 landings arrive inside
+     the punch band (vs 2 of 30 at four frames). The intercept swing also
+     carries its facing — posting up walks *away* from the landing, so a bare
+     attack swings backwards; adding the direction cut damage taken 112 → 80.
+     Damage dealt is still 0: the swing needs in-band, actionable, facing and
+     `frames <= 8` on the same decision, which rarely coincides.
      Fixture: restore `twins-state.bin` (64 KiB work RAM at the encounter)
      instead of replaying the stage; probes in the session scratchpad
      (`probe_reach.py`, `probe_moves.py`) reproduce the numbers above.

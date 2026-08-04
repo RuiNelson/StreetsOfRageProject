@@ -1038,10 +1038,23 @@ At four frames per decision the agent gets one or two chances inside each
 window and positions to about ±6 px. Two landings per episode now arrive inside
 the band, up from one.
 
-Next: run this fight at a finer cadence (`--step-frames 2`) and see whether the
-intercept converts; that isolates granularity from doctrine. Note that
-`--step-frames 2` currently produced no decisions within a 9-minute budget and
-needs investigating before it can be used as evidence.
+**Cadence result.** `--step-frames 2` is not broken — it rejects the default
+`--face-frames 3` (the runner requires `face_frames < step_frames`), so twin
+runs need `--step-frames 2 --face-frames 1`. At that cadence positioning
+improves roughly threefold: **4 of 17 landings arrive inside the punch band**
+against 2 of 30 at four frames, and touchdowns cluster at dx 28-34 instead of
+23-27. Granularity was a real constraint.
+
+The intercept swing must also carry its facing. Reaching the post means walking
+*away* from where the body comes down, so a bare `attack=True` swings backwards
+(observed: mask `$28`, body at dx +35, player action `$19` facing left). The
+intent now sets the direction toward the landing, which the runner applies for
+`face_frames` before the button. Measured effect at 2-frame cadence: damage
+taken 112 → 80 and deaths 2 → 1, but swing attempts fell 5 → 2.
+
+Damage dealt is still **0**. What remains is the coincidence problem: the swing
+needs `frames <= 8`, in-band, seat actionable and facing correct on the same
+decision, and those still rarely line up.
 
 #### Twin evaluation metrics
 

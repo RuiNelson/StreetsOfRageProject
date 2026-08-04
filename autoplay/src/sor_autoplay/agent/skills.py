@@ -519,8 +519,16 @@ class TwinFightSkill:
             lane_gap = abs(float(intercept.twin.world_y) - float(me.world_y))
             in_band = lo <= reach <= hi and lane_gap <= combat.LANE_HIT_HALF
             if intercept.frames <= self.SWING_LEAD_FRAMES and in_band:
+                # Face the landing on the same intent. Reaching the post means
+                # walking *away* from where the body will come down, so by the
+                # time it lands we are facing the wrong way and a bare B swings
+                # backwards. The runner applies direction for `face_frames`
+                # before the button, which is exactly this case.
+                toward_right = intercept.x > float(me.world_x)
                 return Intent(
                     attack=True,
+                    left=not toward_right,
+                    right=toward_right,
                     note=f"twin skill intercept {intercept.twin.label}",
                 )
             goal = twins_ai.intercept_point(me, intercept, profile)
