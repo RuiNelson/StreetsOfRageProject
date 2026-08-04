@@ -9,6 +9,11 @@ Tuned from the original Streets of Rage move lists (GameFAQs player guide):
 | Back (B+C) | Best range, start farther | Mid range | Fastest, shortest — only when close |
 | Grapple | Prefer throw over knees | Prefer throw; vault→back suplex | Throw / knees if needed |
 | Weapons | Great bat/pipe | Weak knife/bottle; OK bat/pipe | Average all |
+
+Back-attack numbers are **measured**, not FAQ-derived: the chord box is the
+player's own body (X −7..+3, Y ±8) and startup is 3 / 23 / 7 frames for
+Axel / Adam / Blaze, so range comes from how far a closing foe walks during
+startup + active frames. See `combat.rear_hit_window`.
 """
 
 from __future__ import annotations
@@ -26,8 +31,15 @@ class CharacterProfile:
     jump_kick_min: float
     jump_kick_max: float
     # Back attack (B+C) usable distance. Axel short/fast; Adam long/slow.
+    # Derived from the measured chord timeline below, not from the FAQ prose.
     rear_range_min: float
     rear_range_max: float
+    # Measured B+C chord (ai-analysis/controls-and-input.md, lockstep trace):
+    # frames until +$34 first arms, damaging frames, damage, frames to idle.
+    rear_startup: int
+    rear_active: int
+    rear_damage: int
+    rear_recover: int
     # Mix biases 0..1 when already in a valid band.
     jump_attack_bias: float
     rear_attack_bias: float
@@ -67,8 +79,12 @@ PROFILES: dict[int, CharacterProfile] = {
         lane_align=12.0,
         jump_kick_min=28.0,
         jump_kick_max=50.0,  # shortest jump range of the three
-        rear_range_min=8.0,
-        rear_range_max=30.0,  # FAQ: shortest range, only when needed
+        rear_range_min=8.0,  # startup beats the foe's own strike: no gap
+        rear_range_max=32.0,  # REACH + 13 closing frames
+        rear_startup=3,
+        rear_active=10,
+        rear_damage=3,
+        rear_recover=17,
         jump_attack_bias=0.40,  # use jump-kick in mid window
         rear_attack_bias=0.40,  # fast backfist — use in its band
         combo_bias=0.55,  # strong combo ****
@@ -87,10 +103,14 @@ PROFILES: dict[int, CharacterProfile] = {
         lane_align=12.0,
         jump_kick_min=30.0,
         jump_kick_max=72.0,  # good jumpkick range
-        rear_range_min=18.0,
-        rear_range_max=52.0,  # FAQ: best range, start farther
+        rear_range_min=29.0,  # 23-frame startup: only a far, closing foe
+        rear_range_max=69.0,  # REACH + 44 closing frames
+        rear_startup=23,  # $22 -> $24 hop, lands in $14
+        rear_active=21,
+        rear_damage=3,
+        rear_recover=44,
         jump_attack_bias=0.45,
-        rear_attack_bias=0.32,
+        rear_attack_bias=0.12,  # 44-frame commit for 3 damage — last resort
         combo_bias=0.40,
         grab_bias=0.10,
         grab_knees=0,  # FAQ: knees not worth it vs throw
@@ -108,7 +128,11 @@ PROFILES: dict[int, CharacterProfile] = {
         jump_kick_min=28.0,
         jump_kick_max=78.0,  # FAQ: best jumpkick range
         rear_range_min=12.0,
-        rear_range_max=40.0,
+        rear_range_max=45.0,  # REACH + 24 closing frames
+        rear_startup=7,
+        rear_active=17,
+        rear_damage=2,  # weakest chord of the three
+        rear_recover=30,
         jump_attack_bias=0.60,  # jump kick is her power tool
         rear_attack_bias=0.28,
         combo_bias=0.18,  # FAQ: worst combo — avoid mashing

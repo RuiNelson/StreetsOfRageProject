@@ -767,7 +767,11 @@ def _decide_free(ctx: DecisionContext) -> Intent:
     # Face-then-hit. Jump-kick is C, then B while airborne — NEVER C+B together
     # (that is rear attack on the ground).
     # ROM facing: bit0 set = face left. Rear threats use current ROM face.
-    if not me.is_hurt:
+    if (
+        not me.is_hurt
+        and ctx.attack_cd == 0
+        and combat.player_can_start_ground_action(me)
+    ):
         rear_foe = combat.closest_behind(
             me,
             snapshot.world_map.entities,
@@ -810,7 +814,9 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                         nav=nav,
                     )
                 walk.clear()
-                ctx.set_attack_cd(4)
+                # The chord owns the seat until recovery (17/44/30 frames at
+                # ~4 frames per decision); re-pressing B+C mid-move is wasted.
+                ctx.set_attack_cd(max(2, profile.rear_recover // 4))
                 return Intent(
                     left=face_left_now,
                     right=not face_left_now,

@@ -142,3 +142,52 @@ class MoveListProfileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RearChordTimingTests(unittest.TestCase):
+    """Measured B+C timeline (ai-analysis/controls-and-input.md)."""
+
+    def _pair(self, gap: float, *, closing: bool = True) -> tuple[MapEntity, MapEntity]:
+        me = replace(_foe(), kind="player", slot="P1", map_x=100.0, map_y=64.0)
+        # Foe behind a right-facing player; facing_left False = walking at us.
+        foe = replace(
+            _foe(),
+            map_x=100.0 - gap,
+            map_y=64.0,
+            facing_left=not closing,
+        )
+        return me, foe
+
+    def test_stationary_foe_only_hit_inside_the_body_box(self) -> None:
+        from sor_autoplay.agent.combat import REAR_REACH_X, rear_hit_window
+
+        me, foe = self._pair(40.0, closing=False)
+        self.assertEqual(rear_hit_window(me, foe, PROFILES[0]), (0.0, REAR_REACH_X))
+
+    def test_closing_foe_extends_the_window_by_startup_plus_active(self) -> None:
+        from sor_autoplay.agent.combat import can_rear_hit, rear_hit_window
+
+        me, foe = self._pair(28.0)
+        _, far = rear_hit_window(me, foe, PROFILES[0])
+        self.assertGreater(far, 28.0)
+        self.assertTrue(can_rear_hit(me, foe, PROFILES[0], face_right=True))
+        # Axel cannot reach a foe that never walks into the box.
+        me, still = self._pair(28.0, closing=False)
+        self.assertFalse(can_rear_hit(me, still, PROFILES[0], face_right=True))
+
+    def test_adam_never_chords_a_foe_already_on_his_back(self) -> None:
+        from sor_autoplay.agent.combat import can_rear_hit
+
+        me, foe = self._pair(14.0)
+        self.assertTrue(can_rear_hit(me, foe, PROFILES[0], face_right=True))
+        # 23-frame startup loses the race at contact range.
+        self.assertFalse(can_rear_hit(me, foe, PROFILES[1], face_right=True))
+        me, far_foe = self._pair(50.0)
+        self.assertTrue(can_rear_hit(me, far_foe, PROFILES[1], face_right=True))
+
+    def test_lane_band_matches_the_attack_box(self) -> None:
+        from sor_autoplay.agent.combat import can_rear_hit
+
+        me, foe = self._pair(24.0)
+        off_lane = replace(foe, map_y=foe.map_y + 14.0)
+        self.assertFalse(can_rear_hit(me, off_lane, PROFILES[0], face_right=True))

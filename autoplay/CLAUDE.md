@@ -246,6 +246,15 @@ for tests/HUD.
      about `$A0`). Solver: `agent/jump_kick.py` predicts multi-enemy hits and
      arms seat `jump_kick` memory so free flight fires B on the solved delay;
      `attack_mix` prefers packs when the plan scores ≥2 hits.
+   - **Rear attack (B+C)** is a contact move, not a reaching one: attack box
+     `+$70` is player X −7..+3 by Y ±8. Measured chord timeline (startup /
+     damaging frames / damage / recovery): Axel 3/10/3/17, Blaze 7/17/2/30,
+     Adam 23/21/3/44 — Adam's is a `$22→$24` hop landing in `$14`, not a
+     backfist. `combat.rear_hit_window` therefore fires only when the foe is
+     inside that body box, or will walk into it during startup+active frames;
+     Adam additionally refuses a foe already at contact (his startup loses to
+     the enemy's own strike). The chord holds the seat for its full recovery
+     via `attack_cd`, and needs an input-ready ground action.
 
    - Breakables (phone booth / crate): walk in → smash (B) or mid-range
      jump-break; then loot spilled pickups/weapons

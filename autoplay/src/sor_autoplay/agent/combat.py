@@ -92,8 +92,19 @@ SIGNAL_SWEEP_STATES = frozenset({0x08, 0x0B})
 SIGNAL_SWEEP_REACT_X = 120.0
 # Minimum |dx| to decide "left vs right" (avoid flip-flop on top of foe).
 FACE_DEADZONE = 4.0
-# Rear-react distance (B+C back attack family).
-REAR_REACT_RANGE = 44.0
+# Rear (B+C) chord geometry, measured in ai-analysis/controls-and-input.md:
+# attack box +$70 is player X −7..+3 by Y ±8 — a contact move on the player's
+# own body, not a reaching one. Add an enemy body half-width for the overlap.
+REAR_BOX_HALF_X = 7.0
+REAR_BODY_HALF_X = 9.0
+REAR_REACH_X = REAR_BOX_HALF_X + REAR_BODY_HALF_X
+REAR_LANE_HALF = 10.0  # box Y ±8 plus enemy body slack
+# ROM chase walk; the chord has no positional history to measure against.
+REAR_CLOSE_SPEED = 1.2
+# Frames a grounded enemy needs from body contact to its own damaging frame.
+ENEMY_STRIKE_FRAMES = 12
+# Rear-react distance (widest per-character window: Adam's 23+21 frames).
+REAR_REACT_RANGE = 72.0
 
 # Legacy aliases used by older tests.
 PUNCH_RANGE = 28.0
@@ -334,6 +345,49 @@ def evaluate_jump_kick(
     )
 
 
+def rear_closing_speed(me: MapEntity, foe: MapEntity) -> float:
+    """Px/frame the foe closes on us, 0 when it is not walking at our back.
+
+    There is no positional history in the pipeline, so this is the ROM's
+    ordinary chase walk applied only to a foe that is free to act and already
+    facing us. Anything committed (attacking, knocked down, held) is treated
+    as stationary for the chord's timeline.
+    """
+
+    if foe.combat_phase not in (CombatPhase.NORMAL, CombatPhase.UNKNOWN):
+        return 0.0
+    if foe.facing_left != (foe.map_x > me.map_x):
+        return 0.0
+    return REAR_CLOSE_SPEED
+
+
+def rear_hit_window(
+    me: MapEntity,
+    foe: MapEntity,
+    profile: CharacterProfile,
+) -> tuple[float, float]:
+    """Inclusive |dx| band in which a B+C issued **now** still connects.
+
+    The chord's attack box `+$70` is the player's own body (X −7..+3, Y ±8),
+    so nothing is hit at arm's length: the foe has to be inside that box on
+    one of the damaging frames. With per-character startup S and active span
+    A (3/10 Axel, 23/21 Adam, 7/17 Blaze) and closing speed v:
+
+        far  = REAR_REACH_X + v·(S + A)   farther out it never walks in.
+        near = 0 while S beats the foe's own strike, otherwise the distance
+               it must still cover so it cannot hit us during our wind-up.
+
+    Adam's 23-frame startup is the whole reason for ``near``: his chord loses
+    the race against anything already standing on his back.
+    """
+
+    speed = rear_closing_speed(me, foe)
+    far = REAR_REACH_X + speed * (profile.rear_startup + profile.rear_active)
+    lead = profile.rear_startup - ENEMY_STRIKE_FRAMES
+    near = 0.0 if lead <= 0 else min(REAR_REACH_X + speed * lead, far)
+    return near, far
+
+
 def can_rear_hit(
     me: MapEntity,
     foe: MapEntity,
@@ -341,12 +395,14 @@ def can_rear_hit(
     *,
     face_right: bool,
 ) -> bool:
-    """Back attack only vs a foe truly behind us and in rear band."""
+    """Back attack only vs a foe behind us that the chord can actually reach."""
 
-    if not enemy_is_behind(me, foe, face_right=face_right, max_dist=profile.rear_range_max):
+    near, far = rear_hit_window(me, foe, profile)
+    if not enemy_is_behind(me, foe, face_right=face_right, max_dist=far):
         return False
-    abs_dx = abs(foe.map_x - me.map_x)
-    return profile.rear_range_min <= abs_dx <= profile.rear_range_max
+    if abs(foe.map_y - me.map_y) > REAR_LANE_HALF:
+        return False
+    return near <= abs(foe.map_x - me.map_x) <= far
 
 
 def player_busy_attacking(me: MapEntity) -> bool:
