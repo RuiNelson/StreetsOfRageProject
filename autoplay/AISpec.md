@@ -1084,6 +1084,37 @@ Two of the three intercept swings also fired while the player was already held
 enemy-grab escape skill should have taken — worth checking `PlayerMode`
 classification for `$79` before tuning anything else here.
 
+##### Continuous back-attack spam, measured
+
+Tested directly with a scripted probe (no agent): press B+C on every frame the
+player can start a ground action, 1200 frames from the restored encounter.
+
+| Movement | Dealt | Taken | B+C edges | Hurt frames |
+| --- | ---: | ---: | ---: | ---: |
+| stand still | **6** | 80 | 83 | 375 |
+| track lane only | **6** | 80 | 81 | 380 |
+| chase on X | 0 | 112 | 77 | 464 |
+
+Findings:
+
+* Spam **does** convert — this is the first melee damage recorded against the
+  pair, two clean back attacks at 3 each. It lands about **one hit per twin
+  approach cycle** (~370 frames apart, one per body), purely because the arc
+  happens to end on the player while the box is active.
+* Chasing is strictly worse on both axes and must not be done. "Never approach"
+  is now measured three separate ways.
+* The "you're invincible with this method" claim does **not** reproduce: 80
+  damage taken and 375 of 1200 frames in hitstun while spamming. The back
+  attack's animation occupies most of the remaining time, so there is no large
+  unexplained window where invulnerability could be hiding.
+
+Extrapolated, spam alone needs ~3000 frames per body (8 hits x ~370) and takes
+~80 damage per 1200 frames — roughly five deaths per kill. It is a damage
+*source*, not a strategy. Its value is the proof that the back attack converts
+on a landing; the predictor's job is to make that happen on **every** approach
+instead of the one the geometry hands us, and the current agent achieves that
+on 0 of 24 landings, so positioning accuracy is the entire remaining gap.
+
 #### Twin evaluation metrics
 
 `evaluation.py` measures the doctrine directly: `twin_throw_band_steps` and

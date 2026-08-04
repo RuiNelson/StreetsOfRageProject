@@ -395,6 +395,15 @@ for tests/HUD.
      decisions, 30 grab acquisitions). Also: 2 of 3 intercept swings fired
      while the player was already held (`$79`) — check `PlayerMode`
      classification for `$79` before tuning this further.
+     **Back-attack spam, measured** (scripted probe, 1200 frames, B+C on every
+     actionable frame): standing still 6 dealt / 80 taken; lane-tracking 6 / 80;
+     chasing 0 / 112. First melee damage ever recorded on the pair — it
+     converts about one hit per twin approach cycle (~370 frames). Chasing is
+     strictly worse, so "never approach" is now measured three ways. The
+     "invincible with this method" claim does not reproduce (375 of 1200 frames
+     in hitstun). Spam is a damage source, not a strategy: ~5 deaths per kill.
+     The gap is positioning accuracy — make the back attack land on *every*
+     landing rather than the one geometry hands us.
      Fixture: restore `twins-state.bin` (64 KiB work RAM at the encounter)
      instead of replaying the stage; probes in the session scratchpad
      (`probe_reach.py`, `probe_moves.py`) reproduce the numbers above.
