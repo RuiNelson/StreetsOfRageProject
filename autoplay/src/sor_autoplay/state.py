@@ -41,6 +41,15 @@ class PlayerSnapshot:
     continues: int
     out_flag: int
     is_playable: bool
+    # Type-$0F continue / name-entry UI (ignored when not continue object).
+    name_entry_active: bool = False
+    continue_selects_no: bool = False
+
+    @property
+    def is_continue_ui(self) -> bool:
+        """Dead player slot showing continue Yes/No or high-score name entry."""
+
+        return self.object_type == mm.OBJ_TYPE_CONTINUE_UI
 
     def summary_line(self) -> str:
         if not self.mode_active and not self.is_playable:
@@ -195,6 +204,13 @@ def _player_from_blocks(
     continues = _u16(globals_block, continues_off)
     out_flag = _u8(globals_block, out_off)
 
+    name_entry_active = False
+    continue_selects_no = False
+    if object_type == mm.OBJ_TYPE_CONTINUE_UI and len(obj) > mm.OBJ_CONTINUE_CHOICE:
+        flags_4b = _u8(obj, mm.OBJ_CONTINUE_UI_FLAGS)
+        name_entry_active = bool(flags_4b & mm.OBJ_CONTINUE_NAME_ENTRY_BIT)
+        continue_selects_no = bool(_u8(obj, mm.OBJ_CONTINUE_CHOICE))
+
     return PlayerSnapshot(
         index=index,
         mode_active=mode_active,
@@ -210,6 +226,8 @@ def _player_from_blocks(
         continues=continues,
         out_flag=out_flag,
         is_playable=is_playable,
+        name_entry_active=name_entry_active,
+        continue_selects_no=continue_selects_no,
     )
 
 
@@ -389,6 +407,10 @@ def snapshot_from_memory_blocks(
             "mr_x_offer_state": mr_x_offer_state & 0xFF,
             "p1_obj59": p1_obj59 & 0xFF,
             "p2_obj59": p2_obj59 & 0xFF,
+            "p1_name_entry": int(p1.name_entry_active),
+            "p2_name_entry": int(p2.name_entry_active),
+            "p1_continue_no": int(p1.continue_selects_no),
+            "p2_continue_no": int(p2.continue_selects_no),
             "p1_hunters": len(world.threats_targeting(1)),
             "p2_hunters": len(world.threats_targeting(2)),
             "phase_knockdown": sum(

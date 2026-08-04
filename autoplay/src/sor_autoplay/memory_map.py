@@ -115,6 +115,12 @@ OBJ_BOSS_DIST_LANE = 0x52
 # when state $0E launches it. Keep this distinct from the boss distance alias.
 OBJ_FAMILY_STATE = 0x52
 OBJ_JACK_WEAPON_ATTACHED = 0x52
+# Type-$0F continue / high-score name-entry object (see player-health-lives-and-combat.md).
+# Bit7 set → high_score_name_entry_dispatcher; clear → continue Yes/No table at $5236.
+OBJ_CONTINUE_UI_FLAGS = 0x4B
+OBJ_CONTINUE_NAME_ENTRY_BIT = 0x80
+# Continue Yes/No selection: 0 = YES, nonzero (bit0) = NO. Toggled by UP/DOWN.
+OBJ_CONTINUE_CHOICE = 0x63
 OBJ_ACTION_FLAGS = 0x58  # player combo/action flags; bit5 queues next normal hit
 OBJ_PAIR_ROLE = 0x5D  # later-boss pair role 1/2; player combo state reuses $5D
 OBJ_COMBO_STATE = 0x5D  # player combo / action chain

@@ -169,16 +169,17 @@ Per enabled seat, one decision:
 ```text
 1. build DecisionContext + classify PlayerMode
 2. if DIALOG        → Mr. X NO path; return
-3. if NOT_PLAYABLE  → idle; return
-4. try_start_mode_skill   # ENEMY_HELD → EnemyGrabEscape; HURT → clear+idle
-5. ensure_perception()    # tactical graph + pressure (requires live entity)
-6. try_crossover_suplex   # commitment; before police
-7. police special?        # A if eligible + grounded-ready
-8. try_hold_resolve       # HOLDING / GRAB_ANIM / weapon tree
-9. 2P air assist?         # both agents + partner jump-family nearby → B+C
-10. _decide_free          # free tactical ladder
-11. coop.guard_attack_intent  # strip B/B+C if partner hit risk
-12. mask_from_intent
+3. if CONTINUE_UI   → name entry / continue Yes path; return
+4. if NOT_PLAYABLE  → idle; return
+5. try_start_mode_skill   # ENEMY_HELD → EnemyGrabEscape; HURT → clear+idle
+6. ensure_perception()    # tactical graph + pressure (requires live entity)
+7. try_crossover_suplex   # commitment; before police
+8. police special?        # A if eligible + grounded-ready
+9. try_hold_resolve       # HOLDING / GRAB_ANIM / weapon tree
+10. 2P air assist?         # both agents + partner jump-family nearby → B+C
+11. _decide_free          # free tactical ladder
+12. coop.guard_attack_intent  # strip B/B+C if partner hit risk
+13. mask_from_intent
 ```
 
 `decide_actions` also decrements each seat’s `attack_cd` once per decision
@@ -224,15 +225,44 @@ First matching wins:
 | Order | Mode           | Predicate                                          |
 | ----- | -------------- | -------------------------------------------------- |
 | 1     | `DIALOG`       | `is_mr_x_offer(snapshot)`                          |
-| 2     | `NOT_PLAYABLE` | `me is None` or `not player_snap.is_playable`      |
-| 3     | `ENEMY_HELD`   | `action_base ∈ {0x78,0x7A,0x7C,0x7E}`              |
-| 4     | `HURT`         | `me.is_hurt`                                       |
-| 5     | `GRAB_ANIM`    | `action_base ∈ {0x62,0x64,0x68,0x6A,0x6C,0x6E}`    |
-| 6     | `AIRBORNE`     | `action_base ∈ [0x10,0x17] ∪ [0x3C,0x42]`          |
-| 7     | `HOLDING`      | grab context `holding` true (weapon or enemy grab) |
-| 8     | `FREE`         | else                                               |
+| 2     | `CONTINUE_UI`  | `player_snap.object_type == $0F` (continue object) |
+| 3     | `NOT_PLAYABLE` | `me is None` or `not player_snap.is_playable`      |
+| 4     | `ENEMY_HELD`   | `action_base ∈ {0x78,0x7A,0x7C,0x7E}`              |
+| 5     | `HURT`         | `me.is_hurt`                                       |
+| 6     | `GRAB_ANIM`    | `action_base ∈ {0x62,0x64,0x68,0x6A,0x6C,0x6E}`    |
+| 7     | `AIRBORNE`     | `action_base ∈ [0x10,0x17] ∪ [0x3C,0x42]`          |
+| 8     | `HOLDING`      | grab context `holding` true (weapon or enemy grab) |
+| 9     | `FREE`         | else                                               |
 
 `STEADY` is session-level only (pause/police/menu), not seat classification.
+
+Seat is driven when `is_playable` **or** `mode_active` **or**
+`object_type == $0F`. After a full life stock is lost the ROM clears the
+player-mode bit and converts the slot to type `$0F`, so continue/name-entry
+input would otherwise be skipped.
+
+### 3.1 Continue UI and high-score name entry (`CONTINUE_UI`)
+
+When lives hit zero, `$2B48 (resolve_player_death)` sets the player object to
+type `$0F`. If the score beats the current 10th-place entry, `object+$4B` bit7
+is set and `$56E6 (high_score_name_entry_dispatcher)` runs first; otherwise the
+normal continue table at `$5236` runs immediately.
+
+| Phase | ROM signal | Agent action | Note |
+| ----- | ---------- | ------------ | ---- |
+| Name entry | type `$0F`, `+$4B` bit7 set | **B** (`confirm`) | Places current glyph; three placements (or END) clear bit7 and hand off to continue |
+| Continue Yes/No, NO selected | type `$0F`, bit7 clear, `+$63 ≠ 0`, continues > 0 | **UP** | UP/DOWN toggle `+$63`; 0 = YES, nonzero = NO |
+| Continue Yes/No, YES selected | type `$0F`, bit7 clear, `+$63 == 0`, continues > 0 | **B** (`confirm`) | Consumes one continue and rebuilds the active player |
+| Out / no continues | continues ≤ 0 or `out_flag` set | idle | Game over / out for that seat |
+
+Rules:
+
+- Always accept continue (**YES**) while continues remain. Never select **NO**.
+- Name glyphs are irrelevant; any three letters (default cursor) are fine.
+- Face-button confirms use the standard **B** pulse path (fresh edge).
+- Clear walk / planner / goal / commitment on entry (same as dialog / not-playable).
+- Session-level `police_special_active` already idles all seats; the ROM also
+  freezes type-`$0F` updates while a police special is running.
 
 ---
 

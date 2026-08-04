@@ -47,6 +47,7 @@ class PlayerMode(Enum):
     """Exclusive ROM-facing modes. FREE is the only open tactical space."""
 
     DIALOG = auto()
+    CONTINUE_UI = auto()  # type-$0F continue Yes/No or high-score name entry
     NOT_PLAYABLE = auto()
     STEADY = auto()  # pause / police special / menus — decided at session level
     ENEMY_HELD = auto()
@@ -189,6 +190,10 @@ def classify_mode(
 
     if is_mr_x:
         return PlayerMode.DIALOG
+    # After lives are exhausted the slot becomes type $0F (continue/name entry).
+    # player_mode bit is cleared, so mode_active is false — still drive the seat.
+    if getattr(player_snap, "is_continue_ui", False):
+        return PlayerMode.CONTINUE_UI
     if me is None or not player_snap.is_playable:
         return PlayerMode.NOT_PLAYABLE
     if me.action_base in ENEMY_HOLD_ACTIONS:

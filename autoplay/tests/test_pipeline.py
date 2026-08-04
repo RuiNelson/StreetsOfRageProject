@@ -23,11 +23,21 @@ class ModeClassifierTests(unittest.TestCase):
         # Minimal stand-in: only fields classify_mode reads from player_snap.
         class _Snap:
             is_playable = True
+            is_continue_ui = False
 
         snap = _Snap()
         self.assertEqual(
             classify_mode(me=me, player_snap=snap, is_mr_x=True),  # type: ignore[arg-type]
             PlayerMode.DIALOG,
+        )
+
+        class _ContinueSnap:
+            is_playable = False
+            is_continue_ui = True
+
+        self.assertEqual(
+            classify_mode(me=None, player_snap=_ContinueSnap(), is_mr_x=False),  # type: ignore[arg-type]
+            PlayerMode.CONTINUE_UI,
         )
         self.assertEqual(
             classify_mode(me=None, player_snap=snap, is_mr_x=False),  # type: ignore[arg-type]

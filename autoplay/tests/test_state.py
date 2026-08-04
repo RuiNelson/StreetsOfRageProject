@@ -3,6 +3,8 @@ import unittest
 from sor_autoplay.memory_map import (
     MAX_HEALTH,
     OBJ_CHARACTER_ID,
+    OBJ_CONTINUE_CHOICE,
+    OBJ_CONTINUE_UI_FLAGS,
     OBJ_HEALTH,
     OBJ_TYPE,
     OBJECT_SLOT_SIZE,
@@ -104,6 +106,34 @@ class StateSnapshotTests(unittest.TestCase):
         self.assertEqual(snap.p1.character_name, "—")
         self.assertIsNone(snap.p1.health)
         self.assertFalse(snap.timer_valid)
+
+    def test_continue_ui_fields_from_object(self) -> None:
+        globals_block = bytearray(0x40)
+        timer_block = bytearray(4)
+        objects = bytearray(0x100)
+
+        _put_u16(globals_block, 0x00, 0x0016)
+        _put_u8(globals_block, 0x18, 0x00)  # mode bit cleared
+        _put_u16(globals_block, 0x1A, 0x0002)
+        _put_u8(globals_block, 0x1E, 0x00)
+        _put_u8(globals_block, 0x20, 0x00)
+
+        _put_u8(objects, OBJ_TYPE, 0x0F)
+        _put_u8(objects, OBJ_CONTINUE_UI_FLAGS, 0x80)
+        _put_u8(objects, OBJ_CONTINUE_CHOICE, 0x01)
+
+        snap = snapshot_from_memory_blocks(
+            globals_block=bytes(globals_block),
+            timer_block=bytes(timer_block),
+            objects_block=bytes(objects),
+        )
+        self.assertTrue(snap.p1.is_continue_ui)
+        self.assertFalse(snap.p1.is_playable)
+        self.assertTrue(snap.p1.name_entry_active)
+        self.assertTrue(snap.p1.continue_selects_no)
+        self.assertEqual(snap.p1.continues, 2)
+        self.assertEqual(snap.raw["p1_name_entry"], 1)
+        self.assertEqual(snap.raw["p1_continue_no"], 1)
 
     def test_character_select_keeps_selection(self) -> None:
         globals_block = bytearray(0x40)

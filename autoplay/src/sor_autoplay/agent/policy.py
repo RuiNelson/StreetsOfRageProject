@@ -262,7 +262,7 @@ def decide_actions(
     p2_note = ""
     both = config.p1_enabled and config.p2_enabled
 
-    if config.p1_enabled and (snapshot.p1.is_playable or snapshot.p1.mode_active):
+    if config.p1_enabled and _seat_drivable(snapshot.p1):
         intent = _decide_one(
             snapshot,
             player_index=1,
@@ -275,7 +275,7 @@ def decide_actions(
         intent = coop.guard_attack_intent(
             _player_entity(snapshot, 1),
             _player_entity(snapshot, 2)
-            if (snapshot.p2.is_playable or snapshot.p2.mode_active)
+            if _seat_drivable(snapshot.p2)
             else None,
             intent,
             both_agents=both,
@@ -284,7 +284,7 @@ def decide_actions(
         p1_note = intent.note
         memory.set_note(1, intent.note)
 
-    if config.p2_enabled and (snapshot.p2.is_playable or snapshot.p2.mode_active):
+    if config.p2_enabled and _seat_drivable(snapshot.p2):
         intent = _decide_one(
             snapshot,
             player_index=2,
@@ -296,7 +296,7 @@ def decide_actions(
         intent = coop.guard_attack_intent(
             _player_entity(snapshot, 2),
             _player_entity(snapshot, 1)
-            if (snapshot.p1.is_playable or snapshot.p1.mode_active)
+            if _seat_drivable(snapshot.p1)
             else None,
             intent,
             both_agents=both,
@@ -351,7 +351,7 @@ def _decide_one(
         is_mr_x=stage.is_mr_x_offer(snapshot),
     )
 
-    # --- Exclusive modes (dialog / not playable / enemy-held / hurt) ---
+    # --- Exclusive modes (dialog / continue / not playable / enemy-held / hurt) ---
     if ctx.mode == PlayerMode.DIALOG:
         ctx.walk.clear()
         ctx.planner.reset()
@@ -359,6 +359,14 @@ def _decide_one(
         assert ctx.seat.commitment is not None
         ctx.seat.commitment.clear(ctx)
         return _mr_x_intent(snapshot, player_index, memory)
+
+    if ctx.mode == PlayerMode.CONTINUE_UI:
+        ctx.walk.clear()
+        ctx.planner.reset()
+        ctx.goal_memory.clear()
+        assert ctx.seat.commitment is not None
+        ctx.seat.commitment.clear(ctx)
+        return _continue_ui_intent(player_snap)
 
     if ctx.mode == PlayerMode.NOT_PLAYABLE:
         ctx.walk.clear()
@@ -2158,6 +2166,46 @@ def _emergency_hole_escape(
         confirm=intent.confirm,
         note=intent.note + " [escape hole]",
     )
+
+
+def _seat_drivable(player: PlayerSnapshot) -> bool:
+    """Whether this seat may receive agent input this decision.
+
+    Continue / name-entry objects clear the player_mode bit, so ``mode_active``
+    is false while ``object_type`` is still ``$0F``.
+    """
+
+    return player.is_playable or player.mode_active or player.is_continue_ui
+
+
+def _continue_ui_intent(player: PlayerSnapshot) -> Intent:
+    """Drive type-$0F continue Yes/No and optional high-score name entry.
+
+    ROM (``$5218`` / ``$56E6``):
+
+    - ``object+$4B`` bit7 set → name entry (``$57D2``). Face buttons place the
+      current glyph; three placements (or END) finish and clear bit7.
+    - bit7 clear → continue Yes/No. ``object+$63`` is 0=YES / nonzero=NO;
+      UP/DOWN toggle; face buttons confirm. YES consumes a continue and
+      rebuilds the active player.
+
+    Policy: finish name entry with **B**, force YES, then confirm with **B**.
+    Never refuse a continue while continues remain.
+    """
+
+    if player.name_entry_active:
+        # Held B places one letter per frame; a short pulse fills three slots
+        # and exits. Glyphs are irrelevant for autoplay.
+        return Intent(confirm=True, note="name entry B")
+
+    if player.continues <= 0 or player.out_flag:
+        return Intent(note="continue out / game over")
+
+    if player.continue_selects_no:
+        # Edge-sensitive UP/DOWN toggle; one direction press flips to YES.
+        return Intent(up=True, note="continue select YES")
+
+    return Intent(confirm=True, note="continue confirm YES")
 
 
 def _mr_x_intent(

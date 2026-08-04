@@ -392,6 +392,74 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(decision.p1_mask & int(SPECIAL), decision.p1_note)
         self.assertIn("progress", decision.p1_note)
 
+    def test_continue_ui_confirms_yes(self) -> None:
+        """Type-$0F continue with YES selected → B confirm."""
+
+        globals_block, timer_block, objects = _base_ingame_blocks()
+        _put_u8(globals_block, 0x18, 0x00)  # mode bit cleared on death
+        _put_u16(globals_block, 0x1A, 0x0003)  # continues remain
+        _put_u8(globals_block, 0x20, 0x00)  # lives exhausted
+        _put_u8(objects, OBJ_TYPE, 0x0F)
+        # +$4B bit7 clear (not name entry); +$63 = 0 (YES)
+        _put_u8(objects, 0x4B, 0x00)
+        _put_u8(objects, 0x63, 0x00)
+        snap = snapshot_from_memory_blocks(
+            globals_block=bytes(globals_block),
+            timer_block=bytes(timer_block),
+            objects_block=bytes(objects),
+        )
+        self.assertTrue(snap.p1.is_continue_ui)
+        self.assertFalse(snap.p1.name_entry_active)
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertTrue(decision.p1_mask & int(ATTACK), msg=decision.p1_note)
+        self.assertIn("continue confirm YES", decision.p1_note)
+
+    def test_continue_ui_selects_yes_when_no_highlighted(self) -> None:
+        globals_block, timer_block, objects = _base_ingame_blocks()
+        _put_u8(globals_block, 0x18, 0x00)
+        _put_u16(globals_block, 0x1A, 0x0002)
+        _put_u8(objects, OBJ_TYPE, 0x0F)
+        _put_u8(objects, 0x4B, 0x00)
+        _put_u8(objects, 0x63, 0x01)  # NO selected
+        snap = snapshot_from_memory_blocks(
+            globals_block=bytes(globals_block),
+            timer_block=bytes(timer_block),
+            objects_block=bytes(objects),
+        )
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertTrue(decision.p1_mask & 0x01, msg=decision.p1_note)  # UP
+        self.assertIn("continue select YES", decision.p1_note)
+
+    def test_name_entry_presses_b(self) -> None:
+        globals_block, timer_block, objects = _base_ingame_blocks()
+        _put_u8(globals_block, 0x18, 0x00)
+        _put_u16(globals_block, 0x1A, 0x0003)
+        _put_u8(objects, OBJ_TYPE, 0x0F)
+        _put_u8(objects, 0x4B, 0x80)  # name-entry path
+        snap = snapshot_from_memory_blocks(
+            globals_block=bytes(globals_block),
+            timer_block=bytes(timer_block),
+            objects_block=bytes(objects),
+        )
+        self.assertTrue(snap.p1.name_entry_active)
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertTrue(decision.p1_mask & int(ATTACK), msg=decision.p1_note)
+        self.assertIn("name entry", decision.p1_note)
+
+    def test_continue_ui_idles_when_no_continues(self) -> None:
+        globals_block, timer_block, objects = _base_ingame_blocks()
+        _put_u8(globals_block, 0x18, 0x00)
+        _put_u16(globals_block, 0x1A, 0x0000)
+        _put_u8(objects, OBJ_TYPE, 0x0F)
+        snap = snapshot_from_memory_blocks(
+            globals_block=bytes(globals_block),
+            timer_block=bytes(timer_block),
+            objects_block=bytes(objects),
+        )
+        decision = decide_actions(snap, AgentConfig(p1_enabled=True))
+        self.assertEqual(decision.p1_mask, 0)
+        self.assertIn("game over", decision.p1_note)
+
     def test_mr_x_selects_no(self) -> None:
         from dataclasses import replace
 
