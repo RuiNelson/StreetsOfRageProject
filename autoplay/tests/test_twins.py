@@ -376,8 +376,15 @@ class PolicyEngagementTests(unittest.TestCase):
         crowding = _twin(world_x=112, world_y=64, slot="B0", mode_flags=1)
         partner = _twin(world_x=320, world_y=64, slot="B1", mode_flags=2, pair_role=2)
         decision = self._decide((me, crowding, partner))
-        self.assertFalse(decision.p1_mask & self.ATTACK, decision.p1_note)
-        self.assertIn("reset", decision.p1_note)
+        # The punch cannot reach her from inside its own dead zone, so the
+        # answer is the *back* attack with our back turned to her — never a
+        # forward punch, and never standing there doing nothing. Attacking is
+        # the default; the earlier "hold still and reposition" rule is what
+        # produced 7 attacks in 400 live decisions.
+        self.assertEqual(decision.p1_mask & self.REAR, self.REAR, decision.p1_note)
+        self.assertIn("back-turn attack", decision.p1_note)
+        self.assertTrue(decision.p1_mask & 0x04, "must press LEFT, away from her")
+        self.assertFalse(decision.p1_mask & 0x08, decision.p1_note)
 
     def test_enemy_hold_actions_own_the_seat_over_the_twin_skill(self) -> None:
         """`$78`-`$7F` must reach the enemy-grab escape skill, not twin combat.
@@ -405,6 +412,27 @@ class PolicyEngagementTests(unittest.TestCase):
             )
             self.assertIs(mode, PlayerMode.ENEMY_HELD, f"action ${action:02X}")
             self.assertTrue(me.is_held_by_enemy, f"action ${action:02X}")
+
+    REAR = 0x60  # B+C chord
+
+    def test_never_back_attacks_a_twin_standing_in_front(self) -> None:
+        """A back attack hits *behind* the player.
+
+        Firing B+C at a body in front swings at empty air — the same
+        "attacks without hitting anything" defect as punching from inside the
+        dead zone, in a different costume.
+        """
+
+        me = _player(world_x=100, world_y=64)  # action $02 = facing right
+        in_front = _twin(world_x=140, world_y=64, slot="B0", mode_flags=1)
+        partner = _twin(world_x=320, world_y=64, slot="B1", mode_flags=2, pair_role=2)
+        decision = self._decide((me, in_front, partner))
+        self.assertNotEqual(
+            decision.p1_mask & self.REAR, self.REAR, decision.p1_note
+        )
+        # She is in front and inside the punch band, so punch her instead.
+        self.assertTrue(decision.p1_mask & self.ATTACK, decision.p1_note)
+        self.assertIn("punch", decision.p1_note)
 
     def test_strike_band_matches_the_sweep(self) -> None:
         from sor_autoplay.agent.characters import PROFILES
@@ -438,6 +466,24 @@ class PolicyEngagementTests(unittest.TestCase):
         )
         decision = self._decide((me, focus, far_committed))
         self.assertTrue(decision.p1_mask & self.ATTACK, decision.p1_note)
+
+    def test_holds_ground_when_the_nearest_twin_is_outside_the_punch_band(self) -> None:
+        """Chasing measured 0 dealt / 112 taken; standing still 6 / 80.
+
+        Outside the punch band the seat must not walk on X. Lane tracking is
+        fine — depth is free damage on a landing — but a RIGHT/LEFT chase is
+        the behaviour that scored zero.
+        """
+
+        me = _player(world_x=100, world_y=64)  # facing right
+        far = _twin(world_x=200, world_y=70, slot="B0", mode_flags=1)
+        partner = _twin(world_x=320, world_y=64, slot="B1", mode_flags=2, pair_role=2)
+        decision = self._decide((me, far, partner))
+        self.assertIn("hold", decision.p1_note)
+        self.assertFalse(decision.p1_mask & 0x04, decision.p1_note)  # LEFT
+        self.assertFalse(decision.p1_mask & 0x08, decision.p1_note)  # RIGHT
+        # Lane only: partner is coplanar so DOWN toward y=70.
+        self.assertTrue(decision.p1_mask & 0x02, decision.p1_note)  # DOWN
 
 
 class FeignTests(unittest.TestCase):

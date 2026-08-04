@@ -337,80 +337,43 @@ for tests/HUD.
      strike range, and focus/hysteresis prefer a **reachable** body at equal HP
      (`TWIN_REACHABLE_DX` 56) — a mode tie-break onto the far grab twin left
      the seat walking past a twin standing in punch range. `--no-police-special`
-     isolates melee in measurement. **Open defect:** melee damage against the
-     twins is still ~0 live; the remaining blocker is in target-selection
-     utility, not in `twins.py`. Reproduce in seconds with
-     `tests/test_twins.py::PolicyEngagementTests` rather than a live episode.
+     isolates melee in measurement. Twin skill now attack-defaults + holds
+     ground (see Twin fight skill below); unit coverage in
+     `tests/test_twins.py::PolicyEngagementTests`.
    - **Twin fight skill** (`skills.TwinFightSkill`, AISpec §9.4b): while any
      type-`$58` boss lives the skill owns the seat (after police, before the
-     hold tree) and runs gate denial → rear attack → feign → punch → space →
-     engage with direct D-pad steering. Attacks require a **grounded** body:
-     `$15ABA` compares `+$18` against the body's own ground snapshot `+$4C`
-     (`MapEntity.ground_z`), not the player's elevation.
-     Attacks lead the target by one decision (four frames) and continue the
-     combo during action `$18` while `+$58` bit 5 is clear.
-     **Measured strike band.** A live teleport sweep (write P1 to a fixed
-     offset from a twin, one B, read boss `+$32`) misses at 8-24 px, hits at
-     28-52, misses past 56 — the punch has a **near dead zone**, and the twins
-     land inside it every time (`$15A64` sends them over the last ~94 px
-     airborne). `twins.can_strike` / `punch_band` gate every twin swing on that
-     window and `twin skill reset` steps back out of the dead zone instead of
-     swinging through it. `combat.can_punch` now takes `min_range` for this;
-     it defaults to 0 so unmeasured families keep their old behaviour.
-     Move values from the player `+$34` descriptor: punch **1**, back attack
-     (`$20`) **3** over 10 frames, back-attack box `+$70` = X −7..+3, Y ±8
-     (contact, not reach). Twins: 22 HP each, 32 damage per hit.
-     **Ballistic intercept.** `$15ABA` cannot steer, so the landing is solved
-     rather than awaited: `MapEntity.vel_x`/`vel_z` expose `+$20`/`+$24` as
-     signed 16.16 and `twins.predict_landing` integrates them with the ROM's
-     own `+0.75`/tick gravity to a landing X and ETA. Verified live — the
-     forecast held landing x 5314.0 constant across a whole 20-tick arc.
-     Only forecast while `+$67 == 2` (other arcs do not lock `+$20` and the
-     prediction drifts); aim the post at the band's **outer** edge (midpoint
-     posts landed at dx 23/27, inside the dead zone); do **not** latch one arc
-     (latching scored 0 swings vs 3 for re-choosing).
-     **ALWAYS test twins with `--no-police-special`.** A previous "damage taken
-     128 → 48" result was an artifact of the special freezing the game for 310
-     of 500 decisions.
-     **STATUS: predictor correct, conversion zero.** Melee-only every variant
-     scores 0 dealt / 128 taken / 2 deaths. The binding constraint is now
-     actuation granularity, not knowledge. Run twin evaluations as
-     `--step-frames 2 --face-frames 1 --no-police-special`; `--step-frames 2`
-     alone fails validation because the default `--face-frames 3` must be
-     less than `step_frames`. At that cadence 4 of 17 landings arrive inside
-     the punch band (vs 2 of 30 at four frames). The intercept swing also
-     carries its facing — posting up walks *away* from the landing, so a bare
-     attack swings backwards; adding the direction cut damage taken 112 → 80.
-     Damage dealt is still 0: the swing needs in-band, actionable, facing and
-     `frames <= 8` on the same decision, which rarely coincides.
-     **Community doctrine (GameFAQs 454496/66063634): stand *under* the
-     landing**, not at punch range — "walk straight under the one who jump
-     kicks you and grab her as she lands", or "use only the back attack for the
-     whole fight". The ROM agrees on geometry: the back attack box `+$70` is
-     player X −7..+3 by Y ±8, centred on our own body, 3 damage over 10 frames.
-     `intercept_point` now aims at the landing itself and the swing is B+C.
-     Measured: 0 dealt, 112 taken (vs 80 for punch-band posting), 1 death —
-     **0 of 24 landings had the player under the body** (touchdowns at dx 16,
-     44, 44, 44, 90+), and standing there invites the grab (245 hitstun
-     decisions, 30 grab acquisitions). The apparent `$79` "mode leak" (2 of 3 swings
-     seeming to fire while held) was a **trace artifact**: `EvaluationStep`
-     sampled state after the input while `note`/`mask` came from the decision
-     before it. `classify_mode` handles `$78`-`$7F` correctly and
-     `TwinFightSkill.valid` requires FREE; a test pins both. Traces now also
-     carry `decided_action`/`decided_x`/`decided_y` (pre-input state) so
-     note-to-state analysis is self-consistent.
-     **Back-attack spam, measured** (scripted probe, 1200 frames, B+C on every
-     actionable frame): standing still 6 dealt / 80 taken; lane-tracking 6 / 80;
-     chasing 0 / 112. First melee damage ever recorded on the pair — it
-     converts about one hit per twin approach cycle (~370 frames). Chasing is
-     strictly worse, so "never approach" is now measured three ways. The
-     "invincible with this method" claim does not reproduce (375 of 1200 frames
-     in hitstun). Spam is a damage source, not a strategy: ~5 deaths per kill.
-     The gap is positioning accuracy — make the back attack land on *every*
-     landing rather than the one geometry hands us.
+     hold tree). **Attack is the default** when a body is close enough to hit.
+     Order: gate denial → precise rear/punch windows → contact ≤22 px
+     back-turn B+C (punch dead zone; weapon must match the side she is on) →
+     feign when behind (lane only, never turn toward her) → **hold ground**
+     when outside the punch band (lane-track only, never chase on X) → line up
+     inside the band. Combo continues during action `$18` while `+$58` bit 5
+     is clear.
+     **Why this ordering.** A prior conjunction of (predicted landing) ∧
+     (frames ≤ 8) ∧ (under the body) threw 0–4 attacks per 700 decisions and
+     did no damage. Scripted B+C mash: stand still 6 dealt / 80 taken;
+     lane-track 6 / 80; chase 0 / 112. First melee damage on the pair — about
+     one hit per approach cycle (~370 frames). Chasing is strictly worse;
+     "never approach" is measured three ways. The skill must not require a
+     window that almost never opens, and must not hunt the bodies.
+     **Measured strike band.** Teleport sweep: miss 8–24 px, hit 28–52, miss
+     past 56. Punch has a **near dead zone**; twins land inside it every jump
+     (`$15A64` covers the last ~94 px airborne). `twins.can_strike` /
+     `punch_band` gate punches; inside the dead zone the skill back-turns and
+     B+C instead of stepping out and waiting. Move values from `+$34`: punch
+     **1**, back attack (`$20`) **3** over 10 frames, box `+$70` = X −7..+3,
+     Y ±8 (contact, not reach). Twins: 22 HP each, 32 damage per hit.
+     **Ballistic intercept** (`twins.predict_landing`) remains available for
+     probes/analysis — forecast is correct while `+$67 == 2` — but the skill
+     no longer walks posts under landings: 0 of 24 landings arrived under the
+     body and the walk fed the grab (245 hitstun steps, 30 grabs).
+     **ALWAYS test twins with `--no-police-special`.** Prefer
+     `--step-frames 2 --face-frames 1 --no-police-special`. The `$79` "mode
+     leak" was a **trace artifact** (post-input state vs pre-input note);
+     `TwinFightSkill.valid` requires FREE; traces carry
+     `decided_action`/`decided_x`/`decided_y`.
      Fixture: restore `twins-state.bin` (64 KiB work RAM at the encounter)
-     instead of replaying the stage; probes in the session scratchpad
-     (`probe_reach.py`, `probe_moves.py`) reproduce the numbers above.
+     instead of replaying the stage.
 10. Route around floor holes (stage 4), factory presses (stage 6), and hold
     the elevator (stage 7)
     - Stage-4 horizontal progression must turn into a persistent vertical

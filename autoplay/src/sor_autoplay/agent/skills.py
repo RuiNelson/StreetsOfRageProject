@@ -341,15 +341,21 @@ class TwinFightSkill:
     approaches against 82 pressure sidesteps — so the seat never closed to
     punch range and landed **zero** melee hits in hundreds of decisions.
 
-    This skill takes the whole fight instead, in one fixed order:
+    This skill takes the whole fight instead. Measured ordering:
 
     1. ROM gate denial (armed leap escape, `$159F8` throw-band exit)
-    2. back attack when a twin is inside the rear band
-    3. feign — hold the back turned to a twin closing from behind, because
-       `$15C72` needs us facing and closing (the speedrun tactic)
-    4. punch when coplanar, in range and facing
-    5. turn to face, when nothing is behind us
-    6. converge on coplanar strike distance of the *reachable* body
+    2. Precise hits: rear band → B+C; punch band + facing → B
+    3. Contact range (≤22 px): back-turn + B+C — the punch dead zone; back
+       attack's box is body-centred and is the only move that converts here
+    4. Feign when she is behind: lane only, never turn toward her (`$15C72`)
+    5. Hold ground when she is far — chasing measured strictly worse than
+       standing still (0 dealt / 112 taken vs 6 / 80). The twins walk and
+       jump onto us; we do not hunt them.
+
+    Attack is the default whenever a body is close enough to hit. A prior
+    conjunction of (predicted landing) ∧ (frames ≤ 8) ∧ (under the body)
+    threw 0–4 attacks per 700 decisions and did no damage; a scripted B+C
+    mash did 6. An agent that does not attack cannot win.
 
     Grabs are deliberately left to the hold tree: once a twin is held, the
     knee/throw skill owns the seat.
@@ -357,96 +363,10 @@ class TwinFightSkill:
 
     name = "twin-fight"
 
-    # One decision is four frames. A twin closing at chase speed covers real
-    # ground in that window, so a range check made *now* describes where the
-    # body already is, not where the punch will land. Lead it by one decision.
-    LEAD_DECISIONS = 1.0
-    # Cap the extrapolation so a leaping body cannot pull the swing wildly.
-    MAX_LEAD_PX = 26.0
-
-    # The punch is damaging on frames 3..12 after the button edge (measured on
-    # `+$34`). Decisions are four frames apart, so press once touchdown is
-    # inside that window.
-    SWING_LEAD_FRAMES = 8
-    # "Walk straight under the one who jump kicks you." The back attack box is
-    # player X -7..+3 by Y +-8, so being roughly on her landing spot is the
-    # whole requirement; allow a little slack for the last decision's drift.
-    UNDER_PX = 14.0
-    UNDER_LANE_PX = 12.0
-
-    def __init__(self) -> None:
-        # slot -> last observed (x, y). The commitment keeps one instance
-        # alive across decisions, so this is a real velocity estimate.
-        self._last: dict[str, tuple[float, float]] = {}
-        # Slot of the arc we committed to intercept, held until it lands.
-        self._locked: str | None = None
-
-    # Measured player walk speed at the encounter: ~6 world px per decision,
-    # i.e. 1.5 px per frame. Used to reject landings we cannot reach in time.
-    WALK_PX_PER_FRAME = 1.5
-
-    def _best_intercept(self, me: MapEntity, entities, profile):
-        """Landing we should set up on, latched for the life of the arc.
-
-        Re-choosing every decision made the seat chase whichever body happened
-        to be nearer to touchdown, so it walked between two arcs and arrived at
-        neither (live: 135 posts, 3 swings). Once an arc is chosen, keep it
-        until it lands or its forecast disappears.
-        """
-
-        forecasts = {
-            twin.slot: forecast
-            for twin, forecast in (
-                (twin, twins_ai.predict_landing(twin))
-                for twin in twins_ai.live_twins(entities)
-            )
-            if forecast is not None
-        }
-        if not forecasts:
-            self._locked = None
-            return None
-
-        # No latch: locking onto an arc for its whole life scored 0 swings
-        # against 3 for re-choosing, because a locked far arc kept the seat
-        # walking past the body that was actually about to land on it.
-        lo, hi = twins_ai.punch_band(profile)
-        def reachable(forecast) -> bool:
-            gap = abs(forecast.x - float(me.world_x))
-            # We only need to reach the *band*, not the landing point itself.
-            return max(0.0, gap - hi) <= forecast.frames * self.WALK_PX_PER_FRAME
-
-        candidates = [f for f in forecasts.values() if reachable(f)]
-        return min(candidates or list(forecasts.values()), key=lambda f: f.ticks)
-
-    def _velocity(self, twin: MapEntity) -> tuple[float, float]:
-        """Per-decision movement of this body, from the previous observation."""
-
-        now = (float(twin.world_x), float(twin.world_y))
-        prev = self._last.get(twin.slot)
-        if prev is None:
-            return 0.0, 0.0
-        vx = max(-self.MAX_LEAD_PX, min(self.MAX_LEAD_PX, now[0] - prev[0]))
-        vy = max(-self.MAX_LEAD_PX, min(self.MAX_LEAD_PX, now[1] - prev[1]))
-        return vx, vy
-
-    def _will_be_in_range(
-        self,
-        me: MapEntity,
-        twin: MapEntity,
-        profile,
-        vel: dict[str, tuple[float, float]],
-    ) -> bool:
-        """True when this body arrives inside the strike box next decision.
-
-        Swinging on the prediction is the whole point: reacting to a body that
-        is already in range means the ROM applies B after it has moved on.
-        """
-
-        vx, vy = vel.get(twin.slot, (0.0, 0.0))
-        dx = abs(float(twin.world_x) + vx * self.LEAD_DECISIONS - float(me.world_x))
-        dy = abs(float(twin.world_y) + vy * self.LEAD_DECISIONS - float(me.world_y))
-        lo, hi = twins_ai.punch_band(profile)
-        return lo <= dx <= hi and dy <= combat.LANE_HIT_HALF
+    # Back attack box is X -7..+3; add her body half-width. Beyond this it
+    # whiffs (12 live swings at up to 96 px dealt nothing). Inside it the
+    # punch is also dead (measured miss under 28 px), so B+C is the only move.
+    REAR_CONTACT_PX = 22.0
 
     def valid(self, ctx: DecisionContext) -> bool:
         me = ctx.me
@@ -465,13 +385,8 @@ class TwinFightSkill:
             return None
         entities = ctx.snapshot.world_map.entities
         live = twins_ai.live_twins(entities)
-        # Estimate velocity against the previous decision, then re-baseline.
-        vel = {twin.slot: self._velocity(twin) for twin in live}
-        self._last = {
-            twin.slot: (float(twin.world_x), float(twin.world_y)) for twin in live
-        }
         doctrine = twins_ai.scene(me, entities)
-        if doctrine.focus is None:
+        if doctrine.focus is None or not live:
             return None
         profile = ctx.profile
         level_index = ctx.snapshot.level_index
@@ -499,138 +414,65 @@ class TwinFightSkill:
 
         face_right = not combat.player_facing_left(me)
 
-        # 2) Back attack: the pair's own geometry hands us this constantly.
-        for twin in twins_ai.live_twins(entities):
-            if twins_ai.is_airborne(twin, me):
-                continue
+        # 2) Precise hit windows first — weapon matches the side she is on.
+        # A back attack hits *behind* the player; firing it at a twin in front
+        # swings at empty air.
+        for twin in live:
             if combat.can_rear_hit(me, twin, profile, face_right=face_right):
                 return Intent(rear_attack=True, note=f"twin skill rear {twin.label}")
-
-        # 2b) Ballistic intercept — the core of the fight.
-        #
-        # `$15ABA` cannot steer: the arc is fixed at phase timer 4 and the body
-        # covers its last ~80 px airborne, landing on top of us. Reacting to
-        # where it *is* therefore yields ~3 punchable frames per 500 decisions
-        # (measured). Instead solve the arc from its own velocity fields, walk
-        # to the landing point offset by the punch band, and start the swing so
-        # its damaging frames (3..12 after the edge) straddle touchdown.
-        intercept = self._best_intercept(me, entities, profile)
-        if intercept is not None:
-            reach = abs(intercept.x - float(me.world_x))
-            lane_gap = abs(float(intercept.twin.world_y) - float(me.world_y))
-            under = reach <= self.UNDER_PX and lane_gap <= self.UNDER_LANE_PX
-            if intercept.frames <= self.SWING_LEAD_FRAMES and under:
-                # B+C, not B. The back attack's box is centred on our own body,
-                # so it covers the spot we are standing on — which is exactly
-                # where the arc puts her. No facing input: the box is symmetric
-                # about the player and a direction press here only walks us off
-                # the landing spot we spent the whole arc reaching.
-                return Intent(
-                    rear_attack=True,
-                    note=f"twin skill intercept {intercept.twin.label}",
-                )
-            goal = twins_ai.intercept_point(me, intercept, profile)
-            return self._move(me, goal, f"twin skill post {intercept.twin.label}")
-
-        # 3) Feign: never turn to meet a twin closing on our back.
-        bait = twins_ai.rear_bait_target(
-            me, entities, face_right=face_right, rear_min=profile.rear_range_max
-        )
-
-        # Attack whichever body is grounded and legal right now. The pair
-        # alternates jump arcs constantly, so waiting for one chosen focus to
-        # land forfeits the openings the other one is handing us.
-        for twin in twins_ai.live_twins(entities):
-            if twins_ai.is_airborne(twin, me):
-                continue
-            if not combat.facing_toward(me, twin):
-                continue
-            if twins_ai.can_strike(me, twin, profile):
+        for twin in live:
+            if twins_ai.can_strike(me, twin, profile) and combat.facing_toward(
+                me, twin
+            ):
                 return Intent(attack=True, note=f"twin skill punch {twin.label}")
-            if self._will_be_in_range(me, twin, profile, vel):
-                return Intent(
-                    attack=True, note=f"twin skill lead {twin.label}"
-                )
 
-        # A body that has landed *on top of us* is inside the punch dead zone
-        # (measured: no damage under 28 px). Swinging there is the whiff that
-        # produced hundreds of attack decisions and zero damage. Step back into
-        # the band instead — this is also how we leave its grab range.
-        crowding = [
-            twin
-            for twin in twins_ai.live_twins(entities)
-            if not twins_ai.is_airborne(twin, me) and twins_ai.too_close(me, twin)
-        ]
-        if crowding:
-            twin = min(
-                crowding, key=lambda t: abs(float(t.world_x) - float(me.world_x))
-            )
-            lo, _ = twins_ai.punch_band(profile)
-            side = -1.0 if float(twin.world_x) > float(me.world_x) else 1.0
-            goal_x = float(twin.world_x) + side * (lo + 8.0)
-            return self._move(
-                me, (goal_x, float(me.world_y)), f"twin skill reset {twin.label}"
-            )
+        nearest = min(live, key=lambda t: abs(float(t.world_x) - float(me.world_x)))
+        gap = abs(float(nearest.world_x) - float(me.world_x))
+        she_is_right = float(nearest.world_x) > float(me.world_x)
+        behind = she_is_right == combat.player_facing_left(me)
+        lane_up = float(nearest.world_y) < float(me.world_y) - 4.0
+        lane_down = float(nearest.world_y) > float(me.world_y) + 4.0
 
-        focus = doctrine.focus
-        if twins_ai.is_airborne(focus, me):
-            grounded = [
-                twin
-                for twin in twins_ai.live_twins(entities)
-                if not twins_ai.is_airborne(twin, me)
-            ]
-            if grounded:
-                focus = min(
-                    grounded,
-                    key=lambda twin: abs(float(twin.world_x) - float(me.world_x)),
-                )
-        dx = float(focus.world_x) - float(me.world_x)
-        dy = float(focus.world_y) - float(me.world_y)
-
-        # 4) Punch a grounded body only. The pair spends much of the fight in
-        # jump arcs, and a punch at an airborne twin passes under it.
-        grounded_focus = not twins_ai.is_airborne(focus, me)
-        if grounded_focus and twins_ai.can_strike(me, focus, profile):
-            return Intent(attack=True, note=f"twin skill punch {focus.label}")
-
-        # Its landing is the ROM's own punish window: after the jump attack
-        # lands, `$15ABA` resets `+$67 = 0, +$30 = 1` and idles ~10 ticks.
-        if not grounded_focus and combat.can_punch(
-            me, focus, profile, require_facing=False
-        ):
+        # 3) Contact / dead zone: back-turn + B+C. Direction turns our back to
+        # her before the button so the rear box covers her and `$15C72` stays
+        # closed (it needs us facing and closing).
+        if gap <= self.REAR_CONTACT_PX:
             return Intent(
-                left=dx < 0, right=dx > 0, note=f"twin skill await land {focus.label}"
+                rear_attack=True,
+                left=she_is_right,
+                right=not she_is_right,
+                note=f"twin skill back-turn attack {nearest.label}",
             )
 
-        if bait is not None:
-            return Intent(note=f"twin skill feign {bait.label}")
-
-        # 5) In range but facing away (and nothing behind): turn.
-        if combat.can_punch(me, focus, profile, require_facing=False):
+        # 4) Body on our back outside contact: hold the feign, lane only.
+        if behind:
             return Intent(
-                left=dx < 0, right=dx > 0, note=f"twin skill face {focus.label}"
+                up=lane_up,
+                down=lane_down,
+                note=f"twin skill let her come {nearest.label}",
             )
 
-        # 6) Converge — but never into a live commit. `$15A64` arms the jump
-        # attack at X < `$60` with no other condition, so walking at a
-        # committed body is the one approach the gates cannot protect. Hold
-        # spacing until it resolves (measured: engaging through commits cost 9
-        # deaths in a single 700-decision episode).
-        for threat in doctrine.threats:
-            if threat.committed and threat.dx < twins_ai.JUMP_ATTACK_X:
-                lane = twins_ai.safe_lane(
-                    me, entities, level_index=level_index, prefer=float(me.world_y)
-                )
-                side = -1.0 if float(threat.twin.world_x) > float(me.world_x) else 1.0
-                hold_x = float(me.world_x) + side * 12.0
-                return self._move(
-                    me, (hold_x, lane), f"twin skill space {threat.twin.label}"
-                )
+        # 5) In front and outside the punch band: hold ground. Chasing on X
+        # measured 0 dealt / 112 taken against 6 / 80 for standing still; the
+        # pair walks and jump-kicks onto us under its own AI. Only track lane
+        # so a jump landing shares our depth.
+        _, hi = twins_ai.punch_band(profile)
+        if gap > hi:
+            return Intent(
+                up=lane_up,
+                down=lane_down,
+                note=f"twin skill hold {nearest.label}",
+            )
 
-        engage = max(20.0, profile.strike_range - 8.0)
-        goal_x = float(focus.world_x) - (engage if dx > 0 else -engage)
-        return self._move(
-            me, (goal_x, float(focus.world_y)), f"twin skill engage {focus.label}"
+        # 6) Inside the punch band but not cleanly hittable (facing/lane).
+        # Face her and match depth — do not walk past the outer edge into
+        # the dead zone.
+        return Intent(
+            left=not she_is_right,
+            right=she_is_right,
+            up=lane_up,
+            down=lane_down,
+            note=f"twin skill line up {nearest.label}",
         )
 
     @staticmethod

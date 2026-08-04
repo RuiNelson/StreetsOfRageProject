@@ -960,11 +960,18 @@ the seat never closed to punch range. While any type-`$58` boss is alive the
 twin skill owns the seat instead, in fixed order:
 
 1. ROM gate denial (armed leap escape, throw-band exit)
-2. back attack on a **grounded** twin inside the rear band
-3. feign — hold the back turned to a twin closing from behind (`$15C72`)
-4. punch any **grounded** twin in range (either body, not a fixed focus)
-5. space out of a committed twin inside `$60` (`$15A64` cannot be denied)
-6. converge on coplanar strike distance
+2. Precise hits: rear band → **B+C**; punch band + facing → **B**
+3. Contact ≤ **22** px (punch dead zone): back-turn + **B+C** — weapon must
+   match the side she is on; a rear attack into a body in front swings at air
+4. Feign when she is behind: lane only, never turn toward her (`$15C72`)
+5. Hold ground when she is outside the punch band — **never chase on X**
+   (measured: chase 0 dealt / 112 taken vs stand still 6 / 80). Lane-track only.
+6. Inside the punch band but not cleanly hittable: face her + match depth
+
+**Attack is the default** whenever a body is close enough to hit. A prior
+conjunction of (predicted landing) ∧ (frames ≤ 8) ∧ (under the body) threw
+0–4 attacks per 700 decisions and did no damage; a scripted B+C mash did 6.
+The skill must not require a window that almost never opens.
 
 It runs after the police special and before the hold tree, so a successful
 grab still converts to knee/throw. Steering is direct D-pad, not the walk
@@ -975,11 +982,8 @@ ground snapshot `+$4C` (exposed as `MapEntity.ground_z`). The player's
 elevation is the wrong reference — a standing twin does not share the player's
 plane. Attacking mid-arc whiffs.
 
-**Timing:** decisions are four frames apart, so a range check describes where
-a body already is, not where the punch lands. The skill therefore leads the
-target by one decision (`_will_be_in_range`, velocity from the previous
-observation, clamped to 26 px) and keeps the combo alive by pressing B during
-attack action `$18` while `+$58` bit 5 is clear, rather than waiting for idle.
+**Timing:** keep the combo alive by pressing B during attack action `$18`
+while `+$58` bit 5 is clear, rather than waiting for idle.
 
 **Strike band (measured, not inferred).** A live teleport sweep — P1 written
 to a fixed offset from a twin, one B, boss `+$32` read back — misses at 8, 12,
@@ -1024,78 +1028,11 @@ Guards learned from live runs:
   3 for re-choosing, because a locked far arc kept the seat walking past the
   body actually about to land on it.
 
-**Status: predictor correct, conversion still zero.** All measurements below
-use `--no-police-special`, which is mandatory for twin runs — an earlier
-"128 → 48 damage taken" result was an artifact of the special freezing the game
-for 310 of 500 decisions, not a real improvement. Melee-only, every variant
-scores 0 damage dealt, 128 taken, 2 deaths.
-
-The binding constraint is no longer knowledge but **actuation granularity**.
-Per 500 decisions there are ~30 landings; converting one needs the seat inside
-a 20 px X band and a 24 px lane band with B pressed in a ~6-frame window before
-touchdown, while ~45% of decisions are spent in hitstun or animation lockout.
-At four frames per decision the agent gets one or two chances inside each
-window and positions to about ±6 px. Two landings per episode now arrive inside
-the band, up from one.
-
-**Cadence result.** `--step-frames 2` is not broken — it rejects the default
-`--face-frames 3` (the runner requires `face_frames < step_frames`), so twin
-runs need `--step-frames 2 --face-frames 1`. At that cadence positioning
-improves roughly threefold: **4 of 17 landings arrive inside the punch band**
-against 2 of 30 at four frames, and touchdowns cluster at dx 28-34 instead of
-23-27. Granularity was a real constraint.
-
-The intercept swing must also carry its facing. Reaching the post means walking
-*away* from where the body comes down, so a bare `attack=True` swings backwards
-(observed: mask `$28`, body at dx +35, player action `$19` facing left). The
-intent now sets the direction toward the landing, which the runner applies for
-`face_frames` before the button. Measured effect at 2-frame cadence: damage
-taken 112 → 80 and deaths 2 → 1, but swing attempts fell 5 → 2.
-
-Damage dealt is still **0**. What remains is the coincidence problem: the swing
-needs `frames <= 8`, in-band, seat actionable and facing correct on the same
-decision, and those still rarely line up.
-
-#### Community doctrine: stand *under* the landing
-
-The long-standing player answer to this pair (GameFAQs board 454496, thread
-66063634) is the Street Fighter crossup counter — "walk straight under the one
-who jump kicks you and grab her as she lands", tech thrown throws by mashing
-up+jump, and one poster's stronger claim: "use only the back attack for the
-whole fight; one will always jump right into it".
-
-The ROM supports that geometry over punch spacing: the back attack's box
-`+$70` is player X −7..+3 by Y ±8 — **centred on our own body**, so it covers
-the spot we are standing on — and it carries 3 damage over 10 damaging frames
-against the punch's 1. `intercept_point` therefore aims at the landing point
-itself (zero stand-off) and the swing is `rear_attack`, with no facing input
-because the box is symmetric.
-
-**Measured: still 0 damage, and worse survival.** 700 decisions at 2-frame
-cadence: 0 dealt, 112 taken (against 80 for punch-band posting), 1 death, 3
-intercept swings. The mechanism of failure is precise — **0 of 24 landings had
-the player under the body**; touchdowns sat at dx 16, 44, 44, 44, 90+. The
-agent never arrives, and the time it spends trying to stand on the landing spot
-walks it into the grab instead: 245 decisions in hitstun (up from 155) and 30
-enemy-grab acquisitions.
-
-Two of the three intercept swings appeared to fire while the player was already
-held (`$79`). **That was a trace artifact, not a mode leak.** `EvaluationStep`
-sampled every state column from the snapshot *after* the input was applied
-while `note`/`mask` came from the decision made before it, so the row paired a
-swing decided while free with the grab that landed during those two frames.
-`classify_mode` handles the whole `$78`-`$7F` family correctly and
-`TwinFightSkill.valid` requires `PlayerMode.FREE`; a test now pins both.
-
-Traces therefore also record `decided_action` / `decided_x` / `decided_y` — the
-state the decision was actually made on — so note-to-state analysis is
-self-consistent. Analyses that compare post-step player state against post-step
-actor state (band occupancy, landing geometry) were never affected.
-
-##### Continuous back-attack spam, measured
-
-Tested directly with a scripted probe (no agent): press B+C on every frame the
-player can start a ground action, 1200 frames from the restored encounter.
+**Status: attack-default + hold ground.** All measurements use
+`--no-police-special` (mandatory for twin runs — a prior "128 → 48 damage
+taken" was the special freezing 310 of 500 decisions). Ballistic intercept
+walking and narrow landing-window conjunctions both scored **0 melee damage**.
+A scripted continuous B+C probe produced the first melee damage:
 
 | Movement | Dealt | Taken | B+C edges | Hurt frames |
 | --- | ---: | ---: | ---: | ---: |
@@ -1103,25 +1040,18 @@ player can start a ground action, 1200 frames from the restored encounter.
 | track lane only | **6** | 80 | 81 | 380 |
 | chase on X | 0 | 112 | 77 | 464 |
 
-Findings:
+Findings that the skill now implements:
 
-* Spam **does** convert — this is the first melee damage recorded against the
-  pair, two clean back attacks at 3 each. It lands about **one hit per twin
-  approach cycle** (~370 frames apart, one per body), purely because the arc
-  happens to end on the player while the box is active.
-* Chasing is strictly worse on both axes and must not be done. "Never approach"
-  is now measured three separate ways.
-* The "you're invincible with this method" claim does **not** reproduce: 80
-  damage taken and 375 of 1200 frames in hitstun while spamming. The back
-  attack's animation occupies most of the remaining time, so there is no large
-  unexplained window where invulnerability could be hiding.
+* Spam **does** convert — about one hit per twin approach cycle (~370 frames).
+* Chasing is strictly worse; the skill **never approaches on X**.
+* Contact ≤22 px uses back-turn + B+C (punch dead zone; rear box is body-centred).
+* Weapon must match the side: rear only when she is behind (or after a deliberate
+  back-turn); punch when she is in the 28–52 band and we face her.
+* Prefer `--step-frames 2 --face-frames 1 --no-police-special`.
 
-Extrapolated, spam alone needs ~3000 frames per body (8 hits x ~370) and takes
-~80 damage per 1200 frames — roughly five deaths per kill. It is a damage
-*source*, not a strategy. Its value is the proof that the back attack converts
-on a landing; the predictor's job is to make that happen on **every** approach
-instead of the one the geometry hands us, and the current agent achieves that
-on 0 of 24 landings, so positioning accuracy is the entire remaining gap.
+The `$79` "mode leak" was a **trace artifact** (post-input state vs pre-input
+note). Traces record `decided_action` / `decided_x` / `decided_y`.
+`TwinFightSkill.valid` requires `PlayerMode.FREE`.
 
 #### Twin evaluation metrics
 
