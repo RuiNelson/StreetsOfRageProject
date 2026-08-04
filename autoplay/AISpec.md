@@ -981,17 +981,35 @@ target by one decision (`_will_be_in_range`, velocity from the previous
 observation, clamped to 26 px) and keeps the combo alive by pressing B during
 attack action `$18` while `+$58` bit 5 is clear, rather than waiting for idle.
 
-**Status: still not working.** Measured over 495 live decisions: 0 damage
-dealt, 128 taken, 2 deaths, 3 ground attacks. The distribution is the real
-finding — 152 decisions in hitstun, 94 in animation lockout, 123 approaching,
-47 spacing, 23 feigning, 13 combo continuations. The seat is being hit far more
-often than it acts, so timing refinements cannot show up yet.
+**Strike band (measured, not inferred).** A live teleport sweep — P1 written
+to a fixed offset from a twin, one B, boss `+$32` read back — misses at 8, 12,
+16, 20 and 24 px, hits cleanly at 28 through 52, and misses again past 56. The
+punch has a **near dead zone**; `combat.can_punch` previously allowed 0..strike
+and so authorised a swing at any distance. `twins.can_strike` / `punch_band`
+now gate every twin swing on the measured window, and a body that has closed
+inside it triggers `twin skill reset` — step back into the band rather than
+swing through it. This matters because `$15A64` makes the twins cover their
+last ~94 px airborne and land *on* the player: the dead zone is their standard
+landing spot.
 
-Next attempt should invert the engagement trigger: approach **only** into a
-ROM punish window (hit reaction `$03`/`$04`, the ~10-tick post-landing idle
-after `$15ABA`, or a whiffed `$15D0C` throw whose `+$78` timeline is still
-running) and otherwise hold outside `$60`, where `$15A64` cannot arm at all.
-Approaching whenever geometry allows is what feeds the hitstun.
+Move values from the player's `+$34` descriptor: normal punch **1** damage,
+back attack (`$20`) **3** over 10 damaging frames, back-attack box `+$70` is
+player X −7..+3 by Y ±8 — a contact move, not a reaching one. Twins hold 22 HP
+each and deal 32 per hit against an 80 HP bar.
+
+**Status: survives, does not yet kill.** With the band fix, one live 500-
+decision episode took 48 damage and 1 death (previously 128 and 2) and dealt
+20 — the first damage ever recorded against this pair — but all 20 came from
+the police special, not melee. Root cause of the remaining zero: a grounded
+twin inside 28-52 px essentially never occurs. Their loop is land → idle ~20
+frames → walk to ~94 px → jump, so they never *walk* into punch range, and 75
+of 189 free decisions were spent in hitstun.
+
+Next attempt should build the engagement entirely around the post-landing idle
+after `$15ABA` (grounded, `+$67 == 0`): treat it as the only approach trigger,
+close into 28-52 during it, and swing there. Every other approach — including
+"geometry allows it" — feeds the hitstun. The police special is not a bonus
+here but 20 of the 44 total HP; keep it enabled outside measurement runs.
 
 #### Twin evaluation metrics
 

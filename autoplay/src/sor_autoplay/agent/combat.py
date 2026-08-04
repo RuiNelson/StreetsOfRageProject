@@ -190,15 +190,23 @@ def can_punch(
     profile: CharacterProfile,
     *,
     require_facing: bool = True,
+    min_range: float = 0.0,
 ) -> bool:
-    """True when a grounded B can reasonably connect this frame."""
+    """True when a grounded B can reasonably connect this frame.
+
+    ``min_range`` is the near dead zone: a body that has closed *inside* the
+    punch arc is not hit by it. Measured live against an Onihime/Yasha body by
+    teleport sweep (probe: place P1 at a fixed offset, one B, read boss `+$32`):
+    misses at 8-24 px, clean hits at 28-52 px, misses again past 56. Callers
+    that know their target's dead zone pass it; the default keeps the historic
+    0..strike behaviour for families that were never measured.
+    """
 
     abs_dx, abs_dy = abs_dx_dy(me, foe)
     if abs_dy > LANE_HIT_HALF:
         return False
-    if abs_dx > profile.strike_range:
+    if abs_dx > profile.strike_range or abs_dx < min_range:
         return False
-    # Too far "inside" them on X still hits in SoR; allow 0..strike.
     if require_facing and not facing_toward(me, foe):
         return False
     return True

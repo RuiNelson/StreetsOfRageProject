@@ -294,6 +294,33 @@ class PolicyEngagementTests(unittest.TestCase):
         self.assertTrue(decision.p1_mask & self.ATTACK, decision.p1_note)
         self.assertIn("punch", decision.p1_note)
 
+    def test_never_swings_from_inside_the_measured_dead_zone(self) -> None:
+        """Live sweep: no damage under 28 px, clean hits 28-52, none past 56.
+
+        The twins end every jump arc on top of the player, so a policy that
+        swings at `dx < 28` spends the whole fight whiffing — which is exactly
+        what hundreds of live attack decisions with zero damage looked like.
+        """
+
+        me = _player(world_x=100, world_y=64)
+        crowding = _twin(world_x=112, world_y=64, slot="B0", mode_flags=1)
+        partner = _twin(world_x=320, world_y=64, slot="B1", mode_flags=2, pair_role=2)
+        decision = self._decide((me, crowding, partner))
+        self.assertFalse(decision.p1_mask & self.ATTACK, decision.p1_note)
+        self.assertIn("reset", decision.p1_note)
+
+    def test_strike_band_matches_the_sweep(self) -> None:
+        from sor_autoplay.agent.characters import PROFILES
+
+        me = _player(world_x=100, world_y=64)
+        profile = PROFILES[0]  # Axel, strike_range 52
+        for dx, expected in ((12, False), (24, False), (28, True),
+                             (44, True), (70, False)):
+            twin = _twin(world_x=100 + dx, world_y=64, slot="B0")
+            self.assertEqual(
+                twins_ai.can_strike(me, twin, profile), expected, f"dx={dx}"
+            )
+
     def test_a_committed_twin_out_of_reach_does_not_cancel_the_punch(self) -> None:
         """Live: 110 pressure sidesteps alternated with 108 approaches.
 

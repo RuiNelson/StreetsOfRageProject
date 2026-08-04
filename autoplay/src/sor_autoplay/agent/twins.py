@@ -57,6 +57,45 @@ LANE_COPLANAR_MAX = 12.0
 # Elevation slack before a body counts as airborne.
 AIRBORNE_Z_MARGIN = 12.0
 
+# --- Measured strike geometry (live teleport sweep, this ROM) --------------
+# P1 placed at a fixed offset from a live twin, one B, boss health word read
+# back: misses at 8/12/16/20/24, hits at 28/32/36/40/44/48/52, misses at
+# 56/60/64/68/72. The punch therefore has a **near dead zone** — a body that
+# has closed onto us is not hit by it, which is exactly where the twins land.
+PUNCH_MIN_X = 26.0
+# Keep a little inside the far edge; a chasing body covers a few px per sample.
+PUNCH_MAX_TRIM = 4.0
+# Outgoing damage read from the player's `+$34` descriptor while the animation
+# runs: normal punch 1 over ~10 damaging frames, back attack ($20) 3 over 10.
+PUNCH_DAMAGE = 1
+REAR_DAMAGE = 3
+# Boss health at the encounter, and their contact damage against an 80 HP bar.
+TWIN_HEALTH = 22
+TWIN_CONTACT_DAMAGE = 32
+
+
+def punch_band(profile) -> tuple[float, float]:
+    """Horizontal window in which a normal punch actually reaches a twin."""
+
+    return PUNCH_MIN_X, max(PUNCH_MIN_X + 4.0, profile.strike_range - PUNCH_MAX_TRIM)
+
+
+def can_strike(me: MapEntity, twin: MapEntity, profile) -> bool:
+    """True when a grounded B on this body would land, per the measured band."""
+
+    if is_airborne(twin, me):
+        return False
+    lo, hi = punch_band(profile)
+    dx = abs(float(twin.world_x) - float(me.world_x))
+    dy = abs(float(twin.world_y) - float(me.world_y))
+    return lo <= dx <= hi and dy <= LANE_COPLANAR_MAX + 2.0
+
+
+def too_close(me: MapEntity, twin: MapEntity) -> bool:
+    """Body has closed inside the punch arc — swinging here whiffs."""
+
+    return abs(float(twin.world_x) - float(me.world_x)) < PUNCH_MIN_X
+
 # Lane scan step when searching for a safe depth.
 _LANE_STEP = 2.0
 

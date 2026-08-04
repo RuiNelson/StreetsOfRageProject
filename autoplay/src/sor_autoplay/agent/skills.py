@@ -396,7 +396,8 @@ class TwinFightSkill:
         vx, vy = vel.get(twin.slot, (0.0, 0.0))
         dx = abs(float(twin.world_x) + vx * self.LEAD_DECISIONS - float(me.world_x))
         dy = abs(float(twin.world_y) + vy * self.LEAD_DECISIONS - float(me.world_y))
-        return dx <= profile.strike_range and dy <= combat.LANE_HIT_HALF
+        lo, hi = twins_ai.punch_band(profile)
+        return lo <= dx <= hi and dy <= combat.LANE_HIT_HALF
 
     def valid(self, ctx: DecisionContext) -> bool:
         me = ctx.me
@@ -469,12 +470,32 @@ class TwinFightSkill:
                 continue
             if not combat.facing_toward(me, twin):
                 continue
-            if combat.can_punch(me, twin, profile, require_facing=True):
+            if twins_ai.can_strike(me, twin, profile):
                 return Intent(attack=True, note=f"twin skill punch {twin.label}")
             if self._will_be_in_range(me, twin, profile, vel):
                 return Intent(
                     attack=True, note=f"twin skill lead {twin.label}"
                 )
+
+        # A body that has landed *on top of us* is inside the punch dead zone
+        # (measured: no damage under 28 px). Swinging there is the whiff that
+        # produced hundreds of attack decisions and zero damage. Step back into
+        # the band instead — this is also how we leave its grab range.
+        crowding = [
+            twin
+            for twin in twins_ai.live_twins(entities)
+            if not twins_ai.is_airborne(twin, me) and twins_ai.too_close(me, twin)
+        ]
+        if crowding:
+            twin = min(
+                crowding, key=lambda t: abs(float(t.world_x) - float(me.world_x))
+            )
+            lo, _ = twins_ai.punch_band(profile)
+            side = -1.0 if float(twin.world_x) > float(me.world_x) else 1.0
+            goal_x = float(twin.world_x) + side * (lo + 8.0)
+            return self._move(
+                me, (goal_x, float(me.world_y)), f"twin skill reset {twin.label}"
+            )
 
         focus = doctrine.focus
         if twins_ai.is_airborne(focus, me):
@@ -494,9 +515,7 @@ class TwinFightSkill:
         # 4) Punch a grounded body only. The pair spends much of the fight in
         # jump arcs, and a punch at an airborne twin passes under it.
         grounded_focus = not twins_ai.is_airborne(focus, me)
-        if grounded_focus and combat.can_punch(
-            me, focus, profile, require_facing=True
-        ):
+        if grounded_focus and twins_ai.can_strike(me, focus, profile):
             return Intent(attack=True, note=f"twin skill punch {focus.label}")
 
         # Its landing is the ROM's own punish window: after the jump attack

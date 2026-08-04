@@ -349,13 +349,27 @@ for tests/HUD.
      (`MapEntity.ground_z`), not the player's elevation.
      Attacks lead the target by one decision (four frames) and continue the
      combo during action `$18` while `+$58` bit 5 is clear.
-     **STATUS: still failing.** 495 live decisions: 0 damage dealt, 128 taken,
-     3 attacks; 152 decisions in hitstun and 94 in animation lockout. The seat
-     is hit far more often than it acts. Next: approach **only** into a ROM
-     punish window (`$03`/`$04` hit reaction, post-landing idle, whiffed
-     `$15D0C`) and otherwise hold outside `$60` where `$15A64` cannot arm.
+     **Measured strike band.** A live teleport sweep (write P1 to a fixed
+     offset from a twin, one B, read boss `+$32`) misses at 8-24 px, hits at
+     28-52, misses past 56 — the punch has a **near dead zone**, and the twins
+     land inside it every time (`$15A64` sends them over the last ~94 px
+     airborne). `twins.can_strike` / `punch_band` gate every twin swing on that
+     window and `twin skill reset` steps back out of the dead zone instead of
+     swinging through it. `combat.can_punch` now takes `min_range` for this;
+     it defaults to 0 so unmeasured families keep their old behaviour.
+     Move values from the player `+$34` descriptor: punch **1**, back attack
+     (`$20`) **3** over 10 frames, back-attack box `+$70` = X −7..+3, Y ±8
+     (contact, not reach). Twins: 22 HP each, 32 damage per hit.
+     **STATUS: survives, does not kill.** With the band fix a 500-decision
+     live episode took 48 damage / 1 death (was 128 / 2) and dealt 20 — first
+     damage ever recorded on this pair — but all 20 was the police special.
+     Melee is still ~0 because a *grounded* twin inside 28-52 px basically
+     never happens: their loop is land → idle ~20 frames → walk to ~94 px →
+     jump. Next: make the post-landing idle (grounded, `+$67 == 0`) the **only**
+     approach trigger, close into 28-52 during it, and swing there.
      Fixture: restore `twins-state.bin` (64 KiB work RAM at the encounter)
-     instead of replaying the stage.
+     instead of replaying the stage; probes in the session scratchpad
+     (`probe_reach.py`, `probe_moves.py`) reproduce the numbers above.
 10. Route around floor holes (stage 4), factory presses (stage 6), and hold
     the elevator (stage 7)
     - Stage-4 horizontal progression must turn into a persistent vertical
