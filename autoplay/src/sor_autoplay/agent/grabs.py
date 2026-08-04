@@ -70,7 +70,7 @@ PARTNER_BOOST_AWAIT_BACK = "await_back"
 PARTNER_BOOST_JUMP = "jump"
 PARTNER_BOOST_AIR = "air_kick"
 
-# Geometry for the higher co-op jump-kick after a partner vault (AISpec §1.4.3).
+# Geometry for the higher co-op jump-kick after a partner vault.
 PARTNER_BOOST_FOE_DX_MIN = 36.0
 PARTNER_BOOST_FOE_DX_MAX = 110.0
 PARTNER_BOOST_FOE_LANE = 28.0
@@ -217,7 +217,7 @@ class GrabMemory:
     clear_ticks: int = 0
     pulse: int = 0
     last_input_tick: int = -10_000
-    # Partner-boost SM (AISpec §1.4.3): C vault → C jump → B air kick.
+    # Partner-boost SM: C vault → C jump → B air kick.
     partner_boost_phase: str = ""
 
     def reset(self) -> None:
@@ -323,7 +323,7 @@ def decide_held(
             me, ctx, tick=tick, foe=foe, profile=prof, ally=ally
         )
 
-    # Partner hold (AISpec §1.4.3): never treat as enemy knee/throw by default.
+    # Partner hold: never treat as enemy knee/throw by default.
     if ctx.partner_grab:
         memory.latched = True
         memory.clear_ticks = 0
@@ -366,7 +366,7 @@ def held_partner_entity(
     me: MapEntity,
     entities: tuple[MapEntity, ...],
 ) -> MapEntity | None:
-    """Other player body latched in a hold with this seat (AISpec §1.4.3)."""
+    """Other player body latched in a hold with this seat."""
 
     if not is_grab_family(me.action_base) and me.action_base not in HOLD_INPUT_ACTIONS:
         # Still recognize mid-vault / air-boost frames if phase is active elsewhere.
@@ -394,7 +394,7 @@ def release_grab_intent(
     me: MapEntity,
     held_body: MapEntity | None,
 ) -> Intent:
-    """Walk away from the held body to drop the grab (AISpec §1.4.2)."""
+    """Walk away from the held body to drop the grab."""
 
     if held_body is not None:
         dx = held_body.map_x - me.map_x

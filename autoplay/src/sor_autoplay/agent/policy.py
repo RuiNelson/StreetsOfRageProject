@@ -25,9 +25,7 @@ from . import (
     enemies as enemy_ai,
     navigation,
     pressure,
-    scene as scene_ai,
     stage,
-    twins as twins_ai,
 )
 from .arbiter import GoalKind, solve_goal
 from .context import DecisionContext, PlayerMode, SeatMemory, build_decision_context
@@ -40,7 +38,6 @@ from .skills import (
     try_crossover_suplex,
     try_hold_resolve,
     try_start_mode_skill,
-    try_twin_fight,
 )
 from .walk import WalkState, blend_walk_with_actions
 
@@ -410,14 +407,6 @@ def _decide_one(
         assert ctx.seat.commitment is not None
         ctx.seat.commitment.clear(ctx)
         return Intent(special=True, note=f"police ({ctx.press.reason})")
-
-    # Twins own the seat outright: the free ladder's controllers preempted
-    # each other every other decision and never landed a hit (AISpec §9.4b).
-    # Runs after police (the special is worth 10 per boss) and before the
-    # hold tree so a successful grab still converts to knee/throw.
-    twin_fight = try_twin_fight(ctx)
-    if twin_fight is not None:
-        return twin_fight
 
     # --- Hold / weapon tree + closed grab animations ---
     held = try_hold_resolve(ctx)
@@ -872,10 +861,7 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             low_health=low_hp,
             entities=snapshot.world_map.entities,
         )
-        # Never for a twin: the partner is permanently behind, so this rewrote
-        # the pair plan to grab_bias 0.9 on every decision and the seat walked
-        # body-to-body forever instead of punching (live: 0 melee damage).
-        if back_exposed and grabbable and not scene_ai.is_twin(foe):
+        if back_exposed and grabbable:
             plan = dc_replace(
                 plan,
                 grab_bias=max(plan.grab_bias, 0.9),
@@ -991,16 +977,12 @@ def _decide_free(ctx: DecisionContext) -> Intent:
 
         # Secure the back first: walk into a legal grab on the front target so
         # the hold can convert to crossover→suplex when a rear hostile exists.
-        # Not for a live twin pair: the partner is *always* behind, so this
-        # branch latched a permanent grab walk that never attacked. §9.4b owns
-        # twin geometry.
         if (
             back_exposed
             and grabbable
             and not me.is_hurt
             and foe.kind in ("enemy", "boss")
             and phase != CombatPhase.GRABBED
-            and not scene_ai.is_twin(foe)
         ):
             if (
                 abs_dx <= 24.0
@@ -1048,105 +1030,14 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 eps_y=6.0,
             )
 
-        # Twins / Souther boss movement. For twins, holds are ignored (they
-        # froze free combat); only active sidesteps on real commits run.
-        # Full attack mix for twins is evaluated *before* soft movement so
-        # punch/jump/grab/rear are not starved by isolate walks.
+        # Souther boss movement: active sidesteps on real commits.
         boss_tactic = bosses.tactical_move(
             me,
             foe,
             snapshot.world_map.entities,
             level_index=snapshot.level_index,
         )
-        is_twin_foe = scene_ai.is_twin(foe)
-        if is_twin_foe:
-            # ROM-gate denial outranks damage: a landed twin throw costs ~40%
-            # of the health bar, a delayed punch costs one decision.
-            if boss_tactic is not None and boss_tactic.mandatory:
-                return _walk_toward(
-                    walk,
-                    me,
-                    goal_x=boss_tactic.goal_x,
-                    goal_y=boss_tactic.goal_y,
-                    reason=boss_tactic.note,
-                    snapshot=snapshot,
-                    advice=advice,
-                    nav=nav,
-                    eps_x=3.0,
-                    eps_y=4.0,
-                )
-            twin_intent = _twin_attack_intent(
-                me=me,
-                foe=foe,
-                plan=plan,
-                profile=profile,
-                walk=walk,
-                ctx=ctx,
-                snapshot=snapshot,
-                advice=advice,
-                nav=nav,
-                coop_ctx=coop_ctx,
-                press=press,
-                face_left=face_left,
-                face_right_now=face_right_now,
-                punch_ok=punch_ok,
-                punch_geom=punch_geom,
-                lane_ok=lane_ok,
-                facing_ok=facing_ok,
-                jump_ok=jump_ok,
-                jk_plan=jk_plan,
-                jump_hits=jump_hits,
-                jump_score=jump_score,
-                grabbable=grabbable,
-                back_exposed=back_exposed,
-                band=band,
-                abs_dx=abs_dx,
-                phase=phase,
-                phase_name=phase_name,
-                tag=tag,
-                cd=cd,
-                player_index=player_index,
-            )
-            if twin_intent is not None:
-                return twin_intent
-            # Real commit sidestep only (never hold-freeze).
-            if (
-                boss_tactic is not None
-                and not boss_tactic.hold
-                and is_dangerous(phase)
-            ):
-                return _walk_toward(
-                    walk,
-                    me,
-                    goal_x=boss_tactic.goal_x,
-                    goal_y=boss_tactic.goal_y,
-                    reason=boss_tactic.note,
-                    snapshot=snapshot,
-                    advice=advice,
-                    nav=nav,
-                    eps_x=3.0,
-                    eps_y=5.0,
-                )
-            # Partner surround / intrusion sidestep when we cannot strike yet.
-            if (
-                boss_tactic is not None
-                and not boss_tactic.hold
-                and not punch_ok
-                and not (jump_ok and jump_hits >= 1)
-            ):
-                return _walk_toward(
-                    walk,
-                    me,
-                    goal_x=boss_tactic.goal_x,
-                    goal_y=boss_tactic.goal_y,
-                    reason=boss_tactic.note,
-                    snapshot=snapshot,
-                    advice=advice,
-                    nav=nav,
-                    eps_x=3.0,
-                    eps_y=5.0,
-                )
-        elif boss_tactic is not None:
+        if boss_tactic is not None:
             if boss_tactic.hold:
                 walk.clear()
                 return Intent(note=boss_tactic.note)
@@ -1191,9 +1082,7 @@ def _decide_free(ctx: DecisionContext) -> Intent:
         # the common Round-1 type $22, $09 is the approach/wind-up and $0A is
         # the active punch. The measured normal-punch boxes now let us strike
         # first; an already-safe off-lane player must not walk back into it.
-        # Twins: never "reengage" into a jump/grab commit lane (that walks
-        # straight into $15D0C). Twin free combat owns the tree above.
-        if combat.enemy_attack_committed(me, foe) and not is_twin_foe:
+        if combat.enemy_attack_committed(me, foe):
             if not lane_ok:
                 # Boss phase decoders can report CHARGE while the boss is
                 # actually waiting for the player to enter its lane. Ordinary
@@ -1780,263 +1669,6 @@ def _clear_ally_lane(
     )
 
 
-def _twin_attack_intent(
-    *,
-    me: MapEntity,
-    foe: MapEntity,
-    plan,
-    profile,
-    walk: WalkState,
-    ctx: DecisionContext,
-    snapshot: GameSnapshot,
-    advice: stage.StageAdvice,
-    nav: NavMemory | None,
-    coop_ctx,
-    press,
-    face_left: bool,
-    face_right_now: bool,
-    punch_ok: bool,
-    punch_geom: bool,
-    lane_ok: bool,
-    facing_ok: bool,
-    jump_ok: bool,
-    jk_plan: JumpKickPlan | None,
-    jump_hits: int,
-    jump_score: float,
-    grabbable: bool,
-    back_exposed: bool,
-    band: str,
-    abs_dx: float,
-    phase: CombatPhase,
-    phase_name: str,
-    tag: str,
-    cd: int,
-    player_index: int,
-) -> Intent | None:
-    """Full attack suite vs Onihime/Yasha while free combat owns the tree.
-
-    Returns an Intent for rear / jump / grab / punch, or None to walk/evade.
-    Real jump/grab *commits* are still DANGEROUS (primary $02 or tactical
-    $02/$03); chase/idle is NORMAL and must be struck.
-    """
-
-    if me.is_hurt or cd != 0:
-        return None
-    if not combat.player_can_start_ground_action(me):
-        return None
-
-    behind = combat.enemy_is_behind(
-        me,
-        foe,
-        face_right=not combat.player_facing_left(me),
-    )
-    mix = enemy_ai.attack_mix(
-        plan,
-        profile,
-        tick=ctx.tick + player_index * 3,
-        in_range=punch_geom,
-        # Do NOT inflate this to 2 for the pair: `crowd >= 2` satisfies
-        # attack_mix's single-target jump rule on every decision, which parked
-        # the seat at jump-kick range and scored zero melee damage live.
-        crowd=press.enemy_count,
-        phase_name=phase_name,
-        band=band,
-        behind=behind and combat.rear_in_band(abs_dx, profile),
-        lane_ok=lane_ok,
-        facing_ok=facing_ok,
-        can_jump=jump_ok and not plan.no_jump,
-        grabbable=grabbable,
-        # NOT back_exposed: in a two-body fight one twin is *always* behind, so
-        # this permanently raised grab_pressure to 0.9 and turned every
-        # in-range decision into a back-shield grab walk that never attacked.
-        # §9.4b already owns partner geometry through the ROM gates.
-        back_exposed=False,
-        jump_hits=jump_hits,
-        jump_score=jump_score,
-    )
-
-    # Punish recovery/hitstun even if mix waited for range.
-    if is_punishable(phase) and phase != CombatPhase.GRABBED and punch_ok:
-        mix = "punch"
-
-    # Commit jump/grab on our depth: do not trade into active damage frames.
-    if is_dangerous(phase) and lane_ok and abs_dx <= profile.strike_range + 28:
-        if mix not in ("rear",):
-            return None
-
-    # $15C72 arms the grab twin's jump-in only against a player closing on it.
-    # Stand the lane instead and let it walk in: chase (`+$67 = $01`) carries no
-    # attack, so it arrives inside punch range with nothing armed.
-    doctrine = twins_ai.scene(me, snapshot.world_map.entities)
-    hold_target = doctrine.hold_for_walk_in
-    if hold_target is not None and hold_target.slot == foe.slot and not punch_ok:
-        walk.clear()
-        # No facing input: turning toward it satisfies $15C72's facing test,
-        # which is the gate the bait exists to keep shut.
-        return Intent(note=f"twin bait walk-in {foe.label} [{tag}]")
-
-    def _ally_block(kind: str, *, rear: bool = False) -> Intent | None:
-        if coop.attack_would_hit_ally(
-            me, coop_ctx.partner, face_left=face_left, rear=rear
-        ):
-            return _clear_ally_lane(
-                walk,
-                me,
-                coop_ctx.partner,
-                reason=f"ally blocks twin {kind} {foe.label}",
-                snapshot=snapshot,
-                advice=advice,
-                nav=nav,
-            )
-        return None
-
-    if mix == "rear" and combat.can_rear_hit(
-        me, foe, profile, face_right=not combat.player_facing_left(me)
-    ):
-        blocked = _ally_block("rear", rear=True)
-        if blocked is not None:
-            return blocked
-        face_now = combat.player_facing_left(me)
-        walk.clear()
-        ctx.set_attack_cd(4)
-        return Intent(
-            left=face_left if face_left else face_now,
-            right=face_right_now if face_right_now else (not face_now),
-            rear_attack=True,
-            note=f"twin rear {foe.label} [{tag}]",
-        )
-
-    if mix == "jump" and jump_ok and facing_ok:
-        holes = _routing_holes(snapshot, advice)
-        land_x = jk_plan.landing_world_x if jk_plan is not None else None
-        if navigation.jump_landing_safe(
-            me, foe, holes, land_x=land_x, land_y=float(me.world_y)
-        ):
-            blocked = _ally_block("jump")
-            if blocked is not None:
-                return blocked
-            walk.clear()
-            ctx.set_attack_cd(1)
-            if jk_plan is not None:
-                ctx.seat.jump_kick.arm(jk_plan, primary_slot=foe.slot)
-                hold_l = jk_plan.hold_dir < 0 or (
-                    jk_plan.hold_dir == 0 and face_left
-                )
-                hold_r = jk_plan.hold_dir > 0 or (
-                    jk_plan.hold_dir == 0 and face_right_now
-                )
-                return Intent(
-                    left=hold_l,
-                    right=hold_r,
-                    jump=True,
-                    note=(
-                        f"twin jump×{jk_plan.hit_count} {foe.label} "
-                        f"[{tag}] {jk_plan.note}"
-                    ),
-                )
-            return Intent(
-                left=face_left,
-                right=face_right_now,
-                jump=True,
-                note=f"twin jump {foe.label} [{tag}]",
-            )
-
-    if mix == "grab_walk" and grabbable:
-        if (
-            abs_dx <= 24.0
-            and lane_ok
-            and facing_ok
-        ):
-            blocked = _ally_block("grab")
-            if blocked is not None:
-                return blocked
-            walk.clear()
-            ctx.set_attack_cd(3)
-            return Intent(
-                left=face_left,
-                right=face_right_now,
-                attack=True,
-                note=f"twin grab {foe.label} [{tag}]",
-            )
-        if not facing_ok and abs_dx <= 40.0:
-            walk.clear()
-            return Intent(
-                left=face_left,
-                right=face_right_now,
-                note=f"twin face grab {foe.label} [{tag}]",
-            )
-        return _walk_toward(
-            walk,
-            me,
-            goal_x=float(foe.world_x),
-            goal_y=float(foe.world_y),
-            reason=f"twin close grab {foe.label} [{tag}]",
-            snapshot=snapshot,
-            advice=advice,
-            nav=nav,
-            eps_x=4.0,
-            eps_y=6.0,
-        )
-
-    if mix == "punch" and punch_ok:
-        blocked = _ally_block("punch")
-        if blocked is not None:
-            return blocked
-        walk.clear()
-        ctx.set_attack_cd(3)
-        return Intent(
-            left=face_left,
-            right=face_right_now,
-            attack=True,
-            note=f"twin punch {foe.label} [{tag}]",
-        )
-
-    # Speedrun feign: keep the back turned to a twin closing from behind. Its
-    # jump-in ($15C72) needs us facing and closing, so a turned back denies it
-    # outright, and the body walks into back-attack range on its own. Turning to
-    # meet it would arm the gate and waste the decision.
-    bait = twins_ai.rear_bait_target(
-        me,
-        snapshot.world_map.entities,
-        face_right=not combat.player_facing_left(me),
-        rear_min=profile.rear_range_max,
-    )
-    if bait is not None and not punch_ok:
-        walk.clear()
-        return Intent(note=f"twin feign back {bait.label} [{tag}]")
-
-    # Geometry ready but wrong face: face then next tick punches.
-    if punch_geom and not facing_ok and lane_ok and not is_dangerous(phase):
-        walk.clear()
-        ctx.set_attack_cd(1)
-        return Intent(
-            left=face_left,
-            right=face_right_now,
-            note=f"twin face {foe.label} [{tag}]",
-        )
-
-    # Terminal approach: converge on coplanar punch geometry. Coplanar denies
-    # $159F8 and is the only range that damages, so an idle focus is always
-    # closed on rather than handed back to the generic walker.
-    if not is_dangerous(phase) and not punch_geom:
-        engage = max(22.0, profile.strike_range - 6.0)
-        side = -1.0 if float(foe.world_x) > float(me.world_x) else 1.0
-        return _walk_toward(
-            walk,
-            me,
-            goal_x=float(foe.world_x) + side * engage,
-            goal_y=float(foe.world_y),
-            reason=f"twin engage {foe.label} [{tag}]",
-            snapshot=snapshot,
-            advice=advice,
-            nav=nav,
-            eps_x=4.0,
-            eps_y=5.0,
-        )
-
-    return None
-
-
 def _stand_point(
     me: MapEntity,
     target: combat.TargetChoice,
@@ -2051,31 +1683,16 @@ def _stand_point(
     ``approach_offset`` (44–56) so measured punches still reach but enemies do
     not free-hit us. Armed seats use ``weapon.approach_stand_dx`` so knife /
     pepper / bat keep their reach advantage instead of walking into punch range.
-    Scene plans (twin pair/survivor) scale stand-off via ``target.plan``.
-    Always match the foe's lane (off-lane = air punches).
-
-    Twin **PAIR**: stand on the side of the focus opposite the partner so the
-    second twin has a longer path to coplanar grab setup.
+    ``target.plan`` scales the stand-off per family. Always match the foe's
+    lane (off-lane = air punches).
     """
 
     from . import weapons as W
 
     foe = target.entity
     plan = target.plan
+    del entities  # kept for signature stability with the free-combat caller
     side = -1.0 if (foe.world_x - me.world_x) > 0 else 1.0
-    if (
-        entities is not None
-        and scene_ai.is_twin(foe)
-        and scene_ai.twin_composition(entities) is scene_ai.TwinComposition.PAIR
-    ):
-        partner_side = _twin_partner_side(foe, entities)
-        strike = profile.strike_range * plan.range_scale
-        already_engaged = abs(float(foe.world_x) - float(me.world_x)) <= strike
-        if partner_side is not None and not already_engaged:
-            # Stand opposite the partner relative to the focus body — but only
-            # while still approaching. Re-deciding the side inside strike range
-            # made the seat orbit the focus and never punch.
-            side = -partner_side
     if me.is_holding_weapon and W.is_weapon_type(me.held_type):
         dist = W.approach_stand_dx(me.held_type, profile)
         if low_health:
@@ -2088,13 +1705,13 @@ def _stand_point(
         dist = max(float(profile.approach_offset), strike * 0.85)
         if low_health:
             dist = max(dist, profile.caution_range * 0.65)
-        # Jump-in counters: park in kick window (not used for twin pair).
+        # Jump-in counters: park in kick window.
         if plan.jump_bias >= 0.5:
             dist = max(
                 dist,
                 (profile.jump_kick_min + profile.jump_kick_max) * 0.5,
             )
-        # Grab pressure (survivor twin, Nora): collapse to body range.
+        # Grab pressure (Nora): collapse to body range.
         if plan.grab_bias >= 0.5:
             dist = min(dist, 20.0)
         else:
@@ -2103,29 +1720,6 @@ def _stand_point(
     stand_x = float(foe.world_x) + side * dist
     stand_y = float(foe.world_y)
     return stand_x, stand_y
-
-
-def _twin_partner_side(
-    focus: MapEntity,
-    entities: tuple[MapEntity, ...] | list[MapEntity],
-) -> float | None:
-    """Sign of (partner.x - focus.x): +1 partner is right of focus, else -1."""
-
-    partners = [
-        twin
-        for twin in scene_ai.live_twins(entities)
-        if twin.slot != focus.slot
-    ]
-    if not partners:
-        return None
-    partner = min(
-        partners,
-        key=lambda twin: abs(float(twin.world_x) - float(focus.world_x)),
-    )
-    dx = float(partner.world_x) - float(focus.world_x)
-    if abs(dx) < 8.0:
-        return None
-    return 1.0 if dx > 0 else -1.0
 
 
 def _walk_toward(

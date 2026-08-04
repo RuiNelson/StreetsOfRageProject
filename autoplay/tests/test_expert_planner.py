@@ -172,7 +172,7 @@ class CombatExpertTests(unittest.TestCase):
         self.assertEqual(assessment.goal, TacticalGoal.SUPLEX)
 
     def test_crowd_pressure_triggers_crossover_suplex(self) -> None:
-        """AISpec §1.4.2 / §4.2: multi-enemy holds vault for a throw launch."""
+        """multi-enemy holds vault for a throw launch."""
 
         me, held, _ = _grab_scene()
         front = _entity(label="Front", slot="E1", map_x=170, world_x=170)

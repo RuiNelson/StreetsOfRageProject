@@ -10,30 +10,6 @@
 specials, timer, level, scores, 2D world map) **plus** optional scripted agents
 that inject standard-control input through `press_buttons`.
 
-## AISpec.md — living AI behaviour contract
-
-**Read `AISpec.md` before changing agent behaviour.** It is the full
-plain-English specification of the scripted AI (pipeline, modes, skills,
-combat, grabs, co-op, navigation, police, evaluation contract). Implementation
-lives under `src/sor_autoplay/agent/`.
-
-`AISpec.md` and the agent code are a **bidirectional source of truth**:
-
-| Change | Also update |
-| --- | --- |
-| Edit intended behaviour in `AISpec.md` | Implement the same rule in `src/sor_autoplay/agent/` (and tests when practical) |
-| Change agent code behaviour | Update the matching section(s) of `AISpec.md` in the **same** change set |
-
-Do not leave the document and code describing different priorities, modes, or
-button rules. Prefer editing `AISpec.md` first when the user describes a
-behaviour change in plain language; prefer code first when fixing a
-ROM-verified edge, then reflect the fix in the spec.
-
-This file (`CLAUDE.md`) keeps operator notes, RAM maps, commands, and
-implementation checkpoints. **Authoritative player-facing / design behaviour
-belongs in `AISpec.md`.** When they disagree, fix the mismatch rather than
-silently following only one side.
-
 ## Ownership
 
 - Project-owned directory in the StreetsOfRageProject workspace.
@@ -73,9 +49,8 @@ machine may lack Tk.
 
 ## Agent design (standard controls only)
 
-Full behaviour: **`AISpec.md`** (see section above). Code:
-`src/sor_autoplay/agent/`. The notes below are a quick checkpoint for agents
-working in this tree; they must stay consistent with `AISpec.md`.
+Code: `src/sor_autoplay/agent/`. The notes below are a quick checkpoint for
+agents working in this tree.
 
 **Controls assumption:** OPTIONS scheme 0 and **no** host `--altControls`.
 
@@ -307,73 +282,10 @@ for tests/HUD.
      state `$02` for live attacks even when tactical `+$67` is zero:
      `$16118` is Souther's claw/contact state and `$15D0C` is the twins'
      damaging jump/grab choreography. Keep grounded against Souther; leave a
-     committed boss attack lane. Twins use **Level-C scene composition**
-     (`agent/scene.py`, AISpec §9.4b): **PAIR** → focus-fire lowest HP with
-     **full attack mix** (punch/jump/grab/rear). Twin phase decode: only
-     primary `$02` or tactical `$02`/`$03` is DANGEROUS — chase `$01` is
-     NORMAL and must be struck (a prior `t!=0→ATTACKING` bug caused perpetual
-     evade). Policy `_twin_attack_intent` before soft sidesteps. Never
-     reengage into a twin commit lane. **SURVIVOR** → full pressure/grab.
-     ROM has no enrage: one body left is much easier.
-   - **Twin ROM gate denial** (`agent/twins.py`, AISpec 9.4b): the twins draw
-     no RNG, so every attack is denied by geometry. Throw commit `$159F8`
-     needs lane `+$52` in **[$10,$20)** and X `+$50` < `$70` — the half-step
-     diagonal is the trigger, while coplanar is safe *and* is punch range.
-     Lane leaves must clear `$20` (`LANE_SAFE_CLEARANCE` 40; the old 28/22 px
-     sidesteps parked the player inside the window) and `safe_lane` clears the
-     band for **every** live twin. Leap-to-grab `$15BE8` arms only while the
-     player is staggered (`+$77 != 0` from `$179F8`) → break contact past `$90`
-     when hurt. Jump-in `$15C72` needs the player closing on the body → bait
-     the grab twin and let it chase in. Denial is `BossTactic.mandatory` and
-     outranks free combat. Grab mode is `+$7B` bit 1 (`pair_role` is only the
-     seed); at equal HP the grab twin is the focus because the approach twin
-     cannot promote while its partner lives.
-   - **Twin engagement (measured live, Round 5).** Two ordinary heuristics have
-     permanently-true preconditions against a *pair* and must be skipped for
-     type `$58`: the `back_exposed` → `grab_bias 0.9` back-shield rewrite (the
-     partner is always behind, so every in-range decision became a grab walk
-     that never attacked) and the jump-kick solver (`no_jump=true`; 6 kicks =
-     0 damage). The pair stand point stops re-deciding its side once inside
-     strike range, and focus/hysteresis prefer a **reachable** body at equal HP
-     (`TWIN_REACHABLE_DX` 56) — a mode tie-break onto the far grab twin left
-     the seat walking past a twin standing in punch range. `--no-police-special`
-     isolates melee in measurement. Twin skill now attack-defaults + holds
-     ground (see Twin fight skill below); unit coverage in
-     `tests/test_twins.py::PolicyEngagementTests`.
-   - **Twin fight skill** (`skills.TwinFightSkill`, AISpec §9.4b): while any
-     type-`$58` boss lives the skill owns the seat (after police, before the
-     hold tree). **Attack is the default** when a body is close enough to hit.
-     Order: gate denial → precise rear/punch windows → contact ≤22 px
-     back-turn B+C (punch dead zone; weapon must match the side she is on) →
-     feign when behind (lane only, never turn toward her) → **hold ground**
-     when outside the punch band (lane-track only, never chase on X) → line up
-     inside the band. Combo continues during action `$18` while `+$58` bit 5
-     is clear.
-     **Why this ordering.** A prior conjunction of (predicted landing) ∧
-     (frames ≤ 8) ∧ (under the body) threw 0–4 attacks per 700 decisions and
-     did no damage. Scripted B+C mash: stand still 6 dealt / 80 taken;
-     lane-track 6 / 80; chase 0 / 112. First melee damage on the pair — about
-     one hit per approach cycle (~370 frames). Chasing is strictly worse;
-     "never approach" is measured three ways. The skill must not require a
-     window that almost never opens, and must not hunt the bodies.
-     **Measured strike band.** Teleport sweep: miss 8–24 px, hit 28–52, miss
-     past 56. Punch has a **near dead zone**; twins land inside it every jump
-     (`$15A64` covers the last ~94 px airborne). `twins.can_strike` /
-     `punch_band` gate punches; inside the dead zone the skill back-turns and
-     B+C instead of stepping out and waiting. Move values from `+$34`: punch
-     **1**, back attack (`$20`) **3** over 10 frames, box `+$70` = X −7..+3,
-     Y ±8 (contact, not reach). Twins: 22 HP each, 32 damage per hit.
-     **Ballistic intercept** (`twins.predict_landing`) remains available for
-     probes/analysis — forecast is correct while `+$67 == 2` — but the skill
-     no longer walks posts under landings: 0 of 24 landings arrived under the
-     body and the walk fed the grab (245 hitstun steps, 30 grabs).
-     **ALWAYS test twins with `--no-police-special`.** Prefer
-     `--step-frames 2 --face-frames 1 --no-police-special`. The `$79` "mode
-     leak" was a **trace artifact** (post-input state vs pre-input note);
-     `TwinFightSkill.valid` requires FREE; traces carry
-     `decided_action`/`decided_x`/`decided_y`.
-     Fixture: restore `twins-state.bin` (64 KiB work RAM at the encounter)
-     instead of replaying the stage.
+     committed boss attack lane. Twin phase decode: only primary `$02` or
+     tactical `$02`/`$03` is DANGEROUS — chase `$01` is NORMAL and must be
+     struck (a prior `t!=0→ATTACKING` bug caused perpetual evade). The twins
+     have **no dedicated AI**: they run through the generic combat ladder.
 10. Route around floor holes (stage 4), factory presses (stage 6), and hold
     the elevator (stage 7)
     - Stage-4 horizontal progression must turn into a persistent vertical
@@ -395,7 +307,7 @@ Map entities carry full combat RAM for agents:
 - `primary_state` (word +$30): ordinary `$0100` normal / `$0300` knockdown /
   `$0500` grabbed / `$0600` death / `$0700` blocked
 - `tactical` (boss +$67), `pair_role` (+$5D), `target_ptr` (who they hunt)
-- `mode_flags` (later-boss +$7B; twin bit1 = grab AI), `target_unavailable`
+- `mode_flags` (later-boss +$7B), `target_unavailable`
   (+$77 from `$179F8`), `phase_timer` (+$78 jump/throw timeline)
 - `boss_dist_x` / `boss_dist_lane` (later-boss geometry)
 - `family_state` (ordinary `+$52`; Jack bit0 is weapon attached)
@@ -475,11 +387,6 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
   `boss_stall_steps` begins after eight consecutive input-ready `guard lane`
   decisions against a blocking boss; enforce `--max-boss-stalls 0` to catch
   the Antonio cross-lane fixed point without rejecting a brief guard.
-  Twin doctrine is measurable: `twin_throw_band_steps` and
-  `twin_leap_exposure_steps` count decisions spent inside an armed `$159F8` /
-  `$15BE8` window and `twins_defeated` counts finished bodies. A Round-5
-  episode enforces `--max-twin-throw-band 0 --max-twin-leap-exposure 0
-  --min-twins-defeated 2`.
   Special-resource and stage mechanics are first-class metrics:
   `special_calls`, `wasteful_special_calls`, `boss_special_opportunities`,
   `missed_boss_special_calls`, `elevator_horizontal_progress_steps`,
@@ -495,6 +402,12 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
   navigates menus, verifies the player/health/game state, and enables lockstep
   on the same connection before returning control; a separate setup process
   leaves an uncontrolled frame gap and is not a comparable scenario start.
+- `--kill-non-bosses` clears ordinary enemies with the host `K` cheat on every
+  decision where **no boss is alive**, so a boss episode does not spend its
+  decisions on the waves in front of the encounter. The guard is mandatory:
+  `killInstantiatedEnemies` sweeps bosses too. Measurement-setup only — it
+  changes what the episode fought through, so do not compare a swept episode
+  against an unswept one.
 - `--restart-level 1..8` composes that path with the `--debugUtils` level
   hotkey, waits for spawn completion, verifies `$FFFF02`, then relocks and
   reseeds. Use it for repeatable later-round geometry, prop, and boss episodes.
@@ -573,7 +486,7 @@ See `src/sor_autoplay/memory_map.py` and
 - Agent modules: `agent/policy.py`, `context.py`, `skills.py`, `inference.py`,
   `expert.py`, `autoplanner.py`, `knowledge.py`, `fuzzy.py`, `arbiter.py`,
   `combat.py`, `pressure.py`, `stage.py`, `navigation.py`, `coop.py`,
-  `characters.py`, `controls.py`, `scene.py`, `twins.py`
+  `characters.py`, `controls.py`
 - Deterministic evaluator: `evaluation.py` (metrics, JSONL trace, acceptance
   criteria, injectable policy callable)
 

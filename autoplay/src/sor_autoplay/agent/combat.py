@@ -30,7 +30,6 @@ from ..world_map import (
     is_in_loot_camera,
 )
 from . import enemies as enemy_ai
-from . import scene as scene_ai
 from . import stage as stage_rules
 from .characters import CharacterProfile
 from .enemies import CounterPlan
@@ -482,23 +481,12 @@ def select_target(
         lane_access = falling(abs(dy), 8.0, 72.0)
         peril = 0.15
         reasons = [f"near={closeness:.2f}", f"lane={lane_access:.2f}"]
-        pair_twin = (
-            scene_ai.is_twin(entity)
-            and scene_ai.twin_composition(entities) is scene_ai.TwinComposition.PAIR
-        )
         if entity.kind == "projectile" or plan.kind == enemy_ai.ThreatKind.PROJECTILE:
             peril = 1.0
             reasons.append("ranged")
         if is_dangerous(phase):
-            # Pair twins: partner jump/grab is a *movement* problem (boss
-            # tactics), not a retarget cue. Mild peril only so focus-fire
-            # (lowest HP) still wins over thrashing onto the attacker.
-            if pair_twin:
-                peril = max(peril, 0.40)
-                reasons.append("attacking-pair-twin")
-            else:
-                peril = 1.0
-                reasons.append("attacking")
+            peril = 1.0
+            reasons.append("attacking")
         if entity.targets_player == my_seat:
             peril = max(peril, 0.82)
             reasons.append("targets-me")
@@ -515,11 +503,6 @@ def select_target(
         strike = 1.0 if can_punch(me, entity, profile, require_facing=False) else 0.0
         priority = enemy_ai.target_priority_membership(entity)
         reasons.append(f"family-priority={priority:.2f}")
-        twin_focus = scene_ai.twin_focus_bonus(
-            entity, entities, my_seat=my_seat
-        )
-        if twin_focus > 0.0:
-            reasons.append(f"twin-focus={twin_focus:.2f}")
         utility = (
             0.24 * closeness
             + 0.25 * peril
@@ -529,11 +512,10 @@ def select_target(
             + 0.03 * forward
             + 0.03 * strike
             + 0.22 * priority
-            + twin_focus
         )
         if entity.kind == "projectile":
             utility = max(utility, 0.98)
-        elif is_dangerous(phase) and not pair_twin:
+        elif is_dangerous(phase):
             utility = max(utility, 0.82)
         if entity.kind == "boss":
             utility = max(utility, 0.94)
@@ -561,23 +543,6 @@ def select_target(
         None,
     )
     if current is not None and best.entity.slot != current.entity.slot:
-        # Twins pair: stick to focus-fire unless challenger has strictly
-        # lower HP (or is a projectile). Partner DANGEROUS does not retarget.
-        if scene_ai.twin_pair_should_stick(
-            current.entity, best.entity, entities, me
-        ):
-            return current
-        # Explicit lower-HP twin: switch even when boss utility floors compress
-        # the score gap below switch_margin.
-        if (
-            scene_ai.twin_composition(entities) is scene_ai.TwinComposition.PAIR
-            and scene_ai.is_twin(current.entity)
-            and scene_ai.is_twin(best.entity)
-            and not best.entity.is_defeated
-            and scene_ai.twin_effective_hp(best.entity)
-            < scene_ai.twin_effective_hp(current.entity)
-        ):
-            return best
         challenger_dangerous = (
             is_dangerous(best.entity.combat_phase)
             or best.entity.kind == "projectile"
@@ -586,13 +551,6 @@ def select_target(
             is_dangerous(current.entity.combat_phase)
             or current.entity.kind == "projectile"
         )
-        # Do not let a non-focus twin's attack state override hysteresis.
-        if (
-            scene_ai.twin_composition(entities) is scene_ai.TwinComposition.PAIR
-            and scene_ai.is_twin(best.entity)
-            and scene_ai.is_twin(current.entity)
-        ):
-            challenger_dangerous = best.entity.kind == "projectile"
         challenger_priority = enemy_ai.target_priority_membership(best.entity)
         current_priority = enemy_ai.target_priority_membership(current.entity)
         material_priority_jump = challenger_priority >= current_priority + 0.12
@@ -640,7 +598,6 @@ def approach_vector(
     ``in_range`` here means **geometry for a grounded punch** (facing optional
     so approach still reports readiness before the turn completes).
 
-    Pass ``entities`` so twin pair/survivor stand-off uses the scene plan.
     """
 
     dx, dy, _old_in, plan = enemy_ai.adjust_approach(

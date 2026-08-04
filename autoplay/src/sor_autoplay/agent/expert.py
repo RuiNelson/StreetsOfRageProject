@@ -17,7 +17,7 @@ BACK_DEADZONE = 8.0
 
 
 # Crowd size that makes a vault→suplex throw preferable to front knees
-# (AISpec §1.4.2: suplex launches help clear multiple enemies).
+# (suplex launches help clear multiple enemies).
 CROWD_SUPLEX_THRESHOLD = 2
 
 
