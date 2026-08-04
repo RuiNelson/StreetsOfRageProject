@@ -127,6 +127,15 @@ OBJ_COMBO_STATE = 0x5D  # player combo / action chain
 OBJ_HELD_PTR = 0x5E  # word pointer to grabbed/held object (weapons / some grabs)
 OBJ_HELD_TYPE = 0x60  # nonzero while holding weapon or grab target type
 OBJ_BOSS_TACTICAL = 0x67  # later-boss tactical substate (and Abadede police latch)
+# Later bosses ($55-$58): $179F8 writes 1 here when the selected player is
+# unavailable (hurt/knockdown $5A-$5F or +$59/+$4B bit1 interaction flags).
+# The twins' leap-to-grab ($15BE8) arms only while this is nonzero.
+OBJ_BOSS_TARGET_UNAVAIL = 0x77
+# Later bosses: multi-purpose phase timer (jump arc, throw timeline, init latch).
+OBJ_BOSS_PHASE_TIMER = 0x78
+# Later bosses: mode flags. Twin bit 1 selects the grab/throw AI path; init
+# seeds it from pair role +$5D, and an unpaired survivor can set or clear it.
+OBJ_BOSS_MODE_FLAGS = 0x7B
 # Ordinary enemy: attacker/contact object pointer (low 16). Grabbed Signal had
 # +$3E = $B800 (P1) while player +$60 was still zero.
 OBJ_ATTACKER_PTR = 0x3E

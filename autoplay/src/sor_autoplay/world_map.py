@@ -159,6 +159,9 @@ class MapEntity:
     facing_left: bool = False  # ordinary +$09 bit1; player action bit0
     boss_dist_x: int = 0  # later-boss +$50 abs X to target
     boss_dist_lane: int = 0  # later-boss +$52 abs lane to target
+    mode_flags: int = 0  # later-boss +$7B; twin bit1 = grab/throw AI path
+    target_unavailable: int = 0  # later-boss +$77 from $179F8
+    phase_timer: int = 0  # later-boss +$78 jump/throw timeline counter
     combat_phase: CombatPhase = CombatPhase.UNKNOWN
 
     @property
@@ -426,6 +429,9 @@ def _entity_from_object(
     interaction = 0
     boss_dist_x = 0
     boss_dist_lane = 0
+    mode_flags = 0
+    target_unavailable = 0
+    phase_timer = 0
     phase = CombatPhase.UNKNOWN
 
     if style.kind == "player":
@@ -446,6 +452,9 @@ def _entity_from_object(
         pair_role = _u8(slot, mm.OBJ_PAIR_ROLE)
         boss_dist_x = _u16(slot, mm.OBJ_BOSS_DIST_X)
         boss_dist_lane = _u16(slot, mm.OBJ_BOSS_DIST_LANE)
+        mode_flags = _u8(slot, mm.OBJ_BOSS_MODE_FLAGS)
+        target_unavailable = _u8(slot, mm.OBJ_BOSS_TARGET_UNAVAIL)
+        phase_timer = _u8(slot, mm.OBJ_BOSS_PHASE_TIMER)
         # Target pointer location differs by boss generation.
         if type_id in (0x30, 0x35):
             target_ptr = _u16(slot, mm.OBJ_BESPOKE_TARGET)
@@ -503,6 +512,9 @@ def _entity_from_object(
         interaction=interaction,
         facing_left=facing_left,
         boss_dist_x=boss_dist_x,
+        mode_flags=mode_flags,
+        target_unavailable=target_unavailable,
+        phase_timer=phase_timer,
         boss_dist_lane=boss_dist_lane,
         combat_phase=phase,
     )

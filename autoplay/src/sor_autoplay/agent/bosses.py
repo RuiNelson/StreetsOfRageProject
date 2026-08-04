@@ -22,12 +22,17 @@ from dataclasses import dataclass
 from ..phases import is_dangerous
 from ..world_map import LANE_Y_MIN, MapEntity, lane_y_max_for_level
 from . import scene as scene_ai
+from . import twins as twins_ai
 
 
 SOUTHER_TYPE = 0x55
 TWIN_TYPE = scene_ai.TWIN_TYPE
 
-# Leave a commit lane by this much before free combat may re-enter.
+# Leave a commit lane by this much before free combat may re-enter. This is a
+# "am I in the path of a live attack" width, not the ROM throw band: widening
+# it to the band clearance made the pressure sidestep fire on 73 of 184 live
+# decisions and starved the fight. The destination is what must clear the
+# band, and every evade routes its goal through `twins_ai.safe_lane`.
 _TWIN_COMMIT_CLEARANCE = 28.0
 # Partner body intrusion — only when almost on top of us (not mid-range chase).
 # Wider windows stole every free-combat decision and starved attacks.
@@ -37,12 +42,18 @@ _TWIN_INTRUDE_Y = 12.0
 
 @dataclass(frozen=True, slots=True)
 class BossTactic:
-    """A safe movement waypoint, or an instruction to hold the safe lane."""
+    """A safe movement waypoint, or an instruction to hold the safe lane.
+
+    ``mandatory`` marks a ROM-gate denial (armed leap / throw band). Those
+    outrank free combat: the attack they prevent costs far more than the punch
+    they delay.
+    """
 
     goal_x: float
     goal_y: float
     hold: bool
     note: str
+    mandatory: bool = False
 
 
 def tactical_move(
@@ -81,6 +92,12 @@ def tactical_move(
     if composition is scene_ai.TwinComposition.ABSENT:
         return None
 
+    # Gate doctrine first: leaving the throw band and escaping an armed leap
+    # both outrank the older proximity heuristics.
+    gate = _twin_gate_tactic(me, entities, level_index=level_index)
+    if gate is not None:
+        return gate
+
     if composition is scene_ai.TwinComposition.PAIR:
         return _twin_pair_tactic(me, target, entities, level_index=level_index)
 
@@ -91,6 +108,51 @@ def tactical_move(
             attack_lane=float(target.world_y),
             level_index=level_index,
             family="twin survivor jump/grab",
+            clearance=_TWIN_COMMIT_CLEARANCE,
+            entities=entities,
+        )
+    return None
+
+
+def _twin_gate_tactic(
+    me: MapEntity,
+    entities: tuple[MapEntity, ...],
+    *,
+    level_index: int,
+) -> BossTactic | None:
+    """ROM-gate movement: escape an armed leap, then leave the throw band.
+
+    ``$159F8`` arms the approach twin's throw commit only at lane separation
+    `$10`–`$1F`, so the half-step diagonal is the single worst place to stand.
+    ``$15BE8`` arms the grab twin's leap only while we are staggered.
+    """
+
+    doctrine = twins_ai.scene(me, entities)
+    if not doctrine.active:
+        return None
+
+    if doctrine.retreat_from is not None:
+        goal_x, goal_y = twins_ai.retreat_goal(
+            me,
+            doctrine.retreat_from,
+            level_index=level_index,
+            entities=entities,
+        )
+        return BossTactic(
+            goal_x=goal_x,
+            goal_y=goal_y,
+            hold=False,
+            note="twins leap escape (staggered)",
+            mandatory=True,
+        )
+
+    if doctrine.lane_unsafe:
+        return BossTactic(
+            goal_x=float(me.world_x),
+            goal_y=twins_ai.safe_lane(me, entities, level_index=level_index),
+            hold=False,
+            note="twins leave throw band",
+            mandatory=True,
         )
     return None
 
@@ -119,6 +181,7 @@ def _twin_pair_tactic(
             level_index=level_index,
             family="twins pair surround",
             clearance=_TWIN_COMMIT_CLEARANCE,
+            entities=entities,
         )
 
     # 2) Any nearby jump/grab commit: leave *that* twin's lane if we share it.
@@ -131,6 +194,7 @@ def _twin_pair_tactic(
             level_index=level_index,
             family="twins pair pressure",
             clearance=_TWIN_COMMIT_CLEARANCE,
+            entities=entities,
         )
 
     # 3) Non-focus twin coplanar and close (grab setup): step off *their*
@@ -142,7 +206,8 @@ def _twin_pair_tactic(
             attack_lane=float(partner.world_y),
             level_index=level_index,
             family="twins pair isolate",
-            clearance=22.0,
+            clearance=_TWIN_COMMIT_CLEARANCE,
+            entities=entities,
         )
 
     # Focus alone committing is covered by (2). Idle focus → free combat.
@@ -179,6 +244,7 @@ def _evade_if_on_lane(
     level_index: int,
     family: str,
     clearance: float,
+    entities: tuple[MapEntity, ...] = (),
 ) -> BossTactic | None:
     """Sidestep when on the attack depth; return None when already clear.
 
@@ -195,6 +261,7 @@ def _evade_if_on_lane(
         level_index=level_index,
         family=family,
         clearance=clearance,
+        entities=entities,
     )
 
 
@@ -205,6 +272,7 @@ def _evade_attack_lane(
     level_index: int,
     family: str,
     clearance: float = 28.0,
+    entities: tuple[MapEntity, ...] = (),
 ) -> BossTactic:
     lane_gap = abs(float(me.world_y) - attack_lane)
     if lane_gap >= clearance - 4.0:
@@ -230,6 +298,11 @@ def _evade_attack_lane(
         goal_y = min(
             candidates,
             key=lambda lane: (abs(lane - float(me.world_y)), lane),
+        )
+    if entities:
+        # Never trade one twin's attack lane for the other's throw band.
+        goal_y = twins_ai.safe_lane(
+            me, entities, level_index=level_index, prefer=goal_y
         )
     return BossTactic(
         goal_x=float(me.world_x),

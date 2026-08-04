@@ -315,6 +315,32 @@ for tests/HUD.
      evade). Policy `_twin_attack_intent` before soft sidesteps. Never
      reengage into a twin commit lane. **SURVIVOR** → full pressure/grab.
      ROM has no enrage: one body left is much easier.
+   - **Twin ROM gate denial** (`agent/twins.py`, AISpec 9.4b): the twins draw
+     no RNG, so every attack is denied by geometry. Throw commit `$159F8`
+     needs lane `+$52` in **[$10,$20)** and X `+$50` < `$70` — the half-step
+     diagonal is the trigger, while coplanar is safe *and* is punch range.
+     Lane leaves must clear `$20` (`LANE_SAFE_CLEARANCE` 40; the old 28/22 px
+     sidesteps parked the player inside the window) and `safe_lane` clears the
+     band for **every** live twin. Leap-to-grab `$15BE8` arms only while the
+     player is staggered (`+$77 != 0` from `$179F8`) → break contact past `$90`
+     when hurt. Jump-in `$15C72` needs the player closing on the body → bait
+     the grab twin and let it chase in. Denial is `BossTactic.mandatory` and
+     outranks free combat. Grab mode is `+$7B` bit 1 (`pair_role` is only the
+     seed); at equal HP the grab twin is the focus because the approach twin
+     cannot promote while its partner lives.
+   - **Twin engagement (measured live, Round 5).** Two ordinary heuristics have
+     permanently-true preconditions against a *pair* and must be skipped for
+     type `$58`: the `back_exposed` → `grab_bias 0.9` back-shield rewrite (the
+     partner is always behind, so every in-range decision became a grab walk
+     that never attacked) and the jump-kick solver (`no_jump=true`; 6 kicks =
+     0 damage). The pair stand point stops re-deciding its side once inside
+     strike range, and focus/hysteresis prefer a **reachable** body at equal HP
+     (`TWIN_REACHABLE_DX` 56) — a mode tie-break onto the far grab twin left
+     the seat walking past a twin standing in punch range. `--no-police-special`
+     isolates melee in measurement. **Open defect:** melee damage against the
+     twins is still ~0 live; the remaining blocker is in target-selection
+     utility, not in `twins.py`. Reproduce in seconds with
+     `tests/test_twins.py::PolicyEngagementTests` rather than a live episode.
 10. Route around floor holes (stage 4), factory presses (stage 6), and hold
     the elevator (stage 7)
     - Stage-4 horizontal progression must turn into a persistent vertical
@@ -336,6 +362,8 @@ Map entities carry full combat RAM for agents:
 - `primary_state` (word +$30): ordinary `$0100` normal / `$0300` knockdown /
   `$0500` grabbed / `$0600` death / `$0700` blocked
 - `tactical` (boss +$67), `pair_role` (+$5D), `target_ptr` (who they hunt)
+- `mode_flags` (later-boss +$7B; twin bit1 = grab AI), `target_unavailable`
+  (+$77 from `$179F8`), `phase_timer` (+$78 jump/throw timeline)
 - `boss_dist_x` / `boss_dist_lane` (later-boss geometry)
 - `family_state` (ordinary `+$52`; Jack bit0 is weapon attached)
 - `combat_phase` decoded in `phases.py` → map outline colours + agent punish/evade
@@ -414,6 +442,11 @@ hurt clear the walk. Progress / approach / loot only *set or refresh* the goal
   `boss_stall_steps` begins after eight consecutive input-ready `guard lane`
   decisions against a blocking boss; enforce `--max-boss-stalls 0` to catch
   the Antonio cross-lane fixed point without rejecting a brief guard.
+  Twin doctrine is measurable: `twin_throw_band_steps` and
+  `twin_leap_exposure_steps` count decisions spent inside an armed `$159F8` /
+  `$15BE8` window and `twins_defeated` counts finished bodies. A Round-5
+  episode enforces `--max-twin-throw-band 0 --max-twin-leap-exposure 0
+  --min-twins-defeated 2`.
   Special-resource and stage mechanics are first-class metrics:
   `special_calls`, `wasteful_special_calls`, `boss_special_opportunities`,
   `missed_boss_special_calls`, `elevator_horizontal_progress_steps`,
@@ -507,7 +540,7 @@ See `src/sor_autoplay/memory_map.py` and
 - Agent modules: `agent/policy.py`, `context.py`, `skills.py`, `inference.py`,
   `expert.py`, `autoplanner.py`, `knowledge.py`, `fuzzy.py`, `arbiter.py`,
   `combat.py`, `pressure.py`, `stage.py`, `navigation.py`, `coop.py`,
-  `characters.py`, `controls.py`
+  `characters.py`, `controls.py`, `scene.py`, `twins.py`
 - Deterministic evaluator: `evaluation.py` (metrics, JSONL trace, acceptance
   criteria, injectable policy callable)
 

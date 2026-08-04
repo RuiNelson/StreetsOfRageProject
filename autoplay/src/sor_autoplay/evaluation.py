@@ -34,6 +34,7 @@ from .agent.grabs import (
     held_enemy_entity,
 )
 from .agent.knowledge import Relation, build_tactical_graph
+from .agent import twins as twins_ai
 from .phases import should_ignore_as_target
 from .state import GameSnapshot, read_snapshot
 from .world_map import MapEntity
@@ -172,6 +173,11 @@ class EpisodeMetrics:
     loot_under_threat_steps: int = 0
     boss_progress_steps: int = 0
     boss_stall_steps: int = 0
+    # Onihime/Yasha ($58) doctrine: decisions spent inside an armed ROM commit
+    # window, and bodies actually finished.
+    twin_throw_band_steps: int = 0
+    twin_leap_exposure_steps: int = 0
+    twins_defeated: int = 0
     elevator_horizontal_progress_steps: int = 0
     special_calls: int = 0
     wasteful_special_calls: int = 0
@@ -187,6 +193,8 @@ class EpisodeMetrics:
     _last_x: int | None = field(default=None, repr=False)
     _zero_health_foes: set[str] = field(default_factory=set, repr=False)
     _boss_stall_streak: int = field(default=0, repr=False)
+    _twin_slots_seen: set[str] = field(default_factory=set, repr=False)
+    _twin_slots_dead: set[str] = field(default_factory=set, repr=False)
     _last_enemy_grab_signature: tuple[int, bool] | None = field(
         default=None,
         repr=False,
@@ -552,6 +560,8 @@ class EpisodeMetrics:
             else:
                 self._boss_stall_streak = 0
 
+            self._record_twin_exposure(before_entity, before.world_map.entities)
+
         lives_lost = max(0, before_player.lives - after_player.lives)
         self.lives_lost += lives_lost
         damage_taken = 0
@@ -641,6 +651,44 @@ class EpisodeMetrics:
         self.total_reward += outcome.reward
         return outcome
 
+    def _record_twin_exposure(self, me, entities) -> None:
+        """Count decisions spent inside an armed Onihime/Yasha commit window.
+
+        These are pure doctrine metrics: `$159F8` cannot fire outside its lane
+        band and `$15BE8` cannot fire against an unstaggered player, so a
+        competent seat drives both counters to zero while still killing both
+        bodies (``twins_defeated``).
+        """
+
+        live = twins_ai.live_twins(entities)
+        for twin in live:
+            self._twin_slots_seen.add(twin.slot)
+        for twin in entities:
+            # Count only the ROM's signed lethal health word. `is_defeated`
+            # also accepts the DEATH combat phase, which a live handoff showed
+            # firing transiently and reporting two kills while both bodies were
+            # still at 22 HP.
+            if (
+                twins_ai.is_twin(twin)
+                and twin.health is not None
+                and twin.health >= 0x8000
+                and twin.slot in self._twin_slots_seen
+                and twin.slot not in self._twin_slots_dead
+            ):
+                self._twin_slots_dead.add(twin.slot)
+                self.twins_defeated += 1
+        if not live:
+            return
+        threats = tuple(twins_ai.assess(me, twin) for twin in live)
+        if any(threat.can_throw_commit for threat in threats):
+            self.twin_throw_band_steps += 1
+        # Exposure is only a policy failure when the seat could have moved.
+        # Counting hitstun frames measured the ROM, not the agent.
+        if player_can_start_ground_action(me) and any(
+            threat.can_leap_grab for threat in threats
+        ):
+            self.twin_leap_exposure_steps += 1
+
     def to_dict(self) -> dict[str, object]:
         return {
             "player": self.player_index,
@@ -680,6 +728,9 @@ class EpisodeMetrics:
             "loot_under_threat_steps": self.loot_under_threat_steps,
             "boss_progress_steps": self.boss_progress_steps,
             "boss_stall_steps": self.boss_stall_steps,
+            "twin_throw_band_steps": self.twin_throw_band_steps,
+            "twin_leap_exposure_steps": self.twin_leap_exposure_steps,
+            "twins_defeated": self.twins_defeated,
             "elevator_horizontal_progress_steps": (
                 self.elevator_horizontal_progress_steps
             ),
@@ -726,6 +777,9 @@ class EvaluationCriteria:
     max_loot_under_threat: int | None = None
     max_boss_progress: int | None = None
     max_boss_stalls: int | None = None
+    max_twin_throw_band: int | None = None
+    max_twin_leap_exposure: int | None = None
+    min_twins_defeated: int | None = None
     max_elevator_horizontal_progress: int | None = None
     max_wasteful_specials: int | None = None
     max_missed_boss_specials: int | None = None
@@ -813,6 +867,24 @@ class EvaluationCriteria:
                 metrics.boss_stall_steps,
                 "boss-stall steps after grace window",
                 "at most",
+            ),
+            (
+                self.max_twin_throw_band,
+                metrics.twin_throw_band_steps,
+                "twin throw-band steps ($159F8 window)",
+                "at most",
+            ),
+            (
+                self.max_twin_leap_exposure,
+                metrics.twin_leap_exposure_steps,
+                "twin leap-grab exposure steps ($15BE8 window)",
+                "at most",
+            ),
+            (
+                self.min_twins_defeated,
+                metrics.twins_defeated,
+                "twins defeated",
+                "at least",
             ),
             (
                 self.max_elevator_horizontal_progress,
@@ -975,6 +1047,7 @@ class LockstepEvaluator:
         agent_config: AgentConfig | None = None,
         criteria: EvaluationCriteria | None = None,
         trace_sink: Callable[[EvaluationStep], None] | None = None,
+        allow_police_special: bool = True,
     ) -> None:
         if player_index not in (1, 2):
             raise ValueError("player_index must be 1 or 2")
@@ -994,10 +1067,12 @@ class LockstepEvaluator:
         self.step_timeout_ms = step_timeout_ms
         self.criteria = criteria or EvaluationCriteria()
         self.trace_sink = trace_sink
+        self.allow_police_special = allow_police_special
         if policy is None:
             config = agent_config or AgentConfig(
                 p1_enabled=player_index == 1,
                 p2_enabled=player_index == 2,
+                allow_police_special=allow_police_special,
             )
             memory = AgentState()
             self.policy = lambda snapshot: decide_actions(snapshot, config, memory)
@@ -1225,7 +1300,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-unreachable-enemy-stalls", type=int)
     parser.add_argument("--max-loot-under-threat", type=int)
     parser.add_argument("--max-boss-progress", type=int)
+    parser.add_argument(
+        "--no-police-special",
+        action="store_true",
+        help="suppress every special spend (isolates melee competence)",
+    )
     parser.add_argument("--max-boss-stalls", type=int)
+    parser.add_argument("--max-twin-throw-band", type=int)
+    parser.add_argument("--max-twin-leap-exposure", type=int)
+    parser.add_argument("--min-twins-defeated", type=int)
     parser.add_argument("--max-elevator-horizontal-progress", type=int)
     parser.add_argument("--max-wasteful-specials", type=int)
     parser.add_argument("--max-missed-boss-specials", type=int)
@@ -1266,6 +1349,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_loot_under_threat=args.max_loot_under_threat,
         max_boss_progress=args.max_boss_progress,
         max_boss_stalls=args.max_boss_stalls,
+        max_twin_throw_band=args.max_twin_throw_band,
+        max_twin_leap_exposure=args.max_twin_leap_exposure,
+        min_twins_defeated=args.min_twins_defeated,
         max_elevator_horizontal_progress=args.max_elevator_horizontal_progress,
         max_wasteful_specials=args.max_wasteful_specials,
         max_missed_boss_specials=args.max_missed_boss_specials,
@@ -1299,6 +1385,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 step_timeout_ms=args.step_timeout_ms,
                 criteria=criteria,
                 trace_sink=trace_sink,
+                allow_police_special=not args.no_police_special,
             ).run()
         report_payload = report.to_dict()
         if scenario is not None:

@@ -556,7 +556,7 @@ def select_target(
         # Twins pair: stick to focus-fire unless challenger has strictly
         # lower HP (or is a projectile). Partner DANGEROUS does not retarget.
         if scene_ai.twin_pair_should_stick(
-            current.entity, best.entity, entities
+            current.entity, best.entity, entities, me
         ):
             return current
         # Explicit lower-HP twin: switch even when boss utility floors compress

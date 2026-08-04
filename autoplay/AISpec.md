@@ -800,16 +800,58 @@ toolkit** (punch / jump-kick / grab / rear); partner jump/grab commits are
 **Critical:** chase (`+$67=$01`) must **not** be DANGEROUS. A prior generic
 `t != 0 → ATTACKING` rule made the agent perpetual-evade and never attack.
 
+#### ROM commit gates (`agent/twins.py`) — normative
+
+The twins draw **no RNG**. Every attack is gated on player geometry and player
+state, so the doctrine is **deny the gate**, not react to the animation. Gates
+verified in `output/sor.asm`:
+
+| Gate | ROM | Opens when |
+| --- | --- | --- |
+| Throw commit (`+$30` → `$02`) | `$159F8` | player available (`+$77 == 0`) **and** lane `+$52` ∈ [`$10`,`$20`) **and** X `+$50` < `$70` |
+| Jump-attack arm | `$15A64` | X < `$60` — distance only, cannot be denied by lane |
+| Leap-to-grab arm | `$15BE8` | player **staggered** (`+$77 != 0`) **and** X < `$90` |
+| Grab jump-in | `$15C72` | X < `$40`, or `$40`–`$70` with player grounded, **closing and facing** |
+| Grab finalize | `$15B2A` | contact, player available, at least one body grounded |
+
+`$179F8` sets `+$77 = 1` for a player in hurt/knockdown `$5A`–`$5F` or holding
+the `+$59`/`+$4B` bit-1 interaction flags. `+$50`/`+$52` are the ROM's own
+absolute deltas, so the thresholds apply directly to world coordinates.
+
+Grab mode is `+$7B` bit 1 (`is_grab_mode`), seeded from pair role `+$5D` and
+mutable at runtime; `pair_role == 2` is only the fallback when `+$7B` reads
+zero.
+
+Four normative rules follow:
+
+1. **Never stand in the throw band.** Lane separation `$10`–`$1F` from any live
+   twin inside `$70` on X is the single worst position in the fight. Coplanar
+   (< `$10`) is *safer* than a half-step sidestep **and** is punch range —
+   fight coplanar. Any lane leave must clear `$20`; `LANE_SAFE_CLEARANCE` is
+   **40** px, and a lane is only safe when it clears the band for **every**
+   live twin (`safe_lane`). This supersedes the old 28/22 px sidesteps, which
+   parked the player exactly inside the trigger.
+2. **Bait the grab twin, never walk into it.** `$15C72` needs the player
+   closing on it, so at `$40`–`$70` the agent holds the lane and lets it chase
+   in — `+$67 = $01` carries no attack. Overridden when the body is punishable.
+3. **Break contact while staggered.** `$15BE8` arms only against a hurt player,
+   so a hurt seat retreats past `$90` from every grab-mode twin before
+   re-engaging (`retreat_goal`).
+4. **Gate denial outranks damage.** A landed throw costs ~40 % of the health
+   bar; a delayed punch costs one decision. `BossTactic.mandatory` marks the
+   band exit and the leap escape, and policy walks them **before**
+   `_twin_attack_intent`.
+
 #### Pair plan (both present)
 
 | Field | Value | Rationale |
 | ----- | ----- | --------- |
 | range_scale | **1.0** | Stand inside measured punch boxes |
-| jump_bias | **0.55** | Jump-kick mid range / pack |
+| jump_bias | **0.15** | Measured: 6 jump kicks vs twins = 0 damage |
 | grab_bias | **0.35** | &lt;0.5 so punches win in-range; grabs via close walk / back-shield |
 | rear_bias | **0.55** | Rear B+C when twin is behind |
 | sidestep | **true** | Lane leave only on real commits |
-| no_jump | **false** | Full C→B toolkit enabled |
+| no_jump | **true** | Jumping surrenders the grounded punch and denies no gate |
 | priority | 2.9 | Slightly above static twin |
 | note | `twins pair — focus-fire full mix (punch/jump/grab/rear)` | |
 
@@ -822,6 +864,14 @@ Uses `twin_effective_hp` (defeated/lethal → `0x7FFF`; `health is None` → bas
 | unique lowest HP among live twins | **+0.18** |
 | tied for lowest HP (e.g. both full) | **+0.10** |
 | higher HP than another live twin | **0** |
+
+**No mode tie-break.** Preferring the grab twin at equal HP is ROM-correct in
+theory (while linked it is the only grab source) but measured worse: it dragged
+the target onto the far body while the near twin stood in punch range, and the
+seat walked past it. `twins.scene` orders focus by HP, then **distance**, then
+grab mode. `twin_pair_should_stick` likewise releases the lock for a challenger
+inside `TWIN_REACHABLE_DX` (**56** px) when the current focus is more than
+twice as far.
 
 **Not scored:** DANGEROUS phase, `pair_role`, `targets_player`. Those used to
 thrash between bodies; partner commits are movement-only (§ below).
@@ -843,15 +893,24 @@ Boss movement while **PAIR** (`bosses.tactical_move` / `_twin_pair_tactic`):
 Threats only — and only **true** DANGEROUS commits (see phase table). Chase
 walk is NORMAL and must not trigger pressure evade.
 
+0. **Mandatory gate denial first** (`_twin_gate_tactic`, both compositions):
+   staggered with a grab twin inside `$90` → `twins leap escape (staggered)`;
+   otherwise standing in any live twin's armed throw band → `twins leave throw
+   band`. Both set `mandatory=True` and run before free combat.
 1. Bracket on X **and** still on shared depth → sidestep; note `twins pair surround`. Clear → **None**.
-2. Nearby twin with real commit **and** on that depth (clearance **28**) → sidestep; note `twins pair pressure`. Clear → **None** (never hold-freeze).
+2. Nearby twin with real commit **and** on that depth (clearance **40**) → sidestep; note `twins pair pressure`. Clear → **None** (never hold-freeze).
 3. Non-focus twin almost on top of player (ΔX≤**36**, ΔY≤**12**) → sidestep partner; note `twins pair isolate`.
 4. Else **None**.
 
-Policy free combat (`_twin_attack_intent`) runs **before** soft sidesteps and
-emits the full mix with notes `twin punch` / `twin jump` / `twin grab` /
-`twin rear` / `twin face`. Never reengage into a twin commit lane
-(`enemy_attack_committed` reengage is disabled for type `$58`).
+Every sidestep destination is filtered through `safe_lane`, so leaving one
+twin's lane can never land inside the other's throw band. Souther keeps his own
+**28** px lane break — the band is a type-`$58` mechanic.
+
+Policy free combat (`_twin_attack_intent`) runs **after** mandatory gate denial
+but **before** soft sidesteps, and emits the full mix with notes `twin punch` /
+`twin jump` / `twin grab` / `twin rear` / `twin face` / `twin bait walk-in`.
+Never reengage into a twin commit lane (`enemy_attack_committed` reengage is
+disabled for type `$58`).
 
 Stand point while PAIR: park on the side of the focus **opposite** the partner
 (`_twin_partner_side`).
@@ -869,7 +928,36 @@ Stand point while PAIR: park on the side of the focus **opposite** the partner
 | priority | 2.6 | |
 | note | `twin survivor — full pressure (grab/punch/jump)` | |
 
-Boss movement while **SURVIVOR**: only when focused twin is DANGEROUS → evade attack lane; note `twin survivor jump/grab`. Otherwise free combat owns the tree (grab_walk / punch via survivor plan).
+Boss movement while **SURVIVOR**: mandatory gate denial still applies — a lone
+twin can promote to grab mode. Otherwise only when the focused twin is
+DANGEROUS → evade attack lane at clearance **40**; note `twin survivor
+jump/grab`. Else free combat owns the tree (grab_walk / punch via survivor plan).
+
+#### Twin engagement rules (measured)
+
+Two ordinary-enemy heuristics must **not** apply to a live twin pair, because a
+second boss makes their preconditions permanently true:
+
+1. **Back-shield grab rewrite** (`back_exposed` → `grab_bias 0.9`): the partner
+   is always behind, so every in-range decision became a body-to-body grab walk
+   that never attacked. Skipped for type `$58`.
+2. **Jump-kick solver**: 6 kicks vs the twins landed 0 damage while the solver
+   kept selecting them whenever both bodies lined up (`no_jump=true`).
+
+The pair stand point also stops re-deciding its side once inside strike range —
+recomputing "opposite the partner" every decision made the seat orbit the focus.
+
+`--no-police-special` (`AgentConfig.allow_police_special`) suppresses every
+special spend; it exists to isolate melee competence in measurement, since the
+special's flat 10-per-boss otherwise masks whether melee lands at all.
+
+#### Twin evaluation metrics
+
+`evaluation.py` measures the doctrine directly: `twin_throw_band_steps` and
+`twin_leap_exposure_steps` count decisions spent inside an armed `$159F8` /
+`$15BE8` window, and `twins_defeated` counts bodies actually finished. A
+competent Round-5 episode enforces
+`--max-twin-throw-band 0 --max-twin-leap-exposure 0 --min-twins-defeated 2`.
 
 Module: `plan_for(entity, entities=…)` applies the overlay; `select_target` and approach pass the full entity tuple.
 

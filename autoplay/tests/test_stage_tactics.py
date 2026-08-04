@@ -328,12 +328,13 @@ class BossTacticTests(unittest.TestCase):
 
     def test_twin_pair_idle_nearby_does_not_freeze_combat(self) -> None:
         """Idle twins at mid range must not emit a hold/isolate freeze."""
-        # Player far from both bodies — free combat should own punches.
+        # Coplanar with the focus (no $159F8 band) and the partner is beyond
+        # the $70 commit range — no ROM gate is armed, so free combat owns it.
         me = _entity(
             kind="player",
             type_id=1,
             world_x=100,
-            world_y=40,
+            world_y=64,
             slot="P1",
         )
         a = _entity(
@@ -346,7 +347,7 @@ class BossTacticTests(unittest.TestCase):
         b = _entity(
             kind="boss",
             type_id=0x58,
-            world_x=200,
+            world_x=260,
             world_y=80,
             slot="B1",
         )
@@ -367,11 +368,13 @@ class BossTacticTests(unittest.TestCase):
             world_y=64,
             slot="P1",
         )
+        # Focus sits outside the throw band (Δlane 32) so the isolate rule is
+        # what fires, not the mandatory band exit.
         focus = _entity(
             kind="boss",
             type_id=0x58,
             world_x=170,
-            world_y=40,
+            world_y=96,
             slot="B0",
         )
         partner = _entity(

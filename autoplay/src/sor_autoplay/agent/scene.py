@@ -22,6 +22,7 @@ from __future__ import annotations
 from enum import Enum, auto
 
 from ..world_map import MapEntity
+from . import twins as twins_ai
 from .enemies import CounterPlan, ThreatKind
 
 
@@ -35,6 +36,10 @@ TWIN_NEAR_Y = 36.0
 # Base boss health from ``$17EDC`` (before difficulty transforms). Used when a
 # twin has no readable health word so equal-unknown twins stay comparable.
 TWIN_BASE_HEALTH = 0x20
+
+# A body this close is worth switching to at equal HP: it is inside every
+# character's measured punch box (54-68 px).
+TWIN_REACHABLE_DX = 56.0
 
 # Utility cap for twin_focus_bonus (AISpec §9.4b).
 TWIN_FOCUS_BONUS_CAP = 0.18
@@ -51,17 +56,22 @@ class TwinComposition(Enum):
 # Pair plan: focus-fire lowest HP with the **full** attack toolkit.
 # range_scale ≤1.0 keeps stand-off inside measured punch boxes.
 # jump/grab/rear enabled — a prior no_jump + grab_bias≈0 plan never mixed.
+# no_jump: measured live — 6 jump kicks against the twins landed 0 damage
+# while the solver kept selecting them whenever both bodies lined up.
+# jump_bias stays < 0.5: coplanar grounded punches are the damage engine
+# (they also deny $159F8), and >= 0.5 parked the stand point at jump-kick
+# range, out of punch reach. A live handoff scored 0 melee damage there.
 # grab_bias stays below 0.5 so punches still win in-range (Nora-level grab
 # would starve B punches); back-shield and close walk still elevate grabs.
 _TWIN_PAIR_PLAN = CounterPlan(
     ThreatKind.JUMP_GRAB,
     range_scale=1.0,
     prefer_lane_delta=0.0,
-    jump_bias=0.55,
+    jump_bias=0.15,
     rear_bias=0.55,
     grab_bias=0.35,
     sidestep=True,
-    no_jump=False,
+    no_jump=True,
     priority=2.9,
     note="twins pair — focus-fire full mix (punch/jump/grab/rear)",
 )
@@ -71,11 +81,11 @@ _TWIN_SURVIVOR_PLAN = CounterPlan(
     ThreatKind.JUMP_GRAB,
     range_scale=1.0,
     prefer_lane_delta=0.0,
-    jump_bias=0.45,
+    jump_bias=0.15,
     rear_bias=0.45,
     grab_bias=0.55,
     sidestep=True,
-    no_jump=False,
+    no_jump=True,
     priority=2.6,
     note="twin survivor — full pressure (grab/punch/jump)",
 )
@@ -178,6 +188,10 @@ def twin_focus_bonus(
     elif entity_hp == min_other:
         # Tied for lowest (typical full-health open): mild preference so
         # geometry / stickiness can break the tie without splitting fire.
+        # Flat: a mode-based tie-break here (grab twin first) is ROM-correct
+        # in theory but measured worse — it pulled the target onto the far
+        # body while the near twin stood in punch range, and the seat walked
+        # past it. Proximity utility decides equal-HP ties.
         bonus = 0.10
     # Higher-HP twin gets 0 — never pull fire off a wounded focus.
     return min(TWIN_FOCUS_BONUS_CAP, bonus)
@@ -187,6 +201,7 @@ def twin_pair_should_stick(
     current: MapEntity,
     challenger: MapEntity,
     entities: tuple[MapEntity, ...] | list[MapEntity],
+    me: MapEntity | None = None,
 ) -> bool:
     """True when pair focus-fire must keep ``current`` over ``challenger``.
 
@@ -205,7 +220,19 @@ def twin_pair_should_stick(
         return False
 
     if is_twin(challenger) and not challenger.is_defeated:
-        return twin_effective_hp(challenger) >= twin_effective_hp(current)
+        if twin_effective_hp(challenger) < twin_effective_hp(current):
+            return False
+        # Equal HP is the whole fight (both open at $20), and pure stickiness
+        # locked the seat onto a body that had walked away while its partner
+        # stood in punch range. Live: 53 decisions inside punch geometry, zero
+        # attacks. Release the lock for a challenger that is reachable now and
+        # clearly closer than the current focus.
+        if me is not None:
+            here = abs(float(challenger.world_x) - float(me.world_x))
+            there = abs(float(current.world_x) - float(me.world_x))
+            if here <= TWIN_REACHABLE_DX and there > here * 2.0:
+                return False
+        return True
 
     if challenger.kind == "projectile":
         return False

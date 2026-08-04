@@ -27,6 +27,7 @@ from . import (
     pressure,
     scene as scene_ai,
     stage,
+    twins as twins_ai,
 )
 from .arbiter import GoalKind, solve_goal
 from .context import DecisionContext, PlayerMode, SeatMemory, build_decision_context
@@ -79,6 +80,10 @@ class AgentConfig:
     p2_enabled: bool = False
     hold_frames: int = 2
     police_threshold: float = _POLICE_THRESHOLD
+    # Diagnostic: suppress every police-special spend. The special is worth 10
+    # damage to each living boss and is normally correct against the pair, so
+    # this is for isolating melee competence in measurement, not doctrine.
+    allow_police_special: bool = True
 
     def enabled_for(self, player_index: int) -> bool:
         if player_index == 1:
@@ -390,7 +395,7 @@ def _decide_one(
     if planned is not None:
         return planned
 
-    if pressure.should_call_police(
+    if config.allow_police_special and pressure.should_call_police(
         ctx.press,
         player_snap.specials,
         threshold=config.police_threshold,
@@ -854,7 +859,10 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             low_health=low_hp,
             entities=snapshot.world_map.entities,
         )
-        if back_exposed and grabbable:
+        # Never for a twin: the partner is permanently behind, so this rewrote
+        # the pair plan to grab_bias 0.9 on every decision and the seat walked
+        # body-to-body forever instead of punching (live: 0 melee damage).
+        if back_exposed and grabbable and not scene_ai.is_twin(foe):
             plan = dc_replace(
                 plan,
                 grab_bias=max(plan.grab_bias, 0.9),
@@ -970,12 +978,16 @@ def _decide_free(ctx: DecisionContext) -> Intent:
 
         # Secure the back first: walk into a legal grab on the front target so
         # the hold can convert to crossover→suplex when a rear hostile exists.
+        # Not for a live twin pair: the partner is *always* behind, so this
+        # branch latched a permanent grab walk that never attacked. §9.4b owns
+        # twin geometry.
         if (
             back_exposed
             and grabbable
             and not me.is_hurt
             and foe.kind in ("enemy", "boss")
             and phase != CombatPhase.GRABBED
+            and not scene_ai.is_twin(foe)
         ):
             if (
                 abs_dx <= 24.0
@@ -1035,6 +1047,21 @@ def _decide_free(ctx: DecisionContext) -> Intent:
         )
         is_twin_foe = scene_ai.is_twin(foe)
         if is_twin_foe:
+            # ROM-gate denial outranks damage: a landed twin throw costs ~40%
+            # of the health bar, a delayed punch costs one decision.
+            if boss_tactic is not None and boss_tactic.mandatory:
+                return _walk_toward(
+                    walk,
+                    me,
+                    goal_x=boss_tactic.goal_x,
+                    goal_y=boss_tactic.goal_y,
+                    reason=boss_tactic.note,
+                    snapshot=snapshot,
+                    advice=advice,
+                    nav=nav,
+                    eps_x=3.0,
+                    eps_y=4.0,
+                )
             twin_intent = _twin_attack_intent(
                 me=me,
                 foe=foe,
@@ -1795,7 +1822,10 @@ def _twin_attack_intent(
         profile,
         tick=ctx.tick + player_index * 3,
         in_range=punch_geom,
-        crowd=max(press.enemy_count, 2),  # pair counts as crowd for jump bias
+        # Do NOT inflate this to 2 for the pair: `crowd >= 2` satisfies
+        # attack_mix's single-target jump rule on every decision, which parked
+        # the seat at jump-kick range and scored zero melee damage live.
+        crowd=press.enemy_count,
         phase_name=phase_name,
         band=band,
         behind=behind and combat.rear_in_band(abs_dx, profile),
@@ -1803,7 +1833,11 @@ def _twin_attack_intent(
         facing_ok=facing_ok,
         can_jump=jump_ok and not plan.no_jump,
         grabbable=grabbable,
-        back_exposed=back_exposed,
+        # NOT back_exposed: in a two-body fight one twin is *always* behind, so
+        # this permanently raised grab_pressure to 0.9 and turned every
+        # in-range decision into a back-shield grab walk that never attacked.
+        # §9.4b already owns partner geometry through the ROM gates.
+        back_exposed=False,
         jump_hits=jump_hits,
         jump_score=jump_score,
     )
@@ -1816,6 +1850,19 @@ def _twin_attack_intent(
     if is_dangerous(phase) and lane_ok and abs_dx <= profile.strike_range + 28:
         if mix not in ("rear",):
             return None
+
+    # $15C72 arms the grab twin's jump-in only against a player closing on it.
+    # Stand the lane instead and let it walk in: chase (`+$67 = $01`) carries no
+    # attack, so it arrives inside punch range with nothing armed.
+    doctrine = twins_ai.scene(me, snapshot.world_map.entities)
+    hold_target = doctrine.hold_for_walk_in
+    if hold_target is not None and hold_target.slot == foe.slot and not punch_ok:
+        walk.clear()
+        return Intent(
+            left=face_left,
+            right=face_right_now,
+            note=f"twin bait walk-in {foe.label} [{tag}]",
+        )
 
     def _ally_block(kind: str, *, rear: bool = False) -> Intent | None:
         if coop.attack_would_hit_ally(
@@ -1943,6 +1990,25 @@ def _twin_attack_intent(
             note=f"twin face {foe.label} [{tag}]",
         )
 
+    # Terminal approach: converge on coplanar punch geometry. Coplanar denies
+    # $159F8 and is the only range that damages, so an idle focus is always
+    # closed on rather than handed back to the generic walker.
+    if not is_dangerous(phase) and not punch_geom:
+        engage = max(22.0, profile.strike_range - 6.0)
+        side = -1.0 if float(foe.world_x) > float(me.world_x) else 1.0
+        return _walk_toward(
+            walk,
+            me,
+            goal_x=float(foe.world_x) + side * engage,
+            goal_y=float(foe.world_y),
+            reason=f"twin engage {foe.label} [{tag}]",
+            snapshot=snapshot,
+            advice=advice,
+            nav=nav,
+            eps_x=4.0,
+            eps_y=5.0,
+        )
+
     return None
 
 
@@ -1978,8 +2044,12 @@ def _stand_point(
         and scene_ai.twin_composition(entities) is scene_ai.TwinComposition.PAIR
     ):
         partner_side = _twin_partner_side(foe, entities)
-        if partner_side is not None:
-            # Stand opposite the partner relative to the focus body.
+        strike = profile.strike_range * plan.range_scale
+        already_engaged = abs(float(foe.world_x) - float(me.world_x)) <= strike
+        if partner_side is not None and not already_engaged:
+            # Stand opposite the partner relative to the focus body — but only
+            # while still approaching. Re-deciding the side inside strike range
+            # made the seat orbit the focus and never punch.
             side = -partner_side
     if me.is_holding_weapon and W.is_weapon_type(me.held_type):
         dist = W.approach_stand_dx(me.held_type, profile)

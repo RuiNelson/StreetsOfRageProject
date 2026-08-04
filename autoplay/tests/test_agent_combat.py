@@ -273,28 +273,38 @@ class EnemyCounterTests(unittest.TestCase):
             twin_composition((a, b)), TwinComposition.PAIR
         )
         pair = plan_for(a, (a, b))
-        self.assertFalse(pair.no_jump)
-        self.assertGreaterEqual(pair.jump_bias, 0.5)
+        # Measured live: 6 jump kicks vs the twins landed 0 damage while the
+        # solver kept picking them whenever both bodies lined up. Jumping also
+        # surrenders the grounded punch, which is the only reliable damage.
+        self.assertTrue(pair.no_jump)
+        # Grounded coplanar punches are the damage engine: they deny $159F8
+        # and are the only reliable hit. jump_bias must stay under every
+        # mid-range jump rule in attack_mix (0.20 / 0.25) so the seat closes
+        # to punch range instead of parking in the kick window.
+        self.assertLess(pair.jump_bias, 0.20)
         self.assertGreaterEqual(pair.rear_bias, 0.5)
         self.assertLess(pair.grab_bias, 0.5)  # punches still win in-range
         self.assertLessEqual(pair.range_scale, 1.0)
         self.assertIn("pair", pair.note)
         self.assertIn("focus-fire", pair.note)
-        # Mid-range jump window must request a jump kick, not wait.
-        self.assertEqual(
-            attack_mix(
-                pair,
-                PROFILES[0],
-                in_range=False,
-                band="jump",
-                can_jump=True,
-                lane_ok=True,
-                facing_ok=True,
-                jump_hits=1,
-                jump_score=1.5,
-            ),
-            "jump",
-        )
+        # No jump buys anything against the twins, not even a multi-hit solve:
+        # walk in and punch instead.
+        for hits, score in ((1, 1.5), (2, 1.8)):
+            self.assertEqual(
+                attack_mix(
+                    pair,
+                    PROFILES[0],
+                    in_range=False,
+                    band="jump",
+                    can_jump=True,
+                    lane_ok=True,
+                    facing_ok=True,
+                    jump_hits=hits,
+                    jump_score=score,
+                ),
+                "wait",
+                f"jump_hits={hits}",
+            )
         self.assertEqual(
             attack_mix(
                 pair,
@@ -322,7 +332,7 @@ class EnemyCounterTests(unittest.TestCase):
 
         self.assertEqual(twin_composition((a,)), TwinComposition.SURVIVOR)
         survivor = plan_for(a, (a,))
-        self.assertFalse(survivor.no_jump)
+        self.assertTrue(survivor.no_jump)
         self.assertGreaterEqual(survivor.grab_bias, 0.45)
         self.assertIn("survivor", survivor.note)
         self.assertEqual(
