@@ -66,6 +66,7 @@ class SeatMemory:
     phase: int = 0
     last_note: str = ""
     attack_cd: int = 0
+    combo_hits: int = 0  # hits landed in the current unbroken combo string
     grab: GrabMemory = field(default_factory=GrabMemory)
     enemy_grab_escape: EnemyGrabEscapeMemory = field(
         default_factory=EnemyGrabEscapeMemory

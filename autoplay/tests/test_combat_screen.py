@@ -1145,40 +1145,52 @@ class PolicyAggressionTests(unittest.TestCase):
         self.assertIn("combo queue", d.p1_note)
         self.assertTrue(d.p1_mask & 0x20, d.p1_note)
 
-    def test_busy_normal_attack_does_not_chain_combo_into_antonio(self) -> None:
+    def test_busy_normal_attack_caps_combo_depth_against_antonio(self) -> None:
         """User-reported: Antonio's power kick can break a committed combo (or
-        grab). Land the current hit and wait rather than queuing another B
-        edge into the counter window."""
+        grab). A lone hit buys no real safety (the ROM's own recovery lock
+        already forces standing still regardless of what we press) while
+        giving up most of the damage, so cap short of the combo's slow
+        finishing hit instead of refusing to chain at all — two fast hits are
+        allowed, the third is not."""
 
-        p1 = _e(
-            kind="player",
-            family="Player",
-            slot="P1",
-            map_x=100,
-            world_x=100,
-            map_y=64,
-            type_id=1,
-            label="P1",
-            action_state=0x18,
-            action_flags=0,
-        )
-        antonio = _e(
-            kind="boss",
-            family="Antonio",
-            type_id=0x56,
-            slot="B0",
-            label="Antonio",
-            map_x=128,
-            world_x=128,
-            map_y=64,
-        )
-        d = decide_actions(
-            self._snap((p1, antonio)),
-            AgentConfig(p1_enabled=True, police_threshold=99.0),
-            AgentState(),
-        )
-        self.assertNotIn("combo queue", d.p1_note)
-        self.assertFalse(d.p1_mask & 0x20, d.p1_note)
+        def snap_with_combo_hits(combo_hits: int):
+            p1 = _e(
+                kind="player",
+                family="Player",
+                slot="P1",
+                map_x=100,
+                world_x=100,
+                map_y=64,
+                type_id=1,
+                label="P1",
+                action_state=0x18,
+                action_flags=0,
+            )
+            antonio = _e(
+                kind="boss",
+                family="Antonio",
+                type_id=0x56,
+                slot="B0",
+                label="Antonio",
+                map_x=128,
+                world_x=128,
+                map_y=64,
+            )
+            state = AgentState()
+            state.p1.combo_hits = combo_hits
+            return decide_actions(
+                self._snap((p1, antonio)),
+                AgentConfig(p1_enabled=True, police_threshold=99.0),
+                state,
+            )
+
+        still_short = snap_with_combo_hits(1)
+        self.assertIn("combo queue", still_short.p1_note)
+        self.assertTrue(still_short.p1_mask & 0x20, still_short.p1_note)
+
+        at_cap = snap_with_combo_hits(2)
+        self.assertNotIn("combo queue", at_cap.p1_note)
+        self.assertFalse(at_cap.p1_mask & 0x20, at_cap.p1_note)
 
     def test_smashes_breakable(self) -> None:
         p1 = _e(

@@ -196,6 +196,15 @@ for tests/HUD.
    - Turn one tick before attack if facing the wrong way (no air / reverse punches)
    - During normal action `$18`, queue the next combo B edge only while player
      `+$58` bit 5 is clear; stop sending B after the ROM has accepted the edge
+   - `CounterPlan.max_combo_hits` caps combo depth per family/boss (seat
+     `combo_hits`, reset to 1 on the fresh punch, `+= 1` per queued edge).
+     Antonio caps at 2 (user-reported, not ROM-confirmed: his power kick can
+     break a committed combo or grab) — refusing to chain at all was tried
+     first and rejected: the ROM's own recovery lock already forces standing
+     still through the first hit's animation regardless of what is pressed,
+     so a single-hit cap bought no real safety while giving up most of the
+     damage. Two fast hits, skip the combo's slower finisher, pending a live
+     trace of the actual counter window
    - Match lane before **punching** (off-lane "close" was the air-punch bug).
      When off-lane, still walk to the horizontal stand-off (`foe.x ±
      approach_offset`), not pure-Y at the current X: a foe approaching on a

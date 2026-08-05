@@ -969,10 +969,18 @@ def _decide_free(ctx: DecisionContext) -> Intent:
 
         if combat.player_busy_attacking(me):
             walk.clear()
-            if combat.can_queue_normal_combo(me, foe, profile) and not plan.no_combo_chain:
+            combo_capped = (
+                plan.max_combo_hits is not None
+                and ctx.seat.combo_hits >= plan.max_combo_hits
+            )
+            if (
+                combat.can_queue_normal_combo(me, foe, profile)
+                and not combo_capped
+            ):
                 if not coop.attack_would_hit_ally(
                     me, coop_ctx.partner, face_left=face_left
                 ):
+                    ctx.seat.combo_hits += 1
                     return Intent(
                         left=face_left,
                         right=face_right_now,
@@ -1452,6 +1460,7 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                     )
                 walk.clear()
                 ctx.set_attack_cd(3)
+                ctx.seat.combo_hits = 1
                 return Intent(
                     left=face_left,
                     right=face_right_now,

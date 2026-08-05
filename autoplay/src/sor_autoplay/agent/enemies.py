@@ -78,9 +78,13 @@ class CounterPlan:
     sidestep: bool = False
     # When True, do not jump (enemy punishes air).
     no_jump: bool = False
-    # When True, land one hit and reset instead of queuing follow-up combo
-    # edges (foe has a counter that punishes a committed combo string).
-    no_combo_chain: bool = False
+    # Cap on hits per unbroken combo string (None = no cap). A foe with a
+    # counter that punishes a committed string is safer traded against with a
+    # short, fast combo than either a full string or a single hit: bailing
+    # after hit 1 buys no real safety (the ROM's own recovery lock already
+    # forces standing still either way) while still giving up most of the
+    # damage, so cap short of the combo's own slow finishing hit instead.
+    max_combo_hits: int | None = None
     # When True, treat "low health / downed" foe as still dangerous (Nora feint).
     distrust_downed: bool = False
     # Extra priority weight for target selection.
@@ -218,9 +222,10 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
         grab_bias=0.05,
         sidestep=True,
         # User-reported (not yet ROM-address-confirmed): his power kick can
-        # break a committed combo or grab. Land one hit and reset rather than
-        # chaining follow-up combo edges into the counter window.
-        no_combo_chain=True,
+        # break a committed combo or grab. ponytail: heuristic pending a live
+        # trace of the actual counter window — two fast hits (skip the
+        # combo's slower finisher) rather than a full string or a lone jab.
+        max_combo_hits=2,
         priority=2.5,
         note="antonio outside boomerang",
     ),
