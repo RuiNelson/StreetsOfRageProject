@@ -1391,7 +1391,12 @@ class PolicyAggressionTests(unittest.TestCase):
         )
         self.assertEqual(d.p1_mask & 0x60, 0x60, msg=hex(d.p1_mask))
 
-    def test_back_exposed_prefers_grab_shield_on_front(self) -> None:
+    def test_rear_chord_outranks_front_grab_shield(self) -> None:
+        """B+C when rear is in the chord window — even with a legal front grab.
+
+        Walking into grab-shield while a foe is already on the back arc is how
+        the agent used to eat free rear punches.
+        """
         p1 = _e(
             kind="player",
             family="Player",
@@ -1404,14 +1409,56 @@ class PolicyAggressionTests(unittest.TestCase):
             action_state=0x02,
         )
         front = _e(map_x=118, world_x=118, map_y=64, label="Front", slot="E0")
+        # ~30 px behind Axel's backfist box (−40..−8) + body slack.
         back = _e(map_x=70, world_x=70, map_y=64, label="Backstab", slot="E1")
         d = decide_actions(
             self._snap((p1, front, back)),
             AgentConfig(p1_enabled=True),
             AgentState(),
         )
+        self.assertTrue(
+            "rear" in d.p1_note or "back atk" in d.p1_note,
+            d.p1_note,
+        )
+        self.assertEqual(d.p1_mask & 0x60, 0x60, msg=hex(d.p1_mask))
+        self.assertNotIn("grab shield", d.p1_note)
+
+    def test_distant_rear_still_uses_grab_shield_on_front(self) -> None:
+        """Grab→crossover only when the rear threat is outside the B+C window."""
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        front = _e(map_x=118, world_x=118, map_y=64, label="Front", slot="E0")
+        # Stationary foe well past Axel's extended rear window (~47 px).
+        back = _e(
+            map_x=20,
+            world_x=20,
+            map_y=64,
+            label="Backstab",
+            slot="E1",
+            facing_left=True,  # not walking into the chord
+        )
+        d = decide_actions(
+            self._snap((p1, front, back)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
         self.assertIn("grab shield", d.p1_note)
+        # Note may mention "vs rear Backstab"; the mask must not be the B+C chord.
+        self.assertNotEqual(d.p1_mask & 0x60, 0x60, msg=hex(d.p1_mask))
         self.assertNotIn("back atk", d.p1_note)
+        self.assertFalse(
+            d.p1_note.startswith("rear "),
+            d.p1_note,
+        )
 
 
 if __name__ == "__main__":

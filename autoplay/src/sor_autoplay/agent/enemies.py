@@ -499,10 +499,10 @@ def attack_mix(
 
     Deterministic rules (``tick`` kept for API compat, unused for rolls):
 
-    - **rear** only when ``behind`` and we would otherwise punch.
+    - **rear** first when ``behind`` (caller already verified B+C can connect).
     - **jump** when the math solver predicts a connect (especially multi-hit
       packs), or for family jump counters (Signal, Haku-Ro) in jump/approach.
-    - **grab_walk** when grab_bias is high (Nora) or back security demands it.
+    - **grab_walk** when grab_bias is high (Nora) or distant back security.
     - **punch** only when ``in_range`` and ``lane_ok`` (and ideally facing).
     - Otherwise **wait** (caller walks).
 

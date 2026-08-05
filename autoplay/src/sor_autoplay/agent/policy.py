@@ -767,68 +767,59 @@ def _decide_free(ctx: DecisionContext) -> Intent:
     # Face-then-hit. Jump-kick is C, then B while airborne — NEVER C+B together
     # (that is rear attack on the ground).
     # ROM facing: bit0 set = face left. Rear threats use current ROM face.
-    if (
-        not me.is_hurt
+    #
+    # Highest free-combat priority: B+C whenever a rear hostile is inside the
+    # measured chord window. Instant back protection outranks walking into a
+    # front grab while someone is already on your back (main free-damage source).
+    face_right_now_me = not combat.player_facing_left(me)
+    rear_foe = combat.closest_behind(
+        me,
+        snapshot.world_map.entities,
+        face_right=face_right_now_me,
+        max_dist=combat.REAR_REACT_RANGE,
+        graph=graph,
+    )
+    rear_chord_ready = (
+        rear_foe is not None
+        and not me.is_hurt
         and ctx.attack_cd == 0
         and combat.player_can_start_ground_action(me)
-    ):
-        rear_foe = combat.closest_behind(
-            me,
-            snapshot.world_map.entities,
-            face_right=not combat.player_facing_left(me),
-            max_dist=min(profile.rear_range_max + 4, combat.REAR_REACT_RANGE),
-            graph=graph,
+        and combat.can_rear_hit(
+            me, rear_foe, profile, face_right=face_right_now_me
         )
-        # Prefer grab→suplex on a legal front target over a rear B+C when the
-        # back is exposed. Rear-attack only when there is no grabbable front foe.
-        front = None if target is None else target.entity
-        can_grab_shield = (
-            front is not None
-            and rear_foe is not None
-            and front.slot != rear_foe.slot
-            and enemy_ai.is_enemy_grabbable(front)
-            and front.kind in ("enemy", "boss")
-        )
-        if (
-            rear_foe is not None
-            and not can_grab_shield
-            and (target is None or rear_foe.slot != target.entity.slot)
+    )
+    if rear_chord_ready:
+        assert rear_foe is not None  # for type checkers; guarded above
+        face_left_now = combat.player_facing_left(me)
+        if coop.attack_would_hit_ally(
+            me, coop_ctx.partner, face_left=face_left_now, rear=True
         ):
-            face_left_now = combat.player_facing_left(me)
-            if combat.can_rear_hit(
+            return _clear_ally_lane(
+                walk,
                 me,
-                rear_foe,
-                profile,
-                face_right=not face_left_now,
-            ):
-                if coop.attack_would_hit_ally(
-                    me, coop_ctx.partner, face_left=face_left_now, rear=True
-                ):
-                    return _clear_ally_lane(
-                        walk,
-                        me,
-                        coop_ctx.partner,
-                        reason=f"ally blocks rear {rear_foe.label}",
-                        snapshot=snapshot,
-                        advice=advice,
-                        nav=nav,
-                    )
-                walk.clear()
-                # The chord owns the seat until recovery (17/44/30 frames at
-                # ~4 frames per decision); re-pressing B+C mid-move is wasted.
-                ctx.set_attack_cd(max(2, profile.rear_recover // 4))
-                return Intent(
-                    left=face_left_now,
-                    right=not face_left_now,
-                    rear_attack=True,
-                    note=f"rear {rear_foe.label}",
-                )
+                coop_ctx.partner,
+                reason=f"ally blocks rear {rear_foe.label}",
+                snapshot=snapshot,
+                advice=advice,
+                nav=nav,
+            )
+        walk.clear()
+        # The chord owns the seat until recovery (17/44/30 frames at
+        # ~4 frames per decision); re-pressing B+C mid-move is wasted.
+        ctx.set_attack_cd(max(2, profile.rear_recover // 4))
+        return Intent(
+            left=face_left_now,
+            right=not face_left_now,
+            rear_attack=True,
+            note=f"rear {rear_foe.label}",
+        )
 
     if target is not None:
         foe = target.entity
-        # Back security is the top free-combat priority: a second live hostile
-        # behind the player means grab a legal front target and let the
-        # crossover-suplex skill shield the back. Armed Jack is not grabbable.
+        # Distant back security (rear not yet in B+C window): grab a legal
+        # front target so crossover-suplex can shield the back once held.
+        # Armed Jack is not grabbable. Never walk into grab-shield when the
+        # rear chord can already fire — that path returned above.
         rear_threat = DEFAULT_COMBAT_EXPERT.assess(
             me,
             snapshot.world_map.entities,
@@ -843,10 +834,22 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             ),
             None,
         )
+        # If expert found a rear threat we can already chord, treat as not
+        # "grab-shield only" (should have returned above; re-check for safety).
+        rear_chord_available = (
+            rear_entity is not None
+            and combat.can_rear_hit(
+                me,
+                rear_entity,
+                profile,
+                face_right=not combat.player_facing_left(me),
+            )
+        )
         back_exposed = (
             rear_entity is not None
             and rear_entity.slot != foe.slot
             and foe.kind in ("enemy", "boss")
+            and not rear_chord_available
         )
         grabbable = enemy_ai.is_enemy_grabbable(foe)
         if graph.entity_has(foe, Relation.GRABBABLE):
@@ -1179,10 +1182,16 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                     )
                 return Intent(note=f"guard threat {foe.label} [{tag}]")
 
+        face_right_for_rear = not combat.player_facing_left(me)
         behind = combat.enemy_is_behind(
             me,
             foe,
-            face_right=not combat.player_facing_left(me),
+            face_right=face_right_for_rear,
+        )
+        # Use the full closing-aware chord window, not only the static box.
+        # A foe walking into the rear box during startup must still force B+C.
+        rear_connect = combat.can_rear_hit(
+            me, foe, profile, face_right=face_right_for_rear
         )
 
         # State transitions can start and finish between four-frame samples
@@ -1242,7 +1251,7 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 crowd=press.enemy_count,
                 phase_name=phase_name,
                 band=band,
-                behind=behind and combat.rear_in_band(abs_dx, profile),
+                behind=rear_connect,
                 lane_ok=lane_ok,
                 facing_ok=facing_ok,
                 can_jump=jump_ok,

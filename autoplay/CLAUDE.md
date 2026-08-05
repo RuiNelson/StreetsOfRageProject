@@ -229,8 +229,9 @@ for tests/HUD.
      `AIR_ATTACK_ONLY` rule. Type-`$28` state `$01` is `ATTACHED` (not
      dangerous); `$02-$04` are `LAUNCHED`/`DANGEROUS`. Family counters: Nora
      prefers grab+knee/throw; Signal prefers mid/far C→B jump kicks; back
-     security (hostile behind) prefers grab→crossover-suplex on a legal front
-     target above other free-combat mix choices.
+     security: when a rear hostile is inside the B+C window, free combat fires
+     the rear chord first; only distant rear threats elevate grab→crossover
+     on a legal front target.
    - Type `$22` state `$0B` dispatches through ROM table `$DD80` to `$E20A`
      and is dangerous; live it retained outgoing damage `$04` at zero health.
      Enemy health uses a signed lethal check: `0` is still active and needs a
@@ -308,6 +309,12 @@ air tech on ordinary street throws without `+$45`; 6-button `--altControls`.
      Adam additionally refuses a foe already at contact (his startup loses to
      the enemy's own strike). The chord holds the seat for its full recovery
      via `attack_cd`, and needs an input-ready ground action.
+   - **Rear B+C outranks front grab-shield** whenever `can_rear_hit` is true:
+     free combat emits the chord before walking into a front hold while a
+     hostile already sits on the back arc (main free-damage failure mode).
+     Grab→crossover-suplex remains only for *distant* rear threats outside
+     the chord window. Search uses `REAR_REACT_RANGE` (96 px), not the static
+     box alone, so closing foes still arm the chord.
 
    - Breakables (phone booth / crate): walk in → smash (B) or mid-range
      jump-break; then loot spilled pickups/weapons
