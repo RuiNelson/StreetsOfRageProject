@@ -320,6 +320,109 @@ class PolicyTests(unittest.TestCase):
             msg=decision.p1_note,
         )
 
+    def test_far_right_wave_enemy_holds_midfield_not_chase(self) -> None:
+        """Scroll-locked waves: sit mid-screen and wait; do not pin to the right clamp."""
+
+        p1 = _entity(
+            kind="player",
+            map_x=100,
+            map_y=64,
+            world_x=100,
+            world_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+            action_state=0x02,
+        )
+        # Far ahead of engage band (110): classic pack spawn on the right.
+        foe = _entity(
+            kind="enemy",
+            map_x=280,
+            map_y=64,
+            world_x=280,
+            world_y=64,
+            slot="E0",
+            label="Garcia",
+        )
+        memory = AgentState()
+        decision = decide_actions(
+            _snapshot_with_map((p1, foe)),
+            AgentConfig(p1_enabled=True),
+            memory,
+        )
+        self.assertIn("hold mid", decision.p1_note, decision.p1_note)
+        self.assertNotIn("progress", decision.p1_note)
+        # Goal is mid CRT (~160), so from map_x=100 the seat must press RIGHT
+        # but must not keep a "close Garcia" chase note.
+        self.assertTrue(decision.p1_mask & 0x08, decision.p1_note)
+        # Once already mid-field, idle instead of continuing right into the pack.
+        p1_mid = _entity(
+            kind="player",
+            map_x=160,
+            map_y=64,
+            world_x=160,
+            world_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+            action_state=0x02,
+        )
+        decision_mid = decide_actions(
+            _snapshot_with_map((p1_mid, foe)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertIn("hold mid", decision_mid.p1_note, decision_mid.p1_note)
+        # Within mid-field eps: no horizontal chase toward the right clamp.
+        self.assertEqual(
+            decision_mid.p1_mask & 0x0C,
+            0,
+            decision_mid.p1_note,
+        )
+
+    def test_closes_when_wave_enemy_enters_engage_band(self) -> None:
+        p1 = _entity(
+            kind="player",
+            map_x=160,
+            map_y=64,
+            world_x=160,
+            world_y=64,
+            slot="P1",
+            label="P1 Axel",
+            family="Player",
+            action_state=0x02,
+        )
+        foe = _entity(
+            kind="enemy",
+            map_x=200,
+            map_y=64,
+            world_x=200,
+            world_y=64,
+            slot="E0",
+            label="Garcia",
+        )
+        decision = decide_actions(
+            _snapshot_with_map((p1, foe)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertNotIn("hold mid", decision.p1_note, decision.p1_note)
+        self.assertTrue(
+            any(
+                k in decision.p1_note
+                for k in (
+                    "close",
+                    "lane",
+                    "punch",
+                    "face",
+                    "jump",
+                    "intercept",
+                    "hold range",
+                )
+            ),
+            decision.p1_note,
+        )
+
     def test_souther_committed_claw_uses_boss_lane_tactic(self) -> None:
         p1 = _entity(
             kind="player",

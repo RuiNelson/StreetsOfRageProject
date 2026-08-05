@@ -374,6 +374,15 @@ air tech on ordinary street throws without `+$45`; 6-button `--altControls`.
       are not holes. With no combat target, clear any old horizontal walk
       latch, center only on lane `$50`, and emit no LEFT/RIGHT progression
 11. Progress right (stage 8: left) only when the graph has no blocker
+12. **Mid-field hold on locked waves** (`combat.midfield_hold_goal`): ordinary
+    enemies spawn on the progress edge and the camera will not scroll until
+    the pack is dead. Chasing them pins the player against the walk clamp
+    (map_x ≈ 288 / 32) and eats free damage. While a live ordinary foe is
+    still more than ~110 px ahead on X, park at CRT mid (`map_x≈160`) and
+    wait; close only after they enter that engage band. Bosses and
+    projectiles never mid-hold (Antonio at the scroll boundary still
+    approaches). A fight goal without an extractable target also parks mid
+    rather than falling through to stage progress.
 
 Map entities carry full combat RAM for agents:
 

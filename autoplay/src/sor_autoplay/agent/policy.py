@@ -1505,6 +1505,18 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             )
             reason = f"chase punish {foe.label} [{tag}]"
 
+        # Wave scroll lock: do not chase ordinary pack members into the
+        # progress-edge clamp. Sit mid-field until they walk into engage range.
+        if not reason.startswith("evade"):
+            hold = combat.midfield_hold_goal(
+                me,
+                foe,
+                progress_right=advice.progress_right,
+            )
+            if hold is not None:
+                stand_x, stand_y = hold
+                reason = f"hold mid {foe.label} [{tag}]"
+
         return _walk_toward(
             walk,
             me,
@@ -1516,8 +1528,33 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             nav=nav,
             # The stand point is only 2–6 px inside character strike range.
             # An 8 px arrival tolerance can stop outside the hit box forever.
-            eps_x=3.0,
+            # Mid-field wait uses a looser X eps so the seat idles instead of
+            # micro-adjusting forever at map_x≈160.
+            eps_x=12.0 if reason.startswith("hold mid") else 3.0,
             eps_y=6.0,
+        )
+
+    # Fight won the arbiter but no extractable target (stale graph / off-lane
+    # pack). Never fall through to stage progress — that walks into the scroll
+    # lock. Park mid-field until a real target appears.
+    if arbitration.winner.kind == GoalKind.FIGHT:
+        hold = combat.midfield_hold_goal(
+            me,
+            None,
+            progress_right=advice.progress_right,
+        )
+        assert hold is not None
+        return _walk_toward(
+            walk,
+            me,
+            goal_x=hold[0],
+            goal_y=hold[1],
+            reason="hold mid (wave)",
+            snapshot=snapshot,
+            advice=advice,
+            nav=nav,
+            eps_x=12.0,
+            eps_y=8.0,
         )
 
     # --- Breakables (crates / phone booths → loot) when no combat target ---

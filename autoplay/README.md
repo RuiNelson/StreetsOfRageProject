@@ -50,6 +50,10 @@ Per-player toggle (HUD button or keys **1** / **2**):
 - A constrained utility solver arbitrates **fight / loot / progress**. Bosses
   block progress, immediate danger vetoes loot, and safe valuable nearby items
   can win after combat instead of being chased unconditionally.
+- **Mid-field hold** while a wave is scroll-locked: ordinary pack members ahead
+  of engage range (`|ΔX| > 110`) are not chased into the walk clamp. The agent
+  sits near CRT mid (`map_x≈160`) and waits for them to approach; bosses still
+  force a close.
 - Fuzzy special pressure combines crowds, active attackers, hunters,
   surrounding geometry, bosses, and health, retaining the fired-rule trace.
   It conserves police calls during small healthy fights, spends for crowds of

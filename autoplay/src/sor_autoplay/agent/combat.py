@@ -56,6 +56,14 @@ ON_SCREEN_LEFT = 0.0
 ON_SCREEN_RIGHT = float(SCREEN_WIDTH)
 ACTIVATION_LEFT = -16.0
 ACTIVATION_RIGHT = float(SCREEN_WIDTH) + 16.0
+# Wave scroll locks pin the camera until the pack dies. Holding the middle of
+# the CRT (also the walk-band centre 32..288) and waiting for ordinary enemies
+# to walk in beats chasing them into the right/left clamp, where the AI takes
+# free damage against a wall.
+MIDFIELD_HOLD_MAP_X = 160.0
+# Close only when the foe has entered this |ΔX| band; larger than every
+# character's jump-kick outer edge so C→B still fires after we leave hold.
+MIDFIELD_ENGAGE_DX = 110.0
 
 # ROM ``hasNearbyObjectInFront`` uses Y ∈ [playerY-12, playerY+12).
 LANE_HIT_HALF = 12.0
@@ -140,6 +148,46 @@ def is_loot_on_camera(entity: MapEntity) -> bool:
     """True when a ground item is inside the walk-band camera ± pickup box."""
 
     return is_in_loot_camera(entity.map_x)
+
+
+def midfield_hold_goal(
+    me: MapEntity,
+    foe: MapEntity | None = None,
+    *,
+    progress_right: bool = True,
+    engage_dx: float = MIDFIELD_ENGAGE_DX,
+    hold_map_x: float = MIDFIELD_HOLD_MAP_X,
+) -> tuple[float, float] | None:
+    """World-space mid-field wait goal while a wave is still live.
+
+    Returns ``(goal_x, goal_y)`` when the player should sit in the middle of
+    the field instead of chasing the progress edge, or ``None`` when normal
+    combat approach should run.
+
+    - Bosses and projectiles never trigger a hold (approach / evade as usual).
+    - Ordinary foes only behind / on the retreat side still force a close.
+    - When ``foe`` is ``None`` (blocker without extractable target), always
+      park at mid-field rather than progress into the scroll lock.
+    """
+
+    cam_x = float(me.world_x) - float(me.map_x)
+    hold_world_x = cam_x + hold_map_x
+    hold_world_y = float(me.world_y)
+
+    if foe is None:
+        return hold_world_x, hold_world_y
+    if foe.kind in ("boss", "projectile"):
+        return None
+
+    dx = float(foe.map_x) - float(me.map_x)
+    if abs(dx) <= engage_dx:
+        return None
+    ahead = (progress_right and dx > engage_dx) or (
+        not progress_right and dx < -engage_dx
+    )
+    if not ahead:
+        return None
+    return hold_world_x, hold_world_y
 
 
 def player_facing_left(me: MapEntity) -> bool:

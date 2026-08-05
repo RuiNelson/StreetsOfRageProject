@@ -16,6 +16,7 @@ from sor_autoplay.agent.combat import (
     face_intent_dirs,
     facing_toward,
     is_on_screen,
+    midfield_hold_goal,
     player_facing_left,
     player_airborne_action,
     player_can_start_ground_action,
@@ -76,6 +77,42 @@ class ScreenAndBandTests(unittest.TestCase):
         self.assertEqual(engagement_band(65, 4, PROFILES[1]), "jump")
         self.assertEqual(engagement_band(20, 4, PROFILES[0]), "close")
         self.assertEqual(engagement_band(120, 4, PROFILES[0]), "far")
+
+    def test_midfield_hold_for_far_progress_side_enemy(self) -> None:
+        me = _e(kind="player", family="Player", slot="P1", map_x=100, type_id=1)
+        far_right = _e(map_x=280, label="Garcia", slot="E0")
+        hold = midfield_hold_goal(me, far_right, progress_right=True)
+        assert hold is not None
+        self.assertAlmostEqual(hold[0], 160.0)
+        self.assertIsNone(
+            midfield_hold_goal(
+                me,
+                _e(map_x=180, label="Close", slot="E1"),
+                progress_right=True,
+            )
+        )
+        # Flanker behind/left of a right-progress seat still forces a close.
+        self.assertIsNone(
+            midfield_hold_goal(
+                me,
+                _e(map_x=20, label="Behind", slot="E2"),
+                progress_right=True,
+            )
+        )
+        # Bosses never mid-hold (scroll-boundary Antonio still approaches).
+        boss = _e(
+            kind="boss",
+            family="Antonio",
+            type_id=0x56,
+            map_x=300,
+            label="Antonio",
+            slot="B0",
+        )
+        self.assertIsNone(midfield_hold_goal(me, boss, progress_right=True))
+        # No extractable target: still park mid-field (wave lock).
+        none_hold = midfield_hold_goal(me, None, progress_right=True)
+        assert none_hold is not None
+        self.assertAlmostEqual(none_hold[0], 160.0)
 
     def test_off_lane_is_not_close(self) -> None:
         # |dy| > 12 must not count as close — air-punch prevention.
