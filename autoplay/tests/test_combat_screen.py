@@ -1192,6 +1192,43 @@ class PolicyAggressionTests(unittest.TestCase):
         self.assertNotIn("combo queue", at_cap.p1_note)
         self.assertFalse(at_cap.p1_mask & 0x20, at_cap.p1_note)
 
+    def test_steps_back_during_post_punch_cooldown_against_antonio(self) -> None:
+        """Antonio's kick arms on target X-velocity == 0 while in range
+        (ai-analysis/enemy-ai.md "Body state machine"). Standing still to
+        wait out our own attack cooldown is exactly that trigger, so a foe
+        with a combo-depth cap should step back instead of idling in place."""
+
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        antonio = _e(
+            kind="boss",
+            family="Antonio",
+            type_id=0x56,
+            slot="B0",
+            label="Antonio",
+            map_x=128,
+            world_x=128,
+            map_y=64,
+        )
+        state = AgentState()
+        state.p1.attack_cd = 2
+        d = decide_actions(
+            self._snap((p1, antonio)),
+            AgentConfig(p1_enabled=True, police_threshold=99.0),
+            state,
+        )
+        self.assertIn("retreat", d.p1_note)
+        self.assertTrue(d.p1_mask & 0x04, d.p1_note)  # step away (left)
+
     def test_smashes_breakable(self) -> None:
         p1 = _e(
             kind="player",

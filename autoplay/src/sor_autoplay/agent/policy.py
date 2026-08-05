@@ -1469,6 +1469,24 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 )
 
         if punch_geom and cd > 0:
+            # Antonio's kick arms on target X-velocity == 0 while in range
+            # ($16DA0 -> $171CC, ai-analysis/enemy-ai.md "Body state
+            # machine"): standing still to wait out our own attack cooldown
+            # is exactly that trigger. Foes with a combo-depth cap already
+            # punish committed pressure the same way, so reuse that signal
+            # and step back instead of idling in the pocket.
+            if plan.max_combo_hits is not None:
+                retreat_x = me.world_x + (-40 if target.dx > 0 else 40)
+                return _walk_toward(
+                    walk,
+                    me,
+                    goal_x=float(retreat_x),
+                    goal_y=float(me.world_y),
+                    reason=f"retreat cd={cd} {foe.label} [{tag}]",
+                    snapshot=snapshot,
+                    advice=advice,
+                    nav=nav,
+                )
             walk.clear()
             return Intent(
                 left=face_left,
