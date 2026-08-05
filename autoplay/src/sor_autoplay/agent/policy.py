@@ -86,6 +86,8 @@ class AgentConfig:
     # damage to each living boss and is normally correct against the pair, so
     # this is for isolating melee competence in measurement, not doctrine.
     allow_police_special: bool = True
+    # Diagnostic: suppress ground weapon pickups (isolates unarmed competence).
+    allow_weapon_pickup: bool = True
 
     def enabled_for(self, player_index: int) -> bool:
         if player_index == 1:
@@ -350,6 +352,7 @@ def _decide_one(
         player_snap=player_snap,
         both_agents=both_agents,
         police_threshold=config.police_threshold,
+        allow_weapon_pickup=config.allow_weapon_pickup,
         tick=memory.tick,
         seat=memory.seat(player_index),
         me=_player_entity(snapshot, player_index),
@@ -703,7 +706,7 @@ def _decide_free(ctx: DecisionContext) -> Intent:
         snapshot.world_map.entities,
         allow_health=allow_hp,
         allow_special_life=allow_star,
-        allow_weapons=True,
+        allow_weapons=ctx.config_allow_weapon_pickup,
         already_holding_weapon=me.is_holding_weapon,
         held_weapon_type=me.held_type,
         profile=profile,

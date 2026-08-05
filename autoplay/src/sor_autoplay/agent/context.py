@@ -118,6 +118,7 @@ class DecisionContext:
     partner_snap: PlayerSnapshot | None
     both_agents: bool
     config_police_threshold: float
+    config_allow_weapon_pickup: bool
     tick: int
     seat: SeatMemory
     profile: CharacterProfile
@@ -226,6 +227,7 @@ def build_decision_context(
     player_snap: PlayerSnapshot,
     both_agents: bool,
     police_threshold: float,
+    allow_weapon_pickup: bool = True,
     tick: int,
     seat: SeatMemory,
     me: MapEntity | None,
@@ -261,6 +263,7 @@ def build_decision_context(
         partner_snap=partner_snap,
         both_agents=both_agents,
         config_police_threshold=police_threshold,
+        config_allow_weapon_pickup=allow_weapon_pickup,
         tick=tick,
         seat=seat,
         profile=profile,

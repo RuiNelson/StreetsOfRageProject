@@ -998,6 +998,7 @@ class LockstepEvaluator:
         criteria: EvaluationCriteria | None = None,
         trace_sink: Callable[[EvaluationStep], None] | None = None,
         allow_police_special: bool = True,
+        allow_weapon_pickup: bool = True,
         kill_non_bosses: bool = False,
     ) -> None:
         if player_index not in (1, 2):
@@ -1019,12 +1020,14 @@ class LockstepEvaluator:
         self.criteria = criteria or EvaluationCriteria()
         self.trace_sink = trace_sink
         self.allow_police_special = allow_police_special
+        self.allow_weapon_pickup = allow_weapon_pickup
         self.kill_non_bosses = kill_non_bosses
         if policy is None:
             config = agent_config or AgentConfig(
                 p1_enabled=player_index == 1,
                 p2_enabled=player_index == 2,
                 allow_police_special=allow_police_special,
+                allow_weapon_pickup=allow_weapon_pickup,
             )
             memory = AgentState()
             self.policy = lambda snapshot: decide_actions(snapshot, config, memory)
@@ -1294,6 +1297,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="suppress every special spend (isolates melee competence)",
     )
     parser.add_argument(
+        "--no-weapons",
+        action="store_true",
+        help="suppress ground weapon pickups (isolates unarmed competence)",
+    )
+    parser.add_argument(
         "--kill-non-bosses",
         action="store_true",
         help=(
@@ -1376,6 +1384,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 criteria=criteria,
                 trace_sink=trace_sink,
                 allow_police_special=not args.no_police_special,
+                allow_weapon_pickup=not args.no_weapons,
                 kill_non_bosses=args.kill_non_bosses,
             ).run()
         report_payload = report.to_dict()
