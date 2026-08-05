@@ -537,8 +537,12 @@ class PolicyAggressionTests(unittest.TestCase):
         decision = decide_actions(
             self._snap((p1, apple)), AgentConfig(p1_enabled=True), AgentState()
         )
+        # $74 is throw-recovery tail: HURT mode owns the seat (no B pickup).
         self.assertEqual(decision.p1_mask, 0, decision.p1_note)
-        self.assertIn("await loot", decision.p1_note)
+        self.assertTrue(
+            "hurt" in decision.p1_note or "await loot" in decision.p1_note,
+            decision.p1_note,
+        )
 
     def test_preemptively_punches_round1_garcia_windup(self) -> None:
         p1 = _e(

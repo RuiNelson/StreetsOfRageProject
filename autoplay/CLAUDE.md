@@ -236,6 +236,19 @@ for tests/HUD.
      `$7C` sets `+$58.bit7`, an eight-tick `+$62` window, and returns to `$7A`;
      B in that window enters counter throw `$7E`. Own the complete sequence,
      emit the two edges separately, and wait through the closed animations
+   - **Throw victim / knockdown locks** (`PlayerMode.HURT`): action families
+     `$50–$5F` (knockdown), `$70–$74` (ordinary throw air/recovery tail), and
+     `$82–$8F` (special-throw choreography). Do **not** run free combat, walk,
+     or B edges there — the ROM ignores voluntary attack/jump on those frames.
+   - **Hold B routing** (`$2BA8`): B alone / B+Up / B+forward = knee `$6A`;
+     **B+back** only = throw `$62`/`$64`. Up/Down never select the throw.
+   - **C+Up landing tech** (bounce cancel): special throw releases arm player
+     `+$45`; while air family `$5C`/`$72`/`$88` and `+$45` is set, HURT mode
+     emits **Up held + C edge** to latch `+$46` so `$3F24` lands as jump `$14`
+     instead of bounce → `$54`. Ordinary street throw `$84→$72` does **not**
+     set `+$45` — stay idle. Observe `+$45`/`+$46` via world map
+     `tech_armed`/`tech_latched`. Skill path:
+     `grabs.decide_hurt_or_throw_reaction` / seat `throw_land_tech` memory.
    - A committed attacker can be turned toward and punched in the same input;
      a separate four-frame facing decision is too slow. Lane evasion respects
      the ordinary-enemy `$02-$70` bounds and retreats on X at either edge

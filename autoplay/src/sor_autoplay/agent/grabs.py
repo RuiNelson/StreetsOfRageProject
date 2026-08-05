@@ -277,6 +277,52 @@ def decide_enemy_grab_escape(
     return Intent(jump=True, note="escape enemy grab crossover")
 
 
+@dataclass
+class ThrowLandTechMemory:
+    """Retry spacing for the C+Up bounce-cancel edge while +$45 is armed."""
+
+    last_input_tick: int = -10_000
+
+    def reset(self) -> None:
+        self.last_input_tick = -10_000
+
+
+def decide_hurt_or_throw_reaction(
+    me: MapEntity,
+    memory: ThrowLandTechMemory,
+    *,
+    tick: int,
+) -> Intent:
+    """Locked hurt/throw-victim frames; C+Up when bounce-cancel tech is armed.
+
+    ROM: special throw releases set ``+$45``; ``$3D12``/``$3D64`` need Up held
+    plus a **jump edge** (logical C) to latch ``+$46``, so ``$3F24`` skips the
+    knockdown bounce and lands as jump ``$14``. Ordinary street throws into
+    ``$72`` without ``+$45`` have no tech — stay idle until recovery.
+    """
+
+    if me.tech_latched:
+        # Already latched; do not spam C (would not re-arm anyway).
+        return Intent(note=f"throw tech latched ${me.action_state:02X}")
+
+    if me.throw_tech_ready:
+        if tick - memory.last_input_tick < GRAB_INPUT_RETRY_TICKS:
+            # Keep Up held between edges so the next C edge still sees Up.
+            return Intent(
+                up=True,
+                note=f"await throw land tech ${me.action_state:02X}",
+            )
+        memory.last_input_tick = tick
+        return Intent(
+            up=True,
+            jump=True,
+            note=f"throw land tech C+Up ${me.action_state:02X}",
+        )
+
+    memory.reset()
+    return Intent(note=f"hurt ${me.action_state:02X}")
+
+
 def decide_held(
     me: MapEntity,
     ctx: GrabContext,

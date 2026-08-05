@@ -130,6 +130,11 @@ OBJ_CONTINUE_NAME_ENTRY_BIT = 0x80
 # Continue Yes/No selection: 0 = YES, nonzero (bit0) = NO. Toggled by UP/DOWN.
 OBJ_CONTINUE_CHOICE = 0x63
 OBJ_ACTION_FLAGS = 0x58  # player combo/action flags; bit5 queues next normal hit
+# Throw-landing tech flags (controls-and-input.md "C+Up landing tech"):
+# +$45 armed by special throw releases ($284A/$28A2/$2AA4); C-edge+Up latches +$46
+# so $3F24 skips bounce and lands as jump $14.
+OBJ_TECH_ARM = 0x45  # player: nonzero while bounce-cancel tech may be latched
+OBJ_TECH_LATCH = 0x46  # player: set by C-edge+Up; consumed on floor land
 OBJ_PAIR_ROLE = 0x5D  # later-boss pair role 1/2; player combo state reuses $5D
 OBJ_COMBO_STATE = 0x5D  # player combo / action chain
 OBJ_HELD_PTR = 0x5E  # word pointer to grabbed/held object (weapons / some grabs)
@@ -178,6 +183,8 @@ ACTION_GRAB = 0x28
 ACTION_GRAB_THROW = 0x44
 ACTION_HURT_MIN = 0x50
 ACTION_HURT_MAX = 0x5F
+# Throw-air families that can consume +$45/+46 bounce-cancel tech at $3F24.
+ACTION_THROW_AIR_TECHABLE = frozenset({0x5C, 0x72, 0x88})
 # Grab/throw reaction family used while holding an enemy (live: Axel $60/$6A/$6C).
 ACTION_HOLD_REACT = 0x60
 ACTION_HOLD_REACT_MAX = 0x6F

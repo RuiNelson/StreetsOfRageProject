@@ -141,6 +141,8 @@ class MapEntity:
     contact_ptr: int = 0  # player +$4C contact/grab partner (live hold uses this)
     outgoing_damage: int = 0  # +$34 active hit frame damage nibble
     action_flags: int = 0  # player +$58; bit5 combo queue, bit7 grab-counter window
+    tech_armed: int = 0  # player +$45; bounce-cancel tech arm
+    tech_latched: int = 0  # player +$46; C+Up latched before land
     combo_state: int = 0  # player +$5D
     tactical: int = 0  # boss +$67
     pair_role: int = 0  # later-boss +$5D (1/2) when kind==boss
@@ -239,8 +241,29 @@ class MapEntity:
 
     @property
     def is_hurt(self) -> bool:
+        """True while voluntary combat input is locked (hurt / throw victim).
+
+        Covers knockdown ``$50–$5F``, ordinary throw air ``$70–$74``, and
+        special-throw choreography ``$82–$8F``. Free combat must not run here.
+        """
+
         base = self.action_base
-        return 0x50 <= base <= 0x5F
+        if 0x50 <= base <= 0x5F:
+            return True
+        if 0x70 <= base <= 0x74:
+            return True
+        if 0x82 <= base <= 0x8F:
+            return True
+        return False
+
+    @property
+    def throw_tech_ready(self) -> bool:
+        """True when C+Up can arm the bounce-cancel latch (``+$45`` set)."""
+
+        return (
+            self.tech_armed != 0
+            and self.action_base in mm.ACTION_THROW_AIR_TECHABLE
+        )
 
     @property
     def is_held_by_enemy(self) -> bool:
@@ -432,6 +455,8 @@ def _entity_from_object(
     contact_ptr = 0
     combo = 0
     action_flags = 0
+    tech_armed = 0
+    tech_latched = 0
     tactical = 0
     pair_role = 0
     target_ptr = 0
@@ -454,6 +479,8 @@ def _entity_from_object(
         held_ptr = _u16(slot, mm.OBJ_HELD_PTR)
         contact_ptr = _u16(slot, mm.OBJ_CONTACT_PTR)
         action_flags = _u8(slot, mm.OBJ_ACTION_FLAGS)
+        tech_armed = _u8(slot, mm.OBJ_TECH_ARM)
+        tech_latched = _u8(slot, mm.OBJ_TECH_LATCH)
         combo = _u8(slot, mm.OBJ_COMBO_STATE)
         facing_left = bool(action_state & 0x01)
         phase = player_phase(action_byte=action_state, held_type=held_type)
@@ -518,6 +545,8 @@ def _entity_from_object(
         contact_ptr=contact_ptr,
         outgoing_damage=outgoing,
         action_flags=action_flags,
+        tech_armed=tech_armed,
+        tech_latched=tech_latched,
         combo_state=combo,
         tactical=tactical,
         pair_role=pair_role,

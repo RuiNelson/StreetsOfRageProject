@@ -207,7 +207,8 @@ def player_phase(
     base = action_byte & 0xFE
     if player_is_held_by_enemy_action(action_byte):
         return CombatPhase.HELD_BY_ENEMY
-    if 0x50 <= base <= 0x5F:
+    # Knockdown $50–$5F, ordinary throw air $70–$74, special-throw $82–$8F.
+    if 0x50 <= base <= 0x5F or 0x70 <= base <= 0x74 or 0x82 <= base <= 0x8F:
         return CombatPhase.HURT_PLAYER
     if held_type:
         return CombatPhase.HOLDING

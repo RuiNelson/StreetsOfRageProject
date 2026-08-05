@@ -168,6 +168,7 @@ class EpisodeMetrics:
     enemy_grab_escape_jump_edges: int = 0
     enemy_grab_counter_throw_edges: int = 0
     missed_enemy_grab_escape_responses: int = 0
+    throw_land_tech_edges: int = 0
     defeated_enemy_attack_edges: int = 0
     defeated_enemy_pursuit_steps: int = 0
     unreachable_enemy_stall_steps: int = 0
@@ -433,6 +434,14 @@ class EpisodeMetrics:
                 self._last_enemy_grab_signature = signature
             elif before_entity.action_base not in ENEMY_HOLD_ACTIONS:
                 self._last_enemy_grab_signature = None
+
+            # C+Up bounce-cancel: Up|C while +$45 armed in techable air families.
+            if (
+                before_entity.throw_tech_ready
+                and (mask & 0x01)
+                and (mask & 0x40)
+            ):
+                self.throw_land_tech_edges += 1
 
             live_combatants = tuple(
                 entity

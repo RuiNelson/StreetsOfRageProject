@@ -30,6 +30,7 @@ from .grabs import (
     GRAB_ANIMATION_ACTIONS,
     EnemyGrabEscapeMemory,
     GrabMemory,
+    ThrowLandTechMemory,
     context_from_player,
 )
 from .jump_kick import JumpKickPending
@@ -69,6 +70,9 @@ class SeatMemory:
     enemy_grab_escape: EnemyGrabEscapeMemory = field(
         default_factory=EnemyGrabEscapeMemory
     )
+    throw_land_tech: ThrowLandTechMemory = field(
+        default_factory=ThrowLandTechMemory
+    )
     walk: WalkState = field(default_factory=WalkState)
     nav: NavMemory = field(default_factory=NavMemory)
     planner: AutoPlanner = field(default_factory=AutoPlanner)
@@ -92,6 +96,7 @@ class SeatMemory:
         self.nav.clear_all()
         self.grab.reset()
         self.enemy_grab_escape.reset()
+        self.throw_land_tech.reset()
         self.jump_kick.clear()
         assert self.commitment is not None
         self.commitment.clear()

@@ -53,6 +53,18 @@ class ModeClassifierTests(unittest.TestCase):
             classify_mode(me=hurt, player_snap=snap, is_mr_x=False),  # type: ignore[arg-type]
             PlayerMode.HURT,
         )
+        # Ordinary enemy throw air $72 is locked (not FREE combat).
+        thrown = replace(me, action_state=0x72)
+        self.assertEqual(
+            classify_mode(me=thrown, player_snap=snap, is_mr_x=False),  # type: ignore[arg-type]
+            PlayerMode.HURT,
+        )
+        # Special-throw choreography $84 likewise.
+        choreo = replace(me, action_state=0x84)
+        self.assertEqual(
+            classify_mode(me=choreo, player_snap=snap, is_mr_x=False),  # type: ignore[arg-type]
+            PlayerMode.HURT,
+        )
         anim = replace(me, action_state=0x68)
         self.assertEqual(
             classify_mode(me=anim, player_snap=snap, is_mr_x=False),  # type: ignore[arg-type]
@@ -68,6 +80,71 @@ class ModeClassifierTests(unittest.TestCase):
             classify_mode(me=free, player_snap=snap, is_mr_x=False),  # type: ignore[arg-type]
             PlayerMode.FREE,
         )
+
+
+class ThrowLandTechTests(unittest.TestCase):
+    def test_c_up_when_tech_armed_in_throw_air(self) -> None:
+        """Special throw +$45: emit logical C+Up (mask UP|C) during $5C/$72/$88."""
+
+        p1 = _entity(
+            kind="player",
+            family="Player",
+            symbol="1",
+            label="P1",
+            slot="P1",
+            type_id=1,
+            action_state=0x5C,
+            combat_phase=CombatPhase.HURT_PLAYER,
+            tech_armed=1,
+        )
+        memory = AgentState()
+        config = AgentConfig(p1_enabled=True)
+        decision = decide_actions(_snapshot((p1,)), config, memory)
+        # Buttons: UP=1, C=JUMP=0x40 in megadrive_remote IntFlag layout used by mask.
+        self.assertTrue(decision.p1_mask & 0x01, decision.p1_note)  # Up
+        self.assertTrue(decision.p1_mask & 0x40, decision.p1_note)  # C
+        self.assertIn("throw land tech", decision.p1_note)
+
+    def test_no_tech_on_ordinary_throw_without_arm(self) -> None:
+        p1 = _entity(
+            kind="player",
+            family="Player",
+            symbol="1",
+            label="P1",
+            slot="P1",
+            type_id=1,
+            action_state=0x72,
+            combat_phase=CombatPhase.HURT_PLAYER,
+            tech_armed=0,
+        )
+        decision = decide_actions(
+            _snapshot((p1,)),
+            AgentConfig(p1_enabled=True),
+            AgentState(),
+        )
+        self.assertEqual(decision.p1_mask, 0, decision.p1_note)
+        self.assertIn("hurt", decision.p1_note)
+
+    def test_tech_retry_holds_up_without_repeating_c_edge(self) -> None:
+        p1 = _entity(
+            kind="player",
+            family="Player",
+            symbol="1",
+            label="P1",
+            slot="P1",
+            type_id=1,
+            action_state=0x5C,
+            combat_phase=CombatPhase.HURT_PLAYER,
+            tech_armed=1,
+        )
+        memory = AgentState()
+        config = AgentConfig(p1_enabled=True)
+        first = decide_actions(_snapshot((p1,)), config, memory)
+        self.assertTrue(first.p1_mask & 0x40)
+        second = decide_actions(_snapshot((p1,)), config, memory)
+        self.assertTrue(second.p1_mask & 0x01, second.p1_note)
+        self.assertEqual(second.p1_mask & 0x40, 0, second.p1_note)
+        self.assertIn("await", second.p1_note)
 
 
 class CommitmentTests(unittest.TestCase):

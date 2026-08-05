@@ -284,11 +284,21 @@ def try_start_mode_skill(ctx: DecisionContext) -> Intent | None:
         ctx.walk.clear()
         ctx.planner.reset()
         ctx.goal_memory.clear()
-        return Intent(note="hurt")
+        ctx.grab_mem.reset()
+        me = ctx.me
+        if me is None:
+            return Intent(note="hurt")
+        return grabs.decide_hurt_or_throw_reaction(
+            me,
+            ctx.seat.throw_land_tech,
+            tick=ctx.tick,
+        )
 
     # Leaving exclusive modes: drop enemy-grab commitment so FREE can proceed.
     if commitment.name == EnemyGrabEscapeSkill.name:
         commitment.clear(ctx)
+    # Clear tech retry when no longer in a locked reaction.
+    ctx.seat.throw_land_tech.reset()
 
     return None
 
