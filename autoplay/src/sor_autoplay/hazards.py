@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 
-from . import memory_map as mm
 from .world_map import LANE_Y_MAX_DEFAULT, lane_y_max_for_level
 
 # Live round-4 sampling: class 0 = pit/open, class 1 = solid walkable floor.

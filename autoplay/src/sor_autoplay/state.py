@@ -192,8 +192,8 @@ def _player_from_blocks(
         health = _u16(obj, mm.OBJ_HEALTH)
         if health > mm.MAX_HEALTH:
             # Clamp display if RAM is mid-write or unexpected.
-            health = min(health, mm.MAX_HEALTH * 2)
-        health_percent = 100.0 * min(health, mm.MAX_HEALTH) / mm.MAX_HEALTH
+            health = mm.MAX_HEALTH
+        health_percent = 100.0 * health / mm.MAX_HEALTH
     else:
         health = None
         health_percent = None

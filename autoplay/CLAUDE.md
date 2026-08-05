@@ -313,6 +313,11 @@ air tech on ordinary street throws without `+$45`; 6-button `--altControls`.
      Adam additionally refuses a foe already at contact (his startup loses to
      the enemy's own strike). The chord holds the seat for its full recovery
      via `attack_cd`, and needs an input-ready ground action.
+     `combat.enemy_is_behind`'s generic side-classification dead zone
+     (`min_dist`, 10px default) must stay separate from this per-character
+     `near` bound: `can_rear_hit` passes `min_dist=0` so a point-blank foe
+     inside Axel/Blaze's small measured `near` (1px/0px) still connects —
+     it previously fell through the generic 10px zone unhit.
    - **Rear B+C outranks front grab-shield** whenever `can_rear_hit` is true:
      free combat emits the chord before walking into a front hold while a
      hostile already sits on the back arc (main free-damage failure mode).

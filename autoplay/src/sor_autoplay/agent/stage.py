@@ -25,7 +25,7 @@ STAGE_PRESS_TYPE = 0x42
 # Solid machine housing the player cannot walk through.
 # X matches the ROM arming band [press_x-48, press_x+96] (asymmetric).
 PRESS_SOLID_LEFT = 48
-PRESS_SOLID_RIGHT = 64
+PRESS_SOLID_RIGHT = 96
 # Lane half-height of the housing. The crusher sits on one lane but the frame
 # occupies a wide middle band; half of 36 leaves only the top/bottom edges free.
 PRESS_SOLID_HALF_Y = 36

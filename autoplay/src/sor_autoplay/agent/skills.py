@@ -14,7 +14,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from ..world_map import MapEntity
 from . import combat, grabs
 from .context import DecisionContext, PlayerMode
 from .controls import Intent

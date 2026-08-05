@@ -33,7 +33,7 @@ from . import enemies as enemy_ai
 from . import stage as stage_rules
 from .characters import CharacterProfile
 from .enemies import CounterPlan
-from .fuzzy import clamp01, falling
+from .fuzzy import falling
 from .jump_kick import (
     JumpKickPlan,
     can_jump_kick_solved,
@@ -450,7 +450,7 @@ def can_rear_hit(
     """Back attack only vs a foe behind us that the chord can actually reach."""
 
     near, far = rear_hit_window(me, foe, profile)
-    if not enemy_is_behind(me, foe, face_right=face_right, max_dist=far):
+    if not enemy_is_behind(me, foe, face_right=face_right, max_dist=far, min_dist=0.0):
         return False
     if abs(foe.map_y - me.map_y) > REAR_LANE_HALF:
         return False
@@ -677,18 +677,25 @@ def enemy_is_behind(
     *,
     face_right: bool,
     max_dist: float = REAR_REACT_RANGE,
+    min_dist: float = 10.0,
 ) -> bool:
-    """True if the foe is on our **rear** side and close enough for a back attack."""
+    """True if the foe is on our **rear** side and close enough for a back attack.
+
+    ``min_dist`` is a generic side-classification dead zone (avoid calling an
+    overlapping foe "behind"); it predates the measured per-character rear
+    box and is too coarse for ``can_rear_hit``, which already enforces the
+    real near/far window from `rear_hit_window` and passes 0 here.
+    """
 
     dx = foe.map_x - me.map_x
     dy = abs(foe.map_y - me.map_y)
     if dy > LANE_HIT_HALF:
         return False
-    if abs(dx) > max_dist or abs(dx) < 6:
+    if abs(dx) > max_dist or abs(dx) < min_dist:
         return False
-    if face_right and dx < -10:
+    if face_right and dx < 0:
         return True
-    if not face_right and dx > 10:
+    if not face_right and dx > 0:
         return True
     return False
 

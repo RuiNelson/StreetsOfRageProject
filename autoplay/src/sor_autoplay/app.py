@@ -323,7 +323,13 @@ class ObserverApp:
                     )
                     client.connect()
                     client.ping()
-                    self._client = client
+                    with self._lock:
+                        if self._stop.is_set():
+                            # stop() ran while we were connecting; do not
+                            # leak this socket past the poller's lifetime.
+                            client.close()
+                            break
+                        self._client = client
                     backoff_s = 0.25
 
                 assert self._client is not None
@@ -375,32 +381,33 @@ class ObserverApp:
                 with self._lock:
                     self._latest = disconnected_snapshot(str(exc))
                     self._agent_notes = ("", "")
-                if self._client is not None:
+                    client, self._client = self._client, None
+                if client is not None:
                     try:
-                        self._client.release_buttons()
+                        client.release_buttons()
                     except Exception:  # noqa: BLE001
                         pass
                     try:
-                        self._client.close()
+                        client.close()
                     except Exception:  # noqa: BLE001
                         pass
-                    self._client = None
                 self._was_agent_active = False
                 self._stop.wait(backoff_s)
                 backoff_s = min(2.0, backoff_s * 1.5)
 
     def stop(self) -> None:
         self._stop.set()
-        if self._client is not None:
+        with self._lock:
+            client, self._client = self._client, None
+        if client is not None:
             try:
-                self._client.release_buttons()
+                client.release_buttons()
             except Exception:  # noqa: BLE001
                 pass
             try:
-                self._client.close()
+                client.close()
             except Exception:  # noqa: BLE001
                 pass
-            self._client = None
 
     def latest(self) -> GameSnapshot:
         with self._lock:

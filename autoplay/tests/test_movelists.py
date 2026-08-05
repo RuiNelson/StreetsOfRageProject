@@ -290,6 +290,14 @@ class RearChordTimingTests(unittest.TestCase):
         off_lane = replace(foe, map_y=foe.map_y + 14.0)
         self.assertFalse(can_rear_hit(me, off_lane, PROFILES[0], face_right=True))
 
+    def test_point_blank_foe_still_connects(self) -> None:
+        """Axel's box starts at -8 (near = 1px); a generic 10px dead zone
+        used to override the measured near bound and swallow this hit."""
+        from sor_autoplay.agent.combat import can_rear_hit
+
+        me, foe = self._pair(3.0)
+        self.assertTrue(can_rear_hit(me, foe, PROFILES[0], face_right=True))
+
 
 class PunchBoxTests(unittest.TestCase):
     """Measured punch attack box +$64 (facing right, Y ±8)."""

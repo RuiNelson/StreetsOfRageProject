@@ -83,6 +83,28 @@ class StateSnapshotTests(unittest.TestCase):
         self.assertEqual(snap.p2.lives, 2)
         self.assertEqual(snap.p2.score, 10)
 
+    def test_torn_health_read_clamps_to_max(self) -> None:
+        """A mid-write/garbage health value above MAX_HEALTH but below the old
+        `MAX_HEALTH * 2` no-op ceiling (e.g. 120) must still clamp to 80, not
+        pass through unclamped into the raw `.health` field."""
+        globals_block = bytearray(0x40)
+        timer_block = bytearray(4)
+        objects = bytearray(0x100)
+
+        _put_u16(globals_block, 0x00, 0x0016)
+        _put_u8(globals_block, 0x18, 0x01)  # P1 only
+        _put_u8(objects, OBJ_TYPE, 0x01)
+        _put_u16(objects, OBJ_HEALTH, MAX_HEALTH + 40)  # 120, garbage read
+        _put_u8(objects, OBJ_CHARACTER_ID, 0x00)
+
+        snap = snapshot_from_memory_blocks(
+            globals_block=bytes(globals_block),
+            timer_block=bytes(timer_block),
+            objects_block=bytes(objects),
+        )
+        self.assertEqual(snap.p1.health, MAX_HEALTH)
+        self.assertEqual(snap.p1.health_percent, 100.0)
+
     def test_one_player_menu_snapshot(self) -> None:
         globals_block = bytearray(0x40)
         timer_block = bytearray(4)
