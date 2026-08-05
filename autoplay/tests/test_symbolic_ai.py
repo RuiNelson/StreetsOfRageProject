@@ -712,6 +712,33 @@ class PolicyRegressionTests(unittest.TestCase):
         self.assertNotEqual(decision.p1_mask, 0, decision.p1_note)
         self.assertIn("reengage boss Antonio", decision.p1_note)
 
+    def test_nearby_antonio_charge_retreats_instead_of_closing_in(self) -> None:
+        """Live measurement (round1-start, axel, rng 711800410): Antonio dashes
+        in on both axes (dx=36, dy=30) and connects, locking the player into
+        the $50-$5F/$70-$74 hurt/throw-recovery chain for ~15 decisions. The
+        off-lane "reengage boss" fixed-point fix (dy=73, far off-lane) must
+        not also march the player into a boss that is already closing in."""
+
+        me = _player(x=150, y=54)
+        antonio = _entity(
+            kind="boss",
+            family="Antonio",
+            type_id=0x56,
+            slot="B0",
+            label="Antonio",
+            map_x=186,
+            world_x=186,
+            map_y=24,
+            world_y=24,
+            combat_phase=CombatPhase.CHARGE,
+        )
+        decision = decide_actions(
+            _snapshot((me, antonio)),
+            AgentConfig(p1_enabled=True, police_threshold=99.0),
+            AgentState(),
+        )
+        self.assertNotIn("reengage boss Antonio", decision.p1_note)
+
     def test_active_enemy_forbids_weapon_detour(self) -> None:
         me = _player()
         enemy = _entity(

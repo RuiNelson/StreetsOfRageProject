@@ -1099,7 +1099,17 @@ def _decide_free(ctx: DecisionContext) -> Intent:
                 # observed motionless for hundreds of frames at dy=73. A boss
                 # is a hard progression blocker, so deliberately re-align
                 # instead of accepting an unbounded "guard lane" fixed point.
-                if foe.kind == "boss":
+                # Exception: a charging boss *already inside reactive lane
+                # range* (Antonio's dash-in commit, closing on both axes) is
+                # not "waiting" — walking to match its lane here marches the
+                # player straight into the hit instead of falling through to
+                # the off-lane retreat below. A charge from far off-lane
+                # (dy well outside THREAT_LANE_REACT_HALF) still re-aligns.
+                charging_nearby = (
+                    foe.combat_phase == CombatPhase.CHARGE
+                    and abs_dy <= combat.THREAT_LANE_REACT_HALF
+                )
+                if foe.kind == "boss" and not charging_nearby:
                     return _walk_toward(
                         walk,
                         me,
