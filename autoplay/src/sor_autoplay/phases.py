@@ -156,6 +156,17 @@ def boss_phase(
     if type_id == 0x55 and p == 0x02:
         return CombatPhase.ATTACKING
 
+    # Antonio primary $02 ($171CC antonio_state2_close_strike, asm $16F0E):
+    # a short committed action entered from state 1 on a target
+    # proximity/velocity/facing gate (not a pure distance check like the
+    # tactical $08 dash/boomerang commit below). Tactical is cleared to 0 on
+    # entry, so without this the generic t!=0 heuristic below sees it as
+    # NORMAL — a real blind spot, since one of the entry paths is the
+    # target's X-velocity being exactly zero, which is the player's own
+    # signature while throwing a stationary ground combo.
+    if type_id == 0x56 and p == 0x02:
+        return CombatPhase.ATTACKING
+
     # Onihime/Yasha (type $58) — ROM tables at $158D8 / $15A5E / $15BE0:
     #   primary $01 active combat: +$67 $00 idle, $01 chase/walk, $02 jump
     #   attack, $03 leap-to-grab. Only $02/$03 (and primary $02 commit) are

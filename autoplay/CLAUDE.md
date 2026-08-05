@@ -198,13 +198,26 @@ for tests/HUD.
      `+$58` bit 5 is clear; stop sending B after the ROM has accepted the edge
    - `CounterPlan.max_combo_hits` caps combo depth per family/boss (seat
      `combo_hits`, reset to 1 on the fresh punch, `+= 1` per queued edge).
-     Antonio caps at 2 (user-reported, not ROM-confirmed: his power kick can
-     break a committed combo or grab) — refusing to chain at all was tried
-     first and rejected: the ROM's own recovery lock already forces standing
-     still through the first hit's animation regardless of what is pressed,
-     so a single-hit cap bought no real safety while giving up most of the
+     Antonio caps at 2 — refusing to chain at all was tried first and
+     rejected: the ROM's own recovery lock already forces standing still
+     through the first hit's animation regardless of what is pressed, so a
+     single-hit cap bought no real safety while giving up most of the
      damage. Two fast hits, skip the combo's slower finisher, pending a live
      trace of the actual counter window
+   - Antonio primary state `$02` (`$171CC antonio_state2_close_strike`, asm
+     `$16F0E`) always decodes `ATTACKING` regardless of tactical (`phases.py`
+     `boss_phase`) — this is the ROM-confirmed candidate for the
+     user-reported power kick that breaks a combo or grab. Distinct from
+     tactical `$08` (the boomerang wind-up, already `CHARGE`): state 1
+     (`$16DA0 antonio_state1_active_combat`) advances to state 2 on a target
+     proximity/velocity/facing gate — not pure distance — and one of its
+     entry paths is the target's X-velocity being exactly zero, which is the
+     player's own signature while throwing a stationary ground combo.
+     Tactical is cleared to 0 on this transition, so without the dedicated
+     rule the generic tactical heuristic saw it as `NORMAL`. See
+     `StreetsOfRageRecompilation/ai-analysis/enemy-ai.md` "Body state
+     machine" under Antonio for the full disassembly trace; the move's
+     visual identity (is it actually a kick?) still needs a live trace
    - Match lane before **punching** (off-lane "close" was the air-punch bug).
      When off-lane, still walk to the horizontal stand-off (`foe.x ±
      approach_offset`), not pure-Y at the current X: a foe approaching on a

@@ -99,9 +99,32 @@ class PhaseDecodeTests(unittest.TestCase):
         )
 
     def test_later_boss_tactical_charge(self) -> None:
+        # Primary $01 (state 1, active combat) is where tactical $08 (the
+        # boomerang wind-up/throw commit, asm $16E88) actually coexists with
+        # a live boss in the ROM; state 2 clears tactical to 0 before it is
+        # ever entered, so primary $02 is covered by its own dedicated rule
+        # below instead (test_antonio_state2_is_always_attacking).
         self.assertEqual(
-            boss_phase(type_id=0x56, primary_byte=0x02, tactical=0x08),
+            boss_phase(type_id=0x56, primary_byte=0x01, tactical=0x08),
             CombatPhase.CHARGE,
+        )
+
+    def test_antonio_state2_is_always_attacking(self) -> None:
+        """$171CC (antonio_state2_close_strike, asm $16F0E): a short committed
+        action entered from state 1 on a target proximity/velocity/facing
+        gate, not a pure distance check. Tactical is cleared to 0 on entry,
+        so without a type-specific rule this decodes as NORMAL — a real blind
+        spot, since a zero target X-velocity is one of the entry paths and
+        matches the player's own signature while throwing a ground combo."""
+
+        self.assertEqual(
+            boss_phase(type_id=0x56, primary_byte=0x02, tactical=0x00),
+            CombatPhase.ATTACKING,
+        )
+        # Souther's own primary $02 special case must stay unaffected.
+        self.assertEqual(
+            boss_phase(type_id=0x55, primary_byte=0x02, tactical=0x00),
+            CombatPhase.ATTACKING,
         )
 
     def test_target_seat(self) -> None:
