@@ -1145,6 +1145,41 @@ class PolicyAggressionTests(unittest.TestCase):
         self.assertIn("combo queue", d.p1_note)
         self.assertTrue(d.p1_mask & 0x20, d.p1_note)
 
+    def test_busy_normal_attack_does_not_chain_combo_into_antonio(self) -> None:
+        """User-reported: Antonio's power kick can break a committed combo (or
+        grab). Land the current hit and wait rather than queuing another B
+        edge into the counter window."""
+
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x18,
+            action_flags=0,
+        )
+        antonio = _e(
+            kind="boss",
+            family="Antonio",
+            type_id=0x56,
+            slot="B0",
+            label="Antonio",
+            map_x=128,
+            world_x=128,
+            map_y=64,
+        )
+        d = decide_actions(
+            self._snap((p1, antonio)),
+            AgentConfig(p1_enabled=True, police_threshold=99.0),
+            AgentState(),
+        )
+        self.assertNotIn("combo queue", d.p1_note)
+        self.assertFalse(d.p1_mask & 0x20, d.p1_note)
+
     def test_smashes_breakable(self) -> None:
         p1 = _e(
             kind="player",

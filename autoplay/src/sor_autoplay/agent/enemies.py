@@ -78,6 +78,9 @@ class CounterPlan:
     sidestep: bool = False
     # When True, do not jump (enemy punishes air).
     no_jump: bool = False
+    # When True, land one hit and reset instead of queuing follow-up combo
+    # edges (foe has a counter that punishes a committed combo string).
+    no_combo_chain: bool = False
     # When True, treat "low health / downed" foe as still dangerous (Nora feint).
     distrust_downed: bool = False
     # Extra priority weight for target selection.
@@ -214,6 +217,10 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
         jump_bias=0.0,
         grab_bias=0.05,
         sidestep=True,
+        # User-reported (not yet ROM-address-confirmed): his power kick can
+        # break a committed combo or grab. Land one hit and reset rather than
+        # chaining follow-up combo edges into the counter window.
+        no_combo_chain=True,
         priority=2.5,
         note="antonio outside boomerang",
     ),

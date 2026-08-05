@@ -966,7 +966,7 @@ def _decide_free(ctx: DecisionContext) -> Intent:
 
         if combat.player_busy_attacking(me):
             walk.clear()
-            if combat.can_queue_normal_combo(me, foe, profile):
+            if combat.can_queue_normal_combo(me, foe, profile) and not plan.no_combo_chain:
                 if not coop.attack_would_hit_ally(
                     me, coop_ctx.partner, face_left=face_left
                 ):
