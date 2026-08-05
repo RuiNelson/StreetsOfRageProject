@@ -92,6 +92,10 @@ JACK_TYPE = 0x27
 JACK_THROW_STATE = 0x0E
 _JACK_PROJECTILE = 0x28
 
+# Antonio's linked boomerang/attack object (ai-analysis/enemy-ai.md "$16CF4
+# antonio family table"). See object_catalog._BOSS_PROJECTILE_STYLES.
+ANTONIO_BOOMERANG_TYPE = 0x96
+
 
 def jack_projectile_phase(entity: MapEntity) -> JackProjectilePhase | None:
     """Distinguish juggling helpers from weapons that are actually in flight.
@@ -258,6 +262,18 @@ _TYPE_PLANS: dict[int, CounterPlan] = {
         sidestep=True,
         priority=2.2,
         note="dodge jack projectile",
+    ),
+    # Antonio's linked boomerang shares his family label ("Antonio"), so it
+    # must be dispatched by type_id like the Jack projectile above — a family
+    # lookup here would return his body's MIDRANGE approach plan instead of
+    # dodging the boomerang itself.
+    ANTONIO_BOOMERANG_TYPE: CounterPlan(
+        ThreatKind.PROJECTILE,
+        range_scale=2.0,
+        prefer_lane_delta=1.0,
+        sidestep=True,
+        priority=2.3,
+        note="dodge antonio boomerang",
     ),
 }
 

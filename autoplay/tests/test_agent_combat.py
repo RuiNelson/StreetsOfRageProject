@@ -123,6 +123,32 @@ class EnemyCounterTests(unittest.TestCase):
         )
         self.assertFalse(dangerous_projectile(helper))
 
+    def test_antonio_boomerang_is_always_a_dodge(self) -> None:
+        """Type $96 (Antonio's linked boomerang) has no confirmed
+        attached/launched split like Jack's $28 helper (see
+        ai-analysis/enemy-ai.md "medium-confidence" note on objects $96-$99),
+        so unlike Jack it must default to dangerous in every state rather than
+        only while some specific primary_state is set."""
+
+        wind_up = _e(
+            kind="projectile",
+            family="Antonio",
+            type_id=0x96,
+            health=None,
+            primary_state=0x0101,
+        )
+        thrown = _e(
+            kind="projectile",
+            family="Antonio",
+            type_id=0x96,
+            health=None,
+            primary_state=0x0300,
+        )
+        for boomerang in (wind_up, thrown):
+            plan = plan_for(boomerang)
+            self.assertEqual(plan.kind, ThreatKind.PROJECTILE)
+            self.assertTrue(dangerous_projectile(boomerang))
+
     def test_jack_body_is_not_mistaken_for_its_projectile(self) -> None:
         plan = plan_for(_e(family="Jack", type_id=0x27))
         self.assertNotEqual(plan.kind, ThreatKind.PROJECTILE)

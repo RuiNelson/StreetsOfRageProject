@@ -63,6 +63,16 @@ _BOSS_STYLES: dict[int, EntityStyle] = {
     0x58: EntityStyle("boss", "Onihime/Yasha", "B", "#ff375f", "Onihime/Yasha"),
 }
 
+# Linked boss attack objects (`ai-analysis/enemy-ai.md` "$16CF4 antonio family
+# table"): type $96 follows Antonio during wind-up/catch and goes independently
+# active during the throw. Exact per-state semantics are only medium-confidence
+# (needs framebuffer tracing), so treat it like Jack's $28 helper default:
+# always a dangerous projectile. Untracked before this, Antonio's boomerang was
+# invisible to the whole agent pipeline (no map entity => never evaded).
+_BOSS_PROJECTILE_STYLES: dict[int, EntityStyle] = {
+    0x96: EntityStyle("projectile", "Antonio", "~", "#af52de", "Antonio boomerang"),
+}
+
 # Carried / ground weapons.
 _WEAPON_STYLES: dict[int, EntityStyle] = {
     0x08: EntityStyle("weapon", "Weapon", "k", "#5ac8fa", "Knife"),
@@ -130,6 +140,7 @@ _SKIP_TYPES = frozenset(
 _ALL_STATIC: dict[int, EntityStyle] = {}
 _ALL_STATIC.update(_ENEMY_STYLES)
 _ALL_STATIC.update(_BOSS_STYLES)
+_ALL_STATIC.update(_BOSS_PROJECTILE_STYLES)
 _ALL_STATIC.update(_WEAPON_STYLES)
 _ALL_STATIC.update(_BREAKABLE_STYLES)
 _ALL_STATIC.update(_HAZARD_STYLES)

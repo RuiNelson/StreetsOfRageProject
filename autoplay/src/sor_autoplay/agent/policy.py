@@ -933,7 +933,11 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             face_right_now = not jk_plan.face_left
 
         if foe.kind == "projectile" or plan.kind == enemy_ai.ThreatKind.PROJECTILE:
-            evade_x = me.world_x - 40 if dx > 0 else me.world_x + 40
+            # `dx` is approach_vector's signed evade intent (+right/-left, the
+            # same convention as `side`/`out_dx` elsewhere in this module) —
+            # the goal must follow that sign, not invert it into the
+            # projectile's path.
+            evade_x = me.world_x + 40 if dx > 0 else me.world_x - 40
             evade_y = me.world_y + (18 if (me.world_x + me.world_y) % 2 == 0 else -18)
             return _walk_toward(
                 walk,

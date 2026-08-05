@@ -75,6 +75,18 @@ class ObjectCatalogTests(unittest.TestCase):
         self.assertIsNotNone(style)
         self.assertEqual(style.kind, "projectile")
 
+    def test_antonio_boomerang_is_a_tracked_projectile(self) -> None:
+        """Type $96 is Antonio's linked boomerang/attack object (see
+        ai-analysis/enemy-ai.md "$16CF4 antonio family table"). Before this it
+        had no catalog entry, so it never became a map entity and the agent
+        pipeline could not see or dodge it."""
+
+        style = style_for_type(0x96)
+        self.assertIsNotNone(style)
+        assert style is not None
+        self.assertEqual(style.kind, "projectile")
+        self.assertEqual(style.family, "Antonio")
+
     def test_mr_x_type_35_is_boss(self) -> None:
         """Final Mr. X body ($1306A) must plot and be hunt-able as a boss."""
 

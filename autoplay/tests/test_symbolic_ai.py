@@ -739,6 +739,34 @@ class PolicyRegressionTests(unittest.TestCase):
         )
         self.assertNotIn("reengage boss Antonio", decision.p1_note)
 
+    def test_antonio_boomerang_is_evaded_not_walked_into(self) -> None:
+        """Type $96 is Antonio's linked boomerang (previously untracked, see
+        object_catalog._BOSS_PROJECTILE_STYLES). Same-lane and close enough to
+        look like a free punch, it must still be dodged like any other
+        projectile rather than approached for a strike."""
+
+        me = _player(x=150, y=64)
+        boomerang = _entity(
+            kind="projectile",
+            family="Antonio",
+            type_id=0x96,
+            slot="X0",
+            label="Antonio boomerang",
+            map_x=175,
+            world_x=175,
+            map_y=64,
+            world_y=64,
+            health=None,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+        decision = decide_actions(
+            _snapshot((me, boomerang)),
+            AgentConfig(p1_enabled=True, police_threshold=99.0),
+            AgentState(),
+        )
+        self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)  # no B
+        self.assertTrue(decision.p1_mask & 0x04, decision.p1_note)  # step away (left)
+
     def test_active_enemy_forbids_weapon_detour(self) -> None:
         me = _player()
         enemy = _entity(

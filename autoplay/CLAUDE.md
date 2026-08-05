@@ -356,6 +356,19 @@ air tech on ordinary street throws without `+$45`; 6-button `--altControls`.
      radius. A distant Antonio is approached rather than fled from
    - A boss decoded as CHARGE but waiting in a distant Y lane is deliberately
      re-aligned with; do not enter the ordinary-enemy `guard lane` fixed point
+   - Antonio's linked boomerang/attack object is type `$96`
+     (`ai-analysis/enemy-ai.md` "$16CF4 antonio family table" — follows him
+     during wind-up/catch, independently active during the throw). It had no
+     `object_catalog` entry, so it was never a `MapEntity` and the whole agent
+     was blind to it; catalogued in `_BOSS_PROJECTILE_STYLES` as an
+     always-dangerous `projectile` (no confirmed attached/launched split like
+     Jack's `$28`, so no state-based exception) and dispatched by `type_id` in
+     `enemies._TYPE_PLANS` — a family-label lookup would have returned
+     Antonio's own body plan instead, since the object shares his "Antonio"
+     family. Fixed alongside a real, previously-untested sign inversion in the
+     generic projectile-dodge goal (`policy._decide_free`): it was walking the
+     player *toward* `approach_vector`'s evade intent, not away from it,
+     applying to every ranged dodge (Jack's axe/torch too, not just Antonio)
    - Souther (type `$55`) and Onihime/Yasha (type `$58`) both use primary
      state `$02` for live attacks even when tactical `+$67` is zero:
      `$16118` is Souther's claw/contact state and `$15D0C` is the twins'
