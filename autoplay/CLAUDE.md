@@ -218,6 +218,21 @@ for tests/HUD.
      `StreetsOfRageRecompilation/ai-analysis/enemy-ai.md` "Body state
      machine" under Antonio for the full disassembly trace; the move's
      visual identity (is it actually a kick?) still needs a live trace
+   - `CounterPlan.retreat_distance` (default 40px, the generic body-grab
+     range) sets how far the cooldown retreat above steps back. Antonio uses
+     130px: the kick/boomerang-arm distance bands top out at ROM-confirmed
+     `$78` (120px), and a live trace of the first version of this retreat
+     (40px) still got hit — 40px from a ~65-70px stand-off only reaches
+     ~105-110px, still inside that band
+   - `attack_mix`'s `behind -> "rear"` is gated on `profile.rear_attack_bias
+     >= 0.2` (`enemies.py`), not unconditional. The bias field existed per
+     character but was never read (`del tick, profile` discarded it): live
+     play showed Adam auto-taking his chord on every "behind" geometry hit
+     despite it being a 21-frame startup / 39-frame recover commit for 3
+     damage (bias 0.12, "last resort" per `characters.py`) — worse, his own
+     slow startup pads `can_rear_hit`'s far bound (`speed*(startup+active)`),
+     so he qualifies for the chord from farther away than a fast character
+     would. Axel (0.40) and Blaze (0.28) still take it on sight
    - Match lane before **punching** (off-lane "close" was the air-punch bug).
      When off-lane, still walk to the horizontal stand-off (`foe.x ±
      approach_offset`), not pure-Y at the current X: a foe approaching on a

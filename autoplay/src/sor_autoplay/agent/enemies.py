@@ -85,6 +85,10 @@ class CounterPlan:
     # forces standing still either way) while still giving up most of the
     # damage, so cap short of the combo's own slow finishing hit instead.
     max_combo_hits: int | None = None
+    # How far (px) to retreat instead of idling during our own post-attack
+    # cooldown, when max_combo_hits is set — a generic body-grab-range
+    # default; set explicitly once a foe's real danger radius is ROM-confirmed.
+    retreat_distance: float = 40.0
     # When True, treat "low health / downed" foe as still dangerous (Nora feint).
     distrust_downed: bool = False
     # Extra priority weight for target selection.
@@ -221,11 +225,14 @@ _FAMILY_PLANS: dict[str, CounterPlan] = {
         jump_bias=0.0,
         grab_bias=0.05,
         sidestep=True,
-        # User-reported (not yet ROM-address-confirmed): his power kick can
-        # break a committed combo or grab. ponytail: heuristic pending a live
-        # trace of the actual counter window — two fast hits (skip the
-        # combo's slower finisher) rather than a full string or a lone jab.
+        # $171CC (antonio_state2_close_strike): a short committed kick that
+        # arms on target X-velocity == 0 while in range — two fast hits (skip
+        # the combo's slower finisher) rather than a full string or a lone jab.
         max_combo_hits=2,
+        # Clear the ROM-confirmed $78 (120px) kick/boomerang-arm distance
+        # band with margin, rather than the generic 40px default which still
+        # left us inside it.
+        retreat_distance=130.0,
         priority=2.5,
         note="antonio outside boomerang",
     ),
@@ -527,7 +534,12 @@ def attack_mix(
 
     Deterministic rules (``tick`` kept for API compat, unused for rolls):
 
-    - **rear** first when ``behind`` (caller already verified B+C can connect).
+    - **rear** first when ``behind`` (caller already verified B+C can connect)
+      and the character's chord is cheap enough to take on sight
+      (``rear_attack_bias``). Adam's is a 21-frame startup / 39-frame recover
+      commit for 3 damage — geometry alone says "behind", but always taking
+      it there is a bad trade; a low-bias character instead falls through to
+      the rest of this ladder (punch/jump/wait) for that decision.
     - **jump** when the math solver predicts a connect (especially multi-hit
       packs), or for family jump counters (Signal, Haku-Ro) in jump/approach.
     - **grab_walk** when grab_bias is high (Nora) or distant back security.
@@ -538,9 +550,9 @@ def attack_mix(
     are the predicted effect of committing to C→B now.
     """
 
-    del tick, profile  # reserved / unused
+    del tick  # reserved / unused
 
-    if behind:
+    if behind and profile.rear_attack_bias >= 0.2:
         return "rear"
 
     if not lane_ok:

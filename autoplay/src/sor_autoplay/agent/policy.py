@@ -1476,7 +1476,8 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             # punish committed pressure the same way, so reuse that signal
             # and step back instead of idling in the pocket.
             if plan.max_combo_hits is not None:
-                retreat_x = me.world_x + (-40 if target.dx > 0 else 40)
+                step = plan.retreat_distance
+                retreat_x = me.world_x + (-step if target.dx > 0 else step)
                 return _walk_toward(
                     walk,
                     me,

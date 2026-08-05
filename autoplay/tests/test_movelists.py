@@ -161,7 +161,7 @@ class MoveListProfileTests(unittest.TestCase):
         self.assertNotEqual(
             attack_mix(
                 plan,
-                PROFILES[1],
+                PROFILES[0],
                 tick=0,
                 in_range=True,
                 crowd=1,
@@ -171,7 +171,29 @@ class MoveListProfileTests(unittest.TestCase):
             ),
             "rear",
         )
+        # Axel's chord is cheap (3/10/17 startup/active/recover) — take it on
+        # sight when actually behind.
         self.assertEqual(
+            attack_mix(
+                plan,
+                PROFILES[0],
+                tick=0,
+                in_range=True,
+                crowd=1,
+                band="close",
+                behind=True,
+            ),
+            "rear",
+        )
+
+    def test_adam_does_not_auto_chord_despite_being_behind(self) -> None:
+        """Adam's chord is a 21-frame startup / 39-frame recover commit for 3
+        damage (rear_attack_bias=0.12, "last resort" per characters.py). Real
+        play showed the agent taking it on every "behind" geometry hit
+        regardless of cost; the bias field existed but was never read."""
+
+        plan = plan_for(_foe())
+        self.assertNotEqual(
             attack_mix(
                 plan,
                 PROFILES[1],
