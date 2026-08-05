@@ -40,7 +40,8 @@ WEAPON_PEPPER = W.WEAPON_PEPPER
 # A longer latch feeds its own B presses back into the $60-$6F reaction family
 # after the held enemy has died, producing an empty knee/throw loop.
 HOLD_LATCH_TICKS = 2
-# Live: B alone knees; mix B+back for throws after a few knees.
+# Legacy cadence when a profile asks for knees before throw (grab_knees > 0).
+# Profiles with prefer_throw and grab_knees=0 throw on the first legal B edge.
 THROW_EVERY = 3
 GRAB_INPUT_RETRY_TICKS = 4
 HOLD_INPUT_ACTIONS = frozenset({0x28, 0x4A, 0x60, 0x66})
@@ -619,7 +620,13 @@ def _enemy_grab_tree(
     profile: CharacterProfile,
     ally: MapEntity | None = None,
 ) -> Intent:
-    """Live: B alone knees the held foe. Mix B+back for throws."""
+    """Front/back hold resolve: profile-driven vault, throw, or knee.
+
+    ROM ``$2BA8``: B alone / B+forward / B+Up = knee ``$6A``; **B+back** only
+    = throw ``$62``/``$64``. Back hold ``$66`` + B = suplex ``$68``. Front hold
+    + C = crossover toward ``$66`` (then B). Character profiles choose the
+    preferred finish; they no longer force a knee-heavy default.
+    """
 
     # B/C edges are accepted only in the stable front/back hold actions. The
     # baseline trace showed repeated B presses through $6A/$63 animations,
@@ -637,6 +644,27 @@ def _enemy_grab_tree(
             note=f"suplex ({profile.name}) act=${me.action_state:02X}",
         )
 
+    # Co-op: never knee into a body-overlapped partner — fling away first.
+    force_throw = coop.ally_in_attack_bubble(
+        me, ally, max_x=coop.ALLY_BODY_X + 2.0, max_y=coop.ALLY_LANE_HALF
+    )
+
+    # Adam/Blaze (prefer_vault): C → back hold → suplex when not forced to
+    # clear an ally. Crowd/back-exposure still use the crossover planner first;
+    # this is the solo finish when that plan did not take ownership.
+    if (
+        me.action_base == 0x60
+        and profile.prefer_vault
+        and not force_throw
+    ):
+        return Intent(
+            jump=True,
+            note=(
+                f"vault ({profile.name}) "
+                f"act=${me.action_state:02X} hold=${ctx.held_type:02X}"
+            ),
+        )
+
     back = throw_back_direction(
         me,
         progress_right=progress_right,
@@ -644,13 +672,30 @@ def _enemy_grab_tree(
         foe=foe,
         ally=ally,
     )
-    # Mostly knees (proven to deal damage). Every Nth pulse: B+back throw.
-    # If a co-op partner is body-overlapped on the hold, prefer an immediate
-    # away throw rather than kneeing into them (SoR1 friendly fire).
-    force_throw = coop.ally_in_attack_bubble(
-        me, ally, max_x=coop.ALLY_BODY_X + 2.0, max_y=coop.ALLY_LANE_HALF
+    do_throw = (
+        force_throw
+        or crowd >= 2
+        or profile.prefer_throw
+        or (
+            profile.grab_knees > 0
+            and memory.pulse > profile.grab_knees
+        )
+        or (
+            profile.grab_knees <= 0
+            and not profile.prefer_throw
+            and memory.pulse % THROW_EVERY == 0
+        )
     )
-    if force_throw or crowd >= 2 or memory.pulse % THROW_EVERY == 0:
+    # Still allow a short knee series when grab_knees > 0 and not forced.
+    if (
+        not force_throw
+        and not profile.prefer_throw
+        and profile.grab_knees > 0
+        and memory.pulse <= profile.grab_knees
+    ):
+        do_throw = False
+
+    if do_throw:
         left = back < 0
         right = back > 0
         side = "L" if left else "R"

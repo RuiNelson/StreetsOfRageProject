@@ -132,13 +132,21 @@ for tests/HUD.
    crowd of at least four, health at or below 40% with a reachable threat, or
    any reachable live boss; a boss forces maximum pressure and the first legal
    grounded A edge immediately.
-6. **Hold-resolve skill** (`agent/skills.py` → `grabs.py`, `weapons.py`): normally **B+back throw**
-   (away = opposite action-state facing bit0). A hold needs a dedicated held
-   field or the grabbed enemy's reciprocal player link; the latch bridges only
-   one missing observer sample so stale contact/reaction state cannot create an
-   empty knee/throw loop. Exact orphan state `$60` with only a stale `+$4C`
-   pointer gets one B edge; live this transitions `$60 -> $6A -> $02` in 16
-   frames. Also knee fallback; bat/pipe swing; throwable weapons. A carried
+6. **Hold-resolve skill** (`agent/skills.py` → `grabs.py`, `weapons.py`): ROM
+   hold finishes are **profile-driven**, not knee-spam by default:
+   - **B+back throw** when `prefer_throw` (all three characters) or after
+     `grab_knees` pulses; back = opposite action-state facing bit0.
+   - **C vault → back hold → B suplex** when `prefer_vault` (Adam/Blaze) on
+     front hold `$60`, unless co-op forces an immediate away throw.
+   - Back hold `$66` always **B suplex**.
+   - B alone / B+Up is only the knee path when a profile still requests knees
+     (`grab_knees > 0` and not yet past that count).
+   A hold needs a dedicated held field or the grabbed enemy's reciprocal player
+   link; the latch bridges only one missing observer sample so stale
+   contact/reaction state cannot create an empty knee/throw loop. Exact orphan
+   state `$60` with only a stale `+$4C` pointer gets one B edge; live this
+   transitions `$60 -> $6A -> $02` in 16 frames. Also bat/pipe swing; throwable
+   weapons. A carried
    weapon is not a combat target or a reason to press B: with no live foe, or
    with a foe outside the ROM range band, weapon policy returns control to
    free combat (walk to weapon stand-off). Math lives in `agent/weapons.py`:
@@ -249,6 +257,38 @@ for tests/HUD.
      set `+$45` — stay idle. Observe `+$45`/`+$46` via world map
      `tech_armed`/`tech_latched`. Skill path:
      `grabs.decide_hurt_or_throw_reaction` / seat `throw_land_tech` memory.
+
+### Player move coverage (agent vs ROM)
+
+| Move | ROM input / actions | Agent |
+|---|---|---|
+| Walk / lane | D-pad | Yes (`walk` latch) |
+| Punch / combo | B ground `$18+` | Yes (`combat` + combo bit5) |
+| Rear / escape | B+C chord `$20+` (Adam `$22→$24`) | Yes (`rear_hit_window`) |
+| Jump | C → `$10` | Yes |
+| Jump-kick | C then B in `$12` | Yes (`jump_kick` solver) |
+| Weapon jump | C while `$30–$3A` → `$3C+` | Yes (Signal sweep path) |
+| Pickup | B near free item | Yes (loot arbiter + box) |
+| Police special | A edge | Yes (pressure gate) |
+| Grab (walk-in) | body contact → `$60` | Yes (approach / grab_bias) |
+| Hold knee | B / B+Up / B+front → `$6A` | Yes only if `grab_knees` left |
+| Hold throw | **B+back** → `$62`/`$64` | Yes (`prefer_throw`) |
+| Hold vault | C → `$76`/`$80` → `$66` | Yes (`prefer_vault` + planner) |
+| Suplex | B on `$66` → `$68` | Yes |
+| Crossover-suplex plan | back threat / crowd | Yes (`CrossoverSuplexSkill`) |
+| Partner vault boost | C off ally → high C → air B | Yes (`partner_boost`) |
+| Enemy-held counter | C then B `$7A–$7E` | Yes (`EnemyGrabEscape`) |
+| Throw-victim lock | `$50–$5F`, `$70–$74`, `$82–$8F` | Yes (`HURT` idle) |
+| Land tech C+Up | `+$45` + C edge + Up | Yes (special throws only) |
+| Knife melee/throw | same B; cone `$90` | Yes (`weapons`) |
+| Pepper throw | B `$44` | Yes |
+| Bat/pipe swing | B in reach | Yes |
+| Bottle | not attack-thrown | Yes (melee dump only) |
+| Mr. X offer | always NO (DOWN+A) | Yes |
+
+**Not agent goals (by design):** B+Up as a distinct throw (ROM treats as knee);
+air tech on ordinary street throws without `+$45`; 6-button `--altControls`.
+
    - A committed attacker can be turned toward and punched in the same input;
      a separate four-frame facing decision is too slow. Lane evasion respects
      the ordinary-enemy `$02-$70` bounds and retreats on X at either edge

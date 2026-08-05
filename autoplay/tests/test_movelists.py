@@ -54,6 +54,97 @@ class MoveListProfileTests(unittest.TestCase):
         self.assertTrue(PROFILES[2].prefer_vault)
         self.assertEqual(PROFILES[2].grab_knees, 0)
 
+    def test_hold_tree_uses_prefer_vault(self) -> None:
+        """Adam/Blaze front hold should emit C for vault→suplex, not knee spam."""
+
+        from sor_autoplay.agent.grabs import GrabMemory, context_from_player, decide_held
+
+        me = MapEntity(
+            kind="player",
+            family="Player",
+            symbol="1",
+            color="#fff",
+            label="P1",
+            type_id=1,
+            world_x=100,
+            world_y=64,
+            world_z=160,
+            map_x=100.0,
+            map_y=64.0,
+            health=80,
+            slot="P1",
+            action_state=0x60,
+            contact_ptr=0xB900,
+            combat_phase=CombatPhase.HOLDING,
+        )
+        foe = _foe()
+        foe = replace(
+            foe,
+            world_x=120,
+            map_x=120.0,
+            primary_state=0x0500,
+            combat_phase=CombatPhase.GRABBED,
+            attacker_ptr=0xB800,
+        )
+        entities = (me, foe)
+        intent = decide_held(
+            me,
+            context_from_player(me, entities),
+            GrabMemory(),
+            tick=1,
+            foe=foe,
+            profile=PROFILES[2],
+        )
+        assert intent is not None
+        self.assertTrue(intent.jump, intent.note)
+        self.assertFalse(intent.attack, intent.note)
+        self.assertIn("vault", intent.note)
+
+    def test_hold_tree_uses_prefer_throw(self) -> None:
+        """Axel (prefer_throw, no vault) throws B+back on the first pulse."""
+
+        from sor_autoplay.agent.grabs import GrabMemory, context_from_player, decide_held
+
+        me = MapEntity(
+            kind="player",
+            family="Player",
+            symbol="1",
+            color="#fff",
+            label="P1",
+            type_id=1,
+            world_x=100,
+            world_y=64,
+            world_z=160,
+            map_x=100.0,
+            map_y=64.0,
+            health=80,
+            slot="P1",
+            action_state=0x60,  # facing right (bit0 clear) → throw left
+            contact_ptr=0xB900,
+            combat_phase=CombatPhase.HOLDING,
+        )
+        foe = replace(
+            _foe(),
+            world_x=120,
+            map_x=120.0,
+            primary_state=0x0500,
+            combat_phase=CombatPhase.GRABBED,
+            attacker_ptr=0xB800,
+        )
+        entities = (me, foe)
+        intent = decide_held(
+            me,
+            context_from_player(me, entities),
+            GrabMemory(),
+            tick=1,
+            foe=foe,
+            profile=PROFILES[0],
+        )
+        assert intent is not None
+        self.assertTrue(intent.attack, intent.note)
+        self.assertTrue(intent.left, intent.note)
+        self.assertIn("throw", intent.note)
+
     def test_axel_rear_band_is_close_only(self) -> None:
         ax = PROFILES[0]
         self.assertEqual(engagement_band(24, 4, ax), "close")
