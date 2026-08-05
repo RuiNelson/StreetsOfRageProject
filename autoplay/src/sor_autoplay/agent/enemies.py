@@ -453,24 +453,24 @@ def adjust_approach(
     err_y = desired_y - me.map_y
     out_dx = 0.0
     out_dy = 0.0
-    # Lane first when badly off.
+    abs_dx = abs(dx)
+    # Lane first when badly off, but never abandon the X stand-off: a foe
+    # approaching on a diagonal closes X while we pure-Y into their lane.
     if abs(err_y) > lane_slop:
         out_dy = 1.0 if err_y > 0 else -1.0
-        # Small X only if already somewhat close on Y path.
-        if abs(dy) <= 20 and abs(err_x) > 10:
+        if plan.grab_bias < 0.5 and abs_dx < stand_dist and abs(err_x) > 6:
+            # Open or hold punch spacing while the lane is still matching.
+            out_dx = 1.0 if err_x > 0 else -1.0
+        elif abs(dy) <= 20 and abs(err_x) > 10:
             out_dx = 1.0 if err_x > 0 else -1.0
     else:
         if abs(err_x) > 6:
             out_dx = 1.0 if err_x > 0 else -1.0
 
-    abs_dx = abs(dx)
     # Inside body-contact band: back out first (do not walk further in),
-    # unless this plan wants a body grab.
-    if (
-        plan.grab_bias < 0.5
-        and abs_dx < too_close
-        and abs(dy) <= lane_slop + 4
-    ):
+    # even while still off-lane — diagonal closers hit the same shell.
+    # Skip only when this plan deliberately wants a body grab.
+    if plan.grab_bias < 0.5 and abs_dx < too_close:
         out_dx = -1.0 if dx > 0 else 1.0 if dx < 0 else out_dx
 
     in_range = abs_dx <= strike and abs(dy) <= 12.0

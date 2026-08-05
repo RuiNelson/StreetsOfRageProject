@@ -1488,7 +1488,11 @@ def _decide_free(ctx: DecisionContext) -> Intent:
             stand_x = float(me.world_x) + (-28 if dx > 0 else 28)
             reason = f"evade {foe.label} [{tag}]"
         elif not lane_ok:
-            stand_x = float(me.world_x)
+            # Keep the horizontal stand-off already computed above (jump mid,
+            # weapon park, or unarmed approach_offset). The old "match lane
+            # first" pin of stand_x to me.world_x walked pure-Y into a
+            # diagonally closing foe and arrived chest-to-chest — free punch
+            # or body-grab. can_punch still refuses B until Y aligns.
             stand_y = float(foe.world_y)
             reason = f"lane {foe.label} [{tag}]"
         elif is_punishable(phase) and plan.grab_bias < 0.5:

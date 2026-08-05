@@ -196,7 +196,11 @@ for tests/HUD.
    - Turn one tick before attack if facing the wrong way (no air / reverse punches)
    - During normal action `$18`, queue the next combo B edge only while player
      `+$58` bit 5 is clear; stop sending B after the ROM has accepted the edge
-   - Match lane **before** closing X (off-lane "close" was the air-punch bug)
+   - Match lane before **punching** (off-lane "close" was the air-punch bug).
+     When off-lane, still walk to the horizontal stand-off (`foe.x ±
+     approach_offset`), not pure-Y at the current X: a foe approaching on a
+     diagonal closes X while pure-Y lane match arrives chest-to-chest for a
+     free punch or body-grab. `can_punch` still refuses B until Y aligns
    - First-punch live hitboxes reach 57 px Axel, 54 px Adam, 68 px Blaze;
      policy strike ranges retain a 4–6 px inner margin and stand at
      `approach_offset` 44–56 rather than body-grab range (~≤18)

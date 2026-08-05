@@ -608,6 +608,90 @@ class PolicyAggressionTests(unittest.TestCase):
         self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
         self.assertIn("escape lane", decision.p1_note)
 
+    def test_diagonal_close_opens_x_stand_while_matching_lane(self) -> None:
+        """A foe closing on a diagonal must not be pure-Y'd into body range.
+
+        Holding current X while walking to the foe's lane used to arrive
+        chest-to-chest (free punch/grab). Keep the punch stand-off on X.
+        """
+
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            world_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        # dx=28 (inside body once lanes meet), dy=22 (off punch lane).
+        foe = _e(
+            type_id=0x22,
+            map_x=128,
+            world_x=128,
+            map_y=86,
+            world_y=86,
+            label="Garcia",
+            primary_state=0x0101,
+            action_state=0x02,
+            combat_phase=CombatPhase.NORMAL,
+            target_ptr=0xB800,
+        )
+        decision = decide_actions(
+            self._snap((p1, foe)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertIn("lane", decision.p1_note)
+        # DOWN toward foe Y and LEFT to open stand-off (foe is to the right).
+        self.assertTrue(decision.p1_mask & 0x02, decision.p1_note)  # DOWN
+        self.assertTrue(decision.p1_mask & 0x04, decision.p1_note)  # LEFT
+        self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)  # no B
+        # Goal X must be left of the player (open gap), not pinned at 100.
+        self.assertRegex(decision.p1_note, r"walk to \(\d+,")
+        goal_x = int(decision.p1_note.split("walk to (")[1].split(",")[0])
+        self.assertLess(goal_x, 100, decision.p1_note)
+
+    def test_diagonal_far_closes_toward_stand_not_body(self) -> None:
+        """Off-lane and far on X still routes to stand-off, not pure-Y hold."""
+
+        p1 = _e(
+            kind="player",
+            family="Player",
+            slot="P1",
+            map_x=100,
+            world_x=100,
+            map_y=64,
+            world_y=64,
+            type_id=1,
+            label="P1",
+            action_state=0x02,
+        )
+        foe = _e(
+            type_id=0x22,
+            map_x=200,
+            world_x=200,
+            map_y=90,
+            world_y=90,
+            label="Garcia",
+            primary_state=0x0101,
+            action_state=0x02,
+            combat_phase=CombatPhase.NORMAL,
+            target_ptr=0xB800,
+        )
+        decision = decide_actions(
+            self._snap((p1, foe)), AgentConfig(p1_enabled=True), AgentState()
+        )
+        self.assertIn("lane", decision.p1_note)
+        self.assertTrue(decision.p1_mask & 0x02, decision.p1_note)  # DOWN
+        self.assertTrue(decision.p1_mask & 0x08, decision.p1_note)  # RIGHT
+        self.assertFalse(decision.p1_mask & 0x20, decision.p1_note)
+        goal_x = int(decision.p1_note.split("walk to (")[1].split(",")[0])
+        # Stand is left of the foe, not on the foe's body X and not held at 100.
+        self.assertGreater(goal_x, 100, decision.p1_note)
+        self.assertLess(goal_x, 200, decision.p1_note)
+
     def test_retreats_horizontally_when_lane_escape_hits_stage_edge(self) -> None:
         p1 = _e(
             kind="player",

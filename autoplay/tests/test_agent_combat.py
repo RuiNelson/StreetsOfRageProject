@@ -11,6 +11,7 @@ from sor_autoplay.agent.enemies import (
     JackProjectilePhase,
     JackWeaponPhase,
     ThreatKind,
+    adjust_approach,
     attack_mix,
     dangerous_projectile,
     jack_projectile_phase,
@@ -84,6 +85,15 @@ class EnemyCounterTests(unittest.TestCase):
         self.assertEqual(plan.kind, ThreatKind.FLANKER)
         self.assertGreater(plan.rear_bias, 0.2)
         self.assertTrue(plan.sidestep)
+
+    def test_adjust_approach_opens_x_on_diagonal_close(self) -> None:
+        me = _e(kind="player", family="Player", slot="P1", map_x=100, map_y=64)
+        # Foe is inside body X once lanes meet, but still off-lane.
+        foe = _e(map_x=128, map_y=86, type_id=0x22)
+        dx, dy, in_range, _plan = adjust_approach(me, foe, PROFILES[0])
+        self.assertFalse(in_range)
+        self.assertGreater(dy, 0.0)  # match lane toward larger Y
+        self.assertLess(dx, 0.0)  # open stand-off (foe is to the right)
 
     def test_jack_projectile_is_dodge(self) -> None:
         projectile = _e(

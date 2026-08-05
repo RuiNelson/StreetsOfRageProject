@@ -26,7 +26,8 @@ Per-player toggle (HUD button or keys **1** / **2**):
 
 - **Face-then-hit combat**: punch only when same lane (±12 Y), in strike range,
   and facing the foe (player action-state bit 0). Turn one tick if wrong-way.
-- No air punches: match lane before closing X; queue ordinary combo hits through
+- No air punches: refuse B until lane-aligned; off-lane walks keep X stand-off
+  (do not pure-Y into a diagonal close); queue ordinary combo hits through
   the ROM's action flag; jump-kick B only in the `$12/$13` free-flight state
 - No generic jump-ins: jumps are reserved for explicit enemy-family counters
 - A typed tactical knowledge graph separates observation from actionability:
