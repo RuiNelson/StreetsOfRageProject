@@ -177,12 +177,25 @@ def _clamp_lane_y(context: Context, y: float) -> int:
 
 
 def _sidestep_direction(context: Context, actor: PlayableCharacter, threat_y: int) -> str | None:
-    """Pick up/down without driving into the lane floor/ceiling."""
+    """Pick up/down without driving into the lane floor/ceiling.
+
+    When the threat has no vertical offset from the actor (a common case:
+    enemies converge onto the player's exact lane before attacking), there is
+    no "away from the threat" direction to prefer, so fall back to whichever
+    side of the lane has more room instead of always picking the same one.
+    """
 
     lane_max = _lane_max(context)
     near_bottom = actor.world_y >= lane_max - LANE_EDGE_MARGIN
     near_top = actor.world_y <= LANE_Y_MIN + LANE_EDGE_MARGIN
-    prefer_up = threat_y > actor.world_y  # step "up" (smaller Y) if threat is lower on screen
+    if threat_y > actor.world_y:
+        prefer_up = True  # step "up" (smaller Y) if threat is lower on screen
+    elif threat_y < actor.world_y:
+        prefer_up = False
+    else:
+        room_up = actor.world_y - LANE_Y_MIN
+        room_down = lane_max - actor.world_y
+        prefer_up = room_up >= room_down
     if prefer_up:
         if near_top:
             return "down" if not near_bottom else None
@@ -358,7 +371,15 @@ def should_sidestep(context: Context) -> Context:
         for enemy in enemies:
             if enemy.targets_player != actor.player_index:
                 continue
-            if is_dangerous(enemy.combat_phase) or _is_close_and_facing_caution(enemy, actor):
+            # A confirmed attack always gets evaded. The UNKNOWN-phase
+            # "insufficient information" caution is only worth an evasive
+            # step when the actor cannot already answer it with a punch —
+            # otherwise striking first is strictly better than backing off
+            # from an enemy that isn't even confirmed dangerous.
+            dangerous = is_dangerous(enemy.combat_phase)
+            if dangerous or (
+                _is_close_and_facing_caution(enemy, actor) and not _in_punch_band(actor, enemy)
+            ):
                 direction = _sidestep_direction(context, actor, enemy.world_y)
                 if direction is None:
                     continue

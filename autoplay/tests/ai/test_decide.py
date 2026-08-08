@@ -296,11 +296,13 @@ class ShouldSidestepTests(unittest.TestCase):
 
     def test_fires_for_close_facing_unknown_phase_enemy(self) -> None:
         # The caution rule: CombatPhase.UNKNOWN on a nearby, player-facing
-        # enemy must be treated as "insufficient information," not "safe."
+        # enemy must be treated as "insufficient information," not "safe" --
+        # but only outside punch band (dy=20 > PUNCH_RANGE_Y=12), since inside
+        # punch band the actor should punch first rather than back off.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
         enemy = make_enemy(
             world_x=130,
-            world_y=90,
+            world_y=80,
             combat_phase=CombatPhase.UNKNOWN,
             targets_player=1,
             facing_left=True,  # facing left, myself is to its left -> facing myself
@@ -313,6 +315,22 @@ class ShouldSidestepTests(unittest.TestCase):
             result,
             {Sidestep(actor_slot="P1", threat_slot="obj01", direction="down")},
         )
+
+    def test_does_not_fire_for_unknown_phase_enemy_in_punch_band(self) -> None:
+        # Same ambiguity as above, but close enough to punch (dy=10 <=
+        # PUNCH_RANGE_Y=12): striking first beats backing away from a
+        # threat that isn't even confirmed dangerous.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(
+            world_x=130,
+            world_y=90,
+            combat_phase=CombatPhase.UNKNOWN,
+            targets_player=1,
+            facing_left=True,
+        )
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(should_sidestep(context), set())
 
     def test_does_not_fire_for_far_away_enemy(self) -> None:
         # Not is_dangerous and too far away for the UNKNOWN-caution rule to
@@ -620,7 +638,9 @@ class ShouldDodgeProjectileTests(unittest.TestCase):
 
         result = should_dodge_projectile(context)
 
-        self.assertEqual(result, {Sidestep(actor_slot="P1", threat_slot="obj10", direction="down")})
+        # No vertical offset (dy=0): world_y=100 sits much closer to the lane
+        # floor (112) than the ceiling (2), so the room-based tiebreak steps up.
+        self.assertEqual(result, {Sidestep(actor_slot="P1", threat_slot="obj10", direction="up")})
 
     def test_does_not_fire_for_moving_away_projectile(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
