@@ -6,7 +6,7 @@ Python app that attaches to a running
 (`megadrive_remote`).
 
 **Current milestone:** live **observer** HUD plus an opt-in **symbolic AI**
-(Phase A — see [`AI.md`](../AI.md)) that can drive P1 and/or P2 through
+(Phase A — see [`AI.md`](AI.md)) that can drive P1 and/or P2 through
 controller input only. The AI is off by default; enable it per player with
 `--agent-p1`/`--agent-p2` or the HUD's per-player "AI: OFF/ON" click label.
 
@@ -25,7 +25,7 @@ controller input only. The AI is off by default; enable it per player with
 
 ### AI (Phase A, opt-in)
 
-- Token/Information/Decision pipeline per `AI.md`: observes the same
+- Token/Information/Decision pipeline per [`AI.md`](AI.md): observes the same
   snapshot the HUD already reads, infers danger/incoming-projectile tokens,
   proposes walk/attack/police decisions, ranks them by emergency, and issues
   the winner through a virtual gamepad (`hold_buttons`/`press_buttons` only —

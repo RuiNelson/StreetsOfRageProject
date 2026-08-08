@@ -9,13 +9,13 @@
 **Current scope:** maximized-window **observer** (mode, characters, health,
 lives, specials, timer, level, scores, 2D world map, floor holes, police-special
 flags), plus an opt-in **symbolic AI** (`ai/` — Phase A of the design in
-`/AI.md`) that can control P1 and/or P2 through controller input only (never
-RAM writes). The AI is off by default and enabled per player via
+[`AI.md`](AI.md)) that can control P1 and/or P2 through controller input only
+(never RAM writes). The AI is off by default and enabled per player via
 `--agent-p1`/`--agent-p2` or the HUD's click-to-toggle label. See `ai/`'s
-module docstrings and `CLAUDE.md` for the Token/Information/Decision pipeline
-and manuscript-grounded combat facts already wired in. Still future work:
-two-player coordination, six-button `--altControls`, and deeper per-boss
-tactics.
+module docstrings and [`AI.md`](AI.md) for the Token/Information/Decision
+pipeline and manuscript-grounded combat facts already wired in. Still future
+work: two-player coordination, six-button `--altControls`, and deeper
+per-boss tactics.
 
 ## Ownership
 
@@ -57,7 +57,8 @@ machine may lack Tk.
 | `phases.py` | Combat-phase decode for map outlines and AI danger checks |
 | `hud.py` | Maximized Tk: State / P1 / P2 + world map + AI toggle labels |
 | `bcd.py` | Packed-BCD helpers |
-| `ai/` | Symbolic AI — see "AI surface" below |
+| `AI.md` | Architecture for the symbolic AI (Token / Information / Decision) |
+| `ai/` | Symbolic AI implementation — see "AI surface" below and [`AI.md`](AI.md) |
 
 ### CLI
 
@@ -79,7 +80,7 @@ entry points in this tree.
 - Map outlines use `phases.py` combat-phase colours
 - Click a player's "AI: OFF/ON" label to toggle that player's AI at runtime
 
-### AI surface (`ai/` — see `/AI.md`)
+### AI surface (`ai/` — see [`AI.md`](AI.md))
 
 | Piece | Role |
 | --- | --- |
@@ -106,11 +107,12 @@ Verified button mapping for the original (non-altControls) scheme (see
 A** — the reverse of the naive "A=attack" assumption. **RearAttack** is the
 simultaneous B+C chord (`$322A`).
 
-Out of scope, per `AI.md`'s own text: two-player coordination rules ("low
-priority... not an expected scenario") and the six-button `--altControls`
-scheme ("planned for a future iteration"). Also out of scope: bespoke
-per-boss combat tactics beyond the subclass hierarchy existing and being
-populated correctly (e.g. Antonio's boomerang dodge timing).
+Out of scope, per [`AI.md`](AI.md)'s own text: two-player coordination rules
+("low priority... not an expected scenario") and the six-button
+`--altControls` scheme ("planned for a future iteration"). Also out of
+scope: bespoke per-boss combat tactics beyond the subclass hierarchy
+existing and being populated correctly (e.g. Antonio's boomerang dodge
+timing).
 
 ## Snapshot cadence
 
@@ -147,12 +149,12 @@ An earlier, ad-hoc scripted AI stack (`src/sor_autoplay/agent/`, `evaluation.py`
 `scenarios.py`, the `sor-autoplay-eval` entry point, HUD key-1/2 toggles,
 `--agent-hold-frames`/`--no-police-special` flags) was deliberately removed
 from this branch because it predated and did not follow the Token/Information/
-Decision architecture in `/AI.md`. Observation (RAM → snapshot → HUD/map) was
-unchanged by that removal.
+Decision architecture in [`AI.md`](AI.md). Observation (RAM → snapshot →
+HUD/map) was unchanged by that removal.
 
 `ai/` (see "AI surface" above) is a **fresh implementation** against that
 architecture, not a revival of the removed stack — the CLI flag names
 (`--agent-p1`/`--agent-p2`) are reused because they're the obvious names, not
 because any removed code came back. Do not look to the old stack (it no
-longer exists) for how the new one should work; follow `/AI.md` and the
-module docstrings under `ai/` instead.
+longer exists) for how the new one should work; follow [`AI.md`](AI.md) and
+the module docstrings under `ai/` instead.

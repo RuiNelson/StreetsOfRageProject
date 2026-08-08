@@ -24,13 +24,14 @@ time-consuming and difficult to debug, and this approach should therefore
 be minimized wherever practical.
 
 Substantial effort has already been invested in analysing the game and
-documenting the findings as manuscripts under `ai-analysis`. These
-manuscripts will serve as the primary reference for the AI's
-implementation. Analysis of the game will continue in parallel, refining
-and correcting the manuscripts as well as the subroutine labels recorded in
-`labels.csv`. The call map feature and the accompanying `call_map.py` tool
-will likewise be used to develop a clearer understanding of the game's
-control flow.
+documenting the findings as manuscripts under
+`StreetsOfRageRecompilation/ai-analysis/` (sibling of this `autoplay/`
+tree in the meta-repository). These manuscripts will serve as the primary
+reference for the AI's implementation. Analysis of the game will continue
+in parallel, refining and correcting the manuscripts as well as the
+subroutine labels recorded in `labels.csv`. The call map feature and the
+accompanying `call_map.py` tool will likewise be used to develop a clearer
+understanding of the game's control flow.
 
 ## Data Structures
 
@@ -128,7 +129,8 @@ the police special attack:
 - `CallPolice` — the sole concrete `Decision` descending directly from the
   abstract class.
 
-Weapon upgrade ranking follows ROM damage constants (`items-and-weapons.md`):
+Weapon upgrade ranking follows ROM damage constants
+(`StreetsOfRageRecompilation/ai-analysis/items-and-weapons.md`):
 **knife 5 > bat/pipe 4 > bottle 3 > pepper 2**. Consumable floor items are
 their own `Information` tokens (`HealthPickup`, `LifePickup`,
 `SpecialPickup`, `ScorePickup`), not folded into `Weapon`.
