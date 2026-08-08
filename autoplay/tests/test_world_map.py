@@ -15,6 +15,8 @@ from sor_autoplay.memory_map import (
     OBJ_SCRIPT_PARAM,
     OBJ_SUBTYPE,
     OBJ_TYPE,
+    OBJ_VEL_X,
+    OBJ_VEL_Z,
     OBJECT_SLOT_SIZE,
 )
 from sor_autoplay.object_catalog import player_style, style_for_object, style_for_type
@@ -45,6 +47,11 @@ def _put_u16(buf: bytearray, offset: int, value: int) -> None:
 def _put_fixed16(buf: bytearray, offset: int, integer: int) -> None:
     buf[offset : offset + 2] = int(integer & 0xFFFF).to_bytes(2, "big", signed=False)
     buf[offset + 2 : offset + 4] = b"\x00\x00"
+
+
+def _put_fixed1616_signed(buf: bytearray, offset: int, value: float) -> None:
+    raw = int(round(value * 65536.0)) & 0xFFFF_FFFF
+    buf[offset : offset + 4] = raw.to_bytes(4, "big")
 
 
 class ObjectCatalogTests(unittest.TestCase):
@@ -205,6 +212,34 @@ class WorldMapParseTests(unittest.TestCase):
 
         self.assertEqual(hazard.kind, "projectile")
         self.assertEqual(hazard.combat_phase, CombatPhase.ATTACKING)
+
+    def test_projectile_velocity_is_decoded(self) -> None:
+        """Projectile-kind objects share the generic +$20/+$24 velocity fields
+        with bosses; before this fix only the boss branch decoded them and a
+        plain projectile (e.g. type $1E debris) always read vel_x/vel_z as
+        0.0 regardless of the object's actual RAM contents."""
+
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+
+        base = 0x100
+        _put_u8(actors, base + OBJ_TYPE, 0x1E)  # bottle shard debris
+        _put_u8(actors, base + OBJ_FLAGS, 0x00)
+        _put_fixed16(actors, base + OBJ_POS_X, 800)
+        _put_fixed16(actors, base + OBJ_POS_Y, 0x40)
+        _put_fixed16(actors, base + OBJ_POS_Z, 0xA0)
+        _put_fixed1616_signed(actors, base + OBJ_VEL_X, -1.5)
+        _put_fixed1616_signed(actors, base + OBJ_VEL_Z, 2.25)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+        debris = next(entity for entity in world.entities if entity.type_id == 0x1E)
+
+        self.assertEqual(debris.kind, "projectile")
+        self.assertAlmostEqual(debris.vel_x, -1.5)
+        self.assertAlmostEqual(debris.vel_z, 2.25)
 
     def test_jack_weapon_latch_is_exposed_to_observation(self) -> None:
         actors = bytearray(ACTORS_BYTES)

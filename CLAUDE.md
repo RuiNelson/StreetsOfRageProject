@@ -23,13 +23,19 @@ This public meta-repository pins the repositories that make up the workspace:
 | `MegaDriveEnvironmentSampleGame/` | Dual-target sample for PC and real Mega Drive hardware | Project-owned; editable |
 | `RageDecompiler/` | Python disassembly and recompilation tools | Project-owned; editable |
 | `StreetsOfRageRecompilation/` | Streets of Rage analysis, generated C++, native overrides, and host executable | Project-owned; editable |
-| `autoplay/` | Python remote SoR observer (`megadrive_remote`) | Project-owned; editable |
+| `autoplay/` | Python remote SoR observer + symbolic AI (`megadrive_remote`) | Project-owned; editable; **not a submodule** |
 | `Genesis-Plus-GX/` | Upstream emulator used only as a behavioral reference | Upstream; never edit |
 
 `Genesis-Plus-GX` is reference material only. Do not modify files, create
 patches, reformat code, commit inside it, or update its gitlink. If comparison
 with it is useful, perform read-only inspection and keep the implementation in
 an owned repository.
+
+Unlike the other rows above, `autoplay/` is tracked directly in this
+meta-repository (no entry in `.gitmodules`, no separate remote) despite this
+table's wording — commit and push its changes as part of a normal
+meta-repository commit, not through the submodule workflow below, and do not
+attempt to update a gitlink for it.
 
 ## Submodule workflow
 

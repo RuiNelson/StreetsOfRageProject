@@ -5,8 +5,10 @@ Python app that attaches to a running
 [`MegaDriveEnvironment`](../MegaDriveEnvironment/) remote-access library
 (`megadrive_remote`).
 
-**Current milestone:** live **observer** HUD only (mode, players, map, hazards).
-Scripted / symbolic AI control has been removed from this tree.
+**Current milestone:** live **observer** HUD plus an opt-in **symbolic AI**
+(Phase A — see [`AI.md`](../AI.md)) that can drive P1 and/or P2 through
+controller input only. The AI is off by default; enable it per player with
+`--agent-p1`/`--agent-p2` or the HUD's per-player "AI: OFF/ON" click label.
 
 ## Features
 
@@ -20,6 +22,20 @@ Scripted / symbolic AI control has been removed from this tree.
   - players `1`/`2`, enemies `G/S/H/N/J`, bosses `B`, weapons/pickups
   - dashed camera rect = player walk band (32..288 × lane); off-camera actors still drawn
   - hunt counts when enemies target P1 / P2
+
+### AI (Phase A, opt-in)
+
+- Token/Information/Decision pipeline per `AI.md`: observes the same
+  snapshot the HUD already reads, infers danger/incoming-projectile tokens,
+  proposes walk/attack/police decisions, ranks them by emergency, and issues
+  the winner through a virtual gamepad (`hold_buttons`/`press_buttons` only —
+  never writes RAM).
+- Covers: approaching and punching the nearest enemy, sidestepping a
+  dangerous or suspicious (unrecognized-state) threat, and calling police
+  when surrounded or low on health.
+- Automatically stands down (releases input) when the game is paused or
+  outside active gameplay (menus, character select, round-clear, continues).
+- Original A/B/C control scheme only; `--altControls` is not yet supported.
 
 ## Requirements
 
@@ -66,6 +82,8 @@ Options:
 | `--poll-ms 33` | Wall-clock remote poll period |
 | `--hud-ms 33` | GUI paint period only |
 | `--once` | Print one snapshot to stdout (no GUI) |
+| `--agent-p1` | Start with the AI controlling P1 (off by default) |
+| `--agent-p2` | Start with the AI controlling P2 (off by default) |
 
 Sampling is wall-clock only (no VSync wait). Keys: **Esc** / **Q** quit.
 
@@ -98,5 +116,6 @@ autoplay/
     hazards.py          # pause, police, floor holes
     bcd.py              # packed-BCD helpers
     phases.py           # ordinary/boss/player combat phase decode
+    ai/                 # symbolic AI (Token/Information/Decision pipeline)
   tests/
 ```

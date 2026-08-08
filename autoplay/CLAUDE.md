@@ -6,9 +6,15 @@
 `StreetsOfRageRecompilation` (`sor`) process via
 `MegaDriveEnvironment`'s `megadrive_remote` client.
 
-**Current scope:** maximized-window **observer** only (mode, characters, health,
+**Current scope:** maximized-window **observer** (mode, characters, health,
 lives, specials, timer, level, scores, 2D world map, floor holes, police-special
-flags). It does **not** inject controller input or run a scripted / symbolic AI.
+flags), plus an opt-in **symbolic AI** (`ai/` — Phase A of the design in
+`/AI.md`) that can control P1 and/or P2 through controller input only (never
+RAM writes). The AI is off by default and enabled per player via
+`--agent-p1`/`--agent-p2` or the HUD's click-to-toggle label. See `ai/`'s
+module docstrings for the Token/Information/Decision pipeline; per-enemy-type
+subclassing, danger-zone clustering, two-player coordination, and the
+six-button `--altControls` scheme remain future work.
 
 ## Ownership
 
@@ -41,31 +47,55 @@ machine may lack Tk.
 
 | Piece | Role |
 | --- | --- |
-| `app.py` | CLI (`--host`, `--port`, `--poll-ms`, `--hud-ms`, `--once`), poll loop |
+| `app.py` | CLI (`--host`, `--port`, `--poll-ms`, `--hud-ms`, `--once`, `--agent-p1`, `--agent-p2`), poll loop, AI dispatch |
 | `state.py` | Work-RAM / remote reads → `GameSnapshot` |
 | `world_map.py` | Camera + actors → map entities (incl. hunt targets) |
 | `object_catalog.py` | Type → symbol / color / family |
 | `memory_map.py` | Known addresses |
 | `hazards.py` | Pause, police special active, floor holes |
-| `phases.py` | Combat-phase decode for map outlines |
-| `hud.py` | Maximized Tk: State / P1 / P2 + world map |
+| `phases.py` | Combat-phase decode for map outlines and AI danger checks |
+| `hud.py` | Maximized Tk: State / P1 / P2 + world map + AI toggle labels |
 | `bcd.py` | Packed-BCD helpers |
+| `ai/` | Symbolic AI — see "AI surface" below |
 
-### CLI (observer only)
+### CLI
 
 - `--host` / `--port` — remote endpoint
 - `--poll-ms` — wall-clock remote sample period (default 33 ms)
 - `--hud-ms` — GUI paint period only
 - `--once` — one snapshot to stdout, no GUI
+- `--agent-p1` / `--agent-p2` — start with the AI controlling that player
+  (off by default; also toggleable at runtime from the HUD)
 
-There are **no** agent enable flags, hold-frame knobs, police-special suppress
-flags, or evaluation entry points in this tree.
+There are no hold-frame knobs, police-special suppress flags, or evaluation
+entry points in this tree.
 
 ### HUD
 
 - Keys: **Esc** / **Q** quit
-- Columns: State · P1 · P2 (health, lives, specials, score, hunt count)
+- Columns: State · P1 · P2 (health, lives, specials, score, hunt count, AI
+  toggle label)
 - Map outlines use `phases.py` combat-phase colours
+- Click a player's "AI: OFF/ON" label to toggle that player's AI at runtime
+
+### AI surface (`ai/`, Phase A — see `/AI.md`)
+
+| Piece | Role |
+| --- | --- |
+| `tokens.py` | `Token`/`Information`/`Decision` base classes, `Context`, `find`/`find_all` |
+| `character.py`, `enemy.py`, `essential.py`, `hazard_tokens.py` | Information tokens (`Myself`/`Partner`, `Enemy`, `Stage`/`CameraRange`/`AnimationInProgress`, `Projectile`/`IncomingProjectile`/`DangerZone`) |
+| `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM) |
+| `inference.py` | `check_for_incoming_projectiles`, `check_for_danger_zone` |
+| `walk_decisions.py`, `attack_decisions.py`, `police_decision.py` | `Decision` tokens (`WalkToNearEnemy`, `Sidestep`, `Punch`, `CallPolice`) |
+| `decide.py` | `should_*` candidate generators |
+| `priority.py` | `determine_priority_decision` — emergency ranking + priority tie-break + logged random fallback |
+| `gamepad.py` | `VirtualGamepad`/`SharedGamepadState` — the only code allowed to call `hold_buttons`/`press_buttons`/`release_buttons`; never `write_memory`/`write_value` |
+| `execute.py` | `execute_decision` dispatch to controller input |
+| `loop.py` | `AgentLoop.tick` — gates on pause/non-gameplay/not-playable first, then runs the full pipeline |
+
+Verified button mapping for the original (non-altControls) scheme (see
+`execute.py`'s module docstring): **Attack/Punch is physical B**, **Police
+special is physical A** — the reverse of the naive "A=attack" assumption.
 
 ## Snapshot cadence
 
@@ -90,19 +120,24 @@ cd autoplay
 PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m unittest discover -s tests -q
 ```
 
-Unit tests cover snapshot decoding, BCD, hazards, phases, world map, and
-`ObserverApp.stop()` client handoff. There is no live host requirement for the
-unit suite.
+Unit tests cover snapshot decoding, BCD, hazards, phases, world map,
+`ObserverApp.stop()` client handoff, and the full `ai/` pipeline (tokens,
+observation, inference, decisions, priority ranking, execution, the
+pause/non-gameplay gate). There is no live host requirement for the unit
+suite.
 
-## What was removed
+## History: the old agent stack, and the new one in `ai/`
 
-The previous symbolic / scripted AI stack is gone from this branch:
+An earlier, ad-hoc scripted AI stack (`src/sor_autoplay/agent/`, `evaluation.py`,
+`scenarios.py`, the `sor-autoplay-eval` entry point, HUD key-1/2 toggles,
+`--agent-hold-frames`/`--no-police-special` flags) was deliberately removed
+from this branch because it predated and did not follow the Token/Information/
+Decision architecture in `/AI.md`. Observation (RAM → snapshot → HUD/map) was
+unchanged by that removal.
 
-- `src/sor_autoplay/agent/` (policy, inference, expert, skills, combat, …)
-- `evaluation.py`, `scenarios.py`, and the `sor-autoplay-eval` entry point
-- CLI: `--agent-p1`, `--agent-p2`, `--agent-hold-frames`, and evaluator flags
-  such as `--no-police-special`
-- HUD AI toggles (keys 1/2) and agent decision notes
-- Agent-focused unit tests
-
-Observation (RAM → snapshot → HUD/map) is intentionally unchanged in capability.
+`ai/` (see "AI surface" above) is a **fresh implementation** against that
+architecture, not a revival of the removed stack — the CLI flag names
+(`--agent-p1`/`--agent-p2`) are reused because they're the obvious names, not
+because any removed code came back. Do not look to the old stack (it no
+longer exists) for how the new one should work; follow `/AI.md` and the
+module docstrings under `ai/` instead.

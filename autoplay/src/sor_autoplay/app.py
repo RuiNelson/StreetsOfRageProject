@@ -10,12 +10,34 @@ from pathlib import Path
 from typing import Sequence
 
 from . import __version__
+from .ai.gamepad import SharedGamepadState, VirtualGamepad
+from .ai.loop import AgentLoop
 from .hud import HUD_PAINT_MS_DEFAULT, ObserverHud
 from .state import GameSnapshot, disconnected_snapshot, read_snapshot
 
 # Wall-clock sample period. ~2 frames at 60 Hz (2 / 60 * 1000 ≈ 33.3 ms).
 DEFAULT_POLL_MS = 33
 ASSUMED_HZ = 60
+
+
+class _RemoteClientProxy:
+    """Forwards button commands to whichever client ``ObserverApp`` currently
+    holds, so the AI's ``SharedGamepadState`` survives poll-loop reconnects
+    without needing to be rebuilt (it is otherwise a plain, long-lived
+    object owned once by ``ObserverApp``)."""
+
+    def __init__(self, app: "ObserverApp") -> None:
+        self._app = app
+
+    def hold_buttons(self, *, player1: int = 0, player2: int = 0) -> None:
+        client = self._app._client
+        if client is not None:
+            client.hold_buttons(player1=player1, player2=player2)
+
+    def press_buttons(self, *, player1: int = 0, player2: int = 0, frames: int = 1) -> None:
+        client = self._app._client
+        if client is not None:
+            client.press_buttons(player1=player1, player2=player2, frames=frames)
 
 
 def _default_megadrive_python_src() -> Path | None:
@@ -93,6 +115,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print one snapshot to stdout and exit (no GUI)",
     )
     parser.add_argument(
+        "--agent-p1",
+        action="store_true",
+        help="Start with the symbolic AI controlling P1 (off by default)",
+    )
+    parser.add_argument(
+        "--agent-p2",
+        action="store_true",
+        help="Start with the symbolic AI controlling P2 (off by default)",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -152,6 +184,8 @@ class ObserverApp:
         *,
         poll_ms: int = DEFAULT_POLL_MS,
         hud_ms: int = HUD_PAINT_MS_DEFAULT,
+        agent_p1: bool = False,
+        agent_p2: bool = False,
     ) -> None:
         self.host = host
         self.port = port
@@ -162,6 +196,34 @@ class ObserverApp:
         self._latest: GameSnapshot = disconnected_snapshot("starting")
         self._client = None
         self._hud: ObserverHud | None = None
+
+        # AI is opt-in and off by default; toggled via CLI flag or the HUD's
+        # per-player click label. One SharedGamepadState is shared by both
+        # VirtualGamepad views because a single remote HOLD_BUTTONS call
+        # latches both players' masks at once (see ai/gamepad.py).
+        self.agent_p1_enabled = threading.Event()
+        self.agent_p2_enabled = threading.Event()
+        if agent_p1:
+            self.agent_p1_enabled.set()
+        if agent_p2:
+            self.agent_p2_enabled.set()
+        self._gamepad_state = SharedGamepadState(_RemoteClientProxy(self))
+        self._gamepads = {
+            1: VirtualGamepad(self._gamepad_state, player_index=1),
+            2: VirtualGamepad(self._gamepad_state, player_index=2),
+        }
+        self._agent_loops = {
+            1: AgentLoop(self._gamepads[1]),
+            2: AgentLoop(self._gamepads[2]),
+        }
+
+    def set_agent_enabled(self, player_index: int, enabled: bool) -> None:
+        event = self.agent_p1_enabled if player_index == 1 else self.agent_p2_enabled
+        if enabled:
+            event.set()
+        else:
+            event.clear()
+            self._gamepads[player_index].release()
 
     def start_poller(self) -> None:
         thread = threading.Thread(target=self._poll_loop, name="sor-remote-poll", daemon=True)
@@ -192,6 +254,10 @@ class ObserverApp:
                             client.close()
                             break
                         self._client = client
+                    # The fresh connection's remote button latch already
+                    # starts empty; resync our cache so a held mask that
+                    # matches what we sent before the drop still gets sent.
+                    self._gamepad_state.reset()
                     backoff_s = 0.25
 
                 assert self._client is not None
@@ -199,6 +265,11 @@ class ObserverApp:
 
                 with self._lock:
                     self._latest = snapshot
+
+                if self.agent_p1_enabled.is_set():
+                    self._agent_loops[1].tick(snapshot, player_index=1)
+                if self.agent_p2_enabled.is_set():
+                    self._agent_loops[2].tick(snapshot, player_index=2)
 
                 elapsed = time.monotonic() - started
                 remaining = poll_s - elapsed
@@ -222,6 +293,13 @@ class ObserverApp:
             client, self._client = self._client, None
         if client is not None:
             try:
+                # Release directly on the captured client, not through
+                # ai.gamepad — self._client is already cleared above, so the
+                # gamepad's proxy would see no client and no-op.
+                client.hold_buttons(player1=0, player2=0)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
                 client.close()
             except Exception:  # noqa: BLE001
                 pass
@@ -235,6 +313,7 @@ class ObserverApp:
         approx_frames = self.poll_ms * ASSUMED_HZ / 1000.0
         self._hud = ObserverHud(
             on_close=self.stop,
+            on_toggle_agent=self._handle_toggle_agent_ui,
             subtitle=f"poll {self.poll_ms}ms (~{approx_frames:.1f}f)",
         )
 
@@ -242,7 +321,11 @@ class ObserverApp:
             if self._stop.is_set() or self._hud is None:
                 return
             try:
-                self._hud.update(self.latest())
+                self._hud.update(
+                    self.latest(),
+                    agent_p1_enabled=self.agent_p1_enabled.is_set(),
+                    agent_p2_enabled=self.agent_p2_enabled.is_set(),
+                )
             except Exception as exc:  # noqa: BLE001
                 self._hud.update(disconnected_snapshot(f"HUD error: {exc}"))
             self._hud.schedule(self.hud_ms, tick)
@@ -253,6 +336,10 @@ class ObserverApp:
         finally:
             self.stop()
         return 0
+
+    def _handle_toggle_agent_ui(self, player_index: int) -> None:
+        event = self.agent_p1_enabled if player_index == 1 else self.agent_p2_enabled
+        self.set_agent_enabled(player_index, not event.is_set())
 
     def run_once(self) -> int:
         from megadrive_remote import MegaDriveClient
@@ -278,6 +365,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         port=args.port,
         poll_ms=args.poll_ms,
         hud_ms=args.hud_ms,
+        agent_p1=args.agent_p1,
+        agent_p2=args.agent_p2,
     )
     if args.once:
         return app.run_once()

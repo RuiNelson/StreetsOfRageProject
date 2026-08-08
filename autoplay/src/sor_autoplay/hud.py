@@ -46,8 +46,10 @@ class ObserverHud:
         title: str = "SoR Autoplay",
         subtitle: str = "live replica",
         on_close: Callable[[], None] | None = None,
+        on_toggle_agent: Callable[[int], None] | None = None,
     ) -> None:
         self._on_close = on_close
+        self._on_toggle_agent = on_toggle_agent
         self._latest_map: WorldMap | None = None
         self._latest_holes: tuple = ()
         self._map_draw_job: str | None = None
@@ -105,7 +107,7 @@ class ObserverHud:
         self._holes = self._label(self._col_state, font=self._font_small, fg=_MUTED)
         self._footer = self._label(
             self._col_state,
-            text="Esc/Q quit · observation only",
+            text="Esc/Q quit · click AI: OFF/ON to toggle autoplay",
             font=self._font_small,
             fg=_DIM,
         )
@@ -117,6 +119,9 @@ class ObserverHud:
         self._p1_stats = self._label(self._col_p1, mono=True)
         self._p1_score = self._label(self._col_p1, mono=True)
         self._p1_hunt = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
+        self._p1_agent_toggle = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
+        self._p1_agent_toggle.configure(cursor="hand2")
+        self._p1_agent_toggle.bind("<Button-1>", lambda _e: self._handle_toggle_agent(1))
 
         # P2 column (always present for a stable 3-column layout)
         self._p2_title = self._heading(self._col_p2, "P2", fg="#ffb3c7")
@@ -125,6 +130,9 @@ class ObserverHud:
         self._p2_stats = self._label(self._col_p2, mono=True)
         self._p2_score = self._label(self._col_p2, mono=True)
         self._p2_hunt = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
+        self._p2_agent_toggle = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
+        self._p2_agent_toggle.configure(cursor="hand2")
+        self._p2_agent_toggle.bind("<Button-1>", lambda _e: self._handle_toggle_agent(2))
 
         # --- Bottom: map fills all remaining window space ---
         self._map_frame = tk.Frame(
@@ -263,6 +271,10 @@ class ObserverHud:
                 return name
         return "TkDefaultFont"
 
+    def _handle_toggle_agent(self, player_index: int) -> None:
+        if self._on_toggle_agent is not None:
+            self._on_toggle_agent(player_index)
+
     def _handle_close(self, _event: object | None = None) -> None:
         if self._on_close is not None:
             self._on_close()
@@ -291,7 +303,13 @@ class ObserverHud:
         if self._latest_map is not None:
             self._draw_map(self._latest_map, self._latest_holes)
 
-    def update(self, snapshot: GameSnapshot) -> None:
+    def update(
+        self,
+        snapshot: GameSnapshot,
+        *,
+        agent_p1_enabled: bool = False,
+        agent_p2_enabled: bool = False,
+    ) -> None:
         if snapshot.connected:
             link = "● LIVE"
             link_color = "#5ddea0"
@@ -354,9 +372,18 @@ class ObserverHud:
         self._p1_hunt.configure(text=f"Hunted ×{h1}" if h1 else "")
         self._p2_hunt.configure(text=f"Hunted ×{h2}" if h2 else "")
 
+        self._render_agent_toggle(self._p1_agent_toggle, agent_p1_enabled)
+        self._render_agent_toggle(self._p2_agent_toggle, agent_p2_enabled)
+
         self._latest_map = snapshot.world_map
         self._latest_holes = snapshot.floor_holes
         self._draw_map(snapshot.world_map, snapshot.floor_holes)
+
+    def _render_agent_toggle(self, label: tk.Label, enabled: bool) -> None:
+        if enabled:
+            label.configure(text="AI: ON  (click to disable)", fg="#5ddea0")
+        else:
+            label.configure(text="AI: OFF  (click to enable)", fg=_MUTED)
 
     def _render_player(
         self,

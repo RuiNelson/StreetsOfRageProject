@@ -517,6 +517,8 @@ def _entity_from_object(
             else CombatPhase.SCRIPTED
         )
     elif style.kind == "projectile":
+        vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X)
+        vel_z = fixed1616_signed(slot, mm.OBJ_VEL_Z)
         phase = CombatPhase.ATTACKING
     elif style.kind == "breakable" and outgoing:
         # Round-8 type-$45 moving props set outgoing damage while in flight.
