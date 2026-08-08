@@ -64,10 +64,11 @@ class AgentLoopGatingTests(unittest.TestCase):
         snapshot = _snapshot(paused=True)
 
         with patch("sor_autoplay.ai.loop.generate_direct_observation_tokens") as observe:
-            loop.tick(snapshot, player_index=1)
+            result = loop.tick(snapshot, player_index=1)
             observe.assert_not_called()
 
         self.assertEqual(gamepad.held, 0)
+        self.assertIsNone(result)
 
     def test_invalid_timer_releases_and_skips_observation(self) -> None:
         gamepad, _client = _gamepad()
@@ -75,10 +76,11 @@ class AgentLoopGatingTests(unittest.TestCase):
         snapshot = _snapshot(timer_valid=False)
 
         with patch("sor_autoplay.ai.loop.generate_direct_observation_tokens") as observe:
-            loop.tick(snapshot, player_index=1)
+            result = loop.tick(snapshot, player_index=1)
             observe.assert_not_called()
 
         self.assertEqual(gamepad.held, 0)
+        self.assertIsNone(result)
 
     def test_not_playable_releases_and_skips_observation(self) -> None:
         gamepad, _client = _gamepad()
@@ -86,10 +88,11 @@ class AgentLoopGatingTests(unittest.TestCase):
         snapshot = _snapshot(is_playable=False)
 
         with patch("sor_autoplay.ai.loop.generate_direct_observation_tokens") as observe:
-            loop.tick(snapshot, player_index=1)
+            result = loop.tick(snapshot, player_index=1)
             observe.assert_not_called()
 
         self.assertEqual(gamepad.held, 0)
+        self.assertIsNone(result)
 
 
 class AgentLoopPipelineTests(unittest.TestCase):
@@ -126,7 +129,7 @@ class AgentLoopPipelineTests(unittest.TestCase):
                 return_value=decision_context,
             ) as decide,
         ):
-            loop.tick(snapshot, player_index=1)
+            result = loop.tick(snapshot, player_index=1)
 
             observe.assert_called_once_with(snapshot, player_index=1)
             inference.assert_called_once_with(observed_context)
@@ -136,6 +139,9 @@ class AgentLoopPipelineTests(unittest.TestCase):
         # accumulated context; determine_priority_decision keeps the single
         # Punch, and execute_decision should have pressed B (punch).
         client.press_buttons.assert_called_once_with(player1=0x0020, player2=0, frames=4)
+        # tick() hands back the winning Decision (e.g. for a HUD to show
+        # what the AI is doing) after execute_decision has already run.
+        self.assertIs(result, punch)
 
     def test_no_surviving_decision_presses_no_button(self) -> None:
         gamepad, client = _gamepad()
@@ -152,9 +158,10 @@ class AgentLoopPipelineTests(unittest.TestCase):
             patch("sor_autoplay.ai.loop.generate_inference_tokens", return_value=set()),
             patch("sor_autoplay.ai.loop.generate_decision_tokens", return_value=set()),
         ):
-            loop.tick(snapshot, player_index=1)
+            result = loop.tick(snapshot, player_index=1)
 
         self.assertEqual(gamepad.held, 0)
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

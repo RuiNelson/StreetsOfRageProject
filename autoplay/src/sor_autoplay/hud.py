@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 from typing import Callable
 
+from .ai.tokens import Decision
 from .phases import CombatPhase, phase_color
 from .state import GameSnapshot, PlayerSnapshot
 from .world_map import MAP_ASPECT, WorldMap
@@ -122,6 +123,7 @@ class ObserverHud:
         self._p1_stats = self._label(self._col_p1, mono=True)
         self._p1_score = self._label(self._col_p1, mono=True)
         self._p1_hunt = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
+        self._p1_decision = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
         self._p1_agent_toggle = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
         self._p1_agent_toggle.configure(cursor="hand2")
         self._p1_agent_toggle.bind("<Button-1>", lambda _e: self._handle_toggle_agent(1))
@@ -133,6 +135,7 @@ class ObserverHud:
         self._p2_stats = self._label(self._col_p2, mono=True)
         self._p2_score = self._label(self._col_p2, mono=True)
         self._p2_hunt = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
+        self._p2_decision = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
         self._p2_agent_toggle = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
         self._p2_agent_toggle.configure(cursor="hand2")
         self._p2_agent_toggle.bind("<Button-1>", lambda _e: self._handle_toggle_agent(2))
@@ -336,6 +339,8 @@ class ObserverHud:
         *,
         agent_p1_enabled: bool = False,
         agent_p2_enabled: bool = False,
+        p1_decision: Decision | None = None,
+        p2_decision: Decision | None = None,
     ) -> None:
         if snapshot.connected:
             link = "● LIVE"
@@ -399,6 +404,9 @@ class ObserverHud:
         self._p1_hunt.configure(text=f"Hunted ×{h1}" if h1 else "")
         self._p2_hunt.configure(text=f"Hunted ×{h2}" if h2 else "")
 
+        self._render_decision(self._p1_decision, agent_p1_enabled, p1_decision)
+        self._render_decision(self._p2_decision, agent_p2_enabled, p2_decision)
+
         self._render_agent_toggle(self._p1_agent_toggle, agent_p1_enabled)
         self._render_agent_toggle(self._p2_agent_toggle, agent_p2_enabled)
 
@@ -411,6 +419,14 @@ class ObserverHud:
             label.configure(text="AI: ON  (click to disable)", fg="#5ddea0")
         else:
             label.configure(text="AI: OFF  (click to enable)", fg=_MUTED)
+
+    def _render_decision(
+        self, label: tk.Label, enabled: bool, decision: Decision | None
+    ) -> None:
+        if not enabled:
+            label.configure(text="")
+            return
+        label.configure(text=f"Decision  {_describe_decision(decision)}", fg="#ffd84d")
 
     def _render_player(
         self,
@@ -758,6 +774,29 @@ def _map_y(map_y: float, world: WorldMap, oy: float, plot_h: float) -> float:
 
     t = (map_y - world.view_top) / world.view_height
     return oy + t * plot_h
+
+
+def _describe_decision(decision: Decision | None) -> str:
+    """One-line label for whichever ``Decision`` determine_priority_decision
+    kept, using the field names shared across the ``ai`` package's Decision
+    subclasses (``target_slot``/``threat_slot``/``direction``/coordinate)
+    rather than special-casing every concrete class here."""
+
+    if decision is None:
+        return "—  (no button)"
+    name = type(decision).__name__
+    parts: list[str] = []
+    direction = getattr(decision, "direction", None)
+    if direction is not None:
+        parts.append(str(direction))
+    target = getattr(decision, "target_slot", None) or getattr(decision, "threat_slot", None)
+    if target is not None:
+        parts.append(f"→{target}")
+    elif hasattr(decision, "target_x") and hasattr(decision, "target_y"):
+        parts.append(f"→({decision.target_x},{decision.target_y})")
+    if parts:
+        return f"{name}  ({' '.join(parts)})"
+    return name
 
 
 def _health_bar(player: PlayerSnapshot, width: int = 16) -> str:

@@ -75,8 +75,8 @@ entry points in this tree.
 ### HUD
 
 - Keys: **Esc** / **Q** quit
-- Columns: State · P1 · P2 (health, lives, specials, score, hunt count, AI
-  toggle label)
+- Columns: State · P1 · P2 (health, lives, specials, score, hunt count,
+  winning-`Decision` label, AI toggle label)
 - Map outlines use `phases.py` combat-phase colours
 - Click a player's "AI: OFF/ON" label to toggle that player's AI at runtime
 
@@ -97,7 +97,7 @@ entry points in this tree.
 | `priority.py` | Graded Sidestep emergency; hold throws outrank knees; stage advance when camera clear |
 | `gamepad.py` | `VirtualGamepad`/`SharedGamepadState` — the only code allowed to call `hold_buttons`/`press_buttons`/`release_buttons`; never `write_memory`/`write_value` |
 | `execute.py` | `execute_decision` dispatch to controller input |
-| `loop.py` | `AgentLoop.tick` — gates on pause/non-gameplay/not-playable first, then runs the full pipeline |
+| `loop.py` | `AgentLoop.tick` — gates on pause/non-gameplay/not-playable first, then runs the full pipeline; returns the winning `Decision` (or `None`) for informational use, e.g. the HUD label |
 
 Verified button mapping for the original (non-altControls) scheme (see
 `execute.py`'s module docstring): **Attack/Punch is physical B** (also

@@ -22,14 +22,22 @@ class AgentLoop:
     def __init__(self, gamepad: VirtualGamepad) -> None:
         self._gamepad = gamepad
 
-    def tick(self, snapshot: GameSnapshot, *, player_index: int) -> None:
+    def tick(self, snapshot: GameSnapshot, *, player_index: int) -> Decision | None:
+        """Run one iteration and return the winning ``Decision``, if any.
+
+        The return value is purely informational (e.g. for a HUD to show
+        what the AI is doing) — callers must not feed it back into the
+        pipeline; ``execute_decision`` has already run by the time it comes
+        back.
+        """
+
         if (
             snapshot.paused
             or not snapshot.timer_valid
             or not snapshot.players[player_index - 1].is_playable
         ):
             self._gamepad.release()
-            return
+            return None
 
         context = generate_direct_observation_tokens(snapshot, player_index=player_index)
         context |= generate_inference_tokens(context)
@@ -39,5 +47,8 @@ class AgentLoop:
         decisions = find_all(context, Decision)
         if not decisions:
             press_no_button(self._gamepad)
-        else:
-            execute_decision(decisions[0], context, self._gamepad)
+            return None
+
+        decision = decisions[0]
+        execute_decision(decision, context, self._gamepad)
+        return decision
