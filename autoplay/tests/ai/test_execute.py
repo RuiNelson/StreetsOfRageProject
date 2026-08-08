@@ -215,29 +215,40 @@ class ExecuteCallPoliceTests(unittest.TestCase):
 
 
 class ExecuteJumpAttackTests(unittest.TestCase):
-    def test_presses_jump_when_grounded(self) -> None:
-        actor = _myself(is_airborne=False)
+    def test_presses_jump_with_direction_when_grounded(self) -> None:
+        actor = _myself(world_x=0, world_y=0, is_airborne=False)
+        enemy = _enemy(world_x=50, world_y=0)
         decision = JumpAttack(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor}, gamepad)
+        execute_decision(decision, {actor, enemy}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=C, frames=3)
+        client.press_buttons.assert_called_once_with(player1=C | RIGHT, frames=3)
 
     def test_presses_punch_when_airborne(self) -> None:
-        actor = _myself(is_airborne=True)
+        actor = _myself(world_x=0, world_y=0, is_airborne=True)
+        enemy = _enemy(world_x=50, world_y=0)
         decision = JumpAttack(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor}, gamepad)
+        execute_decision(decision, {actor, enemy}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B | RIGHT, frames=4)
 
     def test_missing_actor_does_nothing(self) -> None:
         decision = JumpAttack(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
         execute_decision(decision, set(), gamepad)
+
+        client.press_buttons.assert_not_called()
+
+    def test_no_target_does_not_hop_in_place(self) -> None:
+        actor = _myself(is_airborne=False)
+        decision = JumpAttack(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor}, gamepad)
 
         client.press_buttons.assert_not_called()
 

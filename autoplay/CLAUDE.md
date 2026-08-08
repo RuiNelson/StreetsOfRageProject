@@ -90,11 +90,11 @@ entry points in this tree.
 | `essential.py`, `hazard_tokens.py`, `pickup_tokens.py` | `Stage`/`CameraRange`/`AnimationInProgress`, `Projectile`/`IncomingProjectile`/`DangerZone`, `Weapon` + consumable `Pickup` hierarchy + `weapon_rank` |
 | `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM); free-to-act phases include `HOLDING` and `HELD_BY_ENEMY` |
 | `inference.py` | Threat-filtered `IncomingProjectile`; weighted `DangerZone` (type strength + attack phase + cluster + projectiles) |
-| `walk_decisions.py` | `WalkToNearEnemy`, `WalkToAdvanceStage`, `WalkToCoordinate`, `WalkToWeapon`, `WalkToPickup`, `Sidestep` |
-| `attack_decisions.py` | `Punch`, `ThrowKnife`, `Supplex`, `JumpAttack`, `RearAttack` (B+C), `CounterGrab` (held C→B) — no separate `Combo`/`GrabEnemy` |
-| `police_decision.py` | `CallPolice` |
-| `decide.py` | `should_*` candidate generators (character punch bands, weapon rank upgrades, pickup usefulness) |
-| `priority.py` | `determine_priority_decision` — emergency ranking + priority tie-break + logged random fallback; `CounterGrab` ties top emergency with confirmed dodges |
+| `walk_decisions.py` | `WalkToNearEnemy`, `WalkToAdvanceStage`, `WalkToCoordinate`, `WalkToWeapon`, `WalkToPickup`, `WalkToBreakable`, `Sidestep` |
+| `attack_decisions.py` | `Punch`, `SmashBreakable`, hold moves (`KneeStrike`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab` |
+| `police_decision.py` | `CallPolice` (high threat only) |
+| `decide.py` | `should_*` generators; lane-clamped sidestep; on-screen-only chase/advance; hold always acts |
+| `priority.py` | Graded Sidestep emergency; hold throws outrank knees; stage advance when camera clear |
 | `gamepad.py` | `VirtualGamepad`/`SharedGamepadState` — the only code allowed to call `hold_buttons`/`press_buttons`/`release_buttons`; never `write_memory`/`write_value` |
 | `execute.py` | `execute_decision` dispatch to controller input |
 | `loop.py` | `AgentLoop.tick` — gates on pause/non-gameplay/not-playable first, then runs the full pipeline |

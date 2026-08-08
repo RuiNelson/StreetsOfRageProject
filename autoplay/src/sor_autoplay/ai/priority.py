@@ -12,7 +12,19 @@ import logging
 import math
 import random
 
-from .attack_decisions import CounterGrab, JumpAttack, Punch, RearAttack, Supplex, ThrowKnife
+from .attack_decisions import (
+    CounterGrab,
+    FlipHold,
+    JumpAttack,
+    KneeStrike,
+    Punch,
+    RearAttack,
+    ReleaseGrab,
+    SmashBreakable,
+    Supplex,
+    ThrowHeldEnemy,
+    ThrowKnife,
+)
 from .character import Myself, Partner, PlayableCharacter
 from .enemy import Enemy, Jack
 from .hazard_tokens import IncomingProjectile
@@ -30,6 +42,7 @@ from .tokens import Context, Decision, find, find_all
 from .walk_decisions import (
     Sidestep,
     WalkToAdvanceStage,
+    WalkToBreakable,
     WalkToCoordinate,
     WalkToNearEnemy,
     WalkToPickup,
@@ -50,23 +63,32 @@ _EMERGENCY_SIDESTEP_CAUTION_BASE = 58
 _EMERGENCY_SIDESTEP_PROJECTILE_BASE = 80
 _EMERGENCY_SIDESTEP_UNRESOLVED = 55
 _EMERGENCY_SIDESTEP_MAX = 99
-_EMERGENCY_CALL_POLICE = 90
+# Police only after graded sidesteps would already have fired; keep high but
+# decide.py gates emission tightly so this rarely appears.
+_EMERGENCY_CALL_POLICE = 88
 _EMERGENCY_REAR_ATTACK = 55  # escape when boxed in / punch dead-zone
 _EMERGENCY_PUNCH_PUNISHABLE = 60
 _EMERGENCY_PUNCH_DEFAULT = 20
-_EMERGENCY_SUPPLEX = 65  # already committed to a grab -- finishing it is the only sensible action
-_EMERGENCY_JUMP_ATTACK_PUNISHABLE = 60
-_EMERGENCY_JUMP_ATTACK_DEFAULT = 22
+_EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
+_EMERGENCY_HOLD_SUPPLEX = 68
+_EMERGENCY_HOLD_FLIP = 66
+_EMERGENCY_HOLD_KNEE = 64
+_EMERGENCY_HOLD_RELEASE = 50
+_EMERGENCY_JUMP_ATTACK_PUNISHABLE = 28  # below punch; never prefer hop over strike
+_EMERGENCY_JUMP_ATTACK_DEFAULT = 18
 _EMERGENCY_THROW_KNIFE = 25
 _EMERGENCY_RETREAT_FROM_DANGER = 45
+_EMERGENCY_SMASH_BREAKABLE = 16
+_EMERGENCY_WALK_TO_BREAKABLE = 14
 _EMERGENCY_WALK_TO_WEAPON = 8
 _EMERGENCY_WALK_TO_PICKUP_CRITICAL_HEALTH = 50
 _EMERGENCY_WALK_TO_PICKUP_HEALTH = 15
 _EMERGENCY_WALK_TO_PICKUP_LIFE = 12
 _EMERGENCY_WALK_TO_PICKUP_SPECIAL = 9
 _EMERGENCY_WALK_TO_PICKUP_SCORE = 3
-_EMERGENCY_WALK_TO_NEAR_ENEMY = 10
-_EMERGENCY_WALK_TO_ADVANCE_STAGE = 5
+_EMERGENCY_WALK_TO_NEAR_ENEMY = 14
+# Clear camera → push stage (was 5; only emitted when no on-screen enemies).
+_EMERGENCY_WALK_TO_ADVANCE_STAGE = 12
 _EMERGENCY_DEFAULT = 0
 
 # enemy-ai.md combat-table flavour: bosses / Jack / Signal hit harder or grab.
@@ -238,23 +260,29 @@ def _emergency(decision: Decision, context: Context) -> int:
         if target is not None and is_punishable(target.combat_phase):
             return _EMERGENCY_PUNCH_PUNISHABLE
         return _EMERGENCY_PUNCH_DEFAULT
+    if isinstance(decision, SmashBreakable):
+        return _EMERGENCY_SMASH_BREAKABLE
+    if isinstance(decision, ThrowHeldEnemy):
+        return _EMERGENCY_HOLD_THROW
     if isinstance(decision, Supplex):
-        # Holding an enemy is itself the justification -- no target-phase lookup
-        # needed, matching CallPolice's flat value above.
-        return _EMERGENCY_SUPPLEX
+        return _EMERGENCY_HOLD_SUPPLEX
+    if isinstance(decision, FlipHold):
+        return _EMERGENCY_HOLD_FLIP
+    if isinstance(decision, KneeStrike):
+        return _EMERGENCY_HOLD_KNEE
+    if isinstance(decision, ReleaseGrab):
+        return _EMERGENCY_HOLD_RELEASE
     if isinstance(decision, JumpAttack):
         target = find(context, Enemy, slot=decision.target_slot)
         if target is not None and is_punishable(target.combat_phase):
             return _EMERGENCY_JUMP_ATTACK_PUNISHABLE
         return _EMERGENCY_JUMP_ATTACK_DEFAULT
     if isinstance(decision, ThrowKnife):
-        # Already gated on the enemy being out of melee range in decide.py --
-        # no "already committed" nuance to add here.
         return _EMERGENCY_THROW_KNIFE
     if isinstance(decision, WalkToCoordinate):
-        # This decision type is only ever produced for the danger-retreat case
-        # in this phase, per the plan.
         return _EMERGENCY_RETREAT_FROM_DANGER
+    if isinstance(decision, WalkToBreakable):
+        return _EMERGENCY_WALK_TO_BREAKABLE
     if isinstance(decision, WalkToWeapon):
         return _EMERGENCY_WALK_TO_WEAPON
     if isinstance(decision, WalkToPickup):

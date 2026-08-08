@@ -46,3 +46,17 @@ class DangerZone(Information):
     top: float
     bottom: float
     threat_level: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Breakable(Information):
+    """Intact smashable prop (phone booth, crate, …) — punch to break.
+
+    Observed from map entities with ``kind == "breakable"`` that are still
+    intact (not debris). Blocks lateral progress until destroyed.
+    """
+
+    slot: str
+    world_x: int
+    world_y: int
+    type_id: int

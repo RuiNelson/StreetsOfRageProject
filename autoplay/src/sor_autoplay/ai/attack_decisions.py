@@ -41,14 +41,63 @@ class ThrowKnife(Attack):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Supplex(Attack):
+    """Back-hold B — true suplex. Front-hold uses FlipHold first."""
+
     priority: int = 13
     actor_slot: str
     target_slot: str
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class KneeStrike(Attack):
+    """Front-hold B (knee) — keeps the grab and damages."""
+
+    priority: int = 14
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ThrowHeldEnemy(Attack):
+    """Front-hold B+back — throws the held foe (useful vs a rear threat)."""
+
+    priority: int = 16
+    actor_slot: str
+    target_slot: str  # held / primary target slot (for context)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FlipHold(Attack):
+    """Front-hold C — crossover to back hold, then Supplex next ticks."""
+
+    priority: int = 15
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ReleaseGrab(Attack):
+    """Walk away opposite the held enemy to drop the grab."""
+
+    priority: int = 12
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class JumpAttack(Attack):
-    priority: int = 17
+    """Jump-kick only — never a stationary hop. Requires horizontal aim."""
+
+    priority: int = 8  # below basic punch priority (10)
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SmashBreakable(Attack):
+    """B near an intact prop (same input as punch; ROM hits the prop)."""
+
+    priority: int = 9
     actor_slot: str
     target_slot: str
 

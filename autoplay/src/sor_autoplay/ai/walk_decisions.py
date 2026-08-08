@@ -65,3 +65,12 @@ class WalkToPickup(Walk):
     priority: int = 18
     actor_slot: str
     target_slot: str  # Pickup.slot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WalkToBreakable(Walk):
+    """Approach an intact prop to smash it (or clear the path)."""
+
+    priority: int = 12
+    actor_slot: str
+    target_slot: str

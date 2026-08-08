@@ -16,7 +16,7 @@ from sor_autoplay.world_map import MapEntity
 from .character import Myself, Partner
 from .enemy import Enemy, Jack, LaterBoss, enemy_class_for_type
 from .essential import AnimationInProgress, CameraRange, Stage
-from .hazard_tokens import Projectile
+from .hazard_tokens import Breakable, Projectile
 from .pickup_tokens import Weapon, build_pickup_token
 from .tokens import Context
 
@@ -180,6 +180,21 @@ def generate_direct_observation_tokens(
             )
             if token is not None:
                 context.add(token)
+        elif entity.kind == "breakable":
+            # Intact props sit in primary state $01; debris/fragments are
+            # filtered by style_for_object but keep a soft guard here.
+            if entity.combat_phase not in (
+                CombatPhase.DEATH,
+                CombatPhase.SCRIPTED,
+            ):
+                context.add(
+                    Breakable(
+                        slot=entity.slot,
+                        world_x=entity.world_x,
+                        world_y=entity.world_y,
+                        type_id=entity.type_id,
+                    )
+                )
 
     context.add(
         CameraRange(
