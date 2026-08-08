@@ -21,12 +21,19 @@ has a chance to run.
 
 from __future__ import annotations
 
-from .attack_decisions import Punch
+from .attack_decisions import JumpAttack, Punch, Supplex, ThrowKnife
 from .character import Myself, Partner
 from .enemy import Enemy
+from .pickup_tokens import Weapon
 from .police_decision import CallPolice
 from .tokens import Context, Decision, find
-from .walk_decisions import Sidestep, WalkToAdvanceStage, WalkToNearEnemy
+from .walk_decisions import (
+    Sidestep,
+    WalkToAdvanceStage,
+    WalkToCoordinate,
+    WalkToNearEnemy,
+    WalkToWeapon,
+)
 from .gamepad import VirtualGamepad
 
 UP_MASK = 0x0001
@@ -35,21 +42,17 @@ LEFT_MASK = 0x0004
 RIGHT_MASK = 0x0008
 PUNCH_MASK = 0x0020  # physical B — verified mapping, see module docstring
 CALL_POLICE_MASK = 0x0010  # physical A — verified mapping, see module docstring
-THROW_MASK = 0x0010  # physical A — same button as CallPolice, different context
+JUMP_MASK = 0x0040  # physical C
 PUNCH_FRAMES = 4
 CALL_POLICE_FRAMES = 4
-THROW_FRAMES = 4
+SUPPLEX_FRAMES = 4
+THROW_KNIFE_FRAMES = 4
+JUMP_ATTACK_LAUNCH_FRAMES = 3
+JUMP_ATTACK_KICK_FRAMES = 4
 
-# Weapon type ids (knife..pepper spray); a nonzero held_weapon_type outside
-# this range means Myself is currently grabbing an *enemy*, not carrying a
-# weapon (see world_map.MapEntity.is_holding_weapon).
-_WEAPON_TYPE_MIN = 0x08
-_WEAPON_TYPE_MAX = 0x0C
-
-
-def _is_holding_enemy(actor: Myself | Partner) -> bool:
-    held = actor.held_weapon_type
-    return held != 0 and not (_WEAPON_TYPE_MIN <= held <= _WEAPON_TYPE_MAX)
+# Placeholder pickup-adjacency thresholds for WalkToWeapon.
+PICKUP_RANGE_X = 16
+PICKUP_RANGE_Y = 12
 
 
 def press_no_button(gamepad: VirtualGamepad) -> None:
@@ -65,23 +68,27 @@ def _find_actor(context: Context, slot: str) -> Myself | Partner | None:
     return None
 
 
+def _movement_mask(from_x: int, from_y: int, to_x: int, to_y: int) -> int:
+    mask = 0
+    if to_x > from_x:
+        mask |= RIGHT_MASK
+    elif to_x < from_x:
+        mask |= LEFT_MASK
+    # world_map.py convention: smaller world_y = back of stage = "up".
+    if to_y > from_y:
+        mask |= DOWN_MASK
+    elif to_y < from_y:
+        mask |= UP_MASK
+    return mask
+
+
 def _execute_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, decision.actor_slot)
     target = find(context, Enemy, slot=decision.target_slot)
     if actor is None or target is None:
         return
 
-    mask = 0
-    if target.world_x > actor.world_x:
-        mask |= RIGHT_MASK
-    elif target.world_x < actor.world_x:
-        mask |= LEFT_MASK
-    # world_map.py convention: smaller world_y = back of stage = "up".
-    if target.world_y > actor.world_y:
-        mask |= DOWN_MASK
-    elif target.world_y < actor.world_y:
-        mask |= UP_MASK
-    gamepad.hold(mask)
+    gamepad.hold(_movement_mask(actor.world_x, actor.world_y, target.world_x, target.world_y))
 
 
 def _execute_walk_to_advance_stage(
@@ -98,21 +105,56 @@ def _execute_sidestep(decision: Sidestep, context: Context, gamepad: VirtualGame
 
 
 def _execute_punch(decision: Punch, context: Context, gamepad: VirtualGamepad) -> None:
-    # Repeatedly pressing the attack button no-ops once Myself is already
-    # holding the target (grab strikes/throws are selected from directional
-    # input + button per ai-analysis/player-health-lives-and-combat.md's
-    # $2D20 note, not from the plain attack edge) -- this left the AI stuck
-    # holding a near-dead enemy forever. Throwing is the one action that
-    # reliably ends the hold instead.
-    actor = _find_actor(context, decision.actor_slot)
-    if actor is not None and _is_holding_enemy(actor):
-        gamepad.press(THROW_MASK, frames=THROW_FRAMES)
-        return
     gamepad.press(PUNCH_MASK, frames=PUNCH_FRAMES)
 
 
 def _execute_call_police(decision: CallPolice, context: Context, gamepad: VirtualGamepad) -> None:
     gamepad.press(CALL_POLICE_MASK, frames=CALL_POLICE_FRAMES)
+
+
+def _execute_jump_attack(decision: JumpAttack, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, decision.actor_slot)
+    if actor is None:
+        return
+    if not actor.is_airborne:
+        gamepad.press(JUMP_MASK, frames=JUMP_ATTACK_LAUNCH_FRAMES)
+    else:
+        gamepad.press(PUNCH_MASK, frames=JUMP_ATTACK_KICK_FRAMES)
+
+
+def _execute_supplex(decision: Supplex, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, decision.actor_slot)
+    if actor is None:
+        return
+    base = actor.action_state & 0xFE
+    if base == 0x66:
+        gamepad.press(PUNCH_MASK, frames=SUPPLEX_FRAMES)
+    elif base == 0x60:
+        gamepad.press(JUMP_MASK, frames=SUPPLEX_FRAMES)
+    else:
+        gamepad.press(PUNCH_MASK, frames=SUPPLEX_FRAMES)
+
+
+def _execute_throw_knife(decision: ThrowKnife, context: Context, gamepad: VirtualGamepad) -> None:
+    gamepad.press(PUNCH_MASK, frames=THROW_KNIFE_FRAMES)
+
+
+def _execute_walk_to_coordinate(decision: WalkToCoordinate, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, decision.actor_slot)
+    if actor is None:
+        return
+    gamepad.hold(_movement_mask(actor.world_x, actor.world_y, decision.target_x, decision.target_y))
+
+
+def _execute_walk_to_weapon(decision: WalkToWeapon, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, decision.actor_slot)
+    target = find(context, Weapon, slot=decision.target_slot)
+    if actor is None or target is None:
+        return
+    if abs(target.world_x - actor.world_x) <= PICKUP_RANGE_X and abs(target.world_y - actor.world_y) <= PICKUP_RANGE_Y:
+        gamepad.press(PUNCH_MASK, frames=PUNCH_FRAMES)
+    else:
+        gamepad.hold(_movement_mask(actor.world_x, actor.world_y, target.world_x, target.world_y))
 
 
 _HANDLERS = {
@@ -121,6 +163,11 @@ _HANDLERS = {
     Sidestep: _execute_sidestep,
     Punch: _execute_punch,
     CallPolice: _execute_call_police,
+    JumpAttack: _execute_jump_attack,
+    Supplex: _execute_supplex,
+    ThrowKnife: _execute_throw_knife,
+    WalkToCoordinate: _execute_walk_to_coordinate,
+    WalkToWeapon: _execute_walk_to_weapon,
 }
 
 

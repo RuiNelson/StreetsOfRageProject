@@ -13,14 +13,15 @@ from __future__ import annotations
 import math
 
 from ..phases import CombatPhase, is_dangerous, should_ignore_as_target
-from .attack_decisions import Punch
+from .attack_decisions import JumpAttack, Punch, Supplex, ThrowKnife
 from .character import Myself, Partner, PlayableCharacter
 from .enemy import Enemy
-from .essential import AnimationInProgress, Stage
-from .hazard_tokens import DangerZone
+from .essential import AnimationInProgress, CameraRange, Stage
+from .hazard_tokens import DangerZone, IncomingProjectile
+from .pickup_tokens import Weapon
 from .police_decision import CallPolice
 from .tokens import Context, Token, find, find_all
-from .walk_decisions import Sidestep, WalkToAdvanceStage, WalkToNearEnemy
+from .walk_decisions import Sidestep, WalkToAdvanceStage, WalkToCoordinate, WalkToNearEnemy, WalkToWeapon
 
 # Placeholder heuristic thresholds, subject to future tuning against real
 # gameplay.
@@ -31,6 +32,21 @@ CAUTION_RANGE_Y = 24
 POLICE_HEALTH_PERCENT_THRESHOLD = 25.0
 POLICE_DANGER_THRESHOLD = 3
 POLICE_LOW_HEALTH_DANGER_THRESHOLD = 1
+
+_WEAPON_TYPE_MIN = 0x08
+_WEAPON_TYPE_MAX = 0x0C
+JUMP_ATTACK_RANGE_X = 32  # slightly wider than PUNCH_RANGE_X (24) -- placeholder, tunable
+JUMP_ATTACK_RANGE_Y = 20  # slightly wider than PUNCH_RANGE_Y (16)
+KNIFE_RANGE_X = 60
+KNIFE_RANGE_Y = 24
+DANGER_ZONE_RETREAT_THRESHOLD = 4
+_WEAPON_RANK = {0x08: 1, 0x09: 2, 0x0A: 3, 0x0B: 4, 0x0C: 5}  # knife < bottle < bat < pipe < pepper
+PROJECTILE_DODGE_TICKS = 20  # ~0.33s at 60fps -- placeholder, tunable
+
+
+def _is_holding_enemy(actor) -> bool:
+    held = actor.held_weapon_type
+    return held != 0 and not (_WEAPON_TYPE_MIN <= held <= _WEAPON_TYPE_MAX)
 
 
 def _actors(context: Context) -> list[PlayableCharacter]:
@@ -55,6 +71,8 @@ def should_punch(context: Context) -> Context:
     enemies = [e for e in find_all(context, Enemy) if not should_ignore_as_target(e.combat_phase)]
     for actor in _actors(context):
         if find(context, AnimationInProgress, slot=actor.slot) is not None:
+            continue
+        if _is_holding_enemy(actor):
             continue
         for enemy in enemies:
             if abs(enemy.world_x - actor.world_x) <= PUNCH_RANGE_X and abs(enemy.world_y - actor.world_y) <= PUNCH_RANGE_Y:
@@ -136,6 +154,131 @@ def should_call_police(context: Context) -> Context:
     return decisions
 
 
+def should_supplex(context: Context) -> Context:
+    decisions: set[Token] = set()
+    enemies = [e for e in find_all(context, Enemy) if not should_ignore_as_target(e.combat_phase)]
+    for actor in _actors(context):
+        if find(context, AnimationInProgress, slot=actor.slot) is not None:
+            continue
+        if not _is_holding_enemy(actor):
+            continue
+        if not enemies:
+            continue
+        nearest = min(
+            enemies,
+            key=lambda e: math.hypot(e.world_x - actor.world_x, e.world_y - actor.world_y),
+        )
+        decisions.add(Supplex(actor_slot=actor.slot, target_slot=nearest.slot))
+    return decisions
+
+
+def should_jump_attack(context: Context) -> Context:
+    decisions: set[Token] = set()
+    enemies = [e for e in find_all(context, Enemy) if not should_ignore_as_target(e.combat_phase)]
+    for actor in _actors(context):
+        if find(context, AnimationInProgress, slot=actor.slot) is not None:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.is_airborne:
+            continue
+        for enemy in enemies:
+            if (
+                abs(enemy.world_x - actor.world_x) <= JUMP_ATTACK_RANGE_X
+                and abs(enemy.world_y - actor.world_y) <= JUMP_ATTACK_RANGE_Y
+            ):
+                decisions.add(JumpAttack(actor_slot=actor.slot, target_slot=enemy.slot))
+    return decisions
+
+
+def should_throw_knife(context: Context) -> Context:
+    decisions: set[Token] = set()
+    enemies = [e for e in find_all(context, Enemy) if not should_ignore_as_target(e.combat_phase)]
+    for actor in _actors(context):
+        if find(context, AnimationInProgress, slot=actor.slot) is not None:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.held_weapon_type != 0x08:
+            continue
+        if not enemies:
+            continue
+        nearest = min(
+            enemies,
+            key=lambda e: math.hypot(e.world_x - actor.world_x, e.world_y - actor.world_y),
+        )
+        in_melee_range = (
+            abs(nearest.world_x - actor.world_x) <= PUNCH_RANGE_X
+            and abs(nearest.world_y - actor.world_y) <= PUNCH_RANGE_Y
+        )
+        if in_melee_range:
+            continue
+        if abs(nearest.world_x - actor.world_x) <= KNIFE_RANGE_X and abs(nearest.world_y - actor.world_y) <= KNIFE_RANGE_Y:
+            decisions.add(ThrowKnife(actor_slot=actor.slot, target_slot=nearest.slot))
+    return decisions
+
+
+def should_walk_to_weapon(context: Context) -> Context:
+    decisions: set[Token] = set()
+    camera = find(context, CameraRange)
+    if camera is None:
+        return decisions
+    weapons = [
+        w
+        for w in find_all(context, Weapon)
+        if camera.left <= w.world_x <= camera.right and camera.top <= w.world_y <= camera.bottom
+    ]
+    for actor in _actors(context):
+        if find(context, AnimationInProgress, slot=actor.slot) is not None:
+            continue
+        held_rank = _WEAPON_RANK.get(actor.held_weapon_type, 0)
+        upgrades = [w for w in weapons if _WEAPON_RANK.get(w.weapon_type, 0) > held_rank]
+        if not upgrades:
+            continue
+        best = max(upgrades, key=lambda w: _WEAPON_RANK.get(w.weapon_type, 0))
+        decisions.add(WalkToWeapon(actor_slot=actor.slot, target_slot=best.slot))
+    return decisions
+
+
+def should_retreat_from_danger_zone(context: Context) -> Context:
+    decisions: set[Token] = set()
+    for actor in _actors(context):
+        if find(context, AnimationInProgress, slot=actor.slot) is not None:
+            continue
+        zone = find(context, DangerZone, slot=actor.slot)
+        if zone is None or zone.threat_level < DANGER_ZONE_RETREAT_THRESHOLD:
+            continue
+        centroid_x = (zone.left + zone.right) / 2
+        centroid_y = (zone.top + zone.bottom) / 2
+        target_x = actor.world_x + (actor.world_x - centroid_x)
+        target_y = actor.world_y + (actor.world_y - centroid_y)
+        decisions.add(WalkToCoordinate(actor_slot=actor.slot, target_x=int(target_x), target_y=int(target_y)))
+    return decisions
+
+
+def should_dodge_projectile(context: Context) -> Context:
+    decisions: set[Token] = set()
+    projectiles = find_all(context, IncomingProjectile)
+    for actor in _actors(context):
+        if find(context, AnimationInProgress, slot=actor.slot) is not None:
+            continue
+        for projectile in projectiles:
+            if projectile.vel_x == 0:
+                continue
+            dx = projectile.world_x - actor.world_x
+            heading_toward = (dx > 0 and projectile.vel_x < 0) or (dx < 0 and projectile.vel_x > 0)
+            if not heading_toward:
+                continue
+            ticks_to_impact = abs(dx) / abs(projectile.vel_x)
+            if ticks_to_impact > PROJECTILE_DODGE_TICKS:
+                continue
+            if abs(projectile.world_y - actor.world_y) > CAUTION_RANGE_Y:
+                continue
+            direction = "up" if projectile.world_y > actor.world_y else "down"
+            decisions.add(Sidestep(actor_slot=actor.slot, threat_slot=projectile.slot, direction=direction))
+    return decisions
+
+
 def generate_decision_tokens(context: Context) -> Context:
     """Returns context | every should_* candidate that applies."""
 
@@ -146,4 +289,10 @@ def generate_decision_tokens(context: Context) -> Context:
         | should_sidestep(context)
         | should_punch(context)
         | should_call_police(context)
+        | should_supplex(context)
+        | should_jump_attack(context)
+        | should_throw_knife(context)
+        | should_walk_to_weapon(context)
+        | should_retreat_from_danger_zone(context)
+        | should_dodge_projectile(context)
     )

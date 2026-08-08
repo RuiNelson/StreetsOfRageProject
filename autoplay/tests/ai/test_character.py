@@ -20,6 +20,8 @@ def _myself(**overrides) -> Myself:
         held_weapon_type=0,
         facing_left=False,
         combat_phase=CombatPhase.NORMAL,
+        action_state=0,
+        is_airborne=False,
     )
     fields.update(overrides)
     return Myself(**fields)
@@ -52,6 +54,8 @@ class CharacterHierarchyTests(unittest.TestCase):
         self.assertEqual(me.held_weapon_type, 0)
         self.assertFalse(me.facing_left)
         self.assertEqual(me.combat_phase, CombatPhase.NORMAL)
+        self.assertEqual(me.action_state, 0)
+        self.assertFalse(me.is_airborne)
 
     def test_partner_accepts_same_shape(self) -> None:
         partner = Partner(
@@ -68,10 +72,14 @@ class CharacterHierarchyTests(unittest.TestCase):
             held_weapon_type=0x0A,
             facing_left=True,
             combat_phase=CombatPhase.HOLDING,
+            action_state=0x66,
+            is_airborne=True,
         )
         self.assertEqual(partner.character_name, "Blaze")
         self.assertEqual(partner.held_weapon_type, 0x0A)
         self.assertTrue(partner.facing_left)
+        self.assertEqual(partner.action_state, 0x66)
+        self.assertTrue(partner.is_airborne)
 
     def test_frozen_and_hashable(self) -> None:
         me = _myself()

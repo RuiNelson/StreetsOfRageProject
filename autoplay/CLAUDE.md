@@ -78,24 +78,36 @@ entry points in this tree.
 - Map outlines use `phases.py` combat-phase colours
 - Click a player's "AI: OFF/ON" label to toggle that player's AI at runtime
 
-### AI surface (`ai/`, Phase A — see `/AI.md`)
+### AI surface (`ai/` — see `/AI.md`)
 
 | Piece | Role |
 | --- | --- |
 | `tokens.py` | `Token`/`Information`/`Decision` base classes, `Context`, `find`/`find_all` |
-| `character.py`, `enemy.py`, `essential.py`, `hazard_tokens.py` | Information tokens (`Myself`/`Partner`, `Enemy`, `Stage`/`CameraRange`/`AnimationInProgress`, `Projectile`/`IncomingProjectile`/`DangerZone`) |
+| `character.py` | `Myself`/`Partner` (`action_state`, `is_airborne` for `Supplex`/`JumpAttack` sequencing) |
+| `enemy.py` | `Enemy` + per-type/boss subclasses: `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`, `Boss` → `BespokeBoss` (`Abadede`, `MrX`) / `LaterBoss` (`Souther`, `Antonio`, `Bongo`, `Onihime`); `enemy_class_for_type` |
+| `essential.py`, `hazard_tokens.py`, `pickup_tokens.py` | `Stage`/`CameraRange`/`AnimationInProgress`, `Projectile`/`IncomingProjectile`/`DangerZone`, `Weapon` |
 | `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM) |
-| `inference.py` | `check_for_incoming_projectiles`, `check_for_danger_zone` |
-| `walk_decisions.py`, `attack_decisions.py`, `police_decision.py` | `Decision` tokens (`WalkToNearEnemy`, `WalkToAdvanceStage`, `Sidestep`, `Punch`, `CallPolice`) |
+| `inference.py` | `check_for_incoming_projectiles`, `check_for_danger_zone` (proximity clustering — a nearby, not-yet-targeting enemy cluster can trigger a `DangerZone` on its own) |
+| `walk_decisions.py` | `WalkToNearEnemy`, `WalkToAdvanceStage`, `WalkToCoordinate` (danger retreat), `WalkToWeapon`, `Sidestep` |
+| `attack_decisions.py` | `Punch`, `ThrowKnife`, `Supplex`, `JumpAttack` — no separate `Combo`/`GrabEnemy` (see the module docstring: no distinct input exists, `Punch` already covers both) |
+| `police_decision.py` | `CallPolice` |
 | `decide.py` | `should_*` candidate generators |
-| `priority.py` | `determine_priority_decision` — emergency ranking + priority tie-break + logged random fallback |
+| `priority.py` | `determine_priority_decision` — emergency ranking + priority tie-break + logged random fallback; `Sidestep` resolves either an `Enemy` or an `IncomingProjectile` threat |
 | `gamepad.py` | `VirtualGamepad`/`SharedGamepadState` — the only code allowed to call `hold_buttons`/`press_buttons`/`release_buttons`; never `write_memory`/`write_value` |
 | `execute.py` | `execute_decision` dispatch to controller input |
 | `loop.py` | `AgentLoop.tick` — gates on pause/non-gameplay/not-playable first, then runs the full pipeline |
 
 Verified button mapping for the original (non-altControls) scheme (see
-`execute.py`'s module docstring): **Attack/Punch is physical B**, **Police
+`execute.py`'s module docstring): **Attack/Punch is physical B** (also
+`Supplex`'s finishing press and `ThrowKnife`), **Jump is physical C**
+(`JumpAttack`'s launch, `Supplex`'s front-to-back-hold crossover), **Police
 special is physical A** — the reverse of the naive "A=attack" assumption.
+
+Out of scope, per `AI.md`'s own text: two-player coordination rules ("low
+priority... not an expected scenario") and the six-button `--altControls`
+scheme ("planned for a future iteration"). Also out of scope: bespoke
+per-boss combat tactics beyond the subclass hierarchy existing and being
+populated correctly (e.g. Antonio's boomerang dodge timing).
 
 ## Snapshot cadence
 

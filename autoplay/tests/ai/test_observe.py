@@ -1,10 +1,11 @@
 import unittest
 
 from sor_autoplay.ai.character import Myself, Partner
-from sor_autoplay.ai.enemy import Enemy
+from sor_autoplay.ai.enemy import Abadede, Enemy, Garcia, Jack, Souther
 from sor_autoplay.ai.essential import AnimationInProgress, CameraRange, Stage
 from sor_autoplay.ai.hazard_tokens import Projectile
 from sor_autoplay.ai.observe import generate_direct_observation_tokens
+from sor_autoplay.ai.pickup_tokens import Weapon
 from sor_autoplay.ai.tokens import find, find_all
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
@@ -81,6 +82,17 @@ def _enemy_entity(
     kind: str = "enemy",
     combat_phase: CombatPhase = CombatPhase.NORMAL,
     facing_left: bool = False,
+    family_state: int = 0,
+    tactical: int = 0,
+    pair_role: int = 0,
+    boss_dist_x: int = 0,
+    boss_dist_lane: int = 0,
+    mode_flags: int = 0,
+    target_unavailable: int = 0,
+    phase_timer: int = 0,
+    ground_z: int | None = None,
+    vel_x: float = 0.0,
+    vel_z: float = 0.0,
 ) -> MapEntity:
     return MapEntity(
         kind=kind,
@@ -98,6 +110,45 @@ def _enemy_entity(
         slot=slot,
         combat_phase=combat_phase,
         facing_left=facing_left,
+        family_state=family_state,
+        tactical=tactical,
+        pair_role=pair_role,
+        boss_dist_x=boss_dist_x,
+        boss_dist_lane=boss_dist_lane,
+        mode_flags=mode_flags,
+        target_unavailable=target_unavailable,
+        phase_timer=phase_timer,
+        ground_z=ground_z,
+        vel_x=vel_x,
+        vel_z=vel_z,
+    )
+
+
+def _weapon_entity(
+    *,
+    slot: str = "obj10",
+    type_id: int = 0x08,
+    world_x: int = 850,
+    world_y: int = 64,
+    interaction: int = 0,
+    item_param: int = 0,
+) -> MapEntity:
+    return MapEntity(
+        kind="weapon",
+        family="Weapon",
+        symbol="w",
+        color="#ffd24d",
+        label="Knife",
+        type_id=type_id,
+        world_x=world_x,
+        world_y=world_y,
+        world_z=0,
+        map_x=float(world_x - 768),
+        map_y=float(world_y),
+        health=None,
+        slot=slot,
+        interaction=interaction,
+        item_param=item_param,
     )
 
 
@@ -173,7 +224,9 @@ class MyselfTests(unittest.TestCase):
     def test_myself_built_from_snapshot_and_entity(self) -> None:
         p1 = _player_snapshot(index=1)
         p2 = _player_snapshot(index=2, is_playable=False)
-        entity = _player_entity(slot="P1", held_type=0x0A, facing_left=True)
+        entity = _player_entity(
+            slot="P1", held_type=0x0A, facing_left=True, action_state=0x10
+        )
         snapshot = _snapshot(players=(p1, p2), entities=(entity,))
 
         context = generate_direct_observation_tokens(snapshot, player_index=1)
@@ -193,6 +246,8 @@ class MyselfTests(unittest.TestCase):
         self.assertEqual(myself.specials, 2)
         self.assertEqual(myself.held_weapon_type, 0x0A)
         self.assertTrue(myself.facing_left)
+        self.assertEqual(myself.action_state, 0x10)
+        self.assertTrue(myself.is_airborne)  # base 0x10 is in the jump range
 
     def test_myself_omitted_when_entity_absent(self) -> None:
         p1 = _player_snapshot(index=1)
@@ -280,6 +335,123 @@ class EnemyObservationTests(unittest.TestCase):
 
         enemies = find_all(context, Enemy)
         self.assertEqual([e.slot for e in enemies], ["obj01"])
+
+
+class EnemySubclassObservationTests(unittest.TestCase):
+    def test_garcia_type_produces_garcia_class(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        entities = (
+            _player_entity(slot="P1"),
+            _enemy_entity(slot="obj00", type_id=0x20),
+        )
+        snapshot = _snapshot(players=(p1, p2), entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        enemies = find_all(context, Enemy)
+        self.assertEqual(len(enemies), 1)
+        self.assertIsInstance(enemies[0], Garcia)
+
+    def test_jack_type_derives_has_projectile_from_family_state_bit0(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+
+        with_weapon = _enemy_entity(slot="obj01", type_id=0x27, family_state=0x01)
+        snapshot = _snapshot(
+            players=(p1, p2), entities=(_player_entity(slot="P1"), with_weapon)
+        )
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+        jack = find(context, Jack, slot="obj01")
+        self.assertIsNotNone(jack)
+        assert jack is not None
+        self.assertTrue(jack.has_projectile)
+
+        without_weapon = _enemy_entity(slot="obj02", type_id=0x27, family_state=0x00)
+        snapshot = _snapshot(
+            players=(p1, p2), entities=(_player_entity(slot="P1"), without_weapon)
+        )
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+        jack = find(context, Jack, slot="obj02")
+        self.assertIsNotNone(jack)
+        assert jack is not None
+        self.assertFalse(jack.has_projectile)
+
+    def test_bespoke_boss_produces_no_crash_and_right_class(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        boss = _enemy_entity(slot="obj03", type_id=0x30, kind="boss", health=100)
+        entities = (_player_entity(slot="P1"), boss)
+        snapshot = _snapshot(players=(p1, p2), entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        found = find(context, Abadede, slot="obj03")
+        self.assertIsNotNone(found)
+
+    def test_later_boss_extra_fields_round_trip_from_entity(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        boss = _enemy_entity(
+            slot="obj04",
+            type_id=0x55,
+            kind="boss",
+            health=200,
+            tactical=3,
+            pair_role=1,
+            boss_dist_x=40,
+            boss_dist_lane=5,
+            mode_flags=0x02,
+            target_unavailable=1,
+            phase_timer=12,
+            ground_z=160,
+            vel_x=1.5,
+            vel_z=-0.5,
+        )
+        entities = (_player_entity(slot="P1"), boss)
+        snapshot = _snapshot(players=(p1, p2), entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        souther = find(context, Souther, slot="obj04")
+        self.assertIsNotNone(souther)
+        assert souther is not None
+        self.assertEqual(souther.tactical, 3)
+        self.assertEqual(souther.pair_role, 1)
+        self.assertEqual(souther.boss_dist_x, 40)
+        self.assertEqual(souther.boss_dist_lane, 5)
+        self.assertEqual(souther.mode_flags, 0x02)
+        self.assertEqual(souther.target_unavailable, 1)
+        self.assertEqual(souther.phase_timer, 12)
+        self.assertEqual(souther.ground_z, 160)
+        self.assertEqual(souther.vel_x, 1.5)
+        self.assertEqual(souther.vel_z, -0.5)
+
+
+class WeaponObservationTests(unittest.TestCase):
+    def test_free_ground_weapon_produces_weapon_token(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        entities = (_player_entity(slot="P1"), _weapon_entity(slot="obj10"))
+        snapshot = _snapshot(players=(p1, p2), entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        weapons = find_all(context, Weapon)
+        self.assertEqual(len(weapons), 1)
+        self.assertEqual(weapons[0].slot, "obj10")
+        self.assertEqual(weapons[0].weapon_type, 0x08)
+
+    def test_held_or_reserved_weapon_is_not_a_weapon_token(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        held = _weapon_entity(slot="obj11", interaction=1)
+        entities = (_player_entity(slot="P1"), held)
+        snapshot = _snapshot(players=(p1, p2), entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        self.assertEqual(find_all(context, Weapon), [])
 
 
 class ProjectileObservationTests(unittest.TestCase):

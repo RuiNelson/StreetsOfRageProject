@@ -1,7 +1,8 @@
 import unittest
 
-from sor_autoplay.ai.attack_decisions import Punch
+from sor_autoplay.ai.attack_decisions import JumpAttack, Punch, Supplex
 from sor_autoplay.ai.enemy import Enemy
+from sor_autoplay.ai.hazard_tokens import IncomingProjectile
 from sor_autoplay.ai.police_decision import CallPolice
 from sor_autoplay.ai.priority import determine_priority_decision
 from sor_autoplay.ai.tokens import Decision, find_all
@@ -88,6 +89,58 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
         self.assertIsInstance(decisions[0], Sidestep)
+
+    def test_sidestep_on_incoming_projectile_beats_walk_to_near_enemy(self) -> None:
+        # No Enemy at all with this slot -- only an IncomingProjectile.
+        context = {
+            IncomingProjectile(slot="proj01", world_x=0, world_y=0, vel_x=-1.0, vel_z=0.0),
+            Sidestep(actor_slot="P1", threat_slot="proj01", direction="up"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], Sidestep)
+
+    def test_supplex_always_outranks_punch_tier(self) -> None:
+        punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
+        context = {
+            punishable,
+            Supplex(actor_slot="P1", target_slot="obj01"),
+            Punch(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], Supplex)
+
+    def test_jump_attack_emergency_splits_punishable_vs_default(self) -> None:
+        punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
+        normal = _enemy("obj02", CombatPhase.NORMAL)
+
+        punishable_context = {
+            punishable,
+            JumpAttack(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+        }
+        result = determine_priority_decision(punishable_context)
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], JumpAttack)
+
+        default_context = {
+            normal,
+            JumpAttack(actor_slot="P1", target_slot="obj02"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+        result = determine_priority_decision(default_context)
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], JumpAttack)
 
 
 class DeterminePriorityTieBreakTests(unittest.TestCase):

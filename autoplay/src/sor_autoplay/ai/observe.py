@@ -14,9 +14,10 @@ from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 from sor_autoplay.world_map import MapEntity
 
 from .character import Myself, Partner
-from .enemy import Enemy
+from .enemy import Enemy, Jack, LaterBoss, enemy_class_for_type
 from .essential import AnimationInProgress, CameraRange, Stage
 from .hazard_tokens import Projectile
+from .pickup_tokens import Weapon
 from .tokens import Context
 
 
@@ -60,6 +61,8 @@ def _build_playable_character(
         held_weapon_type=entity.held_type,
         facing_left=entity.facing_left,
         combat_phase=entity.combat_phase,
+        action_state=entity.action_state,
+        is_airborne=entity.is_airborne,
     )
 
 
@@ -112,8 +115,25 @@ def generate_direct_observation_tokens(
 
     for entity in snapshot.world_map.entities:
         if entity.kind in ("enemy", "boss") and not entity.is_defeated:
+            cls = enemy_class_for_type(entity.type_id)
+            extra: dict[str, object] = {}
+            if cls is Jack:
+                extra["has_projectile"] = bool(entity.family_state & 0x01)
+            elif issubclass(cls, LaterBoss):
+                extra.update(
+                    tactical=entity.tactical,
+                    pair_role=entity.pair_role,
+                    boss_dist_x=entity.boss_dist_x,
+                    boss_dist_lane=entity.boss_dist_lane,
+                    mode_flags=entity.mode_flags,
+                    target_unavailable=entity.target_unavailable,
+                    phase_timer=entity.phase_timer,
+                    ground_z=entity.ground_z,
+                    vel_x=entity.vel_x,
+                    vel_z=entity.vel_z,
+                )
             context.add(
-                Enemy(
+                cls(
                     slot=entity.slot,
                     type_id=entity.type_id,
                     world_x=entity.world_x,
@@ -122,6 +142,7 @@ def generate_direct_observation_tokens(
                     combat_phase=entity.combat_phase,
                     targets_player=entity.targets_player,
                     facing_left=entity.facing_left,
+                    **extra,
                 )
             )
         elif entity.kind == "projectile":
@@ -132,6 +153,15 @@ def generate_direct_observation_tokens(
                     world_y=entity.world_y,
                     vel_x=entity.vel_x,
                     vel_z=entity.vel_z,
+                )
+            )
+        elif entity.kind == "weapon" and entity.is_free_ground_item:
+            context.add(
+                Weapon(
+                    slot=entity.slot,
+                    world_x=entity.world_x,
+                    world_y=entity.world_y,
+                    weapon_type=entity.type_id,
                 )
             )
 

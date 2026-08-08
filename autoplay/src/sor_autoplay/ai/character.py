@@ -30,6 +30,8 @@ class Character(Information, ABC):
     held_weapon_type: int  # 0 = none; else the weapon type id (0x08-0x0C)
     facing_left: bool
     combat_phase: CombatPhase
+    action_state: int  # raw byte at +$30; front-hold $60 vs back-hold $66
+    is_airborne: bool  # from MapEntity.is_airborne; future JumpAttack C-then-B
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

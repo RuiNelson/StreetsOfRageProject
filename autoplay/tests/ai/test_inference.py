@@ -27,6 +27,8 @@ def make_myself(**overrides) -> Myself:
         held_weapon_type=0,
         facing_left=False,
         combat_phase=CombatPhase.NORMAL,
+        action_state=0,
+        is_airborne=False,
     )
     fields.update(overrides)
     return Myself(**fields)
@@ -128,6 +130,43 @@ class CheckForDangerZoneTests(unittest.TestCase):
     def test_no_myself_or_partner_emits_nothing(self) -> None:
         e1 = make_enemy(targets_player=1)
         self.assertEqual(check_for_danger_zone({e1}), set())
+
+    def test_nearby_non_targeting_enemies_raise_threat_above_zero(self) -> None:
+        # No enemy targets the player at all, but two are clustered nearby --
+        # per AI.md, clustering alone (even before any attack) should still
+        # be able to produce threat_level > 0.
+        myself = make_myself(world_x=100, world_y=100)
+        e1 = make_enemy(slot="e1", world_x=120, world_y=100, targets_player=None)
+        e2 = make_enemy(slot="e2", world_x=140, world_y=100, targets_player=None)
+        context: set[Token] = {myself, e1, e2}
+
+        result = check_for_danger_zone(context)
+
+        self.assertEqual(len(result), 1)
+        zone = next(iter(result))
+        self.assertEqual(zone.threat_level, 1)  # 2 nearby // 2 == 1
+
+    def test_targeting_plus_nearby_beats_targeting_alone(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        e1 = make_enemy(slot="e1", world_x=105, world_y=100, targets_player=1, combat_phase=CombatPhase.NORMAL)
+        context_targeting_only: set[Token] = {myself, e1}
+        targeting_only_zone = next(iter(check_for_danger_zone(context_targeting_only)))
+
+        e2 = make_enemy(slot="e2", world_x=150, world_y=100, targets_player=None, combat_phase=CombatPhase.NORMAL)
+        e3 = make_enemy(slot="e3", world_x=160, world_y=100, targets_player=None, combat_phase=CombatPhase.NORMAL)
+        context_with_cluster: set[Token] = {myself, e1, e2, e3}
+        clustered_zone = next(iter(check_for_danger_zone(context_with_cluster)))
+
+        self.assertGreater(clustered_zone.threat_level, targeting_only_zone.threat_level)
+
+    def test_nearby_enemy_already_counted_as_targeting_is_not_double_counted(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        e1 = make_enemy(slot="e1", world_x=105, world_y=100, targets_player=1, combat_phase=CombatPhase.NORMAL)
+        context: set[Token] = {myself, e1}
+
+        zone = next(iter(check_for_danger_zone(context)))
+
+        self.assertEqual(zone.threat_level, 1)
 
 
 class GenerateInferenceTokensTests(unittest.TestCase):

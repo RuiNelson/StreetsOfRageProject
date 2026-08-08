@@ -8,11 +8,15 @@ from .enemy import Enemy
 from .hazard_tokens import DangerZone, IncomingProjectile, Projectile
 from .tokens import Context, Token, find, find_all
 
-# Deliberately a rough v1 bounding box, not proximity clustering — that is
-# explicitly future work.
+# Deliberately a rough v1 bounding box.
 DANGER_ZONE_MARGIN = 16
 CAUTION_RANGE_X = 40
 CAUTION_RANGE_Y = 24
+# Wider than the caution range: proximity clustering per AI.md -- "a cluster
+# of Enemy tokens positioned in close proximity to one another" contributes a
+# smaller weight even before any of them targets the player.
+CLUSTER_RANGE_X = 80
+CLUSTER_RANGE_Y = 40
 
 
 def _actors(context: Context) -> list[PlayableCharacter]:
@@ -50,13 +54,26 @@ def check_for_danger_zone(context: Context) -> Context:
     enemies = find_all(context, Enemy)
     for actor in _actors(context):
         targeting = [e for e in enemies if e.targets_player == actor.player_index]
-        if not targeting:
-            continue
+        targeting_slots = {e.slot for e in targeting}
+        # Proximity clustering: enemies merely nearby (not already counted via
+        # targeting) contribute a smaller weight -- avoid double-counting.
+        nearby = [
+            e
+            for e in enemies
+            if e.slot not in targeting_slots
+            and abs(e.world_x - actor.world_x) <= CLUSTER_RANGE_X
+            and abs(e.world_y - actor.world_y) <= CLUSTER_RANGE_Y
+        ]
+
         threat_level = len(targeting)
         threat_level += sum(1 for e in targeting if _is_close_and_facing_caution(e, actor))
+        threat_level += len(nearby) // 2
+        if threat_level <= 0:
+            continue
 
-        world_xs = [actor.world_x, *(e.world_x for e in targeting)]
-        world_ys = [actor.world_y, *(e.world_y for e in targeting)]
+        cluster = [*targeting, *nearby]
+        world_xs = [actor.world_x, *(e.world_x for e in cluster)]
+        world_ys = [actor.world_y, *(e.world_y for e in cluster)]
         zones.add(
             DangerZone(
                 slot=actor.slot,

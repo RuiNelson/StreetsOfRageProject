@@ -30,13 +30,27 @@ controller input only. The AI is off by default; enable it per player with
   proposes walk/attack/police decisions, ranks them by emergency, and issues
   the winner through a virtual gamepad (`hold_buttons`/`press_buttons` only —
   never writes RAM).
-- Covers: approaching and punching the nearest enemy, sidestepping a
-  dangerous or suspicious (unrecognized-state) threat, calling police when
-  surrounded or low on health, and walking to advance the stage when no
-  enemy is on screen.
+- Per-enemy-type/boss subclassing (`Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`;
+  bosses split into a bespoke family — `Abadede`/`Mr. X` — and a later-boss
+  family — `Souther`/`Antonio`/`Bongo`/`Onihime`-`Yasha` — matching which RAM
+  fields the ROM actually populates for each).
+- Combat: punching, jump-kicking, suplexing a grabbed enemy (front-hold →
+  back-hold → suplex, all one physical control sequence), and throwing a
+  held knife at range. No separate "combo"/"grab" moves — the ROM has no
+  distinct input for either, so repeated `Punch` already produces both.
+- Movement: approaching the nearest enemy, walking to a weapon upgrade on
+  the floor, advancing the stage when no enemy is on screen, and retreating
+  from a clustered danger zone.
+- Reacts to incoming projectiles (not just melee enemies) by predicting
+  their flight path and sidestepping in time.
+- Danger-zone threat clustering: a group of enemies converging on a player
+  raises alarm even before any of them has actually attacked yet.
+- Calls police when surrounded or low on health.
 - Automatically stands down (releases input) when the game is paused or
   outside active gameplay (menus, character select, round-clear, continues).
 - Original A/B/C control scheme only; `--altControls` is not yet supported.
+  Two-player AI coordination and bespoke per-boss tactics are also future
+  work (see `autoplay/CLAUDE.md`'s AI surface table).
 
 ## Requirements
 

@@ -1,4 +1,4 @@
-"""``Walk``-branch ``Decision`` tokens (Phase A: approach and sidestep only)."""
+"""``Walk``-branch ``Decision`` tokens."""
 
 from __future__ import annotations
 
@@ -36,3 +36,18 @@ class WalkToAdvanceStage(Walk):
     priority: int = 5
     actor_slot: str
     direction: str  # "left" | "right"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WalkToCoordinate(Walk):
+    priority: int = 25
+    actor_slot: str
+    target_x: int
+    target_y: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WalkToWeapon(Walk):
+    priority: int = 22
+    actor_slot: str
+    target_slot: str  # Weapon.slot
