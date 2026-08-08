@@ -120,17 +120,7 @@ it whenever ROM analysis or recompiler inputs change:
 Do not commit ROMs, ignored generated C++, build trees, CMake download trees,
 caches, screenshots, or transient discovery output.
 
-## Running safely
 
-Game boot defects can spin indefinitely. On platforms with GNU `timeout`, use
-a kill grace period:
-
-```bash
-timeout -k 3 20 ./scripts/run StreetsOfRageRecompilation/rom/SOR.bin --debug
-```
-
-After automated runs, verify that no `sor` process remains. On Windows, use a
-bounded process runner or stop the process explicitly after the observation.
 
 ## Reverse-engineering tools
 
@@ -168,5 +158,10 @@ indirect jumps and calls.
 Finish by summarizing changed files, validation performed, and anything not
 tested on the current host.
 
-> Keep this file and the other `CLAUDE.md` files updated as you work
-> Save in the `CLAUDE.md` all the information that charactizes the project that you obtain from the user.
+## Other rules
+
+- do not consult git history
+- Keep this file and the other `CLAUDE.md` files updated as you work
+- Save in the `CLAUDE.md` all the information that charactizes the project that you obtain from the user.
+ 
+ 
