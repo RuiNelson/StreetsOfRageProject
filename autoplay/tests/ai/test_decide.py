@@ -248,6 +248,35 @@ class ShouldWalkToAdvanceStageTests(unittest.TestCase):
 
         self.assertEqual(should_walk_to_advance_stage(context), set())
 
+    def test_does_not_fire_when_the_only_enemy_is_off_screen(self) -> None:
+        """A spawned-but-not-yet-visible enemy must hold the stage just like
+        an on-screen one -- it is a reason to hold position, not a "next
+        wave cue" to push past (see should_walk_to_advance_stage's
+        docstring)."""
+
+        myself = make_myself(world_x=100, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        off_screen_enemy = make_enemy(world_x=500, world_y=100)
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, off_screen_enemy, stage}
+
+        self.assertEqual(should_walk_to_advance_stage(context), set())
+
+    def test_fires_when_the_camera_is_clear_but_an_off_screen_enemy_remains_absent(
+        self,
+    ) -> None:
+        """Sanity check for the fix above: with no enemy token at all (on or
+        off screen), advance still fires."""
+
+        myself = make_myself(world_x=100, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, stage}
+
+        result = should_walk_to_advance_stage(context)
+
+        self.assertEqual(result, {WalkToAdvanceStage(actor_slot="P1", direction="right")})
+
     def test_does_not_fire_when_direction_is_none(self) -> None:
         myself = make_myself()
         stage = Stage(level_index=6, direction="none")

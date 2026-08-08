@@ -338,14 +338,18 @@ def should_walk_to_near_enemy(context: Context) -> Context:
 
 
 def should_walk_to_advance_stage(context: Context) -> Context:
-    """Scroll the stage when the camera is clear of live threats."""
+    """Scroll the stage only once every spawned enemy is gone.
+
+    Gated on every live Enemy token, not just on-screen ones: an enemy that
+    has already spawned off-screen (about to walk/scroll into view) is still
+    a reason to hold position, not a "next wave cue" to push past.
+    """
 
     decisions: set[Token] = set()
     stage = find(context, Stage)
     if stage is None or stage.direction == "none":
         return decisions
-    # Off-screen enemies (next wave cue, etc.) must not freeze progression.
-    if _on_screen_enemies(context):
+    if _live_enemies(context):
         return decisions
     for actor in _actors(context):
         if _blocked(context, actor):

@@ -97,7 +97,7 @@ _EMERGENCY_WALK_TO_PICKUP_LIFE = 12
 _EMERGENCY_WALK_TO_PICKUP_SPECIAL = 9
 _EMERGENCY_WALK_TO_PICKUP_SCORE = 3
 _EMERGENCY_WALK_TO_NEAR_ENEMY = 14
-# Clear camera → push stage (was 5; only emitted when no on-screen enemies).
+# No live enemy left anywhere (on-screen or not) → push stage (was 5).
 _EMERGENCY_WALK_TO_ADVANCE_STAGE = 12
 _EMERGENCY_DEFAULT = 0
 

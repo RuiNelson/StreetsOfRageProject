@@ -93,8 +93,8 @@ entry points in this tree.
 | `walk_decisions.py` | `WalkToNearEnemy`, `WalkToAdvanceStage`, `WalkToCoordinate`, `WalkToWeapon`, `WalkToPickup`, `WalkToBreakable`, `Sidestep` |
 | `attack_decisions.py` | `Punch`, `SmashBreakable`, hold moves (`KneeStrike`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab` |
 | `police_decision.py` | `CallPolice` (high threat only) |
-| `decide.py` | `should_*` generators; lane-clamped sidestep; on-screen-only chase/advance; hold always acts |
-| `priority.py` | Sidestep emergency downgraded to a flat floor pending a rework (see the `_EMERGENCY_SIDESTEP_FLOOR` TODO — the graded 55-99 scoring still exists underneath and still breaks ties among several Sidestep candidates); hold throws outrank knees; stage advance when camera clear |
+| `decide.py` | `should_*` generators; lane-clamped sidestep; on-screen-only chase; stage advance gated on *every* live enemy (on-screen or not), not just on-screen ones; hold always acts |
+| `priority.py` | Sidestep emergency downgraded to a flat floor pending a rework (see the `_EMERGENCY_SIDESTEP_FLOOR` TODO — the graded 55-99 scoring still exists underneath and still breaks ties among several Sidestep candidates); hold throws outrank knees; stage advance when no live enemy remains |
 | `gamepad.py` | `VirtualGamepad`/`SharedGamepadState` — the only code allowed to call `hold_buttons`/`press_buttons`/`release_buttons`; never `write_memory`/`write_value` |
 | `execute.py` | `execute_decision` dispatch to controller input |
 | `loop.py` | `AgentLoop.tick` — gates on pause/non-gameplay/not-playable first, then runs the full pipeline; returns the winning `Decision` (or `None`) for informational use, e.g. the HUD label |
