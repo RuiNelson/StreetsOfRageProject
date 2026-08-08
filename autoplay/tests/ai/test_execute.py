@@ -181,7 +181,7 @@ class ExecutePunchTests(unittest.TestCase):
 
         execute_decision(decision, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
     def test_punch_is_unconditional_even_while_holding_an_enemy(self) -> None:
         # Supplex now owns the "already holding" case (see priority.py /
@@ -192,7 +192,7 @@ class ExecutePunchTests(unittest.TestCase):
 
         execute_decision(decision, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
     def test_still_punches_while_holding_a_weapon(self) -> None:
         actor = replace(_myself(), held_weapon_type=0x0A)  # baseball bat
@@ -201,7 +201,7 @@ class ExecutePunchTests(unittest.TestCase):
 
         execute_decision(decision, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
 class ExecuteCallPoliceTests(unittest.TestCase):
@@ -211,7 +211,7 @@ class ExecuteCallPoliceTests(unittest.TestCase):
 
         execute_decision(decision, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=A, frames=4)
+        client.press_buttons.assert_called_once_with(player1=A, player2=0, frames=4)
 
 
 class ExecuteJumpAttackTests(unittest.TestCase):
@@ -223,7 +223,7 @@ class ExecuteJumpAttackTests(unittest.TestCase):
 
         execute_decision(decision, {actor, enemy}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=C | RIGHT, frames=3)
+        client.press_buttons.assert_called_once_with(player1=C | RIGHT, player2=0, frames=3)
 
     def test_presses_punch_when_airborne(self) -> None:
         actor = _myself(world_x=0, world_y=0, is_airborne=True)
@@ -233,7 +233,7 @@ class ExecuteJumpAttackTests(unittest.TestCase):
 
         execute_decision(decision, {actor, enemy}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B | RIGHT, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B | RIGHT, player2=0, frames=4)
 
     def test_missing_actor_does_nothing(self) -> None:
         decision = JumpAttack(actor_slot="P1", target_slot="obj01")
@@ -261,7 +261,7 @@ class ExecuteSupplexTests(unittest.TestCase):
 
         execute_decision(decision, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=C, frames=4)
+        client.press_buttons.assert_called_once_with(player1=C, player2=0, frames=4)
 
     def test_presses_punch_from_back_hold(self) -> None:
         actor = _myself(action_state=0x66)
@@ -270,7 +270,7 @@ class ExecuteSupplexTests(unittest.TestCase):
 
         execute_decision(decision, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
     def test_presses_punch_as_fallback_for_other_action_state(self) -> None:
         actor = _myself(action_state=0x10)
@@ -279,7 +279,7 @@ class ExecuteSupplexTests(unittest.TestCase):
 
         execute_decision(decision, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
     def test_facing_bit_is_cleared_before_comparison(self) -> None:
         actor = _myself(action_state=0x67)  # back hold, facing bit set
@@ -288,7 +288,7 @@ class ExecuteSupplexTests(unittest.TestCase):
 
         execute_decision(decision, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
 class ExecuteThrowKnifeTests(unittest.TestCase):
@@ -298,7 +298,7 @@ class ExecuteThrowKnifeTests(unittest.TestCase):
 
         execute_decision(decision, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
 class ExecuteRearAttackTests(unittest.TestCase):
@@ -308,7 +308,7 @@ class ExecuteRearAttackTests(unittest.TestCase):
 
         execute_decision(decision, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B | C, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B | C, player2=0, frames=4)
 
 
 class ExecuteCounterGrabTests(unittest.TestCase):
@@ -324,7 +324,7 @@ class ExecuteCounterGrabTests(unittest.TestCase):
 
         execute_decision(decision, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=C, frames=3)
+        client.press_buttons.assert_called_once_with(player1=C, player2=0, frames=3)
 
     def test_presses_b_when_counter_window_open(self) -> None:
         actor = replace(
@@ -338,7 +338,7 @@ class ExecuteCounterGrabTests(unittest.TestCase):
 
         execute_decision(decision, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, frames=3)
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=3)
 
 
 class ExecuteWalkToCoordinateTests(unittest.TestCase):
@@ -379,7 +379,7 @@ class ExecuteWalkToWeaponTests(unittest.TestCase):
 
         execute_decision(decision, {actor, weapon}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
     def test_missing_actor_or_target_does_nothing(self) -> None:
         decision = WalkToWeapon(actor_slot="P1", target_slot="obj05")
@@ -402,7 +402,7 @@ class ExecuteWalkToPickupTests(unittest.TestCase):
 
         execute_decision(decision, {actor, food}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
 class NoRawMemoryWritesTests(unittest.TestCase):

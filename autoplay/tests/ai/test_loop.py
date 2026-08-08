@@ -135,7 +135,7 @@ class AgentLoopPipelineTests(unittest.TestCase):
         # generate_decision_tokens's return value stood in for the whole
         # accumulated context; determine_priority_decision keeps the single
         # Punch, and execute_decision should have pressed B (punch).
-        client.press_buttons.assert_called_once_with(player1=0x0020, frames=4)
+        client.press_buttons.assert_called_once_with(player1=0x0020, player2=0, frames=4)
 
     def test_no_surviving_decision_presses_no_button(self) -> None:
         gamepad, client = _gamepad()

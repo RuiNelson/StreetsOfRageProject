@@ -49,13 +49,58 @@ class SharedGamepadStateTests(unittest.TestCase):
 
         client.hold_buttons.assert_called_once_with(player1=NONE_MASK, player2=LEFT)
 
-    def test_press_targets_the_named_player_only(self) -> None:
+    def test_press_folds_in_the_other_players_current_hold(self) -> None:
+        """Regression: PRESS_BUTTONS applies *both* players' masks in one
+        payload (RemoteAccess::pressButtons), so a call naming only the
+        acting player would silently zero the other player's hold for the
+        press's duration."""
+
         client = MagicMock()
         state = SharedGamepadState(client)
+        state.hold(1, RIGHT)
+        client.press_buttons.reset_mock()
 
         state.press(2, C, frames=3)
 
-        client.press_buttons.assert_called_once_with(player2=C, frames=3)
+        client.press_buttons.assert_called_once_with(player1=RIGHT, player2=C, frames=3)
+
+    def test_press_rearms_both_holds_after_the_server_clears_them(self) -> None:
+        """Regression: RemoteAccess::pressButtons's ReleaseGuard clears both
+        players' remote state to none once ``frames`` completes, regardless
+        of which player pressed. Without an explicit re-arm, the next
+        same-mask hold() would see an unchanged cache and skip re-sending
+        (hold()'s no-op short-circuit), silently freezing that player even
+        though the server no longer holds anything."""
+
+        client = MagicMock()
+        state = SharedGamepadState(client)
+        state.hold(1, RIGHT)
+        state.hold(2, LEFT)
+        client.hold_buttons.reset_mock()
+
+        state.press(1, C, frames=2)
+
+        client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=LEFT)
+
+    def test_hold_after_press_is_a_noop_because_press_already_rearmed_it(self) -> None:
+        """End-to-end version of the freeze bug: walk right, punch, then try
+        to keep walking right. Before the fix, the server's latch was
+        cleared by the press but the cache still said RIGHT, so a later
+        same-mask hold() would wrongly no-op against a server that actually
+        held nothing. The fix moves the re-arm into press() itself, so the
+        server is already back in sync by the time press() returns and this
+        later hold() is a *correct* no-op, not a dropped command."""
+
+        client = MagicMock()
+        state = SharedGamepadState(client)
+        state.hold(1, RIGHT)
+
+        state.press(1, A, frames=2)
+        client.hold_buttons.reset_mock()
+        state.hold(1, RIGHT)
+
+        client.hold_buttons.assert_not_called()
+        self.assertEqual(state.held(1), RIGHT)
 
     def test_invalid_player_index_is_rejected(self) -> None:
         client = MagicMock()
@@ -122,7 +167,7 @@ class VirtualGamepadTests(unittest.TestCase):
         pad.press(A, frames=2)
 
         self.assertEqual(pad.held, RIGHT)
-        client.press_buttons.assert_called_once_with(player1=A, frames=2)
+        client.press_buttons.assert_called_once_with(player1=A, player2=NONE_MASK, frames=2)
 
     def test_invalid_player_index_is_rejected(self) -> None:
         client = MagicMock()
