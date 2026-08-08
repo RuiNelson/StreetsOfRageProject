@@ -1,4 +1,4 @@
-"""Smoke tests for sticky hold_buttons client API (protocol pack only)."""
+"""Smoke tests for sticky hold_buttons client API and ObserverApp lifecycle."""
 
 from __future__ import annotations
 
@@ -25,26 +25,6 @@ class HoldButtonsClientTests(unittest.TestCase):
         self.assertEqual(p2, 0x0004)  # LEFT
 
 
-class AgentButtonApplicationTests(unittest.TestCase):
-    def test_face_button_uses_vsync_pulse_then_relatches_direction(self) -> None:
-        app = ObserverApp.__new__(ObserverApp)
-        app._client = MagicMock()
-        app._sticky_hold = None
-        app._apply_agent_buttons(0x28, 0, hold_frames=2)
-        app._client.press_buttons.assert_called_once_with(
-            player1=0x28, player2=0, frames=3
-        )
-        app._client.hold_buttons.assert_called_once_with(player1=0x08, player2=0)
-
-    def test_direction_only_stays_on_nonblocking_hold(self) -> None:
-        app = ObserverApp.__new__(ObserverApp)
-        app._client = MagicMock()
-        app._sticky_hold = None
-        app._apply_agent_buttons(0x08, 0, hold_frames=2)
-        app._client.press_buttons.assert_not_called()
-        app._client.hold_buttons.assert_called_once_with(player1=0x08, player2=0)
-
-
 class StopClientHandoffTests(unittest.TestCase):
     """stop() must clear self._client under the same lock the poll thread
     uses, and never close a client twice (regression: unlocked read of
@@ -59,7 +39,6 @@ class StopClientHandoffTests(unittest.TestCase):
 
         app.stop()
 
-        client.release_buttons.assert_called_once()
         client.close.assert_called_once()
         self.assertIsNone(app._client)
         self.assertTrue(app._stop.is_set())

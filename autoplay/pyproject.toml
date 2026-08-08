@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sor-autoplay"
 version = "0.1.0"
-description = "Streets of Rage remote observer and future autoplay agent"
+description = "Streets of Rage remote observer (megadrive_remote)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -17,7 +17,6 @@ dev = ["pytest>=7.0"]
 
 [project.scripts]
 sor-autoplay = "sor_autoplay.app:main"
-sor-autoplay-eval = "sor_autoplay.evaluation:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

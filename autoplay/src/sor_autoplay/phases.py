@@ -16,7 +16,7 @@ from . import memory_map as mm
 
 
 class CombatPhase(Enum):
-    """Coarse combat phase used by the agent and HUD."""
+    """Coarse combat phase used by the HUD map outlines."""
 
     UNKNOWN = auto()
     NORMAL = auto()  # free to act / approach

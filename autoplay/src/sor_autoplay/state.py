@@ -25,7 +25,7 @@ class MemorySource(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class PlayerSnapshot:
-    """One player's resources as the HUD and future agent need them."""
+    """One player's resources as the HUD needs them."""
 
     index: int  # 1 or 2
     mode_active: bool

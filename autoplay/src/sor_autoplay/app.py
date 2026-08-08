@@ -1,4 +1,4 @@
-"""Entry point: attach to a running SoR host, observe, and optionally drive AI."""
+"""Entry point: attach to a running SoR host and observe live state."""
 
 from __future__ import annotations
 
@@ -10,15 +10,12 @@ from pathlib import Path
 from typing import Sequence
 
 from . import __version__
-from .agent import AgentConfig, AgentState, decide_actions
 from .hud import HUD_PAINT_MS_DEFAULT, ObserverHud
 from .state import GameSnapshot, disconnected_snapshot, read_snapshot
 
 # Wall-clock sample period. ~2 frames at 60 Hz (2 / 60 * 1000 ≈ 33.3 ms).
 DEFAULT_POLL_MS = 33
 ASSUMED_HZ = 60
-# Frames to hold each AI button mask (standard controls; press_buttons is blocking).
-DEFAULT_AGENT_HOLD_FRAMES = 2
 
 
 def _default_megadrive_python_src() -> Path | None:
@@ -56,9 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sor-autoplay",
         description=(
-            "Observer + optional AI agents for a running StreetsOfRageRecompilation "
-            "instance via MegaDriveEnvironment remote access. "
-            "Agents use standard controls only (no --altControls)."
+            "Live observer for a running StreetsOfRageRecompilation instance "
+            "via MegaDriveEnvironment remote access."
         ),
     )
     parser.add_argument(
@@ -77,9 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_POLL_MS,
         help=(
-            "Wall-clock remote poll period in milliseconds when agents are off "
+            "Wall-clock remote poll period in milliseconds "
             f"(default: {DEFAULT_POLL_MS}, ~2 frames at {ASSUMED_HZ} Hz). "
-            "Does not wait on VSync. When an agent is on, hold-frames pace input."
+            "Does not wait on VSync."
         ),
     )
     parser.add_argument(
@@ -89,25 +85,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "GUI paint period in milliseconds; only redraws the latest snapshot "
             f"(default: {HUD_PAINT_MS_DEFAULT})"
-        ),
-    )
-    parser.add_argument(
-        "--agent-p1",
-        action="store_true",
-        help="Start with the P1 agent enabled (standard controls)",
-    )
-    parser.add_argument(
-        "--agent-p2",
-        action="store_true",
-        help="Start with the P2 agent enabled (standard controls)",
-    )
-    parser.add_argument(
-        "--agent-hold-frames",
-        type=int,
-        default=DEFAULT_AGENT_HOLD_FRAMES,
-        help=(
-            "Frames to hold each AI button mask via press_buttons "
-            f"(default: {DEFAULT_AGENT_HOLD_FRAMES})"
         ),
     )
     parser.add_argument(
@@ -175,9 +152,6 @@ class ObserverApp:
         *,
         poll_ms: int = DEFAULT_POLL_MS,
         hud_ms: int = HUD_PAINT_MS_DEFAULT,
-        agent_p1: bool = False,
-        agent_p2: bool = False,
-        agent_hold_frames: int = DEFAULT_AGENT_HOLD_FRAMES,
     ) -> None:
         self.host = host
         self.port = port
@@ -188,122 +162,10 @@ class ObserverApp:
         self._latest: GameSnapshot = disconnected_snapshot("starting")
         self._client = None
         self._hud: ObserverHud | None = None
-        self._agent_config = AgentConfig(
-            p1_enabled=agent_p1,
-            p2_enabled=agent_p2,
-            hold_frames=max(1, agent_hold_frames),
-        )
-        self._agent_memory = AgentState()
-        self._agent_notes: tuple[str, str] = ("", "")
-        self._was_agent_active = False
-        # True once we know the host supports HOLD_BUTTONS (0x14).
-        # False once the host NAKs UNKNOWN_COMMAND — fall back to press_buttons.
-        self._sticky_hold: bool | None = None
-
-    def agent_config(self) -> AgentConfig:
-        with self._lock:
-            return AgentConfig(
-                p1_enabled=self._agent_config.p1_enabled,
-                p2_enabled=self._agent_config.p2_enabled,
-                hold_frames=self._agent_config.hold_frames,
-                police_threshold=self._agent_config.police_threshold,
-            )
-
-    def set_agent_enabled(self, player_index: int, enabled: bool) -> None:
-        with self._lock:
-            if player_index == 1:
-                self._agent_config.p1_enabled = enabled
-            elif player_index == 2:
-                self._agent_config.p2_enabled = enabled
-
-    def toggle_agent(self, player_index: int) -> bool:
-        with self._lock:
-            if player_index == 1:
-                self._agent_config.p1_enabled = not self._agent_config.p1_enabled
-                return self._agent_config.p1_enabled
-            if player_index == 2:
-                self._agent_config.p2_enabled = not self._agent_config.p2_enabled
-                return self._agent_config.p2_enabled
-        return False
-
-    def agent_notes(self) -> tuple[str, str]:
-        with self._lock:
-            return self._agent_notes
 
     def start_poller(self) -> None:
         thread = threading.Thread(target=self._poll_loop, name="sor-remote-poll", daemon=True)
         thread.start()
-
-    def _apply_agent_buttons(
-        self,
-        p1_mask: int,
-        p2_mask: int,
-        *,
-        hold_frames: int,
-    ) -> None:
-        """Latch or pulse controller masks for the agent.
-
-        Prefers sticky ``hold_buttons`` for continuous D-pad walking. Every
-        face-button action uses blocking ``press_buttons`` for a few VSync
-        frames so ROM +$55 sees a fresh edge, then directions are re-latched.
-        """
-
-        assert self._client is not None
-        # D-pad bits only (re-latch after a face-button press pulse).
-        DIRS = 0x0F
-        FACE_BUTTONS = 0x70
-        # All gameplay actions are edge-sensitive in +$55.  Never infer input
-        # transport from human-readable notes: pulse any A/B/C mask, then keep
-        # only its D-pad component latched for movement/facing.
-        if (p1_mask | p2_mask) & FACE_BUTTONS:
-            frames = max(3, hold_frames)
-            try:
-                self._client.press_buttons(
-                    player1=p1_mask,
-                    player2=p2_mask,
-                    frames=frames,
-                )
-                # Keep D-pad latched after auto-release so we stay on back/face.
-                if hasattr(self._client, "hold_buttons"):
-                    try:
-                        self._client.hold_buttons(
-                            player1=p1_mask & DIRS,
-                            player2=p2_mask & DIRS,
-                        )
-                        self._sticky_hold = True
-                    except Exception:  # noqa: BLE001
-                        pass
-                return
-            except Exception as exc:  # noqa: BLE001
-                msg = str(exc).upper()
-                if "UNKNOWN_COMMAND" not in msg:
-                    raise
-
-        use_sticky = self._sticky_hold is not False
-        if use_sticky and hasattr(self._client, "hold_buttons"):
-            try:
-                self._client.hold_buttons(player1=p1_mask, player2=p2_mask)
-                self._sticky_hold = True
-                return
-            except Exception as exc:  # noqa: BLE001
-                # ServerError UNKNOWN_COMMAND when sor is older than HOLD_BUTTONS.
-                msg = str(exc).upper()
-                code = getattr(exc, "code", None)
-                name = getattr(code, "name", "") if code is not None else ""
-                if (
-                    "UNKNOWN_COMMAND" in msg
-                    or name == "UNKNOWN_COMMAND"
-                    or type(exc).__name__ == "AttributeError"
-                ):
-                    self._sticky_hold = False
-                else:
-                    raise
-
-        self._client.press_buttons(
-            player1=p1_mask,
-            player2=p2_mask,
-            frames=max(hold_frames, 4),
-        )
 
     def _poll_loop(self) -> None:
         from megadrive_remote import MegaDriveClient
@@ -335,44 +197,9 @@ class ObserverApp:
                 assert self._client is not None
                 snapshot = read_snapshot(self._client)
 
-                config = self.agent_config()
-                notes = ("", "")
-                if config.any_enabled() and snapshot.connected:
-                    decision = decide_actions(snapshot, config, self._agent_memory)
-                    notes = (decision.p1_note, decision.p2_note)
-                    if decision.steady:
-                        if self._was_agent_active:
-                            try:
-                                self._client.release_buttons()
-                            except Exception:  # noqa: BLE001
-                                pass
-                            self._was_agent_active = False
-                    else:
-                        self._apply_agent_buttons(
-                            decision.p1_mask,
-                            decision.p2_mask,
-                            hold_frames=config.hold_frames,
-                        )
-                        self._was_agent_active = bool(
-                            decision.p1_mask or decision.p2_mask
-                        )
-                        if not self._was_agent_active:
-                            try:
-                                self._client.release_buttons()
-                            except Exception:  # noqa: BLE001
-                                pass
-                elif self._was_agent_active:
-                    try:
-                        self._client.release_buttons()
-                    except Exception:  # noqa: BLE001
-                        pass
-                    self._was_agent_active = False
-
                 with self._lock:
                     self._latest = snapshot
-                    self._agent_notes = notes
 
-                # Wall-clock cadence always (hold_buttons is non-blocking).
                 elapsed = time.monotonic() - started
                 remaining = poll_s - elapsed
                 if remaining > 0:
@@ -380,18 +207,12 @@ class ObserverApp:
             except Exception as exc:  # noqa: BLE001 - surface any link failure in HUD
                 with self._lock:
                     self._latest = disconnected_snapshot(str(exc))
-                    self._agent_notes = ("", "")
                     client, self._client = self._client, None
                 if client is not None:
-                    try:
-                        client.release_buttons()
-                    except Exception:  # noqa: BLE001
-                        pass
                     try:
                         client.close()
                     except Exception:  # noqa: BLE001
                         pass
-                self._was_agent_active = False
                 self._stop.wait(backoff_s)
                 backoff_s = min(2.0, backoff_s * 1.5)
 
@@ -400,10 +221,6 @@ class ObserverApp:
         with self._lock:
             client, self._client = self._client, None
         if client is not None:
-            try:
-                client.release_buttons()
-            except Exception:  # noqa: BLE001
-                pass
             try:
                 client.close()
             except Exception:  # noqa: BLE001
@@ -418,10 +235,7 @@ class ObserverApp:
         approx_frames = self.poll_ms * ASSUMED_HZ / 1000.0
         self._hud = ObserverHud(
             on_close=self.stop,
-            subtitle=f"poll {self.poll_ms}ms (~{approx_frames:.1f}f) · std controls",
-            on_toggle_agent=self.toggle_agent,
-            agent_config_provider=self.agent_config,
-            agent_notes_provider=self.agent_notes,
+            subtitle=f"poll {self.poll_ms}ms (~{approx_frames:.1f}f)",
         )
 
         def tick() -> None:
@@ -464,9 +278,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         port=args.port,
         poll_ms=args.poll_ms,
         hud_ms=args.hud_ms,
-        agent_p1=args.agent_p1,
-        agent_p2=args.agent_p2,
-        agent_hold_frames=args.agent_hold_frames,
     )
     if args.once:
         return app.run_once()

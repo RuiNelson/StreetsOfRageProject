@@ -32,7 +32,7 @@ study.
 | [`StreetsOfRageRecompilation/`](StreetsOfRageRecompilation/) | Generated and hand-written C++, analysis data, build scripts, and the `sor` executable |
 | [`RageDecompiler/`](RageDecompiler/) | Python tools for disassembly, recompilation, label generation, and runtime discovery |
 | [`MegaDriveEnvironmentSampleGame/`](MegaDriveEnvironmentSampleGame/) | A small game targeting both the PC runtime and real Mega Drive hardware |
-| [`autoplay/`](autoplay/) | Python remote observer and optional autoplay agents for a running `sor` host |
+| [`autoplay/`](autoplay/) | Python remote observer for a running `sor` host |
 
 The playable host expects `MegaDriveEnvironment`, `RageDecompiler`, and
 `StreetsOfRageRecompilation` to remain sibling directories. This is the layout
@@ -158,21 +158,16 @@ recompiler-generated code. These parts include routines such as the
 compressor/decompressor and substitutes for the "wait for VBlank" routines
 that use busy waiting.
 
-### The `autoplay` remote observer and agent
+### The `autoplay` remote observer
 
 `autoplay` is a Python application that attaches to a running `sor` executable
 through the remote-access library shipped with `MegaDriveEnvironment`
-(`megadrive_remote`). The game process remains the host; autoplay only
-observes and, when requested, injects controller input over the remote
-connection.
+(`megadrive_remote`). The game process remains the host; autoplay observes
+live state over the remote connection without injecting controller input.
 
 The app provides a live HUD that reports game mode, level, wave, timer, and
 per-player status, together with a 2D world map of on-screen and off-camera
-actors. Optional per-player agents can play with the standard three-button
-control scheme: they select targets, manage combat and grabs, pick up
-weapons, call the police special under pressure, and apply stage-specific
-navigation rules. Agents are toggled independently for Player 1 and Player 2
-and must not be used with the host's `--altControls` layout.
+actors (including combat-phase outlines and hunt counts).
 
 Launch instructions and CLI options are in `autoplay/README.md`.
 

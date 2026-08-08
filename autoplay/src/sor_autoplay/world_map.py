@@ -5,7 +5,7 @@ Visualization is a **top-down stage map** (not CRT sprite projection):
     map_x = world_x - cam_x          # horizontal, camera-relative
     map_y = lane_y                   # depth (+$14); small = back of stage
 
-Elevation ``world_z`` (+$18) is kept on each entity for future agent use but is
+Elevation ``world_z`` (+$18) is kept on each entity for diagnostics but is
 **not** applied to the plot. The camera rectangle is the player walk band
 (32..288 × 0..lane_max from ``clamp_players_to_gameplay_bounds``), not the full
 320 px CRT — so a player at the left/right walk limit sits on the box rim.
@@ -127,7 +127,7 @@ class MapEntity:
     type_id: int
     world_x: int
     world_y: int  # lane / depth at +$14
-    world_z: int  # elevation at +$18 (stored for agents; not used in plot)
+    world_z: int  # elevation at +$18 (stored for diagnostics; not used in plot)
     # Top-down map coordinates (camera-relative X, absolute lane Y).
     map_x: float
     map_y: float
@@ -410,7 +410,7 @@ def project_to_screen(
     camera_x: int,
     camera_y: int,
 ) -> tuple[float, float]:
-    """CRT sprite projection (kept for agents / diagnostics; not used for map plot).
+    """CRT sprite projection (kept for diagnostics; not used for map plot).
 
     ROM ``emit_object_sprite_mapping`` without VDP $80 bias:
         x = world_x - cam_x

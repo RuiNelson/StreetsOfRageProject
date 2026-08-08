@@ -1,4 +1,4 @@
-"""Streets of Rage remote observer and autoplay agents."""
+"""Streets of Rage remote observer."""
 
 from .state import GameSnapshot, PlayerSnapshot, read_snapshot
 from .world_map import MapEntity, WorldMap
