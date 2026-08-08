@@ -16,8 +16,10 @@ from sor_autoplay.ai.attack_decisions import (
 )
 from sor_autoplay.ai.character import Myself
 from sor_autoplay.ai.enemy import Enemy
+from sor_autoplay.ai.essential import CameraRange
 from sor_autoplay.ai.execute import execute_decision, press_no_button
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_autoplay.ai.hazard_tokens import Breakable
 from sor_autoplay.ai.pickup_tokens import HealthPickup, Weapon
 from sor_autoplay.ai.police_decision import CallPolice
 from sor_autoplay.ai.walk_decisions import (
@@ -358,6 +360,41 @@ class ExecuteWalkToCoordinateTests(unittest.TestCase):
         execute_decision(decision, set(), gamepad)
 
         client.hold_buttons.assert_not_called()
+
+
+class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):
+    """Regression: _movement_mask must only dodge on-screen breakables.
+
+    world_map tracks entities up to two screens beyond each camera edge for
+    hunt-target lookahead, far past what's actually walkable. Without a
+    camera filter, any breakable in that huge tracked radius could trip the
+    dodge on a pure horizontal walk -- and since the dodge always steers
+    toward smaller Y ("up") when the actor is in the lane's lower half (the
+    common case), that made the AI drift up for reasons unrelated to
+    anything on screen.
+    """
+
+    def test_dodges_a_breakable_that_is_actually_on_screen(self) -> None:
+        actor = _myself(world_x=0, world_y=90)
+        prop = Breakable(slot="obj09", world_x=50, world_y=90, type_id=0x40)
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        decision = WalkToCoordinate(actor_slot="P1", target_x=100, target_y=90)
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor, prop, camera}, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=RIGHT | UP, player2=0)
+
+    def test_ignores_a_breakable_far_outside_the_camera(self) -> None:
+        actor = _myself(world_x=0, world_y=90)
+        prop = Breakable(slot="obj09", world_x=50, world_y=90, type_id=0x40)
+        camera = CameraRange(left=200, right=400, top=0, bottom=112)
+        decision = WalkToCoordinate(actor_slot="P1", target_x=100, target_y=90)
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor, prop, camera}, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
 
 class ExecuteWalkToWeaponTests(unittest.TestCase):

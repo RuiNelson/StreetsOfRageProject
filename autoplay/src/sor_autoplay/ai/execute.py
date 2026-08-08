@@ -101,8 +101,22 @@ def _movement_mask(
     """Build a D-pad mask, clamped to lane bounds and steered around props."""
 
     to_y = _clamp_target_y(context, to_y)
+    camera = find(context, CameraRange)
     # Nudge path around intact breakables sitting on the straight-line route.
     for prop in find_all(context, Breakable):
+        # world_map tracks entities up to two screens beyond each camera edge
+        # (hunt-target lookahead), far past what's actually walkable right
+        # now. Without this filter, a breakable anywhere in that huge tracked
+        # radius could trip the dodge below on nearly every walk decision —
+        # and since it always steers toward smaller Y ("up") whenever the
+        # actor is in the lane's lower half (the common case), that made the
+        # AI drift up constantly for reasons that had nothing to do with
+        # what was actually on screen.
+        if camera is not None and not (
+            camera.left <= prop.world_x <= camera.right
+            and camera.top <= prop.world_y <= camera.bottom
+        ):
+            continue
         # Prop between us and target on X, same lane band.
         between = (from_x < prop.world_x < to_x) or (to_x < prop.world_x < from_x)
         if not between:
