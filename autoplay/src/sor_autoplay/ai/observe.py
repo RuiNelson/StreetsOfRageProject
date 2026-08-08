@@ -63,9 +63,18 @@ def _build_playable_character(
     )
 
 
+# Phases where the player is free to issue a new input right now, even
+# though they aren't idle: HOLDING covers both carrying a weapon and
+# grabbing an enemy, and in both cases the game accepts B (knee/strike) or A
+# (throw) on the very next frame. Treating HOLDING as a blocking animation
+# left the AI frozen the instant it grabbed an enemy, since every should_*
+# function refuses to act while AnimationInProgress is present.
+_FREE_TO_ACT_PHASES = frozenset({CombatPhase.NORMAL, CombatPhase.HOLDING})
+
+
 def _maybe_animation_in_progress(entity: MapEntity) -> AnimationInProgress | None:
     phase = player_phase(action_byte=entity.action_state, held_type=entity.held_type)
-    if phase == CombatPhase.NORMAL:
+    if phase in _FREE_TO_ACT_PHASES:
         return None
     return AnimationInProgress(slot=entity.slot)
 

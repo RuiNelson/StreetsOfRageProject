@@ -31,8 +31,9 @@ controller input only. The AI is off by default; enable it per player with
   the winner through a virtual gamepad (`hold_buttons`/`press_buttons` only —
   never writes RAM).
 - Covers: approaching and punching the nearest enemy, sidestepping a
-  dangerous or suspicious (unrecognized-state) threat, and calling police
-  when surrounded or low on health.
+  dangerous or suspicious (unrecognized-state) threat, calling police when
+  surrounded or low on health, and walking to advance the stage when no
+  enemy is on screen.
 - Automatically stands down (releases input) when the game is paused or
   outside active gameplay (menus, character select, round-clear, continues).
 - Original A/B/C control scheme only; `--altControls` is not yet supported.

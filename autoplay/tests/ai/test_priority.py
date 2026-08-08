@@ -5,7 +5,7 @@ from sor_autoplay.ai.enemy import Enemy
 from sor_autoplay.ai.police_decision import CallPolice
 from sor_autoplay.ai.priority import determine_priority_decision
 from sor_autoplay.ai.tokens import Decision, find_all
-from sor_autoplay.ai.walk_decisions import Sidestep, WalkToNearEnemy
+from sor_autoplay.ai.walk_decisions import Sidestep, WalkToAdvanceStage, WalkToNearEnemy
 from sor_autoplay.phases import CombatPhase
 
 
@@ -60,6 +60,21 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         result = determine_priority_decision(context)
 
         self.assertEqual(result, context)
+
+    def test_walk_to_near_enemy_beats_walk_to_advance_stage(self) -> None:
+        # AI.md: advancing the stage is the lowest-priority fallback.
+        enemy = _enemy("obj01", CombatPhase.NORMAL)
+        context = {
+            enemy,
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+            WalkToAdvanceStage(actor_slot="P1", direction="right"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], WalkToNearEnemy)
 
     def test_sidestep_with_unresolvable_threat_still_ranks_above_walk(self) -> None:
         # The referenced Enemy is absent from context entirely.

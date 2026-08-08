@@ -319,6 +319,21 @@ class AnimationInProgressTests(unittest.TestCase):
 
         self.assertIsNotNone(find(context, AnimationInProgress, slot="P1"))
 
+    def test_absent_while_holding_a_grabbed_enemy(self) -> None:
+        """Regression: HOLDING (grabbing an enemy or carrying a weapon) is
+        not an animation lock -- the game accepts a new B/A input on the very
+        next frame. Blocking should_* on this phase left the AI frozen the
+        instant it grabbed an enemy."""
+
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        entities = (_player_entity(slot="P1", action_state=0x00, held_type=0x20),)
+        snapshot = _snapshot(players=(p1, p2), entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        self.assertIsNone(find(context, AnimationInProgress, slot="P1"))
+
     def test_present_for_partner_independently(self) -> None:
         p1 = _player_snapshot(index=1)
         p2 = _player_snapshot(index=2)

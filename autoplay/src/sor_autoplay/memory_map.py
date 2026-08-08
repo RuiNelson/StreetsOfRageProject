@@ -68,6 +68,17 @@ ADDR_BAD_ENDING_SELECTED = 0xFFDE10
 # OPTIONS control layout (0 = standard A=special, B=attack, C=jump).
 ADDR_CONTROL_SCHEME = 0xFFFFC8
 
+# --- Pre-gameplay menu navigation (story -> title -> menu -> character
+# select -> level intro -> gameplay). Used by reach_gameplay.py to drive the
+# real menus via joypad taps + bounded RAM waits, never RAM writes.
+ADDR_SELECT_MENU_CURSOR = 0xFFB840  # W, 0 = one-player mode selected
+ADDR_CHAR_SELECT_SLOT = 0xFFB858  # W, character-select screen order (Adam/Axel/Blaze)
+ADDR_LEVEL_INTRO_ACTIVE = 0xFFFA1F  # B, nonzero while intro locks out controls
+ADDR_SELECT_SCREEN_SUBSTATE = 0xFFFB0E  # W
+ADDR_CHAR_SELECT_SUBSTATE = 0xFFF904  # W
+ADDR_SOUND_MUSIC_VOICE_BANK = 0xFFF014  # L
+ADDR_PLAY_SE = 0xFFF00A  # B, sound command queue slot 0
+
 # Object field used by Mr. X choice UI (bit3 = side, bit4 = choice active).
 OBJ_PLAYER_FLAGS_59 = 0x59
 

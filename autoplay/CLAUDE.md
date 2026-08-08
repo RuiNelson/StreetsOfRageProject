@@ -86,7 +86,7 @@ entry points in this tree.
 | `character.py`, `enemy.py`, `essential.py`, `hazard_tokens.py` | Information tokens (`Myself`/`Partner`, `Enemy`, `Stage`/`CameraRange`/`AnimationInProgress`, `Projectile`/`IncomingProjectile`/`DangerZone`) |
 | `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM) |
 | `inference.py` | `check_for_incoming_projectiles`, `check_for_danger_zone` |
-| `walk_decisions.py`, `attack_decisions.py`, `police_decision.py` | `Decision` tokens (`WalkToNearEnemy`, `Sidestep`, `Punch`, `CallPolice`) |
+| `walk_decisions.py`, `attack_decisions.py`, `police_decision.py` | `Decision` tokens (`WalkToNearEnemy`, `WalkToAdvanceStage`, `Sidestep`, `Punch`, `CallPolice`) |
 | `decide.py` | `should_*` candidate generators |
 | `priority.py` | `determine_priority_decision` — emergency ranking + priority tie-break + logged random fallback |
 | `gamepad.py` | `VirtualGamepad`/`SharedGamepadState` — the only code allowed to call `hold_buttons`/`press_buttons`/`release_buttons`; never `write_memory`/`write_value` |

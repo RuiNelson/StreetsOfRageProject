@@ -16,11 +16,11 @@ from ..phases import CombatPhase, is_dangerous, should_ignore_as_target
 from .attack_decisions import Punch
 from .character import Myself, Partner, PlayableCharacter
 from .enemy import Enemy
-from .essential import AnimationInProgress
+from .essential import AnimationInProgress, Stage
 from .hazard_tokens import DangerZone
 from .police_decision import CallPolice
 from .tokens import Context, Token, find, find_all
-from .walk_decisions import Sidestep, WalkToNearEnemy
+from .walk_decisions import Sidestep, WalkToAdvanceStage, WalkToNearEnemy
 
 # Placeholder heuristic thresholds, subject to future tuning against real
 # gameplay.
@@ -78,6 +78,28 @@ def should_walk_to_near_enemy(context: Context) -> Context:
     return decisions
 
 
+def should_walk_to_advance_stage(context: Context) -> Context:
+    """Progress the stage when there is nothing else to fight.
+
+    Only sensible when no live enemy is on screen -- should_walk_to_near_enemy
+    already covers the case where one exists, so this and that function are
+    mutually exclusive by construction and never compete for the same actor.
+    """
+
+    decisions: set[Token] = set()
+    stage = find(context, Stage)
+    if stage is None or stage.direction == "none":
+        return decisions
+    enemies = [e for e in find_all(context, Enemy) if not should_ignore_as_target(e.combat_phase)]
+    if enemies:
+        return decisions
+    for actor in _actors(context):
+        if find(context, AnimationInProgress, slot=actor.slot) is not None:
+            continue
+        decisions.add(WalkToAdvanceStage(actor_slot=actor.slot, direction=stage.direction))
+    return decisions
+
+
 def should_sidestep(context: Context) -> Context:
     decisions: set[Token] = set()
     enemies = find_all(context, Enemy)
@@ -120,6 +142,7 @@ def generate_decision_tokens(context: Context) -> Context:
     return (
         context
         | should_walk_to_near_enemy(context)
+        | should_walk_to_advance_stage(context)
         | should_sidestep(context)
         | should_punch(context)
         | should_call_police(context)

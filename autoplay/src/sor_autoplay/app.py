@@ -71,6 +71,17 @@ def _ensure_megadrive_remote_on_path() -> None:
     import megadrive_remote  # noqa: F401
 
 
+def _reach_gameplay(host: str, port: int, character: str, *, timeout_ms: int) -> None:
+    """Navigate the real menus to playable gameplay before the observer starts."""
+
+    from megadrive_remote import MegaDriveClient
+
+    from .reach_gameplay import reach_gameplay
+
+    with MegaDriveClient(host, port, connect_timeout=5.0, io_timeout=5.0) as client:
+        reach_gameplay(client, character, timeout_ms=timeout_ms)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sor-autoplay",
@@ -123,6 +134,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--agent-p2",
         action="store_true",
         help="Start with the symbolic AI controlling P2 (off by default)",
+    )
+    parser.add_argument(
+        "--reach-gameplay",
+        choices=("axel", "adam", "blaze"),
+        default=None,
+        help=(
+            "Navigate the real menus (restart, Start, one-player, character "
+            "select) to playable one-player gameplay as this character "
+            "before starting the observer. Off by default; uses "
+            "StreetsOfRageRecompilation/tools/reach_gameplay.py."
+        ),
+    )
+    parser.add_argument(
+        "--reach-gameplay-timeout-ms",
+        type=int,
+        default=30_000,
+        help="Timeout for each menu-navigation step of --reach-gameplay (default: 30000)",
     )
     parser.add_argument(
         "--version",
@@ -359,6 +387,18 @@ class ObserverApp:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     _ensure_megadrive_remote_on_path()
+
+    if args.reach_gameplay is not None:
+        try:
+            _reach_gameplay(
+                args.host,
+                args.port,
+                args.reach_gameplay,
+                timeout_ms=args.reach_gameplay_timeout_ms,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface any navigation failure and stop
+            print(f"--reach-gameplay failed: {exc}", file=sys.stderr)
+            return 1
 
     app = ObserverApp(
         host=args.host,

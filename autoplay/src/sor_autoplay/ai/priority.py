@@ -15,7 +15,7 @@ from .enemy import Enemy
 from .attack_decisions import Punch
 from .police_decision import CallPolice
 from .tokens import Context, Decision, find, find_all
-from .walk_decisions import Sidestep, WalkToNearEnemy
+from .walk_decisions import Sidestep, WalkToAdvanceStage, WalkToNearEnemy
 from ..phases import is_dangerous, is_punishable
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ _EMERGENCY_CALL_POLICE = 90
 _EMERGENCY_PUNCH_PUNISHABLE = 60
 _EMERGENCY_PUNCH_DEFAULT = 20
 _EMERGENCY_WALK_TO_NEAR_ENEMY = 10
+_EMERGENCY_WALK_TO_ADVANCE_STAGE = 5
 _EMERGENCY_DEFAULT = 0
 
 
@@ -51,6 +52,8 @@ def _emergency(decision: Decision, context: Context) -> int:
         return _EMERGENCY_PUNCH_DEFAULT
     if isinstance(decision, WalkToNearEnemy):
         return _EMERGENCY_WALK_TO_NEAR_ENEMY
+    if isinstance(decision, WalkToAdvanceStage):
+        return _EMERGENCY_WALK_TO_ADVANCE_STAGE
     return _EMERGENCY_DEFAULT
 
 

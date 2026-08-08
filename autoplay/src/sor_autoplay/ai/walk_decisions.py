@@ -26,3 +26,13 @@ class Sidestep(Walk):
     actor_slot: str
     threat_slot: str
     direction: str  # "up" | "down"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WalkToAdvanceStage(Walk):
+    # Lowest of the Walk/Attack priorities: per AI.md, "picking up a weapon
+    # carries a higher priority than advancing to the next stage" -- this is
+    # the fallback when nothing more specific applies.
+    priority: int = 5
+    actor_slot: str
+    direction: str  # "left" | "right"

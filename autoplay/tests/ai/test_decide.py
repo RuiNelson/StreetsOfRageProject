@@ -7,14 +7,15 @@ from sor_autoplay.ai.decide import (
     should_call_police,
     should_punch,
     should_sidestep,
+    should_walk_to_advance_stage,
     should_walk_to_near_enemy,
 )
 from sor_autoplay.ai.enemy import Enemy
-from sor_autoplay.ai.essential import AnimationInProgress
+from sor_autoplay.ai.essential import AnimationInProgress, Stage
 from sor_autoplay.ai.hazard_tokens import DangerZone
 from sor_autoplay.ai.police_decision import CallPolice
 from sor_autoplay.ai.tokens import Decision, Token
-from sor_autoplay.ai.walk_decisions import Sidestep, Walk, WalkToNearEnemy
+from sor_autoplay.ai.walk_decisions import Sidestep, Walk, WalkToAdvanceStage, WalkToNearEnemy
 from sor_autoplay.phases import CombatPhase
 
 
@@ -67,6 +68,7 @@ class DecisionDataclassContractTests(unittest.TestCase):
         self.assertEqual(WalkToNearEnemy(actor_slot="P1", target_slot="obj01").priority, 20)
         self.assertEqual(Sidestep(actor_slot="P1", threat_slot="obj01", direction="up").priority, 30)
         self.assertEqual(CallPolice(actor_slot="P1").priority, 0)
+        self.assertEqual(WalkToAdvanceStage(actor_slot="P1", direction="right").priority, 5)
 
 
 class ShouldPunchTests(unittest.TestCase):
@@ -144,6 +146,52 @@ class ShouldWalkToNearEnemyTests(unittest.TestCase):
         enemy = make_enemy()
         context: set[Token] = {myself, enemy, AnimationInProgress(slot="P1")}
         self.assertEqual(should_walk_to_near_enemy(context), set())
+
+
+class ShouldWalkToAdvanceStageTests(unittest.TestCase):
+    def test_fires_when_no_enemies_present(self) -> None:
+        myself = make_myself()
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, stage}
+
+        result = should_walk_to_advance_stage(context)
+
+        self.assertEqual(result, {WalkToAdvanceStage(actor_slot="P1", direction="right")})
+
+    def test_does_not_fire_when_an_enemy_is_present(self) -> None:
+        myself = make_myself()
+        enemy = make_enemy()
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, enemy, stage}
+
+        self.assertEqual(should_walk_to_advance_stage(context), set())
+
+    def test_does_not_fire_when_direction_is_none(self) -> None:
+        myself = make_myself()
+        stage = Stage(level_index=6, direction="none")
+        context: set[Token] = {myself, stage}
+
+        self.assertEqual(should_walk_to_advance_stage(context), set())
+
+    def test_does_not_fire_when_animation_in_progress(self) -> None:
+        myself = make_myself()
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, stage, AnimationInProgress(slot="P1")}
+
+        self.assertEqual(should_walk_to_advance_stage(context), set())
+
+    def test_does_not_fire_without_a_stage_token(self) -> None:
+        myself = make_myself()
+        self.assertEqual(should_walk_to_advance_stage({myself}), set())
+
+    def test_uses_left_direction_for_level_seven(self) -> None:
+        myself = make_myself()
+        stage = Stage(level_index=7, direction="left")
+        context: set[Token] = {myself, stage}
+
+        result = should_walk_to_advance_stage(context)
+
+        self.assertEqual(result, {WalkToAdvanceStage(actor_slot="P1", direction="left")})
 
 
 class ShouldSidestepTests(unittest.TestCase):

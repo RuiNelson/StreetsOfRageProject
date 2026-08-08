@@ -1,5 +1,6 @@
 import inspect
 import unittest
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 from sor_autoplay.ai import execute as execute_module
@@ -11,7 +12,7 @@ from sor_autoplay.ai.enemy import Enemy
 from sor_autoplay.ai.execute import execute_decision, press_no_button
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.police_decision import CallPolice
-from sor_autoplay.ai.walk_decisions import Sidestep, WalkToNearEnemy
+from sor_autoplay.ai.walk_decisions import Sidestep, WalkToAdvanceStage, WalkToNearEnemy
 from sor_autoplay.phases import CombatPhase
 
 UP = 0x0001
@@ -135,12 +136,53 @@ class ExecuteSidestepTests(unittest.TestCase):
         client.hold_buttons.assert_called_once_with(player1=DOWN, player2=0)
 
 
+class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
+    def test_direction_right_holds_right(self) -> None:
+        decision = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, set(), gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
+
+    def test_direction_left_holds_left(self) -> None:
+        decision = WalkToAdvanceStage(actor_slot="P1", direction="left")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, set(), gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
+
+
 class ExecutePunchTests(unittest.TestCase):
     def test_punch_presses_button_b(self) -> None:
         decision = Punch(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
         execute_decision(decision, set(), gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B, frames=4)
+
+    def test_throws_instead_of_punching_when_already_holding_an_enemy(self) -> None:
+        """Regression: repeatedly pressing B no-ops once Myself is already
+        holding the target, which left the AI stuck holding a near-dead
+        enemy forever. held_weapon_type outside the weapon-id range (0x08-
+        0x0C) means an enemy is grabbed, not a weapon carried."""
+
+        actor = replace(_myself(), held_weapon_type=0x20)  # Garcia's type id
+        decision = Punch(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=A, frames=4)
+
+    def test_still_punches_while_holding_a_weapon(self) -> None:
+        actor = replace(_myself(), held_weapon_type=0x0A)  # baseball bat
+        decision = Punch(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, frames=4)
 
