@@ -6,18 +6,26 @@ from unittest.mock import MagicMock
 from sor_autoplay.ai import execute as execute_module
 from sor_autoplay.ai import loop as loop_module
 from sor_autoplay.ai import priority as priority_module
-from sor_autoplay.ai.attack_decisions import JumpAttack, Punch, Supplex, ThrowKnife
+from sor_autoplay.ai.attack_decisions import (
+    CounterGrab,
+    JumpAttack,
+    Punch,
+    RearAttack,
+    Supplex,
+    ThrowKnife,
+)
 from sor_autoplay.ai.character import Myself
 from sor_autoplay.ai.enemy import Enemy
 from sor_autoplay.ai.execute import execute_decision, press_no_button
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.pickup_tokens import Weapon
+from sor_autoplay.ai.pickup_tokens import HealthPickup, Weapon
 from sor_autoplay.ai.police_decision import CallPolice
 from sor_autoplay.ai.walk_decisions import (
     Sidestep,
     WalkToAdvanceStage,
     WalkToCoordinate,
     WalkToNearEnemy,
+    WalkToPickup,
     WalkToWeapon,
 )
 from sor_autoplay.phases import CombatPhase
@@ -282,6 +290,46 @@ class ExecuteThrowKnifeTests(unittest.TestCase):
         client.press_buttons.assert_called_once_with(player1=B, frames=4)
 
 
+class ExecuteRearAttackTests(unittest.TestCase):
+    def test_presses_b_and_c_together(self) -> None:
+        decision = RearAttack(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, set(), gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B | C, frames=4)
+
+
+class ExecuteCounterGrabTests(unittest.TestCase):
+    def test_presses_c_from_held_state(self) -> None:
+        actor = replace(
+            _myself(),
+            action_state=0x7A,
+            combat_phase=CombatPhase.HELD_BY_ENEMY,
+            action_flags=0,
+        )
+        decision = CounterGrab(actor_slot="P1")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=C, frames=3)
+
+    def test_presses_b_when_counter_window_open(self) -> None:
+        actor = replace(
+            _myself(),
+            action_state=0x7A,
+            combat_phase=CombatPhase.HELD_BY_ENEMY,
+            action_flags=0x80,
+        )
+        decision = CounterGrab(actor_slot="P1")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B, frames=3)
+
+
 class ExecuteWalkToCoordinateTests(unittest.TestCase):
     def test_walks_toward_the_given_coordinate(self) -> None:
         actor = _myself(world_x=0, world_y=0)
@@ -330,6 +378,20 @@ class ExecuteWalkToWeaponTests(unittest.TestCase):
 
         client.hold_buttons.assert_not_called()
         client.press_buttons.assert_not_called()
+
+
+class ExecuteWalkToPickupTests(unittest.TestCase):
+    def test_presses_punch_when_adjacent(self) -> None:
+        actor = _myself(world_x=0, world_y=0)
+        food = HealthPickup(
+            slot="obj06", world_x=10, world_y=5, pickup_type=0x4B, health_delta=20
+        )
+        decision = WalkToPickup(actor_slot="P1", target_slot="obj06")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor, food}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B, frames=4)
 
 
 class NoRawMemoryWritesTests(unittest.TestCase):

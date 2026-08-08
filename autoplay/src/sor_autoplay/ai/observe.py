@@ -17,7 +17,7 @@ from .character import Myself, Partner
 from .enemy import Enemy, Jack, LaterBoss, enemy_class_for_type
 from .essential import AnimationInProgress, CameraRange, Stage
 from .hazard_tokens import Projectile
-from .pickup_tokens import Weapon
+from .pickup_tokens import Weapon, build_pickup_token
 from .tokens import Context
 
 
@@ -63,16 +63,22 @@ def _build_playable_character(
         combat_phase=entity.combat_phase,
         action_state=entity.action_state,
         is_airborne=entity.is_airborne,
+        action_flags=entity.action_flags,
     )
 
 
 # Phases where the player is free to issue a new input right now, even
-# though they aren't idle: HOLDING covers both carrying a weapon and
-# grabbing an enemy, and in both cases the game accepts B (knee/strike) or A
-# (throw) on the very next frame. Treating HOLDING as a blocking animation
-# left the AI frozen the instant it grabbed an enemy, since every should_*
-# function refuses to act while AnimationInProgress is present.
-_FREE_TO_ACT_PHASES = frozenset({CombatPhase.NORMAL, CombatPhase.HOLDING})
+# though they aren't idle:
+# - HOLDING covers carrying a weapon and grabbing an enemy (B knee / throw).
+# - HELD_BY_ENEMY is the enemy-grab counter sequence (C then B) — the player
+#   *must* be able to act or the AI freezes until thrown.
+_FREE_TO_ACT_PHASES = frozenset(
+    {
+        CombatPhase.NORMAL,
+        CombatPhase.HOLDING,
+        CombatPhase.HELD_BY_ENEMY,
+    }
+)
 
 
 def _maybe_animation_in_progress(entity: MapEntity) -> AnimationInProgress | None:
@@ -162,8 +168,18 @@ def generate_direct_observation_tokens(
                     world_x=entity.world_x,
                     world_y=entity.world_y,
                     weapon_type=entity.type_id,
+                    wear=entity.item_param & 0xFF,
                 )
             )
+        elif entity.kind == "pickup" and entity.is_free_ground_item:
+            token = build_pickup_token(
+                slot=entity.slot,
+                world_x=entity.world_x,
+                world_y=entity.world_y,
+                pickup_type=entity.type_id,
+            )
+            if token is not None:
+                context.add(token)
 
     context.add(
         CameraRange(

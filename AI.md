@@ -113,16 +113,25 @@ parametrized intent that precedes any concrete action.
 together with a single concrete descendant, `CallPolice`, which activates
 the police special attack:
 
-- `Walk` — for example, `WalkToCoordinate`, `WalkToNearEnemy`, and
-  `WalkToAdvanceStage`; grabbing a lay-down weapon is also considered a
-  `Walk` descendant. `Sidestep` — a short evasive step away from an
-  incoming attack — likewise belongs here, since the game affords no
-  blocking action; evasion is achieved purely through movement.
-- `Attack` — for example, `Punch`, `Combo`, `JumpAttack`, `GrabEnemy`,
-  `Supplex`, and `ThrowKnife`, each parametrized with the
-  target or coordinate to which the attack applies.
+- `Walk` — for example, `WalkToCoordinate`, `WalkToNearEnemy`,
+  `WalkToAdvanceStage`, `WalkToWeapon`, and `WalkToPickup`; grabbing a
+  lay-down weapon or consumable is a `Walk` descendant. `Sidestep` — a
+  short evasive step away from an incoming attack — likewise belongs here,
+  since the game affords no blocking action; evasion is achieved purely
+  through movement.
+- `Attack` — for example, `Punch`, `JumpAttack`, `Supplex`, `ThrowKnife`,
+  `RearAttack` (simultaneous B+C rear/escape chord), and `CounterGrab`
+  (enemy-held C then B sequence), each parametrized with the target or
+  coordinate to which the attack applies where applicable. There is no
+  separate `Combo`/`GrabEnemy` input; repeated `Punch` contact produces
+  both.
 - `CallPolice` — the sole concrete `Decision` descending directly from the
   abstract class.
+
+Weapon upgrade ranking follows ROM damage constants (`items-and-weapons.md`):
+**knife 5 > bat/pipe 4 > bottle 3 > pepper 2**. Consumable floor items are
+their own `Information` tokens (`HealthPickup`, `LifePickup`,
+`SpecialPickup`, `ScorePickup`), not folded into `Weapon`.
 
 As with the `Walk` subclasses, the `Attack` subclasses are expected to be
 precisely defined.

@@ -1,25 +1,36 @@
 import unittest
 
-from sor_autoplay.ai.attack_decisions import Attack, JumpAttack, Punch, Supplex, ThrowKnife
+from sor_autoplay.ai.attack_decisions import (
+    Attack,
+    CounterGrab,
+    JumpAttack,
+    Punch,
+    RearAttack,
+    Supplex,
+    ThrowKnife,
+)
 from sor_autoplay.ai.character import Myself, Partner
 from sor_autoplay.ai.decide import (
     generate_decision_tokens,
     should_call_police,
+    should_counter_grab,
     should_dodge_projectile,
     should_jump_attack,
     should_punch,
+    should_rear_attack,
     should_retreat_from_danger_zone,
     should_sidestep,
     should_supplex,
     should_throw_knife,
     should_walk_to_advance_stage,
     should_walk_to_near_enemy,
+    should_walk_to_pickup,
     should_walk_to_weapon,
 )
 from sor_autoplay.ai.enemy import Enemy
 from sor_autoplay.ai.essential import AnimationInProgress, CameraRange, Stage
 from sor_autoplay.ai.hazard_tokens import DangerZone, IncomingProjectile
-from sor_autoplay.ai.pickup_tokens import Weapon
+from sor_autoplay.ai.pickup_tokens import HealthPickup, Weapon
 from sor_autoplay.ai.police_decision import CallPolice
 from sor_autoplay.ai.tokens import Decision, Token
 from sor_autoplay.ai.walk_decisions import (
@@ -28,6 +39,7 @@ from sor_autoplay.ai.walk_decisions import (
     WalkToAdvanceStage,
     WalkToCoordinate,
     WalkToNearEnemy,
+    WalkToPickup,
     WalkToWeapon,
 )
 from sor_autoplay.phases import CombatPhase
@@ -89,13 +101,21 @@ class DecisionDataclassContractTests(unittest.TestCase):
 
 class ShouldPunchTests(unittest.TestCase):
     def test_fires_within_range(self) -> None:
-        myself = make_myself()
-        enemy = make_enemy(world_x=110, world_y=105)
+        # Axel punch band: inner 16 .. outer 50 (controls-and-input.md).
+        myself = make_myself(world_x=100, world_y=100)
+        enemy = make_enemy(world_x=130, world_y=105)
         context: set[Token] = {myself, enemy}
 
         result = should_punch(context)
 
         self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj01")})
+
+    def test_does_not_fire_inside_inner_dead_zone(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        enemy = make_enemy(world_x=110, world_y=100)  # dx=10 < Axel inner 16
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(should_punch(context), set())
 
     def test_does_not_fire_out_of_range(self) -> None:
         myself = make_myself()
@@ -105,15 +125,15 @@ class ShouldPunchTests(unittest.TestCase):
         self.assertEqual(should_punch(context), set())
 
     def test_does_not_fire_when_animation_in_progress(self) -> None:
-        myself = make_myself()
-        enemy = make_enemy(world_x=110, world_y=105)
+        myself = make_myself(world_x=100, world_y=100)
+        enemy = make_enemy(world_x=130, world_y=105)
         context: set[Token] = {myself, enemy, AnimationInProgress(slot="P1")}
 
         self.assertEqual(should_punch(context), set())
 
     def test_ignores_enemies_that_should_be_ignored_as_target(self) -> None:
-        myself = make_myself()
-        enemy = make_enemy(world_x=110, world_y=105, combat_phase=CombatPhase.DEATH)
+        myself = make_myself(world_x=100, world_y=100)
+        enemy = make_enemy(world_x=130, world_y=105, combat_phase=CombatPhase.DEATH)
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(should_punch(context), set())
@@ -122,8 +142,8 @@ class ShouldPunchTests(unittest.TestCase):
         partner = Partner(
             slot="P2",
             player_index=2,
-            character_id=1,
-            character_name="Blaze",
+            character_id=1,  # Adam: inner 8, outer 48
+            character_name="Adam",
             world_x=300,
             world_y=300,
             health=100,
@@ -136,7 +156,7 @@ class ShouldPunchTests(unittest.TestCase):
             action_state=0,
             is_airborne=False,
         )
-        enemy = make_enemy(slot="obj02", world_x=305, world_y=302)
+        enemy = make_enemy(slot="obj02", world_x=320, world_y=302)
         context: set[Token] = {partner, enemy}
 
         result = should_punch(context)
@@ -145,16 +165,52 @@ class ShouldPunchTests(unittest.TestCase):
 
     def test_does_not_fire_when_holding_an_enemy(self) -> None:
         myself = make_myself(held_weapon_type=0x01)  # not a weapon-type id -> holding an enemy
-        enemy = make_enemy(world_x=110, world_y=105)
+        enemy = make_enemy(world_x=130, world_y=105)
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(should_punch(context), set())
 
 
+class ShouldRearAttackTests(unittest.TestCase):
+    def test_fires_when_enemy_is_behind(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=80, world_y=100)  # behind while facing right
+        context: set[Token] = {myself, enemy}
+
+        result = should_rear_attack(context)
+
+        self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
+
+    def test_fires_when_enemy_inside_punch_dead_zone(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=108, world_y=100)  # dx=8 < Axel inner 16
+        context: set[Token] = {myself, enemy}
+
+        result = should_rear_attack(context)
+
+        self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
+
+
+class ShouldCounterGrabTests(unittest.TestCase):
+    def test_fires_when_held_by_enemy(self) -> None:
+        myself = make_myself(
+            combat_phase=CombatPhase.HELD_BY_ENEMY,
+            action_state=0x7A,
+        )
+        context: set[Token] = {myself}
+
+        self.assertEqual(should_counter_grab(context), {CounterGrab(actor_slot="P1")})
+
+    def test_does_not_fire_when_free(self) -> None:
+        myself = make_myself(combat_phase=CombatPhase.NORMAL)
+        self.assertEqual(should_counter_grab({myself}), set())
+
+
 class ShouldWalkToNearEnemyTests(unittest.TestCase):
     def test_picks_the_nearest_enemy(self) -> None:
         myself = make_myself(world_x=0, world_y=0)
-        near = make_enemy(slot="near", world_x=10, world_y=10)
+        # Outside punch/rear connect bands so walk is the right candidate.
+        near = make_enemy(slot="near", world_x=80, world_y=10)
         far = make_enemy(slot="far", world_x=500, world_y=500)
         context: set[Token] = {myself, near, far}
 
@@ -373,8 +429,9 @@ class ShouldSupplexTests(unittest.TestCase):
 
 class ShouldJumpAttackTests(unittest.TestCase):
     def test_fires_when_not_airborne_and_enemy_in_range(self) -> None:
+        # Jump-kick only beyond punch outer (Axel 50); mid-range band.
         myself = make_myself(world_x=100, world_y=100, is_airborne=False)
-        enemy = make_enemy(world_x=125, world_y=115)
+        enemy = make_enemy(world_x=155, world_y=110)
         context: set[Token] = {myself, enemy}
 
         result = should_jump_attack(context)
@@ -383,7 +440,7 @@ class ShouldJumpAttackTests(unittest.TestCase):
 
     def test_does_not_fire_when_airborne(self) -> None:
         myself = make_myself(world_x=100, world_y=100, is_airborne=True)
-        enemy = make_enemy(world_x=125, world_y=115)
+        enemy = make_enemy(world_x=155, world_y=110)
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(should_jump_attack(context), set())
@@ -397,7 +454,7 @@ class ShouldJumpAttackTests(unittest.TestCase):
 
     def test_does_not_fire_when_holding_an_enemy(self) -> None:
         myself = make_myself(world_x=100, world_y=100, is_airborne=False, held_weapon_type=0x01)
-        enemy = make_enemy(world_x=125, world_y=115)
+        enemy = make_enemy(world_x=155, world_y=110)
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(should_jump_attack(context), set())
@@ -406,7 +463,7 @@ class ShouldJumpAttackTests(unittest.TestCase):
 class ShouldThrowKnifeTests(unittest.TestCase):
     def test_fires_when_holding_knife_and_enemy_outside_melee_but_in_knife_range(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
-        enemy = make_enemy(world_x=140, world_y=100)
+        enemy = make_enemy(world_x=160, world_y=100)  # outside KNIFE_MELEE_X=40
         context: set[Token] = {myself, enemy}
 
         result = should_throw_knife(context)
@@ -422,7 +479,7 @@ class ShouldThrowKnifeTests(unittest.TestCase):
 
     def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x09)
-        enemy = make_enemy(world_x=140, world_y=100)
+        enemy = make_enemy(world_x=160, world_y=100)
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(should_throw_knife(context), set())
@@ -447,6 +504,7 @@ class ShouldWalkToWeaponTests(unittest.TestCase):
         self.assertEqual(result, {WalkToWeapon(actor_slot="P1", target_slot="wpn1")})
 
     def test_does_not_fire_for_same_or_worse_ranked_weapon(self) -> None:
+        # Holding bat (rank 4); bottle is rank 3 — not an upgrade.
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
         camera = CameraRange(left=0, right=200, top=0, bottom=200)
         weapon = Weapon(slot="wpn1", world_x=120, world_y=110, weapon_type=0x09)
@@ -463,15 +521,50 @@ class ShouldWalkToWeaponTests(unittest.TestCase):
         self.assertEqual(should_walk_to_weapon(context), set())
 
     def test_picks_highest_ranked_of_several_upgrades(self) -> None:
+        # Damage rank: knife 5 > bat 4 > bottle 3 > pepper 2.
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
         camera = CameraRange(left=0, right=200, top=0, bottom=200)
-        weak = Weapon(slot="wpn1", world_x=120, world_y=110, weapon_type=0x08)
-        strong = Weapon(slot="wpn2", world_x=130, world_y=115, weapon_type=0x0C)
-        context: set[Token] = {myself, camera, weak, strong}
+        knife = Weapon(slot="wpn1", world_x=120, world_y=110, weapon_type=0x08)
+        pepper = Weapon(slot="wpn2", world_x=130, world_y=115, weapon_type=0x0C)
+        context: set[Token] = {myself, camera, knife, pepper}
 
         result = should_walk_to_weapon(context)
 
-        self.assertEqual(result, {WalkToWeapon(actor_slot="P1", target_slot="wpn2")})
+        self.assertEqual(result, {WalkToWeapon(actor_slot="P1", target_slot="wpn1")})
+
+    def test_knife_is_upgrade_over_bat(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        knife = Weapon(slot="wpn1", world_x=120, world_y=110, weapon_type=0x08)
+        context: set[Token] = {myself, camera, knife}
+
+        result = should_walk_to_weapon(context)
+
+        self.assertEqual(result, {WalkToWeapon(actor_slot="P1", target_slot="wpn1")})
+
+
+class ShouldWalkToPickupTests(unittest.TestCase):
+    def test_fires_for_health_when_missing_enough(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, health=40, health_percent=50.0)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        food = HealthPickup(
+            slot="food1", world_x=120, world_y=110, pickup_type=0x4B, health_delta=20
+        )
+        context: set[Token] = {myself, camera, food}
+
+        result = should_walk_to_pickup(context)
+
+        self.assertEqual(result, {WalkToPickup(actor_slot="P1", target_slot="food1")})
+
+    def test_does_not_fire_for_health_when_full(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, health=80, health_percent=100.0)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        food = HealthPickup(
+            slot="food1", world_x=120, world_y=110, pickup_type=0x47, health_delta=80
+        )
+        context: set[Token] = {myself, camera, food}
+
+        self.assertEqual(should_walk_to_pickup(context), set())
 
 
 class ShouldRetreatFromDangerZoneTests(unittest.TestCase):
@@ -543,7 +636,8 @@ class ShouldDodgeProjectileTests(unittest.TestCase):
 class GenerateDecisionTokensTests(unittest.TestCase):
     def test_unions_all_candidates_into_context(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
-        enemy = make_enemy(world_x=110, world_y=105)
+        # Inside Axel punch band (inner 16..outer 50).
+        enemy = make_enemy(world_x=130, world_y=105)
         context: set[Token] = {myself, enemy}
 
         result = generate_decision_tokens(context)
@@ -551,11 +645,12 @@ class GenerateDecisionTokensTests(unittest.TestCase):
         self.assertIn(myself, result)
         self.assertIn(enemy, result)
         self.assertIn(Punch(actor_slot="P1", target_slot="obj01"), result)
-        self.assertIn(WalkToNearEnemy(actor_slot="P1", target_slot="obj01"), result)
+        # Already in connectable band — walk is suppressed.
+        self.assertNotIn(WalkToNearEnemy(actor_slot="P1", target_slot="obj01"), result)
 
     def test_does_not_mutate_input_context(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
-        enemy = make_enemy(world_x=110, world_y=105)
+        enemy = make_enemy(world_x=130, world_y=105)
         context: set[Token] = {myself, enemy}
         original = set(context)
 

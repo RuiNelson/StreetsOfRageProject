@@ -11,9 +11,11 @@ from __future__ import annotations
 import logging
 import random
 
+from .attack_decisions import CounterGrab, JumpAttack, Punch, RearAttack, Supplex, ThrowKnife
+from .character import Myself, Partner
 from .enemy import Enemy
-from .attack_decisions import JumpAttack, Punch, Supplex, ThrowKnife
 from .hazard_tokens import IncomingProjectile
+from .pickup_tokens import HealthPickup, LifePickup, Pickup, ScorePickup, SpecialPickup
 from .police_decision import CallPolice
 from .tokens import Context, Decision, find, find_all
 from .walk_decisions import (
@@ -21,6 +23,7 @@ from .walk_decisions import (
     WalkToAdvanceStage,
     WalkToCoordinate,
     WalkToNearEnemy,
+    WalkToPickup,
     WalkToWeapon,
 )
 from ..phases import is_dangerous, is_punishable
@@ -31,10 +34,12 @@ logger = logging.getLogger(__name__)
 # outrank calling police, which in turn always outranks a punish window,
 # which always outranks merely approaching. Keeping these as distinct bands
 # (rather than a formula) makes the ranking easy to reason about per-class.
+_EMERGENCY_COUNTER_GRAB = 100  # already held — only useful action
 _EMERGENCY_SIDESTEP_DANGEROUS = 100
 _EMERGENCY_SIDESTEP_CAUTION = 80
 _EMERGENCY_SIDESTEP_UNRESOLVED = 70
 _EMERGENCY_CALL_POLICE = 90
+_EMERGENCY_REAR_ATTACK = 55  # escape when boxed in / punch dead-zone
 _EMERGENCY_PUNCH_PUNISHABLE = 60
 _EMERGENCY_PUNCH_DEFAULT = 20
 _EMERGENCY_SUPPLEX = 65  # already committed to a grab -- finishing it is the only sensible action
@@ -43,12 +48,44 @@ _EMERGENCY_JUMP_ATTACK_DEFAULT = 22
 _EMERGENCY_THROW_KNIFE = 25
 _EMERGENCY_RETREAT_FROM_DANGER = 45
 _EMERGENCY_WALK_TO_WEAPON = 8
+_EMERGENCY_WALK_TO_PICKUP_CRITICAL_HEALTH = 50
+_EMERGENCY_WALK_TO_PICKUP_HEALTH = 15
+_EMERGENCY_WALK_TO_PICKUP_LIFE = 12
+_EMERGENCY_WALK_TO_PICKUP_SPECIAL = 9
+_EMERGENCY_WALK_TO_PICKUP_SCORE = 3
 _EMERGENCY_WALK_TO_NEAR_ENEMY = 10
 _EMERGENCY_WALK_TO_ADVANCE_STAGE = 5
 _EMERGENCY_DEFAULT = 0
 
 
+def _find_actor(context: Context, slot: str) -> Myself | Partner | None:
+    for actor in (find(context, Myself), find(context, Partner)):
+        if actor is not None and actor.slot == slot:
+            return actor
+    return None
+
+
+def _pickup_emergency(decision: WalkToPickup, context: Context) -> int:
+    pickup = find(context, Pickup, slot=decision.target_slot)
+    actor = _find_actor(context, decision.actor_slot)
+    if pickup is None:
+        return _EMERGENCY_WALK_TO_PICKUP_SCORE
+    if isinstance(pickup, HealthPickup):
+        if actor is not None and actor.health_percent < 40.0:
+            return _EMERGENCY_WALK_TO_PICKUP_CRITICAL_HEALTH
+        return _EMERGENCY_WALK_TO_PICKUP_HEALTH
+    if isinstance(pickup, LifePickup):
+        return _EMERGENCY_WALK_TO_PICKUP_LIFE
+    if isinstance(pickup, SpecialPickup):
+        return _EMERGENCY_WALK_TO_PICKUP_SPECIAL
+    if isinstance(pickup, ScorePickup):
+        return _EMERGENCY_WALK_TO_PICKUP_SCORE
+    return _EMERGENCY_WALK_TO_PICKUP_SCORE
+
+
 def _emergency(decision: Decision, context: Context) -> int:
+    if isinstance(decision, CounterGrab):
+        return _EMERGENCY_COUNTER_GRAB
     if isinstance(decision, Sidestep):
         threat = find(context, Enemy, slot=decision.threat_slot)
         if threat is None:
@@ -63,6 +100,11 @@ def _emergency(decision: Decision, context: Context) -> int:
         return _EMERGENCY_SIDESTEP_CAUTION
     if isinstance(decision, CallPolice):
         return _EMERGENCY_CALL_POLICE
+    if isinstance(decision, RearAttack):
+        target = find(context, Enemy, slot=decision.target_slot)
+        if target is not None and is_dangerous(target.combat_phase):
+            return _EMERGENCY_SIDESTEP_CAUTION  # escape a commit from behind
+        return _EMERGENCY_REAR_ATTACK
     if isinstance(decision, Punch):
         target = find(context, Enemy, slot=decision.target_slot)
         if target is not None and is_punishable(target.combat_phase):
@@ -87,6 +129,8 @@ def _emergency(decision: Decision, context: Context) -> int:
         return _EMERGENCY_RETREAT_FROM_DANGER
     if isinstance(decision, WalkToWeapon):
         return _EMERGENCY_WALK_TO_WEAPON
+    if isinstance(decision, WalkToPickup):
+        return _pickup_emergency(decision, context)
     if isinstance(decision, WalkToNearEnemy):
         return _EMERGENCY_WALK_TO_NEAR_ENEMY
     if isinstance(decision, WalkToAdvanceStage):

@@ -50,27 +50,36 @@ def make_enemy(**overrides) -> Enemy:
 
 
 class CheckForIncomingProjectilesTests(unittest.TestCase):
-    def test_promotes_every_projectile_one_to_one(self) -> None:
-        p1 = Projectile(slot="obj10", world_x=10, world_y=20, vel_x=1.0, vel_z=-2.0)
-        p2 = Projectile(slot="obj11", world_x=30, world_y=40, vel_x=-1.5, vel_z=0.5)
-        context: set[Token] = {p1, p2}
+    def test_promotes_only_projectiles_heading_toward_a_player(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        # Closing from the right.
+        threat = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0)
+        # Flying away / irrelevant lane.
+        benign = Projectile(slot="obj11", world_x=30, world_y=200, vel_x=-1.5, vel_z=0.5)
+        context: set[Token] = {myself, threat, benign}
 
         result = check_for_incoming_projectiles(context)
 
         self.assertEqual(
             result,
             {
-                IncomingProjectile(slot="obj10", world_x=10, world_y=20, vel_x=1.0, vel_z=-2.0),
-                IncomingProjectile(slot="obj11", world_x=30, world_y=40, vel_x=-1.5, vel_z=0.5),
+                IncomingProjectile(
+                    slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0
+                ),
             },
         )
 
     def test_no_projectiles_no_output(self) -> None:
         self.assertEqual(check_for_incoming_projectiles(set()), set())
 
+    def test_no_actors_no_output(self) -> None:
+        p = Projectile(slot="obj10", world_x=10, world_y=20, vel_x=1.0, vel_z=0.0)
+        self.assertEqual(check_for_incoming_projectiles({p}), set())
+
 
 class CheckForDangerZoneTests(unittest.TestCase):
-    def test_threat_level_counts_targeting_enemies(self) -> None:
+    def test_threat_level_weights_targeting_enemies(self) -> None:
+        # Garcia weight 1 each; ATTACKING adds +2 → 1 + (1+2) = 4.
         myself = make_myself(world_x=100, world_y=100)
         e1 = make_enemy(slot="e1", world_x=90, world_y=100, targets_player=1, combat_phase=CombatPhase.NORMAL)
         e2 = make_enemy(slot="e2", world_x=120, world_y=100, targets_player=1, combat_phase=CombatPhase.ATTACKING)
@@ -82,11 +91,11 @@ class CheckForDangerZoneTests(unittest.TestCase):
         zone = next(iter(result))
         self.assertIsInstance(zone, DangerZone)
         self.assertEqual(zone.slot, "P1")
-        self.assertEqual(zone.threat_level, 2)
+        self.assertEqual(zone.threat_level, 4)
 
     def test_unknown_caution_bonus_adds_extra_threat(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        # Close, facing, UNKNOWN phase -> +1 bonus on top of the base count.
+        # Close, facing, UNKNOWN phase -> +weight bonus on top of the base.
         e1 = make_enemy(
             slot="e1",
             world_x=110,
@@ -122,7 +131,7 @@ class CheckForDangerZoneTests(unittest.TestCase):
 
     def test_no_targeting_enemies_emits_nothing(self) -> None:
         myself = make_myself()
-        e1 = make_enemy(targets_player=2)
+        e1 = make_enemy(targets_player=2, world_x=500, world_y=500)
         context: set[Token] = {myself, e1}
 
         self.assertEqual(check_for_danger_zone(context), set())
@@ -144,7 +153,7 @@ class CheckForDangerZoneTests(unittest.TestCase):
 
         self.assertEqual(len(result), 1)
         zone = next(iter(result))
-        self.assertEqual(zone.threat_level, 1)  # 2 nearby // 2 == 1
+        self.assertEqual(zone.threat_level, 1)  # 2 nearby weights // 2 == 1
 
     def test_targeting_plus_nearby_beats_targeting_alone(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
@@ -173,7 +182,8 @@ class GenerateInferenceTokensTests(unittest.TestCase):
     def test_unions_context_with_both_checks(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
         enemy = make_enemy(world_x=105, world_y=100, targets_player=1)
-        projectile = Projectile(slot="obj10", world_x=1, world_y=2, vel_x=0.0, vel_z=0.0)
+        # Closing projectile so IncomingProjectile is emitted.
+        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-4.0, vel_z=0.0)
         context: set[Token] = {myself, enemy, projectile}
 
         result = generate_inference_tokens(context)

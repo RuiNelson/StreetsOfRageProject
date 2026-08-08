@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import threading
 import time
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 from . import __version__
 from .ai.gamepad import SharedGamepadState, VirtualGamepad
@@ -72,7 +73,7 @@ def _ensure_megadrive_remote_on_path() -> None:
 
 
 def _reach_gameplay(host: str, port: int, character: str, *, timeout_ms: int) -> None:
-    """Navigate the real menus to playable gameplay before the observer starts."""
+    """Navigate the real menus to playable gameplay (exclusive remote client)."""
 
     from megadrive_remote import MegaDriveClient
 
@@ -82,13 +83,80 @@ def _reach_gameplay(host: str, port: int, character: str, *, timeout_ms: int) ->
         reach_gameplay(client, character, timeout_ms=timeout_ms)
 
 
+def _try_reach_gameplay(
+    host: str,
+    port: int,
+    character: str,
+    *,
+    timeout_ms: int,
+    connect_attempts: int = 8,
+    connect_retry_s: float = 0.75,
+    should_abort: Callable[[], bool] | None = None,
+) -> bool:
+    """Run menu navigation; retry while the host is not listening yet.
+
+    The remote protocol is single-client, so this must not run concurrently
+    with the observer poller. Returns True on success.
+    """
+
+    last_exc: BaseException | None = None
+    for attempt in range(1, connect_attempts + 1):
+        if should_abort is not None and should_abort():
+            print("--reach-gameplay: aborted (observer closing)", file=sys.stderr)
+            return False
+        try:
+            print(
+                f"--reach-gameplay: connecting to {host}:{port} as {character} "
+                f"(attempt {attempt}/{connect_attempts})…",
+                file=sys.stderr,
+            )
+            _reach_gameplay(host, port, character, timeout_ms=timeout_ms)
+            print("--reach-gameplay: reached playable gameplay", file=sys.stderr)
+            return True
+        except Exception as exc:  # noqa: BLE001 - surface any navigation failure
+            last_exc = exc
+            # Connection refused / timeout → host not up yet; keep waiting.
+            if attempt < connect_attempts:
+                # Sleep in small slices so window close aborts promptly.
+                deadline = time.monotonic() + connect_retry_s
+                while time.monotonic() < deadline:
+                    if should_abort is not None and should_abort():
+                        print(
+                            "--reach-gameplay: aborted (observer closing)",
+                            file=sys.stderr,
+                        )
+                        return False
+                    time.sleep(min(0.1, deadline - time.monotonic()))
+    print(
+        f"--reach-gameplay failed after {connect_attempts} attempts: {last_exc}\n"
+        f"  Is the game host running with remote access on {host}:{port}?\n"
+        f"  Example: ./scripts/run --debugUtils --port {port}\n"
+        f"  Observer will keep polling; AI flags still apply once connected.",
+        file=sys.stderr,
+    )
+    return False
+
+
 def build_parser() -> argparse.ArgumentParser:
+    # scripts/autoplay sets SOR_AUTOPLAY_PROG so --help shows the wrapper name.
+    prog = os.environ.get("SOR_AUTOPLAY_PROG") or "sor-autoplay"
     parser = argparse.ArgumentParser(
-        prog="sor-autoplay",
+        prog=prog,
         description=(
             "Live observer for a running StreetsOfRageRecompilation instance "
-            "via MegaDriveEnvironment remote access."
+            "via MegaDriveEnvironment remote access. Optional symbolic AI "
+            "controls P1/P2 through controller input only (never RAM writes)."
         ),
+        epilog=(
+            "Start the game host first (same --port), for example:\n"
+            "  ./scripts/run --debugUtils --port 7777\n"
+            "  ./scripts/autoplay --port 7777 --reach-gameplay axel --agent-p1\n"
+            "\n"
+            "AI is off by default; enable with --agent-p1 / --agent-p2 or the "
+            "HUD toggle labels. --reach-gameplay runs after the GUI opens "
+            "(exclusive remote session, then polling starts)."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--host",
@@ -140,10 +208,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("axel", "adam", "blaze"),
         default=None,
         help=(
-            "Navigate the real menus (restart, Start, one-player, character "
-            "select) to playable one-player gameplay as this character "
-            "before starting the observer. Off by default; uses "
-            "StreetsOfRageRecompilation/tools/reach_gameplay.py."
+            "After the GUI opens, navigate the real menus (restart, Start, "
+            "one-player, character select) to playable one-player gameplay "
+            "as this character, then start remote polling. Off by default. "
+            "The remote protocol is single-client, so navigation runs before "
+            "the observer poller attaches."
         ),
     )
     parser.add_argument(
@@ -336,8 +405,19 @@ class ObserverApp:
         with self._lock:
             return self._latest
 
-    def run_gui(self) -> int:
-        self.start_poller()
+    def run_gui(
+        self,
+        *,
+        reach_gameplay: str | None = None,
+        reach_gameplay_timeout_ms: int = 30_000,
+    ) -> int:
+        """Open the HUD immediately; optionally navigate menus, then poll.
+
+        ``--reach-gameplay`` must not block window creation. The remote service
+        allows only one TCP client, so menu navigation runs on a background
+        thread *before* the poller attaches (AI is held off until then).
+        """
+
         approx_frames = self.poll_ms * ASSUMED_HZ / 1000.0
         self._hud = ObserverHud(
             on_close=self.stop,
@@ -359,11 +439,57 @@ class ObserverApp:
             self._hud.schedule(self.hud_ms, tick)
 
         self._hud.schedule(0, tick)
+
+        if reach_gameplay is not None:
+            with self._lock:
+                self._latest = disconnected_snapshot(
+                    f"navigating menus as {reach_gameplay}…"
+                )
+            thread = threading.Thread(
+                target=self._reach_gameplay_then_start_poller,
+                args=(reach_gameplay, reach_gameplay_timeout_ms),
+                name="sor-reach-gameplay",
+                daemon=True,
+            )
+            thread.start()
+        else:
+            self.start_poller()
+
         try:
             self._hud.run()
         finally:
             self.stop()
         return 0
+
+    def _reach_gameplay_then_start_poller(
+        self, character: str, timeout_ms: int
+    ) -> None:
+        """Exclusive menu navigation, then attach the observer poller.
+
+        AI is disabled for the duration so navigation owns the pad; requested
+        ``--agent-p*`` flags are restored before polling begins.
+        """
+
+        resume_p1 = self.agent_p1_enabled.is_set()
+        resume_p2 = self.agent_p2_enabled.is_set()
+        self.agent_p1_enabled.clear()
+        self.agent_p2_enabled.clear()
+        try:
+            if not self._stop.is_set():
+                _try_reach_gameplay(
+                    self.host,
+                    self.port,
+                    character,
+                    timeout_ms=timeout_ms,
+                    should_abort=self._stop.is_set,
+                )
+        finally:
+            if resume_p1:
+                self.agent_p1_enabled.set()
+            if resume_p2:
+                self.agent_p2_enabled.set()
+            if not self._stop.is_set():
+                self.start_poller()
 
     def _handle_toggle_agent_ui(self, player_index: int) -> None:
         event = self.agent_p1_enabled if player_index == 1 else self.agent_p2_enabled
@@ -388,18 +514,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     _ensure_megadrive_remote_on_path()
 
-    if args.reach_gameplay is not None:
-        try:
-            _reach_gameplay(
-                args.host,
-                args.port,
-                args.reach_gameplay,
-                timeout_ms=args.reach_gameplay_timeout_ms,
-            )
-        except Exception as exc:  # noqa: BLE001 - surface any navigation failure and stop
-            print(f"--reach-gameplay failed: {exc}", file=sys.stderr)
-            return 1
-
     app = ObserverApp(
         host=args.host,
         port=args.port,
@@ -409,8 +523,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         agent_p2=args.agent_p2,
     )
     if args.once:
+        # Snapshot-only mode has no GUI; still honor menu navigation first.
+        if args.reach_gameplay is not None:
+            _try_reach_gameplay(
+                args.host,
+                args.port,
+                args.reach_gameplay,
+                timeout_ms=args.reach_gameplay_timeout_ms,
+            )
         return app.run_once()
-    return app.run_gui()
+
+    agents = []
+    if args.agent_p1:
+        agents.append("P1")
+    if args.agent_p2:
+        agents.append("P2")
+    agent_text = f"; AI on {','.join(agents)}" if agents else ""
+    reach_text = (
+        f"; then reach-gameplay={args.reach_gameplay}"
+        if args.reach_gameplay is not None
+        else ""
+    )
+    print(
+        f"Starting SoR Autoplay GUI → {args.host}:{args.port} "
+        f"(poll {args.poll_ms}ms{agent_text}{reach_text}; Esc/Q to quit)",
+        file=sys.stderr,
+    )
+    return app.run_gui(
+        reach_gameplay=args.reach_gameplay,
+        reach_gameplay_timeout_ms=args.reach_gameplay_timeout_ms,
+    )
 
 
 if __name__ == "__main__":

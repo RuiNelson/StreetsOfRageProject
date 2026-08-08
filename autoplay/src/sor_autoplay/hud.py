@@ -71,6 +71,9 @@ class ObserverHud:
         self.root.configure(bg=_BG)
         self.root.minsize(720, 420)
         self._start_maximized()
+        # Bring the observer to the front (macOS often opens Tk behind the
+        # terminal that launched it).
+        self._raise_window()
         self.root.bind("<Escape>", self._handle_close)
         self.root.bind("<q>", self._handle_close)
         self.root.protocol("WM_DELETE_WINDOW", self._handle_close)
@@ -242,27 +245,51 @@ class ObserverHud:
         self.root.attributes("-fullscreen", False)
         self.root.after_idle(self._apply_maximized)
 
+    def _raise_window(self) -> None:
+        """Make the window visible and focused after launch from a terminal."""
+
+        try:
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+            # Temporary topmost so macOS actually activates the window, then
+            # drop it so the user can freely switch away.
+            self.root.attributes("-topmost", True)
+            self.root.after(200, lambda: self._clear_topmost())
+        except tk.TclError:
+            pass
+
+    def _clear_topmost(self) -> None:
+        try:
+            self.root.attributes("-topmost", False)
+        except tk.TclError:
+            pass
+
     def _apply_maximized(self) -> None:
         self.root.update_idletasks()
         try:
             self.root.state("zoomed")
+            self._raise_window()
             return
         except tk.TclError:
             pass
         try:
             self.root.attributes("-zoomed", True)
+            self._raise_window()
             return
         except tk.TclError:
             pass
         if sys.platform == "darwin":
             try:
                 self.root.tk.call("wm", "state", self.root._w, "zoomed")  # noqa: SLF001
+                self._raise_window()
                 return
             except tk.TclError:
                 pass
         width = self.root.winfo_screenwidth()
         height = self.root.winfo_screenheight()
         self.root.geometry(f"{width}x{height}+0+0")
+        self._raise_window()
 
     def _pick_font_family(self) -> str:
         available = set(tkfont.families())

@@ -9,33 +9,21 @@ set -euo pipefail
 #       ./scripts/run --debugUtils --port 6969
 #   - Python 3.11+ with Tk (_tkinter); this machine prefers python3.11
 #
-# Usage:
+# Full CLI options are defined in the Python package (argparse):
+#   ./scripts/autoplay --help
+#
+# Examples:
 #   ./scripts/autoplay
-#   ./scripts/autoplay --host 127.0.0.1 --port 6969
 #   ./scripts/autoplay --once
-#   ./scripts/autoplay --poll-ms 33
+#   ./scripts/autoplay --agent-p1 --reach-gameplay axel
 
 SCRIPT_DIR="${0:A:h}"
 META_ROOT="${SCRIPT_DIR:h}"
 AUTOPLAY_ROOT="$META_ROOT/autoplay"
 MDE_PYTHON_SRC="$META_ROOT/MegaDriveEnvironment/python/src"
 AUTOPLAY_SRC="$AUTOPLAY_ROOT/src"
-
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-    print "Usage: $0 [sor-autoplay options...]"
-    print ""
-    print "Attach the SoR Autoplay observer to a running sor remote server."
-    print "Default: --host 127.0.0.1 --port 6969"
-    print ""
-    print "Examples:"
-    print "  $0"
-    print "  $0 --port 6969 --poll-ms 33"
-    print "  $0 --once"
-    print ""
-    print "Start the game host first, for example:"
-    print "  ./scripts/run --debugUtils --port 6969"
-    exit 0
-fi
+# Shown as argparse prog= so --help matches how this script is invoked.
+export SOR_AUTOPLAY_PROG="${0:t}"
 
 if [[ ! -d "$AUTOPLAY_SRC/sor_autoplay" ]]; then
     print -u2 "autoplay package not found: $AUTOPLAY_SRC/sor_autoplay"
@@ -48,9 +36,10 @@ if [[ ! -d "$MDE_PYTHON_SRC/megadrive_remote" ]]; then
 fi
 
 # Prefer a Python with Tk. Homebrew/uv 3.13+ on this host often lacks _tkinter.
+# Do not seed the search from $PYTHON — an empty/invalid value would pollute
+# the candidate list.
 PYTHON=""
-for candidate in python3.11 python3.12 python3 "${PYTHON:-}"; do
-    [[ -n "$candidate" ]] || continue
+for candidate in python3.11 python3.12 python3; do
     if command -v "$candidate" >/dev/null 2>&1; then
         if "$candidate" -c 'import tkinter' >/dev/null 2>&1; then
             PYTHON="$candidate"
@@ -67,18 +56,25 @@ fi
 
 export PYTHONPATH="${AUTOPLAY_SRC}:${MDE_PYTHON_SRC}${PYTHONPATH:+:$PYTHONPATH}"
 
-# Defaults only when the user did not pass host/port.
+# Collect user args (plain "$@" — never "${@:-}", which becomes a single empty
+# word when no args are given and can break argparse).
 typeset -a args
 args=("$@")
+
+# Inject host/port defaults only when the user did not pass them.
 has_host=0
 has_port=0
-for arg in "${args[@]:-}"; do
-    case "$arg" in
-        --host|--host=*) has_host=1 ;;
-        --port|--port=*) has_port=1 ;;
-    esac
-done
+if (( ${#args[@]} )); then
+    for arg in "${args[@]}"; do
+        case "$arg" in
+            --host|--host=*) has_host=1 ;;
+            --port|--port=*) has_port=1 ;;
+        esac
+    done
+fi
 (( has_host )) || args=(--host 127.0.0.1 "${args[@]}")
 (( has_port )) || args=(--port 6969 "${args[@]}")
 
+# Always hand off to the package. --help / --version are handled by argparse
+# (including when host/port defaults were prepended).
 exec "$PYTHON" -m sor_autoplay "${args[@]}"

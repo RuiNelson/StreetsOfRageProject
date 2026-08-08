@@ -5,7 +5,7 @@ from sor_autoplay.ai.enemy import Abadede, Enemy, Garcia, Jack, Souther
 from sor_autoplay.ai.essential import AnimationInProgress, CameraRange, Stage
 from sor_autoplay.ai.hazard_tokens import Projectile
 from sor_autoplay.ai.observe import generate_direct_observation_tokens
-from sor_autoplay.ai.pickup_tokens import Weapon
+from sor_autoplay.ai.pickup_tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import find, find_all
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
@@ -177,6 +177,32 @@ def _projectile_entity(
         vel_x=vel_x,
         vel_z=vel_z,
         combat_phase=CombatPhase.ATTACKING,
+    )
+
+
+def _pickup_entity(
+    *,
+    slot: str = "obj12",
+    type_id: int = 0x4B,
+    world_x: int = 860,
+    world_y: int = 64,
+    interaction: int = 0,
+) -> MapEntity:
+    return MapEntity(
+        kind="pickup",
+        family="Health",
+        symbol="a",
+        color="#63e6be",
+        label="Apple",
+        type_id=type_id,
+        world_x=world_x,
+        world_y=world_y,
+        world_z=0,
+        map_x=float(world_x - 768),
+        map_y=float(world_y),
+        health=None,
+        slot=slot,
+        interaction=interaction,
     )
 
 
@@ -454,6 +480,34 @@ class WeaponObservationTests(unittest.TestCase):
         self.assertEqual(find_all(context, Weapon), [])
 
 
+class PickupObservationTests(unittest.TestCase):
+    def test_free_ground_apple_produces_health_pickup(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        entities = (_player_entity(slot="P1"), _pickup_entity(slot="obj12"))
+        snapshot = _snapshot(players=(p1, p2), entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        pickups = find_all(context, HealthPickup)
+        self.assertEqual(len(pickups), 1)
+        self.assertEqual(pickups[0].slot, "obj12")
+        self.assertEqual(pickups[0].health_delta, 20)
+
+    def test_reserved_pickup_is_skipped(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        entities = (
+            _player_entity(slot="P1"),
+            _pickup_entity(slot="obj12", interaction=1),
+        )
+        snapshot = _snapshot(players=(p1, p2), entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        self.assertEqual(find_all(context, HealthPickup), [])
+
+
 class ProjectileObservationTests(unittest.TestCase):
     def test_projectile_included(self) -> None:
         p1 = _player_snapshot(index=1)
@@ -470,6 +524,28 @@ class ProjectileObservationTests(unittest.TestCase):
 
 
 class AnimationInProgressTests(unittest.TestCase):
+    def test_absent_when_held_by_enemy(self) -> None:
+        # CounterGrab needs to act; HELD_BY_ENEMY must not block decisions.
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        entities = (
+            _player_entity(
+                slot="P1",
+                action_state=0x7A,
+                held_type=0,
+                combat_phase=CombatPhase.HELD_BY_ENEMY,
+            ),
+        )
+        snapshot = _snapshot(players=(p1, p2), entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        self.assertIsNone(find(context, AnimationInProgress, slot="P1"))
+        myself = find(context, Myself)
+        self.assertIsNotNone(myself)
+        assert myself is not None
+        self.assertEqual(myself.combat_phase, CombatPhase.HELD_BY_ENEMY)
+
     def test_absent_when_action_normal(self) -> None:
         p1 = _player_snapshot(index=1)
         p2 = _player_snapshot(index=2, is_playable=False)

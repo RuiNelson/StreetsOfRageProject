@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.ai.attack_decisions import JumpAttack, Punch, Supplex
+from sor_autoplay.ai.attack_decisions import CounterGrab, JumpAttack, Punch, Supplex
 from sor_autoplay.ai.enemy import Enemy
 from sor_autoplay.ai.hazard_tokens import IncomingProjectile
 from sor_autoplay.ai.police_decision import CallPolice
@@ -117,6 +117,20 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
         self.assertIsInstance(decisions[0], Supplex)
+
+    def test_counter_grab_beats_sidestep_and_call_police(self) -> None:
+        context = {
+            CounterGrab(actor_slot="P1"),
+            CallPolice(actor_slot="P1"),
+            Sidestep(actor_slot="P1", threat_slot="obj01", direction="up"),
+            _enemy("obj01", CombatPhase.ATTACKING),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], CounterGrab)
 
     def test_jump_attack_emergency_splits_punishable_vs_default(self) -> None:
         punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)

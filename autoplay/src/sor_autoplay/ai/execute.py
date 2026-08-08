@@ -21,10 +21,10 @@ has a chance to run.
 
 from __future__ import annotations
 
-from .attack_decisions import JumpAttack, Punch, Supplex, ThrowKnife
+from .attack_decisions import CounterGrab, JumpAttack, Punch, RearAttack, Supplex, ThrowKnife
 from .character import Myself, Partner
 from .enemy import Enemy
-from .pickup_tokens import Weapon
+from .pickup_tokens import Pickup, Weapon
 from .police_decision import CallPolice
 from .tokens import Context, Decision, find
 from .walk_decisions import (
@@ -32,6 +32,7 @@ from .walk_decisions import (
     WalkToAdvanceStage,
     WalkToCoordinate,
     WalkToNearEnemy,
+    WalkToPickup,
     WalkToWeapon,
 )
 from .gamepad import VirtualGamepad
@@ -47,12 +48,14 @@ PUNCH_FRAMES = 4
 CALL_POLICE_FRAMES = 4
 SUPPLEX_FRAMES = 4
 THROW_KNIFE_FRAMES = 4
+REAR_ATTACK_FRAMES = 4
+COUNTER_FRAMES = 3
 JUMP_ATTACK_LAUNCH_FRAMES = 3
 JUMP_ATTACK_KICK_FRAMES = 4
 
-# Placeholder pickup-adjacency thresholds for WalkToWeapon.
-PICKUP_RANGE_X = 16
-PICKUP_RANGE_Y = 12
+# ROM $3136 pickup search: ±20 X, ±16 lane Y. Stay inside that box before B.
+PICKUP_RANGE_X = 18
+PICKUP_RANGE_Y = 14
 
 
 def press_no_button(gamepad: VirtualGamepad) -> None:
@@ -82,6 +85,16 @@ def _movement_mask(from_x: int, from_y: int, to_x: int, to_y: int) -> int:
     return mask
 
 
+def _face_toward_mask(actor: Myself | Partner, target_x: int) -> int:
+    """Hold the facing direction so attack boxes aim at the target."""
+
+    if target_x < actor.world_x:
+        return LEFT_MASK
+    if target_x > actor.world_x:
+        return RIGHT_MASK
+    return 0
+
+
 def _execute_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, decision.actor_slot)
     target = find(context, Enemy, slot=decision.target_slot)
@@ -105,7 +118,47 @@ def _execute_sidestep(decision: Sidestep, context: Context, gamepad: VirtualGame
 
 
 def _execute_punch(decision: Punch, context: Context, gamepad: VirtualGamepad) -> None:
-    gamepad.press(PUNCH_MASK, frames=PUNCH_FRAMES)
+    actor = _find_actor(context, decision.actor_slot)
+    target = find(context, Enemy, slot=decision.target_slot)
+    face = 0
+    if actor is not None and target is not None:
+        face = _face_toward_mask(actor, target.world_x)
+    # Face + attack edge together so the punch aims the right way.
+    gamepad.press(PUNCH_MASK | face, frames=PUNCH_FRAMES)
+
+
+def _execute_rear_attack(decision: RearAttack, context: Context, gamepad: VirtualGamepad) -> None:
+    # Simultaneous B+C chord ($322A). Do not hold a direction — the rear box
+    # is behind the current facing.
+    gamepad.press(PUNCH_MASK | JUMP_MASK, frames=REAR_ATTACK_FRAMES)
+
+
+def _execute_counter_grab(decision: CounterGrab, context: Context, gamepad: VirtualGamepad) -> None:
+    """Enemy-held counter: C starts crossover; B throws while the window is open.
+
+    From controls-and-input.md:
+      $7A held → C edge → $7C crossover → returns to $7A with +$58 bit 7
+      → B edge → $7E counter throw
+    """
+
+    actor = _find_actor(context, decision.actor_slot)
+    if actor is None:
+        return
+    base = actor.action_base
+    if actor.counter_window_open:
+        # Post-crossover B window (player +$58 bit 7).
+        gamepad.press(PUNCH_MASK, frames=COUNTER_FRAMES)
+        return
+    if base == 0x7A:
+        # Stable held state — C starts the crossover.
+        gamepad.press(JUMP_MASK, frames=COUNTER_FRAMES)
+        return
+    if base in (0x78, 0x7C):
+        # Acquire or mid-crossover — wait for the next actionable state.
+        gamepad.release()
+        return
+    # Fallback: try C (crossover entry) if state is unexpected but still held.
+    gamepad.press(JUMP_MASK, frames=COUNTER_FRAMES)
 
 
 def _execute_call_police(decision: CallPolice, context: Context, gamepad: VirtualGamepad) -> None:
@@ -116,27 +169,41 @@ def _execute_jump_attack(decision: JumpAttack, context: Context, gamepad: Virtua
     actor = _find_actor(context, decision.actor_slot)
     if actor is None:
         return
+    target = find(context, Enemy, slot=decision.target_slot)
+    face = 0
+    if target is not None:
+        face = _face_toward_mask(actor, target.world_x)
     if not actor.is_airborne:
-        gamepad.press(JUMP_MASK, frames=JUMP_ATTACK_LAUNCH_FRAMES)
+        # Hold direction into the jump so launch X velocity aims at the foe.
+        gamepad.press(JUMP_MASK | face, frames=JUMP_ATTACK_LAUNCH_FRAMES)
     else:
-        gamepad.press(PUNCH_MASK, frames=JUMP_ATTACK_KICK_FRAMES)
+        gamepad.press(PUNCH_MASK | face, frames=JUMP_ATTACK_KICK_FRAMES)
 
 
 def _execute_supplex(decision: Supplex, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, decision.actor_slot)
     if actor is None:
         return
-    base = actor.action_state & 0xFE
+    base = actor.action_base
     if base == 0x66:
+        # Back hold → B is suplex.
         gamepad.press(PUNCH_MASK, frames=SUPPLEX_FRAMES)
     elif base == 0x60:
+        # Front hold → C crosses to back hold; next ticks finish with B.
         gamepad.press(JUMP_MASK, frames=SUPPLEX_FRAMES)
     else:
         gamepad.press(PUNCH_MASK, frames=SUPPLEX_FRAMES)
 
 
 def _execute_throw_knife(decision: ThrowKnife, context: Context, gamepad: VirtualGamepad) -> None:
-    gamepad.press(PUNCH_MASK, frames=THROW_KNIFE_FRAMES)
+    actor = _find_actor(context, decision.actor_slot)
+    target = find(context, Enemy, slot=decision.target_slot)
+    face = 0
+    if actor is not None and target is not None:
+        face = _face_toward_mask(actor, target.world_x)
+    # Face the target so the ROM front-cone scan does not flip to melee stab
+    # against a different body, and the throw launches the right way.
+    gamepad.press(PUNCH_MASK | face, frames=THROW_KNIFE_FRAMES)
 
 
 def _execute_walk_to_coordinate(decision: WalkToCoordinate, context: Context, gamepad: VirtualGamepad) -> None:
@@ -157,17 +224,32 @@ def _execute_walk_to_weapon(decision: WalkToWeapon, context: Context, gamepad: V
         gamepad.hold(_movement_mask(actor.world_x, actor.world_y, target.world_x, target.world_y))
 
 
+def _execute_walk_to_pickup(decision: WalkToPickup, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, decision.actor_slot)
+    target = find(context, Pickup, slot=decision.target_slot)
+    if actor is None or target is None:
+        return
+    if abs(target.world_x - actor.world_x) <= PICKUP_RANGE_X and abs(target.world_y - actor.world_y) <= PICKUP_RANGE_Y:
+        # Same B edge as weapons: $3136 find_close_interaction_target.
+        gamepad.press(PUNCH_MASK, frames=PUNCH_FRAMES)
+    else:
+        gamepad.hold(_movement_mask(actor.world_x, actor.world_y, target.world_x, target.world_y))
+
+
 _HANDLERS = {
     WalkToNearEnemy: _execute_walk_to_near_enemy,
     WalkToAdvanceStage: _execute_walk_to_advance_stage,
     Sidestep: _execute_sidestep,
     Punch: _execute_punch,
+    RearAttack: _execute_rear_attack,
+    CounterGrab: _execute_counter_grab,
     CallPolice: _execute_call_police,
     JumpAttack: _execute_jump_attack,
     Supplex: _execute_supplex,
     ThrowKnife: _execute_throw_knife,
     WalkToCoordinate: _execute_walk_to_coordinate,
     WalkToWeapon: _execute_walk_to_weapon,
+    WalkToPickup: _execute_walk_to_pickup,
 }
 
 

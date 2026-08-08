@@ -12,9 +12,10 @@ flags), plus an opt-in **symbolic AI** (`ai/` — Phase A of the design in
 `/AI.md`) that can control P1 and/or P2 through controller input only (never
 RAM writes). The AI is off by default and enabled per player via
 `--agent-p1`/`--agent-p2` or the HUD's click-to-toggle label. See `ai/`'s
-module docstrings for the Token/Information/Decision pipeline; per-enemy-type
-subclassing, danger-zone clustering, two-player coordination, and the
-six-button `--altControls` scheme remain future work.
+module docstrings and `CLAUDE.md` for the Token/Information/Decision pipeline
+and manuscript-grounded combat facts already wired in. Still future work:
+two-player coordination, six-button `--altControls`, and deeper per-boss
+tactics.
 
 ## Ownership
 
@@ -83,25 +84,27 @@ entry points in this tree.
 | Piece | Role |
 | --- | --- |
 | `tokens.py` | `Token`/`Information`/`Decision` base classes, `Context`, `find`/`find_all` |
-| `character.py` | `Myself`/`Partner` (`action_state`, `is_airborne` for `Supplex`/`JumpAttack` sequencing) |
+| `character.py` | `Myself`/`Partner` (`action_state`, `action_flags`, `is_airborne`, punch inner/outer helpers) |
 | `enemy.py` | `Enemy` + per-type/boss subclasses: `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`, `Boss` → `BespokeBoss` (`Abadede`, `MrX`) / `LaterBoss` (`Souther`, `Antonio`, `Bongo`, `Onihime`); `enemy_class_for_type` |
-| `essential.py`, `hazard_tokens.py`, `pickup_tokens.py` | `Stage`/`CameraRange`/`AnimationInProgress`, `Projectile`/`IncomingProjectile`/`DangerZone`, `Weapon` |
-| `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM) |
-| `inference.py` | `check_for_incoming_projectiles`, `check_for_danger_zone` (proximity clustering — a nearby, not-yet-targeting enemy cluster can trigger a `DangerZone` on its own) |
-| `walk_decisions.py` | `WalkToNearEnemy`, `WalkToAdvanceStage`, `WalkToCoordinate` (danger retreat), `WalkToWeapon`, `Sidestep` |
-| `attack_decisions.py` | `Punch`, `ThrowKnife`, `Supplex`, `JumpAttack` — no separate `Combo`/`GrabEnemy` (see the module docstring: no distinct input exists, `Punch` already covers both) |
+| `essential.py`, `hazard_tokens.py`, `pickup_tokens.py` | `Stage`/`CameraRange`/`AnimationInProgress`, `Projectile`/`IncomingProjectile`/`DangerZone`, `Weapon` + consumable `Pickup` hierarchy + `weapon_rank` |
+| `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM); free-to-act phases include `HOLDING` and `HELD_BY_ENEMY` |
+| `inference.py` | Threat-filtered `IncomingProjectile`; weighted `DangerZone` (type strength + attack phase + cluster + projectiles) |
+| `walk_decisions.py` | `WalkToNearEnemy`, `WalkToAdvanceStage`, `WalkToCoordinate`, `WalkToWeapon`, `WalkToPickup`, `Sidestep` |
+| `attack_decisions.py` | `Punch`, `ThrowKnife`, `Supplex`, `JumpAttack`, `RearAttack` (B+C), `CounterGrab` (held C→B) — no separate `Combo`/`GrabEnemy` |
 | `police_decision.py` | `CallPolice` |
-| `decide.py` | `should_*` candidate generators |
-| `priority.py` | `determine_priority_decision` — emergency ranking + priority tie-break + logged random fallback; `Sidestep` resolves either an `Enemy` or an `IncomingProjectile` threat |
+| `decide.py` | `should_*` candidate generators (character punch bands, weapon rank upgrades, pickup usefulness) |
+| `priority.py` | `determine_priority_decision` — emergency ranking + priority tie-break + logged random fallback; `CounterGrab` ties top emergency with confirmed dodges |
 | `gamepad.py` | `VirtualGamepad`/`SharedGamepadState` — the only code allowed to call `hold_buttons`/`press_buttons`/`release_buttons`; never `write_memory`/`write_value` |
 | `execute.py` | `execute_decision` dispatch to controller input |
 | `loop.py` | `AgentLoop.tick` — gates on pause/non-gameplay/not-playable first, then runs the full pipeline |
 
 Verified button mapping for the original (non-altControls) scheme (see
 `execute.py`'s module docstring): **Attack/Punch is physical B** (also
-`Supplex`'s finishing press and `ThrowKnife`), **Jump is physical C**
-(`JumpAttack`'s launch, `Supplex`'s front-to-back-hold crossover), **Police
-special is physical A** — the reverse of the naive "A=attack" assumption.
+`Supplex`'s finishing press, `ThrowKnife`, and `CounterGrab`'s B edge),
+**Jump is physical C** (`JumpAttack` launch, `Supplex` front→back crossover,
+`CounterGrab` crossover, half of `RearAttack`), **Police special is physical
+A** — the reverse of the naive "A=attack" assumption. **RearAttack** is the
+simultaneous B+C chord (`$322A`).
 
 Out of scope, per `AI.md`'s own text: two-player coordination rules ("low
 priority... not an expected scenario") and the six-button `--altControls`

@@ -51,3 +51,17 @@ class WalkToWeapon(Walk):
     priority: int = 22
     actor_slot: str
     target_slot: str  # Weapon.slot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WalkToPickup(Walk):
+    """Walk to (and B-pickup) a free ground consumable.
+
+    Priority sits above stage advance and below weapons: a needed health item
+    outranks wandering, but a weapon upgrade is usually more durable value
+    unless health is critical (emergency ranking handles that case).
+    """
+
+    priority: int = 18
+    actor_slot: str
+    target_slot: str  # Pickup.slot
