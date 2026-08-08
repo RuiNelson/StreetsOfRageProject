@@ -143,6 +143,47 @@ The static disassembler follows known control flow. Active runtime discovery
 and `code-analysis/aux_addresses.txt` provide additional entry points for
 indirect jumps and calls.
 
+### Runtime call recording and call map
+
+For **game analysis** (who calls whom at runtime, which labelled routines
+actually run, callsites for a given flow), use the recompilation binary's
+optional call log and `tools/call_map.py`. Full schema, flags, and agent
+rules live in `StreetsOfRageRecompilation/CLAUDE.md` and the
+`explore-call-map` skill; this is the workspace overview.
+
+1. **Record** while playing or automating a bounded session of `sor`. Every
+   emulated 68000 subroutine **entry** and `bsr`/`jsr` **call** is written as
+   typed CSV (`event,source,callsite,target`). Addresses are six-digit hex
+   ROM addresses. The file is truncated at startup.
+
+```bash
+StreetsOfRageRecompilation/build/sor \
+  --rom StreetsOfRageRecompilation/rom/SOR.bin \
+  --callLog calls.csv
+```
+
+2. **Collapse** one or more logs into a deduplicated SQLite call map. The
+   tool always includes every routine from
+   `StreetsOfRageRecompilation/code-analysis/labels.csv` (including zero
+   activity), so labelled-only routines stay visible next to observed ones.
+
+```bash
+python3 StreetsOfRageRecompilation/tools/call_map.py calls.csv \
+  --database StreetsOfRageRecompilation/call-map.sqlite \
+  --labels StreetsOfRageRecompilation/code-analysis/labels.csv
+```
+
+3. **Analyse** by querying SQLite (agents must not rely on the web viewer).
+   Prefer the views `subroutine_activity`, `subroutine_flow`, and
+   `callsite_flow`. Counts are runtime observations from the captured runs,
+   not proof of every static path. Optional `--port` starts a localhost
+   read-only viewer for humans only.
+
+Call logs, `call-map.sqlite`, and similar artefacts are local analysis
+output: do not commit them unless the user explicitly asks to version that
+exact file. Use this map together with `ai-analysis/*.md` manuscripts and
+`labels.csv` when mapping control flow for reverse engineering or AI work.
+
 ## Validation and handoff
 
 - Documentation-only changes: check Markdown structure, links, paths, command
