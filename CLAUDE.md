@@ -210,5 +210,6 @@ tested on the current host.
 - do not consult git history
 - Keep this file and the other `CLAUDE.md` files updated as you work
 - Save in the `CLAUDE.md` all the information that charactizes the project that you obtain from the user.
- 
+- If running the game for debug, only run if the user asks it, remember to use `--silent` to silence the sound
+
  
