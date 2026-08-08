@@ -49,7 +49,12 @@ def _myself(**overrides) -> Myself:
 
 
 class DetermineEmergencyWinnerTests(unittest.TestCase):
-    def test_sidestep_on_dangerous_enemy_beats_walk_to_near_enemy(self) -> None:
+    def test_sidestep_no_longer_beats_walk_to_near_enemy(self) -> None:
+        """Sidestep is deliberately downgraded to the emergency floor (see
+        the TODO on _EMERGENCY_SIDESTEP_FLOOR in priority.py) until its
+        target-selection heuristics are reworked, so it must not outrank a
+        real action just because a dangerous enemy is present."""
+
         dangerous = _enemy("obj01", CombatPhase.ATTACKING)
         context = {
             dangerous,
@@ -61,9 +66,22 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
 
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], Sidestep)
+        self.assertIsInstance(decisions[0], WalkToNearEnemy)
         # Information tokens (the Enemy) must survive untouched.
         self.assertIn(dangerous, result)
+
+    def test_sidestep_still_wins_when_it_is_the_only_decision(self) -> None:
+        """The floor keeps Sidestep a functional last resort -- it just no
+        longer competes with real actions."""
+
+        dangerous = _enemy("obj01", CombatPhase.ATTACKING)
+        context = {dangerous, Sidestep(actor_slot="P1", threat_slot="obj01", direction="up")}
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], Sidestep)
 
     def test_call_police_beats_punch_on_punishable_enemy(self) -> None:
         punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
@@ -102,7 +120,7 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         self.assertEqual(len(decisions), 1)
         self.assertIsInstance(decisions[0], WalkToNearEnemy)
 
-    def test_sidestep_with_unresolvable_threat_still_ranks_above_walk(self) -> None:
+    def test_sidestep_with_unresolvable_threat_no_longer_ranks_above_walk(self) -> None:
         # The referenced Enemy is absent from context entirely.
         context = {
             Sidestep(actor_slot="P1", threat_slot="missing", direction="down"),
@@ -113,9 +131,9 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
 
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], Sidestep)
+        self.assertIsInstance(decisions[0], WalkToNearEnemy)
 
-    def test_sidestep_on_incoming_projectile_beats_walk_to_near_enemy(self) -> None:
+    def test_sidestep_on_incoming_projectile_no_longer_beats_walk_to_near_enemy(self) -> None:
         # No Enemy at all with this slot -- only an IncomingProjectile.
         context = {
             IncomingProjectile(slot="proj01", world_x=0, world_y=0, vel_x=-1.0, vel_z=0.0),
@@ -127,7 +145,7 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
 
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], Sidestep)
+        self.assertIsInstance(decisions[0], WalkToNearEnemy)
 
     def test_supplex_always_outranks_punch_tier(self) -> None:
         punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)

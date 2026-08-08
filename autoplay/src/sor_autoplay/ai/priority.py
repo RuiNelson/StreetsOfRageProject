@@ -63,6 +63,16 @@ _EMERGENCY_SIDESTEP_CAUTION_BASE = 58
 _EMERGENCY_SIDESTEP_PROJECTILE_BASE = 80
 _EMERGENCY_SIDESTEP_UNRESOLVED = 55
 _EMERGENCY_SIDESTEP_MAX = 99
+# TODO(sidestep-rework): the graded 55-99 band above made Sidestep outrank
+# nearly every real action (punches, chases, holds), turning "evade" into
+# the AI's default instead of a last resort -- target selection among
+# several sidestep-worthy threats is more nuanced than a single scalar can
+# express. _sidestep_emergency/_projectile_sidestep_emergency are kept
+# as-is (and still drive _sidestep_tiebreak_key's ranking when several
+# Sidesteps tie) for when that gets redesigned; until then, _emergency()
+# reports this flat floor instead so Sidestep only wins when nothing else
+# in the context applies.
+_EMERGENCY_SIDESTEP_FLOOR = 1
 # Police only after graded sidesteps would already have fired; keep high but
 # decide.py gates emission tightly so this rarely appears.
 _EMERGENCY_CALL_POLICE = 88
@@ -247,7 +257,8 @@ def _emergency(decision: Decision, context: Context) -> int:
     if isinstance(decision, CounterGrab):
         return _EMERGENCY_COUNTER_GRAB
     if isinstance(decision, Sidestep):
-        return _sidestep_emergency(decision, context)
+        # Downgraded to the floor -- see the TODO on _EMERGENCY_SIDESTEP_FLOOR.
+        return _EMERGENCY_SIDESTEP_FLOOR
     if isinstance(decision, CallPolice):
         return _EMERGENCY_CALL_POLICE
     if isinstance(decision, RearAttack):
