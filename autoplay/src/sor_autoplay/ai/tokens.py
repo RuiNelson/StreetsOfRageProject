@@ -30,7 +30,25 @@ class Token(ABC):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Information(Token, ABC):
-    """A directly observed or inferred state of the game."""
+    """A state of the game, either directly observed or inferred."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Observed(Information, ABC):
+    """A state read directly from the game, without further reasoning.
+
+    Every token produced by ``generate_direct_observation_tokens``
+    (``observe.py``) descends from this class.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Inferred(Information, ABC):
+    """A state derived from directly observed tokens.
+
+    Every token produced by ``generate_inference_tokens``
+    (``inference.py``) descends from this class.
+    """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

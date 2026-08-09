@@ -11,27 +11,30 @@ classDiagram
     Token <|-- Information
     Token <|-- Decision
 
-    Information <|-- Stage
-    Information <|-- CameraRange
-    Information <|-- AnimationInProgress
+    Information <|-- Observed
+    Information <|-- Inferred
 
-    Information <|-- Projectile
-    Information <|-- IncomingProjectile
-    Information <|-- Breakable
+    Observed <|-- Stage
+    Observed <|-- CameraRange
+    Observed <|-- AnimationInProgress
 
-    Information <|-- Weapon
-    Information <|-- Pickup
+    Observed <|-- Projectile
+    Inferred <|-- IncomingProjectile
+    Observed <|-- Breakable
+
+    Observed <|-- Weapon
+    Observed <|-- Pickup
     Pickup <|-- HealthPickup
     Pickup <|-- LifePickup
     Pickup <|-- SpecialPickup
     Pickup <|-- ScorePickup
 
-    Information <|-- Character
+    Observed <|-- Character
     Character <|-- PlayableCharacter
     PlayableCharacter <|-- Myself
     PlayableCharacter <|-- Partner
 
-    Information <|-- Enemy
+    Observed <|-- Enemy
     Enemy <|-- Garcia
     Enemy <|-- Signal
     Enemy <|-- HakuRo

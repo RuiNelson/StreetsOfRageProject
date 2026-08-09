@@ -26,7 +26,7 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
-from .tokens import Information
+from .tokens import Observed
 
 # ROM init damage at weapon +$34 — also the upgrade rank for floor pickups.
 WEAPON_DAMAGE: dict[int, int] = {
@@ -74,7 +74,7 @@ def is_pickup_type(type_id: int) -> bool:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Weapon(Information):
+class Weapon(Observed):
     """Free ground weapon eligible for ``$3136`` pickup (``+$51==0``, wear ``<$3``)."""
 
     slot: str
@@ -85,7 +85,7 @@ class Weapon(Information):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Pickup(Information, ABC):
+class Pickup(Observed, ABC):
     """Free ground consumable (``kind==pickup`` and ``+$51==0``)."""
 
     slot: str

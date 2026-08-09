@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from sor_autoplay.phases import CombatPhase
 
-from .tokens import Information
+from .tokens import Observed
 
 # Measured normal-punch attack boxes facing right (controls-and-input.md):
 # outer X edge of +$64; inner X is the dead zone (body already past the box).
@@ -45,7 +45,7 @@ def punch_outer_x(character_id: int | None) -> int:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Character(Information, ABC):
+class Character(Observed, ABC):
     slot: str  # "P1" or "P2"
     player_index: int  # 1 or 2
     character_id: int | None

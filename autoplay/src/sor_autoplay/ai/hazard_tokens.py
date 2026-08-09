@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .tokens import Information
+from .tokens import Inferred, Observed
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Projectile(Information):
+class Projectile(Observed):
     """Direct observation of a live projectile-kind object in flight."""
 
     slot: str
@@ -25,7 +25,7 @@ class Projectile(Information):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class IncomingProjectile(Information):
+class IncomingProjectile(Inferred):
     """Inference output (built elsewhere): a Projectile judged to be a threat."""
 
     slot: str
@@ -36,7 +36,7 @@ class IncomingProjectile(Information):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Breakable(Information):
+class Breakable(Observed):
     """Intact smashable prop (phone booth, crate, …) — punch to break.
 
     Observed from map entities with ``kind == "breakable"`` that are still

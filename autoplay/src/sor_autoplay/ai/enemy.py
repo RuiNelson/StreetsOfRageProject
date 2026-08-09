@@ -18,11 +18,11 @@ from dataclasses import dataclass
 
 from sor_autoplay.phases import CombatPhase
 
-from .tokens import Information
+from .tokens import Observed
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Enemy(Information):
+class Enemy(Observed):
     slot: str  # e.g. "obj07" — MapEntity.slot
     type_id: int
     world_x: int
