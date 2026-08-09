@@ -88,7 +88,7 @@ class Supplex(GrabMechanics):
     Produced by ``should_hold_actions`` while the actor is in a confirmed
     back hold (base $66).
 
-    Raises emergency: (Enemy when held)×68.
+    Raises emergency: (Enemy when in the GRABBED phase)×68.
     """
 
     priority: int = 13
@@ -103,7 +103,7 @@ class AttackHeldEnemy(GrabMechanics):
     Produced by ``should_hold_actions`` in front hold (base $60) with no
     rear threat, or in an unknown hold-ish state.
 
-    Raises emergency: (Enemy when held)×64.
+    Raises emergency: (Enemy when in the GRABBED phase)×64.
     """
 
     priority: int = 14
@@ -118,7 +118,7 @@ class ThrowHeldEnemy(GrabMechanics):
     Produced by ``should_hold_actions`` in front hold (base $60) when a
     rear threat is present.
 
-    Raises emergency: (Enemy when held)×70.
+    Raises emergency: (Enemy when in the GRABBED phase)×70.
     """
 
     priority: int = 16
@@ -133,7 +133,7 @@ class FlipHold(GrabMechanics):
     Produced by ``should_hold_actions`` in front hold (base $60) as the
     crossover alternate to a knee or throw.
 
-    Raises emergency: (Enemy when held)×66.
+    Raises emergency: (Enemy when in the GRABBED phase)×66.
     """
 
     priority: int = 15
@@ -148,7 +148,7 @@ class ReleaseGrab(GrabMechanics):
     Produced by ``should_hold_actions`` in an unknown hold-ish state so the
     AI never idles inside a hold.
 
-    Raises emergency: (Enemy when held)×50.
+    Raises emergency: (Enemy when in the GRABBED phase)×50.
     """
 
     priority: int = 12
