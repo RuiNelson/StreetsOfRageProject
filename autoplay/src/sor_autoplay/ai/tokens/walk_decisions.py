@@ -10,11 +10,16 @@ from .tokens import Decision
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Walk(Decision, ABC):
-    pass
+    """A decision to move the actor somewhere or toward something."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WalkToNearEnemy(Walk):
+    """Walk to a nearby on-screen enemy to bring it into attack range.
+
+    Raises emergency: Enemy×14.
+    """
+
     priority: int = 20
     actor_slot: str
     target_slot: str
@@ -22,9 +27,15 @@ class WalkToNearEnemy(Walk):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WalkToAdvanceStage(Walk):
-    # Lowest of the Walk/Attack priorities: per AI.md, "picking up a weapon
-    # carries a higher priority than advancing to the next stage" -- this is
-    # the fallback when nothing more specific applies.
+    """Walk in the stage's progress direction to scroll it.
+
+    Raises emergency: (no live Enemy anywhere)×12.
+
+    Lowest of the Walk/Attack priorities: per AI.md, "picking up a weapon
+    carries a higher priority than advancing to the next stage" -- this is
+    the fallback when nothing more specific applies.
+    """
+
     priority: int = 5
     actor_slot: str
     direction: str  # "left" | "right"
@@ -32,6 +43,11 @@ class WalkToAdvanceStage(Walk):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WalkToWeapon(Walk):
+    """Walk to pick up a free ground weapon that outranks the held one.
+
+    Raises emergency: (Weapon when its rank beats the held weapon's)×8.
+    """
+
     priority: int = 22
     actor_slot: str
     target_slot: str  # Weapon.slot
@@ -40,6 +56,9 @@ class WalkToWeapon(Walk):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WalkToPickup(Walk):
     """Walk to (and B-pickup) a free ground consumable.
+
+    Raises emergency: (HealthPickup when the actor's health is critical)×50,
+    HealthPickup×15, LifePickup×12, SpecialPickup×9, ScorePickup×3.
 
     Priority sits above stage advance and below weapons: a needed health item
     outranks wandering, but a weapon upgrade is usually more durable value
@@ -53,7 +72,10 @@ class WalkToPickup(Walk):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WalkToBreakable(Walk):
-    """Approach an intact prop to smash it (or clear the path)."""
+    """Approach an intact prop to smash it (or clear the path).
+
+    Raises emergency: Breakable×14.
+    """
 
     priority: int = 12
     actor_slot: str

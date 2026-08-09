@@ -20,12 +20,16 @@ class Essential(Observed, ABC):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Stage(Essential):
+    """The current stage and its progress direction."""
+
     level_index: int
     direction: str  # "right" for level_index 0-5, "none" for 6, "left" for 7
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CameraRange(Essential):
+    """The camera's visible world rectangle."""
+
     left: float
     right: float
     top: float
@@ -34,4 +38,6 @@ class CameraRange(Essential):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AnimationInProgress(Essential):
+    """A playable character currently locked in an animation."""
+
     slot: str  # "P1" or "P2" — which character this blocks from acting

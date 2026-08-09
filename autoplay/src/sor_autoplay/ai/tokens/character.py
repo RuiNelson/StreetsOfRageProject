@@ -95,9 +95,9 @@ class PlayableCharacter(Character, ABC):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Myself(PlayableCharacter):
-    pass
+    """The playable character this agent controls (player_index 1 or 2)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Partner(PlayableCharacter):
-    pass
+    """The other playable character in the game, when present."""

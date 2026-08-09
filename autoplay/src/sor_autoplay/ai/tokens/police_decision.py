@@ -13,5 +13,11 @@ from .attack_decisions import Attack
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CallPolice(Attack):
+    """The A-button police special — a screen-clearing attack.
+
+    Raises emergency: (Myself when health_percent is below
+    POLICE_HEALTH_PERCENT_THRESHOLD)×88.
+    """
+
     priority: int = 0
     actor_slot: str

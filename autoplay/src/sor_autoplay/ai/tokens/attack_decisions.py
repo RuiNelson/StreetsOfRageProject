@@ -23,7 +23,7 @@ from .tokens import Decision
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Attack(Decision, ABC):
-    pass
+    """A decision that strikes a target — a foe, a prop, or a held body."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -48,6 +48,11 @@ class GrabMechanics(Attack, ABC):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Punch(MeleeAttacks):
+    """Basic B-button punch; repeated contact also triggers the grab.
+
+    Raises emergency: (Enemy when in a punishable phase)×60, Enemy×20.
+    """
+
     priority: int = 10
     actor_slot: str
     target_slot: str
@@ -60,6 +65,11 @@ class WeaponAttacks(Attack, ABC):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ThrowKnife(WeaponAttacks):
+    """Throw the held knife at an out-of-melee-range enemy.
+
+    Raises emergency: (Enemy when beyond melee and within knife range)×25.
+    """
+
     priority: int = 11
     actor_slot: str
     target_slot: str
@@ -67,7 +77,10 @@ class ThrowKnife(WeaponAttacks):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Supplex(GrabMechanics):
-    """Back-hold B — true suplex. Front-hold uses FlipHold first."""
+    """Back-hold B — true suplex. Front-hold uses FlipHold first.
+
+    Raises emergency: (Enemy when held)×68.
+    """
 
     priority: int = 13
     actor_slot: str
@@ -76,7 +89,10 @@ class Supplex(GrabMechanics):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AttackHeldEnemy(GrabMechanics):
-    """Front-hold B (knee) — keeps the grab and damages."""
+    """Front-hold B (knee) — keeps the grab and damages.
+
+    Raises emergency: (Enemy when held)×64.
+    """
 
     priority: int = 14
     actor_slot: str
@@ -85,7 +101,10 @@ class AttackHeldEnemy(GrabMechanics):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ThrowHeldEnemy(GrabMechanics):
-    """Front-hold B+back — throws the held foe (useful vs a rear threat)."""
+    """Front-hold B+back — throws the held foe (useful vs a rear threat).
+
+    Raises emergency: (Enemy when held)×70.
+    """
 
     priority: int = 16
     actor_slot: str
@@ -94,7 +113,10 @@ class ThrowHeldEnemy(GrabMechanics):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FlipHold(GrabMechanics):
-    """Front-hold C — crossover to back hold, then Supplex next ticks."""
+    """Front-hold C — crossover to back hold, then Supplex next ticks.
+
+    Raises emergency: (Enemy when held)×66.
+    """
 
     priority: int = 15
     actor_slot: str
@@ -103,7 +125,10 @@ class FlipHold(GrabMechanics):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ReleaseGrab(GrabMechanics):
-    """Walk away opposite the held enemy to drop the grab."""
+    """Walk away opposite the held enemy to drop the grab.
+
+    Raises emergency: (Enemy when held)×50.
+    """
 
     priority: int = 12
     actor_slot: str
@@ -112,7 +137,10 @@ class ReleaseGrab(GrabMechanics):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class JumpAttack(MeleeAttacks):
-    """Jump-kick only — never a stationary hop. Requires horizontal aim."""
+    """Jump-kick only — never a stationary hop. Requires horizontal aim.
+
+    Raises emergency: (Enemy when in a punishable phase)×28, Enemy×18.
+    """
 
     priority: int = 8  # below basic punch priority (10)
     actor_slot: str
@@ -121,7 +149,10 @@ class JumpAttack(MeleeAttacks):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SmashBreakable(Attack):
-    """B near an intact prop (same input as punch; ROM hits the prop)."""
+    """B near an intact prop (same input as punch; ROM hits the prop).
+
+    Raises emergency: Breakable×16.
+    """
 
     priority: int = 9
     actor_slot: str
@@ -131,6 +162,8 @@ class SmashBreakable(Attack):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RearAttack(MeleeAttacks):
     """Simultaneous B+C rear/escape attack (``$322A``).
+
+    Raises emergency: (Enemy when in a dangerous phase)×60, Enemy×55.
 
     Prefer when a close threat sits behind the player, or when a body has
     closed inside the punch's inner dead zone (punch cannot connect).
@@ -145,7 +178,8 @@ class RearAttack(MeleeAttacks):
 class CounterGrab(GrabMechanics):
     """Enemy-held counter: C edge then B edge while the window is open.
 
-    Highest emergency among attacks — the player is already grabbed.
+    Raises emergency: (Myself when held by an enemy)×100 — the player is
+    already grabbed and this is the only useful action.
     """
 
     priority: int = 40

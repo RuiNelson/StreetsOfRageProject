@@ -21,6 +21,8 @@ from .character import Character
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Enemy(Character):
+    """A hostile on-screen actor that can be hit and defeated."""
+
     type_id: int
     targets_player: int | None  # 1 or 2, or None — from MapEntity.targets_player
 
@@ -32,33 +34,35 @@ class Grunt(Enemy, ABC):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Garcia(Grunt):
-    """Types $20-$23."""
+    """Garcia ordinary enemy (types $20-$23)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Signal(Grunt):
-    """Type $24."""
+    """Signal ordinary enemy (type $24)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class HakuRo(Grunt):
-    """Types $25, $2A."""
+    """HakuRo ordinary enemy (types $25, $2A)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Nora(Grunt):
-    """Type $26."""
+    """Nora ordinary enemy (type $26)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Jack(Grunt):
-    """Type $27."""
+    """Jack ordinary enemy (type $27); may carry a weapon."""
 
     has_projectile: bool  # family_state bit 0 -- "weapon attached"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Boss(Enemy, ABC):
+    """A boss enemy with its own tactical state and behaviour fields."""
+
     tactical: int = 0  # boss +$67 substate; Abadede police latch when set
     pair_role: int = 0  # later-type +$5D (1/2) twin role when kind==boss
     boss_dist_x: int = 0  # later-type +$50 abs X to target
@@ -73,33 +77,36 @@ class Boss(Enemy, ABC):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Abadede(Boss):
-    """Type $30."""
+    """Abadede boss (type $30)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class MrX(Boss):
-    """Type $35."""
+    """Mr. X boss (type $35)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Souther(Boss):
-    """Type $55."""
+    """Souther boss (type $55)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Antonio(Boss):
-    """Type $56."""
+    """Antonio boss (type $56)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Bongo(Boss):
-    """Type $57."""
+    """Bongo boss (type $57)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Onihime(Boss):
-    """Type $58. The ROM runs two same-type instances (Onihime + Yasha),
-    distinguished at runtime by pair_role, not by different type ids."""
+    """Onihime/Yasha twin boss (type $58).
+
+    The ROM runs two same-type instances (Onihime + Yasha), distinguished at
+    runtime by pair_role, not by different type ids.
+    """
 
 
 _TYPE_TO_CLASS: dict[int, type[Enemy]] = {
