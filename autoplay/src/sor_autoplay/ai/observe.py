@@ -16,7 +16,7 @@ from sor_autoplay.world_map import MapEntity
 from .tokens import Myself, Partner
 from .tokens import Boss, Enemy, Jack, enemy_class_for_type
 from .tokens import AnimationInProgress, CameraRange, Stage
-from .tokens import Breakable, Projectile
+from .tokens import Breakable, Pit, Projectile
 from .tokens import Weapon, build_pickup_token
 from .tokens import Context
 
@@ -195,6 +195,16 @@ def generate_direct_observation_tokens(
                         type_id=entity.type_id,
                     )
                 )
+
+    for hole in snapshot.floor_holes:
+        context.add(
+            Pit(
+                world_x=hole.world_x,
+                lane_y=hole.lane_y,
+                width=hole.width,
+                height=hole.height,
+            )
+        )
 
     context.add(
         CameraRange(

@@ -3,10 +3,11 @@ import unittest
 from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay.ai.tokens import Abadede, Enemy, Garcia, Jack, Souther
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
-from sor_autoplay.ai.tokens import Projectile
+from sor_autoplay.ai.tokens import Pit, Projectile
 from sor_autoplay.ai.observe import generate_direct_observation_tokens
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import find, find_all
+from sor_autoplay.hazards import FloorHole
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 from sor_autoplay.world_map import MapEntity, WorldMap
@@ -227,6 +228,7 @@ def _snapshot(
     players: tuple[PlayerSnapshot, PlayerSnapshot],
     entities: tuple[MapEntity, ...] = (),
     level_index: int = 0,
+    floor_holes: tuple[FloorHole, ...] = (),
 ) -> GameSnapshot:
     return GameSnapshot(
         connected=True,
@@ -243,6 +245,7 @@ def _snapshot(
         timer_valid=True,
         players=players,
         world_map=_world_map(entities),
+        floor_holes=floor_holes,
     )
 
 
@@ -521,6 +524,34 @@ class ProjectileObservationTests(unittest.TestCase):
         self.assertEqual(len(projectiles), 1)
         self.assertEqual(projectiles[0].slot, "obj09")
         self.assertEqual(projectiles[0].vel_x, -1.5)
+
+
+class PitObservationTests(unittest.TestCase):
+    def test_floor_holes_become_pit_tokens(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        holes = (FloorHole(world_x=1200, lane_y=64, width=128, height=48),)
+        snapshot = _snapshot(
+            players=(p1, p2), entities=(_player_entity(slot="P1"),), floor_holes=holes
+        )
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        pits = find_all(context, Pit)
+        self.assertEqual(len(pits), 1)
+        self.assertEqual(pits[0].world_x, 1200)
+        self.assertEqual(pits[0].lane_y, 64)
+        self.assertEqual(pits[0].width, 128)
+        self.assertEqual(pits[0].height, 48)
+
+    def test_no_holes_no_pits(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        snapshot = _snapshot(players=(p1, p2), entities=(_player_entity(slot="P1"),))
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        self.assertEqual(find_all(context, Pit), [])
 
 
 class AnimationInProgressTests(unittest.TestCase):

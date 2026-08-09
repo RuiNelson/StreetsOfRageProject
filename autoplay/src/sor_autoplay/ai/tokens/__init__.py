@@ -52,7 +52,7 @@ from .enemy import (
     enemy_class_for_type,
 )
 from .essential import AnimationInProgress, CameraRange, Essential, Stage
-from .hazard_tokens import Breakable, IncomingProjectile, Projectile
+from .hazard_tokens import Breakable, IncomingProjectile, Pit, Projectile, StageObjects
 from .pickup_tokens import (
     HEALTH_DELTA,
     PLAYER_MAX_HEALTH,

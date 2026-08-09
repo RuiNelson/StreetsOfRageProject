@@ -1,13 +1,28 @@
 import unittest
 
-from sor_autoplay.ai.tokens import IncomingProjectile, Projectile
-from sor_autoplay.ai.tokens import Information
+from sor_autoplay.ai.tokens import Breakable, IncomingProjectile, Pit, Projectile
+from sor_autoplay.ai.tokens import Information, Observed, StageObjects
 
 
 class HazardTokenTests(unittest.TestCase):
     def test_all_are_information(self) -> None:
         self.assertTrue(issubclass(Projectile, Information))
         self.assertTrue(issubclass(IncomingProjectile, Information))
+        self.assertTrue(issubclass(Breakable, Information))
+        self.assertTrue(issubclass(Pit, Information))
+
+    def test_stage_objects_hierarchy(self) -> None:
+        self.assertTrue(issubclass(StageObjects, Observed))
+        self.assertTrue(issubclass(Breakable, StageObjects))
+        self.assertTrue(issubclass(Pit, StageObjects))
+        self.assertFalse(issubclass(Projectile, StageObjects))
+
+    def test_pit_fields(self) -> None:
+        pit = Pit(world_x=1200, lane_y=64, width=128, height=48)
+        self.assertEqual(pit.world_x, 1200)
+        self.assertEqual(pit.lane_y, 64)
+        self.assertEqual(pit.width, 128)
+        self.assertEqual(pit.height, 48)
 
     def test_projectile_fields(self) -> None:
         projectile = Projectile(

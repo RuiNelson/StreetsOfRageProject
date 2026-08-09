@@ -21,7 +21,9 @@ classDiagram
 
     Observed <|-- Projectile
     Inferred <|-- IncomingProjectile
-    Observed <|-- Breakable
+    Observed <|-- StageObjects
+    StageObjects <|-- Breakable
+    StageObjects <|-- Pit
 
     Observed <|-- Weapon
     Observed <|-- Pickup

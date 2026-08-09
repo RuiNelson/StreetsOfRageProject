@@ -8,6 +8,7 @@ package. ``IncomingProjectile`` is an inference output, constructed by
 
 from __future__ import annotations
 
+from abc import ABC
 from dataclasses import dataclass
 
 from .tokens import Inferred, Observed
@@ -36,7 +37,27 @@ class IncomingProjectile(Inferred):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Breakable(Observed):
+class StageObjects(Observed, ABC):
+    """An inanimate object placed in the stage, observed directly from RAM."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Pit(StageObjects):
+    """A floor gap (pit) the player can fall into.
+
+    Observed from ``GameSnapshot.floor_holes`` (the ``hazards.py``
+    collision-class scan); fields mirror ``FloorHole`` — an AABB of the
+    open region, ``lane_y`` being the top lane in pixels.
+    """
+
+    world_x: int
+    lane_y: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Breakable(StageObjects):
     """Intact smashable prop (phone booth, crate, …) — punch to break.
 
     Observed from map entities with ``kind == "breakable"`` that are still
