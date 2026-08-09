@@ -35,11 +35,12 @@ classDiagram
     PlayableCharacter <|-- Partner
 
     Character <|-- Enemy
-    Enemy <|-- Garcia
-    Enemy <|-- Signal
-    Enemy <|-- HakuRo
-    Enemy <|-- Nora
-    Enemy <|-- Jack
+    Enemy <|-- Grunt
+    Grunt <|-- Garcia
+    Grunt <|-- Signal
+    Grunt <|-- HakuRo
+    Grunt <|-- Nora
+    Grunt <|-- Jack
     Enemy <|-- Boss
     Boss <|-- Abadede
     Boss <|-- MrX

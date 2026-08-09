@@ -7,6 +7,7 @@ from sor_autoplay.ai.enemy import (
     Boss,
     Enemy,
     Garcia,
+    Grunt,
     HakuRo,
     Jack,
     MrX,
@@ -129,6 +130,11 @@ class EnemyHierarchyTests(unittest.TestCase):
         self.assertTrue(issubclass(Boss, Enemy))
         for cls in (Abadede, MrX, Souther, Antonio, Bongo, Onihime):
             self.assertTrue(issubclass(cls, Boss))
+
+    def test_grunt_hierarchy(self) -> None:
+        for cls in (Garcia, Signal, HakuRo, Nora, Jack):
+            self.assertTrue(issubclass(cls, Grunt))
+        self.assertTrue(issubclass(Grunt, Enemy))
 
     def test_jack_has_projectile_field(self) -> None:
         jack_with = Jack(**_base_kwargs(type_id=0x27, has_projectile=True))

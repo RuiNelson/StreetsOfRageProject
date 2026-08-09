@@ -26,27 +26,32 @@ class Enemy(Character):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Garcia(Enemy):
+class Grunt(Enemy, ABC):
+    """An ordinary (non-boss) enemy."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Garcia(Grunt):
     """Types $20-$23."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Signal(Enemy):
+class Signal(Grunt):
     """Type $24."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class HakuRo(Enemy):
+class HakuRo(Grunt):
     """Types $25, $2A."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Nora(Enemy):
+class Nora(Grunt):
     """Type $26."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Jack(Enemy):
+class Jack(Grunt):
     """Type $27."""
 
     has_projectile: bool  # family_state bit 0 -- "weapon attached"
