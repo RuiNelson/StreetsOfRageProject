@@ -1,8 +1,10 @@
+import os
 import unittest
 
 from sor_autoplay.ai.attack_decisions import CounterGrab, Punch
 from sor_autoplay.ai.police_decision import CallPolice
 from sor_autoplay.ai.walk_decisions import Sidestep, WalkToAdvanceStage, WalkToCoordinate
+from sor_autoplay.hud import ObserverHud, _window_config_path
 from sor_autoplay.hud import _describe_decision
 
 
@@ -38,6 +40,61 @@ class DescribeDecisionTests(unittest.TestCase):
     def test_decision_with_no_extra_fields_shows_bare_name(self) -> None:
         self.assertEqual(_describe_decision(CallPolice(actor_slot="P1")), "CallPolice")
         self.assertEqual(_describe_decision(CounterGrab(actor_slot="P1")), "CounterGrab")
+
+
+class _FakeRoot:
+    """Minimal stand-in for the Tk root: only what _sanitize_geometry uses."""
+
+    def __init__(self) -> None:
+        self.root = self
+
+    def winfo_screenwidth(self) -> int:
+        return 1600
+
+    def winfo_screenheight(self) -> int:
+        return 1000
+
+
+class WindowGeometryTests(unittest.TestCase):
+    """The persisted-window-geometry logic must restore the last size/position
+    instead of maximizing, and must never persist a zoomed (maximized) size."""
+
+    def test_config_path_honors_xdg(self) -> None:
+        old = os.environ.pop("XDG_CONFIG_HOME", None)
+        try:
+            os.environ["XDG_CONFIG_HOME"] = "/tmp/cfg"
+            self.assertEqual(
+                str(_window_config_path()), "/tmp/cfg/sor-autoplay/window.json"
+            )
+        finally:
+            if old is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = old
+
+    def test_sanitize_keeps_valid_geometry(self) -> None:
+        self.assertEqual(
+            ObserverHud._sanitize_geometry(_FakeRoot(), "900x600+120+90"),
+            "900x600+120+90",
+        )
+
+    def test_sanitize_clamps_to_screen(self) -> None:
+        fake = _FakeRoot()
+        self.assertEqual(
+            ObserverHud._sanitize_geometry(fake, "2000x1200+1500+200"),
+            "1600x1000+0+0",
+        )
+        self.assertEqual(
+            ObserverHud._sanitize_geometry(fake, "800x600+4000+5000"),
+            "800x600+800+400",
+        )
+
+    def test_sanitize_rejects_garbage(self) -> None:
+        fake = _FakeRoot()
+        self.assertIsNone(ObserverHud._sanitize_geometry(fake, ""))
+        self.assertIsNone(ObserverHud._sanitize_geometry(fake, "abc"))
+        self.assertIsNone(ObserverHud._sanitize_geometry(fake, "0x600+1+1"))
+        self.assertIsNone(ObserverHud._sanitize_geometry(fake, "900x-5+1+1"))
 
 
 if __name__ == "__main__":

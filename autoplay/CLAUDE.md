@@ -6,7 +6,7 @@
 `StreetsOfRageRecompilation` (`sor`) process via
 `MegaDriveEnvironment`'s `megadrive_remote` client.
 
-**Current scope:** maximized-window **observer** (mode, characters, health,
+**Current scope:** window **observer** (mode, characters, health,
 lives, specials, timer, level, scores, 2D world map, floor holes, police-special
 flags), plus an opt-in **symbolic AI** (`ai/` — Phase A of the design in
 [`AI.md`](AI.md)) that can control P1 and/or P2 through controller input only
@@ -55,7 +55,7 @@ machine may lack Tk.
 | `memory_map.py` | Known addresses |
 | `hazards.py` | Pause, police special active, floor holes |
 | `phases.py` | Combat-phase decode for map outlines and AI danger checks |
-| `hud.py` | Maximized Tk: State / P1 / P2 + world map + AI toggle labels |
+| `hud.py` | Tk window: State / P1 / P2 + world map + AI toggle labels; restores last window size/position |
 | `bcd.py` | Packed-BCD helpers |
 | `AI.md` | Architecture for the symbolic AI (Token / Information / Decision) |
 | `ai/` | Symbolic AI implementation — see "AI surface" below and [`AI.md`](AI.md) |
@@ -79,6 +79,13 @@ entry points in this tree.
   winning-`Decision` label, AI toggle label)
 - Map outlines use `phases.py` combat-phase colours
 - Click a player's "AI: OFF/ON" label to toggle that player's AI at runtime
+- Window size/position is persisted to `~/.config/sor-autoplay/window.json`
+  (`$XDG_CONFIG_HOME` when set): each launch restores the last geometry
+  instead of maximizing. Maximize only happens on first run (no saved file).
+  A maximized (zoomed) close never overwrites the saved normal geometry.
+  Apply geometry after the UI is built — scheduling it with `after_idle` at
+  construction time makes the first deiconify/focus flush the idle callback
+  before the layout exists, so the window drops to its minimum size.
 
 ### AI surface (`ai/` — see [`AI.md`](AI.md))
 

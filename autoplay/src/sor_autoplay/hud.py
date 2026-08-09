@@ -1,9 +1,16 @@
-"""Maximized-window HUD: 3-column status bar + map filling remaining space."""
+"""Tk observer HUD: 3-column status bar + map filling remaining space.
+
+The window restores its last size/position from a small JSON file and only
+maximizes on first run (no saved geometry yet).
+"""
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 import tkinter as tk
+from pathlib import Path
 from tkinter import font as tkfont
 from typing import Callable
 
@@ -17,6 +24,17 @@ STATUS_GAP = 10
 MAP_INNER_PAD = 10
 # GUI paint only; remote sampling uses its own wall-clock poll period.
 HUD_PAINT_MS_DEFAULT = 33
+
+# Where the last window geometry ("WxH+X+Y") is persisted across launches.
+# In ~/.config/sor-autoplay/window.json (or $XDG_CONFIG_HOME).
+_WINDOW_CONFIG_REL = Path("sor-autoplay") / "window.json"
+
+
+def _window_config_path() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME")
+    if base:
+        return Path(base) / _WINDOW_CONFIG_REL
+    return Path.home() / ".config" / _WINDOW_CONFIG_REL
 
 _BG = "#050508"
 _CARD = "#12131a"
@@ -39,7 +57,10 @@ _KIND_Z = {
 
 
 class ObserverHud:
-    """Maximized window: state/P1/P2 columns on top; map takes the rest."""
+    """Observer window: state/P1/P2 columns on top; map takes the rest.
+
+    Restores the last window size/position from disk when available.
+    """
 
     def __init__(
         self,
@@ -71,10 +92,6 @@ class ObserverHud:
         self.root.title(title)
         self.root.configure(bg=_BG)
         self.root.minsize(720, 420)
-        self._start_maximized()
-        # Bring the observer to the front (macOS often opens Tk behind the
-        # terminal that launched it).
-        self._raise_window()
         self.root.bind("<Escape>", self._handle_close)
         self.root.bind("<q>", self._handle_close)
         self.root.protocol("WM_DELETE_WINDOW", self._handle_close)
@@ -197,6 +214,18 @@ class ObserverHud:
         )
         self._map_legend.pack(fill=tk.X, padx=10, pady=(0, 8))
 
+        # Apply geometry only after the whole UI is built. Restore the last
+        # size/position if we have one, otherwise maximize (first run). Do not
+        # schedule this with after_idle at construction time: the first
+        # deiconify/focus flushes the idle callback before the layout exists
+        # and the window ends up dropping to its minimum size.
+        self._save_geometry_job: str | None = None
+        self.root.bind("<Configure>", self._on_window_configure)
+        self._restore_or_maximize()
+        # Bring the observer to the front — macOS often opens Tk behind the
+        # terminal that launched it.
+        self._raise_window()
+
     def _card(self, parent: tk.Frame, column: int) -> tk.Frame:
         frame = tk.Frame(
             parent,
@@ -244,10 +273,6 @@ class ObserverHud:
         label.pack(fill=tk.X)
         return label
 
-    def _start_maximized(self) -> None:
-        self.root.attributes("-fullscreen", False)
-        self.root.after_idle(self._apply_maximized)
-
     def _raise_window(self) -> None:
         """Make the window visible and focused after launch from a terminal."""
 
@@ -269,6 +294,8 @@ class ObserverHud:
             pass
 
     def _apply_maximized(self) -> None:
+        """First-run default: maximize the window (no saved geometry yet)."""
+
         self.root.update_idletasks()
         try:
             self.root.state("zoomed")
@@ -294,6 +321,82 @@ class ObserverHud:
         self.root.geometry(f"{width}x{height}+0+0")
         self._raise_window()
 
+    def _restore_or_maximize(self) -> None:
+        """Restore the last saved size/position; maximize only on first run."""
+
+        self.root.update_idletasks()
+        saved = self._load_saved_geometry()
+        if saved:
+            try:
+                self.root.geometry(saved)
+                return
+            except tk.TclError:
+                pass
+        self._apply_maximized()
+
+    def _load_saved_geometry(self) -> str | None:
+        try:
+            data = json.loads(_window_config_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        geometry = data.get("geometry") if isinstance(data, dict) else None
+        if not isinstance(geometry, str):
+            return None
+        return self._sanitize_geometry(geometry)
+
+    def _sanitize_geometry(self, geometry: str) -> str | None:
+        """Validate a "WxH+X+Y" string and clamp it to the current screen."""
+
+        try:
+            size, _, pos = geometry.partition("+")
+            w_s, h_s = size.split("x")
+            w, h = int(w_s), int(h_s)
+            if pos:
+                x_s, _, y_s = pos.partition("+")
+                x, y = int(x_s), int(y_s)
+            else:
+                x = y = 0
+        except ValueError:
+            return None
+        if w <= 0 or h <= 0:
+            return None
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        w = min(w, sw)
+        h = min(h, sh)
+        x = min(max(x, 0), max(sw - w, 0))
+        y = min(max(y, 0), max(sh - h, 0))
+        return f"{w}x{h}+{x}+{y}"
+
+    def _on_window_configure(self, _event: object | None = None) -> None:
+        # Debounced save so resizing/dragging does not hammer the disk.
+        if self._save_geometry_job is not None:
+            try:
+                self.root.after_cancel(self._save_geometry_job)
+            except tk.TclError:
+                pass
+        self._save_geometry_job = self.root.after(300, self._save_geometry)
+
+    def _save_geometry(self) -> None:
+        self._save_geometry_job = None
+        try:
+            # Never persist a maximized (zoomed) size — keep the previous
+            # normal geometry instead.
+            if self.root.state() == "zoomed":
+                return
+            geometry = self.root.geometry()
+            geometry = self._sanitize_geometry(geometry)
+        except tk.TclError:
+            return
+        if geometry is None:
+            return
+        try:
+            path = _window_config_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"geometry": geometry}), encoding="utf-8")
+        except OSError:
+            pass
+
     def _pick_font_family(self) -> str:
         available = set(tkfont.families())
         for name in ("SF Mono", "Menlo", "Monaco", "Consolas", "Courier New", "TkFixedFont"):
@@ -306,6 +409,15 @@ class ObserverHud:
             self._on_toggle_agent(player_index)
 
     def _handle_close(self, _event: object | None = None) -> None:
+        # Persist the final size/position (unless it is zoomed) so the next
+        # launch restores it.
+        if self._save_geometry_job is not None:
+            try:
+                self.root.after_cancel(self._save_geometry_job)
+            except tk.TclError:
+                pass
+            self._save_geometry_job = None
+        self._save_geometry()
         if self._on_close is not None:
             self._on_close()
         try:
