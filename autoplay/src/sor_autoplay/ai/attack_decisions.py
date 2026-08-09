@@ -30,14 +30,14 @@ class Attack(Decision, ABC):
 class MeleeAttacks(Attack, ABC):
     """Close-combat attacks that need no weapon.
 
-    Covers ``Punch`` / ``JumpAttack`` / ``RearAttack`` and the whole
-    ``GrabMechanics`` family. ``ThrowKnife`` (needs a held knife) and
-    ``SmashBreakable`` (hits a prop, not a foe) are not melee attacks.
+    Covers ``Punch`` / ``JumpAttack`` / ``RearAttack``. ``ThrowKnife``
+    (needs a held knife) and ``SmashBreakable`` (hits a prop, not a foe) are
+    not melee attacks, nor is the ``GrabMechanics`` family.
     """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class GrabMechanics(MeleeAttacks, ABC):
+class GrabMechanics(Attack, ABC):
     """Any move that grabs a foe, exploits a held grab, or counters a grab.
 
     Covers the hold-move family (``AttackHeldEnemy`` / ``Supplex`` /

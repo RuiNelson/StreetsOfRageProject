@@ -59,7 +59,7 @@ classDiagram
 
     Decision <|-- Attack
     Attack <|-- MeleeAttacks
-    MeleeAttacks <|-- GrabMechanics
+    Attack <|-- GrabMechanics
     MeleeAttacks <|-- Punch
     Attack <|-- ThrowKnife
     GrabMechanics <|-- Supplex
