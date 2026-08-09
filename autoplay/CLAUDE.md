@@ -132,6 +132,30 @@ corresponding source change.
 Add concrete tokens as subclasses rather than generic discriminator fields,
 per [`AI.md`](AI.md), so the diagram and the class tree stay aligned.
 
+## Token docstring convention
+
+Every token class docstring follows the same normalized shape.
+
+1. **First line:** a short, concise, human-readable description of the token.
+   It may include technical details.
+2. **Inferred descendants add a second line** describing clearly and shortly
+   under what conditions they are generated and which function generates
+   them (e.g. "Built by ``generate_inference_tokens`` when the projectile is
+   approaching, in the player's lane, and within the impact window").
+3. **Decision descendants add a second line** describing how they can be
+   ranked **in emergency**. This is *not* a static number: the static
+   ``priority`` field only breaks ties between decisions that rank as
+   equally emergent. Emergency is calculated from the *presence of other
+   tokens*, or from the presence of another token *under certain
+   conditions*. Format:
+
+   ```text
+   Raises emergency: InferredToken1×100, InferredToken2×50, (Weapon when distance is less than 32)×150
+   ```
+
+   Planned inferred tokens to reference from these lines:
+   ``EnemyNearTheRearOfMyself``, ``ClusterOfEnemies``.
+
 ## Snapshot cadence
 
 - **Snapshot cadence is wall-clock polling**, not VSync waits.
