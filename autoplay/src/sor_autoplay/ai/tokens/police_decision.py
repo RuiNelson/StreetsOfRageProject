@@ -15,6 +15,9 @@ from .attack_decisions import Attack
 class CallPolice(Attack):
     """The A-button police special — a screen-clearing attack.
 
+    Produced by ``should_call_police`` when the actor has a special and
+    health_percent is below POLICE_HEALTH_PERCENT_THRESHOLD.
+
     Raises emergency: (Myself when health_percent is below
     POLICE_HEALTH_PERCENT_THRESHOLD)×88.
     """

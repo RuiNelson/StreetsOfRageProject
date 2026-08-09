@@ -142,7 +142,11 @@ Every token class docstring follows the same normalized shape.
    under what conditions they are generated and which function generates
    them (e.g. "Built by ``generate_inference_tokens`` when the projectile is
    approaching, in the player's lane, and within the impact window").
-3. **Decision descendants add a second line** describing how they can be
+3. **Decision descendants add a second line describing when they are
+   produced** — the ``should_*`` generator that creates them and the
+   conditions under which it fires (e.g. "Produced by ``should_punch`` when
+   an enemy sits within the actor's punch band").
+4. **Decision descendants add a third line** describing how they can be
    ranked **in emergency**. This is *not* a static number: the static
    ``priority`` field only breaks ties between decisions that rank as
    equally emergent. Emergency is calculated from the *presence of other

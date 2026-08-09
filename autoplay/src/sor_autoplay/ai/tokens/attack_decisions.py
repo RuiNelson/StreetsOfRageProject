@@ -50,6 +50,9 @@ class GrabMechanics(Attack, ABC):
 class Punch(MeleeAttacks):
     """Basic B-button punch; repeated contact also triggers the grab.
 
+    Produced by ``should_punch`` when an enemy sits within the actor's punch
+    band.
+
     Raises emergency: (Enemy when in a punishable phase)×60, Enemy×20.
     """
 
@@ -67,6 +70,9 @@ class WeaponAttacks(Attack, ABC):
 class ThrowKnife(WeaponAttacks):
     """Throw the held knife at an out-of-melee-range enemy.
 
+    Produced by ``should_throw_knife`` when the actor holds a knife (type
+    $08) and the nearest enemy is beyond melee but within knife range.
+
     Raises emergency: (Enemy when beyond melee and within knife range)×25.
     """
 
@@ -78,6 +84,9 @@ class ThrowKnife(WeaponAttacks):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Supplex(GrabMechanics):
     """Back-hold B — true suplex. Front-hold uses FlipHold first.
+
+    Produced by ``should_hold_actions`` while the actor is in a confirmed
+    back hold (base $66).
 
     Raises emergency: (Enemy when held)×68.
     """
@@ -91,6 +100,9 @@ class Supplex(GrabMechanics):
 class AttackHeldEnemy(GrabMechanics):
     """Front-hold B (knee) — keeps the grab and damages.
 
+    Produced by ``should_hold_actions`` in front hold (base $60) with no
+    rear threat, or in an unknown hold-ish state.
+
     Raises emergency: (Enemy when held)×64.
     """
 
@@ -102,6 +114,9 @@ class AttackHeldEnemy(GrabMechanics):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ThrowHeldEnemy(GrabMechanics):
     """Front-hold B+back — throws the held foe (useful vs a rear threat).
+
+    Produced by ``should_hold_actions`` in front hold (base $60) when a
+    rear threat is present.
 
     Raises emergency: (Enemy when held)×70.
     """
@@ -115,6 +130,9 @@ class ThrowHeldEnemy(GrabMechanics):
 class FlipHold(GrabMechanics):
     """Front-hold C — crossover to back hold, then Supplex next ticks.
 
+    Produced by ``should_hold_actions`` in front hold (base $60) as the
+    crossover alternate to a knee or throw.
+
     Raises emergency: (Enemy when held)×66.
     """
 
@@ -126,6 +144,9 @@ class FlipHold(GrabMechanics):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ReleaseGrab(GrabMechanics):
     """Walk away opposite the held enemy to drop the grab.
+
+    Produced by ``should_hold_actions`` in an unknown hold-ish state so the
+    AI never idles inside a hold.
 
     Raises emergency: (Enemy when held)×50.
     """
@@ -139,6 +160,9 @@ class ReleaseGrab(GrabMechanics):
 class JumpAttack(MeleeAttacks):
     """Jump-kick only — never a stationary hop. Requires horizontal aim.
 
+    Produced by ``should_jump_attack`` when a forward enemy sits in the
+    horizontal jump band (outside punch outer, within the max ΔX).
+
     Raises emergency: (Enemy when in a punishable phase)×28, Enemy×18.
     """
 
@@ -151,6 +175,9 @@ class JumpAttack(MeleeAttacks):
 class SmashBreakable(Attack):
     """B near an intact prop (same input as punch; ROM hits the prop).
 
+    Produced by ``should_smash_breakable`` when an intact Breakable is in
+    smash range.
+
     Raises emergency: Breakable×16.
     """
 
@@ -162,6 +189,9 @@ class SmashBreakable(Attack):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RearAttack(MeleeAttacks):
     """Simultaneous B+C rear/escape attack (``$322A``).
+
+    Produced by ``should_rear_attack`` when an enemy is in the rear band or
+    closed inside the punch inner dead zone.
 
     Raises emergency: (Enemy when in a dangerous phase)×60, Enemy×55.
 
@@ -177,6 +207,9 @@ class RearAttack(MeleeAttacks):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CounterGrab(GrabMechanics):
     """Enemy-held counter: C edge then B edge while the window is open.
+
+    Produced by ``should_counter_grab`` while the actor is held by an enemy
+    (HELD_BY_ENEMY) and the counter is not already running.
 
     Raises emergency: (Myself when held by an enemy)×100 — the player is
     already grabbed and this is the only useful action.

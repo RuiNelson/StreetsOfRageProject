@@ -17,6 +17,9 @@ class Walk(Decision, ABC):
 class WalkToNearEnemy(Walk):
     """Walk to a nearby on-screen enemy to bring it into attack range.
 
+    Produced by ``should_walk_to_near_enemy`` when an on-screen enemy exists
+    and no enemy is already within punch or rear range.
+
     Raises emergency: Enemy×14.
     """
 
@@ -28,6 +31,9 @@ class WalkToNearEnemy(Walk):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WalkToAdvanceStage(Walk):
     """Walk in the stage's progress direction to scroll it.
+
+    Produced by ``should_walk_to_advance_stage`` when no live Enemy token
+    remains anywhere and the stage has a progress direction.
 
     Raises emergency: (no live Enemy anywhere)×12.
 
@@ -45,6 +51,9 @@ class WalkToAdvanceStage(Walk):
 class WalkToWeapon(Walk):
     """Walk to pick up a free ground weapon that outranks the held one.
 
+    Produced by ``should_walk_to_weapon`` when an in-camera Weapon token
+    ranks higher than the actor's held weapon.
+
     Raises emergency: (Weapon when its rank beats the held weapon's)×8.
     """
 
@@ -56,6 +65,9 @@ class WalkToWeapon(Walk):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WalkToPickup(Walk):
     """Walk to (and B-pickup) a free ground consumable.
+
+    Produced by ``should_walk_to_pickup`` when a useful Pickup token is in
+    camera for the actor.
 
     Raises emergency: (HealthPickup when the actor's health is critical)×50,
     HealthPickup×15, LifePickup×12, SpecialPickup×9, ScorePickup×3.
@@ -73,6 +85,9 @@ class WalkToPickup(Walk):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WalkToBreakable(Walk):
     """Approach an intact prop to smash it (or clear the path).
+
+    Produced by ``should_walk_to_breakable`` when an in-camera Breakable
+    lies beyond smash range ahead of the actor.
 
     Raises emergency: Breakable×14.
     """
