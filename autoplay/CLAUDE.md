@@ -161,8 +161,11 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m unittest discove
 Unit tests cover snapshot decoding, BCD, hazards, phases, world map,
 `ObserverApp.stop()` client handoff, and the full `ai/` pipeline (tokens,
 observation, inference, decisions, priority ranking, execution, the
-pause/non-gameplay gate). There is no live host requirement for the unit
-suite.
+pause/non-gameplay gate). The token-class tests live in
+`tests/ai/tokens/` (`test_tokens.py`, `test_character.py`, `test_enemy.py`,
+`test_essential.py`, `test_hazard_tokens.py`, `test_pickup_tokens.py`),
+mirroring the `ai/` module split; pipeline tests stay in `tests/ai/`.
+There is no live host requirement for the unit suite.
 
 After changing `TokenMap.md`, validate the Mermaid syntax by rendering it
 (requires Chrome + `mmdc` from `@mermaid-js/mermaid-cli`):
