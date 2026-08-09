@@ -1,10 +1,10 @@
 import os
 import unittest
 
-from sor_autoplay.ai.attack_decisions import CounterGrab, Punch
+from sor_autoplay.ai.tokens import CounterGrab, Punch
 from sor_autoplay.ai.loop import DecisionState
-from sor_autoplay.ai.police_decision import CallPolice
-from sor_autoplay.ai.walk_decisions import WalkToAdvanceStage
+from sor_autoplay.ai.tokens import CallPolice
+from sor_autoplay.ai.tokens import WalkToAdvanceStage
 from sor_autoplay.hud import ObserverHud, _window_config_path
 from sor_autoplay.hud import _describe_decision, _describe_pending
 

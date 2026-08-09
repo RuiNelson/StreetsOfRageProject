@@ -1,12 +1,12 @@
 import unittest
 
-from sor_autoplay.ai.attack_decisions import CounterGrab, JumpAttack, Punch, Supplex
-from sor_autoplay.ai.character import Myself
-from sor_autoplay.ai.enemy import Enemy
-from sor_autoplay.ai.police_decision import CallPolice
+from sor_autoplay.ai.tokens import CounterGrab, JumpAttack, Punch, Supplex
+from sor_autoplay.ai.tokens import Myself
+from sor_autoplay.ai.tokens import Enemy
+from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.priority import determine_priority_decision
 from sor_autoplay.ai.tokens import Decision, find_all
-from sor_autoplay.ai.walk_decisions import WalkToAdvanceStage, WalkToNearEnemy
+from sor_autoplay.ai.tokens import WalkToAdvanceStage, WalkToNearEnemy
 from sor_autoplay.phases import CombatPhase
 
 

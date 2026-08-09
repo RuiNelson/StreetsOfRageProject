@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.ai.attack_decisions import (
+from sor_autoplay.ai.tokens import (
     Attack,
     CounterGrab,
     FlipHold,
@@ -10,7 +10,7 @@ from sor_autoplay.ai.attack_decisions import (
     RearAttack,
     ThrowKnife,
 )
-from sor_autoplay.ai.character import Myself, Partner
+from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay.ai.decide import (
     generate_decision_tokens,
     should_call_police,
@@ -25,12 +25,12 @@ from sor_autoplay.ai.decide import (
     should_walk_to_pickup,
     should_walk_to_weapon,
 )
-from sor_autoplay.ai.enemy import Enemy
-from sor_autoplay.ai.essential import AnimationInProgress, CameraRange, Stage
-from sor_autoplay.ai.pickup_tokens import HealthPickup, Weapon
-from sor_autoplay.ai.police_decision import CallPolice
+from sor_autoplay.ai.tokens import Enemy
+from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
+from sor_autoplay.ai.tokens import HealthPickup, Weapon
+from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import Decision, Token
-from sor_autoplay.ai.walk_decisions import (
+from sor_autoplay.ai.tokens import (
     Walk,
     WalkToAdvanceStage,
     WalkToNearEnemy,

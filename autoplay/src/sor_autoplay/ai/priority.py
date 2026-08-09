@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import random
 
-from .attack_decisions import (
+from .tokens import (
     CounterGrab,
     FlipHold,
     JumpAttack,
@@ -24,18 +24,18 @@ from .attack_decisions import (
     ThrowHeldEnemy,
     ThrowKnife,
 )
-from .character import Myself, Partner
-from .enemy import Enemy
-from .pickup_tokens import (
+from .tokens import Myself, Partner
+from .tokens import Enemy
+from .tokens import (
     HealthPickup,
     LifePickup,
     Pickup,
     ScorePickup,
     SpecialPickup,
 )
-from .police_decision import CallPolice
+from .tokens import CallPolice
 from .tokens import Context, Decision, find, find_all
-from .walk_decisions import (
+from .tokens import (
     WalkToAdvanceStage,
     WalkToBreakable,
     WalkToNearEnemy,

@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.ai.essential import AnimationInProgress, CameraRange, Stage
+from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
 from sor_autoplay.ai.tokens import Information
 
 

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 from sor_autoplay.ai import execute as execute_module
 from sor_autoplay.ai import loop as loop_module
 from sor_autoplay.ai import priority as priority_module
-from sor_autoplay.ai.attack_decisions import (
+from sor_autoplay.ai.tokens import (
     CounterGrab,
     JumpAttack,
     Punch,
@@ -14,15 +14,15 @@ from sor_autoplay.ai.attack_decisions import (
     Supplex,
     ThrowKnife,
 )
-from sor_autoplay.ai.character import Myself
-from sor_autoplay.ai.enemy import Enemy
-from sor_autoplay.ai.essential import CameraRange
+from sor_autoplay.ai.tokens import Myself
+from sor_autoplay.ai.tokens import Enemy
+from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.execute import execute_decision, press_no_button
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.hazard_tokens import Breakable
-from sor_autoplay.ai.pickup_tokens import HealthPickup, Weapon
-from sor_autoplay.ai.police_decision import CallPolice
-from sor_autoplay.ai.walk_decisions import (
+from sor_autoplay.ai.tokens import Breakable
+from sor_autoplay.ai.tokens import HealthPickup, Weapon
+from sor_autoplay.ai.tokens import CallPolice
+from sor_autoplay.ai.tokens import (
     WalkToAdvanceStage,
     WalkToNearEnemy,
     WalkToPickup,

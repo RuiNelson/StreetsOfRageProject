@@ -1,11 +1,11 @@
 import unittest
 
-from sor_autoplay.ai.character import Myself, Partner
-from sor_autoplay.ai.enemy import Abadede, Enemy, Garcia, Jack, Souther
-from sor_autoplay.ai.essential import AnimationInProgress, CameraRange, Stage
-from sor_autoplay.ai.hazard_tokens import Projectile
+from sor_autoplay.ai.tokens import Myself, Partner
+from sor_autoplay.ai.tokens import Abadede, Enemy, Garcia, Jack, Souther
+from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
+from sor_autoplay.ai.tokens import Projectile
 from sor_autoplay.ai.observe import generate_direct_observation_tokens
-from sor_autoplay.ai.pickup_tokens import HealthPickup, Weapon
+from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import find, find_all
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot

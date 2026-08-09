@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from ..phases import CombatPhase
-from .character import Myself, Partner, PlayableCharacter
-from .enemy import Enemy, Jack
-from .hazard_tokens import IncomingProjectile, Projectile
+from .tokens import Myself, Partner, PlayableCharacter
+from .tokens import Enemy, Jack
+from .tokens import IncomingProjectile, Projectile
 from .tokens import Context, Token, find, find_all
 
 # Projectiles outside this time-to-impact window are not "incoming" yet.

@@ -10,7 +10,7 @@ Police special = physical A (0x0010), Jump = physical C (0x0040).
 
 from __future__ import annotations
 
-from .attack_decisions import (
+from .tokens import (
     CounterGrab,
     FlipHold,
     JumpAttack,
@@ -23,14 +23,14 @@ from .attack_decisions import (
     ThrowHeldEnemy,
     ThrowKnife,
 )
-from .character import Myself, Partner
-from .enemy import Enemy
-from .essential import CameraRange
-from .hazard_tokens import Breakable
-from .pickup_tokens import Pickup, Weapon
-from .police_decision import CallPolice
+from .tokens import Myself, Partner
+from .tokens import Enemy
+from .tokens import CameraRange
+from .tokens import Breakable
+from .tokens import Pickup, Weapon
+from .tokens import CallPolice
 from .tokens import Context, Decision, find, find_all
-from .walk_decisions import (
+from .tokens import (
     WalkToAdvanceStage,
     WalkToBreakable,
     WalkToNearEnemy,

@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.ai.pickup_tokens import (
+from sor_autoplay.ai.tokens import (
     HealthPickup,
     LifePickup,
     Pickup,

@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.ai.character import Character, Myself, Partner, PlayableCharacter
+from sor_autoplay.ai.tokens import Character, Myself, Partner, PlayableCharacter
 from sor_autoplay.ai.tokens import Information, Token
 from sor_autoplay.phases import CombatPhase
 

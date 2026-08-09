@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.ai.enemy import (
+from sor_autoplay.ai.tokens import (
     Abadede,
     Antonio,
     Bongo,

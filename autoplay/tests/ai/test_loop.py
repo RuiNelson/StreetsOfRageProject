@@ -1,11 +1,11 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from sor_autoplay.ai.attack_decisions import Punch
-from sor_autoplay.ai.enemy import Enemy
+from sor_autoplay.ai.tokens import Punch
+from sor_autoplay.ai.tokens import Enemy
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.loop import AgentLoop, DecisionState
-from sor_autoplay.ai.walk_decisions import WalkToAdvanceStage
+from sor_autoplay.ai.tokens import WalkToAdvanceStage
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 

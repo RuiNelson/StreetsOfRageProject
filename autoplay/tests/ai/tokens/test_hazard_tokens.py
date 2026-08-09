@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.ai.hazard_tokens import IncomingProjectile, Projectile
+from sor_autoplay.ai.tokens import IncomingProjectile, Projectile
 from sor_autoplay.ai.tokens import Information
 
 

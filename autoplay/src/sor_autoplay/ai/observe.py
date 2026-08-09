@@ -13,11 +13,11 @@ from sor_autoplay.phases import CombatPhase, player_phase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 from sor_autoplay.world_map import MapEntity
 
-from .character import Myself, Partner
-from .enemy import Boss, Enemy, Jack, enemy_class_for_type
-from .essential import AnimationInProgress, CameraRange, Stage
-from .hazard_tokens import Breakable, Projectile
-from .pickup_tokens import Weapon, build_pickup_token
+from .tokens import Myself, Partner
+from .tokens import Boss, Enemy, Jack, enemy_class_for_type
+from .tokens import AnimationInProgress, CameraRange, Stage
+from .tokens import Breakable, Projectile
+from .tokens import Weapon, build_pickup_token
 from .tokens import Context
 
 

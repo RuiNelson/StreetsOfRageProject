@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 
 from ..phases import CombatPhase, should_ignore_as_target
-from .attack_decisions import (
+from .tokens import (
     CounterGrab,
     FlipHold,
     JumpAttack,
@@ -23,7 +23,7 @@ from .attack_decisions import (
     ThrowHeldEnemy,
     ThrowKnife,
 )
-from .character import (
+from .tokens import (
     Myself,
     Partner,
     PlayableCharacter,
@@ -31,10 +31,10 @@ from .character import (
     punch_outer_x,
     PUNCH_RANGE_Y,
 )
-from .enemy import Enemy
-from .essential import AnimationInProgress, CameraRange, Stage
-from .hazard_tokens import Breakable
-from .pickup_tokens import (
+from .tokens import Enemy
+from .tokens import AnimationInProgress, CameraRange, Stage
+from .tokens import Breakable
+from .tokens import (
     PLAYER_MAX_HEALTH,
     HealthPickup,
     LifePickup,
@@ -45,9 +45,9 @@ from .pickup_tokens import (
     is_weapon_type,
     weapon_rank,
 )
-from .police_decision import CallPolice
+from .tokens import CallPolice
 from .tokens import Context, Token, find, find_all
-from .walk_decisions import (
+from .tokens import (
     WalkToAdvanceStage,
     WalkToBreakable,
     WalkToNearEnemy,

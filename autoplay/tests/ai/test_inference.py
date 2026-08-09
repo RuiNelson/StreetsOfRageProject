@@ -1,8 +1,8 @@
 import unittest
 
-from sor_autoplay.ai.character import Myself
-from sor_autoplay.ai.enemy import Enemy
-from sor_autoplay.ai.hazard_tokens import IncomingProjectile, Projectile
+from sor_autoplay.ai.tokens import Myself
+from sor_autoplay.ai.tokens import Enemy
+from sor_autoplay.ai.tokens import IncomingProjectile, Projectile
 from sor_autoplay.ai.inference import (
     check_for_incoming_projectiles,
     generate_inference_tokens,
