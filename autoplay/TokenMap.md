@@ -14,9 +14,10 @@ classDiagram
     Information <|-- Observed
     Information <|-- Inferred
 
-    Observed <|-- Stage
-    Observed <|-- CameraRange
-    Observed <|-- AnimationInProgress
+    Observed <|-- Essential
+    Essential <|-- Stage
+    Essential <|-- CameraRange
+    Essential <|-- AnimationInProgress
 
     Observed <|-- Projectile
     Inferred <|-- IncomingProjectile

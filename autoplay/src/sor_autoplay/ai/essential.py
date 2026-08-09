@@ -1,23 +1,31 @@
 """Essential ``Information`` tokens not tied to any character or enemy type.
 
-See ``AI.md``'s "Essential Tokens" section.
+See ``AI.md``'s "Essential Tokens" section. ``Essential`` groups the shared
+scene-wide observations: the current stage, the camera's frame, and any
+animation currently blocking a playable character.
 """
 
 from __future__ import annotations
 
+from abc import ABC
 from dataclasses import dataclass
 
 from .tokens import Observed
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Stage(Observed):
+class Essential(Observed, ABC):
+    """A scene-wide observation not tied to a specific character or enemy."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Stage(Essential):
     level_index: int
     direction: str  # "right" for level_index 0-5, "none" for 6, "left" for 7
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class CameraRange(Observed):
+class CameraRange(Essential):
     left: float
     right: float
     top: float
@@ -25,5 +33,5 @@ class CameraRange(Observed):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class AnimationInProgress(Observed):
+class AnimationInProgress(Essential):
     slot: str  # "P1" or "P2" — which character this blocks from acting
