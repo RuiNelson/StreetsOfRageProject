@@ -27,7 +27,17 @@ class Attack(Decision, ABC):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class GrabMechanics(Attack, ABC):
+class MeleeAttacks(Attack, ABC):
+    """Close-combat attacks that need no weapon.
+
+    Covers ``Punch`` / ``JumpAttack`` / ``RearAttack`` and the whole
+    ``GrabMechanics`` family. ``ThrowKnife`` (needs a held knife) and
+    ``SmashBreakable`` (hits a prop, not a foe) are not melee attacks.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GrabMechanics(MeleeAttacks, ABC):
     """Any move that grabs a foe, exploits a held grab, or counters a grab.
 
     Covers the hold-move family (``AttackHeldEnemy`` / ``Supplex`` /
@@ -37,7 +47,7 @@ class GrabMechanics(Attack, ABC):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Punch(Attack):
+class Punch(MeleeAttacks):
     priority: int = 10
     actor_slot: str
     target_slot: str
@@ -96,7 +106,7 @@ class ReleaseGrab(GrabMechanics):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class JumpAttack(Attack):
+class JumpAttack(MeleeAttacks):
     """Jump-kick only — never a stationary hop. Requires horizontal aim."""
 
     priority: int = 8  # below basic punch priority (10)
@@ -114,7 +124,7 @@ class SmashBreakable(Attack):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class RearAttack(Attack):
+class RearAttack(MeleeAttacks):
     """Simultaneous B+C rear/escape attack (``$322A``).
 
     Prefer when a close threat sits behind the player, or when a body has
