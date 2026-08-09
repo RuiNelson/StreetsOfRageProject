@@ -58,6 +58,7 @@ machine may lack Tk.
 | `hud.py` | Tk window: State / P1 / P2 + world map + AI toggle labels; restores last window size/position |
 | `bcd.py` | Packed-BCD helpers |
 | `AI.md` | Architecture for the symbolic AI (Token / Information / Decision) |
+| `TokenMap.md` | Mermaid class diagram of the token hierarchy (classes and inheritance only); keep in sync with the `ai/` sources |
 | `ai/` | Symbolic AI implementation — see "AI surface" below and [`AI.md`](AI.md) |
 
 ### CLI
@@ -121,6 +122,19 @@ scope: bespoke per-boss combat tactics beyond the subclass hierarchy
 existing and being populated correctly (e.g. Antonio's boomerang dodge
 timing).
 
+## TokenMap (keep updated)
+
+`TokenMap.md` holds the Mermaid `classDiagram` of the full token hierarchy
+under `ai/`: the token classes and their inheritance only (no notes, no
+members). It is a living reference, not a historical snapshot. Any change
+to the token classes — adding, renaming, removing a class — must update
+`TokenMap.md` (class name and inheritance edges) in the same delivery.
+Likewise, editing the diagram alone should only happen together with the
+corresponding source change.
+
+Add concrete tokens as subclasses rather than generic discriminator fields,
+per [`AI.md`](AI.md), so the diagram and the class tree stay aligned.
+
 ## Snapshot cadence
 
 - **Snapshot cadence is wall-clock polling**, not VSync waits.
@@ -149,6 +163,15 @@ Unit tests cover snapshot decoding, BCD, hazards, phases, world map,
 observation, inference, decisions, priority ranking, execution, the
 pause/non-gameplay gate). There is no live host requirement for the unit
 suite.
+
+After changing `TokenMap.md`, validate the Mermaid syntax by rendering it
+(requires Chrome + `mmdc` from `@mermaid-js/mermaid-cli`):
+
+```bash
+awk '/^```mermaid/{f=1;next} /^```/{if(f){f=0;exit}} f' TokenMap.md > /tmp/tokenmap.mmd
+PUPPETEER_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  mmdc -i /tmp/tokenmap.mmd -o /tmp/tokenmap.svg
+```
 
 ## History: the old agent stack, and the new one in `ai/`
 
