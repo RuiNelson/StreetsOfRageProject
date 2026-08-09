@@ -54,7 +54,12 @@ class Punch(MeleeAttacks):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class ThrowKnife(Attack):
+class WeaponAttacks(Attack, ABC):
+    """Attacks that require holding a weapon (e.g. ``ThrowKnife``)."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ThrowKnife(WeaponAttacks):
     priority: int = 11
     actor_slot: str
     target_slot: str

@@ -61,7 +61,8 @@ classDiagram
     Attack <|-- MeleeAttacks
     Attack <|-- GrabMechanics
     MeleeAttacks <|-- Punch
-    Attack <|-- ThrowKnife
+    Attack <|-- WeaponAttacks
+    WeaponAttacks <|-- ThrowKnife
     GrabMechanics <|-- Supplex
     GrabMechanics <|-- AttackHeldEnemy
     GrabMechanics <|-- ThrowHeldEnemy
