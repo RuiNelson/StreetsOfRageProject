@@ -9,7 +9,8 @@ produces both.
 
 ``RearAttack`` is the simultaneous B+C chord (``$322A``): reaches *behind*
 the player. ``CounterGrab`` is the enemy-held sequence (C crossover then B
-throw) from ``controls-and-input.md``.
+throw) from ``controls-and-input.md``. ``GrabMechanics`` groups every move
+that grabs a foe, exploits a held grab, or reacts to being grabbed.
 """
 
 from __future__ import annotations
@@ -23,6 +24,16 @@ from .tokens import Decision
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Attack(Decision, ABC):
     pass
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GrabMechanics(Attack, ABC):
+    """Any move that grabs a foe, exploits a held grab, or counters a grab.
+
+    Covers the hold-move family (``KneeStrike`` / ``Supplex`` /
+    ``ThrowHeldEnemy`` / ``FlipHold`` / ``ReleaseGrab``) and the reaction to
+    being grabbed by an enemy (``CounterGrab``).
+    """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -40,7 +51,7 @@ class ThrowKnife(Attack):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Supplex(Attack):
+class Supplex(GrabMechanics):
     """Back-hold B — true suplex. Front-hold uses FlipHold first."""
 
     priority: int = 13
@@ -49,7 +60,7 @@ class Supplex(Attack):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class KneeStrike(Attack):
+class KneeStrike(GrabMechanics):
     """Front-hold B (knee) — keeps the grab and damages."""
 
     priority: int = 14
@@ -58,7 +69,7 @@ class KneeStrike(Attack):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class ThrowHeldEnemy(Attack):
+class ThrowHeldEnemy(GrabMechanics):
     """Front-hold B+back — throws the held foe (useful vs a rear threat)."""
 
     priority: int = 16
@@ -67,7 +78,7 @@ class ThrowHeldEnemy(Attack):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class FlipHold(Attack):
+class FlipHold(GrabMechanics):
     """Front-hold C — crossover to back hold, then Supplex next ticks."""
 
     priority: int = 15
@@ -76,7 +87,7 @@ class FlipHold(Attack):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class ReleaseGrab(Attack):
+class ReleaseGrab(GrabMechanics):
     """Walk away opposite the held enemy to drop the grab."""
 
     priority: int = 12
@@ -116,7 +127,7 @@ class RearAttack(Attack):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class CounterGrab(Attack):
+class CounterGrab(GrabMechanics):
     """Enemy-held counter: C edge then B edge while the window is open.
 
     Highest emergency among attacks — the player is already grabbed.

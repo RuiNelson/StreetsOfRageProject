@@ -58,17 +58,18 @@ classDiagram
     Walk <|-- WalkToBreakable
 
     Decision <|-- Attack
+    Attack <|-- GrabMechanics
     Attack <|-- Punch
     Attack <|-- ThrowKnife
-    Attack <|-- Supplex
-    Attack <|-- KneeStrike
-    Attack <|-- ThrowHeldEnemy
-    Attack <|-- FlipHold
-    Attack <|-- ReleaseGrab
+    GrabMechanics <|-- Supplex
+    GrabMechanics <|-- KneeStrike
+    GrabMechanics <|-- ThrowHeldEnemy
+    GrabMechanics <|-- FlipHold
+    GrabMechanics <|-- ReleaseGrab
     Attack <|-- JumpAttack
     Attack <|-- SmashBreakable
     Attack <|-- RearAttack
-    Attack <|-- CounterGrab
+    GrabMechanics <|-- CounterGrab
 
     Decision <|-- CallPolice
 ```
