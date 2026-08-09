@@ -41,14 +41,12 @@ classDiagram
     Enemy <|-- Nora
     Enemy <|-- Jack
     Enemy <|-- Boss
-    Boss <|-- BespokeBoss
-    BespokeBoss <|-- Abadede
-    BespokeBoss <|-- MrX
-    Boss <|-- LaterBoss
-    LaterBoss <|-- Souther
-    LaterBoss <|-- Antonio
-    LaterBoss <|-- Bongo
-    LaterBoss <|-- Onihime
+    Boss <|-- Abadede
+    Boss <|-- MrX
+    Boss <|-- Souther
+    Boss <|-- Antonio
+    Boss <|-- Bongo
+    Boss <|-- Onihime
 
     Decision <|-- Walk
     Walk <|-- WalkToNearEnemy

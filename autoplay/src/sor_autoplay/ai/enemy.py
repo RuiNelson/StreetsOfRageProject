@@ -2,13 +2,13 @@
 
 Per ``ai-analysis/enemy-ai.md`` and ``world_map.py``'s ``MapEntity``: ordinary
 enemies ($20-$2A) all share one object layout, so only Jack ($27) needs an
-extra field (``family_state`` bit 0, weapon attached). Bosses split into two
-families by which ``MapEntity`` fields the ``elif style.kind == "boss":``
-branch actually populates: Abadede/Mr. X use a bespoke target pointer and
-leave the tactical/pair_role/boss_dist_*/mode_flags/target_unavailable/
-phase_timer/ground_z fields meaningless, while Souther/Antonio/Bongo/
-Onihime-Yasha (all sharing type $58, distinguished only by ``pair_role`` at
-runtime) fully populate them.
+extra field (``family_state`` bit 0, weapon attached). Every boss is a direct
+``Boss`` subclass. The tactical/pair_role/boss_dist_*/mode_flags/
+target_unavailable/phase_timer/ground_z/vel_* fields live on ``Boss`` with
+defaults: Abadede/Mr. X use a bespoke target pointer and leave them at their
+defaults (meaningless there), while Souther/Antonio/Bongo/Onihime-Yasha (all
+sharing type $58, distinguished only by ``pair_role`` at runtime) fully
+populate them.
 """
 
 from __future__ import annotations
@@ -54,55 +54,45 @@ class Jack(Enemy):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Boss(Enemy, ABC):
-    pass
+    tactical: int = 0  # boss +$67 substate; Abadede police latch when set
+    pair_role: int = 0  # later-type +$5D (1/2) twin role when kind==boss
+    boss_dist_x: int = 0  # later-type +$50 abs X to target
+    boss_dist_lane: int = 0  # later-type +$52 abs lane to target
+    mode_flags: int = 0  # later-type +$7B; twin bit1 = grab/throw AI path
+    target_unavailable: int = 0  # later-type +$77 from $179F8
+    phase_timer: int = 0  # later-type +$78 jump/throw timeline counter
+    ground_z: int | None = None  # later-type +$4C ground/landing height
+    vel_x: float = 0.0  # +$20 signed 16.16, ROM units per tick
+    vel_z: float = 0.0  # +$24 signed 16.16, ROM units per tick
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class BespokeBoss(Boss, ABC):
-    pass
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class Abadede(BespokeBoss):
+class Abadede(Boss):
     """Type $30."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class MrX(BespokeBoss):
+class MrX(Boss):
     """Type $35."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class LaterBoss(Boss, ABC):
-    tactical: int
-    pair_role: int
-    boss_dist_x: int
-    boss_dist_lane: int
-    mode_flags: int
-    target_unavailable: int
-    phase_timer: int
-    ground_z: int | None
-    vel_x: float
-    vel_z: float
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class Souther(LaterBoss):
+class Souther(Boss):
     """Type $55."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Antonio(LaterBoss):
+class Antonio(Boss):
     """Type $56."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Bongo(LaterBoss):
+class Bongo(Boss):
     """Type $57."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Onihime(LaterBoss):
+class Onihime(Boss):
     """Type $58. The ROM runs two same-type instances (Onihime + Yasha),
     distinguished at runtime by pair_role, not by different type ids."""
 

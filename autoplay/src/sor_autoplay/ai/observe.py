@@ -14,7 +14,7 @@ from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 from sor_autoplay.world_map import MapEntity
 
 from .character import Myself, Partner
-from .enemy import Enemy, Jack, LaterBoss, enemy_class_for_type
+from .enemy import Boss, Enemy, Jack, enemy_class_for_type
 from .essential import AnimationInProgress, CameraRange, Stage
 from .hazard_tokens import Breakable, Projectile
 from .pickup_tokens import Weapon, build_pickup_token
@@ -125,7 +125,7 @@ def generate_direct_observation_tokens(
             extra: dict[str, object] = {}
             if cls is Jack:
                 extra["has_projectile"] = bool(entity.family_state & 0x01)
-            elif issubclass(cls, LaterBoss):
+            elif issubclass(cls, Boss):
                 extra.update(
                     tactical=entity.tactical,
                     pair_role=entity.pair_role,

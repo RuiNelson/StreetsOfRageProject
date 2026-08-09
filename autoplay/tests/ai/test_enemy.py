@@ -5,12 +5,10 @@ from sor_autoplay.ai.enemy import (
     Antonio,
     Bongo,
     Boss,
-    BespokeBoss,
     Enemy,
     Garcia,
     HakuRo,
     Jack,
-    LaterBoss,
     MrX,
     Nora,
     Onihime,
@@ -129,12 +127,8 @@ class EnemyClassForTypeTests(unittest.TestCase):
 class EnemyHierarchyTests(unittest.TestCase):
     def test_boss_hierarchy(self) -> None:
         self.assertTrue(issubclass(Boss, Enemy))
-        self.assertTrue(issubclass(BespokeBoss, Boss))
-        self.assertTrue(issubclass(LaterBoss, Boss))
-        self.assertTrue(issubclass(Abadede, BespokeBoss))
-        self.assertTrue(issubclass(MrX, BespokeBoss))
-        for cls in (Souther, Antonio, Bongo, Onihime):
-            self.assertTrue(issubclass(cls, LaterBoss))
+        for cls in (Abadede, MrX, Souther, Antonio, Bongo, Onihime):
+            self.assertTrue(issubclass(cls, Boss))
 
     def test_jack_has_projectile_field(self) -> None:
         jack_with = Jack(**_base_kwargs(type_id=0x27, has_projectile=True))
@@ -142,13 +136,15 @@ class EnemyHierarchyTests(unittest.TestCase):
         self.assertTrue(jack_with.has_projectile)
         self.assertFalse(jack_without.has_projectile)
 
-    def test_bespoke_boss_needs_no_extra_fields(self) -> None:
+    def test_boss_needs_no_extra_fields(self) -> None:
         abadede = Abadede(**_base_kwargs(type_id=0x30, health=100))
         self.assertIsInstance(abadede, Enemy)
         mrx = MrX(**_base_kwargs(type_id=0x35, health=100))
         self.assertIsInstance(mrx, Enemy)
+        self.assertEqual(abadede.tactical, 0)
+        self.assertIsNone(abadede.ground_z)
 
-    def test_later_boss_extra_fields_round_trip(self) -> None:
+    def test_boss_extra_fields_round_trip(self) -> None:
         souther = Souther(
             **_base_kwargs(type_id=0x55, health=200),
             tactical=3,
