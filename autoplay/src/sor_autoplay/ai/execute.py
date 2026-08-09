@@ -14,7 +14,7 @@ from .attack_decisions import (
     CounterGrab,
     FlipHold,
     JumpAttack,
-    KneeStrike,
+    AttackHeldEnemy,
     Punch,
     RearAttack,
     ReleaseGrab,
@@ -270,7 +270,7 @@ def _execute_supplex(decision: Supplex, context: Context, gamepad: VirtualGamepa
         gamepad.press(PUNCH_MASK, frames=SUPPLEX_FRAMES)
 
 
-def _execute_knee_strike(decision: KneeStrike, context: Context, gamepad: VirtualGamepad) -> None:
+def _execute_attack_held_enemy(decision: AttackHeldEnemy, context: Context, gamepad: VirtualGamepad) -> None:
     # Front-hold B alone (Up/Down ignored by ROM for throw; no L/R = knee).
     gamepad.press(PUNCH_MASK, frames=HOLD_FRAMES)
 
@@ -368,7 +368,7 @@ _HANDLERS = {
     CallPolice: _execute_call_police,
     JumpAttack: _execute_jump_attack,
     Supplex: _execute_supplex,
-    KneeStrike: _execute_knee_strike,
+    AttackHeldEnemy: _execute_attack_held_enemy,
     ThrowHeldEnemy: _execute_throw_held_enemy,
     FlipHold: _execute_flip_hold,
     ReleaseGrab: _execute_release_grab,

@@ -30,7 +30,7 @@ class Attack(Decision, ABC):
 class GrabMechanics(Attack, ABC):
     """Any move that grabs a foe, exploits a held grab, or counters a grab.
 
-    Covers the hold-move family (``KneeStrike`` / ``Supplex`` /
+    Covers the hold-move family (``AttackHeldEnemy`` / ``Supplex`` /
     ``ThrowHeldEnemy`` / ``FlipHold`` / ``ReleaseGrab``) and the reaction to
     being grabbed by an enemy (``CounterGrab``).
     """
@@ -60,7 +60,7 @@ class Supplex(GrabMechanics):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class KneeStrike(GrabMechanics):
+class AttackHeldEnemy(GrabMechanics):
     """Front-hold B (knee) — keeps the grab and damages."""
 
     priority: int = 14

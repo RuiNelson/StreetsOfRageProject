@@ -5,7 +5,7 @@ from sor_autoplay.ai.attack_decisions import (
     CounterGrab,
     FlipHold,
     JumpAttack,
-    KneeStrike,
+    AttackHeldEnemy,
     Punch,
     RearAttack,
     ThrowKnife,
@@ -339,7 +339,7 @@ class ShouldHoldActionsTests(unittest.TestCase):
 
         result = should_hold_actions(context)
 
-        self.assertIn(KneeStrike(actor_slot="P1", target_slot="near"), result)
+        self.assertIn(AttackHeldEnemy(actor_slot="P1", target_slot="near"), result)
         self.assertIn(FlipHold(actor_slot="P1", target_slot="near"), result)
 
     def test_does_not_fire_when_holding_a_weapon(self) -> None:
@@ -366,7 +366,7 @@ class ShouldHoldActionsTests(unittest.TestCase):
     def test_no_crash_with_no_enemies(self) -> None:
         myself = make_myself(held_weapon_type=0x01, action_state=0x60)
         result = should_hold_actions({myself})
-        self.assertTrue(any(isinstance(t, KneeStrike) for t in result))
+        self.assertTrue(any(isinstance(t, AttackHeldEnemy) for t in result))
 
 
 class ShouldJumpAttackTests(unittest.TestCase):

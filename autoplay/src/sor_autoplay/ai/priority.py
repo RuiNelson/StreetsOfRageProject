@@ -15,7 +15,7 @@ from .attack_decisions import (
     CounterGrab,
     FlipHold,
     JumpAttack,
-    KneeStrike,
+    AttackHeldEnemy,
     Punch,
     RearAttack,
     ReleaseGrab,
@@ -123,7 +123,7 @@ def _emergency(decision: Decision, context: Context) -> int:
         return _EMERGENCY_HOLD_SUPPLEX
     if isinstance(decision, FlipHold):
         return _EMERGENCY_HOLD_FLIP
-    if isinstance(decision, KneeStrike):
+    if isinstance(decision, AttackHeldEnemy):
         return _EMERGENCY_HOLD_KNEE
     if isinstance(decision, ReleaseGrab):
         return _EMERGENCY_HOLD_RELEASE

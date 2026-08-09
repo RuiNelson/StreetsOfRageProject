@@ -14,7 +14,7 @@ from .attack_decisions import (
     CounterGrab,
     FlipHold,
     JumpAttack,
-    KneeStrike,
+    AttackHeldEnemy,
     Punch,
     RearAttack,
     ReleaseGrab,
@@ -234,12 +234,12 @@ def should_hold_actions(context: Context) -> Context:
                 decisions.add(FlipHold(actor_slot=actor.slot, target_slot=target_slot))
             else:
                 # Standard: knee damage, or flip for a suplex finish.
-                decisions.add(KneeStrike(actor_slot=actor.slot, target_slot=target_slot))
+                decisions.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
                 decisions.add(FlipHold(actor_slot=actor.slot, target_slot=target_slot))
             continue
 
         # Unknown hold-ish state with +$60 non-weapon: still act (knee or release).
-        decisions.add(KneeStrike(actor_slot=actor.slot, target_slot=target_slot))
+        decisions.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
         if nearest is not None:
             decisions.add(ReleaseGrab(actor_slot=actor.slot, target_slot=target_slot))
     return decisions

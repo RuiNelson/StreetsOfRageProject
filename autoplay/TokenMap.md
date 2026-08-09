@@ -62,7 +62,7 @@ classDiagram
     Attack <|-- Punch
     Attack <|-- ThrowKnife
     GrabMechanics <|-- Supplex
-    GrabMechanics <|-- KneeStrike
+    GrabMechanics <|-- AttackHeldEnemy
     GrabMechanics <|-- ThrowHeldEnemy
     GrabMechanics <|-- FlipHold
     GrabMechanics <|-- ReleaseGrab
