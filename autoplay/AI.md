@@ -109,9 +109,7 @@ represents a projected future state. A `Decision` cannot be translated
 directly into a control signal; rather, it represents a deliberated and
 parametrized intent that precedes any concrete action.
 
-`Decision` comprises two principal abstract branches, `Walk` and `Attack`,
-together with a single concrete descendant, `CallPolice`, which activates
-the police special attack:
+`Decision` comprises two principal abstract branches, `Walk` and `Attack`:
 
 - `Walk` — for example, `WalkToNearEnemy`,
   `WalkToAdvanceStage`, `WalkToWeapon`, and `WalkToPickup`; grabbing a
@@ -121,9 +119,8 @@ the police special attack:
   (enemy-held C then B sequence), each parametrized with the target or
   coordinate to which the attack applies where applicable. There is no
   separate `Combo`/`GrabEnemy` input; repeated `Punch` contact produces
-  both.
-- `CallPolice` — the sole concrete `Decision` descending directly from the
-  abstract class.
+  both. `CallPolice`, which activates the police special attack, is an
+  `Attack` descendant.
 
 Weapon upgrade ranking follows ROM damage constants
 (`StreetsOfRageRecompilation/ai-analysis/items-and-weapons.md`):

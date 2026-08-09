@@ -73,5 +73,5 @@ classDiagram
     MeleeAttacks <|-- RearAttack
     GrabMechanics <|-- CounterGrab
 
-    Decision <|-- CallPolice
+    Attack <|-- CallPolice
 ```

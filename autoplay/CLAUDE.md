@@ -100,7 +100,7 @@ entry points in this tree.
 | `inference.py` | Threat-filtered `IncomingProjectile` (approaching + in-lane + impact window); non-playable `Actors` are filtered by not being `Myself`/`Partner`/`Enemy` |
 | `walk_decisions.py` | `WalkToNearEnemy`, `WalkToAdvanceStage`, `WalkToWeapon`, `WalkToPickup`, `WalkToBreakable` |
 | `attack_decisions.py` | `Punch`, `SmashBreakable`, hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups weaponless close combat (`Punch`/`JumpAttack`/`RearAttack`); `GrabMechanics` groups all grab/anti-grab moves; `WeaponAttacks` groups attacks requiring a held weapon (`ThrowKnife`) |
-| `police_decision.py` | `CallPolice` (health-critical only; below `POLICE_HEALTH_PERCENT_THRESHOLD`) |
+| `police_decision.py` | `CallPolice` — an `Attack` descendant (health-critical only; below `POLICE_HEALTH_PERCENT_THRESHOLD`) |
 | `decide.py` | `should_*` generators; on-screen-only chase; stage advance gated on *every* live enemy (on-screen or not), not just on-screen ones; hold always acts |
 | `priority.py` | Emergency scores (counter-grab 100, call-police 88, rear 60/55, supplex 68, throw-held 70, knee 64, flip 66, release 50, knife 25, jump 28/18, punch 60/20, stage-advance 12, weapon 8, pickup tiers) — the max wins, with the `priority` field breaking ties; hold throws outrank knees; stage advance when no live enemy remains |
 | `gamepad.py` | `VirtualGamepad`/`SharedGamepadState` — the only code allowed to call `hold_buttons`/`press_buttons`/`release_buttons`; never `write_memory`/`write_value` |
