@@ -4,13 +4,28 @@ Per ``AI.md``: this also performs target selection, since ranking by
 emergency and keeping only the highest-ranked ``Decision`` is what collapses
 several same-type candidates (e.g. a ``Punch`` against each of two nearby
 enemies) down to one.
+
+Each ``_emergency_*`` function below computes its score from the
+``Information`` tokens present in the ``Context`` — per the matching
+concrete ``Decision`` class's ``Raises emergency: ...`` docstring line —
+never from the decision's type alone. The module constants are named
+*contributions* consulted when their token condition holds; they are not
+applied unconditionally.
 """
 
 from __future__ import annotations
 
 import logging
 import random
+from collections.abc import Callable
 
+from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
+from .decide import (
+    KNIFE_MELEE_X,
+    KNIFE_RANGE_X,
+    KNIFE_RANGE_Y,
+    POLICE_HEALTH_PERCENT_THRESHOLD,
+)
 from .tokens import (
     CounterGrab,
     FlipHold,
@@ -25,7 +40,7 @@ from .tokens import (
     ThrowKnife,
 )
 from .tokens import Myself, Partner
-from .tokens import Enemy
+from .tokens import Breakable, Enemy, Weapon, weapon_rank
 from .tokens import (
     HealthPickup,
     LifePickup,
@@ -42,7 +57,6 @@ from .tokens import (
     WalkToPickup,
     WalkToWeapon,
 )
-from ..phases import is_dangerous, is_punishable
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +96,102 @@ def _find_actor(context: Context, slot: str) -> Myself | Partner | None:
     return None
 
 
-def _pickup_emergency(decision: WalkToPickup, context: Context) -> int:
+def _emergency_counter_grab(decision: CounterGrab, context: Context) -> int:
+    actor = _find_actor(context, decision.actor_slot)
+    if actor is not None and actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+        return _EMERGENCY_COUNTER_GRAB
+    return _EMERGENCY_DEFAULT
+
+
+def _emergency_call_police(decision: CallPolice, context: Context) -> int:
+    actor = _find_actor(context, decision.actor_slot)
+    if actor is not None and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD:
+        return _EMERGENCY_CALL_POLICE
+    return _EMERGENCY_DEFAULT
+
+
+def _emergency_rear_attack(decision: RearAttack, context: Context) -> int:
+    target = find(context, Enemy, slot=decision.target_slot)
+    if target is None:
+        return _EMERGENCY_DEFAULT
+    if is_dangerous(target.combat_phase):
+        return _EMERGENCY_REAR_ATTACK_DANGEROUS
+    return _EMERGENCY_REAR_ATTACK
+
+
+def _emergency_punch(decision: Punch, context: Context) -> int:
+    target = find(context, Enemy, slot=decision.target_slot)
+    if target is None:
+        return _EMERGENCY_DEFAULT
+    if is_punishable(target.combat_phase):
+        return _EMERGENCY_PUNCH_PUNISHABLE
+    return _EMERGENCY_PUNCH_DEFAULT
+
+
+def _emergency_jump_attack(decision: JumpAttack, context: Context) -> int:
+    target = find(context, Enemy, slot=decision.target_slot)
+    if target is None:
+        return _EMERGENCY_DEFAULT
+    if is_punishable(target.combat_phase):
+        return _EMERGENCY_JUMP_ATTACK_PUNISHABLE
+    return _EMERGENCY_JUMP_ATTACK_DEFAULT
+
+
+def _emergency_smash_breakable(decision: SmashBreakable, context: Context) -> int:
+    target = find(context, Breakable, slot=decision.target_slot)
+    if target is None:
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_SMASH_BREAKABLE
+
+
+def _emergency_walk_to_breakable(decision: WalkToBreakable, context: Context) -> int:
+    target = find(context, Breakable, slot=decision.target_slot)
+    if target is None:
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_WALK_TO_BREAKABLE
+
+
+def _emergency_walk_to_weapon(decision: WalkToWeapon, context: Context) -> int:
+    weapon = find(context, Weapon, slot=decision.target_slot)
+    actor = _find_actor(context, decision.actor_slot)
+    if weapon is None or actor is None:
+        return _EMERGENCY_DEFAULT
+    if weapon_rank(weapon.weapon_type) > weapon_rank(actor.held_weapon_type):
+        return _EMERGENCY_WALK_TO_WEAPON
+    return _EMERGENCY_DEFAULT
+
+
+def _emergency_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context) -> int:
+    target = find(context, Enemy, slot=decision.target_slot)
+    if target is None:
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_WALK_TO_NEAR_ENEMY
+
+
+def _emergency_walk_to_advance_stage(decision: WalkToAdvanceStage, context: Context) -> int:
+    live_enemies = [
+        enemy for enemy in find_all(context, Enemy) if not should_ignore_as_target(enemy.combat_phase)
+    ]
+    if live_enemies:
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_WALK_TO_ADVANCE_STAGE
+
+
+def _emergency_throw_knife(decision: ThrowKnife, context: Context) -> int:
+    target = find(context, Enemy, slot=decision.target_slot)
+    actor = _find_actor(context, decision.actor_slot)
+    if target is None or actor is None:
+        return _EMERGENCY_DEFAULT
+    dx = abs(target.world_x - actor.world_x)
+    dy = abs(target.world_y - actor.world_y)
+    beyond_melee = not (dx <= KNIFE_MELEE_X and dy <= KNIFE_RANGE_Y)
+    within_knife_range = dx <= KNIFE_RANGE_X and dy <= KNIFE_RANGE_Y
+    if beyond_melee and within_knife_range:
+        return _EMERGENCY_THROW_KNIFE
+    return _EMERGENCY_DEFAULT
+
+
+def _emergency_walk_to_pickup(decision: WalkToPickup, context: Context) -> int:
     pickup = find(context, Pickup, slot=decision.target_slot)
     actor = _find_actor(context, decision.actor_slot)
     if pickup is None:
@@ -100,51 +209,45 @@ def _pickup_emergency(decision: WalkToPickup, context: Context) -> int:
     return _EMERGENCY_WALK_TO_PICKUP_SCORE
 
 
+def _held_enemy_emergency(weight: int) -> Callable[[Decision, Context], int]:
+    """Build an ``_emergency_*`` for a hold move: ``weight`` only while its
+    target ``Enemy`` is actually held (``CombatPhase.GRABBED``)."""
+
+    def _emergency(decision: Decision, context: Context) -> int:
+        target = find(context, Enemy, slot=getattr(decision, "target_slot", None))
+        if target is not None and target.combat_phase is CombatPhase.GRABBED:
+            return weight
+        return _EMERGENCY_DEFAULT
+
+    return _emergency
+
+
+_EMERGENCY_FUNCS: dict[type[Decision], Callable[[Decision, Context], int]] = {
+    CounterGrab: _emergency_counter_grab,
+    CallPolice: _emergency_call_police,
+    RearAttack: _emergency_rear_attack,
+    Punch: _emergency_punch,
+    SmashBreakable: _emergency_smash_breakable,
+    ThrowHeldEnemy: _held_enemy_emergency(_EMERGENCY_HOLD_THROW),
+    Supplex: _held_enemy_emergency(_EMERGENCY_HOLD_SUPPLEX),
+    FlipHold: _held_enemy_emergency(_EMERGENCY_HOLD_FLIP),
+    AttackHeldEnemy: _held_enemy_emergency(_EMERGENCY_HOLD_KNEE),
+    ReleaseGrab: _held_enemy_emergency(_EMERGENCY_HOLD_RELEASE),
+    JumpAttack: _emergency_jump_attack,
+    ThrowKnife: _emergency_throw_knife,
+    WalkToBreakable: _emergency_walk_to_breakable,
+    WalkToWeapon: _emergency_walk_to_weapon,
+    WalkToPickup: _emergency_walk_to_pickup,
+    WalkToNearEnemy: _emergency_walk_to_near_enemy,
+    WalkToAdvanceStage: _emergency_walk_to_advance_stage,
+}
+
+
 def _emergency(decision: Decision, context: Context) -> int:
-    if isinstance(decision, CounterGrab):
-        return _EMERGENCY_COUNTER_GRAB
-    if isinstance(decision, CallPolice):
-        return _EMERGENCY_CALL_POLICE
-    if isinstance(decision, RearAttack):
-        target = find(context, Enemy, slot=decision.target_slot)
-        if target is not None and is_dangerous(target.combat_phase):
-            return _EMERGENCY_REAR_ATTACK_DANGEROUS
-        return _EMERGENCY_REAR_ATTACK
-    if isinstance(decision, Punch):
-        target = find(context, Enemy, slot=decision.target_slot)
-        if target is not None and is_punishable(target.combat_phase):
-            return _EMERGENCY_PUNCH_PUNISHABLE
-        return _EMERGENCY_PUNCH_DEFAULT
-    if isinstance(decision, SmashBreakable):
-        return _EMERGENCY_SMASH_BREAKABLE
-    if isinstance(decision, ThrowHeldEnemy):
-        return _EMERGENCY_HOLD_THROW
-    if isinstance(decision, Supplex):
-        return _EMERGENCY_HOLD_SUPPLEX
-    if isinstance(decision, FlipHold):
-        return _EMERGENCY_HOLD_FLIP
-    if isinstance(decision, AttackHeldEnemy):
-        return _EMERGENCY_HOLD_KNEE
-    if isinstance(decision, ReleaseGrab):
-        return _EMERGENCY_HOLD_RELEASE
-    if isinstance(decision, JumpAttack):
-        target = find(context, Enemy, slot=decision.target_slot)
-        if target is not None and is_punishable(target.combat_phase):
-            return _EMERGENCY_JUMP_ATTACK_PUNISHABLE
-        return _EMERGENCY_JUMP_ATTACK_DEFAULT
-    if isinstance(decision, ThrowKnife):
-        return _EMERGENCY_THROW_KNIFE
-    if isinstance(decision, WalkToBreakable):
-        return _EMERGENCY_WALK_TO_BREAKABLE
-    if isinstance(decision, WalkToWeapon):
-        return _EMERGENCY_WALK_TO_WEAPON
-    if isinstance(decision, WalkToPickup):
-        return _pickup_emergency(decision, context)
-    if isinstance(decision, WalkToNearEnemy):
-        return _EMERGENCY_WALK_TO_NEAR_ENEMY
-    if isinstance(decision, WalkToAdvanceStage):
-        return _EMERGENCY_WALK_TO_ADVANCE_STAGE
-    return _EMERGENCY_DEFAULT
+    func = _EMERGENCY_FUNCS.get(type(decision))
+    if func is None:
+        return _EMERGENCY_DEFAULT
+    return func(decision, context)
 
 
 def determine_priority_decision(context: Context) -> Context:
