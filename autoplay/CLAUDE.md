@@ -92,9 +92,9 @@ entry points in this tree.
 
 | Piece | Role |
 | --- | --- |
-| `tokens.py` | `Token`/`Information`/`Decision` base classes, `Context`, `find`/`find_all` |
-| `character.py` | `Myself`/`Partner` (`action_state`, `action_flags`, `is_airborne`, punch inner/outer helpers) |
-| `enemy.py` | `Enemy` + per-type/boss subclasses: `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`, `Boss` → `BespokeBoss` (`Abadede`, `MrX`) / `LaterBoss` (`Souther`, `Antonio`, `Bongo`, `Onihime`); `enemy_class_for_type` |
+| `tokens.py` | `Token`/`Information`/`Decision` base classes, `Context`, `find`/`find_all`; `Information` splits into `Observed` (directly read from RAM) and `Inferred` (derived from observed tokens) |
+| `character.py` | `Character` common actor base (`slot`, position, health, facing, combat phase); `Myself`/`Partner` (`player_index`, `action_state`, `action_flags`, `is_airborne`, punch inner/outer helpers) |
+| `enemy.py` | `Enemy` (a `Character`; adds `type_id`, `targets_player`) + per-type/boss subclasses: `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`, `Boss` → `BespokeBoss` (`Abadede`, `MrX`) / `LaterBoss` (`Souther`, `Antonio`, `Bongo`, `Onihime`); `enemy_class_for_type` |
 | `essential.py`, `hazard_tokens.py`, `pickup_tokens.py` | `Stage`/`CameraRange`/`AnimationInProgress`, `Projectile`/`IncomingProjectile`, `Weapon` + consumable `Pickup` hierarchy + `weapon_rank` |
 | `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM); free-to-act phases include `HOLDING` and `HELD_BY_ENEMY` |
 | `inference.py` | Threat-filtered `IncomingProjectile` (approaching + in-lane + impact window); non-playable `Actors` are filtered by not being `Myself`/`Partner`/`Enemy` |

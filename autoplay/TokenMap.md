@@ -34,7 +34,7 @@ classDiagram
     PlayableCharacter <|-- Myself
     PlayableCharacter <|-- Partner
 
-    Observed <|-- Enemy
+    Character <|-- Enemy
     Enemy <|-- Garcia
     Enemy <|-- Signal
     Enemy <|-- HakuRo

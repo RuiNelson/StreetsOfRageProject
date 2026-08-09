@@ -1,16 +1,10 @@
-"""Playable-character ``Information`` tokens (``Myself`` / ``Partner``).
+"""``Character`` token hierarchy: playable characters and enemies.
 
 Per ``AI.md``: character identity (Axel/Adam/Blaze) is a plain attribute
 rather than a subclass, since playable characters do not otherwise differ in
-token structure.
-
-Action-state conventions (``controls-and-input.md``,
-``player-health-lives-and-combat.md``):
-
-- ``+$30`` bit 0 = facing left; even base is the action family.
-- Front hold ``$60`` / back hold ``$66`` accept B/C edges for knee/throw/suplex.
-- Enemy-held sequence ``$78`` → ``$7A`` → optional crossover ``$7C`` → counter
-  ``$7E``; ``action_flags`` bit 7 is the post-crossover B window (``+$58``).
+token structure. ``Character`` is the common actor base; ``Enemy`` (in
+``enemy.py``) and ``PlayableCharacter`` (``Myself`` / ``Partner``) descend
+from it. Action-state conventions live on ``PlayableCharacter``.
 """
 
 from __future__ import annotations
@@ -46,19 +40,41 @@ def punch_outer_x(character_id: int | None) -> int:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Character(Observed, ABC):
-    slot: str  # "P1" or "P2"
+    """A living on-screen actor: a playable character or an enemy.
+
+    Carries only what every actor shares (identity ``slot``, position,
+    health, facing, combat phase). Player-only state lives on
+    ``PlayableCharacter``; hostile-only state lives on ``Enemy``.
+    """
+
+    slot: str  # "P1"/"P2" for playable; MapEntity slot like "obj07" otherwise
+    world_x: int
+    world_y: int
+    health: int | None
+    facing_left: bool
+    combat_phase: CombatPhase
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PlayableCharacter(Character, ABC):
+    """A player-controlled character (``Myself`` / ``Partner``).
+
+    Action-state conventions (``controls-and-input.md``,
+    ``player-health-lives-and-combat.md``):
+
+    - ``+$30`` bit 0 = facing left; even base is the action family.
+    - Front hold ``$60`` / back hold ``$66`` accept B/C edges for knee/throw/suplex.
+    - Enemy-held sequence ``$78`` → ``$7A`` → optional crossover ``$7C`` → counter
+      ``$7E``; ``action_flags`` bit 7 is the post-crossover B window (``+$58``).
+    """
+
     player_index: int  # 1 or 2
     character_id: int | None
     character_name: str
-    world_x: int
-    world_y: int
-    health: int
     health_percent: float
     lives: int
     specials: int
     held_weapon_type: int  # 0 = none; else the weapon type id (0x08-0x0C)
-    facing_left: bool
-    combat_phase: CombatPhase
     action_state: int  # raw byte at +$30; front-hold $60 vs back-hold $66
     is_airborne: bool  # from MapEntity.is_airborne; JumpAttack C-then-B
     # player +$58: bit 7 = grab-counter B window after C crossover ($7C).
@@ -75,11 +91,6 @@ class Character(Observed, ABC):
         """True when the held-by-enemy counter accepts a B edge (``+$58`` bit 7)."""
 
         return bool(self.action_flags & 0x80)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class PlayableCharacter(Character, ABC):
-    pass
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

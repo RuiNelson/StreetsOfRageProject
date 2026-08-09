@@ -16,21 +16,13 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
-from sor_autoplay.phases import CombatPhase
-
-from .tokens import Observed
+from .character import Character
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Enemy(Observed):
-    slot: str  # e.g. "obj07" — MapEntity.slot
+class Enemy(Character):
     type_id: int
-    world_x: int
-    world_y: int
-    health: int | None
-    combat_phase: CombatPhase
     targets_player: int | None  # 1 or 2, or None — from MapEntity.targets_player
-    facing_left: bool
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
