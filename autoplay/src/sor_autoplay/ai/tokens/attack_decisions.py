@@ -30,9 +30,9 @@ class Attack(Decision, ABC):
 class MeleeAttacks(Attack, ABC):
     """Close-combat attacks that need no weapon.
 
-    Covers ``Punch`` / ``JumpAttack`` / ``RearAttack``. ``ThrowKnife``
-    (needs a held knife) and ``SmashBreakable`` (hits a prop, not a foe) are
-    not melee attacks, nor is the ``GrabMechanics`` family.
+    The family is exactly ``Punch`` / ``JumpAttack`` / ``RearAttack``.
+    ``ThrowKnife`` (needs a held weapon) and ``SmashBreakable`` (hits a prop,
+    not a foe) are separate ``Attack`` branches, as is ``GrabMechanics``.
     """
 
 
