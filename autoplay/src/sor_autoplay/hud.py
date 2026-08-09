@@ -14,6 +14,7 @@ from pathlib import Path
 from tkinter import font as tkfont
 from typing import Callable
 
+from .ai.loop import DecisionState
 from .ai.tokens import Decision
 from .phases import CombatPhase, phase_color
 from .state import GameSnapshot, PlayerSnapshot
@@ -141,6 +142,7 @@ class ObserverHud:
         self._p1_score = self._label(self._col_p1, mono=True)
         self._p1_hunt = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
         self._p1_decision = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
+        self._p1_pending = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
         self._p1_agent_toggle = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
         self._p1_agent_toggle.configure(cursor="hand2")
         self._p1_agent_toggle.bind("<Button-1>", lambda _e: self._handle_toggle_agent(1))
@@ -153,6 +155,7 @@ class ObserverHud:
         self._p2_score = self._label(self._col_p2, mono=True)
         self._p2_hunt = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
         self._p2_decision = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
+        self._p2_pending = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
         self._p2_agent_toggle = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
         self._p2_agent_toggle.configure(cursor="hand2")
         self._p2_agent_toggle.bind("<Button-1>", lambda _e: self._handle_toggle_agent(2))
@@ -451,8 +454,8 @@ class ObserverHud:
         *,
         agent_p1_enabled: bool = False,
         agent_p2_enabled: bool = False,
-        p1_decision: Decision | None = None,
-        p2_decision: Decision | None = None,
+        p1_state: DecisionState | None = None,
+        p2_state: DecisionState | None = None,
     ) -> None:
         if snapshot.connected:
             link = "● LIVE"
@@ -516,8 +519,10 @@ class ObserverHud:
         self._p1_hunt.configure(text=f"Hunted ×{h1}" if h1 else "")
         self._p2_hunt.configure(text=f"Hunted ×{h2}" if h2 else "")
 
-        self._render_decision(self._p1_decision, agent_p1_enabled, p1_decision)
-        self._render_decision(self._p2_decision, agent_p2_enabled, p2_decision)
+        self._render_decision(self._p1_decision, agent_p1_enabled, p1_state)
+        self._render_decision(self._p2_decision, agent_p2_enabled, p2_state)
+        self._render_pending(self._p1_pending, agent_p1_enabled, p1_state)
+        self._render_pending(self._p2_pending, agent_p2_enabled, p2_state)
 
         self._render_agent_toggle(self._p1_agent_toggle, agent_p1_enabled)
         self._render_agent_toggle(self._p2_agent_toggle, agent_p2_enabled)
@@ -533,12 +538,20 @@ class ObserverHud:
             label.configure(text="AI: OFF  (click to enable)", fg=_MUTED)
 
     def _render_decision(
-        self, label: tk.Label, enabled: bool, decision: Decision | None
+        self, label: tk.Label, enabled: bool, state: DecisionState | None
     ) -> None:
-        if not enabled:
+        if not enabled or state is None:
             label.configure(text="")
             return
-        label.configure(text=f"Decision  {_describe_decision(decision)}", fg="#ffd84d")
+        label.configure(text=f"Decision  {_describe_decision(state.winning)}", fg="#ffd84d")
+
+    def _render_pending(
+        self, label: tk.Label, enabled: bool, state: DecisionState | None
+    ) -> None:
+        if not enabled or state is None:
+            label.configure(text="")
+            return
+        label.configure(text=_describe_pending(state.pending), fg=_MUTED)
 
     def _render_player(
         self,
@@ -909,6 +922,16 @@ def _describe_decision(decision: Decision | None) -> str:
     if parts:
         return f"{name}  ({' '.join(parts)})"
     return name
+
+
+def _describe_pending(pending: tuple[Decision, ...]) -> str:
+    """One-line label for every candidate ``Decision`` the AI considered
+    before ``determine_priority_decision`` collapsed them to one."""
+
+    if not pending:
+        return ""
+    names = ", ".join(_describe_decision(decision) for decision in pending)
+    return f"Pending  {names}"
 
 
 def _health_bar(player: PlayerSnapshot, width: int = 16) -> str:

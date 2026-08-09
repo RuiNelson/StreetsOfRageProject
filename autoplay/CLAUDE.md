@@ -77,7 +77,7 @@ entry points in this tree.
 
 - Keys: **Esc** / **Q** quit
 - Columns: State · P1 · P2 (health, lives, specials, score, hunt count,
-  winning-`Decision` label, AI toggle label)
+  winning-`Decision` label, one extra pending-decision label, AI toggle label)
 - Map outlines use `phases.py` combat-phase colours
 - Click a player's "AI: OFF/ON" label to toggle that player's AI at runtime
 - Window size/position is persisted to `~/.config/sor-autoplay/window.json`
@@ -95,17 +95,17 @@ entry points in this tree.
 | `tokens.py` | `Token`/`Information`/`Decision` base classes, `Context`, `find`/`find_all` |
 | `character.py` | `Myself`/`Partner` (`action_state`, `action_flags`, `is_airborne`, punch inner/outer helpers) |
 | `enemy.py` | `Enemy` + per-type/boss subclasses: `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`, `Boss` → `BespokeBoss` (`Abadede`, `MrX`) / `LaterBoss` (`Souther`, `Antonio`, `Bongo`, `Onihime`); `enemy_class_for_type` |
-| `essential.py`, `hazard_tokens.py`, `pickup_tokens.py` | `Stage`/`CameraRange`/`AnimationInProgress`, `Projectile`/`IncomingProjectile`/`DangerZone`, `Weapon` + consumable `Pickup` hierarchy + `weapon_rank` |
+| `essential.py`, `hazard_tokens.py`, `pickup_tokens.py` | `Stage`/`CameraRange`/`AnimationInProgress`, `Projectile`/`IncomingProjectile`, `Weapon` + consumable `Pickup` hierarchy + `weapon_rank` |
 | `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM); free-to-act phases include `HOLDING` and `HELD_BY_ENEMY` |
-| `inference.py` | Threat-filtered `IncomingProjectile`; weighted `DangerZone` (type strength + attack phase + cluster + projectiles) |
-| `walk_decisions.py` | `WalkToNearEnemy`, `WalkToAdvanceStage`, `WalkToCoordinate`, `WalkToWeapon`, `WalkToPickup`, `WalkToBreakable`, `Sidestep` |
+| `inference.py` | Threat-filtered `IncomingProjectile` (approaching + in-lane + impact window); non-playable `Actors` are filtered by not being `Myself`/`Partner`/`Enemy` |
+| `walk_decisions.py` | `WalkToNearEnemy`, `WalkToAdvanceStage`, `WalkToWeapon`, `WalkToPickup`, `WalkToBreakable` |
 | `attack_decisions.py` | `Punch`, `SmashBreakable`, hold moves (`KneeStrike`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab` |
-| `police_decision.py` | `CallPolice` (high threat only) |
-| `decide.py` | `should_*` generators; lane-clamped sidestep; on-screen-only chase; stage advance gated on *every* live enemy (on-screen or not), not just on-screen ones; hold always acts |
-| `priority.py` | Sidestep emergency downgraded to a flat floor pending a rework (see the `_EMERGENCY_SIDESTEP_FLOOR` TODO — the graded 55-99 scoring still exists underneath and still breaks ties among several Sidestep candidates); hold throws outrank knees; stage advance when no live enemy remains |
+| `police_decision.py` | `CallPolice` (health-critical only; below `POLICE_HEALTH_PERCENT_THRESHOLD`) |
+| `decide.py` | `should_*` generators; on-screen-only chase; stage advance gated on *every* live enemy (on-screen or not), not just on-screen ones; hold always acts |
+| `priority.py` | Emergency scores (counter-grab 100, call-police 88, rear 60/55, supplex 68, throw-held 70, knee 64, flip 66, release 50, knife 25, jump 28/18, punch 60/20, stage-advance 12, weapon 8, pickup tiers) — the max wins, with the `priority` field breaking ties; hold throws outrank knees; stage advance when no live enemy remains |
 | `gamepad.py` | `VirtualGamepad`/`SharedGamepadState` — the only code allowed to call `hold_buttons`/`press_buttons`/`release_buttons`; never `write_memory`/`write_value` |
 | `execute.py` | `execute_decision` dispatch to controller input |
-| `loop.py` | `AgentLoop.tick` — gates on pause/non-gameplay/not-playable first, then runs the full pipeline; returns the winning `Decision` (or `None`) for informational use, e.g. the HUD label |
+| `loop.py` | `AgentLoop.tick` — gates on pause/non-gameplay/not-playable first, then runs the full pipeline; fills a thread-safe `DecisionState` (winning + every pending candidate) via `inform_hud` every tick and clears it on gate; returns the winning `Decision` (or `None`) for informational use |
 
 Verified button mapping for the original (non-altControls) scheme (see
 `execute.py`'s module docstring): **Attack/Punch is physical B** (also

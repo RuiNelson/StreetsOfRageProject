@@ -17,7 +17,6 @@ classDiagram
 
     Information <|-- Projectile
     Information <|-- IncomingProjectile
-    Information <|-- DangerZone
     Information <|-- Breakable
 
     Information <|-- Weapon
@@ -50,9 +49,7 @@ classDiagram
 
     Decision <|-- Walk
     Walk <|-- WalkToNearEnemy
-    Walk <|-- Sidestep
     Walk <|-- WalkToAdvanceStage
-    Walk <|-- WalkToCoordinate
     Walk <|-- WalkToWeapon
     Walk <|-- WalkToPickup
     Walk <|-- WalkToBreakable

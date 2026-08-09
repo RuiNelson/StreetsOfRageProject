@@ -23,9 +23,7 @@ from sor_autoplay.ai.hazard_tokens import Breakable
 from sor_autoplay.ai.pickup_tokens import HealthPickup, Weapon
 from sor_autoplay.ai.police_decision import CallPolice
 from sor_autoplay.ai.walk_decisions import (
-    Sidestep,
     WalkToAdvanceStage,
-    WalkToCoordinate,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
@@ -138,24 +136,6 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         execute_decision(decision, context, gamepad)
 
         client.hold_buttons.assert_not_called()
-
-
-class ExecuteSidestepTests(unittest.TestCase):
-    def test_direction_up_holds_up(self) -> None:
-        decision = Sidestep(actor_slot="P1", threat_slot="obj01", direction="up")
-        gamepad, client = _gamepad()
-
-        execute_decision(decision, set(), gamepad)
-
-        client.hold_buttons.assert_called_once_with(player1=UP, player2=0)
-
-    def test_direction_down_holds_down(self) -> None:
-        decision = Sidestep(actor_slot="P1", threat_slot="obj01", direction="down")
-        gamepad, client = _gamepad()
-
-        execute_decision(decision, set(), gamepad)
-
-        client.hold_buttons.assert_called_once_with(player1=DOWN, player2=0)
 
 
 class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
@@ -343,25 +323,6 @@ class ExecuteCounterGrabTests(unittest.TestCase):
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=3)
 
 
-class ExecuteWalkToCoordinateTests(unittest.TestCase):
-    def test_walks_toward_the_given_coordinate(self) -> None:
-        actor = _myself(world_x=0, world_y=0)
-        decision = WalkToCoordinate(actor_slot="P1", target_x=50, target_y=50)
-        gamepad, client = _gamepad()
-
-        execute_decision(decision, {actor}, gamepad)
-
-        client.hold_buttons.assert_called_once_with(player1=RIGHT | DOWN, player2=0)
-
-    def test_missing_actor_does_nothing(self) -> None:
-        decision = WalkToCoordinate(actor_slot="P1", target_x=50, target_y=50)
-        gamepad, client = _gamepad()
-
-        execute_decision(decision, set(), gamepad)
-
-        client.hold_buttons.assert_not_called()
-
-
 class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):
     """Regression: _movement_mask must only dodge on-screen breakables.
 
@@ -378,10 +339,11 @@ class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):
         actor = _myself(world_x=0, world_y=90)
         prop = Breakable(slot="obj09", world_x=50, world_y=90, type_id=0x40)
         camera = CameraRange(left=0, right=200, top=0, bottom=112)
-        decision = WalkToCoordinate(actor_slot="P1", target_x=100, target_y=90)
+        target = _enemy(world_x=100, world_y=90)
+        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, prop, camera}, gamepad)
+        execute_decision(decision, {actor, target, prop, camera}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT | UP, player2=0)
 
@@ -389,10 +351,11 @@ class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):
         actor = _myself(world_x=0, world_y=90)
         prop = Breakable(slot="obj09", world_x=50, world_y=90, type_id=0x40)
         camera = CameraRange(left=200, right=400, top=0, bottom=112)
-        decision = WalkToCoordinate(actor_slot="P1", target_x=100, target_y=90)
+        target = _enemy(world_x=100, world_y=90)
+        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, prop, camera}, gamepad)
+        execute_decision(decision, {actor, target, prop, camera}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 

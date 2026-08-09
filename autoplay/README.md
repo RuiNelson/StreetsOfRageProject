@@ -5,10 +5,6 @@ Python app that attaches to a running
 [`MegaDriveEnvironment`](../MegaDriveEnvironment/) remote-access library
 (`megadrive_remote`).
 
-**Current milestone:** live **observer** HUD plus an opt-in **symbolic AI**
-(Phase A — see [`AI.md`](AI.md)) that can drive P1 and/or P2 through
-controller input only. The AI is off by default; enable it per player with
-`--agent-p1`/`--agent-p2` or the HUD's per-player "AI: OFF/ON" click label.
 
 ## Features
 
@@ -23,7 +19,7 @@ controller input only. The AI is off by default; enable it per player with
   - dashed camera rect = player walk band (32..288 × lane); off-camera actors still drawn
   - hunt counts when enemies target P1 / P2
 
-### AI (Phase A, opt-in)
+### AI
 
 - Token/Information/Decision pipeline per [`AI.md`](AI.md): observes the same
   snapshot the HUD already reads, infers danger/incoming-projectile tokens,
@@ -39,13 +35,15 @@ controller input only. The AI is off by default; enable it per player with
   held knife at range. No separate "combo"/"grab" moves — the ROM has no
   distinct input for either, so repeated `Punch` already produces both.
 - Movement: approaching the nearest enemy, walking to a weapon upgrade on
-  the floor, advancing the stage when no enemy is on screen, and retreating
-  from a clustered danger zone.
+  the floor, and advancing the stage when no enemy is on screen.
 - Reacts to incoming projectiles (not just melee enemies) by predicting
-  their flight path and sidestepping in time.
-- Danger-zone threat clustering: a group of enemies converging on a player
-  raises alarm even before any of them has actually attacked yet.
-- Calls police when surrounded or low on health.
+  their flight path and picking a dodge direction in time.
+- Threat-filtered `IncomingProjectile` inference only — no separate danger
+  zone or sidestep machinery.
+- Calls police automatically when health drops below a critical threshold
+  (and never while holding an enemy or with zero specials).
+- The HUD shows the AI's current winning `Decision` plus a pending-decision
+  label of every candidate it was choosing between.
 - Automatically stands down (releases input) when the game is paused or
   outside active gameplay (menus, character select, round-clear, continues).
 - Original A/B/C control scheme only; `--altControls` is not yet supported.

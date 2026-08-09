@@ -2,10 +2,11 @@ import os
 import unittest
 
 from sor_autoplay.ai.attack_decisions import CounterGrab, Punch
+from sor_autoplay.ai.loop import DecisionState
 from sor_autoplay.ai.police_decision import CallPolice
-from sor_autoplay.ai.walk_decisions import Sidestep, WalkToAdvanceStage, WalkToCoordinate
+from sor_autoplay.ai.walk_decisions import WalkToAdvanceStage
 from sor_autoplay.hud import ObserverHud, _window_config_path
-from sor_autoplay.hud import _describe_decision
+from sor_autoplay.hud import _describe_decision, _describe_pending
 
 
 class DescribeDecisionTests(unittest.TestCase):
@@ -22,16 +23,6 @@ class DescribeDecisionTests(unittest.TestCase):
 
         self.assertEqual(_describe_decision(decision), "Punch  (→obj03)")
 
-    def test_decision_with_a_threat_slot_and_direction(self) -> None:
-        decision = Sidestep(actor_slot="P1", threat_slot="obj04", direction="up")
-
-        self.assertEqual(_describe_decision(decision), "Sidestep  (up →obj04)")
-
-    def test_decision_with_a_coordinate(self) -> None:
-        decision = WalkToCoordinate(actor_slot="P1", target_x=10, target_y=20)
-
-        self.assertEqual(_describe_decision(decision), "WalkToCoordinate  (→(10,20))")
-
     def test_decision_with_only_a_direction(self) -> None:
         decision = WalkToAdvanceStage(actor_slot="P1", direction="right")
 
@@ -40,6 +31,33 @@ class DescribeDecisionTests(unittest.TestCase):
     def test_decision_with_no_extra_fields_shows_bare_name(self) -> None:
         self.assertEqual(_describe_decision(CallPolice(actor_slot="P1")), "CallPolice")
         self.assertEqual(_describe_decision(CounterGrab(actor_slot="P1")), "CounterGrab")
+
+
+class DescribePendingTests(unittest.TestCase):
+    """_describe_pending renders the candidate list the AI considered before
+    priority collapse -- the HUD's "one extra label (pending decision)"."""
+
+    def test_empty_pending_reads_as_blank(self) -> None:
+        self.assertEqual(_describe_pending(()), "")
+
+    def test_single_pending_decision(self) -> None:
+        state = DecisionState(
+            winning=Punch(actor_slot="P1", target_slot="obj03"),
+            pending=(Punch(actor_slot="P1", target_slot="obj03"),),
+        )
+        self.assertEqual(
+            _describe_pending(state.pending), "Pending  Punch  (→obj03)"
+        )
+
+    def test_multiple_pending_decisions_are_comma_joined(self) -> None:
+        pending = (
+            Punch(actor_slot="P1", target_slot="obj03"),
+            WalkToAdvanceStage(actor_slot="P1", direction="right"),
+        )
+        self.assertEqual(
+            _describe_pending(pending),
+            "Pending  Punch  (→obj03), WalkToAdvanceStage  (right)",
+        )
 
 
 class _FakeRoot:

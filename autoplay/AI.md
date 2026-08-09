@@ -50,9 +50,8 @@ complicate the implementation as the system grows; subclassing is the
 preferred mechanism for expressing such distinctions.
 
 A `Token` must never embed another `Token` by value. Since the context is
-a flat collection, any relationship between two tokens — for instance, a
-`WalkToNearEnemy` decision naming the enemy it targets, or a `DangerZone`
-naming the enemies that produced it — must be expressed as a reference to
+a flat unordered collection, any relationship between two tokens — for instance, a
+`WalkToNearEnemy` decision naming the enemy it targets must be expressed as a reference to
 the related token's identifier, to be resolved by looking it up in the
 context, rather than by holding the related token itself.
 
@@ -114,12 +113,9 @@ parametrized intent that precedes any concrete action.
 together with a single concrete descendant, `CallPolice`, which activates
 the police special attack:
 
-- `Walk` — for example, `WalkToCoordinate`, `WalkToNearEnemy`,
+- `Walk` — for example, `WalkToNearEnemy`,
   `WalkToAdvanceStage`, `WalkToWeapon`, and `WalkToPickup`; grabbing a
-  lay-down weapon or consumable is a `Walk` descendant. `Sidestep` — a
-  short evasive step away from an incoming attack — likewise belongs here,
-  since the game affords no blocking action; evasion is achieved purely
-  through movement.
+  lay-down weapon or consumable is a `Walk` descendant.
 - `Attack` — for example, `Punch`, `JumpAttack`, `Supplex`, `ThrowKnife`,
   `RearAttack` (simultaneous B+C rear/escape chord), and `CounterGrab`
   (enemy-held C then B sequence), each parametrized with the target or
@@ -162,14 +158,6 @@ a new decision.
 already in flight, allowing the AI to react to it before it reaches the
 character.
 
-**`DangerZone`** designates an area the player should avoid, or react to,
-because it is surrounded by enemies; it encapsulates a coordinate
-rectangle and an associated threat level. More elaborate inferences are
-also anticipated here — for example, a cluster of `Enemy` tokens
-positioned in close proximity to one another may be consolidated into a
-`DangerZone` whose threat level is proportional to the number and
-relative strength of the enemies it references, even before any of them
-has initiated an attack.
 
 ## Process
 
@@ -195,6 +183,9 @@ context |= generate_inference_tokens(context)
 # Decision tokens
 context |= generate_decision_tokens(context)
 context = determine_priority_decision(context)
+
+# UI
+inform_hud(context)
 
 decisions = [token for token in context if isinstance(token, Decision)]
 
@@ -290,6 +281,11 @@ should subsequently assign the affected tokens distinct priorities.
 By the end of this function, the context retains all of its `Information`
 tokens together with, at most, a single surviving `Decision` token; no
 `Decision` token remains in the context if none applies.
+
+### `inform_hud`
+
+Pass a copy of the context to the HUD system. The HUD can use some tokens
+to add some information visible to the user while the program runs.
 
 ### `press_no_button`
 

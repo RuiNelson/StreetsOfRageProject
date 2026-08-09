@@ -31,10 +31,8 @@ from .pickup_tokens import Pickup, Weapon
 from .police_decision import CallPolice
 from .tokens import Context, Decision, find, find_all
 from .walk_decisions import (
-    Sidestep,
     WalkToAdvanceStage,
     WalkToBreakable,
-    WalkToCoordinate,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
@@ -125,7 +123,7 @@ def _movement_mask(
             continue
         if abs(prop.world_x - from_x) > abs(to_x - from_x):
             continue
-        # Sidestep vertically around the prop (prefer away from lane edge).
+        # Step vertically around the prop (prefer away from lane edge).
         lo, hi = _lane_bounds(context)
         if from_y < (lo + hi) / 2:
             to_y = _clamp_target_y(context, prop.world_y + BREAKABLE_AVOID_Y)
@@ -191,21 +189,6 @@ def _execute_walk_to_advance_stage(
     gamepad.hold(
         _movement_mask(context, actor.world_x, actor.world_y, ahead_x, actor.world_y) or mask
     )
-
-
-def _execute_sidestep(decision: Sidestep, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
-    lo, hi = _lane_bounds(context)
-    if decision.direction == "up":
-        if actor is not None and actor.world_y <= lo:
-            gamepad.release()
-            return
-        gamepad.hold(UP_MASK)
-    elif decision.direction == "down":
-        if actor is not None and actor.world_y >= hi:
-            gamepad.release()
-            return
-        gamepad.hold(DOWN_MASK)
 
 
 def _execute_punch(decision: Punch, context: Context, gamepad: VirtualGamepad) -> None:
@@ -333,17 +316,6 @@ def _execute_throw_knife(decision: ThrowKnife, context: Context, gamepad: Virtua
     gamepad.press(PUNCH_MASK | face, frames=THROW_KNIFE_FRAMES)
 
 
-def _execute_walk_to_coordinate(decision: WalkToCoordinate, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
-    if actor is None:
-        return
-    gamepad.hold(
-        _movement_mask(
-            context, actor.world_x, actor.world_y, decision.target_x, decision.target_y
-        )
-    )
-
-
 def _execute_walk_to_weapon(decision: WalkToWeapon, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, decision.actor_slot)
     target = find(context, Weapon, slot=decision.target_slot)
@@ -389,7 +361,6 @@ def _execute_walk_to_breakable(
 _HANDLERS = {
     WalkToNearEnemy: _execute_walk_to_near_enemy,
     WalkToAdvanceStage: _execute_walk_to_advance_stage,
-    Sidestep: _execute_sidestep,
     Punch: _execute_punch,
     SmashBreakable: _execute_smash_breakable,
     RearAttack: _execute_rear_attack,
@@ -402,7 +373,6 @@ _HANDLERS = {
     FlipHold: _execute_flip_hold,
     ReleaseGrab: _execute_release_grab,
     ThrowKnife: _execute_throw_knife,
-    WalkToCoordinate: _execute_walk_to_coordinate,
     WalkToWeapon: _execute_walk_to_weapon,
     WalkToPickup: _execute_walk_to_pickup,
     WalkToBreakable: _execute_walk_to_breakable,

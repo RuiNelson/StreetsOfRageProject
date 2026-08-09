@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import math
 
-from ..phases import CombatPhase, is_dangerous, should_ignore_as_target
-from ..world_map import LANE_Y_MIN
+from ..phases import CombatPhase, should_ignore_as_target
 from .attack_decisions import (
     CounterGrab,
     FlipHold,
@@ -34,7 +33,7 @@ from .character import (
 )
 from .enemy import Enemy
 from .essential import AnimationInProgress, CameraRange, Stage
-from .hazard_tokens import Breakable, DangerZone, IncomingProjectile
+from .hazard_tokens import Breakable
 from .pickup_tokens import (
     PLAYER_MAX_HEALTH,
     HealthPickup,
@@ -49,21 +48,15 @@ from .pickup_tokens import (
 from .police_decision import CallPolice
 from .tokens import Context, Token, find, find_all
 from .walk_decisions import (
-    Sidestep,
     WalkToAdvanceStage,
     WalkToBreakable,
-    WalkToCoordinate,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
 )
 
-CAUTION_RANGE_X = 40
-CAUTION_RANGE_Y = 24
 # Police special is scarce (usually 1/life). Only panic-level situations.
 POLICE_HEALTH_PERCENT_THRESHOLD = 18.0
-POLICE_DANGER_THRESHOLD = 10
-POLICE_LOW_HEALTH_DANGER_THRESHOLD = 5
 
 # Jump-kick is a *horizontal* attack — never a stationary hop.
 JUMP_ATTACK_MIN_DX = 28  # must leave punch outer / need air travel
@@ -72,8 +65,6 @@ JUMP_ATTACK_RANGE_Y = 14
 KNIFE_RANGE_X = 90
 KNIFE_RANGE_Y = 16
 KNIFE_MELEE_X = 40
-DANGER_ZONE_RETREAT_THRESHOLD = 5
-PROJECTILE_DODGE_TICKS = 20
 
 HEALTH_PICKUP_MISSING_MIN = 16
 HEALTH_CRITICAL_PERCENT = 40.0
@@ -84,8 +75,6 @@ BREAKABLE_BLOCK_X = 28  # treat as path obstacle within this X of the walk line
 BREAKABLE_BLOCK_Y = 20
 REAR_THREAT_X = 56
 REAR_THREAT_Y = 24
-# Soft margin before the ROM lane clamp so we stop holding into the wall.
-LANE_EDGE_MARGIN = 6
 
 
 def _is_holding_enemy(actor: PlayableCharacter) -> bool:
@@ -99,10 +88,6 @@ def _actors(context: Context) -> list[PlayableCharacter]:
 
 def _blocked(context: Context, actor: PlayableCharacter) -> bool:
     return find(context, AnimationInProgress, slot=actor.slot) is not None
-
-
-def _is_facing(enemy: Enemy, target_world_x: int) -> bool:
-    return target_world_x <= enemy.world_x if enemy.facing_left else target_world_x >= enemy.world_x
 
 
 def _enemy_behind_actor(actor: PlayableCharacter, enemy: Enemy) -> bool:
@@ -136,15 +121,6 @@ def _in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
     return adx < punch_inner_x(actor.character_id)
 
 
-def _is_close_and_facing_caution(enemy: Enemy, actor: PlayableCharacter) -> bool:
-    return (
-        enemy.combat_phase is CombatPhase.UNKNOWN
-        and abs(enemy.world_x - actor.world_x) <= CAUTION_RANGE_X
-        and abs(enemy.world_y - actor.world_y) <= CAUTION_RANGE_Y
-        and _is_facing(enemy, actor.world_x)
-    )
-
-
 def _in_camera(camera: CameraRange, world_x: int, world_y: int) -> bool:
     return camera.left <= world_x <= camera.right and camera.top <= world_y <= camera.bottom
 
@@ -159,50 +135,6 @@ def _on_screen_enemies(context: Context) -> list[Enemy]:
     if camera is None:
         return enemies
     return [e for e in enemies if _in_camera(camera, e.world_x, e.world_y)]
-
-
-def _lane_max(context: Context) -> float:
-    camera = find(context, CameraRange)
-    if camera is not None:
-        return float(camera.bottom)
-    return 0x70
-
-
-def _clamp_lane_y(context: Context, y: float) -> int:
-    lo = float(LANE_Y_MIN) + LANE_EDGE_MARGIN
-    hi = _lane_max(context) - LANE_EDGE_MARGIN
-    if hi < lo:
-        return int(y)
-    return int(max(lo, min(hi, y)))
-
-
-def _sidestep_direction(context: Context, actor: PlayableCharacter, threat_y: int) -> str | None:
-    """Pick up/down without driving into the lane floor/ceiling.
-
-    When the threat has no vertical offset from the actor (a common case:
-    enemies converge onto the player's exact lane before attacking), there is
-    no "away from the threat" direction to prefer, so fall back to whichever
-    side of the lane has more room instead of always picking the same one.
-    """
-
-    lane_max = _lane_max(context)
-    near_bottom = actor.world_y >= lane_max - LANE_EDGE_MARGIN
-    near_top = actor.world_y <= LANE_Y_MIN + LANE_EDGE_MARGIN
-    if threat_y > actor.world_y:
-        prefer_up = True  # step "up" (smaller Y) if threat is lower on screen
-    elif threat_y < actor.world_y:
-        prefer_up = False
-    else:
-        room_up = actor.world_y - LANE_Y_MIN
-        room_down = lane_max - actor.world_y
-        prefer_up = room_up >= room_down
-    if prefer_up:
-        if near_top:
-            return "down" if not near_bottom else None
-        return "up"
-    if near_bottom:
-        return "up" if not near_top else None
-    return "down"
 
 
 def _rear_threats(actor: PlayableCharacter, enemies: list[Enemy]) -> list[Enemy]:
@@ -362,37 +294,6 @@ def should_walk_to_advance_stage(context: Context) -> Context:
     return decisions
 
 
-def should_sidestep(context: Context) -> Context:
-    decisions: set[Token] = set()
-    enemies = find_all(context, Enemy)
-    for actor in _actors(context):
-        if _blocked(context, actor):
-            continue
-        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
-            continue
-        if _is_holding_enemy(actor):
-            continue
-        for enemy in enemies:
-            if enemy.targets_player != actor.player_index:
-                continue
-            # A confirmed attack always gets evaded. The UNKNOWN-phase
-            # "insufficient information" caution is only worth an evasive
-            # step when the actor cannot already answer it with a punch —
-            # otherwise striking first is strictly better than backing off
-            # from an enemy that isn't even confirmed dangerous.
-            dangerous = is_dangerous(enemy.combat_phase)
-            if dangerous or (
-                _is_close_and_facing_caution(enemy, actor) and not _in_punch_band(actor, enemy)
-            ):
-                direction = _sidestep_direction(context, actor, enemy.world_y)
-                if direction is None:
-                    continue
-                decisions.add(
-                    Sidestep(actor_slot=actor.slot, threat_slot=enemy.slot, direction=direction)
-                )
-    return decisions
-
-
 def should_call_police(context: Context) -> Context:
     decisions: set[Token] = set()
     for actor in _actors(context):
@@ -404,15 +305,9 @@ def should_call_police(context: Context) -> Context:
             continue
         if actor.specials <= 0:
             continue
-        # Keep at least one special for true emergencies when stock is 1.
-        danger = find(context, DangerZone, slot=actor.slot)
-        if danger is None:
+        if actor.health_percent >= POLICE_HEALTH_PERCENT_THRESHOLD:
             continue
-        critical = actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD
-        if danger.threat_level >= POLICE_DANGER_THRESHOLD or (
-            critical and danger.threat_level >= POLICE_LOW_HEALTH_DANGER_THRESHOLD
-        ):
-            decisions.add(CallPolice(actor_slot=actor.slot))
+        decisions.add(CallPolice(actor_slot=actor.slot))
     return decisions
 
 
@@ -631,67 +526,6 @@ def should_walk_to_breakable(context: Context) -> Context:
     return decisions
 
 
-def should_retreat_from_danger_zone(context: Context) -> Context:
-    decisions: set[Token] = set()
-    for actor in _actors(context):
-        if _blocked(context, actor):
-            continue
-        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
-            continue
-        if _is_holding_enemy(actor):
-            continue
-        zone = find(context, DangerZone, slot=actor.slot)
-        if zone is None or zone.threat_level < DANGER_ZONE_RETREAT_THRESHOLD:
-            continue
-        centroid_x = (zone.left + zone.right) / 2
-        centroid_y = (zone.top + zone.bottom) / 2
-        target_x = actor.world_x + (actor.world_x - centroid_x)
-        target_y = _clamp_lane_y(context, actor.world_y + (actor.world_y - centroid_y))
-        decisions.add(
-            WalkToCoordinate(actor_slot=actor.slot, target_x=int(target_x), target_y=target_y)
-        )
-    return decisions
-
-
-def should_dodge_projectile(context: Context) -> Context:
-    decisions: set[Token] = set()
-    projectiles = find_all(context, IncomingProjectile)
-    for actor in _actors(context):
-        if _blocked(context, actor):
-            continue
-        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
-            continue
-        if _is_holding_enemy(actor):
-            continue
-        for projectile in projectiles:
-            if projectile.vel_x == 0:
-                if abs(projectile.world_x - actor.world_x) > CAUTION_RANGE_X:
-                    continue
-                direction = _sidestep_direction(context, actor, projectile.world_y)
-                if direction is None:
-                    continue
-                decisions.add(
-                    Sidestep(actor_slot=actor.slot, threat_slot=projectile.slot, direction=direction)
-                )
-                continue
-            dx = projectile.world_x - actor.world_x
-            heading_toward = (dx > 0 and projectile.vel_x < 0) or (dx < 0 and projectile.vel_x > 0)
-            if not heading_toward:
-                continue
-            ticks_to_impact = abs(dx) / abs(projectile.vel_x)
-            if ticks_to_impact > PROJECTILE_DODGE_TICKS:
-                continue
-            if abs(projectile.world_y - actor.world_y) > CAUTION_RANGE_Y:
-                continue
-            direction = _sidestep_direction(context, actor, projectile.world_y)
-            if direction is None:
-                continue
-            decisions.add(
-                Sidestep(actor_slot=actor.slot, threat_slot=projectile.slot, direction=direction)
-            )
-    return decisions
-
-
 def generate_decision_tokens(context: Context) -> Context:
     """Returns context | every should_* candidate that applies."""
 
@@ -701,7 +535,6 @@ def generate_decision_tokens(context: Context) -> Context:
         | should_hold_actions(context)
         | should_walk_to_near_enemy(context)
         | should_walk_to_advance_stage(context)
-        | should_sidestep(context)
         | should_punch(context)
         | should_rear_attack(context)
         | should_call_police(context)
@@ -711,6 +544,4 @@ def generate_decision_tokens(context: Context) -> Context:
         | should_walk_to_pickup(context)
         | should_smash_breakable(context)
         | should_walk_to_breakable(context)
-        | should_retreat_from_danger_zone(context)
-        | should_dodge_projectile(context)
     )

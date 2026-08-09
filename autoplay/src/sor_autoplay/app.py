@@ -13,7 +13,6 @@ from typing import Callable, Sequence
 from . import __version__
 from .ai.gamepad import SharedGamepadState, VirtualGamepad
 from .ai.loop import AgentLoop
-from .ai.tokens import Decision
 from .hud import HUD_PAINT_MS_DEFAULT, ObserverHud
 from .state import GameSnapshot, disconnected_snapshot, read_snapshot
 
@@ -294,10 +293,6 @@ class ObserverApp:
         self._latest: GameSnapshot = disconnected_snapshot("starting")
         self._client = None
         self._hud: ObserverHud | None = None
-        # Last Decision each AgentLoop.tick() executed, for the HUD only —
-        # written by the poll thread, read by the Tk tick under self._lock,
-        # same pattern as self._latest.
-        self._last_decision: dict[int, Decision | None] = {1: None, 2: None}
 
         # AI is opt-in and off by default; toggled via CLI flag or the HUD's
         # per-player click label. One SharedGamepadState is shared by both
@@ -325,8 +320,8 @@ class ObserverApp:
             event.set()
         else:
             event.clear()
-            with self._lock:
-                self._last_decision[player_index] = None
+            # Clear the HUD's live decision state so the label reads as idle.
+            self._agent_loops[player_index].inform_hud(set())
             self._gamepads[player_index].release()
 
     def start_poller(self) -> None:
@@ -370,19 +365,10 @@ class ObserverApp:
                 with self._lock:
                     self._latest = snapshot
 
-                decision_p1 = (
+                if self.agent_p1_enabled.is_set():
                     self._agent_loops[1].tick(snapshot, player_index=1)
-                    if self.agent_p1_enabled.is_set()
-                    else None
-                )
-                decision_p2 = (
+                if self.agent_p2_enabled.is_set():
                     self._agent_loops[2].tick(snapshot, player_index=2)
-                    if self.agent_p2_enabled.is_set()
-                    else None
-                )
-                with self._lock:
-                    self._last_decision[1] = decision_p1
-                    self._last_decision[2] = decision_p2
 
                 elapsed = time.monotonic() - started
                 remaining = poll_s - elapsed
@@ -421,10 +407,6 @@ class ObserverApp:
         with self._lock:
             return self._latest
 
-    def last_decision(self, player_index: int) -> Decision | None:
-        with self._lock:
-            return self._last_decision[player_index]
-
     def run_gui(
         self,
         *,
@@ -453,8 +435,8 @@ class ObserverApp:
                     self.latest(),
                     agent_p1_enabled=self.agent_p1_enabled.is_set(),
                     agent_p2_enabled=self.agent_p2_enabled.is_set(),
-                    p1_decision=self.last_decision(1),
-                    p2_decision=self.last_decision(2),
+                    p1_state=self._agent_loops[1].decision_state(),
+                    p2_state=self._agent_loops[2].decision_state(),
                 )
             except Exception as exc:  # noqa: BLE001
                 self._hud.update(disconnected_snapshot(f"HUD error: {exc}"))

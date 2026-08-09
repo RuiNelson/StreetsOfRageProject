@@ -21,14 +21,6 @@ class WalkToNearEnemy(Walk):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Sidestep(Walk):
-    priority: int = 30
-    actor_slot: str
-    threat_slot: str
-    direction: str  # "up" | "down"
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
 class WalkToAdvanceStage(Walk):
     # Lowest of the Walk/Attack priorities: per AI.md, "picking up a weapon
     # carries a higher priority than advancing to the next stage" -- this is
@@ -36,14 +28,6 @@ class WalkToAdvanceStage(Walk):
     priority: int = 5
     actor_slot: str
     direction: str  # "left" | "right"
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class WalkToCoordinate(Walk):
-    priority: int = 25
-    actor_slot: str
-    target_x: int
-    target_y: int
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

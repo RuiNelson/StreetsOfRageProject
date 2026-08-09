@@ -15,13 +15,10 @@ from sor_autoplay.ai.decide import (
     generate_decision_tokens,
     should_call_police,
     should_counter_grab,
-    should_dodge_projectile,
     should_hold_actions,
     should_jump_attack,
     should_punch,
     should_rear_attack,
-    should_retreat_from_danger_zone,
-    should_sidestep,
     should_throw_knife,
     should_walk_to_advance_stage,
     should_walk_to_near_enemy,
@@ -30,15 +27,12 @@ from sor_autoplay.ai.decide import (
 )
 from sor_autoplay.ai.enemy import Enemy
 from sor_autoplay.ai.essential import AnimationInProgress, CameraRange, Stage
-from sor_autoplay.ai.hazard_tokens import DangerZone, IncomingProjectile
 from sor_autoplay.ai.pickup_tokens import HealthPickup, Weapon
 from sor_autoplay.ai.police_decision import CallPolice
 from sor_autoplay.ai.tokens import Decision, Token
 from sor_autoplay.ai.walk_decisions import (
-    Sidestep,
     Walk,
     WalkToAdvanceStage,
-    WalkToCoordinate,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
@@ -89,13 +83,11 @@ class DecisionDataclassContractTests(unittest.TestCase):
         self.assertTrue(issubclass(Attack, Decision))
         self.assertTrue(issubclass(CallPolice, Decision))
         self.assertTrue(issubclass(WalkToNearEnemy, Walk))
-        self.assertTrue(issubclass(Sidestep, Walk))
         self.assertTrue(issubclass(Punch, Attack))
 
     def test_priority_defaults(self) -> None:
         self.assertEqual(Punch(actor_slot="P1", target_slot="obj01").priority, 10)
         self.assertEqual(WalkToNearEnemy(actor_slot="P1", target_slot="obj01").priority, 20)
-        self.assertEqual(Sidestep(actor_slot="P1", threat_slot="obj01", direction="up").priority, 30)
         self.assertEqual(CallPolice(actor_slot="P1").priority, 0)
         self.assertEqual(WalkToAdvanceStage(actor_slot="P1", direction="right").priority, 5)
 
@@ -305,134 +297,33 @@ class ShouldWalkToAdvanceStageTests(unittest.TestCase):
         self.assertEqual(result, {WalkToAdvanceStage(actor_slot="P1", direction="left")})
 
 
-class ShouldSidestepTests(unittest.TestCase):
-    def test_fires_for_confirmed_dangerous_enemy(self) -> None:
-        myself = make_myself(world_x=100, world_y=100)
-        enemy = make_enemy(
-            world_x=110,
-            world_y=120,
-            combat_phase=CombatPhase.ATTACKING,
-            targets_player=1,
-        )
-        context: set[Token] = {myself, enemy}
-
-        result = should_sidestep(context)
-
-        self.assertEqual(
-            result,
-            {Sidestep(actor_slot="P1", threat_slot="obj01", direction="up")},
-        )
-
-    def test_fires_for_close_facing_unknown_phase_enemy(self) -> None:
-        # The caution rule: CombatPhase.UNKNOWN on a nearby, player-facing
-        # enemy must be treated as "insufficient information," not "safe" --
-        # but only outside punch band (dy=20 > PUNCH_RANGE_Y=12), since inside
-        # punch band the actor should punch first rather than back off.
-        myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        enemy = make_enemy(
-            world_x=130,
-            world_y=80,
-            combat_phase=CombatPhase.UNKNOWN,
-            targets_player=1,
-            facing_left=True,  # facing left, myself is to its left -> facing myself
-        )
-        context: set[Token] = {myself, enemy}
-
-        result = should_sidestep(context)
-
-        self.assertEqual(
-            result,
-            {Sidestep(actor_slot="P1", threat_slot="obj01", direction="down")},
-        )
-
-    def test_does_not_fire_for_unknown_phase_enemy_in_punch_band(self) -> None:
-        # Same ambiguity as above, but close enough to punch (dy=10 <=
-        # PUNCH_RANGE_Y=12): striking first beats backing away from a
-        # threat that isn't even confirmed dangerous.
-        myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        enemy = make_enemy(
-            world_x=130,
-            world_y=90,
-            combat_phase=CombatPhase.UNKNOWN,
-            targets_player=1,
-            facing_left=True,
-        )
-        context: set[Token] = {myself, enemy}
-
-        self.assertEqual(should_sidestep(context), set())
-
-    def test_does_not_fire_for_far_away_enemy(self) -> None:
-        # Not is_dangerous and too far away for the UNKNOWN-caution rule to
-        # apply either.
-        myself = make_myself(world_x=0, world_y=0)
-        enemy = make_enemy(
-            world_x=500,
-            world_y=500,
-            combat_phase=CombatPhase.UNKNOWN,
-            targets_player=1,
-            facing_left=True,
-        )
-        context: set[Token] = {myself, enemy}
-
-        self.assertEqual(should_sidestep(context), set())
-
-    def test_does_not_fire_for_non_targeting_enemy(self) -> None:
-        myself = make_myself(world_x=100, world_y=100)
-        enemy = make_enemy(
-            world_x=105,
-            world_y=105,
-            combat_phase=CombatPhase.ATTACKING,
-            targets_player=2,
-        )
-        context: set[Token] = {myself, enemy}
-
-        self.assertEqual(should_sidestep(context), set())
-
-    def test_does_not_fire_for_unknown_phase_when_not_facing(self) -> None:
-        myself = make_myself(world_x=100, world_y=100)
-        enemy = make_enemy(
-            world_x=130,
-            world_y=90,
-            combat_phase=CombatPhase.UNKNOWN,
-            targets_player=1,
-            facing_left=False,  # facing away from myself
-        )
-        context: set[Token] = {myself, enemy}
-
-        self.assertEqual(should_sidestep(context), set())
-
-
 class ShouldCallPoliceTests(unittest.TestCase):
-    def test_fires_when_danger_zone_threat_high(self) -> None:
-        myself = make_myself(specials=1, health_percent=100.0)
-        danger = DangerZone(slot="P1", left=0, right=1, top=0, bottom=1, threat_level=10)
-        context: set[Token] = {myself, danger}
-
-        self.assertEqual(should_call_police(context), {CallPolice(actor_slot="P1")})
-
-    def test_fires_when_low_health_and_meaningful_threat(self) -> None:
+    def test_fires_when_health_is_critical(self) -> None:
         myself = make_myself(specials=1, health_percent=10.0)
-        danger = DangerZone(slot="P1", left=0, right=1, top=0, bottom=1, threat_level=5)
-        context: set[Token] = {myself, danger}
+        context: set[Token] = {myself}
 
         self.assertEqual(should_call_police(context), {CallPolice(actor_slot="P1")})
 
-    def test_does_not_fire_on_mild_danger(self) -> None:
-        myself = make_myself(specials=1, health_percent=100.0)
-        danger = DangerZone(slot="P1", left=0, right=1, top=0, bottom=1, threat_level=3)
-        context: set[Token] = {myself, danger}
+    def test_does_not_fire_at_the_critical_threshold(self) -> None:
+        myself = make_myself(specials=1, health_percent=18.0)
+        context: set[Token] = {myself}
+
+        self.assertEqual(should_call_police(context), set())
+
+    def test_does_not_fire_when_health_is_not_critical(self) -> None:
+        myself = make_myself(specials=1, health_percent=30.0)
+        context: set[Token] = {myself}
 
         self.assertEqual(should_call_police(context), set())
 
     def test_never_fires_with_zero_specials(self) -> None:
         myself = make_myself(specials=0, health_percent=1.0)
-        danger = DangerZone(slot="P1", left=0, right=1, top=0, bottom=1, threat_level=20)
-        context: set[Token] = {myself, danger}
+        context: set[Token] = {myself}
 
         self.assertEqual(should_call_police(context), set())
 
-    def test_no_danger_zone_means_no_signal(self) -> None:
-        myself = make_myself(specials=1, health_percent=1.0)
+    def test_never_fires_when_holding_an_enemy(self) -> None:
+        myself = make_myself(specials=1, health_percent=10.0, held_weapon_type=0x10)
         context: set[Token] = {myself}
 
         self.assertEqual(should_call_police(context), set())
@@ -630,74 +521,6 @@ class ShouldWalkToPickupTests(unittest.TestCase):
         context: set[Token] = {myself, camera, food}
 
         self.assertEqual(should_walk_to_pickup(context), set())
-
-
-class ShouldRetreatFromDangerZoneTests(unittest.TestCase):
-    def test_fires_at_or_above_threshold_and_moves_away_from_centroid(self) -> None:
-        myself = make_myself(world_x=100, world_y=100)
-        danger = DangerZone(slot="P1", left=100, right=140, top=100, bottom=100, threat_level=5)
-        context: set[Token] = {myself, danger}
-
-        result = should_retreat_from_danger_zone(context)
-
-        self.assertEqual(len(result), 1)
-        decision = next(iter(result))
-        self.assertIsInstance(decision, WalkToCoordinate)
-        self.assertEqual(decision.actor_slot, "P1")
-        # centroid_x = 120; actor is left of it, so retreat should move further left.
-        self.assertLess(decision.target_x, myself.world_x)
-
-    def test_does_not_fire_below_threshold(self) -> None:
-        myself = make_myself(world_x=100, world_y=100)
-        danger = DangerZone(slot="P1", left=100, right=140, top=100, bottom=100, threat_level=3)
-        context: set[Token] = {myself, danger}
-
-        self.assertEqual(should_retreat_from_danger_zone(context), set())
-
-    def test_no_danger_zone_no_decision(self) -> None:
-        myself = make_myself()
-        self.assertEqual(should_retreat_from_danger_zone({myself}), set())
-
-
-class ShouldDodgeProjectileTests(unittest.TestCase):
-    def test_fires_for_closing_in_lane_projectile_within_window(self) -> None:
-        myself = make_myself(world_x=100, world_y=100)
-        projectile = IncomingProjectile(slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0)
-        context: set[Token] = {myself, projectile}
-
-        result = should_dodge_projectile(context)
-
-        # No vertical offset (dy=0): world_y=100 sits much closer to the lane
-        # floor (112) than the ceiling (2), so the room-based tiebreak steps up.
-        self.assertEqual(result, {Sidestep(actor_slot="P1", threat_slot="obj10", direction="up")})
-
-    def test_does_not_fire_for_moving_away_projectile(self) -> None:
-        myself = make_myself(world_x=100, world_y=100)
-        projectile = IncomingProjectile(slot="obj10", world_x=150, world_y=100, vel_x=5.0, vel_z=0.0)
-        context: set[Token] = {myself, projectile}
-
-        self.assertEqual(should_dodge_projectile(context), set())
-
-    def test_does_not_fire_when_out_of_lane(self) -> None:
-        myself = make_myself(world_x=100, world_y=100)
-        projectile = IncomingProjectile(slot="obj10", world_x=150, world_y=500, vel_x=-5.0, vel_z=0.0)
-        context: set[Token] = {myself, projectile}
-
-        self.assertEqual(should_dodge_projectile(context), set())
-
-    def test_does_not_fire_when_too_far_to_impact_in_time(self) -> None:
-        myself = make_myself(world_x=100, world_y=100)
-        projectile = IncomingProjectile(slot="obj10", world_x=10000, world_y=100, vel_x=-1.0, vel_z=0.0)
-        context: set[Token] = {myself, projectile}
-
-        self.assertEqual(should_dodge_projectile(context), set())
-
-    def test_does_not_fire_for_zero_velocity(self) -> None:
-        myself = make_myself(world_x=100, world_y=100)
-        projectile = IncomingProjectile(slot="obj10", world_x=150, world_y=100, vel_x=0.0, vel_z=0.0)
-        context: set[Token] = {myself, projectile}
-
-        self.assertEqual(should_dodge_projectile(context), set())
 
 
 class GenerateDecisionTokensTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.ai.hazard_tokens import DangerZone, IncomingProjectile, Projectile
+from sor_autoplay.ai.hazard_tokens import IncomingProjectile, Projectile
 from sor_autoplay.ai.tokens import Information
 
 
@@ -8,7 +8,6 @@ class HazardTokenTests(unittest.TestCase):
     def test_all_are_information(self) -> None:
         self.assertTrue(issubclass(Projectile, Information))
         self.assertTrue(issubclass(IncomingProjectile, Information))
-        self.assertTrue(issubclass(DangerZone, Information))
 
     def test_projectile_fields(self) -> None:
         projectile = Projectile(
@@ -26,17 +25,6 @@ class HazardTokenTests(unittest.TestCase):
         )
         self.assertEqual(incoming.slot, "obj09")
         self.assertEqual(incoming.vel_x, -1.5)
-
-    def test_danger_zone_fields(self) -> None:
-        zone = DangerZone(
-            slot="P1", left=32.0, right=96.0, top=0.0, bottom=112.0, threat_level=3
-        )
-        self.assertEqual(zone.slot, "P1")
-        self.assertEqual(zone.left, 32.0)
-        self.assertEqual(zone.right, 96.0)
-        self.assertEqual(zone.top, 0.0)
-        self.assertEqual(zone.bottom, 112.0)
-        self.assertEqual(zone.threat_level, 3)
 
     def test_frozen_and_hashable(self) -> None:
         projectile = Projectile(

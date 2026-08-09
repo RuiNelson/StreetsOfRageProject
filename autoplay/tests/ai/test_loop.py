@@ -4,7 +4,8 @@ from unittest.mock import MagicMock, patch
 from sor_autoplay.ai.attack_decisions import Punch
 from sor_autoplay.ai.enemy import Enemy
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
+from sor_autoplay.ai.loop import AgentLoop, DecisionState
+from sor_autoplay.ai.walk_decisions import WalkToAdvanceStage
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 
@@ -162,6 +163,99 @@ class AgentLoopPipelineTests(unittest.TestCase):
 
         self.assertEqual(gamepad.held, 0)
         self.assertIsNone(result)
+
+
+class DecisionStateHudTests(unittest.TestCase):
+    """AI.md's UI step: every tick copies the surviving Decision plus every
+    candidate into a thread-safe DecisionState the HUD can read without
+    touching the pipeline."""
+
+    def _enemy(self) -> Enemy:
+        return Enemy(
+            slot="obj01",
+            type_id=0x20,
+            world_x=0,
+            world_y=0,
+            health=10,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+        )
+
+    def test_inform_hud_exposes_winning_and_pending(self) -> None:
+        loop = AgentLoop(_gamepad()[0])
+        enemy = self._enemy()
+        punch = Punch(actor_slot="P1", target_slot="obj01")
+
+        loop.inform_hud({enemy, punch}, pending=(punch,))
+
+        state = loop.decision_state()
+        self.assertIsInstance(state, DecisionState)
+        self.assertIs(state.winning, punch)
+        self.assertEqual(state.pending, (punch,))
+
+    def test_inform_hud_clears_with_empty_context(self) -> None:
+        loop = AgentLoop(_gamepad()[0])
+        punch = Punch(actor_slot="P1", target_slot="obj01")
+        loop.inform_hud({punch}, pending=(punch,))
+
+        loop.inform_hud(set())
+
+        state = loop.decision_state()
+        self.assertIsNone(state.winning)
+        self.assertEqual(state.pending, ())
+
+    def test_full_pipeline_fills_pending_with_all_candidates(self) -> None:
+        gamepad, _client = _gamepad()
+        loop = AgentLoop(gamepad)
+        enemy = self._enemy()
+        punch = Punch(actor_slot="P1", target_slot="obj01")
+        walk = WalkToAdvanceStage(actor_slot="P1", direction="right")
+
+        with (
+            patch(
+                "sor_autoplay.ai.loop.generate_direct_observation_tokens",
+                return_value={enemy},
+            ),
+            patch("sor_autoplay.ai.loop.generate_inference_tokens", return_value=set()),
+            patch(
+                "sor_autoplay.ai.loop.generate_decision_tokens",
+                return_value={enemy, punch, walk},
+            ),
+        ):
+            result = loop.tick(_snapshot(), player_index=1)
+
+        state = loop.decision_state()
+        self.assertIs(result, punch)
+        self.assertIs(state.winning, punch)
+        self.assertEqual(set(state.pending), {punch, walk})
+
+    def test_gated_tick_clears_the_previous_decision_state(self) -> None:
+        gamepad, _client = _gamepad()
+        loop = AgentLoop(gamepad)
+        enemy = self._enemy()
+        punch = Punch(actor_slot="P1", target_slot="obj01")
+        with (
+            patch(
+                "sor_autoplay.ai.loop.generate_direct_observation_tokens",
+                return_value={enemy},
+            ),
+            patch("sor_autoplay.ai.loop.generate_inference_tokens", return_value=set()),
+            patch(
+                "sor_autoplay.ai.loop.generate_decision_tokens",
+                return_value={enemy, punch},
+            ),
+        ):
+            loop.tick(_snapshot(), player_index=1)
+        self.assertIs(loop.decision_state().winning, punch)
+
+        with patch("sor_autoplay.ai.loop.generate_direct_observation_tokens") as observe:
+            loop.tick(_snapshot(paused=True), player_index=1)
+            observe.assert_not_called()
+
+        state = loop.decision_state()
+        self.assertIsNone(state.winning)
+        self.assertEqual(state.pending, ())
 
 
 if __name__ == "__main__":
