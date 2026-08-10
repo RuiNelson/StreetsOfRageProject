@@ -13,13 +13,14 @@ from sor_autoplay.ai.tokens import (
     RearAttack,
     Supplex,
     ThrowKnife,
+    ThrowPepper,
 )
 from sor_autoplay.ai.tokens import Myself
 from sor_autoplay.ai.tokens import Enemy
 from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.execute import execute_decision, press_no_button
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.tokens import Breakable
+from sor_autoplay.ai.tokens import Breakable, Pit
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
@@ -337,6 +338,16 @@ class ExecuteThrowKnifeTests(unittest.TestCase):
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
+class ExecuteThrowPepperTests(unittest.TestCase):
+    def test_throw_pepper_presses_button_b(self) -> None:
+        decision = ThrowPepper(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, set(), gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+
+
 class ExecuteRearAttackTests(unittest.TestCase):
     def test_presses_b_and_c_together(self) -> None:
         decision = RearAttack(actor_slot="P1", target_slot="obj01")
@@ -410,6 +421,49 @@ class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):
         gamepad, client = _gamepad()
 
         execute_decision(decision, {actor, target, prop, camera}, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
+
+
+class ExecuteMovementPitAvoidanceTests(unittest.TestCase):
+    """A Pit sitting on the walk path must be dodged, mirroring the existing
+    Breakable-avoidance behavior above -- falling in costs a full life
+    (player-health-lives-and-combat.md), so this must never be a no-op."""
+
+    def test_dodges_a_pit_that_is_actually_on_screen(self) -> None:
+        actor = _myself(world_x=0, world_y=90)
+        pit = Pit(world_x=45, lane_y=84, width=10, height=12)
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        target = _enemy(world_x=100, world_y=90)
+        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor, target, pit, camera}, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=RIGHT | UP, player2=0)
+
+    def test_ignores_a_pit_far_outside_the_camera(self) -> None:
+        actor = _myself(world_x=0, world_y=90)
+        pit = Pit(world_x=45, lane_y=84, width=10, height=12)
+        camera = CameraRange(left=200, right=400, top=0, bottom=112)
+        target = _enemy(world_x=100, world_y=90)
+        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor, target, pit, camera}, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
+
+    def test_ignores_a_pit_not_on_the_path(self) -> None:
+        actor = _myself(world_x=0, world_y=90)
+        # Pit is behind the actor, not between actor and target.
+        pit = Pit(world_x=-50, lane_y=84, width=10, height=12)
+        camera = CameraRange(left=-100, right=200, top=0, bottom=112)
+        target = _enemy(world_x=100, world_y=90)
+        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor, target, pit, camera}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 

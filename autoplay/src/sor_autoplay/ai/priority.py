@@ -25,6 +25,7 @@ from .decide import (
     KNIFE_RANGE_X,
     KNIFE_RANGE_Y,
     POLICE_HEALTH_PERCENT_THRESHOLD,
+    POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE,
 )
 from .tokens import (
     CounterGrab,
@@ -38,6 +39,7 @@ from .tokens import (
     Supplex,
     ThrowHeldEnemy,
     ThrowKnife,
+    ThrowPepper,
 )
 from .tokens import Myself, Partner
 from .tokens import Breakable, Enemy, Weapon, weapon_rank
@@ -75,6 +77,7 @@ _EMERGENCY_HOLD_RELEASE = 50
 _EMERGENCY_JUMP_ATTACK_PUNISHABLE = 28  # below punch; never prefer hop over strike
 _EMERGENCY_JUMP_ATTACK_DEFAULT = 18
 _EMERGENCY_THROW_KNIFE = 25
+_EMERGENCY_THROW_PEPPER = 25
 _EMERGENCY_SMASH_BREAKABLE = 16
 _EMERGENCY_WALK_TO_BREAKABLE = 14
 _EMERGENCY_WALK_TO_WEAPON = 8
@@ -105,7 +108,14 @@ def _emergency_counter_grab(decision: CounterGrab, context: Context) -> int:
 
 def _emergency_call_police(decision: CallPolice, context: Context) -> int:
     actor = _find_actor(context, decision.actor_slot)
-    if actor is not None and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD:
+    if actor is None:
+        return _EMERGENCY_DEFAULT
+    threshold = (
+        POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE
+        if actor.lives <= 1
+        else POLICE_HEALTH_PERCENT_THRESHOLD
+    )
+    if actor.health_percent < threshold:
         return _EMERGENCY_CALL_POLICE
     return _EMERGENCY_DEFAULT
 
@@ -177,18 +187,29 @@ def _emergency_walk_to_advance_stage(decision: WalkToAdvanceStage, context: Cont
     return _EMERGENCY_WALK_TO_ADVANCE_STAGE
 
 
-def _emergency_throw_knife(decision: ThrowKnife, context: Context) -> int:
-    target = find(context, Enemy, slot=decision.target_slot)
-    actor = _find_actor(context, decision.actor_slot)
+def _emergency_thrown_weapon(decision: Decision, context: Context, weight: int) -> int:
+    """Shared range check for the two attack-thrown weapons (knife, pepper —
+    items-and-weapons.md's ``$21E6``): beyond melee, within throw range."""
+
+    target = find(context, Enemy, slot=getattr(decision, "target_slot", None))
+    actor = _find_actor(context, getattr(decision, "actor_slot", None))
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
     dx = abs(target.world_x - actor.world_x)
     dy = abs(target.world_y - actor.world_y)
     beyond_melee = not (dx <= KNIFE_MELEE_X and dy <= KNIFE_RANGE_Y)
-    within_knife_range = dx <= KNIFE_RANGE_X and dy <= KNIFE_RANGE_Y
-    if beyond_melee and within_knife_range:
-        return _EMERGENCY_THROW_KNIFE
+    within_range = dx <= KNIFE_RANGE_X and dy <= KNIFE_RANGE_Y
+    if beyond_melee and within_range:
+        return weight
     return _EMERGENCY_DEFAULT
+
+
+def _emergency_throw_knife(decision: ThrowKnife, context: Context) -> int:
+    return _emergency_thrown_weapon(decision, context, _EMERGENCY_THROW_KNIFE)
+
+
+def _emergency_throw_pepper(decision: ThrowPepper, context: Context) -> int:
+    return _emergency_thrown_weapon(decision, context, _EMERGENCY_THROW_PEPPER)
 
 
 def _emergency_walk_to_pickup(decision: WalkToPickup, context: Context) -> int:
@@ -235,6 +256,7 @@ _EMERGENCY_FUNCS: dict[type[Decision], Callable[[Decision, Context], int]] = {
     ReleaseGrab: _held_enemy_emergency(_EMERGENCY_HOLD_RELEASE),
     JumpAttack: _emergency_jump_attack,
     ThrowKnife: _emergency_throw_knife,
+    ThrowPepper: _emergency_throw_pepper,
     WalkToBreakable: _emergency_walk_to_breakable,
     WalkToWeapon: _emergency_walk_to_weapon,
     WalkToPickup: _emergency_walk_to_pickup,

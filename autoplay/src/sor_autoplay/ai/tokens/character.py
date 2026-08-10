@@ -25,6 +25,12 @@ PUNCH_RANGE_Y = 12  # attack box Y is ±8; leave a small lane slack
 DEFAULT_PUNCH_INNER_X = 14
 DEFAULT_PUNCH_OUTER_X = 48
 
+# Measured bat/pipe swing reach (weapons-range-and-damage.md §5, live Axel):
+# max |w_x-p_x| = 36 px, shorter than any character's unarmed outer edge above
+# -- a held bat/pipe must use this instead of the per-character punch table.
+MELEE_WEAPON_TYPES = frozenset({0x0A, 0x0B})  # baseball bat, steel pipe
+MELEE_WEAPON_PUNCH_OUTER_X = 36
+
 
 def punch_inner_x(character_id: int | None) -> int:
     if character_id is None:
@@ -32,10 +38,35 @@ def punch_inner_x(character_id: int | None) -> int:
     return PUNCH_INNER_X.get(character_id, DEFAULT_PUNCH_INNER_X)
 
 
-def punch_outer_x(character_id: int | None) -> int:
+def punch_outer_x(character_id: int | None, held_weapon_type: int = 0) -> int:
+    if held_weapon_type in MELEE_WEAPON_TYPES:
+        return MELEE_WEAPON_PUNCH_OUTER_X
     if character_id is None:
         return DEFAULT_PUNCH_OUTER_X
     return PUNCH_OUTER_X.get(character_id, DEFAULT_PUNCH_OUTER_X)
+
+
+# Rear-attack ($322A player_attack_jump_chord) own attack box +$64, measured
+# live facing right (controls-and-input.md "Measured chord timing"): Y is
+# always +-8 for all three characters. Adam's chord is a hop ($22 -> $24)
+# whose box reaches forward as well as behind; Axel/Blaze only reach behind.
+REAR_ATTACK_Y = 8
+REAR_ATTACK_BEHIND_MAX_X: dict[int, int] = {0: 40, 1: 42, 2: 53}  # Axel, Adam, Blaze
+REAR_ATTACK_FRONT_MAX_X: dict[int, int] = {0: 0, 1: 14, 2: 0}
+DEFAULT_REAR_ATTACK_BEHIND_MAX_X = 48
+DEFAULT_REAR_ATTACK_FRONT_MAX_X = 0
+
+
+def rear_attack_behind_max_x(character_id: int | None) -> int:
+    if character_id is None:
+        return DEFAULT_REAR_ATTACK_BEHIND_MAX_X
+    return REAR_ATTACK_BEHIND_MAX_X.get(character_id, DEFAULT_REAR_ATTACK_BEHIND_MAX_X)
+
+
+def rear_attack_front_max_x(character_id: int | None) -> int:
+    if character_id is None:
+        return DEFAULT_REAR_ATTACK_FRONT_MAX_X
+    return REAR_ATTACK_FRONT_MAX_X.get(character_id, DEFAULT_REAR_ATTACK_FRONT_MAX_X)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -9,6 +9,7 @@ from sor_autoplay.ai.tokens import (
     Punch,
     RearAttack,
     ThrowKnife,
+    ThrowPepper,
 )
 from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay.ai.decide import (
@@ -20,6 +21,7 @@ from sor_autoplay.ai.decide import (
     should_punch,
     should_rear_attack,
     should_throw_knife,
+    should_throw_pepper,
     should_walk_to_advance_stage,
     should_walk_to_near_enemy,
     should_walk_to_pickup,
@@ -163,6 +165,22 @@ class ShouldPunchTests(unittest.TestCase):
 
         self.assertEqual(should_punch(context), set())
 
+    def test_bat_shortens_reach_below_unarmed_outer(self) -> None:
+        # Axel's unarmed outer is 50, but a held bat's measured reach is 36
+        # (weapons-range-and-damage.md) -- a target at dx=45 is unreachable.
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
+        enemy = make_enemy(world_x=145, world_y=100)
+
+        self.assertEqual(should_punch({myself, enemy}), set())
+
+    def test_bat_still_fires_within_its_own_shorter_reach(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
+        enemy = make_enemy(world_x=130, world_y=100)  # dx=30, within bat's 36
+
+        result = should_punch({myself, enemy})
+
+        self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj01")})
+
 
 class ShouldRearAttackTests(unittest.TestCase):
     def test_fires_when_enemy_is_behind(self) -> None:
@@ -174,9 +192,23 @@ class ShouldRearAttackTests(unittest.TestCase):
 
         self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
 
-    def test_fires_when_enemy_inside_punch_dead_zone(self) -> None:
+    def test_axel_does_not_fire_for_an_enemy_in_front(self) -> None:
+        # controls-and-input.md "Measured chord timing": Axel's $322A box is
+        # X -40..-8 -- pure backfist, no forward reach at all.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        enemy = make_enemy(world_x=108, world_y=100)  # dx=8 < Axel inner 16
+        enemy = make_enemy(world_x=108, world_y=100)  # dx=8, in front
+        context: set[Token] = {myself, enemy}
+
+        result = should_rear_attack(context)
+
+        self.assertEqual(result, set())
+
+    def test_adams_hop_fires_for_an_enemy_closed_in_front(self) -> None:
+        # Adam's chord ($22 -> $24) is a forward-reaching hop, X -42..+14.
+        myself = make_myself(
+            character_id=1, character_name="Adam", world_x=100, world_y=100, facing_left=False
+        )
+        enemy = make_enemy(world_x=108, world_y=100)  # dx=8, within Adam's +14 front reach
         context: set[Token] = {myself, enemy}
 
         result = should_rear_attack(context)
@@ -328,6 +360,21 @@ class ShouldCallPoliceTests(unittest.TestCase):
 
         self.assertEqual(should_call_police(context), set())
 
+    def test_last_life_fires_at_a_higher_health_threshold(self) -> None:
+        # A KO on the last life risks a continue/game-over instead of a free
+        # respawn (player-health-lives-and-combat.md) -- 30% is above the
+        # ordinary 18% threshold but below the last-life 35% one.
+        myself = make_myself(specials=1, health_percent=30.0, lives=1)
+        context: set[Token] = {myself}
+
+        self.assertEqual(should_call_police(context), {CallPolice(actor_slot="P1")})
+
+    def test_last_life_still_respects_its_own_higher_threshold(self) -> None:
+        myself = make_myself(specials=1, health_percent=40.0, lives=1)
+        context: set[Token] = {myself}
+
+        self.assertEqual(should_call_police(context), set())
+
 
 class ShouldHoldActionsTests(unittest.TestCase):
     def test_front_hold_offers_knee_and_flip(self) -> None:
@@ -415,6 +462,27 @@ class ShouldJumpAttackTests(unittest.TestCase):
 
         self.assertEqual(should_jump_attack(context), set())
 
+    def test_axel_does_not_fire_beyond_his_shorter_kick_range(self) -> None:
+        # controls-and-input.md "Closed-form trajectory summary": Axel's
+        # early-kick range is 60px, well short of the old flat 72px cap.
+        myself = make_myself(world_x=100, world_y=100, is_airborne=False, facing_left=False)
+        enemy = make_enemy(world_x=165, world_y=100)  # dx=65 > Axel's 60
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+        context: set[Token] = {myself, enemy, camera}
+
+        self.assertEqual(should_jump_attack(context), set())
+
+    def test_blaze_fires_at_a_range_beyond_axels_reach(self) -> None:
+        myself = make_myself(
+            character_id=2, character_name="Blaze", world_x=100, world_y=100,
+            is_airborne=False, facing_left=False,
+        )
+        enemy = make_enemy(world_x=165, world_y=100)  # dx=65, within Blaze's 75
+
+        result = should_jump_attack({myself, enemy})
+
+        self.assertEqual(result, {JumpAttack(actor_slot="P1", target_slot="obj01")})
+
 
 class ShouldThrowKnifeTests(unittest.TestCase):
     def test_fires_when_holding_knife_and_enemy_outside_melee_but_in_knife_range(self) -> None:
@@ -446,6 +514,38 @@ class ShouldThrowKnifeTests(unittest.TestCase):
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(should_throw_knife(context), set())
+
+
+class ShouldThrowPepperTests(unittest.TestCase):
+    def test_fires_when_holding_pepper_and_enemy_outside_melee_but_in_range(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
+        enemy = make_enemy(world_x=160, world_y=100)  # outside KNIFE_MELEE_X=40
+        context: set[Token] = {myself, enemy}
+
+        result = should_throw_pepper(context)
+
+        self.assertEqual(result, {ThrowPepper(actor_slot="P1", target_slot="obj01")})
+
+    def test_does_not_fire_when_enemy_is_in_melee_range(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
+        enemy = make_enemy(world_x=110, world_y=105)
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(should_throw_pepper(context), set())
+
+    def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)  # knife
+        enemy = make_enemy(world_x=160, world_y=100)
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(should_throw_pepper(context), set())
+
+    def test_does_not_fire_when_enemy_beyond_range(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
+        enemy = make_enemy(world_x=500, world_y=500)
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(should_throw_pepper(context), set())
 
 
 class ShouldWalkToWeaponTests(unittest.TestCase):

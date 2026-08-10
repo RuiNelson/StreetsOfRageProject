@@ -23,16 +23,21 @@ from .attack_decisions import (
     Supplex,
     ThrowHeldEnemy,
     ThrowKnife,
+    ThrowPepper,
     WeaponAttacks,
 )
 from .character import (
+    MELEE_WEAPON_TYPES,
     PUNCH_RANGE_Y,
+    REAR_ATTACK_Y,
     Character,
     Myself,
     Partner,
     PlayableCharacter,
     punch_inner_x,
     punch_outer_x,
+    rear_attack_behind_max_x,
+    rear_attack_front_max_x,
 )
 from .enemy import (
     Abadede,

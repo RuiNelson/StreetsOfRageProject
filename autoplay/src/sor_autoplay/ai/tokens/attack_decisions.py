@@ -51,7 +51,8 @@ class Punch(MeleeAttacks):
     """Basic B-button punch; repeated contact also triggers the grab.
 
     Produced by ``should_punch`` when an enemy sits within the actor's punch
-    band.
+    band. A held bat/pipe shortens that band to its own measured 36px reach
+    (weapons-range-and-damage.md) instead of the unarmed per-character table.
 
     Raises emergency: (Enemy when in a punishable phase)×60, Enemy×20.
     """
@@ -63,7 +64,9 @@ class Punch(MeleeAttacks):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WeaponAttacks(Attack, ABC):
-    """Attacks that require holding a weapon (e.g. ``ThrowKnife``)."""
+    """Attacks that require holding a weapon (e.g. ``ThrowKnife``,
+    ``ThrowPepper`` — the only two weapon types the ROM attack-throws,
+    per items-and-weapons.md's ``$21E6 (player_release_thrown_weapon)``)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -74,6 +77,26 @@ class ThrowKnife(WeaponAttacks):
     $08) and the nearest enemy is beyond melee but within knife range.
 
     Raises emergency: (Enemy when beyond melee and within knife range)×25.
+    """
+
+    priority: int = 11
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ThrowPepper(WeaponAttacks):
+    """Throw the held pepper spray at an out-of-melee-range enemy.
+
+    On hit it immobilizes the target rather than dealing the raw damage a
+    knife throw does (items-and-weapons.md), making it a crowd-control tool.
+
+    Produced by ``should_throw_pepper`` when the actor holds pepper spray
+    (type $0C) and the nearest enemy is beyond melee but within throw range
+    (reusing ``ThrowKnife``'s measured range constants — pepper's own
+    effective throw range has not been separately measured).
+
+    Raises emergency: (Enemy when beyond melee and within throw range)×25.
     """
 
     priority: int = 11
@@ -190,13 +213,16 @@ class SmashBreakable(Attack):
 class RearAttack(MeleeAttacks):
     """Simultaneous B+C rear/escape attack (``$322A``).
 
-    Produced by ``should_rear_attack`` when an enemy is in the rear band or
-    closed inside the punch inner dead zone.
+    Produced by ``should_rear_attack`` when an enemy sits inside the
+    character-specific ``$322A`` attack box (measured live,
+    controls-and-input.md): behind the player for all three characters
+    (Axel/Adam/Blaze up to 40/42/53px), and additionally in front only for
+    Adam (up to 14px — his chord is a forward-reaching hop, not a backfist).
 
     Raises emergency: (Enemy when in a dangerous phase)×60, Enemy×55.
 
-    Prefer when a close threat sits behind the player, or when a body has
-    closed inside the punch's inner dead zone (punch cannot connect).
+    Prefer when a close threat sits behind the player. For Adam only, also
+    prefer it when a body has closed inside his hop's forward reach.
     """
 
     priority: int = 15

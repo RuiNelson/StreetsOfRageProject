@@ -2,6 +2,11 @@ import unittest
 
 from sor_autoplay.ai.tokens import Character, Myself, Partner, PlayableCharacter
 from sor_autoplay.ai.tokens import Information, Token
+from sor_autoplay.ai.tokens import (
+    punch_outer_x,
+    rear_attack_behind_max_x,
+    rear_attack_front_max_x,
+)
 from sor_autoplay.phases import CombatPhase
 
 
@@ -90,6 +95,34 @@ class CharacterHierarchyTests(unittest.TestCase):
 
     def test_priority_defaults_to_zero(self) -> None:
         self.assertEqual(_myself().priority, 0)
+
+
+class PunchOuterXWeaponAwareTests(unittest.TestCase):
+    def test_unarmed_uses_per_character_table(self) -> None:
+        self.assertEqual(punch_outer_x(0), 50)  # Axel
+        self.assertEqual(punch_outer_x(1), 48)  # Adam
+        self.assertEqual(punch_outer_x(2), 60)  # Blaze
+
+    def test_bat_or_pipe_shrinks_reach_to_measured_36px_for_every_character(self) -> None:
+        for character_id in (0, 1, 2):
+            self.assertEqual(punch_outer_x(character_id, held_weapon_type=0x0A), 36)
+            self.assertEqual(punch_outer_x(character_id, held_weapon_type=0x0B), 36)
+
+    def test_other_held_types_do_not_shrink_reach(self) -> None:
+        # Knife (0x08) and unarmed grab-slot values are unaffected.
+        self.assertEqual(punch_outer_x(0, held_weapon_type=0x08), 50)
+
+
+class RearAttackBoxTests(unittest.TestCase):
+    def test_behind_max_matches_measured_per_character_box(self) -> None:
+        self.assertEqual(rear_attack_behind_max_x(0), 40)  # Axel
+        self.assertEqual(rear_attack_behind_max_x(1), 42)  # Adam
+        self.assertEqual(rear_attack_behind_max_x(2), 53)  # Blaze
+
+    def test_only_adam_reaches_forward(self) -> None:
+        self.assertEqual(rear_attack_front_max_x(0), 0)  # Axel: pure backfist
+        self.assertEqual(rear_attack_front_max_x(1), 14)  # Adam: forward hop
+        self.assertEqual(rear_attack_front_max_x(2), 0)  # Blaze: pure backfist
 
 
 if __name__ == "__main__":

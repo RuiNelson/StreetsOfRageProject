@@ -22,6 +22,7 @@ from .tokens import (
     Supplex,
     ThrowHeldEnemy,
     ThrowKnife,
+    ThrowPepper,
 )
 from .tokens import (
     Myself,
@@ -30,6 +31,8 @@ from .tokens import (
     punch_inner_x,
     punch_outer_x,
     PUNCH_RANGE_Y,
+    rear_attack_behind_max_x,
+    rear_attack_front_max_x,
 )
 from .tokens import Enemy
 from .tokens import AnimationInProgress, CameraRange, Stage
@@ -57,14 +60,30 @@ from .tokens import (
 
 # Police special is scarce (usually 1/life). Only panic-level situations.
 POLICE_HEALTH_PERCENT_THRESHOLD = 18.0
+# On the last life a KO risks a continue/game-over screen instead of a free
+# respawn at full health (player-health-lives-and-combat.md) -- call police
+# sooner rather than risk it.
+POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE = 35.0
 
 # Jump-kick is a *horizontal* attack — never a stationary hop.
 JUMP_ATTACK_MIN_DX = 28  # must leave punch outer / need air travel
-JUMP_ATTACK_MAX_DX = 72
+# Early-kick free-flight range per character_id (controls-and-input.md
+# "Closed-form trajectory summary"): 60/69/75 px -- Axel's real reach is well
+# short of Blaze's, so a flat cap either strands Axel mid-air or under-uses
+# Blaze's longer kick.
+JUMP_ATTACK_MAX_DX_BY_CHARACTER: dict[int, int] = {0: 60, 1: 69, 2: 75}  # Axel, Adam, Blaze
+JUMP_ATTACK_MAX_DX_DEFAULT = 72
 JUMP_ATTACK_RANGE_Y = 14
+
+
+def _jump_attack_max_dx(character_id: int | None) -> int:
+    if character_id is None:
+        return JUMP_ATTACK_MAX_DX_DEFAULT
+    return JUMP_ATTACK_MAX_DX_BY_CHARACTER.get(character_id, JUMP_ATTACK_MAX_DX_DEFAULT)
 KNIFE_RANGE_X = 90
 KNIFE_RANGE_Y = 16
 KNIFE_MELEE_X = 40
+PEPPER_SPRAY_TYPE = 0x0C
 
 HEALTH_PICKUP_MISSING_MIN = 16
 HEALTH_CRITICAL_PERCENT = 40.0
@@ -105,20 +124,19 @@ def _in_punch_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
     dy = abs(enemy.world_y - actor.world_y)
     if dy > PUNCH_RANGE_Y:
         return False
-    return punch_inner_x(actor.character_id) <= dx <= punch_outer_x(actor.character_id)
+    outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
+    return punch_inner_x(actor.character_id) <= dx <= outer
 
 
 def _in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
     dx = enemy.world_x - actor.world_x
     dy = abs(enemy.world_y - actor.world_y)
-    if dy > PUNCH_RANGE_Y + 4:
+    if dy > PUNCH_RANGE_Y:
         return False
     adx = abs(dx)
-    if adx > 48:
-        return False
     if _enemy_behind_actor(actor, enemy):
-        return adx <= 48
-    return adx < punch_inner_x(actor.character_id)
+        return adx <= rear_attack_behind_max_x(actor.character_id)
+    return adx <= rear_attack_front_max_x(actor.character_id)
 
 
 def _in_camera(camera: CameraRange, world_x: int, world_y: int) -> bool:
@@ -305,7 +323,12 @@ def should_call_police(context: Context) -> Context:
             continue
         if actor.specials <= 0:
             continue
-        if actor.health_percent >= POLICE_HEALTH_PERCENT_THRESHOLD:
+        threshold = (
+            POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE
+            if actor.lives <= 1
+            else POLICE_HEALTH_PERCENT_THRESHOLD
+        )
+        if actor.health_percent >= threshold:
             continue
         decisions.add(CallPolice(actor_slot=actor.slot))
     return decisions
@@ -333,7 +356,7 @@ def should_jump_attack(context: Context) -> Context:
             # Must need the air approach: outside punch outer, with real ΔX.
             if dx < max(JUMP_ATTACK_MIN_DX, punch_outer_x(actor.character_id)):
                 continue
-            if dx > JUMP_ATTACK_MAX_DX:
+            if dx > _jump_attack_max_dx(actor.character_id):
                 continue
             # Only kick forward — jump-in-place facing wrong way is useless.
             if not _enemy_in_front(actor, enemy):
@@ -371,6 +394,44 @@ def should_throw_knife(context: Context) -> Context:
             and abs(nearest.world_y - actor.world_y) <= KNIFE_RANGE_Y
         ):
             decisions.add(ThrowKnife(actor_slot=actor.slot, target_slot=nearest.slot))
+    return decisions
+
+
+def should_throw_pepper(context: Context) -> Context:
+    """Mirrors ``should_throw_knife``'s range gating: items-and-weapons.md
+    confirms pepper spray is also attack-thrown (``$21E6``, command 3), but
+    its own effective throw range has not been separately measured, so this
+    reuses ``KNIFE_MELEE_X``/``KNIFE_RANGE_X``/``KNIFE_RANGE_Y`` as the
+    closest available evidence."""
+
+    decisions: set[Token] = set()
+    enemies = _on_screen_enemies(context)
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.held_weapon_type != PEPPER_SPRAY_TYPE:
+            continue
+        if not enemies:
+            continue
+        nearest = min(
+            enemies,
+            key=lambda e: math.hypot(e.world_x - actor.world_x, e.world_y - actor.world_y),
+        )
+        in_melee_range = (
+            abs(nearest.world_x - actor.world_x) <= KNIFE_MELEE_X
+            and abs(nearest.world_y - actor.world_y) <= KNIFE_RANGE_Y
+        )
+        if in_melee_range:
+            continue
+        if (
+            abs(nearest.world_x - actor.world_x) <= KNIFE_RANGE_X
+            and abs(nearest.world_y - actor.world_y) <= KNIFE_RANGE_Y
+        ):
+            decisions.add(ThrowPepper(actor_slot=actor.slot, target_slot=nearest.slot))
     return decisions
 
 
@@ -540,6 +601,7 @@ def generate_decision_tokens(context: Context) -> Context:
         | should_call_police(context)
         | should_jump_attack(context)
         | should_throw_knife(context)
+        | should_throw_pepper(context)
         | should_walk_to_weapon(context)
         | should_walk_to_pickup(context)
         | should_smash_breakable(context)

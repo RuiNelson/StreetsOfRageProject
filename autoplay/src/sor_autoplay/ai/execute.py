@@ -22,11 +22,12 @@ from .tokens import (
     Supplex,
     ThrowHeldEnemy,
     ThrowKnife,
+    ThrowPepper,
 )
 from .tokens import Myself, Partner, PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
 from .tokens import Enemy
 from .tokens import CameraRange
-from .tokens import Breakable
+from .tokens import Breakable, Pit
 from .tokens import Pickup, Weapon
 from .tokens import CallPolice
 from .tokens import Context, Decision, find, find_all
@@ -52,6 +53,7 @@ PUNCH_FRAMES = 4
 CALL_POLICE_FRAMES = 4
 SUPPLEX_FRAMES = 4
 THROW_KNIFE_FRAMES = 4
+THROW_PEPPER_FRAMES = 4
 REAR_ATTACK_FRAMES = 4
 COUNTER_FRAMES = 3
 JUMP_ATTACK_LAUNCH_FRAMES = 3
@@ -63,6 +65,11 @@ PICKUP_RANGE_Y = 14
 LANE_EDGE_MARGIN = 6
 BREAKABLE_AVOID_X = 28
 BREAKABLE_AVOID_Y = 22
+# Clearance kept beyond a Pit's own footprint — falling in costs a full life
+# (player-health-lives-and-combat.md's $01C0 fall-boundary check), so this
+# stays smaller than BREAKABLE_AVOID_Y only because the pit's real height is
+# already added on top of it (see the dodge loop below).
+PIT_AVOID_MARGIN = 8
 # Stop just inside punch_outer_x — never walk onto the enemy.
 WALK_TO_ENEMY_STOP_BUFFER = 4
 # While still approaching a dangerous (ATTACKING/CHARGE) enemy and already
@@ -137,6 +144,34 @@ def _movement_mask(
         else:
             to_y = _clamp_target_y(context, prop.world_y - BREAKABLE_AVOID_Y)
 
+    # Nudge path around floor pits — same camera-filtered, path-intersecting
+    # dodge idiom as the breakable loop above, but keyed off the pit's own
+    # AABB (world_x/lane_y/width/height) instead of a fixed point margin,
+    # since a pit's footprint is directly observed rather than assumed.
+    for pit in find_all(context, Pit):
+        pit_right = pit.world_x + pit.width
+        pit_bottom = pit.lane_y + pit.height
+        pit_center_x = (pit.world_x + pit_right) / 2
+        pit_center_y = (pit.lane_y + pit_bottom) / 2
+        if camera is not None and not (
+            camera.left <= pit_center_x <= camera.right
+            and camera.top <= pit_center_y <= camera.bottom
+        ):
+            continue
+        between = (from_x < pit_center_x < to_x) or (to_x < pit_center_x < from_x)
+        if not between:
+            continue
+        half_height = (pit_bottom - pit.lane_y) / 2 + PIT_AVOID_MARGIN
+        if abs(pit_center_y - from_y) > half_height and abs(pit_center_y - to_y) > half_height:
+            continue
+        if abs(pit_center_x - from_x) > abs(to_x - from_x):
+            continue
+        lo, hi = _lane_bounds(context)
+        if from_y < (lo + hi) / 2:
+            to_y = _clamp_target_y(context, pit_bottom + PIT_AVOID_MARGIN)
+        else:
+            to_y = _clamp_target_y(context, pit.lane_y - PIT_AVOID_MARGIN)
+
     mask = 0
     if to_x > from_x:
         mask |= RIGHT_MASK
@@ -183,7 +218,7 @@ def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[
     down the enemy's line of attack.
     """
 
-    outer = punch_outer_x(actor.character_id)
+    outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
     inner = punch_inner_x(actor.character_id)
     stop_dx = max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER)
 
@@ -354,6 +389,15 @@ def _execute_throw_knife(decision: ThrowKnife, context: Context, gamepad: Virtua
     gamepad.press(PUNCH_MASK | face, frames=THROW_KNIFE_FRAMES)
 
 
+def _execute_throw_pepper(decision: ThrowPepper, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, decision.actor_slot)
+    target = find(context, Enemy, slot=decision.target_slot)
+    face = 0
+    if actor is not None and target is not None:
+        face = _face_toward_mask(actor, target.world_x)
+    gamepad.press(PUNCH_MASK | face, frames=THROW_PEPPER_FRAMES)
+
+
 def _execute_walk_to_weapon(decision: WalkToWeapon, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, decision.actor_slot)
     target = find(context, Weapon, slot=decision.target_slot)
@@ -411,6 +455,7 @@ _HANDLERS = {
     FlipHold: _execute_flip_hold,
     ReleaseGrab: _execute_release_grab,
     ThrowKnife: _execute_throw_knife,
+    ThrowPepper: _execute_throw_pepper,
     WalkToWeapon: _execute_walk_to_weapon,
     WalkToPickup: _execute_walk_to_pickup,
     WalkToBreakable: _execute_walk_to_breakable,

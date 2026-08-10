@@ -16,10 +16,12 @@ class CallPolice(Attack):
     """The A-button police special — a screen-clearing attack.
 
     Produced by ``should_call_police`` when the actor has a special and
-    health_percent is below POLICE_HEALTH_PERCENT_THRESHOLD.
+    health_percent is below POLICE_HEALTH_PERCENT_THRESHOLD (or the higher
+    POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE while on the last life, where a
+    KO risks a continue/game-over instead of a free respawn).
 
-    Raises emergency: (Myself when health_percent is below
-    POLICE_HEALTH_PERCENT_THRESHOLD)×88.
+    Raises emergency: (Myself when health_percent is below that same
+    lives-aware threshold)×88.
     """
 
     priority: int = 0

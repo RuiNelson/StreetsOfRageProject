@@ -12,6 +12,7 @@ from sor_autoplay.ai.tokens import (
     SmashBreakable,
     Supplex,
     ThrowKnife,
+    ThrowPepper,
     Weapon,
 )
 from sor_autoplay.ai.tokens import Myself
@@ -70,6 +71,24 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
     def test_call_police_beats_punch_on_punishable_enemy(self) -> None:
         punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
         myself = _myself(health_percent=10.0)
+        context = {
+            punishable,
+            myself,
+            CallPolice(actor_slot="P1"),
+            Punch(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], CallPolice)
+
+    def test_call_police_on_last_life_beats_punch_above_ordinary_threshold(self) -> None:
+        # 30% health is above the ordinary 18% threshold but below the
+        # last-life 35% one, so emergency should still be raised.
+        punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
+        myself = _myself(health_percent=30.0, lives=1)
         context = {
             punishable,
             myself,
@@ -327,6 +346,38 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
             actor,
             near_enemy,
             ThrowKnife(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], WalkToNearEnemy)
+
+    def test_throw_pepper_scores_within_range_beyond_melee(self) -> None:
+        actor = _myself(world_x=0, world_y=0)
+        far_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=60, world_y=0)
+        context = {
+            actor,
+            far_enemy,
+            ThrowPepper(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], ThrowPepper)
+
+    def test_throw_pepper_scores_zero_when_still_in_melee(self) -> None:
+        actor = _myself(world_x=0, world_y=0)
+        near_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=10, world_y=0)
+        context = {
+            actor,
+            near_enemy,
+            ThrowPepper(actor_slot="P1", target_slot="obj01"),
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
