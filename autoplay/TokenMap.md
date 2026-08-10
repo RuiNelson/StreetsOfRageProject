@@ -63,6 +63,10 @@ classDiagram
     Attack <|-- MeleeAttacks
     Attack <|-- GrabMechanics
     MeleeAttacks <|-- Punch
+    Attack <|-- MeleeWeaponAttacks
+    MeleeWeaponAttacks <|-- SwingBatOrPipe
+    MeleeWeaponAttacks <|-- StabWithKnifeOrBottle
+    MeleeWeaponAttacks <|-- SprayPepper
     Attack <|-- WeaponAttacks
     WeaponAttacks <|-- ThrowKnife
     WeaponAttacks <|-- ThrowPepper

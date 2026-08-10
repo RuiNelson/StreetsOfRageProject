@@ -8,6 +8,9 @@ from sor_autoplay.ai.tokens import (
     AttackHeldEnemy,
     Punch,
     RearAttack,
+    SprayPepper,
+    StabWithKnifeOrBottle,
+    SwingBatOrPipe,
     ThrowKnife,
     ThrowPepper,
 )
@@ -20,6 +23,9 @@ from sor_autoplay.ai.decide import (
     should_jump_attack,
     should_punch,
     should_rear_attack,
+    should_spray_pepper,
+    should_stab_with_knife_or_bottle,
+    should_swing_bat_or_pipe,
     should_throw_knife,
     should_throw_pepper,
     should_walk_to_advance_stage,
@@ -165,21 +171,104 @@ class ShouldPunchTests(unittest.TestCase):
 
         self.assertEqual(should_punch(context), set())
 
-    def test_bat_shortens_reach_below_unarmed_outer(self) -> None:
+    def test_does_not_fire_while_holding_any_weapon(self) -> None:
+        # Punch is unarmed-only now -- a held bat/pipe/knife/bottle/pepper
+        # fires SwingBatOrPipe/StabWithKnifeOrBottle/SprayPepper instead
+        # (same B-button input, but a genuinely different ROM move/reach).
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
+        enemy = make_enemy(world_x=130, world_y=100)  # well within any of the bands
+
+        self.assertEqual(should_punch({myself, enemy}), set())
+
+
+class ShouldSwingBatOrPipeTests(unittest.TestCase):
+    def test_fires_within_the_measured_36px_reach(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
+        enemy = make_enemy(world_x=130, world_y=100)  # dx=30, within bat's 36
+
+        result = should_swing_bat_or_pipe({myself, enemy})
+
+        self.assertEqual(result, {SwingBatOrPipe(actor_slot="P1", target_slot="obj01")})
+
+    def test_pipe_also_fires(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0B)
+        enemy = make_enemy(world_x=130, world_y=100)
+
+        result = should_swing_bat_or_pipe({myself, enemy})
+
+        self.assertEqual(result, {SwingBatOrPipe(actor_slot="P1", target_slot="obj01")})
+
+    def test_does_not_fire_beyond_the_36px_reach(self) -> None:
         # Axel's unarmed outer is 50, but a held bat's measured reach is 36
         # (weapons-range-and-damage.md) -- a target at dx=45 is unreachable.
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
         enemy = make_enemy(world_x=145, world_y=100)
 
-        self.assertEqual(should_punch({myself, enemy}), set())
+        self.assertEqual(should_swing_bat_or_pipe({myself, enemy}), set())
 
-    def test_bat_still_fires_within_its_own_shorter_reach(self) -> None:
-        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
-        enemy = make_enemy(world_x=130, world_y=100)  # dx=30, within bat's 36
+    def test_does_not_fire_when_unarmed(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
+        enemy = make_enemy(world_x=130, world_y=100)
 
-        result = should_punch({myself, enemy})
+        self.assertEqual(should_swing_bat_or_pipe({myself, enemy}), set())
 
-        self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj01")})
+    def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)  # knife
+        enemy = make_enemy(world_x=130, world_y=100)
+
+        self.assertEqual(should_swing_bat_or_pipe({myself, enemy}), set())
+
+
+class ShouldStabWithKnifeOrBottleTests(unittest.TestCase):
+    def test_fires_within_the_unarmed_punch_band(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
+        enemy = make_enemy(world_x=130, world_y=105)
+
+        result = should_stab_with_knife_or_bottle({myself, enemy})
+
+        self.assertEqual(result, {StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01")})
+
+    def test_bottle_also_fires(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x09)
+        enemy = make_enemy(world_x=130, world_y=105)
+
+        result = should_stab_with_knife_or_bottle({myself, enemy})
+
+        self.assertEqual(result, {StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01")})
+
+    def test_does_not_fire_when_unarmed(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
+        enemy = make_enemy(world_x=130, world_y=105)
+
+        self.assertEqual(should_stab_with_knife_or_bottle({myself, enemy}), set())
+
+    def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)  # bat
+        enemy = make_enemy(world_x=130, world_y=105)
+
+        self.assertEqual(should_stab_with_knife_or_bottle({myself, enemy}), set())
+
+
+class ShouldSprayPepperTests(unittest.TestCase):
+    def test_fires_within_the_unarmed_punch_band(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
+        enemy = make_enemy(world_x=130, world_y=105)
+
+        result = should_spray_pepper({myself, enemy})
+
+        self.assertEqual(result, {SprayPepper(actor_slot="P1", target_slot="obj01")})
+
+    def test_does_not_fire_when_unarmed(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
+        enemy = make_enemy(world_x=130, world_y=105)
+
+        self.assertEqual(should_spray_pepper({myself, enemy}), set())
+
+    def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)  # knife
+        enemy = make_enemy(world_x=130, world_y=105)
+
+        self.assertEqual(should_spray_pepper({myself, enemy}), set())
 
 
 class ShouldRearAttackTests(unittest.TestCase):

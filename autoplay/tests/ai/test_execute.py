@@ -11,7 +11,10 @@ from sor_autoplay.ai.tokens import (
     JumpAttack,
     Punch,
     RearAttack,
+    SprayPepper,
+    StabWithKnifeOrBottle,
     Supplex,
+    SwingBatOrPipe,
     ThrowKnife,
     ThrowPepper,
 )
@@ -232,11 +235,44 @@ class ExecutePunchTests(unittest.TestCase):
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
     def test_still_punches_while_holding_a_weapon(self) -> None:
+        # should_punch no longer produces Punch while armed (that's
+        # SwingBatOrPipe/StabWithKnifeOrBottle/SprayPepper's job now), but
+        # execution itself is unconditional on whatever Decision it's given.
         actor = replace(_myself(), held_weapon_type=0x0A)  # baseball bat
         decision = Punch(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
         execute_decision(decision, {actor}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+
+
+class ExecuteSwingBatOrPipeTests(unittest.TestCase):
+    def test_presses_button_b(self) -> None:
+        decision = SwingBatOrPipe(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, set(), gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+
+
+class ExecuteStabWithKnifeOrBottleTests(unittest.TestCase):
+    def test_presses_button_b(self) -> None:
+        decision = StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, set(), gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+
+
+class ExecuteSprayPepperTests(unittest.TestCase):
+    def test_presses_button_b(self) -> None:
+        decision = SprayPepper(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 

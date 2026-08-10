@@ -19,7 +19,10 @@ from .tokens import (
     RearAttack,
     ReleaseGrab,
     SmashBreakable,
+    SprayPepper,
+    StabWithKnifeOrBottle,
     Supplex,
+    SwingBatOrPipe,
     ThrowHeldEnemy,
     ThrowKnife,
     ThrowPepper,
@@ -264,9 +267,14 @@ def _execute_walk_to_advance_stage(
     )
 
 
-def _execute_punch(decision: Punch, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
-    target = find(context, Enemy, slot=decision.target_slot)
+def _execute_melee_strike(decision: Decision, context: Context, gamepad: VirtualGamepad) -> None:
+    """Shared handler for ``Punch`` / ``SwingBatOrPipe`` /
+    ``StabWithKnifeOrBottle`` / ``SprayPepper`` -- identical B-button press
+    regardless of which (if any) weapon is held; only the ROM-side move that
+    resolves from it differs."""
+
+    actor = _find_actor(context, getattr(decision, "actor_slot", None))
+    target = find(context, Enemy, slot=getattr(decision, "target_slot", None))
     face = 0
     if actor is not None and target is not None:
         face = _face_toward_mask(actor, target.world_x)
@@ -443,7 +451,10 @@ def _execute_walk_to_breakable(
 _HANDLERS = {
     WalkToNearEnemy: _execute_walk_to_near_enemy,
     WalkToAdvanceStage: _execute_walk_to_advance_stage,
-    Punch: _execute_punch,
+    Punch: _execute_melee_strike,
+    SwingBatOrPipe: _execute_melee_strike,
+    StabWithKnifeOrBottle: _execute_melee_strike,
+    SprayPepper: _execute_melee_strike,
     SmashBreakable: _execute_smash_breakable,
     RearAttack: _execute_rear_attack,
     CounterGrab: _execute_counter_grab,

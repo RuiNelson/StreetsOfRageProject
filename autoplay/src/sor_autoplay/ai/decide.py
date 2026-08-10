@@ -19,12 +19,16 @@ from .tokens import (
     RearAttack,
     ReleaseGrab,
     SmashBreakable,
+    SprayPepper,
+    StabWithKnifeOrBottle,
     Supplex,
+    SwingBatOrPipe,
     ThrowHeldEnemy,
     ThrowKnife,
     ThrowPepper,
 )
 from .tokens import (
+    MELEE_WEAPON_TYPES,
     Myself,
     Partner,
     PlayableCharacter,
@@ -165,7 +169,16 @@ def _rear_threats(actor: PlayableCharacter, enemies: list[Enemy]) -> list[Enemy]
     ]
 
 
-def should_punch(context: Context) -> Context:
+STAB_WEAPON_TYPES = frozenset({0x08, 0x09})  # knife, bottle
+
+
+def _should_melee_strike(context: Context, *, held_types: frozenset[int] | None, decision_cls) -> Context:
+    """Shared body for ``should_punch`` / ``should_swing_bat_or_pipe`` /
+    ``should_stab_with_knife_or_bottle`` / ``should_spray_pepper``: they
+    issue the identical B-button input (see execute.py's
+    ``_execute_melee_strike``), gated only on which weapon type (if any)
+    the actor holds. ``held_types=None`` means unarmed (``Punch``)."""
+
     decisions: set[Token] = set()
     enemies = _live_enemies(context)
     for actor in _actors(context):
@@ -173,14 +186,37 @@ def should_punch(context: Context) -> Context:
             continue
         if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
             continue
-        if _is_holding_enemy(actor):
+        held_matches = (
+            actor.held_weapon_type == 0 if held_types is None else actor.held_weapon_type in held_types
+        )
+        if not held_matches:
             continue
         for enemy in enemies:
             if _enemy_behind_actor(actor, enemy) and abs(enemy.world_x - actor.world_x) > 4:
                 continue
             if _in_punch_band(actor, enemy):
-                decisions.add(Punch(actor_slot=actor.slot, target_slot=enemy.slot))
+                decisions.add(decision_cls(actor_slot=actor.slot, target_slot=enemy.slot))
     return decisions
+
+
+def should_punch(context: Context) -> Context:
+    return _should_melee_strike(context, held_types=None, decision_cls=Punch)
+
+
+def should_swing_bat_or_pipe(context: Context) -> Context:
+    return _should_melee_strike(context, held_types=MELEE_WEAPON_TYPES, decision_cls=SwingBatOrPipe)
+
+
+def should_stab_with_knife_or_bottle(context: Context) -> Context:
+    return _should_melee_strike(
+        context, held_types=STAB_WEAPON_TYPES, decision_cls=StabWithKnifeOrBottle
+    )
+
+
+def should_spray_pepper(context: Context) -> Context:
+    return _should_melee_strike(
+        context, held_types=frozenset({PEPPER_SPRAY_TYPE}), decision_cls=SprayPepper
+    )
 
 
 def should_rear_attack(context: Context) -> Context:
@@ -597,6 +633,9 @@ def generate_decision_tokens(context: Context) -> Context:
         | should_walk_to_near_enemy(context)
         | should_walk_to_advance_stage(context)
         | should_punch(context)
+        | should_swing_bat_or_pipe(context)
+        | should_stab_with_knife_or_bottle(context)
+        | should_spray_pepper(context)
         | should_rear_attack(context)
         | should_call_police(context)
         | should_jump_attack(context)

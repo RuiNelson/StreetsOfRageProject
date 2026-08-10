@@ -10,7 +10,10 @@ from sor_autoplay.ai.tokens import (
     Punch,
     ScorePickup,
     SmashBreakable,
+    SprayPepper,
+    StabWithKnifeOrBottle,
     Supplex,
+    SwingBatOrPipe,
     ThrowKnife,
     ThrowPepper,
     Weapon,
@@ -228,6 +231,55 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
         self.assertIsInstance(decisions[0], JumpAttack)
+
+
+class DetermineEmergencyMeleeWeaponSiblingsTests(unittest.TestCase):
+    """SwingBatOrPipe/StabWithKnifeOrBottle/SprayPepper share Punch's exact
+    emergency formula (_emergency_melee_strike) -- one representative check
+    per sibling that the shared wiring wins over a punishable-but-farther
+    WalkToNearEnemy exactly like Punch does."""
+
+    def test_swing_bat_or_pipe_beats_walk_to_near_enemy_on_punishable_target(self) -> None:
+        punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
+        context = {
+            punishable,
+            SwingBatOrPipe(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], SwingBatOrPipe)
+
+    def test_stab_with_knife_or_bottle_beats_walk_to_near_enemy_on_punishable_target(self) -> None:
+        punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
+        context = {
+            punishable,
+            StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], StabWithKnifeOrBottle)
+
+    def test_spray_pepper_beats_walk_to_near_enemy_on_punishable_target(self) -> None:
+        punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
+        context = {
+            punishable,
+            SprayPepper(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], SprayPepper)
 
 
 class DetermineEmergencyTokenConditionTests(unittest.TestCase):

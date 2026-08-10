@@ -36,7 +36,10 @@ from .tokens import (
     RearAttack,
     ReleaseGrab,
     SmashBreakable,
+    SprayPepper,
+    StabWithKnifeOrBottle,
     Supplex,
+    SwingBatOrPipe,
     ThrowHeldEnemy,
     ThrowKnife,
     ThrowPepper,
@@ -129,8 +132,13 @@ def _emergency_rear_attack(decision: RearAttack, context: Context) -> int:
     return _EMERGENCY_REAR_ATTACK
 
 
-def _emergency_punch(decision: Punch, context: Context) -> int:
-    target = find(context, Enemy, slot=decision.target_slot)
+def _emergency_melee_strike(decision: Decision, context: Context) -> int:
+    """Shared scoring for ``Punch`` / ``SwingBatOrPipe`` /
+    ``StabWithKnifeOrBottle`` / ``SprayPepper`` -- same formula regardless
+    of held weapon, since none of these has evidence of a different
+    punishable-phase payoff."""
+
+    target = find(context, Enemy, slot=getattr(decision, "target_slot", None))
     if target is None:
         return _EMERGENCY_DEFAULT
     if is_punishable(target.combat_phase):
@@ -247,7 +255,10 @@ _EMERGENCY_FUNCS: dict[type[Decision], Callable[[Decision, Context], int]] = {
     CounterGrab: _emergency_counter_grab,
     CallPolice: _emergency_call_police,
     RearAttack: _emergency_rear_attack,
-    Punch: _emergency_punch,
+    Punch: _emergency_melee_strike,
+    SwingBatOrPipe: _emergency_melee_strike,
+    StabWithKnifeOrBottle: _emergency_melee_strike,
+    SprayPepper: _emergency_melee_strike,
     SmashBreakable: _emergency_smash_breakable,
     ThrowHeldEnemy: _held_enemy_emergency(_EMERGENCY_HOLD_THROW),
     Supplex: _held_enemy_emergency(_EMERGENCY_HOLD_SUPPLEX),
