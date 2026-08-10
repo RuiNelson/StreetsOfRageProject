@@ -375,6 +375,60 @@ class ShouldWalkToNearEnemyTests(unittest.TestCase):
         context: set[Token] = {myself, enemy, AnimationInProgress(slot="P1")}
         self.assertEqual(should_walk_to_near_enemy(context), set())
 
+    def test_falls_back_to_an_off_screen_enemy_ahead_in_the_stage_direction(self) -> None:
+        # Regression: with nothing on-screen, an off-screen enemy still
+        # correctly holds back should_walk_to_advance_stage, but nothing
+        # ever chased it, so the AI produced no decision at all and the
+        # camera never moved to bring it into view.
+        myself = make_myself(world_x=100, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        ahead = make_enemy(world_x=500, world_y=100)  # off-screen, ahead
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, ahead, stage}
+
+        result = should_walk_to_near_enemy(context)
+
+        self.assertEqual(result, {WalkToNearEnemy(actor_slot="P1", target_slot="obj01")})
+
+    def test_does_not_chase_an_off_screen_enemy_behind(self) -> None:
+        # Must never walk backward for an abandoned off-screen leftover.
+        myself = make_myself(world_x=500, world_y=100)
+        camera = CameraRange(left=400, right=600, top=0, bottom=200)
+        behind = make_enemy(world_x=50, world_y=100)  # off-screen, behind
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, behind, stage}
+
+        self.assertEqual(should_walk_to_near_enemy(context), set())
+
+    def test_off_screen_fallback_needs_a_stage_token(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        ahead = make_enemy(world_x=500, world_y=100)
+        context: set[Token] = {myself, camera, ahead}
+
+        self.assertEqual(should_walk_to_near_enemy(context), set())
+
+    def test_off_screen_fallback_inert_when_stage_direction_is_none(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        ahead = make_enemy(world_x=500, world_y=100)
+        stage = Stage(level_index=6, direction="none")
+        context: set[Token] = {myself, camera, ahead, stage}
+
+        self.assertEqual(should_walk_to_near_enemy(context), set())
+
+    def test_on_screen_enemy_still_takes_priority_over_the_fallback(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        on_screen = make_enemy(slot="near", world_x=150, world_y=10, health=10)
+        off_screen_ahead = make_enemy(slot="far", world_x=500, world_y=100)
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, on_screen, off_screen_ahead, stage}
+
+        result = should_walk_to_near_enemy(context)
+
+        self.assertEqual(result, {WalkToNearEnemy(actor_slot="P1", target_slot="near")})
+
 
 class ShouldWalkToAdvanceStageTests(unittest.TestCase):
     def test_fires_when_no_enemies_present(self) -> None:

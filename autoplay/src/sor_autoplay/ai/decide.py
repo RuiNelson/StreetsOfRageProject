@@ -315,11 +315,18 @@ def should_hold_actions(context: Context) -> Context:
     return decisions
 
 
+def _ahead_in_stage_direction(actor_world_x: int, enemy_world_x: int, direction: str) -> bool:
+    if direction == "right":
+        return enemy_world_x >= actor_world_x
+    if direction == "left":
+        return enemy_world_x <= actor_world_x
+    return False
+
+
 def should_walk_to_near_enemy(context: Context) -> Context:
     decisions: set[Token] = set()
-    # Only chase on-screen / nearby combatants so off-screen leftovers don't
-    # block stage advance forever.
-    enemies = _on_screen_enemies(context)
+    on_screen = _on_screen_enemies(context)
+    stage = find(context, Stage)
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -327,6 +334,22 @@ def should_walk_to_near_enemy(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
+        enemies = on_screen
+        if not enemies and stage is not None:
+            # Nothing on-screen to chase: fall back to the nearest live
+            # enemy ahead in the stage's own scroll direction (e.g. the
+            # next wave, tracked on the world map but not yet in camera).
+            # Never chase one that's behind -- that's the "off-screen
+            # leftover" this decision must not walk backward for. Without
+            # this fallback, a live off-screen enemy still correctly holds
+            # back should_walk_to_advance_stage, but nothing ever moves the
+            # camera to bring it into view, and the AI is stuck producing no
+            # decision at all.
+            enemies = [
+                e
+                for e in _live_enemies(context)
+                if _ahead_in_stage_direction(actor.world_x, e.world_x, stage.direction)
+            ]
         if not enemies:
             continue
         if any(_in_punch_band(actor, e) or _in_rear_band(actor, e) for e in enemies):

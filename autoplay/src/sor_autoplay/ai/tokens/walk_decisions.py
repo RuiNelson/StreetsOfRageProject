@@ -18,7 +18,11 @@ class WalkToNearEnemy(Walk):
     """Walk to a nearby on-screen enemy to bring it into attack range.
 
     Produced by ``should_walk_to_near_enemy`` when an on-screen enemy exists
-    and no enemy is already within punch or rear range.
+    and no enemy is already within punch or rear range. Falls back to the
+    nearest live enemy ahead in the stage's scroll direction when nothing
+    is on-screen (e.g. the next wave, tracked on the world map but not yet
+    in camera) -- never one behind, so this never walks backward for an
+    abandoned off-screen leftover.
 
     Raises emergency: Enemy×14.
     """
