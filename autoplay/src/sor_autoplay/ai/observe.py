@@ -208,8 +208,17 @@ def generate_direct_observation_tokens(
 
     context.add(
         CameraRange(
-            left=snapshot.world_map.camera_left,
-            right=snapshot.world_map.camera_right,
+            # world_map.camera_left/right are the ROM's screen-relative walk
+            # clamp (always 32..288 in map_x space, per world_map.py's
+            # _framed_view) — NOT a world-absolute rectangle. Every other
+            # token here (Enemy/Myself/Weapon/... world_x) is in absolute,
+            # ever-growing world-scroll coordinates, so this must be
+            # translated by camera_x or every should_*'s _in_camera check
+            # silently stops matching anything the moment the level scrolls
+            # past map_x 288. Y does not scroll in this game, so top/bottom
+            # need no translation.
+            left=snapshot.world_map.camera_x + snapshot.world_map.camera_left,
+            right=snapshot.world_map.camera_x + snapshot.world_map.camera_right,
             top=snapshot.world_map.camera_top,
             bottom=snapshot.world_map.camera_bottom,
         )

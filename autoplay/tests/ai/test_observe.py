@@ -1,11 +1,13 @@
 import unittest
 
+from sor_autoplay.ai import decide as decide_module
 from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay.ai.tokens import Abadede, Enemy, Garcia, Jack, Souther
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
 from sor_autoplay.ai.tokens import Pit, Projectile
 from sor_autoplay.ai.observe import generate_direct_observation_tokens
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
+from sor_autoplay.ai.tokens import WalkToNearEnemy
 from sor_autoplay.ai.tokens import find, find_all
 from sor_autoplay.hazards import FloorHole
 from sor_autoplay.phases import CombatPhase
@@ -653,14 +655,52 @@ class StageAndCameraTests(unittest.TestCase):
         self.assertEqual(stage.direction, "left")
 
     def test_camera_range_present(self) -> None:
+        # world_map.camera_left/right (32..288) are screen-relative (map_x
+        # space); every other token's world_x is absolute world-scroll
+        # coordinates, so the AI's CameraRange must be translated by
+        # camera_x (768 in this fixture) or _in_camera would never match a
+        # scrolled-forward Enemy/Weapon/Pickup/Breakable's world_x again.
         context = self._context_for_level(0)
         camera = find(context, CameraRange)
         self.assertIsNotNone(camera)
         assert camera is not None
-        self.assertEqual(camera.left, 32.0)
-        self.assertEqual(camera.right, 288.0)
+        self.assertEqual(camera.left, 768.0 + 32.0)
+        self.assertEqual(camera.right, 768.0 + 288.0)
         self.assertEqual(camera.top, 0.0)
         self.assertEqual(camera.bottom, 112.0)
+
+    def test_scrolled_forward_enemy_is_still_seen_as_on_screen_by_decide(self) -> None:
+        """Regression: observe.py's CameraRange must stay in the same
+        world-absolute coordinate space as every other token's world_x, or
+        decide.py's _in_camera-gated should_* generators (walk-to-near-enemy,
+        jump attack, throw knife, walk-to-weapon/pickup/breakable) silently
+        stop matching anything once the level has scrolled forward at all —
+        every fixture here already uses a scrolled camera_x=768."""
+
+        players = (
+            _player_snapshot(index=1),
+            _player_snapshot(index=2, is_playable=False),
+        )
+        entities = (
+            _player_entity(slot="P1", world_x=800, world_y=64),
+            _enemy_entity(world_x=900, world_y=64),
+        )
+        snapshot = _snapshot(players=players, entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        camera = find(context, CameraRange)
+        enemy = find(context, Enemy, slot="obj00")
+        assert camera is not None and enemy is not None
+        self.assertTrue(camera.left <= enemy.world_x <= camera.right)
+
+        on_screen = decide_module._on_screen_enemies(context)
+        self.assertEqual(on_screen, [enemy])
+
+        decisions = decide_module.should_walk_to_near_enemy(context)
+        self.assertEqual(
+            decisions, {WalkToNearEnemy(actor_slot="P1", target_slot="obj00")}
+        )
 
 
 if __name__ == "__main__":
