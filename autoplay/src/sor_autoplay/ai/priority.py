@@ -310,7 +310,14 @@ def determine_priority_decision(context: Context) -> Context:
     if len(tied) == 1:
         winner = tied[0]
     else:
-        names = ", ".join(sorted(type(decision).__name__ for decision in tied))
+        # tied entries are never literally the same object here: Context is
+        # a set of frozen/hashable Decision dataclasses, so two candidates
+        # with identical priority/actor_slot/target_slot would already have
+        # deduplicated into one. Log full repr (not just the class name) so
+        # that distinguishing field -- almost always a different
+        # target_slot/actor_slot -- is visible instead of looking like a
+        # duplicate.
+        details = ", ".join(sorted(repr(decision) for decision in tied))
         logger.warning(
             "determine_priority_decision: %d decisions tied at emergency=%d "
             "priority=%d (%s); picking one at random. Assign distinct "
@@ -318,7 +325,7 @@ def determine_priority_decision(context: Context) -> Context:
             len(tied),
             max_emergency,
             max_priority,
-            names,
+            details,
         )
         winner = random.choice(tied)
 

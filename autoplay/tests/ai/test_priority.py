@@ -552,12 +552,18 @@ class DeterminePriorityRandomTieTests(unittest.TestCase):
         punch_b = Punch(actor_slot="P1", target_slot="objB")
         context = {enemy_a, enemy_b, punch_a, punch_b}
 
-        with self.assertLogs("sor_autoplay.ai.priority", level="WARNING"):
+        with self.assertLogs("sor_autoplay.ai.priority", level="WARNING") as logs:
             result = determine_priority_decision(context)
 
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
         self.assertIn(decisions[0], (punch_a, punch_b))
+        # The two tied Punch candidates target different enemies -- the log
+        # must show that (full repr), not just the shared class name, or it
+        # misleadingly reads as the exact same decision logged twice.
+        message = logs.output[0]
+        self.assertIn("target_slot='objA'", message)
+        self.assertIn("target_slot='objB'", message)
 
 
 if __name__ == "__main__":
