@@ -23,6 +23,7 @@ from .tokens import (
     StabWithKnifeOrBottle,
     Supplex,
     SwingBatOrPipe,
+    TechRecover,
     ThrowHeldEnemy,
     ThrowKnife,
     ThrowPepper,
@@ -59,6 +60,7 @@ THROW_KNIFE_FRAMES = 4
 THROW_PEPPER_FRAMES = 4
 REAR_ATTACK_FRAMES = 4
 COUNTER_FRAMES = 3
+TECH_RECOVER_FRAMES = 3
 JUMP_ATTACK_LAUNCH_FRAMES = 3
 JUMP_ATTACK_KICK_FRAMES = 4
 HOLD_FRAMES = 4
@@ -311,6 +313,13 @@ def _execute_counter_grab(decision: CounterGrab, context: Context, gamepad: Virt
     gamepad.press(JUMP_MASK, frames=COUNTER_FRAMES)
 
 
+def _execute_tech_recover(decision: TechRecover, context: Context, gamepad: VirtualGamepad) -> None:
+    # A held Up plus a *fresh* C edge, every tick this decision wins -- the
+    # ROM requires a new C press, not a held-over one (controls-and-input.md
+    # "C must be a fresh edge while Up is held").
+    gamepad.press(JUMP_MASK | UP_MASK, frames=TECH_RECOVER_FRAMES)
+
+
 def _execute_call_police(decision: CallPolice, context: Context, gamepad: VirtualGamepad) -> None:
     gamepad.press(CALL_POLICE_MASK, frames=CALL_POLICE_FRAMES)
 
@@ -458,6 +467,7 @@ _HANDLERS = {
     SmashBreakable: _execute_smash_breakable,
     RearAttack: _execute_rear_attack,
     CounterGrab: _execute_counter_grab,
+    TechRecover: _execute_tech_recover,
     CallPolice: _execute_call_police,
     JumpAttack: _execute_jump_attack,
     Supplex: _execute_supplex,

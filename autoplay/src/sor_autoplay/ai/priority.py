@@ -40,6 +40,7 @@ from .tokens import (
     StabWithKnifeOrBottle,
     Supplex,
     SwingBatOrPipe,
+    TechRecover,
     ThrowHeldEnemy,
     ThrowKnife,
     ThrowPepper,
@@ -67,6 +68,7 @@ logger = logging.getLogger(__name__)
 
 # 0-100 emergency scale.
 _EMERGENCY_COUNTER_GRAB = 100  # already held — only useful action
+_EMERGENCY_TECH_RECOVER = 90  # narrow window, free to act at nothing else
 _EMERGENCY_CALL_POLICE = 88
 _EMERGENCY_REAR_ATTACK = 55  # escape when boxed in / punch dead-zone
 _EMERGENCY_REAR_ATTACK_DANGEROUS = 60  # escape a commit from behind
@@ -106,6 +108,13 @@ def _emergency_counter_grab(decision: CounterGrab, context: Context) -> int:
     actor = _find_actor(context, decision.actor_slot)
     if actor is not None and actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
         return _EMERGENCY_COUNTER_GRAB
+    return _EMERGENCY_DEFAULT
+
+
+def _emergency_tech_recover(decision: TechRecover, context: Context) -> int:
+    actor = _find_actor(context, decision.actor_slot)
+    if actor is not None and actor.throw_tech_ready:
+        return _EMERGENCY_TECH_RECOVER
     return _EMERGENCY_DEFAULT
 
 
@@ -253,6 +262,7 @@ def _held_enemy_emergency(weight: int) -> Callable[[Decision, Context], int]:
 
 _EMERGENCY_FUNCS: dict[type[Decision], Callable[[Decision, Context], int]] = {
     CounterGrab: _emergency_counter_grab,
+    TechRecover: _emergency_tech_recover,
     CallPolice: _emergency_call_police,
     RearAttack: _emergency_rear_attack,
     Punch: _emergency_melee_strike,

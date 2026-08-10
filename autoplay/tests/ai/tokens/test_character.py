@@ -125,5 +125,31 @@ class RearAttackBoxTests(unittest.TestCase):
         self.assertEqual(rear_attack_front_max_x(2), 0)  # Blaze: pure backfist
 
 
+class ThrowTechReadyTests(unittest.TestCase):
+    def test_true_when_armed_on_a_techable_action(self) -> None:
+        # $5C, $72, $88 are the techable free-flight families; facing bit
+        # (bit 0) must not matter.
+        for action_state in (0x5C, 0x5D, 0x72, 0x73, 0x88, 0x89):
+            me = _myself(action_state=action_state, tech_armed=1)
+            self.assertTrue(me.throw_tech_ready, msg=hex(action_state))
+
+    def test_false_when_not_armed(self) -> None:
+        me = _myself(action_state=0x72, tech_armed=0)
+        self.assertFalse(me.throw_tech_ready)
+
+    def test_false_on_an_ordinary_street_throw_even_if_armed_field_nonzero(self) -> None:
+        # $72 IS techable, but per controls-and-input.md the ordinary street
+        # throw path never actually sets +$45 -- this only checks that the
+        # property still correctly gates on the field regardless, since a
+        # non-techable action must never read as ready even if tech_armed
+        # were somehow nonzero (defensive: e.g. $02 idle).
+        me = _myself(action_state=0x02, tech_armed=1)
+        self.assertFalse(me.throw_tech_ready)
+
+    def test_defaults_to_not_armed(self) -> None:
+        me = _myself(action_state=0x72)
+        self.assertFalse(me.throw_tech_ready)
+
+
 if __name__ == "__main__":
     unittest.main()

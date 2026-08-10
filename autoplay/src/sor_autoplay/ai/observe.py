@@ -64,6 +64,7 @@ def _build_playable_character(
         action_state=entity.action_state,
         is_airborne=entity.is_airborne,
         action_flags=entity.action_flags,
+        tech_armed=entity.tech_armed,
     )
 
 

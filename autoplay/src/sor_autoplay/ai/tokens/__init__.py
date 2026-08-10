@@ -81,6 +81,7 @@ from .pickup_tokens import (
     weapon_rank,
 )
 from .police_decision import CallPolice
+from .recovery_decisions import Recovery, TechRecover
 from .tokens import (
     Context,
     Decision,

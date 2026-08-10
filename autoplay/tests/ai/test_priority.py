@@ -14,6 +14,7 @@ from sor_autoplay.ai.tokens import (
     StabWithKnifeOrBottle,
     Supplex,
     SwingBatOrPipe,
+    TechRecover,
     ThrowKnife,
     ThrowPepper,
     Weapon,
@@ -186,6 +187,64 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             myself,
             CounterGrab(actor_slot="P1"),
             CallPolice(actor_slot="P1"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], CounterGrab)
+
+    def test_tech_recover_beats_call_police(self) -> None:
+        myself = _myself(
+            combat_phase=CombatPhase.HURT_PLAYER,
+            action_state=0x72,
+            tech_armed=1,
+            health_percent=10.0,
+        )
+        context = {
+            myself,
+            TechRecover(actor_slot="P1"),
+            CallPolice(actor_slot="P1"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], TechRecover)
+
+    def test_tech_recover_scores_zero_when_not_armed(self) -> None:
+        myself = _myself(
+            combat_phase=CombatPhase.HURT_PLAYER,
+            action_state=0x72,
+            tech_armed=0,
+            health_percent=10.0,
+        )
+        context = {
+            myself,
+            TechRecover(actor_slot="P1"),
+            CallPolice(actor_slot="P1"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], CallPolice)
+
+    def test_counter_grab_beats_tech_recover(self) -> None:
+        # Being held by an enemy right now outranks a still-open landing
+        # tech window from an earlier throw.
+        myself = _myself(
+            combat_phase=CombatPhase.HELD_BY_ENEMY,
+            action_state=0x72,
+            tech_armed=1,
+        )
+        context = {
+            myself,
+            CounterGrab(actor_slot="P1"),
+            TechRecover(actor_slot="P1"),
         }
 
         result = determine_priority_decision(context)

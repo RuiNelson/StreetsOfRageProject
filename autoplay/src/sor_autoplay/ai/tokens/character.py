@@ -12,6 +12,7 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
+from sor_autoplay.memory_map import ACTION_THROW_AIR_TECHABLE
 from sor_autoplay.phases import CombatPhase
 
 from .tokens import Observed
@@ -97,6 +98,10 @@ class PlayableCharacter(Character, ABC):
     - Front hold ``$60`` / back hold ``$66`` accept B/C edges for knee/throw/suplex.
     - Enemy-held sequence ``$78`` → ``$7A`` → optional crossover ``$7C`` → counter
       ``$7E``; ``action_flags`` bit 7 is the post-crossover B window (``+$58``).
+    - ``tech_armed`` (``+$45``) is set only by specific special/boss hold-throw
+      choreography launching into ``$5C``/``$88`` — an ordinary street-enemy
+      throw (``$72`` via ``$29D0``) never arms it, so C+Up is inert there
+      (controls-and-input.md "C+Up landing tech").
     """
 
     player_index: int  # 1 or 2
@@ -110,6 +115,7 @@ class PlayableCharacter(Character, ABC):
     is_airborne: bool  # from MapEntity.is_airborne; JumpAttack C-then-B
     # player +$58: bit 7 = grab-counter B window after C crossover ($7C).
     action_flags: int = 0
+    tech_armed: int = 0  # player +$45; bounce-cancel tech may still be latched
 
     @property
     def action_base(self) -> int:
@@ -122,6 +128,18 @@ class PlayableCharacter(Character, ABC):
         """True when the held-by-enemy counter accepts a B edge (``+$58`` bit 7)."""
 
         return bool(self.action_flags & 0x80)
+
+    @property
+    def throw_tech_ready(self) -> bool:
+        """True when a fresh C-edge + Up can still latch the bounce-cancel
+        landing tech (``+$45`` set on a techable free-flight action).
+
+        Mirrors ``world_map.MapEntity.throw_tech_ready`` exactly — that
+        property already carries the "only certain throws arm this" nuance,
+        this is just the same fact surfaced on the AI's own token.
+        """
+
+        return self.tech_armed != 0 and self.action_base in ACTION_THROW_AIR_TECHABLE
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

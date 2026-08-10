@@ -15,6 +15,7 @@ from sor_autoplay.ai.tokens import (
     StabWithKnifeOrBottle,
     Supplex,
     SwingBatOrPipe,
+    TechRecover,
     ThrowKnife,
     ThrowPepper,
 )
@@ -422,6 +423,16 @@ class ExecuteCounterGrabTests(unittest.TestCase):
         execute_decision(decision, {actor}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=3)
+
+
+class ExecuteTechRecoverTests(unittest.TestCase):
+    def test_presses_c_and_up_together(self) -> None:
+        decision = TechRecover(actor_slot="P1")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, set(), gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=C | UP, player2=0, frames=3)
 
 
 class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):

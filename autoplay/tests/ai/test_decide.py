@@ -11,6 +11,7 @@ from sor_autoplay.ai.tokens import (
     SprayPepper,
     StabWithKnifeOrBottle,
     SwingBatOrPipe,
+    TechRecover,
     ThrowKnife,
     ThrowPepper,
 )
@@ -26,6 +27,7 @@ from sor_autoplay.ai.decide import (
     should_spray_pepper,
     should_stab_with_knife_or_bottle,
     should_swing_bat_or_pipe,
+    should_tech_recover,
     should_throw_knife,
     should_throw_pepper,
     should_walk_to_advance_stage,
@@ -318,6 +320,37 @@ class ShouldCounterGrabTests(unittest.TestCase):
     def test_does_not_fire_when_free(self) -> None:
         myself = make_myself(combat_phase=CombatPhase.NORMAL)
         self.assertEqual(should_counter_grab({myself}), set())
+
+
+class ShouldTechRecoverTests(unittest.TestCase):
+    def test_fires_when_the_tech_window_is_armed(self) -> None:
+        myself = make_myself(
+            combat_phase=CombatPhase.HURT_PLAYER, action_state=0x72, tech_armed=1
+        )
+        context: set[Token] = {myself}
+
+        self.assertEqual(should_tech_recover(context), {TechRecover(actor_slot="P1")})
+
+    def test_does_not_fire_when_not_armed(self) -> None:
+        myself = make_myself(
+            combat_phase=CombatPhase.HURT_PLAYER, action_state=0x72, tech_armed=0
+        )
+        self.assertEqual(should_tech_recover({myself}), set())
+
+    def test_does_not_fire_on_a_non_techable_action_even_if_armed(self) -> None:
+        myself = make_myself(combat_phase=CombatPhase.NORMAL, action_state=0x02, tech_armed=1)
+        self.assertEqual(should_tech_recover({myself}), set())
+
+    def test_bypasses_the_animation_in_progress_gate(self) -> None:
+        # Unlike should_punch etc., should_tech_recover must still fire while
+        # the actor is "blocked" -- that's the whole HURT_PLAYER window it's
+        # meant to interrupt (mirrors should_counter_grab's own exception).
+        myself = make_myself(
+            combat_phase=CombatPhase.HURT_PLAYER, action_state=0x72, tech_armed=1
+        )
+        context: set[Token] = {myself, AnimationInProgress(slot="P1")}
+
+        self.assertEqual(should_tech_recover(context), {TechRecover(actor_slot="P1")})
 
 
 class ShouldWalkToNearEnemyTests(unittest.TestCase):

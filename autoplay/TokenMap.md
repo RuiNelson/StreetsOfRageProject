@@ -81,4 +81,7 @@ classDiagram
     GrabMechanics <|-- CounterGrab
 
     Attack <|-- CallPolice
+
+    Decision <|-- Recovery
+    Recovery <|-- TechRecover
 ```

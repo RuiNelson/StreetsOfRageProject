@@ -23,6 +23,7 @@ from .tokens import (
     StabWithKnifeOrBottle,
     Supplex,
     SwingBatOrPipe,
+    TechRecover,
     ThrowHeldEnemy,
     ThrowKnife,
     ThrowPepper,
@@ -245,6 +246,21 @@ def should_counter_grab(context: Context) -> Context:
         if actor.action_base == 0x7E:
             continue
         decisions.add(CounterGrab(actor_slot=actor.slot))
+    return decisions
+
+
+def should_tech_recover(context: Context) -> Context:
+    """Fires precisely inside the C+Up bounce-cancel window
+    (controls-and-input.md "C+Up landing tech"). Like ``should_counter_grab``,
+    this bypasses the generic ``_blocked`` gate on purpose: the actor is
+    airborne/hurt (``HURT_PLAYER``) for this whole window and would
+    otherwise never be judged free to act."""
+
+    decisions: set[Token] = set()
+    for actor in _actors(context):
+        if not actor.throw_tech_ready:
+            continue
+        decisions.add(TechRecover(actor_slot=actor.slot))
     return decisions
 
 
@@ -629,6 +645,7 @@ def generate_decision_tokens(context: Context) -> Context:
     return (
         context
         | should_counter_grab(context)
+        | should_tech_recover(context)
         | should_hold_actions(context)
         | should_walk_to_near_enemy(context)
         | should_walk_to_advance_stage(context)
