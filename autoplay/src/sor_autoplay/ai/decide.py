@@ -339,19 +339,49 @@ def should_walk_to_near_enemy(context: Context) -> Context:
     return decisions
 
 
+def _advance_blocking_enemies(context: Context) -> list[Enemy]:
+    """Live enemies that should hold back stage advance.
+
+    Almost every live enemy counts, on-screen or not (see
+    ``should_walk_to_advance_stage``) -- except an off-screen enemy already
+    at exactly 0 health. Per ``world_map.MapEntity.is_defeated``'s own note,
+    zero health is not yet ``is_defeated`` -- the ROM still counts it alive
+    and wants one more "finishing" hit -- but ``should_walk_to_near_enemy``
+    never chases an off-screen target, so nothing in this pipeline will ever
+    deliver that hit. Without this carve-out such a straggler blocks stage
+    advance forever, which contradicts ``should_walk_to_near_enemy``'s own
+    on-screen-only design intent ("so off-screen leftovers don't block
+    stage advance forever").
+    """
+
+    camera = find(context, CameraRange)
+    blocking = []
+    for enemy in _live_enemies(context):
+        if (
+            camera is not None
+            and not _in_camera(camera, enemy.world_x, enemy.world_y)
+            and enemy.health == 0
+        ):
+            continue
+        blocking.append(enemy)
+    return blocking
+
+
 def should_walk_to_advance_stage(context: Context) -> Context:
     """Scroll the stage only once every spawned enemy is gone.
 
     Gated on every live Enemy token, not just on-screen ones: an enemy that
     has already spawned off-screen (about to walk/scroll into view) is still
-    a reason to hold position, not a "next wave cue" to push past.
+    a reason to hold position, not a "next wave cue" to push past. The one
+    exception is an off-screen enemy already at 0 health -- see
+    ``_advance_blocking_enemies``.
     """
 
     decisions: set[Token] = set()
     stage = find(context, Stage)
     if stage is None or stage.direction == "none":
         return decisions
-    if _live_enemies(context):
+    if _advance_blocking_enemies(context):
         return decisions
     for actor in _actors(context):
         if _blocked(context, actor):

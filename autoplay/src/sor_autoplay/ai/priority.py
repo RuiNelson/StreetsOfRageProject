@@ -19,13 +19,14 @@ import logging
 import random
 from collections.abc import Callable
 
-from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
+from ..phases import CombatPhase, is_dangerous, is_punishable
 from .decide import (
     KNIFE_MELEE_X,
     KNIFE_RANGE_X,
     KNIFE_RANGE_Y,
     POLICE_HEALTH_PERCENT_THRESHOLD,
     POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE,
+    _advance_blocking_enemies,
 )
 from .tokens import (
     CounterGrab,
@@ -196,10 +197,7 @@ def _emergency_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context) -
 
 
 def _emergency_walk_to_advance_stage(decision: WalkToAdvanceStage, context: Context) -> int:
-    live_enemies = [
-        enemy for enemy in find_all(context, Enemy) if not should_ignore_as_target(enemy.combat_phase)
-    ]
-    if live_enemies:
+    if _advance_blocking_enemies(context):
         return _EMERGENCY_DEFAULT
     return _EMERGENCY_WALK_TO_ADVANCE_STAGE
 

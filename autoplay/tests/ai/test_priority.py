@@ -22,6 +22,7 @@ from sor_autoplay.ai.tokens import (
 from sor_autoplay.ai.tokens import Myself
 from sor_autoplay.ai.tokens import Enemy
 from sor_autoplay.ai.tokens import CallPolice
+from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.priority import determine_priority_decision
 from sor_autoplay.ai.tokens import Decision, find_all
 from sor_autoplay.ai.tokens import (
@@ -146,6 +147,27 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
         self.assertIsInstance(decisions[0], WalkToNearEnemy)
+
+    def test_advance_stage_fires_when_only_remaining_enemy_is_off_screen_at_zero_health(
+        self,
+    ) -> None:
+        # Same regression as test_decide.py's should_walk_to_advance_stage
+        # coverage, exercised through the emergency function this time:
+        # priority.py must reach the same "not blocking" conclusion as
+        # decide.py's own gate, via the shared _advance_blocking_enemies.
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        stranded = _enemy("obj01", CombatPhase.NORMAL, world_x=500, world_y=0, health=0)
+        context = {
+            camera,
+            stranded,
+            WalkToAdvanceStage(actor_slot="P1", direction="right"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], WalkToAdvanceStage)
 
     def test_supplex_always_outranks_punch_tier(self) -> None:
         held = _enemy("obj01", CombatPhase.GRABBED)

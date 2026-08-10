@@ -423,6 +423,46 @@ class ShouldWalkToAdvanceStageTests(unittest.TestCase):
 
         self.assertEqual(result, {WalkToAdvanceStage(actor_slot="P1", direction="right")})
 
+    def test_fires_when_the_only_remaining_enemy_is_off_screen_at_zero_health(self) -> None:
+        # Regression: world_map.MapEntity.is_defeated's own note says zero
+        # health is still "alive" (needs a finishing hit) -- but nothing
+        # ever chases an off-screen target, so such a straggler must not
+        # block stage advance forever.
+        myself = make_myself(world_x=100, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        stranded = make_enemy(world_x=500, world_y=100, health=0)
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, stranded, stage}
+
+        result = should_walk_to_advance_stage(context)
+
+        self.assertEqual(result, {WalkToAdvanceStage(actor_slot="P1", direction="right")})
+
+    def test_does_not_fire_when_the_off_screen_zero_health_enemy_could_still_be_hit(
+        self,
+    ) -> None:
+        # An on-screen enemy at 0 health is still reachable/finishable, so
+        # it must keep blocking advance just like any other live enemy.
+        myself = make_myself(world_x=100, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        on_screen_zero_hp = make_enemy(world_x=150, world_y=100, health=0)
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, on_screen_zero_hp, stage}
+
+        self.assertEqual(should_walk_to_advance_stage(context), set())
+
+    def test_off_screen_enemy_with_nonzero_health_still_blocks(self) -> None:
+        # Only exactly-zero health is exempted -- a still-damageable
+        # off-screen enemy is a genuine "about to scroll into view" reason
+        # to hold position, per the original docstring rationale.
+        myself = make_myself(world_x=100, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        off_screen_alive = make_enemy(world_x=500, world_y=100, health=1)
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, off_screen_alive, stage}
+
+        self.assertEqual(should_walk_to_advance_stage(context), set())
+
     def test_does_not_fire_when_direction_is_none(self) -> None:
         myself = make_myself()
         stage = Stage(level_index=6, direction="none")

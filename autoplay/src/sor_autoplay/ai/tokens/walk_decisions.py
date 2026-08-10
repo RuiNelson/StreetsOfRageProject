@@ -33,9 +33,12 @@ class WalkToAdvanceStage(Walk):
     """Walk in the stage's progress direction to scroll it.
 
     Produced by ``should_walk_to_advance_stage`` when no live Enemy token
-    remains anywhere and the stage has a progress direction.
+    remains anywhere -- except an off-screen enemy already at 0 health,
+    which nothing in this pipeline will ever chase down to finish off (see
+    ``decide._advance_blocking_enemies``) -- and the stage has a progress
+    direction.
 
-    Raises emergency: (no live Enemy anywhere)×12.
+    Raises emergency: (no blocking Enemy anywhere)×12.
 
     Lowest of the Walk/Attack priorities: per AI.md, "picking up a weapon
     carries a higher priority than advancing to the next stage" -- this is
