@@ -115,9 +115,24 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
 
         client.hold_buttons.assert_called_once_with(player1=LEFT | UP, player2=0)
 
-    def test_same_position_holds_no_direction(self) -> None:
+    def test_standing_on_the_enemy_steps_back_to_punch_range(self) -> None:
+        # Never walk onto the enemy — stop just inside punch_outer_x.
         actor = _myself(world_x=10, world_y=10)
         target = _enemy(world_x=10, world_y=10)
+        context = {actor, target}
+        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, context, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
+
+    def test_stops_just_inside_punch_range_instead_of_overlapping_enemy(self) -> None:
+        # Axel: punch_outer_x=50, stop buffer 4 -> stop_dx=46. Placing the
+        # actor exactly at that stopping x (relative to the enemy at x=50)
+        # means it has already arrived and should hold no further movement.
+        actor = _myself(world_x=4, world_y=50)
+        target = _enemy(world_x=50, world_y=50)
         context = {actor, target}
         decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
@@ -136,6 +151,45 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         execute_decision(decision, context, gamepad)
 
         client.hold_buttons.assert_not_called()
+
+    def test_sidesteps_a_dangerous_enemys_exact_lane_while_still_far_away(self) -> None:
+        actor = _myself(world_x=0, world_y=50)
+        target = replace(_enemy(world_x=200, world_y=50), combat_phase=CombatPhase.ATTACKING)
+        context = {actor, target}
+        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, context, gamepad)
+
+        # Same lane (dy=0) and far away (dx=200) from an actively attacking
+        # enemy -> step off its lane instead of walking straight down it.
+        client.hold_buttons.assert_called_once_with(player1=RIGHT | DOWN, player2=0)
+
+    def test_does_not_sidestep_a_dangerous_enemy_once_close_enough_to_punch(self) -> None:
+        # dx=46 == stop_dx: already at the stopping point, so the actor
+        # aligns for the punch instead of sidestepping.
+        actor = _myself(world_x=-6, world_y=50)
+        target = replace(_enemy(world_x=40, world_y=50), combat_phase=CombatPhase.ATTACKING)
+        context = {actor, target}
+        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+        gamepad.hold(RIGHT)  # start non-zero so a hold(0) call is observable
+        client.hold_buttons.reset_mock()
+
+        execute_decision(decision, context, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=0, player2=0)
+
+    def test_does_not_sidestep_an_enemy_that_is_not_dangerous(self) -> None:
+        actor = _myself(world_x=0, world_y=50)
+        target = _enemy(world_x=200, world_y=50)  # NORMAL phase
+        context = {actor, target}
+        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, context, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
 
 class ExecuteWalkToAdvanceStageTests(unittest.TestCase):

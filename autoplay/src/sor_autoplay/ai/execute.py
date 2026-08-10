@@ -23,7 +23,7 @@ from .tokens import (
     ThrowHeldEnemy,
     ThrowKnife,
 )
-from .tokens import Myself, Partner
+from .tokens import Myself, Partner, PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
 from .tokens import Enemy
 from .tokens import CameraRange
 from .tokens import Breakable
@@ -38,6 +38,7 @@ from .tokens import (
     WalkToWeapon,
 )
 from .gamepad import VirtualGamepad
+from ..phases import is_dangerous
 from ..world_map import LANE_Y_MIN
 
 UP_MASK = 0x0001
@@ -62,6 +63,12 @@ PICKUP_RANGE_Y = 14
 LANE_EDGE_MARGIN = 6
 BREAKABLE_AVOID_X = 28
 BREAKABLE_AVOID_Y = 22
+# Stop just inside punch_outer_x — never walk onto the enemy.
+WALK_TO_ENEMY_STOP_BUFFER = 4
+# While still approaching a dangerous (ATTACKING/CHARGE) enemy and already
+# near its exact lane, sidestep by this much instead of closing distance
+# straight down its line of attack.
+WALK_TO_ENEMY_LANE_SAFETY_Y = PUNCH_RANGE_Y + 16
 
 
 def press_no_button(gamepad: VirtualGamepad) -> None:
@@ -164,14 +171,45 @@ def _back_direction_mask(actor: Myself | Partner) -> int:
     return RIGHT_MASK if actor.facing_left else LEFT_MASK
 
 
+def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[int, int]:
+    """Stopping point for approaching ``target``.
+
+    Stops just inside the actor's punch outer edge (never overlaps the
+    enemy, per AI-Goals.md's "não se deve aproximar mais do que o
+    suficiente"). Converges the actor's Y onto the enemy's lane so the
+    eventual punch lands (dy must clear PUNCH_RANGE_Y) — except while a
+    dangerous enemy is still far away and the actor already sits on its
+    exact lane, where it sidesteps instead of closing distance straight
+    down the enemy's line of attack.
+    """
+
+    outer = punch_outer_x(actor.character_id)
+    inner = punch_inner_x(actor.character_id)
+    stop_dx = max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER)
+
+    if actor.world_x <= target.world_x:
+        target_x = target.world_x - stop_dx
+    else:
+        target_x = target.world_x + stop_dx
+
+    dx = abs(target.world_x - actor.world_x)
+    on_lane = abs(actor.world_y - target.world_y) < WALK_TO_ENEMY_LANE_SAFETY_Y
+    if is_dangerous(target.combat_phase) and dx > stop_dx and on_lane:
+        offset = WALK_TO_ENEMY_LANE_SAFETY_Y if actor.world_y >= target.world_y else -WALK_TO_ENEMY_LANE_SAFETY_Y
+        target_y = target.world_y + offset
+    else:
+        target_y = target.world_y
+
+    return target_x, target_y
+
+
 def _execute_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, decision.actor_slot)
     target = find(context, Enemy, slot=decision.target_slot)
     if actor is None or target is None:
         return
-    gamepad.hold(
-        _movement_mask(context, actor.world_x, actor.world_y, target.world_x, target.world_y)
-    )
+    target_x, target_y = _walk_to_near_enemy_target(actor, target)
+    gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
 
 
 def _execute_walk_to_advance_stage(
