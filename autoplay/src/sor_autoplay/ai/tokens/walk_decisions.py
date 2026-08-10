@@ -17,14 +17,16 @@ class Walk(Decision, ABC):
 class WalkToNearEnemy(Walk):
     """Walk to a nearby on-screen enemy to bring it into attack range.
 
-    Produced by ``could_walk_to_near_enemy`` when an on-screen enemy exists
-    and no enemy is already within punch or rear range. Falls back to the
-    nearest live enemy ahead in the stage's scroll direction when nothing
-    is on-screen (e.g. the next wave, tracked on the world map but not yet
-    in camera) -- never one behind, so this never walks backward for an
-    abandoned off-screen leftover.
+    Produced by ``could_walk_to_near_enemy`` once per reachable enemy when
+    at least one on-screen enemy exists and none is already within punch or
+    rear range -- never just the nearest; determine_priority_decision picks
+    among the candidates. Falls back to every live enemy ahead in the
+    stage's scroll direction when nothing is on-screen (e.g. the next wave,
+    tracked on the world map but not yet in camera) -- never one behind, so
+    this never walks backward for an abandoned off-screen leftover.
 
-    Raises emergency: Enemy×14.
+    Raises emergency: Enemy×14, closer scoring higher (distance-scored;
+    see priority._emergency_walk_to_near_enemy).
     """
 
     priority: int = 20
@@ -58,10 +60,13 @@ class WalkToAdvanceStage(Walk):
 class WalkToWeapon(Walk):
     """Walk to pick up a free ground weapon that outranks the held one.
 
-    Produced by ``could_walk_to_weapon`` when an in-camera Weapon token
-    ranks higher than the actor's held weapon.
+    Produced by ``could_walk_to_weapon`` once per in-camera Weapon token
+    that ranks higher than the actor's held weapon -- never just the best
+    one; determine_priority_decision picks among the candidates.
 
-    Raises emergency: (Weapon when its rank beats the held weapon's)×8.
+    Raises emergency: (Weapon when its rank beats the held weapon's)×3+rank
+    (rank 2..5, so a better upgrade among several outranks a lesser one;
+    see priority._emergency_walk_to_weapon).
     """
 
     priority: int = 22
@@ -73,8 +78,10 @@ class WalkToWeapon(Walk):
 class WalkToPickup(Walk):
     """Walk to (and B-pickup) a free ground consumable.
 
-    Produced by ``could_walk_to_pickup`` when a useful Pickup token is in
-    camera for the actor.
+    Produced by ``could_walk_to_pickup`` once per useful Pickup token in
+    camera for the actor -- never just the best one; determine_priority_
+    decision picks among the candidates via the already per-target emergency
+    tiers below.
 
     Raises emergency: (HealthPickup when the actor's health is critical)×50,
     HealthPickup×15, LifePickup×12, SpecialPickup×9, ScorePickup×3.
@@ -93,14 +100,17 @@ class WalkToPickup(Walk):
 class WalkToBreakable(Walk):
     """Approach an intact prop to smash it (or clear the path).
 
-    Produced by ``could_walk_to_breakable`` when an in-camera Breakable
-    lies beyond smash range ahead of the actor. Execution stops just inside
-    smash range on whichever side the actor already occupies -- a
-    Breakable is itself a solid obstacle, so walking to its exact center
-    would mean walking into it (e.g. from directly above/below) and
-    getting stuck (see ``execute._walk_to_breakable_target``).
+    Produced by ``could_walk_to_breakable`` once per in-camera Breakable
+    that lies beyond smash range ahead of the actor -- never just the
+    nearest; determine_priority_decision picks among the candidates.
+    Execution stops just inside smash range on whichever side the actor
+    already occupies -- a Breakable is itself a solid obstacle, so walking
+    to its exact center would mean walking into it (e.g. from directly
+    above/below) and getting stuck (see
+    ``execute._walk_to_breakable_target``).
 
-    Raises emergency: Breakable×14.
+    Raises emergency: Breakable×14, closer scoring higher (distance-scored;
+    see priority._emergency_walk_to_breakable).
     """
 
     priority: int = 12

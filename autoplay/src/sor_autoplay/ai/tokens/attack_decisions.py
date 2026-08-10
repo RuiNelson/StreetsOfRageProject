@@ -154,10 +154,14 @@ class WeaponAttacks(Attack, ABC):
 class ThrowKnife(WeaponAttacks):
     """Throw the held knife at an out-of-melee-range enemy.
 
-    Produced by ``could_throw_knife`` when the actor holds a knife (type
-    $08) and the nearest enemy is beyond melee but within knife range.
+    Produced by ``could_throw_knife`` once per on-screen enemy, when the
+    actor holds a knife (type $08) and that enemy is beyond melee but
+    within knife range -- never just the nearest; determine_priority_
+    decision picks among the candidates.
 
-    Raises emergency: (Enemy when beyond melee and within knife range)×25.
+    Raises emergency: (Enemy when beyond melee and within knife range)×25,
+    closer scoring higher (distance-scored; see
+    priority._emergency_thrown_weapon).
     """
 
     priority: int = 11
@@ -172,12 +176,16 @@ class ThrowPepper(WeaponAttacks):
     On hit it immobilizes the target rather than dealing the raw damage a
     knife throw does (items-and-weapons.md), making it a crowd-control tool.
 
-    Produced by ``could_throw_pepper`` when the actor holds pepper spray
-    (type $0C) and the nearest enemy is beyond melee but within throw range
-    (reusing ``ThrowKnife``'s measured range constants — pepper's own
-    effective throw range has not been separately measured).
+    Produced by ``could_throw_pepper`` once per on-screen enemy, when the
+    actor holds pepper spray (type $0C) and that enemy is beyond melee but
+    within throw range (reusing ``ThrowKnife``'s measured range constants —
+    pepper's own effective throw range has not been separately measured) --
+    never just the nearest; determine_priority_decision picks among the
+    candidates.
 
-    Raises emergency: (Enemy when beyond melee and within throw range)×25.
+    Raises emergency: (Enemy when beyond melee and within throw range)×25,
+    closer scoring higher (distance-scored; see
+    priority._emergency_thrown_weapon).
     """
 
     priority: int = 11

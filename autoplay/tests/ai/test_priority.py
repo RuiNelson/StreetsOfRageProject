@@ -135,8 +135,10 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
 
     def test_walk_to_near_enemy_beats_walk_to_advance_stage(self) -> None:
         # AI.md: advancing the stage is the lowest-priority fallback.
-        enemy = _enemy("obj01", CombatPhase.NORMAL)
+        myself = _myself(world_x=0, world_y=50)
+        enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=10, world_y=50)
         context = {
+            myself,
             enemy,
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
             WalkToAdvanceStage(actor_slot="P1", direction="right"),
@@ -147,6 +149,27 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
         self.assertIsInstance(decisions[0], WalkToNearEnemy)
+
+    def test_walk_to_near_enemy_picks_the_closer_of_two_candidates(self) -> None:
+        # could_walk_to_near_enemy (decide.py) no longer pre-selects the
+        # nearest enemy -- this is now determine_priority_decision's job,
+        # via _emergency_walk_to_near_enemy's distance-bucketed score.
+        myself = _myself(world_x=0, world_y=0)
+        near = _enemy("obj01", CombatPhase.NORMAL, world_x=10, world_y=0)
+        far = _enemy("obj02", CombatPhase.NORMAL, world_x=150, world_y=0)
+        context = {
+            myself,
+            near,
+            far,
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].target_slot, "obj01")
 
     def test_advance_stage_fires_when_only_remaining_enemy_is_off_screen_at_zero_health(
         self,
@@ -435,6 +458,27 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         self.assertEqual(len(decisions), 1)
         self.assertIsInstance(decisions[0], WalkToWeapon)
 
+    def test_walk_to_weapon_picks_the_higher_ranked_upgrade(self) -> None:
+        # could_walk_to_weapon (decide.py) no longer pre-selects the best
+        # upgrade -- this is now determine_priority_decision's job, via
+        # _emergency_walk_to_weapon's rank-scaled score.
+        unarmed = _myself(held_weapon_type=0)
+        knife = Weapon(slot="obj01", world_x=0, world_y=0, weapon_type=0x08)  # rank 5
+        pepper = Weapon(slot="obj02", world_x=0, world_y=0, weapon_type=0x0C)  # rank 2
+        context = {
+            unarmed,
+            knife,
+            pepper,
+            WalkToWeapon(actor_slot="P1", target_slot="obj01"),
+            WalkToWeapon(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].target_slot, "obj01")
+
     def test_walk_to_weapon_scores_zero_when_not_an_upgrade(self) -> None:
         # Already holding the best weapon: the floor pepper spray isn't an
         # upgrade, so WalkToWeapon's condition is false and it loses to a
@@ -488,6 +532,27 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         self.assertEqual(len(decisions), 1)
         self.assertIsInstance(decisions[0], WalkToNearEnemy)
 
+    def test_throw_knife_picks_the_closer_of_two_qualifying_enemies(self) -> None:
+        # could_throw_knife (decide.py) no longer pre-selects the nearest
+        # enemy -- this is now determine_priority_decision's job, via the
+        # shared _emergency_thrown_weapon's distance-bucketed score.
+        actor = _myself(world_x=0, world_y=0)
+        near = _enemy("obj01", CombatPhase.NORMAL, world_x=50, world_y=0)
+        far = _enemy("obj02", CombatPhase.NORMAL, world_x=85, world_y=0)
+        context = {
+            actor,
+            near,
+            far,
+            ThrowKnife(actor_slot="P1", target_slot="obj01"),
+            ThrowKnife(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].target_slot, "obj01")
+
     def test_throw_pepper_scores_within_range_beyond_melee(self) -> None:
         actor = _myself(world_x=0, world_y=0)
         far_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=60, world_y=0)
@@ -535,6 +600,27 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
         self.assertIsInstance(decisions[0], SmashBreakable)
+
+    def test_walk_to_breakable_picks_the_closer_of_two_candidates(self) -> None:
+        # could_walk_to_breakable (decide.py) no longer pre-selects the
+        # nearest breakable -- this is now determine_priority_decision's
+        # job, via _emergency_walk_to_breakable's distance-bucketed score.
+        myself = _myself(world_x=0, world_y=0)
+        near = Breakable(slot="near", world_x=10, world_y=0, type_id=0x40)
+        far = Breakable(slot="far", world_x=150, world_y=0, type_id=0x40)
+        context = {
+            myself,
+            near,
+            far,
+            WalkToBreakable(actor_slot="P1", target_slot="near"),
+            WalkToBreakable(actor_slot="P1", target_slot="far"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].target_slot, "near")
 
     def test_walk_to_breakable_scores_zero_when_target_missing(self) -> None:
         enemy = _enemy("obj02", CombatPhase.NORMAL)

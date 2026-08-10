@@ -86,6 +86,8 @@ def _jump_attack_max_dx(character_id: int | None) -> int:
     if character_id is None:
         return JUMP_ATTACK_MAX_DX_DEFAULT
     return JUMP_ATTACK_MAX_DX_BY_CHARACTER.get(character_id, JUMP_ATTACK_MAX_DX_DEFAULT)
+
+
 KNIFE_RANGE_X = 90
 KNIFE_RANGE_Y = 16
 KNIFE_MELEE_X = 40
@@ -373,11 +375,12 @@ def could_walk_to_near_enemy(context: Context) -> Context:
             continue
         if any(_in_punch_band(actor, e) or _in_rear_band(actor, e) for e in enemies):
             continue
-        nearest = min(
-            enemies,
-            key=lambda e: math.hypot(e.world_x - actor.world_x, e.world_y - actor.world_y),
-        )
-        decisions.add(WalkToNearEnemy(actor_slot=actor.slot, target_slot=nearest.slot))
+        # One candidate per reachable enemy -- determine_priority_decision
+        # (priority.py's distance-scored emergency) picks the closest one,
+        # per AI.md's own target-selection principle: this function only
+        # says what's possible, never which possibility is best.
+        for enemy in enemies:
+            decisions.add(WalkToNearEnemy(actor_slot=actor.slot, target_slot=enemy.slot))
     return decisions
 
 
@@ -489,7 +492,12 @@ def could_jump_attack(context: Context) -> Context:
     return decisions
 
 
-def could_throw_knife(context: Context) -> Context:
+def _could_throw_ranged_weapon(context: Context, *, weapon_type: int, decision_cls) -> Context:
+    """Shared body for ``could_throw_knife`` / ``could_throw_pepper``: one
+    candidate per on-screen enemy beyond melee but within throw range --
+    never just the nearest. determine_priority_decision (priority.py's
+    distance-scored emergency) picks which one actually gets thrown at."""
+
     decisions: set[Token] = set()
     enemies = _on_screen_enemies(context)
     for actor in _actors(context):
@@ -499,26 +507,25 @@ def could_throw_knife(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
-        if actor.held_weapon_type != 0x08:
+        if actor.held_weapon_type != weapon_type:
             continue
-        if not enemies:
-            continue
-        nearest = min(
-            enemies,
-            key=lambda e: math.hypot(e.world_x - actor.world_x, e.world_y - actor.world_y),
-        )
-        in_melee_range = (
-            abs(nearest.world_x - actor.world_x) <= KNIFE_MELEE_X
-            and abs(nearest.world_y - actor.world_y) <= KNIFE_RANGE_Y
-        )
-        if in_melee_range:
-            continue
-        if (
-            abs(nearest.world_x - actor.world_x) <= KNIFE_RANGE_X
-            and abs(nearest.world_y - actor.world_y) <= KNIFE_RANGE_Y
-        ):
-            decisions.add(ThrowKnife(actor_slot=actor.slot, target_slot=nearest.slot))
+        for enemy in enemies:
+            in_melee_range = (
+                abs(enemy.world_x - actor.world_x) <= KNIFE_MELEE_X
+                and abs(enemy.world_y - actor.world_y) <= KNIFE_RANGE_Y
+            )
+            if in_melee_range:
+                continue
+            if (
+                abs(enemy.world_x - actor.world_x) <= KNIFE_RANGE_X
+                and abs(enemy.world_y - actor.world_y) <= KNIFE_RANGE_Y
+            ):
+                decisions.add(decision_cls(actor_slot=actor.slot, target_slot=enemy.slot))
     return decisions
+
+
+def could_throw_knife(context: Context) -> Context:
+    return _could_throw_ranged_weapon(context, weapon_type=0x08, decision_cls=ThrowKnife)
 
 
 def could_throw_pepper(context: Context) -> Context:
@@ -528,35 +535,7 @@ def could_throw_pepper(context: Context) -> Context:
     reuses ``KNIFE_MELEE_X``/``KNIFE_RANGE_X``/``KNIFE_RANGE_Y`` as the
     closest available evidence."""
 
-    decisions: set[Token] = set()
-    enemies = _on_screen_enemies(context)
-    for actor in _actors(context):
-        if _blocked(context, actor):
-            continue
-        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
-            continue
-        if _is_holding_enemy(actor):
-            continue
-        if actor.held_weapon_type != PEPPER_SPRAY_TYPE:
-            continue
-        if not enemies:
-            continue
-        nearest = min(
-            enemies,
-            key=lambda e: math.hypot(e.world_x - actor.world_x, e.world_y - actor.world_y),
-        )
-        in_melee_range = (
-            abs(nearest.world_x - actor.world_x) <= KNIFE_MELEE_X
-            and abs(nearest.world_y - actor.world_y) <= KNIFE_RANGE_Y
-        )
-        if in_melee_range:
-            continue
-        if (
-            abs(nearest.world_x - actor.world_x) <= KNIFE_RANGE_X
-            and abs(nearest.world_y - actor.world_y) <= KNIFE_RANGE_Y
-        ):
-            decisions.add(ThrowPepper(actor_slot=actor.slot, target_slot=nearest.slot))
-    return decisions
+    return _could_throw_ranged_weapon(context, weapon_type=PEPPER_SPRAY_TYPE, decision_cls=ThrowPepper)
 
 
 def could_walk_to_weapon(context: Context) -> Context:
@@ -578,10 +557,10 @@ def could_walk_to_weapon(context: Context) -> Context:
             continue
         held_rank = weapon_rank(actor.held_weapon_type)
         upgrades = [w for w in weapons if weapon_rank(w.weapon_type) > held_rank]
-        if not upgrades:
-            continue
-        best = max(upgrades, key=lambda w: weapon_rank(w.weapon_type))
-        decisions.add(WalkToWeapon(actor_slot=actor.slot, target_slot=best.slot))
+        # One candidate per upgrade -- priority.py's rank-scaled emergency
+        # favors the better upgrade, not a min/max pick made here.
+        for weapon in upgrades:
+            decisions.add(WalkToWeapon(actor_slot=actor.slot, target_slot=weapon.slot))
     return decisions
 
 
@@ -618,29 +597,11 @@ def could_walk_to_pickup(context: Context) -> Context:
         if _is_holding_enemy(actor):
             continue
         useful = [p for p in pickups if _pickup_is_useful(actor, p)]
-        if not useful:
-            continue
-
-        def _rank(p: Pickup) -> tuple[int, int]:
-            if isinstance(p, HealthPickup):
-                urgency = 3 if actor.health_percent < HEALTH_CRITICAL_PERCENT else 2
-                return (urgency, p.health_delta)
-            if isinstance(p, LifePickup):
-                return (2, 0)
-            if isinstance(p, SpecialPickup):
-                return (1, 0)
-            if isinstance(p, ScorePickup):
-                return (0, p.points)
-            return (0, 0)
-
-        best = max(
-            useful,
-            key=lambda p: (
-                _rank(p),
-                -math.hypot(p.world_x - actor.world_x, p.world_y - actor.world_y),
-            ),
-        )
-        decisions.add(WalkToPickup(actor_slot=actor.slot, target_slot=best.slot))
+        # One candidate per useful pickup -- priority.py's per-target
+        # _emergency_walk_to_pickup already ranks by type/urgency, so no
+        # selection belongs here.
+        for pickup in useful:
+            decisions.add(WalkToPickup(actor_slot=actor.slot, target_slot=pickup.slot))
     return decisions
 
 
@@ -701,13 +662,10 @@ def could_walk_to_breakable(context: Context) -> Context:
                 and abs(b.world_y - actor.world_y) <= BREAKABLE_PUNCH_Y
             )
         ]
-        if not candidates:
-            continue
-        best = min(
-            candidates,
-            key=lambda b: math.hypot(b.world_x - actor.world_x, b.world_y - actor.world_y),
-        )
-        decisions.add(WalkToBreakable(actor_slot=actor.slot, target_slot=best.slot))
+        # One candidate per reachable breakable -- priority.py's distance-
+        # bucketed emergency picks the closest one.
+        for prop in candidates:
+            decisions.add(WalkToBreakable(actor_slot=actor.slot, target_slot=prop.slot))
     return decisions
 
 

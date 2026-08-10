@@ -16,6 +16,7 @@ applied unconditionally.
 from __future__ import annotations
 
 import logging
+import math
 import random
 from collections.abc import Callable
 
@@ -86,7 +87,8 @@ _EMERGENCY_THROW_KNIFE = 25
 _EMERGENCY_THROW_PEPPER = 25
 _EMERGENCY_SMASH_BREAKABLE = 16
 _EMERGENCY_WALK_TO_BREAKABLE = 14
-_EMERGENCY_WALK_TO_WEAPON = 8
+_EMERGENCY_WALK_TO_WEAPON = 8  # reference value: knife (rank 5) via _EMERGENCY_WALK_TO_WEAPON_BASE
+_EMERGENCY_WALK_TO_WEAPON_BASE = 3  # + weapon_rank (2..5) -> 5..8
 _EMERGENCY_WALK_TO_PICKUP_CRITICAL_HEALTH = 50
 _EMERGENCY_WALK_TO_PICKUP_HEALTH = 15
 _EMERGENCY_WALK_TO_PICKUP_LIFE = 12
@@ -103,6 +105,29 @@ def _find_actor(context: Context, slot: str) -> Myself | Partner | None:
         if actor is not None and actor.slot == slot:
             return actor
     return None
+
+
+def _distance_emergency(distance: float, *, base: int, floor: int, step_px: float) -> int:
+    """Near-continuous distance scoring: ``base`` at distance 0, dropping by
+    1 every ``step_px`` pixels, floored at ``floor`` -- both must stay
+    inside the caller's own established emergency band, never crossing into
+    a different decision type's tier. This is what lets ``could_*``
+    functions (decide.py) stop pre-selecting a single "best" candidate
+    themselves and produce one Decision per possibility instead, per
+    AI.md's own worked example (several ``Punch`` candidates collapsing to
+    one only in ``determine_priority_decision``): the ranking still favours
+    the closest/best option, it just happens here instead of inside the
+    could_* function.
+
+    A handful of coarse buckets was tried first and discarded: with several
+    enemies clustered together (the common case), most fell into the same
+    bucket and tied every tick, so determine_priority_decision's random
+    tie-break kept flipping the target -- confirmed live against a running
+    host. One point per ``step_px`` makes an exact tie between two distinct
+    candidates rare in practice.
+    """
+
+    return max(floor, base - int(distance // step_px))
 
 
 def _emergency_counter_grab(decision: CounterGrab, context: Context) -> int:
@@ -174,9 +199,11 @@ def _emergency_smash_breakable(decision: SmashBreakable, context: Context) -> in
 
 def _emergency_walk_to_breakable(decision: WalkToBreakable, context: Context) -> int:
     target = find(context, Breakable, slot=decision.target_slot)
-    if target is None:
+    actor = _find_actor(context, decision.actor_slot)
+    if target is None or actor is None:
         return _EMERGENCY_DEFAULT
-    return _EMERGENCY_WALK_TO_BREAKABLE
+    distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
+    return _distance_emergency(distance, base=_EMERGENCY_WALK_TO_BREAKABLE, floor=8, step_px=15)
 
 
 def _emergency_walk_to_weapon(decision: WalkToWeapon, context: Context) -> int:
@@ -184,16 +211,25 @@ def _emergency_walk_to_weapon(decision: WalkToWeapon, context: Context) -> int:
     actor = _find_actor(context, decision.actor_slot)
     if weapon is None or actor is None:
         return _EMERGENCY_DEFAULT
-    if weapon_rank(weapon.weapon_type) > weapon_rank(actor.held_weapon_type):
-        return _EMERGENCY_WALK_TO_WEAPON
-    return _EMERGENCY_DEFAULT
+    rank = weapon_rank(weapon.weapon_type)
+    if rank <= weapon_rank(actor.held_weapon_type):
+        return _EMERGENCY_DEFAULT
+    # Scales with how much of an upgrade this weapon is (rank 2..5) instead
+    # of a flat weight, so a better upgrade among several candidates ranks
+    # higher -- e.g. knife (rank 5) reaches the original flat value 8,
+    # pepper (rank 2) sits lower at 5. Stays inside the gap between
+    # ScorePickup (3) and SpecialPickup (9) so it never crosses into a
+    # different decision type's tier.
+    return _EMERGENCY_WALK_TO_WEAPON_BASE + rank
 
 
 def _emergency_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context) -> int:
     target = find(context, Enemy, slot=decision.target_slot)
-    if target is None:
+    actor = _find_actor(context, decision.actor_slot)
+    if target is None or actor is None:
         return _EMERGENCY_DEFAULT
-    return _EMERGENCY_WALK_TO_NEAR_ENEMY
+    distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
+    return _distance_emergency(distance, base=_EMERGENCY_WALK_TO_NEAR_ENEMY, floor=8, step_px=15)
 
 
 def _emergency_walk_to_advance_stage(decision: WalkToAdvanceStage, context: Context) -> int:
@@ -214,9 +250,10 @@ def _emergency_thrown_weapon(decision: Decision, context: Context, weight: int) 
     dy = abs(target.world_y - actor.world_y)
     beyond_melee = not (dx <= KNIFE_MELEE_X and dy <= KNIFE_RANGE_Y)
     within_range = dx <= KNIFE_RANGE_X and dy <= KNIFE_RANGE_Y
-    if beyond_melee and within_range:
-        return weight
-    return _EMERGENCY_DEFAULT
+    if not (beyond_melee and within_range):
+        return _EMERGENCY_DEFAULT
+    distance = math.hypot(dx, dy)
+    return _distance_emergency(distance, base=weight, floor=weight - 4, step_px=15)
 
 
 def _emergency_throw_knife(decision: ThrowKnife, context: Context) -> int:

@@ -31,18 +31,21 @@ from sor_autoplay.ai.decide import (
     could_throw_knife,
     could_throw_pepper,
     could_walk_to_advance_stage,
+    could_walk_to_breakable,
     could_walk_to_near_enemy,
     could_walk_to_pickup,
     could_walk_to_weapon,
 )
 from sor_autoplay.ai.tokens import Enemy
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
+from sor_autoplay.ai.tokens import Breakable
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import Decision, Token
 from sor_autoplay.ai.tokens import (
     Walk,
     WalkToAdvanceStage,
+    WalkToBreakable,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
@@ -377,16 +380,26 @@ class CouldTechRecoverTests(unittest.TestCase):
 
 
 class CouldWalkToNearEnemyTests(unittest.TestCase):
-    def test_picks_the_nearest_enemy(self) -> None:
+    def test_produces_one_candidate_per_reachable_enemy_not_just_the_nearest(self) -> None:
+        # could_walk_to_near_enemy must not pre-select -- per AI.md, ranking
+        # several same-kind candidates against each other is
+        # determine_priority_decision's job (see test_priority.py's
+        # test_walk_to_near_enemy_picks_the_closer_of_two_candidates).
         myself = make_myself(world_x=0, world_y=0)
         # Outside punch/rear connect bands so walk is the right candidate.
         near = make_enemy(slot="near", world_x=80, world_y=10)
-        far = make_enemy(slot="far", world_x=500, world_y=500)
+        far = make_enemy(slot="far", world_x=500, world_y=10)
         context: set[Token] = {myself, near, far}
 
         result = could_walk_to_near_enemy(context)
 
-        self.assertEqual(result, {WalkToNearEnemy(actor_slot="P1", target_slot="near")})
+        self.assertEqual(
+            result,
+            {
+                WalkToNearEnemy(actor_slot="P1", target_slot="near"),
+                WalkToNearEnemy(actor_slot="P1", target_slot="far"),
+            },
+        )
 
     def test_no_enemies_no_decision(self) -> None:
         myself = make_myself()
@@ -815,8 +828,11 @@ class CouldWalkToWeaponTests(unittest.TestCase):
 
         self.assertEqual(could_walk_to_weapon(context), set())
 
-    def test_picks_highest_ranked_of_several_upgrades(self) -> None:
-        # Damage rank: knife 5 > bat 4 > bottle 3 > pepper 2.
+    def test_produces_one_candidate_per_upgrade_not_just_the_best(self) -> None:
+        # could_walk_to_weapon must not pre-select -- per AI.md, ranking
+        # several same-kind candidates against each other is
+        # determine_priority_decision's job (see test_priority.py's
+        # test_walk_to_weapon_picks_the_higher_ranked_upgrade).
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
         camera = CameraRange(left=0, right=200, top=0, bottom=200)
         knife = Weapon(slot="wpn1", world_x=120, world_y=110, weapon_type=0x08)
@@ -825,7 +841,13 @@ class CouldWalkToWeaponTests(unittest.TestCase):
 
         result = could_walk_to_weapon(context)
 
-        self.assertEqual(result, {WalkToWeapon(actor_slot="P1", target_slot="wpn1")})
+        self.assertEqual(
+            result,
+            {
+                WalkToWeapon(actor_slot="P1", target_slot="wpn1"),
+                WalkToWeapon(actor_slot="P1", target_slot="wpn2"),
+            },
+        )
 
     def test_knife_is_upgrade_over_bat(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
@@ -886,6 +908,56 @@ class GenerateDecisionTokensTests(unittest.TestCase):
         generate_decision_tokens(context)
 
         self.assertEqual(context, original)
+
+
+class CouldWalkToBreakableTests(unittest.TestCase):
+    def test_fires_for_an_in_camera_breakable_beyond_smash_range(self) -> None:
+        myself = make_myself(world_x=0, world_y=0)
+        camera = CameraRange(left=-50, right=200, top=-50, bottom=200)
+        prop = Breakable(slot="obj09", world_x=60, world_y=0, type_id=0x40)
+        context: set[Token] = {myself, camera, prop}
+
+        result = could_walk_to_breakable(context)
+
+        self.assertEqual(result, {WalkToBreakable(actor_slot="P1", target_slot="obj09")})
+
+    def test_does_not_fire_when_already_in_smash_range(self) -> None:
+        myself = make_myself(world_x=0, world_y=0)
+        camera = CameraRange(left=-50, right=200, top=-50, bottom=200)
+        prop = Breakable(slot="obj09", world_x=10, world_y=0, type_id=0x40)
+        context: set[Token] = {myself, camera, prop}
+
+        self.assertEqual(could_walk_to_breakable(context), set())
+
+    def test_produces_one_candidate_per_reachable_breakable_not_just_the_nearest(self) -> None:
+        # Must not pre-select -- per AI.md, ranking several same-kind
+        # candidates against each other is determine_priority_decision's
+        # job (see test_priority.py's
+        # test_walk_to_breakable_picks_the_closer_of_two_candidates).
+        myself = make_myself(world_x=0, world_y=0)
+        camera = CameraRange(left=-50, right=300, top=-50, bottom=200)
+        near = Breakable(slot="near", world_x=60, world_y=0, type_id=0x40)
+        far = Breakable(slot="far", world_x=250, world_y=0, type_id=0x40)
+        context: set[Token] = {myself, camera, near, far}
+
+        result = could_walk_to_breakable(context)
+
+        self.assertEqual(
+            result,
+            {
+                WalkToBreakable(actor_slot="P1", target_slot="near"),
+                WalkToBreakable(actor_slot="P1", target_slot="far"),
+            },
+        )
+
+    def test_missing_camera_still_considers_off_screen_breakables(self) -> None:
+        myself = make_myself(world_x=0, world_y=0)
+        prop = Breakable(slot="obj09", world_x=60, world_y=0, type_id=0x40)
+        context: set[Token] = {myself, prop}
+
+        result = could_walk_to_breakable(context)
+
+        self.assertEqual(result, {WalkToBreakable(actor_slot="P1", target_slot="obj09")})
 
 
 if __name__ == "__main__":
