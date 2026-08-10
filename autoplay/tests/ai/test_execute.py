@@ -29,6 +29,7 @@ from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
     WalkToAdvanceStage,
+    WalkToBreakable,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
@@ -433,6 +434,57 @@ class ExecuteTechRecoverTests(unittest.TestCase):
         execute_decision(decision, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=C | UP, player2=0, frames=3)
+
+
+class ExecuteWalkToBreakableTests(unittest.TestCase):
+    """A Breakable is itself a solid obstacle -- walking to its exact
+    center means walking into it from whatever angle a straight line
+    happens to be, which can mean approaching from directly above/below
+    and getting stuck. Must stop just inside smash range on whichever
+    side the actor already occupies instead."""
+
+    def test_stops_short_of_the_breakables_exact_position(self) -> None:
+        actor = _myself(world_x=0, world_y=90)
+        prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
+        decision = WalkToBreakable(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor, prop}, gamepad)
+
+        # BREAKABLE_PUNCH_X=36, BREAKABLE_STOP_BUFFER=4 -> stop_dx=32, so
+        # the actor approaches to x=68, never reaching the prop's x=100.
+        client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
+
+    def test_approaches_from_whichever_side_the_actor_is_already_on(self) -> None:
+        actor = _myself(world_x=200, world_y=90)
+        prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
+        decision = WalkToBreakable(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor, prop}, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
+
+    def test_holds_no_direction_once_already_at_the_stopping_point(self) -> None:
+        actor = _myself(world_x=68, world_y=90)
+        prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
+        decision = WalkToBreakable(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+        gamepad.hold(RIGHT)  # start non-zero so a hold(0) call is observable
+        client.hold_buttons.reset_mock()
+
+        execute_decision(decision, {actor, prop}, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=0, player2=0)
+
+    def test_missing_actor_or_target_does_nothing(self) -> None:
+        prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
+        decision = WalkToBreakable(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {prop}, gamepad)
+
+        client.hold_buttons.assert_not_called()
 
 
 class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):

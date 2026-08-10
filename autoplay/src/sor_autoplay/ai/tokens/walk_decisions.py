@@ -94,7 +94,11 @@ class WalkToBreakable(Walk):
     """Approach an intact prop to smash it (or clear the path).
 
     Produced by ``should_walk_to_breakable`` when an in-camera Breakable
-    lies beyond smash range ahead of the actor.
+    lies beyond smash range ahead of the actor. Execution stops just inside
+    smash range on whichever side the actor already occupies -- a
+    Breakable is itself a solid obstacle, so walking to its exact center
+    would mean walking into it (e.g. from directly above/below) and
+    getting stuck (see ``execute._walk_to_breakable_target``).
 
     Raises emergency: Breakable×14.
     """

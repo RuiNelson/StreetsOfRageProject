@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 
 from ..phases import CombatPhase, should_ignore_as_target
+from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
 from .tokens import (
     CounterGrab,
     FlipHold,
@@ -148,8 +149,26 @@ def _in_camera(camera: CameraRange, world_x: int, world_y: int) -> bool:
     return camera.left <= world_x <= camera.right and camera.top <= world_y <= camera.bottom
 
 
+def _in_playable_lane(world_y: int, context: Context) -> bool:
+    """False for an enemy positioned outside the level's actual walkable Y
+    band -- e.g. stage 1's scripted "behind a door" placeholder, which is a
+    real Enemy object (tracked, health, combat_phase) at an anomalously high
+    world_y the player can never physically reach. Without this filter the
+    AI repeatedly commits to attacks/chases against a target it can never
+    connect with, and it can also block should_walk_to_advance_stage
+    forever the same way an abandoned 0-HP straggler does."""
+
+    stage = find(context, Stage)
+    lane_max = lane_y_max_for_level(stage.level_index) if stage is not None else LANE_Y_MAX_DEFAULT
+    return LANE_Y_MIN <= world_y <= lane_max
+
+
 def _live_enemies(context: Context) -> list[Enemy]:
-    return [e for e in find_all(context, Enemy) if not should_ignore_as_target(e.combat_phase)]
+    return [
+        e
+        for e in find_all(context, Enemy)
+        if not should_ignore_as_target(e.combat_phase) and _in_playable_lane(e.world_y, context)
+    ]
 
 
 def _on_screen_enemies(context: Context) -> list[Enemy]:

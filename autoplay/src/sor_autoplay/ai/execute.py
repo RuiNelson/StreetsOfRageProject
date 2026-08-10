@@ -43,6 +43,7 @@ from .tokens import (
     WalkToWeapon,
 )
 from .gamepad import VirtualGamepad
+from .decide import BREAKABLE_PUNCH_X
 from ..phases import is_dangerous
 from ..world_map import LANE_Y_MIN
 
@@ -81,6 +82,12 @@ WALK_TO_ENEMY_STOP_BUFFER = 4
 # near its exact lane, sidestep by this much instead of closing distance
 # straight down its line of attack.
 WALK_TO_ENEMY_LANE_SAFETY_Y = PUNCH_RANGE_Y + 16
+# A Breakable is itself a solid obstacle -- walking straight to its exact
+# (world_x, world_y) means walking into it from whatever angle happens to be
+# a straight line, which can mean approaching from directly above/below and
+# getting stuck against its collision. Stop just inside smash range on
+# whichever side the actor already occupies, at the same Y, instead.
+BREAKABLE_STOP_BUFFER = 4
 
 
 def press_no_button(gamepad: VirtualGamepad) -> None:
@@ -445,6 +452,20 @@ def _execute_walk_to_pickup(decision: WalkToPickup, context: Context, gamepad: V
         )
 
 
+def _walk_to_breakable_target(actor: Myself | Partner, target: Breakable) -> tuple[int, int]:
+    """Stopping point for approaching ``target``: a Breakable is a solid
+    obstacle, so stop just inside smash range on whichever side the actor
+    already occupies rather than walking to the breakable's exact (and
+    unreachable) center."""
+
+    stop_dx = max(0, BREAKABLE_PUNCH_X - BREAKABLE_STOP_BUFFER)
+    if actor.world_x <= target.world_x:
+        target_x = target.world_x - stop_dx
+    else:
+        target_x = target.world_x + stop_dx
+    return target_x, target.world_y
+
+
 def _execute_walk_to_breakable(
     decision: WalkToBreakable, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -452,9 +473,8 @@ def _execute_walk_to_breakable(
     target = find(context, Breakable, slot=decision.target_slot)
     if actor is None or target is None:
         return
-    gamepad.hold(
-        _movement_mask(context, actor.world_x, actor.world_y, target.world_x, target.world_y)
-    )
+    target_x, target_y = _walk_to_breakable_target(actor, target)
+    gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
 
 
 _HANDLERS = {

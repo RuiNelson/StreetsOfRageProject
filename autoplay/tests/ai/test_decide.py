@@ -141,6 +141,29 @@ class ShouldPunchTests(unittest.TestCase):
 
         self.assertEqual(should_punch(context), set())
 
+    def test_ignores_an_enemy_outside_the_playable_lane(self) -> None:
+        # Regression: stage 1's scripted "behind a door" enemy is a real,
+        # tracked Enemy object (health, combat_phase) at an anomalously
+        # high world_y the player can never physically reach -- attacking
+        # it just wastes time on a target that can never connect. Y=115 is
+        # otherwise well within punch band Y-slack (dy=10 <= PUNCH_RANGE_Y),
+        # so only the lane-bounds filter (LANE_Y_MAX_DEFAULT=112) explains
+        # this being excluded.
+        myself = make_myself(world_x=100, world_y=105)
+        beyond_lane = make_enemy(world_x=130, world_y=115, combat_phase=CombatPhase.NORMAL)
+        context: set[Token] = {myself, beyond_lane}
+
+        self.assertEqual(should_punch(context), set())
+
+    def test_fires_for_an_enemy_right_at_the_playable_lane_edge(self) -> None:
+        myself = make_myself(world_x=100, world_y=105)
+        at_edge = make_enemy(world_x=130, world_y=112, combat_phase=CombatPhase.NORMAL)
+        context: set[Token] = {myself, at_edge}
+
+        result = should_punch(context)
+
+        self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj01")})
+
     def test_fires_for_partner_too(self) -> None:
         partner = Partner(
             slot="P2",
@@ -148,7 +171,7 @@ class ShouldPunchTests(unittest.TestCase):
             character_id=1,  # Adam: inner 8, outer 48
             character_name="Adam",
             world_x=300,
-            world_y=300,
+            world_y=60,
             health=100,
             health_percent=100.0,
             lives=3,
@@ -159,7 +182,7 @@ class ShouldPunchTests(unittest.TestCase):
             action_state=0,
             is_airborne=False,
         )
-        enemy = make_enemy(slot="obj02", world_x=320, world_y=302)
+        enemy = make_enemy(slot="obj02", world_x=320, world_y=62)
         context: set[Token] = {partner, enemy}
 
         result = should_punch(context)
