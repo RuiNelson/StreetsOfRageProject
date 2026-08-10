@@ -18,22 +18,22 @@ from sor_autoplay.ai.tokens import (
 from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay.ai.decide import (
     generate_decision_tokens,
-    should_call_police,
-    should_counter_grab,
-    should_hold_actions,
-    should_jump_attack,
-    should_punch,
-    should_rear_attack,
-    should_spray_pepper,
-    should_stab_with_knife_or_bottle,
-    should_swing_bat_or_pipe,
-    should_tech_recover,
-    should_throw_knife,
-    should_throw_pepper,
-    should_walk_to_advance_stage,
-    should_walk_to_near_enemy,
-    should_walk_to_pickup,
-    should_walk_to_weapon,
+    could_call_police,
+    could_counter_grab,
+    could_hold_actions,
+    could_jump_attack,
+    could_punch,
+    could_rear_attack,
+    could_spray_pepper,
+    could_stab_with_knife_or_bottle,
+    could_swing_bat_or_pipe,
+    could_tech_recover,
+    could_throw_knife,
+    could_throw_pepper,
+    could_walk_to_advance_stage,
+    could_walk_to_near_enemy,
+    could_walk_to_pickup,
+    could_walk_to_weapon,
 )
 from sor_autoplay.ai.tokens import Enemy
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
@@ -102,14 +102,14 @@ class DecisionDataclassContractTests(unittest.TestCase):
         self.assertEqual(WalkToAdvanceStage(actor_slot="P1", direction="right").priority, 5)
 
 
-class ShouldPunchTests(unittest.TestCase):
+class CouldPunchTests(unittest.TestCase):
     def test_fires_within_range(self) -> None:
         # Axel punch band: inner 16 .. outer 50 (controls-and-input.md).
         myself = make_myself(world_x=100, world_y=100)
         enemy = make_enemy(world_x=130, world_y=105)
         context: set[Token] = {myself, enemy}
 
-        result = should_punch(context)
+        result = could_punch(context)
 
         self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj01")})
 
@@ -118,28 +118,28 @@ class ShouldPunchTests(unittest.TestCase):
         enemy = make_enemy(world_x=110, world_y=100)  # dx=10 < Axel inner 16
         context: set[Token] = {myself, enemy}
 
-        self.assertEqual(should_punch(context), set())
+        self.assertEqual(could_punch(context), set())
 
     def test_does_not_fire_out_of_range(self) -> None:
         myself = make_myself()
         enemy = make_enemy(world_x=200, world_y=200)
         context: set[Token] = {myself, enemy}
 
-        self.assertEqual(should_punch(context), set())
+        self.assertEqual(could_punch(context), set())
 
     def test_does_not_fire_when_animation_in_progress(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
         enemy = make_enemy(world_x=130, world_y=105)
         context: set[Token] = {myself, enemy, AnimationInProgress(slot="P1")}
 
-        self.assertEqual(should_punch(context), set())
+        self.assertEqual(could_punch(context), set())
 
     def test_ignores_enemies_that_should_be_ignored_as_target(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
         enemy = make_enemy(world_x=130, world_y=105, combat_phase=CombatPhase.DEATH)
         context: set[Token] = {myself, enemy}
 
-        self.assertEqual(should_punch(context), set())
+        self.assertEqual(could_punch(context), set())
 
     def test_ignores_an_enemy_outside_the_playable_lane(self) -> None:
         # Regression: stage 1's scripted "behind a door" enemy is a real,
@@ -153,14 +153,14 @@ class ShouldPunchTests(unittest.TestCase):
         beyond_lane = make_enemy(world_x=130, world_y=115, combat_phase=CombatPhase.NORMAL)
         context: set[Token] = {myself, beyond_lane}
 
-        self.assertEqual(should_punch(context), set())
+        self.assertEqual(could_punch(context), set())
 
     def test_fires_for_an_enemy_right_at_the_playable_lane_edge(self) -> None:
         myself = make_myself(world_x=100, world_y=105)
         at_edge = make_enemy(world_x=130, world_y=112, combat_phase=CombatPhase.NORMAL)
         context: set[Token] = {myself, at_edge}
 
-        result = should_punch(context)
+        result = could_punch(context)
 
         self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj01")})
 
@@ -185,7 +185,7 @@ class ShouldPunchTests(unittest.TestCase):
         enemy = make_enemy(slot="obj02", world_x=320, world_y=62)
         context: set[Token] = {partner, enemy}
 
-        result = should_punch(context)
+        result = could_punch(context)
 
         self.assertEqual(result, {Punch(actor_slot="P2", target_slot="obj02")})
 
@@ -194,7 +194,7 @@ class ShouldPunchTests(unittest.TestCase):
         enemy = make_enemy(world_x=130, world_y=105)
         context: set[Token] = {myself, enemy}
 
-        self.assertEqual(should_punch(context), set())
+        self.assertEqual(could_punch(context), set())
 
     def test_does_not_fire_while_holding_any_weapon(self) -> None:
         # Punch is unarmed-only now -- a held bat/pipe/knife/bottle/pepper
@@ -203,15 +203,15 @@ class ShouldPunchTests(unittest.TestCase):
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
         enemy = make_enemy(world_x=130, world_y=100)  # well within any of the bands
 
-        self.assertEqual(should_punch({myself, enemy}), set())
+        self.assertEqual(could_punch({myself, enemy}), set())
 
 
-class ShouldSwingBatOrPipeTests(unittest.TestCase):
+class CouldSwingBatOrPipeTests(unittest.TestCase):
     def test_fires_within_the_measured_36px_reach(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
         enemy = make_enemy(world_x=130, world_y=100)  # dx=30, within bat's 36
 
-        result = should_swing_bat_or_pipe({myself, enemy})
+        result = could_swing_bat_or_pipe({myself, enemy})
 
         self.assertEqual(result, {SwingBatOrPipe(actor_slot="P1", target_slot="obj01")})
 
@@ -219,7 +219,7 @@ class ShouldSwingBatOrPipeTests(unittest.TestCase):
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0B)
         enemy = make_enemy(world_x=130, world_y=100)
 
-        result = should_swing_bat_or_pipe({myself, enemy})
+        result = could_swing_bat_or_pipe({myself, enemy})
 
         self.assertEqual(result, {SwingBatOrPipe(actor_slot="P1", target_slot="obj01")})
 
@@ -229,27 +229,27 @@ class ShouldSwingBatOrPipeTests(unittest.TestCase):
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
         enemy = make_enemy(world_x=145, world_y=100)
 
-        self.assertEqual(should_swing_bat_or_pipe({myself, enemy}), set())
+        self.assertEqual(could_swing_bat_or_pipe({myself, enemy}), set())
 
     def test_does_not_fire_when_unarmed(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
         enemy = make_enemy(world_x=130, world_y=100)
 
-        self.assertEqual(should_swing_bat_or_pipe({myself, enemy}), set())
+        self.assertEqual(could_swing_bat_or_pipe({myself, enemy}), set())
 
     def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)  # knife
         enemy = make_enemy(world_x=130, world_y=100)
 
-        self.assertEqual(should_swing_bat_or_pipe({myself, enemy}), set())
+        self.assertEqual(could_swing_bat_or_pipe({myself, enemy}), set())
 
 
-class ShouldStabWithKnifeOrBottleTests(unittest.TestCase):
+class CouldStabWithKnifeOrBottleTests(unittest.TestCase):
     def test_fires_within_the_unarmed_punch_band(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
         enemy = make_enemy(world_x=130, world_y=105)
 
-        result = should_stab_with_knife_or_bottle({myself, enemy})
+        result = could_stab_with_knife_or_bottle({myself, enemy})
 
         self.assertEqual(result, {StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01")})
 
@@ -257,7 +257,7 @@ class ShouldStabWithKnifeOrBottleTests(unittest.TestCase):
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x09)
         enemy = make_enemy(world_x=130, world_y=105)
 
-        result = should_stab_with_knife_or_bottle({myself, enemy})
+        result = could_stab_with_knife_or_bottle({myself, enemy})
 
         self.assertEqual(result, {StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01")})
 
@@ -265,21 +265,21 @@ class ShouldStabWithKnifeOrBottleTests(unittest.TestCase):
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
         enemy = make_enemy(world_x=130, world_y=105)
 
-        self.assertEqual(should_stab_with_knife_or_bottle({myself, enemy}), set())
+        self.assertEqual(could_stab_with_knife_or_bottle({myself, enemy}), set())
 
     def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)  # bat
         enemy = make_enemy(world_x=130, world_y=105)
 
-        self.assertEqual(should_stab_with_knife_or_bottle({myself, enemy}), set())
+        self.assertEqual(could_stab_with_knife_or_bottle({myself, enemy}), set())
 
 
-class ShouldSprayPepperTests(unittest.TestCase):
+class CouldSprayPepperTests(unittest.TestCase):
     def test_fires_within_the_unarmed_punch_band(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
         enemy = make_enemy(world_x=130, world_y=105)
 
-        result = should_spray_pepper({myself, enemy})
+        result = could_spray_pepper({myself, enemy})
 
         self.assertEqual(result, {SprayPepper(actor_slot="P1", target_slot="obj01")})
 
@@ -287,22 +287,22 @@ class ShouldSprayPepperTests(unittest.TestCase):
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
         enemy = make_enemy(world_x=130, world_y=105)
 
-        self.assertEqual(should_spray_pepper({myself, enemy}), set())
+        self.assertEqual(could_spray_pepper({myself, enemy}), set())
 
     def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)  # knife
         enemy = make_enemy(world_x=130, world_y=105)
 
-        self.assertEqual(should_spray_pepper({myself, enemy}), set())
+        self.assertEqual(could_spray_pepper({myself, enemy}), set())
 
 
-class ShouldRearAttackTests(unittest.TestCase):
+class CouldRearAttackTests(unittest.TestCase):
     def test_fires_when_enemy_is_behind(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
         enemy = make_enemy(world_x=80, world_y=100)  # behind while facing right
         context: set[Token] = {myself, enemy}
 
-        result = should_rear_attack(context)
+        result = could_rear_attack(context)
 
         self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
 
@@ -313,7 +313,7 @@ class ShouldRearAttackTests(unittest.TestCase):
         enemy = make_enemy(world_x=108, world_y=100)  # dx=8, in front
         context: set[Token] = {myself, enemy}
 
-        result = should_rear_attack(context)
+        result = could_rear_attack(context)
 
         self.assertEqual(result, set())
 
@@ -325,12 +325,12 @@ class ShouldRearAttackTests(unittest.TestCase):
         enemy = make_enemy(world_x=108, world_y=100)  # dx=8, within Adam's +14 front reach
         context: set[Token] = {myself, enemy}
 
-        result = should_rear_attack(context)
+        result = could_rear_attack(context)
 
         self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
 
 
-class ShouldCounterGrabTests(unittest.TestCase):
+class CouldCounterGrabTests(unittest.TestCase):
     def test_fires_when_held_by_enemy(self) -> None:
         myself = make_myself(
             combat_phase=CombatPhase.HELD_BY_ENEMY,
@@ -338,45 +338,45 @@ class ShouldCounterGrabTests(unittest.TestCase):
         )
         context: set[Token] = {myself}
 
-        self.assertEqual(should_counter_grab(context), {CounterGrab(actor_slot="P1")})
+        self.assertEqual(could_counter_grab(context), {CounterGrab(actor_slot="P1")})
 
     def test_does_not_fire_when_free(self) -> None:
         myself = make_myself(combat_phase=CombatPhase.NORMAL)
-        self.assertEqual(should_counter_grab({myself}), set())
+        self.assertEqual(could_counter_grab({myself}), set())
 
 
-class ShouldTechRecoverTests(unittest.TestCase):
+class CouldTechRecoverTests(unittest.TestCase):
     def test_fires_when_the_tech_window_is_armed(self) -> None:
         myself = make_myself(
             combat_phase=CombatPhase.HURT_PLAYER, action_state=0x72, tech_armed=1
         )
         context: set[Token] = {myself}
 
-        self.assertEqual(should_tech_recover(context), {TechRecover(actor_slot="P1")})
+        self.assertEqual(could_tech_recover(context), {TechRecover(actor_slot="P1")})
 
     def test_does_not_fire_when_not_armed(self) -> None:
         myself = make_myself(
             combat_phase=CombatPhase.HURT_PLAYER, action_state=0x72, tech_armed=0
         )
-        self.assertEqual(should_tech_recover({myself}), set())
+        self.assertEqual(could_tech_recover({myself}), set())
 
     def test_does_not_fire_on_a_non_techable_action_even_if_armed(self) -> None:
         myself = make_myself(combat_phase=CombatPhase.NORMAL, action_state=0x02, tech_armed=1)
-        self.assertEqual(should_tech_recover({myself}), set())
+        self.assertEqual(could_tech_recover({myself}), set())
 
     def test_bypasses_the_animation_in_progress_gate(self) -> None:
-        # Unlike should_punch etc., should_tech_recover must still fire while
+        # Unlike could_punch etc., could_tech_recover must still fire while
         # the actor is "blocked" -- that's the whole HURT_PLAYER window it's
-        # meant to interrupt (mirrors should_counter_grab's own exception).
+        # meant to interrupt (mirrors could_counter_grab's own exception).
         myself = make_myself(
             combat_phase=CombatPhase.HURT_PLAYER, action_state=0x72, tech_armed=1
         )
         context: set[Token] = {myself, AnimationInProgress(slot="P1")}
 
-        self.assertEqual(should_tech_recover(context), {TechRecover(actor_slot="P1")})
+        self.assertEqual(could_tech_recover(context), {TechRecover(actor_slot="P1")})
 
 
-class ShouldWalkToNearEnemyTests(unittest.TestCase):
+class CouldWalkToNearEnemyTests(unittest.TestCase):
     def test_picks_the_nearest_enemy(self) -> None:
         myself = make_myself(world_x=0, world_y=0)
         # Outside punch/rear connect bands so walk is the right candidate.
@@ -384,23 +384,23 @@ class ShouldWalkToNearEnemyTests(unittest.TestCase):
         far = make_enemy(slot="far", world_x=500, world_y=500)
         context: set[Token] = {myself, near, far}
 
-        result = should_walk_to_near_enemy(context)
+        result = could_walk_to_near_enemy(context)
 
         self.assertEqual(result, {WalkToNearEnemy(actor_slot="P1", target_slot="near")})
 
     def test_no_enemies_no_decision(self) -> None:
         myself = make_myself()
-        self.assertEqual(should_walk_to_near_enemy({myself}), set())
+        self.assertEqual(could_walk_to_near_enemy({myself}), set())
 
     def test_no_decision_when_animation_in_progress(self) -> None:
         myself = make_myself()
         enemy = make_enemy()
         context: set[Token] = {myself, enemy, AnimationInProgress(slot="P1")}
-        self.assertEqual(should_walk_to_near_enemy(context), set())
+        self.assertEqual(could_walk_to_near_enemy(context), set())
 
     def test_falls_back_to_an_off_screen_enemy_ahead_in_the_stage_direction(self) -> None:
         # Regression: with nothing on-screen, an off-screen enemy still
-        # correctly holds back should_walk_to_advance_stage, but nothing
+        # correctly holds back could_walk_to_advance_stage, but nothing
         # ever chased it, so the AI produced no decision at all and the
         # camera never moved to bring it into view.
         myself = make_myself(world_x=100, world_y=100)
@@ -409,7 +409,7 @@ class ShouldWalkToNearEnemyTests(unittest.TestCase):
         stage = Stage(level_index=0, direction="right")
         context: set[Token] = {myself, camera, ahead, stage}
 
-        result = should_walk_to_near_enemy(context)
+        result = could_walk_to_near_enemy(context)
 
         self.assertEqual(result, {WalkToNearEnemy(actor_slot="P1", target_slot="obj01")})
 
@@ -421,7 +421,7 @@ class ShouldWalkToNearEnemyTests(unittest.TestCase):
         stage = Stage(level_index=0, direction="right")
         context: set[Token] = {myself, camera, behind, stage}
 
-        self.assertEqual(should_walk_to_near_enemy(context), set())
+        self.assertEqual(could_walk_to_near_enemy(context), set())
 
     def test_off_screen_fallback_needs_a_stage_token(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
@@ -429,7 +429,7 @@ class ShouldWalkToNearEnemyTests(unittest.TestCase):
         ahead = make_enemy(world_x=500, world_y=100)
         context: set[Token] = {myself, camera, ahead}
 
-        self.assertEqual(should_walk_to_near_enemy(context), set())
+        self.assertEqual(could_walk_to_near_enemy(context), set())
 
     def test_off_screen_fallback_inert_when_stage_direction_is_none(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
@@ -438,7 +438,7 @@ class ShouldWalkToNearEnemyTests(unittest.TestCase):
         stage = Stage(level_index=6, direction="none")
         context: set[Token] = {myself, camera, ahead, stage}
 
-        self.assertEqual(should_walk_to_near_enemy(context), set())
+        self.assertEqual(could_walk_to_near_enemy(context), set())
 
     def test_on_screen_enemy_still_takes_priority_over_the_fallback(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
@@ -448,18 +448,18 @@ class ShouldWalkToNearEnemyTests(unittest.TestCase):
         stage = Stage(level_index=0, direction="right")
         context: set[Token] = {myself, camera, on_screen, off_screen_ahead, stage}
 
-        result = should_walk_to_near_enemy(context)
+        result = could_walk_to_near_enemy(context)
 
         self.assertEqual(result, {WalkToNearEnemy(actor_slot="P1", target_slot="near")})
 
 
-class ShouldWalkToAdvanceStageTests(unittest.TestCase):
+class CouldWalkToAdvanceStageTests(unittest.TestCase):
     def test_fires_when_no_enemies_present(self) -> None:
         myself = make_myself()
         stage = Stage(level_index=0, direction="right")
         context: set[Token] = {myself, stage}
 
-        result = should_walk_to_advance_stage(context)
+        result = could_walk_to_advance_stage(context)
 
         self.assertEqual(result, {WalkToAdvanceStage(actor_slot="P1", direction="right")})
 
@@ -469,12 +469,12 @@ class ShouldWalkToAdvanceStageTests(unittest.TestCase):
         stage = Stage(level_index=0, direction="right")
         context: set[Token] = {myself, enemy, stage}
 
-        self.assertEqual(should_walk_to_advance_stage(context), set())
+        self.assertEqual(could_walk_to_advance_stage(context), set())
 
     def test_does_not_fire_when_the_only_enemy_is_off_screen(self) -> None:
         """A spawned-but-not-yet-visible enemy must hold the stage just like
         an on-screen one -- it is a reason to hold position, not a "next
-        wave cue" to push past (see should_walk_to_advance_stage's
+        wave cue" to push past (see could_walk_to_advance_stage's
         docstring)."""
 
         myself = make_myself(world_x=100, world_y=100)
@@ -483,7 +483,7 @@ class ShouldWalkToAdvanceStageTests(unittest.TestCase):
         stage = Stage(level_index=0, direction="right")
         context: set[Token] = {myself, camera, off_screen_enemy, stage}
 
-        self.assertEqual(should_walk_to_advance_stage(context), set())
+        self.assertEqual(could_walk_to_advance_stage(context), set())
 
     def test_fires_when_the_camera_is_clear_but_an_off_screen_enemy_remains_absent(
         self,
@@ -496,7 +496,7 @@ class ShouldWalkToAdvanceStageTests(unittest.TestCase):
         stage = Stage(level_index=0, direction="right")
         context: set[Token] = {myself, camera, stage}
 
-        result = should_walk_to_advance_stage(context)
+        result = could_walk_to_advance_stage(context)
 
         self.assertEqual(result, {WalkToAdvanceStage(actor_slot="P1", direction="right")})
 
@@ -511,7 +511,7 @@ class ShouldWalkToAdvanceStageTests(unittest.TestCase):
         stage = Stage(level_index=0, direction="right")
         context: set[Token] = {myself, camera, stranded, stage}
 
-        result = should_walk_to_advance_stage(context)
+        result = could_walk_to_advance_stage(context)
 
         self.assertEqual(result, {WalkToAdvanceStage(actor_slot="P1", direction="right")})
 
@@ -526,7 +526,7 @@ class ShouldWalkToAdvanceStageTests(unittest.TestCase):
         stage = Stage(level_index=0, direction="right")
         context: set[Token] = {myself, camera, on_screen_zero_hp, stage}
 
-        self.assertEqual(should_walk_to_advance_stage(context), set())
+        self.assertEqual(could_walk_to_advance_stage(context), set())
 
     def test_off_screen_enemy_with_nonzero_health_still_blocks(self) -> None:
         # Only exactly-zero health is exempted -- a still-damageable
@@ -538,66 +538,66 @@ class ShouldWalkToAdvanceStageTests(unittest.TestCase):
         stage = Stage(level_index=0, direction="right")
         context: set[Token] = {myself, camera, off_screen_alive, stage}
 
-        self.assertEqual(should_walk_to_advance_stage(context), set())
+        self.assertEqual(could_walk_to_advance_stage(context), set())
 
     def test_does_not_fire_when_direction_is_none(self) -> None:
         myself = make_myself()
         stage = Stage(level_index=6, direction="none")
         context: set[Token] = {myself, stage}
 
-        self.assertEqual(should_walk_to_advance_stage(context), set())
+        self.assertEqual(could_walk_to_advance_stage(context), set())
 
     def test_does_not_fire_when_animation_in_progress(self) -> None:
         myself = make_myself()
         stage = Stage(level_index=0, direction="right")
         context: set[Token] = {myself, stage, AnimationInProgress(slot="P1")}
 
-        self.assertEqual(should_walk_to_advance_stage(context), set())
+        self.assertEqual(could_walk_to_advance_stage(context), set())
 
     def test_does_not_fire_without_a_stage_token(self) -> None:
         myself = make_myself()
-        self.assertEqual(should_walk_to_advance_stage({myself}), set())
+        self.assertEqual(could_walk_to_advance_stage({myself}), set())
 
     def test_uses_left_direction_for_level_seven(self) -> None:
         myself = make_myself()
         stage = Stage(level_index=7, direction="left")
         context: set[Token] = {myself, stage}
 
-        result = should_walk_to_advance_stage(context)
+        result = could_walk_to_advance_stage(context)
 
         self.assertEqual(result, {WalkToAdvanceStage(actor_slot="P1", direction="left")})
 
 
-class ShouldCallPoliceTests(unittest.TestCase):
+class CouldCallPoliceTests(unittest.TestCase):
     def test_fires_when_health_is_critical(self) -> None:
         myself = make_myself(specials=1, health_percent=10.0)
         context: set[Token] = {myself}
 
-        self.assertEqual(should_call_police(context), {CallPolice(actor_slot="P1")})
+        self.assertEqual(could_call_police(context), {CallPolice(actor_slot="P1")})
 
     def test_does_not_fire_at_the_critical_threshold(self) -> None:
         myself = make_myself(specials=1, health_percent=18.0)
         context: set[Token] = {myself}
 
-        self.assertEqual(should_call_police(context), set())
+        self.assertEqual(could_call_police(context), set())
 
     def test_does_not_fire_when_health_is_not_critical(self) -> None:
         myself = make_myself(specials=1, health_percent=30.0)
         context: set[Token] = {myself}
 
-        self.assertEqual(should_call_police(context), set())
+        self.assertEqual(could_call_police(context), set())
 
     def test_never_fires_with_zero_specials(self) -> None:
         myself = make_myself(specials=0, health_percent=1.0)
         context: set[Token] = {myself}
 
-        self.assertEqual(should_call_police(context), set())
+        self.assertEqual(could_call_police(context), set())
 
     def test_never_fires_when_holding_an_enemy(self) -> None:
         myself = make_myself(specials=1, health_percent=10.0, held_weapon_type=0x10)
         context: set[Token] = {myself}
 
-        self.assertEqual(should_call_police(context), set())
+        self.assertEqual(could_call_police(context), set())
 
     def test_last_life_fires_at_a_higher_health_threshold(self) -> None:
         # A KO on the last life risks a continue/game-over instead of a free
@@ -606,16 +606,16 @@ class ShouldCallPoliceTests(unittest.TestCase):
         myself = make_myself(specials=1, health_percent=30.0, lives=1)
         context: set[Token] = {myself}
 
-        self.assertEqual(should_call_police(context), {CallPolice(actor_slot="P1")})
+        self.assertEqual(could_call_police(context), {CallPolice(actor_slot="P1")})
 
     def test_last_life_still_respects_its_own_higher_threshold(self) -> None:
         myself = make_myself(specials=1, health_percent=40.0, lives=1)
         context: set[Token] = {myself}
 
-        self.assertEqual(should_call_police(context), set())
+        self.assertEqual(could_call_police(context), set())
 
 
-class ShouldHoldActionsTests(unittest.TestCase):
+class CouldHoldActionsTests(unittest.TestCase):
     def test_front_hold_offers_knee_and_flip(self) -> None:
         myself = make_myself(
             world_x=100, world_y=100, held_weapon_type=0x01, action_state=0x60
@@ -623,7 +623,7 @@ class ShouldHoldActionsTests(unittest.TestCase):
         near = make_enemy(slot="near", world_x=110, world_y=100)
         context: set[Token] = {myself, near}
 
-        result = should_hold_actions(context)
+        result = could_hold_actions(context)
 
         self.assertIn(AttackHeldEnemy(actor_slot="P1", target_slot="near"), result)
         self.assertIn(FlipHold(actor_slot="P1", target_slot="near"), result)
@@ -633,29 +633,29 @@ class ShouldHoldActionsTests(unittest.TestCase):
         enemy = make_enemy(world_x=110, world_y=100)
         context: set[Token] = {myself, enemy}
 
-        self.assertEqual(should_hold_actions(context), set())
+        self.assertEqual(could_hold_actions(context), set())
 
     def test_does_not_fire_when_not_holding_anything(self) -> None:
         myself = make_myself(held_weapon_type=0, action_state=0x60)
         enemy = make_enemy(world_x=110, world_y=100)
         context: set[Token] = {myself, enemy}
 
-        self.assertEqual(should_hold_actions(context), set())
+        self.assertEqual(could_hold_actions(context), set())
 
     def test_does_not_fire_when_animation_in_progress(self) -> None:
         myself = make_myself(held_weapon_type=0x01, action_state=0x60)
         enemy = make_enemy(world_x=110, world_y=100)
         context: set[Token] = {myself, enemy, AnimationInProgress(slot="P1")}
 
-        self.assertEqual(should_hold_actions(context), set())
+        self.assertEqual(could_hold_actions(context), set())
 
     def test_no_crash_with_no_enemies(self) -> None:
         myself = make_myself(held_weapon_type=0x01, action_state=0x60)
-        result = should_hold_actions({myself})
+        result = could_hold_actions({myself})
         self.assertTrue(any(isinstance(t, AttackHeldEnemy) for t in result))
 
 
-class ShouldJumpAttackTests(unittest.TestCase):
+class CouldJumpAttackTests(unittest.TestCase):
     def test_fires_when_horizontal_jump_kick_is_useful(self) -> None:
         # Jump-kick only beyond punch outer (Axel 50) with real ΔX, in front.
         myself = make_myself(world_x=100, world_y=100, is_airborne=False, facing_left=False)
@@ -663,7 +663,7 @@ class ShouldJumpAttackTests(unittest.TestCase):
         camera = CameraRange(left=0, right=400, top=0, bottom=200)
         context: set[Token] = {myself, enemy, camera}
 
-        result = should_jump_attack(context)
+        result = could_jump_attack(context)
 
         self.assertEqual(result, {JumpAttack(actor_slot="P1", target_slot="obj01")})
 
@@ -673,7 +673,7 @@ class ShouldJumpAttackTests(unittest.TestCase):
         camera = CameraRange(left=0, right=400, top=0, bottom=200)
         context: set[Token] = {myself, enemy, camera}
 
-        self.assertEqual(should_jump_attack(context), set())
+        self.assertEqual(could_jump_attack(context), set())
 
     def test_does_not_fire_when_airborne(self) -> None:
         myself = make_myself(world_x=100, world_y=100, is_airborne=True, facing_left=False)
@@ -681,7 +681,7 @@ class ShouldJumpAttackTests(unittest.TestCase):
         camera = CameraRange(left=0, right=400, top=0, bottom=200)
         context: set[Token] = {myself, enemy, camera}
 
-        self.assertEqual(should_jump_attack(context), set())
+        self.assertEqual(could_jump_attack(context), set())
 
     def test_does_not_fire_out_of_range(self) -> None:
         myself = make_myself(world_x=100, world_y=100, is_airborne=False)
@@ -689,7 +689,7 @@ class ShouldJumpAttackTests(unittest.TestCase):
         camera = CameraRange(left=0, right=400, top=0, bottom=200)
         context: set[Token] = {myself, enemy, camera}
 
-        self.assertEqual(should_jump_attack(context), set())
+        self.assertEqual(could_jump_attack(context), set())
 
     def test_does_not_fire_when_holding_an_enemy(self) -> None:
         myself = make_myself(
@@ -699,7 +699,7 @@ class ShouldJumpAttackTests(unittest.TestCase):
         camera = CameraRange(left=0, right=400, top=0, bottom=200)
         context: set[Token] = {myself, enemy, camera}
 
-        self.assertEqual(should_jump_attack(context), set())
+        self.assertEqual(could_jump_attack(context), set())
 
     def test_axel_does_not_fire_beyond_his_shorter_kick_range(self) -> None:
         # controls-and-input.md "Closed-form trajectory summary": Axel's
@@ -709,7 +709,7 @@ class ShouldJumpAttackTests(unittest.TestCase):
         camera = CameraRange(left=0, right=400, top=0, bottom=200)
         context: set[Token] = {myself, enemy, camera}
 
-        self.assertEqual(should_jump_attack(context), set())
+        self.assertEqual(could_jump_attack(context), set())
 
     def test_blaze_fires_at_a_range_beyond_axels_reach(self) -> None:
         myself = make_myself(
@@ -718,18 +718,18 @@ class ShouldJumpAttackTests(unittest.TestCase):
         )
         enemy = make_enemy(world_x=165, world_y=100)  # dx=65, within Blaze's 75
 
-        result = should_jump_attack({myself, enemy})
+        result = could_jump_attack({myself, enemy})
 
         self.assertEqual(result, {JumpAttack(actor_slot="P1", target_slot="obj01")})
 
 
-class ShouldThrowKnifeTests(unittest.TestCase):
+class CouldThrowKnifeTests(unittest.TestCase):
     def test_fires_when_holding_knife_and_enemy_outside_melee_but_in_knife_range(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
         enemy = make_enemy(world_x=160, world_y=100)  # outside KNIFE_MELEE_X=40
         context: set[Token] = {myself, enemy}
 
-        result = should_throw_knife(context)
+        result = could_throw_knife(context)
 
         self.assertEqual(result, {ThrowKnife(actor_slot="P1", target_slot="obj01")})
 
@@ -738,30 +738,30 @@ class ShouldThrowKnifeTests(unittest.TestCase):
         enemy = make_enemy(world_x=110, world_y=105)
         context: set[Token] = {myself, enemy}
 
-        self.assertEqual(should_throw_knife(context), set())
+        self.assertEqual(could_throw_knife(context), set())
 
     def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x09)
         enemy = make_enemy(world_x=160, world_y=100)
         context: set[Token] = {myself, enemy}
 
-        self.assertEqual(should_throw_knife(context), set())
+        self.assertEqual(could_throw_knife(context), set())
 
     def test_does_not_fire_when_enemy_beyond_knife_range(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
         enemy = make_enemy(world_x=500, world_y=500)
         context: set[Token] = {myself, enemy}
 
-        self.assertEqual(should_throw_knife(context), set())
+        self.assertEqual(could_throw_knife(context), set())
 
 
-class ShouldThrowPepperTests(unittest.TestCase):
+class CouldThrowPepperTests(unittest.TestCase):
     def test_fires_when_holding_pepper_and_enemy_outside_melee_but_in_range(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
         enemy = make_enemy(world_x=160, world_y=100)  # outside KNIFE_MELEE_X=40
         context: set[Token] = {myself, enemy}
 
-        result = should_throw_pepper(context)
+        result = could_throw_pepper(context)
 
         self.assertEqual(result, {ThrowPepper(actor_slot="P1", target_slot="obj01")})
 
@@ -770,31 +770,31 @@ class ShouldThrowPepperTests(unittest.TestCase):
         enemy = make_enemy(world_x=110, world_y=105)
         context: set[Token] = {myself, enemy}
 
-        self.assertEqual(should_throw_pepper(context), set())
+        self.assertEqual(could_throw_pepper(context), set())
 
     def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)  # knife
         enemy = make_enemy(world_x=160, world_y=100)
         context: set[Token] = {myself, enemy}
 
-        self.assertEqual(should_throw_pepper(context), set())
+        self.assertEqual(could_throw_pepper(context), set())
 
     def test_does_not_fire_when_enemy_beyond_range(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
         enemy = make_enemy(world_x=500, world_y=500)
         context: set[Token] = {myself, enemy}
 
-        self.assertEqual(should_throw_pepper(context), set())
+        self.assertEqual(could_throw_pepper(context), set())
 
 
-class ShouldWalkToWeaponTests(unittest.TestCase):
+class CouldWalkToWeaponTests(unittest.TestCase):
     def test_fires_for_in_camera_upgrade_weapon(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
         camera = CameraRange(left=0, right=200, top=0, bottom=200)
         weapon = Weapon(slot="wpn1", world_x=120, world_y=110, weapon_type=0x0A)
         context: set[Token] = {myself, camera, weapon}
 
-        result = should_walk_to_weapon(context)
+        result = could_walk_to_weapon(context)
 
         self.assertEqual(result, {WalkToWeapon(actor_slot="P1", target_slot="wpn1")})
 
@@ -805,7 +805,7 @@ class ShouldWalkToWeaponTests(unittest.TestCase):
         weapon = Weapon(slot="wpn1", world_x=120, world_y=110, weapon_type=0x09)
         context: set[Token] = {myself, camera, weapon}
 
-        self.assertEqual(should_walk_to_weapon(context), set())
+        self.assertEqual(could_walk_to_weapon(context), set())
 
     def test_does_not_fire_for_weapon_outside_camera_range(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
@@ -813,7 +813,7 @@ class ShouldWalkToWeaponTests(unittest.TestCase):
         weapon = Weapon(slot="wpn1", world_x=999, world_y=999, weapon_type=0x0A)
         context: set[Token] = {myself, camera, weapon}
 
-        self.assertEqual(should_walk_to_weapon(context), set())
+        self.assertEqual(could_walk_to_weapon(context), set())
 
     def test_picks_highest_ranked_of_several_upgrades(self) -> None:
         # Damage rank: knife 5 > bat 4 > bottle 3 > pepper 2.
@@ -823,7 +823,7 @@ class ShouldWalkToWeaponTests(unittest.TestCase):
         pepper = Weapon(slot="wpn2", world_x=130, world_y=115, weapon_type=0x0C)
         context: set[Token] = {myself, camera, knife, pepper}
 
-        result = should_walk_to_weapon(context)
+        result = could_walk_to_weapon(context)
 
         self.assertEqual(result, {WalkToWeapon(actor_slot="P1", target_slot="wpn1")})
 
@@ -833,12 +833,12 @@ class ShouldWalkToWeaponTests(unittest.TestCase):
         knife = Weapon(slot="wpn1", world_x=120, world_y=110, weapon_type=0x08)
         context: set[Token] = {myself, camera, knife}
 
-        result = should_walk_to_weapon(context)
+        result = could_walk_to_weapon(context)
 
         self.assertEqual(result, {WalkToWeapon(actor_slot="P1", target_slot="wpn1")})
 
 
-class ShouldWalkToPickupTests(unittest.TestCase):
+class CouldWalkToPickupTests(unittest.TestCase):
     def test_fires_for_health_when_missing_enough(self) -> None:
         myself = make_myself(world_x=100, world_y=100, health=40, health_percent=50.0)
         camera = CameraRange(left=0, right=200, top=0, bottom=200)
@@ -847,7 +847,7 @@ class ShouldWalkToPickupTests(unittest.TestCase):
         )
         context: set[Token] = {myself, camera, food}
 
-        result = should_walk_to_pickup(context)
+        result = could_walk_to_pickup(context)
 
         self.assertEqual(result, {WalkToPickup(actor_slot="P1", target_slot="food1")})
 
@@ -859,7 +859,7 @@ class ShouldWalkToPickupTests(unittest.TestCase):
         )
         context: set[Token] = {myself, camera, food}
 
-        self.assertEqual(should_walk_to_pickup(context), set())
+        self.assertEqual(could_walk_to_pickup(context), set())
 
 
 class GenerateDecisionTokensTests(unittest.TestCase):

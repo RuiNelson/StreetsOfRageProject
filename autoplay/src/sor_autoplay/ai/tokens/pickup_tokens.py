@@ -4,7 +4,7 @@ Weapon damage ranking (``items-and-weapons.md`` / ``weapons-range-and-damage.md`
 
     knife 5 > bat/pipe 4 > bottle 3 > pepper 2
 
-``weapon_rank`` exposes that order so ``should_walk_to_weapon`` can treat a
+``weapon_rank`` exposes that order so ``could_walk_to_weapon`` can treat a
 higher rank as an upgrade. Pepper is weakest by raw damage; its immobilize
 utility is a separate inference concern, not a pickup rank boost.
 

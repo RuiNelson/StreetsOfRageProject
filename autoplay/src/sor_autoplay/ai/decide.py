@@ -1,6 +1,6 @@
-"""``generate_decision_tokens`` and its ``should_*`` candidate generators.
+"""``generate_decision_tokens`` and its ``could_*`` candidate generators.
 
-Per ``AI.md``, each ``should_*`` function is concerned only with whether a
+Per ``AI.md``, each ``could_*`` function is concerned only with whether a
 decision is possible and sensible — never with relative importance across
 decisions, which is ``determine_priority_decision``'s job (``priority.py``).
 """
@@ -155,7 +155,7 @@ def _in_playable_lane(world_y: int, context: Context) -> bool:
     real Enemy object (tracked, health, combat_phase) at an anomalously high
     world_y the player can never physically reach. Without this filter the
     AI repeatedly commits to attacks/chases against a target it can never
-    connect with, and it can also block should_walk_to_advance_stage
+    connect with, and it can also block could_walk_to_advance_stage
     forever the same way an abandoned 0-HP straggler does."""
 
     stage = find(context, Stage)
@@ -192,9 +192,9 @@ def _rear_threats(actor: PlayableCharacter, enemies: list[Enemy]) -> list[Enemy]
 STAB_WEAPON_TYPES = frozenset({0x08, 0x09})  # knife, bottle
 
 
-def _should_melee_strike(context: Context, *, held_types: frozenset[int] | None, decision_cls) -> Context:
-    """Shared body for ``should_punch`` / ``should_swing_bat_or_pipe`` /
-    ``should_stab_with_knife_or_bottle`` / ``should_spray_pepper``: they
+def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, decision_cls) -> Context:
+    """Shared body for ``could_punch`` / ``could_swing_bat_or_pipe`` /
+    ``could_stab_with_knife_or_bottle`` / ``could_spray_pepper``: they
     issue the identical B-button input (see execute.py's
     ``_execute_melee_strike``), gated only on which weapon type (if any)
     the actor holds. ``held_types=None`` means unarmed (``Punch``)."""
@@ -219,27 +219,27 @@ def _should_melee_strike(context: Context, *, held_types: frozenset[int] | None,
     return decisions
 
 
-def should_punch(context: Context) -> Context:
-    return _should_melee_strike(context, held_types=None, decision_cls=Punch)
+def could_punch(context: Context) -> Context:
+    return _could_melee_strike(context, held_types=None, decision_cls=Punch)
 
 
-def should_swing_bat_or_pipe(context: Context) -> Context:
-    return _should_melee_strike(context, held_types=MELEE_WEAPON_TYPES, decision_cls=SwingBatOrPipe)
+def could_swing_bat_or_pipe(context: Context) -> Context:
+    return _could_melee_strike(context, held_types=MELEE_WEAPON_TYPES, decision_cls=SwingBatOrPipe)
 
 
-def should_stab_with_knife_or_bottle(context: Context) -> Context:
-    return _should_melee_strike(
+def could_stab_with_knife_or_bottle(context: Context) -> Context:
+    return _could_melee_strike(
         context, held_types=STAB_WEAPON_TYPES, decision_cls=StabWithKnifeOrBottle
     )
 
 
-def should_spray_pepper(context: Context) -> Context:
-    return _should_melee_strike(
+def could_spray_pepper(context: Context) -> Context:
+    return _could_melee_strike(
         context, held_types=frozenset({PEPPER_SPRAY_TYPE}), decision_cls=SprayPepper
     )
 
 
-def should_rear_attack(context: Context) -> Context:
+def could_rear_attack(context: Context) -> Context:
     decisions: set[Token] = set()
     enemies = _live_enemies(context)
     for actor in _actors(context):
@@ -257,7 +257,7 @@ def should_rear_attack(context: Context) -> Context:
     return decisions
 
 
-def should_counter_grab(context: Context) -> Context:
+def could_counter_grab(context: Context) -> Context:
     decisions: set[Token] = set()
     for actor in _actors(context):
         if actor.combat_phase is not CombatPhase.HELD_BY_ENEMY:
@@ -268,9 +268,9 @@ def should_counter_grab(context: Context) -> Context:
     return decisions
 
 
-def should_tech_recover(context: Context) -> Context:
+def could_tech_recover(context: Context) -> Context:
     """Fires precisely inside the C+Up bounce-cancel window
-    (controls-and-input.md "C+Up landing tech"). Like ``should_counter_grab``,
+    (controls-and-input.md "C+Up landing tech"). Like ``could_counter_grab``,
     this bypasses the generic ``_blocked`` gate on purpose: the actor is
     airborne/hurt (``HURT_PLAYER``) for this whole window and would
     otherwise never be judged free to act."""
@@ -283,7 +283,7 @@ def should_tech_recover(context: Context) -> Context:
     return decisions
 
 
-def should_hold_actions(context: Context) -> Context:
+def could_hold_actions(context: Context) -> Context:
     """While grabbing an enemy: knee, throw-back, flip→suplex, or release.
 
     Never leave the AI idle in a hold — that was a common failure mode.
@@ -342,7 +342,7 @@ def _ahead_in_stage_direction(actor_world_x: int, enemy_world_x: int, direction:
     return False
 
 
-def should_walk_to_near_enemy(context: Context) -> Context:
+def could_walk_to_near_enemy(context: Context) -> Context:
     decisions: set[Token] = set()
     on_screen = _on_screen_enemies(context)
     stage = find(context, Stage)
@@ -361,7 +361,7 @@ def should_walk_to_near_enemy(context: Context) -> Context:
             # Never chase one that's behind -- that's the "off-screen
             # leftover" this decision must not walk backward for. Without
             # this fallback, a live off-screen enemy still correctly holds
-            # back should_walk_to_advance_stage, but nothing ever moves the
+            # back could_walk_to_advance_stage, but nothing ever moves the
             # camera to bring it into view, and the AI is stuck producing no
             # decision at all.
             enemies = [
@@ -385,13 +385,13 @@ def _advance_blocking_enemies(context: Context) -> list[Enemy]:
     """Live enemies that should hold back stage advance.
 
     Almost every live enemy counts, on-screen or not (see
-    ``should_walk_to_advance_stage``) -- except an off-screen enemy already
+    ``could_walk_to_advance_stage``) -- except an off-screen enemy already
     at exactly 0 health. Per ``world_map.MapEntity.is_defeated``'s own note,
     zero health is not yet ``is_defeated`` -- the ROM still counts it alive
-    and wants one more "finishing" hit -- but ``should_walk_to_near_enemy``
+    and wants one more "finishing" hit -- but ``could_walk_to_near_enemy``
     never chases an off-screen target, so nothing in this pipeline will ever
     deliver that hit. Without this carve-out such a straggler blocks stage
-    advance forever, which contradicts ``should_walk_to_near_enemy``'s own
+    advance forever, which contradicts ``could_walk_to_near_enemy``'s own
     on-screen-only design intent ("so off-screen leftovers don't block
     stage advance forever").
     """
@@ -409,7 +409,7 @@ def _advance_blocking_enemies(context: Context) -> list[Enemy]:
     return blocking
 
 
-def should_walk_to_advance_stage(context: Context) -> Context:
+def could_walk_to_advance_stage(context: Context) -> Context:
     """Scroll the stage only once every spawned enemy is gone.
 
     Gated on every live Enemy token, not just on-screen ones: an enemy that
@@ -436,7 +436,7 @@ def should_walk_to_advance_stage(context: Context) -> Context:
     return decisions
 
 
-def should_call_police(context: Context) -> Context:
+def could_call_police(context: Context) -> Context:
     decisions: set[Token] = set()
     for actor in _actors(context):
         if _blocked(context, actor):
@@ -458,7 +458,7 @@ def should_call_police(context: Context) -> Context:
     return decisions
 
 
-def should_jump_attack(context: Context) -> Context:
+def could_jump_attack(context: Context) -> Context:
     """Jump-kick only when a horizontal approach is useful — never hop in place."""
 
     decisions: set[Token] = set()
@@ -489,7 +489,7 @@ def should_jump_attack(context: Context) -> Context:
     return decisions
 
 
-def should_throw_knife(context: Context) -> Context:
+def could_throw_knife(context: Context) -> Context:
     decisions: set[Token] = set()
     enemies = _on_screen_enemies(context)
     for actor in _actors(context):
@@ -521,8 +521,8 @@ def should_throw_knife(context: Context) -> Context:
     return decisions
 
 
-def should_throw_pepper(context: Context) -> Context:
-    """Mirrors ``should_throw_knife``'s range gating: items-and-weapons.md
+def could_throw_pepper(context: Context) -> Context:
+    """Mirrors ``could_throw_knife``'s range gating: items-and-weapons.md
     confirms pepper spray is also attack-thrown (``$21E6``, command 3), but
     its own effective throw range has not been separately measured, so this
     reuses ``KNIFE_MELEE_X``/``KNIFE_RANGE_X``/``KNIFE_RANGE_Y`` as the
@@ -559,7 +559,7 @@ def should_throw_pepper(context: Context) -> Context:
     return decisions
 
 
-def should_walk_to_weapon(context: Context) -> Context:
+def could_walk_to_weapon(context: Context) -> Context:
     decisions: set[Token] = set()
     camera = find(context, CameraRange)
     if camera is None:
@@ -602,7 +602,7 @@ def _pickup_is_useful(actor: PlayableCharacter, pickup: Pickup) -> bool:
     return False
 
 
-def should_walk_to_pickup(context: Context) -> Context:
+def could_walk_to_pickup(context: Context) -> Context:
     decisions: set[Token] = set()
     camera = find(context, CameraRange)
     if camera is None:
@@ -644,7 +644,7 @@ def should_walk_to_pickup(context: Context) -> Context:
     return decisions
 
 
-def should_smash_breakable(context: Context) -> Context:
+def could_smash_breakable(context: Context) -> Context:
     decisions: set[Token] = set()
     camera = find(context, CameraRange)
     breakables = find_all(context, Breakable)
@@ -666,7 +666,7 @@ def should_smash_breakable(context: Context) -> Context:
     return decisions
 
 
-def should_walk_to_breakable(context: Context) -> Context:
+def could_walk_to_breakable(context: Context) -> Context:
     """Approach breakables that block forward stage progress."""
 
     decisions: set[Token] = set()
@@ -712,26 +712,26 @@ def should_walk_to_breakable(context: Context) -> Context:
 
 
 def generate_decision_tokens(context: Context) -> Context:
-    """Returns context | every should_* candidate that applies."""
+    """Returns context | every could_* candidate that applies."""
 
     return (
         context
-        | should_counter_grab(context)
-        | should_tech_recover(context)
-        | should_hold_actions(context)
-        | should_walk_to_near_enemy(context)
-        | should_walk_to_advance_stage(context)
-        | should_punch(context)
-        | should_swing_bat_or_pipe(context)
-        | should_stab_with_knife_or_bottle(context)
-        | should_spray_pepper(context)
-        | should_rear_attack(context)
-        | should_call_police(context)
-        | should_jump_attack(context)
-        | should_throw_knife(context)
-        | should_throw_pepper(context)
-        | should_walk_to_weapon(context)
-        | should_walk_to_pickup(context)
-        | should_smash_breakable(context)
-        | should_walk_to_breakable(context)
+        | could_counter_grab(context)
+        | could_tech_recover(context)
+        | could_hold_actions(context)
+        | could_walk_to_near_enemy(context)
+        | could_walk_to_advance_stage(context)
+        | could_punch(context)
+        | could_swing_bat_or_pipe(context)
+        | could_stab_with_knife_or_bottle(context)
+        | could_spray_pepper(context)
+        | could_rear_attack(context)
+        | could_call_police(context)
+        | could_jump_attack(context)
+        | could_throw_knife(context)
+        | could_throw_pepper(context)
+        | could_walk_to_weapon(context)
+        | could_walk_to_pickup(context)
+        | could_smash_breakable(context)
+        | could_walk_to_breakable(context)
     )

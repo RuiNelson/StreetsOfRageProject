@@ -603,7 +603,7 @@ class AnimationInProgressTests(unittest.TestCase):
     def test_absent_while_holding_a_grabbed_enemy(self) -> None:
         """Regression: HOLDING (grabbing an enemy or carrying a weapon) is
         not an animation lock -- the game accepts a new B/A input on the very
-        next frame. Blocking should_* on this phase left the AI frozen the
+        next frame. Blocking could_* on this phase left the AI frozen the
         instant it grabbed an enemy."""
 
         p1 = _player_snapshot(index=1)
@@ -672,7 +672,7 @@ class StageAndCameraTests(unittest.TestCase):
     def test_scrolled_forward_enemy_is_still_seen_as_on_screen_by_decide(self) -> None:
         """Regression: observe.py's CameraRange must stay in the same
         world-absolute coordinate space as every other token's world_x, or
-        decide.py's _in_camera-gated should_* generators (walk-to-near-enemy,
+        decide.py's _in_camera-gated could_* generators (walk-to-near-enemy,
         jump attack, throw knife, walk-to-weapon/pickup/breakable) silently
         stop matching anything once the level has scrolled forward at all —
         every fixture here already uses a scrolled camera_x=768."""
@@ -697,7 +697,7 @@ class StageAndCameraTests(unittest.TestCase):
         on_screen = decide_module._on_screen_enemies(context)
         self.assertEqual(on_screen, [enemy])
 
-        decisions = decide_module.should_walk_to_near_enemy(context)
+        decisions = decide_module.could_walk_to_near_enemy(context)
         self.assertEqual(
             decisions, {WalkToNearEnemy(actor_slot="P1", target_slot="obj00")}
         )

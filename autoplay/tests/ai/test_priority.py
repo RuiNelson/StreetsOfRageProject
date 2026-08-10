@@ -151,7 +151,7 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
     def test_advance_stage_fires_when_only_remaining_enemy_is_off_screen_at_zero_health(
         self,
     ) -> None:
-        # Same regression as test_decide.py's should_walk_to_advance_stage
+        # Same regression as test_decide.py's could_walk_to_advance_stage
         # coverage, exercised through the emergency function this time:
         # priority.py must reach the same "not blocking" conclusion as
         # decide.py's own gate, via the shared _advance_blocking_enemies.

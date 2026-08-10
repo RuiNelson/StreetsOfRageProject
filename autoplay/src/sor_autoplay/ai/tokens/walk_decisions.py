@@ -17,7 +17,7 @@ class Walk(Decision, ABC):
 class WalkToNearEnemy(Walk):
     """Walk to a nearby on-screen enemy to bring it into attack range.
 
-    Produced by ``should_walk_to_near_enemy`` when an on-screen enemy exists
+    Produced by ``could_walk_to_near_enemy`` when an on-screen enemy exists
     and no enemy is already within punch or rear range. Falls back to the
     nearest live enemy ahead in the stage's scroll direction when nothing
     is on-screen (e.g. the next wave, tracked on the world map but not yet
@@ -36,7 +36,7 @@ class WalkToNearEnemy(Walk):
 class WalkToAdvanceStage(Walk):
     """Walk in the stage's progress direction to scroll it.
 
-    Produced by ``should_walk_to_advance_stage`` when no live Enemy token
+    Produced by ``could_walk_to_advance_stage`` when no live Enemy token
     remains anywhere -- except an off-screen enemy already at 0 health,
     which nothing in this pipeline will ever chase down to finish off (see
     ``decide._advance_blocking_enemies``) -- and the stage has a progress
@@ -58,7 +58,7 @@ class WalkToAdvanceStage(Walk):
 class WalkToWeapon(Walk):
     """Walk to pick up a free ground weapon that outranks the held one.
 
-    Produced by ``should_walk_to_weapon`` when an in-camera Weapon token
+    Produced by ``could_walk_to_weapon`` when an in-camera Weapon token
     ranks higher than the actor's held weapon.
 
     Raises emergency: (Weapon when its rank beats the held weapon's)×8.
@@ -73,7 +73,7 @@ class WalkToWeapon(Walk):
 class WalkToPickup(Walk):
     """Walk to (and B-pickup) a free ground consumable.
 
-    Produced by ``should_walk_to_pickup`` when a useful Pickup token is in
+    Produced by ``could_walk_to_pickup`` when a useful Pickup token is in
     camera for the actor.
 
     Raises emergency: (HealthPickup when the actor's health is critical)×50,
@@ -93,7 +93,7 @@ class WalkToPickup(Walk):
 class WalkToBreakable(Walk):
     """Approach an intact prop to smash it (or clear the path).
 
-    Produced by ``should_walk_to_breakable`` when an in-camera Breakable
+    Produced by ``could_walk_to_breakable`` when an in-camera Breakable
     lies beyond smash range ahead of the actor. Execution stops just inside
     smash range on whichever side the actor already occupies -- a
     Breakable is itself a solid obstacle, so walking to its exact center

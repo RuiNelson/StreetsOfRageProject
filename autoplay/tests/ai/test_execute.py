@@ -237,7 +237,7 @@ class ExecutePunchTests(unittest.TestCase):
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
     def test_still_punches_while_holding_a_weapon(self) -> None:
-        # should_punch no longer produces Punch while armed (that's
+        # could_punch no longer produces Punch while armed (that's
         # SwingBatOrPipe/StabWithKnifeOrBottle/SprayPepper's job now), but
         # execution itself is unconditional on whatever Decision it's given.
         actor = replace(_myself(), held_weapon_type=0x0A)  # baseball bat

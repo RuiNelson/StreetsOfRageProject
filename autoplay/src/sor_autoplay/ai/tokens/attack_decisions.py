@@ -64,7 +64,7 @@ class Punch(MeleeAttacks):
     """Basic B-button punch while unarmed; repeated contact also triggers
     the grab.
 
-    Produced by ``should_punch`` when the actor holds no weapon and an
+    Produced by ``could_punch`` when the actor holds no weapon and an
     enemy sits within the actor's unarmed punch band.
 
     Raises emergency: (Enemy when in a punishable phase)×60, Enemy×20.
@@ -91,7 +91,7 @@ class MeleeWeaponAttacks(Attack, ABC):
 class SwingBatOrPipe(MeleeWeaponAttacks):
     """B-button swing while holding a bat or pipe (types $0A/$0B).
 
-    Produced by ``should_swing_bat_or_pipe`` when an enemy sits within the
+    Produced by ``could_swing_bat_or_pipe`` when an enemy sits within the
     weapon's measured 36px reach (weapons-range-and-damage.md), shorter than
     any character's unarmed punch_outer_x.
 
@@ -108,7 +108,7 @@ class StabWithKnifeOrBottle(MeleeWeaponAttacks):
     """B-button stab while holding a knife or bottle (types $08/$09), used
     when the enemy is too close to throw the knife instead.
 
-    Produced by ``should_stab_with_knife_or_bottle`` when an enemy sits
+    Produced by ``could_stab_with_knife_or_bottle`` when an enemy sits
     within the actor's unarmed punch band (this weapon's own melee reach
     has not been separately measured, so the unarmed table is reused as the
     closest available evidence).
@@ -126,7 +126,7 @@ class SprayPepper(MeleeWeaponAttacks):
     """B-button melee spray while holding pepper spray (type $0C), used
     when the enemy is too close to throw it instead.
 
-    Produced by ``should_spray_pepper`` when an enemy sits within the
+    Produced by ``could_spray_pepper`` when an enemy sits within the
     actor's unarmed punch band (this weapon's own melee reach has not been
     separately measured, so the unarmed table is reused as the closest
     available evidence).
@@ -154,7 +154,7 @@ class WeaponAttacks(Attack, ABC):
 class ThrowKnife(WeaponAttacks):
     """Throw the held knife at an out-of-melee-range enemy.
 
-    Produced by ``should_throw_knife`` when the actor holds a knife (type
+    Produced by ``could_throw_knife`` when the actor holds a knife (type
     $08) and the nearest enemy is beyond melee but within knife range.
 
     Raises emergency: (Enemy when beyond melee and within knife range)×25.
@@ -172,7 +172,7 @@ class ThrowPepper(WeaponAttacks):
     On hit it immobilizes the target rather than dealing the raw damage a
     knife throw does (items-and-weapons.md), making it a crowd-control tool.
 
-    Produced by ``should_throw_pepper`` when the actor holds pepper spray
+    Produced by ``could_throw_pepper`` when the actor holds pepper spray
     (type $0C) and the nearest enemy is beyond melee but within throw range
     (reusing ``ThrowKnife``'s measured range constants — pepper's own
     effective throw range has not been separately measured).
@@ -189,7 +189,7 @@ class ThrowPepper(WeaponAttacks):
 class Supplex(GrabMechanics):
     """Back-hold B — true suplex. Front-hold uses FlipHold first.
 
-    Produced by ``should_hold_actions`` while the actor is in a confirmed
+    Produced by ``could_hold_actions`` while the actor is in a confirmed
     back hold (base $66).
 
     Raises emergency: (Enemy when in the GRABBED phase)×68.
@@ -204,7 +204,7 @@ class Supplex(GrabMechanics):
 class AttackHeldEnemy(GrabMechanics):
     """Front-hold B (knee) — keeps the grab and damages.
 
-    Produced by ``should_hold_actions`` in front hold (base $60) with no
+    Produced by ``could_hold_actions`` in front hold (base $60) with no
     rear threat, or in an unknown hold-ish state.
 
     Raises emergency: (Enemy when in the GRABBED phase)×64.
@@ -219,7 +219,7 @@ class AttackHeldEnemy(GrabMechanics):
 class ThrowHeldEnemy(GrabMechanics):
     """Front-hold B+back — throws the held foe (useful vs a rear threat).
 
-    Produced by ``should_hold_actions`` in front hold (base $60) when a
+    Produced by ``could_hold_actions`` in front hold (base $60) when a
     rear threat is present.
 
     Raises emergency: (Enemy when in the GRABBED phase)×70.
@@ -234,7 +234,7 @@ class ThrowHeldEnemy(GrabMechanics):
 class FlipHold(GrabMechanics):
     """Front-hold C — crossover to back hold, then Supplex next ticks.
 
-    Produced by ``should_hold_actions`` in front hold (base $60) as the
+    Produced by ``could_hold_actions`` in front hold (base $60) as the
     crossover alternate to a knee or throw.
 
     Raises emergency: (Enemy when in the GRABBED phase)×66.
@@ -249,7 +249,7 @@ class FlipHold(GrabMechanics):
 class ReleaseGrab(GrabMechanics):
     """Walk away opposite the held enemy to drop the grab.
 
-    Produced by ``should_hold_actions`` in an unknown hold-ish state so the
+    Produced by ``could_hold_actions`` in an unknown hold-ish state so the
     AI never idles inside a hold.
 
     Raises emergency: (Enemy when in the GRABBED phase)×50.
@@ -264,7 +264,7 @@ class ReleaseGrab(GrabMechanics):
 class JumpAttack(MeleeAttacks):
     """Jump-kick only — never a stationary hop. Requires horizontal aim.
 
-    Produced by ``should_jump_attack`` when a forward enemy sits in the
+    Produced by ``could_jump_attack`` when a forward enemy sits in the
     horizontal jump band (outside punch outer, within the max ΔX).
 
     Raises emergency: (Enemy when in a punishable phase)×28, Enemy×18.
@@ -279,7 +279,7 @@ class JumpAttack(MeleeAttacks):
 class SmashBreakable(Attack):
     """B near an intact prop (same input as punch; ROM hits the prop).
 
-    Produced by ``should_smash_breakable`` when an intact Breakable is in
+    Produced by ``could_smash_breakable`` when an intact Breakable is in
     smash range.
 
     Raises emergency: Breakable×16.
@@ -294,7 +294,7 @@ class SmashBreakable(Attack):
 class RearAttack(MeleeAttacks):
     """Simultaneous B+C rear/escape attack (``$322A``).
 
-    Produced by ``should_rear_attack`` when an enemy sits inside the
+    Produced by ``could_rear_attack`` when an enemy sits inside the
     character-specific ``$322A`` attack box (measured live,
     controls-and-input.md): behind the player for all three characters
     (Axel/Adam/Blaze up to 40/42/53px), and additionally in front only for
@@ -315,7 +315,7 @@ class RearAttack(MeleeAttacks):
 class CounterGrab(GrabMechanics):
     """Enemy-held counter: C edge then B edge while the window is open.
 
-    Produced by ``should_counter_grab`` while the actor is held by an enemy
+    Produced by ``could_counter_grab`` while the actor is held by an enemy
     (HELD_BY_ENEMY) and the counter is not already running.
 
     Raises emergency: (Myself when held by an enemy)×100 — the player is

@@ -25,7 +25,7 @@ class TechRecover(Recovery):
     (controls-and-input.md "C+Up landing tech") that skips the knockdown
     bounce and lands like a jump instead.
 
-    Produced by ``should_tech_recover`` while the actor's throw-tech window
+    Produced by ``could_tech_recover`` while the actor's throw-tech window
     is armed and still open (``PlayableCharacter.throw_tech_ready``) --
     only specific special/boss hold-throw choreography arms it; an ordinary
     street-enemy throw never does, so this correctly never fires there.

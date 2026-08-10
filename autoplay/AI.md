@@ -139,7 +139,7 @@ character or enemy type, but are nonetheless essential to the AI's
 decision-making. The most important of these are described below.
 
 **`CameraRange`** encapsulates the rectangle currently framed by the
-camera. It is read directly from RAM, and is consulted by most `should_*`
+camera. It is read directly from RAM, and is consulted by most `could_*`
 functions to determine which otherwise directly observed tokens —
 enemies, weapons, hazards — are actually on screen and may therefore be
 acted upon.
@@ -221,14 +221,22 @@ This function likewise invokes a set of subordinate functions, each of
 which reads the context and conditionally contributes a token, or a small
 set of tokens, to it.
 
-Each such function is named with the prefix `should_`, for example
-`should_grab_enemy` or `should_walk`. A given function must not concern
-itself with the relative importance of its decision; it must concern
-itself only with whether the decision is possible in the first place, and,
-if so, whether it makes sense to pursue. For instance, a function should
+Each such function is named with the prefix `could_`, for example
+`could_grab_enemy` or `could_walk` — deliberately not `should_`. Naming
+these functions `should_*` would misstate what they do: they answer "is
+this decision *possible*, and does it make some kind of sense to pursue",
+never "is this decision the one to actually take right now". That second
+question — the "should" of the loop — belongs entirely to
+`determine_priority_decision`, described next: it alone weighs the
+possible decisions this step produced against one another and picks the
+one that should actually be executed. A `could_*` function must therefore
+never concern itself with the relative importance of its decision, only
+with whether the decision is possible in the first place and, if so,
+whether it makes sense to pursue at all. For instance, a function should
 produce a token for picking up a weapon only if the weapon is present on
 the floor **and** within the `CameraRange` **and** an upgrade to the
-current weapon held.
+current weapon held — never because it judges that upgrade more urgent
+than some other candidate action.
 
 Most such functions must additionally decline to produce a token whenever
 an `AnimationInProgress` token for the relevant character is present in
@@ -237,7 +245,11 @@ current animation concludes.
 
 ### `determine_priority_decision`
 
-This function constitutes the most demanding part of the process.
+This is the "should" component of the loop: `generate_decision_tokens`'s
+`could_*` functions establish everything the actor *could* do this tick;
+this function alone decides what it *should* do, by ranking those
+possibilities against each other. It constitutes the most demanding part
+of the process.
 
 It also performs target selection: when `generate_decision_tokens`
 produces several instances of the same kind of `Decision` against
