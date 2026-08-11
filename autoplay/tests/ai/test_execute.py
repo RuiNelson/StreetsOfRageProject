@@ -25,11 +25,14 @@ from sor_autoplay.ai.tokens import Myself
 from sor_autoplay.ai.tokens import Enemy
 from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.execute import (
+    BREAKABLE_STOP_BUFFER,
+    MOVE_DEADBAND_X,
     WALK_TO_ENEMY_LANE_SAFETY_Y,
     _walk_to_near_enemy_target,
     execute_verb,
     press_no_button,
 )
+from sor_autoplay.ai.decide import BREAKABLE_PUNCH_X, in_smash_range
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.tokens import Breakable, Pit, SafeSpot
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
@@ -724,8 +727,8 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
 
         execute_verb(verb, {actor, prop}, gamepad)
 
-        # BREAKABLE_PUNCH_X=36, BREAKABLE_STOP_BUFFER=4 -> stop_dx=32, so
-        # the actor approaches to x=68, never reaching the prop's x=100.
+        # BREAKABLE_PUNCH_X=36, BREAKABLE_STOP_BUFFER=12 -> stop_dx=24, so
+        # the actor approaches to x=76, never reaching the prop's x=100.
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
     def test_approaches_from_whichever_side_the_actor_is_already_on(self) -> None:
@@ -769,6 +772,22 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
         execute_verb(verb, {prop}, gamepad)
 
         client.hold_buttons.assert_not_called()
+
+    def test_worst_case_deadband_stop_still_lands_in_smash_range(self) -> None:
+        # Regression: _movement_mask releases the walk-in hold as soon as the
+        # actor is within MOVE_DEADBAND_X of the approach's stop point, not
+        # only once it has actually reached it -- so the real resting
+        # distance from the prop can be (BREAKABLE_PUNCH_X -
+        # BREAKABLE_STOP_BUFFER) + MOVE_DEADBAND_X. A buffer smaller than the
+        # deadband (the old value, 4 < 5) let that worst case land one pixel
+        # outside BREAKABLE_PUNCH_X: in_smash_range then stayed false
+        # forever against a target that never moves to close the gap itself,
+        # so the actor arrived and never threw a punch.
+        worst_case_dx = (BREAKABLE_PUNCH_X - BREAKABLE_STOP_BUFFER) + MOVE_DEADBAND_X
+        actor = _myself(world_x=100 - worst_case_dx, world_y=90)
+        prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
+
+        self.assertTrue(in_smash_range(actor, prop))
 
 
 class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):

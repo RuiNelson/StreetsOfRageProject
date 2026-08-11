@@ -109,7 +109,17 @@ WALK_TO_ENEMY_LANE_SAFETY_Y = PUNCH_RANGE_Y + 16
 # a straight line, which can mean approaching from directly above/below and
 # getting stuck against its collision. Stop just inside smash range on
 # whichever side the actor already occupies, at the same Y, instead.
-BREAKABLE_STOP_BUFFER = 4
+#
+# Must exceed MOVE_DEADBAND_X: the deadband stops the walk-in's RIGHT/LEFT
+# hold as soon as the actor is within MOVE_DEADBAND_X of the stop point --
+# not only once it has actually reached it -- so the real resting distance
+# from the prop can be up to (BREAKABLE_PUNCH_X - BREAKABLE_STOP_BUFFER) +
+# MOVE_DEADBAND_X. With the old buffer of 4 (< MOVE_DEADBAND_X's 5) that
+# worst case landed at 37px, one past BREAKABLE_PUNCH_X's 36 -- in_smash_range
+# then stayed false forever against a target that, unlike an enemy, never
+# moves to close the last pixel itself: the actor arrived and never threw a
+# punch. Live-diagnosed; keep this comfortably above MOVE_DEADBAND_X.
+BREAKABLE_STOP_BUFFER = 12
 
 
 def press_no_button(gamepad: VirtualGamepad) -> None:
