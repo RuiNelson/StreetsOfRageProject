@@ -95,6 +95,24 @@ def press_no_button(gamepad: VirtualGamepad) -> None:
     gamepad.release()
 
 
+def _press(gamepad: VirtualGamepad, mask: int, *, frames: int) -> None:
+    """Issue a pure button press, dropping any stale directional hold first.
+
+    ``hold_buttons`` is a *sticky* latch (gamepad.py's module docstring):
+    whatever direction the previous tick's walk decision held stays held
+    until something changes it, and ``SharedGamepadState.press`` deliberately
+    re-arms it after the press. So a walk tick followed by an attack tick
+    left the actor still walking through the strike -- past the enemy and out
+    of its own punch band, or straight over the pickup it had just pressed B
+    to collect. A press-only handler owns no movement, so it must clear that
+    hold. ``VirtualGamepad.hold`` short-circuits when the mask is unchanged,
+    making this free on every tick except the walk→press transition.
+    """
+
+    gamepad.hold(0)
+    gamepad.press(mask, frames=frames)
+
+
 def _find_actor(context: Context, slot: str) -> Myself | Partner | None:
     for actor in (find(context, Myself), find(context, Partner)):
         if actor is not None and actor.slot == slot:
@@ -261,6 +279,7 @@ def _execute_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context, gam
     actor = _find_actor(context, decision.actor_slot)
     target = find(context, Enemy, slot=decision.target_slot)
     if actor is None or target is None:
+        gamepad.release()
         return
     target_x, target_y = _walk_to_near_enemy_target(actor, target)
     gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
@@ -288,6 +307,7 @@ def _execute_retreat_from_danger(
     actor = _find_actor(context, decision.actor_slot)
     target = find(context, Enemy, slot=decision.target_slot)
     if actor is None or target is None:
+        gamepad.release()
         return
     target_x, target_y = _retreat_from_danger_target(actor, target)
     gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
@@ -321,7 +341,7 @@ def _execute_melee_strike(decision: Decision, context: Context, gamepad: Virtual
     face = 0
     if actor is not None and target is not None:
         face = _face_toward_mask(actor, target.world_x)
-    gamepad.press(PUNCH_MASK | face, frames=PUNCH_FRAMES)
+    _press(gamepad, PUNCH_MASK | face, frames=PUNCH_FRAMES)
 
 
 def _execute_smash_breakable(decision: SmashBreakable, context: Context, gamepad: VirtualGamepad) -> None:
@@ -330,44 +350,46 @@ def _execute_smash_breakable(decision: SmashBreakable, context: Context, gamepad
     face = 0
     if actor is not None and target is not None:
         face = _face_toward_mask(actor, target.world_x)
-    gamepad.press(PUNCH_MASK | face, frames=PUNCH_FRAMES)
+    _press(gamepad, PUNCH_MASK | face, frames=PUNCH_FRAMES)
 
 
 def _execute_rear_attack(decision: RearAttack, context: Context, gamepad: VirtualGamepad) -> None:
-    gamepad.press(PUNCH_MASK | JUMP_MASK, frames=REAR_ATTACK_FRAMES)
+    _press(gamepad, PUNCH_MASK | JUMP_MASK, frames=REAR_ATTACK_FRAMES)
 
 
 def _execute_counter_grab(decision: CounterGrab, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, decision.actor_slot)
     if actor is None:
+        gamepad.release()
         return
     base = actor.action_base
     if actor.counter_window_open:
-        gamepad.press(PUNCH_MASK, frames=COUNTER_FRAMES)
+        _press(gamepad, PUNCH_MASK, frames=COUNTER_FRAMES)
         return
     if base == 0x7A:
-        gamepad.press(JUMP_MASK, frames=COUNTER_FRAMES)
+        _press(gamepad, JUMP_MASK, frames=COUNTER_FRAMES)
         return
     if base in (0x78, 0x7C):
         gamepad.release()
         return
-    gamepad.press(JUMP_MASK, frames=COUNTER_FRAMES)
+    _press(gamepad, JUMP_MASK, frames=COUNTER_FRAMES)
 
 
 def _execute_tech_recover(decision: TechRecover, context: Context, gamepad: VirtualGamepad) -> None:
     # A held Up plus a *fresh* C edge, every tick this decision wins -- the
     # ROM requires a new C press, not a held-over one (controls-and-input.md
     # "C must be a fresh edge while Up is held").
-    gamepad.press(JUMP_MASK | UP_MASK, frames=TECH_RECOVER_FRAMES)
+    _press(gamepad, JUMP_MASK | UP_MASK, frames=TECH_RECOVER_FRAMES)
 
 
 def _execute_call_police(decision: CallPolice, context: Context, gamepad: VirtualGamepad) -> None:
-    gamepad.press(CALL_POLICE_MASK, frames=CALL_POLICE_FRAMES)
+    _press(gamepad, CALL_POLICE_MASK, frames=CALL_POLICE_FRAMES)
 
 
 def _execute_jump_attack(decision: JumpAttack, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, decision.actor_slot)
     if actor is None:
+        gamepad.release()
         return
     target = find(context, Enemy, slot=decision.target_slot)
     if target is None:
@@ -377,47 +399,51 @@ def _execute_jump_attack(decision: JumpAttack, context: Context, gamepad: Virtua
     face = _face_toward_mask(actor, target.world_x)
     if face == 0:
         # Already overlapping on X — punch, don't jump.
-        gamepad.press(PUNCH_MASK, frames=PUNCH_FRAMES)
+        _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
         return
     if not actor.is_airborne:
         # Launch with horizontal hold so crouch→flight carries ±3 px/frame.
-        gamepad.press(JUMP_MASK | face, frames=JUMP_ATTACK_LAUNCH_FRAMES)
+        _press(gamepad, JUMP_MASK | face, frames=JUMP_ATTACK_LAUNCH_FRAMES)
         gamepad.hold(face)
     else:
-        gamepad.press(PUNCH_MASK | face, frames=JUMP_ATTACK_KICK_FRAMES)
+        _press(gamepad, PUNCH_MASK | face, frames=JUMP_ATTACK_KICK_FRAMES)
 
 
 def _execute_supplex(decision: Supplex, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, decision.actor_slot)
     if actor is None:
+        gamepad.release()
         return
     base = actor.action_base
     if base == 0x66:
-        gamepad.press(PUNCH_MASK, frames=SUPPLEX_FRAMES)
+        _press(gamepad, PUNCH_MASK, frames=SUPPLEX_FRAMES)
     elif base == 0x60:
         # Should have been FlipHold, but finish the crossover if we land here.
-        gamepad.press(JUMP_MASK, frames=SUPPLEX_FRAMES)
+        _press(gamepad, JUMP_MASK, frames=SUPPLEX_FRAMES)
     else:
-        gamepad.press(PUNCH_MASK, frames=SUPPLEX_FRAMES)
+        _press(gamepad, PUNCH_MASK, frames=SUPPLEX_FRAMES)
 
 
 def _execute_attack_held_enemy(decision: AttackHeldEnemy, context: Context, gamepad: VirtualGamepad) -> None:
     # Front-hold B alone (Up/Down ignored by ROM for throw; no L/R = knee).
-    gamepad.press(PUNCH_MASK, frames=HOLD_FRAMES)
+    # The cleared hold matters here: a leftover walk direction would turn this
+    # knee into the B+back throw below.
+    _press(gamepad, PUNCH_MASK, frames=HOLD_FRAMES)
 
 
 def _execute_throw_held_enemy(decision: ThrowHeldEnemy, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, decision.actor_slot)
     if actor is None:
+        gamepad.release()
         return
     # B + back (L/R opposite facing) — controls-and-input.md hold section.
     back = _back_direction_mask(actor)
-    gamepad.press(PUNCH_MASK | back, frames=HOLD_FRAMES)
+    _press(gamepad, PUNCH_MASK | back, frames=HOLD_FRAMES)
 
 
 def _execute_flip_hold(decision: FlipHold, context: Context, gamepad: VirtualGamepad) -> None:
     # Front-hold C → back hold $66; next tick Supplex finishes.
-    gamepad.press(JUMP_MASK, frames=HOLD_FRAMES)
+    _press(gamepad, JUMP_MASK, frames=HOLD_FRAMES)
 
 
 def _execute_release_grab(decision: ReleaseGrab, context: Context, gamepad: VirtualGamepad) -> None:
@@ -444,7 +470,7 @@ def _execute_throw_knife(decision: ThrowKnife, context: Context, gamepad: Virtua
     face = 0
     if actor is not None and target is not None:
         face = _face_toward_mask(actor, target.world_x)
-    gamepad.press(PUNCH_MASK | face, frames=THROW_KNIFE_FRAMES)
+    _press(gamepad, PUNCH_MASK | face, frames=THROW_KNIFE_FRAMES)
 
 
 def _execute_throw_pepper(decision: ThrowPepper, context: Context, gamepad: VirtualGamepad) -> None:
@@ -453,16 +479,17 @@ def _execute_throw_pepper(decision: ThrowPepper, context: Context, gamepad: Virt
     face = 0
     if actor is not None and target is not None:
         face = _face_toward_mask(actor, target.world_x)
-    gamepad.press(PUNCH_MASK | face, frames=THROW_PEPPER_FRAMES)
+    _press(gamepad, PUNCH_MASK | face, frames=THROW_PEPPER_FRAMES)
 
 
 def _execute_walk_to_weapon(decision: WalkToWeapon, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, decision.actor_slot)
     target = find(context, Weapon, slot=decision.target_slot)
     if actor is None or target is None:
+        gamepad.release()
         return
     if abs(target.world_x - actor.world_x) <= PICKUP_RANGE_X and abs(target.world_y - actor.world_y) <= PICKUP_RANGE_Y:
-        gamepad.press(PUNCH_MASK, frames=PUNCH_FRAMES)
+        _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
     else:
         gamepad.hold(
             _movement_mask(
@@ -475,9 +502,10 @@ def _execute_walk_to_pickup(decision: WalkToPickup, context: Context, gamepad: V
     actor = _find_actor(context, decision.actor_slot)
     target = find(context, Pickup, slot=decision.target_slot)
     if actor is None or target is None:
+        gamepad.release()
         return
     if abs(target.world_x - actor.world_x) <= PICKUP_RANGE_X and abs(target.world_y - actor.world_y) <= PICKUP_RANGE_Y:
-        gamepad.press(PUNCH_MASK, frames=PUNCH_FRAMES)
+        _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
     else:
         gamepad.hold(
             _movement_mask(
@@ -506,6 +534,7 @@ def _execute_walk_to_breakable(
     actor = _find_actor(context, decision.actor_slot)
     target = find(context, Breakable, slot=decision.target_slot)
     if actor is None or target is None:
+        gamepad.release()
         return
     target_x, target_y = _walk_to_breakable_target(actor, target)
     gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))

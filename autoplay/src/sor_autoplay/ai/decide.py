@@ -32,7 +32,6 @@ from .tokens import (
 from .tokens import (
     MELEE_WEAPON_TYPES,
     Myself,
-    Partner,
     PlayableCharacter,
     punch_inner_x,
     punch_outer_x,
@@ -111,7 +110,22 @@ def _is_holding_enemy(actor: PlayableCharacter) -> bool:
 
 
 def _actors(context: Context) -> list[PlayableCharacter]:
-    return [actor for actor in (find(context, Myself), find(context, Partner)) if actor is not None]
+    """The characters this pipeline may decide *for* -- only ``Myself``.
+
+    Per AI.md, one loop instance runs per AI-controlled player, "each
+    producing its own ``Myself``", and ``AgentLoop.tick`` executes the
+    surviving decision on *that* player's own ``VirtualGamepad``. A
+    ``Partner`` decision reaching ``execute_decision`` would therefore be
+    carried out on the wrong pad: it is parametrized with the partner's
+    slot, position and facing, so e.g. a ``Punch`` the partner could land
+    made ``Myself`` press B (plus the partner's facing direction) at empty
+    air, and it outranks ``Myself``'s own walk candidates while doing it.
+    ``Partner`` stays in the context as ``Information`` -- for coordination
+    and awareness -- but is never an actor here.
+    """
+
+    myself = find(context, Myself)
+    return [myself] if myself is not None else []
 
 
 def _blocked(context: Context, actor: PlayableCharacter) -> bool:
@@ -175,10 +189,21 @@ def _enemy_actionable(actor: PlayableCharacter, enemy: Enemy) -> bool:
 # could_retreat_from_danger) -- approximate on purpose: this is a caution
 # buffer, not a hitbox measurement.
 RETREAT_CAUTION_MARGIN = 24
+# The caution zone is a box, not an X-only band. Attacks in this game only
+# connect within roughly a lane of each other (PUNCH_RANGE_Y), so a committed
+# enemy several lanes away is not a reason to back off -- and treating it as
+# one made the AI refuse to approach *and* walk backwards from a threat it
+# was never in line with. Kept below execute.WALK_TO_ENEMY_LANE_SAFETY_Y
+# (PUNCH_RANGE_Y + 16) so the sidestep that decision's executor performs
+# actually leaves this zone instead of retreating from its own dodge.
+RETREAT_CAUTION_MARGIN_Y = PUNCH_RANGE_Y + 12
 
 
 def _too_close_to_keep_approaching(actor: PlayableCharacter, enemy: Enemy) -> bool:
     dx = abs(enemy.world_x - actor.world_x)
+    dy = abs(enemy.world_y - actor.world_y)
+    if dy > RETREAT_CAUTION_MARGIN_Y:
+        return False
     outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
     return dx <= outer + RETREAT_CAUTION_MARGIN
 
@@ -349,12 +374,18 @@ def could_hold_actions(context: Context) -> Context:
         if base in (0x28, 0x2A, 0x2C, 0x2E, 0x62, 0x64, 0x68, 0x6A, 0x6C, 0x6E):
             continue
 
-        nearest = None
-        if enemies:
-            nearest = min(
-                enemies,
-                key=lambda e: math.hypot(e.world_x - actor.world_x, e.world_y - actor.world_y),
-            )
+        # Target the enemy actually in the grab, not merely the closest one:
+        # every hold move's emergency (priority._held_enemy_emergency) is
+        # gated on its target being in CombatPhase.GRABBED, so naming a
+        # different bystander that happens to be a pixel nearer collapses
+        # the whole hold family to emergency 0 and leaves the choice of
+        # knee/throw/suplex to the static priority tie-break instead of the
+        # rear-threat reasoning below.
+        def _distance(enemy: Enemy) -> float:
+            return math.hypot(enemy.world_x - actor.world_x, enemy.world_y - actor.world_y)
+
+        grabbed = [e for e in enemies if e.combat_phase is CombatPhase.GRABBED]
+        nearest = min(grabbed or enemies, key=_distance, default=None)
         target_slot = nearest.slot if nearest is not None else actor.slot
         rear = _rear_threats(actor, enemies)
 

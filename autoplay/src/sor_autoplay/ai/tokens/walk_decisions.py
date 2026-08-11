@@ -115,10 +115,11 @@ class RetreatFromDanger(Walk):
     enemy in this zone, so the two never compete for the same target.
 
     Raises emergency: Enemy (dangerous, not yet actionable, in the caution
-    zone)×30, closer scoring higher (distance-scored; see
+    zone)×17, closer scoring higher (distance-scored; see
     priority._emergency_retreat_from_danger) -- higher than
     WalkToNearEnemy(14) so this wins over still approaching, lower than any
-    real attack so attacking always wins once actually possible.
+    real attack (the lowest being JumpAttack×18) so attacking always wins
+    once actually possible.
     """
 
     priority: int = 21

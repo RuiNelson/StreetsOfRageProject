@@ -290,6 +290,61 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
         client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
 
 
+class StaleMovementHoldTests(unittest.TestCase):
+    """``hold_buttons`` is a sticky latch and ``SharedGamepadState.press``
+    re-arms it after the press, so a walk tick followed by an attack tick
+    used to leave the actor still walking through the strike -- straight
+    past the enemy and out of its own punch band, or over the pickup it had
+    just pressed B to collect. Every press-only handler must drop the hold
+    first (``execute._press``)."""
+
+    def _assert_clears_hold(self, decision, context) -> None:
+        gamepad, client = _gamepad()
+        gamepad.hold(RIGHT)  # leftover from a previous walk tick
+        client.hold_buttons.reset_mock()
+
+        execute_decision(decision, context, gamepad)
+
+        self.assertEqual(gamepad.held, 0)
+        # The cleared latch also has to reach the host, not just the cache.
+        self.assertIn(
+            ((), {"player1": 0, "player2": 0}), client.hold_buttons.call_args_list
+        )
+
+    def test_punch_clears_a_leftover_walk_hold(self) -> None:
+        self._assert_clears_hold(Punch(actor_slot="P1", target_slot="obj01"), set())
+
+    def test_rear_attack_clears_a_leftover_walk_hold(self) -> None:
+        self._assert_clears_hold(RearAttack(actor_slot="P1", target_slot="obj01"), set())
+
+    def test_call_police_clears_a_leftover_walk_hold(self) -> None:
+        self._assert_clears_hold(CallPolice(actor_slot="P1"), set())
+
+    def test_collecting_a_pickup_clears_a_leftover_walk_hold(self) -> None:
+        actor = _myself(world_x=100, world_y=100)
+        pickup = HealthPickup(
+            slot="item01", world_x=100, world_y=100, pickup_type=0x01, health_delta=40
+        )
+        self._assert_clears_hold(
+            WalkToPickup(actor_slot="P1", target_slot="item01"), {actor, pickup}
+        )
+
+    def test_a_walk_whose_target_vanished_releases_instead_of_coasting(self) -> None:
+        gamepad, client = _gamepad()
+        gamepad.hold(RIGHT)
+        client.hold_buttons.reset_mock()
+
+        # Target no longer in the context (killed between decision and
+        # execution) -- the handler must stop the actor, not let the stale
+        # hold carry it onward indefinitely.
+        execute_decision(
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"), set(), gamepad
+        )
+
+        self.assertEqual(gamepad.held, 0)
+        client.hold_buttons.assert_called_once_with(player1=0, player2=0)
+
+
 class ExecutePunchTests(unittest.TestCase):
     def test_punch_presses_button_b(self) -> None:
         decision = Punch(actor_slot="P1", target_slot="obj01")

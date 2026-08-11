@@ -670,9 +670,15 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
 
 class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
     def test_picks_the_closer_of_two_retreat_candidates(self) -> None:
+        # Both distances stay inside decide._too_close_to_keep_approaching's
+        # caution zone (Axel: punch_outer 50 + RETREAT_CAUTION_MARGIN 24), the
+        # only range could_retreat_from_danger ever produces a candidate at.
+        # An out-of-zone distance here would sit on the band's floor together
+        # with everything else and make this pass or fail on the random
+        # tie-break rather than on the ranking under test.
         myself = _myself(world_x=0, world_y=0)
-        near = _enemy("obj01", CombatPhase.ATTACKING, world_x=60, world_y=0)
-        far = _enemy("obj02", CombatPhase.ATTACKING, world_x=200, world_y=0)
+        near = _enemy("obj01", CombatPhase.ATTACKING, world_x=20, world_y=0)
+        far = _enemy("obj02", CombatPhase.ATTACKING, world_x=70, world_y=0)
         context = {
             myself,
             near,
@@ -707,6 +713,49 @@ class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
         self.assertIsInstance(decisions[0], RetreatFromDanger)
+
+    def test_loses_to_a_punch_on_a_different_enemy(self) -> None:
+        # RetreatFromDanger's own docstring: "lower than any real attack so
+        # attacking always wins once actually possible". Its band used to be
+        # 30..20, which beat a plain Punch (20), a JumpAttack (18/28) and a
+        # knife throw (21..25) -- so a dangerous enemy closing in made the
+        # actor back away from a *different* enemy it could already hit.
+        myself = _myself(world_x=0, world_y=0)
+        dangerous_close = _enemy("obj01", CombatPhase.ATTACKING, world_x=20, world_y=0)
+        punchable = _enemy("obj02", CombatPhase.NORMAL, world_x=40, world_y=0)
+        context = {
+            myself,
+            dangerous_close,
+            punchable,
+            RetreatFromDanger(actor_slot="P1", target_slot="obj01"),
+            Punch(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], Punch)
+
+    def test_loses_to_the_weakest_real_attack(self) -> None:
+        # JumpAttack against a non-punishable target (18) is the lowest real
+        # attack tier there is -- retreat must sit under even that.
+        myself = _myself(world_x=0, world_y=0)
+        dangerous_close = _enemy("obj01", CombatPhase.ATTACKING, world_x=20, world_y=0)
+        kickable = _enemy("obj02", CombatPhase.NORMAL, world_x=60, world_y=0)
+        context = {
+            myself,
+            dangerous_close,
+            kickable,
+            RetreatFromDanger(actor_slot="P1", target_slot="obj01"),
+            JumpAttack(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], JumpAttack)
 
     def test_scores_zero_when_target_missing(self) -> None:
         # RetreatFromDanger for a target that has since vanished from the

@@ -169,7 +169,14 @@ class CouldPunchTests(unittest.TestCase):
 
         self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj01")})
 
-    def test_fires_for_partner_too(self) -> None:
+    def test_never_fires_for_the_partner(self) -> None:
+        # One AgentLoop runs per AI-controlled player and executes the
+        # surviving decision on *that* player's own VirtualGamepad, so a
+        # decision parametrized with the partner's slot, position and facing
+        # would be carried out on the wrong pad -- Myself pressing B at empty
+        # air because the partner happened to be next to an enemy, and
+        # out-ranking Myself's own candidates while doing it. Partner stays
+        # in the context as Information only.
         partner = Partner(
             slot="P2",
             player_index=2,
@@ -190,9 +197,33 @@ class CouldPunchTests(unittest.TestCase):
         enemy = make_enemy(slot="obj02", world_x=320, world_y=62)
         context: set[Token] = {partner, enemy}
 
-        result = could_punch(context)
+        self.assertEqual(could_punch(context), set())
 
-        self.assertEqual(result, {Punch(actor_slot="P2", target_slot="obj02")})
+    def test_still_fires_for_myself_while_a_partner_is_present(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        partner = Partner(
+            slot="P2",
+            player_index=2,
+            character_id=1,
+            character_name="Adam",
+            world_x=300,
+            world_y=60,
+            health=100,
+            health_percent=100.0,
+            lives=3,
+            specials=1,
+            held_weapon_type=0,
+            facing_left=False,
+            combat_phase=CombatPhase.NORMAL,
+            action_state=0,
+            is_airborne=False,
+        )
+        enemy = make_enemy(world_x=130, world_y=100)
+        context: set[Token] = {myself, partner, enemy}
+
+        self.assertEqual(
+            could_punch(context), {Punch(actor_slot="P1", target_slot="obj01")}
+        )
 
     def test_does_not_fire_when_holding_an_enemy(self) -> None:
         myself = make_myself(held_weapon_type=0x01)  # not a weapon-type id -> holding an enemy
@@ -591,6 +622,31 @@ class CouldRetreatFromDangerTests(unittest.TestCase):
 
         self.assertEqual(could_retreat_from_danger(context), set())
 
+    def test_does_not_fire_for_a_dangerous_enemy_several_lanes_away(self) -> None:
+        # The caution zone is a box, not an X-only band: an enemy committed
+        # to an attack it cannot possibly connect with (dy well past
+        # RETREAT_CAUTION_MARGIN_Y) is no reason to walk backwards.
+        myself = make_myself(world_x=100, world_y=40, facing_left=False)
+        enemy = make_enemy(world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING)
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(could_retreat_from_danger(context), set())
+
+    def test_an_out_of_lane_dangerous_enemy_is_still_worth_approaching(self) -> None:
+        # The other half of the same gate: could_walk_to_near_enemy skips the
+        # enemy could_retreat_from_danger owns, so an X-only caution zone
+        # left the actor neither approaching nor retreating -- it just
+        # produced no decision at all for a threat it was never in line with.
+        myself = make_myself(world_x=100, world_y=40, facing_left=False)
+        enemy = make_enemy(world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING)
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+        context: set[Token] = {myself, enemy, camera}
+
+        self.assertEqual(
+            could_walk_to_near_enemy(context),
+            {WalkToNearEnemy(actor_slot="P1", target_slot="obj01")},
+        )
+
     def test_no_enemies_no_decision(self) -> None:
         myself = make_myself()
         self.assertEqual(could_retreat_from_danger({myself}), set())
@@ -791,6 +847,26 @@ class CouldHoldActionsTests(unittest.TestCase):
         context: set[Token] = {myself, enemy, AnimationInProgress(slot="P1")}
 
         self.assertEqual(could_hold_actions(context), set())
+
+    def test_targets_the_grabbed_enemy_not_a_nearer_bystander(self) -> None:
+        # Every hold move's emergency (priority._held_enemy_emergency) is
+        # gated on its target being GRABBED, so naming a bystander that
+        # happens to be a pixel closer collapsed the whole family to
+        # emergency 0 and handed the knee/throw/suplex choice to the static
+        # priority tie-break instead of the rear-threat reasoning.
+        myself = make_myself(
+            world_x=100, world_y=100, held_weapon_type=0x01, action_state=0x60
+        )
+        bystander = make_enemy(slot="bystander", world_x=102, world_y=100)
+        grabbed = make_enemy(
+            slot="grabbed", world_x=110, world_y=100, combat_phase=CombatPhase.GRABBED
+        )
+        context: set[Token] = {myself, bystander, grabbed}
+
+        result = could_hold_actions(context)
+
+        self.assertIn(AttackHeldEnemy(actor_slot="P1", target_slot="grabbed"), result)
+        self.assertNotIn(AttackHeldEnemy(actor_slot="P1", target_slot="bystander"), result)
 
     def test_no_crash_with_no_enemies(self) -> None:
         myself = make_myself(held_weapon_type=0x01, action_state=0x60)

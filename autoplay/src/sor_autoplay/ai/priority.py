@@ -22,6 +22,7 @@ from collections.abc import Callable
 
 from ..phases import CombatPhase, is_dangerous, is_punishable
 from .decide import (
+    HEALTH_CRITICAL_PERCENT,
     KNIFE_MELEE_X,
     KNIFE_RANGE_X,
     KNIFE_RANGE_Y,
@@ -96,7 +97,16 @@ _EMERGENCY_WALK_TO_PICKUP_LIFE = 12
 _EMERGENCY_WALK_TO_PICKUP_SPECIAL = 9
 _EMERGENCY_WALK_TO_PICKUP_SCORE = 3
 _EMERGENCY_WALK_TO_NEAR_ENEMY = 14
-_EMERGENCY_RETREAT_FROM_DANGER = 30  # closer scoring higher, floor 20
+# Must sit in the gap between WalkToNearEnemy's base (14) and the *lowest*
+# real attack tier (_EMERGENCY_JUMP_ATTACK_DEFAULT, 18) -- backing off an
+# imminent threat outranks still walking toward one, but never outranks
+# actually hitting something, per RetreatFromDanger's own docstring
+# ("lower than any real attack so attacking always wins once actually
+# possible"). The previous 30/20 band broke that: it beat a plain Punch
+# (20), a JumpAttack (18/28) and a knife throw (21..25), so a dangerous
+# enemy closing in made the actor back away from a *different* enemy it
+# could already hit.
+_EMERGENCY_RETREAT_FROM_DANGER = 17  # closer scoring higher, floor 15
 # No live enemy left anywhere (on-screen or not) → push stage (was 5).
 _EMERGENCY_WALK_TO_ADVANCE_STAGE = 12
 _EMERGENCY_DEFAULT = 0
@@ -243,7 +253,12 @@ def _emergency_retreat_from_danger(decision: RetreatFromDanger, context: Context
     # Closer to the still-dangerous, not-yet-hittable enemy is more urgent to
     # back away from -- stays above WalkToNearEnemy(14) so this wins over
     # still approaching the same target, below any real attack's tier.
-    return _distance_emergency(distance, base=_EMERGENCY_RETREAT_FROM_DANGER, floor=20, step_px=15)
+    # step_px is wider than the other distance-scored decisions' 15 because
+    # this band is only three points tall (15..17, wedged between
+    # WalkToNearEnemy and JumpAttack); 25px spreads those three points across
+    # decide._too_close_to_keep_approaching's whole caution zone instead of
+    # saturating at the floor a third of the way into it.
+    return _distance_emergency(distance, base=_EMERGENCY_RETREAT_FROM_DANGER, floor=15, step_px=25)
 
 
 def _emergency_walk_to_advance_stage(decision: WalkToAdvanceStage, context: Context) -> int:
@@ -284,7 +299,10 @@ def _emergency_walk_to_pickup(decision: WalkToPickup, context: Context) -> int:
     if pickup is None:
         return _EMERGENCY_WALK_TO_PICKUP_SCORE
     if isinstance(pickup, HealthPickup):
-        if actor is not None and actor.health_percent < 40.0:
+        # Same threshold decide._pickup_is_useful uses to decide the pickup
+        # is worth walking to at all -- a second literal here would silently
+        # diverge from it.
+        if actor is not None and actor.health_percent < HEALTH_CRITICAL_PERCENT:
             return _EMERGENCY_WALK_TO_PICKUP_CRITICAL_HEALTH
         return _EMERGENCY_WALK_TO_PICKUP_HEALTH
     if isinstance(pickup, LifePickup):
