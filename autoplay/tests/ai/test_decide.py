@@ -717,6 +717,24 @@ class CouldRetreatFromDangerTests(unittest.TestCase):
 
         self.assertEqual(could_retreat_from_danger(context), set())
 
+    def test_fires_for_a_dangerous_enemy_behind_the_actor(self) -> None:
+        # Deliberately side-agnostic (see this generator's docstring). An
+        # earlier version skipped behind enemies, which is what made the
+        # verb that owns a committed enemy depend on which way the actor
+        # happened to be facing -- and since retreating *sets* facing away,
+        # that handed the same enemy back and forth between this verb and
+        # could_walk_to_near_enemy's turn-around on every tick. Uncovered
+        # before: the whole limit cycle lived in this gap.
+        myself = make_myself(world_x=100, world_y=100, facing_left=True)
+        enemy = make_enemy(  # to the right of a left-facing actor -> behind
+            world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING
+        )
+        context: set[Token] = {myself, enemy}
+
+        result = could_retreat_from_danger(context)
+
+        self.assertEqual(result, {RetreatFromDanger(actor_slot="P1", target_slot="obj01")})
+
     def test_does_not_fire_when_already_actionable(self) -> None:
         # Already hittable -- attack instead of retreating.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)

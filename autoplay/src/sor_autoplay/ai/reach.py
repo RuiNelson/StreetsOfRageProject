@@ -84,6 +84,36 @@ RETREAT_CAUTION_MARGIN = 24
 # actually leaves this zone instead of retreating from its own dodge.
 RETREAT_CAUTION_MARGIN_Y = PUNCH_RANGE_Y + 12
 
+# Hysteresis band on top of the caution zone, for the *approach* half of the
+# decision only (decide.could_walk_to_near_enemy).
+#
+# Retreating and approaching used to switch on the exact same boundary --
+# too_close_to_keep_approaching -- with nothing between them. That is a
+# textbook limit cycle, and it reproduced immediately when the pipeline was
+# driven over synthetic ticks against a single ATTACKING enemy: one retreat
+# step (RETREAT_FROM_DANGER_DISTANCE) carries the actor a few px past the
+# boundary, which deletes the IncomingMelee token, which un-skips
+# could_walk_to_near_enemy, which walks straight back in and re-arms the
+# threat on the very next tick. The observed period was *one tick* -- a
+# LEFT/RIGHT alternation at the full poll rate, plus a slow lane drift from
+# the walk verb's own sidestep, exactly the "changes direction very often,
+# in jumps and up/down, with a single enemy, not during the attack" the user
+# reported.
+#
+# So the approach must not resume the instant the retreat trigger clears: it
+# stays suppressed until the actor is this much *beyond* the caution zone.
+# Between the two thresholds the actor simply holds its ground rather than
+# oscillating -- the right answer against a committed attacker anyway, and it
+# lifts by itself the moment the enemy leaves its dangerous phase, since the
+# suppression is gated on that phase and not on distance alone.
+#
+# Sized well above what either body covers in a single tick (the actor walks
+# a few px per 33ms poll; the fastest committed closer measured, Signal's
+# slide, is ~2.5px/tick) so neither can traverse the whole band in one
+# sample and re-arm the cycle -- but kept small enough that the actor still
+# closes to punch range promptly once the threat passes.
+APPROACH_RELEASE_MARGIN = 16
+
 # Clearance kept beyond a Pit's own footprint — falling in costs a full life
 # (player-health-lives-and-combat.md's $01C0 fall-boundary check).
 PIT_AVOID_MARGIN = 8
@@ -394,7 +424,9 @@ def in_enemy_dead_zone(
     return all(forward_dx < rng.forward_min - margin for rng in enemy.attack_ranges)
 
 
-def too_close_to_keep_approaching(actor: PlayableCharacter, enemy: Enemy) -> bool:
+def too_close_to_keep_approaching(
+    actor: PlayableCharacter, enemy: Enemy, *, extra_margin: int = 0
+) -> bool:
     """True when walking the last stretch risks arriving as the hit lands.
 
     Prefers the enemy's own extracted reach: the caution box below was always
@@ -402,18 +434,23 @@ def too_close_to_keep_approaching(actor: PlayableCharacter, enemy: Enemy) -> boo
     nothing to do with how far the enemy can hit. It stays as the fallback
     for an enemy whose ranges are unknown (every boss, and any session
     without ROM tables).
+
+    ``extra_margin`` widens whichever of the two the caller lands on. It
+    exists for ``decide.could_walk_to_near_enemy``'s hysteresis band -- see
+    ``APPROACH_RELEASE_MARGIN`` -- and defaults to 0, so the threat judgment
+    itself (``inference.check_for_incoming_melee``) is unchanged.
     """
 
-    reachable = enemy_can_reach(enemy, actor)
+    reachable = enemy_can_reach(enemy, actor, margin=REACH_SAFETY_MARGIN + extra_margin)
     if reachable is not None:
         return reachable
 
     dx = abs(enemy.world_x - actor.world_x)
     dy = abs(enemy.world_y - actor.world_y)
-    if dy > RETREAT_CAUTION_MARGIN_Y:
+    if dy > RETREAT_CAUTION_MARGIN_Y + extra_margin:
         return False
     outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
-    return dx <= outer + RETREAT_CAUTION_MARGIN
+    return dx <= outer + RETREAT_CAUTION_MARGIN + extra_margin
 
 
 def enemy_projected(enemy: Enemy, ticks: int) -> Enemy:

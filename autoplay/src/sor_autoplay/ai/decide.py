@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 
-from ..phases import CombatPhase
+from ..phases import CombatPhase, is_dangerous
 from . import reach
 from .tokens import (
     CounterGrab,
@@ -377,24 +377,65 @@ def could_walk_to_near_enemy(context: Context) -> Context:
         # (priority.py's distance-scored emergency) picks the closest one,
         # per AI.md's own target-selection principle: this function only
         # says what's possible, never which possibility is best.
+        # Neither skip below tests which *side* the enemy is on, and that is
+        # deliberate -- see could_retreat_from_danger for the facing-feedback
+        # cycle that a front-only skip creates. A dangerous, close enemy is
+        # owned by RetreatFromDanger from whichever side it stands on.
         threatening = reach.targets_of(context, IncomingMelee, actor.slot)
         for enemy in enemies:
-            if enemy.slot in threatening and reach.enemy_in_front(actor, enemy):
+            if enemy.slot in threatening:
                 # could_retreat_from_danger covers this one instead -- don't
                 # propose closing the last stretch of distance into a
-                # committed attack that isn't hittable yet. Only for an
-                # enemy in *front*: for one at the actor's back, this walk
-                # is the turn-around (holding the D-pad toward it flips
-                # facing, see execute._walk_to_near_enemy_target), and
-                # turning to face a committed attacker beats fleeing it
-                # blind -- could_retreat_from_danger skips it for the same
-                # reason, so the two still never compete for one target.
+                # committed attack that isn't hittable yet.
+                continue
+            if is_dangerous(enemy.combat_phase) and reach.too_close_to_keep_approaching(
+                actor, enemy, extra_margin=reach.APPROACH_RELEASE_MARGIN
+            ):
+                # Hysteresis (see reach.APPROACH_RELEASE_MARGIN). Skipping
+                # only on the IncomingMelee token above put approach and
+                # retreat on one shared boundary: a single retreat step
+                # cleared the token, which un-skipped this walk, which walked
+                # straight back in and re-armed it -- a one-tick limit cycle
+                # against a single enemy, reproduced by driving the pipeline
+                # over synthetic ticks. Stay backed off until genuinely clear
+                # of the threat, not one pixel past it.
                 continue
             verbs.add(WalkToNearEnemy(actor_slot=actor.slot, target_slot=enemy.slot))
     return verbs
 
 
 def could_retreat_from_danger(context: Context) -> Context:
+    """Back off from a committed enemy that is close but not yet hittable.
+
+    Deliberately side-agnostic. An earlier version skipped an enemy at the
+    actor's back, reasoning that turning to face it beats fleeing it blind,
+    and paired that with a front-only skip in ``could_walk_to_near_enemy``
+    so the two never competed for one target. Driving the pipeline over
+    synthetic ticks showed that pairing is a *facing-feedback limit cycle*,
+    and a far more visible one than the shared-threshold cycle
+    ``reach.APPROACH_RELEASE_MARGIN`` documents:
+
+    1. a frontal threat produces ``RetreatFromDanger``; the executor holds
+       the D-pad away from it;
+    2. holding a direction is what sets facing, so the actor is now facing
+       *away* -- and ``reach.enemy_behind_actor`` reads facing, so the very
+       same enemy re-classifies as "behind" on the next tick;
+    3. as "behind" it is skipped here, and picked up by
+       ``could_walk_to_near_enemy``'s turn-around instead, which walks back
+       toward it and flips facing again;
+    4. which makes it "in front" once more, and step 1 repeats.
+
+    The commanded direction therefore reversed *every single tick* for as
+    long as one enemy stayed committed nearby -- with the walk verb's lane
+    sidestep riding on top, which is what made it read as darting up/down
+    as well. The cure is to take facing out of the ownership decision
+    entirely: a dangerous, close enemy belongs to this verb from whichever
+    side it stands on, and ``could_walk_to_near_enemy``'s matching skips are
+    likewise side-agnostic. Backing away from a behind enemy still gains
+    distance, and the turn-around happens naturally once the enemy leaves
+    its dangerous phase and this verb stops claiming it.
+    """
+
     verbs: set[Token] = set()
     for actor in _actors(context):
         if _blocked(context, actor):
@@ -407,14 +448,6 @@ def could_retreat_from_danger(context: Context) -> Context:
         for target_slot in reach.targets_of(context, IncomingMelee, actor.slot):
             enemy = find(context, Enemy, slot=target_slot)
             if enemy is None:
-                continue
-            if reach.enemy_behind_actor(actor, enemy):
-                # Fleeing something already at the actor's back means running
-                # blind, facing away, with the threat following -- turning to
-                # face it is strictly better and is what
-                # could_walk_to_near_enemy proposes for a behind enemy (the
-                # D-pad sets facing). The two still never compete for one
-                # target: that function's matching skip is front-only.
                 continue
             if target_slot in actionable:
                 continue  # already hittable -- attack instead of retreating
