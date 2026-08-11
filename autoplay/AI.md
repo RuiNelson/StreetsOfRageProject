@@ -38,7 +38,7 @@ understanding of the game's control flow.
 ### Token Hierarchy
 
 The AI system is founded on a single abstract base class, `Token`, from
-which two further abstract classes descend: `Information` and `Decision`.
+which two further abstract classes descend: `Information` and `Verb`.
 Each of these abstract classes is expected to accumulate numerous
 subclasses over the course of implementation.
 
@@ -51,7 +51,7 @@ preferred mechanism for expressing such distinctions.
 
 A `Token` must never embed another `Token` by value. Since the context is
 a flat unordered collection, any relationship between two tokens — for instance, a
-`WalkToNearEnemy` decision naming the enemy it targets must be expressed as a reference to
+`WalkToNearEnemy` verb naming the enemy it targets must be expressed as a reference to
 the related token's identifier, to be resolved by looking it up in the
 context, rather than by holding the related token itself.
 
@@ -102,14 +102,14 @@ player must proceed leftward. `Stage` does not encapsulate hazards or
 collectable floor items, as these are represented by their own dedicated
 tokens.
 
-### `Decision`
+### `Verb`
 
-Whereas `Information` represents the present state of the game, `Decision`
-represents a projected future state. A `Decision` cannot be translated
+Whereas `Information` represents the present state of the game, `Verb`
+represents a projected future state. A `Verb` cannot be translated
 directly into a control signal; rather, it represents a deliberated and
 parametrized intent that precedes any concrete action.
 
-`Decision` comprises two principal abstract branches, `Walk` and `Attack`:
+`Verb` comprises two principal abstract branches, `Walk` and `Attack`:
 
 - `Walk` — for example, `WalkToNearEnemy`,
   `WalkToAdvanceStage`, `WalkToWeapon`, and `WalkToPickup`; grabbing a
@@ -119,7 +119,7 @@ parametrized intent that precedes any concrete action.
   `CounterGrab` (enemy-held C then B sequence), each parametrized with the
   target or coordinate to which the attack applies where applicable. There
   is no separate `Combo` input; repeated `Punch` contact produces the chain.
-  Taking a hold, on the other hand, is its own decision and its own
+  Taking a hold, on the other hand, is its own verb and its own
   *absence* of an input — see [Grabbing an enemy](#grabbing-an-enemy).
   `CallPolice`, which activates the police special attack, is an `Attack`
   descendant.
@@ -149,9 +149,9 @@ acted upon.
 **`AnimationInProgress`** is carried by a `PlayableCharacter` whenever that
 character's current animation, as observed directly from RAM, has not yet
 finished (for example, the startup or recovery frames of an attack). Its
-mere presence in the context signals to `generate_decision_tokens`,
+mere presence in the context signals to `generate_verb_tokens`,
 described below, that the corresponding character cannot presently act on
-a new decision.
+a new verb.
 
 **`IncomingProjectile`** encapsulates the trajectory of a projectile
 already in flight, allowing the AI to react to it before it reaches the
@@ -173,7 +173,7 @@ since a Mega Drive attack only hits by current position: the early commit
 was a guaranteed whiff that left the character locked in its own recovery
 frames exactly when the still-closing enemy arrived and landed a free hit.
 Consuming this token usefully needs a genuine evasive reaction (e.g. a
-sidestep/reposition decision), not an early commit to the same
+sidestep/reposition verb), not an early commit to the same
 reactive-only attack.
 
 **`TargetInReach`** answers, once per tick and per (actor, enemy) pair,
@@ -185,7 +185,7 @@ side), `InJumpAttackReach` (in front, beyond punch outer, inside the
 kick's free-flight range) and `ActionableTarget` (some attack the AI
 already has would really fire on this enemy now — the "stop walking, you
 can already hit it" signal). The geometry behind them lives in `reach.py`,
-shared with the decision and ranking stages, so all three agree on one
+shared with the verb and ranking stages, so all three agree on one
 definition of every band instead of each recomputing it.
 
 **`IncomingMelee`** is the melee counterpart of `IncomingProjectile`: an
@@ -326,20 +326,20 @@ context: set[Token] = set()
 context |= generate_direct_observation_tokens(game_ram)
 context |= generate_inference_tokens(context)
 
-# Decision tokens
-context |= generate_decision_tokens(context)
-context = determine_priority_decision(context)
+# Verb tokens
+context |= generate_verb_tokens(context)
+context = determine_priority_verb(context)
 
 # UI
 inform_hud(context)
 
-decisions = [token for token in context if isinstance(token, Decision)]
+verbs = [token for token in context if isinstance(token, Verb)]
 
-if not decisions:
+if not verbs:
     press_no_button()
 else:
-    decision, = decisions
-    execute_decision(decision, context)
+    verb, = verbs
+    execute_verb(verb, context)
 
 sleep_until_next_ram_poll()
 ```
@@ -375,7 +375,7 @@ judgment from raw coordinates. That is the point of the stage: a band is
 computed once per tick, in one place, and every later stage sees the same
 answer.
 
-### `generate_decision_tokens`
+### `generate_verb_tokens`
 
 This function likewise invokes a set of subordinate functions, each of
 which reads the context and conditionally contributes a token, or a small
@@ -384,14 +384,14 @@ set of tokens, to it.
 Each such function is named with the prefix `could_`, for example
 `could_grab_enemy` or `could_walk` — deliberately not `should_`. Naming
 these functions `should_*` would misstate what they do: they answer "is
-this decision *possible*, and does it make some kind of sense to pursue",
-never "is this decision the one to actually take right now". That second
+this verb *possible*, and does it make some kind of sense to pursue",
+never "is this verb the one to actually take right now". That second
 question — the "should" of the loop — belongs entirely to
-`determine_priority_decision`, described next: it alone weighs the
-possible decisions this step produced against one another and picks the
+`determine_priority_verb`, described next: it alone weighs the
+possible verbs this step produced against one another and picks the
 one that should actually be executed. A `could_*` function must therefore
-never concern itself with the relative importance of its decision, only
-with whether the decision is possible in the first place and, if so,
+never concern itself with the relative importance of its verb, only
+with whether the verb is possible in the first place and, if so,
 whether it makes sense to pursue at all. For instance, a function should
 produce a token for picking up a weapon only if the weapon is present on
 the floor **and** within the `CameraRange` **and** an upgrade to the
@@ -400,43 +400,43 @@ than some other candidate action.
 
 Most such functions must additionally decline to produce a token whenever
 an `AnimationInProgress` token for the relevant character is present in
-the context, since the character cannot act on a new decision until its
+the context, since the character cannot act on a new verb until its
 current animation concludes.
 
-### `determine_priority_decision`
+### `determine_priority_verb`
 
-This is the "should" component of the loop: `generate_decision_tokens`'s
+This is the "should" component of the loop: `generate_verb_tokens`'s
 `could_*` functions establish everything the actor *could* do this tick;
 this function alone decides what it *should* do, by ranking those
 possibilities against each other. It constitutes the most demanding part
 of the process.
 
-It also performs target selection: when `generate_decision_tokens`
-produces several instances of the same kind of `Decision` against
+It also performs target selection: when `generate_verb_tokens`
+produces several instances of the same kind of `Verb` against
 different enemies (for example, a `Punch` against each of two nearby
 enemies), no separate selection step exists — the choice is made here,
-as a consequence of ranking every `Decision` token in the context by
+as a consequence of ranking every `Verb` token in the context by
 emergency and retaining only the highest-ranked one.
 
-It ranks the `Decision` tokens present in the context — using the
+It ranks the `Verb` tokens present in the context — using the
 `Information` tokens already present in that same context — by their
-degree of **emergency**, and discards every `Decision` token other than
+degree of **emergency**, and discards every `Verb` token other than
 the one ranked highest. The `Information` tokens are left untouched: they
-remain in the context because `execute_decision` (and its auxiliary
+remain in the context because `execute_verb` (and its auxiliary
 functions, described below) requires them in order to carry out the
-surviving decision. For instance, executing a `WalkToNearEnemy` decision
+surviving verb. For instance, executing a `WalkToNearEnemy` verb
 requires knowing the targeted enemy's position, which is held by an
 `Enemy` token already present in the context.
 
 Because emergency is recomputed from the current game state on every
-iteration of the loop, an exact tie between two `Decision` tokens is
+iteration of the loop, an exact tie between two `Verb` tokens is
 expected to be transient in practice: as the game state evolves from one
 poll to the next, the underlying `Information` — for example, the distance
 to each of two candidate enemies — is very unlikely to remain identical
 for long, and the tokens' emergency ranks will diverge on a subsequent
 iteration.
 
-Where multiple `Decision` tokens share the same rank of emergency
+Where multiple `Verb` tokens share the same rank of emergency
 (typically because their emergency is zero), each `Token` additionally
 carries a `priority` property, independent of the rest of the context,
 used to break the tie — for example, picking up a weapon carries a higher
@@ -448,8 +448,8 @@ recoverable exception: the occurrence must be logged, and a developer
 should subsequently assign the affected tokens distinct priorities.
 
 By the end of this function, the context retains all of its `Information`
-tokens together with, at most, a single surviving `Decision` token; no
-`Decision` token remains in the context if none applies.
+tokens together with, at most, a single surviving `Verb` token; no
+`Verb` token remains in the context if none applies.
 
 ### `inform_hud`
 
@@ -461,25 +461,25 @@ to add some information visible to the user while the program runs.
 There are situations in which the AI need not act at all. This function
 guarantees that no button is pressed under such circumstances.
 
-### `execute_decision`
+### `execute_verb`
 
-This function dispatches the surviving `Decision` token to one of a set of
-auxiliary functions, one per concrete `Decision` subclass. Each such
-function receives both the decision and the remaining context, since it
+This function dispatches the surviving `Verb` token to one of a set of
+auxiliary functions, one per concrete `Verb` subclass. Each such
+function receives both the verb and the remaining context, since it
 generally needs one or more `Information` tokens to carry out the
-decision — for example, fulfilling a `WalkToNearEnemy` decision requires
+verb — for example, fulfilling a `WalkToNearEnemy` verb requires
 reading the targeted enemy's position from the corresponding `Enemy`
 token in the context.
 
 None of these auxiliary functions should be understood as "issue the
-sequence of controller inputs required to fulfil the decision." Rather,
+sequence of controller inputs required to fulfil the verb." Rather,
 each should steer the controller only as much as is necessary for the
-decision to eventually be fulfilled, and should not consume more time
-than required. For example, if the decision is to walk toward a given
+verb to eventually be fulfilled, and should not consume more time
+than required. For example, if the verb is to walk toward a given
 point, the corresponding function need only set the controller to hold
 the appropriate direction and return immediately.
 
-This ensures that the AI remains reactive and can revise its decisions
+This ensures that the AI remains reactive and can revise its verbs
 promptly as events unfold.
 
 Because the `MegaDriveEnvironment` remote access interface supports

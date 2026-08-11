@@ -10,6 +10,7 @@ from sor_autoplay.ai.tokens import (
     CounterGrab,
     GrabEnemy,
     JumpAttack,
+    OpenBreakable,
     Punch,
     RearAttack,
     SprayPepper,
@@ -26,7 +27,7 @@ from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.execute import (
     WALK_TO_ENEMY_LANE_SAFETY_Y,
     _walk_to_near_enemy_target,
-    execute_decision,
+    execute_verb,
     press_no_button,
 )
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
@@ -36,7 +37,6 @@ from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
     RetreatFromDanger,
     WalkToAdvanceStage,
-    WalkToBreakable,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
@@ -114,10 +114,10 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         actor = _myself(world_x=0, world_y=0)
         target = _enemy(world_x=100, world_y=50)
         context = {actor, target}
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT | DOWN, player2=0)
 
@@ -125,10 +125,10 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         actor = _myself(world_x=50, world_y=50)
         target = _enemy(world_x=0, world_y=0)
         context = {actor, target}
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=LEFT | UP, player2=0)
 
@@ -142,10 +142,10 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         actor = _myself(world_x=100, world_y=100)
         target = _enemy(world_x=70, world_y=100)
         context = {actor, target}
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
 
@@ -154,10 +154,10 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         actor = _myself(world_x=10, world_y=10)
         target = _enemy(world_x=10, world_y=10)
         context = {actor, target}
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
 
@@ -168,21 +168,21 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         actor = _myself(world_x=4, world_y=50)
         target = _enemy(world_x=50, world_y=50)
         context = {actor, target}
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
         gamepad.hold(RIGHT)  # start non-zero so a hold(0) call is observable
         client.hold_buttons.reset_mock()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=0, player2=0)
 
     def test_missing_actor_or_target_does_nothing(self) -> None:
         context: set = {_enemy()}
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_not_called()
 
@@ -190,10 +190,10 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         actor = _myself(world_x=0, world_y=50)
         target = replace(_enemy(world_x=200, world_y=50), combat_phase=CombatPhase.ATTACKING)
         context = {actor, target}
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         # Same lane (dy=0) and far away (dx=200) from an actively attacking
         # enemy -> step off its lane instead of walking straight down it.
@@ -205,12 +205,12 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         actor = _myself(world_x=-6, world_y=50)
         target = replace(_enemy(world_x=40, world_y=50), combat_phase=CombatPhase.ATTACKING)
         context = {actor, target}
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
         gamepad.hold(RIGHT)  # start non-zero so a hold(0) call is observable
         client.hold_buttons.reset_mock()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=0, player2=0)
 
@@ -241,10 +241,10 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         actor = _myself(world_x=0, world_y=50)
         target = _enemy(world_x=200, world_y=50)  # NORMAL phase
         context = {actor, target}
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
@@ -254,10 +254,10 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
         actor = _myself(world_x=100, world_y=50)
         target = replace(_enemy(world_x=150, world_y=50), combat_phase=CombatPhase.ATTACKING)
         context = {actor, target}
-        decision = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        verb = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
 
@@ -265,10 +265,10 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
         actor = _myself(world_x=100, world_y=50)
         target = replace(_enemy(world_x=50, world_y=50), combat_phase=CombatPhase.ATTACKING)
         context = {actor, target}
-        decision = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        verb = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
@@ -276,10 +276,10 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
         actor = _myself(world_x=100, world_y=50)
         target = replace(_enemy(world_x=150, world_y=90), combat_phase=CombatPhase.ATTACKING)
         context = {actor, target}
-        decision = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        verb = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         # Backing away moves on X only -- never toward the enemy's lane too.
         client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
@@ -292,10 +292,10 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
         actor = _myself(world_x=100, world_y=50)
         target = replace(_enemy(world_x=150, world_y=50), combat_phase=CombatPhase.ATTACKING)
         context = {actor, target, SafeSpot(actor_slot="P1", world_x=100, world_y=74)}
-        decision = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        verb = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         # Pure sidestep: down the lane, no lateral component.
         client.hold_buttons.assert_called_once_with(player1=DOWN, player2=0)
@@ -304,37 +304,37 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
         actor = _myself(world_x=100, world_y=50)
         target = replace(_enemy(world_x=150, world_y=50), combat_phase=CombatPhase.ATTACKING)
         context = {actor, target, SafeSpot(actor_slot="P2", world_x=100, world_y=74)}
-        decision = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        verb = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
 
     def test_missing_actor_or_target_does_nothing(self) -> None:
         context: set = {_enemy()}
-        decision = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        verb = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_not_called()
 
 
 class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
     def test_direction_right_holds_right(self) -> None:
-        decision = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
     def test_direction_left_holds_left(self) -> None:
-        decision = WalkToAdvanceStage(actor_slot="P1", direction="left")
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="left")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
 
@@ -355,7 +355,7 @@ class MovementDeadbandTests(unittest.TestCase):
         target = _enemy(world_x=149, world_y=100)
         gamepad, client = _gamepad()
 
-        execute_decision(
+        execute_verb(
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"), {actor, target}, gamepad
         )
 
@@ -369,7 +369,7 @@ class MovementDeadbandTests(unittest.TestCase):
         for actor_x in (101, 105):
             actor = _myself(world_x=actor_x, world_y=40)
             gamepad, _ = _gamepad()
-            execute_decision(
+            execute_verb(
                 WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
                 {actor, target},
                 gamepad,
@@ -390,12 +390,12 @@ class StaleMovementHoldTests(unittest.TestCase):
     just pressed B to collect. Every press-only handler must drop the hold
     first (``execute._press``)."""
 
-    def _assert_clears_hold(self, decision, context) -> None:
+    def _assert_clears_hold(self, verb, context) -> None:
         gamepad, client = _gamepad()
         gamepad.hold(RIGHT)  # leftover from a previous walk tick
         client.hold_buttons.reset_mock()
 
-        execute_decision(decision, context, gamepad)
+        execute_verb(verb, context, gamepad)
 
         self.assertEqual(gamepad.held, 0)
         # The cleared latch also has to reach the host, not just the cache.
@@ -426,10 +426,10 @@ class StaleMovementHoldTests(unittest.TestCase):
         gamepad.hold(RIGHT)
         client.hold_buttons.reset_mock()
 
-        # Target no longer in the context (killed between decision and
+        # Target no longer in the context (killed between verb and
         # execution) -- the handler must stop the actor, not let the stale
         # hold carry it onward indefinitely.
-        execute_decision(
+        execute_verb(
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"), set(), gamepad
         )
 
@@ -439,10 +439,10 @@ class StaleMovementHoldTests(unittest.TestCase):
 
 class ExecutePunchTests(unittest.TestCase):
     def test_punch_presses_button_b(self) -> None:
-        decision = Punch(actor_slot="P1", target_slot="obj01")
+        verb = Punch(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
@@ -450,62 +450,62 @@ class ExecutePunchTests(unittest.TestCase):
         # Supplex now owns the "already holding" case (see priority.py /
         # execute.py's _execute_supplex); Punch always just presses B.
         actor = replace(_myself(), held_weapon_type=0x20)  # Garcia's type id
-        decision = Punch(actor_slot="P1", target_slot="obj01")
+        verb = Punch(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor}, gamepad)
+        execute_verb(verb, {actor}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
     def test_still_punches_while_holding_a_weapon(self) -> None:
         # could_punch no longer produces Punch while armed (that's
         # SwingBatOrPipe/StabWithKnifeOrBottle/SprayPepper's job now), but
-        # execution itself is unconditional on whatever Decision it's given.
+        # execution itself is unconditional on whatever Verb it's given.
         actor = replace(_myself(), held_weapon_type=0x0A)  # baseball bat
-        decision = Punch(actor_slot="P1", target_slot="obj01")
+        verb = Punch(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor}, gamepad)
+        execute_verb(verb, {actor}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
 class ExecuteSwingBatOrPipeTests(unittest.TestCase):
     def test_presses_button_b(self) -> None:
-        decision = SwingBatOrPipe(actor_slot="P1", target_slot="obj01")
+        verb = SwingBatOrPipe(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
 class ExecuteStabWithKnifeOrBottleTests(unittest.TestCase):
     def test_presses_button_b(self) -> None:
-        decision = StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01")
+        verb = StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
 class ExecuteSprayPepperTests(unittest.TestCase):
     def test_presses_button_b(self) -> None:
-        decision = SprayPepper(actor_slot="P1", target_slot="obj01")
+        verb = SprayPepper(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
 class ExecuteCallPoliceTests(unittest.TestCase):
     def test_call_police_presses_button_a(self) -> None:
-        decision = CallPolice(actor_slot="P1")
+        verb = CallPolice(actor_slot="P1")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=A, player2=0, frames=4)
 
@@ -514,37 +514,37 @@ class ExecuteJumpAttackTests(unittest.TestCase):
     def test_presses_jump_with_direction_when_grounded(self) -> None:
         actor = _myself(world_x=0, world_y=0, is_airborne=False)
         enemy = _enemy(world_x=50, world_y=0)
-        decision = JumpAttack(actor_slot="P1", target_slot="obj01")
+        verb = JumpAttack(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, enemy}, gamepad)
+        execute_verb(verb, {actor, enemy}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=C | RIGHT, player2=0, frames=3)
 
     def test_presses_punch_when_airborne(self) -> None:
         actor = _myself(world_x=0, world_y=0, is_airborne=True)
         enemy = _enemy(world_x=50, world_y=0)
-        decision = JumpAttack(actor_slot="P1", target_slot="obj01")
+        verb = JumpAttack(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, enemy}, gamepad)
+        execute_verb(verb, {actor, enemy}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B | RIGHT, player2=0, frames=4)
 
     def test_missing_actor_does_nothing(self) -> None:
-        decision = JumpAttack(actor_slot="P1", target_slot="obj01")
+        verb = JumpAttack(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.press_buttons.assert_not_called()
 
     def test_no_target_does_not_hop_in_place(self) -> None:
         actor = _myself(is_airborne=False)
-        decision = JumpAttack(actor_slot="P1", target_slot="obj01")
+        verb = JumpAttack(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor}, gamepad)
+        execute_verb(verb, {actor}, gamepad)
 
         client.press_buttons.assert_not_called()
 
@@ -555,10 +555,10 @@ class ExecuteGrabEnemyTests(unittest.TestCase):
         # damage is zero, so pressing B here would produce a hit instead.
         actor = _myself(world_x=100, world_y=100)
         target = _enemy(world_x=130, world_y=100)
-        decision = GrabEnemy(actor_slot="P1", target_slot="obj01")
+        verb = GrabEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, target}, gamepad)
+        execute_verb(verb, {actor, target}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
         client.press_buttons.assert_not_called()
@@ -566,10 +566,10 @@ class ExecuteGrabEnemyTests(unittest.TestCase):
     def test_aims_at_the_enemy_itself_including_the_lane(self) -> None:
         actor = _myself(world_x=100, world_y=100)
         target = _enemy(world_x=130, world_y=108)
-        decision = GrabEnemy(actor_slot="P1", target_slot="obj01")
+        verb = GrabEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, target}, gamepad)
+        execute_verb(verb, {actor, target}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT | DOWN, player2=0)
 
@@ -579,21 +579,21 @@ class ExecuteGrabEnemyTests(unittest.TestCase):
         # the deadband must fall back to the facing direction, not release.
         actor = _myself(world_x=100, world_y=100)
         target = _enemy(world_x=102, world_y=100)
-        decision = GrabEnemy(actor_slot="P1", target_slot="obj01")
+        verb = GrabEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, target}, gamepad)
+        execute_verb(verb, {actor, target}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
     def test_releases_when_the_target_is_gone(self) -> None:
         actor = _myself(world_x=100, world_y=100)
-        decision = GrabEnemy(actor_slot="P1", target_slot="obj01")
+        verb = GrabEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
         gamepad.hold(RIGHT)
         client.hold_buttons.reset_mock()
 
-        execute_decision(decision, {actor}, gamepad)
+        execute_verb(verb, {actor}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=0, player2=0)
 
@@ -601,67 +601,67 @@ class ExecuteGrabEnemyTests(unittest.TestCase):
 class ExecuteSupplexTests(unittest.TestCase):
     def test_presses_jump_from_front_hold(self) -> None:
         actor = _myself(action_state=0x60)
-        decision = Supplex(actor_slot="P1", target_slot="obj01")
+        verb = Supplex(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor}, gamepad)
+        execute_verb(verb, {actor}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=C, player2=0, frames=4)
 
     def test_presses_punch_from_back_hold(self) -> None:
         actor = _myself(action_state=0x66)
-        decision = Supplex(actor_slot="P1", target_slot="obj01")
+        verb = Supplex(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor}, gamepad)
+        execute_verb(verb, {actor}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
     def test_presses_punch_as_fallback_for_other_action_state(self) -> None:
         actor = _myself(action_state=0x10)
-        decision = Supplex(actor_slot="P1", target_slot="obj01")
+        verb = Supplex(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor}, gamepad)
+        execute_verb(verb, {actor}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
     def test_facing_bit_is_cleared_before_comparison(self) -> None:
         actor = _myself(action_state=0x67)  # back hold, facing bit set
-        decision = Supplex(actor_slot="P1", target_slot="obj01")
+        verb = Supplex(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor}, gamepad)
+        execute_verb(verb, {actor}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
 class ExecuteThrowKnifeTests(unittest.TestCase):
     def test_throw_knife_presses_button_b(self) -> None:
-        decision = ThrowKnife(actor_slot="P1", target_slot="obj01")
+        verb = ThrowKnife(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
 class ExecuteThrowPepperTests(unittest.TestCase):
     def test_throw_pepper_presses_button_b(self) -> None:
-        decision = ThrowPepper(actor_slot="P1", target_slot="obj01")
+        verb = ThrowPepper(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
 class ExecuteRearAttackTests(unittest.TestCase):
     def test_presses_b_and_c_together(self) -> None:
-        decision = RearAttack(actor_slot="P1", target_slot="obj01")
+        verb = RearAttack(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B | C, player2=0, frames=4)
 
@@ -674,10 +674,10 @@ class ExecuteCounterGrabTests(unittest.TestCase):
             combat_phase=CombatPhase.HELD_BY_ENEMY,
             action_flags=0,
         )
-        decision = CounterGrab(actor_slot="P1")
+        verb = CounterGrab(actor_slot="P1")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor}, gamepad)
+        execute_verb(verb, {actor}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=C, player2=0, frames=3)
 
@@ -688,38 +688,41 @@ class ExecuteCounterGrabTests(unittest.TestCase):
             combat_phase=CombatPhase.HELD_BY_ENEMY,
             action_flags=0x80,
         )
-        decision = CounterGrab(actor_slot="P1")
+        verb = CounterGrab(actor_slot="P1")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor}, gamepad)
+        execute_verb(verb, {actor}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=3)
 
 
 class ExecuteTechRecoverTests(unittest.TestCase):
     def test_presses_c_and_up_together(self) -> None:
-        decision = TechRecover(actor_slot="P1")
+        verb = TechRecover(actor_slot="P1")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=C | UP, player2=0, frames=3)
 
 
-class ExecuteWalkToBreakableTests(unittest.TestCase):
-    """A Breakable is itself a solid obstacle -- walking to its exact
-    center means walking into it from whatever angle a straight line
-    happens to be, which can mean approaching from directly above/below
-    and getting stuck. Must stop just inside smash range on whichever
+class ExecuteOpenBreakableTests(unittest.TestCase):
+    """One verb spanning the approach and the strike, switching on
+    decide.in_smash_range.
+
+    While still approaching: a Breakable is itself a solid obstacle, so
+    walking to its exact center means walking into it from whatever angle a
+    straight line happens to be, which can mean approaching from directly
+    above/below and getting stuck. Stop just inside smash range on whichever
     side the actor already occupies instead."""
 
     def test_stops_short_of_the_breakables_exact_position(self) -> None:
         actor = _myself(world_x=0, world_y=90)
         prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
-        decision = WalkToBreakable(actor_slot="P1", target_slot="obj09")
+        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, prop}, gamepad)
+        execute_verb(verb, {actor, prop}, gamepad)
 
         # BREAKABLE_PUNCH_X=36, BREAKABLE_STOP_BUFFER=4 -> stop_dx=32, so
         # the actor approaches to x=68, never reaching the prop's x=100.
@@ -728,31 +731,42 @@ class ExecuteWalkToBreakableTests(unittest.TestCase):
     def test_approaches_from_whichever_side_the_actor_is_already_on(self) -> None:
         actor = _myself(world_x=200, world_y=90)
         prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
-        decision = WalkToBreakable(actor_slot="P1", target_slot="obj09")
+        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, prop}, gamepad)
+        execute_verb(verb, {actor, prop}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
 
-    def test_holds_no_direction_once_already_at_the_stopping_point(self) -> None:
+    def test_presses_b_once_inside_smash_range(self) -> None:
+        # dx=32 is inside BREAKABLE_PUNCH_X (36). Under the old split verbs
+        # this was where WalkToBreakable stopped holding and the actor had to
+        # wait for SmashBreakable to win a later tick; one verb hits now.
         actor = _myself(world_x=68, world_y=90)
         prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
-        decision = WalkToBreakable(actor_slot="P1", target_slot="obj09")
+        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
         gamepad, client = _gamepad()
-        gamepad.hold(RIGHT)  # start non-zero so a hold(0) call is observable
-        client.hold_buttons.reset_mock()
 
-        execute_decision(decision, {actor, prop}, gamepad)
+        execute_verb(verb, {actor, prop}, gamepad)
 
-        client.hold_buttons.assert_called_once_with(player1=0, player2=0)
+        client.press_buttons.assert_called_once_with(player1=B | RIGHT, player2=0, frames=4)
+
+    def test_faces_the_prop_before_hitting_it(self) -> None:
+        actor = _myself(world_x=120, world_y=90)
+        prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
+        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {actor, prop}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B | LEFT, player2=0, frames=4)
 
     def test_missing_actor_or_target_does_nothing(self) -> None:
         prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
-        decision = WalkToBreakable(actor_slot="P1", target_slot="obj09")
+        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {prop}, gamepad)
+        execute_verb(verb, {prop}, gamepad)
 
         client.hold_buttons.assert_not_called()
 
@@ -774,10 +788,10 @@ class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):
         prop = Breakable(slot="obj09", world_x=50, world_y=90, type_id=0x40)
         camera = CameraRange(left=0, right=200, top=0, bottom=112)
         target = _enemy(world_x=100, world_y=90)
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, target, prop, camera}, gamepad)
+        execute_verb(verb, {actor, target, prop, camera}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT | UP, player2=0)
 
@@ -786,10 +800,10 @@ class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):
         prop = Breakable(slot="obj09", world_x=50, world_y=90, type_id=0x40)
         camera = CameraRange(left=200, right=400, top=0, bottom=112)
         target = _enemy(world_x=100, world_y=90)
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, target, prop, camera}, gamepad)
+        execute_verb(verb, {actor, target, prop, camera}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
@@ -804,10 +818,10 @@ class ExecuteMovementPitAvoidanceTests(unittest.TestCase):
         pit = Pit(world_x=45, lane_y=84, width=10, height=12)
         camera = CameraRange(left=0, right=200, top=0, bottom=112)
         target = _enemy(world_x=100, world_y=90)
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, target, pit, camera}, gamepad)
+        execute_verb(verb, {actor, target, pit, camera}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT | UP, player2=0)
 
@@ -816,10 +830,10 @@ class ExecuteMovementPitAvoidanceTests(unittest.TestCase):
         pit = Pit(world_x=45, lane_y=84, width=10, height=12)
         camera = CameraRange(left=200, right=400, top=0, bottom=112)
         target = _enemy(world_x=100, world_y=90)
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, target, pit, camera}, gamepad)
+        execute_verb(verb, {actor, target, pit, camera}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
@@ -829,10 +843,10 @@ class ExecuteMovementPitAvoidanceTests(unittest.TestCase):
         pit = Pit(world_x=-50, lane_y=84, width=10, height=12)
         camera = CameraRange(left=-100, right=200, top=0, bottom=112)
         target = _enemy(world_x=100, world_y=90)
-        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, target, pit, camera}, gamepad)
+        execute_verb(verb, {actor, target, pit, camera}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
@@ -841,28 +855,28 @@ class ExecuteWalkToWeaponTests(unittest.TestCase):
     def test_holds_movement_when_far_from_weapon(self) -> None:
         actor = _myself(world_x=0, world_y=0)
         weapon = Weapon(slot="obj05", world_x=100, world_y=100, weapon_type=0x08)
-        decision = WalkToWeapon(actor_slot="P1", target_slot="obj05")
+        verb = WalkToWeapon(actor_slot="P1", target_slot="obj05")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, weapon}, gamepad)
+        execute_verb(verb, {actor, weapon}, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT | DOWN, player2=0)
 
     def test_presses_punch_when_adjacent(self) -> None:
         actor = _myself(world_x=0, world_y=0)
         weapon = Weapon(slot="obj05", world_x=10, world_y=5, weapon_type=0x08)
-        decision = WalkToWeapon(actor_slot="P1", target_slot="obj05")
+        verb = WalkToWeapon(actor_slot="P1", target_slot="obj05")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, weapon}, gamepad)
+        execute_verb(verb, {actor, weapon}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
     def test_missing_actor_or_target_does_nothing(self) -> None:
-        decision = WalkToWeapon(actor_slot="P1", target_slot="obj05")
+        verb = WalkToWeapon(actor_slot="P1", target_slot="obj05")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, set(), gamepad)
+        execute_verb(verb, set(), gamepad)
 
         client.hold_buttons.assert_not_called()
         client.press_buttons.assert_not_called()
@@ -874,10 +888,10 @@ class ExecuteWalkToPickupTests(unittest.TestCase):
         food = HealthPickup(
             slot="obj06", world_x=10, world_y=5, pickup_type=0x4B, health_delta=20
         )
-        decision = WalkToPickup(actor_slot="P1", target_slot="obj06")
+        verb = WalkToPickup(actor_slot="P1", target_slot="obj06")
         gamepad, client = _gamepad()
 
-        execute_decision(decision, {actor, food}, gamepad)
+        execute_verb(verb, {actor, food}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 

@@ -1,14 +1,14 @@
-"""``determine_priority_decision`` — rank ``Decision`` tokens by emergency.
+"""``determine_priority_verb`` — rank ``Verb`` tokens by emergency.
 
 Per ``AI.md``: this also performs target selection, since ranking by
-emergency and keeping only the highest-ranked ``Decision`` is what collapses
+emergency and keeping only the highest-ranked ``Verb`` is what collapses
 several same-type candidates (e.g. a ``Punch`` against each of two nearby
 enemies) down to one.
 
 Each ``_emergency_*`` function below computes its score from the
 ``Information`` tokens present in the ``Context`` — per the matching
-concrete ``Decision`` class's ``Raises emergency: ...`` docstring line —
-never from the decision's type alone. The module constants are named
+concrete ``Verb`` class's ``Raises emergency: ...`` docstring line —
+never from the verb's type alone. The module constants are named
 *contributions* consulted when their token condition holds; they are not
 applied unconditionally.
 """
@@ -24,6 +24,7 @@ from ..phases import HITSTUN_FRAMES, CombatPhase, is_dangerous
 from . import reach
 from .decide import (
     HEALTH_CRITICAL_PERCENT,
+    in_smash_range,
     KNIFE_MELEE_X,
     KNIFE_RANGE_X,
     KNIFE_RANGE_Y,
@@ -40,8 +41,8 @@ from .tokens import (
     AttackHeldEnemy,
     Punch,
     RearAttack,
+    OpenBreakable,
     ReleaseGrab,
-    SmashBreakable,
     SprayPepper,
     StabWithKnifeOrBottle,
     Supplex,
@@ -70,11 +71,10 @@ from .tokens import (
     SpecialPickup,
 )
 from .tokens import CallPolice
-from .tokens import Context, Decision, find, find_all
+from .tokens import Context, Verb, find, find_all
 from .tokens import (
     RetreatFromDanger,
     WalkToAdvanceStage,
-    WalkToBreakable,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
@@ -149,8 +149,12 @@ _EMERGENCY_JUMP_ATTACK_PUNISHABLE = 28  # below punch; never prefer hop over str
 _EMERGENCY_JUMP_ATTACK_DEFAULT = 18
 _EMERGENCY_THROW_KNIFE = 25
 _EMERGENCY_THROW_PEPPER = 25
-_EMERGENCY_SMASH_BREAKABLE = 16
-_EMERGENCY_WALK_TO_BREAKABLE = 14
+# One verb, two tiers -- the same two the former SmashBreakable (flat 16 in
+# range) and WalkToBreakable (14 down to 8 by distance) carried, so merging
+# them changed no ranking: being in range is simply the top of OpenBreakable's
+# own scale rather than a different verb.
+_EMERGENCY_OPEN_BREAKABLE_IN_RANGE = 16
+_EMERGENCY_OPEN_BREAKABLE_APPROACH = 14
 _EMERGENCY_WALK_TO_WEAPON = 8  # reference value: knife (rank 5) via _EMERGENCY_WALK_TO_WEAPON_BASE
 _EMERGENCY_WALK_TO_WEAPON_BASE = 3  # + weapon_rank (2..5) -> 5..8
 _EMERGENCY_WALK_TO_PICKUP_CRITICAL_HEALTH = 50
@@ -185,17 +189,17 @@ def _distance_emergency(distance: float, *, base: int, floor: int, step_px: floa
     """Near-continuous distance scoring: ``base`` at distance 0, dropping by
     1 every ``step_px`` pixels, floored at ``floor`` -- both must stay
     inside the caller's own established emergency band, never crossing into
-    a different decision type's tier. This is what lets ``could_*``
+    a different verb type's tier. This is what lets ``could_*``
     functions (decide.py) stop pre-selecting a single "best" candidate
-    themselves and produce one Decision per possibility instead, per
+    themselves and produce one Verb per possibility instead, per
     AI.md's own worked example (several ``Punch`` candidates collapsing to
-    one only in ``determine_priority_decision``): the ranking still favours
+    one only in ``determine_priority_verb``): the ranking still favours
     the closest/best option, it just happens here instead of inside the
     could_* function.
 
     A handful of coarse buckets was tried first and discarded: with several
     enemies clustered together (the common case), most fell into the same
-    bucket and tied every tick, so determine_priority_decision's random
+    bucket and tied every tick, so determine_priority_verb's random
     tie-break kept flipping the target -- confirmed live against a running
     host. One point per ``step_px`` makes an exact tie between two distinct
     candidates rare in practice.
@@ -204,22 +208,22 @@ def _distance_emergency(distance: float, *, base: int, floor: int, step_px: floa
     return max(floor, base - int(distance // step_px))
 
 
-def _emergency_counter_grab(decision: CounterGrab, context: Context) -> int:
-    actor = _find_actor(context, decision.actor_slot)
+def _emergency_counter_grab(verb: CounterGrab, context: Context) -> int:
+    actor = _find_actor(context, verb.actor_slot)
     if actor is not None and actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
         return _EMERGENCY_COUNTER_GRAB
     return _EMERGENCY_DEFAULT
 
 
-def _emergency_tech_recover(decision: TechRecover, context: Context) -> int:
-    actor = _find_actor(context, decision.actor_slot)
+def _emergency_tech_recover(verb: TechRecover, context: Context) -> int:
+    actor = _find_actor(context, verb.actor_slot)
     if actor is not None and actor.throw_tech_ready:
         return _EMERGENCY_TECH_RECOVER
     return _EMERGENCY_DEFAULT
 
 
-def _emergency_call_police(decision: CallPolice, context: Context) -> int:
-    actor = _find_actor(context, decision.actor_slot)
+def _emergency_call_police(verb: CallPolice, context: Context) -> int:
+    actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         return _EMERGENCY_DEFAULT
     threshold = (
@@ -234,9 +238,9 @@ def _emergency_call_police(decision: CallPolice, context: Context) -> int:
     return _EMERGENCY_DEFAULT
 
 
-def _emergency_rear_attack(decision: RearAttack, context: Context) -> int:
-    target = find(context, Enemy, slot=decision.target_slot)
-    actor = _find_actor(context, decision.actor_slot)
+def _emergency_rear_attack(verb: RearAttack, context: Context) -> int:
+    target = find(context, Enemy, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
     if target is None:
         return _EMERGENCY_DEFAULT
     dangerous = is_dangerous(target.combat_phase)
@@ -269,13 +273,13 @@ def _is_punish_window(context: Context, target_slot: str | None) -> bool:
     return any(token.target_slot == target_slot for token in find_all(context, PunishWindow))
 
 
-def _emergency_melee_strike(decision: Decision, context: Context) -> int:
+def _emergency_melee_strike(verb: Verb, context: Context) -> int:
     """Shared scoring for ``Punch`` / ``SwingBatOrPipe`` /
     ``StabWithKnifeOrBottle`` / ``SprayPepper`` -- same formula regardless
     of held weapon, since none of these has evidence of a different
     punishable-phase payoff."""
 
-    target = find(context, Enemy, slot=getattr(decision, "target_slot", None))
+    target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
     if target is None:
         return _EMERGENCY_DEFAULT
     if _is_punish_window(context, target.slot):
@@ -283,8 +287,8 @@ def _emergency_melee_strike(decision: Decision, context: Context) -> int:
     return _EMERGENCY_PUNCH_DEFAULT
 
 
-def _emergency_jump_attack(decision: JumpAttack, context: Context) -> int:
-    target = find(context, Enemy, slot=decision.target_slot)
+def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
+    target = find(context, Enemy, slot=verb.target_slot)
     if target is None:
         return _EMERGENCY_DEFAULT
     if _is_punish_window(context, target.slot):
@@ -292,7 +296,7 @@ def _emergency_jump_attack(decision: JumpAttack, context: Context) -> int:
     return _EMERGENCY_JUMP_ATTACK_DEFAULT
 
 
-def _emergency_grab_enemy(decision: GrabEnemy, context: Context) -> int:
+def _emergency_grab_enemy(verb: GrabEnemy, context: Context) -> int:
     """The best tier among the ``GrabOpportunity`` tokens for this pair.
 
     Several opportunities can hold at once (a whip enemy in front *and* a
@@ -305,8 +309,8 @@ def _emergency_grab_enemy(decision: GrabEnemy, context: Context) -> int:
     opportunities = [
         token
         for token in find_all(context, GrabOpportunity)
-        if token.actor_slot == decision.actor_slot
-        and token.target_slot == decision.target_slot
+        if token.actor_slot == verb.actor_slot
+        and token.target_slot == verb.target_slot
     ]
     if not opportunities:
         return _EMERGENCY_DEFAULT
@@ -319,29 +323,29 @@ def _emergency_grab_enemy(decision: GrabEnemy, context: Context) -> int:
     return score
 
 
-def _emergency_smash_breakable(decision: SmashBreakable, context: Context) -> int:
-    target = find(context, Breakable, slot=decision.target_slot)
-    if target is None:
-        return _EMERGENCY_DEFAULT
-    return _EMERGENCY_SMASH_BREAKABLE
+def _emergency_open_breakable(verb: OpenBreakable, context: Context) -> int:
+    """In smash range is the top tier; otherwise score by how far the walk-in
+    still is, so several props rank against each other."""
 
-
-def _emergency_walk_to_breakable(decision: WalkToBreakable, context: Context) -> int:
-    target = find(context, Breakable, slot=decision.target_slot)
-    actor = _find_actor(context, decision.actor_slot)
+    target = find(context, Breakable, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
+    if in_smash_range(actor, target):
+        return _EMERGENCY_OPEN_BREAKABLE_IN_RANGE
     distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
-    return _distance_emergency(distance, base=_EMERGENCY_WALK_TO_BREAKABLE, floor=8, step_px=15)
+    return _distance_emergency(
+        distance, base=_EMERGENCY_OPEN_BREAKABLE_APPROACH, floor=8, step_px=15
+    )
 
 
-def _emergency_walk_to_weapon(decision: WalkToWeapon, context: Context) -> int:
+def _emergency_walk_to_weapon(verb: WalkToWeapon, context: Context) -> int:
     upgrade = next(
         (
             token
             for token in find_all(context, WeaponUpgrade)
-            if token.actor_slot == decision.actor_slot
-            and token.target_slot == decision.target_slot
+            if token.actor_slot == verb.actor_slot
+            and token.target_slot == verb.target_slot
         ),
         None,
     )
@@ -355,37 +359,37 @@ def _emergency_walk_to_weapon(decision: WalkToWeapon, context: Context) -> int:
     # higher -- e.g. knife (rank 5) reaches the original flat value 8,
     # pepper (rank 2) sits lower at 5. Stays inside the gap between
     # ScorePickup (3) and SpecialPickup (9) so it never crosses into a
-    # different decision type's tier.
+    # different verb type's tier.
     return _EMERGENCY_WALK_TO_WEAPON_BASE + rank
 
 
-def _emergency_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context) -> int:
-    target = find(context, Enemy, slot=decision.target_slot)
-    actor = _find_actor(context, decision.actor_slot)
+def _emergency_walk_to_near_enemy(verb: WalkToNearEnemy, context: Context) -> int:
+    target = find(context, Enemy, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
     distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
     return _distance_emergency(distance, base=_EMERGENCY_WALK_TO_NEAR_ENEMY, floor=8, step_px=15)
 
 
-def _emergency_retreat_from_danger(decision: RetreatFromDanger, context: Context) -> int:
-    target = find(context, Enemy, slot=decision.target_slot)
-    actor = _find_actor(context, decision.actor_slot)
+def _emergency_retreat_from_danger(verb: RetreatFromDanger, context: Context) -> int:
+    target = find(context, Enemy, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
     threatening = any(
-        token.actor_slot == decision.actor_slot and token.target_slot == decision.target_slot
+        token.actor_slot == verb.actor_slot and token.target_slot == verb.target_slot
         for token in find_all(context, IncomingMelee)
     )
     if not threatening:
-        # The commit this decision was produced for is over (or the enemy
+        # The commit this verb was produced for is over (or the enemy
         # left the caution box): nothing left to back away from.
         return _EMERGENCY_DEFAULT
     distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
     # Closer to the still-dangerous, not-yet-hittable enemy is more urgent to
     # back away from -- stays above WalkToNearEnemy(14) so this wins over
     # still approaching the same target, below any real attack's tier.
-    # step_px is wider than the other distance-scored decisions' 15 because
+    # step_px is wider than the other distance-scored verbs' 15 because
     # this band is only three points tall (15..17, wedged between
     # WalkToNearEnemy and JumpAttack); 25px spreads those three points across
     # reach.too_close_to_keep_approaching's whole caution zone instead of
@@ -393,18 +397,18 @@ def _emergency_retreat_from_danger(decision: RetreatFromDanger, context: Context
     return _distance_emergency(distance, base=_EMERGENCY_RETREAT_FROM_DANGER, floor=15, step_px=25)
 
 
-def _emergency_walk_to_advance_stage(decision: WalkToAdvanceStage, context: Context) -> int:
+def _emergency_walk_to_advance_stage(verb: WalkToAdvanceStage, context: Context) -> int:
     if _advance_blocking_enemies(context):
         return _EMERGENCY_DEFAULT
     return _EMERGENCY_WALK_TO_ADVANCE_STAGE
 
 
-def _emergency_thrown_weapon(decision: Decision, context: Context, weight: int) -> int:
+def _emergency_thrown_weapon(verb: Verb, context: Context, weight: int) -> int:
     """Shared range check for the two attack-thrown weapons (knife, pepper —
     items-and-weapons.md's ``$21E6``): beyond melee, within throw range."""
 
-    target = find(context, Enemy, slot=getattr(decision, "target_slot", None))
-    actor = _find_actor(context, getattr(decision, "actor_slot", None))
+    target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
+    actor = _find_actor(context, getattr(verb, "actor_slot", None))
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
     dx = abs(target.world_x - actor.world_x)
@@ -417,17 +421,17 @@ def _emergency_thrown_weapon(decision: Decision, context: Context, weight: int) 
     return _distance_emergency(distance, base=weight, floor=weight - 4, step_px=15)
 
 
-def _emergency_throw_knife(decision: ThrowKnife, context: Context) -> int:
-    return _emergency_thrown_weapon(decision, context, _EMERGENCY_THROW_KNIFE)
+def _emergency_throw_knife(verb: ThrowKnife, context: Context) -> int:
+    return _emergency_thrown_weapon(verb, context, _EMERGENCY_THROW_KNIFE)
 
 
-def _emergency_throw_pepper(decision: ThrowPepper, context: Context) -> int:
-    return _emergency_thrown_weapon(decision, context, _EMERGENCY_THROW_PEPPER)
+def _emergency_throw_pepper(verb: ThrowPepper, context: Context) -> int:
+    return _emergency_thrown_weapon(verb, context, _EMERGENCY_THROW_PEPPER)
 
 
-def _emergency_walk_to_pickup(decision: WalkToPickup, context: Context) -> int:
-    pickup = find(context, Pickup, slot=decision.target_slot)
-    actor = _find_actor(context, decision.actor_slot)
+def _emergency_walk_to_pickup(verb: WalkToPickup, context: Context) -> int:
+    pickup = find(context, Pickup, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
     if pickup is None:
         return _EMERGENCY_WALK_TO_PICKUP_SCORE
     if isinstance(pickup, HealthPickup):
@@ -446,12 +450,12 @@ def _emergency_walk_to_pickup(decision: WalkToPickup, context: Context) -> int:
     return _EMERGENCY_WALK_TO_PICKUP_SCORE
 
 
-def _held_enemy_emergency(weight: int) -> Callable[[Decision, Context], int]:
+def _held_enemy_emergency(weight: int) -> Callable[[Verb, Context], int]:
     """Build an ``_emergency_*`` for a hold move: ``weight`` only while its
     target ``Enemy`` is actually held (``CombatPhase.GRABBED``)."""
 
-    def _emergency(decision: Decision, context: Context) -> int:
-        target = find(context, Enemy, slot=getattr(decision, "target_slot", None))
+    def _emergency(verb: Verb, context: Context) -> int:
+        target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
         if target is not None and target.combat_phase is CombatPhase.GRABBED:
             return weight
         return _EMERGENCY_DEFAULT
@@ -459,7 +463,7 @@ def _held_enemy_emergency(weight: int) -> Callable[[Decision, Context], int]:
     return _emergency
 
 
-_EMERGENCY_FUNCS: dict[type[Decision], Callable[[Decision, Context], int]] = {
+_EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     CounterGrab: _emergency_counter_grab,
     TechRecover: _emergency_tech_recover,
     CallPolice: _emergency_call_police,
@@ -468,7 +472,7 @@ _EMERGENCY_FUNCS: dict[type[Decision], Callable[[Decision, Context], int]] = {
     SwingBatOrPipe: _emergency_melee_strike,
     StabWithKnifeOrBottle: _emergency_melee_strike,
     SprayPepper: _emergency_melee_strike,
-    SmashBreakable: _emergency_smash_breakable,
+    OpenBreakable: _emergency_open_breakable,
     GrabEnemy: _emergency_grab_enemy,
     ThrowHeldEnemy: _held_enemy_emergency(_EMERGENCY_HOLD_THROW),
     Supplex: _held_enemy_emergency(_EMERGENCY_HOLD_SUPPLEX),
@@ -478,7 +482,6 @@ _EMERGENCY_FUNCS: dict[type[Decision], Callable[[Decision, Context], int]] = {
     JumpAttack: _emergency_jump_attack,
     ThrowKnife: _emergency_throw_knife,
     ThrowPepper: _emergency_throw_pepper,
-    WalkToBreakable: _emergency_walk_to_breakable,
     WalkToWeapon: _emergency_walk_to_weapon,
     WalkToPickup: _emergency_walk_to_pickup,
     WalkToNearEnemy: _emergency_walk_to_near_enemy,
@@ -519,49 +522,49 @@ def _stunned_target_ceiling(context: Context, target_slot: str | None) -> int | 
     return _EMERGENCY_ATTACK_HITSTUN
 
 
-def _emergency(decision: Decision, context: Context) -> int:
-    func = _EMERGENCY_FUNCS.get(type(decision))
-    score = _EMERGENCY_DEFAULT if func is None else func(decision, context)
-    if isinstance(decision, Attack):
+def _emergency(verb: Verb, context: Context) -> int:
+    func = _EMERGENCY_FUNCS.get(type(verb))
+    score = _EMERGENCY_DEFAULT if func is None else func(verb, context)
+    if isinstance(verb, Attack):
         # A stunned enemy cannot act, cannot retaliate, and will still be
         # standing there in a moment, so it must never outrank dealing with
         # one that can -- which is what the punishable tier (60) made it do,
         # above even the RearAttack escape (55) with a second enemy live at
         # the actor's back. Strictly a ceiling: an attack already ranked
         # lower keeps its own score.
-        ceiling = _stunned_target_ceiling(context, getattr(decision, "target_slot", None))
+        ceiling = _stunned_target_ceiling(context, getattr(verb, "target_slot", None))
         if ceiling is not None:
             return min(score, ceiling)
     return score
 
 
-def determine_priority_decision(context: Context) -> Context:
-    """Keep every ``Information`` token; collapse ``Decision`` tokens to one."""
+def determine_priority_verb(context: Context) -> Context:
+    """Keep every ``Information`` token; collapse ``Verb`` tokens to one."""
 
-    decisions = find_all(context, Decision)
-    if not decisions:
+    verbs = find_all(context, Verb)
+    if not verbs:
         return context
 
-    scored = [(_emergency(decision, context), decision) for decision in decisions]
+    scored = [(_emergency(verb, context), verb) for verb in verbs]
     max_emergency = max(score for score, _ in scored)
-    top_emergency = [decision for score, decision in scored if score == max_emergency]
+    top_emergency = [verb for score, verb in scored if score == max_emergency]
 
-    max_priority = max(decision.priority for decision in top_emergency)
-    tied = [decision for decision in top_emergency if decision.priority == max_priority]
+    max_priority = max(verb.priority for verb in top_emergency)
+    tied = [verb for verb in top_emergency if verb.priority == max_priority]
 
     if len(tied) == 1:
         winner = tied[0]
     else:
         # tied entries are never literally the same object here: Context is
-        # a set of frozen/hashable Decision dataclasses, so two candidates
+        # a set of frozen/hashable Verb dataclasses, so two candidates
         # with identical priority/actor_slot/target_slot would already have
         # deduplicated into one. Log full repr (not just the class name) so
         # that distinguishing field -- almost always a different
         # target_slot/actor_slot -- is visible instead of looking like a
         # duplicate.
-        details = ", ".join(sorted(repr(decision) for decision in tied))
+        details = ", ".join(sorted(repr(verb) for verb in tied))
         logger.warning(
-            "determine_priority_decision: %d decisions tied at emergency=%d "
+            "determine_priority_verb: %d verbs tied at emergency=%d "
             "priority=%d (%s); picking one at random. Assign distinct "
             "priorities to break this deterministically.",
             len(tied),
@@ -571,4 +574,4 @@ def determine_priority_decision(context: Context) -> Context:
         )
         winner = random.choice(tied)
 
-    return {token for token in context if not isinstance(token, Decision)} | {winner}
+    return {token for token in context if not isinstance(token, Verb)} | {winner}

@@ -320,7 +320,7 @@ class ObserverApp:
             event.set()
         else:
             event.clear()
-            # Clear the HUD's live decision state so the label reads as idle.
+            # Clear the HUD's live verb state so the label reads as idle.
             self._agent_loops[player_index].inform_hud(set())
             self._gamepads[player_index].release()
 
@@ -435,8 +435,8 @@ class ObserverApp:
                     self.latest(),
                     agent_p1_enabled=self.agent_p1_enabled.is_set(),
                     agent_p2_enabled=self.agent_p2_enabled.is_set(),
-                    p1_state=self._agent_loops[1].decision_state(),
-                    p2_state=self._agent_loops[2].decision_state(),
+                    p1_state=self._agent_loops[1].verb_state(),
+                    p2_state=self._agent_loops[2].verb_state(),
                 )
             except Exception as exc:  # noqa: BLE001
                 self._hud.update(disconnected_snapshot(f"HUD error: {exc}"))

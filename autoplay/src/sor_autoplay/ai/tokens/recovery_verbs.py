@@ -1,4 +1,4 @@
-"""``Recovery``-branch ``Decision`` tokens.
+"""``Recovery``-branch ``Verb`` tokens.
 
 Not ``Attack`` (strikes nothing), not ``Walk`` (no movement target), not
 ``GrabMechanics`` (not about a hold) -- a distinct family for actions whose
@@ -10,12 +10,12 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
-from .tokens import Decision
+from .tokens import Verb
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Recovery(Decision, ABC):
-    """A decision that escapes or shortens a bad state the actor is in,
+class Recovery(Verb, ABC):
+    """A verb that escapes or shortens a bad state the actor is in,
     rather than acting on an enemy, prop, or held body."""
 
 

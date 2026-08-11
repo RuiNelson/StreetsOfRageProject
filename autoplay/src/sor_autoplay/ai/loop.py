@@ -5,8 +5,8 @@
 observer's existing single-poll-per-tick discipline.
 
 ``inform_hud`` implements AI.md's UI step: it copies the surviving
-``Decision`` (and every candidate that preceded it) into a thread-safe
-``DecisionState`` that the observer's Tk thread reads for the HUD.
+``Verb`` (and every candidate that preceded it) into a thread-safe
+``VerbState`` that the observer's Tk thread reads for the HUD.
 """
 
 from __future__ import annotations
@@ -16,61 +16,61 @@ from dataclasses import dataclass
 
 from sor_autoplay.state import GameSnapshot
 
-from .decide import generate_decision_tokens
-from .execute import execute_decision, press_no_button
+from .decide import generate_verb_tokens
+from .execute import execute_verb, press_no_button
 from .gamepad import VirtualGamepad
 from .inference import generate_inference_tokens
 from .observe import generate_direct_observation_tokens
-from .priority import determine_priority_decision
-from .tokens import Context, Decision, find_all
+from .priority import determine_priority_verb
+from .tokens import Context, Verb, find_all
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class DecisionState:
+class VerbState:
     """Thread-safe snapshot of one player's last tick, for the HUD.
 
-    ``winning`` is the ``Decision`` that survived
-    ``determine_priority_decision`` and that ``execute_decision`` is (about
-    to be) carrying out. ``pending`` holds every candidate ``Decision`` the
+    ``winning`` is the ``Verb`` that survived
+    ``determine_priority_verb`` and that ``execute_verb`` is (about
+    to be) carrying out. ``pending`` holds every candidate ``Verb`` the
     tick considered before that collapse, so the HUD can also show what the
     AI was choosing between.
     """
 
-    winning: Decision | None
-    pending: tuple[Decision, ...]
+    winning: Verb | None
+    pending: tuple[Verb, ...]
 
 
 class AgentLoop:
     def __init__(self, gamepad: VirtualGamepad) -> None:
         self._gamepad = gamepad
-        self._decision_state = DecisionState(winning=None, pending=())
+        self._verb_state = VerbState(winning=None, pending=())
         self._state_lock = threading.Lock()
 
-    def inform_hud(self, context: Context, *, pending: tuple[Decision, ...] = ()) -> None:
-        """Copy the current tick's decisions into the thread-safe HUD state.
+    def inform_hud(self, context: Context, *, pending: tuple[Verb, ...] = ()) -> None:
+        """Copy the current tick's verbs into the thread-safe HUD state.
 
-        ``context`` is the post-collapse context (at most one ``Decision``);
+        ``context`` is the post-collapse context (at most one ``Verb``);
         ``pending`` carries the pre-collapse candidate list so the HUD can
         also show what the AI was choosing between. Callers may also pass an
         empty context (e.g. right after disabling the agent) to clear it.
         """
 
-        decisions = tuple(find_all(context, Decision))
-        winning = decisions[0] if decisions else None
+        verbs = tuple(find_all(context, Verb))
+        winning = verbs[0] if verbs else None
         with self._state_lock:
-            self._decision_state = DecisionState(winning=winning, pending=pending)
+            self._verb_state = VerbState(winning=winning, pending=pending)
 
-    def decision_state(self) -> DecisionState:
+    def verb_state(self) -> VerbState:
         with self._state_lock:
-            return self._decision_state
+            return self._verb_state
 
-    def tick(self, snapshot: GameSnapshot, *, player_index: int) -> Decision | None:
-        """Run one iteration and return the winning ``Decision``, if any.
+    def tick(self, snapshot: GameSnapshot, *, player_index: int) -> Verb | None:
+        """Run one iteration and return the winning ``Verb``, if any.
 
         The return value is purely informational (e.g. for a HUD to show
         what the AI is doing) — callers must not feed it back into the
-        pipeline; ``execute_decision`` has already run by the time it comes
-        back. The HUD's canonical source is ``decision_state()``, which
+        pipeline; ``execute_verb`` has already run by the time it comes
+        back. The HUD's canonical source is ``verb_state()``, which
         ``inform_hud`` fills every tick.
         """
 
@@ -85,16 +85,16 @@ class AgentLoop:
 
         context = generate_direct_observation_tokens(snapshot, player_index=player_index)
         context |= generate_inference_tokens(context)
-        context |= generate_decision_tokens(context)
-        pending = tuple(find_all(context, Decision))
-        context = determine_priority_decision(context)
+        context |= generate_verb_tokens(context)
+        pending = tuple(find_all(context, Verb))
+        context = determine_priority_verb(context)
         self.inform_hud(context, pending=pending)
 
-        decisions = find_all(context, Decision)
-        if not decisions:
+        verbs = find_all(context, Verb)
+        if not verbs:
             press_no_button(self._gamepad)
             return None
 
-        decision = decisions[0]
-        execute_decision(decision, context, self._gamepad)
-        return decision
+        verb = verbs[0]
+        execute_verb(verb, context, self._gamepad)
+        return verb

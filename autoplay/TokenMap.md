@@ -9,7 +9,7 @@ classDiagram
     direction LR
 
     Token <|-- Information
-    Token <|-- Decision
+    Token <|-- Verb
 
     Information <|-- Observed
     Information <|-- Inferred
@@ -68,15 +68,14 @@ classDiagram
     GrabOpportunity <|-- GrabToClearRear
     GrabOpportunity <|-- GrabToNeutralizeWhip
 
-    Decision <|-- Walk
+    Verb <|-- Walk
     Walk <|-- WalkToNearEnemy
     Walk <|-- WalkToAdvanceStage
     Walk <|-- WalkToWeapon
     Walk <|-- WalkToPickup
-    Walk <|-- WalkToBreakable
     Walk <|-- RetreatFromDanger
 
-    Decision <|-- Attack
+    Verb <|-- Attack
     Attack <|-- MeleeAttacks
     Attack <|-- GrabMechanics
     MeleeAttacks <|-- Punch
@@ -94,12 +93,12 @@ classDiagram
     GrabMechanics <|-- FlipHold
     GrabMechanics <|-- ReleaseGrab
     MeleeAttacks <|-- JumpAttack
-    Attack <|-- SmashBreakable
+    Attack <|-- OpenBreakable
     MeleeAttacks <|-- RearAttack
     GrabMechanics <|-- CounterGrab
 
     Attack <|-- CallPolice
 
-    Decision <|-- Recovery
+    Verb <|-- Recovery
     Recovery <|-- TechRecover
 ```

@@ -7,6 +7,7 @@ from sor_autoplay.ai.tokens import (
     GrabEnemy,
     JumpAttack,
     AttackHeldEnemy,
+    OpenBreakable,
     Punch,
     RearAttack,
     SprayPepper,
@@ -18,7 +19,7 @@ from sor_autoplay.ai.tokens import (
 )
 from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay.ai.decide import (
-    generate_decision_tokens,
+    generate_verb_tokens,
     could_call_police,
     could_counter_grab,
     could_grab_enemy,
@@ -34,7 +35,7 @@ from sor_autoplay.ai.decide import (
     could_throw_knife,
     could_throw_pepper,
     could_walk_to_advance_stage,
-    could_walk_to_breakable,
+    could_open_breakable,
     could_walk_to_near_enemy,
     could_walk_to_pickup,
     could_walk_to_weapon,
@@ -44,12 +45,11 @@ from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
 from sor_autoplay.ai.tokens import Breakable
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
-from sor_autoplay.ai.tokens import Decision, Token
+from sor_autoplay.ai.tokens import Verb, Token
 from sor_autoplay.ai.tokens import (
     RetreatFromDanger,
     Walk,
     WalkToAdvanceStage,
-    WalkToBreakable,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
@@ -90,11 +90,11 @@ could_tech_recover = _with_inference(could_tech_recover)
 could_throw_knife = _with_inference(could_throw_knife)
 could_throw_pepper = _with_inference(could_throw_pepper)
 could_walk_to_advance_stage = _with_inference(could_walk_to_advance_stage)
-could_walk_to_breakable = _with_inference(could_walk_to_breakable)
+could_open_breakable = _with_inference(could_open_breakable)
 could_walk_to_near_enemy = _with_inference(could_walk_to_near_enemy)
 could_walk_to_pickup = _with_inference(could_walk_to_pickup)
 could_walk_to_weapon = _with_inference(could_walk_to_weapon)
-generate_decision_tokens = _with_inference(generate_decision_tokens)
+generate_verb_tokens = _with_inference(generate_verb_tokens)
 
 
 def make_myself(**overrides) -> Myself:
@@ -164,11 +164,11 @@ def make_nora(**overrides) -> Nora:
     return Nora(**fields)
 
 
-class DecisionDataclassContractTests(unittest.TestCase):
+class VerbDataclassContractTests(unittest.TestCase):
     def test_decision_class_hierarchy(self) -> None:
-        self.assertTrue(issubclass(Walk, Decision))
-        self.assertTrue(issubclass(Attack, Decision))
-        self.assertTrue(issubclass(CallPolice, Decision))
+        self.assertTrue(issubclass(Walk, Verb))
+        self.assertTrue(issubclass(Attack, Verb))
+        self.assertTrue(issubclass(CallPolice, Verb))
         self.assertTrue(issubclass(WalkToNearEnemy, Walk))
         self.assertTrue(issubclass(Punch, Attack))
 
@@ -243,8 +243,8 @@ class CouldPunchTests(unittest.TestCase):
 
     def test_never_fires_for_the_partner(self) -> None:
         # One AgentLoop runs per AI-controlled player and executes the
-        # surviving decision on *that* player's own VirtualGamepad, so a
-        # decision parametrized with the partner's slot, position and facing
+        # surviving verb on *that* player's own VirtualGamepad, so a
+        # verb parametrized with the partner's slot, position and facing
         # would be carried out on the wrong pad -- Myself pressing B at empty
         # air because the partner happened to be next to an enemy, and
         # out-ranking Myself's own candidates while doing it. Partner stays
@@ -512,7 +512,7 @@ class CouldWalkToNearEnemyTests(unittest.TestCase):
     def test_produces_one_candidate_per_reachable_enemy_not_just_the_nearest(self) -> None:
         # could_walk_to_near_enemy must not pre-select -- per AI.md, ranking
         # several same-kind candidates against each other is
-        # determine_priority_decision's job (see test_priority.py's
+        # determine_priority_verb's job (see test_priority.py's
         # test_walk_to_near_enemy_picks_the_closer_of_two_candidates).
         myself = make_myself(world_x=0, world_y=0)
         # Outside punch/rear connect bands so walk is the right candidate.
@@ -543,7 +543,7 @@ class CouldWalkToNearEnemyTests(unittest.TestCase):
     def test_falls_back_to_an_off_screen_enemy_ahead_in_the_stage_direction(self) -> None:
         # Regression: with nothing on-screen, an off-screen enemy still
         # correctly holds back could_walk_to_advance_stage, but nothing
-        # ever chased it, so the AI produced no decision at all and the
+        # ever chased it, so the AI produced no verb at all and the
         # camera never moved to bring it into view.
         myself = make_myself(world_x=100, world_y=100)
         camera = CameraRange(left=0, right=200, top=0, bottom=200)
@@ -737,7 +737,7 @@ class CouldRetreatFromDangerTests(unittest.TestCase):
         # The other half of the same gate: could_walk_to_near_enemy skips the
         # enemy could_retreat_from_danger owns, so an X-only caution zone
         # left the actor neither approaching nor retreating -- it just
-        # produced no decision at all for a threat it was never in line with.
+        # produced no verb at all for a threat it was never in line with.
         myself = make_myself(world_x=100, world_y=40, facing_left=False)
         enemy = make_enemy(world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING)
         camera = CameraRange(left=0, right=400, top=0, bottom=200)
@@ -1236,7 +1236,7 @@ class CouldWalkToWeaponTests(unittest.TestCase):
     def test_produces_one_candidate_per_upgrade_not_just_the_best(self) -> None:
         # could_walk_to_weapon must not pre-select -- per AI.md, ranking
         # several same-kind candidates against each other is
-        # determine_priority_decision's job (see test_priority.py's
+        # determine_priority_verb's job (see test_priority.py's
         # test_walk_to_weapon_picks_the_higher_ranked_upgrade).
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
         camera = CameraRange(left=0, right=200, top=0, bottom=200)
@@ -1289,14 +1289,14 @@ class CouldWalkToPickupTests(unittest.TestCase):
         self.assertEqual(could_walk_to_pickup(context), set())
 
 
-class GenerateDecisionTokensTests(unittest.TestCase):
+class GenerateVerbTokensTests(unittest.TestCase):
     def test_unions_all_candidates_into_context(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
         # Inside Axel punch band (inner 16..outer 50).
         enemy = make_enemy(world_x=130, world_y=105)
         context: set[Token] = {myself, enemy}
 
-        result = generate_decision_tokens(context)
+        result = generate_verb_tokens(context)
 
         self.assertIn(myself, result)
         self.assertIn(enemy, result)
@@ -1310,48 +1310,66 @@ class GenerateDecisionTokensTests(unittest.TestCase):
         context: set[Token] = {myself, enemy}
         original = set(context)
 
-        generate_decision_tokens(context)
+        generate_verb_tokens(context)
 
         self.assertEqual(context, original)
 
 
-class CouldWalkToBreakableTests(unittest.TestCase):
+class CouldOpenBreakableTests(unittest.TestCase):
     def test_fires_for_an_in_camera_breakable_beyond_smash_range(self) -> None:
         myself = make_myself(world_x=0, world_y=0)
         camera = CameraRange(left=-50, right=200, top=-50, bottom=200)
         prop = Breakable(slot="obj09", world_x=60, world_y=0, type_id=0x40)
         context: set[Token] = {myself, camera, prop}
 
-        result = could_walk_to_breakable(context)
+        result = could_open_breakable(context)
 
-        self.assertEqual(result, {WalkToBreakable(actor_slot="P1", target_slot="obj09")})
+        self.assertEqual(result, {OpenBreakable(actor_slot="P1", target_slot="obj09")})
 
-    def test_does_not_fire_when_already_in_smash_range(self) -> None:
+    def test_fires_when_already_in_smash_range(self) -> None:
+        # The old split produced nothing here from could_walk_to_breakable
+        # and relied on could_smash_breakable for the same prop; one verb
+        # covers both, and priority scores this at the in-range tier.
         myself = make_myself(world_x=0, world_y=0)
         camera = CameraRange(left=-50, right=200, top=-50, bottom=200)
         prop = Breakable(slot="obj09", world_x=10, world_y=0, type_id=0x40)
         context: set[Token] = {myself, camera, prop}
 
-        self.assertEqual(could_walk_to_breakable(context), set())
+        self.assertEqual(
+            could_open_breakable(context), {OpenBreakable(actor_slot="P1", target_slot="obj09")}
+        )
+
+    def test_fires_for_a_prop_in_range_behind_the_actor(self) -> None:
+        # Behind the stage direction, so the "ahead" filter drops it -- but
+        # it is already in reach, and opening it costs only the B press.
+        myself = make_myself(world_x=200, world_y=0)
+        camera = CameraRange(left=-50, right=400, top=-50, bottom=200)
+        stage = Stage(level_index=0, direction="right")
+        prop = Breakable(slot="obj09", world_x=180, world_y=0, type_id=0x40)
+        context: set[Token] = {myself, camera, stage, prop}
+
+        self.assertEqual(
+            could_open_breakable(context), {OpenBreakable(actor_slot="P1", target_slot="obj09")}
+        )
 
     def test_produces_one_candidate_per_reachable_breakable_not_just_the_nearest(self) -> None:
         # Must not pre-select -- per AI.md, ranking several same-kind
-        # candidates against each other is determine_priority_decision's
+        # candidates against each other is determine_priority_verb's
         # job (see test_priority.py's
-        # test_walk_to_breakable_picks_the_closer_of_two_candidates).
+        # test_open_breakable_picks_the_closer_of_two_candidates).
         myself = make_myself(world_x=0, world_y=0)
         camera = CameraRange(left=-50, right=300, top=-50, bottom=200)
         near = Breakable(slot="near", world_x=60, world_y=0, type_id=0x40)
         far = Breakable(slot="far", world_x=250, world_y=0, type_id=0x40)
         context: set[Token] = {myself, camera, near, far}
 
-        result = could_walk_to_breakable(context)
+        result = could_open_breakable(context)
 
         self.assertEqual(
             result,
             {
-                WalkToBreakable(actor_slot="P1", target_slot="near"),
-                WalkToBreakable(actor_slot="P1", target_slot="far"),
+                OpenBreakable(actor_slot="P1", target_slot="near"),
+                OpenBreakable(actor_slot="P1", target_slot="far"),
             },
         )
 
@@ -1360,9 +1378,9 @@ class CouldWalkToBreakableTests(unittest.TestCase):
         prop = Breakable(slot="obj09", world_x=60, world_y=0, type_id=0x40)
         context: set[Token] = {myself, prop}
 
-        result = could_walk_to_breakable(context)
+        result = could_open_breakable(context)
 
-        self.assertEqual(result, {WalkToBreakable(actor_slot="P1", target_slot="obj09")})
+        self.assertEqual(result, {OpenBreakable(actor_slot="P1", target_slot="obj09")})
 
 
 if __name__ == "__main__":

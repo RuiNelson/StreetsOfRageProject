@@ -1,7 +1,7 @@
 import unittest
 from dataclasses import dataclass
 
-from sor_autoplay.ai.tokens import Decision, Information, Token, find, find_all
+from sor_autoplay.ai.tokens import Verb, Information, Token, find, find_all
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -16,19 +16,19 @@ class _OtherWidget(Information):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class _Order(Decision):
+class _Order(Verb):
     pass
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class _UnusedDecision(Decision):
+class _UnusedVerb(Verb):
     pass
 
 
 class TokenHierarchyTests(unittest.TestCase):
-    def test_information_and_decision_are_tokens(self) -> None:
+    def test_information_and_verb_are_tokens(self) -> None:
         self.assertTrue(issubclass(Information, Token))
-        self.assertTrue(issubclass(Decision, Token))
+        self.assertTrue(issubclass(Verb, Token))
 
     def test_default_priority_is_zero(self) -> None:
         widget = _Widget(slot="obj00")
@@ -78,7 +78,7 @@ class FindTests(unittest.TestCase):
         self.assertCountEqual(results, [self.widget_a, self.widget_b])
 
     def test_find_all_returns_empty_list_when_no_matches(self) -> None:
-        self.assertEqual(find_all(self.context, _UnusedDecision), [])
+        self.assertEqual(find_all(self.context, _UnusedVerb), [])
 
 
 if __name__ == "__main__":

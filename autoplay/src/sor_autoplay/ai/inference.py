@@ -182,7 +182,7 @@ def check_for_targets_in_reach(context: Context) -> Context:
     Computing these here instead of inside each ``could_*`` is what lets
     ``decide.py`` and ``priority.py`` ask the same question and get the same
     answer within a tick, and stops the same trigonometry from being redone
-    once per decision family.
+    once per verb family.
     """
 
     enemies = reach.live_enemies(context)

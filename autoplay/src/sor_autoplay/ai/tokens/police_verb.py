@@ -1,14 +1,14 @@
-"""The police-special ``Attack`` decision.
+"""The police-special ``Attack`` verb.
 
 ``CallPolice`` is the A-button police special: an attack, so it descends
-from ``Attack`` rather than directly from ``Decision``.
+from ``Attack`` rather than directly from ``Verb``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .attack_decisions import Attack
+from .attack_verbs import Attack
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

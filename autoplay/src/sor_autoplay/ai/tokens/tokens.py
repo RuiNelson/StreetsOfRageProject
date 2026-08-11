@@ -1,4 +1,4 @@
-"""Base ``Token``/``Information``/``Decision`` hierarchy and context lookup.
+"""Base ``Token``/``Information``/``Verb`` hierarchy and context lookup.
 
 Per ``AI.md``: a ``Token`` never embeds another ``Token`` by value. Any
 relationship between two tokens is expressed as a reference to the related
@@ -18,10 +18,10 @@ TokenT = TypeVar("TokenT", bound="Token")
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Token(ABC):
-    """Common base for every ``Information`` and ``Decision``.
+    """Common base for every ``Information`` and ``Verb``.
 
-    ``priority`` only breaks ties between ``Decision`` tokens that
-    :func:`determine_priority_decision <sor_autoplay.ai.priority.determine_priority_decision>`
+    ``priority`` only breaks ties between ``Verb`` tokens that
+    :func:`determine_priority_verb <sor_autoplay.ai.priority.determine_priority_verb>`
     ranks as equally emergent; it plays no role in emergency ranking itself.
     """
 
@@ -52,7 +52,7 @@ class Inferred(Information, ABC):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Decision(Token, ABC):
+class Verb(Token, ABC):
     """A deliberated, parametrized intent — not yet a control signal."""
 
 

@@ -582,7 +582,7 @@ class PitObservationTests(unittest.TestCase):
 
 class AnimationInProgressTests(unittest.TestCase):
     def test_absent_when_held_by_enemy(self) -> None:
-        # CounterGrab needs to act; HELD_BY_ENEMY must not block decisions.
+        # CounterGrab needs to act; HELD_BY_ENEMY must not block verbs.
         p1 = _player_snapshot(index=1)
         p2 = _player_snapshot(index=2, is_playable=False)
         entities = (
@@ -721,11 +721,11 @@ class StageAndCameraTests(unittest.TestCase):
         on_screen = reach_module.on_screen_enemies(context)
         self.assertEqual(on_screen, [enemy])
 
-        decisions = decide_module.could_walk_to_near_enemy(
+        verbs = decide_module.could_walk_to_near_enemy(
             generate_inference_tokens(set(context))
         )
         self.assertEqual(
-            decisions, {WalkToNearEnemy(actor_slot="P1", target_slot="obj00")}
+            verbs, {WalkToNearEnemy(actor_slot="P1", target_slot="obj00")}
         )
 
 

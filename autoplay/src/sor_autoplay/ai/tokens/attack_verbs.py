@@ -1,4 +1,4 @@
-"""``Attack``-branch ``Decision`` tokens.
+"""``Attack``-branch ``Verb`` tokens.
 
 No separate ``Combo`` class: ``$3028 (player_normal_attack_input)`` is
 documented as "normal-attack entry and combo continuation" -- one input, so
@@ -16,7 +16,7 @@ walking into an enemy without attacking.
 all issue the identical physical B-button press (see ``execute.py``'s shared
 ``_execute_melee_strike``) -- the ROM resolves a different move, reach, and
 damage purely from the actor's held weapon type. They are kept as distinct
-``Decision`` classes (rather than one ``Punch`` covering every held weapon)
+``Verb`` classes (rather than one ``Punch`` covering every held weapon)
 because they are not the same move: different animation, hitbox, and damage
 per weapons-range-and-damage.md / items-and-weapons.md, even though nothing
 about the *input* differs.
@@ -32,12 +32,12 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
-from .tokens import Decision
+from .tokens import Verb
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Attack(Decision, ABC):
-    """A decision that strikes a target — a foe, a prop, or a held body.
+class Attack(Verb, ABC):
+    """A verb that strikes a target — a foe, a prop, or a held body.
 
     Branch-wide emergency rule: whatever a concrete subclass's own
     ``Raises emergency`` line says, an attack whose target is a **stunned**
@@ -210,7 +210,7 @@ class ThrowKnife(WeaponAttacks):
     Produced by ``could_throw_knife`` once per on-screen enemy, when the
     actor holds a knife (type $08) and that enemy is beyond melee but
     within knife range -- never just the nearest; determine_priority_
-    decision picks among the candidates.
+    verb picks among the candidates.
 
     Raises emergency: (Enemy when beyond melee and within knife range)×25,
     closer scoring higher (distance-scored; see
@@ -233,7 +233,7 @@ class ThrowPepper(WeaponAttacks):
     actor holds pepper spray (type $0C) and that enemy is beyond melee but
     within throw range (reusing ``ThrowKnife``'s measured range constants —
     pepper's own effective throw range has not been separately measured) --
-    never just the nearest; determine_priority_decision picks among the
+    never just the nearest; determine_priority_verb picks among the
     candidates.
 
     Raises emergency: (Enemy when beyond melee and within throw range)×25,
@@ -340,13 +340,25 @@ class JumpAttack(MeleeAttacks):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class SmashBreakable(Attack):
-    """B near an intact prop (same input as punch; ROM hits the prop).
+class OpenBreakable(Attack):
+    """Deal with an intact prop: close the distance if needed, then B.
 
-    Produced by ``could_smash_breakable`` when an intact Breakable is in
-    smash range.
+    One verb rather than the former ``WalkToBreakable`` + ``SmashBreakable``
+    pair. Splitting them described the *executor's* two states, not two
+    intents: nothing ever wanted to walk to a prop without smashing it, and
+    the walk half could win a tick, be re-proposed the next, and never hand
+    over cleanly if the ranking drifted between the two tiers in between.
+    The intent is "open that prop"; how far away the actor happens to be is
+    the executor's problem (``execute._execute_open_breakable``) and the
+    ranking's input, not a second verb.
 
-    Raises emergency: Breakable×16.
+    Produced by ``could_open_breakable`` once per in-camera ``Breakable``
+    that is either already in smash range or ahead on the stage path --
+    never just the nearest; determine_priority_verb picks among them.
+
+    Raises emergency: (Breakable in smash range)×16, Breakable×14 otherwise,
+    closer scoring higher (distance-scored; see
+    priority._emergency_open_breakable).
     """
 
     priority: int = 9

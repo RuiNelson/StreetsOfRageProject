@@ -2,46 +2,46 @@ import os
 import unittest
 
 from sor_autoplay.ai.tokens import CounterGrab, Punch
-from sor_autoplay.ai.loop import DecisionState
+from sor_autoplay.ai.loop import VerbState
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import WalkToAdvanceStage
 from sor_autoplay.hud import ObserverHud, _window_config_path
-from sor_autoplay.hud import _describe_decision, _describe_pending
+from sor_autoplay.hud import _describe_verb, _describe_pending
 
 
-class DescribeDecisionTests(unittest.TestCase):
-    """_describe_decision is the HUD's "what is the AI doing" label -- it
-    reads the field names shared across ai/*.py's Decision subclasses
+class DescribeVerbTests(unittest.TestCase):
+    """_describe_verb is the HUD's "what is the AI doing" label -- it
+    reads the field names shared across ai/*.py's Verb subclasses
     (target_slot/threat_slot/direction/coordinate) instead of special-casing
     every concrete class, so this exercises each of those shapes."""
 
     def test_none_reads_as_no_button(self) -> None:
-        self.assertEqual(_describe_decision(None), "—  (no button)")
+        self.assertEqual(_describe_verb(None), "—  (no button)")
 
-    def test_decision_with_a_target_slot(self) -> None:
-        decision = Punch(actor_slot="P1", target_slot="obj03")
+    def test_verb_with_a_target_slot(self) -> None:
+        verb = Punch(actor_slot="P1", target_slot="obj03")
 
-        self.assertEqual(_describe_decision(decision), "Punch  (→obj03)")
+        self.assertEqual(_describe_verb(verb), "Punch  (→obj03)")
 
-    def test_decision_with_only_a_direction(self) -> None:
-        decision = WalkToAdvanceStage(actor_slot="P1", direction="right")
+    def test_verb_with_only_a_direction(self) -> None:
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
 
-        self.assertEqual(_describe_decision(decision), "WalkToAdvanceStage  (right)")
+        self.assertEqual(_describe_verb(verb), "WalkToAdvanceStage  (right)")
 
-    def test_decision_with_no_extra_fields_shows_bare_name(self) -> None:
-        self.assertEqual(_describe_decision(CallPolice(actor_slot="P1")), "CallPolice")
-        self.assertEqual(_describe_decision(CounterGrab(actor_slot="P1")), "CounterGrab")
+    def test_verb_with_no_extra_fields_shows_bare_name(self) -> None:
+        self.assertEqual(_describe_verb(CallPolice(actor_slot="P1")), "CallPolice")
+        self.assertEqual(_describe_verb(CounterGrab(actor_slot="P1")), "CounterGrab")
 
 
 class DescribePendingTests(unittest.TestCase):
     """_describe_pending renders the candidate list the AI considered before
-    priority collapse -- the HUD's "one extra label (pending decision)"."""
+    priority collapse -- the HUD's "one extra label (pending verb)"."""
 
     def test_empty_pending_reads_as_blank(self) -> None:
         self.assertEqual(_describe_pending(()), "")
 
-    def test_single_pending_decision(self) -> None:
-        state = DecisionState(
+    def test_single_pending_verb(self) -> None:
+        state = VerbState(
             winning=Punch(actor_slot="P1", target_slot="obj03"),
             pending=(Punch(actor_slot="P1", target_slot="obj03"),),
         )
@@ -49,7 +49,7 @@ class DescribePendingTests(unittest.TestCase):
             _describe_pending(state.pending), "Pending  Punch  (→obj03)"
         )
 
-    def test_multiple_pending_decisions_are_comma_joined(self) -> None:
+    def test_multiple_pending_verbs_are_comma_joined(self) -> None:
         pending = (
             Punch(actor_slot="P1", target_slot="obj03"),
             WalkToAdvanceStage(actor_slot="P1", direction="right"),

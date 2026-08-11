@@ -78,7 +78,7 @@ RETREAT_CAUTION_MARGIN = 24
 # enemy several lanes away is not a reason to back off -- and treating it as
 # one made the AI refuse to approach *and* walk backwards from a threat it
 # was never in line with. Kept below execute.WALK_TO_ENEMY_LANE_SAFETY_Y
-# (PUNCH_RANGE_Y + 16) so the sidestep that decision's executor performs
+# (PUNCH_RANGE_Y + 16) so the sidestep that verb's executor performs
 # actually leaves this zone instead of retreating from its own dodge.
 RETREAT_CAUTION_MARGIN_Y = PUNCH_RANGE_Y + 12
 
@@ -278,7 +278,7 @@ def rear_attack_is_warranted(
 def enemy_actionable(
     actor: PlayableCharacter, enemy: Enemy, enemies: list[Enemy]
 ) -> bool:
-    """True when an existing melee/rear-attack decision would actually fire
+    """True when an existing melee/rear-attack verb would actually fire
     on this enemy right now -- not just whether it sits inside
     ``in_punch_band``'s raw distance box.
 

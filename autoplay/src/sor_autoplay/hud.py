@@ -14,8 +14,8 @@ from pathlib import Path
 from tkinter import font as tkfont
 from typing import Callable
 
-from .ai.loop import DecisionState
-from .ai.tokens import Decision
+from .ai.loop import VerbState
+from .ai.tokens import Verb
 from .phases import CombatPhase, phase_color
 from .state import GameSnapshot, PlayerSnapshot
 from .world_map import MAP_ASPECT, WorldMap
@@ -141,7 +141,7 @@ class ObserverHud:
         self._p1_stats = self._label(self._col_p1, mono=True)
         self._p1_score = self._label(self._col_p1, mono=True)
         self._p1_hunt = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
-        self._p1_decision = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
+        self._p1_verb = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
         self._p1_pending = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
         self._p1_agent_toggle = self._label(self._col_p1, font=self._font_small, fg=_MUTED)
         self._p1_agent_toggle.configure(cursor="hand2")
@@ -154,7 +154,7 @@ class ObserverHud:
         self._p2_stats = self._label(self._col_p2, mono=True)
         self._p2_score = self._label(self._col_p2, mono=True)
         self._p2_hunt = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
-        self._p2_decision = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
+        self._p2_verb = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
         self._p2_pending = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
         self._p2_agent_toggle = self._label(self._col_p2, font=self._font_small, fg=_MUTED)
         self._p2_agent_toggle.configure(cursor="hand2")
@@ -454,8 +454,8 @@ class ObserverHud:
         *,
         agent_p1_enabled: bool = False,
         agent_p2_enabled: bool = False,
-        p1_state: DecisionState | None = None,
-        p2_state: DecisionState | None = None,
+        p1_state: VerbState | None = None,
+        p2_state: VerbState | None = None,
     ) -> None:
         if snapshot.connected:
             link = "● LIVE"
@@ -519,8 +519,8 @@ class ObserverHud:
         self._p1_hunt.configure(text=f"Hunted ×{h1}" if h1 else "")
         self._p2_hunt.configure(text=f"Hunted ×{h2}" if h2 else "")
 
-        self._render_decision(self._p1_decision, agent_p1_enabled, p1_state)
-        self._render_decision(self._p2_decision, agent_p2_enabled, p2_state)
+        self._render_verb(self._p1_verb, agent_p1_enabled, p1_state)
+        self._render_verb(self._p2_verb, agent_p2_enabled, p2_state)
         self._render_pending(self._p1_pending, agent_p1_enabled, p1_state)
         self._render_pending(self._p2_pending, agent_p2_enabled, p2_state)
 
@@ -537,16 +537,16 @@ class ObserverHud:
         else:
             label.configure(text="AI: OFF  (click to enable)", fg=_MUTED)
 
-    def _render_decision(
-        self, label: tk.Label, enabled: bool, state: DecisionState | None
+    def _render_verb(
+        self, label: tk.Label, enabled: bool, state: VerbState | None
     ) -> None:
         if not enabled or state is None:
             label.configure(text="")
             return
-        label.configure(text=f"Decision  {_describe_decision(state.winning)}", fg="#ffd84d")
+        label.configure(text=f"Verb  {_describe_verb(state.winning)}", fg="#ffd84d")
 
     def _render_pending(
-        self, label: tk.Label, enabled: bool, state: DecisionState | None
+        self, label: tk.Label, enabled: bool, state: VerbState | None
     ) -> None:
         if not enabled or state is None:
             label.configure(text="")
@@ -901,36 +901,36 @@ def _map_y(map_y: float, world: WorldMap, oy: float, plot_h: float) -> float:
     return oy + t * plot_h
 
 
-def _describe_decision(decision: Decision | None) -> str:
-    """One-line label for whichever ``Decision`` determine_priority_decision
-    kept, using the field names shared across the ``ai`` package's Decision
+def _describe_verb(verb: Verb | None) -> str:
+    """One-line label for whichever ``Verb`` determine_priority_verb
+    kept, using the field names shared across the ``ai`` package's Verb
     subclasses (``target_slot``/``threat_slot``/``direction``/coordinate)
     rather than special-casing every concrete class here."""
 
-    if decision is None:
+    if verb is None:
         return "—  (no button)"
-    name = type(decision).__name__
+    name = type(verb).__name__
     parts: list[str] = []
-    direction = getattr(decision, "direction", None)
+    direction = getattr(verb, "direction", None)
     if direction is not None:
         parts.append(str(direction))
-    target = getattr(decision, "target_slot", None) or getattr(decision, "threat_slot", None)
+    target = getattr(verb, "target_slot", None) or getattr(verb, "threat_slot", None)
     if target is not None:
         parts.append(f"→{target}")
-    elif hasattr(decision, "target_x") and hasattr(decision, "target_y"):
-        parts.append(f"→({decision.target_x},{decision.target_y})")
+    elif hasattr(verb, "target_x") and hasattr(verb, "target_y"):
+        parts.append(f"→({verb.target_x},{verb.target_y})")
     if parts:
         return f"{name}  ({' '.join(parts)})"
     return name
 
 
-def _describe_pending(pending: tuple[Decision, ...]) -> str:
-    """One-line label for every candidate ``Decision`` the AI considered
-    before ``determine_priority_decision`` collapsed them to one."""
+def _describe_pending(pending: tuple[Verb, ...]) -> str:
+    """One-line label for every candidate ``Verb`` the AI considered
+    before ``determine_priority_verb`` collapsed them to one."""
 
     if not pending:
         return ""
-    names = ", ".join(_describe_decision(decision) for decision in pending)
+    names = ", ".join(_describe_verb(verb) for verb in pending)
     return f"Pending  {names}"
 
 

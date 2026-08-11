@@ -1,7 +1,7 @@
-"""``execute_decision`` — dispatch the surviving ``Decision`` to controller input.
+"""``execute_verb`` — dispatch the surviving ``Verb`` to controller input.
 
 Per ``AI.md``: each handler steers the controller only as much as necessary
-and returns immediately — never blocks/sleeps waiting for the decision to
+and returns immediately — never blocks/sleeps waiting for the verb to
 play out.
 
 CRITICAL button mapping (original scheme): Attack/Punch = physical B (0x0020),
@@ -18,8 +18,8 @@ from .tokens import (
     AttackHeldEnemy,
     Punch,
     RearAttack,
+    OpenBreakable,
     ReleaseGrab,
-    SmashBreakable,
     SprayPepper,
     StabWithKnifeOrBottle,
     Supplex,
@@ -35,17 +35,16 @@ from .tokens import CameraRange
 from .tokens import Breakable, Pit, SafeSpot
 from .tokens import Pickup, Weapon
 from .tokens import CallPolice
-from .tokens import Context, Decision, find, find_all
+from .tokens import Context, Verb, find, find_all
 from .tokens import (
     RetreatFromDanger,
     WalkToAdvanceStage,
-    WalkToBreakable,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
 )
 from .gamepad import VirtualGamepad
-from .decide import BREAKABLE_PUNCH_X
+from .decide import BREAKABLE_PUNCH_X, in_smash_range
 from .reach import PIT_AVOID_MARGIN, enemy_behind_actor
 from ..phases import is_dangerous
 from ..world_map import LANE_Y_MIN
@@ -121,7 +120,7 @@ def _press(gamepad: VirtualGamepad, mask: int, *, frames: int) -> None:
     """Issue a pure button press, dropping any stale directional hold first.
 
     ``hold_buttons`` is a *sticky* latch (gamepad.py's module docstring):
-    whatever direction the previous tick's walk decision held stays held
+    whatever direction the previous tick's walk verb held stays held
     until something changes it, and ``SharedGamepadState.press`` deliberately
     re-arms it after the press. So a walk tick followed by an attack tick
     left the actor still walking through the strike -- past the enemy and out
@@ -172,7 +171,7 @@ def _movement_mask(
         # world_map tracks entities up to two screens beyond each camera edge
         # (hunt-target lookahead), far past what's actually walkable right
         # now. Without this filter, a breakable anywhere in that huge tracked
-        # radius could trip the dodge below on nearly every walk decision —
+        # radius could trip the dodge below on nearly every walk verb —
         # and since it always steers toward smaller Y ("up") whenever the
         # actor is in the lane's lower half (the common case), that made the
         # AI drift up constantly for reasons that had nothing to do with
@@ -310,9 +309,9 @@ def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[
     return target_x, target_y
 
 
-def _execute_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
-    target = find(context, Enemy, slot=decision.target_slot)
+def _execute_walk_to_near_enemy(verb: WalkToNearEnemy, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Enemy, slot=verb.target_slot)
     if actor is None or target is None:
         gamepad.release()
         return
@@ -321,7 +320,7 @@ def _execute_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context, gam
 
 
 # How far to step back per tick while retreating -- roughly clears the
-# RETREAT_CAUTION_MARGIN zone decide.py gates this decision on, without
+# RETREAT_CAUTION_MARGIN zone decide.py gates this verb on, without
 # being a single-tick teleport.
 RETREAT_FROM_DANGER_DISTANCE = 32
 
@@ -351,10 +350,10 @@ def _retreat_from_danger_target(
 
 
 def _execute_retreat_from_danger(
-    decision: RetreatFromDanger, context: Context, gamepad: VirtualGamepad
+    verb: RetreatFromDanger, context: Context, gamepad: VirtualGamepad
 ) -> None:
-    actor = _find_actor(context, decision.actor_slot)
-    target = find(context, Enemy, slot=decision.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Enemy, slot=verb.target_slot)
     if actor is None or target is None:
         gamepad.release()
         return
@@ -363,51 +362,45 @@ def _execute_retreat_from_danger(
 
 
 def _execute_walk_to_advance_stage(
-    decision: WalkToAdvanceStage, context: Context, gamepad: VirtualGamepad
+    verb: WalkToAdvanceStage, context: Context, gamepad: VirtualGamepad
 ) -> None:
-    actor = _find_actor(context, decision.actor_slot)
+    actor = _find_actor(context, verb.actor_slot)
     if actor is None:
-        gamepad.hold(RIGHT_MASK if decision.direction == "right" else LEFT_MASK)
+        gamepad.hold(RIGHT_MASK if verb.direction == "right" else LEFT_MASK)
         return
     # Pure lateral advance — do not add accidental Up/Down.
-    mask = RIGHT_MASK if decision.direction == "right" else LEFT_MASK
+    mask = RIGHT_MASK if verb.direction == "right" else LEFT_MASK
     # If a breakable sits immediately ahead, approach with a slight Y offset
     # so the next tick can smash rather than walk forever into it.
-    ahead_x = actor.world_x + (40 if decision.direction == "right" else -40)
+    ahead_x = actor.world_x + (40 if verb.direction == "right" else -40)
     gamepad.hold(
         _movement_mask(context, actor.world_x, actor.world_y, ahead_x, actor.world_y) or mask
     )
 
 
-def _execute_melee_strike(decision: Decision, context: Context, gamepad: VirtualGamepad) -> None:
+def _execute_melee_strike(verb: Verb, context: Context, gamepad: VirtualGamepad) -> None:
     """Shared handler for ``Punch`` / ``SwingBatOrPipe`` /
     ``StabWithKnifeOrBottle`` / ``SprayPepper`` -- identical B-button press
     regardless of which (if any) weapon is held; only the ROM-side move that
     resolves from it differs."""
 
-    actor = _find_actor(context, getattr(decision, "actor_slot", None))
-    target = find(context, Enemy, slot=getattr(decision, "target_slot", None))
+    actor = _find_actor(context, getattr(verb, "actor_slot", None))
+    target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
     face = 0
     if actor is not None and target is not None:
         face = _face_toward_mask(actor, target.world_x)
     _press(gamepad, PUNCH_MASK | face, frames=PUNCH_FRAMES)
 
 
-def _execute_smash_breakable(decision: SmashBreakable, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
-    target = find(context, Breakable, slot=decision.target_slot)
-    face = 0
-    if actor is not None and target is not None:
-        face = _face_toward_mask(actor, target.world_x)
-    _press(gamepad, PUNCH_MASK | face, frames=PUNCH_FRAMES)
 
 
-def _execute_rear_attack(decision: RearAttack, context: Context, gamepad: VirtualGamepad) -> None:
+
+def _execute_rear_attack(verb: RearAttack, context: Context, gamepad: VirtualGamepad) -> None:
     _press(gamepad, PUNCH_MASK | JUMP_MASK, frames=REAR_ATTACK_FRAMES)
 
 
-def _execute_counter_grab(decision: CounterGrab, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
+def _execute_counter_grab(verb: CounterGrab, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         gamepad.release()
         return
@@ -424,23 +417,23 @@ def _execute_counter_grab(decision: CounterGrab, context: Context, gamepad: Virt
     _press(gamepad, JUMP_MASK, frames=COUNTER_FRAMES)
 
 
-def _execute_tech_recover(decision: TechRecover, context: Context, gamepad: VirtualGamepad) -> None:
-    # A held Up plus a *fresh* C edge, every tick this decision wins -- the
+def _execute_tech_recover(verb: TechRecover, context: Context, gamepad: VirtualGamepad) -> None:
+    # A held Up plus a *fresh* C edge, every tick this verb wins -- the
     # ROM requires a new C press, not a held-over one (controls-and-input.md
     # "C must be a fresh edge while Up is held").
     _press(gamepad, JUMP_MASK | UP_MASK, frames=TECH_RECOVER_FRAMES)
 
 
-def _execute_call_police(decision: CallPolice, context: Context, gamepad: VirtualGamepad) -> None:
+def _execute_call_police(verb: CallPolice, context: Context, gamepad: VirtualGamepad) -> None:
     _press(gamepad, CALL_POLICE_MASK, frames=CALL_POLICE_FRAMES)
 
 
-def _execute_jump_attack(decision: JumpAttack, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
+def _execute_jump_attack(verb: JumpAttack, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         gamepad.release()
         return
-    target = find(context, Enemy, slot=decision.target_slot)
+    target = find(context, Enemy, slot=verb.target_slot)
     if target is None:
         # No target → do not hop in place.
         gamepad.release()
@@ -458,7 +451,7 @@ def _execute_jump_attack(decision: JumpAttack, context: Context, gamepad: Virtua
         _press(gamepad, PUNCH_MASK | face, frames=JUMP_ATTACK_KICK_FRAMES)
 
 
-def _execute_grab_enemy(decision: GrabEnemy, context: Context, gamepad: VirtualGamepad) -> None:
+def _execute_grab_enemy(verb: GrabEnemy, context: Context, gamepad: VirtualGamepad) -> None:
     """Walk into the target — direction only, never an attack button.
 
     Two ROM facts shape this handler (see ``reach.GRAB_RANGE_Y``). The
@@ -472,13 +465,13 @@ def _execute_grab_enemy(decision: GrabEnemy, context: Context, gamepad: VirtualG
     already overlap and the last thing to do is stop pressing.
     """
 
-    actor = _find_actor(context, decision.actor_slot)
-    target = find(context, Enemy, slot=decision.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Enemy, slot=verb.target_slot)
     if actor is None or target is None:
         gamepad.release()
         return
     # Aim at the enemy itself, with none of _walk_to_near_enemy_target's stop
-    # buffer: overlapping is the whole point of this decision.
+    # buffer: overlapping is the whole point of this verb.
     mask = _movement_mask(context, actor.world_x, actor.world_y, target.world_x, target.world_y)
     if not mask & (LEFT_MASK | RIGHT_MASK):
         mask |= _face_toward_mask(actor, target.world_x) or (
@@ -487,8 +480,8 @@ def _execute_grab_enemy(decision: GrabEnemy, context: Context, gamepad: VirtualG
     gamepad.hold(mask)
 
 
-def _execute_supplex(decision: Supplex, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
+def _execute_supplex(verb: Supplex, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         gamepad.release()
         return
@@ -502,15 +495,15 @@ def _execute_supplex(decision: Supplex, context: Context, gamepad: VirtualGamepa
         _press(gamepad, PUNCH_MASK, frames=SUPPLEX_FRAMES)
 
 
-def _execute_attack_held_enemy(decision: AttackHeldEnemy, context: Context, gamepad: VirtualGamepad) -> None:
+def _execute_attack_held_enemy(verb: AttackHeldEnemy, context: Context, gamepad: VirtualGamepad) -> None:
     # Front-hold B alone (Up/Down ignored by ROM for throw; no L/R = knee).
     # The cleared hold matters here: a leftover walk direction would turn this
     # knee into the B+back throw below.
     _press(gamepad, PUNCH_MASK, frames=HOLD_FRAMES)
 
 
-def _execute_throw_held_enemy(decision: ThrowHeldEnemy, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
+def _execute_throw_held_enemy(verb: ThrowHeldEnemy, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         gamepad.release()
         return
@@ -519,14 +512,14 @@ def _execute_throw_held_enemy(decision: ThrowHeldEnemy, context: Context, gamepa
     _press(gamepad, PUNCH_MASK | back, frames=HOLD_FRAMES)
 
 
-def _execute_flip_hold(decision: FlipHold, context: Context, gamepad: VirtualGamepad) -> None:
+def _execute_flip_hold(verb: FlipHold, context: Context, gamepad: VirtualGamepad) -> None:
     # Front-hold C → back hold $66; next tick Supplex finishes.
     _press(gamepad, JUMP_MASK, frames=HOLD_FRAMES)
 
 
-def _execute_release_grab(decision: ReleaseGrab, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
-    target = find(context, Enemy, slot=decision.target_slot)
+def _execute_release_grab(verb: ReleaseGrab, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Enemy, slot=verb.target_slot)
     if actor is None:
         gamepad.release()
         return
@@ -542,27 +535,27 @@ def _execute_release_grab(decision: ReleaseGrab, context: Context, gamepad: Virt
     )
 
 
-def _execute_throw_knife(decision: ThrowKnife, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
-    target = find(context, Enemy, slot=decision.target_slot)
+def _execute_throw_knife(verb: ThrowKnife, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Enemy, slot=verb.target_slot)
     face = 0
     if actor is not None and target is not None:
         face = _face_toward_mask(actor, target.world_x)
     _press(gamepad, PUNCH_MASK | face, frames=THROW_KNIFE_FRAMES)
 
 
-def _execute_throw_pepper(decision: ThrowPepper, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
-    target = find(context, Enemy, slot=decision.target_slot)
+def _execute_throw_pepper(verb: ThrowPepper, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Enemy, slot=verb.target_slot)
     face = 0
     if actor is not None and target is not None:
         face = _face_toward_mask(actor, target.world_x)
     _press(gamepad, PUNCH_MASK | face, frames=THROW_PEPPER_FRAMES)
 
 
-def _execute_walk_to_weapon(decision: WalkToWeapon, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
-    target = find(context, Weapon, slot=decision.target_slot)
+def _execute_walk_to_weapon(verb: WalkToWeapon, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Weapon, slot=verb.target_slot)
     if actor is None or target is None:
         gamepad.release()
         return
@@ -576,9 +569,9 @@ def _execute_walk_to_weapon(decision: WalkToWeapon, context: Context, gamepad: V
         )
 
 
-def _execute_walk_to_pickup(decision: WalkToPickup, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, decision.actor_slot)
-    target = find(context, Pickup, slot=decision.target_slot)
+def _execute_walk_to_pickup(verb: WalkToPickup, context: Context, gamepad: VirtualGamepad) -> None:
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Pickup, slot=verb.target_slot)
     if actor is None or target is None:
         gamepad.release()
         return
@@ -606,13 +599,23 @@ def _walk_to_breakable_target(actor: Myself | Partner, target: Breakable) -> tup
     return target_x, target.world_y
 
 
-def _execute_walk_to_breakable(
-    decision: WalkToBreakable, context: Context, gamepad: VirtualGamepad
+def _execute_open_breakable(
+    verb: OpenBreakable, context: Context, gamepad: VirtualGamepad
 ) -> None:
-    actor = _find_actor(context, decision.actor_slot)
-    target = find(context, Breakable, slot=decision.target_slot)
+    """Close the distance, then hit it -- one verb, both halves.
+
+    The switch is ``decide.in_smash_range``, the same predicate
+    ``priority._emergency_open_breakable`` scores with, so the tier the verb
+    won on and the action it takes can never describe different situations.
+    """
+
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Breakable, slot=verb.target_slot)
     if actor is None or target is None:
         gamepad.release()
+        return
+    if in_smash_range(actor, target):
+        _press(gamepad, PUNCH_MASK | _face_toward_mask(actor, target.world_x), frames=PUNCH_FRAMES)
         return
     target_x, target_y = _walk_to_breakable_target(actor, target)
     gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
@@ -626,7 +629,6 @@ _HANDLERS = {
     SwingBatOrPipe: _execute_melee_strike,
     StabWithKnifeOrBottle: _execute_melee_strike,
     SprayPepper: _execute_melee_strike,
-    SmashBreakable: _execute_smash_breakable,
     RearAttack: _execute_rear_attack,
     CounterGrab: _execute_counter_grab,
     TechRecover: _execute_tech_recover,
@@ -642,13 +644,13 @@ _HANDLERS = {
     ThrowPepper: _execute_throw_pepper,
     WalkToWeapon: _execute_walk_to_weapon,
     WalkToPickup: _execute_walk_to_pickup,
-    WalkToBreakable: _execute_walk_to_breakable,
+    OpenBreakable: _execute_open_breakable,
 }
 
 
-def execute_decision(decision: Decision, context: Context, gamepad: VirtualGamepad) -> None:
-    handler = _HANDLERS.get(type(decision))
+def execute_verb(verb: Verb, context: Context, gamepad: VirtualGamepad) -> None:
+    handler = _HANDLERS.get(type(verb))
     if handler is None:
         press_no_button(gamepad)
         return
-    handler(decision, context, gamepad)
+    handler(verb, context, gamepad)

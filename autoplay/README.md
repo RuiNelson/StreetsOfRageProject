@@ -21,9 +21,9 @@ Python app that attaches to a running
 
 ### AI
 
-- Token/Information/Decision pipeline per [`AI.md`](AI.md): observes the same
+- Token/Information/Verb pipeline per [`AI.md`](AI.md): observes the same
   snapshot the HUD already reads, infers danger/incoming-projectile tokens,
-  proposes walk/attack/police decisions, ranks them by emergency, and issues
+  proposes walk/attack/police verbs, ranks them by emergency, and issues
   the winner through a virtual gamepad (`hold_buttons`/`press_buttons` only —
   never writes RAM).
 - Per-enemy-type/boss subclassing (`Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`;
@@ -42,7 +42,7 @@ Python app that attaches to a running
   zone or sidestep machinery.
 - Calls police automatically when health drops below a critical threshold
   (and never while holding an enemy or with zero specials).
-- The HUD shows the AI's current winning `Decision` plus a pending-decision
+- The HUD shows the AI's current winning `Verb` plus a pending-verb
   label of every candidate it was choosing between.
 - Automatically stands down (releases input) when the game is paused or
   outside active gameplay (menus, character select, round-clear, continues).
@@ -129,6 +129,6 @@ autoplay/
     hazards.py          # pause, police, floor holes
     bcd.py              # packed-BCD helpers
     phases.py           # ordinary/boss/player combat phase decode
-    ai/                 # symbolic AI (Token/Information/Decision pipeline)
+    ai/                 # symbolic AI (Token/Information/Verb pipeline)
   tests/
 ```

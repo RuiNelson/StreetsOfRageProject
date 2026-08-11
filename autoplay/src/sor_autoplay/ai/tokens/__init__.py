@@ -2,13 +2,13 @@
 
 Mirrors the former flat ``ai/`` module layout: base tokens, character and
 enemy observations, essential scene tokens, hazards, pickups, and the
-``Decision`` branches. Pipeline modules and tests may import everything
+``Verb`` branches. Pipeline modules and tests may import everything
 from this package, e.g. ``from sor_autoplay.ai.tokens import Myself``.
 """
 
 from __future__ import annotations
 
-from .attack_decisions import (
+from .attack_verbs import (
     Attack,
     AttackHeldEnemy,
     CounterGrab,
@@ -18,10 +18,10 @@ from .attack_decisions import (
     JumpAttack,
     MeleeAttacks,
     MeleeWeaponAttacks,
+    OpenBreakable,
     Punch,
     RearAttack,
     ReleaseGrab,
-    SmashBreakable,
     SprayPepper,
     StabWithKnifeOrBottle,
     Supplex,
@@ -102,11 +102,11 @@ from .pickup_tokens import (
     pickup_class_for_type,
     weapon_rank,
 )
-from .police_decision import CallPolice
-from .recovery_decisions import Recovery, TechRecover
+from .police_verb import CallPolice
+from .recovery_verbs import Recovery, TechRecover
 from .tokens import (
     Context,
-    Decision,
+    Verb,
     Information,
     Inferred,
     Observed,
@@ -114,11 +114,10 @@ from .tokens import (
     find,
     find_all,
 )
-from .walk_decisions import (
+from .walk_verbs import (
     RetreatFromDanger,
     Walk,
     WalkToAdvanceStage,
-    WalkToBreakable,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 from sor_autoplay.ai.tokens import Punch
 from sor_autoplay.ai.tokens import Enemy
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop, DecisionState
+from sor_autoplay.ai.loop import AgentLoop, VerbState
 from sor_autoplay.ai.tokens import WalkToAdvanceStage
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
@@ -114,7 +114,7 @@ class AgentLoopPipelineTests(unittest.TestCase):
         )
         punch = Punch(actor_slot="P1", target_slot="obj01")
         observed_context = {enemy}
-        decision_context = {enemy, punch}
+        verb_context = {enemy, punch}
 
         with (
             patch(
@@ -126,8 +126,8 @@ class AgentLoopPipelineTests(unittest.TestCase):
                 return_value=set(),
             ) as inference,
             patch(
-                "sor_autoplay.ai.loop.generate_decision_tokens",
-                return_value=decision_context,
+                "sor_autoplay.ai.loop.generate_verb_tokens",
+                return_value=verb_context,
             ) as decide,
         ):
             result = loop.tick(snapshot, player_index=1)
@@ -136,15 +136,15 @@ class AgentLoopPipelineTests(unittest.TestCase):
             inference.assert_called_once_with(observed_context)
             decide.assert_called_once()
 
-        # generate_decision_tokens's return value stood in for the whole
-        # accumulated context; determine_priority_decision keeps the single
-        # Punch, and execute_decision should have pressed B (punch).
+        # generate_verb_tokens's return value stood in for the whole
+        # accumulated context; determine_priority_verb keeps the single
+        # Punch, and execute_verb should have pressed B (punch).
         client.press_buttons.assert_called_once_with(player1=0x0020, player2=0, frames=4)
-        # tick() hands back the winning Decision (e.g. for a HUD to show
-        # what the AI is doing) after execute_decision has already run.
+        # tick() hands back the winning Verb (e.g. for a HUD to show
+        # what the AI is doing) after execute_verb has already run.
         self.assertIs(result, punch)
 
-    def test_no_surviving_decision_presses_no_button(self) -> None:
+    def test_no_surviving_verb_presses_no_button(self) -> None:
         gamepad, client = _gamepad()
         gamepad.hold(0x0008)
         client.hold_buttons.reset_mock()
@@ -157,7 +157,7 @@ class AgentLoopPipelineTests(unittest.TestCase):
                 return_value=set(),
             ),
             patch("sor_autoplay.ai.loop.generate_inference_tokens", return_value=set()),
-            patch("sor_autoplay.ai.loop.generate_decision_tokens", return_value=set()),
+            patch("sor_autoplay.ai.loop.generate_verb_tokens", return_value=set()),
         ):
             result = loop.tick(snapshot, player_index=1)
 
@@ -165,9 +165,9 @@ class AgentLoopPipelineTests(unittest.TestCase):
         self.assertIsNone(result)
 
 
-class DecisionStateHudTests(unittest.TestCase):
-    """AI.md's UI step: every tick copies the surviving Decision plus every
-    candidate into a thread-safe DecisionState the HUD can read without
+class VerbStateHudTests(unittest.TestCase):
+    """AI.md's UI step: every tick copies the surviving Verb plus every
+    candidate into a thread-safe VerbState the HUD can read without
     touching the pipeline."""
 
     def _enemy(self) -> Enemy:
@@ -189,8 +189,8 @@ class DecisionStateHudTests(unittest.TestCase):
 
         loop.inform_hud({enemy, punch}, pending=(punch,))
 
-        state = loop.decision_state()
-        self.assertIsInstance(state, DecisionState)
+        state = loop.verb_state()
+        self.assertIsInstance(state, VerbState)
         self.assertIs(state.winning, punch)
         self.assertEqual(state.pending, (punch,))
 
@@ -201,7 +201,7 @@ class DecisionStateHudTests(unittest.TestCase):
 
         loop.inform_hud(set())
 
-        state = loop.decision_state()
+        state = loop.verb_state()
         self.assertIsNone(state.winning)
         self.assertEqual(state.pending, ())
 
@@ -219,18 +219,18 @@ class DecisionStateHudTests(unittest.TestCase):
             ),
             patch("sor_autoplay.ai.loop.generate_inference_tokens", return_value=set()),
             patch(
-                "sor_autoplay.ai.loop.generate_decision_tokens",
+                "sor_autoplay.ai.loop.generate_verb_tokens",
                 return_value={enemy, punch, walk},
             ),
         ):
             result = loop.tick(_snapshot(), player_index=1)
 
-        state = loop.decision_state()
+        state = loop.verb_state()
         self.assertIs(result, punch)
         self.assertIs(state.winning, punch)
         self.assertEqual(set(state.pending), {punch, walk})
 
-    def test_gated_tick_clears_the_previous_decision_state(self) -> None:
+    def test_gated_tick_clears_the_previous_verb_state(self) -> None:
         gamepad, _client = _gamepad()
         loop = AgentLoop(gamepad)
         enemy = self._enemy()
@@ -242,18 +242,18 @@ class DecisionStateHudTests(unittest.TestCase):
             ),
             patch("sor_autoplay.ai.loop.generate_inference_tokens", return_value=set()),
             patch(
-                "sor_autoplay.ai.loop.generate_decision_tokens",
+                "sor_autoplay.ai.loop.generate_verb_tokens",
                 return_value={enemy, punch},
             ),
         ):
             loop.tick(_snapshot(), player_index=1)
-        self.assertIs(loop.decision_state().winning, punch)
+        self.assertIs(loop.verb_state().winning, punch)
 
         with patch("sor_autoplay.ai.loop.generate_direct_observation_tokens") as observe:
             loop.tick(_snapshot(paused=True), player_index=1)
             observe.assert_not_called()
 
-        state = loop.decision_state()
+        state = loop.verb_state()
         self.assertIsNone(state.winning)
         self.assertEqual(state.pending, ())
 

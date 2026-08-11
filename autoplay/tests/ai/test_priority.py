@@ -11,7 +11,7 @@ from sor_autoplay.ai.tokens import (
     Punch,
     RearAttack,
     ScorePickup,
-    SmashBreakable,
+    OpenBreakable,
     SprayPepper,
     StabWithKnifeOrBottle,
     Supplex,
@@ -26,12 +26,11 @@ from sor_autoplay.ai.tokens import ClosingEnemy, Enemy, Garcia, Nora
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai.priority import determine_priority_decision as _rank_decisions
-from sor_autoplay.ai.tokens import Decision, find_all
+from sor_autoplay.ai.priority import determine_priority_verb as _rank_verbs
+from sor_autoplay.ai.tokens import Verb, find_all
 from sor_autoplay.ai.tokens import (
     RetreatFromDanger,
     WalkToAdvanceStage,
-    WalkToBreakable,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
@@ -39,7 +38,7 @@ from sor_autoplay.ai.tokens import (
 from sor_autoplay.phases import HITSTUN_FRAMES, PEPPER_STUN_FRAMES, CombatPhase
 
 
-def determine_priority_decision(context):
+def determine_priority_verb(context):
     """Rank a context built the way AI.md's loop builds it.
 
     Several ``_emergency_*`` functions read ``Inferred`` tokens
@@ -49,7 +48,7 @@ def determine_priority_decision(context):
     observed half of the context, so they derive the inferred half here.
     """
 
-    return _rank_decisions(generate_inference_tokens(set(context)))
+    return _rank_verbs(generate_inference_tokens(set(context)))
 
 
 def _enemy(slot: str, combat_phase: CombatPhase, **overrides) -> Enemy:
@@ -106,11 +105,11 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], CallPolice)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], CallPolice)
 
     def test_call_police_on_last_life_beats_punch_above_ordinary_threshold(self) -> None:
         # 30% health is above the ordinary 18% threshold but below the
@@ -124,11 +123,11 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], CallPolice)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], CallPolice)
 
     def test_call_police_below_full_health_loses_to_punishable_punch(self) -> None:
         # Above the health threshold, CallPolice's condition is false (0),
@@ -142,17 +141,17 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], Punch)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], Punch)
 
-    def test_no_decisions_returns_context_unchanged(self) -> None:
+    def test_no_verbs_returns_context_unchanged(self) -> None:
         enemy = _enemy("obj01", CombatPhase.NORMAL)
         context = {enemy}
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
         self.assertEqual(result, context)
 
@@ -167,15 +166,15 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             WalkToAdvanceStage(actor_slot="P1", direction="right"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], WalkToNearEnemy)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
 
     def test_walk_to_near_enemy_picks_the_closer_of_two_candidates(self) -> None:
         # could_walk_to_near_enemy (decide.py) no longer pre-selects the
-        # nearest enemy -- this is now determine_priority_decision's job,
+        # nearest enemy -- this is now determine_priority_verb's job,
         # via _emergency_walk_to_near_enemy's distance-bucketed score.
         myself = _myself(world_x=0, world_y=64)
         near = _enemy("obj01", CombatPhase.NORMAL, world_x=10, world_y=64)
@@ -188,11 +187,11 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].target_slot, "obj01")
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
 
     def test_advance_stage_fires_when_only_remaining_enemy_is_off_screen_at_zero_health(
         self,
@@ -209,11 +208,11 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             WalkToAdvanceStage(actor_slot="P1", direction="right"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], WalkToAdvanceStage)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToAdvanceStage)
 
     def test_supplex_always_outranks_punch_tier(self) -> None:
         held = _enemy("obj01", CombatPhase.GRABBED)
@@ -225,11 +224,11 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], Supplex)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], Supplex)
 
     def test_hold_move_scores_zero_when_target_not_grabbed(self) -> None:
         # The "Enemy when held" condition is CombatPhase.GRABBED; a target in
@@ -243,11 +242,11 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], Punch)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], Punch)
 
     def test_counter_grab_beats_call_police(self) -> None:
         myself = _myself(combat_phase=CombatPhase.HELD_BY_ENEMY, health_percent=10.0)
@@ -257,11 +256,11 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             CallPolice(actor_slot="P1"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], CounterGrab)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], CounterGrab)
 
     def test_tech_recover_beats_call_police(self) -> None:
         myself = _myself(
@@ -276,11 +275,11 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             CallPolice(actor_slot="P1"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], TechRecover)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], TechRecover)
 
     def test_tech_recover_scores_zero_when_not_armed(self) -> None:
         myself = _myself(
@@ -295,11 +294,11 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             CallPolice(actor_slot="P1"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], CallPolice)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], CallPolice)
 
     def test_counter_grab_beats_tech_recover(self) -> None:
         # Being held by an enemy right now outranks a still-open landing
@@ -315,11 +314,11 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             TechRecover(actor_slot="P1"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], CounterGrab)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], CounterGrab)
 
     def test_counter_grab_scores_zero_when_not_held(self) -> None:
         myself = _myself(combat_phase=CombatPhase.NORMAL, health_percent=10.0)
@@ -329,11 +328,11 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             CallPolice(actor_slot="P1"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], CallPolice)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], CallPolice)
 
     def test_jump_attack_emergency_splits_punishable_vs_default(self) -> None:
         punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
@@ -344,20 +343,20 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             JumpAttack(actor_slot="P1", target_slot="obj01"),
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
-        result = determine_priority_decision(punishable_context)
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], JumpAttack)
+        result = determine_priority_verb(punishable_context)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], JumpAttack)
 
         default_context = {
             normal,
             JumpAttack(actor_slot="P1", target_slot="obj02"),
             WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
         }
-        result = determine_priority_decision(default_context)
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], JumpAttack)
+        result = determine_priority_verb(default_context)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], JumpAttack)
 
 
 class DetermineEmergencyMeleeWeaponSiblingsTests(unittest.TestCase):
@@ -374,11 +373,11 @@ class DetermineEmergencyMeleeWeaponSiblingsTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], SwingBatOrPipe)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], SwingBatOrPipe)
 
     def test_stab_with_knife_or_bottle_beats_walk_to_near_enemy_on_punishable_target(self) -> None:
         punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
@@ -388,11 +387,11 @@ class DetermineEmergencyMeleeWeaponSiblingsTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], StabWithKnifeOrBottle)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], StabWithKnifeOrBottle)
 
     def test_spray_pepper_beats_walk_to_near_enemy_on_punishable_target(self) -> None:
         punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
@@ -402,17 +401,17 @@ class DetermineEmergencyMeleeWeaponSiblingsTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], SprayPepper)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], SprayPepper)
 
 
 class DetermineEmergencyTokenConditionTests(unittest.TestCase):
     """Branches that were reachable in the old constant chain but had no
     dedicated coverage: WalkToPickup tiers, WalkToWeapon rank, ThrowKnife
-    range, and the two Breakable decisions' target-presence check."""
+    range, and the two Breakable verbs' target-presence check."""
 
     def test_walk_to_pickup_critical_health_beats_life_pickup(self) -> None:
         critical = _myself(health_percent=30.0)
@@ -426,11 +425,11 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
             WalkToPickup(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].target_slot, "obj01")
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
 
     def test_walk_to_pickup_full_health_pickup_beats_score_pickup(self) -> None:
         # At full health the HealthPickup formula drops from critical (50)
@@ -446,11 +445,11 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
             WalkToPickup(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].target_slot, "obj01")
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
 
     def test_walk_to_pickup_life_beats_score(self) -> None:
         actor = _myself()
@@ -464,11 +463,11 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
             WalkToPickup(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].target_slot, "obj01")
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
 
     def test_walk_to_weapon_scores_when_rank_beats_held(self) -> None:
         # The camera matters: WeaponUpgrade is only inferred for a weapon
@@ -478,15 +477,15 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         knife = Weapon(slot="obj01", world_x=0, world_y=64, weapon_type=0x08)
         context = {unarmed, knife, _camera(), WalkToWeapon(actor_slot="P1", target_slot="obj01")}
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], WalkToWeapon)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToWeapon)
 
     def test_walk_to_weapon_picks_the_higher_ranked_upgrade(self) -> None:
         # could_walk_to_weapon (decide.py) no longer pre-selects the best
-        # upgrade -- this is now determine_priority_decision's job, via
+        # upgrade -- this is now determine_priority_verb's job, via
         # _emergency_walk_to_weapon's rank-scaled score.
         unarmed = _myself(held_weapon_type=0)
         knife = Weapon(slot="obj01", world_x=0, world_y=64, weapon_type=0x08)  # rank 5
@@ -500,16 +499,16 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
             WalkToWeapon(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].target_slot, "obj01")
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
 
     def test_walk_to_weapon_scores_zero_when_not_an_upgrade(self) -> None:
         # Already holding the best weapon: the floor pepper spray isn't an
         # upgrade, so WalkToWeapon's condition is false and it loses to a
-        # WalkToNearEnemy (14) that would otherwise be a weaker decision.
+        # WalkToNearEnemy (14) that would otherwise be a weaker verb.
         armed_with_knife = _myself(held_weapon_type=0x08)
         pepper = Weapon(slot="obj01", world_x=0, world_y=64, weapon_type=0x0C)
         enemy = _enemy("obj02", CombatPhase.NORMAL)
@@ -522,11 +521,11 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], WalkToNearEnemy)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
 
     def test_throw_knife_scores_within_range_beyond_melee(self) -> None:
         actor = _myself(world_x=0, world_y=64)
@@ -538,11 +537,11 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], ThrowKnife)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], ThrowKnife)
 
     def test_throw_knife_scores_zero_when_still_in_melee(self) -> None:
         actor = _myself(world_x=0, world_y=64)
@@ -554,15 +553,15 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], WalkToNearEnemy)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
 
     def test_throw_knife_picks_the_closer_of_two_qualifying_enemies(self) -> None:
         # could_throw_knife (decide.py) no longer pre-selects the nearest
-        # enemy -- this is now determine_priority_decision's job, via the
+        # enemy -- this is now determine_priority_verb's job, via the
         # shared _emergency_thrown_weapon's distance-bucketed score.
         actor = _myself(world_x=0, world_y=64)
         near = _enemy("obj01", CombatPhase.NORMAL, world_x=50, world_y=64)
@@ -575,11 +574,11 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
             ThrowKnife(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].target_slot, "obj01")
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
 
     def test_throw_pepper_scores_within_range_beyond_melee(self) -> None:
         actor = _myself(world_x=0, world_y=64)
@@ -591,11 +590,11 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], ThrowPepper)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], ThrowPepper)
 
     def test_throw_pepper_scores_zero_when_still_in_melee(self) -> None:
         actor = _myself(world_x=0, world_y=64)
@@ -607,62 +606,66 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], WalkToNearEnemy)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
 
-    def test_smash_breakable_scores_when_target_present(self) -> None:
+    def test_open_breakable_in_range_scores_above_walking_to_an_enemy(self) -> None:
+        # The in-range tier (16) is the former SmashBreakable's flat score;
+        # the actor stands on the prop's own position here.
+        myself = _myself(world_x=0, world_y=64)
         prop = Breakable(slot="obj01", world_x=0, world_y=64, type_id=0x70)
         enemy = _enemy("obj02", CombatPhase.NORMAL)
         context = {
+            myself,
             prop,
             enemy,
-            SmashBreakable(actor_slot="P1", target_slot="obj01"),
+            OpenBreakable(actor_slot="P1", target_slot="obj01"),
             WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], SmashBreakable)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], OpenBreakable)
 
-    def test_walk_to_breakable_picks_the_closer_of_two_candidates(self) -> None:
-        # could_walk_to_breakable (decide.py) no longer pre-selects the
-        # nearest breakable -- this is now determine_priority_decision's
-        # job, via _emergency_walk_to_breakable's distance-bucketed score.
+    def test_open_breakable_picks_the_closer_of_two_candidates(self) -> None:
+        # could_open_breakable (decide.py) does not pre-select the nearest
+        # breakable -- this is determine_priority_verb's job, via
+        # _emergency_open_breakable's distance score.
         myself = _myself(world_x=0, world_y=64)
-        near = Breakable(slot="near", world_x=10, world_y=64, type_id=0x40)
+        near = Breakable(slot="near", world_x=60, world_y=64, type_id=0x40)
         far = Breakable(slot="far", world_x=150, world_y=64, type_id=0x40)
         context = {
             myself,
             near,
             far,
-            WalkToBreakable(actor_slot="P1", target_slot="near"),
-            WalkToBreakable(actor_slot="P1", target_slot="far"),
+            OpenBreakable(actor_slot="P1", target_slot="near"),
+            OpenBreakable(actor_slot="P1", target_slot="far"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].target_slot, "near")
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "near")
 
-    def test_walk_to_breakable_scores_zero_when_target_missing(self) -> None:
+    def test_open_breakable_scores_zero_when_target_missing(self) -> None:
         enemy = _enemy("obj02", CombatPhase.NORMAL)
         context = {
             enemy,
-            WalkToBreakable(actor_slot="P1", target_slot="obj01"),
+            OpenBreakable(actor_slot="P1", target_slot="obj01"),
             WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], WalkToNearEnemy)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
 
 
 def _stunned_grunt(slot: str, **overrides) -> Garcia:
@@ -707,11 +710,11 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
                     RearAttack(actor_slot="P1", target_slot="obj02"),
                 }
 
-                result = determine_priority_decision(context)
+                result = determine_priority_verb(context)
 
-                decisions = find_all(result, Decision)
-                self.assertEqual(len(decisions), 1)
-                self.assertIsInstance(decisions[0], RearAttack)
+                verbs = find_all(result, Verb)
+                self.assertEqual(len(verbs), 1)
+                self.assertIsInstance(verbs[0], RearAttack)
 
     def test_a_pepper_stunned_target_loses_to_a_strike_on_an_enemy_still_able_to_act(
         self,
@@ -729,11 +732,11 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].target_slot, "obj02")
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj02")
 
     def test_a_hitstunned_target_keeps_the_combo_going(self) -> None:
         # The other side of the same coin: $18 frames is the middle of the
@@ -751,11 +754,11 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].target_slot, "obj01")
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
 
     def test_a_pepper_stun_counted_down_into_hitstun_range_is_a_combo_again(self) -> None:
         # A pepper stun that has run down to its last frames is about to
@@ -771,11 +774,11 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].target_slot, "obj01")
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
 
     def test_any_stun_still_beats_walking_off_to_another_enemy(self) -> None:
         # Lowered, not abandoned: nothing better on the table means keep
@@ -793,11 +796,11 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
                     WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
                 }
 
-                result = determine_priority_decision(context)
+                result = determine_priority_verb(context)
 
-                decisions = find_all(result, Decision)
-                self.assertEqual(len(decisions), 1)
-                self.assertIsInstance(decisions[0], Punch)
+                verbs = find_all(result, Verb)
+                self.assertEqual(len(verbs), 1)
+                self.assertIsInstance(verbs[0], Punch)
 
     def test_any_stun_still_beats_retreating_and_advancing(self) -> None:
         myself = _myself(world_x=100, world_y=64, facing_left=False)
@@ -814,11 +817,11 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
                     WalkToAdvanceStage(actor_slot="P1", direction="right"),
                 }
 
-                result = determine_priority_decision(context)
+                result = determine_priority_verb(context)
 
-                decisions = find_all(result, Decision)
-                self.assertEqual(len(decisions), 1)
-                self.assertIsInstance(decisions[0], Punch)
+                verbs = find_all(result, Verb)
+                self.assertEqual(len(verbs), 1)
+                self.assertIsInstance(verbs[0], Punch)
 
     def test_a_knocked_down_target_keeps_the_full_punishable_tier(self) -> None:
         # Only the *stun* is capped. A knockdown ends in a wake-up with
@@ -834,11 +837,11 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].target_slot, "obj01")
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
 
     def test_the_cap_never_raises_an_already_lower_score(self) -> None:
         # An unwarranted RearAttack scores 9; capping at 19 must not lift it
@@ -852,16 +855,16 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], WalkToNearEnemy)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
 
 
 class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
     """GrabEnemy scores from the ``GrabOpportunity`` tokens inference raised
-    for its own (actor, target) pair -- never from the decision's type."""
+    for its own (actor, target) pair -- never from the verb's type."""
 
     def _grunt(self, slot: str, **overrides) -> Garcia:
         fields = dict(
@@ -893,11 +896,11 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="front"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], GrabEnemy)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], GrabEnemy)
 
     def test_clearing_the_rear_loses_to_the_escape_chord_against_a_commit(self) -> None:
         # An enemy already committed behind is not something to turn your
@@ -916,11 +919,11 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
             RearAttack(actor_slot="P1", target_slot="behind"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], RearAttack)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], RearAttack)
 
     def test_grabbing_nora_outranks_punching_her(self) -> None:
         myself = _myself(world_x=100, world_y=100)
@@ -942,11 +945,11 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="nora"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], GrabEnemy)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], GrabEnemy)
 
     def test_grabbing_nora_loses_to_a_free_hit_on_a_defenceless_enemy(self) -> None:
         # Her whip is a reason to prefer the hold in an ordinary fight, not a
@@ -972,11 +975,11 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="downed"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], Punch)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], Punch)
 
     def test_no_opportunity_left_drops_the_grab_out_of_contention(self) -> None:
         # The reason to close in is gone (lone ordinary enemy, no rear
@@ -991,11 +994,11 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="front"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], Punch)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], Punch)
 
 
 class DetermineEmergencyRearAttackTests(unittest.TestCase):
@@ -1009,7 +1012,7 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
         calm = _enemy("objB", CombatPhase.NORMAL)
         rear_dangerous = RearAttack(actor_slot="P1", target_slot="objA")
         rear_calm = RearAttack(actor_slot="P1", target_slot="objB")
-        # objB's decision exists only because of the early-warning token, not
+        # objB's verb exists only because of the early-warning token, not
         # because it is in the real band -- must not out-rank a genuine
         # dangerous-phase target sitting in range.
         context = {
@@ -1020,11 +1023,11 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
             ClosingEnemy(slot="objB"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIs(decisions[0], rear_dangerous)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIs(verbs[0], rear_dangerous)
 
     def test_loses_to_turning_around_when_the_chord_is_not_warranted(self) -> None:
         # The abuse case: a lone enemy at the actor's back, far enough out of
@@ -1042,25 +1045,25 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], WalkToNearEnemy)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
 
     def test_still_fires_when_it_is_the_only_option(self) -> None:
         # "Se poder usar, usar": nothing else reaches this enemy, so the
-        # chord is still the decision -- de-preferring it must not mean
+        # chord is still the verb -- de-preferring it must not mean
         # standing there doing nothing.
         myself = _myself(world_x=100, world_y=100)
         behind = _enemy("obj01", CombatPhase.NORMAL, world_x=70, world_y=100)
         context = {myself, behind, RearAttack(actor_slot="P1", target_slot="obj01")}
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], RearAttack)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], RearAttack)
 
     def test_outranks_turning_around_inside_the_punch_dead_zone(self) -> None:
         # dx=-10 is closer than Axel's punch_inner (16): turning around
@@ -1075,11 +1078,11 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], RearAttack)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], RearAttack)
 
     def test_outranks_a_punch_while_boxed_in(self) -> None:
         # Flanked front and back: spending the turn hands the front enemy a
@@ -1096,11 +1099,11 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], RearAttack)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], RearAttack)
 
     def test_loses_to_a_punch_on_a_front_enemy_when_not_warranted(self) -> None:
         # Not boxed in (the punchable enemy is on the same side as nothing
@@ -1114,11 +1117,11 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="obj01"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], Punch)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], Punch)
 
 
 class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
@@ -1143,11 +1146,11 @@ class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
             RetreatFromDanger(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].target_slot, "obj01")
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
 
     def test_outranks_walking_toward_a_different_far_enemy(self) -> None:
         # The actor can only do one thing -- backing away from an imminent,
@@ -1164,11 +1167,11 @@ class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], RetreatFromDanger)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], RetreatFromDanger)
 
     def test_loses_to_a_punch_on_a_different_enemy(self) -> None:
         # RetreatFromDanger's own docstring: "lower than any real attack so
@@ -1187,11 +1190,11 @@ class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
             Punch(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], Punch)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], Punch)
 
     def test_loses_to_the_weakest_real_attack(self) -> None:
         # JumpAttack against a non-punishable target (18) is the lowest real
@@ -1207,11 +1210,11 @@ class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
             JumpAttack(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], JumpAttack)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], JumpAttack)
 
     def test_scores_zero_when_target_missing(self) -> None:
         # RetreatFromDanger for a target that has since vanished from the
@@ -1225,11 +1228,11 @@ class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
             WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
         }
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], WalkToNearEnemy)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
 
 
 class DeterminePriorityTieBreakTests(unittest.TestCase):
@@ -1240,11 +1243,11 @@ class DeterminePriorityTieBreakTests(unittest.TestCase):
         high = Punch(actor_slot="P1", target_slot="objB", priority=50)
         context = {enemy_a, enemy_b, low, high}
 
-        result = determine_priority_decision(context)
+        result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIs(decisions[0], high)
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIs(verbs[0], high)
 
 
 class DeterminePriorityRandomTieTests(unittest.TestCase):
@@ -1256,14 +1259,14 @@ class DeterminePriorityRandomTieTests(unittest.TestCase):
         context = {enemy_a, enemy_b, punch_a, punch_b}
 
         with self.assertLogs("sor_autoplay.ai.priority", level="WARNING") as logs:
-            result = determine_priority_decision(context)
+            result = determine_priority_verb(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIn(decisions[0], (punch_a, punch_b))
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIn(verbs[0], (punch_a, punch_b))
         # The two tied Punch candidates target different enemies -- the log
         # must show that (full repr), not just the shared class name, or it
-        # misleadingly reads as the exact same decision logged twice.
+        # misleadingly reads as the exact same verb logged twice.
         message = logs.output[0]
         self.assertIn("target_slot='objA'", message)
         self.assertIn("target_slot='objB'", message)

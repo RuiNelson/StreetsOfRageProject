@@ -1,8 +1,8 @@
-"""``generate_decision_tokens`` and its ``could_*`` candidate generators.
+"""``generate_verb_tokens`` and its ``could_*`` candidate generators.
 
 Per ``AI.md``, each ``could_*`` function is concerned only with whether a
-decision is possible and sensible — never with relative importance across
-decisions, which is ``determine_priority_decision``'s job (``priority.py``).
+verb is possible and sensible — never with relative importance across
+verbs, which is ``determine_priority_verb``'s job (``priority.py``).
 
 Reach questions ("can this move hit that enemy from here?") are not answered
 here: ``inference.py`` answers them once per tick into ``TargetInReach``
@@ -25,7 +25,7 @@ from .tokens import (
     Punch,
     RearAttack,
     ReleaseGrab,
-    SmashBreakable,
+    OpenBreakable,
     SprayPepper,
     StabWithKnifeOrBottle,
     Supplex,
@@ -68,7 +68,6 @@ from .tokens import Context, Token, find, find_all
 from .tokens import (
     RetreatFromDanger,
     WalkToAdvanceStage,
-    WalkToBreakable,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
@@ -110,8 +109,8 @@ def _actors(context: Context) -> list[PlayableCharacter]:
 
     Per AI.md, one loop instance runs per AI-controlled player, "each
     producing its own ``Myself``", and ``AgentLoop.tick`` executes the
-    surviving decision on *that* player's own ``VirtualGamepad``. A
-    ``Partner`` decision reaching ``execute_decision`` would therefore be
+    surviving verb on *that* player's own ``VirtualGamepad``. A
+    ``Partner`` verb reaching ``execute_verb`` would therefore be
     carried out on the wrong pad: it is parametrized with the partner's
     slot, position and facing, so e.g. a ``Punch`` the partner could land
     made ``Myself`` press B (plus the partner's facing direction) at empty
@@ -131,14 +130,14 @@ def _blocked(context: Context, actor: PlayableCharacter) -> bool:
 STAB_WEAPON_TYPES = frozenset({0x08, 0x09})  # knife, bottle
 
 
-def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, decision_cls) -> Context:
+def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, verb_cls) -> Context:
     """Shared body for ``could_punch`` / ``could_swing_bat_or_pipe`` /
     ``could_stab_with_knife_or_bottle`` / ``could_spray_pepper``: they
     issue the identical B-button input (see execute.py's
     ``_execute_melee_strike``), gated only on which weapon type (if any)
     the actor holds. ``held_types=None`` means unarmed (``Punch``)."""
 
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -152,32 +151,32 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
         # InPunchReach already carries the "in front (within tolerance) and
         # inside the band" judgment this used to recompute inline.
         for target_slot in reach.targets_of(context, InPunchReach, actor.slot):
-            decisions.add(decision_cls(actor_slot=actor.slot, target_slot=target_slot))
-    return decisions
+            verbs.add(verb_cls(actor_slot=actor.slot, target_slot=target_slot))
+    return verbs
 
 
 def could_punch(context: Context) -> Context:
-    return _could_melee_strike(context, held_types=None, decision_cls=Punch)
+    return _could_melee_strike(context, held_types=None, verb_cls=Punch)
 
 
 def could_swing_bat_or_pipe(context: Context) -> Context:
-    return _could_melee_strike(context, held_types=MELEE_WEAPON_TYPES, decision_cls=SwingBatOrPipe)
+    return _could_melee_strike(context, held_types=MELEE_WEAPON_TYPES, verb_cls=SwingBatOrPipe)
 
 
 def could_stab_with_knife_or_bottle(context: Context) -> Context:
     return _could_melee_strike(
-        context, held_types=STAB_WEAPON_TYPES, decision_cls=StabWithKnifeOrBottle
+        context, held_types=STAB_WEAPON_TYPES, verb_cls=StabWithKnifeOrBottle
     )
 
 
 def could_spray_pepper(context: Context) -> Context:
     return _could_melee_strike(
-        context, held_types=frozenset({PEPPER_SPRAY_TYPE}), decision_cls=SprayPepper
+        context, held_types=frozenset({PEPPER_SPRAY_TYPE}), verb_cls=SprayPepper
     )
 
 
 def could_rear_attack(context: Context) -> Context:
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -204,19 +203,19 @@ def could_rear_attack(context: Context) -> Context:
         # and lives in priority._emergency_rear_attack via
         # reach.rear_attack_is_warranted.
         for target_slot in reach.targets_of(context, InRearReach, actor.slot):
-            decisions.add(RearAttack(actor_slot=actor.slot, target_slot=target_slot))
-    return decisions
+            verbs.add(RearAttack(actor_slot=actor.slot, target_slot=target_slot))
+    return verbs
 
 
 def could_counter_grab(context: Context) -> Context:
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     for actor in _actors(context):
         if actor.combat_phase is not CombatPhase.HELD_BY_ENEMY:
             continue
         if actor.action_base == 0x7E:
             continue
-        decisions.add(CounterGrab(actor_slot=actor.slot))
-    return decisions
+        verbs.add(CounterGrab(actor_slot=actor.slot))
+    return verbs
 
 
 def could_tech_recover(context: Context) -> Context:
@@ -226,12 +225,12 @@ def could_tech_recover(context: Context) -> Context:
     airborne/hurt (``HURT_PLAYER``) for this whole window and would
     otherwise never be judged free to act."""
 
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     for actor in _actors(context):
         if not actor.throw_tech_ready:
             continue
-        decisions.add(TechRecover(actor_slot=actor.slot))
-    return decisions
+        verbs.add(TechRecover(actor_slot=actor.slot))
+    return verbs
 
 
 def could_grab_enemy(context: Context) -> Context:
@@ -249,7 +248,7 @@ def could_grab_enemy(context: Context) -> Context:
     grab, exactly as it is a reason not to ``Punch``.
     """
 
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -273,8 +272,8 @@ def could_grab_enemy(context: Context) -> Context:
                 # hit rather than the hold -- same reasoning that keeps
                 # could_jump_attack from kicking into one.
                 continue
-            decisions.add(GrabEnemy(actor_slot=actor.slot, target_slot=target_slot))
-    return decisions
+            verbs.add(GrabEnemy(actor_slot=actor.slot, target_slot=target_slot))
+    return verbs
 
 
 def could_hold_actions(context: Context) -> Context:
@@ -283,7 +282,7 @@ def could_hold_actions(context: Context) -> Context:
     Never leave the AI idle in a hold — that was a common failure mode.
     """
 
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     enemies = reach.live_enemies(context)
     for actor in _actors(context):
         if _blocked(context, actor):
@@ -312,26 +311,26 @@ def could_hold_actions(context: Context) -> Context:
 
         if base == 0x66:
             # Confirmed back hold → B is suplex.
-            decisions.add(Supplex(actor_slot=actor.slot, target_slot=target_slot))
+            verbs.add(Supplex(actor_slot=actor.slot, target_slot=target_slot))
             continue
 
         if base == 0x60:
             if rear:
                 # Throw the held body into the rear threat (B+back).
-                decisions.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
+                verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
                 # Also offer flip→suplex as alternate (priority decides).
-                decisions.add(FlipHold(actor_slot=actor.slot, target_slot=target_slot))
+                verbs.add(FlipHold(actor_slot=actor.slot, target_slot=target_slot))
             else:
                 # Standard: knee damage, or flip for a suplex finish.
-                decisions.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
-                decisions.add(FlipHold(actor_slot=actor.slot, target_slot=target_slot))
+                verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
+                verbs.add(FlipHold(actor_slot=actor.slot, target_slot=target_slot))
             continue
 
         # Unknown hold-ish state with +$60 non-weapon: still act (knee or release).
-        decisions.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
+        verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
         if nearest is not None:
-            decisions.add(ReleaseGrab(actor_slot=actor.slot, target_slot=target_slot))
-    return decisions
+            verbs.add(ReleaseGrab(actor_slot=actor.slot, target_slot=target_slot))
+    return verbs
 
 
 def _ahead_in_stage_direction(actor_world_x: int, enemy_world_x: int, direction: str) -> bool:
@@ -343,7 +342,7 @@ def _ahead_in_stage_direction(actor_world_x: int, enemy_world_x: int, direction:
 
 
 def could_walk_to_near_enemy(context: Context) -> Context:
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     on_screen = reach.on_screen_enemies(context)
     stage = find(context, Stage)
     for actor in _actors(context):
@@ -359,11 +358,11 @@ def could_walk_to_near_enemy(context: Context) -> Context:
             # enemy ahead in the stage's own scroll direction (e.g. the
             # next wave, tracked on the world map but not yet in camera).
             # Never chase one that's behind -- that's the "off-screen
-            # leftover" this decision must not walk backward for. Without
+            # leftover" this verb must not walk backward for. Without
             # this fallback, a live off-screen enemy still correctly holds
             # back could_walk_to_advance_stage, but nothing ever moves the
             # camera to bring it into view, and the AI is stuck producing no
-            # decision at all.
+            # verb at all.
             enemies = [
                 e
                 for e in reach.live_enemies(context)
@@ -374,7 +373,7 @@ def could_walk_to_near_enemy(context: Context) -> Context:
         actionable = reach.targets_of(context, ActionableTarget, actor.slot)
         if any(enemy.slot in actionable for enemy in enemies):
             continue
-        # One candidate per reachable enemy -- determine_priority_decision
+        # One candidate per reachable enemy -- determine_priority_verb
         # (priority.py's distance-scored emergency) picks the closest one,
         # per AI.md's own target-selection principle: this function only
         # says what's possible, never which possibility is best.
@@ -391,12 +390,12 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 # blind -- could_retreat_from_danger skips it for the same
                 # reason, so the two still never compete for one target.
                 continue
-            decisions.add(WalkToNearEnemy(actor_slot=actor.slot, target_slot=enemy.slot))
-    return decisions
+            verbs.add(WalkToNearEnemy(actor_slot=actor.slot, target_slot=enemy.slot))
+    return verbs
 
 
 def could_retreat_from_danger(context: Context) -> Context:
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -419,8 +418,8 @@ def could_retreat_from_danger(context: Context) -> Context:
                 continue
             if target_slot in actionable:
                 continue  # already hittable -- attack instead of retreating
-            decisions.add(RetreatFromDanger(actor_slot=actor.slot, target_slot=target_slot))
-    return decisions
+            verbs.add(RetreatFromDanger(actor_slot=actor.slot, target_slot=target_slot))
+    return verbs
 
 
 def _advance_blocking_enemies(context: Context) -> list[Enemy]:
@@ -461,12 +460,12 @@ def could_walk_to_advance_stage(context: Context) -> Context:
     ``_advance_blocking_enemies``.
     """
 
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     stage = find(context, Stage)
     if stage is None or stage.direction == "none":
-        return decisions
+        return verbs
     if _advance_blocking_enemies(context):
-        return decisions
+        return verbs
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -474,12 +473,12 @@ def could_walk_to_advance_stage(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
-        decisions.add(WalkToAdvanceStage(actor_slot=actor.slot, direction=stage.direction))
-    return decisions
+        verbs.add(WalkToAdvanceStage(actor_slot=actor.slot, direction=stage.direction))
+    return verbs
 
 
 def could_call_police(context: Context) -> Context:
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -491,8 +490,8 @@ def could_call_police(context: Context) -> Context:
             continue
         if not _police_is_worth_it(context, actor):
             continue
-        decisions.add(CallPolice(actor_slot=actor.slot))
-    return decisions
+        verbs.add(CallPolice(actor_slot=actor.slot))
+    return verbs
 
 
 def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
@@ -520,7 +519,7 @@ def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
 def could_jump_attack(context: Context) -> Context:
     """Jump-kick only when a horizontal approach is useful — never hop in place."""
 
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -537,17 +536,17 @@ def could_jump_attack(context: Context) -> Context:
         for target_slot in reach.targets_of(context, InJumpAttackReach, actor.slot):
             if target_slot in threatening:
                 continue
-            decisions.add(JumpAttack(actor_slot=actor.slot, target_slot=target_slot))
-    return decisions
+            verbs.add(JumpAttack(actor_slot=actor.slot, target_slot=target_slot))
+    return verbs
 
 
-def _could_throw_ranged_weapon(context: Context, *, weapon_type: int, decision_cls) -> Context:
+def _could_throw_ranged_weapon(context: Context, *, weapon_type: int, verb_cls) -> Context:
     """Shared body for ``could_throw_knife`` / ``could_throw_pepper``: one
     candidate per on-screen enemy beyond melee but within throw range --
-    never just the nearest. determine_priority_decision (priority.py's
+    never just the nearest. determine_priority_verb (priority.py's
     distance-scored emergency) picks which one actually gets thrown at."""
 
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     enemies = reach.on_screen_enemies(context)
     for actor in _actors(context):
         if _blocked(context, actor):
@@ -569,12 +568,12 @@ def _could_throw_ranged_weapon(context: Context, *, weapon_type: int, decision_c
                 abs(enemy.world_x - actor.world_x) <= KNIFE_RANGE_X
                 and abs(enemy.world_y - actor.world_y) <= KNIFE_RANGE_Y
             ):
-                decisions.add(decision_cls(actor_slot=actor.slot, target_slot=enemy.slot))
-    return decisions
+                verbs.add(verb_cls(actor_slot=actor.slot, target_slot=enemy.slot))
+    return verbs
 
 
 def could_throw_knife(context: Context) -> Context:
-    return _could_throw_ranged_weapon(context, weapon_type=0x08, decision_cls=ThrowKnife)
+    return _could_throw_ranged_weapon(context, weapon_type=0x08, verb_cls=ThrowKnife)
 
 
 def could_throw_pepper(context: Context) -> Context:
@@ -584,11 +583,11 @@ def could_throw_pepper(context: Context) -> Context:
     reuses ``KNIFE_MELEE_X``/``KNIFE_RANGE_X``/``KNIFE_RANGE_Y`` as the
     closest available evidence."""
 
-    return _could_throw_ranged_weapon(context, weapon_type=PEPPER_SPRAY_TYPE, decision_cls=ThrowPepper)
+    return _could_throw_ranged_weapon(context, weapon_type=PEPPER_SPRAY_TYPE, verb_cls=ThrowPepper)
 
 
 def could_walk_to_weapon(context: Context) -> Context:
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -601,8 +600,8 @@ def could_walk_to_weapon(context: Context) -> Context:
         # priority.py's rank-scaled emergency favours the better one rather
         # than a min/max pick made here.
         for target_slot in reach.targets_of(context, WeaponUpgrade, actor.slot):
-            decisions.add(WalkToWeapon(actor_slot=actor.slot, target_slot=target_slot))
-    return decisions
+            verbs.add(WalkToWeapon(actor_slot=actor.slot, target_slot=target_slot))
+    return verbs
 
 
 def _pickup_is_useful(actor: PlayableCharacter, pickup: Pickup) -> bool:
@@ -623,10 +622,10 @@ def _pickup_is_useful(actor: PlayableCharacter, pickup: Pickup) -> bool:
 
 
 def could_walk_to_pickup(context: Context) -> Context:
-    decisions: set[Token] = set()
+    verbs: set[Token] = set()
     camera = find(context, CameraRange)
     if camera is None:
-        return decisions
+        return verbs
     pickups = [
         p for p in find_all(context, Pickup) if reach.in_camera(camera, p.world_x, p.world_y)
     ]
@@ -642,43 +641,42 @@ def could_walk_to_pickup(context: Context) -> Context:
         # _emergency_walk_to_pickup already ranks by type/urgency, so no
         # selection belongs here.
         for pickup in useful:
-            decisions.add(WalkToPickup(actor_slot=actor.slot, target_slot=pickup.slot))
-    return decisions
+            verbs.add(WalkToPickup(actor_slot=actor.slot, target_slot=pickup.slot))
+    return verbs
 
 
-def could_smash_breakable(context: Context) -> Context:
-    decisions: set[Token] = set()
-    camera = find(context, CameraRange)
-    breakables = find_all(context, Breakable)
-    if camera is not None:
-        breakables = [b for b in breakables if reach.in_camera(camera, b.world_x, b.world_y)]
-    for actor in _actors(context):
-        if _blocked(context, actor):
-            continue
-        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
-            continue
-        if _is_holding_enemy(actor):
-            continue
-        for prop in breakables:
-            if (
-                abs(prop.world_x - actor.world_x) <= BREAKABLE_PUNCH_X
-                and abs(prop.world_y - actor.world_y) <= BREAKABLE_PUNCH_Y
-            ):
-                decisions.add(SmashBreakable(actor_slot=actor.slot, target_slot=prop.slot))
-    return decisions
+def in_smash_range(actor: PlayableCharacter, prop: Breakable) -> bool:
+    """Close enough that B hits the prop without moving first.
+
+    Shared with ``priority`` and ``execute``, which both need the same
+    answer now that one verb spans the approach and the strike.
+    """
+
+    return (
+        abs(prop.world_x - actor.world_x) <= BREAKABLE_PUNCH_X
+        and abs(prop.world_y - actor.world_y) <= BREAKABLE_PUNCH_Y
+    )
 
 
-def could_walk_to_breakable(context: Context) -> Context:
-    """Approach breakables that block forward stage progress."""
+def could_open_breakable(context: Context) -> Context:
+    """Props worth opening: already in range, or ahead on the stage path.
 
-    decisions: set[Token] = set()
+    One generator for what used to be ``could_smash_breakable`` plus
+    ``could_walk_to_breakable``. The distinction between them was never
+    about intent -- both meant "open that prop" -- only about whether the
+    actor had arrived yet, which is now answered once here (and again, per
+    tick, by ``priority``/``execute``) instead of deciding which of two
+    verbs may exist.
+    """
+
+    verbs: set[Token] = set()
     stage = find(context, Stage)
     camera = find(context, CameraRange)
     breakables = find_all(context, Breakable)
     if camera is not None:
         breakables = [b for b in breakables if reach.in_camera(camera, b.world_x, b.world_y)]
     if not breakables:
-        return decisions
+        return verbs
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -686,7 +684,9 @@ def could_walk_to_breakable(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
-        # Prefer props ahead on the stage path.
+        # Prefer props ahead on the stage path -- but a prop already within
+        # reach is worth opening whichever side of the actor it is on, since
+        # opening it costs only the B press.
         ahead = breakables
         if stage is not None and stage.direction == "right":
             ahead = [b for b in breakables if b.world_x >= actor.world_x - 8]
@@ -694,23 +694,16 @@ def could_walk_to_breakable(context: Context) -> Context:
             ahead = [b for b in breakables if b.world_x <= actor.world_x + 8]
         if not ahead:
             ahead = breakables
-        # Skip if already in smash range (SmashBreakable owns that).
-        candidates = [
-            b
-            for b in ahead
-            if not (
-                abs(b.world_x - actor.world_x) <= BREAKABLE_PUNCH_X
-                and abs(b.world_y - actor.world_y) <= BREAKABLE_PUNCH_Y
-            )
-        ]
+        candidates = {b.slot: b for b in ahead}
+        candidates.update({b.slot: b for b in breakables if in_smash_range(actor, b)})
         # One candidate per reachable breakable -- priority.py's distance-
-        # bucketed emergency picks the closest one.
-        for prop in candidates:
-            decisions.add(WalkToBreakable(actor_slot=actor.slot, target_slot=prop.slot))
-    return decisions
+        # scored emergency picks the closest one.
+        for prop in candidates.values():
+            verbs.add(OpenBreakable(actor_slot=actor.slot, target_slot=prop.slot))
+    return verbs
 
 
-def generate_decision_tokens(context: Context) -> Context:
+def generate_verb_tokens(context: Context) -> Context:
     """Returns context | every could_* candidate that applies."""
 
     return (
@@ -733,6 +726,5 @@ def generate_decision_tokens(context: Context) -> Context:
         | could_throw_pepper(context)
         | could_walk_to_weapon(context)
         | could_walk_to_pickup(context)
-        | could_smash_breakable(context)
-        | could_walk_to_breakable(context)
+        | could_open_breakable(context)
     )
