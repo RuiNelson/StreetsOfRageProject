@@ -17,6 +17,7 @@ from abc import ABC
 from dataclasses import dataclass
 
 from .character import Character
+from .tokens import Inferred
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -25,6 +26,11 @@ class Enemy(Character):
 
     type_id: int
     targets_player: int | None  # 1 or 2, or None — from MapEntity.targets_player
+    # Ordinary-enemy velocity only (Grunt family); Boss populates its own
+    # vel_x/vel_z below from different offsets -- see memory_map.py's
+    # OBJ_VEL_X_ORDINARY/OBJ_VEL_LANE_ORDINARY.
+    grunt_vel_x: float = 0.0  # +$1C signed 16.16, ordinary enemies only
+    grunt_vel_y: float = 0.0  # +$20 signed 16.16 (lane), ordinary enemies only
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -136,3 +142,22 @@ def enemy_class_for_type(type_id: int) -> type[Enemy]:
     """
 
     return _TYPE_TO_CLASS.get(type_id & 0xFF, Enemy)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ClosingEnemy(Inferred):
+    """A Grunt closing fast enough on X and lane to reach rear-attack range
+    within the next few ticks, even though its *current* position is not
+    there yet.
+
+    Produced by ``inference.check_for_closing_enemies`` from a Grunt's
+    ``grunt_vel_x``/``grunt_vel_y`` (never for a Boss -- out of scope). The
+    band-check helpers in ``decide.py`` are purely instantaneous-position, so
+    a fast diagonal closer can go from "outside every reaction band" to
+    "already attacking" between two polls with no warning; this token is the
+    early-warning signal that lets ``could_rear_attack`` react a few ticks
+    ahead of the raw position check. Reference-only per AI.md -- consumers
+    look up the full Enemy via ``find(context, Enemy, slot=...)``.
+    """
+
+    slot: str

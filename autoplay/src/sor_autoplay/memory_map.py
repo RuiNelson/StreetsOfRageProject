@@ -98,6 +98,17 @@ OBJ_POS_Z = 0x18  # long 16.16 height
 # $0000C000 (+0.75) to +$24 every later tick until +$18 meets +$4C.
 OBJ_VEL_X = 0x20
 OBJ_VEL_Z = 0x24
+# Ordinary-enemy velocity, per enemy-ai.md's "object layout used by ordinary
+# enemies" table ($1C/$20/$24 = X/lane/vertical velocity, evidenced by $973E,
+# $9F96 ordinary_enemy_advance_x_bounded, $A00E
+# ordinary_enemy_advance_lane_bounded; corroborated independently by the boss
+# AI section citing +$1C(target) as a player target's X-velocity). This
+# implies the existing OBJ_VEL_X=0x20 above is actually lane velocity for
+# this family, not X -- but it is boss-only in practice today (Boss.vel_x/
+# vel_z), so it is left untouched here; these are separate, correctly named
+# constants for ordinary enemies only.
+OBJ_VEL_X_ORDINARY = 0x1C
+OBJ_VEL_LANE_ORDINARY = 0x20
 # Lane sign latched at jump launch; selects the X velocity direction.
 OBJ_BOSS_LANE_SIGN = 0x61
 # Primary state at +$30:

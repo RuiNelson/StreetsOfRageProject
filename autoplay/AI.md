@@ -155,6 +155,15 @@ a new decision.
 already in flight, allowing the AI to react to it before it reaches the
 character.
 
+**`ClosingEnemy`** flags an ordinary enemy whose own velocity — not just
+its current position — puts it on course to close into rear-attack range
+within the next few ticks, even though it is not there yet. Ordinary
+enemies steer toward the player on both axes at once, so a fast diagonal
+approach can otherwise go from "outside every reaction band" to "already
+attacking" between two RAM polls with no warning, since the band checks
+elsewhere are purely instantaneous-position. Reference-only, like
+`AnimationInProgress`: its mere presence for a given enemy is the signal.
+
 
 ## Process
 

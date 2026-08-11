@@ -96,6 +96,8 @@ def _enemy_entity(
     ground_z: int | None = None,
     vel_x: float = 0.0,
     vel_z: float = 0.0,
+    enemy_vel_x: float = 0.0,
+    enemy_vel_y: float = 0.0,
 ) -> MapEntity:
     return MapEntity(
         kind=kind,
@@ -124,6 +126,8 @@ def _enemy_entity(
         ground_z=ground_z,
         vel_x=vel_x,
         vel_z=vel_z,
+        enemy_vel_x=enemy_vel_x,
+        enemy_vel_y=enemy_vel_y,
     )
 
 
@@ -342,6 +346,22 @@ class EnemyObservationTests(unittest.TestCase):
         self.assertEqual(len(enemies), 1)
         self.assertEqual(enemies[0].slot, "obj00")
         self.assertEqual(enemies[0].type_id, 0x20)
+
+    def test_grunt_velocity_reaches_the_enemy_token(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        entities = (
+            _player_entity(slot="P1"),
+            _enemy_entity(slot="obj00", enemy_vel_x=-3.5, enemy_vel_y=1.25),
+        )
+        snapshot = _snapshot(players=(p1, p2), entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        enemy = find(context, Enemy, slot="obj00")
+        assert enemy is not None
+        self.assertEqual(enemy.grunt_vel_x, -3.5)
+        self.assertEqual(enemy.grunt_vel_y, 1.25)
 
     def test_enemy_omitted_when_defeated(self) -> None:
         p1 = _player_snapshot(index=1)

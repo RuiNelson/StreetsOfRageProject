@@ -36,7 +36,7 @@ from sor_autoplay.ai.decide import (
     could_walk_to_pickup,
     could_walk_to_weapon,
 )
-from sor_autoplay.ai.tokens import Enemy
+from sor_autoplay.ai.tokens import ClosingEnemy, Enemy
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
 from sor_autoplay.ai.tokens import Breakable
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
@@ -326,6 +326,30 @@ class CouldRearAttackTests(unittest.TestCase):
             character_id=1, character_name="Adam", world_x=100, world_y=100, facing_left=False
         )
         enemy = make_enemy(world_x=108, world_y=100)  # dx=8, within Adam's +14 front reach
+        context: set[Token] = {myself, enemy}
+
+        result = could_rear_attack(context)
+
+        self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
+
+    def test_fires_for_a_closing_enemy_still_outside_the_instantaneous_band(self) -> None:
+        # ClosingEnemy is the early-warning signal from inference.py: an
+        # enemy not yet in _in_rear_band's instantaneous check, but flagged
+        # as about to close in fast (diagonal approach the raw band check
+        # can't see coming between two polls).
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=160, world_y=100)  # dx=60, outside Axel's 40px band
+        context: set[Token] = {myself, enemy, ClosingEnemy(slot="obj01")}
+
+        result = could_rear_attack(context)
+
+        self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
+
+    def test_still_fires_by_the_real_band_without_a_closing_enemy_token(self) -> None:
+        # Regression: the ClosingEnemy check must be additive, not a
+        # replacement for the existing instantaneous-band check.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=80, world_y=100)  # behind while facing right
         context: set[Token] = {myself, enemy}
 
         result = could_rear_attack(context)

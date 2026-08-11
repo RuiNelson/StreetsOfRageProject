@@ -167,6 +167,10 @@ class MapEntity:
     ground_z: int | None = None  # later-boss +$4C ground/landing height
     vel_x: float = 0.0  # +$20 signed 16.16, ROM units per tick
     vel_z: float = 0.0  # +$24 signed 16.16, ROM units per tick
+    # Ordinary-enemy velocity (kind=="enemy" only; distinct offsets/fields
+    # from the boss vel_x/vel_z above -- see memory_map.py).
+    enemy_vel_x: float = 0.0  # +$1C signed 16.16
+    enemy_vel_y: float = 0.0  # +$20 signed 16.16 (lane)
     combat_phase: CombatPhase = CombatPhase.UNKNOWN
 
     @property
@@ -472,6 +476,8 @@ def _entity_from_object(
     ground_z = None
     vel_x = 0.0
     vel_z = 0.0
+    enemy_vel_x = 0.0
+    enemy_vel_y = 0.0
     phase = CombatPhase.UNKNOWN
 
     if style.kind == "player":
@@ -488,6 +494,8 @@ def _entity_from_object(
         target_ptr = _u16(slot, mm.OBJ_TARGET_PTR)
         attacker_ptr = _u16(slot, mm.OBJ_ATTACKER_PTR)
         family_state = _u8(slot, mm.OBJ_FAMILY_STATE)
+        enemy_vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X_ORDINARY)
+        enemy_vel_y = fixed1616_signed(slot, mm.OBJ_VEL_LANE_ORDINARY)
         phase = ordinary_enemy_phase(primary_state, type_id=type_id)
     elif style.kind == "boss":
         tactical = _u8(slot, mm.OBJ_BOSS_TACTICAL)
@@ -567,6 +575,8 @@ def _entity_from_object(
         ground_z=ground_z,
         vel_x=vel_x,
         vel_z=vel_z,
+        enemy_vel_x=enemy_vel_x,
+        enemy_vel_y=enemy_vel_y,
         boss_dist_lane=boss_dist_lane,
         combat_phase=phase,
     )

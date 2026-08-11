@@ -149,6 +149,8 @@ def generate_direct_observation_tokens(
                     combat_phase=entity.combat_phase,
                     targets_player=entity.targets_player,
                     facing_left=entity.facing_left,
+                    grunt_vel_x=entity.enemy_vel_x,
+                    grunt_vel_y=entity.enemy_vel_y,
                     **extra,
                 )
             )

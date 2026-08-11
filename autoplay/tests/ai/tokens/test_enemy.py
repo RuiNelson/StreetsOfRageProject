@@ -5,6 +5,7 @@ from sor_autoplay.ai.tokens import (
     Antonio,
     Bongo,
     Boss,
+    ClosingEnemy,
     Enemy,
     Garcia,
     Grunt,
@@ -17,7 +18,7 @@ from sor_autoplay.ai.tokens import (
     Souther,
     enemy_class_for_type,
 )
-from sor_autoplay.ai.tokens import Information
+from sor_autoplay.ai.tokens import Inferred, Information
 from sor_autoplay.phases import CombatPhase
 
 
@@ -58,6 +59,36 @@ class EnemyTests(unittest.TestCase):
         )
         self.assertIsNone(enemy.health)
         self.assertIsNone(enemy.targets_player)
+
+    def test_grunt_velocity_defaults_to_zero(self) -> None:
+        enemy = Enemy(
+            slot="obj07",
+            type_id=0x20,
+            world_x=900,
+            world_y=64,
+            health=6,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=None,
+            facing_left=False,
+        )
+        self.assertEqual(enemy.grunt_vel_x, 0.0)
+        self.assertEqual(enemy.grunt_vel_y, 0.0)
+
+    def test_grunt_velocity_round_trips(self) -> None:
+        enemy = Enemy(
+            slot="obj07",
+            type_id=0x20,
+            world_x=900,
+            world_y=64,
+            health=6,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=None,
+            facing_left=False,
+            grunt_vel_x=-2.5,
+            grunt_vel_y=1.25,
+        )
+        self.assertEqual(enemy.grunt_vel_x, -2.5)
+        self.assertEqual(enemy.grunt_vel_y, 1.25)
 
     def test_frozen_and_hashable(self) -> None:
         enemy = Enemy(
@@ -174,6 +205,21 @@ class EnemyHierarchyTests(unittest.TestCase):
         self.assertEqual(souther.ground_z, 160)
         self.assertEqual(souther.vel_x, 1.5)
         self.assertEqual(souther.vel_z, -0.5)
+
+
+class ClosingEnemyTests(unittest.TestCase):
+    def test_is_inferred(self) -> None:
+        self.assertTrue(issubclass(ClosingEnemy, Inferred))
+
+    def test_reference_only_slot_field(self) -> None:
+        closing = ClosingEnemy(slot="obj07")
+        self.assertEqual(closing.slot, "obj07")
+
+    def test_frozen_and_hashable(self) -> None:
+        closing = ClosingEnemy(slot="obj07")
+        with self.assertRaises(Exception):
+            closing.slot = "obj08"  # type: ignore[misc]
+        self.assertIn(closing, {closing})
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from sor_autoplay.ai.tokens import (
     JumpAttack,
     LifePickup,
     Punch,
+    RearAttack,
     ScorePickup,
     SmashBreakable,
     SprayPepper,
@@ -20,7 +21,7 @@ from sor_autoplay.ai.tokens import (
     Weapon,
 )
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import Enemy
+from sor_autoplay.ai.tokens import ClosingEnemy, Enemy
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.priority import determine_priority_decision
@@ -635,6 +636,35 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
         self.assertIsInstance(decisions[0], WalkToNearEnemy)
+
+
+class DetermineEmergencyRearAttackTests(unittest.TestCase):
+    """RearAttack's emergency only depends on the target's combat_phase, not
+    on whether the candidate was triggered by the real band check or by a
+    ClosingEnemy early-warning token -- confirms priority.py needed no
+    change when could_rear_attack learned to react to ClosingEnemy."""
+
+    def test_dangerous_target_wins_regardless_of_a_closing_enemy_token(self) -> None:
+        dangerous = _enemy("objA", CombatPhase.ATTACKING)
+        calm = _enemy("objB", CombatPhase.NORMAL)
+        rear_dangerous = RearAttack(actor_slot="P1", target_slot="objA")
+        rear_calm = RearAttack(actor_slot="P1", target_slot="objB")
+        # objB's decision exists only because of the early-warning token, not
+        # because it is in the real band -- must not out-rank a genuine
+        # dangerous-phase target sitting in range.
+        context = {
+            dangerous,
+            calm,
+            rear_dangerous,
+            rear_calm,
+            ClosingEnemy(slot="objB"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIs(decisions[0], rear_dangerous)
 
 
 class DeterminePriorityTieBreakTests(unittest.TestCase):

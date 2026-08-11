@@ -15,7 +15,9 @@ from sor_autoplay.memory_map import (
     OBJ_SCRIPT_PARAM,
     OBJ_SUBTYPE,
     OBJ_TYPE,
+    OBJ_VEL_LANE_ORDINARY,
     OBJ_VEL_X,
+    OBJ_VEL_X_ORDINARY,
     OBJ_VEL_Z,
     OBJECT_SLOT_SIZE,
 )
@@ -240,6 +242,65 @@ class WorldMapParseTests(unittest.TestCase):
         self.assertEqual(debris.kind, "projectile")
         self.assertAlmostEqual(debris.vel_x, -1.5)
         self.assertAlmostEqual(debris.vel_z, 2.25)
+
+    def test_ordinary_enemy_velocity_is_decoded(self) -> None:
+        """Ordinary enemies (kind=="enemy") must expose their own +$1C/+$20
+        velocity, distinct from the boss-only vel_x/vel_z at +$20/+$24 --
+        before this fix a Grunt always read enemy_vel_x/enemy_vel_y as 0.0
+        regardless of RAM contents, hiding fast diagonal closers from the AI."""
+
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+
+        base = 0x100
+        _put_u8(actors, base + OBJ_TYPE, 0x20)  # Garcia
+        _put_u8(actors, base + OBJ_FLAGS, 0x00)
+        _put_fixed16(actors, base + OBJ_POS_X, 800)
+        _put_fixed16(actors, base + OBJ_POS_Y, 0x40)
+        _put_fixed16(actors, base + OBJ_POS_Z, 0xA0)
+        _put_u16(actors, base + OBJ_PRIMARY_STATE, 0x0100)  # ENEMY_ST_NORMAL
+        _put_u16(actors, base + OBJ_HEALTH, 10)
+        _put_fixed1616_signed(actors, base + OBJ_VEL_X_ORDINARY, -3.5)
+        _put_fixed1616_signed(actors, base + OBJ_VEL_LANE_ORDINARY, 1.25)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+        garcia = next(entity for entity in world.entities if entity.type_id == 0x20)
+
+        self.assertEqual(garcia.kind, "enemy")
+        self.assertAlmostEqual(garcia.enemy_vel_x, -3.5)
+        self.assertAlmostEqual(garcia.enemy_vel_y, 1.25)
+
+    def test_boss_velocity_fields_are_unaffected_by_ordinary_enemy_offsets(self) -> None:
+        """Boss's existing vel_x/vel_z (+$20/+$24) must stay untouched by the
+        new ordinary-enemy-only enemy_vel_x/enemy_vel_y fields."""
+
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+
+        base = 0x100
+        _put_u8(actors, base + OBJ_TYPE, 0x35)  # Mr. X boss
+        _put_u8(actors, base + OBJ_FLAGS, 0x00)
+        _put_fixed16(actors, base + OBJ_POS_X, 800)
+        _put_fixed16(actors, base + OBJ_POS_Y, 0x40)
+        _put_fixed16(actors, base + OBJ_POS_Z, 0xA0)
+        _put_u16(actors, base + OBJ_HEALTH, 100)
+        _put_fixed1616_signed(actors, base + OBJ_VEL_X, 2.0)
+        _put_fixed1616_signed(actors, base + OBJ_VEL_Z, -4.0)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+        boss = next(entity for entity in world.entities if entity.type_id == 0x35)
+
+        self.assertEqual(boss.kind, "boss")
+        self.assertAlmostEqual(boss.vel_x, 2.0)
+        self.assertAlmostEqual(boss.vel_z, -4.0)
+        self.assertEqual(boss.enemy_vel_x, 0.0)
+        self.assertEqual(boss.enemy_vel_y, 0.0)
 
     def test_jack_weapon_latch_is_exposed_to_observation(self) -> None:
         actors = bytearray(ACTORS_BYTES)

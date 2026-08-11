@@ -48,6 +48,7 @@ from .enemy import (
     Antonio,
     Bongo,
     Boss,
+    ClosingEnemy,
     Enemy,
     Garcia,
     Grunt,
