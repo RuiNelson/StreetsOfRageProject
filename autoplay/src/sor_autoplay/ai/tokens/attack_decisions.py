@@ -65,9 +65,9 @@ class Punch(MeleeAttacks):
     the grab.
 
     Produced by ``could_punch`` when the actor holds no weapon and an
-    enemy sits within the actor's unarmed punch band.
+    ``InPunchReach`` names an enemy its forward strike would connect with.
 
-    Raises emergency: (Enemy when in a punishable phase)×60, Enemy×20.
+    Raises emergency: (PunishWindow for the target)×60, Enemy×20.
     """
 
     priority: int = 10
@@ -272,10 +272,13 @@ class ReleaseGrab(GrabMechanics):
 class JumpAttack(MeleeAttacks):
     """Jump-kick only — never a stationary hop. Requires horizontal aim.
 
-    Produced by ``could_jump_attack`` when a forward enemy sits in the
-    horizontal jump band (outside punch outer, within the max ΔX).
+    Produced by ``could_jump_attack`` for an ``InJumpAttackReach`` target
+    (forward, outside punch outer, within the kick's max ΔX) that has no
+    ``IncomingMelee`` against the actor -- the kick's own travel would
+    otherwise deliver it into a committed attack, airborne and unable to
+    change its mind.
 
-    Raises emergency: (Enemy when in a punishable phase)×28, Enemy×18.
+    Raises emergency: (PunishWindow for the target)×28, Enemy×18.
     """
 
     priority: int = 8  # below basic punch priority (10)
@@ -302,13 +305,13 @@ class SmashBreakable(Attack):
 class RearAttack(MeleeAttacks):
     """Simultaneous B+C rear/escape attack (``$322A``).
 
-    Produced by ``could_rear_attack`` when an enemy sits inside the
-    character-specific ``$322A`` attack box (measured live,
+    Produced by ``could_rear_attack`` for an ``InRearReach`` target -- an
+    enemy inside the character-specific ``$322A`` attack box (measured live,
     controls-and-input.md): behind the player for all three characters
     (Axel/Adam/Blaze up to 40/42/53px), and additionally in front only for
     Adam (up to 14px — his chord is a forward-reaching hop, not a backfist).
 
-    Raises emergency, when ``decide._rear_attack_is_warranted`` holds --
+    Raises emergency, when ``reach.rear_attack_is_warranted`` holds --
     i.e. the actor is boxed in between two enemies, or the target is inside
     the punch dead zone, the two cases where turning around solves nothing:
     (Enemy when in a dangerous phase)×60, Enemy×55. Otherwise, with a

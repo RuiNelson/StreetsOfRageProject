@@ -45,6 +45,7 @@ from .character import (
 )
 from .enemy import (
     Abadede,
+    ActionableTarget,
     Antonio,
     Bongo,
     Boss,
@@ -53,16 +54,30 @@ from .enemy import (
     Garcia,
     Grunt,
     HakuRo,
+    InJumpAttackReach,
+    InPunchReach,
+    InRearReach,
+    IncomingMelee,
     Jack,
     MrX,
     Nora,
     Onihime,
+    PunishWindow,
     Signal,
     Souther,
+    Surrounded,
+    TargetInReach,
     enemy_class_for_type,
 )
 from .essential import AnimationInProgress, CameraRange, Essential, Stage
-from .hazard_tokens import Breakable, IncomingProjectile, Pit, Projectile, StageObjects
+from .hazard_tokens import (
+    Breakable,
+    IncomingProjectile,
+    Pit,
+    Projectile,
+    SafeSpot,
+    StageObjects,
+)
 from .pickup_tokens import (
     HEALTH_DELTA,
     PLAYER_MAX_HEALTH,
@@ -75,6 +90,7 @@ from .pickup_tokens import (
     ScorePickup,
     SpecialPickup,
     Weapon,
+    WeaponUpgrade,
     build_pickup_token,
     is_pickup_type,
     is_weapon_type,

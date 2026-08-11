@@ -14,7 +14,7 @@ from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 from sor_autoplay.world_map import MapEntity
 
 from .tokens import Myself, Partner
-from .tokens import Boss, Enemy, Jack, enemy_class_for_type
+from .tokens import Boss, Enemy, Grunt, Jack, enemy_class_for_type
 from .tokens import AnimationInProgress, CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile
 from .tokens import Weapon, build_pickup_token
@@ -124,6 +124,11 @@ def generate_direct_observation_tokens(
         if entity.kind in ("enemy", "boss") and not entity.is_defeated:
             cls = enemy_class_for_type(entity.type_id)
             extra: dict[str, object] = {}
+            if issubclass(cls, Grunt):
+                # +$50 is a per-kind alias in RAM; world_map only reads it as
+                # a stun timer for kind=="enemy", which is exactly the Grunt
+                # family here. Boss keeps its own +$50 (distance to target).
+                extra["stun_timer"] = entity.stun_timer
             if cls is Jack:
                 extra["has_projectile"] = bool(entity.family_state & 0x01)
             elif issubclass(cls, Boss):

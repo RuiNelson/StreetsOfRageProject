@@ -1,12 +1,33 @@
-"""``generate_inference_tokens`` and its ``check_for_*`` derivation functions."""
+"""``generate_inference_tokens`` and its ``check_for_*`` derivation functions.
+
+Every function here turns directly observed tokens into a *judgment*: a
+token is added only when the judgment holds, never as a 1:1 mirror of an
+observation (per ``AI.md``). The geometry they judge with lives in
+``reach.py``, shared with ``decide.py``/``priority.py`` so all three stages
+agree on one definition of every band.
+"""
 
 from __future__ import annotations
 
-from ..phases import CombatPhase, should_ignore_as_target
+import math
+
+from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
+from . import reach
 from .tokens import Myself, Partner, PlayableCharacter
-from .tokens import Enemy, Jack
-from .tokens import ClosingEnemy, Grunt
+from .tokens import Enemy, Grunt
+from .tokens import (
+    ActionableTarget,
+    ClosingEnemy,
+    InJumpAttackReach,
+    InPunchReach,
+    InRearReach,
+    IncomingMelee,
+    PunishWindow,
+    Surrounded,
+)
+from .tokens import CameraRange, Pit, SafeSpot
 from .tokens import IncomingProjectile, Projectile
+from .tokens import Weapon, WeaponUpgrade, weapon_rank
 from .tokens import Context, Token, find, find_all
 from .tokens import rear_attack_behind_max_x, rear_attack_front_max_x
 
@@ -20,6 +41,19 @@ CAUTION_RANGE_X = 40
 # the slowest measured RearAttack startup (Adam, 21 frames).
 CLOSING_ENEMY_THREAT_TICKS = 6
 CLOSING_ENEMY_LANE_SLACK = 24
+
+# A crowd, rather than a queue: this many live enemies inside the close box
+# around the actor (or any pincer -- at least one on each side) is what makes
+# it "surrounded". Two enemies arriving from the same side are an ordinary
+# fight; the box is the same one RearAttack uses to decide it is boxed in.
+SURROUNDED_MIN_ENEMIES = 3
+
+# Candidate step sizes when looking for a SafeSpot. X matches
+# execute.RETREAT_FROM_DANGER_DISTANCE (one retreat tick's worth of travel);
+# the lane step clears PUNCH_RANGE_Y so a sidestep actually leaves the
+# attacker's line rather than shuffling inside it.
+SAFE_SPOT_STEP_X = 32
+SAFE_SPOT_STEP_Y = 24
 
 
 def _actors(context: Context) -> list[PlayableCharacter]:
@@ -82,9 +116,7 @@ def _closing_enemy_threatens(enemy: Grunt, actor: PlayableCharacter) -> bool:
     Must pick the *side-specific* band (behind vs front), not their union:
     Axel/Blaze have zero forward RearAttack reach, so an enemy closing in
     from the front must never be promoted for them, even though they do
-    have a real behind band. This mirrors decide.py's own
-    facing-aware ``_enemy_behind_actor`` test rather than importing it, to
-    keep the existing no-cross-import convention between the two modules.
+    have a real behind band.
     """
 
     if abs(enemy.world_y - actor.world_y) > CLOSING_ENEMY_LANE_SLACK:
@@ -99,7 +131,7 @@ def _closing_enemy_threatens(enemy: Grunt, actor: PlayableCharacter) -> bool:
     if not heading_toward:
         return False
 
-    behind = (dx > 0) if actor.facing_left else (dx < 0)
+    behind = reach.enemy_behind_actor(actor, enemy)
     max_x = (
         rear_attack_behind_max_x(actor.character_id)
         if behind
@@ -109,8 +141,8 @@ def _closing_enemy_threatens(enemy: Grunt, actor: PlayableCharacter) -> bool:
         # No reach at all on this side (e.g. Axel/Blaze from the front).
         return False
     if abs(dx) <= max_x:
-        # Already inside the band -- decide._in_rear_band already covers
-        # this tick without needing the early-warning signal.
+        # Already inside the band -- reach.in_rear_band already covers this
+        # tick without needing the early-warning signal.
         return False
 
     ticks = (abs(dx) - max_x) / abs(vx)
@@ -123,7 +155,7 @@ def check_for_closing_enemies(context: Context) -> Context:
     Per ``AI.md``, this is a threat judgment, not a 1:1 copy of every
     observed ``Grunt`` -- see the module docstring on ``ClosingEnemy`` for
     why the AI needs this early-warning signal at all: the band checks in
-    ``decide.py`` are purely instantaneous-position, so a fast diagonal
+    ``reach.py`` are purely instantaneous-position, so a fast diagonal
     closer can arrive between two polls with no warning otherwise.
     """
 
@@ -140,12 +172,242 @@ def check_for_closing_enemies(context: Context) -> Context:
     return closing
 
 
-def generate_inference_tokens(context: Context) -> Context:
-    """Derive ``IncomingProjectile``/``ClosingEnemy`` tokens from direct
-    observation."""
+def check_for_targets_in_reach(context: Context) -> Context:
+    """Derive the per-move reach bands once per (actor, live enemy) pair.
 
-    return (
+    Computing these here instead of inside each ``could_*`` is what lets
+    ``decide.py`` and ``priority.py`` ask the same question and get the same
+    answer within a tick, and stops the same trigonometry from being redone
+    once per decision family.
+    """
+
+    enemies = reach.live_enemies(context)
+    if not enemies:
+        return set()
+
+    tokens: set[Token] = set()
+    for actor in _actors(context):
+        for enemy in enemies:
+            pair = {"actor_slot": actor.slot, "target_slot": enemy.slot}
+            if reach.punch_would_connect(actor, enemy):
+                tokens.add(InPunchReach(**pair))
+            if reach.in_rear_band(actor, enemy):
+                tokens.add(InRearReach(**pair))
+            if reach.in_jump_attack_band(actor, enemy):
+                tokens.add(InJumpAttackReach(**pair))
+            if reach.enemy_actionable(actor, enemy, enemies):
+                tokens.add(ActionableTarget(**pair))
+    return tokens
+
+
+def check_for_incoming_melee(context: Context) -> Context:
+    """Promote committed enemies close enough for their attack to land.
+
+    The melee counterpart of ``check_for_incoming_projectiles``: a dangerous
+    phase alone is not a threat (an enemy swinging at nothing three lanes
+    away is not), and neither is proximity alone. Only on-screen enemies
+    qualify -- an off-screen one cannot connect this tick.
+    """
+
+    enemies = reach.on_screen_enemies(context)
+    if not enemies:
+        return set()
+
+    tokens: set[Token] = set()
+    for actor in _actors(context):
+        for enemy in enemies:
+            if not is_dangerous(enemy.combat_phase):
+                continue
+            if not reach.too_close_to_keep_approaching(actor, enemy):
+                continue
+            tokens.add(IncomingMelee(actor_slot=actor.slot, target_slot=enemy.slot))
+    return tokens
+
+
+def _punish_frames_left(enemy: Enemy) -> int:
+    """The ROM's own countdown for this punish window, when it has one.
+
+    Only a stunned ``Grunt`` exposes one (``+$50``, seeded with $18 for
+    hitstun and $A0 for the pepper-spray immobilization). Knockdown, block
+    and grab windows end on collision/animation events instead, so they
+    report 0 -- "no readable timer", not "about to end".
+    """
+
+    if isinstance(enemy, Grunt) and enemy.combat_phase is CombatPhase.STUNNED:
+        return enemy.stun_timer
+    return 0
+
+
+def check_for_punish_windows(context: Context) -> Context:
+    """Promote every live enemy that currently cannot defend itself."""
+
+    tokens: set[Token] = set()
+    for enemy in reach.live_enemies(context):
+        if not is_punishable(enemy.combat_phase):
+            continue
+        tokens.add(
+            PunishWindow(target_slot=enemy.slot, frames_left=_punish_frames_left(enemy))
+        )
+    return tokens
+
+
+def check_for_surrounded(context: Context) -> Context:
+    """Judge whether an actor is boxed in rather than facing a queue.
+
+    Uses the same close box as ``reach.rear_attack_is_warranted``'s
+    boxed-in test, so "surrounded" and "the chord is warranted" cannot
+    disagree about what counts as close.
+    """
+
+    enemies = reach.on_screen_enemies(context)
+    if not enemies:
+        return set()
+
+    tokens: set[Token] = set()
+    for actor in _actors(context):
+        near = [
+            enemy
+            for enemy in enemies
+            if abs(enemy.world_x - actor.world_x) <= reach.REAR_THREAT_X
+            and abs(enemy.world_y - actor.world_y) <= reach.REAR_THREAT_Y
+        ]
+        behind = sum(1 for enemy in near if reach.enemy_behind_actor(actor, enemy))
+        in_front = len(near) - behind
+        pincered = behind >= 1 and in_front >= 1
+        if len(near) < SURROUNDED_MIN_ENEMIES and not pincered:
+            continue
+        tokens.add(Surrounded(actor_slot=actor.slot, in_front=in_front, behind=behind))
+    return tokens
+
+
+def _inside_pit(context: Context, world_x: int, world_y: int) -> bool:
+    for pit in find_all(context, Pit):
+        if (
+            pit.world_x - reach.PIT_AVOID_MARGIN <= world_x <= pit.world_x + pit.width + reach.PIT_AVOID_MARGIN
+            and pit.lane_y - reach.PIT_AVOID_MARGIN <= world_y <= pit.lane_y + pit.height + reach.PIT_AVOID_MARGIN
+        ):
+            return True
+    return False
+
+
+def _safe_spot_candidates(
+    actor: PlayableCharacter, threat: Enemy
+) -> list[tuple[int, int]]:
+    """Steps worth considering: away on X, and the two sidesteps, alone or
+    combined with the retreat. Standing still is not a candidate -- this
+    token only exists to answer "back off to *where*"."""
+
+    away = -SAFE_SPOT_STEP_X if threat.world_x >= actor.world_x else SAFE_SPOT_STEP_X
+    return [
+        (actor.world_x + away, actor.world_y),
+        (actor.world_x + away, actor.world_y + SAFE_SPOT_STEP_Y),
+        (actor.world_x + away, actor.world_y - SAFE_SPOT_STEP_Y),
+        (actor.world_x, actor.world_y + SAFE_SPOT_STEP_Y),
+        (actor.world_x, actor.world_y - SAFE_SPOT_STEP_Y),
+    ]
+
+
+def check_for_safe_spots(context: Context) -> Context:
+    """Pick where to back off to, for each actor with an ``IncomingMelee``.
+
+    Runs after ``check_for_incoming_melee`` (``generate_inference_tokens``
+    threads the context through in order) because a safe spot is only
+    meaningful relative to a threat worth leaving.
+    """
+
+    threats = find_all(context, IncomingMelee)
+    if not threats:
+        return set()
+
+    camera = find(context, CameraRange)
+    enemies = reach.live_enemies(context)
+
+    tokens: set[Token] = set()
+    for actor in _actors(context):
+        threatening = [
+            enemy
+            for enemy in enemies
+            for threat in threats
+            if threat.actor_slot == actor.slot and threat.target_slot == enemy.slot
+        ]
+        if not threatening:
+            continue
+        nearest = min(
+            threatening,
+            key=lambda e: math.hypot(e.world_x - actor.world_x, e.world_y - actor.world_y),
+        )
+
+        best: tuple[float, tuple[int, int]] | None = None
+        for candidate_x, candidate_y in _safe_spot_candidates(actor, nearest):
+            if not reach.in_playable_lane(candidate_y, context):
+                continue
+            if camera is not None and not reach.in_camera(camera, candidate_x, candidate_y):
+                continue
+            if _inside_pit(context, candidate_x, candidate_y):
+                continue
+            clearance = min(
+                math.hypot(enemy.world_x - candidate_x, enemy.world_y - candidate_y)
+                for enemy in enemies
+            )
+            if best is None or clearance > best[0]:
+                best = (clearance, (candidate_x, candidate_y))
+        if best is None:
+            continue
+        tokens.add(
+            SafeSpot(actor_slot=actor.slot, world_x=best[1][0], world_y=best[1][1])
+        )
+    return tokens
+
+
+def check_for_weapon_upgrades(context: Context) -> Context:
+    """Promote ground weapons that beat what the actor is carrying."""
+
+    camera = find(context, CameraRange)
+    if camera is None:
+        return set()
+
+    weapons = [
+        weapon
+        for weapon in find_all(context, Weapon)
+        if weapon.wear < 3 and reach.in_camera(camera, weapon.world_x, weapon.world_y)
+    ]
+    if not weapons:
+        return set()
+
+    tokens: set[Token] = set()
+    for actor in _actors(context):
+        held_rank = weapon_rank(actor.held_weapon_type)
+        for weapon in weapons:
+            rank = weapon_rank(weapon.weapon_type)
+            if rank <= held_rank:
+                continue
+            tokens.add(
+                WeaponUpgrade(
+                    actor_slot=actor.slot,
+                    target_slot=weapon.slot,
+                    rank=rank,
+                    rank_gain=rank - held_rank,
+                )
+            )
+    return tokens
+
+
+def generate_inference_tokens(context: Context) -> Context:
+    """Derive every ``Inferred`` token from direct observation.
+
+    ``check_for_safe_spots`` reads the ``IncomingMelee`` tokens produced
+    earlier in this same chain, so the context is threaded through the
+    calls in order rather than unioned from independent snapshots.
+    """
+
+    context = (
         context
         | check_for_incoming_projectiles(context)
         | check_for_closing_enemies(context)
+        | check_for_targets_in_reach(context)
+        | check_for_incoming_melee(context)
+        | check_for_punish_windows(context)
+        | check_for_surrounded(context)
+        | check_for_weapon_upgrades(context)
     )
+    return context | check_for_safe_spots(context)

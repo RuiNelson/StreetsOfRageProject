@@ -24,7 +24,8 @@ from sor_autoplay.ai.tokens import Myself
 from sor_autoplay.ai.tokens import ClosingEnemy, Enemy
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import CameraRange
-from sor_autoplay.ai.priority import determine_priority_decision
+from sor_autoplay.ai.inference import generate_inference_tokens
+from sor_autoplay.ai.priority import determine_priority_decision as _rank_decisions
 from sor_autoplay.ai.tokens import Decision, find_all
 from sor_autoplay.ai.tokens import (
     RetreatFromDanger,
@@ -37,12 +38,25 @@ from sor_autoplay.ai.tokens import (
 from sor_autoplay.phases import CombatPhase
 
 
+def determine_priority_decision(context):
+    """Rank a context built the way AI.md's loop builds it.
+
+    Several ``_emergency_*`` functions read ``Inferred`` tokens
+    (``PunishWindow``, ``IncomingMelee``, ``WeaponUpgrade``, ``Surrounded``)
+    rather than re-deriving the same judgment from raw coordinates, and the
+    loop always produces those before ranking. These tests hand-build the
+    observed half of the context, so they derive the inferred half here.
+    """
+
+    return _rank_decisions(generate_inference_tokens(set(context)))
+
+
 def _enemy(slot: str, combat_phase: CombatPhase, **overrides) -> Enemy:
     fields = dict(
         slot=slot,
         type_id=0x20,
         world_x=0,
-        world_y=0,
+        world_y=64,
         health=10,
         combat_phase=combat_phase,
         targets_player=1,
@@ -52,6 +66,12 @@ def _enemy(slot: str, combat_phase: CombatPhase, **overrides) -> Enemy:
     return Enemy(**fields)
 
 
+def _camera() -> CameraRange:
+    """A camera wide enough to contain every fixture position here."""
+
+    return CameraRange(left=-200, right=600, top=0, bottom=112)
+
+
 def _myself(**overrides) -> Myself:
     fields = dict(
         slot="P1",
@@ -59,7 +79,7 @@ def _myself(**overrides) -> Myself:
         character_id=0,
         character_name="Axel",
         world_x=100,
-        world_y=100,
+        world_y=64,
         health=80,
         health_percent=100.0,
         lives=3,
@@ -156,9 +176,9 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         # could_walk_to_near_enemy (decide.py) no longer pre-selects the
         # nearest enemy -- this is now determine_priority_decision's job,
         # via _emergency_walk_to_near_enemy's distance-bucketed score.
-        myself = _myself(world_x=0, world_y=0)
-        near = _enemy("obj01", CombatPhase.NORMAL, world_x=10, world_y=0)
-        far = _enemy("obj02", CombatPhase.NORMAL, world_x=150, world_y=0)
+        myself = _myself(world_x=0, world_y=64)
+        near = _enemy("obj01", CombatPhase.NORMAL, world_x=10, world_y=64)
+        far = _enemy("obj02", CombatPhase.NORMAL, world_x=150, world_y=64)
         context = {
             myself,
             near,
@@ -181,7 +201,7 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         # priority.py must reach the same "not blocking" conclusion as
         # decide.py's own gate, via the shared _advance_blocking_enemies.
         camera = CameraRange(left=0, right=200, top=0, bottom=200)
-        stranded = _enemy("obj01", CombatPhase.NORMAL, world_x=500, world_y=0, health=0)
+        stranded = _enemy("obj01", CombatPhase.NORMAL, world_x=500, world_y=64, health=0)
         context = {
             camera,
             stranded,
@@ -395,8 +415,8 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
 
     def test_walk_to_pickup_critical_health_beats_life_pickup(self) -> None:
         critical = _myself(health_percent=30.0)
-        pickup = HealthPickup(slot="obj01", world_x=0, world_y=0, pickup_type=0x4B, health_delta=20)
-        life_pickup = LifePickup(slot="obj02", world_x=0, world_y=0, pickup_type=0x4C)
+        pickup = HealthPickup(slot="obj01", world_x=0, world_y=64, pickup_type=0x4B, health_delta=20)
+        life_pickup = LifePickup(slot="obj02", world_x=0, world_y=64, pickup_type=0x4C)
         context = {
             critical,
             pickup,
@@ -415,8 +435,8 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         # At full health the HealthPickup formula drops from critical (50)
         # to its non-critical tier (15), which still beats a ScorePickup (3).
         healthy = _myself(health_percent=100.0)
-        pickup = HealthPickup(slot="obj01", world_x=0, world_y=0, pickup_type=0x4B, health_delta=20)
-        score_pickup = ScorePickup(slot="obj02", world_x=0, world_y=0, pickup_type=0x3F, points=3000)
+        pickup = HealthPickup(slot="obj01", world_x=0, world_y=64, pickup_type=0x4B, health_delta=20)
+        score_pickup = ScorePickup(slot="obj02", world_x=0, world_y=64, pickup_type=0x3F, points=3000)
         context = {
             healthy,
             pickup,
@@ -433,8 +453,8 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
 
     def test_walk_to_pickup_life_beats_score(self) -> None:
         actor = _myself()
-        life_pickup = LifePickup(slot="obj01", world_x=0, world_y=0, pickup_type=0x4C)
-        score_pickup = ScorePickup(slot="obj02", world_x=0, world_y=0, pickup_type=0x3F, points=3000)
+        life_pickup = LifePickup(slot="obj01", world_x=0, world_y=64, pickup_type=0x4C)
+        score_pickup = ScorePickup(slot="obj02", world_x=0, world_y=64, pickup_type=0x3F, points=3000)
         context = {
             actor,
             life_pickup,
@@ -450,9 +470,12 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         self.assertEqual(decisions[0].target_slot, "obj01")
 
     def test_walk_to_weapon_scores_when_rank_beats_held(self) -> None:
+        # The camera matters: WeaponUpgrade is only inferred for a weapon
+        # actually on screen, and _emergency_walk_to_weapon reads that token
+        # rather than re-ranking the raw Weapon.
         unarmed = _myself(held_weapon_type=0)
-        knife = Weapon(slot="obj01", world_x=0, world_y=0, weapon_type=0x08)
-        context = {unarmed, knife, WalkToWeapon(actor_slot="P1", target_slot="obj01")}
+        knife = Weapon(slot="obj01", world_x=0, world_y=64, weapon_type=0x08)
+        context = {unarmed, knife, _camera(), WalkToWeapon(actor_slot="P1", target_slot="obj01")}
 
         result = determine_priority_decision(context)
 
@@ -465,12 +488,13 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         # upgrade -- this is now determine_priority_decision's job, via
         # _emergency_walk_to_weapon's rank-scaled score.
         unarmed = _myself(held_weapon_type=0)
-        knife = Weapon(slot="obj01", world_x=0, world_y=0, weapon_type=0x08)  # rank 5
-        pepper = Weapon(slot="obj02", world_x=0, world_y=0, weapon_type=0x0C)  # rank 2
+        knife = Weapon(slot="obj01", world_x=0, world_y=64, weapon_type=0x08)  # rank 5
+        pepper = Weapon(slot="obj02", world_x=0, world_y=64, weapon_type=0x0C)  # rank 2
         context = {
             unarmed,
             knife,
             pepper,
+            _camera(),
             WalkToWeapon(actor_slot="P1", target_slot="obj01"),
             WalkToWeapon(actor_slot="P1", target_slot="obj02"),
         }
@@ -486,12 +510,13 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         # upgrade, so WalkToWeapon's condition is false and it loses to a
         # WalkToNearEnemy (14) that would otherwise be a weaker decision.
         armed_with_knife = _myself(held_weapon_type=0x08)
-        pepper = Weapon(slot="obj01", world_x=0, world_y=0, weapon_type=0x0C)
+        pepper = Weapon(slot="obj01", world_x=0, world_y=64, weapon_type=0x0C)
         enemy = _enemy("obj02", CombatPhase.NORMAL)
         context = {
             armed_with_knife,
             pepper,
             enemy,
+            _camera(),
             WalkToWeapon(actor_slot="P1", target_slot="obj01"),
             WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
         }
@@ -503,8 +528,8 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         self.assertIsInstance(decisions[0], WalkToNearEnemy)
 
     def test_throw_knife_scores_within_range_beyond_melee(self) -> None:
-        actor = _myself(world_x=0, world_y=0)
-        far_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=60, world_y=0)
+        actor = _myself(world_x=0, world_y=64)
+        far_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=60, world_y=64)
         context = {
             actor,
             far_enemy,
@@ -519,8 +544,8 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         self.assertIsInstance(decisions[0], ThrowKnife)
 
     def test_throw_knife_scores_zero_when_still_in_melee(self) -> None:
-        actor = _myself(world_x=0, world_y=0)
-        near_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=10, world_y=0)
+        actor = _myself(world_x=0, world_y=64)
+        near_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=10, world_y=64)
         context = {
             actor,
             near_enemy,
@@ -538,9 +563,9 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         # could_throw_knife (decide.py) no longer pre-selects the nearest
         # enemy -- this is now determine_priority_decision's job, via the
         # shared _emergency_thrown_weapon's distance-bucketed score.
-        actor = _myself(world_x=0, world_y=0)
-        near = _enemy("obj01", CombatPhase.NORMAL, world_x=50, world_y=0)
-        far = _enemy("obj02", CombatPhase.NORMAL, world_x=85, world_y=0)
+        actor = _myself(world_x=0, world_y=64)
+        near = _enemy("obj01", CombatPhase.NORMAL, world_x=50, world_y=64)
+        far = _enemy("obj02", CombatPhase.NORMAL, world_x=85, world_y=64)
         context = {
             actor,
             near,
@@ -556,8 +581,8 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         self.assertEqual(decisions[0].target_slot, "obj01")
 
     def test_throw_pepper_scores_within_range_beyond_melee(self) -> None:
-        actor = _myself(world_x=0, world_y=0)
-        far_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=60, world_y=0)
+        actor = _myself(world_x=0, world_y=64)
+        far_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=60, world_y=64)
         context = {
             actor,
             far_enemy,
@@ -572,8 +597,8 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         self.assertIsInstance(decisions[0], ThrowPepper)
 
     def test_throw_pepper_scores_zero_when_still_in_melee(self) -> None:
-        actor = _myself(world_x=0, world_y=0)
-        near_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=10, world_y=0)
+        actor = _myself(world_x=0, world_y=64)
+        near_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=10, world_y=64)
         context = {
             actor,
             near_enemy,
@@ -588,7 +613,7 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         self.assertIsInstance(decisions[0], WalkToNearEnemy)
 
     def test_smash_breakable_scores_when_target_present(self) -> None:
-        prop = Breakable(slot="obj01", world_x=0, world_y=0, type_id=0x70)
+        prop = Breakable(slot="obj01", world_x=0, world_y=64, type_id=0x70)
         enemy = _enemy("obj02", CombatPhase.NORMAL)
         context = {
             prop,
@@ -607,9 +632,9 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         # could_walk_to_breakable (decide.py) no longer pre-selects the
         # nearest breakable -- this is now determine_priority_decision's
         # job, via _emergency_walk_to_breakable's distance-bucketed score.
-        myself = _myself(world_x=0, world_y=0)
-        near = Breakable(slot="near", world_x=10, world_y=0, type_id=0x40)
-        far = Breakable(slot="far", world_x=150, world_y=0, type_id=0x40)
+        myself = _myself(world_x=0, world_y=64)
+        near = Breakable(slot="near", world_x=10, world_y=64, type_id=0x40)
+        far = Breakable(slot="far", world_x=150, world_y=64, type_id=0x40)
         context = {
             myself,
             near,
@@ -764,15 +789,18 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
 
 class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
     def test_picks_the_closer_of_two_retreat_candidates(self) -> None:
-        # Both distances stay inside decide._too_close_to_keep_approaching's
+        # Both distances stay inside reach.too_close_to_keep_approaching's
         # caution zone (Axel: punch_outer 50 + RETREAT_CAUTION_MARGIN 24), the
         # only range could_retreat_from_danger ever produces a candidate at.
         # An out-of-zone distance here would sit on the band's floor together
         # with everything else and make this pass or fail on the random
         # tie-break rather than on the ranking under test.
-        myself = _myself(world_x=0, world_y=0)
-        near = _enemy("obj01", CombatPhase.ATTACKING, world_x=20, world_y=0)
-        far = _enemy("obj02", CombatPhase.ATTACKING, world_x=70, world_y=0)
+        # world_y sits inside the playable lane (LANE_Y_MIN..lane max): an
+        # enemy outside it is not a live target at all, so no IncomingMelee
+        # would be inferred and neither candidate would rank as a retreat.
+        myself = _myself(world_x=0, world_y=64)
+        near = _enemy("obj01", CombatPhase.ATTACKING, world_x=20, world_y=64)
+        far = _enemy("obj02", CombatPhase.ATTACKING, world_x=70, world_y=64)
         context = {
             myself,
             near,
@@ -791,9 +819,9 @@ class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
         # The actor can only do one thing -- backing away from an imminent,
         # not-yet-hittable threat must win over still approaching a
         # completely different, farther-off target.
-        myself = _myself(world_x=0, world_y=0)
-        dangerous_close = _enemy("obj01", CombatPhase.ATTACKING, world_x=60, world_y=0)
-        calm_far = _enemy("obj02", CombatPhase.NORMAL, world_x=300, world_y=0)
+        myself = _myself(world_x=0, world_y=64)
+        dangerous_close = _enemy("obj01", CombatPhase.ATTACKING, world_x=60, world_y=64)
+        calm_far = _enemy("obj02", CombatPhase.NORMAL, world_x=300, world_y=64)
         context = {
             myself,
             dangerous_close,
@@ -814,9 +842,9 @@ class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
         # 30..20, which beat a plain Punch (20), a JumpAttack (18/28) and a
         # knife throw (21..25) -- so a dangerous enemy closing in made the
         # actor back away from a *different* enemy it could already hit.
-        myself = _myself(world_x=0, world_y=0)
-        dangerous_close = _enemy("obj01", CombatPhase.ATTACKING, world_x=20, world_y=0)
-        punchable = _enemy("obj02", CombatPhase.NORMAL, world_x=40, world_y=0)
+        myself = _myself(world_x=0, world_y=64)
+        dangerous_close = _enemy("obj01", CombatPhase.ATTACKING, world_x=20, world_y=64)
+        punchable = _enemy("obj02", CombatPhase.NORMAL, world_x=40, world_y=64)
         context = {
             myself,
             dangerous_close,
@@ -834,9 +862,9 @@ class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
     def test_loses_to_the_weakest_real_attack(self) -> None:
         # JumpAttack against a non-punishable target (18) is the lowest real
         # attack tier there is -- retreat must sit under even that.
-        myself = _myself(world_x=0, world_y=0)
-        dangerous_close = _enemy("obj01", CombatPhase.ATTACKING, world_x=20, world_y=0)
-        kickable = _enemy("obj02", CombatPhase.NORMAL, world_x=60, world_y=0)
+        myself = _myself(world_x=0, world_y=64)
+        dangerous_close = _enemy("obj01", CombatPhase.ATTACKING, world_x=20, world_y=64)
+        kickable = _enemy("obj02", CombatPhase.NORMAL, world_x=60, world_y=64)
         context = {
             myself,
             dangerous_close,
@@ -854,8 +882,8 @@ class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
     def test_scores_zero_when_target_missing(self) -> None:
         # RetreatFromDanger for a target that has since vanished from the
         # context must not out-rank a real candidate for a present enemy.
-        myself = _myself(world_x=0, world_y=0)
-        present = _enemy("obj02", CombatPhase.NORMAL, world_x=10, world_y=0)
+        myself = _myself(world_x=0, world_y=64)
+        present = _enemy("obj02", CombatPhase.NORMAL, world_x=10, world_y=64)
         context = {
             myself,
             present,

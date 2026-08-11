@@ -27,6 +27,7 @@ class CombatPhase(Enum):
     SCRIPTED = auto()  # police / remove / control
     DEATH = auto()  # dying — ignore as target
     RECOVERY = auto()  # boss hitstun / police reaction
+    STUNNED = auto()  # ordinary enemy frozen on a timed stun — free hits
     CHARGE = auto()  # boss charge / clothesline commit
     HURT_PLAYER = auto()  # player hurt states
     HOLDING = auto()  # player holding weapon/enemy
@@ -90,19 +91,47 @@ def ordinary_enemy_phase(
     primary_state_word: int,
     *,
     type_id: int | None = None,
+    health: int | None = None,
+    police_special_active: bool = False,
 ) -> CombatPhase:
-    """Map ordinary-enemy state/flags at ``+$30/$31`` to a combat phase."""
+    """Map ordinary-enemy state/flags at ``+$30/$31`` to a combat phase.
+
+    ``health`` and ``police_special_active`` are only consulted to tell the
+    two meanings of state ``$0400`` apart -- see the ``ENEMY_ST_SCRIPTED``
+    branch below. Omitting them keeps the conservative reading (SCRIPTED).
+    """
 
     hi = primary_state_word & 0xFF00
     if hi == mm.ENEMY_ST_NORMAL or hi == 0x0000:
         return CombatPhase.NORMAL
     if hi == mm.ENEMY_ST_ALT:
-        # Shared $9B36 contact/reaction handling. It is a good follow-up window,
-        # but not evidence that the enemy is starting another family move.
-        return CombatPhase.RECOVERY
+        # $9B88 (ordinary_enemy_apply_contact_damage) *is* this state's own
+        # per-frame handler, and all it does is count the stun timer +$50
+        # down (`subq.b #1,$50(a0)`, seeded with $18 = 24 frames on the hit
+        # that starts it) until it writes $0100 back and hands control to
+        # the family AI again. So this is a timed hitstun the player caused
+        # -- the enemy cannot act for its duration -- not merely the tail of
+        # a move it chose, which is what RECOVERY means everywhere else here
+        # (e.g. Signal's own $0D animation delay below).
+        return CombatPhase.STUNNED
     if hi == mm.ENEMY_ST_KNOCKDOWN:
         return CombatPhase.KNOCKDOWN
     if hi == mm.ENEMY_ST_SCRIPTED:
+        # Shared handler $A43E, every ordinary type's state-table entry 4,
+        # serves two unrelated purposes (enemy-ai.md, "Collision, reactions,
+        # grabs, and death"):
+        #
+        # - pepper-spray immobilization -- it loads +$50 = $A0 (160 frames)
+        #   and counts it down to $0100 exactly like the hitstun above, a
+        #   far longer free-hit window than any knockdown;
+        # - police-special sweep removal, which forces the same $0400 with
+        #   health $FFFF while the global special flag is up.
+        #
+        # Only the first is a stun. The second is the enemy being taken off
+        # the board by the special and must stay SCRIPTED so nothing chases
+        # or waits for it.
+        if not police_special_active and (health is None or health != 0xFFFF):
+            return CombatPhase.STUNNED
         return CombatPhase.SCRIPTED
     if hi == mm.ENEMY_ST_GRABBED:
         return CombatPhase.GRABBED
@@ -247,7 +276,8 @@ def phase_label(phase: CombatPhase) -> str:
         CombatPhase.BLOCKED: "block",
         CombatPhase.SCRIPTED: "script",
         CombatPhase.DEATH: "die",
-        CombatPhase.RECOVERY: "stun",
+        CombatPhase.RECOVERY: "recov",
+        CombatPhase.STUNNED: "stun",
         CombatPhase.CHARGE: "charge",
         CombatPhase.HURT_PLAYER: "hurt",
         CombatPhase.HOLDING: "hold",
@@ -265,6 +295,7 @@ def phase_color(phase: CombatPhase) -> str | None:
         CombatPhase.CHARGE: "#ff9f0a",
         CombatPhase.GRABBED: "#bf5af2",
         CombatPhase.RECOVERY: "#ffd60a",
+        CombatPhase.STUNNED: "#a3e635",  # free hits, like KNOCKDOWN but frozen
         CombatPhase.DEATH: "#636366",
         CombatPhase.SCRIPTED: "#8e8e93",
         CombatPhase.HELD_BY_ENEMY: "#ff375f",
@@ -287,6 +318,7 @@ def is_punishable(phase: CombatPhase) -> bool:
         CombatPhase.KNOCKDOWN,
         CombatPhase.BLOCKED,
         CombatPhase.RECOVERY,
+        CombatPhase.STUNNED,
         CombatPhase.GRABBED,
     )
 

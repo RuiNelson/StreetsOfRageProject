@@ -21,11 +21,13 @@ classDiagram
 
     Observed <|-- Projectile
     Inferred <|-- IncomingProjectile
+    Inferred <|-- SafeSpot
     Observed <|-- StageObjects
     StageObjects <|-- Breakable
     StageObjects <|-- Pit
 
     Observed <|-- Weapon
+    Inferred <|-- WeaponUpgrade
     Observed <|-- Pickup
     Pickup <|-- HealthPickup
     Pickup <|-- LifePickup
@@ -52,12 +54,23 @@ classDiagram
     Boss <|-- Bongo
     Boss <|-- Onihime
 
+    Inferred <|-- ClosingEnemy
+    Inferred <|-- IncomingMelee
+    Inferred <|-- PunishWindow
+    Inferred <|-- Surrounded
+    Inferred <|-- TargetInReach
+    TargetInReach <|-- InPunchReach
+    TargetInReach <|-- InRearReach
+    TargetInReach <|-- InJumpAttackReach
+    TargetInReach <|-- ActionableTarget
+
     Decision <|-- Walk
     Walk <|-- WalkToNearEnemy
     Walk <|-- WalkToAdvanceStage
     Walk <|-- WalkToWeapon
     Walk <|-- WalkToPickup
     Walk <|-- WalkToBreakable
+    Walk <|-- RetreatFromDanger
 
     Decision <|-- Attack
     Attack <|-- MeleeAttacks

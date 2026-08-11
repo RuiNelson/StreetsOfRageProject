@@ -1,0 +1,277 @@
+"""Geometry and target-filtering shared by the whole AI pipeline.
+
+These predicates used to be private helpers inside ``decide.py``, recomputed
+independently by ``priority.py`` (through cross-module imports of those
+privates) and deliberately *duplicated* by ``inference.py``, which must not
+import ``decide``. Keeping them here gives every stage one definition to
+agree on: ``inference.py`` turns them into ``TargetInReach`` tokens once per
+tick, ``decide.py``/``priority.py`` read those tokens, and ``execute.py``
+reuses the same lane/pit clearance values it has to steer around.
+
+Nothing in this module reads RAM or produces tokens -- it only answers
+questions about tokens already in the context.
+"""
+
+from __future__ import annotations
+
+from ..phases import should_ignore_as_target
+from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
+from .tokens import (
+    CameraRange,
+    Context,
+    Enemy,
+    PlayableCharacter,
+    PUNCH_RANGE_Y,
+    Stage,
+    find,
+    find_all,
+    punch_inner_x,
+    punch_outer_x,
+    rear_attack_behind_max_x,
+    rear_attack_front_max_x,
+)
+
+# Punch is a forward strike, but ``_could_melee_strike`` has always allowed a
+# few pixels of slack for an enemy that is nominally "behind" while standing
+# essentially on top of the actor.
+PUNCH_BEHIND_TOLERANCE_X = 4
+
+# Jump-kick is a *horizontal* attack — never a stationary hop.
+JUMP_ATTACK_MIN_DX = 28  # must leave punch outer / need air travel
+# Early-kick free-flight range per character_id (controls-and-input.md
+# "Closed-form trajectory summary"): 60/69/75 px -- Axel's real reach is well
+# short of Blaze's, so a flat cap either strands Axel mid-air or under-uses
+# Blaze's longer kick.
+JUMP_ATTACK_MAX_DX_BY_CHARACTER: dict[int, int] = {0: 60, 1: 69, 2: 75}  # Axel, Adam, Blaze
+JUMP_ATTACK_MAX_DX_DEFAULT = 72
+JUMP_ATTACK_RANGE_Y = 14
+
+# Box around the actor inside which another enemy counts as "the other side is
+# covered too" for RearAttack, and as a crowd member for Surrounded.
+REAR_THREAT_X = 56
+REAR_THREAT_Y = 24
+
+# Extra px beyond punch_outer_x where a still-approaching dangerous enemy
+# switches from "keep walking closer" to "back off instead" (see
+# could_retreat_from_danger) -- approximate on purpose: this is a caution
+# buffer, not a hitbox measurement.
+RETREAT_CAUTION_MARGIN = 24
+# The caution zone is a box, not an X-only band. Attacks in this game only
+# connect within roughly a lane of each other (PUNCH_RANGE_Y), so a committed
+# enemy several lanes away is not a reason to back off -- and treating it as
+# one made the AI refuse to approach *and* walk backwards from a threat it
+# was never in line with. Kept below execute.WALK_TO_ENEMY_LANE_SAFETY_Y
+# (PUNCH_RANGE_Y + 16) so the sidestep that decision's executor performs
+# actually leaves this zone instead of retreating from its own dodge.
+RETREAT_CAUTION_MARGIN_Y = PUNCH_RANGE_Y + 12
+
+# Clearance kept beyond a Pit's own footprint — falling in costs a full life
+# (player-health-lives-and-combat.md's $01C0 fall-boundary check).
+PIT_AVOID_MARGIN = 8
+
+
+def targets_of(context: Context, cls: type, actor_slot: str) -> set[str]:
+    """Target slots of every ``cls`` token in ``context`` for one actor.
+
+    ``find``/``find_all`` match on a ``slot`` attribute, which the
+    actor-and-target inference tokens deliberately do not have (they
+    reference two tokens, not one), so this is their lookup.
+    """
+
+    return {
+        token.target_slot
+        for token in find_all(context, cls)
+        if getattr(token, "actor_slot", None) == actor_slot
+    }
+
+
+def jump_attack_max_dx(character_id: int | None) -> int:
+    if character_id is None:
+        return JUMP_ATTACK_MAX_DX_DEFAULT
+    return JUMP_ATTACK_MAX_DX_BY_CHARACTER.get(character_id, JUMP_ATTACK_MAX_DX_DEFAULT)
+
+
+def enemy_behind_actor(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    if actor.facing_left:
+        return enemy.world_x > actor.world_x
+    return enemy.world_x < actor.world_x
+
+
+def enemy_in_front(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    return not enemy_behind_actor(actor, enemy)
+
+
+def in_camera(camera: CameraRange, world_x: int, world_y: int) -> bool:
+    return camera.left <= world_x <= camera.right and camera.top <= world_y <= camera.bottom
+
+
+def in_playable_lane(world_y: int, context: Context) -> bool:
+    """False for an enemy positioned outside the level's actual walkable Y
+    band -- e.g. stage 1's scripted "behind a door" placeholder, which is a
+    real Enemy object (tracked, health, combat_phase) at an anomalously high
+    world_y the player can never physically reach. Without this filter the
+    AI repeatedly commits to attacks/chases against a target it can never
+    connect with, and it can also block could_walk_to_advance_stage
+    forever the same way an abandoned 0-HP straggler does."""
+
+    stage = find(context, Stage)
+    lane_max = lane_y_max_for_level(stage.level_index) if stage is not None else LANE_Y_MAX_DEFAULT
+    return LANE_Y_MIN <= world_y <= lane_max
+
+
+def live_enemies(context: Context) -> list[Enemy]:
+    return [
+        e
+        for e in find_all(context, Enemy)
+        if not should_ignore_as_target(e.combat_phase) and in_playable_lane(e.world_y, context)
+    ]
+
+
+def on_screen_enemies(context: Context) -> list[Enemy]:
+    camera = find(context, CameraRange)
+    enemies = live_enemies(context)
+    if camera is None:
+        return enemies
+    return [e for e in enemies if in_camera(camera, e.world_x, e.world_y)]
+
+
+def in_punch_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """Raw distance box only -- ignores facing. Callers that want "a strike
+    would actually connect" want :func:`punch_would_connect` instead."""
+
+    dx = abs(enemy.world_x - actor.world_x)
+    dy = abs(enemy.world_y - actor.world_y)
+    if dy > PUNCH_RANGE_Y:
+        return False
+    outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
+    return punch_inner_x(actor.character_id) <= dx <= outer
+
+
+def punch_would_connect(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """``in_punch_band`` *and* the enemy is actually in front (within the
+    small behind tolerance). Punch is a forward strike, so the raw band on
+    its own describes a dead zone the actor cannot hit."""
+
+    if not in_punch_band(actor, enemy):
+        return False
+    return (
+        enemy_in_front(actor, enemy)
+        or abs(enemy.world_x - actor.world_x) <= PUNCH_BEHIND_TOLERANCE_X
+    )
+
+
+def in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """Inside the ``$322A`` chord's real reach on the enemy's own side.
+
+    The behind and front bands differ per character (Axel/Blaze have zero
+    forward reach), so this must pick the side-specific band, never their
+    union.
+    """
+
+    dx = enemy.world_x - actor.world_x
+    dy = abs(enemy.world_y - actor.world_y)
+    if dy > PUNCH_RANGE_Y:
+        return False
+    adx = abs(dx)
+    if enemy_behind_actor(actor, enemy):
+        return adx <= rear_attack_behind_max_x(actor.character_id)
+    return adx <= rear_attack_front_max_x(actor.character_id)
+
+
+def in_jump_attack_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """True when a jump kick is the move that covers this gap: in front, in
+    lane, beyond the actor's own punch outer edge, inside the kick's own
+    free-flight range."""
+
+    dx = abs(enemy.world_x - actor.world_x)
+    dy = abs(enemy.world_y - actor.world_y)
+    if dy > JUMP_ATTACK_RANGE_Y:
+        return False
+    if dx < max(JUMP_ATTACK_MIN_DX, punch_outer_x(actor.character_id)):
+        return False
+    if dx > jump_attack_max_dx(actor.character_id):
+        return False
+    return enemy_in_front(actor, enemy)
+
+
+def rear_threats(actor: PlayableCharacter, enemies: list[Enemy]) -> list[Enemy]:
+    return [
+        e
+        for e in enemies
+        if enemy_behind_actor(actor, e)
+        and abs(e.world_x - actor.world_x) <= REAR_THREAT_X
+        and abs(e.world_y - actor.world_y) <= REAR_THREAT_Y
+    ]
+
+
+def rear_attack_is_warranted(
+    actor: PlayableCharacter, enemy: Enemy, enemies: list[Enemy]
+) -> bool:
+    """True when the ``$322A`` chord is the *right* answer to ``enemy``
+    sitting in the rear band -- not merely a possible one.
+
+    The chord is slow (up to 21 frames of startup, controls-and-input.md's
+    measured timings) and hits only by current position, so it whiffs
+    whenever the target moves during startup and leaves the actor in its
+    recovery frames. Turning around and punching is faster and far more
+    reliable, and turning is free: holding the D-pad toward a behind enemy
+    flips facing, after which ``could_punch`` covers it normally (see
+    ``execute._walk_to_near_enemy_target``). So the chord is reserved for
+    the two cases where turning around does not actually solve anything --
+    exactly the "escape when boxed in / punch dead-zone" intent
+    ``priority._EMERGENCY_REAR_ATTACK`` has always documented:
+
+    1. **Punch dead zone** -- the target is closer than ``punch_inner_x``,
+       so it stays unhittable by a normal strike even after the turn.
+    2. **Boxed in** -- another live enemy is close on the actor's opposite
+       side, so spending the turn hands that one a free hit.
+    """
+
+    if abs(enemy.world_x - actor.world_x) < punch_inner_x(actor.character_id):
+        return True
+
+    target_behind = enemy_behind_actor(actor, enemy)
+    return any(
+        other is not enemy
+        and enemy_behind_actor(actor, other) is not target_behind
+        and abs(other.world_x - actor.world_x) <= REAR_THREAT_X
+        and abs(other.world_y - actor.world_y) <= REAR_THREAT_Y
+        for other in enemies
+    )
+
+
+def enemy_actionable(
+    actor: PlayableCharacter, enemy: Enemy, enemies: list[Enemy]
+) -> bool:
+    """True when an existing melee/rear-attack decision would actually fire
+    on this enemy right now -- not just whether it sits inside
+    ``in_punch_band``'s raw distance box.
+
+    Live testing showed that mismatch created a dead zone: an enemy sitting
+    behind the actor, beyond RearAttack's own real band but still inside the
+    punch box by raw distance, made ``could_walk_to_near_enemy`` skip it as
+    "already in range" while nothing could actually hit it, leaving the
+    actor standing still and undefended.
+
+    The rear band only counts when ``rear_attack_is_warranted`` agrees:
+    ``could_rear_attack`` no longer fires on band membership alone, so
+    treating a merely-in-band enemy as actionable would recreate that same
+    vacuum -- nothing attacking it, and ``could_walk_to_near_enemy``
+    declining to turn toward it.
+    """
+
+    if in_rear_band(actor, enemy) and rear_attack_is_warranted(actor, enemy, enemies):
+        return True
+    return punch_would_connect(actor, enemy)
+
+
+def too_close_to_keep_approaching(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """True inside the caution box: close enough that walking the last
+    stretch risks arriving exactly as the enemy's commit lands."""
+
+    dx = abs(enemy.world_x - actor.world_x)
+    dy = abs(enemy.world_y - actor.world_y)
+    if dy > RETREAT_CAUTION_MARGIN_Y:
+        return False
+    outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
+    return dx <= outer + RETREAT_CAUTION_MARGIN

@@ -155,6 +155,12 @@ class MapEntity:
     # with player character id and boss distances — only meaningful for
     # weapon/pickup kinds.
     item_param: int = 0
+    # Ordinary enemies (kind=="enemy" only): remaining stun frames at the same
+    # +$50 offset. Seeded with $18 by the hitstun handler $9B88 and with $A0 by
+    # the pepper-spray path in $A43E, and counted down by whichever of the two
+    # owns the current state — so it is only meaningful while combat_phase is
+    # CombatPhase.STUNNED.
+    stun_timer: int = 0
     # Weapon/pickup +$51: zero = free ground object; nonzero = held/thrown/
     # reserved/mid-collect. ROM will not start a pickup when this is set.
     interaction: int = 0
@@ -431,6 +437,7 @@ def _entity_from_object(
     style: EntityStyle,
     type_id: int,
     camera_x: int,
+    police_special_active: bool = False,
 ) -> MapEntity | None:
     if len(slot) < OBJECT_SLOT_SIZE:
         return None
@@ -467,6 +474,7 @@ def _entity_from_object(
     attacker_ptr = 0
     family_state = 0
     item_param = 0
+    stun_timer = 0
     interaction = 0
     boss_dist_x = 0
     boss_dist_lane = 0
@@ -496,7 +504,13 @@ def _entity_from_object(
         family_state = _u8(slot, mm.OBJ_FAMILY_STATE)
         enemy_vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X_ORDINARY)
         enemy_vel_y = fixed1616_signed(slot, mm.OBJ_VEL_LANE_ORDINARY)
-        phase = ordinary_enemy_phase(primary_state, type_id=type_id)
+        stun_timer = _u8(slot, mm.OBJ_ORDINARY_STUN_TIMER)
+        phase = ordinary_enemy_phase(
+            primary_state,
+            type_id=type_id,
+            health=health,
+            police_special_active=police_special_active,
+        )
     elif style.kind == "boss":
         tactical = _u8(slot, mm.OBJ_BOSS_TACTICAL)
         pair_role = _u8(slot, mm.OBJ_PAIR_ROLE)
@@ -566,6 +580,7 @@ def _entity_from_object(
         subtype=subtype,
         script_param=script_param,
         item_param=item_param,
+        stun_timer=stun_timer,
         interaction=interaction,
         facing_left=facing_left,
         boss_dist_x=boss_dist_x,
@@ -708,6 +723,7 @@ def parse_world_map(
     p1_mode_active: bool = False,
     p2_mode_active: bool = False,
     level_index: int = 0,
+    police_special_active: bool = False,
 ) -> WorldMap:
     if len(actors_block) < ACTORS_BYTES:
         raise ValueError(f"actors_block too short ({len(actors_block)} < {ACTORS_BYTES})")
@@ -762,6 +778,7 @@ def parse_world_map(
             style=style,
             type_id=type_id,
             camera_x=camera_x,
+            police_special_active=police_special_active,
         )
         if entity is not None and _include_entity(entity, slot, lane_max=lane_max):
             entities.append(entity)

@@ -52,7 +52,46 @@ from sor_autoplay.ai.tokens import (
     WalkToPickup,
     WalkToWeapon,
 )
+from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.phases import CombatPhase
+
+
+def _with_inference(generator):
+    """Run ``generate_inference_tokens`` before the generator under test.
+
+    AI.md's loop always derives the ``Inferred`` half of the context before
+    any ``could_*`` runs, and the generators read those tokens (``InPunchReach``,
+    ``ActionableTarget``, ``IncomingMelee``, ``WeaponUpgrade``, ...) instead of
+    recomputing the geometry themselves. These tests hand-build the *observed*
+    half, so they have to derive the inferred half the same way the loop does
+    -- otherwise they would be exercising half a pipeline.
+    """
+
+    def wrapped(context):
+        return generator(generate_inference_tokens(set(context)))
+
+    return wrapped
+
+
+could_call_police = _with_inference(could_call_police)
+could_counter_grab = _with_inference(could_counter_grab)
+could_hold_actions = _with_inference(could_hold_actions)
+could_jump_attack = _with_inference(could_jump_attack)
+could_punch = _with_inference(could_punch)
+could_rear_attack = _with_inference(could_rear_attack)
+could_retreat_from_danger = _with_inference(could_retreat_from_danger)
+could_spray_pepper = _with_inference(could_spray_pepper)
+could_stab_with_knife_or_bottle = _with_inference(could_stab_with_knife_or_bottle)
+could_swing_bat_or_pipe = _with_inference(could_swing_bat_or_pipe)
+could_tech_recover = _with_inference(could_tech_recover)
+could_throw_knife = _with_inference(could_throw_knife)
+could_throw_pepper = _with_inference(could_throw_pepper)
+could_walk_to_advance_stage = _with_inference(could_walk_to_advance_stage)
+could_walk_to_breakable = _with_inference(could_walk_to_breakable)
+could_walk_to_near_enemy = _with_inference(could_walk_to_near_enemy)
+could_walk_to_pickup = _with_inference(could_walk_to_pickup)
+could_walk_to_weapon = _with_inference(could_walk_to_weapon)
+generate_decision_tokens = _with_inference(generate_decision_tokens)
 
 
 def make_myself(**overrides) -> Myself:
@@ -824,6 +863,33 @@ class CouldCallPoliceTests(unittest.TestCase):
     def test_never_fires_when_holding_an_enemy(self) -> None:
         myself = make_myself(specials=1, health_percent=10.0, held_weapon_type=0x10)
         context: set[Token] = {myself}
+
+        self.assertEqual(could_call_police(context), set())
+
+    def test_fires_when_pincered_below_the_surrounded_threshold(self) -> None:
+        # The other reason the special exists: it is the only move that
+        # clears every side at once, so a crowd counts even above the
+        # "about to die" thresholds -- just not while comfortably healthy.
+        myself = make_myself(specials=1, health_percent=50.0, world_x=100, world_y=100)
+        front = make_enemy(slot="obj01", world_x=130, world_y=100)
+        back = make_enemy(slot="obj02", world_x=70, world_y=100)
+        context: set[Token] = {myself, front, back}
+
+        self.assertEqual(could_call_police(context), {CallPolice(actor_slot="P1")})
+
+    def test_does_not_fire_when_pincered_while_healthy(self) -> None:
+        myself = make_myself(specials=1, health_percent=90.0, world_x=100, world_y=100)
+        front = make_enemy(slot="obj01", world_x=130, world_y=100)
+        back = make_enemy(slot="obj02", world_x=70, world_y=100)
+        context: set[Token] = {myself, front, back}
+
+        self.assertEqual(could_call_police(context), set())
+
+    def test_does_not_fire_for_a_queue_on_one_side(self) -> None:
+        myself = make_myself(specials=1, health_percent=50.0, world_x=100, world_y=100)
+        near = make_enemy(slot="obj01", world_x=130, world_y=100)
+        far = make_enemy(slot="obj02", world_x=145, world_y=100)
+        context: set[Token] = {myself, near, far}
 
         self.assertEqual(could_call_police(context), set())
 

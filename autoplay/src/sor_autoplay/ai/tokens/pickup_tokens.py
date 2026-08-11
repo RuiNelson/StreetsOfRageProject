@@ -26,7 +26,7 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
-from .tokens import Observed
+from .tokens import Inferred, Observed
 
 # ROM init damage at weapon +$34 — also the upgrade rank for floor pickups.
 WEAPON_DAMAGE: dict[int, int] = {
@@ -82,6 +82,22 @@ class Weapon(Observed):
     world_y: int
     weapon_type: int  # 0x08 knife .. 0x0C pepper spray
     wear: int = 0  # object +$50; usable while < 3
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WeaponUpgrade(Inferred):
+    """A ground ``Weapon`` worth walking to: it outranks what the actor holds.
+
+    Produced by ``inference.check_for_weapon_upgrades`` for every in-camera,
+    still-usable ``Weapon`` whose ``weapon_rank`` beats the actor's held
+    weapon. ``rank_gain`` is that difference, so ranking a knife against a
+    bottle does not mean re-reading the damage table downstream.
+    """
+
+    actor_slot: str
+    target_slot: str  # Weapon.slot
+    rank: int  # weapon_rank of the ground weapon
+    rank_gain: int  # rank minus the held weapon's rank; always > 0
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

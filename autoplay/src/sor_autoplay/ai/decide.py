@@ -3,14 +3,19 @@
 Per ``AI.md``, each ``could_*`` function is concerned only with whether a
 decision is possible and sensible — never with relative importance across
 decisions, which is ``determine_priority_decision``'s job (``priority.py``).
+
+Reach questions ("can this move hit that enemy from here?") are not answered
+here: ``inference.py`` answers them once per tick into ``TargetInReach``
+tokens, using the geometry in ``reach.py``, and these generators read those
+tokens.
 """
 
 from __future__ import annotations
 
 import math
 
-from ..phases import CombatPhase, is_dangerous, should_ignore_as_target
-from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
+from ..phases import CombatPhase
+from . import reach
 from .tokens import (
     CounterGrab,
     FlipHold,
@@ -33,13 +38,16 @@ from .tokens import (
     MELEE_WEAPON_TYPES,
     Myself,
     PlayableCharacter,
-    punch_inner_x,
-    punch_outer_x,
-    PUNCH_RANGE_Y,
-    rear_attack_behind_max_x,
-    rear_attack_front_max_x,
 )
 from .tokens import Enemy
+from .tokens import (
+    ActionableTarget,
+    InJumpAttackReach,
+    InPunchReach,
+    InRearReach,
+    IncomingMelee,
+    Surrounded,
+)
 from .tokens import AnimationInProgress, CameraRange, Stage
 from .tokens import Breakable
 from .tokens import (
@@ -49,9 +57,8 @@ from .tokens import (
     Pickup,
     ScorePickup,
     SpecialPickup,
-    Weapon,
+    WeaponUpgrade,
     is_weapon_type,
-    weapon_rank,
 )
 from .tokens import CallPolice
 from .tokens import Context, Token, find, find_all
@@ -70,23 +77,11 @@ POLICE_HEALTH_PERCENT_THRESHOLD = 18.0
 # respawn at full health (player-health-lives-and-combat.md) -- call police
 # sooner rather than risk it.
 POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE = 35.0
-
-# Jump-kick is a *horizontal* attack — never a stationary hop.
-JUMP_ATTACK_MIN_DX = 28  # must leave punch outer / need air travel
-# Early-kick free-flight range per character_id (controls-and-input.md
-# "Closed-form trajectory summary"): 60/69/75 px -- Axel's real reach is well
-# short of Blaze's, so a flat cap either strands Axel mid-air or under-uses
-# Blaze's longer kick.
-JUMP_ATTACK_MAX_DX_BY_CHARACTER: dict[int, int] = {0: 60, 1: 69, 2: 75}  # Axel, Adam, Blaze
-JUMP_ATTACK_MAX_DX_DEFAULT = 72
-JUMP_ATTACK_RANGE_Y = 14
-
-
-def _jump_attack_max_dx(character_id: int | None) -> int:
-    if character_id is None:
-        return JUMP_ATTACK_MAX_DX_DEFAULT
-    return JUMP_ATTACK_MAX_DX_BY_CHARACTER.get(character_id, JUMP_ATTACK_MAX_DX_DEFAULT)
-
+# Being surrounded is the other reason the special exists — it is the only
+# move that clears every side at once. Still gated on health, just far less
+# strictly than the "about to die" thresholds above: spending it while
+# healthy wastes the one panic button of the life.
+POLICE_HEALTH_PERCENT_THRESHOLD_SURROUNDED = 60.0
 
 KNIFE_RANGE_X = 90
 KNIFE_RANGE_Y = 16
@@ -100,8 +95,6 @@ BREAKABLE_PUNCH_X = 36
 BREAKABLE_PUNCH_Y = 16
 BREAKABLE_BLOCK_X = 28  # treat as path obstacle within this X of the walk line
 BREAKABLE_BLOCK_Y = 20
-REAR_THREAT_X = 56
-REAR_THREAT_Y = 24
 
 
 def _is_holding_enemy(actor: PlayableCharacter) -> bool:
@@ -132,170 +125,6 @@ def _blocked(context: Context, actor: PlayableCharacter) -> bool:
     return find(context, AnimationInProgress, slot=actor.slot) is not None
 
 
-def _enemy_behind_actor(actor: PlayableCharacter, enemy: Enemy) -> bool:
-    if actor.facing_left:
-        return enemy.world_x > actor.world_x
-    return enemy.world_x < actor.world_x
-
-
-def _enemy_in_front(actor: PlayableCharacter, enemy: Enemy) -> bool:
-    return not _enemy_behind_actor(actor, enemy)
-
-
-def _in_punch_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
-    dx = abs(enemy.world_x - actor.world_x)
-    dy = abs(enemy.world_y - actor.world_y)
-    if dy > PUNCH_RANGE_Y:
-        return False
-    outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
-    return punch_inner_x(actor.character_id) <= dx <= outer
-
-
-def _in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
-    dx = enemy.world_x - actor.world_x
-    dy = abs(enemy.world_y - actor.world_y)
-    if dy > PUNCH_RANGE_Y:
-        return False
-    adx = abs(dx)
-    if _enemy_behind_actor(actor, enemy):
-        return adx <= rear_attack_behind_max_x(actor.character_id)
-    return adx <= rear_attack_front_max_x(actor.character_id)
-
-
-def _rear_attack_is_warranted(
-    actor: PlayableCharacter, enemy: Enemy, enemies: list[Enemy]
-) -> bool:
-    """True when the ``$322A`` chord is the *right* answer to ``enemy``
-    sitting in the rear band -- not merely a possible one.
-
-    The chord is slow (up to 21 frames of startup, controls-and-input.md's
-    measured timings) and hits only by current position, so it whiffs
-    whenever the target moves during startup and leaves the actor in its
-    recovery frames. Turning around and punching is faster and far more
-    reliable, and turning is free: holding the D-pad toward a behind enemy
-    flips facing, after which ``could_punch`` covers it normally (see
-    ``execute._walk_to_near_enemy_target``). So the chord is reserved for
-    the two cases where turning around does not actually solve anything --
-    exactly the "escape when boxed in / punch dead-zone" intent
-    ``priority._EMERGENCY_REAR_ATTACK`` has always documented:
-
-    1. **Punch dead zone** -- the target is closer than ``punch_inner_x``,
-       so it stays unhittable by a normal strike even after the turn.
-    2. **Boxed in** -- another live enemy is close on the actor's opposite
-       side, so spending the turn hands that one a free hit.
-    """
-
-    if abs(enemy.world_x - actor.world_x) < punch_inner_x(actor.character_id):
-        return True
-
-    target_behind = _enemy_behind_actor(actor, enemy)
-    return any(
-        other is not enemy
-        and _enemy_behind_actor(actor, other) is not target_behind
-        and abs(other.world_x - actor.world_x) <= REAR_THREAT_X
-        and abs(other.world_y - actor.world_y) <= REAR_THREAT_Y
-        for other in enemies
-    )
-
-
-def _enemy_actionable(
-    actor: PlayableCharacter, enemy: Enemy, enemies: list[Enemy]
-) -> bool:
-    """True when an existing melee/rear-attack decision would actually fire
-    on this enemy right now -- not just whether it sits inside
-    ``_in_punch_band``'s raw distance box.
-
-    ``_in_punch_band`` ignores facing, but ``_could_melee_strike`` (the
-    shared body behind ``could_punch`` and friends) refuses a behind enemy
-    beyond a 4px tolerance -- Punch is a forward strike. Live testing showed
-    that mismatch created a dead zone: an enemy sitting behind the actor,
-    beyond RearAttack's own real band but still inside the punch box by raw
-    distance, made ``could_walk_to_near_enemy`` skip it as "already in
-    range" while nothing could actually hit it, leaving the actor standing
-    still and undefended.
-
-    The rear band only counts when ``_rear_attack_is_warranted`` agrees:
-    ``could_rear_attack`` no longer fires on band membership alone, so
-    treating a merely-in-band enemy as actionable would recreate that same
-    vacuum -- nothing attacking it, and ``could_walk_to_near_enemy``
-    declining to turn toward it.
-    """
-
-    if _in_rear_band(actor, enemy) and _rear_attack_is_warranted(actor, enemy, enemies):
-        return True
-    if not _in_punch_band(actor, enemy):
-        return False
-    return _enemy_in_front(actor, enemy) or abs(enemy.world_x - actor.world_x) <= 4
-
-
-# Extra px beyond punch_outer_x where a still-approaching dangerous enemy
-# switches from "keep walking closer" to "back off instead" (see
-# could_retreat_from_danger) -- approximate on purpose: this is a caution
-# buffer, not a hitbox measurement.
-RETREAT_CAUTION_MARGIN = 24
-# The caution zone is a box, not an X-only band. Attacks in this game only
-# connect within roughly a lane of each other (PUNCH_RANGE_Y), so a committed
-# enemy several lanes away is not a reason to back off -- and treating it as
-# one made the AI refuse to approach *and* walk backwards from a threat it
-# was never in line with. Kept below execute.WALK_TO_ENEMY_LANE_SAFETY_Y
-# (PUNCH_RANGE_Y + 16) so the sidestep that decision's executor performs
-# actually leaves this zone instead of retreating from its own dodge.
-RETREAT_CAUTION_MARGIN_Y = PUNCH_RANGE_Y + 12
-
-
-def _too_close_to_keep_approaching(actor: PlayableCharacter, enemy: Enemy) -> bool:
-    dx = abs(enemy.world_x - actor.world_x)
-    dy = abs(enemy.world_y - actor.world_y)
-    if dy > RETREAT_CAUTION_MARGIN_Y:
-        return False
-    outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
-    return dx <= outer + RETREAT_CAUTION_MARGIN
-
-
-def _in_camera(camera: CameraRange, world_x: int, world_y: int) -> bool:
-    return camera.left <= world_x <= camera.right and camera.top <= world_y <= camera.bottom
-
-
-def _in_playable_lane(world_y: int, context: Context) -> bool:
-    """False for an enemy positioned outside the level's actual walkable Y
-    band -- e.g. stage 1's scripted "behind a door" placeholder, which is a
-    real Enemy object (tracked, health, combat_phase) at an anomalously high
-    world_y the player can never physically reach. Without this filter the
-    AI repeatedly commits to attacks/chases against a target it can never
-    connect with, and it can also block could_walk_to_advance_stage
-    forever the same way an abandoned 0-HP straggler does."""
-
-    stage = find(context, Stage)
-    lane_max = lane_y_max_for_level(stage.level_index) if stage is not None else LANE_Y_MAX_DEFAULT
-    return LANE_Y_MIN <= world_y <= lane_max
-
-
-def _live_enemies(context: Context) -> list[Enemy]:
-    return [
-        e
-        for e in find_all(context, Enemy)
-        if not should_ignore_as_target(e.combat_phase) and _in_playable_lane(e.world_y, context)
-    ]
-
-
-def _on_screen_enemies(context: Context) -> list[Enemy]:
-    camera = find(context, CameraRange)
-    enemies = _live_enemies(context)
-    if camera is None:
-        return enemies
-    return [e for e in enemies if _in_camera(camera, e.world_x, e.world_y)]
-
-
-def _rear_threats(actor: PlayableCharacter, enemies: list[Enemy]) -> list[Enemy]:
-    return [
-        e
-        for e in enemies
-        if _enemy_behind_actor(actor, e)
-        and abs(e.world_x - actor.world_x) <= REAR_THREAT_X
-        and abs(e.world_y - actor.world_y) <= REAR_THREAT_Y
-    ]
-
-
 STAB_WEAPON_TYPES = frozenset({0x08, 0x09})  # knife, bottle
 
 
@@ -307,7 +136,6 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
     the actor holds. ``held_types=None`` means unarmed (``Punch``)."""
 
     decisions: set[Token] = set()
-    enemies = _live_enemies(context)
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -318,11 +146,10 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
         )
         if not held_matches:
             continue
-        for enemy in enemies:
-            if _enemy_behind_actor(actor, enemy) and abs(enemy.world_x - actor.world_x) > 4:
-                continue
-            if _in_punch_band(actor, enemy):
-                decisions.add(decision_cls(actor_slot=actor.slot, target_slot=enemy.slot))
+        # InPunchReach already carries the "in front (within tolerance) and
+        # inside the band" judgment this used to recompute inline.
+        for target_slot in reach.targets_of(context, InPunchReach, actor.slot):
+            decisions.add(decision_cls(actor_slot=actor.slot, target_slot=target_slot))
     return decisions
 
 
@@ -348,7 +175,6 @@ def could_spray_pepper(context: Context) -> Context:
 
 def could_rear_attack(context: Context) -> Context:
     decisions: set[Token] = set()
-    enemies = _live_enemies(context)
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -358,25 +184,24 @@ def could_rear_attack(context: Context) -> Context:
             continue
         if actor.is_airborne:
             continue
-        for enemy in enemies:
-            # NOT ClosingEnemy: an earlier version also fired here purely on
-            # that early-warning inference, before the enemy was actually in
-            # _in_rear_band's real range. Live testing showed that backfires
-            # -- $322A only hits based on *current* position, so committing
-            # to it early is a guaranteed whiff that locks the actor in the
-            # attack's own recovery frames exactly when the still-closing
-            # enemy arrives and lands its hit for free. ClosingEnemy remains
-            # a real, tested signal (see inference.py) -- it just needs a
-            # genuine evasive reaction to consume it usefully, not an early
-            # commit to the same reactive-only attack.
-            # Produced on band membership alone, per AI.md: a could_* asks
-            # only "is this possible and does it make some kind of sense",
-            # never "is this the one to take". Whether the chord is the
-            # *right* answer -- rather than turning around and punching --
-            # is a ranking question, and lives in
-            # priority._emergency_rear_attack via _rear_attack_is_warranted.
-            if _in_rear_band(actor, enemy):
-                decisions.add(RearAttack(actor_slot=actor.slot, target_slot=enemy.slot))
+        # InRearReach, NOT ClosingEnemy: an earlier version also fired here
+        # purely on that early-warning inference, before the enemy was
+        # actually in the chord's real range. Live testing showed that
+        # backfires -- $322A only hits based on *current* position, so
+        # committing to it early is a guaranteed whiff that locks the actor
+        # in the attack's own recovery frames exactly when the still-closing
+        # enemy arrives and lands its hit for free. ClosingEnemy remains a
+        # real, tested signal (see inference.py) -- it just needs a genuine
+        # evasive reaction to consume it usefully, not an early commit to
+        # the same reactive-only attack.
+        # Produced on band membership alone, per AI.md: a could_* asks only
+        # "is this possible and does it make some kind of sense", never "is
+        # this the one to take". Whether the chord is the *right* answer --
+        # rather than turning around and punching -- is a ranking question,
+        # and lives in priority._emergency_rear_attack via
+        # reach.rear_attack_is_warranted.
+        for target_slot in reach.targets_of(context, InRearReach, actor.slot):
+            decisions.add(RearAttack(actor_slot=actor.slot, target_slot=target_slot))
     return decisions
 
 
@@ -413,7 +238,7 @@ def could_hold_actions(context: Context) -> Context:
     """
 
     decisions: set[Token] = set()
-    enemies = _live_enemies(context)
+    enemies = reach.live_enemies(context)
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -437,7 +262,7 @@ def could_hold_actions(context: Context) -> Context:
         grabbed = [e for e in enemies if e.combat_phase is CombatPhase.GRABBED]
         nearest = min(grabbed or enemies, key=_distance, default=None)
         target_slot = nearest.slot if nearest is not None else actor.slot
-        rear = _rear_threats(actor, enemies)
+        rear = reach.rear_threats(actor, enemies)
 
         if base == 0x66:
             # Confirmed back hold → B is suplex.
@@ -473,7 +298,7 @@ def _ahead_in_stage_direction(actor_world_x: int, enemy_world_x: int, direction:
 
 def could_walk_to_near_enemy(context: Context) -> Context:
     decisions: set[Token] = set()
-    on_screen = _on_screen_enemies(context)
+    on_screen = reach.on_screen_enemies(context)
     stage = find(context, Stage)
     for actor in _actors(context):
         if _blocked(context, actor):
@@ -495,23 +320,21 @@ def could_walk_to_near_enemy(context: Context) -> Context:
             # decision at all.
             enemies = [
                 e
-                for e in _live_enemies(context)
+                for e in reach.live_enemies(context)
                 if _ahead_in_stage_direction(actor.world_x, e.world_x, stage.direction)
             ]
         if not enemies:
             continue
-        if any(_enemy_actionable(actor, e, enemies) for e in enemies):
+        actionable = reach.targets_of(context, ActionableTarget, actor.slot)
+        if any(enemy.slot in actionable for enemy in enemies):
             continue
         # One candidate per reachable enemy -- determine_priority_decision
         # (priority.py's distance-scored emergency) picks the closest one,
         # per AI.md's own target-selection principle: this function only
         # says what's possible, never which possibility is best.
+        threatening = reach.targets_of(context, IncomingMelee, actor.slot)
         for enemy in enemies:
-            if (
-                is_dangerous(enemy.combat_phase)
-                and _enemy_in_front(actor, enemy)
-                and _too_close_to_keep_approaching(actor, enemy)
-            ):
+            if enemy.slot in threatening and reach.enemy_in_front(actor, enemy):
                 # could_retreat_from_danger covers this one instead -- don't
                 # propose closing the last stretch of distance into a
                 # committed attack that isn't hittable yet. Only for an
@@ -528,7 +351,6 @@ def could_walk_to_near_enemy(context: Context) -> Context:
 
 def could_retreat_from_danger(context: Context) -> Context:
     decisions: set[Token] = set()
-    enemies = _on_screen_enemies(context)
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -536,10 +358,12 @@ def could_retreat_from_danger(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
-        for enemy in enemies:
-            if not is_dangerous(enemy.combat_phase):
+        actionable = reach.targets_of(context, ActionableTarget, actor.slot)
+        for target_slot in reach.targets_of(context, IncomingMelee, actor.slot):
+            enemy = find(context, Enemy, slot=target_slot)
+            if enemy is None:
                 continue
-            if _enemy_behind_actor(actor, enemy):
+            if reach.enemy_behind_actor(actor, enemy):
                 # Fleeing something already at the actor's back means running
                 # blind, facing away, with the threat following -- turning to
                 # face it is strictly better and is what
@@ -547,11 +371,9 @@ def could_retreat_from_danger(context: Context) -> Context:
                 # D-pad sets facing). The two still never compete for one
                 # target: that function's matching skip is front-only.
                 continue
-            if _enemy_actionable(actor, enemy, enemies):
+            if target_slot in actionable:
                 continue  # already hittable -- attack instead of retreating
-            if not _too_close_to_keep_approaching(actor, enemy):
-                continue  # still far enough that a normal approach is fine
-            decisions.add(RetreatFromDanger(actor_slot=actor.slot, target_slot=enemy.slot))
+            decisions.add(RetreatFromDanger(actor_slot=actor.slot, target_slot=target_slot))
     return decisions
 
 
@@ -572,10 +394,10 @@ def _advance_blocking_enemies(context: Context) -> list[Enemy]:
 
     camera = find(context, CameraRange)
     blocking = []
-    for enemy in _live_enemies(context):
+    for enemy in reach.live_enemies(context):
         if (
             camera is not None
-            and not _in_camera(camera, enemy.world_x, enemy.world_y)
+            and not reach.in_camera(camera, enemy.world_x, enemy.world_y)
             and enemy.health == 0
         ):
             continue
@@ -621,22 +443,38 @@ def could_call_police(context: Context) -> Context:
             continue
         if actor.specials <= 0:
             continue
-        threshold = (
-            POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE
-            if actor.lives <= 1
-            else POLICE_HEALTH_PERCENT_THRESHOLD
-        )
-        if actor.health_percent >= threshold:
+        if not _police_is_worth_it(context, actor):
             continue
         decisions.add(CallPolice(actor_slot=actor.slot))
     return decisions
+
+
+def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
+    """The two situations the special is for: about to die, or boxed in.
+
+    ``Surrounded`` is the second one -- it is the only move that clears
+    every side at once, so a crowd the actor cannot fight its way out of is
+    as good a reason as low health, just at a laxer health gate so it is
+    never spent while comfortably healthy.
+    """
+
+    threshold = (
+        POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE
+        if actor.lives <= 1
+        else POLICE_HEALTH_PERCENT_THRESHOLD
+    )
+    if actor.health_percent < threshold:
+        return True
+    surrounded = any(
+        token.actor_slot == actor.slot for token in find_all(context, Surrounded)
+    )
+    return surrounded and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD_SURROUNDED
 
 
 def could_jump_attack(context: Context) -> Context:
     """Jump-kick only when a horizontal approach is useful — never hop in place."""
 
     decisions: set[Token] = set()
-    enemies = _on_screen_enemies(context)
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -646,20 +484,14 @@ def could_jump_attack(context: Context) -> Context:
             continue
         if actor.is_airborne:
             continue
-        for enemy in enemies:
-            dx = abs(enemy.world_x - actor.world_x)
-            dy = abs(enemy.world_y - actor.world_y)
-            if dy > JUMP_ATTACK_RANGE_Y:
+        # Never hop into a committed attack: the kick's own travel would
+        # deliver the actor to the enemy mid-swing, airborne and unable to
+        # change its mind.
+        threatening = reach.targets_of(context, IncomingMelee, actor.slot)
+        for target_slot in reach.targets_of(context, InJumpAttackReach, actor.slot):
+            if target_slot in threatening:
                 continue
-            # Must need the air approach: outside punch outer, with real ΔX.
-            if dx < max(JUMP_ATTACK_MIN_DX, punch_outer_x(actor.character_id)):
-                continue
-            if dx > _jump_attack_max_dx(actor.character_id):
-                continue
-            # Only kick forward — jump-in-place facing wrong way is useless.
-            if not _enemy_in_front(actor, enemy):
-                continue
-            decisions.add(JumpAttack(actor_slot=actor.slot, target_slot=enemy.slot))
+            decisions.add(JumpAttack(actor_slot=actor.slot, target_slot=target_slot))
     return decisions
 
 
@@ -670,7 +502,7 @@ def _could_throw_ranged_weapon(context: Context, *, weapon_type: int, decision_c
     distance-scored emergency) picks which one actually gets thrown at."""
 
     decisions: set[Token] = set()
-    enemies = _on_screen_enemies(context)
+    enemies = reach.on_screen_enemies(context)
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -711,14 +543,6 @@ def could_throw_pepper(context: Context) -> Context:
 
 def could_walk_to_weapon(context: Context) -> Context:
     decisions: set[Token] = set()
-    camera = find(context, CameraRange)
-    if camera is None:
-        return decisions
-    weapons = [
-        w
-        for w in find_all(context, Weapon)
-        if _in_camera(camera, w.world_x, w.world_y) and w.wear < 3
-    ]
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -726,12 +550,12 @@ def could_walk_to_weapon(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
-        held_rank = weapon_rank(actor.held_weapon_type)
-        upgrades = [w for w in weapons if weapon_rank(w.weapon_type) > held_rank]
-        # One candidate per upgrade -- priority.py's rank-scaled emergency
-        # favors the better upgrade, not a min/max pick made here.
-        for weapon in upgrades:
-            decisions.add(WalkToWeapon(actor_slot=actor.slot, target_slot=weapon.slot))
+        # WeaponUpgrade is the judgment "in camera, still usable, and better
+        # than what this actor holds" -- one candidate per upgrade, since
+        # priority.py's rank-scaled emergency favours the better one rather
+        # than a min/max pick made here.
+        for target_slot in reach.targets_of(context, WeaponUpgrade, actor.slot):
+            decisions.add(WalkToWeapon(actor_slot=actor.slot, target_slot=target_slot))
     return decisions
 
 
@@ -758,7 +582,7 @@ def could_walk_to_pickup(context: Context) -> Context:
     if camera is None:
         return decisions
     pickups = [
-        p for p in find_all(context, Pickup) if _in_camera(camera, p.world_x, p.world_y)
+        p for p in find_all(context, Pickup) if reach.in_camera(camera, p.world_x, p.world_y)
     ]
     for actor in _actors(context):
         if _blocked(context, actor):
@@ -781,7 +605,7 @@ def could_smash_breakable(context: Context) -> Context:
     camera = find(context, CameraRange)
     breakables = find_all(context, Breakable)
     if camera is not None:
-        breakables = [b for b in breakables if _in_camera(camera, b.world_x, b.world_y)]
+        breakables = [b for b in breakables if reach.in_camera(camera, b.world_x, b.world_y)]
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -806,7 +630,7 @@ def could_walk_to_breakable(context: Context) -> Context:
     camera = find(context, CameraRange)
     breakables = find_all(context, Breakable)
     if camera is not None:
-        breakables = [b for b in breakables if _in_camera(camera, b.world_x, b.world_y)]
+        breakables = [b for b in breakables if reach.in_camera(camera, b.world_x, b.world_y)]
     if not breakables:
         return decisions
     for actor in _actors(context):

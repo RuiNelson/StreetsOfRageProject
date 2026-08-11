@@ -62,6 +62,24 @@ class Pit(StageObjects):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class SafeSpot(Inferred):
+    """A nearby point the actor can back off to that is clear of trouble.
+
+    Produced by ``inference.check_for_safe_spots`` only while the actor has
+    an ``IncomingMelee`` to back away from: the best of a small set of
+    candidate steps around it, keeping the one that is furthest from every
+    live enemy while staying inside the playable lane and the camera, and
+    off any ``Pit`` (plus ``reach.PIT_AVOID_MARGIN`` of clearance). Absent
+    when no candidate qualifies -- retreating then falls back to stepping
+    straight away on X.
+    """
+
+    actor_slot: str
+    world_x: int
+    world_y: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Breakable(StageObjects):
     """Intact smashable prop (phone booth, crate, …) — punch to break.
 

@@ -85,8 +85,10 @@ class PhaseDecodeTests(unittest.TestCase):
             ordinary_enemy_phase(0x0D01, type_id=0x24), CombatPhase.RECOVERY
         )
 
-    def test_common_state_two_is_contact_recovery(self) -> None:
-        self.assertEqual(ordinary_enemy_phase(0x0203), CombatPhase.RECOVERY)
+    def test_common_state_two_is_hitstun(self) -> None:
+        # $0200's own handler is $9B88, which does nothing but count the
+        # stun timer +$50 down and write $0100 back at zero.
+        self.assertEqual(ordinary_enemy_phase(0x0203), CombatPhase.STUNNED)
 
     def test_abadede_police_recovery(self) -> None:
         self.assertEqual(

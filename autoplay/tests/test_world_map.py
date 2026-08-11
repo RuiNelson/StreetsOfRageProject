@@ -10,6 +10,7 @@ from sor_autoplay.memory_map import (
     OBJ_POS_X,
     OBJ_POS_Y,
     OBJ_POS_Z,
+    OBJ_ORDINARY_STUN_TIMER,
     OBJ_PRIMARY_STATE,
     OBJ_OUTGOING_DAMAGE,
     OBJ_SCRIPT_PARAM,
@@ -272,6 +273,65 @@ class WorldMapParseTests(unittest.TestCase):
         self.assertEqual(garcia.kind, "enemy")
         self.assertAlmostEqual(garcia.enemy_vel_x, -3.5)
         self.assertAlmostEqual(garcia.enemy_vel_y, 1.25)
+
+    def test_ordinary_enemy_stun_state_and_timer_are_decoded(self) -> None:
+        """State $0200 is the ROM's timed hitstun ($9B88 counts +$50 down and
+        writes $0100 back at zero), so the enemy must read as STUNNED with
+        its remaining frames exposed -- that window is free damage."""
+
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+
+        base = 0x100
+        _put_u8(actors, base + OBJ_TYPE, 0x20)  # Garcia
+        _put_u8(actors, base + OBJ_FLAGS, 0x00)
+        _put_fixed16(actors, base + OBJ_POS_X, 800)
+        _put_fixed16(actors, base + OBJ_POS_Y, 0x40)
+        _put_fixed16(actors, base + OBJ_POS_Z, 0xA0)
+        _put_u16(actors, base + OBJ_PRIMARY_STATE, 0x0200)  # ENEMY_ST_ALT
+        _put_u16(actors, base + OBJ_HEALTH, 10)
+        _put_u8(actors, base + OBJ_ORDINARY_STUN_TIMER, 0x11)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+        garcia = next(entity for entity in world.entities if entity.type_id == 0x20)
+
+        self.assertEqual(garcia.combat_phase, CombatPhase.STUNNED)
+        self.assertEqual(garcia.stun_timer, 0x11)
+
+    def test_scripted_state_is_pepper_stun_while_the_special_is_idle(self) -> None:
+        """$0400 has two meanings ($A43E): pepper-spray immobilization (160
+        frames, counted down at +$50) and police-sweep removal, which forces
+        health $FFFF while the special runs. Only the first is a stun."""
+
+        def _build(*, health: int, police: bool):
+            actors = bytearray(ACTORS_BYTES)
+            camera = bytearray(CAMERA_BYTES)
+            _put_u16(camera, 0x02, 768)
+            base = 0x100
+            _put_u8(actors, base + OBJ_TYPE, 0x20)
+            _put_u8(actors, base + OBJ_FLAGS, 0x00)
+            _put_fixed16(actors, base + OBJ_POS_X, 800)
+            _put_fixed16(actors, base + OBJ_POS_Y, 0x40)
+            _put_fixed16(actors, base + OBJ_POS_Z, 0xA0)
+            _put_u16(actors, base + OBJ_PRIMARY_STATE, 0x0400)  # ENEMY_ST_SCRIPTED
+            _put_u16(actors, base + OBJ_HEALTH, health)
+            _put_u8(actors, base + OBJ_ORDINARY_STUN_TIMER, 0xA0)
+            world = parse_world_map(
+                actors_block=bytes(actors),
+                camera_block=bytes(camera),
+                police_special_active=police,
+            )
+            return next(e for e in world.entities if e.type_id == 0x20)
+
+        peppered = _build(health=10, police=False)
+        self.assertEqual(peppered.combat_phase, CombatPhase.STUNNED)
+        self.assertEqual(peppered.stun_timer, 0xA0)
+
+        swept = _build(health=0xFFFF, police=True)
+        self.assertEqual(swept.combat_phase, CombatPhase.SCRIPTED)
 
     def test_boss_velocity_fields_are_unaffected_by_ordinary_enemy_offsets(self) -> None:
         """Boss's existing vel_x/vel_z (+$20/+$24) must stay untouched by the

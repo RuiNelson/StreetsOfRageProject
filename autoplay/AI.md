@@ -174,6 +174,64 @@ Consuming this token usefully needs a genuine evasive reaction (e.g. a
 sidestep/reposition decision), not an early commit to the same
 reactive-only attack.
 
+**`TargetInReach`** answers, once per tick and per (actor, enemy) pair,
+"which of my moves can reach that enemy from here". It is abstract; its
+concrete descendants are one per move family — `InPunchReach` (a forward
+strike would connect: inside the punch band *and* actually in front),
+`InRearReach` (inside the `$322A` chord's real reach on the enemy's own
+side), `InJumpAttackReach` (in front, beyond punch outer, inside the
+kick's free-flight range) and `ActionableTarget` (some attack the AI
+already has would really fire on this enemy now — the "stop walking, you
+can already hit it" signal). The geometry behind them lives in `reach.py`,
+shared with the decision and ranking stages, so all three agree on one
+definition of every band instead of each recomputing it.
+
+**`IncomingMelee`** is the melee counterpart of `IncomingProjectile`: an
+on-screen enemy in a committed attack phase, close enough that its hit can
+actually land on the actor. A dangerous phase alone is not a threat and
+neither is proximity alone, so this is a judgment, not a copy of every
+attacking enemy on screen.
+
+**`PunishWindow`** flags an enemy that cannot defend itself right now —
+knocked down, blocked, grabbed, in move recovery, or **stunned**. It
+carries `frames_left` when the ROM exposes a countdown, which today means
+a stunned `Grunt`'s own `+$50` timer (`$18` frames for hitstun, `$A0` for
+the pepper-spray immobilization).
+
+**`Surrounded`** flags an actor boxed in by a crowd rather than facing a
+queue: three or more live enemies inside the close box around it, or a
+pincer with at least one on each side. It is what makes the police special
+worth spending on something other than imminent death.
+
+**`SafeSpot`** answers "back off to *where*" for an actor that has an
+`IncomingMelee`: the best of a few candidate steps around it, judged by
+clearance from every live enemy and rejected outright when it leaves the
+playable lane or the camera, or lands on a `Pit`. `RetreatFromDanger`'s
+executor steers here when it exists and falls back to stepping straight
+back on X when it does not.
+
+**`WeaponUpgrade`** flags a ground `Weapon` that is in camera, still
+usable, and better than what the actor is carrying, carrying the rank and
+the rank gain so nothing downstream re-reads the damage table.
+
+### Stunned enemies
+
+`Grunt` carries the ROM's own stun counter (`+$50`) and reads as
+`CombatPhase.STUNNED` while it is running. Two different ROM paths produce
+it, and both are timed states the enemy cannot act out of:
+
+- **hitstun**, state `$0200`, whose own handler `$9B88` seeds `+$50` with
+  `$18` (24 frames) and does nothing but count it down before writing
+  `$0100` back;
+- **pepper-spray immobilization**, state `$0400` through the shared
+  handler `$A43E`, seeded with `$A0` (160 frames) — a far longer free-hit
+  window than any knockdown.
+
+State `$0400` is also what the police special forces on every ordinary
+enemy while sweeping them off the board, with health `$FFFF`; that case
+stays `SCRIPTED` so nothing chases or waits for a body that is being
+removed.
+
 
 ## Process
 
@@ -233,6 +291,17 @@ Each such function is named with the prefix `check_for_`, for example
 `check_for_incoming_projectiles`. Every one of these functions produces a
 focused set of `Information` descendants — often no more than one — which
 is appended to the context.
+
+Most of them read only directly observed tokens and are therefore
+independent of one another; `check_for_safe_spots` is the exception, since
+a safe spot only means anything relative to a threat, so it runs last and
+reads the `IncomingMelee` tokens produced earlier in the same call.
+
+The `could_*` functions below, and the `_emergency_*` functions that rank
+their output, consume these tokens rather than re-deriving the same
+judgment from raw coordinates. That is the point of the stage: a band is
+computed once per tick, in one place, and every later stage sees the same
+answer.
 
 ### `generate_decision_tokens`
 

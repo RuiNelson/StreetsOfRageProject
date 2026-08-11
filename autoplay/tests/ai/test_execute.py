@@ -29,7 +29,7 @@ from sor_autoplay.ai.execute import (
     press_no_button,
 )
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.tokens import Breakable, Pit
+from sor_autoplay.ai.tokens import Breakable, Pit, SafeSpot
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
@@ -281,6 +281,33 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
         execute_decision(decision, context, gamepad)
 
         # Backing away moves on X only -- never toward the enemy's lane too.
+        client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
+
+    def test_prefers_the_inferred_safe_spot(self) -> None:
+        # inference.check_for_safe_spots already weighed the sidesteps
+        # against the straight retreat (clearance from every live enemy,
+        # lane/camera bounds, pits). When it produced one, the executor must
+        # steer there rather than re-deciding "straight back on X".
+        actor = _myself(world_x=100, world_y=50)
+        target = replace(_enemy(world_x=150, world_y=50), combat_phase=CombatPhase.ATTACKING)
+        context = {actor, target, SafeSpot(actor_slot="P1", world_x=100, world_y=74)}
+        decision = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, context, gamepad)
+
+        # Pure sidestep: down the lane, no lateral component.
+        client.hold_buttons.assert_called_once_with(player1=DOWN, player2=0)
+
+    def test_ignores_a_safe_spot_belonging_to_the_partner(self) -> None:
+        actor = _myself(world_x=100, world_y=50)
+        target = replace(_enemy(world_x=150, world_y=50), combat_phase=CombatPhase.ATTACKING)
+        context = {actor, target, SafeSpot(actor_slot="P2", world_x=100, world_y=74)}
+        decision = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, context, gamepad)
+
         client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
 
     def test_missing_actor_or_target_does_nothing(self) -> None:

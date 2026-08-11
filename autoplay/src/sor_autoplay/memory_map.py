@@ -135,6 +135,14 @@ OBJ_CHARACTER_ID = 0x50  # player character id (same offset, different meaning)
 # Ground weapons: wear/exhaust counter (+$50 < 3 is still usable). Consumable
 # pickups store their effect index here. Same offset, different meanings.
 OBJ_ITEM_PARAM = 0x50
+# Ordinary enemies: remaining stun frames, counted down by whichever state
+# handler owns the stun. $9B88 (ordinary_enemy_apply_contact_damage, the
+# $0200 handler) loads $18 on the hit that starts hitstun and does
+# `subq.b #1,$50(a0)` every frame, returning to $0100 at zero. $A43E (the
+# shared $0400 handler) does the same with $A0 for the pepper-spray
+# immobilization. Same offset as the weapon wear / boss distance aliases
+# above -- only meaningful for kind=="enemy".
+OBJ_ORDINARY_STUN_TIMER = 0x50
 # Weapons/pickups: nonzero means reserved, held, thrown, or mid-collect
 # (ROM find_close_interaction_target at $3136 requires zero for a free ground
 # weapon). Not the same as ordinary enemy family_state at +$52.

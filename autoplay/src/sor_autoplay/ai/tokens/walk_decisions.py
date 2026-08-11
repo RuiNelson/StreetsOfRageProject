@@ -18,12 +18,13 @@ class WalkToNearEnemy(Walk):
     """Walk to a nearby on-screen enemy to bring it into attack range.
 
     Produced by ``could_walk_to_near_enemy`` once per reachable enemy when
-    at least one on-screen enemy exists and none is *actionable* yet
-    (``decide._enemy_actionable``: within rear range *and* worth the
-    RearAttack chord there, or within punch range and actually in front --
-    not just inside the punch box's raw distance, which ignores facing and
-    would otherwise make this skip a behind enemy Punch itself refuses to
-    hit, leaving the actor undefended) -- never just the nearest;
+    at least one on-screen enemy exists and none carries an
+    ``ActionableTarget`` for this actor yet (``reach.enemy_actionable``:
+    within rear range *and* worth the RearAttack chord there, or within
+    punch range and actually in front -- not just inside the punch box's raw
+    distance, which ignores facing and would otherwise make this skip a
+    behind enemy Punch itself refuses to hit, leaving the actor
+    undefended) -- never just the nearest;
     determine_priority_decision picks among the candidates. Falls back to
     every live enemy ahead in the stage's scroll direction when nothing is
     on-screen (e.g. the next wave, tracked on the world map but not yet in
@@ -36,7 +37,7 @@ class WalkToNearEnemy(Walk):
     ``execute._walk_to_near_enemy_target``). That makes it the fast,
     reliable alternative to the slow, whiff-prone ``RearAttack`` chord --
     which is why the rear band no longer counts as actionable on its own
-    (``decide._rear_attack_is_warranted``) and why the dangerous-enemy
+    (``reach.rear_attack_is_warranted``) and why the dangerous-enemy
     caution-zone skip below is front-only.
 
     Raises emergency: Enemy×14, closer scoring higher (distance-scored;
@@ -74,11 +75,12 @@ class WalkToAdvanceStage(Walk):
 class WalkToWeapon(Walk):
     """Walk to pick up a free ground weapon that outranks the held one.
 
-    Produced by ``could_walk_to_weapon`` once per in-camera Weapon token
-    that ranks higher than the actor's held weapon -- never just the best
-    one; determine_priority_decision picks among the candidates.
+    Produced by ``could_walk_to_weapon`` once per ``WeaponUpgrade`` -- the
+    inference that a ground weapon is in camera, still usable, and better
+    than what this actor holds -- never just the best one;
+    determine_priority_decision picks among the candidates.
 
-    Raises emergency: (Weapon when its rank beats the held weapon's)×3+rank
+    Raises emergency: WeaponUpgrade×3+rank
     (rank 2..5, so a better upgrade among several outranks a lesser one;
     see priority._emergency_walk_to_weapon).
     """
@@ -115,17 +117,17 @@ class RetreatFromDanger(Walk):
     """Back away from a dangerous enemy that is not yet actionable, instead
     of closing the last stretch of distance into its committed attack.
 
-    Produced by ``could_retreat_from_danger`` once per on-screen enemy in a
-    dangerous phase (ATTACKING/CHARGE) that decide._enemy_actionable would
-    reject (not really hittable yet) and that sits close enough
-    (decide._too_close_to_keep_approaching) that continuing to approach
-    risks arriving right as it lands its hit -- never just the nearest;
-    determine_priority_decision picks among the candidates.
+    Produced by ``could_retreat_from_danger`` once per ``IncomingMelee``
+    (an on-screen enemy in a dangerous phase, close enough that continuing
+    to approach risks arriving right as its hit lands) that carries no
+    ``ActionableTarget`` -- not really hittable yet -- and is not behind the
+    actor; never just the nearest, determine_priority_decision picks among
+    the candidates.
     ``could_walk_to_near_enemy`` skips producing a candidate for the same
     enemy in this zone, so the two never compete for the same target.
 
-    Raises emergency: Enemy (dangerous, not yet actionable, in the caution
-    zone)×17, closer scoring higher (distance-scored; see
+    Raises emergency: IncomingMelee×17, closer scoring higher
+    (distance-scored; see
     priority._emergency_retreat_from_danger) -- higher than
     WalkToNearEnemy(14) so this wins over still approaching, lower than any
     real attack (the lowest being JumpAttack×18) so attacking always wins

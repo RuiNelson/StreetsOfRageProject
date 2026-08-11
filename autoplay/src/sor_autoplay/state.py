@@ -315,6 +315,8 @@ def snapshot_from_memory_blocks(
     if game_state not in _PLAYER_RESOURCE_STATES and not p2.is_playable:
         p2 = _blank_player(2, p2)
 
+    special_on = is_police_special_active(police_special_active_byte)
+
     world = empty_world_map()
     map_source = actors_block if actors_block is not None else objects_block
     from .world_map import ACTORS_BYTES
@@ -328,9 +330,11 @@ def snapshot_from_memory_blocks(
             p1_mode_active=p1.mode_active or p1.is_playable,
             p2_mode_active=p2.mode_active or p2.is_playable,
             level_index=level_index,
+            # Tells the ordinary-enemy $0400 state apart: pepper-spray stun
+            # while the special is idle, sweep removal while it runs.
+            police_special_active=special_on,
         )
 
-    special_on = is_police_special_active(police_special_active_byte)
     holes: tuple[FloorHole, ...] = ()
     barriers: tuple[FloorHole, ...] = ()
     if (

@@ -16,6 +16,7 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
+from ...phases import CombatPhase
 from .character import Character
 from .tokens import Inferred
 
@@ -35,7 +36,28 @@ class Enemy(Character):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Grunt(Enemy, ABC):
-    """An ordinary (non-boss) enemy."""
+    """An ordinary (non-boss) enemy.
+
+    ``stun_timer`` is the ROM's own remaining-stun counter at ``+$50``,
+    in 60 Hz frames. Only ordinary enemies have it: the two handlers that
+    seed and decrement it ($9B88 for the $18-frame hitstun, $A43E for the
+    $A0-frame pepper-spray immobilization) are ordinary-enemy state-table
+    entries, and every boss family runs its own hit reactions instead.
+    """
+
+    stun_timer: int = 0  # +$50, frames left; only meaningful while stunned
+
+    @property
+    def is_stunned(self) -> bool:
+        """True while the enemy is frozen on a timed stun (see ``stun_timer``).
+
+        A stun is not just a punish window: unlike KNOCKDOWN (which ends in
+        a wake-up with invulnerability) or RECOVERY (the tail of a move the
+        enemy chose), the enemy is standing, hittable and unable to act for
+        the whole of ``stun_timer``.
+        """
+
+        return self.combat_phase is CombatPhase.STUNNED
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -161,3 +183,115 @@ class ClosingEnemy(Inferred):
     """
 
     slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TargetInReach(Inferred, ABC):
+    """An enemy that one of the actor's moves can reach *right now*.
+
+    Produced by ``inference.check_for_targets_in_reach`` once per (actor,
+    enemy) pair and per move family, from the geometry in ``ai/reach.py``.
+    Reference-only: both ends are slot references, resolved with
+    ``find(context, Enemy, slot=...)`` / ``_find_actor``.
+
+    Every concrete subclass answers a different move's question, which is
+    why this is a hierarchy rather than one token with a "kind" field: a
+    ``could_*`` asks for exactly the band its own move uses, and the
+    inference stage computes each band once per tick instead of every
+    ``could_*`` and every ``_emergency_*`` recomputing it from raw
+    coordinates.
+    """
+
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InPunchReach(TargetInReach):
+    """A forward strike (B) would connect with this enemy now.
+
+    Produced by ``inference.check_for_targets_in_reach`` when the enemy is
+    inside ``reach.in_punch_band`` *and* in front of the actor (within
+    ``reach.PUNCH_BEHIND_TOLERANCE_X``) -- the raw band alone ignores facing
+    and describes a dead zone the actor cannot actually hit.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InRearReach(TargetInReach):
+    """The ``$322A`` rear/escape chord would reach this enemy now.
+
+    Produced by ``inference.check_for_targets_in_reach`` when the enemy is
+    inside ``reach.in_rear_band`` -- the chord's real reach on the enemy's
+    own side (behind vs front), never the union of both, since Axel and
+    Blaze have zero forward reach.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InJumpAttackReach(TargetInReach):
+    """A jump kick would cover the gap to this enemy now.
+
+    Produced by ``inference.check_for_targets_in_reach`` when the enemy is
+    in front, in lane, beyond the actor's punch outer edge and inside the
+    kick's own free-flight range (``reach.in_jump_attack_band``).
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ActionableTarget(TargetInReach):
+    """An enemy some already-available attack would really fire on now.
+
+    Produced by ``inference.check_for_targets_in_reach`` when
+    ``reach.enemy_actionable`` holds: inside the punch reach, or inside the
+    rear band *and* the chord is the right answer there
+    (``reach.rear_attack_is_warranted``). This is the "stop walking, you can
+    already hit it" signal ``could_walk_to_near_enemy`` consumes, and it is
+    deliberately narrower than the union of the bands above.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class IncomingMelee(Inferred):
+    """An enemy whose committed attack is close enough to land on the actor.
+
+    Produced by ``inference.check_for_incoming_melee`` for an on-screen
+    enemy in a dangerous phase (ATTACKING/CHARGE) sitting inside
+    ``reach.too_close_to_keep_approaching``'s caution box. The melee-range
+    counterpart of ``IncomingProjectile``: a threat judgment, not a copy of
+    every dangerous enemy on screen.
+    """
+
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PunishWindow(Inferred):
+    """An enemy that cannot defend itself right now -- free damage.
+
+    Produced by ``inference.check_for_punish_windows`` for every live enemy
+    in a punishable phase (``phases.is_punishable``: knockdown, blocked,
+    stunned, grabbed, or move recovery). ``frames_left`` carries the ROM's
+    own countdown when it is known -- a stunned ``Grunt``'s ``stun_timer``
+    (+$50) -- and 0 when the phase has no readable timer.
+    """
+
+    target_slot: str
+    frames_left: int = 0
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Surrounded(Inferred):
+    """The actor is boxed in by a crowd rather than facing a queue.
+
+    Produced by ``inference.check_for_surrounded`` when at least
+    ``inference.SURROUNDED_MIN_ENEMIES`` live enemies are inside the close
+    box around the actor, or when it is pincered (at least one enemy on each
+    side of it inside that box). ``in_front``/``behind`` are the counts that
+    produced the judgment.
+    """
+
+    actor_slot: str
+    in_front: int
+    behind: int

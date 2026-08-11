@@ -18,6 +18,16 @@ from sor_autoplay.ai.tokens import (
     Souther,
     enemy_class_for_type,
 )
+from sor_autoplay.ai.tokens import (
+    ActionableTarget,
+    InJumpAttackReach,
+    InPunchReach,
+    InRearReach,
+    IncomingMelee,
+    PunishWindow,
+    Surrounded,
+    TargetInReach,
+)
 from sor_autoplay.ai.tokens import Inferred, Information
 from sor_autoplay.phases import CombatPhase
 
@@ -220,6 +230,75 @@ class ClosingEnemyTests(unittest.TestCase):
         with self.assertRaises(Exception):
             closing.slot = "obj08"  # type: ignore[misc]
         self.assertIn(closing, {closing})
+
+
+class GruntStunTests(unittest.TestCase):
+    def _garcia(self, **overrides) -> Garcia:
+        fields = dict(
+            slot="obj07",
+            type_id=0x20,
+            world_x=900,
+            world_y=64,
+            health=6,
+            combat_phase=CombatPhase.STUNNED,
+            targets_player=1,
+            facing_left=True,
+        )
+        fields.update(overrides)
+        return Garcia(**fields)
+
+    def test_stun_timer_defaults_to_zero(self) -> None:
+        self.assertEqual(self._garcia(combat_phase=CombatPhase.NORMAL).stun_timer, 0)
+
+    def test_is_stunned_follows_the_combat_phase(self) -> None:
+        self.assertTrue(self._garcia(stun_timer=0x18).is_stunned)
+        self.assertFalse(
+            self._garcia(combat_phase=CombatPhase.KNOCKDOWN, stun_timer=0).is_stunned
+        )
+
+    def test_a_knocked_down_grunt_is_not_stunned_even_with_a_stale_timer(self) -> None:
+        # +$50 is a shared alias whose value is only meaningful while the
+        # stun handler owns the state.
+        grunt = self._garcia(combat_phase=CombatPhase.KNOCKDOWN, stun_timer=0x18)
+        self.assertFalse(grunt.is_stunned)
+
+    def test_bosses_have_no_stun_timer(self) -> None:
+        self.assertFalse(hasattr(Abadede, "stun_timer"))
+
+
+class ReachAndThreatTokenTests(unittest.TestCase):
+    def test_all_are_inferred(self) -> None:
+        for cls in (
+            TargetInReach,
+            InPunchReach,
+            InRearReach,
+            InJumpAttackReach,
+            ActionableTarget,
+            IncomingMelee,
+            PunishWindow,
+            Surrounded,
+        ):
+            self.assertTrue(issubclass(cls, Inferred), cls.__name__)
+
+    def test_reach_family_shares_one_base(self) -> None:
+        for cls in (InPunchReach, InRearReach, InJumpAttackReach, ActionableTarget):
+            self.assertTrue(issubclass(cls, TargetInReach), cls.__name__)
+
+    def test_reach_tokens_reference_both_ends_by_slot(self) -> None:
+        token = InPunchReach(actor_slot="P1", target_slot="obj07")
+        self.assertEqual(token.actor_slot, "P1")
+        self.assertEqual(token.target_slot, "obj07")
+        self.assertIn(token, {token})
+
+    def test_sibling_reach_tokens_are_distinct_values(self) -> None:
+        # Same pair, different move: these must not collapse in the context.
+        punch = InPunchReach(actor_slot="P1", target_slot="obj07")
+        rear = InRearReach(actor_slot="P1", target_slot="obj07")
+        self.assertNotEqual(punch, rear)
+        self.assertEqual(len({punch, rear}), 2)
+
+    def test_punish_window_frames_default_to_zero(self) -> None:
+        self.assertEqual(PunishWindow(target_slot="obj07").frames_left, 0)
 
 
 if __name__ == "__main__":

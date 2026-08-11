@@ -31,7 +31,7 @@ from .tokens import (
 from .tokens import Myself, Partner, PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
 from .tokens import Enemy
 from .tokens import CameraRange
-from .tokens import Breakable, Pit
+from .tokens import Breakable, Pit, SafeSpot
 from .tokens import Pickup, Weapon
 from .tokens import CallPolice
 from .tokens import Context, Decision, find, find_all
@@ -44,7 +44,8 @@ from .tokens import (
     WalkToWeapon,
 )
 from .gamepad import VirtualGamepad
-from .decide import BREAKABLE_PUNCH_X, _enemy_behind_actor
+from .decide import BREAKABLE_PUNCH_X
+from .reach import PIT_AVOID_MARGIN, enemy_behind_actor
 from ..phases import is_dangerous
 from ..world_map import LANE_Y_MIN
 
@@ -92,11 +93,11 @@ PICKUP_RANGE_Y = 14
 LANE_EDGE_MARGIN = 6
 BREAKABLE_AVOID_X = 28
 BREAKABLE_AVOID_Y = 22
-# Clearance kept beyond a Pit's own footprint — falling in costs a full life
-# (player-health-lives-and-combat.md's $01C0 fall-boundary check), so this
-# stays smaller than BREAKABLE_AVOID_Y only because the pit's real height is
-# already added on top of it (see the dodge loop below).
-PIT_AVOID_MARGIN = 8
+# Pit clearance (reach.PIT_AVOID_MARGIN) stays smaller than BREAKABLE_AVOID_Y
+# only because the pit's real height is already added on top of it (see the
+# dodge loop below). It is shared with inference.check_for_safe_spots, which
+# must reject the same ground this steers around.
+
 # Stop just inside punch_outer_x — never walk onto the enemy.
 WALK_TO_ENEMY_STOP_BUFFER = 4
 # While still approaching a dangerous (ATTACKING/CHARGE) enemy and already
@@ -280,7 +281,7 @@ def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[
     inner = punch_inner_x(actor.character_id)
     stop_dx = max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER)
 
-    if _enemy_behind_actor(actor, target):
+    if enemy_behind_actor(actor, target):
         # Aim for the *far* side, so the movement mask points at the enemy
         # rather than away from it. Holding a direction is what sets facing,
         # so this is the turn-around: after a tick the enemy is in front and
@@ -324,8 +325,22 @@ def _execute_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context, gam
 RETREAT_FROM_DANGER_DISTANCE = 32
 
 
-def _retreat_from_danger_target(actor: Myself | Partner, target: Enemy) -> tuple[int, int]:
-    """Step directly away from ``target`` on X, holding the current lane."""
+def _retreat_from_danger_target(
+    actor: Myself | Partner, target: Enemy, context: Context
+) -> tuple[int, int]:
+    """Where to back off to.
+
+    Prefers the ``SafeSpot`` inference for this actor: it has already
+    weighed the sidesteps against the straight retreat by clearance from
+    every live enemy, and rejected candidates that leave the lane, leave the
+    camera, or land on a pit. Falls back to stepping directly away from
+    ``target`` on X, holding the current lane, when no safe spot was found
+    -- backing off blindly still beats standing in the attack.
+    """
+
+    for spot in find_all(context, SafeSpot):
+        if spot.actor_slot == actor.slot:
+            return spot.world_x, spot.world_y
 
     if actor.world_x <= target.world_x:
         target_x = actor.world_x - RETREAT_FROM_DANGER_DISTANCE
@@ -342,7 +357,7 @@ def _execute_retreat_from_danger(
     if actor is None or target is None:
         gamepad.release()
         return
-    target_x, target_y = _retreat_from_danger_target(actor, target)
+    target_x, target_y = _retreat_from_danger_target(actor, target, context)
     gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
 
 

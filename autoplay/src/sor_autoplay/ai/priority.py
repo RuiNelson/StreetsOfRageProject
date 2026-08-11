@@ -20,7 +20,8 @@ import math
 import random
 from collections.abc import Callable
 
-from ..phases import CombatPhase, is_dangerous, is_punishable
+from ..phases import CombatPhase, is_dangerous
+from . import reach
 from .decide import (
     HEALTH_CRITICAL_PERCENT,
     KNIFE_MELEE_X,
@@ -29,8 +30,6 @@ from .decide import (
     POLICE_HEALTH_PERCENT_THRESHOLD,
     POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE,
     _advance_blocking_enemies,
-    _live_enemies,
-    _rear_attack_is_warranted,
 )
 from .tokens import (
     CounterGrab,
@@ -51,7 +50,8 @@ from .tokens import (
     ThrowPepper,
 )
 from .tokens import Myself, Partner
-from .tokens import Breakable, Enemy, Weapon, weapon_rank
+from .tokens import Breakable, Enemy
+from .tokens import IncomingMelee, PunishWindow, Surrounded, WeaponUpgrade
 from .tokens import (
     HealthPickup,
     LifePickup,
@@ -76,6 +76,10 @@ logger = logging.getLogger(__name__)
 _EMERGENCY_COUNTER_GRAB = 100  # already held — only useful action
 _EMERGENCY_TECH_RECOVER = 90  # narrow window, free to act at nothing else
 _EMERGENCY_CALL_POLICE = 88
+# Boxed in but not yet at the health thresholds above: still the only move
+# that clears every side at once, so it outranks every strike, but it sits
+# below the "about to die" call so the two are never confused.
+_EMERGENCY_CALL_POLICE_SURROUNDED = 80
 _EMERGENCY_REAR_ATTACK = 55  # escape when boxed in / punch dead-zone
 _EMERGENCY_REAR_ATTACK_DANGEROUS = 60  # escape a commit from behind
 # The same chord when turning around *is* available (decide.
@@ -179,6 +183,8 @@ def _emergency_call_police(decision: CallPolice, context: Context) -> int:
     )
     if actor.health_percent < threshold:
         return _EMERGENCY_CALL_POLICE
+    if any(token.actor_slot == actor.slot for token in find_all(context, Surrounded)):
+        return _EMERGENCY_CALL_POLICE_SURROUNDED
     return _EMERGENCY_DEFAULT
 
 
@@ -194,8 +200,8 @@ def _emergency_rear_attack(decision: RearAttack, context: Context) -> int:
     # turn-and-punch that decide.could_walk_to_near_enemy offers for the same
     # enemy, which is what stops the AI reaching for a slow, whiff-prone
     # reversal as its reflex answer to anything at its back.
-    warranted = actor is not None and _rear_attack_is_warranted(
-        actor, target, _live_enemies(context)
+    warranted = actor is not None and reach.rear_attack_is_warranted(
+        actor, target, reach.live_enemies(context)
     )
     if warranted:
         return _EMERGENCY_REAR_ATTACK_DANGEROUS if dangerous else _EMERGENCY_REAR_ATTACK
@@ -204,6 +210,17 @@ def _emergency_rear_attack(decision: RearAttack, context: Context) -> int:
         if dangerous
         else _EMERGENCY_REAR_ATTACK_UNWARRANTED
     )
+
+
+def _is_punish_window(context: Context, target_slot: str | None) -> bool:
+    """Whether inference judged this target defenceless this tick.
+
+    Reads the ``PunishWindow`` token rather than re-testing the phase, so
+    "free damage" has one definition across the pipeline -- including the
+    stunned phases, which carry the ROM's own remaining-frames count.
+    """
+
+    return any(token.target_slot == target_slot for token in find_all(context, PunishWindow))
 
 
 def _emergency_melee_strike(decision: Decision, context: Context) -> int:
@@ -215,7 +232,7 @@ def _emergency_melee_strike(decision: Decision, context: Context) -> int:
     target = find(context, Enemy, slot=getattr(decision, "target_slot", None))
     if target is None:
         return _EMERGENCY_DEFAULT
-    if is_punishable(target.combat_phase):
+    if _is_punish_window(context, target.slot):
         return _EMERGENCY_PUNCH_PUNISHABLE
     return _EMERGENCY_PUNCH_DEFAULT
 
@@ -224,7 +241,7 @@ def _emergency_jump_attack(decision: JumpAttack, context: Context) -> int:
     target = find(context, Enemy, slot=decision.target_slot)
     if target is None:
         return _EMERGENCY_DEFAULT
-    if is_punishable(target.combat_phase):
+    if _is_punish_window(context, target.slot):
         return _EMERGENCY_JUMP_ATTACK_PUNISHABLE
     return _EMERGENCY_JUMP_ATTACK_DEFAULT
 
@@ -246,13 +263,20 @@ def _emergency_walk_to_breakable(decision: WalkToBreakable, context: Context) ->
 
 
 def _emergency_walk_to_weapon(decision: WalkToWeapon, context: Context) -> int:
-    weapon = find(context, Weapon, slot=decision.target_slot)
-    actor = _find_actor(context, decision.actor_slot)
-    if weapon is None or actor is None:
+    upgrade = next(
+        (
+            token
+            for token in find_all(context, WeaponUpgrade)
+            if token.actor_slot == decision.actor_slot
+            and token.target_slot == decision.target_slot
+        ),
+        None,
+    )
+    if upgrade is None:
+        # No upgrade judgment for this pair this tick: the weapon is gone,
+        # out of camera, worn out, or no longer better than what is held.
         return _EMERGENCY_DEFAULT
-    rank = weapon_rank(weapon.weapon_type)
-    if rank <= weapon_rank(actor.held_weapon_type):
-        return _EMERGENCY_DEFAULT
+    rank = upgrade.rank
     # Scales with how much of an upgrade this weapon is (rank 2..5) instead
     # of a flat weight, so a better upgrade among several candidates ranks
     # higher -- e.g. knife (rank 5) reaches the original flat value 8,
@@ -276,6 +300,14 @@ def _emergency_retreat_from_danger(decision: RetreatFromDanger, context: Context
     actor = _find_actor(context, decision.actor_slot)
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
+    threatening = any(
+        token.actor_slot == decision.actor_slot and token.target_slot == decision.target_slot
+        for token in find_all(context, IncomingMelee)
+    )
+    if not threatening:
+        # The commit this decision was produced for is over (or the enemy
+        # left the caution box): nothing left to back away from.
+        return _EMERGENCY_DEFAULT
     distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
     # Closer to the still-dangerous, not-yet-hittable enemy is more urgent to
     # back away from -- stays above WalkToNearEnemy(14) so this wins over
@@ -283,7 +315,7 @@ def _emergency_retreat_from_danger(decision: RetreatFromDanger, context: Context
     # step_px is wider than the other distance-scored decisions' 15 because
     # this band is only three points tall (15..17, wedged between
     # WalkToNearEnemy and JumpAttack); 25px spreads those three points across
-    # decide._too_close_to_keep_approaching's whole caution zone instead of
+    # reach.too_close_to_keep_approaching's whole caution zone instead of
     # saturating at the floor a third of the way into it.
     return _distance_emergency(distance, base=_EMERGENCY_RETREAT_FROM_DANGER, floor=15, step_px=25)
 

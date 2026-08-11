@@ -1,6 +1,8 @@
 import unittest
 
 from sor_autoplay.ai import decide as decide_module
+from sor_autoplay.ai import reach as reach_module
+from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay.ai.tokens import Abadede, Enemy, Garcia, Jack, Souther
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
@@ -98,6 +100,7 @@ def _enemy_entity(
     vel_z: float = 0.0,
     enemy_vel_x: float = 0.0,
     enemy_vel_y: float = 0.0,
+    stun_timer: int = 0,
 ) -> MapEntity:
     return MapEntity(
         kind=kind,
@@ -128,6 +131,7 @@ def _enemy_entity(
         vel_z=vel_z,
         enemy_vel_x=enemy_vel_x,
         enemy_vel_y=enemy_vel_y,
+        stun_timer=stun_timer,
     )
 
 
@@ -714,13 +718,65 @@ class StageAndCameraTests(unittest.TestCase):
         assert camera is not None and enemy is not None
         self.assertTrue(camera.left <= enemy.world_x <= camera.right)
 
-        on_screen = decide_module._on_screen_enemies(context)
+        on_screen = reach_module.on_screen_enemies(context)
         self.assertEqual(on_screen, [enemy])
 
-        decisions = decide_module.could_walk_to_near_enemy(context)
+        decisions = decide_module.could_walk_to_near_enemy(
+            generate_inference_tokens(set(context))
+        )
         self.assertEqual(
             decisions, {WalkToNearEnemy(actor_slot="P1", target_slot="obj00")}
         )
+
+
+class GruntStunObservationTests(unittest.TestCase):
+    def test_stun_timer_reaches_the_grunt_token(self) -> None:
+        players = (
+            _player_snapshot(index=1),
+            _player_snapshot(index=2, is_playable=False),
+        )
+        entities = (
+            _player_entity(slot="P1", world_x=800, world_y=64),
+            _enemy_entity(
+                world_x=880,
+                world_y=64,
+                combat_phase=CombatPhase.STUNNED,
+                stun_timer=0x18,
+            ),
+        )
+        snapshot = _snapshot(players=players, entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        garcia = find(context, Garcia, slot="obj00")
+        assert garcia is not None
+        self.assertEqual(garcia.stun_timer, 0x18)
+        self.assertTrue(garcia.is_stunned)
+
+    def test_boss_tokens_do_not_take_the_stun_timer_alias(self) -> None:
+        # +$50 is the boss's distance-to-target, not a stun timer.
+        players = (
+            _player_snapshot(index=1),
+            _player_snapshot(index=2, is_playable=False),
+        )
+        entities = (
+            _player_entity(slot="P1", world_x=800, world_y=64),
+            _enemy_entity(
+                slot="obj01",
+                type_id=0x30,
+                kind="boss",
+                world_x=880,
+                world_y=64,
+                stun_timer=0x18,
+            ),
+        )
+        snapshot = _snapshot(players=players, entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        boss = find(context, Abadede, slot="obj01")
+        assert boss is not None
+        self.assertFalse(hasattr(boss, "stun_timer"))
 
 
 if __name__ == "__main__":
