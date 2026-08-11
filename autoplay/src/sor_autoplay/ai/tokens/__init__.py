@@ -8,6 +8,9 @@ from this package, e.g. ``from sor_autoplay.ai.tokens import Myself``.
 
 from __future__ import annotations
 
+from ...attack_ranges import AttackRange
+from ...hitboxes import Hitbox
+
 from .attack_verbs import (
     Attack,
     AttackHeldEnemy,
@@ -54,8 +57,8 @@ from .enemy import (
     Enemy,
     Garcia,
     GrabOpportunity,
+    GrabIntoDeadZone,
     GrabToClearRear,
-    GrabToNeutralizeWhip,
     Grunt,
     HakuRo,
     InGrabReach,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import argparse
 import os
 import sys
@@ -14,6 +16,7 @@ from . import __version__
 from .ai.gamepad import SharedGamepadState, VirtualGamepad
 from .ai.loop import AgentLoop
 from .hud import HUD_PAINT_MS_DEFAULT, ObserverHud
+from .rom_data import RomData
 from .state import GameSnapshot, disconnected_snapshot, read_snapshot
 
 # Wall-clock sample period. ~2 frames at 60 Hz (2 / 60 * 1000 ≈ 33.3 ms).
@@ -273,6 +276,24 @@ def _print_snapshot(snapshot: GameSnapshot) -> None:
         print(f"  error: {snapshot.error}")
 
 
+logger = logging.getLogger(__name__)
+
+
+def _read_rom_data(client) -> RomData | None:
+    """Read the static ROM tables, or ``None`` if the link refuses them.
+
+    Hitboxes and attack ranges are an enhancement over the position-only
+    observation that came before them, so losing them must not take the
+    observer down with them.
+    """
+
+    try:
+        return RomData.read(client)
+    except Exception:  # noqa: BLE001 - any link failure degrades, never fails
+        logger.warning("could not read ROM shape/animation tables", exc_info=True)
+        return None
+
+
 class ObserverApp:
     def __init__(
         self,
@@ -292,6 +313,7 @@ class ObserverApp:
         self._lock = threading.Lock()
         self._latest: GameSnapshot = disconnected_snapshot("starting")
         self._client = None
+        self._rom: RomData | None = None
         self._hud: ObserverHud | None = None
 
         # AI is opt-in and off by default; toggled via CLI flag or the HUD's
@@ -357,10 +379,15 @@ class ObserverApp:
                     # starts empty; resync our cache so a held mask that
                     # matches what we sent before the drop still gets sent.
                     self._gamepad_state.reset()
+                    # ROM shape/animation tables: static for the session, so
+                    # they are read once per *connection* rather than per
+                    # poll. A failure here is not fatal -- the observer keeps
+                    # working, just without real hitboxes or attack ranges.
+                    self._rom = _read_rom_data(client)
                     backoff_s = 0.25
 
                 assert self._client is not None
-                snapshot = read_snapshot(self._client)
+                snapshot = read_snapshot(self._client, rom=self._rom)
 
                 with self._lock:
                     self._latest = snapshot
@@ -505,7 +532,7 @@ class ObserverApp:
         try:
             with MegaDriveClient(self.host, self.port, connect_timeout=2.0, io_timeout=2.0) as client:
                 client.ping()
-                snapshot = read_snapshot(client)
+                snapshot = read_snapshot(client, rom=_read_rom_data(client))
         except Exception as exc:  # noqa: BLE001
             snapshot = disconnected_snapshot(str(exc))
             _print_snapshot(snapshot)

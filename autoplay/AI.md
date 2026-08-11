@@ -220,6 +220,42 @@ the rank gain so nothing downstream re-reads the damage table.
 question — can I, and should I. They are described in
 [Grabbing an enemy](#grabbing-an-enemy) below.
 
+### Hitbox and AttackRange
+
+Two formal objects carry the geometry the AI used to approximate.
+
+**`Hitbox`** is an object's real collision AABB, in absolute world
+coordinates. Enemies cache nothing, so it is *reconstructed* from the ROM's
+shape tables exactly as `$AB24` builds it; players cache theirs at `+$64`
+and `+$70` and can simply be read. Every `Enemy`, `Breakable` and `Weapon`
+carries exactly one.
+
+**`AttackRange`** is one attack an enemy can reach with, in pixels ahead of
+its own origin. An enemy carries as many as its animations select, plus one
+for whatever it is holding. They are extracted from the ROM: each animation
+frame names an attack box id, and the shape table turns that id into
+geometry (`graphics-engine.md` §8.3). Nothing here is tuned.
+
+Both are **value objects, not tokens**. The rule that a token may never embed
+another token by value is about relationships between independent
+observations; a body box and a reach are properties *of* the enemy that
+carries them, meaningless on their own, and resolving them through the
+context would be indirection for its own sake.
+
+What this buys the AI is a real answer to two questions it previously
+guessed at:
+
+- *how close is too close?* — the enemy's own reach, rather than a margin
+  derived from the **actor's** punch range, which had nothing to do with it;
+- *is there anywhere safe to stand?* — an `AttackRange` has a minimum as
+  well as a maximum, so an enemy whose every attack starts further out than
+  contact has a dead zone. Pressing into it is safe, and grabbing from
+  inside it is free.
+
+An unknown reach is `None`, never zero: bosses have no labelled animation
+set, and a session with no ROM access has no ranges at all. Callers fall
+back on their own margins there rather than treating the enemy as harmless.
+
 ### Stunned enemies
 
 `Grunt` carries the ROM's own stun counter (`+$50`) and reads as
@@ -284,12 +320,15 @@ Why it is worth spending an attack on:
 - a held enemy is a **weapon against the ones behind you**. `FlipHold`
   turns the actor around and `ThrowHeldEnemy` (B + back) throws the held
   body backwards, into whatever was closing in from that side;
-- **`Nora`** (type `$26`, "Whip attacks" per `enemy-ai.md`) fights at a
-  range her whip cannot answer once a body is pressed against it. Holding
-  her converts her best distance into her worst.
+- an enemy whose **every attack has a dead zone** cannot answer a body
+  pressed against it. Holding it converts its best distance into its worst.
+  The ROM picks out exactly one today: `Nora`, whose only attacking
+  animation reaches 32 to 80 pixels ahead and nothing closer.
 
 Those are exactly the two `GrabOpportunity` descendants —
-`GrabToClearRear` and `GrabToNeutralizeWhip`. They are subclasses rather
+`GrabToClearRear` and `GrabIntoDeadZone`. The second is derived from the
+extracted `AttackRange`s rather than from the enemy's class, so a corrected
+extraction changes the AI's behaviour without changing any code. They are subclasses rather
 than one token with a reason field, per this document's own rule, and they
 rank differently: clearing the rear beats every strike on an enemy that can
 still act, while the whip case is an improvement on an ordinary exchange

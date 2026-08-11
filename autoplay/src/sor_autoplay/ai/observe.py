@@ -156,6 +156,8 @@ def generate_direct_observation_tokens(
                     facing_left=entity.facing_left,
                     grunt_vel_x=entity.enemy_vel_x,
                     grunt_vel_y=entity.enemy_vel_y,
+                    hitbox=entity.hitbox,
+                    attack_ranges=entity.attack_ranges,
                     **extra,
                 )
             )
@@ -177,6 +179,7 @@ def generate_direct_observation_tokens(
                     world_y=entity.world_y,
                     weapon_type=entity.type_id,
                     wear=entity.item_param & 0xFF,
+                    hitbox=entity.hitbox,
                 )
             )
         elif entity.kind == "pickup" and entity.is_free_ground_item:
@@ -201,6 +204,7 @@ def generate_direct_observation_tokens(
                         world_x=entity.world_x,
                         world_y=entity.world_y,
                         type_id=entity.type_id,
+                        hitbox=entity.hitbox,
                     )
                 )
 

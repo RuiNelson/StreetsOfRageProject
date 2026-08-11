@@ -26,6 +26,7 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
+from ...hitboxes import Hitbox
 from .tokens import Inferred, Observed
 
 # ROM init damage at weapon +$34 — also the upgrade rank for floor pickups.
@@ -82,6 +83,9 @@ class Weapon(Observed):
     world_y: int
     weapon_type: int  # 0x08 knife .. 0x0C pepper spray
     wear: int = 0  # object +$50; usable while < 3
+    # The weapon's own footprint on the ground, from the ROM shape tables --
+    # the box $3136's pickup search really tests against.
+    hitbox: Hitbox | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -16,6 +16,8 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
+from ...attack_ranges import AttackRange
+from ...hitboxes import Hitbox
 from ...phases import CombatPhase
 from .character import Character
 from .tokens import Inferred
@@ -23,7 +25,20 @@ from .tokens import Inferred
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Enemy(Character):
-    """A hostile on-screen actor that can be hit and defeated."""
+    """A hostile on-screen actor that can be hit and defeated.
+
+    ``hitbox`` is this enemy's real body AABB, rebuilt per tick from the ROM
+    shape tables the way ``$AB24`` does -- enemies cache nothing, so it has
+    to be reconstructed (``hitboxes.py``). ``attack_ranges`` is every reach
+    the enemy has, extracted from its type's own animation set plus whatever
+    it is carrying (``attack_ranges.py``). Both are value objects, not
+    tokens: a token may not embed a token by value, and these are properties
+    *of* this enemy rather than independent observations.
+
+    Both default to empty, which is what a session without ROM table access
+    looks like -- consumers must treat "no hitbox" as "unknown", never as
+    "no body".
+    """
 
     type_id: int
     targets_player: int | None  # 1 or 2, or None — from MapEntity.targets_player
@@ -32,6 +47,31 @@ class Enemy(Character):
     # OBJ_VEL_X_ORDINARY/OBJ_VEL_LANE_ORDINARY.
     grunt_vel_x: float = 0.0  # +$1C signed 16.16, ordinary enemies only
     grunt_vel_y: float = 0.0  # +$20 signed 16.16 (lane), ordinary enemies only
+    hitbox: Hitbox | None = None
+    attack_ranges: tuple[AttackRange, ...] = ()
+
+    @property
+    def max_reach(self) -> int:
+        """How far ahead this enemy can hit from where it stands, in px.
+
+        Zero when nothing was extracted (a boss, or no ROM tables), which
+        callers must read as "unknown" and fall back on their own margins
+        for -- not as "harmless".
+        """
+
+        return max((r.forward_max for r in self.attack_ranges), default=0)
+
+    @property
+    def min_reach(self) -> int:
+        """The nearest an enemy's *shortest* attack still reaches.
+
+        Positive means a dead zone: every attack it has starts further out
+        than this, so standing closer is safe from all of them. Nora is the
+        clear case (whip shape $22 starts 32px out); most enemies have a box
+        that reaches their own feet and return 0.
+        """
+
+        return min((r.forward_min for r in self.attack_ranges), default=0)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -298,13 +338,21 @@ class GrabToClearRear(GrabOpportunity):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class GrabToNeutralizeWhip(GrabOpportunity):
-    """``Nora`` fights with a whip, which cannot answer a body against it.
+class GrabIntoDeadZone(GrabOpportunity):
+    """Every attack this enemy has starts further out than the actor can be.
 
-    Produced by ``inference.check_for_grab_opportunities`` for a live
-    ``Nora`` (type $26, "Whip attacks" per enemy-ai.md's visual-family
-    table). Her reach is the reason to close it: held, she has no move that
-    connects, so a grab converts her best range into her worst.
+    Produced by ``inference.check_for_grab_opportunities`` when the enemy's
+    extracted ``attack_ranges`` all have a positive ``forward_min``
+    (``Enemy.min_reach``), so closing to contact leaves it with no move that
+    connects at all.
+
+    Today the ROM picks out exactly one enemy this way: ``Nora``, whose only
+    attacking animation selects shape ``$22``, reaching 32 to 80 pixels
+    ahead. Every other ordinary type has at least one box that covers its own
+    feet. That is deliberately *not* hardcoded here -- an enemy earns this
+    because of its extracted geometry, so a corrected extraction or a
+    newly-covered type changes the AI's behaviour without changing this
+    class.
     """
 
 

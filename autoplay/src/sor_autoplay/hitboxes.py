@@ -100,7 +100,7 @@ def _s16(data: bytes, offset: int) -> int:
 
 
 @dataclass(frozen=True, slots=True)
-class Box:
+class Hitbox:
     """An absolute-world-coordinate AABB, exactly as the ROM compares them.
 
     ``y`` is the lane (depth) axis and ``z`` is height; the HUD map plots
@@ -126,7 +126,7 @@ class Box:
 
         return self.x1 <= self.x0 or self.y1 <= self.y0
 
-    def overlaps(self, other: Box) -> bool:
+    def overlaps(self, other: Hitbox) -> bool:
         """The ROM's own test ($AB88, run per axis, X then lane then Z)."""
 
         return (
@@ -185,7 +185,7 @@ def build_box(
     lane_y: int,
     world_z: int,
     player_table: bool = False,
-) -> Box | None:
+) -> Hitbox | None:
     """Rebuild one AABB the way ``$AB24`` does, or ``None`` for no box.
 
     ``None`` covers both a zero ``box_id`` (the frame carries no box of this
@@ -206,7 +206,7 @@ def build_box(
     x0 = world_x + _s8(record[0])
     y0 = lane_y + _s8(lane[0])
     z0 = world_z + _s8(record[3])
-    return Box(
+    return Hitbox(
         x0=x0,
         x1=x0 + _s8(record[1]),
         y0=y0,
@@ -228,7 +228,7 @@ def object_boxes(
     world_x: int,
     lane_y: int,
     world_z: int,
-) -> tuple[Box | None, Box | None]:
+) -> tuple[Hitbox | None, Hitbox | None]:
     """``(attack_box, body_box)`` for a non-player object.
 
     Positions are passed in rather than re-decoded here so this stays a pure
@@ -248,16 +248,16 @@ def object_boxes(
     return build(slot[OBJ_ATTACK_BOX_ID]), build(slot[OBJ_BODY_BOX_ID])
 
 
-def cached_box(slot: bytes, offset: int) -> Box | None:
+def cached_box(slot: bytes, offset: int) -> Hitbox | None:
     """Read a player's already-built box straight out of its object.
 
     Returns ``None`` when the six words are degenerate, which is how the
-    no-box path leaves them (see :attr:`Box.is_degenerate`).
+    no-box path leaves them (see :attr:`Hitbox.is_degenerate`).
     """
 
     if len(slot) < offset + CACHED_BOX_BYTES:
         return None
-    box = Box(
+    box = Hitbox(
         x0=_s16(slot, offset),
         x1=_s16(slot, offset + 2),
         y0=_s16(slot, offset + 4),

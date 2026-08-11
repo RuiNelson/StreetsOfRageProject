@@ -14,6 +14,7 @@ from .hazards import (
     is_paused,
     is_police_special_active,
 )
+from .rom_data import RomData
 from .world_map import WorldMap, empty_world_map, parse_world_map
 
 
@@ -248,6 +249,7 @@ def snapshot_from_memory_blocks(
     mr_x_offer_state: int = 0,
     connected: bool = True,
     error: str | None = None,
+    rom: RomData | None = None,
 ) -> GameSnapshot:
     """Build a snapshot from pre-fetched RAM windows.
 
@@ -333,6 +335,10 @@ def snapshot_from_memory_blocks(
             # Tells the ordinary-enemy $0400 state apart: pepper-spray stun
             # while the special is idle, sweep removal while it runs.
             police_special_active=special_on,
+            # ROM shape/animation tables, when the caller has read them: they
+            # are what turns object slots into real hitboxes and attack
+            # ranges instead of assumed rectangles.
+            rom=rom,
         )
 
     holes: tuple[FloorHole, ...] = ()
@@ -452,7 +458,7 @@ def _blank_player(index: int, previous: PlayerSnapshot) -> PlayerSnapshot:
     )
 
 
-def read_snapshot(client: MemorySource) -> GameSnapshot:
+def read_snapshot(client: MemorySource, *, rom: RomData | None = None) -> GameSnapshot:
     """Fetch the RAM windows needed for HUD + 2D map and build a snapshot."""
 
     from .world_map import ACTORS_BYTES, CAMERA_BYTES
@@ -492,6 +498,7 @@ def read_snapshot(client: MemorySource) -> GameSnapshot:
         mr_x_offer_flag=mr_x_blob[0],
         mr_x_offer_state=int.from_bytes(mr_x_blob[4:6], "big"),
         connected=True,
+        rom=rom,
     )
 
 

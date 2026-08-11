@@ -1,5 +1,7 @@
 import unittest
 
+from tests.test_attack_ranges import _animation_set, _shape_tables
+
 from sor_autoplay.memory_map import (
     OBJ_CHARACTER_ID,
     OBJ_FLAGS,
@@ -548,3 +550,79 @@ class WorldMapParseTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RomGeometryTests(unittest.TestCase):
+    """MapEntity carries the real hitbox and attack ranges when RomData is
+    supplied, and stays silent about both when it is not.
+
+    Uses synthetic ROM tables rather than the real dump: the ROM is not
+    versioned, so no test may depend on it. The values here mirror Nora's
+    real layout (a single 32..80 whip) so the wiring is exercised against
+    the shape it will actually see.
+    """
+
+    def _rom(self):
+        from sor_autoplay.rom_data import RomData
+
+        tables = _shape_tables(
+            {
+                1: (32, 48, 0, -44, 24),  # whip-like: reaches 32..80
+                2: (-9, 18, 0, -60, 60),  # body
+            }
+        )
+        from sor_autoplay.attack_ranges import ANIMATION_SET_FOR_TYPE, AnimationSets
+
+        return RomData(
+            shapes=tables,
+            animations=AnimationSets(
+                blocks={ANIMATION_SET_FOR_TYPE[0x26]: _animation_set([[(1, 2)]])}
+            ),
+        )
+
+    def _nora_actors(self) -> bytes:
+        actors = bytearray(ACTORS_BYTES)
+        base = 0x100
+        actors[base + OBJ_TYPE] = 0x26  # Nora, whose set is the one _rom builds
+        actors[base + OBJ_PRIMARY_STATE] = 0x01
+        actors[base + 0x03] = 2  # hitboxes.OBJ_BODY_BOX_ID
+        _put_fixed16(actors, base + OBJ_POS_X, 800)
+        _put_fixed16(actors, base + OBJ_POS_Y, 0x40)
+        _put_fixed16(actors, base + OBJ_POS_Z, 0x00)
+        _put_u16(actors, base + OBJ_HEALTH, 11)
+        return bytes(actors)
+
+    def _camera(self) -> bytes:
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+        return bytes(camera)
+
+    def _nora_entity(self, rom):
+        world = parse_world_map(
+            actors_block=self._nora_actors(), camera_block=self._camera(), rom=rom
+        )
+        enemies = [e for e in world.entities if e.kind == "enemy"]
+        self.assertEqual(len(enemies), 1)
+        return enemies[0]
+
+    def test_body_hitbox_is_built_at_the_objects_own_position(self) -> None:
+        entity = self._nora_entity(self._rom())
+
+        self.assertIsNotNone(entity.hitbox)
+        self.assertEqual(entity.hitbox.x0, entity.world_x - 9)
+        self.assertEqual(entity.hitbox.x1, entity.world_x + 9)
+
+    def test_attack_ranges_come_from_the_types_animation_set(self) -> None:
+        entity = self._nora_entity(self._rom())
+
+        self.assertEqual(len(entity.attack_ranges), 1)
+        self.assertEqual(
+            (entity.attack_ranges[0].forward_min, entity.attack_ranges[0].forward_max),
+            (32, 80),
+        )
+
+    def test_without_rom_data_both_stay_empty(self) -> None:
+        entity = self._nora_entity(None)
+
+        self.assertIsNone(entity.hitbox)
+        self.assertEqual(entity.attack_ranges, ())

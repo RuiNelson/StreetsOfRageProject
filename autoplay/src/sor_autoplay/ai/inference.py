@@ -15,12 +15,11 @@ from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_
 from . import reach
 from .tokens import Myself, Partner, PlayableCharacter
 from .tokens import Enemy, Grunt
-from .tokens import Nora
 from .tokens import (
     ActionableTarget,
     ClosingEnemy,
+    GrabIntoDeadZone,
     GrabToClearRear,
-    GrabToNeutralizeWhip,
     InGrabReach,
     InJumpAttackReach,
     InPunchReach,
@@ -282,8 +281,11 @@ def check_for_grab_opportunities(context: Context) -> Context:
             # only) would not have offered it anyway.
             if any(other.slot != enemy.slot for other in rear):
                 tokens.add(GrabToClearRear(**pair))
-            if isinstance(enemy, Nora):
-                tokens.add(GrabToNeutralizeWhip(**pair))
+            if enemy.min_reach > 0:
+                # Every attack it owns starts further out than contact --
+                # read from the ROM shape its animations select, not from
+                # the enemy's type. See GrabIntoDeadZone.
+                tokens.add(GrabIntoDeadZone(**pair))
     return tokens
 
 

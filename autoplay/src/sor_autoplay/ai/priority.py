@@ -56,8 +56,8 @@ from .tokens import Myself, Partner
 from .tokens import Breakable, Enemy, Grunt
 from .tokens import (
     GrabOpportunity,
+    GrabIntoDeadZone,
     GrabToClearRear,
-    GrabToNeutralizeWhip,
     IncomingMelee,
     PunishWindow,
     Surrounded,
@@ -134,12 +134,12 @@ _EMERGENCY_ATTACK_LONG_STUN = 19
 # committed behind (_EMERGENCY_REAR_ATTACK_DANGEROUS, 60): there is no time to
 # walk into anything then.
 _EMERGENCY_GRAB_CLEAR_REAR = 58
-# Nora's whip is a reach weapon with nothing to answer a body pressed against
-# it, so holding her is better than trading punches -- but it is an
-# improvement on an ordinary fight, not an escape from a bad one, so it sits
-# just above the jump-kick-on-a-punishable tier (28) and well under the
-# punish/escape tiers.
-_EMERGENCY_GRAB_NEUTRALIZE_WHIP = 30
+# An enemy whose every attack starts further out than contact (Nora, per the
+# extracted ranges) has nothing to answer a body pressed against it, so
+# holding it beats trading strikes -- but it is an improvement on an ordinary
+# fight, not an escape from a bad one, so it sits just above the
+# jump-kick-on-a-punishable tier (28) and well under the punish/escape tiers.
+_EMERGENCY_GRAB_DEAD_ZONE = 30
 _EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
 _EMERGENCY_HOLD_SUPPLEX = 68
 _EMERGENCY_HOLD_FLIP = 66
@@ -318,8 +318,8 @@ def _emergency_grab_enemy(verb: GrabEnemy, context: Context) -> int:
     score = _EMERGENCY_DEFAULT
     if any(isinstance(token, GrabToClearRear) for token in opportunities):
         score = max(score, _EMERGENCY_GRAB_CLEAR_REAR)
-    if any(isinstance(token, GrabToNeutralizeWhip) for token in opportunities):
-        score = max(score, _EMERGENCY_GRAB_NEUTRALIZE_WHIP)
+    if any(isinstance(token, GrabIntoDeadZone) for token in opportunities):
+        score = max(score, _EMERGENCY_GRAB_DEAD_ZONE)
     return score
 
 

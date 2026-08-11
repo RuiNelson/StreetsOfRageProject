@@ -11,6 +11,7 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
+from ...hitboxes import Hitbox
 from .tokens import Inferred, Observed
 
 
@@ -91,3 +92,7 @@ class Breakable(StageObjects):
     world_x: int
     world_y: int
     type_id: int
+    # The prop's real footprint, rebuilt from the ROM shape tables. A
+    # Breakable is a solid obstacle, so this is what execute.py's path
+    # avoidance ought to steer around rather than a fixed margin.
+    hitbox: Hitbox | None = None

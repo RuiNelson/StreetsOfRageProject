@@ -11,7 +11,7 @@ from sor_autoplay.hitboxes import (
     ROM_LANE_EXTENT_TABLE,
     ROM_OBJECT_SHAPE_TABLE,
     ROM_PLAYER_SHAPE_TABLE,
-    Box,
+    Hitbox,
     ShapeTables,
     build_box,
     cached_box,
@@ -70,7 +70,7 @@ class BuildBoxTests(unittest.TestCase):
         box = build_box(tables, box_id=1, world_x=100, lane_y=60, world_z=200)
 
         self.assertEqual(
-            box, Box(x0=108, x1=128, y0=54, y1=66, z0=160, z1=184)
+            box, Hitbox(x0=108, x1=128, y0=54, y1=66, z0=160, z1=184)
         )
 
     def test_sign_extends_the_second_byte_too(self) -> None:
@@ -166,7 +166,7 @@ class CachedBoxTests(unittest.TestCase):
 
         box = cached_box(bytes(slot), OBJ_CACHED_ATTACK_BOX)
 
-        self.assertEqual(box, Box(x0=300, x1=340, y0=50, y1=66, z0=-40, z1=-8))
+        self.assertEqual(box, Hitbox(x0=300, x1=340, y0=50, y1=66, z0=-40, z1=-8))
 
     def test_degenerate_fill_reads_as_no_box(self) -> None:
         # $4140's no-box path memfills the 12 bytes with a constant, which
@@ -181,10 +181,10 @@ class CachedBoxTests(unittest.TestCase):
 
 class BoxOverlapTests(unittest.TestCase):
     def test_overlap_requires_all_three_axes(self) -> None:
-        attack = Box(x0=100, x1=140, y0=50, y1=66, z0=-40, z1=-8)
-        same_lane = Box(x0=130, x1=143, y0=55, y1=71, z0=-40, z1=-8)
-        other_lane = Box(x0=130, x1=143, y0=90, y1=106, z0=-40, z1=-8)
-        overhead = Box(x0=130, x1=143, y0=55, y1=71, z0=-90, z1=-60)
+        attack = Hitbox(x0=100, x1=140, y0=50, y1=66, z0=-40, z1=-8)
+        same_lane = Hitbox(x0=130, x1=143, y0=55, y1=71, z0=-40, z1=-8)
+        other_lane = Hitbox(x0=130, x1=143, y0=90, y1=106, z0=-40, z1=-8)
+        overhead = Hitbox(x0=130, x1=143, y0=55, y1=71, z0=-90, z1=-60)
 
         self.assertTrue(attack.overlaps(same_lane))
         self.assertFalse(attack.overlaps(other_lane))

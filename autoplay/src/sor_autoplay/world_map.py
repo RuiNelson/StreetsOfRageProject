@@ -17,6 +17,9 @@ from dataclasses import dataclass
 
 from . import memory_map as mm
 from .object_catalog import EntityStyle, player_style, style_for_object
+from .attack_ranges import AttackRange, attack_ranges_for_object
+from .hitboxes import Hitbox, object_boxes
+from .rom_data import RomData
 from .phases import (
     CombatPhase,
     boss_phase,
@@ -178,6 +181,14 @@ class MapEntity:
     enemy_vel_x: float = 0.0  # +$1C signed 16.16
     enemy_vel_y: float = 0.0  # +$20 signed 16.16 (lane)
     combat_phase: CombatPhase = CombatPhase.UNKNOWN
+    # The object's real body AABB, rebuilt from the ROM shape tables the way
+    # $AB24 does (hitboxes.py). None when no RomData was supplied or the frame
+    # carries no body box -- never a guessed rectangle.
+    hitbox: Hitbox | None = None
+    # Every reach this object has, extracted from its type's animation set
+    # (attack_ranges.py). Empty for anything that does not attack, and for
+    # bosses, whose animation sets are not labelled.
+    attack_ranges: tuple[AttackRange, ...] = ()
 
     @property
     def is_free_ground_item(self) -> bool:
@@ -430,6 +441,40 @@ def project_to_screen(
     return float(world_x - camera_x), float((lane_y >> 1) + elev_z - camera_y)
 
 
+def _object_geometry(
+    slot: bytes,
+    rom: RomData | None,
+    *,
+    type_id: int,
+    world_x: int,
+    world_y: int,
+    world_z: int,
+    held_type: int,
+) -> tuple[Hitbox | None, tuple[AttackRange, ...]]:
+    """The object's body box and its reaches, or empty without ``rom``.
+
+    Both are ROM-derived: the body box is rebuilt per tick because it follows
+    the object's position and current animation frame, while the attack ranges
+    are static per type and only re-derived when the held weapon changes what
+    the object can reach.
+    """
+
+    if rom is None:
+        return None, ()
+    _attack, body = object_boxes(
+        rom.shapes,
+        slot,
+        type_id=type_id,
+        world_x=world_x,
+        lane_y=world_y,
+        world_z=world_z,
+    )
+    ranges = attack_ranges_for_object(
+        rom.animations, rom.shapes, type_id=type_id, held_weapon_type=held_type
+    )
+    return body, ranges
+
+
 def _entity_from_object(
     slot: bytes,
     *,
@@ -438,6 +483,7 @@ def _entity_from_object(
     type_id: int,
     camera_x: int,
     police_special_active: bool = False,
+    rom: RomData | None = None,
 ) -> MapEntity | None:
     if len(slot) < OBJECT_SLOT_SIZE:
         return None
@@ -548,6 +594,16 @@ def _entity_from_object(
         # symbolic/fuzzy consumers instead of treating them as inert scenery.
         phase = CombatPhase.ATTACKING
 
+    hitbox, ranges = _object_geometry(
+        slot,
+        rom,
+        type_id=type_id,
+        world_x=world_x,
+        world_y=world_y,
+        world_z=world_z,
+        held_type=held_type,
+    )
+
     return MapEntity(
         kind=style.kind,
         family=style.family,
@@ -565,6 +621,8 @@ def _entity_from_object(
         action_state=action_state,
         primary_state=primary_state,
         held_type=held_type,
+        hitbox=hitbox,
+        attack_ranges=ranges,
         held_ptr=held_ptr,
         contact_ptr=contact_ptr,
         outgoing_damage=outgoing,
@@ -724,6 +782,7 @@ def parse_world_map(
     p2_mode_active: bool = False,
     level_index: int = 0,
     police_special_active: bool = False,
+    rom: RomData | None = None,
 ) -> WorldMap:
     if len(actors_block) < ACTORS_BYTES:
         raise ValueError(f"actors_block too short ({len(actors_block)} < {ACTORS_BYTES})")
@@ -754,6 +813,7 @@ def parse_world_map(
             style=style,
             type_id=type_id,
             camera_x=camera_x,
+            rom=rom,
         )
         # Players: always keep while type-1; ignore SAT blink/hidden bit.
         if entity is not None:
@@ -779,6 +839,7 @@ def parse_world_map(
             type_id=type_id,
             camera_x=camera_x,
             police_special_active=police_special_active,
+            rom=rom,
         )
         if entity is not None and _include_entity(entity, slot, lane_max=lane_max):
             entities.append(entity)

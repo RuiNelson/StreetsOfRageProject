@@ -5,7 +5,7 @@ from sor_autoplay.ai.tokens import Abadede, ClosingEnemy, Enemy, Garcia, Nora
 from sor_autoplay.ai.tokens import (
     ActionableTarget,
     GrabToClearRear,
-    GrabToNeutralizeWhip,
+    GrabIntoDeadZone,
     InGrabReach,
     InJumpAttackReach,
     InPunchReach,
@@ -29,7 +29,7 @@ from sor_autoplay.ai.inference import (
     check_for_weapon_upgrades,
     generate_inference_tokens,
 )
-from sor_autoplay.ai.tokens import Token
+from sor_autoplay.ai.tokens import AttackRange, Token
 from sor_autoplay.phases import CombatPhase
 
 
@@ -85,9 +85,25 @@ def make_garcia(**overrides) -> Garcia:
     return Garcia(**fields)
 
 
+# Nora's real whip reach, exactly as attack_ranges.py extracts it from
+# $242F8's animation 10 (shape $22). The dead-zone judgment is driven by this
+# data, not by the enemy's class, so the fixture has to carry it.
+NORA_WHIP = AttackRange(
+    shape_id=0x22,
+    animation=10,
+    forward_min=32,
+    forward_max=80,
+    lane_min=-12,
+    lane_max=10,
+    height_min=-44,
+    height_max=-20,
+)
+
+
 def make_nora(**overrides) -> Nora:
     fields = dict(
         slot="obj02",
+        attack_ranges=(NORA_WHIP,),
         type_id=0x26,
         world_x=100,
         world_y=100,
@@ -337,7 +353,7 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
 
         result = check_for_grab_opportunities({myself, nora})
 
-        self.assertEqual(result, {GrabToNeutralizeWhip(actor_slot="P1", target_slot="obj02")})
+        self.assertEqual(result, {GrabIntoDeadZone(actor_slot="P1", target_slot="obj02")})
 
     def test_a_committed_enemy_is_not_grabbable(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
@@ -357,7 +373,7 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
 
         result = check_for_grab_opportunities({myself, nora})
 
-        self.assertEqual(result, {GrabToNeutralizeWhip(actor_slot="P1", target_slot="obj02")})
+        self.assertEqual(result, {GrabIntoDeadZone(actor_slot="P1", target_slot="obj02")})
 
     def test_bosses_are_out_of_scope(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)

@@ -86,6 +86,14 @@ RETREAT_CAUTION_MARGIN_Y = PUNCH_RANGE_Y + 12
 # (player-health-lives-and-combat.md's $01C0 fall-boundary check).
 PIT_AVOID_MARGIN = 8
 
+# Slack added to an enemy's *extracted* reach before treating the actor as
+# standing inside it. The reach itself is exact -- it is the ROM's own shape
+# record -- but the sample is not: at the 33ms default poll an enemy covers a
+# few pixels between two observations, and it may also step forward during its
+# own startup frames. Half a tile absorbs both without pretending the box is
+# bigger than it is.
+REACH_SAFETY_MARGIN = 8
+
 
 def targets_of(context: Context, cls: type, actor_slot: str) -> set[str]:
     """Target slots of every ``cls`` token in ``context`` for one actor.
@@ -300,9 +308,78 @@ def enemy_actionable(
     return punch_would_connect(actor, enemy)
 
 
+def enemy_forward_dx(enemy: Enemy, actor: PlayableCharacter) -> int:
+    """How far ahead of ``enemy``, along its own facing, ``actor`` stands.
+
+    Negative means behind it. This is the coordinate an ``AttackRange`` is
+    expressed in, since a range is stored forward-oriented and mirrors with
+    the enemy rather than being re-extracted per facing.
+    """
+
+    dx = actor.world_x - enemy.world_x
+    return -dx if enemy.facing_left else dx
+
+
+def enemy_can_reach(
+    enemy: Enemy, actor: PlayableCharacter, *, margin: int = REACH_SAFETY_MARGIN
+) -> bool | None:
+    """Would any of this enemy's real attacks cover the actor from here?
+
+    ``None`` means *unknown*, not *no*: bosses have no extracted animation
+    set, and a session without ROM table access has no ranges at all. Callers
+    must fall back on their own margins for that case rather than treating
+    the enemy as harmless.
+    """
+
+    if not enemy.attack_ranges:
+        return None
+    forward_dx = enemy_forward_dx(enemy, actor)
+    lane_dy = actor.world_y - enemy.world_y
+    return any(
+        rng.forward_min - margin <= forward_dx <= rng.forward_max + margin
+        and rng.lane_min - margin <= lane_dy <= rng.lane_max + margin
+        for rng in enemy.attack_ranges
+    )
+
+
+def in_enemy_dead_zone(
+    enemy: Enemy, actor: PlayableCharacter, *, margin: int = REACH_SAFETY_MARGIN
+) -> bool:
+    """True when the actor stands inside *every* one of this enemy's attacks.
+
+    Not merely "not currently covered": closer than the nearest edge of every
+    range it has, so it cannot hit the actor without first backing off. Nora
+    is the case this exists for -- her whip (shape ``$22``) starts 32px out,
+    so pressing against her is safe from the only attack she owns.
+
+    Conservative on purpose: the margin *shrinks* the dead zone here, where
+    it widens the reach in ``enemy_can_reach``. Both err toward "the enemy
+    can hit me".
+    """
+
+    if not enemy.attack_ranges:
+        return False
+    forward_dx = enemy_forward_dx(enemy, actor)
+    if forward_dx < 0:
+        # Behind it. Turning around is free, so this is not a dead zone in
+        # any useful sense -- it is just a bad moment for the enemy.
+        return False
+    return all(forward_dx < rng.forward_min - margin for rng in enemy.attack_ranges)
+
+
 def too_close_to_keep_approaching(actor: PlayableCharacter, enemy: Enemy) -> bool:
-    """True inside the caution box: close enough that walking the last
-    stretch risks arriving exactly as the enemy's commit lands."""
+    """True when walking the last stretch risks arriving as the hit lands.
+
+    Prefers the enemy's own extracted reach: the caution box below was always
+    an admitted approximation built from the *actor's* punch range, which has
+    nothing to do with how far the enemy can hit. It stays as the fallback
+    for an enemy whose ranges are unknown (every boss, and any session
+    without ROM tables).
+    """
+
+    reachable = enemy_can_reach(enemy, actor)
+    if reachable is not None:
+        return reachable
 
     dx = abs(enemy.world_x - actor.world_x)
     dy = abs(enemy.world_y - actor.world_y)

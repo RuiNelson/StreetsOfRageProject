@@ -66,7 +66,7 @@ classDiagram
     TargetInReach <|-- ActionableTarget
     Inferred <|-- GrabOpportunity
     GrabOpportunity <|-- GrabToClearRear
-    GrabOpportunity <|-- GrabToNeutralizeWhip
+    GrabOpportunity <|-- GrabIntoDeadZone
 
     Verb <|-- Walk
     Walk <|-- WalkToNearEnemy

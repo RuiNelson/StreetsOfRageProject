@@ -22,7 +22,7 @@ from sor_autoplay.ai.tokens import (
     ActionableTarget,
     GrabOpportunity,
     GrabToClearRear,
-    GrabToNeutralizeWhip,
+    GrabIntoDeadZone,
     InGrabReach,
     InJumpAttackReach,
     InPunchReach,
@@ -281,7 +281,7 @@ class ReachAndThreatTokenTests(unittest.TestCase):
             ActionableTarget,
             GrabOpportunity,
             GrabToClearRear,
-            GrabToNeutralizeWhip,
+            GrabIntoDeadZone,
             IncomingMelee,
             PunishWindow,
             Surrounded,
@@ -315,7 +315,7 @@ class ReachAndThreatTokenTests(unittest.TestCase):
         self.assertEqual(PunishWindow(target_slot="obj07").frames_left, 0)
 
     def test_grab_opportunity_family_shares_one_base(self) -> None:
-        for cls in (GrabToClearRear, GrabToNeutralizeWhip):
+        for cls in (GrabToClearRear, GrabIntoDeadZone):
             self.assertTrue(issubclass(cls, GrabOpportunity), cls.__name__)
 
     def test_grab_opportunities_are_distinct_reasons_for_one_pair(self) -> None:
@@ -323,7 +323,7 @@ class ReachAndThreatTokenTests(unittest.TestCase):
         # independent reasons to take the same hold, so they must coexist in
         # the context rather than collapse into one another.
         rear = GrabToClearRear(actor_slot="P1", target_slot="obj07")
-        whip = GrabToNeutralizeWhip(actor_slot="P1", target_slot="obj07")
+        whip = GrabIntoDeadZone(actor_slot="P1", target_slot="obj07")
         self.assertNotEqual(rear, whip)
         self.assertEqual(len({rear, whip}), 2)
 

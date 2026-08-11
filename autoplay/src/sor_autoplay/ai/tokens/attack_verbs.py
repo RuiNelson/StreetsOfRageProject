@@ -94,7 +94,7 @@ class GrabEnemy(GrabMechanics):
     ``GrabOpportunity`` (worth it), and no ``IncomingMelee`` -- walking into
     a committed attack is how the actor gets hit rather than the hold.
 
-    Raises emergency: GrabToClearRear×58, GrabToNeutralizeWhip×30.
+    Raises emergency: GrabToClearRear×58, GrabIntoDeadZone×30.
 
     The rear tier sits above every strike on an enemy that can still act
     (punch 20, jump 18/28), above the unwarranted ``RearAttack`` chord

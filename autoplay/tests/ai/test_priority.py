@@ -22,7 +22,7 @@ from sor_autoplay.ai.tokens import (
     Weapon,
 )
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import ClosingEnemy, Enemy, Garcia, Nora
+from sor_autoplay.ai.tokens import AttackRange, ClosingEnemy, Enemy, Garcia, Nora
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.inference import generate_inference_tokens
@@ -64,6 +64,21 @@ def _enemy(slot: str, combat_phase: CombatPhase, **overrides) -> Enemy:
     )
     fields.update(overrides)
     return Enemy(**fields)
+
+
+# Nora's real whip reach, exactly as attack_ranges.py extracts it from
+# $242F8's animation 10 (shape $22). The dead-zone judgment is driven by this
+# data, not by the enemy's class, so the fixture has to carry it.
+NORA_WHIP = AttackRange(
+    shape_id=0x22,
+    animation=10,
+    forward_min=32,
+    forward_max=80,
+    lane_min=-12,
+    lane_max=10,
+    height_min=-44,
+    height_max=-20,
+)
 
 
 def _camera() -> CameraRange:
@@ -929,6 +944,7 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
         myself = _myself(world_x=100, world_y=100)
         nora = Nora(
             slot="nora",
+            attack_ranges=(NORA_WHIP,),
             type_id=0x26,
             world_x=130,
             world_y=100,
@@ -957,6 +973,7 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
         myself = _myself(world_x=100, world_y=100)
         nora = Nora(
             slot="nora",
+            attack_ranges=(NORA_WHIP,),
             type_id=0x26,
             world_x=130,
             world_y=100,
