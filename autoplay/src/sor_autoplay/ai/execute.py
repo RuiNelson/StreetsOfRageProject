@@ -88,6 +88,23 @@ HOLD_FRAMES = 4
 MOVE_DEADBAND_X = 5
 MOVE_DEADBAND_Y = 3
 
+# Hysteresis around dx == 0 for "which side of the target" decisions --
+# facing (_face_toward_mask) and the near/far pick inside
+# _walk_to_near_enemy_target. Both used to re-derive their answer from a raw
+# sign test on actor.world_x vs the target every tick. Once the actor closes
+# to melee range the two bodies sit almost exactly on top of each other, and
+# a couple of px of ordinary walk/attack jitter flips that sign on
+# essentially every tick. Because holding the resulting direction is what
+# sets facing on the *next* tick, an un-margined flip there became a
+# self-sustaining oscillation: cross -> command the opposite side -> facing
+# flips -> now reads as crossed the other way -> command back... Live symptom:
+# the AI visibly flipping left/right against a single, stationary-ish enemy,
+# not just when switching targets. Comfortably above MOVE_DEADBAND_X (so
+# residual walk-deadband jitter can never trip it) and well inside every
+# character's stop_dx (32px..56px, see punch_inner_x/punch_outer_x), so the
+# actual stopping distance from an enemy is unaffected.
+DIRECTION_HYSTERESIS_X = 10
+
 PICKUP_RANGE_X = 18
 PICKUP_RANGE_Y = 14
 LANE_EDGE_MARGIN = 6
@@ -255,9 +272,10 @@ def _movement_mask(
 
 
 def _face_toward_mask(actor: Myself | Partner, target_x: int) -> int:
-    if target_x < actor.world_x:
+    dx = target_x - actor.world_x
+    if dx < -DIRECTION_HYSTERESIS_X:
         return LEFT_MASK
-    if target_x > actor.world_x:
+    if dx > DIRECTION_HYSTERESIS_X:
         return RIGHT_MASK
     return 0
 
@@ -285,13 +303,24 @@ def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[
     already reached ATTACKING and landed a hit before the sidestep could
     take effect. Aiming for the offset lane for the whole dangerous approach
     avoids ever walking down the enemy's exact line in the first place.
+
+    Within ``DIRECTION_HYSTERESIS_X`` of the enemy on X, which side to aim
+    for is read off ``actor.facing_left`` instead of the live position
+    compare below: this close, ``actor.world_x`` vs ``target.world_x`` is
+    noise (see ``DIRECTION_HYSTERESIS_X``'s own comment), and picking the far
+    side on a spurious flip would jump the stop point by a full
+    ``2 * stop_dx`` -- a large, visible direction change for what is really
+    still the same encounter.
     """
 
     outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
     inner = punch_inner_x(actor.character_id)
     stop_dx = max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER)
 
-    if enemy_behind_actor(actor, target):
+    dx = target.world_x - actor.world_x
+    if abs(dx) <= DIRECTION_HYSTERESIS_X:
+        approach_from_right = actor.facing_left
+    elif enemy_behind_actor(actor, target):
         # Aim for the *far* side, so the movement mask points at the enemy
         # rather than away from it. Holding a direction is what sets facing,
         # so this is the turn-around: after a tick the enemy is in front and
@@ -299,15 +328,10 @@ def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[
         # branch below) would instead back the actor away while still facing
         # the wrong way, leaving the slow RearAttack chord as the only thing
         # that could reach it.
-        target_x = (
-            target.world_x - stop_dx
-            if actor.world_x > target.world_x
-            else target.world_x + stop_dx
-        )
-    elif actor.world_x <= target.world_x:
-        target_x = target.world_x - stop_dx
+        approach_from_right = actor.world_x <= target.world_x
     else:
-        target_x = target.world_x + stop_dx
+        approach_from_right = actor.world_x > target.world_x
+    target_x = target.world_x + stop_dx if approach_from_right else target.world_x - stop_dx
 
     dx = abs(target.world_x - actor.world_x)
     if is_dangerous(target.combat_phase) and dx > stop_dx:

@@ -251,6 +251,57 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
+    def test_close_range_side_pick_does_not_glitch_exactly_on_alignment(self) -> None:
+        # Regression (live-diagnosed): the old side pick combined a strict
+        # enemy_behind_actor() sign test with an *inclusive* <= elsewhere, so
+        # for a left-facing actor dx=0 exactly picked the opposite side from
+        # dx=+-1 right next to it -- a single-tick, full 2*stop_dx jump to
+        # the far side of the enemy whenever an approach's integer rounding
+        # briefly landed exactly on alignment. That flip is what set facing
+        # the next tick, so it read back as the AI reversing direction
+        # against a single, barely-moving enemy. Adjacent ticks a pixel
+        # apart, straddling dx=0, must now agree.
+        target = _enemy(world_x=100, world_y=40)
+        masks = []
+        for actor_x in (99, 100, 101):
+            actor = replace(_myself(world_x=actor_x, world_y=40), facing_left=True)
+            gamepad, _ = _gamepad()
+            execute_verb(
+                WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+                {actor, target},
+                gamepad,
+            )
+            masks.append(gamepad.held)
+
+        self.assertFalse(
+            any(m & LEFT for m in masks) and any(m & RIGHT for m in masks),
+            f"opposite horizontal commands straddling exact alignment: {masks}",
+        )
+
+
+class FaceTowardMaskHysteresisTests(unittest.TestCase):
+    """``_face_toward_mask`` sets the facing bit pressed alongside an attack.
+    Right at melee range the actor and target sit almost on top of each
+    other, so a raw, unmargined sign test on their dx flips on every pixel of
+    ordinary jitter; adjacent ticks a pixel apart must not command opposite
+    facing."""
+
+    def test_straddling_alignment_never_commands_opposite_facing(self) -> None:
+        target = _enemy(world_x=100, world_y=40)
+        masks = []
+        for actor_x in (99, 100, 101):
+            actor = _myself(world_x=actor_x, world_y=40)
+            gamepad, client = _gamepad()
+
+            execute_verb(Punch(actor_slot="P1", target_slot="obj01"), {actor, target}, gamepad)
+
+            masks.append(client.press_buttons.call_args.kwargs["player1"])
+
+        self.assertFalse(
+            any(m & LEFT for m in masks) and any(m & RIGHT for m in masks),
+            f"opposite facing commands straddling exact alignment: {masks}",
+        )
+
 
 class ExecuteRetreatFromDangerTests(unittest.TestCase):
     def test_steps_away_from_a_target_to_the_right(self) -> None:
