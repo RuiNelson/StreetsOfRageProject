@@ -33,6 +33,7 @@ from sor_autoplay.ai.tokens import Breakable, Pit
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
+    RetreatFromDanger,
     WalkToAdvanceStage,
     WalkToBreakable,
     WalkToNearEnemy,
@@ -224,6 +225,51 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         execute_decision(decision, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
+
+
+class ExecuteRetreatFromDangerTests(unittest.TestCase):
+    def test_steps_away_from_a_target_to_the_right(self) -> None:
+        actor = _myself(world_x=100, world_y=50)
+        target = replace(_enemy(world_x=150, world_y=50), combat_phase=CombatPhase.ATTACKING)
+        context = {actor, target}
+        decision = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, context, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
+
+    def test_steps_away_from_a_target_to_the_left(self) -> None:
+        actor = _myself(world_x=100, world_y=50)
+        target = replace(_enemy(world_x=50, world_y=50), combat_phase=CombatPhase.ATTACKING)
+        context = {actor, target}
+        decision = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, context, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
+
+    def test_holds_the_current_lane_while_retreating(self) -> None:
+        actor = _myself(world_x=100, world_y=50)
+        target = replace(_enemy(world_x=150, world_y=90), combat_phase=CombatPhase.ATTACKING)
+        context = {actor, target}
+        decision = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, context, gamepad)
+
+        # Backing away moves on X only -- never toward the enemy's lane too.
+        client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
+
+    def test_missing_actor_or_target_does_nothing(self) -> None:
+        context: set = {_enemy()}
+        decision = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, context, gamepad)
+
+        client.hold_buttons.assert_not_called()
 
 
 class ExecuteWalkToAdvanceStageTests(unittest.TestCase):

@@ -24,6 +24,7 @@ from sor_autoplay.ai.decide import (
     could_jump_attack,
     could_punch,
     could_rear_attack,
+    could_retreat_from_danger,
     could_spray_pepper,
     could_stab_with_knife_or_bottle,
     could_swing_bat_or_pipe,
@@ -43,6 +44,7 @@ from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import Decision, Token
 from sor_autoplay.ai.tokens import (
+    RetreatFromDanger,
     Walk,
     WalkToAdvanceStage,
     WalkToBreakable,
@@ -517,6 +519,81 @@ class CouldWalkToNearEnemyTests(unittest.TestCase):
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(could_walk_to_near_enemy(context), set())
+
+    def test_skips_a_dangerous_enemy_in_the_retreat_caution_zone(self) -> None:
+        # Axel: punch_outer=50, RETREAT_CAUTION_MARGIN=24 -> zone is dx<=74.
+        # could_retreat_from_danger covers this enemy instead.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(
+            world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING
+        )  # dx=70, dangerous, in front (not actionable: outside punch_outer=50)
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(could_walk_to_near_enemy(context), set())
+
+    def test_still_approaches_a_dangerous_enemy_beyond_the_caution_zone(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(
+            world_x=200, world_y=100, combat_phase=CombatPhase.ATTACKING
+        )  # dx=100, beyond the 74px caution zone
+        context: set[Token] = {myself, enemy}
+
+        result = could_walk_to_near_enemy(context)
+
+        self.assertEqual(result, {WalkToNearEnemy(actor_slot="P1", target_slot="obj01")})
+
+
+class CouldRetreatFromDangerTests(unittest.TestCase):
+    def test_fires_for_a_dangerous_enemy_in_the_caution_zone(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING)  # dx=70
+        context: set[Token] = {myself, enemy}
+
+        result = could_retreat_from_danger(context)
+
+        self.assertEqual(result, {RetreatFromDanger(actor_slot="P1", target_slot="obj01")})
+
+    def test_fires_for_a_charging_enemy_too(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=170, world_y=100, combat_phase=CombatPhase.CHARGE)
+        context: set[Token] = {myself, enemy}
+
+        result = could_retreat_from_danger(context)
+
+        self.assertEqual(result, {RetreatFromDanger(actor_slot="P1", target_slot="obj01")})
+
+    def test_does_not_fire_for_a_non_dangerous_enemy(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=170, world_y=100, combat_phase=CombatPhase.NORMAL)
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(could_retreat_from_danger(context), set())
+
+    def test_does_not_fire_when_already_actionable(self) -> None:
+        # Already hittable -- attack instead of retreating.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=130, world_y=100, combat_phase=CombatPhase.ATTACKING)  # dx=30, in front, in punch band
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(could_retreat_from_danger(context), set())
+
+    def test_does_not_fire_when_still_far_beyond_the_caution_zone(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=200, world_y=100, combat_phase=CombatPhase.ATTACKING)  # dx=100
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(could_retreat_from_danger(context), set())
+
+    def test_no_decision_when_animation_in_progress(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING)
+        context: set[Token] = {myself, enemy, AnimationInProgress(slot="P1")}
+
+        self.assertEqual(could_retreat_from_danger(context), set())
+
+    def test_no_enemies_no_decision(self) -> None:
+        myself = make_myself()
+        self.assertEqual(could_retreat_from_danger({myself}), set())
 
 
 class CouldWalkToAdvanceStageTests(unittest.TestCase):

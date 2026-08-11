@@ -27,6 +27,7 @@ from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.priority import determine_priority_decision
 from sor_autoplay.ai.tokens import Decision, find_all
 from sor_autoplay.ai.tokens import (
+    RetreatFromDanger,
     WalkToAdvanceStage,
     WalkToBreakable,
     WalkToNearEnemy,
@@ -665,6 +666,65 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
         self.assertIs(decisions[0], rear_dangerous)
+
+
+class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
+    def test_picks_the_closer_of_two_retreat_candidates(self) -> None:
+        myself = _myself(world_x=0, world_y=0)
+        near = _enemy("obj01", CombatPhase.ATTACKING, world_x=60, world_y=0)
+        far = _enemy("obj02", CombatPhase.ATTACKING, world_x=200, world_y=0)
+        context = {
+            myself,
+            near,
+            far,
+            RetreatFromDanger(actor_slot="P1", target_slot="obj01"),
+            RetreatFromDanger(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].target_slot, "obj01")
+
+    def test_outranks_walking_toward_a_different_far_enemy(self) -> None:
+        # The actor can only do one thing -- backing away from an imminent,
+        # not-yet-hittable threat must win over still approaching a
+        # completely different, farther-off target.
+        myself = _myself(world_x=0, world_y=0)
+        dangerous_close = _enemy("obj01", CombatPhase.ATTACKING, world_x=60, world_y=0)
+        calm_far = _enemy("obj02", CombatPhase.NORMAL, world_x=300, world_y=0)
+        context = {
+            myself,
+            dangerous_close,
+            calm_far,
+            RetreatFromDanger(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], RetreatFromDanger)
+
+    def test_scores_zero_when_target_missing(self) -> None:
+        # RetreatFromDanger for a target that has since vanished from the
+        # context must not out-rank a real candidate for a present enemy.
+        myself = _myself(world_x=0, world_y=0)
+        present = _enemy("obj02", CombatPhase.NORMAL, world_x=10, world_y=0)
+        context = {
+            myself,
+            present,
+            RetreatFromDanger(actor_slot="P1", target_slot="obj01"),  # obj01 missing
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], WalkToNearEnemy)
 
 
 class DeterminePriorityTieBreakTests(unittest.TestCase):

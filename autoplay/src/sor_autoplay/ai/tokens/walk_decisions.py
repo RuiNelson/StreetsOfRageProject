@@ -101,6 +101,32 @@ class WalkToPickup(Walk):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RetreatFromDanger(Walk):
+    """Back away from a dangerous enemy that is not yet actionable, instead
+    of closing the last stretch of distance into its committed attack.
+
+    Produced by ``could_retreat_from_danger`` once per on-screen enemy in a
+    dangerous phase (ATTACKING/CHARGE) that decide._enemy_actionable would
+    reject (not really hittable yet) and that sits close enough
+    (decide._too_close_to_keep_approaching) that continuing to approach
+    risks arriving right as it lands its hit -- never just the nearest;
+    determine_priority_decision picks among the candidates.
+    ``could_walk_to_near_enemy`` skips producing a candidate for the same
+    enemy in this zone, so the two never compete for the same target.
+
+    Raises emergency: Enemy (dangerous, not yet actionable, in the caution
+    zone)×30, closer scoring higher (distance-scored; see
+    priority._emergency_retreat_from_danger) -- higher than
+    WalkToNearEnemy(14) so this wins over still approaching, lower than any
+    real attack so attacking always wins once actually possible.
+    """
+
+    priority: int = 21
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class WalkToBreakable(Walk):
     """Approach an intact prop to smash it (or clear the path).
 

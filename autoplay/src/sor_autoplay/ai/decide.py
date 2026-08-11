@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 
-from ..phases import CombatPhase, should_ignore_as_target
+from ..phases import CombatPhase, is_dangerous, should_ignore_as_target
 from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
 from .tokens import (
     CounterGrab,
@@ -57,6 +57,7 @@ from .tokens import (
 from .tokens import CallPolice
 from .tokens import Context, Token, find, find_all
 from .tokens import (
+    RetreatFromDanger,
     WalkToAdvanceStage,
     WalkToBreakable,
     WalkToNearEnemy,
@@ -167,6 +168,19 @@ def _enemy_actionable(actor: PlayableCharacter, enemy: Enemy) -> bool:
     if not _in_punch_band(actor, enemy):
         return False
     return _enemy_in_front(actor, enemy) or abs(enemy.world_x - actor.world_x) <= 4
+
+
+# Extra px beyond punch_outer_x where a still-approaching dangerous enemy
+# switches from "keep walking closer" to "back off instead" (see
+# could_retreat_from_danger) -- approximate on purpose: this is a caution
+# buffer, not a hitbox measurement.
+RETREAT_CAUTION_MARGIN = 24
+
+
+def _too_close_to_keep_approaching(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    dx = abs(enemy.world_x - actor.world_x)
+    outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
+    return dx <= outer + RETREAT_CAUTION_MARGIN
 
 
 def _in_camera(camera: CameraRange, world_x: int, world_y: int) -> bool:
@@ -412,7 +426,33 @@ def could_walk_to_near_enemy(context: Context) -> Context:
         # per AI.md's own target-selection principle: this function only
         # says what's possible, never which possibility is best.
         for enemy in enemies:
+            if is_dangerous(enemy.combat_phase) and _too_close_to_keep_approaching(actor, enemy):
+                # could_retreat_from_danger covers this one instead -- don't
+                # propose closing the last stretch of distance into a
+                # committed attack that isn't hittable yet.
+                continue
             decisions.add(WalkToNearEnemy(actor_slot=actor.slot, target_slot=enemy.slot))
+    return decisions
+
+
+def could_retreat_from_danger(context: Context) -> Context:
+    decisions: set[Token] = set()
+    enemies = _on_screen_enemies(context)
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        for enemy in enemies:
+            if not is_dangerous(enemy.combat_phase):
+                continue
+            if _enemy_actionable(actor, enemy):
+                continue  # already hittable -- attack instead of retreating
+            if not _too_close_to_keep_approaching(actor, enemy):
+                continue  # still far enough that a normal approach is fine
+            decisions.add(RetreatFromDanger(actor_slot=actor.slot, target_slot=enemy.slot))
     return decisions
 
 
@@ -710,6 +750,7 @@ def generate_decision_tokens(context: Context) -> Context:
         | could_tech_recover(context)
         | could_hold_actions(context)
         | could_walk_to_near_enemy(context)
+        | could_retreat_from_danger(context)
         | could_walk_to_advance_stage(context)
         | could_punch(context)
         | could_swing_bat_or_pipe(context)

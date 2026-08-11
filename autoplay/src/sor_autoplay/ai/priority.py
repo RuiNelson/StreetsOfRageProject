@@ -59,6 +59,7 @@ from .tokens import (
 from .tokens import CallPolice
 from .tokens import Context, Decision, find, find_all
 from .tokens import (
+    RetreatFromDanger,
     WalkToAdvanceStage,
     WalkToBreakable,
     WalkToNearEnemy,
@@ -95,6 +96,7 @@ _EMERGENCY_WALK_TO_PICKUP_LIFE = 12
 _EMERGENCY_WALK_TO_PICKUP_SPECIAL = 9
 _EMERGENCY_WALK_TO_PICKUP_SCORE = 3
 _EMERGENCY_WALK_TO_NEAR_ENEMY = 14
+_EMERGENCY_RETREAT_FROM_DANGER = 30  # closer scoring higher, floor 20
 # No live enemy left anywhere (on-screen or not) → push stage (was 5).
 _EMERGENCY_WALK_TO_ADVANCE_STAGE = 12
 _EMERGENCY_DEFAULT = 0
@@ -232,6 +234,18 @@ def _emergency_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context) -
     return _distance_emergency(distance, base=_EMERGENCY_WALK_TO_NEAR_ENEMY, floor=8, step_px=15)
 
 
+def _emergency_retreat_from_danger(decision: RetreatFromDanger, context: Context) -> int:
+    target = find(context, Enemy, slot=decision.target_slot)
+    actor = _find_actor(context, decision.actor_slot)
+    if target is None or actor is None:
+        return _EMERGENCY_DEFAULT
+    distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
+    # Closer to the still-dangerous, not-yet-hittable enemy is more urgent to
+    # back away from -- stays above WalkToNearEnemy(14) so this wins over
+    # still approaching the same target, below any real attack's tier.
+    return _distance_emergency(distance, base=_EMERGENCY_RETREAT_FROM_DANGER, floor=20, step_px=15)
+
+
 def _emergency_walk_to_advance_stage(decision: WalkToAdvanceStage, context: Context) -> int:
     if _advance_blocking_enemies(context):
         return _EMERGENCY_DEFAULT
@@ -317,6 +331,7 @@ _EMERGENCY_FUNCS: dict[type[Decision], Callable[[Decision, Context], int]] = {
     WalkToWeapon: _emergency_walk_to_weapon,
     WalkToPickup: _emergency_walk_to_pickup,
     WalkToNearEnemy: _emergency_walk_to_near_enemy,
+    RetreatFromDanger: _emergency_retreat_from_danger,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
 }
 

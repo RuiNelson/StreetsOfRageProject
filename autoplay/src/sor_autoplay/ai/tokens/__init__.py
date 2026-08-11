@@ -94,6 +94,7 @@ from .tokens import (
     find_all,
 )
 from .walk_decisions import (
+    RetreatFromDanger,
     Walk,
     WalkToAdvanceStage,
     WalkToBreakable,

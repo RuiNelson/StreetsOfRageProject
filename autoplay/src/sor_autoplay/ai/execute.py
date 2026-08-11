@@ -36,6 +36,7 @@ from .tokens import Pickup, Weapon
 from .tokens import CallPolice
 from .tokens import Context, Decision, find, find_all
 from .tokens import (
+    RetreatFromDanger,
     WalkToAdvanceStage,
     WalkToBreakable,
     WalkToNearEnemy,
@@ -265,6 +266,33 @@ def _execute_walk_to_near_enemy(decision: WalkToNearEnemy, context: Context, gam
     gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
 
 
+# How far to step back per tick while retreating -- roughly clears the
+# RETREAT_CAUTION_MARGIN zone decide.py gates this decision on, without
+# being a single-tick teleport.
+RETREAT_FROM_DANGER_DISTANCE = 32
+
+
+def _retreat_from_danger_target(actor: Myself | Partner, target: Enemy) -> tuple[int, int]:
+    """Step directly away from ``target`` on X, holding the current lane."""
+
+    if actor.world_x <= target.world_x:
+        target_x = actor.world_x - RETREAT_FROM_DANGER_DISTANCE
+    else:
+        target_x = actor.world_x + RETREAT_FROM_DANGER_DISTANCE
+    return target_x, actor.world_y
+
+
+def _execute_retreat_from_danger(
+    decision: RetreatFromDanger, context: Context, gamepad: VirtualGamepad
+) -> None:
+    actor = _find_actor(context, decision.actor_slot)
+    target = find(context, Enemy, slot=decision.target_slot)
+    if actor is None or target is None:
+        return
+    target_x, target_y = _retreat_from_danger_target(actor, target)
+    gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
+
+
 def _execute_walk_to_advance_stage(
     decision: WalkToAdvanceStage, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -485,6 +513,7 @@ def _execute_walk_to_breakable(
 
 _HANDLERS = {
     WalkToNearEnemy: _execute_walk_to_near_enemy,
+    RetreatFromDanger: _execute_retreat_from_danger,
     WalkToAdvanceStage: _execute_walk_to_advance_stage,
     Punch: _execute_melee_strike,
     SwingBatOrPipe: _execute_melee_strike,
