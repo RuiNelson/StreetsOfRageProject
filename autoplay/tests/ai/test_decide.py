@@ -489,6 +489,35 @@ class CouldWalkToNearEnemyTests(unittest.TestCase):
 
         self.assertEqual(result, {WalkToNearEnemy(actor_slot="P1", target_slot="near")})
 
+    def test_skips_an_enemy_already_actionable_in_front(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=130, world_y=100)  # in front, in punch band
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(could_walk_to_near_enemy(context), set())
+
+    def test_does_not_skip_an_enemy_behind_beyond_both_real_bands(self) -> None:
+        # Regression (live-diagnosed): dx=-46 sits inside _in_punch_band's raw
+        # distance box (punch_inner=16..punch_outer=50 for Axel) but the
+        # enemy is behind the actor's facing, beyond both RearAttack's real
+        # band (40px) and could_punch's 4px behind tolerance -- nothing can
+        # actually hit it. Skipping WalkToNearEnemy here left the actor
+        # standing still, undefended, while the enemy closed in and hit.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=54, world_y=100)  # behind (facing right), dx=-46
+        context: set[Token] = {myself, enemy}
+
+        result = could_walk_to_near_enemy(context)
+
+        self.assertEqual(result, {WalkToNearEnemy(actor_slot="P1", target_slot="obj01")})
+
+    def test_skips_an_enemy_behind_within_the_real_rear_band(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=70, world_y=100)  # behind, dx=-30, within Axel's 40px band
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(could_walk_to_near_enemy(context), set())
+
 
 class CouldWalkToAdvanceStageTests(unittest.TestCase):
     def test_fires_when_no_enemies_present(self) -> None:

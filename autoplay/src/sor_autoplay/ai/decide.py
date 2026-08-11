@@ -147,6 +147,28 @@ def _in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
     return adx <= rear_attack_front_max_x(actor.character_id)
 
 
+def _enemy_actionable(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """True when an existing melee/rear-attack decision would actually fire
+    on this enemy right now -- not just whether it sits inside
+    ``_in_punch_band``'s raw distance box.
+
+    ``_in_punch_band`` ignores facing, but ``_could_melee_strike`` (the
+    shared body behind ``could_punch`` and friends) refuses a behind enemy
+    beyond a 4px tolerance -- Punch is a forward strike. Live testing showed
+    that mismatch created a dead zone: an enemy sitting behind the actor,
+    beyond RearAttack's own real band but still inside the punch box by raw
+    distance, made ``could_walk_to_near_enemy`` skip it as "already in
+    range" while nothing could actually hit it, leaving the actor standing
+    still and undefended.
+    """
+
+    if _in_rear_band(actor, enemy):
+        return True
+    if not _in_punch_band(actor, enemy):
+        return False
+    return _enemy_in_front(actor, enemy) or abs(enemy.world_x - actor.world_x) <= 4
+
+
 def _in_camera(camera: CameraRange, world_x: int, world_y: int) -> bool:
     return camera.left <= world_x <= camera.right and camera.top <= world_y <= camera.bottom
 
@@ -383,7 +405,7 @@ def could_walk_to_near_enemy(context: Context) -> Context:
             ]
         if not enemies:
             continue
-        if any(_in_punch_band(actor, e) or _in_rear_band(actor, e) for e in enemies):
+        if any(_enemy_actionable(actor, e) for e in enemies):
             continue
         # One candidate per reachable enemy -- determine_priority_decision
         # (priority.py's distance-scored emergency) picks the closest one,

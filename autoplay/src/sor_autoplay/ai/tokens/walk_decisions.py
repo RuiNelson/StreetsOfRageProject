@@ -18,12 +18,16 @@ class WalkToNearEnemy(Walk):
     """Walk to a nearby on-screen enemy to bring it into attack range.
 
     Produced by ``could_walk_to_near_enemy`` once per reachable enemy when
-    at least one on-screen enemy exists and none is already within punch or
-    rear range -- never just the nearest; determine_priority_decision picks
-    among the candidates. Falls back to every live enemy ahead in the
-    stage's scroll direction when nothing is on-screen (e.g. the next wave,
-    tracked on the world map but not yet in camera) -- never one behind, so
-    this never walks backward for an abandoned off-screen leftover.
+    at least one on-screen enemy exists and none is *actionable* yet
+    (``decide._enemy_actionable``: really within rear range, or within
+    punch range and actually in front -- not just inside the punch box's
+    raw distance, which ignores facing and would otherwise make this skip a
+    behind enemy Punch itself refuses to hit, leaving the actor undefended)
+    -- never just the nearest; determine_priority_decision picks among the
+    candidates. Falls back to every live enemy ahead in the stage's scroll
+    direction when nothing is on-screen (e.g. the next wave, tracked on the
+    world map but not yet in camera) -- never one behind, so this never
+    walks backward for an abandoned off-screen leftover.
 
     Raises emergency: Enemy×14, closer scoring higher (distance-scored;
     see priority._emergency_walk_to_near_enemy).
