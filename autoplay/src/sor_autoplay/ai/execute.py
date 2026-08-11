@@ -67,6 +67,26 @@ JUMP_ATTACK_LAUNCH_FRAMES = 3
 JUMP_ATTACK_KICK_FRAMES = 4
 HOLD_FRAMES = 4
 
+# Per-axis deadband: stop steering once the target is within roughly one
+# tick's worth of travel.
+#
+# The controller is a bang-bang actuator sampled far more slowly than the game
+# runs. Ground walk is a couple of px per frame and the default poll is 33 ms
+# (~2 frames at 60 Hz), so an exact-coordinate target is never landed on: the
+# actor steps past it, the next tick sees the residual flip sign and commands
+# the opposite direction, and it steps back. Live symptom: constant left/right
+# shaking -- most visible while the AI is mainly travelling *vertically*,
+# where the X residual is all that is left oscillating and the actor visibly
+# vibrates instead of walking cleanly up or down the lane.
+#
+# X is the wider band because horizontal walk is the faster axis. Both stay
+# well inside every arrival test that follows a walk (PICKUP_RANGE_*,
+# BREAKABLE_PUNCH_X, punch_inner_x), so nothing that used to be reachable
+# stops being reached -- the actor just stops hunting for a pixel it cannot
+# stand on.
+MOVE_DEADBAND_X = 5
+MOVE_DEADBAND_Y = 3
+
 PICKUP_RANGE_X = 18
 PICKUP_RANGE_Y = 14
 LANE_EDGE_MARGIN = 6
@@ -204,14 +224,14 @@ def _movement_mask(
             to_y = _clamp_target_y(context, pit.lane_y - PIT_AVOID_MARGIN)
 
     mask = 0
-    if to_x > from_x:
+    if to_x - from_x > MOVE_DEADBAND_X:
         mask |= RIGHT_MASK
-    elif to_x < from_x:
+    elif from_x - to_x > MOVE_DEADBAND_X:
         mask |= LEFT_MASK
     # Smaller world_y = back of stage = "up".
-    if to_y > from_y:
+    if to_y - from_y > MOVE_DEADBAND_Y:
         mask |= DOWN_MASK
-    elif to_y < from_y:
+    elif from_y - to_y > MOVE_DEADBAND_Y:
         mask |= UP_MASK
 
     # Never hold into the lane clamp.

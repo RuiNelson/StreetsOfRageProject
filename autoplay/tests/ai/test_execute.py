@@ -106,8 +106,12 @@ class PressNoButtonTests(unittest.TestCase):
 
 class ExecuteWalkToNearEnemyTests(unittest.TestCase):
     def test_walks_toward_enemy_to_the_right_and_below(self) -> None:
+        # Enemy far enough right that the stopping point (its x minus Axel's
+        # stop_dx of 46) is still well outside MOVE_DEADBAND_X -- otherwise
+        # the actor has effectively arrived on X and only the lane component
+        # should be held.
         actor = _myself(world_x=0, world_y=0)
-        target = _enemy(world_x=50, world_y=50)
+        target = _enemy(world_x=100, world_y=50)
         context = {actor, target}
         decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
@@ -305,6 +309,49 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
         execute_decision(decision, set(), gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
+
+
+class MovementDeadbandTests(unittest.TestCase):
+    """The controller is a bang-bang actuator sampled every ~33 ms while the
+    game walks the actor a couple of px per frame, so an exact-coordinate
+    target is stepped over rather than landed on. Without a deadband the
+    residual flips sign every tick and the actor vibrates left/right instead
+    of travelling -- worst while moving vertically, where the X residual is
+    the only thing still oscillating."""
+
+    def test_does_not_steer_for_a_sub_step_x_residual(self) -> None:
+        # Actor sits 3px from its stopping point on X (Axel stop_dx=46, enemy
+        # at 149 -> stop at 103) but a full lane away: it should travel purely
+        # down the lane, with no horizontal component at all.
+        actor = _myself(world_x=100, world_y=40)
+        target = _enemy(world_x=149, world_y=100)
+        gamepad, client = _gamepad()
+
+        execute_decision(
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"), {actor, target}, gamepad
+        )
+
+        client.hold_buttons.assert_called_once_with(player1=DOWN, player2=0)
+
+    def test_straddling_the_stop_point_never_commands_opposite_directions(self) -> None:
+        # The shake itself: two ticks a few px either side of the same
+        # stopping point must not ask for LEFT then RIGHT.
+        target = _enemy(world_x=149, world_y=40)
+        masks = []
+        for actor_x in (101, 105):
+            actor = _myself(world_x=actor_x, world_y=40)
+            gamepad, _ = _gamepad()
+            execute_decision(
+                WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+                {actor, target},
+                gamepad,
+            )
+            masks.append(gamepad.held)
+
+        self.assertFalse(
+            any(m & LEFT for m in masks) and any(m & RIGHT for m in masks),
+            f"opposite horizontal commands across adjacent ticks: {masks}",
+        )
 
 
 class StaleMovementHoldTests(unittest.TestCase):
