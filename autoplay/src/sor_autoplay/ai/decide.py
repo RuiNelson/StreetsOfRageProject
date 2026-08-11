@@ -517,7 +517,15 @@ def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
 
 
 def could_jump_attack(context: Context) -> Context:
-    """Jump-kick only when a horizontal approach is useful — never hop in place."""
+    """Jump-kick only when a horizontal approach is useful — never hop in
+    place. Once already airborne, keep producing the same verb every tick
+    so the actor actually lands the follow-through B edge instead of
+    sailing through the air silent: ``execute.state_machine_jump_attack``
+    only presses B while a ``JumpAttack`` is still winning, and
+    ``reach.in_jump_attack_band`` is what keeps the target valid through
+    the flight (see its docstring) -- there is no other way for the AI to
+    remember it already committed to a kick, since a ``Verb`` carries no
+    state across ticks."""
 
     verbs: set[Token] = set()
     for actor in _actors(context):
@@ -527,14 +535,13 @@ def could_jump_attack(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
-        if actor.is_airborne:
-            continue
-        # Never hop into a committed attack: the kick's own travel would
-        # deliver the actor to the enemy mid-swing, airborne and unable to
-        # change its mind.
+        # Never *launch* into a committed attack: the kick's own travel
+        # would deliver the actor to the enemy mid-swing, airborne and
+        # unable to change its mind. Once already airborne there is no
+        # changing course either way, so this gate only applies pre-launch.
         threatening = reach.targets_of(context, IncomingMelee, actor.slot)
         for target_slot in reach.targets_of(context, InJumpAttackReach, actor.slot):
-            if target_slot in threatening:
+            if not actor.is_airborne and target_slot in threatening:
                 continue
             verbs.add(JumpAttack(actor_slot=actor.slot, target_slot=target_slot))
     return verbs

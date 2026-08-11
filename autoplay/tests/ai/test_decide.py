@@ -1109,9 +1109,40 @@ class CouldJumpAttackTests(unittest.TestCase):
 
         self.assertEqual(could_jump_attack(context), set())
 
-    def test_does_not_fire_when_airborne(self) -> None:
+    def test_still_fires_while_airborne_so_the_kick_b_edge_gets_pressed(self) -> None:
+        # Live-diagnosed regression: the AI used to launch (C) and then go
+        # completely silent for the rest of the flight, because this used to
+        # bail out on any airborne actor -- leaving
+        # execute.state_machine_jump_attack's airborne branch (the B press
+        # that actually lands the kick) unreachable. controls-and-input.md
+        # "C only to leave the ground, then B later while airborne" requires
+        # this generator to keep offering the verb every tick of the flight.
         myself = make_myself(world_x=100, world_y=100, is_airborne=True, facing_left=False)
         enemy = make_enemy(world_x=160, world_y=105)
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+        context: set[Token] = {myself, enemy, camera}
+
+        result = could_jump_attack(context)
+
+        self.assertEqual(result, {JumpAttack(actor_slot="P1", target_slot="obj01")})
+
+    def test_airborne_follow_through_ignores_the_ground_launch_min_dx(self) -> None:
+        # Mid-flight the actor has already closed some of the gap under its
+        # own committed trajectory (no mid-air lane control) -- dx=40 is
+        # inside Axel's punch_outer (50) and would fail the *grounded* launch
+        # gate, but the B edge still has to land during free flight.
+        myself = make_myself(world_x=100, world_y=100, is_airborne=True, facing_left=False)
+        enemy = make_enemy(world_x=140, world_y=100)
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+        context: set[Token] = {myself, enemy, camera}
+
+        result = could_jump_attack(context)
+
+        self.assertEqual(result, {JumpAttack(actor_slot="P1", target_slot="obj01")})
+
+    def test_airborne_follow_through_still_respects_max_dx(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, is_airborne=True, facing_left=False)
+        enemy = make_enemy(world_x=500, world_y=500)
         camera = CameraRange(left=0, right=400, top=0, bottom=200)
         context: set[Token] = {myself, enemy, camera}
 

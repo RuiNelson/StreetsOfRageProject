@@ -239,14 +239,25 @@ def in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
 
 def in_jump_attack_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
     """True when a jump kick is the move that covers this gap: in front, in
-    lane, beyond the actor's own punch outer edge, inside the kick's own
-    free-flight range."""
+    lane, inside the kick's own free-flight range.
+
+    The min-dx gate (beyond the actor's own punch outer edge -- no point
+    hopping somewhere a punch already reaches) only applies while still
+    grounded: that is the launch decision. Once already airborne the actor
+    is committed to a fixed trajectory (controls-and-input.md "Free
+    flight": no mid-air lane control, only limited air steer) and closing
+    distance is no longer optional, so the min-dx gate must not also
+    disqualify the follow-through B edge (``$3914``) once the flight has
+    naturally carried the actor closer than that edge -- see execute.py's
+    ``state_machine_jump_attack`` airborne branch, which this band gates.
+    """
 
     dx = abs(enemy.world_x - actor.world_x)
     dy = abs(enemy.world_y - actor.world_y)
     if dy > JUMP_ATTACK_RANGE_Y:
         return False
-    if dx < max(JUMP_ATTACK_MIN_DX, punch_outer_x(actor.character_id)):
+    min_dx = 0 if actor.is_airborne else max(JUMP_ATTACK_MIN_DX, punch_outer_x(actor.character_id))
+    if dx < min_dx:
         return False
     if dx > jump_attack_max_dx(actor.character_id):
         return False
