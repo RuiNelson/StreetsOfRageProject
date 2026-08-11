@@ -34,6 +34,16 @@ class CombatPhase(Enum):
     HELD_BY_ENEMY = auto()  # enemy has grabbed the player ($78-$7E)
 
 
+# The two seeds the ordinary-enemy stun timer at ``+$50`` is ever loaded
+# with. ``$9B88`` (the $0200 hitstun handler) writes HITSTUN_FRAMES on the
+# hit that starts the stun; ``$A43E`` writes PEPPER_STUN_FRAMES for the
+# $0400 pepper-spray immobilization. Both only ever count down from there,
+# so a live timer above HITSTUN_FRAMES can only be a pepper stun -- which is
+# what lets a reader tell a brief combo window apart from a body parked for
+# most of three seconds.
+HITSTUN_FRAMES = 0x18  # 24 frames
+PEPPER_STUN_FRAMES = 0xA0  # 160 frames
+
 # Player action dispatcher entries $78/$7A/$7C/$7E form the enemy-grab
 # counter sequence. Facing occupies bit 0, so compare the even base action.
 PLAYER_HELD_BY_ENEMY_ACTIONS = frozenset({0x78, 0x7A, 0x7C, 0x7E})

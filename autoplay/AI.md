@@ -232,17 +232,27 @@ enemy while sweeping them off the board, with health `$FFFF`; that case
 stays `SCRIPTED` so nothing chases or waits for a body that is being
 removed.
 
-A stun does not raise the urgency of hitting that enemy — it lowers it.
-Every `Attack` against a stunned `Grunt` is capped at a tier wedged
-between the `Walk` decisions and a plain strike, because a stunned body
-is the one target that is not going anywhere: it cannot act, cannot
-retaliate, and will still be standing there in a moment. Anything
-involving an enemy that *can* still act therefore wins — a strike on it,
-or the `RearAttack` escape from one at the actor's back — while the cap
-stays high enough that the AI keeps hitting the stunned enemy when
-nothing better is on the table, rather than walking off to fetch another
-one. This is a ceiling, never a raise: an attack already ranked lower
-(an unwarranted `RearAttack`, say) keeps its own lower score.
+A stun does not raise the urgency of hitting that enemy — it caps it, and
+the two stuns cap it differently, because they are not the same
+situation. The remaining frames tell them apart: the timer can only ever
+count down from one of the two seeds above, so anything above `$18` is a
+pepper stun.
+
+- **Hitstun** is the middle of a combo. The ROM's own 3-hit chain is what
+  knocks an enemy down, and each landed hit re-seeds the timer, so
+  attacking a hitstunned enemy stays just *above* a plain strike — the AI
+  finishes the combo instead of turning to a fresh enemy that happens to
+  be equally punchable.
+- **The pepper stun** parks the enemy for nearly three seconds. Attacking
+  it drops *below* a plain strike, so anything that can still act gets
+  dealt with first. (A pepper stun that has counted down into hitstun
+  range is about to end, and is treated as a combo window again.)
+
+Both stay far below the `RearAttack` escape, so a live enemy at the
+actor's back interrupts either one, and both stay above every `Walk`
+tier, so the AI never walks off mid-stun to fetch another enemy. This is
+strictly a ceiling: an attack already ranked lower — an unwarranted
+`RearAttack`, say — keeps its own lower score.
 
 
 ## Process

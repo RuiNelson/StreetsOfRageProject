@@ -14,8 +14,10 @@
   down), keeping the police-special sweep on `SCRIPTED`.
 - `Sidestep` is still not a decision of its own; `SafeSpot` gives
   `RetreatFromDanger`'s executor somewhere deliberate to go instead.
-- A stun *lowers* the emergency of attacking that enemy instead of raising
-  it: `Attack` on a stunned `Grunt` is capped between the `Walk` tiers and a
-  plain strike, so a live enemy (or the `RearAttack` escape) always comes
-  first, but the AI still finishes the stunned one off rather than walking
-  away. Knockdown keeps the full punishable tier.
+- A stun *caps* the emergency of attacking that enemy instead of raising
+  it, and the two stuns cap it differently: hitstun (`$18` frames) stays
+  just above a plain strike so the ROM's 3-hit chain is not abandoned
+  mid-combo, while the pepper stun (`$A0`) drops below it, since that enemy
+  is parked for nearly three seconds. Both stay below the `RearAttack`
+  escape and above every `Walk` tier. Knockdown keeps the full punishable
+  tier.

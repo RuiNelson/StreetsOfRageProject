@@ -35,7 +35,7 @@ from sor_autoplay.ai.tokens import (
     WalkToPickup,
     WalkToWeapon,
 )
-from sor_autoplay.phases import CombatPhase
+from sor_autoplay.phases import HITSTUN_FRAMES, PEPPER_STUN_FRAMES, CombatPhase
 
 
 def determine_priority_decision(context):
@@ -665,6 +665,9 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
 
 
 def _stunned_grunt(slot: str, **overrides) -> Garcia:
+    """A Grunt mid-hitstun by default (the ROM's $18-frame seed). Pass
+    ``stun_timer=PEPPER_STUN_FRAMES`` for the long pepper-spray stun."""
+
     fields = dict(
         slot=slot,
         type_id=0x20,
@@ -674,7 +677,7 @@ def _stunned_grunt(slot: str, **overrides) -> Garcia:
         combat_phase=CombatPhase.STUNNED,
         targets_player=1,
         facing_left=False,
-        stun_timer=0x18,
+        stun_timer=HITSTUN_FRAMES,
     )
     fields.update(overrides)
     return Garcia(**fields)
@@ -686,34 +689,40 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
     is capped so anything involving an enemy that *can* still act wins,
     without dropping so low that the actor abandons it."""
 
-    def test_a_stunned_target_loses_to_the_rear_attack_escape(self) -> None:
+    def test_any_stun_loses_to_the_rear_attack_escape(self) -> None:
         # The case this cap exists for: a stunned body in front used to
         # score the punishable tier (60) and beat the $322A escape (55)
         # while a second, live enemy stood at the actor's back.
         myself = _myself(world_x=100, world_y=64, facing_left=False)
-        stunned = _stunned_grunt("obj01", world_x=130)
         behind = _enemy("obj02", CombatPhase.NORMAL, world_x=95, world_y=64)
-        context = {
-            myself,
-            stunned,
-            behind,
-            Punch(actor_slot="P1", target_slot="obj01"),
-            RearAttack(actor_slot="P1", target_slot="obj02"),
-        }
+        for frames in (HITSTUN_FRAMES, PEPPER_STUN_FRAMES):
+            with self.subTest(stun_timer=frames):
+                stunned = _stunned_grunt("obj01", world_x=130, stun_timer=frames)
+                context = {
+                    myself,
+                    stunned,
+                    behind,
+                    Punch(actor_slot="P1", target_slot="obj01"),
+                    RearAttack(actor_slot="P1", target_slot="obj02"),
+                }
 
-        result = determine_priority_decision(context)
+                result = determine_priority_decision(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], RearAttack)
+                decisions = find_all(result, Decision)
+                self.assertEqual(len(decisions), 1)
+                self.assertIsInstance(decisions[0], RearAttack)
 
-    def test_a_stunned_target_loses_to_a_strike_on_an_enemy_still_able_to_act(self) -> None:
+    def test_a_pepper_stunned_target_loses_to_a_strike_on_an_enemy_still_able_to_act(
+        self,
+    ) -> None:
+        # $A0 frames is nearly three seconds of parked enemy: the tunnel
+        # vision this cap exists to break.
         myself = _myself(world_x=100, world_y=64, facing_left=False)
-        stunned = _stunned_grunt("obj01", world_x=130)
+        parked = _stunned_grunt("obj01", world_x=130, stun_timer=PEPPER_STUN_FRAMES)
         active = _enemy("obj02", CombatPhase.NORMAL, world_x=140, world_y=64)
         context = {
             myself,
-            stunned,
+            parked,
             active,
             Punch(actor_slot="P1", target_slot="obj01"),
             Punch(actor_slot="P1", target_slot="obj02"),
@@ -725,44 +734,90 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
         self.assertEqual(len(decisions), 1)
         self.assertEqual(decisions[0].target_slot, "obj02")
 
-    def test_still_beats_walking_off_to_another_enemy(self) -> None:
+    def test_a_hitstunned_target_keeps_the_combo_going(self) -> None:
+        # The other side of the same coin: $18 frames is the middle of the
+        # ROM's own 3-hit chain, and it is the third hit that knocks the
+        # enemy down. Switching to an equally punchable fresh enemy would
+        # throw that away, so hitstun ranks just above a plain strike.
+        myself = _myself(world_x=100, world_y=64, facing_left=False)
+        combo_target = _stunned_grunt("obj01", world_x=130)
+        active = _enemy("obj02", CombatPhase.NORMAL, world_x=140, world_y=64)
+        context = {
+            myself,
+            combo_target,
+            active,
+            Punch(actor_slot="P1", target_slot="obj01"),
+            Punch(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].target_slot, "obj01")
+
+    def test_a_pepper_stun_counted_down_into_hitstun_range_is_a_combo_again(self) -> None:
+        # A pepper stun that has run down to its last frames is about to
+        # end, which is exactly when treating it as a combo window is right.
+        myself = _myself(world_x=100, world_y=64, facing_left=False)
+        nearly_awake = _stunned_grunt("obj01", world_x=130, stun_timer=4)
+        active = _enemy("obj02", CombatPhase.NORMAL, world_x=140, world_y=64)
+        context = {
+            myself,
+            nearly_awake,
+            active,
+            Punch(actor_slot="P1", target_slot="obj01"),
+            Punch(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].target_slot, "obj01")
+
+    def test_any_stun_still_beats_walking_off_to_another_enemy(self) -> None:
         # Lowered, not abandoned: nothing better on the table means keep
         # hitting the stunned body rather than fetching a distant enemy.
         myself = _myself(world_x=100, world_y=64, facing_left=False)
-        stunned = _stunned_grunt("obj01", world_x=130)
         far = _enemy("obj02", CombatPhase.NORMAL, world_x=300, world_y=64)
-        context = {
-            myself,
-            stunned,
-            far,
-            Punch(actor_slot="P1", target_slot="obj01"),
-            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
-        }
+        for frames in (HITSTUN_FRAMES, PEPPER_STUN_FRAMES):
+            with self.subTest(stun_timer=frames):
+                stunned = _stunned_grunt("obj01", world_x=130, stun_timer=frames)
+                context = {
+                    myself,
+                    stunned,
+                    far,
+                    Punch(actor_slot="P1", target_slot="obj01"),
+                    WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+                }
 
-        result = determine_priority_decision(context)
+                result = determine_priority_decision(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], Punch)
+                decisions = find_all(result, Decision)
+                self.assertEqual(len(decisions), 1)
+                self.assertIsInstance(decisions[0], Punch)
 
-    def test_still_beats_retreating_and_advancing(self) -> None:
+    def test_any_stun_still_beats_retreating_and_advancing(self) -> None:
         myself = _myself(world_x=100, world_y=64, facing_left=False)
-        stunned = _stunned_grunt("obj01", world_x=130)
         dangerous = _enemy("obj02", CombatPhase.ATTACKING, world_x=160, world_y=64)
-        context = {
-            myself,
-            stunned,
-            dangerous,
-            Punch(actor_slot="P1", target_slot="obj01"),
-            RetreatFromDanger(actor_slot="P1", target_slot="obj02"),
-            WalkToAdvanceStage(actor_slot="P1", direction="right"),
-        }
+        for frames in (HITSTUN_FRAMES, PEPPER_STUN_FRAMES):
+            with self.subTest(stun_timer=frames):
+                stunned = _stunned_grunt("obj01", world_x=130, stun_timer=frames)
+                context = {
+                    myself,
+                    stunned,
+                    dangerous,
+                    Punch(actor_slot="P1", target_slot="obj01"),
+                    RetreatFromDanger(actor_slot="P1", target_slot="obj02"),
+                    WalkToAdvanceStage(actor_slot="P1", direction="right"),
+                }
 
-        result = determine_priority_decision(context)
+                result = determine_priority_decision(context)
 
-        decisions = find_all(result, Decision)
-        self.assertEqual(len(decisions), 1)
-        self.assertIsInstance(decisions[0], Punch)
+                decisions = find_all(result, Decision)
+                self.assertEqual(len(decisions), 1)
+                self.assertIsInstance(decisions[0], Punch)
 
     def test_a_knocked_down_target_keeps_the_full_punishable_tier(self) -> None:
         # Only the *stun* is capped. A knockdown ends in a wake-up with

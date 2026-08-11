@@ -20,7 +20,7 @@ import math
 import random
 from collections.abc import Callable
 
-from ..phases import CombatPhase, is_dangerous
+from ..phases import HITSTUN_FRAMES, CombatPhase, is_dangerous
 from . import reach
 from .decide import (
     HEALTH_CRITICAL_PERCENT,
@@ -95,18 +95,25 @@ _EMERGENCY_REAR_ATTACK_UNWARRANTED = 9
 _EMERGENCY_REAR_ATTACK_UNWARRANTED_DANGEROUS = 11
 _EMERGENCY_PUNCH_PUNISHABLE = 60
 _EMERGENCY_PUNCH_DEFAULT = 20
-# Ceiling (never a raise -- see _emergency) for any Attack whose target is a
-# stunned Grunt. Deliberately wedged between WalkToNearEnemy's base (14) and
-# a plain Punch (20):
+# Ceilings (never a raise -- see _emergency) for an Attack whose target is a
+# stunned Grunt. Which one applies depends on how much of the stun is left,
+# because the ROM's two stuns are not the same situation at all.
 #
-# - above every Walk tier, so the actor keeps hitting the stunned body when
-#   nothing better exists instead of wandering off to fetch another enemy;
-# - above RetreatFromDanger (17..15), preserving "attacking always wins once
-#   actually possible";
-# - below a plain strike on an enemy that can still act (20), and far below
-#   the RearAttack escape (55/60), so a second enemy anywhere near always
-#   gets dealt with first.
-_EMERGENCY_ATTACK_STUNNED = 19
+# A **hitstun** ($18 frames, seeded by the hit itself) is the middle of a
+# combo: the ROM's own 3-hit chain is what actually knocks an enemy down,
+# and each landed hit re-seeds the timer. So it stays just above a plain
+# strike (20), which is what keeps the actor finishing the combo instead of
+# turning to a fresh enemy that happens to be equally punchable. It still
+# sits far below the RearAttack escape (55/60), so a real threat elsewhere
+# interrupts the combo -- as it should.
+_EMERGENCY_ATTACK_HITSTUN = 21
+# A **pepper-spray stun** ($A0 frames, nearly three seconds) is the opposite:
+# the enemy is parked. Hitting it must lose to a strike on anything that can
+# still act (20), while staying above every Walk tier (WalkToNearEnemy peaks
+# at 14) and above RetreatFromDanger (17..15) -- lowered, not abandoned, so
+# the actor still finishes it off when nothing better is on the table
+# instead of walking away to fetch another enemy.
+_EMERGENCY_ATTACK_LONG_STUN = 19
 _EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
 _EMERGENCY_HOLD_SUPPLEX = 68
 _EMERGENCY_HOLD_FLIP = 66
@@ -426,33 +433,51 @@ _EMERGENCY_FUNCS: dict[type[Decision], Callable[[Decision, Context], int]] = {
 }
 
 
-def _target_is_stunned(context: Context, target_slot: str | None) -> bool:
-    """Whether this decision's target is a ``Grunt`` frozen on a timed stun.
+def _stunned_target_ceiling(context: Context, target_slot: str | None) -> int | None:
+    """The emergency ceiling for attacking ``target_slot``, or ``None``.
 
-    Only ordinary enemies have the ROM counter behind ``is_stunned``; a
-    ``Boss``, a ``Breakable`` or a missing target all answer no.
+    ``None`` means "not a stunned target, no ceiling": only ordinary enemies
+    have the ROM counter behind ``is_stunned``, so a ``Boss``, a
+    ``Breakable`` or a missing target never gets one.
+
+    The remaining time decides which ceiling, read from the target's
+    ``PunishWindow`` (the token that exists precisely so this does not have
+    to go back to raw observation fields) and falling back to the Grunt's
+    own counter if no window is in context. Above ``HITSTUN_FRAMES`` the
+    timer can only belong to the long pepper-spray stun, since that is the
+    larger of the ROM's two seeds and both only count down. A pepper stun
+    that *has* counted down into hitstun range is about to end, which is
+    exactly when treating it as a combo window is right again.
     """
 
     if target_slot is None:
-        return False
+        return None
     target = find(context, Enemy, slot=target_slot)
-    return isinstance(target, Grunt) and target.is_stunned
+    if not (isinstance(target, Grunt) and target.is_stunned):
+        return None
+    window = next(
+        (token for token in find_all(context, PunishWindow) if token.target_slot == target_slot),
+        None,
+    )
+    frames_left = window.frames_left if window is not None else target.stun_timer
+    if frames_left > HITSTUN_FRAMES:
+        return _EMERGENCY_ATTACK_LONG_STUN
+    return _EMERGENCY_ATTACK_HITSTUN
 
 
 def _emergency(decision: Decision, context: Context) -> int:
     func = _EMERGENCY_FUNCS.get(type(decision))
     score = _EMERGENCY_DEFAULT if func is None else func(decision, context)
-    if isinstance(decision, Attack) and _target_is_stunned(
-        context, getattr(decision, "target_slot", None)
-    ):
-        # A stunned enemy is the one target that is *not* going anywhere:
-        # it cannot act, cannot retaliate, and will still be standing there
-        # in a moment. Hitting it is worth doing when nothing else is on the
-        # table, but it must never outrank dealing with an enemy that can
-        # still act -- which is what the punishable tier (60) made it do,
+    if isinstance(decision, Attack):
+        # A stunned enemy cannot act, cannot retaliate, and will still be
+        # standing there in a moment, so it must never outrank dealing with
+        # one that can -- which is what the punishable tier (60) made it do,
         # above even the RearAttack escape (55) with a second enemy live at
-        # the actor's back.
-        return min(score, _EMERGENCY_ATTACK_STUNNED)
+        # the actor's back. Strictly a ceiling: an attack already ranked
+        # lower keeps its own score.
+        ceiling = _stunned_target_ceiling(context, getattr(decision, "target_slot", None))
+        if ceiling is not None:
+            return min(score, ceiling)
     return score
 
 

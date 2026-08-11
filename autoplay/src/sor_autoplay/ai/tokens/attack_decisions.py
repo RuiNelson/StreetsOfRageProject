@@ -36,12 +36,22 @@ class Attack(Decision, ABC):
 
     Branch-wide emergency rule: whatever a concrete subclass's own
     ``Raises emergency`` line says, an attack whose target is a **stunned**
-    ``Grunt`` (``Grunt.is_stunned``) is capped at
-    ``priority._EMERGENCY_ATTACK_STUNNED``. A stunned body cannot act,
-    cannot retaliate and will still be there in a moment, so it must never
-    outrank dealing with an enemy that can still act; the cap only ever
-    lowers a score, and stays above every ``Walk`` tier so the actor keeps
-    hitting it when nothing better is on the table.
+    ``Grunt`` (``Grunt.is_stunned``) is capped -- never raised -- by how
+    much of the stun is left, read from the target's ``PunishWindow``:
+
+    - a **hitstun** (at most ``phases.HITSTUN_FRAMES``) caps at
+      ``priority._EMERGENCY_ATTACK_HITSTUN``, just above a plain strike, so
+      the actor finishes the ROM's own 3-hit chain -- whose third hit is
+      what knocks the enemy down -- instead of turning to an equally
+      punchable fresh enemy;
+    - anything longer is the ``$A0``-frame pepper-spray stun and caps at
+      ``priority._EMERGENCY_ATTACK_LONG_STUN``, *below* a plain strike: that
+      body is parked for nearly three seconds and anything that can still
+      act matters more.
+
+    Both stay far below the ``RearAttack`` escape, so a real threat
+    elsewhere interrupts either one, and above every ``Walk`` tier, so the
+    actor never walks off mid-stun to fetch a different enemy.
     """
 
 
