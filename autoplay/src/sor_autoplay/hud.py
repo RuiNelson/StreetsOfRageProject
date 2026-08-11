@@ -16,6 +16,7 @@ from typing import Callable
 
 from .ai.loop import VerbState
 from .ai.tokens import Verb
+from .hitboxes import Hitbox
 from .phases import CombatPhase, phase_color
 from .state import GameSnapshot, PlayerSnapshot
 from .world_map import MAP_ASPECT, WorldMap
@@ -43,6 +44,14 @@ _BORDER = "#3a3f55"
 _TEXT = "#d7dbe8"
 _MUTED = "#8b90a5"
 _DIM = "#5c6178"
+# AttackRange squares: same red as phases.phase_color's ATTACKING outline,
+# stippled (Tk canvas items have no real alpha) the same way floor holes
+# already fake translucency in this HUD.
+_RANGE_FILL = "#ff453a"
+# Screen-space floor for a hitbox-derived marker, so a real but tiny/
+# zoomed-out box does not vanish. Purely cosmetic -- never fed back into
+# anything the AI reads.
+MIN_MARKER_PX = 6
 
 # Draw order: props under fighters so players/bosses stay readable.
 _KIND_Z = {
@@ -85,6 +94,7 @@ class ObserverHud:
         self._empty_label: int | None = None
         self._markers: list[tuple[int, int]] = []  # (square_id, text_id)
         self._hole_rects: list[int] = []
+        self._range_rects: list[int] = []  # AttackRange squares, pooled like holes
         self._last_canvas_size: tuple[int, int] = (0, 0)
         self._last_plot_geom: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
         self._last_meta_text: str = ""
@@ -689,6 +699,9 @@ class ObserverHud:
         for index in range(len(holes), len(self._hole_rects)):
             canvas.itemconfigure(self._hole_rects[index], state="hidden")
 
+        # Fallback marker size for an entity with no real Hitbox this tick
+        # (no RomData, or a frame whose body box id is 0) -- unchanged from
+        # before real hitboxes existed.
         half = max(7, min(16, int(min(plot_w, plot_h) / 40)))
         boss_half = half + 2
 
@@ -697,12 +710,16 @@ class ObserverHud:
             key=lambda e: (_KIND_Z.get(e.kind, 4), e.world_y, e.world_x),
         )
         self._ensure_marker_pool(len(entities))
+        # Upper bound: some entities will fall outside the plot and draw none
+        # of their ranges, so this only ever over-allocates, never under-.
+        self._ensure_range_pool(sum(len(e.attack_ranges) for e in entities))
 
         plot_left = ox
         plot_right = ox + plot_w
         plot_top = oy
         plot_bottom = oy + plot_h
         drawn = 0
+        ranges_drawn = 0
 
         for entity in entities:
             # map_x = cam-relative X; map_y = absolute lane (top-down, Z ignored).
@@ -714,8 +731,14 @@ class ObserverHud:
             if drawn >= len(self._markers):
                 self._ensure_marker_pool(drawn + 1)
             square_id, text_id = self._markers[drawn]
-            r = boss_half if entity.kind in ("player", "boss") else half
-            canvas.coords(square_id, cx - r, cy - r, cx + r, cy + r)
+            if entity.hitbox is not None:
+                sx0, sy0, sx1, sy1 = _hitbox_to_canvas(entity.hitbox, world, ox, oy, plot_w, plot_h)
+                sx0, sx1 = _expand_to_min(sx0, sx1, MIN_MARKER_PX)
+                sy0, sy1 = _expand_to_min(sy0, sy1, MIN_MARKER_PX)
+            else:
+                r = boss_half if entity.kind in ("player", "boss") else half
+                sx0, sy0, sx1, sy1 = cx - r, cy - r, cx + r, cy + r
+            canvas.coords(square_id, sx0, sy0, sx1, sy1)
             outline = phase_color(
                 CombatPhase.DEATH if entity.is_defeated else entity.combat_phase
             )
@@ -735,6 +758,8 @@ class ObserverHud:
                 outline=outline,
                 width=2,
             )
+            # Letter stays at the entity's own position, not the (possibly
+            # off-centre, per a lane-offset attack box) hitbox centre.
             canvas.coords(text_id, cx, cy)
             # Single letter/symbol — no phase suffix (outline carries state).
             canvas.itemconfigure(
@@ -748,10 +773,36 @@ class ObserverHud:
             canvas.tag_raise(text_id)
             drawn += 1
 
+            for attack_range in entity.attack_ranges:
+                projected = attack_range.projected(
+                    world_x=entity.world_x,
+                    lane_y=entity.world_y,
+                    world_z=entity.world_z,
+                    facing_left=entity.facing_left,
+                )
+                rx0, ry0, rx1, ry1 = _hitbox_to_canvas(projected, world, ox, oy, plot_w, plot_h)
+                rx0 = max(plot_left, min(plot_right, rx0))
+                rx1 = max(plot_left, min(plot_right, rx1))
+                ry0 = max(plot_top, min(plot_bottom, ry0))
+                ry1 = max(plot_top, min(plot_bottom, ry1))
+                if rx1 - rx0 < 2 or ry1 - ry0 < 2:
+                    continue
+                if ranges_drawn >= len(self._range_rects):
+                    self._ensure_range_pool(ranges_drawn + 1)
+                range_id = self._range_rects[ranges_drawn]
+                canvas.coords(range_id, rx0, ry0, rx1, ry1)
+                canvas.itemconfigure(range_id, state="normal")
+                # Below the marker/letter, above holes and the camera plate.
+                canvas.tag_raise(range_id, "cam")
+                canvas.tag_lower(range_id, "marker")
+                ranges_drawn += 1
+
         for index in range(drawn, len(self._markers)):
             square_id, text_id = self._markers[index]
             canvas.itemconfigure(square_id, state="hidden")
             canvas.itemconfigure(text_id, state="hidden")
+        for index in range(ranges_drawn, len(self._range_rects)):
+            canvas.itemconfigure(self._range_rects[index], state="hidden")
 
         empty_cx = ox + plot_w / 2
         empty_cy = oy + plot_h / 2
@@ -835,6 +886,31 @@ class ObserverHud:
                 )
             )
 
+    def _ensure_range_pool(self, count: int) -> None:
+        """Grow the reusable ``AttackRange`` square pool to at least ``count``.
+
+        One rectangle per (entity, AttackRange) pair, not per entity: an
+        enemy with several attacks (e.g. Garcia's four) gets one square each,
+        so overlaps read as denser-shaded ground rather than hiding which
+        attacks actually reach a given spot.
+        """
+
+        canvas = self._canvas
+        while len(self._range_rects) < count:
+            self._range_rects.append(
+                canvas.create_rectangle(
+                    0,
+                    0,
+                    0,
+                    0,
+                    fill=_RANGE_FILL,
+                    outline="",
+                    stipple="gray50",
+                    state="hidden",
+                    tags=("range",),
+                )
+            )
+
     def _ensure_marker_pool(self, count: int) -> None:
         """Grow the reusable square-outline/text pool to at least ``count``."""
 
@@ -899,6 +975,37 @@ def _map_y(map_y: float, world: WorldMap, oy: float, plot_h: float) -> float:
 
     t = (map_y - world.view_top) / world.view_height
     return oy + t * plot_h
+
+
+def _hitbox_to_canvas(
+    hitbox: Hitbox, world: WorldMap, ox: float, oy: float, plot_w: float, plot_h: float
+) -> tuple[float, float, float, float]:
+    """Project an absolute-world ``Hitbox`` into canvas coordinates.
+
+    X needs the camera offset first (``map_x = world_x - camera_x``, per
+    ``world_map.project_to_map``); the lane axis is already absolute in both
+    coordinate systems, so ``hitbox.y0``/``y1`` go straight into ``_map_y``.
+    """
+
+    x0 = _map_x(hitbox.x0 - world.camera_x, world, ox, plot_w)
+    x1 = _map_x(hitbox.x1 - world.camera_x, world, ox, plot_w)
+    y0 = _map_y(hitbox.y0, world, oy, plot_h)
+    y1 = _map_y(hitbox.y1, world, oy, plot_h)
+    return x0, y0, x1, y1
+
+
+def _expand_to_min(a: float, b: float, minimum: float) -> tuple[float, float]:
+    """Widen ``(a, b)`` symmetrically about its centre to at least ``minimum``.
+
+    Only ever grows, never shrinks a real box -- purely a visibility floor
+    for a hitbox that projects to a sliver at a zoomed-out view.
+    """
+
+    span = b - a
+    if span >= minimum:
+        return a, b
+    pad = (minimum - span) / 2.0
+    return a - pad, b + pad
 
 
 def _describe_verb(verb: Verb | None) -> str:

@@ -5,8 +5,11 @@ from sor_autoplay.ai.tokens import CounterGrab, Punch
 from sor_autoplay.ai.loop import VerbState
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import WalkToAdvanceStage
+from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay.hud import ObserverHud, _window_config_path
 from sor_autoplay.hud import _describe_verb, _describe_pending
+from sor_autoplay.hud import _expand_to_min, _hitbox_to_canvas
+from sor_autoplay.world_map import WorldMap
 
 
 class DescribeVerbTests(unittest.TestCase):
@@ -58,6 +61,86 @@ class DescribePendingTests(unittest.TestCase):
             _describe_pending(pending),
             "Pending  Punch  (→obj03), WalkToAdvanceStage  (right)",
         )
+
+
+def _world(*, camera_x: int = 768) -> WorldMap:
+    """A WorldMap fixture wide enough that projected coordinates land inside
+    the plot; only the fields _hitbox_to_canvas actually reads are given
+    non-trivial values."""
+
+    return WorldMap(
+        camera_x=camera_x,
+        camera_y=0,
+        camera_left=32.0,
+        camera_right=288.0,
+        camera_top=0.0,
+        camera_bottom=112.0,
+        view_left=-100.0,
+        view_right=420.0,
+        view_top=-20.0,
+        view_bottom=132.0,
+        entities=(),
+    )
+
+
+class HitboxToCanvasTests(unittest.TestCase):
+    """X needs the camera offset (hitbox coordinates are absolute world, map
+    coordinates are camera-relative); the lane axis (Y) is already absolute
+    in both, so it must pass straight through untouched."""
+
+    def test_x_is_offset_by_camera_x_before_projecting(self) -> None:
+        world = _world(camera_x=768)
+        box = Hitbox(x0=780, x1=820, y0=34, y1=50, z0=-40, z1=-8)
+        ox, oy, plot_w, plot_h = 10.0, 10.0, 260.0, 112.0
+
+        x0, y0, x1, y1 = _hitbox_to_canvas(box, world, ox, oy, plot_w, plot_h)
+
+        from sor_autoplay.hud import _map_x, _map_y
+
+        self.assertEqual(x0, _map_x(780 - 768, world, ox, plot_w))
+        self.assertEqual(x1, _map_x(820 - 768, world, ox, plot_w))
+        self.assertEqual(y0, _map_y(34, world, oy, plot_h))
+        self.assertEqual(y1, _map_y(50, world, oy, plot_h))
+
+    def test_a_wider_box_projects_to_a_wider_rectangle(self) -> None:
+        world = _world()
+        ox, oy, plot_w, plot_h = 10.0, 10.0, 260.0, 112.0
+        narrow = Hitbox(x0=790, x1=800, y0=34, y1=50, z0=0, z1=0)
+        wide = Hitbox(x0=760, x1=840, y0=34, y1=50, z0=0, z1=0)
+
+        nx0, _, nx1, _ = _hitbox_to_canvas(narrow, world, ox, oy, plot_w, plot_h)
+        wx0, _, wx1, _ = _hitbox_to_canvas(wide, world, ox, oy, plot_w, plot_h)
+
+        self.assertGreater(wx1 - wx0, nx1 - nx0)
+
+    def test_an_asymmetric_lane_offset_is_not_recentred(self) -> None:
+        # Nora's real whip lane extent (-12..+10) is not symmetric about her
+        # own position -- the projection must preserve that, not re-centre it.
+        world = _world()
+        ox, oy, plot_w, plot_h = 10.0, 10.0, 260.0, 112.0
+        box = Hitbox(x0=800, x1=848, y0=64 - 12, y1=64 + 10, z0=0, z1=0)
+
+        _, y0, _, y1 = _hitbox_to_canvas(box, world, ox, oy, plot_w, plot_h)
+
+        from sor_autoplay.hud import _map_y
+
+        self.assertEqual(y0, _map_y(52, world, oy, plot_h))
+        self.assertEqual(y1, _map_y(74, world, oy, plot_h))
+
+
+class ExpandToMinTests(unittest.TestCase):
+    def test_leaves_a_span_already_at_or_above_the_minimum_untouched(self) -> None:
+        self.assertEqual(_expand_to_min(10.0, 20.0, 6.0), (10.0, 20.0))
+        self.assertEqual(_expand_to_min(10.0, 16.0, 6.0), (10.0, 16.0))
+
+    def test_grows_a_smaller_span_symmetrically_about_its_centre(self) -> None:
+        a, b = _expand_to_min(10.0, 12.0, 6.0)
+        self.assertAlmostEqual(b - a, 6.0)
+        self.assertAlmostEqual((a + b) / 2, 11.0)  # centre unchanged
+
+    def test_never_shrinks_a_real_box(self) -> None:
+        a, b = _expand_to_min(0.0, 100.0, 6.0)
+        self.assertEqual((a, b), (0.0, 100.0))
 
 
 class _FakeRoot:
