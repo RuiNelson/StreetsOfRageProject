@@ -420,6 +420,59 @@ class CheckForIncomingMeleeTests(unittest.TestCase):
 
         self.assertEqual(check_for_incoming_melee({myself, enemy}), set())
 
+    def test_a_fast_committed_enemy_still_far_away_promotes_predictively(self) -> None:
+        # Signal's slide (enemy-ai.md "Signal's slide is velocity, not a
+        # hitbox"): no attack shape anywhere in its own animation set, so
+        # attack_ranges stays empty and the only way to see this coming is
+        # the velocity projection. 250px out (well past Axel's 74px caution
+        # box) but closing at 25 px/tick facing left.
+        myself = make_myself(world_x=100, world_y=100)
+        signal = make_enemy(
+            slot="obj01",
+            type_id=0x24,
+            world_x=250,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+            facing_left=True,
+            grunt_vel_x=-25.0,
+            grunt_vel_y=0.0,
+        )
+
+        result = check_for_incoming_melee({myself, signal})
+
+        self.assertEqual(result, {IncomingMelee(actor_slot="P1", target_slot="obj01")})
+
+    def test_a_committed_enemy_moving_away_is_not_promoted(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        signal = make_enemy(
+            slot="obj01",
+            type_id=0x24,
+            world_x=250,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+            grunt_vel_x=25.0,
+            grunt_vel_y=0.0,
+        )
+
+        self.assertEqual(check_for_incoming_melee({myself, signal}), set())
+
+    def test_a_calm_enemy_closing_fast_is_still_not_a_threat(self) -> None:
+        # Velocity alone never substitutes for the dangerous-phase gate --
+        # an ordinary approaching Grunt (CombatPhase.NORMAL) always has
+        # nonzero velocity and must not be promoted just for walking toward
+        # the actor.
+        myself = make_myself(world_x=100, world_y=100)
+        enemy = make_enemy(
+            slot="obj01",
+            world_x=250,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            grunt_vel_x=-25.0,
+            grunt_vel_y=0.0,
+        )
+
+        self.assertEqual(check_for_incoming_melee({myself, enemy}), set())
+
 
 class CheckForPunishWindowsTests(unittest.TestCase):
     def test_knockdown_has_no_readable_timer(self) -> None:

@@ -14,6 +14,8 @@ questions about tokens already in the context.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ..phases import should_ignore_as_target
 from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
 from .tokens import (
@@ -93,6 +95,20 @@ PIT_AVOID_MARGIN = 8
 # own startup frames. Half a tile absorbs both without pretending the box is
 # bigger than it is.
 REACH_SAFETY_MARGIN = 8
+
+# How far ahead a Grunt's own committed velocity (grunt_vel_x/grunt_vel_y) is
+# trusted to extrapolate -- shared between inference.check_for_closing_enemies
+# (the rear-band early warning) and check_for_incoming_melee's predictive
+# extension below, so "soon" means the same thing to both. ~200ms at the
+# 33ms poll default: one missed poll plus margin for the slowest measured
+# RearAttack startup (Adam, 21 frames).
+#
+# Not every closing enemy has a reach box to test against: enemy-ai.md's
+# "Signal's slide is velocity, not a hitbox" documents a real ROM case
+# (Signal state $0A) that sets +$1C/+$20 directly with no attack shape at
+# all -- the danger *is* the velocity, tested here by the enemy's own body
+# reaching the caution zone, not by anything in attack_ranges.py.
+CLOSING_ENEMY_THREAT_TICKS = 6
 
 
 def targets_of(context: Context, cls: type, actor_slot: str) -> set[str]:
@@ -387,3 +403,42 @@ def too_close_to_keep_approaching(actor: PlayableCharacter, enemy: Enemy) -> boo
         return False
     outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
     return dx <= outer + RETREAT_CAUTION_MARGIN
+
+
+def enemy_projected(enemy: Enemy, ticks: int) -> Enemy:
+    """``enemy``, ``ticks`` ahead, assuming its own committed velocity holds.
+
+    Only ``grunt_vel_x``/``grunt_vel_y`` move the projection -- the ordinary-
+    enemy-only fields (``Boss`` always reports 0 there; its own ``vel_x``/
+    ``vel_z`` live at different offsets and are out of scope, matching
+    ``check_for_closing_enemies``). A stationary enemy projects to itself.
+    """
+
+    return replace(
+        enemy,
+        world_x=enemy.world_x + round(enemy.grunt_vel_x * ticks),
+        world_y=enemy.world_y + round(enemy.grunt_vel_y * ticks),
+    )
+
+
+def enemy_will_close_soon(
+    actor: PlayableCharacter, enemy: Enemy, *, ticks: int = CLOSING_ENEMY_THREAT_TICKS
+) -> bool:
+    """Will ``enemy`` be caution-close *soon*, even though it is not yet?
+
+    ``too_close_to_keep_approaching`` alone is reactive: it only sees the
+    enemy's *current* position, so a fast committed mover -- Signal's slide
+    is the ROM-confirmed case (enemy-ai.md "Signal's slide is velocity, not
+    a hitbox"), ~2.5 px/tick with no attack shape at all -- can close from
+    "outside every band" to "already landing" between two polls with no
+    warning. This projects the enemy ``ticks`` ahead by its own velocity and
+    re-tests the same caution predicate there.
+
+    A stationary enemy (``grunt_vel_x == grunt_vel_y == 0``, true for every
+    ``Boss`` and any ``Grunt`` not currently moving) projects to itself, so
+    this degrades to ``too_close_to_keep_approaching`` and never fires an
+    extra warning that current-position logic would not already have
+    caught.
+    """
+
+    return too_close_to_keep_approaching(actor, enemy_projected(enemy, ticks))

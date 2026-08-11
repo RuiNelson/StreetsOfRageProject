@@ -40,9 +40,10 @@ PROJECTILE_LANE_SLACK = 24
 CAUTION_RANGE_X = 40
 
 # A Grunt outside this time-to-arrival window is not "closing fast" yet.
-# ~200ms at the 33ms poll default: covers one missed poll plus margin for
-# the slowest measured RearAttack startup (Adam, 21 frames).
-CLOSING_ENEMY_THREAT_TICKS = 6
+# The tick horizon itself now lives in reach.CLOSING_ENEMY_THREAT_TICKS --
+# shared with check_for_incoming_melee's predictive extension below, so
+# "soon" means the same thing to both -- but the rear-band lane slack is
+# specific to this check's own band test and stays local.
 CLOSING_ENEMY_LANE_SLACK = 24
 
 # A crowd, rather than a queue: this many live enemies inside the close box
@@ -114,7 +115,7 @@ def check_for_incoming_projectiles(context: Context) -> Context:
 def _closing_enemy_threatens(enemy: Grunt, actor: PlayableCharacter) -> bool:
     """True when the enemy is heading toward the actor's rear-attack band on
     X and is still off-lane enough that it is not obviously stationary,
-    landing inside that band within ``CLOSING_ENEMY_THREAT_TICKS``.
+    landing inside that band within ``reach.CLOSING_ENEMY_THREAT_TICKS``.
 
     Must pick the *side-specific* band (behind vs front), not their union:
     Axel/Blaze have zero forward RearAttack reach, so an enemy closing in
@@ -149,7 +150,7 @@ def _closing_enemy_threatens(enemy: Grunt, actor: PlayableCharacter) -> bool:
         return False
 
     ticks = (abs(dx) - max_x) / abs(vx)
-    return ticks <= CLOSING_ENEMY_THREAT_TICKS
+    return ticks <= reach.CLOSING_ENEMY_THREAT_TICKS
 
 
 def check_for_closing_enemies(context: Context) -> Context:
@@ -206,12 +207,28 @@ def check_for_targets_in_reach(context: Context) -> Context:
 
 
 def check_for_incoming_melee(context: Context) -> Context:
-    """Promote committed enemies close enough for their attack to land.
+    """Promote committed enemies close enough for their attack to land --
+    *or* about to be, on their own current velocity.
 
     The melee counterpart of ``check_for_incoming_projectiles``: a dangerous
     phase alone is not a threat (an enemy swinging at nothing three lanes
     away is not), and neither is proximity alone. Only on-screen enemies
     qualify -- an off-screen one cannot connect this tick.
+
+    ``reach.too_close_to_keep_approaching`` alone only sees the enemy's
+    *current* position, which misses a committed fast mover: Signal's slide
+    is the ROM-confirmed case (enemy-ai.md "Signal's slide is velocity, not
+    a hitbox") -- state $0A sets +$1C/+$20 directly (~2.5 px/tick toward the
+    target) with no attack shape anywhere in its animation set, so
+    ``Enemy.attack_ranges`` is empty for it and there is nothing for a
+    static reach check to find. ``reach.enemy_will_close_soon`` re-tests the
+    same caution predicate ``reach.CLOSING_ENEMY_THREAT_TICKS`` ticks ahead,
+    so a dangerous-phase enemy already closing distance promotes
+    ``IncomingMelee`` before it arrives, not only once it has -- which is
+    what lets ``could_retreat_from_danger`` (decide.py) react in time instead
+    of only after the hit is already unavoidable. A stationary enemy
+    projects to itself, so this never promotes anything the current-position
+    test would not already have caught.
     """
 
     enemies = reach.on_screen_enemies(context)
@@ -223,7 +240,10 @@ def check_for_incoming_melee(context: Context) -> Context:
         for enemy in enemies:
             if not is_dangerous(enemy.combat_phase):
                 continue
-            if not reach.too_close_to_keep_approaching(actor, enemy):
+            imminent = reach.too_close_to_keep_approaching(
+                actor, enemy
+            ) or reach.enemy_will_close_soon(actor, enemy)
+            if not imminent:
                 continue
             tokens.add(IncomingMelee(actor_slot=actor.slot, target_slot=enemy.slot))
     return tokens

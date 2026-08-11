@@ -10,7 +10,7 @@ ROM's own geometry.
 import unittest
 
 from sor_autoplay.ai import reach
-from sor_autoplay.ai.tokens import AttackRange, Enemy, Garcia, Myself, Nora
+from sor_autoplay.ai.tokens import AttackRange, Enemy, Garcia, Myself, Nora, Signal
 from sor_autoplay.phases import CombatPhase
 
 # Nora's whip and Garcia's straight punch, exactly as attack_ranges.py pulls
@@ -89,6 +89,26 @@ def _garcia(**overrides) -> Garcia:
     )
     fields.update(overrides)
     return Garcia(**fields)
+
+
+def _signal(**overrides) -> Signal:
+    # Signal's own animation set carries no shape with meaningful reach
+    # anywhere in it (enemy-ai.md "Signal's slide is velocity, not a
+    # hitbox") -- attack_ranges stays empty even mid-slide, unlike Garcia
+    # or Nora above.
+    fields = dict(
+        slot="obj03",
+        type_id=0x24,
+        world_x=300,
+        world_y=100,
+        health=8,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=1,
+        facing_left=True,
+        attack_ranges=(),
+    )
+    fields.update(overrides)
+    return Signal(**fields)
 
 
 class EnemyForwardDxTests(unittest.TestCase):
@@ -204,6 +224,90 @@ class EnemyMaxAndMinReachTests(unittest.TestCase):
         bare: Enemy = _garcia(attack_ranges=())
         self.assertEqual(bare.max_reach, 0)
         self.assertEqual(bare.min_reach, 0)
+
+
+class EnemyProjectedTests(unittest.TestCase):
+    def test_moves_by_velocity_times_ticks(self) -> None:
+        signal = _signal(world_x=300, world_y=100, grunt_vel_x=-2.5, grunt_vel_y=2.0)
+
+        projected = reach.enemy_projected(signal, 6)
+
+        self.assertEqual(projected.world_x, 300 - round(2.5 * 6))
+        self.assertEqual(projected.world_y, 100 + round(2.0 * 6))
+
+    def test_a_stationary_enemy_projects_to_itself(self) -> None:
+        signal = _signal(world_x=300, world_y=100)
+
+        projected = reach.enemy_projected(signal, 6)
+
+        self.assertEqual((projected.world_x, projected.world_y), (300, 100))
+
+    def test_leaves_every_other_field_untouched(self) -> None:
+        signal = _signal(grunt_vel_x=-2.5)
+
+        projected = reach.enemy_projected(signal, 6)
+
+        self.assertEqual(projected.slot, signal.slot)
+        self.assertEqual(projected.combat_phase, signal.combat_phase)
+        self.assertEqual(projected.attack_ranges, signal.attack_ranges)
+
+
+class EnemyWillCloseSoonTests(unittest.TestCase):
+    """Signal's slide (enemy-ai.md "Signal's slide is velocity, not a
+    hitbox") is the ROM-confirmed case this exists for: no attack shape
+    anywhere in its animation set, so attack_ranges is empty and
+    too_close_to_keep_approaching only ever sees the caution-box fallback,
+    which is reactive -- it does not fire until the slide has already
+    arrived."""
+
+    def test_a_fast_committed_signal_still_far_away_closes_soon(self) -> None:
+        # 150px out (well outside Axel's 74px caution box) but closing at
+        # 25 px/tick: 6 ticks covers exactly that 150px, landing dx=0 --
+        # deliberately about the *projection*, not current distance.
+        actor = _myself(world_x=100, world_y=100)
+        signal = _signal(world_x=250, world_y=100, grunt_vel_x=-25.0, grunt_vel_y=0.0)
+
+        self.assertFalse(reach.too_close_to_keep_approaching(actor, signal))
+        self.assertTrue(reach.enemy_will_close_soon(actor, signal))
+
+    def test_a_stationary_signal_never_closes_soon_on_its_own(self) -> None:
+        # Far away and not moving: the *current*-position test already
+        # answers this; projecting a stationary enemy must not add a second,
+        # different answer.
+        actor = _myself(world_x=100, world_y=100)
+        far = _signal(world_x=400, world_y=100)
+
+        self.assertFalse(reach.too_close_to_keep_approaching(actor, far))
+        self.assertFalse(reach.enemy_will_close_soon(actor, far))
+
+    def test_moving_away_does_not_close_soon(self) -> None:
+        # Same distance and speed as the closing case above, opposite sign.
+        actor = _myself(world_x=100, world_y=100)
+        signal = _signal(world_x=250, world_y=100, grunt_vel_x=25.0, grunt_vel_y=0.0)
+
+        self.assertFalse(reach.enemy_will_close_soon(actor, signal))
+
+    def test_off_lane_closing_does_not_count(self) -> None:
+        # Heading straight at the actor's X but on a lane the caution box's
+        # own Y margin excludes -- the projection must still respect that,
+        # not just the X approach.
+        actor = _myself(world_x=100, world_y=100)
+        signal = _signal(world_x=250, world_y=300, grunt_vel_x=-25.0, grunt_vel_y=0.0)
+
+        self.assertFalse(reach.enemy_will_close_soon(actor, signal))
+
+    def test_a_grunt_with_a_real_reach_still_prefers_it_once_projected(self) -> None:
+        # Garcia (confirmed punch: forward 0..40, lane -8..8) 100px ahead of
+        # his own reach, closing at 15 px/tick toward the actor -- projects
+        # to forward_dx=10, inside his real band, well before the caution
+        # box's coarser fallback would have said anything. facing_left=True
+        # (default) means the actor, to Garcia's left, is what "forward"
+        # means for him, so his own world_x must fall to close the gap.
+        actor = _myself(world_x=100, world_y=100)
+        garcia = _garcia(world_x=200, world_y=100, grunt_vel_x=-15.0, grunt_vel_y=0.0)
+
+        self.assertFalse(reach.too_close_to_keep_approaching(actor, garcia))
+        self.assertTrue(reach.enemy_will_close_soon(actor, garcia))
 
 
 if __name__ == "__main__":

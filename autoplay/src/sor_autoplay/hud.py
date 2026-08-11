@@ -15,11 +15,12 @@ from tkinter import font as tkfont
 from typing import Callable
 
 from .ai.loop import VerbState
+from .ai.reach import CLOSING_ENEMY_THREAT_TICKS
 from .ai.tokens import Verb
 from .hitboxes import Hitbox
-from .phases import CombatPhase, phase_color
+from .phases import CombatPhase, is_dangerous, phase_color
 from .state import GameSnapshot, PlayerSnapshot
-from .world_map import MAP_ASPECT, WorldMap
+from .world_map import MAP_ASPECT, MapEntity, WorldMap
 
 OUTER_PAD = 12
 STATUS_GAP = 10
@@ -77,6 +78,16 @@ _RANGE_FILL = _blend_hex("#ff453a", _PLOT_BG, _RANGE_FILL_ALPHA)
 # zoomed-out box does not vanish. Purely cosmetic -- never fed back into
 # anything the AI reads.
 MIN_MARKER_PX = 6
+# Closing-threat vectors: a committed (ATTACKING/CHARGE) ordinary enemy with
+# real velocity toward the actor, drawn as an arrow from its current spot to
+# where reach.enemy_will_close_soon projects it -- the same colour phases.
+# phase_color already uses for CHARGE, since this is the same "committed,
+# about to happen" idea applied to movement instead of an attack box.
+# Deliberately distinct from the AttackRange squares: some enemies (Signal's
+# slide -- enemy-ai.md "Signal's slide is velocity, not a hitbox") have no
+# attack shape at all, so nothing would ever paint a range square for them
+# without this.
+_CLOSING_COLOR = "#ff9f0a"
 
 # Draw order: props under fighters so players/bosses stay readable.
 _KIND_Z = {
@@ -120,6 +131,7 @@ class ObserverHud:
         self._markers: list[tuple[int, int]] = []  # (square_id, text_id)
         self._hole_rects: list[int] = []
         self._range_rects: list[int] = []  # AttackRange squares, pooled like holes
+        self._closing_lines: list[int] = []  # velocity-projection arrows
         self._last_canvas_size: tuple[int, int] = (0, 0)
         self._last_plot_geom: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
         self._last_meta_text: str = ""
@@ -738,6 +750,7 @@ class ObserverHud:
         # Upper bound: some entities will fall outside the plot and draw none
         # of their ranges, so this only ever over-allocates, never under-.
         self._ensure_range_pool(sum(len(e.attack_ranges) for e in entities))
+        self._ensure_closing_pool(len(entities))  # at most one arrow each
 
         plot_left = ox
         plot_right = ox + plot_w
@@ -745,6 +758,7 @@ class ObserverHud:
         plot_bottom = oy + plot_h
         drawn = 0
         ranges_drawn = 0
+        closing_drawn = 0
 
         for entity in entities:
             # map_x = cam-relative X; map_y = absolute lane (top-down, Z ignored).
@@ -822,12 +836,33 @@ class ObserverHud:
                 canvas.tag_lower(range_id, "marker")
                 ranges_drawn += 1
 
+            # Closing-threat vector: a committed ordinary enemy with real
+            # velocity toward the actor, even one with no AttackRange at all
+            # (Signal's slide -- enemy-ai.md "Signal's slide is velocity,
+            # not a hitbox").
+            projected_map = _closing_projection(entity)
+            if projected_map is not None:
+                px = _map_x(projected_map[0], world, ox, plot_w)
+                py = _map_y(projected_map[1], world, oy, plot_h)
+                px = max(plot_left, min(plot_right, px))
+                py = max(plot_top, min(plot_bottom, py))
+                if closing_drawn >= len(self._closing_lines):
+                    self._ensure_closing_pool(closing_drawn + 1)
+                line_id = self._closing_lines[closing_drawn]
+                canvas.coords(line_id, cx, cy, px, py)
+                canvas.itemconfigure(line_id, state="normal")
+                canvas.tag_raise(line_id, "cam")
+                canvas.tag_lower(line_id, "marker")
+                closing_drawn += 1
+
         for index in range(drawn, len(self._markers)):
             square_id, text_id = self._markers[index]
             canvas.itemconfigure(square_id, state="hidden")
             canvas.itemconfigure(text_id, state="hidden")
         for index in range(ranges_drawn, len(self._range_rects)):
             canvas.itemconfigure(self._range_rects[index], state="hidden")
+        for index in range(closing_drawn, len(self._closing_lines)):
+            canvas.itemconfigure(self._closing_lines[index], state="hidden")
 
         empty_cx = ox + plot_w / 2
         empty_cy = oy + plot_h / 2
@@ -938,6 +973,30 @@ class ObserverHud:
                 )
             )
 
+    def _ensure_closing_pool(self, count: int) -> None:
+        """Grow the reusable closing-threat arrow pool to at least ``count``.
+
+        One arrow per entity at most (an enemy either has a real velocity
+        toward the actor this tick or it does not), unlike the range-square
+        pool which can need several per entity.
+        """
+
+        canvas = self._canvas
+        while len(self._closing_lines) < count:
+            self._closing_lines.append(
+                canvas.create_line(
+                    0,
+                    0,
+                    0,
+                    0,
+                    fill=_CLOSING_COLOR,
+                    width=2,
+                    arrow=tk.LAST,
+                    state="hidden",
+                    tags=("closing",),
+                )
+            )
+
     def _ensure_marker_pool(self, count: int) -> None:
         """Grow the reusable square-outline/text pool to at least ``count``."""
 
@@ -1019,6 +1078,36 @@ def _hitbox_to_canvas(
     y0 = _map_y(hitbox.y0, world, oy, plot_h)
     y1 = _map_y(hitbox.y1, world, oy, plot_h)
     return x0, y0, x1, y1
+
+
+def _closing_projection(entity: MapEntity) -> tuple[float, float] | None:
+    """Where ``entity`` will be, in map coordinates, if it is a closing
+    threat worth drawing an arrow for -- ``None`` if it is not one.
+
+    Three conditions, matching ``reach.enemy_will_close_soon``'s own scope
+    (ordinary enemy, committed, actually moving) rather than duplicating its
+    geometry: a ``Boss`` never populates ``enemy_vel_x``/``enemy_vel_y``
+    here at all (``world_map.py`` only reads them in the ``kind=="enemy"``
+    branch), so the velocity check alone already excludes one -- the
+    explicit ``kind`` test is what makes that a documented invariant instead
+    of an accident. A calm (``NORMAL``) enemy is excluded even mid-walk,
+    when its velocity is otherwise identical to a committed one's: showing
+    an arrow on every approaching enemy would bury the one case (a
+    committed attacker with real reach-none of its own -- Signal's slide is
+    the confirmed ROM case, enemy-ai.md "Signal's slide is velocity, not a
+    hitbox") this exists to surface.
+    """
+
+    if entity.kind != "enemy":
+        return None
+    if not is_dangerous(entity.combat_phase):
+        return None
+    if not (entity.enemy_vel_x or entity.enemy_vel_y):
+        return None
+    return (
+        entity.map_x + entity.enemy_vel_x * CLOSING_ENEMY_THREAT_TICKS,
+        entity.map_y + entity.enemy_vel_y * CLOSING_ENEMY_THREAT_TICKS,
+    )
 
 
 def _expand_to_min(a: float, b: float, minimum: float) -> tuple[float, float]:

@@ -1,6 +1,7 @@
 import os
 import unittest
 
+from sor_autoplay.ai.reach import CLOSING_ENEMY_THREAT_TICKS
 from sor_autoplay.ai.tokens import CounterGrab, Punch
 from sor_autoplay.ai.loop import VerbState
 from sor_autoplay.ai.tokens import CallPolice
@@ -8,8 +9,9 @@ from sor_autoplay.ai.tokens import WalkToAdvanceStage
 from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay.hud import ObserverHud, _window_config_path
 from sor_autoplay.hud import _describe_verb, _describe_pending
-from sor_autoplay.hud import _blend_hex, _expand_to_min, _hitbox_to_canvas
-from sor_autoplay.world_map import WorldMap
+from sor_autoplay.hud import _blend_hex, _closing_projection, _expand_to_min, _hitbox_to_canvas
+from sor_autoplay.phases import CombatPhase
+from sor_autoplay.world_map import MapEntity, WorldMap
 
 
 class DescribeVerbTests(unittest.TestCase):
@@ -81,6 +83,70 @@ def _world(*, camera_x: int = 768) -> WorldMap:
         view_bottom=132.0,
         entities=(),
     )
+
+
+def _enemy_entity(**overrides) -> MapEntity:
+    fields = dict(
+        kind="enemy",
+        family="Signal",
+        symbol="S",
+        color="#7dffa0",
+        label="Signal",
+        type_id=0x24,
+        world_x=200,
+        world_y=64,
+        world_z=0,
+        map_x=200.0,
+        map_y=64.0,
+        health=8,
+        slot="obj00",
+        combat_phase=CombatPhase.ATTACKING,
+        facing_left=True,
+        enemy_vel_x=-2.5,
+        enemy_vel_y=0.0,
+    )
+    fields.update(overrides)
+    return MapEntity(**fields)
+
+
+class ClosingProjectionTests(unittest.TestCase):
+    """_closing_projection is the pure decision behind the HUD's closing-
+    threat arrow (a committed ordinary enemy with real velocity toward the
+    actor -- Signal's slide, enemy-ai.md "Signal's slide is velocity, not a
+    hitbox", is the ROM-confirmed case with no AttackRange at all to draw
+    instead)."""
+
+    def test_projects_a_committed_enemys_own_velocity(self) -> None:
+        entity = _enemy_entity(map_x=200.0, map_y=64.0, enemy_vel_x=-2.5, enemy_vel_y=1.0)
+
+        result = _closing_projection(entity)
+
+        self.assertEqual(
+            result,
+            (
+                200.0 + -2.5 * CLOSING_ENEMY_THREAT_TICKS,
+                64.0 + 1.0 * CLOSING_ENEMY_THREAT_TICKS,
+            ),
+        )
+
+    def test_a_calm_enemy_gets_no_arrow_even_while_moving(self) -> None:
+        # A routine approach has real velocity too -- only a committed
+        # (ATTACKING/CHARGE) phase should surface it, or every walking
+        # enemy would draw one and bury Signal's slide in the noise.
+        entity = _enemy_entity(combat_phase=CombatPhase.NORMAL)
+
+        self.assertIsNone(_closing_projection(entity))
+
+    def test_a_stationary_enemy_gets_no_arrow(self) -> None:
+        entity = _enemy_entity(enemy_vel_x=0.0, enemy_vel_y=0.0)
+
+        self.assertIsNone(_closing_projection(entity))
+
+    def test_only_ordinary_enemies_qualify_not_players_or_bosses(self) -> None:
+        for kind in ("player", "boss", "breakable", "weapon"):
+            with self.subTest(kind=kind):
+                entity = _enemy_entity(kind=kind)
+                self.assertIsNone(_closing_projection(entity))
 
 
 class HitboxToCanvasTests(unittest.TestCase):

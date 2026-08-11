@@ -190,9 +190,25 @@ definition of every band instead of each recomputing it.
 
 **`IncomingMelee`** is the melee counterpart of `IncomingProjectile`: an
 on-screen enemy in a committed attack phase, close enough that its hit can
-actually land on the actor. A dangerous phase alone is not a threat and
-neither is proximity alone, so this is a judgment, not a copy of every
-attacking enemy on screen.
+actually land on the actor — or, on the enemy's own current velocity, soon
+will be. A dangerous phase alone is not a threat and neither is proximity
+alone, so this is a judgment, not a copy of every attacking enemy on screen.
+
+The predictive half exists because not every committed attack has a static
+reach to test: Signal's slide (`enemy-ai.md` "Signal's slide is velocity,
+not a hitbox") sets its own velocity directly and carries no attack shape
+anywhere in its animation set, so `Enemy.attack_ranges` stays empty for it
+and a purely instantaneous-position check would never see it coming until
+it had already arrived. `reach.enemy_will_close_soon` re-tests the same
+caution predicate a short horizon (`reach.CLOSING_ENEMY_THREAT_TICKS`)
+ahead by projecting the enemy's own `grunt_vel_x`/`grunt_vel_y`, and a
+stationary enemy projects to itself, so this never promotes anything the
+current-position test would not already have caught. Unlike `ClosingEnemy`
+below, this reuses the *existing* `IncomingMelee` → `RetreatFromDanger`
+pipeline rather than needing a new verb, which is exactly the kind of
+"genuine evasive reaction" `ClosingEnemy`'s own note asks for — just
+reached through a different, broader signal (any direction, not only the
+rear band) rather than through `ClosingEnemy` itself.
 
 **`PunishWindow`** flags an enemy that cannot defend itself right now —
 knocked down, blocked, grabbed, in move recovery, or **stunned**. It

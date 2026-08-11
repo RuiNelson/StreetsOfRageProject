@@ -358,13 +358,19 @@ class GrabIntoDeadZone(GrabOpportunity):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class IncomingMelee(Inferred):
-    """An enemy whose committed attack is close enough to land on the actor.
+    """An enemy whose committed attack is close enough to land on the actor
+    -- or, on its own current velocity, soon will be.
 
     Produced by ``inference.check_for_incoming_melee`` for an on-screen
     enemy in a dangerous phase (ATTACKING/CHARGE) sitting inside
-    ``reach.too_close_to_keep_approaching``'s caution box. The melee-range
-    counterpart of ``IncomingProjectile``: a threat judgment, not a copy of
-    every dangerous enemy on screen.
+    ``reach.too_close_to_keep_approaching``'s caution box now, or projected
+    into it within ``reach.CLOSING_ENEMY_THREAT_TICKS``
+    (``reach.enemy_will_close_soon``) -- the predictive half exists for a
+    committed *closing* attack with no static reach to test at all, the
+    ROM-confirmed case being Signal's slide (enemy-ai.md "Signal's slide is
+    velocity, not a hitbox"). The melee-range counterpart of
+    ``IncomingProjectile``: a threat judgment, not a copy of every dangerous
+    enemy on screen.
     """
 
     actor_slot: str
