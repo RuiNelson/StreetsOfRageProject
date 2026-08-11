@@ -59,6 +59,24 @@ SURROUNDED_MIN_ENEMIES = 3
 SAFE_SPOT_STEP_X = 32
 SAFE_SPOT_STEP_Y = 24
 
+# See _safe_spot_candidates' docstring: a couple of px of jitter around
+# dx == 0 between the actor and its threat should not flip which way "away"
+# points. Same magnitude as execute.DIRECTION_HYSTERESIS_X, kept as its own
+# constant since inference.py must not import execute.py.
+SAFE_SPOT_SIDE_HYSTERESIS_X = 10
+
+# Minimum clearance improvement a sidestep/diagonal candidate must offer
+# over the plain X-away retreat (the first candidate _safe_spot_candidates
+# returns) before check_for_safe_spots prefers it. Without this, two
+# candidates scoring within a couple of px of each other on ordinary
+# position jitter flipped which one won every tick -- and since the
+# candidates differ in whether they add a Y step at all, that flip read live
+# as the actor darting into a vertical/diagonal dash instead of holding a
+# steady retreat line. Comfortably above the noise one tick of movement can
+# introduce, well below the real clearance gap a genuinely better sidestep
+# provides.
+SAFE_SPOT_PREFERENCE_MARGIN = 12
+
 
 def _actors(context: Context) -> list[PlayableCharacter]:
     return [actor for actor in (find(context, Myself), find(context, Partner)) if actor is not None]
@@ -380,9 +398,22 @@ def _safe_spot_candidates(
 ) -> list[tuple[int, int]]:
     """Steps worth considering: away on X, and the two sidesteps, alone or
     combined with the retreat. Standing still is not a candidate -- this
-    token only exists to answer "back off to *where*"."""
+    token only exists to answer "back off to *where*".
 
-    away = -SAFE_SPOT_STEP_X if threat.world_x >= actor.world_x else SAFE_SPOT_STEP_X
+    Within ``SAFE_SPOT_SIDE_HYSTERESIS_X`` of the threat, which way is
+    "away" is read off ``actor.facing_left`` instead of the raw compare
+    (same convention as ``execute._back_direction_mask``: right when facing
+    left) -- an actor already backed into caution range sits close enough to
+    its threat that a couple of px of jitter would otherwise flip every
+    candidate here, including the sidesteps, to the opposite side on
+    consecutive ticks.
+    """
+
+    dx = threat.world_x - actor.world_x
+    if abs(dx) <= SAFE_SPOT_SIDE_HYSTERESIS_X:
+        away = SAFE_SPOT_STEP_X if actor.facing_left else -SAFE_SPOT_STEP_X
+    else:
+        away = -SAFE_SPOT_STEP_X if dx >= 0 else SAFE_SPOT_STEP_X
     return [
         (actor.world_x + away, actor.world_y),
         (actor.world_x + away, actor.world_y + SAFE_SPOT_STEP_Y),
@@ -422,8 +453,14 @@ def check_for_safe_spots(context: Context) -> Context:
             key=lambda e: math.hypot(e.world_x - actor.world_x, e.world_y - actor.world_y),
         )
 
+        # index 0 (the plain X-away retreat) is the stability anchor: every
+        # other candidate must clear it by SAFE_SPOT_PREFERENCE_MARGIN to
+        # win, so a near-tie keeps resolving to the same simple retreat
+        # instead of flipping to a sidestep on ordinary jitter (see that
+        # constant's comment).
         best: tuple[float, tuple[int, int]] | None = None
-        for candidate_x, candidate_y in _safe_spot_candidates(actor, nearest):
+        anchor_clearance: float | None = None
+        for index, (candidate_x, candidate_y) in enumerate(_safe_spot_candidates(actor, nearest)):
             if not reach.in_playable_lane(candidate_y, context):
                 continue
             if camera is not None and not reach.in_camera(camera, candidate_x, candidate_y):
@@ -434,8 +471,15 @@ def check_for_safe_spots(context: Context) -> Context:
                 math.hypot(enemy.world_x - candidate_x, enemy.world_y - candidate_y)
                 for enemy in enemies
             )
-            if best is None or clearance > best[0]:
-                best = (clearance, (candidate_x, candidate_y))
+            if index == 0:
+                anchor_clearance = clearance
+                score = clearance
+            elif anchor_clearance is None:
+                score = clearance
+            else:
+                score = clearance - SAFE_SPOT_PREFERENCE_MARGIN
+            if best is None or score > best[0]:
+                best = (score, (candidate_x, candidate_y))
         if best is None:
             continue
         tokens.add(

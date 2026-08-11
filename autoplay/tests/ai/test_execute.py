@@ -13,6 +13,7 @@ from sor_autoplay.ai.tokens import (
     OpenBreakable,
     Punch,
     RearAttack,
+    ReleaseGrab,
     SprayPepper,
     StabWithKnifeOrBottle,
     Supplex,
@@ -383,6 +384,29 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
         # Pure sidestep: down the lane, no lateral component.
         client.hold_buttons.assert_called_once_with(player1=DOWN, player2=0)
 
+    def test_fallback_side_pick_does_not_glitch_exactly_on_alignment(self) -> None:
+        # Regression, same shape as the walk-to-enemy X pick: with no
+        # SafeSpot in context, the fallback picked "away" from a raw compare
+        # on actor.world_x vs target.world_x, so a couple of px of jitter
+        # right at alignment flipped the full 2*RETREAT_FROM_DANGER_DISTANCE
+        # retreat direction.
+        masks = []
+        for actor_x in (99, 100, 101):
+            actor = replace(_myself(world_x=actor_x, world_y=50), facing_left=True)
+            target = replace(_enemy(world_x=100, world_y=50), combat_phase=CombatPhase.ATTACKING)
+            gamepad, _ = _gamepad()
+            execute_verb(
+                RetreatFromDanger(actor_slot="P1", target_slot="obj01"),
+                {actor, target},
+                gamepad,
+            )
+            masks.append(gamepad.held)
+
+        self.assertFalse(
+            any(m & LEFT for m in masks) and any(m & RIGHT for m in masks),
+            f"opposite horizontal commands straddling exact alignment: {masks}",
+        )
+
     def test_ignores_a_safe_spot_belonging_to_the_partner(self) -> None:
         actor = _myself(world_x=100, world_y=50)
         target = replace(_enemy(world_x=150, world_y=50), combat_phase=CombatPhase.ATTACKING)
@@ -681,6 +705,30 @@ class ExecuteGrabEnemyTests(unittest.TestCase):
         client.hold_buttons.assert_called_once_with(player1=0, player2=0)
 
 
+class ExecuteReleaseGrabTests(unittest.TestCase):
+    def test_side_pick_does_not_glitch_exactly_on_alignment(self) -> None:
+        # Regression, same shape as the other side picks in this file: the
+        # two bodies are still overlapping right after a release, so a raw
+        # compare on actor.world_x vs target.world_x flipped which way was
+        # "away" on ordinary jitter.
+        target = _enemy(world_x=100, world_y=100)
+        masks = []
+        for actor_x in (99, 100, 101):
+            actor = replace(_myself(world_x=actor_x, world_y=100), facing_left=True)
+            gamepad, _ = _gamepad()
+            execute_verb(
+                ReleaseGrab(actor_slot="P1", target_slot="obj01"),
+                {actor, target},
+                gamepad,
+            )
+            masks.append(gamepad.held)
+
+        self.assertFalse(
+            any(m & LEFT for m in masks) and any(m & RIGHT for m in masks),
+            f"opposite horizontal commands straddling exact alignment: {masks}",
+        )
+
+
 class ExecuteSupplexTests(unittest.TestCase):
     def test_presses_jump_from_front_hold(self) -> None:
         actor = _myself(action_state=0x60)
@@ -843,6 +891,29 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
         execute_verb(verb, {actor, prop}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B | LEFT, player2=0, frames=4)
+
+    def test_side_pick_does_not_glitch_exactly_on_alignment(self) -> None:
+        # Regression, same shape as the enemy/retreat/release-grab side
+        # picks: dy=40 keeps the actor outside smash range on Y (in_smash_
+        # range requires BREAKABLE_PUNCH_Y=16) so the walk-in target,
+        # not the punch, is what's under test. A raw compare on
+        # actor.world_x vs the prop's flipped which side to stop on for a
+        # couple of px of jitter right at alignment.
+        actor_x = 100
+        masks = []
+        for prop_x in (99, 100, 101):
+            actor = replace(_myself(world_x=actor_x, world_y=50), facing_left=True)
+            prop = Breakable(slot="obj09", world_x=prop_x, world_y=90, type_id=0x40)
+            gamepad, _ = _gamepad()
+            execute_verb(
+                OpenBreakable(actor_slot="P1", target_slot="obj09"), {actor, prop}, gamepad
+            )
+            masks.append(gamepad.held)
+
+        self.assertFalse(
+            any(m & LEFT for m in masks) and any(m & RIGHT for m in masks),
+            f"opposite horizontal commands straddling exact alignment: {masks}",
+        )
 
     def test_missing_actor_or_target_does_nothing(self) -> None:
         prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)

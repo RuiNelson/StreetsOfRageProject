@@ -28,6 +28,7 @@ from sor_autoplay.ai.inference import (
     check_for_targets_in_reach,
     check_for_weapon_upgrades,
     generate_inference_tokens,
+    _safe_spot_candidates,
 )
 from sor_autoplay.ai.tokens import AttackRange, Token
 from sor_autoplay.phases import CombatPhase
@@ -569,6 +570,51 @@ class CheckForSafeSpotsTests(unittest.TestCase):
         spot = next(iter(result))
         self.assertEqual(spot.world_x, 100)
         self.assertNotEqual(spot.world_y, 60)
+
+    def test_side_pick_does_not_glitch_exactly_on_alignment(self) -> None:
+        # Regression (live-diagnosed, same shape as execute.py's X pick):
+        # the old "away" sign was a raw compare between actor and threat X,
+        # so a couple of px of jitter right around alignment flipped every
+        # candidate here -- including the sidesteps -- to the opposite side.
+        actor = make_myself(world_x=100, world_y=60, facing_left=True)
+        xs = []
+        for threat_x in (99, 100, 101):
+            threat = make_enemy(world_x=threat_x, world_y=60)
+            xs.append(_safe_spot_candidates(actor, threat)[0][0])
+
+        self.assertEqual(len(set(xs)), 1, f"away side flipped across alignment: {xs}")
+
+    def test_prefers_the_plain_retreat_over_a_near_tied_sidestep(self) -> None:
+        # Regression: candidates used to be picked by raw max clearance, so
+        # two candidates within a couple of px of each other on ordinary
+        # jitter flipped which one won -- and since the candidates differ in
+        # whether they add a Y step, that flip read live as the actor
+        # darting into a vertical dash instead of holding a steady retreat
+        # line. Pits carve away every candidate except the plain retreat
+        # (index 0, x=68,y=60) and the X-away-plus-Y-up sidestep (x=68,
+        # y=36), and a bystander enemy at (68, 51) is placed so the
+        # sidestep's *raw* clearance (15px) edges out the plain retreat's
+        # (9px) by less than SAFE_SPOT_PREFERENCE_MARGIN -- old code picked
+        # the sidestep; the anchor bias must keep picking the plain retreat.
+        myself = make_myself(world_x=100, world_y=60, facing_left=False)
+        threat = make_enemy(
+            slot="obj01", world_x=160, world_y=60, combat_phase=CombatPhase.ATTACKING
+        )
+        bystander = make_enemy(
+            slot="obj02", world_x=68, world_y=51, combat_phase=CombatPhase.NORMAL
+        )
+        camera = CameraRange(left=0, right=400, top=0, bottom=112)
+        context = {myself, threat, bystander, camera}
+        context = context | check_for_incoming_melee(context)
+        context = context | {
+            Pit(world_x=0, lane_y=76, width=400, height=8),
+            Pit(world_x=90, lane_y=28, width=20, height=8),
+        }
+
+        result = check_for_safe_spots(context)
+
+        spot = next(iter(result))
+        self.assertEqual((spot.world_x, spot.world_y), (68, 60))
 
 
 class CheckForWeaponUpgradesTests(unittest.TestCase):

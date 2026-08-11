@@ -390,16 +390,29 @@ def _retreat_from_danger_target(
     camera, or land on a pit. Falls back to stepping directly away from
     ``target`` on X, holding the current lane, when no safe spot was found
     -- backing off blindly still beats standing in the attack.
+
+    Within ``DIRECTION_HYSTERESIS_X`` of the target, which way is "away" is
+    read off ``actor.facing_left`` instead of the live position compare --
+    the same reasoning as ``_walk_to_near_enemy_target``'s own X pick: this
+    close, the raw compare is noise, and flipping it flips the full
+    ``2 * RETREAT_FROM_DANGER_DISTANCE`` retreat direction on a spurious
+    tick.
     """
 
     for spot in find_all(context, SafeSpot):
         if spot.actor_slot == actor.slot:
             return spot.world_x, spot.world_y
 
-    if actor.world_x <= target.world_x:
-        target_x = actor.world_x - RETREAT_FROM_DANGER_DISTANCE
+    dx = target.world_x - actor.world_x
+    if abs(dx) <= DIRECTION_HYSTERESIS_X:
+        flee_right = actor.facing_left
     else:
-        target_x = actor.world_x + RETREAT_FROM_DANGER_DISTANCE
+        flee_right = dx < 0
+    target_x = (
+        actor.world_x + RETREAT_FROM_DANGER_DISTANCE
+        if flee_right
+        else actor.world_x - RETREAT_FROM_DANGER_DISTANCE
+    )
     return target_x, actor.world_y
 
 
@@ -582,8 +595,18 @@ def state_machine_release_grab(verb: ReleaseGrab, context: Context, gamepad: Vir
         mask = _back_direction_mask(actor)
         gamepad.hold(mask)
         return
-    # Walk away from the held body.
-    away_x = actor.world_x + (20 if actor.world_x >= target.world_x else -20)
+    # Walk away from the held body. Within DIRECTION_HYSTERESIS_X, use
+    # facing (same fallback as the target-is-None branch above) instead of
+    # the raw compare -- the two bodies are still overlapping right after a
+    # release, so a couple of px of jitter would otherwise flip which way is
+    # "away" every tick.
+    dx = target.world_x - actor.world_x
+    if abs(dx) <= DIRECTION_HYSTERESIS_X:
+        # Same convention as _back_direction_mask above: right when facing left.
+        away_right = actor.facing_left
+    else:
+        away_right = dx < 0
+    away_x = actor.world_x + (20 if away_right else -20)
     gamepad.hold(
         _movement_mask(context, actor.world_x, actor.world_y, away_x, actor.world_y)
     )
@@ -643,13 +666,22 @@ def _walk_to_breakable_target(actor: Myself | Partner, target: Breakable) -> tup
     """Stopping point for approaching ``target``: a Breakable is a solid
     obstacle, so stop just inside smash range on whichever side the actor
     already occupies rather than walking to the breakable's exact (and
-    unreachable) center."""
+    unreachable) center.
+
+    Within ``DIRECTION_HYSTERESIS_X`` of the prop, which side counts as
+    "already occupies" is read off ``actor.facing_left`` instead of the raw
+    compare, same as ``_walk_to_near_enemy_target``'s X pick -- otherwise a
+    couple of px of approach jitter right at the prop flips the stop point
+    by a full ``2 * stop_dx``.
+    """
 
     stop_dx = max(0, BREAKABLE_PUNCH_X - BREAKABLE_STOP_BUFFER)
-    if actor.world_x <= target.world_x:
-        target_x = target.world_x - stop_dx
+    dx = target.world_x - actor.world_x
+    if abs(dx) <= DIRECTION_HYSTERESIS_X:
+        approach_from_right = actor.facing_left
     else:
-        target_x = target.world_x + stop_dx
+        approach_from_right = dx < 0
+    target_x = target.world_x + stop_dx if approach_from_right else target.world_x - stop_dx
     return target_x, target.world_y
 
 
