@@ -22,7 +22,12 @@ from sor_autoplay.ai.tokens import (
 from sor_autoplay.ai.tokens import Myself
 from sor_autoplay.ai.tokens import Enemy
 from sor_autoplay.ai.tokens import CameraRange
-from sor_autoplay.ai.execute import execute_decision, press_no_button
+from sor_autoplay.ai.execute import (
+    WALK_TO_ENEMY_LANE_SAFETY_Y,
+    _walk_to_near_enemy_target,
+    execute_decision,
+    press_no_button,
+)
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.tokens import Breakable, Pit
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
@@ -185,6 +190,29 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         execute_decision(decision, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=0, player2=0)
+
+    def test_offsets_lane_from_a_dangerous_enemy_even_before_reaching_its_exact_lane(self) -> None:
+        # Regression (live-diagnosed): gating the offset on already sitting
+        # on the enemy's exact lane reacted too late -- the approach
+        # converges onto that lane over several ticks regardless (nothing
+        # else holds it off), so by the time the old gate opened the enemy
+        # had often already reached ATTACKING and landed a hit. Aim for the
+        # offset lane for the whole dangerous approach instead.
+        #
+        # A direction-only movement-mask assertion can't distinguish this
+        # from the old behaviour here: with dy=30 (>= the old
+        # WALK_TO_ENEMY_LANE_SAFETY_Y=28 "on_lane" threshold), the old code
+        # converged straight onto the enemy's exact lane (target_y=50) while
+        # the new code aims for an offset lane (target_y=50+28=78) -- both
+        # are still below the actor's own world_y=80, so both read as an "UP"
+        # step either way. Only the exact target position reveals the fix,
+        # so call the private target-computation helper directly.
+        actor = _myself(world_x=0, world_y=80)
+        target = replace(_enemy(world_x=200, world_y=50), combat_phase=CombatPhase.ATTACKING)
+
+        target_x, target_y = _walk_to_near_enemy_target(actor, target)
+
+        self.assertEqual(target_y, 50 + WALK_TO_ENEMY_LANE_SAFETY_Y)
 
     def test_does_not_sidestep_an_enemy_that_is_not_dangerous(self) -> None:
         actor = _myself(world_x=0, world_y=50)

@@ -225,9 +225,16 @@ def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[
     enemy, per AI-Goals.md's "não se deve aproximar mais do que o
     suficiente"). Converges the actor's Y onto the enemy's lane so the
     eventual punch lands (dy must clear PUNCH_RANGE_Y) — except while a
-    dangerous enemy is still far away and the actor already sits on its
-    exact lane, where it sidesteps instead of closing distance straight
-    down the enemy's line of attack.
+    dangerous enemy is still far away, where it aims for an offset lane
+    instead of closing distance straight down the enemy's line of attack.
+
+    Live testing showed gating this offset on the actor already sitting on
+    the enemy's exact lane (``on_lane``) reacted too late: the approach
+    converges onto that lane over several ticks regardless (nothing else
+    holds it off), so by the time the gate opened the enemy had often
+    already reached ATTACKING and landed a hit before the sidestep could
+    take effect. Aiming for the offset lane for the whole dangerous approach
+    avoids ever walking down the enemy's exact line in the first place.
     """
 
     outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
@@ -240,8 +247,7 @@ def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[
         target_x = target.world_x + stop_dx
 
     dx = abs(target.world_x - actor.world_x)
-    on_lane = abs(actor.world_y - target.world_y) < WALK_TO_ENEMY_LANE_SAFETY_Y
-    if is_dangerous(target.combat_phase) and dx > stop_dx and on_lane:
+    if is_dangerous(target.combat_phase) and dx > stop_dx:
         offset = WALK_TO_ENEMY_LANE_SAFETY_Y if actor.world_y >= target.world_y else -WALK_TO_ENEMY_LANE_SAFETY_Y
         target_y = target.world_y + offset
     else:
