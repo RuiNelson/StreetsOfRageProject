@@ -164,6 +164,16 @@ attacking" between two RAM polls with no warning, since the band checks
 elsewhere are purely instantaneous-position. Reference-only, like
 `AnimationInProgress`: its mere presence for a given enemy is the signal.
 
+Note: no `could_*` function currently consumes it. An earlier attempt had
+`could_rear_attack` fire on it directly, before the enemy was actually
+within `RearAttack`'s real range — live testing showed that backfires,
+since a Mega Drive attack only hits by current position: the early commit
+was a guaranteed whiff that left the character locked in its own recovery
+frames exactly when the still-closing enemy arrived and landed a free hit.
+Consuming this token usefully needs a genuine evasive reaction (e.g. a
+sidestep/reposition decision), not an early commit to the same
+reactive-only attack.
+
 
 ## Process
 

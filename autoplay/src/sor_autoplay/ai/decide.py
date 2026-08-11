@@ -40,7 +40,7 @@ from .tokens import (
     rear_attack_behind_max_x,
     rear_attack_front_max_x,
 )
-from .tokens import ClosingEnemy, Enemy
+from .tokens import Enemy
 from .tokens import AnimationInProgress, CameraRange, Stage
 from .tokens import Breakable
 from .tokens import (
@@ -254,11 +254,17 @@ def could_rear_attack(context: Context) -> Context:
         if actor.is_airborne:
             continue
         for enemy in enemies:
-            # ClosingEnemy is the early-warning signal from inference.py: an
-            # enemy not yet in the instantaneous band but projected to
-            # arrive within a few ticks, closing diagonally too fast for a
-            # purely position-based check to react in time.
-            if _in_rear_band(actor, enemy) or find(context, ClosingEnemy, slot=enemy.slot) is not None:
+            # NOT ClosingEnemy: an earlier version also fired here purely on
+            # that early-warning inference, before the enemy was actually in
+            # _in_rear_band's real range. Live testing showed that backfires
+            # -- $322A only hits based on *current* position, so committing
+            # to it early is a guaranteed whiff that locks the actor in the
+            # attack's own recovery frames exactly when the still-closing
+            # enemy arrives and lands its hit for free. ClosingEnemy remains
+            # a real, tested signal (see inference.py) -- it just needs a
+            # genuine evasive reaction to consume it usefully, not an early
+            # commit to the same reactive-only attack.
+            if _in_rear_band(actor, enemy):
                 decisions.add(RearAttack(actor_slot=actor.slot, target_slot=enemy.slot))
     return decisions
 

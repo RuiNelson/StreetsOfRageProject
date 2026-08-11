@@ -332,25 +332,25 @@ class CouldRearAttackTests(unittest.TestCase):
 
         self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
 
-    def test_fires_for_a_closing_enemy_still_outside_the_instantaneous_band(self) -> None:
-        # ClosingEnemy is the early-warning signal from inference.py: an
-        # enemy not yet in _in_rear_band's instantaneous check, but flagged
-        # as about to close in fast (diagonal approach the raw band check
-        # can't see coming between two polls).
+    def test_does_not_fire_early_for_a_closing_enemy_still_outside_the_band(self) -> None:
+        # Regression (live-diagnosed): an earlier version also fired here
+        # purely on ClosingEnemy, before the enemy was actually within
+        # _in_rear_band's real range. $322A only hits based on *current*
+        # position, so that committed Axel to a guaranteed-whiff attack and
+        # left him locked in its recovery frames exactly when the
+        # still-closing enemy arrived and landed its own hit for free.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
         enemy = make_enemy(world_x=160, world_y=100)  # dx=60, outside Axel's 40px band
         context: set[Token] = {myself, enemy, ClosingEnemy(slot="obj01")}
 
         result = could_rear_attack(context)
 
-        self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
+        self.assertEqual(result, set())
 
-    def test_still_fires_by_the_real_band_without_a_closing_enemy_token(self) -> None:
-        # Regression: the ClosingEnemy check must be additive, not a
-        # replacement for the existing instantaneous-band check.
+    def test_still_fires_by_the_real_band_regardless_of_a_closing_enemy_token(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
         enemy = make_enemy(world_x=80, world_y=100)  # behind while facing right
-        context: set[Token] = {myself, enemy}
+        context: set[Token] = {myself, enemy, ClosingEnemy(slot="obj01")}
 
         result = could_rear_attack(context)
 
