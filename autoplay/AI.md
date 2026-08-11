@@ -226,9 +226,11 @@ Two formal objects carry the geometry the AI used to approximate.
 
 **`Hitbox`** is an object's real collision AABB, in absolute world
 coordinates. Enemies cache nothing, so it is *reconstructed* from the ROM's
-shape tables exactly as `$AB24` builds it; players cache theirs at `+$64`
-and `+$70` and can simply be read. Every `Enemy`, `Breakable` and `Weapon`
-carries exactly one.
+shape tables exactly as `$AB24` builds it; a `PlayableCharacter` caches its
+own body box at `+$70` every frame (`$4140`) and needs no ROM tables at all
+-- it is simply read. Every `Enemy`, `Breakable`, `Weapon`, `Myself` and
+`Partner` carries exactly one (`None` when it is not available this tick,
+never a guessed rectangle).
 
 **`AttackRange`** is one attack an enemy can reach with, in pixels ahead of
 its own origin. An enemy carries as many as its animations select, plus one

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from . import memory_map as mm
 from .object_catalog import EntityStyle, player_style, style_for_object
 from .attack_ranges import AttackRange, attack_ranges_for_object
-from .hitboxes import Hitbox, object_boxes
+from .hitboxes import OBJ_CACHED_BODY_BOX, Hitbox, cached_box, object_boxes
 from .rom_data import RomData
 from .phases import (
     CombatPhase,
@@ -181,13 +181,18 @@ class MapEntity:
     enemy_vel_x: float = 0.0  # +$1C signed 16.16
     enemy_vel_y: float = 0.0  # +$20 signed 16.16 (lane)
     combat_phase: CombatPhase = CombatPhase.UNKNOWN
-    # The object's real body AABB, rebuilt from the ROM shape tables the way
-    # $AB24 does (hitboxes.py). None when no RomData was supplied or the frame
-    # carries no body box -- never a guessed rectangle.
+    # The object's real body AABB. A player reads its own cached box straight
+    # out of the object (+$70, written every frame by $4140) and needs no ROM
+    # tables for it; everything else is rebuilt from the ROM shape tables the
+    # way $AB24 does (hitboxes.py), and needs RomData to do that. None means
+    # "not available this tick" either way -- no RomData for a non-player, or
+    # a degenerate cached box for a player mid no-attack frame -- never a
+    # guessed rectangle.
     hitbox: Hitbox | None = None
     # Every reach this object has, extracted from its type's animation set
-    # (attack_ranges.py). Empty for anything that does not attack, and for
-    # bosses, whose animation sets are not labelled.
+    # (attack_ranges.py). Empty for a player (its reach is the punch geometry
+    # in tokens/character.py, not this field), for anything that does not
+    # attack, and for bosses, whose animation sets are not labelled.
     attack_ranges: tuple[AttackRange, ...] = ()
 
     @property
@@ -445,20 +450,32 @@ def _object_geometry(
     slot: bytes,
     rom: RomData | None,
     *,
+    style_kind: str,
     type_id: int,
     world_x: int,
     world_y: int,
     world_z: int,
     held_type: int,
 ) -> tuple[Hitbox | None, tuple[AttackRange, ...]]:
-    """The object's body box and its reaches, or empty without ``rom``.
+    """The object's body box and its reaches, or empty without enough data.
 
-    Both are ROM-derived: the body box is rebuilt per tick because it follows
-    the object's position and current animation frame, while the attack ranges
-    are static per type and only re-derived when the held weapon changes what
-    the object can reach.
+    Players are the one case that needs no ROM tables at all: ``$4140``
+    already wrote their body box into the object at ``+$70`` (six absolute
+    words), so it is read directly (``hitboxes.cached_box``) rather than
+    rebuilt. Nothing populates ``attack_ranges`` for a player -- the extracted
+    ranges are indexed by ordinary-enemy type id and describe an animation
+    set a player object does not use; a player's own reach is Axel/Adam/
+    Blaze's *punch* geometry in ``tokens/character.py``, not this field.
+
+    Every other kind is reconstructed from the ROM shape tables the way
+    ``$AB24`` does, and needs ``rom`` for that: the body box follows the
+    object's position and current animation frame every tick, while the
+    attack ranges are static per type and only re-derived when the held
+    weapon changes what the object can reach.
     """
 
+    if style_kind == "player":
+        return cached_box(slot, OBJ_CACHED_BODY_BOX), ()
     if rom is None:
         return None, ()
     _attack, body = object_boxes(
@@ -597,6 +614,7 @@ def _entity_from_object(
     hitbox, ranges = _object_geometry(
         slot,
         rom,
+        style_kind=style.kind,
         type_id=type_id,
         world_x=world_x,
         world_y=world_y,

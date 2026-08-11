@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.ai.tokens import Character, Myself, Partner, PlayableCharacter
+from sor_autoplay.ai.tokens import Character, Hitbox, Myself, Partner, PlayableCharacter
 from sor_autoplay.ai.tokens import Information, Token
 from sor_autoplay.ai.tokens import (
     punch_outer_x,
@@ -95,6 +95,15 @@ class CharacterHierarchyTests(unittest.TestCase):
 
     def test_priority_defaults_to_zero(self) -> None:
         self.assertEqual(_myself().priority, 0)
+
+    def test_hitbox_defaults_to_none(self) -> None:
+        # No link, or a no-attack frame's degenerate cached box -- see
+        # world_map._object_geometry's player branch.
+        self.assertIsNone(_myself().hitbox)
+
+    def test_hitbox_round_trips_the_players_own_cached_box(self) -> None:
+        box = Hitbox(x0=780, x1=820, y0=34, y1=50, z0=-40, z1=-8)
+        self.assertEqual(_myself(hitbox=box).hitbox, box)
 
 
 class PunchOuterXWeaponAwareTests(unittest.TestCase):

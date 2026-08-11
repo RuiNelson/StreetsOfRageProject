@@ -12,6 +12,7 @@ from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import WalkToNearEnemy
 from sor_autoplay.ai.tokens import find, find_all
 from sor_autoplay.hazards import FloorHole
+from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 from sor_autoplay.world_map import MapEntity, WorldMap
@@ -55,6 +56,7 @@ def _player_entity(
     held_type: int = 0,
     facing_left: bool = False,
     combat_phase: CombatPhase = CombatPhase.NORMAL,
+    hitbox: Hitbox | None = None,
 ) -> MapEntity:
     return MapEntity(
         kind="player",
@@ -74,6 +76,7 @@ def _player_entity(
         held_type=held_type,
         facing_left=facing_left,
         combat_phase=combat_phase,
+        hitbox=hitbox,
     )
 
 
@@ -287,6 +290,31 @@ class MyselfTests(unittest.TestCase):
         self.assertTrue(myself.facing_left)
         self.assertEqual(myself.action_state, 0x10)
         self.assertTrue(myself.is_airborne)  # base 0x10 is in the jump range
+
+    def test_myself_carries_the_entitys_cached_hitbox(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        box = Hitbox(x0=780, x1=820, y0=34, y1=50, z0=-40, z1=-8)
+        entity = _player_entity(slot="P1", hitbox=box)
+        snapshot = _snapshot(players=(p1, p2), entities=(entity,))
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        myself = find(context, Myself)
+        assert myself is not None
+        self.assertEqual(myself.hitbox, box)
+
+    def test_myself_hitbox_is_none_without_a_cached_box(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        entity = _player_entity(slot="P1")
+        snapshot = _snapshot(players=(p1, p2), entities=(entity,))
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        myself = find(context, Myself)
+        assert myself is not None
+        self.assertIsNone(myself.hitbox)
 
     def test_myself_omitted_when_entity_absent(self) -> None:
         p1 = _player_snapshot(index=1)

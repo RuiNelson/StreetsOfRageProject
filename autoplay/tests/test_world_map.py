@@ -24,6 +24,7 @@ from sor_autoplay.memory_map import (
     OBJ_VEL_Z,
     OBJECT_SLOT_SIZE,
 )
+from sor_autoplay.hitboxes import OBJ_CACHED_BODY_BOX
 from sor_autoplay.object_catalog import player_style, style_for_object, style_for_type
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.world_map import (
@@ -625,4 +626,62 @@ class RomGeometryTests(unittest.TestCase):
         entity = self._nora_entity(None)
 
         self.assertIsNone(entity.hitbox)
+        self.assertEqual(entity.attack_ranges, ())
+
+
+class PlayerHitboxTests(unittest.TestCase):
+    """Unlike an enemy, a player caches its body box at +$70 every frame
+    ($4140) -- world_map only has to read it (hitboxes.cached_box), so this
+    needs no RomData at all."""
+
+    def _p1_actors(self, *, cached_body: tuple[int, int, int, int, int, int] | None) -> bytes:
+        actors = bytearray(ACTORS_BYTES)
+        _put_u8(actors, OBJ_TYPE, 0x01)  # OBJ_TYPE_ACTIVE_PLAYER
+        _put_u8(actors, OBJ_FLAGS, 0x08)
+        _put_fixed16(actors, OBJ_POS_X, 800)
+        _put_fixed16(actors, OBJ_POS_Y, 0x40)
+        _put_fixed16(actors, OBJ_POS_Z, 0)
+        _put_u16(actors, OBJ_HEALTH, 0x50)
+        _put_u8(actors, OBJ_CHARACTER_ID, 0x00)
+        if cached_body is not None:
+            for i, value in enumerate(cached_body):
+                offset = OBJ_CACHED_BODY_BOX + i * 2
+                actors[offset : offset + 2] = int(value).to_bytes(2, "big", signed=True)
+        return bytes(actors)
+
+    def _camera(self) -> bytes:
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+        return bytes(camera)
+
+    def _p1_entity(self, *, cached_body):
+        world = parse_world_map(
+            actors_block=self._p1_actors(cached_body=cached_body),
+            camera_block=self._camera(),
+            p1_character_id=0,
+        )
+        players = [e for e in world.entities if e.kind == "player" and e.slot == "P1"]
+        self.assertEqual(len(players), 1)
+        return players[0]
+
+    def test_reads_the_cached_body_box_with_no_rom_data(self) -> None:
+        entity = self._p1_entity(cached_body=(780, 820, 34, 50, -40, -8))
+
+        self.assertIsNotNone(entity.hitbox)
+        self.assertEqual(
+            (entity.hitbox.x0, entity.hitbox.x1, entity.hitbox.y0, entity.hitbox.y1),
+            (780, 820, 34, 50),
+        )
+
+    def test_degenerate_cached_box_is_no_box(self) -> None:
+        # $4140's no-attack fill collapses every axis to zero width.
+        entity = self._p1_entity(cached_body=(0, 0, 0, 0, 0, 0))
+
+        self.assertIsNone(entity.hitbox)
+
+    def test_never_carries_attack_ranges(self) -> None:
+        # A player's reach lives in tokens/character.py's punch geometry,
+        # not in this ROM-extracted field.
+        entity = self._p1_entity(cached_body=(780, 820, 34, 50, -40, -8))
+
         self.assertEqual(entity.attack_ranges, ())

@@ -12,6 +12,7 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
+from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay.memory_map import ACTION_THROW_AIR_TECHABLE
 from sor_autoplay.phases import CombatPhase
 
@@ -102,6 +103,16 @@ class PlayableCharacter(Character, ABC):
       choreography launching into ``$5C``/``$88`` — an ordinary street-enemy
       throw (``$72`` via ``$29D0``) never arms it, so C+Up is inert there
       (controls-and-input.md "C+Up landing tech").
+
+    ``hitbox`` is this character's real body AABB, read straight out of the
+    object rather than reconstructed: unlike an enemy, a player caches it at
+    ``+$70`` every frame (``$4140``), so ``world_map`` only has to read it
+    (``hitboxes.cached_box``). ``None`` on a no-attack frame with a
+    degenerate cached box, or without a link -- never a guessed rectangle.
+    There is no matching ``attack_ranges`` here: a player's reach is the
+    punch/rear/jump-kick geometry already in this module
+    (``punch_outer_x`` and friends), which is per-character and per-weapon,
+    not per-animation-frame the way an enemy's is.
     """
 
     player_index: int  # 1 or 2
@@ -116,6 +127,7 @@ class PlayableCharacter(Character, ABC):
     # player +$58: bit 7 = grab-counter B window after C crossover ($7C).
     action_flags: int = 0
     tech_armed: int = 0  # player +$45; bounce-cancel tech may still be latched
+    hitbox: Hitbox | None = None
 
     @property
     def action_base(self) -> int:
