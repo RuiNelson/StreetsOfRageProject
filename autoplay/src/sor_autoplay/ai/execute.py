@@ -319,7 +319,7 @@ def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[
     return target_x, target_y
 
 
-def _execute_walk_to_near_enemy(verb: WalkToNearEnemy, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_walk_to_near_enemy(verb: WalkToNearEnemy, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, verb.actor_slot)
     target = find(context, Enemy, slot=verb.target_slot)
     if actor is None or target is None:
@@ -359,7 +359,7 @@ def _retreat_from_danger_target(
     return target_x, actor.world_y
 
 
-def _execute_retreat_from_danger(
+def state_machine_retreat_from_danger(
     verb: RetreatFromDanger, context: Context, gamepad: VirtualGamepad
 ) -> None:
     actor = _find_actor(context, verb.actor_slot)
@@ -371,7 +371,7 @@ def _execute_retreat_from_danger(
     gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
 
 
-def _execute_walk_to_advance_stage(
+def state_machine_walk_to_advance_stage(
     verb: WalkToAdvanceStage, context: Context, gamepad: VirtualGamepad
 ) -> None:
     actor = _find_actor(context, verb.actor_slot)
@@ -388,7 +388,7 @@ def _execute_walk_to_advance_stage(
     )
 
 
-def _execute_melee_strike(verb: Verb, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_melee_strike(verb: Verb, context: Context, gamepad: VirtualGamepad) -> None:
     """Shared handler for ``Punch`` / ``SwingBatOrPipe`` /
     ``StabWithKnifeOrBottle`` / ``SprayPepper`` -- identical B-button press
     regardless of which (if any) weapon is held; only the ROM-side move that
@@ -405,11 +405,11 @@ def _execute_melee_strike(verb: Verb, context: Context, gamepad: VirtualGamepad)
 
 
 
-def _execute_rear_attack(verb: RearAttack, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_rear_attack(verb: RearAttack, context: Context, gamepad: VirtualGamepad) -> None:
     _press(gamepad, PUNCH_MASK | JUMP_MASK, frames=REAR_ATTACK_FRAMES)
 
 
-def _execute_counter_grab(verb: CounterGrab, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_counter_grab(verb: CounterGrab, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         gamepad.release()
@@ -427,18 +427,18 @@ def _execute_counter_grab(verb: CounterGrab, context: Context, gamepad: VirtualG
     _press(gamepad, JUMP_MASK, frames=COUNTER_FRAMES)
 
 
-def _execute_tech_recover(verb: TechRecover, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_tech_recover(verb: TechRecover, context: Context, gamepad: VirtualGamepad) -> None:
     # A held Up plus a *fresh* C edge, every tick this verb wins -- the
     # ROM requires a new C press, not a held-over one (controls-and-input.md
     # "C must be a fresh edge while Up is held").
     _press(gamepad, JUMP_MASK | UP_MASK, frames=TECH_RECOVER_FRAMES)
 
 
-def _execute_call_police(verb: CallPolice, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_call_police(verb: CallPolice, context: Context, gamepad: VirtualGamepad) -> None:
     _press(gamepad, CALL_POLICE_MASK, frames=CALL_POLICE_FRAMES)
 
 
-def _execute_jump_attack(verb: JumpAttack, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         gamepad.release()
@@ -461,7 +461,7 @@ def _execute_jump_attack(verb: JumpAttack, context: Context, gamepad: VirtualGam
         _press(gamepad, PUNCH_MASK | face, frames=JUMP_ATTACK_KICK_FRAMES)
 
 
-def _execute_grab_enemy(verb: GrabEnemy, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_grab_enemy(verb: GrabEnemy, context: Context, gamepad: VirtualGamepad) -> None:
     """Walk into the target — direction only, never an attack button.
 
     Two ROM facts shape this handler (see ``reach.GRAB_RANGE_Y``). The
@@ -490,7 +490,7 @@ def _execute_grab_enemy(verb: GrabEnemy, context: Context, gamepad: VirtualGamep
     gamepad.hold(mask)
 
 
-def _execute_supplex(verb: Supplex, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_supplex(verb: Supplex, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         gamepad.release()
@@ -505,14 +505,14 @@ def _execute_supplex(verb: Supplex, context: Context, gamepad: VirtualGamepad) -
         _press(gamepad, PUNCH_MASK, frames=SUPPLEX_FRAMES)
 
 
-def _execute_attack_held_enemy(verb: AttackHeldEnemy, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_attack_held_enemy(verb: AttackHeldEnemy, context: Context, gamepad: VirtualGamepad) -> None:
     # Front-hold B alone (Up/Down ignored by ROM for throw; no L/R = knee).
     # The cleared hold matters here: a leftover walk direction would turn this
     # knee into the B+back throw below.
     _press(gamepad, PUNCH_MASK, frames=HOLD_FRAMES)
 
 
-def _execute_throw_held_enemy(verb: ThrowHeldEnemy, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_throw_held_enemy(verb: ThrowHeldEnemy, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         gamepad.release()
@@ -522,12 +522,12 @@ def _execute_throw_held_enemy(verb: ThrowHeldEnemy, context: Context, gamepad: V
     _press(gamepad, PUNCH_MASK | back, frames=HOLD_FRAMES)
 
 
-def _execute_flip_hold(verb: FlipHold, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_flip_hold(verb: FlipHold, context: Context, gamepad: VirtualGamepad) -> None:
     # Front-hold C → back hold $66; next tick Supplex finishes.
     _press(gamepad, JUMP_MASK, frames=HOLD_FRAMES)
 
 
-def _execute_release_grab(verb: ReleaseGrab, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_release_grab(verb: ReleaseGrab, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, verb.actor_slot)
     target = find(context, Enemy, slot=verb.target_slot)
     if actor is None:
@@ -545,7 +545,7 @@ def _execute_release_grab(verb: ReleaseGrab, context: Context, gamepad: VirtualG
     )
 
 
-def _execute_throw_knife(verb: ThrowKnife, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_throw_knife(verb: ThrowKnife, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, verb.actor_slot)
     target = find(context, Enemy, slot=verb.target_slot)
     face = 0
@@ -554,7 +554,7 @@ def _execute_throw_knife(verb: ThrowKnife, context: Context, gamepad: VirtualGam
     _press(gamepad, PUNCH_MASK | face, frames=THROW_KNIFE_FRAMES)
 
 
-def _execute_throw_pepper(verb: ThrowPepper, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_throw_pepper(verb: ThrowPepper, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, verb.actor_slot)
     target = find(context, Enemy, slot=verb.target_slot)
     face = 0
@@ -563,7 +563,7 @@ def _execute_throw_pepper(verb: ThrowPepper, context: Context, gamepad: VirtualG
     _press(gamepad, PUNCH_MASK | face, frames=THROW_PEPPER_FRAMES)
 
 
-def _execute_walk_to_weapon(verb: WalkToWeapon, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_walk_to_weapon(verb: WalkToWeapon, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, verb.actor_slot)
     target = find(context, Weapon, slot=verb.target_slot)
     if actor is None or target is None:
@@ -579,7 +579,7 @@ def _execute_walk_to_weapon(verb: WalkToWeapon, context: Context, gamepad: Virtu
         )
 
 
-def _execute_walk_to_pickup(verb: WalkToPickup, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_walk_to_pickup(verb: WalkToPickup, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, verb.actor_slot)
     target = find(context, Pickup, slot=verb.target_slot)
     if actor is None or target is None:
@@ -609,7 +609,7 @@ def _walk_to_breakable_target(actor: Myself | Partner, target: Breakable) -> tup
     return target_x, target.world_y
 
 
-def _execute_open_breakable(
+def state_machine_open_breakable(
     verb: OpenBreakable, context: Context, gamepad: VirtualGamepad
 ) -> None:
     """Close the distance, then hit it -- one verb, both halves.
@@ -632,29 +632,29 @@ def _execute_open_breakable(
 
 
 _HANDLERS = {
-    WalkToNearEnemy: _execute_walk_to_near_enemy,
-    RetreatFromDanger: _execute_retreat_from_danger,
-    WalkToAdvanceStage: _execute_walk_to_advance_stage,
-    Punch: _execute_melee_strike,
-    SwingBatOrPipe: _execute_melee_strike,
-    StabWithKnifeOrBottle: _execute_melee_strike,
-    SprayPepper: _execute_melee_strike,
-    RearAttack: _execute_rear_attack,
-    CounterGrab: _execute_counter_grab,
-    TechRecover: _execute_tech_recover,
-    CallPolice: _execute_call_police,
-    JumpAttack: _execute_jump_attack,
-    GrabEnemy: _execute_grab_enemy,
-    Supplex: _execute_supplex,
-    AttackHeldEnemy: _execute_attack_held_enemy,
-    ThrowHeldEnemy: _execute_throw_held_enemy,
-    FlipHold: _execute_flip_hold,
-    ReleaseGrab: _execute_release_grab,
-    ThrowKnife: _execute_throw_knife,
-    ThrowPepper: _execute_throw_pepper,
-    WalkToWeapon: _execute_walk_to_weapon,
-    WalkToPickup: _execute_walk_to_pickup,
-    OpenBreakable: _execute_open_breakable,
+    WalkToNearEnemy: state_machine_walk_to_near_enemy,
+    RetreatFromDanger: state_machine_retreat_from_danger,
+    WalkToAdvanceStage: state_machine_walk_to_advance_stage,
+    Punch: state_machine_melee_strike,
+    SwingBatOrPipe: state_machine_melee_strike,
+    StabWithKnifeOrBottle: state_machine_melee_strike,
+    SprayPepper: state_machine_melee_strike,
+    RearAttack: state_machine_rear_attack,
+    CounterGrab: state_machine_counter_grab,
+    TechRecover: state_machine_tech_recover,
+    CallPolice: state_machine_call_police,
+    JumpAttack: state_machine_jump_attack,
+    GrabEnemy: state_machine_grab_enemy,
+    Supplex: state_machine_supplex,
+    AttackHeldEnemy: state_machine_attack_held_enemy,
+    ThrowHeldEnemy: state_machine_throw_held_enemy,
+    FlipHold: state_machine_flip_hold,
+    ReleaseGrab: state_machine_release_grab,
+    ThrowKnife: state_machine_throw_knife,
+    ThrowPepper: state_machine_throw_pepper,
+    WalkToWeapon: state_machine_walk_to_weapon,
+    WalkToPickup: state_machine_walk_to_pickup,
+    OpenBreakable: state_machine_open_breakable,
 }
 
 

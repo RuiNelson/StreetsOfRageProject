@@ -134,7 +134,7 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
     """Shared body for ``could_punch`` / ``could_swing_bat_or_pipe`` /
     ``could_stab_with_knife_or_bottle`` / ``could_spray_pepper``: they
     issue the identical B-button input (see execute.py's
-    ``_execute_melee_strike``), gated only on which weapon type (if any)
+    ``state_machine_melee_strike``), gated only on which weapon type (if any)
     the actor holds. ``held_types=None`` means unarmed (``Punch``)."""
 
     verbs: set[Token] = set()

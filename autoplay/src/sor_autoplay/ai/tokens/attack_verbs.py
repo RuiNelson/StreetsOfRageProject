@@ -14,7 +14,7 @@ walking into an enemy without attacking.
 
 ``Punch``, ``SwingBatOrPipe``, ``StabWithKnifeOrBottle``, and ``SprayPepper``
 all issue the identical physical B-button press (see ``execute.py``'s shared
-``_execute_melee_strike``) -- the ROM resolves a different move, reach, and
+``state_machine_melee_strike``) -- the ROM resolves a different move, reach, and
 damage purely from the actor's held weapon type. They are kept as distinct
 ``Verb`` classes (rather than one ``Punch`` covering every held weapon)
 because they are not the same move: different animation, hitbox, and damage
@@ -349,7 +349,7 @@ class OpenBreakable(Attack):
     the walk half could win a tick, be re-proposed the next, and never hand
     over cleanly if the ranking drifted between the two tiers in between.
     The intent is "open that prop"; how far away the actor happens to be is
-    the executor's problem (``execute._execute_open_breakable``) and the
+    the executor's problem (``execute.state_machine_open_breakable``) and the
     ranking's input, not a second verb.
 
     Produced by ``could_open_breakable`` once per in-camera ``Breakable``

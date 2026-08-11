@@ -451,7 +451,7 @@ class ExecutePunchTests(unittest.TestCase):
 
     def test_punch_is_unconditional_even_while_holding_an_enemy(self) -> None:
         # Supplex now owns the "already holding" case (see priority.py /
-        # execute.py's _execute_supplex); Punch always just presses B.
+        # execute.py's state_machine_supplex); Punch always just presses B.
         actor = replace(_myself(), held_weapon_type=0x20)  # Garcia's type id
         verb = Punch(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()

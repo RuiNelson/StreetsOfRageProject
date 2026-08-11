@@ -549,3 +549,35 @@ mediate communication with the interface.
 This function suspends execution until the next scheduled RAM poll, so
 that the cadence of the loop matches the polling interval already
 established for game-state observation, rather than running unconstrained.
+
+## The executor is a state machine
+
+`execute_verb`'s dispatch table (`_HANDLERS` in `execute.py`) is, by
+design, a classic finite-state machine's output stage: the surviving
+`Verb`'s concrete type is the state, and the table maps each state to the
+function that produces this tick's controller output from that state and
+the current `Context` — a Mealy machine's `output = f(state, input)`,
+not a lookup that merely happens to resemble one.
+
+The winning `Verb` is what **activates** a state machine. It does not
+carry the state machine's own internal progress: `determine_priority_verb`
+recomputes the winning `Verb` from scratch every tick from the live
+`Context`, so which state machine runs next is decided fresh each
+iteration, the same way the rest of the loop is. Each state machine's own
+function is named `state_machine_*` (for example `state_machine_punch`,
+`state_machine_open_breakable`), one per concrete `Verb` subclass or
+shared across a family that issues the identical input (the four melee
+strikes share `state_machine_melee_strike`, since the ROM resolves the
+move from the held weapon type rather than the input differing).
+
+A `state_machine_*` function still follows `execute_verb`'s existing
+contract: steer the controller only as much as necessary for the verb to
+eventually be fulfilled, and return immediately — never block or sleep
+waiting for the move to play out. Where a single verb spans more than one
+condition of the world (for example `OpenBreakable`, approach *or* strike
+depending on `decide.in_smash_range`), that condition is the state
+machine's own transition test, evaluated fresh against the current
+`Context` on every call — there is no separate, longer-lived state kept
+between ticks beyond the game's own RAM and the virtual gamepad's sticky
+hold (`gamepad.py`), which every press-only state machine explicitly
+clears via `_press` rather than treating as part of its state.
