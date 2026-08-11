@@ -86,13 +86,19 @@ entry points in this tree.
   through `hud._hitbox_to_canvas`, then floored to `MIN_MARKER_PX` so a tiny
   or zoomed-out box never disappears) rather than the old fixed per-kind
   radius, which is kept only as the fallback for an entity with no hitbox
-  this tick (no `RomData`, or a frame whose body box id is 0). A stippled red
-  square is drawn per `AttackRange` on an on-screen entity (`AttackRange.
+  this tick (no `RomData`, or a frame whose body box id is 0). A translucent
+  red square is drawn per `AttackRange` on an on-screen entity (`AttackRange.
   projected`, one square per range rather than a merged bounding box, so a
   dead zone like Nora's shows as a real gap between her body and where the
-  square starts, and an enemy with several ranges reads as denser-shaded
-  ground where they overlap) — pooled and z-ordered under the entity markers
-  the same way floor holes are pooled and raised above the camera plate
+  square starts) — pooled and z-ordered under the entity markers the same
+  way floor holes are pooled and raised above the camera plate. Translucency
+  is `hud._blend_hex` (fill pre-mixed with the plot background at
+  `_RANGE_FILL_ALPHA`, drawn as an opaque solid), not Tk's `stipple` option:
+  `stipple` is this HUD's idiom for floor holes, but it silently renders as
+  flat opaque fill on Aqua Tk (macOS) instead of dithering, and since
+  `_blend_hex` produces one fixed opaque colour, two overlapping range
+  squares do not compound into a darker shade — whichever draws last simply
+  covers the other
 - Click a player's "AI: OFF/ON" label to toggle that player's AI at runtime
 - Window size/position is persisted to `~/.config/sor-autoplay/window.json`
   (`$XDG_CONFIG_HOME` when set): each launch restores the last geometry

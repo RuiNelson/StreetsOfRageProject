@@ -44,10 +44,35 @@ _BORDER = "#3a3f55"
 _TEXT = "#d7dbe8"
 _MUTED = "#8b90a5"
 _DIM = "#5c6178"
+# Map plot background (_ensure_static_plate's self._plot_rect fill) -- the
+# surface an AttackRange square is blended against, see _blend_hex.
+_PLOT_BG = "#11131c"
 # AttackRange squares: same red as phases.phase_color's ATTACKING outline,
-# stippled (Tk canvas items have no real alpha) the same way floor holes
-# already fake translucency in this HUD.
-_RANGE_FILL = "#ff453a"
+# at 35% opacity. Tk canvas items have no real alpha, and `stipple` -- this
+# HUD's other translucency idiom, used for floor holes -- is silently a
+# no-op on Aqua Tk (macOS): the canvas draws the stipple pattern's *fill*
+# solid instead of dithering it, so a stippled square here would render as
+# flat opaque red covering whatever is under it. Blending the colour with
+# the known plot background ahead of time and drawing that as a plain solid
+# fill reads as translucent on every platform, at the cost of only being
+# exactly right over that one background colour (approximately right over
+# anything else on the map, which is the same trade the stipple idiom
+# already made).
+_RANGE_FILL_ALPHA = 0.35
+
+
+def _blend_hex(fg: str, bg: str, alpha: float) -> str:
+    """``fg`` at ``alpha`` opacity over solid ``bg``, as one opaque hex colour."""
+
+    fr, fgc, fb = int(fg[1:3], 16), int(fg[3:5], 16), int(fg[5:7], 16)
+    br, bgc, bb = int(bg[1:3], 16), int(bg[3:5], 16), int(bg[5:7], 16)
+    r = round(fr * alpha + br * (1 - alpha))
+    g = round(fgc * alpha + bgc * (1 - alpha))
+    b = round(fb * alpha + bb * (1 - alpha))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+_RANGE_FILL = _blend_hex("#ff453a", _PLOT_BG, _RANGE_FILL_ALPHA)
 # Screen-space floor for a hitbox-derived marker, so a real but tiny/
 # zoomed-out box does not vanish. Purely cosmetic -- never fed back into
 # anything the AI reads.
@@ -890,9 +915,12 @@ class ObserverHud:
         """Grow the reusable ``AttackRange`` square pool to at least ``count``.
 
         One rectangle per (entity, AttackRange) pair, not per entity: an
-        enemy with several attacks (e.g. Garcia's four) gets one square each,
-        so overlaps read as denser-shaded ground rather than hiding which
-        attacks actually reach a given spot.
+        enemy with several confirmed attacks (Garcia types $21/$22's own
+        two-stage strike, e.g.) gets one square each. ``_RANGE_FILL`` is a
+        pre-blended solid colour rather than a real alpha fill (Tk canvas
+        items have none) -- so unlike true translucency, two overlapping
+        squares do not compound into a darker shade; whichever is drawn last
+        simply covers the other at the same fixed opacity.
         """
 
         canvas = self._canvas
@@ -905,7 +933,6 @@ class ObserverHud:
                     0,
                     fill=_RANGE_FILL,
                     outline="",
-                    stipple="gray50",
                     state="hidden",
                     tags=("range",),
                 )

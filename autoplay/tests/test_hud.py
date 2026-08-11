@@ -8,7 +8,7 @@ from sor_autoplay.ai.tokens import WalkToAdvanceStage
 from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay.hud import ObserverHud, _window_config_path
 from sor_autoplay.hud import _describe_verb, _describe_pending
-from sor_autoplay.hud import _expand_to_min, _hitbox_to_canvas
+from sor_autoplay.hud import _blend_hex, _expand_to_min, _hitbox_to_canvas
 from sor_autoplay.world_map import WorldMap
 
 
@@ -126,6 +126,28 @@ class HitboxToCanvasTests(unittest.TestCase):
 
         self.assertEqual(y0, _map_y(52, world, oy, plot_h))
         self.assertEqual(y1, _map_y(74, world, oy, plot_h))
+
+
+class BlendHexTests(unittest.TestCase):
+    """AttackRange squares fake translucency by pre-mixing a solid colour
+    rather than using Tk's `stipple` (silently a no-op on Aqua/macOS,
+    rendering flat opaque fill instead of a dithered pattern)."""
+
+    def test_alpha_zero_is_pure_background(self) -> None:
+        self.assertEqual(_blend_hex("#ff453a", "#11131c", 0.0), "#11131c")
+
+    def test_alpha_one_is_pure_foreground(self) -> None:
+        self.assertEqual(_blend_hex("#ff453a", "#11131c", 1.0), "#ff453a")
+
+    def test_partial_alpha_lands_between_the_two_colours(self) -> None:
+        blended = _blend_hex("#ff453a", "#11131c", 0.5)
+        for i in (1, 3, 5):
+            fg_channel = int("#ff453a"[i : i + 2], 16)
+            bg_channel = int("#11131c"[i : i + 2], 16)
+            blended_channel = int(blended[i : i + 2], 16)
+            lo, hi = sorted((fg_channel, bg_channel))
+            self.assertLessEqual(lo, blended_channel)
+            self.assertLessEqual(blended_channel, hi)
 
 
 class ExpandToMinTests(unittest.TestCase):

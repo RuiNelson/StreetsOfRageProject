@@ -1,6 +1,7 @@
 import unittest
 
 from sor_autoplay.attack_ranges import (
+    CONFIRMED_TYPE_SHAPES,
     MELEE_WEAPON_REACH_X,
     MIN_REACH_GAIN,
     AnimationSets,
@@ -193,8 +194,12 @@ class HeldWeaponRangeTests(unittest.TestCase):
             self.assertIsNone(held_weapon_range(weapon_type))
 
     def test_an_armed_enemy_keeps_its_own_ranges_too(self) -> None:
-        tables = _shape_tables({1: (0, 40, 0, -50, 6), 2: (-9, 18, 0, -60, 60)})
-        sets = _sets(_animation_set([[(1, 2)]]))
+        # Shape $14 is Garcia type $20's one ROM-confirmed strike (see
+        # CONFIRMED_TYPE_SHAPES) -- using it here means this exercises the
+        # weapon-combination behaviour without also tripping the type-$20
+        # confirmed-shape filter under test separately below.
+        tables = _shape_tables({0x14: (0, 40, 0, -50, 6), 2: (-9, 18, 0, -60, 60)})
+        sets = _sets(_animation_set([[(0x14, 2)]]))
 
         unarmed = attack_ranges_for_object(sets, tables, type_id=0x20)
         armed = attack_ranges_for_object(sets, tables, type_id=0x20, held_weapon_type=0x0A)
@@ -212,6 +217,74 @@ class HeldWeaponRangeTests(unittest.TestCase):
 
         self.assertEqual(len(armed), 1)
         self.assertEqual(armed[0].forward_max, MELEE_WEAPON_REACH_X)
+
+
+class ConfirmedTypeShapesTests(unittest.TestCase):
+    """Garcia types $20-$23 all point at the same $1FC70 set, but they are
+    four different combat archetypes (enemy-ai.md's "Garcia-family state
+    tables" section) -- a shared set's shapes do not all belong to every
+    type sharing it. CONFIRMED_TYPE_SHAPES narrows the extraction down to
+    what address-level ROM tracing actually confirmed for each type; a type
+    with no confirmed entry keeps the full (unfiltered) heuristic result.
+
+    The shapes below are real Garcia geometry, not synthetic placeholders:
+    $14 (type $20's own confirmed strike, state $09/$D856), $12 then $3E
+    (the two-stage attack types $21/$22 share via handler $E190), and $18
+    (present in the shared set, but with no confirmed owner -- see the
+    module docstring's "This table is not exhaustive").
+    """
+
+    def _garcia_tables(self):
+        return _shape_tables(
+            {
+                0x14: (32, 24, 0, -42, 7),  # type $20's confirmed strike
+                0x12: (0, 40, 0, -50, 6),  # types $21/$22, stage one
+                0x3E: (16, 35, 0, -48, 6),  # types $21/$22, stage two
+                0x18: (24, 48, 0, -56, 16),  # unconfirmed for any type
+                2: (-9, 18, 0, -60, 60),  # body
+            }
+        )
+
+    def _garcia_sets(self):
+        # One animation per shape so every one clears MIN_REACH_GAIN against
+        # the shared body box and survives into attack_ranges_for_set.
+        return _sets(
+            _animation_set(
+                [[(0x14, 2)], [(0x12, 2)], [(0x3E, 2)], [(0x18, 2)]]
+            )
+        )
+
+    def test_confirmed_shapes_cover_exactly_the_traced_types(self) -> None:
+        self.assertEqual(set(CONFIRMED_TYPE_SHAPES), {0x20, 0x21, 0x22})
+        self.assertEqual(CONFIRMED_TYPE_SHAPES[0x20], frozenset({0x14}))
+        self.assertEqual(CONFIRMED_TYPE_SHAPES[0x21], frozenset({0x12, 0x3E}))
+        self.assertEqual(CONFIRMED_TYPE_SHAPES[0x22], frozenset({0x12, 0x3E}))
+
+    def test_type_20_keeps_only_its_own_confirmed_strike(self) -> None:
+        ranges = attack_ranges_for_object(
+            self._garcia_sets(), self._garcia_tables(), type_id=0x20
+        )
+
+        self.assertEqual({r.shape_id for r in ranges}, {0x14})
+
+    def test_types_21_and_22_keep_only_their_shared_two_stage_attack(self) -> None:
+        for type_id in (0x21, 0x22):
+            with self.subTest(type_id=type_id):
+                ranges = attack_ranges_for_object(
+                    self._garcia_sets(), self._garcia_tables(), type_id=type_id
+                )
+
+                self.assertEqual({r.shape_id for r in ranges}, {0x12, 0x3E})
+
+    def test_type_23_has_no_confirmed_entry_and_keeps_the_full_heuristic_set(self) -> None:
+        # Unconfirmed, not disproven -- see the module docstring. Nothing in
+        # the shared set is excluded for a type with no CONFIRMED_TYPE_SHAPES
+        # entry, including the unconfirmed $18.
+        ranges = attack_ranges_for_object(
+            self._garcia_sets(), self._garcia_tables(), type_id=0x23
+        )
+
+        self.assertEqual({r.shape_id for r in ranges}, {0x14, 0x12, 0x3E, 0x18})
 
 
 if __name__ == "__main__":

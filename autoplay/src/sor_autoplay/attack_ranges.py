@@ -36,6 +36,25 @@ Two things this module deliberately does not claim:
   own shape and attach table (``$60A0`` for an enemy holder), so its reach is
   not in the enemy's animation set at all. ``held_weapon_range`` supplies the
   one measured value available instead, and says so.
+
+Garcia types ``$20``-``$23`` all point at the *same* animation set
+(``$1FC70``), but they are four different combat archetypes with four
+separate state-dispatch tables (enemy-ai.md's "Garcia-family state tables"
+section) -- the shared set's attack shapes do not all belong to every type
+that uses it. Address-level tracing of each type's own dispatch table found
+six places in the whole ROM where a state handler makes a *direct* collision
+test against the target (``jsr $00AD04``, distinct from the generic per-frame
+pipeline every object goes through regardless of state) naming an exact
+shape id, which is positive, addressable confirmation rather than the
+geometric ``MIN_REACH_GAIN`` heuristic below. ``CONFIRMED_TYPE_SHAPES``
+restricts a type's extracted ranges to just the shapes confirmed *for that
+type* where such evidence exists (today: ``$20``, and ``$21``/``$22`` which
+share their attacking state's handler at ``$E190``); a type absent from that
+mapping keeps the full heuristic result from its shared set, which is
+demonstrably an overestimate for the types that do have confirmed evidence
+and should be read as *unconfirmed*, not as *false*, for the rest -- most
+ordinary-enemy attacks are never gated by the manual ``$AD04`` shortcut at
+all, so a shape's absence from the confirmed table says nothing either way.
 """
 
 from __future__ import annotations
@@ -63,6 +82,19 @@ ANIMATION_SET_FOR_TYPE: Mapping[int, int] = {
 
 # Every distinct set, read once each even though several types share one.
 ANIMATION_SET_BASES = tuple(sorted(set(ANIMATION_SET_FOR_TYPE.values())))
+
+# Shape ids confirmed, by address-level ROM tracing, to be *this type's own*
+# genuine strike (see the module docstring and enemy-ai.md's "Garcia-family
+# state tables and confirmed strike boxes"). A type missing from this mapping
+# keeps every shape the geometric heuristic finds in its shared set.
+CONFIRMED_TYPE_SHAPES: Mapping[int, frozenset[int]] = {
+    # State $09 ($D856) tests box $14/$15 directly against the target.
+    0x20: frozenset({0x14}),
+    # Both types share attacking-state handler $E190 (+ $E0EC sub-check),
+    # which tests box $12/$13 then $3E/$3F -- two stages of one attack.
+    0x21: frozenset({0x12, 0x3E}),
+    0x22: frozenset({0x12, 0x3E}),
+}
 
 # How much of a set to read. Sets are a few KB at most; over-reading is
 # harmless because every offset walked comes from the data itself.
@@ -291,10 +323,21 @@ def attack_ranges_for_object(
     type_id: int,
     held_weapon_type: int = 0,
 ) -> tuple[AttackRange, ...]:
-    """Every reach this enemy has right now: its own, plus what it carries."""
+    """Every reach this enemy has right now: its own, plus what it carries.
 
-    set_base = ANIMATION_SET_FOR_TYPE.get(type_id & 0xFF)
+    ``type_id`` also narrows a shared animation set down to the shapes
+    confirmed for that specific type, when such evidence exists
+    (``CONFIRMED_TYPE_SHAPES``) -- otherwise every type sharing a set (e.g.
+    Garcia ``$20``-``$23`` all on ``$1FC70``) would inherit every other
+    sharing type's attacks too.
+    """
+
+    key = type_id & 0xFF
+    set_base = ANIMATION_SET_FOR_TYPE.get(key)
     ranges = attack_ranges_for_set(sets, tables, set_base) if set_base is not None else ()
+    confirmed = CONFIRMED_TYPE_SHAPES.get(key)
+    if confirmed is not None:
+        ranges = tuple(r for r in ranges if r.shape_id in confirmed)
     weapon = held_weapon_range(held_weapon_type)
     if weapon is None:
         return ranges
