@@ -44,7 +44,7 @@ from .tokens import (
     WalkToWeapon,
 )
 from .gamepad import VirtualGamepad
-from .decide import BREAKABLE_PUNCH_X
+from .decide import BREAKABLE_PUNCH_X, _enemy_behind_actor
 from ..phases import is_dangerous
 from ..world_map import LANE_Y_MIN
 
@@ -260,7 +260,20 @@ def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[
     inner = punch_inner_x(actor.character_id)
     stop_dx = max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER)
 
-    if actor.world_x <= target.world_x:
+    if _enemy_behind_actor(actor, target):
+        # Aim for the *far* side, so the movement mask points at the enemy
+        # rather than away from it. Holding a direction is what sets facing,
+        # so this is the turn-around: after a tick the enemy is in front and
+        # could_punch covers it normally. Stopping on the near side (the
+        # branch below) would instead back the actor away while still facing
+        # the wrong way, leaving the slow RearAttack chord as the only thing
+        # that could reach it.
+        target_x = (
+            target.world_x - stop_dx
+            if actor.world_x > target.world_x
+            else target.world_x + stop_dx
+        )
+    elif actor.world_x <= target.world_x:
         target_x = target.world_x - stop_dx
     else:
         target_x = target.world_x + stop_dx

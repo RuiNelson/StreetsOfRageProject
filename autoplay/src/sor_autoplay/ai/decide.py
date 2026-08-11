@@ -162,7 +162,45 @@ def _in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
     return adx <= rear_attack_front_max_x(actor.character_id)
 
 
-def _enemy_actionable(actor: PlayableCharacter, enemy: Enemy) -> bool:
+def _rear_attack_is_warranted(
+    actor: PlayableCharacter, enemy: Enemy, enemies: list[Enemy]
+) -> bool:
+    """True when the ``$322A`` chord is the *right* answer to ``enemy``
+    sitting in the rear band -- not merely a possible one.
+
+    The chord is slow (up to 21 frames of startup, controls-and-input.md's
+    measured timings) and hits only by current position, so it whiffs
+    whenever the target moves during startup and leaves the actor in its
+    recovery frames. Turning around and punching is faster and far more
+    reliable, and turning is free: holding the D-pad toward a behind enemy
+    flips facing, after which ``could_punch`` covers it normally (see
+    ``execute._walk_to_near_enemy_target``). So the chord is reserved for
+    the two cases where turning around does not actually solve anything --
+    exactly the "escape when boxed in / punch dead-zone" intent
+    ``priority._EMERGENCY_REAR_ATTACK`` has always documented:
+
+    1. **Punch dead zone** -- the target is closer than ``punch_inner_x``,
+       so it stays unhittable by a normal strike even after the turn.
+    2. **Boxed in** -- another live enemy is close on the actor's opposite
+       side, so spending the turn hands that one a free hit.
+    """
+
+    if abs(enemy.world_x - actor.world_x) < punch_inner_x(actor.character_id):
+        return True
+
+    target_behind = _enemy_behind_actor(actor, enemy)
+    return any(
+        other is not enemy
+        and _enemy_behind_actor(actor, other) is not target_behind
+        and abs(other.world_x - actor.world_x) <= REAR_THREAT_X
+        and abs(other.world_y - actor.world_y) <= REAR_THREAT_Y
+        for other in enemies
+    )
+
+
+def _enemy_actionable(
+    actor: PlayableCharacter, enemy: Enemy, enemies: list[Enemy]
+) -> bool:
     """True when an existing melee/rear-attack decision would actually fire
     on this enemy right now -- not just whether it sits inside
     ``_in_punch_band``'s raw distance box.
@@ -175,9 +213,15 @@ def _enemy_actionable(actor: PlayableCharacter, enemy: Enemy) -> bool:
     distance, made ``could_walk_to_near_enemy`` skip it as "already in
     range" while nothing could actually hit it, leaving the actor standing
     still and undefended.
+
+    The rear band only counts when ``_rear_attack_is_warranted`` agrees:
+    ``could_rear_attack`` no longer fires on band membership alone, so
+    treating a merely-in-band enemy as actionable would recreate that same
+    vacuum -- nothing attacking it, and ``could_walk_to_near_enemy``
+    declining to turn toward it.
     """
 
-    if _in_rear_band(actor, enemy):
+    if _in_rear_band(actor, enemy) and _rear_attack_is_warranted(actor, enemy, enemies):
         return True
     if not _in_punch_band(actor, enemy):
         return False
@@ -325,6 +369,12 @@ def could_rear_attack(context: Context) -> Context:
             # a real, tested signal (see inference.py) -- it just needs a
             # genuine evasive reaction to consume it usefully, not an early
             # commit to the same reactive-only attack.
+            # Produced on band membership alone, per AI.md: a could_* asks
+            # only "is this possible and does it make some kind of sense",
+            # never "is this the one to take". Whether the chord is the
+            # *right* answer -- rather than turning around and punching --
+            # is a ranking question, and lives in
+            # priority._emergency_rear_attack via _rear_attack_is_warranted.
             if _in_rear_band(actor, enemy):
                 decisions.add(RearAttack(actor_slot=actor.slot, target_slot=enemy.slot))
     return decisions
@@ -450,17 +500,27 @@ def could_walk_to_near_enemy(context: Context) -> Context:
             ]
         if not enemies:
             continue
-        if any(_enemy_actionable(actor, e) for e in enemies):
+        if any(_enemy_actionable(actor, e, enemies) for e in enemies):
             continue
         # One candidate per reachable enemy -- determine_priority_decision
         # (priority.py's distance-scored emergency) picks the closest one,
         # per AI.md's own target-selection principle: this function only
         # says what's possible, never which possibility is best.
         for enemy in enemies:
-            if is_dangerous(enemy.combat_phase) and _too_close_to_keep_approaching(actor, enemy):
+            if (
+                is_dangerous(enemy.combat_phase)
+                and _enemy_in_front(actor, enemy)
+                and _too_close_to_keep_approaching(actor, enemy)
+            ):
                 # could_retreat_from_danger covers this one instead -- don't
                 # propose closing the last stretch of distance into a
-                # committed attack that isn't hittable yet.
+                # committed attack that isn't hittable yet. Only for an
+                # enemy in *front*: for one at the actor's back, this walk
+                # is the turn-around (holding the D-pad toward it flips
+                # facing, see execute._walk_to_near_enemy_target), and
+                # turning to face a committed attacker beats fleeing it
+                # blind -- could_retreat_from_danger skips it for the same
+                # reason, so the two still never compete for one target.
                 continue
             decisions.add(WalkToNearEnemy(actor_slot=actor.slot, target_slot=enemy.slot))
     return decisions
@@ -479,7 +539,15 @@ def could_retreat_from_danger(context: Context) -> Context:
         for enemy in enemies:
             if not is_dangerous(enemy.combat_phase):
                 continue
-            if _enemy_actionable(actor, enemy):
+            if _enemy_behind_actor(actor, enemy):
+                # Fleeing something already at the actor's back means running
+                # blind, facing away, with the threat following -- turning to
+                # face it is strictly better and is what
+                # could_walk_to_near_enemy proposes for a behind enemy (the
+                # D-pad sets facing). The two still never compete for one
+                # target: that function's matching skip is front-only.
+                continue
+            if _enemy_actionable(actor, enemy, enemies):
                 continue  # already hittable -- attack instead of retreating
             if not _too_close_to_keep_approaching(actor, enemy):
                 continue  # still far enough that a normal approach is fine

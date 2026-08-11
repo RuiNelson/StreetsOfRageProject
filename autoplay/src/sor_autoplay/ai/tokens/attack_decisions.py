@@ -308,10 +308,22 @@ class RearAttack(MeleeAttacks):
     (Axel/Adam/Blaze up to 40/42/53px), and additionally in front only for
     Adam (up to 14px — his chord is a forward-reaching hop, not a backfist).
 
-    Raises emergency: (Enemy when in a dangerous phase)×60, Enemy×55.
+    Raises emergency, when ``decide._rear_attack_is_warranted`` holds --
+    i.e. the actor is boxed in between two enemies, or the target is inside
+    the punch dead zone, the two cases where turning around solves nothing:
+    (Enemy when in a dangerous phase)×60, Enemy×55. Otherwise, with a
+    turn-and-punch available: (Enemy when in a dangerous phase)×11,
+    Enemy×9.
 
-    Prefer when a close threat sits behind the player. For Adam only, also
-    prefer it when a body has closed inside his hop's forward reach.
+    The chord costs up to 21 frames of startup and hits only by current
+    position, so it whiffs whenever the target drifts during that window and
+    leaves the actor in its recovery frames. That is why band membership
+    alone does not make it preferred: it stays a produced, usable option,
+    but ranks under the ``WalkToNearEnemy`` turn-around
+    (``execute._walk_to_near_enemy_target``) that reaches the same enemy
+    faster and more reliably. For Adam only, the forward reach of his hop
+    ($322A is a hop for him, not a backfist) means the same applies to a
+    body closed inside 14px in front.
     """
 
     priority: int = 15

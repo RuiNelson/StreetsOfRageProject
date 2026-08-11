@@ -19,15 +19,25 @@ class WalkToNearEnemy(Walk):
 
     Produced by ``could_walk_to_near_enemy`` once per reachable enemy when
     at least one on-screen enemy exists and none is *actionable* yet
-    (``decide._enemy_actionable``: really within rear range, or within
-    punch range and actually in front -- not just inside the punch box's
-    raw distance, which ignores facing and would otherwise make this skip a
-    behind enemy Punch itself refuses to hit, leaving the actor undefended)
-    -- never just the nearest; determine_priority_decision picks among the
-    candidates. Falls back to every live enemy ahead in the stage's scroll
-    direction when nothing is on-screen (e.g. the next wave, tracked on the
-    world map but not yet in camera) -- never one behind, so this never
-    walks backward for an abandoned off-screen leftover.
+    (``decide._enemy_actionable``: within rear range *and* worth the
+    RearAttack chord there, or within punch range and actually in front --
+    not just inside the punch box's raw distance, which ignores facing and
+    would otherwise make this skip a behind enemy Punch itself refuses to
+    hit, leaving the actor undefended) -- never just the nearest;
+    determine_priority_decision picks among the candidates. Falls back to
+    every live enemy ahead in the stage's scroll direction when nothing is
+    on-screen (e.g. the next wave, tracked on the world map but not yet in
+    camera) -- never one behind, so this never walks backward for an
+    abandoned off-screen leftover.
+
+    For an enemy at the actor's *back* this decision is the turn-around:
+    holding the D-pad toward it is what sets facing, after which
+    ``could_punch`` covers it normally (see
+    ``execute._walk_to_near_enemy_target``). That makes it the fast,
+    reliable alternative to the slow, whiff-prone ``RearAttack`` chord --
+    which is why the rear band no longer counts as actionable on its own
+    (``decide._rear_attack_is_warranted``) and why the dangerous-enemy
+    caution-zone skip below is front-only.
 
     Raises emergency: Enemy×14, closer scoring higher (distance-scored;
     see priority._emergency_walk_to_near_enemy).

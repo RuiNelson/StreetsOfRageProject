@@ -667,6 +667,100 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
         self.assertEqual(len(decisions), 1)
         self.assertIs(decisions[0], rear_dangerous)
 
+    def test_loses_to_turning_around_when_the_chord_is_not_warranted(self) -> None:
+        # The abuse case: a lone enemy at the actor's back, far enough out of
+        # the punch dead zone that turning around and punching works. $322A
+        # costs up to 21 frames of startup and hits only by current position,
+        # so it must not be the reflex answer -- the turn-around
+        # (WalkToNearEnemy, which decide.py now offers for this same enemy)
+        # has to win.
+        myself = _myself(world_x=100, world_y=100)  # Axel, facing right
+        behind = _enemy("obj01", CombatPhase.NORMAL, world_x=70, world_y=100)
+        context = {
+            myself,
+            behind,
+            RearAttack(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], WalkToNearEnemy)
+
+    def test_still_fires_when_it_is_the_only_option(self) -> None:
+        # "Se poder usar, usar": nothing else reaches this enemy, so the
+        # chord is still the decision -- de-preferring it must not mean
+        # standing there doing nothing.
+        myself = _myself(world_x=100, world_y=100)
+        behind = _enemy("obj01", CombatPhase.NORMAL, world_x=70, world_y=100)
+        context = {myself, behind, RearAttack(actor_slot="P1", target_slot="obj01")}
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], RearAttack)
+
+    def test_outranks_turning_around_inside_the_punch_dead_zone(self) -> None:
+        # dx=-10 is closer than Axel's punch_inner (16): turning around
+        # leaves the enemy unhittable, so the chord is the right tool and
+        # keeps its top-tier score.
+        myself = _myself(world_x=100, world_y=100)
+        behind = _enemy("obj01", CombatPhase.NORMAL, world_x=90, world_y=100)
+        context = {
+            myself,
+            behind,
+            RearAttack(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], RearAttack)
+
+    def test_outranks_a_punch_while_boxed_in(self) -> None:
+        # Flanked front and back: spending the turn hands the front enemy a
+        # free hit, which is exactly what the chord exists for -- it must
+        # beat punching either one.
+        myself = _myself(world_x=100, world_y=100)
+        behind = _enemy("obj01", CombatPhase.NORMAL, world_x=70, world_y=100)
+        flanker = _enemy("obj02", CombatPhase.NORMAL, world_x=140, world_y=100)
+        context = {
+            myself,
+            behind,
+            flanker,
+            RearAttack(actor_slot="P1", target_slot="obj01"),
+            Punch(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], RearAttack)
+
+    def test_loses_to_a_punch_on_a_front_enemy_when_not_warranted(self) -> None:
+        # Not boxed in (the punchable enemy is on the same side as nothing
+        # else) and out of the dead zone: a fast, reliable strike wins.
+        myself = _myself(world_x=100, world_y=100)
+        behind = _enemy("obj01", CombatPhase.NORMAL, world_x=70, world_y=100)
+        context = {
+            myself,
+            behind,
+            RearAttack(actor_slot="P1", target_slot="obj01"),
+            Punch(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], Punch)
+
 
 class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
     def test_picks_the_closer_of_two_retreat_candidates(self) -> None:

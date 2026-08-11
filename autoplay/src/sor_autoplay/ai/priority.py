@@ -29,6 +29,8 @@ from .decide import (
     POLICE_HEALTH_PERCENT_THRESHOLD,
     POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE,
     _advance_blocking_enemies,
+    _live_enemies,
+    _rear_attack_is_warranted,
 )
 from .tokens import (
     CounterGrab,
@@ -76,6 +78,16 @@ _EMERGENCY_TECH_RECOVER = 90  # narrow window, free to act at nothing else
 _EMERGENCY_CALL_POLICE = 88
 _EMERGENCY_REAR_ATTACK = 55  # escape when boxed in / punch dead-zone
 _EMERGENCY_REAR_ATTACK_DANGEROUS = 60  # escape a commit from behind
+# The same chord when turning around *is* available (decide.
+# _rear_attack_is_warranted says no): still a usable option, no longer a
+# preferred one. $322A costs up to 21 frames of startup and hits only by
+# current position, so it whiffs whenever the target drifts during that
+# window; a turn-and-punch is faster and far more reliable. These sit below
+# every real strike and below WalkToNearEnemy's realistic in-band range
+# (12..14 -- the rear band is at most 53px), so the turn-around wins when it
+# exists and the chord still fires when nothing better is on the table.
+_EMERGENCY_REAR_ATTACK_UNWARRANTED = 9
+_EMERGENCY_REAR_ATTACK_UNWARRANTED_DANGEROUS = 11
 _EMERGENCY_PUNCH_PUNISHABLE = 60
 _EMERGENCY_PUNCH_DEFAULT = 20
 _EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
@@ -172,11 +184,26 @@ def _emergency_call_police(decision: CallPolice, context: Context) -> int:
 
 def _emergency_rear_attack(decision: RearAttack, context: Context) -> int:
     target = find(context, Enemy, slot=decision.target_slot)
+    actor = _find_actor(context, decision.actor_slot)
     if target is None:
         return _EMERGENCY_DEFAULT
-    if is_dangerous(target.combat_phase):
-        return _EMERGENCY_REAR_ATTACK_DANGEROUS
-    return _EMERGENCY_REAR_ATTACK
+    dangerous = is_dangerous(target.combat_phase)
+    # Two tiers, not one: the chord earns a top-tier score only where turning
+    # around solves nothing -- boxed in between two enemies, or a target
+    # inside the punch dead zone. Everywhere else it drops below the
+    # turn-and-punch that decide.could_walk_to_near_enemy offers for the same
+    # enemy, which is what stops the AI reaching for a slow, whiff-prone
+    # reversal as its reflex answer to anything at its back.
+    warranted = actor is not None and _rear_attack_is_warranted(
+        actor, target, _live_enemies(context)
+    )
+    if warranted:
+        return _EMERGENCY_REAR_ATTACK_DANGEROUS if dangerous else _EMERGENCY_REAR_ATTACK
+    return (
+        _EMERGENCY_REAR_ATTACK_UNWARRANTED_DANGEROUS
+        if dangerous
+        else _EMERGENCY_REAR_ATTACK_UNWARRANTED
+    )
 
 
 def _emergency_melee_strike(decision: Decision, context: Context) -> int:

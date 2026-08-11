@@ -127,6 +127,23 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
 
         client.hold_buttons.assert_called_once_with(player1=LEFT | UP, player2=0)
 
+    def test_turns_toward_an_enemy_at_the_actors_back(self) -> None:
+        # Holding a direction is what sets facing, so walking *toward* a
+        # behind enemy is the turn-around. Stopping on the near side (the
+        # front-enemy rule) would instead hold RIGHT here -- backing away
+        # while still facing the wrong way, which leaves the slow $322A
+        # chord as the only thing that can reach it. Actor faces right
+        # (facing_left=False), enemy sits to its left, so: behind.
+        actor = _myself(world_x=100, world_y=100)
+        target = _enemy(world_x=70, world_y=100)
+        context = {actor, target}
+        decision = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, context, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=LEFT, player2=0)
+
     def test_standing_on_the_enemy_steps_back_to_punch_range(self) -> None:
         # Never walk onto the enemy — stop just inside punch_outer_x.
         actor = _myself(world_x=10, world_y=10)

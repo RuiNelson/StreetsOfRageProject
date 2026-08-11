@@ -544,10 +544,39 @@ class CouldWalkToNearEnemyTests(unittest.TestCase):
 
         self.assertEqual(result, {WalkToNearEnemy(actor_slot="P1", target_slot="obj01")})
 
-    def test_skips_an_enemy_behind_within_the_real_rear_band(self) -> None:
+    def test_turns_toward_an_enemy_behind_when_the_chord_is_not_warranted(self) -> None:
+        # dx=-30 is inside Axel's 40px rear band, but turning around is
+        # available (dx >= punch_inner 16, nothing flanking), so this walk --
+        # the turn-around; holding the D-pad toward the enemy sets facing --
+        # must be offered as the faster, more reliable alternative to the
+        # $322A chord. Treating mere band membership as "already actionable"
+        # is what made the AI reflexively reach for the chord instead.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        enemy = make_enemy(world_x=70, world_y=100)  # behind, dx=-30, within Axel's 40px band
+        enemy = make_enemy(world_x=70, world_y=100)  # behind, dx=-30
         context: set[Token] = {myself, enemy}
+
+        self.assertEqual(
+            could_walk_to_near_enemy(context),
+            {WalkToNearEnemy(actor_slot="P1", target_slot="obj01")},
+        )
+
+    def test_skips_an_enemy_behind_inside_the_punch_dead_zone(self) -> None:
+        # dx=-10 is closer than Axel's punch_inner (16): turning around still
+        # leaves it unhittable, so RearAttack genuinely owns this one and
+        # walking is not an alternative.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=90, world_y=100)
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(could_walk_to_near_enemy(context), set())
+
+    def test_skips_an_enemy_behind_while_boxed_in(self) -> None:
+        # A flanker in front means spending the turn hands it a free hit --
+        # RearAttack owns this one too.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        behind = make_enemy(world_x=70, world_y=100)
+        flanker = make_enemy(slot="obj02", world_x=140, world_y=100)
+        context: set[Token] = {myself, behind, flanker}
 
         self.assertEqual(could_walk_to_near_enemy(context), set())
 
