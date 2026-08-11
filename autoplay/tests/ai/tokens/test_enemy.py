@@ -20,6 +20,10 @@ from sor_autoplay.ai.tokens import (
 )
 from sor_autoplay.ai.tokens import (
     ActionableTarget,
+    GrabOpportunity,
+    GrabToClearRear,
+    GrabToNeutralizeWhip,
+    InGrabReach,
     InJumpAttackReach,
     InPunchReach,
     InRearReach,
@@ -273,7 +277,11 @@ class ReachAndThreatTokenTests(unittest.TestCase):
             InPunchReach,
             InRearReach,
             InJumpAttackReach,
+            InGrabReach,
             ActionableTarget,
+            GrabOpportunity,
+            GrabToClearRear,
+            GrabToNeutralizeWhip,
             IncomingMelee,
             PunishWindow,
             Surrounded,
@@ -281,7 +289,13 @@ class ReachAndThreatTokenTests(unittest.TestCase):
             self.assertTrue(issubclass(cls, Inferred), cls.__name__)
 
     def test_reach_family_shares_one_base(self) -> None:
-        for cls in (InPunchReach, InRearReach, InJumpAttackReach, ActionableTarget):
+        for cls in (
+            InPunchReach,
+            InRearReach,
+            InJumpAttackReach,
+            InGrabReach,
+            ActionableTarget,
+        ):
             self.assertTrue(issubclass(cls, TargetInReach), cls.__name__)
 
     def test_reach_tokens_reference_both_ends_by_slot(self) -> None:
@@ -299,6 +313,19 @@ class ReachAndThreatTokenTests(unittest.TestCase):
 
     def test_punish_window_frames_default_to_zero(self) -> None:
         self.assertEqual(PunishWindow(target_slot="obj07").frames_left, 0)
+
+    def test_grab_opportunity_family_shares_one_base(self) -> None:
+        for cls in (GrabToClearRear, GrabToNeutralizeWhip):
+            self.assertTrue(issubclass(cls, GrabOpportunity), cls.__name__)
+
+    def test_grab_opportunities_are_distinct_reasons_for_one_pair(self) -> None:
+        # A whip enemy in front *and* a body at the actor's back: two
+        # independent reasons to take the same hold, so they must coexist in
+        # the context rather than collapse into one another.
+        rear = GrabToClearRear(actor_slot="P1", target_slot="obj07")
+        whip = GrabToNeutralizeWhip(actor_slot="P1", target_slot="obj07")
+        self.assertNotEqual(rear, whip)
+        self.assertEqual(len({rear, whip}), 2)
 
 
 if __name__ == "__main__":

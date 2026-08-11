@@ -15,9 +15,13 @@ from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_
 from . import reach
 from .tokens import Myself, Partner, PlayableCharacter
 from .tokens import Enemy, Grunt
+from .tokens import Nora
 from .tokens import (
     ActionableTarget,
     ClosingEnemy,
+    GrabToClearRear,
+    GrabToNeutralizeWhip,
+    InGrabReach,
     InJumpAttackReach,
     InPunchReach,
     InRearReach,
@@ -195,6 +199,8 @@ def check_for_targets_in_reach(context: Context) -> Context:
                 tokens.add(InRearReach(**pair))
             if reach.in_jump_attack_band(actor, enemy):
                 tokens.add(InJumpAttackReach(**pair))
+            if reach.grab_would_connect(actor, enemy):
+                tokens.add(InGrabReach(**pair))
             if reach.enemy_actionable(actor, enemy, enemies):
                 tokens.add(ActionableTarget(**pair))
     return tokens
@@ -221,6 +227,63 @@ def check_for_incoming_melee(context: Context) -> Context:
             if not reach.too_close_to_keep_approaching(actor, enemy):
                 continue
             tokens.add(IncomingMelee(actor_slot=actor.slot, target_slot=enemy.slot))
+    return tokens
+
+
+# Enemy phases a hold can actually be taken on. Deliberately not
+# ``is_punishable``: that set includes KNOCKDOWN (a body on the floor, which
+# the contact test cannot hold) and GRABBED (already held). ATTACKING/CHARGE
+# are excluded for the opposite reason -- walking into a committed enemy is
+# how the actor takes the hit instead of the hold. What is left is an enemy
+# standing on its feet and able to be walked into: free to act, frozen on a
+# timed stun, stuck on geometry, or in the tail of its own move.
+GRABBABLE_PHASES = frozenset(
+    {
+        CombatPhase.NORMAL,
+        CombatPhase.STUNNED,
+        CombatPhase.BLOCKED,
+        CombatPhase.RECOVERY,
+    }
+)
+
+
+def check_for_grab_opportunities(context: Context) -> Context:
+    """Judge, per (actor, enemy) pair, whether a hold beats a strike.
+
+    Not "every enemy that could be grabbed": a grab costs the actor its
+    attack for the walk-in and locks both bodies together, so this only
+    fires for the situations where that trade pays off -- see the concrete
+    ``GrabOpportunity`` subclasses. Whether the grab is *reachable* is a
+    separate question, answered by ``InGrabReach`` above;
+    ``decide.could_grab_enemy`` requires both.
+
+    ``Grunt`` only, like ``check_for_closing_enemies``: the ROM does let a
+    player hold the later bosses, but per-boss tactics are out of scope.
+    """
+
+    enemies = reach.on_screen_enemies(context)
+    if not enemies:
+        return set()
+
+    grabbable = [enemy for enemy in enemies if enemy.combat_phase in GRABBABLE_PHASES]
+    if not grabbable:
+        return set()
+
+    tokens: set[Token] = set()
+    for actor in _actors(context):
+        rear = reach.rear_threats(actor, enemies)
+        for enemy in grabbable:
+            if not isinstance(enemy, Grunt):
+                continue
+            pair = {"actor_slot": actor.slot, "target_slot": enemy.slot}
+            # A rear threat that *is* the candidate is not a pincer -- the
+            # actor would be walking backwards into the same enemy it is
+            # already worried about, and reach.grab_would_connect (forward
+            # only) would not have offered it anyway.
+            if any(other.slot != enemy.slot for other in rear):
+                tokens.add(GrabToClearRear(**pair))
+            if isinstance(enemy, Nora):
+                tokens.add(GrabToNeutralizeWhip(**pair))
     return tokens
 
 
@@ -406,6 +469,7 @@ def generate_inference_tokens(context: Context) -> Context:
         | check_for_closing_enemies(context)
         | check_for_targets_in_reach(context)
         | check_for_incoming_melee(context)
+        | check_for_grab_opportunities(context)
         | check_for_punish_windows(context)
         | check_for_surrounded(context)
         | check_for_weapon_upgrades(context)

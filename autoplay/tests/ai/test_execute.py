@@ -8,6 +8,7 @@ from sor_autoplay.ai import loop as loop_module
 from sor_autoplay.ai import priority as priority_module
 from sor_autoplay.ai.tokens import (
     CounterGrab,
+    GrabEnemy,
     JumpAttack,
     Punch,
     RearAttack,
@@ -546,6 +547,55 @@ class ExecuteJumpAttackTests(unittest.TestCase):
         execute_decision(decision, {actor}, gamepad)
 
         client.press_buttons.assert_not_called()
+
+
+class ExecuteGrabEnemyTests(unittest.TestCase):
+    def test_walks_into_the_target_without_pressing_a_button(self) -> None:
+        # $AAA0 only reports the grab contact code while the actor's outgoing
+        # damage is zero, so pressing B here would produce a hit instead.
+        actor = _myself(world_x=100, world_y=100)
+        target = _enemy(world_x=130, world_y=100)
+        decision = GrabEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor, target}, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
+        client.press_buttons.assert_not_called()
+
+    def test_aims_at_the_enemy_itself_including_the_lane(self) -> None:
+        actor = _myself(world_x=100, world_y=100)
+        target = _enemy(world_x=130, world_y=108)
+        decision = GrabEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor, target}, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=RIGHT | DOWN, player2=0)
+
+    def test_keeps_walking_in_once_inside_the_movement_deadband(self) -> None:
+        # The contact test also needs the actor's *walking* attack box: an
+        # actor standing still on top of the enemy never takes the hold, so
+        # the deadband must fall back to the facing direction, not release.
+        actor = _myself(world_x=100, world_y=100)
+        target = _enemy(world_x=102, world_y=100)
+        decision = GrabEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_decision(decision, {actor, target}, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
+
+    def test_releases_when_the_target_is_gone(self) -> None:
+        actor = _myself(world_x=100, world_y=100)
+        decision = GrabEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+        gamepad.hold(RIGHT)
+        client.hold_buttons.reset_mock()
+
+        execute_decision(decision, {actor}, gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=0, player2=0)
 
 
 class ExecuteSupplexTests(unittest.TestCase):

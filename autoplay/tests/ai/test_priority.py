@@ -4,6 +4,7 @@ from sor_autoplay.ai.tokens import (
     AttackHeldEnemy,
     Breakable,
     CounterGrab,
+    GrabEnemy,
     HealthPickup,
     JumpAttack,
     LifePickup,
@@ -21,7 +22,7 @@ from sor_autoplay.ai.tokens import (
     Weapon,
 )
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import ClosingEnemy, Enemy, Garcia
+from sor_autoplay.ai.tokens import ClosingEnemy, Enemy, Garcia, Nora
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.inference import generate_inference_tokens
@@ -856,6 +857,145 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
         decisions = find_all(result, Decision)
         self.assertEqual(len(decisions), 1)
         self.assertIsInstance(decisions[0], WalkToNearEnemy)
+
+
+class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
+    """GrabEnemy scores from the ``GrabOpportunity`` tokens inference raised
+    for its own (actor, target) pair -- never from the decision's type."""
+
+    def _grunt(self, slot: str, **overrides) -> Garcia:
+        fields = dict(
+            slot=slot,
+            type_id=0x20,
+            world_x=0,
+            world_y=100,
+            health=10,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=False,
+        )
+        fields.update(overrides)
+        return Garcia(**fields)
+
+    def test_clearing_the_rear_outranks_punching_the_same_enemy(self) -> None:
+        # Axel at 100 facing right, one enemy in grab reach in front and one
+        # inside the rear-threat box behind: the hold is what converts that
+        # pincer into a backwards throw, so it must beat the plain strike.
+        myself = _myself(world_x=100, world_y=100)
+        front = self._grunt("front", world_x=130, world_y=100)
+        behind = self._grunt("behind", world_x=60, world_y=100)
+        context = {
+            myself,
+            front,
+            behind,
+            _camera(),
+            GrabEnemy(actor_slot="P1", target_slot="front"),
+            Punch(actor_slot="P1", target_slot="front"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], GrabEnemy)
+
+    def test_clearing_the_rear_loses_to_the_escape_chord_against_a_commit(self) -> None:
+        # An enemy already committed behind is not something to turn your
+        # back on to walk into another body: the $322A escape wins.
+        myself = _myself(world_x=100, world_y=100)
+        front = self._grunt("front", world_x=130, world_y=100)
+        behind = self._grunt(
+            "behind", world_x=70, world_y=100, combat_phase=CombatPhase.ATTACKING
+        )
+        context = {
+            myself,
+            front,
+            behind,
+            _camera(),
+            GrabEnemy(actor_slot="P1", target_slot="front"),
+            RearAttack(actor_slot="P1", target_slot="behind"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], RearAttack)
+
+    def test_grabbing_nora_outranks_punching_her(self) -> None:
+        myself = _myself(world_x=100, world_y=100)
+        nora = Nora(
+            slot="nora",
+            type_id=0x26,
+            world_x=130,
+            world_y=100,
+            health=11,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+        )
+        context = {
+            myself,
+            nora,
+            _camera(),
+            GrabEnemy(actor_slot="P1", target_slot="nora"),
+            Punch(actor_slot="P1", target_slot="nora"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], GrabEnemy)
+
+    def test_grabbing_nora_loses_to_a_free_hit_on_a_defenceless_enemy(self) -> None:
+        # Her whip is a reason to prefer the hold in an ordinary fight, not a
+        # reason to walk past an enemy that cannot defend itself at all.
+        myself = _myself(world_x=100, world_y=100)
+        nora = Nora(
+            slot="nora",
+            type_id=0x26,
+            world_x=130,
+            world_y=100,
+            health=11,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+        )
+        downed = self._grunt("downed", world_x=140, world_y=100, combat_phase=CombatPhase.KNOCKDOWN)
+        context = {
+            myself,
+            nora,
+            downed,
+            _camera(),
+            GrabEnemy(actor_slot="P1", target_slot="nora"),
+            Punch(actor_slot="P1", target_slot="downed"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], Punch)
+
+    def test_no_opportunity_left_drops_the_grab_out_of_contention(self) -> None:
+        # The reason to close in is gone (lone ordinary enemy, no rear
+        # threat), so the stale walk-in must not beat an ordinary punch.
+        myself = _myself(world_x=100, world_y=100)
+        front = self._grunt("front", world_x=130, world_y=100)
+        context = {
+            myself,
+            front,
+            _camera(),
+            GrabEnemy(actor_slot="P1", target_slot="front"),
+            Punch(actor_slot="P1", target_slot="front"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], Punch)
 
 
 class DetermineEmergencyRearAttackTests(unittest.TestCase):

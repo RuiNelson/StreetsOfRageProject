@@ -35,6 +35,7 @@ from .tokens import (
     Attack,
     CounterGrab,
     FlipHold,
+    GrabEnemy,
     JumpAttack,
     AttackHeldEnemy,
     Punch,
@@ -52,7 +53,15 @@ from .tokens import (
 )
 from .tokens import Myself, Partner
 from .tokens import Breakable, Enemy, Grunt
-from .tokens import IncomingMelee, PunishWindow, Surrounded, WeaponUpgrade
+from .tokens import (
+    GrabOpportunity,
+    GrabToClearRear,
+    GrabToNeutralizeWhip,
+    IncomingMelee,
+    PunishWindow,
+    Surrounded,
+    WeaponUpgrade,
+)
 from .tokens import (
     HealthPickup,
     LifePickup,
@@ -114,6 +123,23 @@ _EMERGENCY_ATTACK_HITSTUN = 21
 # the actor still finishes it off when nothing better is on the table
 # instead of walking away to fetch another enemy.
 _EMERGENCY_ATTACK_LONG_STUN = 19
+# Taking a hold (GrabEnemy), one tier per GrabOpportunity present.
+#
+# Clearing the rear is the strong case: with an enemy behind and a grabbable
+# body in front, the hold converts the pincer into ThrowHeldEnemy's B+back
+# throw straight into the enemy behind. It therefore outranks every strike on
+# an enemy that can still act (20), and the warranted RearAttack chord when
+# the rear enemy is not itself committed (55) -- the chord is slow and hits
+# only by current position. It stays under the chord against an enemy already
+# committed behind (_EMERGENCY_REAR_ATTACK_DANGEROUS, 60): there is no time to
+# walk into anything then.
+_EMERGENCY_GRAB_CLEAR_REAR = 58
+# Nora's whip is a reach weapon with nothing to answer a body pressed against
+# it, so holding her is better than trading punches -- but it is an
+# improvement on an ordinary fight, not an escape from a bad one, so it sits
+# just above the jump-kick-on-a-punishable tier (28) and well under the
+# punish/escape tiers.
+_EMERGENCY_GRAB_NEUTRALIZE_WHIP = 30
 _EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
 _EMERGENCY_HOLD_SUPPLEX = 68
 _EMERGENCY_HOLD_FLIP = 66
@@ -266,6 +292,33 @@ def _emergency_jump_attack(decision: JumpAttack, context: Context) -> int:
     return _EMERGENCY_JUMP_ATTACK_DEFAULT
 
 
+def _emergency_grab_enemy(decision: GrabEnemy, context: Context) -> int:
+    """The best tier among the ``GrabOpportunity`` tokens for this pair.
+
+    Several opportunities can hold at once (a whip enemy in front *and* a
+    body at the actor's back); the strongest reason is what the grab is
+    worth. No opportunity left this tick -- the rear enemy moved off, the
+    target stopped being grabbable -- means there is no longer a reason to
+    close in, so the walk-in drops out of contention entirely.
+    """
+
+    opportunities = [
+        token
+        for token in find_all(context, GrabOpportunity)
+        if token.actor_slot == decision.actor_slot
+        and token.target_slot == decision.target_slot
+    ]
+    if not opportunities:
+        return _EMERGENCY_DEFAULT
+
+    score = _EMERGENCY_DEFAULT
+    if any(isinstance(token, GrabToClearRear) for token in opportunities):
+        score = max(score, _EMERGENCY_GRAB_CLEAR_REAR)
+    if any(isinstance(token, GrabToNeutralizeWhip) for token in opportunities):
+        score = max(score, _EMERGENCY_GRAB_NEUTRALIZE_WHIP)
+    return score
+
+
 def _emergency_smash_breakable(decision: SmashBreakable, context: Context) -> int:
     target = find(context, Breakable, slot=decision.target_slot)
     if target is None:
@@ -416,6 +469,7 @@ _EMERGENCY_FUNCS: dict[type[Decision], Callable[[Decision, Context], int]] = {
     StabWithKnifeOrBottle: _emergency_melee_strike,
     SprayPepper: _emergency_melee_strike,
     SmashBreakable: _emergency_smash_breakable,
+    GrabEnemy: _emergency_grab_enemy,
     ThrowHeldEnemy: _held_enemy_emergency(_EMERGENCY_HOLD_THROW),
     Supplex: _held_enemy_emergency(_EMERGENCY_HOLD_SUPPLEX),
     FlipHold: _held_enemy_emergency(_EMERGENCY_HOLD_FLIP),

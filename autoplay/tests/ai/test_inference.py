@@ -1,9 +1,12 @@
 import unittest
 
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import ClosingEnemy, Enemy, Garcia
+from sor_autoplay.ai.tokens import Abadede, ClosingEnemy, Enemy, Garcia, Nora
 from sor_autoplay.ai.tokens import (
     ActionableTarget,
+    GrabToClearRear,
+    GrabToNeutralizeWhip,
+    InGrabReach,
     InJumpAttackReach,
     InPunchReach,
     InRearReach,
@@ -16,6 +19,7 @@ from sor_autoplay.ai.tokens import IncomingProjectile, Projectile
 from sor_autoplay.ai.tokens import Weapon, WeaponUpgrade
 from sor_autoplay.ai.inference import (
     check_for_closing_enemies,
+    check_for_grab_opportunities,
     check_for_incoming_melee,
     check_for_incoming_projectiles,
     check_for_punish_windows,
@@ -79,6 +83,21 @@ def make_garcia(**overrides) -> Garcia:
     )
     fields.update(overrides)
     return Garcia(**fields)
+
+
+def make_nora(**overrides) -> Nora:
+    fields = dict(
+        slot="obj02",
+        type_id=0x26,
+        world_x=100,
+        world_y=100,
+        health=11,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=1,
+        facing_left=True,
+    )
+    fields.update(overrides)
+    return Nora(**fields)
 
 
 class CheckForIncomingProjectilesTests(unittest.TestCase):
@@ -244,6 +263,120 @@ class CheckForTargetsInReachTests(unittest.TestCase):
         unreachable = make_enemy(slot="obj01", world_x=130, world_y=400)
 
         self.assertEqual(check_for_targets_in_reach({myself, unreachable}), set())
+
+    def test_enemy_in_front_within_close_combat_range_is_grab_reach(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(slot="obj01", world_x=130, world_y=100)
+
+        result = check_for_targets_in_reach({myself, enemy})
+
+        self.assertIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_enemy_beyond_the_punch_outer_edge_is_not_grab_reach(self) -> None:
+        # Axel's outer edge is 50px; the walk-in is only worth committing to
+        # from inside close-combat range.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(slot="obj01", world_x=155, world_y=100)
+
+        result = check_for_targets_in_reach({myself, enemy})
+
+        self.assertNotIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_enemy_off_lane_is_not_grab_reach_even_inside_punch_reach(self) -> None:
+        # dy=11 still clears PUNCH_RANGE_Y (12) but not GRAB_RANGE_Y (10):
+        # two bodies have to actually overlap for the contact test to fire.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(slot="obj01", world_x=130, world_y=111)
+
+        result = check_for_targets_in_reach({myself, enemy})
+
+        self.assertIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertNotIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_enemy_behind_beyond_the_tolerance_is_not_grab_reach(self) -> None:
+        # The ROM's contact test reads the actor's *attack* box, which points
+        # forward -- a behind enemy is turned toward first, not walked into.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(slot="obj01", world_x=70, world_y=100)
+
+        result = check_for_targets_in_reach({myself, enemy})
+
+        self.assertNotIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+
+
+class CheckForGrabOpportunitiesTests(unittest.TestCase):
+    def test_promotes_the_front_enemy_when_another_is_at_the_actors_back(self) -> None:
+        # Axel facing right: the enemy at x=60 is behind, inside
+        # reach.rear_threats' box (56 x 24), so holding the one in front is
+        # what turns the pincer into a backwards throw.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        front = make_garcia(slot="obj01", world_x=130, world_y=100)
+        behind = make_garcia(slot="obj02", world_x=60, world_y=100)
+
+        result = check_for_grab_opportunities({myself, front, behind})
+
+        self.assertIn(GrabToClearRear(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_the_rear_enemy_alone_is_not_its_own_reason_to_be_grabbed(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        behind = make_garcia(slot="obj02", world_x=60, world_y=100)
+
+        result = check_for_grab_opportunities({myself, behind})
+
+        self.assertEqual(result, set())
+
+    def test_no_opportunity_from_a_lone_enemy_in_front(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        front = make_garcia(slot="obj01", world_x=130, world_y=100)
+
+        self.assertEqual(check_for_grab_opportunities({myself, front}), set())
+
+    def test_promotes_nora_on_her_own(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        nora = make_nora(slot="obj02", world_x=130, world_y=100)
+
+        result = check_for_grab_opportunities({myself, nora})
+
+        self.assertEqual(result, {GrabToNeutralizeWhip(actor_slot="P1", target_slot="obj02")})
+
+    def test_a_committed_enemy_is_not_grabbable(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        nora = make_nora(slot="obj02", world_x=130, world_y=100, combat_phase=CombatPhase.ATTACKING)
+
+        self.assertEqual(check_for_grab_opportunities({myself, nora}), set())
+
+    def test_a_knocked_down_enemy_is_not_grabbable(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        nora = make_nora(slot="obj02", world_x=130, world_y=100, combat_phase=CombatPhase.KNOCKDOWN)
+
+        self.assertEqual(check_for_grab_opportunities({myself, nora}), set())
+
+    def test_a_stunned_enemy_is_still_grabbable(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        nora = make_nora(slot="obj02", world_x=130, world_y=100, combat_phase=CombatPhase.STUNNED)
+
+        result = check_for_grab_opportunities({myself, nora})
+
+        self.assertEqual(result, {GrabToNeutralizeWhip(actor_slot="P1", target_slot="obj02")})
+
+    def test_bosses_are_out_of_scope(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        boss = Abadede(
+            slot="obj01",
+            type_id=0x30,
+            world_x=130,
+            world_y=100,
+            health=40,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+        )
+        behind = make_garcia(slot="obj02", world_x=60, world_y=100)
+
+        # The boss would otherwise qualify (grabbable phase, an enemy at the
+        # actor's back); the Grunt behind is only its own rear threat, which
+        # is not a reason to grab it.
+        self.assertEqual(check_for_grab_opportunities({myself, boss, behind}), set())
 
 
 class CheckForIncomingMeleeTests(unittest.TestCase):

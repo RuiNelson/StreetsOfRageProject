@@ -62,7 +62,11 @@ classDiagram
     TargetInReach <|-- InPunchReach
     TargetInReach <|-- InRearReach
     TargetInReach <|-- InJumpAttackReach
+    TargetInReach <|-- InGrabReach
     TargetInReach <|-- ActionableTarget
+    Inferred <|-- GrabOpportunity
+    GrabOpportunity <|-- GrabToClearRear
+    GrabOpportunity <|-- GrabToNeutralizeWhip
 
     Decision <|-- Walk
     Walk <|-- WalkToNearEnemy
@@ -83,6 +87,7 @@ classDiagram
     Attack <|-- WeaponAttacks
     WeaponAttacks <|-- ThrowKnife
     WeaponAttacks <|-- ThrowPepper
+    GrabMechanics <|-- GrabEnemy
     GrabMechanics <|-- Supplex
     GrabMechanics <|-- AttackHeldEnemy
     GrabMechanics <|-- ThrowHeldEnemy

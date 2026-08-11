@@ -1,11 +1,16 @@
 """``Attack``-branch ``Decision`` tokens.
 
-No separate ``Combo``/``GrabEnemy`` classes: ``$3028
-(player_normal_attack_input)`` is documented as "normal-attack entry and
-combo continuation," and a grab is an emergent side effect of repeated
-melee-strike contact once the target's own state permits it -- there is no
-distinct input for either, so a melee strike (executed every tick) already
-produces both.
+No separate ``Combo`` class: ``$3028 (player_normal_attack_input)`` is
+documented as "normal-attack entry and combo continuation" -- one input, so
+a melee strike executed every tick already produces the chain.
+
+``GrabEnemy`` *is* its own class, though, because a grab is not that same
+input at all. ``$AAA0`` reports contact code 3 only while the actor's
+outgoing damage ``+$34`` is zero, and ``$3266`` turns that code into a hold
+at the very top of the ground-action priority chain, before any button is
+read (player-health-lives-and-combat.md's "Input and action selection").
+A grab is therefore something a strike actively *prevents*: it is taken by
+walking into an enemy without attacking.
 
 ``Punch``, ``SwingBatOrPipe``, ``StabWithKnifeOrBottle``, and ``SprayPepper``
 all issue the identical physical B-button press (see ``execute.py``'s shared
@@ -73,10 +78,38 @@ class MeleeAttacks(Attack, ABC):
 class GrabMechanics(Attack, ABC):
     """Any move that grabs a foe, exploits a held grab, or counters a grab.
 
-    Covers the hold-move family (``AttackHeldEnemy`` / ``Supplex`` /
-    ``ThrowHeldEnemy`` / ``FlipHold`` / ``ReleaseGrab``) and the reaction to
-    being grabbed by an enemy (``CounterGrab``).
+    Covers taking the hold (``GrabEnemy``), the hold-move family
+    (``AttackHeldEnemy`` / ``Supplex`` / ``ThrowHeldEnemy`` / ``FlipHold`` /
+    ``ReleaseGrab``) and the reaction to being grabbed by an enemy
+    (``CounterGrab``).
     """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GrabEnemy(GrabMechanics):
+    """Walk into an enemy, without attacking, to take a hold of it.
+
+    Produced by ``could_grab_enemy`` for an unarmed, free-to-act actor when
+    the same enemy carries both an ``InGrabReach`` (possible) and a
+    ``GrabOpportunity`` (worth it), and no ``IncomingMelee`` -- walking into
+    a committed attack is how the actor gets hit rather than the hold.
+
+    Raises emergency: GrabToClearRear×58, GrabToNeutralizeWhip×30.
+
+    The rear tier sits above every strike on an enemy that can still act
+    (punch 20, jump 18/28), above the unwarranted ``RearAttack`` chord
+    (9/11) and above the warranted chord against a rear enemy that is not
+    itself committed (55): with a body available in front, throwing it
+    backwards deals with that enemy *and* clears the actor's back, which the
+    chord's own docstring admits it often whiffs at. It stays below the
+    chord against an enemy already committed behind (60) -- there is no time
+    to walk into anything then -- and below every hold move on a hold that
+    already exists (64..70): using the hold beats taking another one.
+    """
+
+    priority: int = 17
+    actor_slot: str
+    target_slot: str
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

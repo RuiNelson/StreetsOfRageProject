@@ -114,13 +114,15 @@ parametrized intent that precedes any concrete action.
 - `Walk` — for example, `WalkToNearEnemy`,
   `WalkToAdvanceStage`, `WalkToWeapon`, and `WalkToPickup`; grabbing a
   lay-down weapon or consumable is a `Walk` descendant.
-- `Attack` — for example, `Punch`, `JumpAttack`, `Supplex`, `ThrowKnife`,
-  `RearAttack` (simultaneous B+C rear/escape chord), and `CounterGrab`
-  (enemy-held C then B sequence), each parametrized with the target or
-  coordinate to which the attack applies where applicable. There is no
-  separate `Combo`/`GrabEnemy` input; repeated `Punch` contact produces
-  both. `CallPolice`, which activates the police special attack, is an
-  `Attack` descendant.
+- `Attack` — for example, `Punch`, `JumpAttack`, `GrabEnemy`, `Supplex`,
+  `ThrowKnife`, `RearAttack` (simultaneous B+C rear/escape chord), and
+  `CounterGrab` (enemy-held C then B sequence), each parametrized with the
+  target or coordinate to which the attack applies where applicable. There
+  is no separate `Combo` input; repeated `Punch` contact produces the chain.
+  Taking a hold, on the other hand, is its own decision and its own
+  *absence* of an input — see [Grabbing an enemy](#grabbing-an-enemy).
+  `CallPolice`, which activates the police special attack, is an `Attack`
+  descendant.
 
 Weapon upgrade ranking follows ROM damage constants
 (`StreetsOfRageRecompilation/ai-analysis/items-and-weapons.md`):
@@ -214,6 +216,10 @@ back on X when it does not.
 usable, and better than what the actor is carrying, carrying the rank and
 the rank gain so nothing downstream re-reads the damage table.
 
+**`InGrabReach`** and **`GrabOpportunity`** are the two halves of the grab
+question — can I, and should I. They are described in
+[Grabbing an enemy](#grabbing-an-enemy) below.
+
 ### Stunned enemies
 
 `Grunt` carries the ROM's own stun counter (`+$50`) and reads as
@@ -254,6 +260,50 @@ tier, so the AI never walks off mid-stun to fetch another enemy. This is
 strictly a ceiling: an attack already ranked lower — an unwarranted
 `RearAttack`, say — keeps its own lower score.
 
+
+### Grabbing an enemy
+
+A hold is not a button. `$AAA0`, the shared contact routine, compares the
+actor's own attack box against an enemy's body box and reports contact code
+3 — the grab code — only when three things are true at once: the actor's
+outgoing damage `+$34` is **zero**, the actor is not already holding
+anything (`+$4C == 0`), and the two are within 8px of elevation. `$3266`
+then converts that code into a hold *at the top of the ground-action
+priority chain*, before any button is read at all: front hold `$60` when
+the two face each other, back hold `$66` — one B away from a suplex — when
+the actor is behind the enemy facing the same way.
+
+So the AI grabs by **walking into an enemy without attacking**. A strike is
+not how a grab happens, it is what prevents one: an active attack frame has
+a nonzero `+$34` and reports the damage code 2 instead. The same test also
+reads the actor's attack box first, and that box only exists on a moving
+frame, so the walk-in has to keep going rather than stop on contact.
+
+Why it is worth spending an attack on:
+
+- a held enemy is a **weapon against the ones behind you**. `FlipHold`
+  turns the actor around and `ThrowHeldEnemy` (B + back) throws the held
+  body backwards, into whatever was closing in from that side;
+- **`Nora`** (type `$26`, "Whip attacks" per `enemy-ai.md`) fights at a
+  range her whip cannot answer once a body is pressed against it. Holding
+  her converts her best distance into her worst.
+
+Those are exactly the two `GrabOpportunity` descendants —
+`GrabToClearRear` and `GrabToNeutralizeWhip`. They are subclasses rather
+than one token with a reason field, per this document's own rule, and they
+rank differently: clearing the rear beats every strike on an enemy that can
+still act, while the whip case is an improvement on an ordinary exchange
+and ranks just above a jump kick.
+
+`InGrabReach` answers the other half — whether walking in would actually
+reach — and, like every other `TargetInReach`, comes from one geometry
+definition in `reach.py`. `could_grab_enemy` requires both, because a grab
+that is possible is not automatically a grab that is worth taking, and
+neither is the reverse.
+
+This list is meant to grow. Any further situation where a hold beats a
+strike belongs here as another `GrabOpportunity` subclass with its own
+tier, not as a new field on an existing one.
 
 ## Process
 

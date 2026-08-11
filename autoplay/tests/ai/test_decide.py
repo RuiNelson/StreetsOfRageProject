@@ -4,6 +4,7 @@ from sor_autoplay.ai.tokens import (
     Attack,
     CounterGrab,
     FlipHold,
+    GrabEnemy,
     JumpAttack,
     AttackHeldEnemy,
     Punch,
@@ -20,6 +21,7 @@ from sor_autoplay.ai.decide import (
     generate_decision_tokens,
     could_call_police,
     could_counter_grab,
+    could_grab_enemy,
     could_hold_actions,
     could_jump_attack,
     could_punch,
@@ -37,7 +39,7 @@ from sor_autoplay.ai.decide import (
     could_walk_to_pickup,
     could_walk_to_weapon,
 )
-from sor_autoplay.ai.tokens import ClosingEnemy, Enemy
+from sor_autoplay.ai.tokens import ClosingEnemy, Enemy, Garcia, Nora
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
 from sor_autoplay.ai.tokens import Breakable
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
@@ -75,6 +77,7 @@ def _with_inference(generator):
 
 could_call_police = _with_inference(could_call_police)
 could_counter_grab = _with_inference(could_counter_grab)
+could_grab_enemy = _with_inference(could_grab_enemy)
 could_hold_actions = _with_inference(could_hold_actions)
 could_jump_attack = _with_inference(could_jump_attack)
 could_punch = _with_inference(could_punch)
@@ -129,6 +132,36 @@ def make_enemy(**overrides) -> Enemy:
     )
     fields.update(overrides)
     return Enemy(**fields)
+
+
+def make_garcia(**overrides) -> Garcia:
+    fields = dict(
+        slot="obj01",
+        type_id=0x20,
+        world_x=100,
+        world_y=100,
+        health=10,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=1,
+        facing_left=True,
+    )
+    fields.update(overrides)
+    return Garcia(**fields)
+
+
+def make_nora(**overrides) -> Nora:
+    fields = dict(
+        slot="obj02",
+        type_id=0x26,
+        world_x=100,
+        world_y=100,
+        health=11,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=1,
+        facing_left=True,
+    )
+    fields.update(overrides)
+    return Nora(**fields)
 
 
 class DecisionDataclassContractTests(unittest.TestCase):
@@ -907,6 +940,77 @@ class CouldCallPoliceTests(unittest.TestCase):
         context: set[Token] = {myself}
 
         self.assertEqual(could_call_police(context), set())
+
+
+class CouldGrabEnemyTests(unittest.TestCase):
+    """Axel (character_id 0): grab reach is his punch outer edge, 50px, with
+    a 10px lane tolerance (reach.GRAB_RANGE_Y)."""
+
+    def _pincer(self, **actor_overrides) -> tuple[Myself, Garcia, Garcia]:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False, **actor_overrides)
+        front = make_garcia(slot="front", world_x=130, world_y=100)
+        behind = make_garcia(slot="behind", world_x=60, world_y=100)
+        return myself, front, behind
+
+    def test_fires_on_the_front_enemy_of_a_pincer(self) -> None:
+        myself, front, behind = self._pincer()
+
+        result = could_grab_enemy({myself, front, behind})
+
+        self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="front")})
+
+    def test_fires_on_nora_without_any_rear_threat(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        nora = make_nora(slot="nora", world_x=130, world_y=100)
+
+        result = could_grab_enemy({myself, nora})
+
+        self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="nora")})
+
+    def test_does_not_fire_on_an_ordinary_lone_enemy(self) -> None:
+        # No GrabOpportunity: nothing to gain over simply punching it.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        front = make_garcia(slot="front", world_x=130, world_y=100)
+
+        self.assertEqual(could_grab_enemy({myself, front}), set())
+
+    def test_does_not_fire_out_of_grab_reach(self) -> None:
+        myself, _, behind = self._pincer()
+        far = make_garcia(slot="front", world_x=160, world_y=100)
+
+        self.assertEqual(could_grab_enemy({myself, far, behind}), set())
+
+    def test_does_not_fire_while_armed(self) -> None:
+        myself, front, behind = self._pincer(held_weapon_type=0x0A)
+
+        self.assertEqual(could_grab_enemy({myself, front, behind}), set())
+
+    def test_does_not_fire_while_already_holding_an_enemy(self) -> None:
+        myself, front, behind = self._pincer(held_weapon_type=0x01, action_state=0x60)
+
+        self.assertEqual(could_grab_enemy({myself, front, behind}), set())
+
+    def test_does_not_fire_while_airborne(self) -> None:
+        myself, front, behind = self._pincer(is_airborne=True)
+
+        self.assertEqual(could_grab_enemy({myself, front, behind}), set())
+
+    def test_does_not_walk_into_a_committed_attack(self) -> None:
+        # The target is dangerous and inside the caution box, so inference
+        # raises IncomingMelee for it: walking in now takes the hit, not the
+        # hold. It is also no longer grabbable, so this is doubly gated.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        nora = make_nora(
+            slot="nora", world_x=130, world_y=100, combat_phase=CombatPhase.ATTACKING
+        )
+
+        self.assertEqual(could_grab_enemy({myself, nora}), set())
+
+    def test_does_not_fire_when_animation_in_progress(self) -> None:
+        myself, front, behind = self._pincer()
+        context: set[Token] = {myself, front, behind, AnimationInProgress(slot="P1")}
+
+        self.assertEqual(could_grab_enemy(context), set())
 
 
 class CouldHoldActionsTests(unittest.TestCase):

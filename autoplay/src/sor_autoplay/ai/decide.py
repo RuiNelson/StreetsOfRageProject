@@ -19,6 +19,7 @@ from . import reach
 from .tokens import (
     CounterGrab,
     FlipHold,
+    GrabEnemy,
     JumpAttack,
     AttackHeldEnemy,
     Punch,
@@ -42,6 +43,8 @@ from .tokens import (
 from .tokens import Enemy
 from .tokens import (
     ActionableTarget,
+    GrabOpportunity,
+    InGrabReach,
     InJumpAttackReach,
     InPunchReach,
     InRearReach,
@@ -228,6 +231,49 @@ def could_tech_recover(context: Context) -> Context:
         if not actor.throw_tech_ready:
             continue
         decisions.add(TechRecover(actor_slot=actor.slot))
+    return decisions
+
+
+def could_grab_enemy(context: Context) -> Context:
+    """Walk into an enemy, unarmed and unattacking, to take a hold of it.
+
+    Both halves of the question are already answered in the context:
+    ``InGrabReach`` says the walk-in would connect, ``GrabOpportunity`` says
+    the hold is worth more than a strike here. This function only adds the
+    gates about the *actor*.
+
+    Armed actors are excluded. The ROM's contact test does not care what the
+    actor carries, but every held weapon has its own melee move with better
+    reach or damage than a bare hold, and closing to contact would spend
+    that advantage -- so for the AI, holding a weapon is a reason not to
+    grab, exactly as it is a reason not to ``Punch``.
+    """
+
+    decisions: set[Token] = set()
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.held_weapon_type != 0:
+            continue
+        if actor.is_airborne:
+            # $AAA0 aborts the grab code unless the two bodies are within 8px
+            # of elevation, so an airborne actor cannot take a hold at all.
+            continue
+        in_reach = reach.targets_of(context, InGrabReach, actor.slot)
+        threatening = reach.targets_of(context, IncomingMelee, actor.slot)
+        for target_slot in reach.targets_of(context, GrabOpportunity, actor.slot):
+            if target_slot not in in_reach:
+                continue
+            if target_slot in threatening:
+                # Walking into a committed attack is how the actor takes the
+                # hit rather than the hold -- same reasoning that keeps
+                # could_jump_attack from kicking into one.
+                continue
+            decisions.add(GrabEnemy(actor_slot=actor.slot, target_slot=target_slot))
     return decisions
 
 
@@ -672,6 +718,7 @@ def generate_decision_tokens(context: Context) -> Context:
         | could_counter_grab(context)
         | could_tech_recover(context)
         | could_hold_actions(context)
+        | could_grab_enemy(context)
         | could_walk_to_near_enemy(context)
         | could_retreat_from_danger(context)
         | could_walk_to_advance_stage(context)

@@ -36,6 +36,23 @@ from .tokens import (
 # essentially on top of the actor.
 PUNCH_BEHIND_TOLERANCE_X = 4
 
+# Taking a hold of an enemy is not an input at all -- it is a *contact*
+# result. ``$AAA0`` (the shared contact routine) tests the actor's own attack
+# box (+$64) against the enemy's body box and reports code 3, the grab code,
+# only when the actor's outgoing damage ``+$34`` is **zero** (a walking frame,
+# never a strike's active frames, which report the damage code 2 instead), the
+# actor is not already holding anything (``+$4C == 0``) and the two are within
+# 8px of elevation. ``$3266`` then converts that code into a hold before any
+# button is even read -- front hold ``$60`` when the two face each other, back
+# hold ``$66`` (one B away from a suplex) when the actor is behind the enemy
+# facing the same way. So the AI grabs by *walking into* an enemy without
+# attacking, which is why this band is not a hitbox measurement: it is how far
+# out the walk-in is still worth committing to. It reuses the actor's own
+# unarmed punch outer edge -- the distance the rest of the pipeline already
+# treats as close-combat range for that character -- with a lane tolerance
+# tighter than a punch's, since two bodies have to actually overlap.
+GRAB_RANGE_Y = 10
+
 # Jump-kick is a *horizontal* attack — never a stationary hop.
 JUMP_ATTACK_MIN_DX = 28  # must leave punch outer / need air travel
 # Early-kick free-flight range per character_id (controls-and-input.md
@@ -158,6 +175,24 @@ def punch_would_connect(actor: PlayableCharacter, enemy: Enemy) -> bool:
         enemy_in_front(actor, enemy)
         or abs(enemy.world_x - actor.world_x) <= PUNCH_BEHIND_TOLERANCE_X
     )
+
+
+def grab_would_connect(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """True when walking into ``enemy`` would end in a hold.
+
+    Mirrors ``punch_would_connect``'s shape on purpose: the contact test the
+    ROM runs (``$AAA0``, see ``GRAB_RANGE_Y``) reads the actor's *attack*
+    box, which is oriented forward, so an enemy strictly behind the actor is
+    not walked into -- it is turned toward first, and only then grabbed.
+    """
+
+    dx = abs(enemy.world_x - actor.world_x)
+    dy = abs(enemy.world_y - actor.world_y)
+    if dy > GRAB_RANGE_Y:
+        return False
+    if dx > punch_outer_x(actor.character_id):
+        return False
+    return enemy_in_front(actor, enemy) or dx <= PUNCH_BEHIND_TOLERANCE_X
 
 
 def in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:

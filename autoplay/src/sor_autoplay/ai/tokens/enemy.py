@@ -252,6 +252,63 @@ class ActionableTarget(TargetInReach):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class InGrabReach(TargetInReach):
+    """Walking into this enemy would take a hold of it.
+
+    Produced by ``inference.check_for_targets_in_reach`` when
+    ``reach.grab_would_connect`` holds -- in front, in lane, and inside the
+    actor's own close-combat range. The hold itself is a contact result, not
+    an input (see ``reach.GRAB_RANGE_Y``), so "in reach" here means "one
+    walk-in away", not "one button away".
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GrabOpportunity(Inferred, ABC):
+    """Holding this enemy is worth more right now than hitting it.
+
+    Abstract because the situations that make a grab pay off are unrelated
+    to each other and rank differently; each concrete subclass is one such
+    situation, per ``AI.md``'s "subclasses, not discriminator fields". All of
+    them are produced by ``inference.check_for_grab_opportunities``, and only
+    for a ``Grunt``: boss grabs exist in the ROM (types $55-$58 have the
+    shared grabbee states) but bespoke boss tactics are out of scope.
+
+    Reference-only, like the ``TargetInReach`` family: both ends are slot
+    references. ``decide.could_grab_enemy`` pairs one of these with an
+    ``InGrabReach`` for the same pair -- the opportunity says it is *worth*
+    grabbing, the reach token says it is *possible*.
+    """
+
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GrabToClearRear(GrabOpportunity):
+    """A hold on this enemy is the way out of being caught between two.
+
+    Produced by ``inference.check_for_grab_opportunities`` when another live
+    enemy is inside ``reach.rear_threats``' box behind the actor. Taking the
+    front body turns that pincer into a weapon: ``could_hold_actions``
+    already answers a rear threat with ``ThrowHeldEnemy`` (B+back), which
+    throws the held enemy backwards *into* the one behind, and offers
+    ``FlipHold`` as the alternate that ends up facing that way.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GrabToNeutralizeWhip(GrabOpportunity):
+    """``Nora`` fights with a whip, which cannot answer a body against it.
+
+    Produced by ``inference.check_for_grab_opportunities`` for a live
+    ``Nora`` (type $26, "Whip attacks" per enemy-ai.md's visual-family
+    table). Her reach is the reason to close it: held, she has no move that
+    connects, so a grab converts her best range into her worst.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class IncomingMelee(Inferred):
     """An enemy whose committed attack is close enough to land on the actor.
 

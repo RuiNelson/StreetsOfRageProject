@@ -13,6 +13,7 @@ from __future__ import annotations
 from .tokens import (
     CounterGrab,
     FlipHold,
+    GrabEnemy,
     JumpAttack,
     AttackHeldEnemy,
     Punch,
@@ -457,6 +458,35 @@ def _execute_jump_attack(decision: JumpAttack, context: Context, gamepad: Virtua
         _press(gamepad, PUNCH_MASK | face, frames=JUMP_ATTACK_KICK_FRAMES)
 
 
+def _execute_grab_enemy(decision: GrabEnemy, context: Context, gamepad: VirtualGamepad) -> None:
+    """Walk into the target — direction only, never an attack button.
+
+    Two ROM facts shape this handler (see ``reach.GRAB_RANGE_Y``). The
+    contact code that becomes a hold is only reported while the actor's
+    outgoing damage ``+$34`` is zero, so pressing B here would produce a hit
+    instead of the grab. And the same test first requires the actor's own
+    attack box to be non-empty, which is a *walking* frame's box: standing
+    still touching the enemy is not enough, the actor has to keep walking
+    into it. That is why the movement mask's deadband falls back to the
+    facing direction instead of releasing -- at that point the two bodies
+    already overlap and the last thing to do is stop pressing.
+    """
+
+    actor = _find_actor(context, decision.actor_slot)
+    target = find(context, Enemy, slot=decision.target_slot)
+    if actor is None or target is None:
+        gamepad.release()
+        return
+    # Aim at the enemy itself, with none of _walk_to_near_enemy_target's stop
+    # buffer: overlapping is the whole point of this decision.
+    mask = _movement_mask(context, actor.world_x, actor.world_y, target.world_x, target.world_y)
+    if not mask & (LEFT_MASK | RIGHT_MASK):
+        mask |= _face_toward_mask(actor, target.world_x) or (
+            LEFT_MASK if actor.facing_left else RIGHT_MASK
+        )
+    gamepad.hold(mask)
+
+
 def _execute_supplex(decision: Supplex, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, decision.actor_slot)
     if actor is None:
@@ -602,6 +632,7 @@ _HANDLERS = {
     TechRecover: _execute_tech_recover,
     CallPolice: _execute_call_police,
     JumpAttack: _execute_jump_attack,
+    GrabEnemy: _execute_grab_enemy,
     Supplex: _execute_supplex,
     AttackHeldEnemy: _execute_attack_held_enemy,
     ThrowHeldEnemy: _execute_throw_held_enemy,
