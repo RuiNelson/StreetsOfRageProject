@@ -21,7 +21,7 @@ from sor_autoplay.ai.tokens import (
     Weapon,
 )
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import ClosingEnemy, Enemy
+from sor_autoplay.ai.tokens import ClosingEnemy, Enemy, Garcia
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.inference import generate_inference_tokens
@@ -655,6 +655,145 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
             enemy,
             WalkToBreakable(actor_slot="P1", target_slot="obj01"),
             WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], WalkToNearEnemy)
+
+
+def _stunned_grunt(slot: str, **overrides) -> Garcia:
+    fields = dict(
+        slot=slot,
+        type_id=0x20,
+        world_x=0,
+        world_y=64,
+        health=10,
+        combat_phase=CombatPhase.STUNNED,
+        targets_player=1,
+        facing_left=False,
+        stun_timer=0x18,
+    )
+    fields.update(overrides)
+    return Garcia(**fields)
+
+
+class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
+    """A stunned Grunt is the one target that is not going anywhere: it
+    cannot act and will still be standing there in a moment. Attacking it
+    is capped so anything involving an enemy that *can* still act wins,
+    without dropping so low that the actor abandons it."""
+
+    def test_a_stunned_target_loses_to_the_rear_attack_escape(self) -> None:
+        # The case this cap exists for: a stunned body in front used to
+        # score the punishable tier (60) and beat the $322A escape (55)
+        # while a second, live enemy stood at the actor's back.
+        myself = _myself(world_x=100, world_y=64, facing_left=False)
+        stunned = _stunned_grunt("obj01", world_x=130)
+        behind = _enemy("obj02", CombatPhase.NORMAL, world_x=95, world_y=64)
+        context = {
+            myself,
+            stunned,
+            behind,
+            Punch(actor_slot="P1", target_slot="obj01"),
+            RearAttack(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], RearAttack)
+
+    def test_a_stunned_target_loses_to_a_strike_on_an_enemy_still_able_to_act(self) -> None:
+        myself = _myself(world_x=100, world_y=64, facing_left=False)
+        stunned = _stunned_grunt("obj01", world_x=130)
+        active = _enemy("obj02", CombatPhase.NORMAL, world_x=140, world_y=64)
+        context = {
+            myself,
+            stunned,
+            active,
+            Punch(actor_slot="P1", target_slot="obj01"),
+            Punch(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].target_slot, "obj02")
+
+    def test_still_beats_walking_off_to_another_enemy(self) -> None:
+        # Lowered, not abandoned: nothing better on the table means keep
+        # hitting the stunned body rather than fetching a distant enemy.
+        myself = _myself(world_x=100, world_y=64, facing_left=False)
+        stunned = _stunned_grunt("obj01", world_x=130)
+        far = _enemy("obj02", CombatPhase.NORMAL, world_x=300, world_y=64)
+        context = {
+            myself,
+            stunned,
+            far,
+            Punch(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], Punch)
+
+    def test_still_beats_retreating_and_advancing(self) -> None:
+        myself = _myself(world_x=100, world_y=64, facing_left=False)
+        stunned = _stunned_grunt("obj01", world_x=130)
+        dangerous = _enemy("obj02", CombatPhase.ATTACKING, world_x=160, world_y=64)
+        context = {
+            myself,
+            stunned,
+            dangerous,
+            Punch(actor_slot="P1", target_slot="obj01"),
+            RetreatFromDanger(actor_slot="P1", target_slot="obj02"),
+            WalkToAdvanceStage(actor_slot="P1", direction="right"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertIsInstance(decisions[0], Punch)
+
+    def test_a_knocked_down_target_keeps_the_full_punishable_tier(self) -> None:
+        # Only the *stun* is capped. A knockdown ends in a wake-up with
+        # invulnerability, so that window really does have to be used now.
+        myself = _myself(world_x=100, world_y=64, facing_left=False)
+        knocked_down = _enemy("obj01", CombatPhase.KNOCKDOWN, world_x=130, world_y=64)
+        active = _enemy("obj02", CombatPhase.NORMAL, world_x=140, world_y=64)
+        context = {
+            myself,
+            knocked_down,
+            active,
+            Punch(actor_slot="P1", target_slot="obj01"),
+            Punch(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_decision(context)
+
+        decisions = find_all(result, Decision)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].target_slot, "obj01")
+
+    def test_the_cap_never_raises_an_already_lower_score(self) -> None:
+        # An unwarranted RearAttack scores 9; capping at 19 must not lift it
+        # above the turn-around that decide.py offers for the same enemy.
+        myself = _myself(world_x=100, world_y=64, facing_left=False)
+        stunned_behind = _stunned_grunt("obj01", world_x=70)
+        context = {
+            myself,
+            stunned_behind,
+            RearAttack(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
         result = determine_priority_decision(context)

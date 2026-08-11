@@ -32,6 +32,7 @@ from .decide import (
     _advance_blocking_enemies,
 )
 from .tokens import (
+    Attack,
     CounterGrab,
     FlipHold,
     JumpAttack,
@@ -50,7 +51,7 @@ from .tokens import (
     ThrowPepper,
 )
 from .tokens import Myself, Partner
-from .tokens import Breakable, Enemy
+from .tokens import Breakable, Enemy, Grunt
 from .tokens import IncomingMelee, PunishWindow, Surrounded, WeaponUpgrade
 from .tokens import (
     HealthPickup,
@@ -94,6 +95,18 @@ _EMERGENCY_REAR_ATTACK_UNWARRANTED = 9
 _EMERGENCY_REAR_ATTACK_UNWARRANTED_DANGEROUS = 11
 _EMERGENCY_PUNCH_PUNISHABLE = 60
 _EMERGENCY_PUNCH_DEFAULT = 20
+# Ceiling (never a raise -- see _emergency) for any Attack whose target is a
+# stunned Grunt. Deliberately wedged between WalkToNearEnemy's base (14) and
+# a plain Punch (20):
+#
+# - above every Walk tier, so the actor keeps hitting the stunned body when
+#   nothing better exists instead of wandering off to fetch another enemy;
+# - above RetreatFromDanger (17..15), preserving "attacking always wins once
+#   actually possible";
+# - below a plain strike on an enemy that can still act (20), and far below
+#   the RearAttack escape (55/60), so a second enemy anywhere near always
+#   gets dealt with first.
+_EMERGENCY_ATTACK_STUNNED = 19
 _EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
 _EMERGENCY_HOLD_SUPPLEX = 68
 _EMERGENCY_HOLD_FLIP = 66
@@ -413,11 +426,34 @@ _EMERGENCY_FUNCS: dict[type[Decision], Callable[[Decision, Context], int]] = {
 }
 
 
+def _target_is_stunned(context: Context, target_slot: str | None) -> bool:
+    """Whether this decision's target is a ``Grunt`` frozen on a timed stun.
+
+    Only ordinary enemies have the ROM counter behind ``is_stunned``; a
+    ``Boss``, a ``Breakable`` or a missing target all answer no.
+    """
+
+    if target_slot is None:
+        return False
+    target = find(context, Enemy, slot=target_slot)
+    return isinstance(target, Grunt) and target.is_stunned
+
+
 def _emergency(decision: Decision, context: Context) -> int:
     func = _EMERGENCY_FUNCS.get(type(decision))
-    if func is None:
-        return _EMERGENCY_DEFAULT
-    return func(decision, context)
+    score = _EMERGENCY_DEFAULT if func is None else func(decision, context)
+    if isinstance(decision, Attack) and _target_is_stunned(
+        context, getattr(decision, "target_slot", None)
+    ):
+        # A stunned enemy is the one target that is *not* going anywhere:
+        # it cannot act, cannot retaliate, and will still be standing there
+        # in a moment. Hitting it is worth doing when nothing else is on the
+        # table, but it must never outrank dealing with an enemy that can
+        # still act -- which is what the punishable tier (60) made it do,
+        # above even the RearAttack escape (55) with a second enemy live at
+        # the actor's back.
+        return min(score, _EMERGENCY_ATTACK_STUNNED)
+    return score
 
 
 def determine_priority_decision(context: Context) -> Context:

@@ -232,6 +232,18 @@ enemy while sweeping them off the board, with health `$FFFF`; that case
 stays `SCRIPTED` so nothing chases or waits for a body that is being
 removed.
 
+A stun does not raise the urgency of hitting that enemy — it lowers it.
+Every `Attack` against a stunned `Grunt` is capped at a tier wedged
+between the `Walk` decisions and a plain strike, because a stunned body
+is the one target that is not going anywhere: it cannot act, cannot
+retaliate, and will still be standing there in a moment. Anything
+involving an enemy that *can* still act therefore wins — a strike on it,
+or the `RearAttack` escape from one at the actor's back — while the cap
+stays high enough that the AI keeps hitting the stunned enemy when
+nothing better is on the table, rather than walking off to fetch another
+one. This is a ceiling, never a raise: an attack already ranked lower
+(an unwarranted `RearAttack`, say) keeps its own lower score.
+
 
 ## Process
 

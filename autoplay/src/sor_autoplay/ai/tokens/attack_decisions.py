@@ -32,7 +32,17 @@ from .tokens import Decision
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Attack(Decision, ABC):
-    """A decision that strikes a target — a foe, a prop, or a held body."""
+    """A decision that strikes a target — a foe, a prop, or a held body.
+
+    Branch-wide emergency rule: whatever a concrete subclass's own
+    ``Raises emergency`` line says, an attack whose target is a **stunned**
+    ``Grunt`` (``Grunt.is_stunned``) is capped at
+    ``priority._EMERGENCY_ATTACK_STUNNED``. A stunned body cannot act,
+    cannot retaliate and will still be there in a moment, so it must never
+    outrank dealing with an enemy that can still act; the cap only ever
+    lowers a score, and stays above every ``Walk`` tier so the actor keeps
+    hitting it when nothing better is on the table.
+    """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
