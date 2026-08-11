@@ -46,7 +46,9 @@ class _FakeClient:
         self.held = 0
 
 
-def _actor(world_x: int, world_y: int, facing_left: bool) -> Myself:
+def _actor(
+    world_x: int, world_y: int, facing_left: bool, health_percent: float = 100.0
+) -> Myself:
     return Myself(
         slot="P1",
         player_index=1,
@@ -54,8 +56,8 @@ def _actor(world_x: int, world_y: int, facing_left: bool) -> Myself:
         character_name="Axel",
         world_x=world_x,
         world_y=world_y,
-        health=100,
-        health_percent=100.0,
+        health=int(health_percent),
+        health_percent=health_percent,
         lives=3,
         specials=1,
         held_weapon_type=0,
@@ -87,6 +89,7 @@ def _run(
     enemy_x: int,
     enemy_y: int,
     phases,
+    health_percent: float = 100.0,
 ) -> list[int]:
     """Drive the pipeline ``ticks`` times, returning each tick's held mask.
 
@@ -101,7 +104,7 @@ def _run(
     ax, ay, facing_left = actor_x, actor_y, False
     for tick in range(ticks):
         context = {
-            _actor(ax, ay, facing_left),
+            _actor(ax, ay, facing_left, health_percent),
             _enemy(enemy_x, enemy_y, phases[tick % len(phases)]),
             CameraRange(left=-100, right=500, top=0, bottom=112),
             Stage(level_index=0, direction="right"),
@@ -165,6 +168,10 @@ class SingleEnemyDirectionStabilityTests(unittest.TestCase):
     """
 
     def test_committed_enemy_does_not_cause_per_tick_reversals(self) -> None:
+        # Hurt, so RetreatFromDanger is in play at all (decide.
+        # _retreat_is_worth_it) -- that is the configuration both cycles
+        # needed, since a healthy actor now simply walks in and never gives
+        # the retreat anything to fight over.
         masks = _run(
             ticks=20,
             actor_x=100,
@@ -172,6 +179,7 @@ class SingleEnemyDirectionStabilityTests(unittest.TestCase):
             enemy_x=160,
             enemy_y=60,
             phases=[CombatPhase.ATTACKING],
+            health_percent=20.0,
         )
 
         # The old pipeline alternated retreat/approach on literally every
@@ -190,7 +198,34 @@ class SingleEnemyDirectionStabilityTests(unittest.TestCase):
 
     def test_retreat_from_a_committed_enemy_is_sustained(self) -> None:
         # Backing off must actually gain ground: the cycle's signature was
-        # that it never did, bouncing between the same two x values.
+        # that it never did, bouncing between the same two x values. Hurt, so
+        # the retreat is warranted in the first place.
+        masks = _run(
+            ticks=6,
+            actor_x=100,
+            actor_y=60,
+            enemy_x=160,
+            enemy_y=60,
+            phases=[CombatPhase.ATTACKING],
+            health_percent=20.0,
+        )
+
+        self.assertTrue(
+            any(mask & LEFT for mask in masks),
+            "never backed off from a committed enemy while hurt",
+        )
+        self.assertFalse(
+            any(mask & RIGHT for mask in masks),
+            f"walked back toward the committed enemy mid-retreat: "
+            f"{[hex(m) for m in masks]}",
+        )
+
+    def test_healthy_actor_walks_into_a_committed_enemy_instead_of_fleeing(self) -> None:
+        # The design rule this suite must not let regress: an enemy cannot be
+        # defeated without standing in its range, so at full health a
+        # committed enemy nearby is something to close on. A general flee
+        # reflex made the AI passive *and* supplied both limit cycles above
+        # with the verb they oscillated against.
         masks = _run(
             ticks=6,
             actor_x=100,
@@ -200,14 +235,9 @@ class SingleEnemyDirectionStabilityTests(unittest.TestCase):
             phases=[CombatPhase.ATTACKING],
         )
 
-        self.assertTrue(
-            any(mask & LEFT for mask in masks),
-            "never backed off from a committed enemy in the caution zone",
-        )
         self.assertFalse(
-            any(mask & RIGHT for mask in masks),
-            f"walked back toward the committed enemy mid-retreat: "
-            f"{[hex(m) for m in masks]}",
+            any(mask & LEFT for mask in masks),
+            f"fled a committed enemy at full health: {[hex(m) for m in masks]}",
         )
 
     def test_closes_in_again_once_the_enemy_is_no_longer_committed(self) -> None:

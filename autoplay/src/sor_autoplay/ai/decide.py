@@ -333,6 +333,44 @@ def could_hold_actions(context: Context) -> Context:
     return verbs
 
 
+# Backing off is a *concession*, not a reflex. A beat-em-up is won by
+# trading hits: every enemy has to be closed on and struck, and closing on a
+# live enemy always means standing inside the range it can hit back from.
+# Treating "a committed enemy is within caution distance" as a reason to flee
+# therefore refuses the only exchange that ever wins the fight -- the AI backs
+# off, the enemy follows, and the round goes nowhere. (It was also half of a
+# live limit cycle: retreat and approach fighting over the same enemy, see
+# could_retreat_from_danger.)
+#
+# So retreat is gated on the two situations where the exchange genuinely is
+# not survivable and space is worth more than damage:
+#
+# 1. **Hurt** -- below this much health there is no room to trade, and a KO
+#    costs a whole life. Shares HEALTH_CRITICAL_PERCENT's reading of "hurt
+#    enough to change plans", which _pickup_is_useful already uses.
+# 2. **Surrounded** -- 3+ enemies in the close box or a pincer
+#    (inference.check_for_surrounded). No amount of facing answers being hit
+#    from both sides at once; the only fix is space.
+#
+# Healthy and one-on-one, the AI walks in and takes the hit it has to take.
+RETREAT_HEALTH_PERCENT_THRESHOLD = HEALTH_CRITICAL_PERCENT
+
+
+def _retreat_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
+    """Whether backing off beats engaging -- see RETREAT_HEALTH_PERCENT_THRESHOLD.
+
+    Also the single owner test for a dangerous, close enemy: when this is
+    true ``could_retreat_from_danger`` claims it and
+    ``could_walk_to_near_enemy`` stands off; when false the walk claims it and
+    retreat produces nothing. Exactly one of the two ever holds a given
+    enemy, which is what keeps them from handing it back and forth.
+    """
+
+    if actor.health_percent < RETREAT_HEALTH_PERCENT_THRESHOLD:
+        return True
+    return any(token.actor_slot == actor.slot for token in find_all(context, Surrounded))
+
+
 def _ahead_in_stage_direction(actor_world_x: int, enemy_world_x: int, direction: str) -> bool:
     if direction == "right":
         return enemy_world_x >= actor_world_x
@@ -377,19 +415,29 @@ def could_walk_to_near_enemy(context: Context) -> Context:
         # (priority.py's distance-scored emergency) picks the closest one,
         # per AI.md's own target-selection principle: this function only
         # says what's possible, never which possibility is best.
-        # Neither skip below tests which *side* the enemy is on, and that is
-        # deliberate -- see could_retreat_from_danger for the facing-feedback
-        # cycle that a front-only skip creates. A dangerous, close enemy is
-        # owned by RetreatFromDanger from whichever side it stands on.
+        # Stand off only when retreat is actually going to claim the enemy
+        # (_retreat_is_worth_it -- hurt or surrounded). Otherwise close in:
+        # a committed enemy nearby is the *normal* state of a fight, not a
+        # reason to stop walking, and the attack verbs outrank this one the
+        # moment it is in range.
+        #
+        # Neither skip tests which *side* the enemy is on, deliberately --
+        # see could_retreat_from_danger for the facing-feedback cycle a
+        # front-only skip creates.
         threatening = reach.targets_of(context, IncomingMelee, actor.slot)
+        standing_off = _retreat_is_worth_it(context, actor)
         for enemy in enemies:
-            if enemy.slot in threatening:
+            if standing_off and enemy.slot in threatening:
                 # could_retreat_from_danger covers this one instead -- don't
                 # propose closing the last stretch of distance into a
                 # committed attack that isn't hittable yet.
                 continue
-            if is_dangerous(enemy.combat_phase) and reach.too_close_to_keep_approaching(
-                actor, enemy, extra_margin=reach.APPROACH_RELEASE_MARGIN
+            if (
+                standing_off
+                and is_dangerous(enemy.combat_phase)
+                and reach.too_close_to_keep_approaching(
+                    actor, enemy, extra_margin=reach.APPROACH_RELEASE_MARGIN
+                )
             ):
                 # Hysteresis (see reach.APPROACH_RELEASE_MARGIN). Skipping
                 # only on the IncomingMelee token above put approach and
@@ -405,7 +453,14 @@ def could_walk_to_near_enemy(context: Context) -> Context:
 
 
 def could_retreat_from_danger(context: Context) -> Context:
-    """Back off from a committed enemy that is close but not yet hittable.
+    """Back off from a committed enemy -- only when the fight is already lost
+    on the current terms.
+
+    Gated on ``_retreat_is_worth_it``: hurt, or surrounded. Backing off is
+    not the default answer to danger, because there is no way to defeat an
+    enemy without standing in its range at some point -- see that function's
+    own comment. Healthy and one-on-one, ``could_walk_to_near_enemy`` owns
+    the same enemy and walks in instead.
 
     Deliberately side-agnostic. An earlier version skipped an enemy at the
     actor's back, reasoning that turning to face it beats fleeing it blind,
@@ -444,6 +499,8 @@ def could_retreat_from_danger(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
+        if not _retreat_is_worth_it(context, actor):
+            continue  # healthy and not boxed in -- engage, don't flee
         actionable = reach.targets_of(context, ActionableTarget, actor.slot)
         for target_slot in reach.targets_of(context, IncomingMelee, actor.slot):
             enemy = find(context, Enemy, slot=target_slot)

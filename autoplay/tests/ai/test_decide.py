@@ -668,16 +668,33 @@ class CouldWalkToNearEnemyTests(unittest.TestCase):
 
         self.assertEqual(could_walk_to_near_enemy(context), set())
 
-    def test_skips_a_dangerous_enemy_in_the_retreat_caution_zone(self) -> None:
+    def test_skips_a_dangerous_enemy_in_the_caution_zone_only_while_hurt(self) -> None:
         # Axel: punch_outer=50, RETREAT_CAUTION_MARGIN=24 -> zone is dx<=74.
-        # could_retreat_from_danger covers this enemy instead.
-        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        # Standing off is only right when could_retreat_from_danger will
+        # actually claim the enemy (_retreat_is_worth_it) -- otherwise the two
+        # verbs would leave it unowned and the actor would just stand there.
+        myself = make_myself(
+            world_x=100, world_y=100, facing_left=False, health_percent=20.0
+        )
         enemy = make_enemy(
             world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING
         )  # dx=70, dangerous, in front (not actionable: outside punch_outer=50)
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(could_walk_to_near_enemy(context), set())
+
+    def test_closes_on_a_dangerous_enemy_in_the_caution_zone_while_healthy(self) -> None:
+        # The design point behind _retreat_is_worth_it: an enemy cannot be
+        # defeated without standing in its range, so a committed enemy nearby
+        # is the normal state of a fight, not a reason to stop walking. At
+        # full health this must approach, not stand off.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING)
+        context: set[Token] = {myself, enemy}
+
+        result = could_walk_to_near_enemy(context)
+
+        self.assertEqual(result, {WalkToNearEnemy(actor_slot="P1", target_slot="obj01")})
 
     def test_still_approaches_a_dangerous_enemy_beyond_the_caution_zone(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
@@ -692,8 +709,13 @@ class CouldWalkToNearEnemyTests(unittest.TestCase):
 
 
 class CouldRetreatFromDangerTests(unittest.TestCase):
-    def test_fires_for_a_dangerous_enemy_in_the_caution_zone(self) -> None:
-        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+    """Backing off is a concession, not a reflex: an enemy cannot be defeated
+    without standing in its range, so danger alone is never the reason. Every
+    firing case here therefore also carries a reason to concede -- hurt, or
+    surrounded (``decide._retreat_is_worth_it``)."""
+
+    def test_fires_for_a_dangerous_enemy_in_the_caution_zone_while_hurt(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False, health_percent=20.0)
         enemy = make_enemy(world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING)  # dx=70
         context: set[Token] = {myself, enemy}
 
@@ -702,7 +724,7 @@ class CouldRetreatFromDangerTests(unittest.TestCase):
         self.assertEqual(result, {RetreatFromDanger(actor_slot="P1", target_slot="obj01")})
 
     def test_fires_for_a_charging_enemy_too(self) -> None:
-        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        myself = make_myself(world_x=100, world_y=100, facing_left=False, health_percent=20.0)
         enemy = make_enemy(world_x=170, world_y=100, combat_phase=CombatPhase.CHARGE)
         context: set[Token] = {myself, enemy}
 
@@ -710,8 +732,37 @@ class CouldRetreatFromDangerTests(unittest.TestCase):
 
         self.assertEqual(result, {RetreatFromDanger(actor_slot="P1", target_slot="obj01")})
 
-    def test_does_not_fire_for_a_non_dangerous_enemy(self) -> None:
+    def test_does_not_fire_while_healthy_and_one_on_one(self) -> None:
+        # The design point: at full health the same committed enemy is
+        # could_walk_to_near_enemy's to close on, not something to flee.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        enemy = make_enemy(world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING)
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(could_retreat_from_danger(context), set())
+
+    def test_fires_while_healthy_when_surrounded(self) -> None:
+        # The other reason to concede: no amount of facing answers being hit
+        # from both sides at once, so space is worth more than damage even at
+        # full health. Pincer -- one enemy each side of the actor, both inside
+        # REAR_THREAT_X (56). dx=54 for the committed one is the window where
+        # it is close enough to count toward Surrounded and to threaten, but
+        # still outside punch_outer (50) and so not yet ActionableTarget --
+        # a hittable enemy is attacked, never retreated from.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        front = make_enemy(
+            slot="obj01", world_x=154, world_y=100, combat_phase=CombatPhase.ATTACKING
+        )
+        behind = make_enemy(slot="obj02", world_x=60, world_y=100)
+        context: set[Token] = {myself, front, behind}
+        context |= generate_inference_tokens(context)
+
+        result = could_retreat_from_danger(context)
+
+        self.assertIn(RetreatFromDanger(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_does_not_fire_for_a_non_dangerous_enemy(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False, health_percent=20.0)
         enemy = make_enemy(world_x=170, world_y=100, combat_phase=CombatPhase.NORMAL)
         context: set[Token] = {myself, enemy}
 
@@ -725,7 +776,7 @@ class CouldRetreatFromDangerTests(unittest.TestCase):
         # that handed the same enemy back and forth between this verb and
         # could_walk_to_near_enemy's turn-around on every tick. Uncovered
         # before: the whole limit cycle lived in this gap.
-        myself = make_myself(world_x=100, world_y=100, facing_left=True)
+        myself = make_myself(world_x=100, world_y=100, facing_left=True, health_percent=20.0)
         enemy = make_enemy(  # to the right of a left-facing actor -> behind
             world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING
         )

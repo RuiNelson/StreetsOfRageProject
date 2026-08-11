@@ -114,17 +114,21 @@ class WalkToPickup(Walk):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RetreatFromDanger(Walk):
-    """Back away from a dangerous enemy that is not yet actionable, instead
-    of closing the last stretch of distance into its committed attack.
+    """Give up ground to a dangerous enemy, when the exchange is one the
+    actor cannot currently afford to take.
 
     Produced by ``could_retreat_from_danger`` once per ``IncomingMelee``
     (an on-screen enemy in a dangerous phase, close enough that continuing
     to approach risks arriving right as its hit lands) that carries no
-    ``ActionableTarget`` -- not really hittable yet -- and is not behind the
-    actor; never just the nearest, determine_priority_verb picks among
-    the candidates.
-    ``could_walk_to_near_enemy`` skips producing a candidate for the same
-    enemy in this zone, so the two never compete for the same target.
+    ``ActionableTarget`` -- not really hittable yet -- and **only while
+    ``decide._retreat_is_worth_it``**: the actor is hurt, or ``Surrounded``.
+    Danger alone is deliberately not enough, since no enemy can be defeated
+    without standing in the range it hits back from. Never just the nearest;
+    determine_priority_verb picks among the candidates.
+    That same predicate decides which verb owns the enemy: while it holds,
+    ``could_walk_to_near_enemy`` stands off; while it does not, that verb
+    closes in and this one produces nothing. Exactly one of the two ever
+    holds a given enemy, from whichever side it stands on.
 
     Raises emergency: IncomingMelee×17, closer scoring higher
     (distance-scored; see
