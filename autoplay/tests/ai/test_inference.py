@@ -94,10 +94,11 @@ class CheckForIncomingProjectilesTests(unittest.TestCase):
 
 class CheckForClosingEnemiesTests(unittest.TestCase):
     def test_promotes_a_grunt_closing_diagonally_beyond_the_rear_band(self) -> None:
-        # Axel (character_id=0): rear-attack behind band is 40px.
-        myself = make_myself(character_id=0, world_x=100, world_y=100)
+        # Axel (character_id=0), facing right: rear-attack *behind* band is
+        # 40px, so the closing enemy must be behind (world_x < actor's).
+        myself = make_myself(character_id=0, world_x=100, world_y=100, facing_left=False)
         garcia = make_garcia(
-            slot="obj20", world_x=160, world_y=110, grunt_vel_x=-10.0, grunt_vel_y=-2.0
+            slot="obj20", world_x=40, world_y=110, grunt_vel_x=10.0, grunt_vel_y=-2.0
         )
         context: set[Token] = {myself, garcia}
 
@@ -105,52 +106,75 @@ class CheckForClosingEnemiesTests(unittest.TestCase):
 
         self.assertEqual(result, {ClosingEnemy(slot="obj20")})
 
-    def test_no_promotion_when_heading_away(self) -> None:
-        myself = make_myself(character_id=0, world_x=100, world_y=100)
+    def test_no_promotion_when_closing_from_the_front(self) -> None:
+        # Regression: Axel/Blaze have zero forward RearAttack reach, so an
+        # enemy closing in from the front must never be promoted for them,
+        # even though the same distance/speed would qualify from behind.
+        myself = make_myself(character_id=0, world_x=100, world_y=100, facing_left=False)
         garcia = make_garcia(
-            slot="obj20", world_x=160, world_y=110, grunt_vel_x=10.0, grunt_vel_y=0.0
+            slot="obj20", world_x=160, world_y=100, grunt_vel_x=-10.0, grunt_vel_y=0.0
+        )
+        context: set[Token] = {myself, garcia}
+
+        self.assertEqual(check_for_closing_enemies(context), set())
+
+    def test_promotes_from_the_front_for_adams_forward_reaching_hop(self) -> None:
+        # Adam (character_id=1) is the one character whose RearAttack chord
+        # also reaches forward (14px) -- the front case must still work for him.
+        myself = make_myself(character_id=1, world_x=100, world_y=100, facing_left=False)
+        garcia = make_garcia(
+            slot="obj20", world_x=160, world_y=100, grunt_vel_x=-10.0, grunt_vel_y=0.0
+        )
+        context: set[Token] = {myself, garcia}
+
+        self.assertEqual(check_for_closing_enemies(context), {ClosingEnemy(slot="obj20")})
+
+    def test_no_promotion_when_heading_away(self) -> None:
+        myself = make_myself(character_id=0, world_x=100, world_y=100, facing_left=False)
+        garcia = make_garcia(
+            slot="obj20", world_x=40, world_y=110, grunt_vel_x=-10.0, grunt_vel_y=0.0
         )
         context: set[Token] = {myself, garcia}
 
         self.assertEqual(check_for_closing_enemies(context), set())
 
     def test_no_promotion_for_a_stationary_grunt(self) -> None:
-        myself = make_myself(character_id=0, world_x=100, world_y=100)
-        garcia = make_garcia(slot="obj20", world_x=160, world_y=110)
+        myself = make_myself(character_id=0, world_x=100, world_y=100, facing_left=False)
+        garcia = make_garcia(slot="obj20", world_x=40, world_y=110)
         context: set[Token] = {myself, garcia}
 
         self.assertEqual(check_for_closing_enemies(context), set())
 
     def test_no_promotion_when_already_inside_the_rear_band(self) -> None:
         # decide._in_rear_band already covers this tick without early warning.
-        myself = make_myself(character_id=0, world_x=100, world_y=100)
+        myself = make_myself(character_id=0, world_x=100, world_y=100, facing_left=False)
         garcia = make_garcia(
-            slot="obj20", world_x=130, world_y=100, grunt_vel_x=-10.0, grunt_vel_y=0.0
+            slot="obj20", world_x=70, world_y=100, grunt_vel_x=10.0, grunt_vel_y=0.0
         )
         context: set[Token] = {myself, garcia}
 
         self.assertEqual(check_for_closing_enemies(context), set())
 
     def test_no_promotion_when_too_far_off_lane(self) -> None:
-        myself = make_myself(character_id=0, world_x=100, world_y=100)
+        myself = make_myself(character_id=0, world_x=100, world_y=100, facing_left=False)
         garcia = make_garcia(
-            slot="obj20", world_x=160, world_y=300, grunt_vel_x=-10.0, grunt_vel_y=0.0
+            slot="obj20", world_x=40, world_y=300, grunt_vel_x=10.0, grunt_vel_y=0.0
         )
         context: set[Token] = {myself, garcia}
 
         self.assertEqual(check_for_closing_enemies(context), set())
 
     def test_no_promotion_when_too_many_ticks_away(self) -> None:
-        myself = make_myself(character_id=0, world_x=100, world_y=100)
+        myself = make_myself(character_id=0, world_x=100, world_y=100, facing_left=False)
         garcia = make_garcia(
-            slot="obj20", world_x=300, world_y=110, grunt_vel_x=-1.0, grunt_vel_y=0.0
+            slot="obj20", world_x=-100, world_y=110, grunt_vel_x=1.0, grunt_vel_y=0.0
         )
         context: set[Token] = {myself, garcia}
 
         self.assertEqual(check_for_closing_enemies(context), set())
 
     def test_no_actors_no_output(self) -> None:
-        garcia = make_garcia(slot="obj20", world_x=160, world_y=110, grunt_vel_x=-10.0)
+        garcia = make_garcia(slot="obj20", world_x=40, world_y=110, grunt_vel_x=10.0)
         self.assertEqual(check_for_closing_enemies({garcia}), set())
 
 
@@ -170,9 +194,9 @@ class GenerateInferenceTokensTests(unittest.TestCase):
         self.assertTrue(any(isinstance(t, IncomingProjectile) for t in result))
 
     def test_unions_context_with_closing_enemy_check(self) -> None:
-        myself = make_myself(character_id=0, world_x=100, world_y=100)
+        myself = make_myself(character_id=0, world_x=100, world_y=100, facing_left=False)
         garcia = make_garcia(
-            slot="obj20", world_x=160, world_y=110, grunt_vel_x=-10.0, grunt_vel_y=0.0
+            slot="obj20", world_x=40, world_y=110, grunt_vel_x=10.0, grunt_vel_y=0.0
         )
         context: set[Token] = {myself, garcia}
 

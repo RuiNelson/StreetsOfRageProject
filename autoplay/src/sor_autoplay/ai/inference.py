@@ -79,10 +79,12 @@ def _closing_enemy_threatens(enemy: Grunt, actor: PlayableCharacter) -> bool:
     X and is still off-lane enough that it is not obviously stationary,
     landing inside that band within ``CLOSING_ENEMY_THREAT_TICKS``.
 
-    Deliberately reuses the *union* of the front/behind rear-attack bands
-    (rather than replicating decide.py's facing-aware behind/front split)
-    so this module stays independent of decide.py, matching the existing
-    no-cross-import convention between the two.
+    Must pick the *side-specific* band (behind vs front), not their union:
+    Axel/Blaze have zero forward RearAttack reach, so an enemy closing in
+    from the front must never be promoted for them, even though they do
+    have a real behind band. This mirrors decide.py's own
+    facing-aware ``_enemy_behind_actor`` test rather than importing it, to
+    keep the existing no-cross-import convention between the two modules.
     """
 
     if abs(enemy.world_y - actor.world_y) > CLOSING_ENEMY_LANE_SLACK:
@@ -97,16 +99,21 @@ def _closing_enemy_threatens(enemy: Grunt, actor: PlayableCharacter) -> bool:
     if not heading_toward:
         return False
 
-    rear_max_x = max(
-        rear_attack_behind_max_x(actor.character_id),
-        rear_attack_front_max_x(actor.character_id),
+    behind = (dx > 0) if actor.facing_left else (dx < 0)
+    max_x = (
+        rear_attack_behind_max_x(actor.character_id)
+        if behind
+        else rear_attack_front_max_x(actor.character_id)
     )
-    if abs(dx) <= rear_max_x:
+    if max_x <= 0:
+        # No reach at all on this side (e.g. Axel/Blaze from the front).
+        return False
+    if abs(dx) <= max_x:
         # Already inside the band -- decide._in_rear_band already covers
         # this tick without needing the early-warning signal.
         return False
 
-    ticks = (abs(dx) - rear_max_x) / abs(vx)
+    ticks = (abs(dx) - max_x) / abs(vx)
     return ticks <= CLOSING_ENEMY_THREAT_TICKS
 
 
