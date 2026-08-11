@@ -200,7 +200,9 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
 
         # Same lane (dy=0) and far away (dx=200) from an actively attacking
         # enemy -> step off its lane instead of walking straight down it.
-        client.hold_buttons.assert_called_once_with(player1=RIGHT | DOWN, player2=0)
+        # Side picked from target.world_y=50 against the lane's fixed
+        # midpoint (57 with no CameraRange in context) -> below it -> UP.
+        client.hold_buttons.assert_called_once_with(player1=RIGHT | UP, player2=0)
 
     def test_does_not_sidestep_a_dangerous_enemy_once_close_enough_to_punch(self) -> None:
         # dx=46 == stop_dx: already at the stopping point, so the actor
@@ -225,20 +227,20 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         # had often already reached ATTACKING and landed a hit. Aim for the
         # offset lane for the whole dangerous approach instead.
         #
-        # A direction-only movement-mask assertion can't distinguish this
-        # from the old behaviour here: with dy=30 (>= the old
-        # WALK_TO_ENEMY_LANE_SAFETY_Y=28 "on_lane" threshold), the old code
-        # converged straight onto the enemy's exact lane (target_y=50) while
-        # the new code aims for an offset lane (target_y=50+28=78) -- both
-        # are still below the actor's own world_y=80, so both read as an "UP"
-        # step either way. Only the exact target position reveals the fix,
-        # so call the private target-computation helper directly.
+        # The offset side is picked from the target's own position against
+        # the lane's fixed midpoint, not from actor.world_y vs
+        # target.world_y (see _walk_to_near_enemy_target's docstring): with
+        # no CameraRange in context, _lane_bounds defaults to lo=8, hi=106,
+        # midpoint=57 -- target.world_y=50 sits below that, so the offset
+        # pushes further up (-WALK_TO_ENEMY_LANE_SAFETY_Y), independent of
+        # the actor's own world_y=80.
         actor = _myself(world_x=0, world_y=80)
         target = replace(_enemy(world_x=200, world_y=50), combat_phase=CombatPhase.ATTACKING)
+        context = {actor, target}
 
-        target_x, target_y = _walk_to_near_enemy_target(actor, target)
+        target_x, target_y = _walk_to_near_enemy_target(actor, target, context)
 
-        self.assertEqual(target_y, 50 + WALK_TO_ENEMY_LANE_SAFETY_Y)
+        self.assertEqual(target_y, 50 - WALK_TO_ENEMY_LANE_SAFETY_Y)
 
     def test_does_not_sidestep_an_enemy_that_is_not_dangerous(self) -> None:
         actor = _myself(world_x=0, world_y=50)
@@ -276,6 +278,33 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         self.assertFalse(
             any(m & LEFT for m in masks) and any(m & RIGHT for m in masks),
             f"opposite horizontal commands straddling exact alignment: {masks}",
+        )
+
+    def test_close_range_lane_offset_does_not_glitch_exactly_on_alignment(self) -> None:
+        # Regression (live-diagnosed): the sidestep-lane offset picked its
+        # up/down side from actor.world_y >= target.world_y -- a raw compare
+        # between two bodies converging onto the same lane. While still far
+        # away on X (is_dangerous and dx > stop_dx both still hold), dy == 0
+        # gets crossed on essentially every tick of ordinary walk jitter, and
+        # each crossing swung target_y by a full
+        # 2*WALK_TO_ENEMY_LANE_SAFETY_Y -- read live as the actor darting
+        # up/down against a single, barely-moving enemy. Adjacent ticks a
+        # pixel apart, straddling dy=0, must now agree.
+        target = replace(_enemy(world_x=300, world_y=40), combat_phase=CombatPhase.ATTACKING)
+        masks = []
+        for actor_y in (39, 40, 41):
+            actor = _myself(world_x=0, world_y=actor_y)
+            gamepad, _ = _gamepad()
+            execute_verb(
+                WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+                {actor, target},
+                gamepad,
+            )
+            masks.append(gamepad.held)
+
+        self.assertFalse(
+            any(m & UP for m in masks) and any(m & DOWN for m in masks),
+            f"opposite vertical commands straddling exact lane alignment: {masks}",
         )
 
 

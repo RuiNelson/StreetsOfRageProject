@@ -286,7 +286,9 @@ def _back_direction_mask(actor: Myself | Partner) -> int:
     return RIGHT_MASK if actor.facing_left else LEFT_MASK
 
 
-def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[int, int]:
+def _walk_to_near_enemy_target(
+    actor: Myself | Partner, target: Enemy, context: Context
+) -> tuple[int, int]:
     """Stopping point for approaching ``target``.
 
     Stops just inside the actor's punch outer edge (never overlaps the
@@ -311,6 +313,19 @@ def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[
     side on a spurious flip would jump the stop point by a full
     ``2 * stop_dx`` -- a large, visible direction change for what is really
     still the same encounter.
+
+    The offset lane's up/down side is picked from ``target.world_y`` against
+    the lane's own fixed midpoint (``_lane_bounds``), not from
+    ``actor.world_y`` vs ``target.world_y``: while approaching, both bodies
+    are converging onto the same Y, so their *relative* compare crosses zero
+    on essentially every tick from a couple of px of ordinary walk jitter --
+    and unlike the X pick above, there is no persisted "facing" on the
+    vertical axis to fall back on. Picking the side from the target's
+    position against the fixed lane midpoint sidesteps the noise instead of
+    damping it: the midpoint doesn't move tick to tick, so the pick is
+    already stable without needing a hysteresis band. Live symptom before
+    this: the actor darting up/down (a full ``2 * WALK_TO_ENEMY_LANE_SAFETY_Y``
+    swing) against a single, barely-moving dangerous enemy.
     """
 
     outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
@@ -335,7 +350,12 @@ def _walk_to_near_enemy_target(actor: Myself | Partner, target: Enemy) -> tuple[
 
     dx = abs(target.world_x - actor.world_x)
     if is_dangerous(target.combat_phase) and dx > stop_dx:
-        offset = WALK_TO_ENEMY_LANE_SAFETY_Y if actor.world_y >= target.world_y else -WALK_TO_ENEMY_LANE_SAFETY_Y
+        lo, hi = _lane_bounds(context)
+        offset = (
+            WALK_TO_ENEMY_LANE_SAFETY_Y
+            if target.world_y >= (lo + hi) / 2
+            else -WALK_TO_ENEMY_LANE_SAFETY_Y
+        )
         target_y = target.world_y + offset
     else:
         target_y = target.world_y
@@ -349,7 +369,7 @@ def state_machine_walk_to_near_enemy(verb: WalkToNearEnemy, context: Context, ga
     if actor is None or target is None:
         gamepad.release()
         return
-    target_x, target_y = _walk_to_near_enemy_target(actor, target)
+    target_x, target_y = _walk_to_near_enemy_target(actor, target, context)
     gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
 
 
