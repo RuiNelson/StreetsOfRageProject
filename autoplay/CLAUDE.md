@@ -249,7 +249,20 @@ feeding each tick's output back the way the game would, and asserting on the
 resulting sequence. It also covers the two *multi-enemy* sources found the
 same way -- the random tie-break in `determine_priority_verb`, and the lane
 aim following the enemy's combat phase -- via `_run_multi`, which staggers
-each enemy's phase cycle the way a real group behaves. Add to this file,
+each enemy's phase cycle the way a real group behaves.
+
+`JumpKickFlightTests` is the same idea applied to the one move that spans
+several ROM *states* as well as several ticks. `_run_jump` drives a whole
+jump through the unarmed family (`$10` crouch → `$12` free flight → `$16`
+kick → `$14` land), feeding each tick's output back in, over an
+`_EdgeTrackingClient` that expires timed presses so a **held** button and a
+fresh **edge** are distinguishable -- which is the whole point, since
+`$3914` accepts only an edge and only in free flight. It pins the two
+reported failures: a B issued during the crouch is still held when flight
+begins (no edge, no kick ever), and a verb that evaporates mid-flight
+reaches `press_no_button`, which releases the hold and costs both the kick
+and the launch direction `$384E` samples at the end of the crouch. Measured
+before the fix: 211 of 587 launched jumps produced no kick at all. Add to this file,
 rather than a single-tick test, when a change touches which verb or target
 *owns* a situation across ticks; the useful assertions here are counts of
 direction reversals and target switches, not any single tick's output.

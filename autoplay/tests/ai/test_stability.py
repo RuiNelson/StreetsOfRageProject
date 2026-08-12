@@ -18,13 +18,15 @@ from sor_autoplay.ai.execute import execute_verb
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.priority import determine_priority_verb
-from sor_autoplay.ai.tokens import CameraRange, Enemy, Myself, Stage, Verb, find_all
+from sor_autoplay.ai.tokens import CameraRange, Enemy, Myself, Stage, Verb, find, find_all
 from sor_autoplay.phases import CombatPhase
 
 UP = 0x0001
 DOWN = 0x0002
 LEFT = 0x0004
 RIGHT = 0x0008
+B = 0x0020      # attack
+JUMP = 0x0040   # physical C
 
 # Ground walk is a couple of px per frame at a ~2-frame poll.
 STEP_X = 4
@@ -422,3 +424,168 @@ class MultipleEnemyTargetStabilityTests(unittest.TestCase):
             f"was pulled back and forth between two enemies: "
             f"{[hex(m) for m in masks]}",
         )
+
+
+class _EdgeTrackingClient:
+    """Like ``_FakeClient``, but keeps a *timed* press the way the host does.
+
+    A ROM input bit is edge-triggered (``+$55``), so "was B pressed" and "is
+    B held" are different questions and the jump kick only answers to the
+    first. Modelling ``press_buttons(frames=N)`` as a mask that expires is
+    what makes that distinction observable here.
+    """
+
+    def __init__(self) -> None:
+        self.held = 0
+        self._pressed = 0
+        self._frames = 0
+
+    def hold_buttons(self, player1=0, player2=0):
+        self.held = player1
+
+    def press_buttons(self, player1=0, player2=0, frames=1):
+        self._pressed = player1
+        self._frames = frames
+
+    def release_buttons(self, player1=0, player2=0):
+        self.held = 0
+        self._pressed = 0
+        self._frames = 0
+
+    def advance(self, frames):
+        """The mask on the pad right now; expires timed presses."""
+
+        mask = (self._pressed if self._frames > 0 else 0) | self.held
+        self._frames = max(0, self._frames - frames)
+        if self._frames == 0:
+            self._pressed = 0
+        return mask
+
+
+# The ROM's own unarmed jump family, with the facing bit cleared
+# (controls-and-input.md "Action state machine"): $10 is the 5-frame crouch,
+# $12 free flight, $16 the kick, $14 the landing.
+JUMP_START, FREE_FLIGHT, JUMP_KICK, JUMP_LAND = 0x10, 0x12, 0x16, 0x14
+CROUCH_FRAMES = 5
+FRAMES_PER_TICK = 2
+
+
+def _run_jump(enemy_x: int, frames: int = 40, enemy_vel: int = 0) -> dict:
+    """Drive one whole jump, feeding the ROM's action state machine back in.
+
+    Returns what the flight actually achieved: whether a *fresh* B edge
+    arrived while in free flight (the only thing $3914 accepts), and whether
+    a direction was held at the moment $384E samples it -- the two failures
+    that between them had the AI jumping at enemies and doing nothing.
+    """
+
+    client = _EdgeTrackingClient()
+    gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+    ax, action, crouch = 100, 0x02, 0
+    prev_mask = 0
+    result = {"kick_edge_in_flight": False, "direction_at_launch": False,
+              "b_pressed_in_crouch": False}
+
+    for frame in range(frames):
+        airborne = JUMP_START <= (action & 0xFE) <= 0x17
+        if frame % FRAMES_PER_TICK == 0:
+            context = {
+                _actor(ax, 100, False),
+                _enemy(int(enemy_x), 100, CombatPhase.NORMAL),
+                CameraRange(left=-100, right=500, top=0, bottom=112),
+                Stage(level_index=0, direction="right"),
+            }
+            context = {
+                token
+                for token in context
+                if not isinstance(token, Myself)
+            } | {
+                replace(find(context, Myself), action_state=action, is_airborne=airborne)
+            }
+            context |= generate_inference_tokens(context)
+            context |= generate_verb_tokens(context)
+            context = determine_priority_verb(context)
+            verbs = find_all(context, Verb)
+            if verbs:
+                execute_verb(verbs[0], context, gamepad)
+
+        mask = client.advance(FRAMES_PER_TICK if frame % FRAMES_PER_TICK == 0 else 0)
+        edge = mask & ~prev_mask
+        prev_mask = mask
+        base = action & 0xFE
+
+        if base == 0x02 and (edge & JUMP) and not (mask & B):
+            action, crouch = JUMP_START, CROUCH_FRAMES
+        elif base == FREE_FLIGHT and (edge & B):
+            action = JUMP_KICK
+            result["kick_edge_in_flight"] = True
+        elif base == JUMP_START and (mask & B):
+            result["b_pressed_in_crouch"] = True
+
+        base = action & 0xFE
+        if base == JUMP_START:
+            crouch -= 1
+            if crouch <= 0:
+                action = FREE_FLIGHT
+                result["direction_at_launch"] = bool(mask & (LEFT | RIGHT))
+        elif base in (FREE_FLIGHT, JUMP_KICK):
+            ax += 3
+            if ax >= enemy_x:
+                action = JUMP_LAND
+        elif base == JUMP_LAND:
+            action = 0x02
+        enemy_x += enemy_vel
+    return result
+
+
+class JumpKickFlightTests(unittest.TestCase):
+    """The jump kick is the one move that spans several ticks *and* several
+    ROM states, so it can only be checked across a run of them.
+
+    Both failures pinned here were reported from play and then measured on a
+    flight harness: 211 of 587 launched jumps produced no kick at all, and
+    the first jump of an encounter travelled nowhere because the direction
+    was not held when ``$384E`` sampled it."""
+
+    def test_a_launched_jump_lands_a_kick_edge_in_free_flight(self) -> None:
+        result = _run_jump(enemy_x=155)
+
+        self.assertTrue(
+            result["kick_edge_in_flight"],
+            "B never arrived as a fresh edge during free flight -- $3914 "
+            "accepts nothing else, so the actor flew the whole arc and did "
+            "nothing",
+        )
+
+    def test_a_target_leaving_the_band_mid_flight_still_gets_kicked(self) -> None:
+        # The flight is committed the moment it starts, but the *verb* used
+        # to depend on the reach band still holding -- so a target walking
+        # out of it deleted the verb mid-air, and a tick with no verb
+        # reaches press_no_button, which releases the hold: no kick, and no
+        # carry either if it happens during the crouch.
+        result = _run_jump(enemy_x=155, enemy_vel=3)
+
+        self.assertTrue(result["kick_edge_in_flight"])
+        self.assertTrue(result["direction_at_launch"])
+
+    def test_no_b_is_pressed_during_the_crouch(self) -> None:
+        # A B pressed in the crouch is still *held* when free flight starts
+        # (_press holds 4 frames, the AI re-decides every 2), so no edge ever
+        # arrives and the kick silently never happens.
+        result = _run_jump(enemy_x=155)
+
+        self.assertFalse(result["b_pressed_in_crouch"])
+
+    def test_the_launch_direction_is_held_when_the_rom_samples_it(self) -> None:
+        # $384E reads the held direction once, at the end of the crouch. The
+        # virtual X axis needs AXIS_RAMP_TICKS to reach an edge -- longer
+        # than the crouch lasts -- so this only holds because the jump
+        # handler bypasses it.
+        result = _run_jump(enemy_x=155)
+
+        self.assertTrue(
+            result["direction_at_launch"],
+            "no direction held at launch: the jump goes straight up and the "
+            "kick lands on empty air where the actor stood",
+        )
+
