@@ -57,6 +57,7 @@ from .reach import (
     PIT_AVOID_MARGIN,
     REACH_SAFETY_MARGIN,
     enemy_behind_actor,
+    enemy_lane_covers,
     pit_endangers,
 )
 from ..phases import is_dangerous
@@ -409,6 +410,47 @@ def _dead_zone_stop_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> 
     return max(floor, min(stop_dx, inside))
 
 
+def _crossing_would_walk_into_the_swing(actor: Myself | Partner, target: Enemy) -> bool:
+    """True while starting the walk into a dead-zone enemy would cross a
+    live swing.
+
+    Only for an enemy that *has* a dead zone, and only from outside its
+    whole reach -- the two conditions that make waiting a real tactic rather
+    than passivity. Nora is the case: her whip covers 32..80px, so outside 80
+    she cannot touch the actor at all, and the pocket under 32 is the place
+    to be. Between them is her band, and it has to be crossed.
+
+    Which is where the hits came from. With the approach aiming for the
+    pocket, a live recording had her land 9 of her 10 hits at ~80px -- the
+    far edge of her reach, catching the actor as it set off. So the crossing
+    waits for the swing to end; her engage-and-swing (state ``$08``) is
+    stationary, so waiting outside it costs nothing, and the moment she stops
+    the actor walks all the way through to the pocket.
+
+    Deliberately *not* general. Holding ground against an ordinary enemy --
+    one whose reach starts at its own feet, so there is no safe distance
+    short of out of range -- was measured and is simply passivity: it walks
+    up and hits you anyway, while you have stopped attacking. That
+    experiment cost 20% of the AI's damage output and raised the damage it
+    took. The difference here is that "outside 80px" is a place Nora
+    genuinely cannot reach.
+    """
+
+    if target.min_reach <= 0 or not is_dangerous(target.combat_phase):
+        return False
+    if target.max_reach <= 0:
+        return False
+    if not enemy_lane_covers(target, actor):
+        # The swing is not aimed anywhere near this lane, so there is nothing
+        # to wait out -- and waiting anyway was expensive: gating on the X
+        # gap alone cost half the AI's stage progress in a live recording
+        # (1487px against 2579-3255) because it sat out swings it was never
+        # in the line of.
+        return False
+    gap = abs(target.world_x - actor.world_x)
+    return gap > target.max_reach + REACH_SAFETY_MARGIN
+
+
 def _walk_to_near_enemy_target(
     actor: Myself | Partner, target: Enemy, context: Context
 ) -> tuple[int, int]:
@@ -455,6 +497,9 @@ def _walk_to_near_enemy_target(
     inner = punch_inner_x(actor.character_id)
     stop_dx = max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER)
     stop_dx = _dead_zone_stop_dx(actor, target, stop_dx)
+
+    if _crossing_would_walk_into_the_swing(actor, target):
+        return actor.world_x, actor.world_y
 
     dx = target.world_x - actor.world_x
     if abs(dx) <= DIRECTION_HYSTERESIS_X:

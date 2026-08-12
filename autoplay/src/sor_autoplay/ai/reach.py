@@ -519,6 +519,28 @@ def enemy_can_reach(
     )
 
 
+def enemy_lane_covers(
+    enemy: Enemy, actor: PlayableCharacter, *, margin: int = REACH_SAFETY_MARGIN
+) -> bool:
+    """Is the actor in the *lane* any of this enemy's attacks sweep?
+
+    The lane half of ``enemy_can_reach``, on its own. An attack in this game
+    only connects within roughly a lane of its target, so a reach that is
+    long on X says nothing about a target standing well above or below it --
+    and treating a long reach as dangerous regardless of lane makes an actor
+    wait out swings that were never aimed anywhere near it.
+
+    ``False`` when nothing was extracted, which is the same "unknown" every
+    other reach predicate reports; callers must not read it as "safe".
+    """
+
+    lane_dy = actor.world_y - enemy.world_y
+    return any(
+        rng.lane_min - margin <= lane_dy <= rng.lane_max + margin
+        for rng in enemy.attack_ranges
+    )
+
+
 def in_enemy_dead_zone(
     enemy: Enemy, actor: PlayableCharacter, *, margin: int = REACH_SAFETY_MARGIN
 ) -> bool:

@@ -172,6 +172,50 @@ class DeadZoneApproachTests(unittest.TestCase):
             stop_dx, punch_usable_inner_x(0), "too close for Axel's own punch"
         )
 
+    def test_waits_outside_her_reach_rather_than_crossing_a_live_swing(self) -> None:
+        # 9 of the 10 hits a live Nora landed came at ~80px -- the far edge of
+        # her whip -- catching the actor as it set off across the band. Her
+        # engage-and-swing is stationary, so waiting it out costs nothing.
+        actor = _myself(world_x=100, world_y=100)
+        swinging = self._nora(world_x=200, world_y=100, combat_phase=CombatPhase.ATTACKING)
+
+        target_x, target_y = _walk_to_near_enemy_target(actor, swinging, set())
+
+        self.assertEqual((target_x, target_y), (actor.world_x, actor.world_y))
+
+    def test_crosses_anyway_once_already_inside_the_band(self) -> None:
+        # Standing in the band is the worst place to be: press on to the
+        # pocket rather than waiting there.
+        actor = _myself(world_x=100, world_y=100)
+        swinging = self._nora(world_x=160, world_y=100, combat_phase=CombatPhase.ATTACKING)
+
+        target_x, _ = _walk_to_near_enemy_target(actor, swinging, set())
+
+        self.assertLess(swinging.world_x - target_x, swinging.min_reach)
+
+    def test_does_not_wait_out_a_swing_in_another_lane(self) -> None:
+        # Her whip sweeps a lane band; a swing the actor is nowhere near the
+        # line of is not a reason to stop. Gating on the X gap alone cost half
+        # the AI's stage progress in a live recording.
+        actor = _myself(world_x=100, world_y=100)
+        off_lane = self._nora(world_x=200, world_y=160, combat_phase=CombatPhase.ATTACKING)
+
+        target_x, _ = _walk_to_near_enemy_target(actor, off_lane, set())
+
+        self.assertNotEqual(target_x, actor.world_x)
+
+    def test_an_ordinary_enemy_is_never_waited_out(self) -> None:
+        # An enemy whose reach starts at its own feet has no distance that is
+        # both safe and useful, so holding ground is simply passivity -- it
+        # walks up and hits you anyway while you have stopped attacking.
+        actor = _myself(world_x=100, world_y=100)
+        garcia = _enemy(world_x=200, world_y=100)
+        garcia = replace(garcia, combat_phase=CombatPhase.ATTACKING)
+
+        target_x, _ = _walk_to_near_enemy_target(actor, garcia, set())
+
+        self.assertNotEqual(target_x, actor.world_x)
+
     def test_an_enemy_without_a_dead_zone_is_unaffected(self) -> None:
         # Garcia's punch covers his own feet, so there is no pocket and the
         # stop distance stays the actor's own punch edge.
