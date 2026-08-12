@@ -24,11 +24,12 @@ from sor_autoplay.ai.tokens import (
 )
 from sor_autoplay.ai.tokens import Myself
 from sor_autoplay.ai.tokens import AttackRange, Enemy, Nora, punch_usable_inner_x
-from sor_autoplay.ai.tokens import CameraRange
+from sor_autoplay.ai.tokens import CameraRange, Stage
 from sor_autoplay.ai.execute import (
     BREAKABLE_STOP_BUFFER,
     MOVE_DEADBAND_X,
     WALK_TO_ENEMY_LANE_SAFETY_Y,
+    _walk_to_breakable_target,
     _walk_to_near_enemy_target,
     execute_tick,
     execute_verb,
@@ -125,6 +126,57 @@ class PressNoButtonTests(unittest.TestCase):
 
         client.hold_buttons.assert_called_once_with(player1=0, player2=0)
         self.assertEqual(gamepad.held, 0)
+
+
+class BreakableApproachSideTests(unittest.TestCase):
+    """Standing on a prop, which side to step to cannot be decided by
+    anything the AI itself flips every tick."""
+
+    def _prop(self, x: int, y: int = 100):
+        from sor_autoplay.ai.tokens import Breakable
+
+        return Breakable(slot="prop", world_x=x, world_y=y, type_id=0x11)
+
+    def _stage(self, direction: str = "right"):
+        return Stage(level_index=0, direction=direction)
+
+    def test_the_side_is_stable_however_the_actor_faces(self) -> None:
+        # Reading it off facing is a feedback loop: a prop, unlike an enemy,
+        # never moves to break the symmetry. Measured live as 107 seconds at
+        # one prop with LEFT held on 244 ticks and RIGHT on 240, the steering
+        # axis cancelling almost all of it.
+        prop = self._prop(200)
+        context = {self._stage("right")}
+
+        left = _walk_to_breakable_target(
+            _myself(world_x=200, world_y=100, facing_left=True), prop, context
+        )
+        right = _walk_to_breakable_target(
+            _myself(world_x=200, world_y=100, facing_left=False), prop, context
+        )
+
+        self.assertEqual(left, right)
+
+    def test_it_stops_on_the_side_it_is_coming_from(self) -> None:
+        prop = self._prop(200)
+
+        going_right = _walk_to_breakable_target(
+            _myself(world_x=200, world_y=100), prop, {self._stage("right")}
+        )
+        going_left = _walk_to_breakable_target(
+            _myself(world_x=200, world_y=100), prop, {self._stage("left")}
+        )
+
+        self.assertLess(going_right[0], prop.world_x)
+        self.assertGreater(going_left[0], prop.world_x)
+
+    def test_a_prop_clearly_to_one_side_still_uses_that_side(self) -> None:
+        prop = self._prop(300)
+        actor = _myself(world_x=100, world_y=100)
+
+        target_x, _ = _walk_to_breakable_target(actor, prop, {self._stage("right")})
+
+        self.assertLess(target_x, prop.world_x)
 
 
 class DeadZoneApproachTests(unittest.TestCase):

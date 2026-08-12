@@ -38,7 +38,7 @@ from .tokens import (
     punch_usable_inner_x,
 )
 from .tokens import Enemy
-from .tokens import CameraRange
+from .tokens import CameraRange, Stage
 from .tokens import Breakable, Pit, SafeSpot
 from .tokens import Pickup, Weapon
 from .tokens import CallPolice
@@ -954,23 +954,41 @@ def state_machine_walk_to_pickup(verb: WalkToPickup, context: Context, gamepad: 
         )
 
 
-def _walk_to_breakable_target(actor: Myself | Partner, target: Breakable) -> tuple[int, int]:
+def _walk_to_breakable_target(
+    actor: Myself | Partner, target: Breakable, context: Context
+) -> tuple[int, int]:
     """Stopping point for approaching ``target``: a Breakable is a solid
     obstacle, so stop just inside smash range on whichever side the actor
     already occupies rather than walking to the breakable's exact (and
     unreachable) center.
 
-    Within ``DIRECTION_HYSTERESIS_X`` of the prop, which side counts as
-    "already occupies" is read off ``actor.facing_left`` instead of the raw
-    compare, same as ``_walk_to_near_enemy_target``'s X pick -- otherwise a
-    couple of px of approach jitter right at the prop flips the stop point
-    by a full ``2 * stop_dx``.
+    Standing essentially *on* the prop, which side that is has to be decided
+    by something the AI does not itself change every tick. Reading it off
+    ``actor.facing_left`` -- the idiom ``_walk_to_near_enemy_target`` uses --
+    is a facing-feedback loop here, because unlike an enemy a prop never
+    moves to break the symmetry: press left, facing goes left, the stop point
+    jumps to the far side, press right, facing goes right, and back. Measured
+    live: **107 seconds** of a 200s run at one prop, LEFT held on 244 ticks
+    and RIGHT on 240, the virtual steering axis cancelling almost all of it
+    (2242 ticks with no direction on the pad at all) while the actor never
+    moved a pixel on X.
+
+    The stage's own progress direction is the anchor instead: fixed for the
+    whole level, so it cannot oscillate, and it leaves the actor on the side
+    it is coming from -- already lined up to carry on once the prop is gone.
     """
 
     stop_dx = max(0, BREAKABLE_PUNCH_X - BREAKABLE_STOP_BUFFER)
     dx = target.world_x - actor.world_x
     if abs(dx) <= DIRECTION_HYSTERESIS_X:
-        approach_from_right = actor.facing_left
+        stage = find(context, Stage)
+        direction = stage.direction if stage is not None else "right"
+        if direction == "left":
+            approach_from_right = True
+        elif direction == "right":
+            approach_from_right = False
+        else:
+            approach_from_right = actor.facing_left
     else:
         approach_from_right = dx < 0
     target_x = target.world_x + stop_dx if approach_from_right else target.world_x - stop_dx
@@ -995,7 +1013,7 @@ def state_machine_open_breakable(
     if in_smash_range(actor, target):
         _press(gamepad, PUNCH_MASK | _face_toward_mask(actor, target.world_x), frames=PUNCH_FRAMES)
         return
-    target_x, target_y = _walk_to_breakable_target(actor, target)
+    target_x, target_y = _walk_to_breakable_target(actor, target, context)
     _hold_steered(gamepad, _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
 
 
