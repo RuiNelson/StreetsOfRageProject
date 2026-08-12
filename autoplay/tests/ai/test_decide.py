@@ -42,7 +42,7 @@ from sor_autoplay.ai.decide import (
 )
 from sor_autoplay.ai.tokens import AttackRange, ClosingEnemy, Enemy, Garcia, Nora
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
-from sor_autoplay.ai.tokens import Breakable
+from sor_autoplay.ai.tokens import Breakable, Pit
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import Verb, Token
@@ -545,6 +545,19 @@ class CouldWalkToNearEnemyTests(unittest.TestCase):
                 WalkToNearEnemy(actor_slot="P1", target_slot="far"),
             },
         )
+
+    def test_never_targets_an_enemy_standing_in_a_pit(self) -> None:
+        # Live-diagnosed: walking toward a target that is itself sitting in
+        # a pit's danger zone means standing there too, and once
+        # execute._pit_escape_mask pushes the actor back out, the same
+        # target immediately pulls it right back in -- read as the actor
+        # turning left then right forever at the pit's own edge.
+        myself = make_myself(world_x=0, world_y=0)
+        pit = Pit(world_x=70, lane_y=0, width=20, height=20)
+        stuck = make_enemy(slot="stuck", world_x=80, world_y=10)
+        context: set[Token] = {myself, pit, stuck}
+
+        self.assertEqual(could_walk_to_near_enemy(context), set())
 
     def test_no_enemies_no_decision(self) -> None:
         myself = make_myself()
@@ -1380,6 +1393,15 @@ class CouldWalkToWeaponTests(unittest.TestCase):
 
         self.assertEqual(result, {WalkToWeapon(actor_slot="P1", target_slot="wpn1")})
 
+    def test_never_targets_a_weapon_sitting_in_a_pit(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        weapon = Weapon(slot="wpn1", world_x=120, world_y=110, weapon_type=0x0A)
+        pit = Pit(world_x=110, lane_y=100, width=20, height=20)
+        context: set[Token] = {myself, camera, weapon, pit}
+
+        self.assertEqual(could_walk_to_weapon(context), set())
+
 
 class CouldWalkToPickupTests(unittest.TestCase):
     def test_fires_for_health_when_missing_enough(self) -> None:
@@ -1401,6 +1423,17 @@ class CouldWalkToPickupTests(unittest.TestCase):
             slot="food1", world_x=120, world_y=110, pickup_type=0x47, health_delta=80
         )
         context: set[Token] = {myself, camera, food}
+
+        self.assertEqual(could_walk_to_pickup(context), set())
+
+    def test_never_targets_a_pickup_sitting_in_a_pit(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, health=40, health_percent=50.0)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        food = HealthPickup(
+            slot="food1", world_x=120, world_y=110, pickup_type=0x4B, health_delta=20
+        )
+        pit = Pit(world_x=110, lane_y=100, width=20, height=20)
+        context: set[Token] = {myself, camera, food, pit}
 
         self.assertEqual(could_walk_to_pickup(context), set())
 
@@ -1454,6 +1487,15 @@ class CouldOpenBreakableTests(unittest.TestCase):
         self.assertEqual(
             could_open_breakable(context), {OpenBreakable(actor_slot="P1", target_slot="obj09")}
         )
+
+    def test_never_targets_a_breakable_sitting_in_a_pit(self) -> None:
+        myself = make_myself(world_x=0, world_y=0)
+        camera = CameraRange(left=-50, right=200, top=-50, bottom=200)
+        prop = Breakable(slot="obj09", world_x=60, world_y=0, type_id=0x40)
+        pit = Pit(world_x=50, lane_y=-10, width=20, height=20)
+        context: set[Token] = {myself, camera, prop, pit}
+
+        self.assertEqual(could_open_breakable(context), set())
 
     def test_fires_for_a_prop_in_range_behind_the_actor(self) -> None:
         # Behind the stage direction, so the "ahead" filter drops it -- but

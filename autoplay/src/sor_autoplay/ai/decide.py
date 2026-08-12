@@ -60,6 +60,7 @@ from .tokens import (
     Pickup,
     ScorePickup,
     SpecialPickup,
+    Weapon,
     WeaponUpgrade,
     is_weapon_type,
 )
@@ -427,6 +428,10 @@ def could_walk_to_near_enemy(context: Context) -> Context:
         threatening = reach.targets_of(context, IncomingMelee, actor.slot)
         standing_off = _retreat_is_worth_it(context, actor)
         for enemy in enemies:
+            if reach.any_pit_endangers(context, enemy.world_x, enemy.world_y):
+                # Never walk toward a target that is itself standing in a
+                # pit's danger zone -- reaching it means standing there too.
+                continue
             if standing_off and enemy.slot in threatening:
                 # could_retreat_from_danger covers this one instead -- don't
                 # propose closing the last stretch of distance into a
@@ -697,6 +702,12 @@ def could_walk_to_weapon(context: Context) -> Context:
         # priority.py's rank-scaled emergency favours the better one rather
         # than a min/max pick made here.
         for target_slot in reach.targets_of(context, WeaponUpgrade, actor.slot):
+            weapon = find(context, Weapon, slot=target_slot)
+            if weapon is None:
+                continue
+            if reach.any_pit_endangers(context, weapon.world_x, weapon.world_y):
+                # Never walk toward a target sitting in a pit's danger zone.
+                continue
             verbs.add(WalkToWeapon(actor_slot=actor.slot, target_slot=target_slot))
     return verbs
 
@@ -724,7 +735,11 @@ def could_walk_to_pickup(context: Context) -> Context:
     if camera is None:
         return verbs
     pickups = [
-        p for p in find_all(context, Pickup) if reach.in_camera(camera, p.world_x, p.world_y)
+        p
+        for p in find_all(context, Pickup)
+        if reach.in_camera(camera, p.world_x, p.world_y)
+        # Never walk toward a target sitting in a pit's danger zone.
+        and not reach.any_pit_endangers(context, p.world_x, p.world_y)
     ]
     for actor in _actors(context):
         if _blocked(context, actor):
@@ -772,6 +787,10 @@ def could_open_breakable(context: Context) -> Context:
     breakables = find_all(context, Breakable)
     if camera is not None:
         breakables = [b for b in breakables if reach.in_camera(camera, b.world_x, b.world_y)]
+    # Never walk toward a target sitting in a pit's danger zone.
+    breakables = [
+        b for b in breakables if not reach.any_pit_endangers(context, b.world_x, b.world_y)
+    ]
     if not breakables:
         return verbs
     for actor in _actors(context):

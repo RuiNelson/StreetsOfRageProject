@@ -475,7 +475,16 @@ whether it makes sense to pursue at all. For instance, a function should
 produce a token for picking up a weapon only if the weapon is present on
 the floor **and** within the `CameraRange` **and** an upgrade to the
 current weapon held — never because it judges that upgrade more urgent
-than some other candidate action.
+than some other candidate action. The same "does it make sense to pursue
+at all" test rules out a target whose own position sits inside a `Pit`'s
+danger zone (`reach.any_pit_endangers`): every walk toward a fixed point
+(a nearby enemy, a weapon, a pickup, a breakable prop) skips a candidate
+there, since reaching it means standing in the pit. Live testing found
+the alternative — producing the walk and letting `execute_tick`'s pit
+override fight it back out once the actor arrived — meant the two
+disagreed every tick right at the pit's own edge, the walk pulling the
+actor back in the moment the override let go: the actor turning left
+then right in place, neither side ever winning.
 
 Most such functions must additionally decline to produce a token whenever
 an `AnimationInProgress` token for the relevant character is present in

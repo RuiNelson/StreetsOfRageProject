@@ -135,6 +135,24 @@ def pit_endangers(pit: Pit, world_x: int, world_y: int, *, margin: int = PIT_AVO
     )
 
 
+def any_pit_endangers(context: Context, world_x: int, world_y: int) -> bool:
+    """True when ``(world_x, world_y)`` sits in the danger zone of *any*
+    ``Pit`` in ``context``.
+
+    The shared "is this even a destination worth aiming at" check for every
+    ``could_walk_to_*`` generator: a target sitting on a pit -- an enemy the
+    game lured there, a pickup or weapon spawned on top of one -- is not
+    reachable at all without standing in the danger zone first, so nothing
+    should ever produce a walk toward it in the first place. Live-diagnosed:
+    without this, a walk verb aimed squarely at a pit-adjacent target left
+    the actor endlessly re-approaching the one point ``execute._pit_escape_
+    mask`` had just pushed it away from, reading as the actor turning left
+    then right in place at the pit's own edge.
+    """
+
+    return any(pit_endangers(pit, world_x, world_y) for pit in find_all(context, Pit))
+
+
 # Slack added to an enemy's *extracted* reach before treating the actor as
 # standing inside it. The reach itself is exact -- it is the ROM's own shape
 # record -- but the sample is not: at the 33ms default poll an enemy covers a
