@@ -15,7 +15,7 @@ from tkinter import font as tkfont
 from typing import Callable
 
 from .ai.loop import VerbState
-from .ai.reach import CLOSING_ENEMY_THREAT_TICKS
+from .ai.reach import CLOSING_ENEMY_THREAT_FRAMES
 from .ai.tokens import Verb
 from .hitboxes import Hitbox
 from .phases import CombatPhase, is_dangerous, phase_color
@@ -1105,8 +1105,8 @@ def _closing_projection(entity: MapEntity) -> tuple[float, float] | None:
     if not (entity.enemy_vel_x or entity.enemy_vel_y):
         return None
     return (
-        entity.map_x + entity.enemy_vel_x * CLOSING_ENEMY_THREAT_TICKS,
-        entity.map_y + entity.enemy_vel_y * CLOSING_ENEMY_THREAT_TICKS,
+        entity.map_x + entity.enemy_vel_x * CLOSING_ENEMY_THREAT_FRAMES,
+        entity.map_y + entity.enemy_vel_y * CLOSING_ENEMY_THREAT_FRAMES,
     )
 
 

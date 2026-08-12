@@ -50,6 +50,36 @@ class Enemy(Character):
     hitbox: Hitbox | None = None
     attack_ranges: tuple[AttackRange, ...] = ()
 
+    def predict_position_after_n_frames(self, n_frames: int) -> tuple[int, int]:
+        """Where this enemy stands ``n_frames`` from now, on its own velocity.
+
+        The unit is a **60 Hz game frame**, not an AI poll tick, because that
+        is the unit the ROM itself moves in: ``grunt_vel_x``/``grunt_vel_y``
+        are the raw 16.16 fields at ``+$1C``/``+$20``, and ``$17AB8``
+        integrates them into the position exactly once per frame. A poll tick
+        is ~2 of those at the 33ms default (``app.DEFAULT_POLL_MS``), so
+        anything that multiplies these velocities by a *tick* count under-
+        projects by that factor -- see ``ai/kinematics.py``, which owns the
+        conversion and every lead time built on top of this.
+
+        Constant velocity only: this is where the enemy *would* be if it
+        kept doing what it is doing, which is exactly right over the handful
+        of frames a move's startup lasts and increasingly optimistic beyond
+        that (``kinematics.MAX_LEAD_FRAMES`` is the trust horizon callers
+        clamp to).
+
+        A ``Boss`` always reports 0 velocity here and therefore predicts to
+        its current position: its own ``vel_x``/``vel_z`` live at different
+        offsets, are not confirmed to be the X/lane pair, and boss tactics
+        are out of scope (see ``Boss``). That is "no better guess than
+        standing still", not an assertion that it is stationary.
+        """
+
+        return (
+            round(self.world_x + self.grunt_vel_x * n_frames),
+            round(self.world_y + self.grunt_vel_y * n_frames),
+        )
+
     @property
     def max_reach(self) -> int:
         """How far ahead this enemy can hit from where it stands, in px.
@@ -120,7 +150,8 @@ class HakuRo(Grunt):
 # first time this tick): large enough that nothing downstream mistakes an
 # unobserved Nora for one that has recently attacked. Not a frame count --
 # ticks_since_last_attack counts AI poll ticks (observe.NoraAttackTracker),
-# same unit as reach.CLOSING_ENEMY_THREAT_TICKS.
+# unlike everything in kinematics.py and reach.CLOSING_ENEMY_THREAT_FRAMES,
+# which are 60 Hz game frames.
 NORA_TICKS_SINCE_ATTACK_UNKNOWN = 1_000
 
 
@@ -391,7 +422,7 @@ class IncomingMelee(Inferred):
     Produced by ``inference.check_for_incoming_melee`` for an on-screen
     enemy in a dangerous phase (ATTACKING/CHARGE) sitting inside
     ``reach.too_close_to_keep_approaching``'s caution box now, or projected
-    into it within ``reach.CLOSING_ENEMY_THREAT_TICKS``
+    into it within ``reach.CLOSING_ENEMY_THREAT_FRAMES``
     (``reach.enemy_will_close_soon``) -- the predictive half exists for a
     committed *closing* attack with no static reach to test at all, the
     ROM-confirmed case being Signal's slide (enemy-ai.md "Signal's slide is

@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 
 from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
-from . import reach
+from . import kinematics, reach
 from .tokens import Myself, Partner, PlayableCharacter
 from .tokens import Enemy, Grunt
 from .tokens import (
@@ -40,7 +40,7 @@ PROJECTILE_LANE_SLACK = 24
 CAUTION_RANGE_X = 40
 
 # A Grunt outside this time-to-arrival window is not "closing fast" yet.
-# The tick horizon itself now lives in reach.CLOSING_ENEMY_THREAT_TICKS --
+# The horizon itself now lives in reach.CLOSING_ENEMY_THREAT_FRAMES --
 # shared with check_for_incoming_melee's predictive extension below, so
 # "soon" means the same thing to both -- but the rear-band lane slack is
 # specific to this check's own band test and stays local.
@@ -133,7 +133,7 @@ def check_for_incoming_projectiles(context: Context) -> Context:
 def _closing_enemy_threatens(enemy: Grunt, actor: PlayableCharacter) -> bool:
     """True when the enemy is heading toward the actor's rear-attack band on
     X and is still off-lane enough that it is not obviously stationary,
-    landing inside that band within ``reach.CLOSING_ENEMY_THREAT_TICKS``.
+    landing inside that band within ``reach.CLOSING_ENEMY_THREAT_FRAMES``.
 
     Must pick the *side-specific* band (behind vs front), not their union:
     Axel/Blaze have zero forward RearAttack reach, so an enemy closing in
@@ -167,8 +167,10 @@ def _closing_enemy_threatens(enemy: Grunt, actor: PlayableCharacter) -> bool:
         # tick without needing the early-warning signal.
         return False
 
-    ticks = (abs(dx) - max_x) / abs(vx)
-    return ticks <= reach.CLOSING_ENEMY_THREAT_TICKS
+    # vx is px per 60 Hz frame (the ROM's own +$1C, integrated once a frame),
+    # so this quotient is a frame count and belongs against a frame horizon.
+    frames = (abs(dx) - max_x) / abs(vx)
+    return frames <= reach.CLOSING_ENEMY_THREAT_FRAMES
 
 
 def check_for_closing_enemies(context: Context) -> Context:
@@ -201,6 +203,24 @@ def check_for_targets_in_reach(context: Context) -> Context:
     ``decide.py`` and ``priority.py`` ask the same question and get the same
     answer within a tick, and stops the same trigonometry from being redone
     once per verb family.
+
+    Each band is tested where its own move would **arrive**, not where the
+    enemy stands now: every one of these attacks costs time (``kinematics``
+    -- 3 to 21 frames of startup for the two button moves, a crouch plus a
+    whole flight for the kick, a walk-in for the grab), and the enemy keeps
+    moving through it. So the four move bands are evaluated against four
+    *different* projections of the same enemy, each at its own lead:
+
+    - an enemy walking out of range no longer produces the strike that would
+      whiff behind it -- the case ``RearAttack``'s docstring has always
+      described for Adam, whose 21-frame chord lets a walking target clear
+      the entire box before it arms;
+    - an enemy walking in produces it slightly early, so the move is already
+      arming as the enemy arrives instead of starting from scratch once it
+      has.
+
+    A stationary enemy projects to itself, so nothing changes for the many
+    targets that are not moving (stunned, knocked down, mid-attack).
     """
 
     enemies = reach.live_enemies(context)
@@ -211,15 +231,32 @@ def check_for_targets_in_reach(context: Context) -> Context:
     for actor in _actors(context):
         for enemy in enemies:
             pair = {"actor_slot": actor.slot, "target_slot": enemy.slot}
-            if reach.punch_would_connect(actor, enemy):
+            punch_at = kinematics.enemy_projected(
+                enemy, kinematics.melee_strike_lead_frames(actor, enemy)
+            )
+            rear_at = kinematics.enemy_projected(
+                enemy, kinematics.rear_attack_lead_frames(actor, enemy)
+            )
+            jump_at = kinematics.enemy_projected(
+                enemy, kinematics.jump_attack_lead_frames(actor, enemy)
+            )
+            grab_at = kinematics.enemy_projected(
+                enemy, kinematics.grab_lead_frames(actor, enemy)
+            )
+            if reach.punch_would_connect(actor, punch_at):
                 tokens.add(InPunchReach(**pair))
-            if reach.in_rear_band(actor, enemy):
+            if reach.in_rear_band(actor, rear_at):
                 tokens.add(InRearReach(**pair))
-            if reach.in_jump_attack_band(actor, enemy):
+            if reach.in_jump_attack_band(actor, jump_at):
                 tokens.add(InJumpAttackReach(**pair))
-            if reach.grab_would_connect(actor, enemy):
+            if reach.grab_would_connect(actor, grab_at):
                 tokens.add(InGrabReach(**pair))
-            if reach.enemy_actionable(actor, enemy, enemies):
+            # Same two projections the two tokens above were judged from --
+            # this is "one of those attacks would fire", so it must not
+            # re-judge the same bands at a different instant.
+            if reach.enemy_actionable(
+                actor, enemy, enemies, punch_at=punch_at, rear_at=rear_at
+            ):
                 tokens.add(ActionableTarget(**pair))
     return tokens
 
@@ -236,11 +273,11 @@ def check_for_incoming_melee(context: Context) -> Context:
     ``reach.too_close_to_keep_approaching`` alone only sees the enemy's
     *current* position, which misses a committed fast mover: Signal's slide
     is the ROM-confirmed case (enemy-ai.md "Signal's slide is velocity, not
-    a hitbox") -- state $0A sets +$1C/+$20 directly (~2.5 px/tick toward the
+    a hitbox") -- state $0A sets +$1C/+$20 directly (~2.5 px/frame toward the
     target) with no attack shape anywhere in its animation set, so
     ``Enemy.attack_ranges`` is empty for it and there is nothing for a
     static reach check to find. ``reach.enemy_will_close_soon`` re-tests the
-    same caution predicate ``reach.CLOSING_ENEMY_THREAT_TICKS`` ticks ahead,
+    same caution predicate ``reach.CLOSING_ENEMY_THREAT_FRAMES`` frames ahead,
     so a dangerous-phase enemy already closing distance promotes
     ``IncomingMelee`` before it arrives, not only once it has -- which is
     what lets ``could_retreat_from_danger`` (decide.py) react in time instead

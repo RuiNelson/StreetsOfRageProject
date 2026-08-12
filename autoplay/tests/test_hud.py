@@ -1,7 +1,7 @@
 import os
 import unittest
 
-from sor_autoplay.ai.reach import CLOSING_ENEMY_THREAT_TICKS
+from sor_autoplay.ai.reach import CLOSING_ENEMY_THREAT_FRAMES
 from sor_autoplay.ai.tokens import CounterGrab, Punch
 from sor_autoplay.ai.loop import VerbState
 from sor_autoplay.ai.tokens import CallPolice
@@ -124,8 +124,8 @@ class ClosingProjectionTests(unittest.TestCase):
         self.assertEqual(
             result,
             (
-                200.0 + -2.5 * CLOSING_ENEMY_THREAT_TICKS,
-                64.0 + 1.0 * CLOSING_ENEMY_THREAT_TICKS,
+                200.0 + -2.5 * CLOSING_ENEMY_THREAT_FRAMES,
+                64.0 + 1.0 * CLOSING_ENEMY_THREAT_FRAMES,
             ),
         )
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 
 from ..phases import CombatPhase, is_dangerous
-from . import reach
+from . import kinematics, reach
 from .tokens import (
     CounterGrab,
     FlipHold,
@@ -642,6 +642,34 @@ def could_jump_attack(context: Context) -> Context:
     return verbs
 
 
+def thrown_weapon_impact_point(actor: PlayableCharacter, enemy: Enemy, verb_cls) -> Enemy:
+    """``enemy`` where the thrown weapon would actually meet it.
+
+    The interception, not the current position: a knife covers 16 px per
+    frame and pepper spray only 6 (weapons-range-and-damage.md), so a walking
+    target moves a real distance during the flight -- half a body width for a
+    knife thrown across the screen, several for pepper. ``kinematics``
+    resolves the flight time against the target's own velocity.
+
+    Shared with ``priority._emergency_thrown_weapon`` so the verb that gets
+    produced and the score it is ranked with are computed about the same
+    point; judging them at two different instants would let a candidate exist
+    with an emergency of 0 and never be thrown.
+    """
+
+    return kinematics.target_at_impact(verb_cls, actor, enemy)
+
+
+def thrown_weapon_would_connect(actor: PlayableCharacter, impact: Enemy) -> bool:
+    """Beyond melee, inside throw range -- judged at the impact point."""
+
+    dx = abs(impact.world_x - actor.world_x)
+    dy = abs(impact.world_y - actor.world_y)
+    if dy > KNIFE_RANGE_Y:
+        return False
+    return KNIFE_MELEE_X < dx <= KNIFE_RANGE_X
+
+
 def _could_throw_ranged_weapon(context: Context, *, weapon_type: int, verb_cls) -> Context:
     """Shared body for ``could_throw_knife`` / ``could_throw_pepper``: one
     candidate per on-screen enemy beyond melee but within throw range --
@@ -660,16 +688,8 @@ def _could_throw_ranged_weapon(context: Context, *, weapon_type: int, verb_cls) 
         if actor.held_weapon_type != weapon_type:
             continue
         for enemy in enemies:
-            in_melee_range = (
-                abs(enemy.world_x - actor.world_x) <= KNIFE_MELEE_X
-                and abs(enemy.world_y - actor.world_y) <= KNIFE_RANGE_Y
-            )
-            if in_melee_range:
-                continue
-            if (
-                abs(enemy.world_x - actor.world_x) <= KNIFE_RANGE_X
-                and abs(enemy.world_y - actor.world_y) <= KNIFE_RANGE_Y
-            ):
+            impact = thrown_weapon_impact_point(actor, enemy, verb_cls)
+            if thrown_weapon_would_connect(actor, impact):
                 verbs.add(verb_cls(actor_slot=actor.slot, target_slot=enemy.slot))
     return verbs
 

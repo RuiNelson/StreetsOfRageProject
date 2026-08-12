@@ -227,7 +227,7 @@ class EnemyMaxAndMinReachTests(unittest.TestCase):
 
 
 class EnemyProjectedTests(unittest.TestCase):
-    def test_moves_by_velocity_times_ticks(self) -> None:
+    def test_moves_by_velocity_times_frames(self) -> None:
         signal = _signal(world_x=300, world_y=100, grunt_vel_x=-2.5, grunt_vel_y=2.0)
 
         projected = reach.enemy_projected(signal, 6)
@@ -261,11 +261,13 @@ class EnemyWillCloseSoonTests(unittest.TestCase):
     arrived."""
 
     def test_a_fast_committed_signal_still_far_away_closes_soon(self) -> None:
-        # 150px out (well outside Axel's 74px caution box) but closing at
-        # 25 px/tick: 6 ticks covers exactly that 150px, landing dx=0 --
-        # deliberately about the *projection*, not current distance.
+        # 99px out (well outside Axel's 74px caution box) but sliding in at
+        # the slide's own ROM speed, ~2.5 px per 60 Hz frame: over
+        # CLOSING_ENEMY_THREAT_FRAMES that is 30px, landing at dx=69, inside
+        # the box -- deliberately about the *projection*, not current
+        # distance.
         actor = _myself(world_x=100, world_y=100)
-        signal = _signal(world_x=250, world_y=100, grunt_vel_x=-25.0, grunt_vel_y=0.0)
+        signal = _signal(world_x=199, world_y=100, grunt_vel_x=-2.5, grunt_vel_y=0.0)
 
         self.assertFalse(reach.too_close_to_keep_approaching(actor, signal))
         self.assertTrue(reach.enemy_will_close_soon(actor, signal))
@@ -283,7 +285,7 @@ class EnemyWillCloseSoonTests(unittest.TestCase):
     def test_moving_away_does_not_close_soon(self) -> None:
         # Same distance and speed as the closing case above, opposite sign.
         actor = _myself(world_x=100, world_y=100)
-        signal = _signal(world_x=250, world_y=100, grunt_vel_x=25.0, grunt_vel_y=0.0)
+        signal = _signal(world_x=199, world_y=100, grunt_vel_x=2.5, grunt_vel_y=0.0)
 
         self.assertFalse(reach.enemy_will_close_soon(actor, signal))
 
@@ -292,19 +294,20 @@ class EnemyWillCloseSoonTests(unittest.TestCase):
         # own Y margin excludes -- the projection must still respect that,
         # not just the X approach.
         actor = _myself(world_x=100, world_y=100)
-        signal = _signal(world_x=250, world_y=300, grunt_vel_x=-25.0, grunt_vel_y=0.0)
+        signal = _signal(world_x=199, world_y=300, grunt_vel_x=-2.5, grunt_vel_y=0.0)
 
         self.assertFalse(reach.enemy_will_close_soon(actor, signal))
 
     def test_a_grunt_with_a_real_reach_still_prefers_it_once_projected(self) -> None:
-        # Garcia (confirmed punch: forward 0..40, lane -8..8) 100px ahead of
-        # his own reach, closing at 15 px/tick toward the actor -- projects
-        # to forward_dx=10, inside his real band, well before the caution
-        # box's coarser fallback would have said anything. facing_left=True
+        # Garcia (confirmed punch: forward 0..40, lane -8..8) 60px ahead of
+        # his own reach, closing at the ROM lunge speed of ~2.75 px per 60 Hz
+        # frame -- over CLOSING_ENEMY_THREAT_FRAMES that projects him to
+        # forward_dx=27, inside his real band, well before the caution box's
+        # coarser fallback would have said anything. facing_left=True
         # (default) means the actor, to Garcia's left, is what "forward"
         # means for him, so his own world_x must fall to close the gap.
         actor = _myself(world_x=100, world_y=100)
-        garcia = _garcia(world_x=200, world_y=100, grunt_vel_x=-15.0, grunt_vel_y=0.0)
+        garcia = _garcia(world_x=160, world_y=100, grunt_vel_x=-2.75, grunt_vel_y=0.0)
 
         self.assertFalse(reach.too_close_to_keep_approaching(actor, garcia))
         self.assertTrue(reach.enemy_will_close_soon(actor, garcia))

@@ -299,6 +299,109 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         self.assertNotIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
 
+    def test_an_enemy_walking_out_of_the_punch_band_is_not_in_punch_reach(self) -> None:
+        # dx=48, inside Axel's 16..50 band right now -- but the punch takes
+        # its measured 3 startup frames plus the poll latency to arm, and at
+        # 2 px per 60 Hz frame the enemy is 10px further out by then.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        leaving = make_enemy(slot="obj01", world_x=148, world_y=100, grunt_vel_x=2.0)
+
+        result = check_for_targets_in_reach({myself, leaving})
+
+        self.assertNotIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertNotIn(ActionableTarget(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_an_enemy_walking_into_the_punch_band_is_already_in_punch_reach(self) -> None:
+        # The mirror image: dx=58 is outside the band now, but the strike
+        # arms as the enemy arrives rather than starting from scratch once
+        # it has.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        arriving = make_enemy(slot="obj01", world_x=158, world_y=100, grunt_vel_x=-2.0)
+
+        result = check_for_targets_in_reach({myself, arriving})
+
+        self.assertIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_adams_slow_chord_loses_a_walking_target_axels_keeps(self) -> None:
+        # The same enemy, 20px behind and walking away at 2 px/frame. Axel's
+        # chord arms in 3 frames and still covers it; Adam's takes 21
+        # (controls-and-input.md "Measured chord timing"), by which point the
+        # target has left his 42px box entirely -- exactly the whiff that
+        # manuscript warns about, now visible to the AI.
+        axel = make_myself(world_x=100, world_y=100, facing_left=False)
+        adam = make_myself(
+            world_x=100, world_y=100, facing_left=False, character_id=1, character_name="Adam"
+        )
+        leaving = make_enemy(slot="obj01", world_x=80, world_y=100, grunt_vel_x=-2.0)
+
+        self.assertIn(
+            InRearReach(actor_slot="P1", target_slot="obj01"),
+            check_for_targets_in_reach({axel, leaving}),
+        )
+        self.assertNotIn(
+            InRearReach(actor_slot="P1", target_slot="obj01"),
+            check_for_targets_in_reach({adam, leaving}),
+        )
+
+    def test_a_fleeing_enemy_is_not_worth_a_jump_kick(self) -> None:
+        # dx=55 is inside Axel's 50..60 kick band now. The kick costs a
+        # 5-frame crouch and then closes at 3 px/frame, so a target fleeing
+        # at 2 is 79px away by the time the kick could land -- past the
+        # kick's own reach.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        fleeing = make_enemy(slot="obj01", world_x=155, world_y=100, grunt_vel_x=2.0)
+
+        result = check_for_targets_in_reach({myself, fleeing})
+
+        self.assertNotIn(InJumpAttackReach(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_an_enemy_closing_into_punch_range_is_punched_not_kicked(self) -> None:
+        # Same starting gap, walking in instead: by the time a kick could be
+        # launched the enemy is inside punch range, where a hop is the wrong
+        # move -- so the kick band drops it and the punch band takes it.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        closing = make_enemy(slot="obj01", world_x=155, world_y=100, grunt_vel_x=-2.0)
+
+        result = check_for_targets_in_reach({myself, closing})
+
+        self.assertNotIn(InJumpAttackReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_a_grab_walk_in_still_offers_a_target_it_would_reach(self) -> None:
+        # Already inside the walk-in range (dx=40) and retreating slowly:
+        # the walk-in arrives essentially at once, so the hold is still on
+        # offer -- a lead must not make the AI refuse grabs it can take.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        retreating = make_enemy(slot="obj01", world_x=140, world_y=100, grunt_vel_x=2.0)
+
+        result = check_for_targets_in_reach({myself, retreating})
+
+        self.assertIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_a_walk_in_that_would_never_catch_up_is_not_grab_reach(self) -> None:
+        # 25px beyond Axel's own close-combat edge and retreating at 2 px per
+        # frame against his ROM walk speed of 3 ($3670): the gap closes at
+        # 1 px/frame, so the walk-in arrives far too late to be worth
+        # committing to -- and the prediction lands well outside the range.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        retreating = make_enemy(slot="obj01", world_x=175, world_y=100, grunt_vel_x=2.0)
+
+        result = check_for_targets_in_reach({myself, retreating})
+
+        self.assertNotIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_a_stationary_enemy_is_judged_exactly_where_it_stands(self) -> None:
+        # The no-velocity case must be untouched by any of the above: every
+        # projection is the identity, so the bands answer as they always did.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        still = make_enemy(slot="obj01", world_x=130, world_y=100)
+
+        result = check_for_targets_in_reach({myself, still})
+
+        self.assertIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(ActionableTarget(actor_slot="P1", target_slot="obj01"), result)
+
     def test_enemy_off_lane_is_not_grab_reach_even_inside_punch_reach(self) -> None:
         # dy=11 still clears PUNCH_RANGE_Y (12) but not GRAB_RANGE_Y (10):
         # two bodies have to actually overlap for the contact test to fire.
@@ -425,17 +528,18 @@ class CheckForIncomingMeleeTests(unittest.TestCase):
         # Signal's slide (enemy-ai.md "Signal's slide is velocity, not a
         # hitbox"): no attack shape anywhere in its own animation set, so
         # attack_ranges stays empty and the only way to see this coming is
-        # the velocity projection. 250px out (well past Axel's 74px caution
-        # box) but closing at 25 px/tick facing left.
+        # the velocity projection. 99px out (past Axel's 74px caution box)
+        # but closing at the slide's own ~2.5 px per 60 Hz frame facing left,
+        # which is 30px over reach.CLOSING_ENEMY_THREAT_FRAMES.
         myself = make_myself(world_x=100, world_y=100)
         signal = make_enemy(
             slot="obj01",
             type_id=0x24,
-            world_x=250,
+            world_x=199,
             world_y=100,
             combat_phase=CombatPhase.ATTACKING,
             facing_left=True,
-            grunt_vel_x=-25.0,
+            grunt_vel_x=-2.5,
             grunt_vel_y=0.0,
         )
 

@@ -10,14 +10,19 @@ reuses the same lane/pit clearance values it has to steer around.
 
 Nothing in this module reads RAM or produces tokens -- it only answers
 questions about tokens already in the context.
+
+Every predicate here is about *this instant*. When a caller needs "will this
+still be true when my move actually lands", it projects the enemy first
+(``kinematics.py`` owns the lead times and ``enemy_projected``, re-exported
+below) and asks the same question at that future position -- the geometry is
+not duplicated for the predictive case.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 from ..phases import should_ignore_as_target
 from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
+from .kinematics import enemy_projected
 from .tokens import (
     CameraRange,
     Context,
@@ -110,7 +115,7 @@ RETREAT_CAUTION_MARGIN_Y = PUNCH_RANGE_Y + 12
 #
 # Sized well above what either body covers in a single tick (the actor walks
 # a few px per 33ms poll; the fastest committed closer measured, Signal's
-# slide, is ~2.5px/tick) so neither can traverse the whole band in one
+# slide, is ~2.5px/frame) so neither can traverse the whole band in one
 # sample and re-arm the cycle -- but kept small enough that the actor still
 # closes to punch range promptly once the threat passes.
 APPROACH_RELEASE_MARGIN = 16
@@ -164,16 +169,23 @@ REACH_SAFETY_MARGIN = 8
 # How far ahead a Grunt's own committed velocity (grunt_vel_x/grunt_vel_y) is
 # trusted to extrapolate -- shared between inference.check_for_closing_enemies
 # (the rear-band early warning) and check_for_incoming_melee's predictive
-# extension below, so "soon" means the same thing to both. ~200ms at the
-# 33ms poll default: one missed poll plus margin for the slowest measured
-# RearAttack startup (Adam, 21 frames).
+# extension below, so "soon" means the same thing to both. ~200ms: one missed
+# poll plus margin for the slowest measured RearAttack startup (Adam, 21
+# frames).
+#
+# In **60 Hz frames**, which is the unit those velocity fields are actually
+# in -- the ROM integrates them once per frame ($17AB8, see
+# Enemy.predict_position_after_n_frames). This constant used to be a count of
+# AI poll *ticks* multiplied straight into a per-frame velocity, which
+# projected only half the distance its own "~200ms" docstring described,
+# since a tick is ~2 frames at the 33ms default poll.
 #
 # Not every closing enemy has a reach box to test against: enemy-ai.md's
 # "Signal's slide is velocity, not a hitbox" documents a real ROM case
 # (Signal state $0A) that sets +$1C/+$20 directly with no attack shape at
 # all -- the danger *is* the velocity, tested here by the enemy's own body
 # reaching the caution zone, not by anything in attack_ranges.py.
-CLOSING_ENEMY_THREAT_TICKS = 6
+CLOSING_ENEMY_THREAT_FRAMES = 12
 
 
 def targets_of(context: Context, cls: type, actor_slot: str) -> set[str]:
@@ -376,7 +388,12 @@ def rear_attack_is_warranted(
 
 
 def enemy_actionable(
-    actor: PlayableCharacter, enemy: Enemy, enemies: list[Enemy]
+    actor: PlayableCharacter,
+    enemy: Enemy,
+    enemies: list[Enemy],
+    *,
+    punch_at: Enemy | None = None,
+    rear_at: Enemy | None = None,
 ) -> bool:
     """True when an existing melee/rear-attack verb would actually fire
     on this enemy right now -- not just whether it sits inside
@@ -393,11 +410,23 @@ def enemy_actionable(
     treating a merely-in-band enemy as actionable would recreate that same
     vacuum -- nothing attacking it, and ``could_walk_to_near_enemy``
     declining to turn toward it.
+
+    ``punch_at``/``rear_at`` are the same enemy projected to where each of
+    those two moves would meet it (``kinematics``), and default to the enemy
+    itself. Any caller that also produces ``InPunchReach``/``InRearReach``
+    from projected positions must pass them -- ``inference.check_for_targets_
+    in_reach`` does -- because this answers "one of those two attacks would
+    fire", and judging the same bands at a different instant would contradict
+    the very tokens it is meant to agree with.
     """
 
-    if in_rear_band(actor, enemy) and rear_attack_is_warranted(actor, enemy, enemies):
+    rear_target = enemy if rear_at is None else rear_at
+    punch_target = enemy if punch_at is None else punch_at
+    if in_rear_band(actor, rear_target) and rear_attack_is_warranted(
+        actor, rear_target, enemies
+    ):
         return True
-    return punch_would_connect(actor, enemy)
+    return punch_would_connect(actor, punch_target)
 
 
 def enemy_forward_dx(enemy: Enemy, actor: PlayableCharacter) -> int:
@@ -488,34 +517,19 @@ def too_close_to_keep_approaching(
     return dx <= outer + RETREAT_CAUTION_MARGIN + extra_margin
 
 
-def enemy_projected(enemy: Enemy, ticks: int) -> Enemy:
-    """``enemy``, ``ticks`` ahead, assuming its own committed velocity holds.
-
-    Only ``grunt_vel_x``/``grunt_vel_y`` move the projection -- the ordinary-
-    enemy-only fields (``Boss`` always reports 0 there; its own ``vel_x``/
-    ``vel_z`` live at different offsets and are out of scope, matching
-    ``check_for_closing_enemies``). A stationary enemy projects to itself.
-    """
-
-    return replace(
-        enemy,
-        world_x=enemy.world_x + round(enemy.grunt_vel_x * ticks),
-        world_y=enemy.world_y + round(enemy.grunt_vel_y * ticks),
-    )
-
-
 def enemy_will_close_soon(
-    actor: PlayableCharacter, enemy: Enemy, *, ticks: int = CLOSING_ENEMY_THREAT_TICKS
+    actor: PlayableCharacter, enemy: Enemy, *, frames: int = CLOSING_ENEMY_THREAT_FRAMES
 ) -> bool:
     """Will ``enemy`` be caution-close *soon*, even though it is not yet?
 
     ``too_close_to_keep_approaching`` alone is reactive: it only sees the
     enemy's *current* position, so a fast committed mover -- Signal's slide
     is the ROM-confirmed case (enemy-ai.md "Signal's slide is velocity, not
-    a hitbox"), ~2.5 px/tick with no attack shape at all -- can close from
+    a hitbox"), ~2.5 px/frame with no attack shape at all -- can close from
     "outside every band" to "already landing" between two polls with no
-    warning. This projects the enemy ``ticks`` ahead by its own velocity and
-    re-tests the same caution predicate there.
+    warning. This projects the enemy ``frames`` ahead by its own velocity
+    (``Enemy.predict_position_after_n_frames``) and re-tests the same caution
+    predicate there.
 
     A stationary enemy (``grunt_vel_x == grunt_vel_y == 0``, true for every
     ``Boss`` and any ``Grunt`` not currently moving) projects to itself, so
@@ -524,4 +538,4 @@ def enemy_will_close_soon(
     caught.
     """
 
-    return too_close_to_keep_approaching(actor, enemy_projected(enemy, ticks))
+    return too_close_to_keep_approaching(actor, enemy_projected(enemy, frames))

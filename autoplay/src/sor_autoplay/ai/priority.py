@@ -24,11 +24,10 @@ from . import reach
 from .decide import (
     HEALTH_CRITICAL_PERCENT,
     in_smash_range,
-    KNIFE_MELEE_X,
-    KNIFE_RANGE_X,
-    KNIFE_RANGE_Y,
     POLICE_HEALTH_PERCENT_THRESHOLD,
     POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE,
+    thrown_weapon_impact_point,
+    thrown_weapon_would_connect,
     _advance_blocking_enemies,
 )
 from .tokens import (
@@ -157,7 +156,7 @@ _EMERGENCY_JUMP_ATTACK_NORA_RECOVERY = 24
 _EMERGENCY_JUMP_ATTACK_DEFAULT = 18
 # How many ticks after Nora's own attack ends she still counts as "freshly"
 # vulnerable for the tier above. Not a ROM-confirmed minimum recovery time --
-# deliberately conservative, comparable to reach.CLOSING_ENEMY_THREAT_TICKS's
+# deliberately conservative, comparable to reach.CLOSING_ENEMY_THREAT_FRAMES's
 # own "how far ahead is trusted" horizon at the same ~33ms poll default.
 NORA_RECOVERY_PUNISH_TICKS = 10
 _EMERGENCY_THROW_KNIFE = 25
@@ -443,19 +442,25 @@ def _emergency_walk_to_advance_stage(verb: WalkToAdvanceStage, context: Context)
 
 def _emergency_thrown_weapon(verb: Verb, context: Context, weight: int) -> int:
     """Shared range check for the two attack-thrown weapons (knife, pepper —
-    items-and-weapons.md's ``$21E6``): beyond melee, within throw range."""
+    items-and-weapons.md's ``$21E6``): beyond melee, within throw range.
+
+    Judged at the interception point, exactly as ``decide`` judged it when
+    producing the verb (``decide.thrown_weapon_impact_point``) -- the two must
+    agree about *where* the target is, or a verb could be produced and then
+    scored 0 for being out of a range it was never measured against. The
+    distance that scores one candidate against another is that same flight
+    distance, so a target running away ranks below one standing still at the
+    same current gap.
+    """
 
     target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
     actor = _find_actor(context, getattr(verb, "actor_slot", None))
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
-    dx = abs(target.world_x - actor.world_x)
-    dy = abs(target.world_y - actor.world_y)
-    beyond_melee = not (dx <= KNIFE_MELEE_X and dy <= KNIFE_RANGE_Y)
-    within_range = dx <= KNIFE_RANGE_X and dy <= KNIFE_RANGE_Y
-    if not (beyond_melee and within_range):
+    impact = thrown_weapon_impact_point(actor, target, type(verb))
+    if not thrown_weapon_would_connect(actor, impact):
         return _EMERGENCY_DEFAULT
-    distance = math.hypot(dx, dy)
+    distance = math.hypot(impact.world_x - actor.world_x, impact.world_y - actor.world_y)
     return _distance_emergency(distance, base=weight, floor=weight - 4, step_px=15)
 
 

@@ -1301,6 +1301,18 @@ class CouldThrowKnifeTests(unittest.TestCase):
 
         self.assertEqual(could_throw_knife(context), set())
 
+    def test_fires_at_an_enemy_that_will_walk_into_range(self) -> None:
+        # dx=32 is inside melee right now, so a throw would be the wrong
+        # move -- but the knife flies at 16 px/frame and the enemy is walking
+        # *away* at 2, so by the time it is released and lands the gap is a
+        # throwing gap. Judged at the impact point, not at the current one.
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
+        enemy = make_enemy(world_x=132, world_y=100, grunt_vel_x=2.0)
+
+        result = could_throw_knife({myself, enemy})
+
+        self.assertEqual(result, {ThrowKnife(actor_slot="P1", target_slot="obj01")})
+
 
 class CouldThrowPepperTests(unittest.TestCase):
     def test_fires_when_holding_pepper_and_enemy_outside_melee_but_in_range(self) -> None:
@@ -1332,6 +1344,25 @@ class CouldThrowPepperTests(unittest.TestCase):
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(could_throw_pepper(context), set())
+
+    def test_does_not_fire_at_a_target_the_slow_spray_would_never_reach(self) -> None:
+        # dx=60, comfortably inside the 90px throw range for both weapons on
+        # a static test. Pepper spray only travels 6 px/frame
+        # (weapons-range-and-damage.md), so against a target walking away at
+        # 2 it needs 15 frames of flight and meets it 100px out -- past that
+        # range. The knife's 16 px/frame closes the same gap in 4 and
+        # connects from the identical spot, which is exactly why the two
+        # weapons cannot share one static range test.
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
+        fleeing = make_enemy(world_x=160, world_y=100, grunt_vel_x=2.0)
+
+        self.assertEqual(could_throw_pepper({myself, fleeing}), set())
+
+        with_knife = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
+        self.assertEqual(
+            could_throw_knife({with_knife, fleeing}),
+            {ThrowKnife(actor_slot="P1", target_slot="obj01")},
+        )
 
 
 class CouldWalkToWeaponTests(unittest.TestCase):

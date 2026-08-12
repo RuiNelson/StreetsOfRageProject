@@ -188,6 +188,11 @@ can already hit it" signal). The geometry behind them lives in `reach.py`,
 shared with the verb and ranking stages, so all three agree on one
 definition of every band instead of each recomputing it.
 
+"From here" is really "from here, when that move arrives": each band is
+judged against the enemy projected forward by its own move's lead time —
+see [Kinematics](#kinematics-attacking-where-the-target-will-be) — so the
+family is predictive rather than reactive.
+
 **`IncomingMelee`** is the melee counterpart of `IncomingProjectile`: an
 on-screen enemy in a committed attack phase, close enough that its hit can
 actually land on the actor — or, on the enemy's own current velocity, soon
@@ -200,7 +205,7 @@ not a hitbox") sets its own velocity directly and carries no attack shape
 anywhere in its animation set, so `Enemy.attack_ranges` stays empty for it
 and a purely instantaneous-position check would never see it coming until
 it had already arrived. `reach.enemy_will_close_soon` re-tests the same
-caution predicate a short horizon (`reach.CLOSING_ENEMY_THREAT_TICKS`)
+caution predicate a short horizon (`reach.CLOSING_ENEMY_THREAT_FRAMES`)
 ahead by projecting the enemy's own `grunt_vel_x`/`grunt_vel_y`, and a
 stationary enemy projects to itself, so this never promotes anything the
 current-position test would not already have caught. Unlike `ClosingEnemy`
@@ -273,6 +278,49 @@ guessed at:
 An unknown reach is `None`, never zero: bosses have no labelled animation
 set, and a session with no ROM access has no ranges at all. Callers fall
 back on their own margins there rather than treating the enemy as harmless.
+
+### Kinematics: attacking where the target *will* be
+
+`Hitbox` and `AttackRange` answer where things are. They are not enough on
+their own, because nothing in this game happens at the instant the AI
+decides: a punch arms 3 frames later (5 for Blaze), the `$322A` chord takes
+3 for Axel and **21** for Adam, a jump kick costs a 5-frame crouch plus a
+whole flight at 3 px/frame, a thrown knife travels at 16 px/frame and pepper
+spray at only 6 — and the AI's own poll adds a frame or two on top of all of
+them. An enemy walks through every one of those windows. Aiming an attack at
+a position the target has already left is how a move whiffs and leaves the
+actor standing in its own recovery frames, which is precisely what
+`controls-and-input.md` warns about for the chord: *"a caller that presses
+B+C once the target is already in range arms the hit after the target has
+walked through the box"*.
+
+So every enemy answers `predict_position_after_n_frames(n)` — its own
+velocity (the ROM's `+$1C`/`+$20`, which `$17AB8` integrates once per 60 Hz
+frame) extrapolated at constant speed. The unit is a **game frame**, never an
+AI poll tick; a tick is about two frames, and treating one as the other is a
+silent factor-of-two error. A `Boss` predicts to where it stands, since it
+never populates those fields — "no better guess", not "stationary".
+
+`ai/kinematics.py` turns that into a lead time per move, from measured ROM
+timings and, for the two moves that are really approaches, the ROM's own
+walk-speed tables. Where a move has to *travel* — a jump kick, a grab
+walk-in, a thrown weapon — the lead is a one-dimensional pursuit solve
+against the target's own velocity, so a target walking in is met sooner, one
+walking away later, and one fleeing as fast as the actor can close is
+correctly judged uncatchable rather than chased.
+
+`inference.check_for_targets_in_reach` then evaluates each move's band at
+that move's own arrival time, which is what makes the whole `TargetInReach`
+family predictive rather than reactive: the same enemy is projected four
+different distances for the punch, the chord, the kick and the grab. The
+ranking and the executor use the same projections, so a verb is produced,
+scored and aimed about one instant.
+
+Every concrete `Attack` declares its model in `ATTACK_LEAD_FRAMES`, and a
+test fails if one does not. Some models are legitimately zero, and that is a
+kinematic result rather than an omission: a held enemy travels with the actor
+(zero relative velocity), a `Breakable` does not move at all, and
+`CallPolice` — a screen-wide scripted sweep — has no aim point to lead.
 
 ### Stunned enemies
 
@@ -453,6 +501,11 @@ their output, consume these tokens rather than re-deriving the same
 judgment from raw coordinates. That is the point of the stage: a band is
 computed once per tick, in one place, and every later stage sees the same
 answer.
+
+It is also where the AI's one prediction about the near future is applied:
+`check_for_targets_in_reach` measures each move's band at the moment that
+move would land, not at the moment the snapshot was taken
+(see [Kinematics](#kinematics-attacking-where-the-target-will-be)).
 
 ### `generate_verb_tokens`
 

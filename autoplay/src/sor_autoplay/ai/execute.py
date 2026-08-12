@@ -44,6 +44,7 @@ from .tokens import (
     WalkToWeapon,
 )
 from .gamepad import VirtualGamepad
+from . import kinematics
 from .decide import BREAKABLE_PUNCH_X, in_smash_range
 from .reach import PIT_AVOID_MARGIN, enemy_behind_actor, pit_endangers
 from ..phases import is_dangerous
@@ -349,6 +350,20 @@ def _back_direction_mask(actor: Myself | Partner) -> int:
     return RIGHT_MASK if actor.facing_left else LEFT_MASK
 
 
+def _aim_point(verb: Verb, actor: Myself | Partner, target: Enemy) -> Enemy:
+    """The target where this verb's own move will meet it (``kinematics``).
+
+    The executor aims at the same point the decision was made about. Facing
+    is the reason it matters: holding a direction is what sets facing, and
+    the press lands a few frames later, so pointing at a stale position can
+    commit the strike at the side the enemy has just left -- the identical
+    mistake ``inference.check_for_targets_in_reach`` avoids when producing
+    the verb. A stationary target aims at itself.
+    """
+
+    return kinematics.target_at_impact(type(verb), actor, target)
+
+
 def _walk_to_near_enemy_target(
     actor: Myself | Partner, target: Enemy, context: Context
 ) -> tuple[int, int]:
@@ -550,7 +565,7 @@ def state_machine_melee_strike(verb: Verb, context: Context, gamepad: VirtualGam
     target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
     face = 0
     if actor is not None and target is not None:
-        face = _face_toward_mask(actor, target.world_x)
+        face = _face_toward_mask(actor, _aim_point(verb, actor, target).world_x)
     _press(gamepad, PUNCH_MASK | face, frames=PUNCH_FRAMES)
 
 
@@ -600,9 +615,12 @@ def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: Virtu
         # No target → do not hop in place.
         gamepad.release()
         return
-    face = _face_toward_mask(actor, target.world_x)
+    # The kick is the longest-lead move the AI has (crouch plus a whole
+    # flight), so where the target *will* be decides both which way to launch
+    # and whether a jump is the right move at all.
+    face = _face_toward_mask(actor, _aim_point(verb, actor, target).world_x)
     if face == 0:
-        # Already overlapping on X — punch, don't jump.
+        # Will still be overlapping on X when it lands — punch, don't jump.
         _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
         return
     if not actor.is_airborne:
@@ -640,10 +658,14 @@ def state_machine_grab_enemy(verb: GrabEnemy, context: Context, gamepad: Virtual
         gamepad.release()
         return
     # Aim at the enemy itself, with none of _walk_to_near_enemy_target's stop
-    # buffer: overlapping is the whole point of this verb.
-    mask = _movement_mask(context, actor.world_x, actor.world_y, target.world_x, target.world_y)
+    # buffer: overlapping is the whole point of this verb. Lead the walk-in
+    # (_aim_point) rather than chasing the enemy's current position -- the
+    # walk takes as long as it takes, and steering at where the body already
+    # was is what turns a pursuit into a tail-chase.
+    aim = _aim_point(verb, actor, target)
+    mask = _movement_mask(context, actor.world_x, actor.world_y, aim.world_x, aim.world_y)
     if not mask & (LEFT_MASK | RIGHT_MASK):
-        mask |= _face_toward_mask(actor, target.world_x) or (
+        mask |= _face_toward_mask(actor, aim.world_x) or (
             LEFT_MASK if actor.facing_left else RIGHT_MASK
         )
     _hold_steered(gamepad, mask)
@@ -720,7 +742,7 @@ def state_machine_throw_knife(verb: ThrowKnife, context: Context, gamepad: Virtu
     target = find(context, Enemy, slot=verb.target_slot)
     face = 0
     if actor is not None and target is not None:
-        face = _face_toward_mask(actor, target.world_x)
+        face = _face_toward_mask(actor, _aim_point(verb, actor, target).world_x)
     _press(gamepad, PUNCH_MASK | face, frames=THROW_KNIFE_FRAMES)
 
 
@@ -729,7 +751,7 @@ def state_machine_throw_pepper(verb: ThrowPepper, context: Context, gamepad: Vir
     target = find(context, Enemy, slot=verb.target_slot)
     face = 0
     if actor is not None and target is not None:
-        face = _face_toward_mask(actor, target.world_x)
+        face = _face_toward_mask(actor, _aim_point(verb, actor, target).world_x)
     _press(gamepad, PUNCH_MASK | face, frames=THROW_PEPPER_FRAMES)
 
 
