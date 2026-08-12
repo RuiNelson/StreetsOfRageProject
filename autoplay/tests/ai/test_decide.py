@@ -19,6 +19,7 @@ from sor_autoplay.ai.tokens import (
 )
 from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay.ai.decide import (
+    in_smash_range,
     generate_verb_tokens,
     could_call_police,
     could_counter_grab,
@@ -1475,6 +1476,37 @@ class CouldThrowPepperTests(unittest.TestCase):
                         could_throw_pepper({myself, enemy}),
                         {ThrowPepper(actor_slot="P1", target_slot="obj01")},
                     )
+
+
+class InSmashRangeTests(unittest.TestCase):
+    """A punch box starts 16px in front of Axel, so "close enough to hit"
+    has an inner edge as well as an outer one."""
+
+    def _prop(self, dx: int, dy: int = 0):
+        return Breakable(slot="prop", world_x=100 + dx, world_y=100 + dy, type_id=0x11)
+
+    def test_a_prop_the_actor_stands_on_is_not_in_range(self) -> None:
+        # Live: 94 seconds of a 7-minute run spent punching one prop from 1px
+        # away -- ~430 presses that could not connect -- because this said
+        # yes, so the executor pressed B instead of repositioning, and the
+        # attack animation then blocked every verb on the following tick,
+        # releasing the controller and resetting the steering axis so the
+        # actor never walked away either.
+        actor = make_myself(world_x=100, world_y=100)
+
+        self.assertFalse(in_smash_range(actor, self._prop(dx=1)))
+        self.assertFalse(in_smash_range(actor, self._prop(dx=-4, dy=-14)))
+
+    def test_a_prop_inside_the_punch_band_is(self) -> None:
+        actor = make_myself(world_x=100, world_y=100)
+
+        self.assertTrue(in_smash_range(actor, self._prop(dx=24)))
+        self.assertTrue(in_smash_range(actor, self._prop(dx=-24)))
+
+    def test_a_prop_beyond_the_outer_edge_is_not(self) -> None:
+        actor = make_myself(world_x=100, world_y=100)
+
+        self.assertFalse(in_smash_range(actor, self._prop(dx=60)))
 
 
 class CouldWalkToWeaponTests(unittest.TestCase):

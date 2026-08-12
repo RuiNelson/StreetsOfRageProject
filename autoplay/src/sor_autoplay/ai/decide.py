@@ -39,6 +39,7 @@ from .tokens import (
     MELEE_WEAPON_TYPES,
     Myself,
     PlayableCharacter,
+    punch_usable_inner_x,
 )
 from .tokens import Enemy
 from .tokens import (
@@ -852,10 +853,21 @@ def in_smash_range(actor: PlayableCharacter, prop: Breakable) -> bool:
 
     Shared with ``priority`` and ``execute``, which both need the same
     answer now that one verb spans the approach and the strike.
+
+    The **inner** edge matters as much as the outer one, and leaving it out
+    was a hard stall: a punch box starts 16px in front of Axel, so a prop the
+    actor is standing on top of cannot be hit at all -- but this said "in
+    range", the executor pressed B instead of repositioning, and the
+    resulting attack animation blocked every verb on the next tick, which
+    released the controller and reset the steering axis, so the actor never
+    walked away either. Recorded live: **94 seconds** of a 7-minute run spent
+    punching one type-$11 prop from 1px away, ~430 presses, ending in a lost
+    life -- and 22 shorter stalls in the same run.
     """
 
+    dx = abs(prop.world_x - actor.world_x)
     return (
-        abs(prop.world_x - actor.world_x) <= BREAKABLE_PUNCH_X
+        punch_usable_inner_x(actor.character_id) <= dx <= BREAKABLE_PUNCH_X
         and abs(prop.world_y - actor.world_y) <= BREAKABLE_PUNCH_Y
     )
 

@@ -735,10 +735,14 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         self.assertIsInstance(verbs[0], WalkToNearEnemy)
 
     def test_open_breakable_in_range_scores_above_walking_to_an_enemy(self) -> None:
-        # The in-range tier (16) is the former SmashBreakable's flat score;
-        # the actor stands on the prop's own position here.
+        # The in-range tier (16) is the former SmashBreakable's flat score.
+        # 24px is inside the punch band proper -- past its 16px inner edge
+        # and well within BREAKABLE_PUNCH_X. Standing on the prop's own
+        # position, as this used to, is *not* in range: the box starts in
+        # front of the actor, which is how the AI got stuck punching a prop
+        # from 1px away for 94 seconds.
         myself = _myself(world_x=0, world_y=64)
-        prop = Breakable(slot="obj01", world_x=0, world_y=64, type_id=0x70)
+        prop = Breakable(slot="obj01", world_x=24, world_y=64, type_id=0x70)
         enemy = _enemy("obj02", CombatPhase.NORMAL)
         context = {
             myself,
