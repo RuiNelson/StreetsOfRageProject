@@ -121,6 +121,25 @@ _EMERGENCY_ATTACK_HITSTUN = 21
 # the actor still finishes it off when nothing better is on the table
 # instead of walking away to fetch another enemy.
 _EMERGENCY_ATTACK_LONG_STUN = 19
+# The same ceiling again, for the case the two above do not cover: another
+# enemy is *about to hit the actor* (an `IncomingMelee` naming a different
+# target) while the current one is parked.
+#
+# This is the user-reported case, and the whole reason `_stunned_target_
+# ceiling` exists in the first place -- "a stunned enemy cannot act, cannot
+# retaliate, and will still be standing there in a moment, so it must never
+# outrank dealing with one that can". The two ceilings above did not achieve
+# it: 21 and 19 both beat `WalkToNearEnemy`'s realistic 11..14, so the AI
+# kept comboing a stunned body while a second enemy walked up behind it and
+# punched it in the back. The parked target loses nothing by waiting -- that
+# is what "parked" means.
+#
+# Placed just under WalkToNearEnemy's own base (14) rather than at 0, so the
+# turn-and-face wins while the threat is genuinely close (its distance
+# scoring puts it at 11..14 inside ~45px) and the punish still wins over a
+# distant one. On an exact tie the `priority` field settles it in the walk's
+# favour anyway (20 vs 10).
+_EMERGENCY_ATTACK_PARKED_UNDER_THREAT = 10
 # Taking a hold (GrabEnemy), one tier per GrabOpportunity present.
 #
 # Clearing the rear is the strong case: with an enemy behind and a grabbable
@@ -535,12 +554,38 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
 }
 
 
-def _stunned_target_ceiling(context: Context, target_slot: str | None) -> int | None:
+def _other_enemy_is_incoming(context: Context, actor_slot: str, target_slot: str) -> bool:
+    """Is something *other than* this target about to hit the actor?
+
+    Reads the `IncomingMelee` judgments inference already made, so "about to
+    hit me" has one definition across the pipeline.
+    """
+
+    return any(
+        token.actor_slot == actor_slot and token.target_slot != target_slot
+        for token in find_all(context, IncomingMelee)
+    )
+
+
+def _stunned_target_ceiling(
+    context: Context, actor_slot: str | None, target_slot: str | None
+) -> int | None:
     """The emergency ceiling for attacking ``target_slot``, or ``None``.
 
-    ``None`` means "not a stunned target, no ceiling": only ordinary enemies
+    ``None`` means "not a parked target, no ceiling": only ordinary enemies
     have the ROM counter behind ``is_stunned``, so a ``Boss``, a
     ``Breakable`` or a missing target never gets one.
+
+    A **stunned** target is parked: it cannot act, cannot retaliate, and will
+    still be there in a moment. So when another enemy is about to land a hit
+    on the actor (`_other_enemy_is_incoming`), finishing the combo is worth
+    less than turning to face the one that can actually hurt it -- reported
+    from play as taking a punch in the back while hitting an enemy that was
+    already stunned, and the reason this ceiling exists at all.
+
+    A **knockdown** is deliberately not treated the same way: that window
+    ends in a wake-up with invulnerability, so unlike a stun it really does
+    have to be used now.
 
     The remaining time decides which ceiling, read from the target's
     ``PunishWindow`` (the token that exists precisely so this does not have
@@ -558,6 +603,8 @@ def _stunned_target_ceiling(context: Context, target_slot: str | None) -> int | 
     target = find(context, Enemy, slot=target_slot)
     if not (isinstance(target, Grunt) and target.is_stunned):
         return None
+    if actor_slot is not None and _other_enemy_is_incoming(context, actor_slot, target_slot):
+        return _EMERGENCY_ATTACK_PARKED_UNDER_THREAT
     window = next(
         (token for token in find_all(context, PunishWindow) if token.target_slot == target_slot),
         None,
@@ -578,7 +625,11 @@ def _emergency(verb: Verb, context: Context) -> int:
         # above even the RearAttack escape (55) with a second enemy live at
         # the actor's back. Strictly a ceiling: an attack already ranked
         # lower keeps its own score.
-        ceiling = _stunned_target_ceiling(context, getattr(verb, "target_slot", None))
+        ceiling = _stunned_target_ceiling(
+            context,
+            getattr(verb, "actor_slot", None),
+            getattr(verb, "target_slot", None),
+        )
         if ceiling is not None:
             return min(score, ceiling)
     return score

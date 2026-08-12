@@ -925,15 +925,19 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
                 self.assertIsInstance(verbs[0], Punch)
 
     def test_any_stun_still_beats_retreating_and_advancing(self) -> None:
+        # With nothing else bearing down, finishing the stunned enemy is
+        # free damage and must beat both giving up ground and pushing on.
+        # The committed enemy here is far enough away to produce no
+        # IncomingMelee -- see the next test for when it is not.
         myself = _myself(world_x=100, world_y=64, facing_left=False)
-        dangerous = _enemy("obj02", CombatPhase.ATTACKING, world_x=160, world_y=64)
+        distant = _enemy("obj02", CombatPhase.ATTACKING, world_x=400, world_y=64)
         for frames in (HITSTUN_FRAMES, PEPPER_STUN_FRAMES):
             with self.subTest(stun_timer=frames):
                 stunned = _stunned_grunt("obj01", world_x=130, stun_timer=frames)
                 context = {
                     myself,
                     stunned,
-                    dangerous,
+                    distant,
                     Punch(actor_slot="P1", target_slot="obj01"),
                     RetreatFromDanger(actor_slot="P1", target_slot="obj02"),
                     WalkToAdvanceStage(actor_slot="P1", direction="right"),
@@ -944,6 +948,58 @@ class DetermineEmergencyStunnedTargetTests(unittest.TestCase):
                 verbs = find_all(result, Verb)
                 self.assertEqual(len(verbs), 1)
                 self.assertIsInstance(verbs[0], Punch)
+
+    def test_a_stun_loses_to_dealing_with_an_enemy_about_to_land_a_hit(self) -> None:
+        """Reported from play: the AI took a punch in the back while hitting
+        an enemy that was *already stunned*.
+
+        That is the exact situation this whole ceiling exists for -- "a
+        stunned enemy cannot act, cannot retaliate, and will still be
+        standing there in a moment" -- but 21 and 19 both beat every response
+        to the enemy that *can* act, so nothing ever interrupted the combo.
+        The stunned body loses nothing by waiting a moment.
+        """
+
+        myself = _myself(world_x=100, world_y=64, facing_left=False)
+        stunned = _stunned_grunt("obj01", world_x=130, stun_timer=HITSTUN_FRAMES)
+        # Close enough behind to be an IncomingMelee this tick.
+        behind = _enemy("obj02", CombatPhase.ATTACKING, world_x=55, world_y=64)
+        context = {
+            myself,
+            stunned,
+            behind,
+            _camera(),
+            Punch(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
+        self.assertEqual(verbs[0].target_slot, "obj02")
+
+    def test_a_live_target_is_still_worth_punching_under_the_same_threat(self) -> None:
+        # The cap is about *parked* targets only. An enemy that can still act
+        # is worth hitting even with another one closing in -- otherwise the
+        # AI would never trade at all.
+        myself = _myself(world_x=100, world_y=64, facing_left=False)
+        live = _enemy("obj01", CombatPhase.NORMAL, world_x=130, world_y=64)
+        behind = _enemy("obj02", CombatPhase.ATTACKING, world_x=55, world_y=64)
+        context = {
+            myself,
+            live,
+            behind,
+            _camera(),
+            Punch(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertIsInstance(verbs[0], Punch)
 
     def test_a_knocked_down_target_keeps_the_full_punishable_tier(self) -> None:
         # Only the *stun* is capped. A knockdown ends in a wake-up with
