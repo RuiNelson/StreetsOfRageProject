@@ -106,6 +106,15 @@ class PhaseDecodeTests(unittest.TestCase):
         # keep falling back to NORMAL rather than picking up a stray mapping.
         self.assertEqual(ordinary_enemy_phase(0x0901, type_id=0x26), CombatPhase.NORMAL)
 
+    def test_jack_lunge_shares_noras_toolkit_at_his_own_state_numbers(self) -> None:
+        # enemy-ai.md's "A second scripted lunge, shared with Jack": his own
+        # table at $1037C reuses the identical $F5F2/$F64A/$F6BC addresses
+        # Nora's table uses at $13/$14/$15, but at Jack's own states
+        # $08/$09/$0A instead.
+        self.assertEqual(ordinary_enemy_phase(0x0801, type_id=0x27), CombatPhase.CHARGE)
+        self.assertEqual(ordinary_enemy_phase(0x0901, type_id=0x27), CombatPhase.CHARGE)
+        self.assertEqual(ordinary_enemy_phase(0x0A01, type_id=0x27), CombatPhase.ATTACKING)
+
     def test_signal_attack_family_states(self) -> None:
         self.assertEqual(
             ordinary_enemy_phase(0x0801, type_id=0x24), CombatPhase.CHARGE

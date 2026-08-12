@@ -157,6 +157,27 @@ _TYPE_SPECIFIC_MOVE_PHASES: dict[int, dict[int, CombatPhase]] = {
         0x14: CombatPhase.CHARGE,
         0x15: CombatPhase.ATTACKING,
     },
+    # Jack $27: enemy-ai.md's "A second scripted lunge, shared with Jack"
+    # dumped his own primary-state table at $1037C and found the *identical*
+    # three lunge addresses ($F5F2/$F64A/$F6BC) Nora's table uses at her
+    # states $13/$14/$15, but at Jack's own states $08/$09/$0A instead -- his
+    # own numbering, same shared toolkit routine. Before this entry, Jack's
+    # lunge fell through to UNKNOWN exactly the way every one of Nora's own
+    # states did before she got a table at all: invisible to is_dangerous,
+    # so check_for_incoming_melee/enemy_will_close_soon never saw him coming
+    # and the AI took his lunge as a free hit. $F5F2/$F64A pick a lane offset
+    # and gate on distance before the lunge fires -- committed, not yet the
+    # hit -- CHARGE; $F6BC is the lunge itself, writing +$1C/+$20 directly
+    # toward the target with no attack shape of its own -- ATTACKING, same
+    # as Nora's $15. His own states $01/$03/$07 use the shared
+    # reselect-target/knockdown-trigger/blocked-delegate routines too (per
+    # the same manuscript section), but those land on the generic
+    # $0100/$0300/$0700 hi-byte cases above and need no entry here.
+    0x27: {
+        0x08: CombatPhase.CHARGE,
+        0x09: CombatPhase.CHARGE,
+        0x0A: CombatPhase.ATTACKING,
+    },
 }
 
 
