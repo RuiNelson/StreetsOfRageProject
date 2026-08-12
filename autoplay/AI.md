@@ -405,15 +405,15 @@ context = determine_priority_verb(context)
 inform_hud(context)
 
 verbs = [token for token in context if isinstance(token, Verb)]
+verb = verbs[0] if verbs else None
 
-if not verbs:
-    press_no_button()
-else:
-    verb, = verbs
-    execute_verb(verb, context)
+execute_tick(verb, context)
 
 sleep_until_next_ram_poll()
 ```
+
+`execute_tick` is the single entry point that replaces choosing between
+`press_no_button`/`execute_verb` itself — see that section below for why.
 
 ### `generate_direct_observation_tokens`
 
@@ -560,6 +560,29 @@ the appropriate direction and return immediately.
 
 This ensures that the AI remains reactive and can revise its verbs
 promptly as events unfold.
+
+### `execute_tick`
+
+`execute_tick(verb, context, gamepad)` is what the process loop actually
+calls every tick, instead of choosing between `press_no_button` and
+`execute_verb` itself. It runs one override *before* either of those: when
+the actor's own current position sits inside a `Pit`'s footprint (plus
+`reach.PIT_AVOID_MARGIN`) — knocked there, or having walked or drifted in
+while nothing else was contesting it — it walks straight out to the nearest
+edge instead, regardless of which `Verb` (if any) won this tick.
+
+This is deliberately *not* a `Verb` of its own for `generate_verb_tokens`
+and `determine_priority_verb` to rank against every other candidate. Every
+other pit-awareness this AI has — `execute._movement_mask`'s own detour
+around a pit sitting on a walk verb's path, `inference.check_for_safe_
+spots`'s rejection of a pit as a retreat *candidate* — only ever comes up
+incidentally, while the actor is already walking somewhere for an unrelated
+reason. Nothing reacted to the actor simply already standing in the danger
+zone with no walk verb underway, which is precisely the gap `execute_tick`
+closes: falling in a pit costs a full life
+(player-health-lives-and-combat.md's `$01C0` fall-boundary check), so this
+is a constraint on how the actor is allowed to move right now — the
+executor's own responsibility — not a competing intent.
 
 Because the `MegaDriveEnvironment` remote access interface supports
 pressing and holding buttons but not reading which buttons are currently

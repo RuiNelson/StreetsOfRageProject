@@ -23,6 +23,7 @@ from .tokens import (
     Context,
     Enemy,
     PlayableCharacter,
+    Pit,
     PUNCH_RANGE_Y,
     Stage,
     find,
@@ -117,6 +118,47 @@ APPROACH_RELEASE_MARGIN = 16
 # Clearance kept beyond a Pit's own footprint — falling in costs a full life
 # (player-health-lives-and-combat.md's $01C0 fall-boundary check).
 PIT_AVOID_MARGIN = 8
+
+
+def pit_endangers(pit: Pit, world_x: int, world_y: int, *, margin: int = PIT_AVOID_MARGIN) -> bool:
+    """True when ``(world_x, world_y)`` sits inside ``pit``'s footprint plus
+    ``margin`` -- close enough that a fall is a real risk, not just nearby.
+
+    The one definition of "standing in a pit's danger zone", shared by
+    ``inference.check_for_safe_spots`` (reject a retreat candidate here) and
+    ``decide.could_escape_pit`` (the actor's own current position).
+    """
+
+    return (
+        pit.world_x - margin <= world_x <= pit.world_x + pit.width + margin
+        and pit.lane_y - margin <= world_y <= pit.lane_y + pit.height + margin
+    )
+
+
+def pit_escape_target(
+    pit: Pit, world_x: int, world_y: int, *, margin: int = PIT_AVOID_MARGIN
+) -> tuple[int, int]:
+    """The nearest point clearly outside ``pit``'s footprint from here.
+
+    A pit is a rectangle; the actor already standing in or near one is
+    closer to one of its four edges than the others, so this picks the
+    cheapest exit -- straight out the nearest side -- rather than routing
+    through the pit's far corner. ``execute.state_machine_escape_pit`` walks
+    straight to whatever this returns.
+    """
+
+    left = world_x - (pit.world_x - margin)
+    right = (pit.world_x + pit.width + margin) - world_x
+    top = world_y - (pit.lane_y - margin)
+    bottom = (pit.lane_y + pit.height + margin) - world_y
+    nearest = min(left, right, top, bottom)
+    if nearest == left:
+        return pit.world_x - margin, world_y
+    if nearest == right:
+        return pit.world_x + pit.width + margin, world_y
+    if nearest == top:
+        return world_x, pit.lane_y - margin
+    return world_x, pit.lane_y + pit.height + margin
 
 # Slack added to an enemy's *extracted* reach before treating the actor as
 # standing inside it. The reach itself is exact -- it is the ROM's own shape

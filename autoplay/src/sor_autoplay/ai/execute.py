@@ -45,7 +45,7 @@ from .tokens import (
 )
 from .gamepad import VirtualGamepad
 from .decide import BREAKABLE_PUNCH_X, in_smash_range
-from .reach import PIT_AVOID_MARGIN, enemy_behind_actor
+from .reach import PIT_AVOID_MARGIN, enemy_behind_actor, pit_endangers, pit_escape_target
 from ..phases import is_dangerous
 from ..world_map import LANE_Y_MIN
 
@@ -811,3 +811,51 @@ def execute_verb(verb: Verb, context: Context, gamepad: VirtualGamepad) -> None:
         press_no_button(gamepad)
         return
     handler(verb, context, gamepad)
+
+
+def _pit_escape_mask(context: Context, actor: Myself) -> int | None:
+    """A movement mask that walks ``actor`` straight out of a ``Pit``'s
+    danger zone it currently stands in, or ``None`` when it doesn't.
+
+    Falling in costs a full life (player-health-lives-and-combat.md's
+    ``$01C0`` fall-boundary check). Every *other* pit-awareness in this
+    module only ever comes up incidentally, mid-route to some unrelated
+    destination (the dodge loop inside ``_movement_mask``) -- nothing
+    reacts to the actor already standing in the danger zone with no walk
+    verb underway to steer it. This is that reaction; see ``execute_tick``.
+    """
+
+    for pit in find_all(context, Pit):
+        if pit_endangers(pit, actor.world_x, actor.world_y):
+            target_x, target_y = pit_escape_target(pit, actor.world_x, actor.world_y)
+            return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)
+    return None
+
+
+def execute_tick(verb: Verb | None, context: Context, gamepad: VirtualGamepad) -> None:
+    """The one place every tick's controller output actually comes from --
+    ``AgentLoop.tick`` calls this instead of choosing between
+    ``press_no_button``/``execute_verb`` itself, so the pit override below
+    applies whichever of those two the rest of the pipeline would otherwise
+    have reached.
+
+    Pit danger is deliberately not a ``Verb`` decide.py/priority.py rank
+    against everything else: it is a constraint on *how* the actor is
+    allowed to move right now, the same kind of thing ``_movement_mask``'s
+    own pit/breakable dodge already is for a walk verb's path, not a
+    competing intent. Overriding here, unconditionally, is what makes it
+    apply regardless of which verb -- if any -- won this tick, including
+    a plain melee strike or no verb at all, neither of which any Pit token
+    reaches otherwise.
+    """
+
+    actor = find(context, Myself)
+    if actor is not None:
+        mask = _pit_escape_mask(context, actor)
+        if mask is not None:
+            _hold_steered(gamepad, mask)
+            return
+    if verb is None:
+        press_no_button(gamepad)
+        return
+    execute_verb(verb, context, gamepad)

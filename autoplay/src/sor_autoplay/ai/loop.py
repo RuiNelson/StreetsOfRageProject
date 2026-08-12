@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from sor_autoplay.state import GameSnapshot
 
 from .decide import generate_verb_tokens
-from .execute import execute_verb, press_no_button
+from .execute import execute_tick
 from .gamepad import VirtualGamepad
 from .inference import generate_inference_tokens
 from .observe import NoraAttackTracker, generate_direct_observation_tokens
@@ -78,9 +78,11 @@ class AgentLoop:
 
         The return value is purely informational (e.g. for a HUD to show
         what the AI is doing) — callers must not feed it back into the
-        pipeline; ``execute_verb`` has already run by the time it comes
-        back. The HUD's canonical source is ``verb_state()``, which
-        ``inform_hud`` fills every tick.
+        pipeline; ``execute_tick`` has already run by the time it comes
+        back, and may have overridden the returned ``Verb`` with a pit
+        escape (``execute.execute_tick``'s own docstring). The HUD's
+        canonical source is ``verb_state()``, which ``inform_hud`` fills
+        every tick.
         """
 
         if (
@@ -102,10 +104,6 @@ class AgentLoop:
         self.inform_hud(context, pending=pending)
 
         verbs = find_all(context, Verb)
-        if not verbs:
-            press_no_button(self._gamepad)
-            return None
-
-        verb = verbs[0]
-        execute_verb(verb, context, self._gamepad)
+        verb = verbs[0] if verbs else None
+        execute_tick(verb, context, self._gamepad)
         return verb

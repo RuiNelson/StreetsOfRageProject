@@ -30,6 +30,7 @@ from sor_autoplay.ai.execute import (
     MOVE_DEADBAND_X,
     WALK_TO_ENEMY_LANE_SAFETY_Y,
     _walk_to_near_enemy_target,
+    execute_tick,
     execute_verb,
     press_no_button,
 )
@@ -1127,6 +1128,85 @@ class ExecuteMovementPitAvoidanceTests(unittest.TestCase):
         gamepad, client = _gamepad()
 
         _settle(verb, {actor, target, pit, camera}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+
+class ExecuteTickPitEscapeTests(unittest.TestCase):
+    """``execute_tick`` -- not ``_movement_mask``'s incidental path dodge --
+    is what reacts to the actor already *standing* in a pit's danger zone,
+    regardless of which verb (if any) won this tick. This is the executor's
+    own responsibility, deliberately not a ``Verb`` decide.py/priority.py
+    would have to rank against everything else."""
+
+    def _settle_tick(self, verb, context, gamepad, ticks: int = AXIS_RAMP_TICKS) -> None:
+        for _ in range(ticks):
+            execute_tick(verb, context, gamepad)
+
+    def test_escapes_a_pit_even_with_no_winning_verb(self) -> None:
+        # Actor sits inside the pit, closer to its right edge; nothing else
+        # is happening this tick (no Verb survived priority ranking).
+        actor = _myself(world_x=53, world_y=90)
+        pit = Pit(world_x=45, lane_y=84, width=10, height=12)
+        gamepad, client = _gamepad()
+
+        self._settle_tick(None, {actor, pit}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+    def test_pit_escape_overrides_a_winning_attack_verb(self) -> None:
+        # A Punch verb won this tick, but the actor is standing in a pit --
+        # escaping it must still take over the controller.
+        actor = _myself(world_x=53, world_y=90)
+        pit = Pit(world_x=45, lane_y=84, width=10, height=12)
+        target = _enemy(world_x=53, world_y=90)
+        verb = Punch(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        self._settle_tick(verb, {actor, target, pit}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+    def test_escapes_toward_the_nearer_edge(self) -> None:
+        # Same pit, actor now sits closer to the left edge instead.
+        actor = _myself(world_x=47, world_y=90)
+        pit = Pit(world_x=45, lane_y=84, width=10, height=12)
+        gamepad, client = _gamepad()
+
+        self._settle_tick(None, {actor, pit}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=LEFT, player2=0)
+
+    def test_no_override_when_not_near_any_pit(self) -> None:
+        actor = _myself(world_x=0, world_y=90)
+        pit = Pit(world_x=500, lane_y=84, width=10, height=12)
+        target = _enemy(world_x=100, world_y=90)
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        self._settle_tick(verb, {actor, target, pit}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+    def test_no_verb_and_no_pit_presses_no_button(self) -> None:
+        gamepad, client = _gamepad()
+        gamepad.hold(RIGHT)
+        client.hold_buttons.reset_mock()
+
+        execute_tick(None, set(), gamepad)
+
+        client.hold_buttons.assert_called_once_with(player1=0, player2=0)
+        self.assertEqual(gamepad.held, 0)
+
+    def test_missing_actor_falls_through_to_the_winning_verb(self) -> None:
+        # No Myself token at all (e.g. between polls) must not crash --
+        # execute_tick still hands off to the normal verb dispatch.
+        target = _enemy(world_x=100, world_y=90)
+        pit = Pit(world_x=500, lane_y=84, width=10, height=12)
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        gamepad, client = _gamepad()
+
+        self._settle_tick(verb, {target, pit}, gamepad)
 
         client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
 

@@ -384,13 +384,7 @@ def check_for_surrounded(context: Context) -> Context:
 
 
 def _inside_pit(context: Context, world_x: int, world_y: int) -> bool:
-    for pit in find_all(context, Pit):
-        if (
-            pit.world_x - reach.PIT_AVOID_MARGIN <= world_x <= pit.world_x + pit.width + reach.PIT_AVOID_MARGIN
-            and pit.lane_y - reach.PIT_AVOID_MARGIN <= world_y <= pit.lane_y + pit.height + reach.PIT_AVOID_MARGIN
-        ):
-            return True
-    return False
+    return any(reach.pit_endangers(pit, world_x, world_y) for pit in find_all(context, Pit))
 
 
 def _safe_spot_candidates(
