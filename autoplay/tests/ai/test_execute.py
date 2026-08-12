@@ -1200,6 +1200,44 @@ class ExecuteTickPitEscapeTests(unittest.TestCase):
 
         client.hold_buttons.assert_called_with(player1=DOWN, player2=0)
 
+    def test_never_freezes_a_few_pixels_short_of_the_danger_boundary(self) -> None:
+        # Regression: aiming the dodge exactly at the danger boundary
+        # (pit.lane_y - PIT_AVOID_MARGIN) meant that once from_y drifted to
+        # within MOVE_DEADBAND_Y of that same point -- reachable well before
+        # from_y actually crosses it -- the Y mask bits went quiet on a
+        # from_y still short of "cleared" *and* X was still frozen (both
+        # checks share the one boundary), so the whole mask went to 0 and
+        # the actor froze in place, convinced it was still in danger.
+        # world_y=78 is exactly that near-boundary gap (2px inside the old
+        # target, comfortably inside the old MOVE_DEADBAND_Y=3 window) for
+        # this pit's danger_top of 76.
+        actor = _myself(world_x=53, world_y=78)
+        pit = Pit(world_x=45, lane_y=84, width=10, height=12)
+        gamepad, client = _gamepad()
+
+        self._settle_tick(None, {actor, pit}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=UP, player2=0)
+
+    def test_never_stays_stuck_anywhere_inside_the_margin(self) -> None:
+        # Broader sweep of the same regression: for every from_y across the
+        # pit's full margin-expanded band, settling execute_tick must always
+        # end up commanding some movement, never permanent silence --
+        # whatever numeric coincidence might produce a 0 mask on a given
+        # tick, either _movement_mask's own overshoot or _pit_escape_mask's
+        # fallback must still resolve to real movement once settled (a
+        # single tick's L/R bit can still read 0 while the virtual axis is
+        # ramping up -- see gamepad.py -- so this settles first).
+        pit = Pit(world_x=45, lane_y=84, width=10, height=12)
+        for world_y in range(76, 105):
+            with self.subTest(world_y=world_y):
+                actor = _myself(world_x=53, world_y=world_y)
+                gamepad, client = _gamepad()
+
+                self._settle_tick(None, {actor, pit}, gamepad)
+
+                self.assertNotEqual(gamepad.held, 0)
+
     def test_no_override_when_not_near_any_pit(self) -> None:
         actor = _myself(world_x=0, world_y=90)
         pit = Pit(world_x=500, lane_y=84, width=10, height=12)

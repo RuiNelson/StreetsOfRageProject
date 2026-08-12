@@ -114,6 +114,14 @@ BREAKABLE_AVOID_Y = 22
 # only because the pit's real height is already added on top of it (see the
 # dodge loop below). It is shared with inference.check_for_safe_spots, which
 # must reject the same ground this steers around.
+#
+# How far past PIT_AVOID_MARGIN's own boundary the pit dodge's Y target aims
+# -- must exceed MOVE_DEADBAND_Y, or the target can land within the deadband
+# of a from_y that has not actually reached the boundary yet, zeroing the Y
+# mask bits while X is still frozen ("not cleared"): an empty mask, i.e. the
+# actor freezes a few pixels short of escaping. See the dodge loop's own
+# comment for the live-diagnosed deadlock this prevents.
+PIT_DODGE_OVERSHOOT = MOVE_DEADBAND_Y + 5
 
 # Stop just inside punch_outer_x — never walk onto the enemy.
 WALK_TO_ENEMY_STOP_BUFFER = 4
@@ -288,11 +296,22 @@ def _movement_mask(
         if from_y <= danger_top or from_y >= danger_bottom:
             # Already clear vertically -- safe to keep closing X this tick.
             continue
+        # The dodge target must clear the danger boundary by more than
+        # MOVE_DEADBAND_Y, not land exactly on it: live-diagnosed deadlock --
+        # aiming at danger_top/danger_bottom itself means that once from_y
+        # drifts to within MOVE_DEADBAND_Y of that same point, the Y mask
+        # bits go quiet (deadband) *while X is still frozen and "not
+        # cleared" is still true* (the boundary is inclusive on both
+        # checks), so the whole mask goes to 0 and the actor freezes a few
+        # pixels short of actually escaping -- reachable well before the
+        # true edge, not just exactly on it. PIT_DODGE_OVERSHOOT pushes the
+        # aim point far enough past the boundary that "not cleared" and
+        # "within the deadband of the target" can never both hold at once.
         lo, hi = _lane_bounds(context)
         if from_y < (lo + hi) / 2:
-            to_y = _clamp_target_y(context, pit_bottom + PIT_AVOID_MARGIN)
+            to_y = _clamp_target_y(context, pit_bottom + PIT_AVOID_MARGIN + PIT_DODGE_OVERSHOOT)
         else:
-            to_y = _clamp_target_y(context, pit.lane_y - PIT_AVOID_MARGIN)
+            to_y = _clamp_target_y(context, pit.lane_y - PIT_AVOID_MARGIN - PIT_DODGE_OVERSHOOT)
         to_x = from_x
 
     mask = 0
@@ -849,6 +868,15 @@ def _pit_escape_mask(context: Context, actor: Myself) -> int | None:
     tick and stops calling this the moment the actor clears the pit on
     *either* axis, which ``_movement_mask``'s Y-first dodge always reaches
     well before X could ever travel as far as this target.
+
+    Never returns 0 while ``pit_endangers`` holds. ``_movement_mask`` is
+    built to guarantee that on its own (``PIT_DODGE_OVERSHOOT``), but this
+    is the one place in the whole pipeline where "the actor believes it is
+    in a pit" is known for certain -- so it is also the right place to
+    refuse categorically to hand back "do nothing" for that belief,
+    independent of whatever combination of deadbands and margins produced
+    it. Freezing a few pixels short of safety while still convinced it is
+    in danger is exactly the deadlock this rules out, live-diagnosed.
     """
 
     for pit in find_all(context, Pit):
@@ -859,7 +887,11 @@ def _pit_escape_mask(context: Context, actor: Myself) -> int | None:
             far_x = pit.world_x + pit.width + PIT_AVOID_MARGIN + MOVE_DEADBAND_X + 1
         else:
             far_x = pit.world_x - PIT_AVOID_MARGIN - MOVE_DEADBAND_X - 1
-        return _movement_mask(context, actor.world_x, actor.world_y, far_x, actor.world_y)
+        mask = _movement_mask(context, actor.world_x, actor.world_y, far_x, actor.world_y)
+        if mask != 0:
+            return mask
+        pit_center_y = pit.lane_y + pit.height / 2
+        return DOWN_MASK if actor.world_y < pit_center_y else UP_MASK
     return None
 
 

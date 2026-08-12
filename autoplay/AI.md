@@ -581,7 +581,12 @@ whichever half of the lane the actor is already in (toward the near edge),
 the same rule `execute._movement_mask`'s own pit detour already uses below,
 since this override hands that same logic a point on the far side of the
 pit purely to make it recognise and take over — the geometry itself is
-entirely `_movement_mask`'s.
+entirely `_movement_mask`'s. That target overshoots the danger boundary by
+a real margin rather than landing exactly on it, and the override never
+hands back an empty command while the actor still believes it is in
+danger: live testing found both the exact-boundary target and a still-
+possible empty mask could otherwise leave the actor frozen a few pixels
+short of safety, convinced it needed to escape but commanding nothing.
 
 This is deliberately *not* a `Verb` of its own for `generate_verb_tokens`
 and `determine_priority_verb` to rank against every other candidate. Every
