@@ -1267,26 +1267,41 @@ class DeterminePriorityTieBreakTests(unittest.TestCase):
         self.assertIs(verbs[0], high)
 
 
-class DeterminePriorityRandomTieTests(unittest.TestCase):
-    def test_exact_tie_logs_warning_and_still_picks_exactly_one(self) -> None:
+class DeterminePriorityTieTests(unittest.TestCase):
+    """Ties between same-class verbs aimed at different targets are routine
+    by design -- a ``could_*`` produces one candidate per valid target and
+    never pre-selects -- so the tie-break runs constantly and its *stability*
+    is what matters, not which candidate it favours."""
+
+    def _tied_context(self):
         enemy_a = _enemy("objA", CombatPhase.NORMAL)
         enemy_b = _enemy("objB", CombatPhase.NORMAL)
         punch_a = Punch(actor_slot="P1", target_slot="objA")
         punch_b = Punch(actor_slot="P1", target_slot="objB")
-        context = {enemy_a, enemy_b, punch_a, punch_b}
+        return {enemy_a, enemy_b, punch_a, punch_b}, punch_a, punch_b
 
-        with self.assertLogs("sor_autoplay.ai.priority", level="WARNING") as logs:
-            result = determine_priority_verb(context)
+    def test_exact_tie_picks_exactly_one(self) -> None:
+        context, punch_a, punch_b = self._tied_context()
 
-        verbs = find_all(result, Verb)
+        verbs = find_all(determine_priority_verb(context), Verb)
+
         self.assertEqual(len(verbs), 1)
         self.assertIn(verbs[0], (punch_a, punch_b))
-        # The two tied Punch candidates target different enemies -- the log
-        # must show that (full repr), not just the shared class name, or it
-        # misleadingly reads as the exact same verb logged twice.
-        message = logs.output[0]
-        self.assertIn("target_slot='objA'", message)
-        self.assertIn("target_slot='objB'", message)
+
+    def test_exact_tie_resolves_to_the_same_verb_every_time(self) -> None:
+        # The regression that matters. This used to be random.choice, which
+        # is defensible for one tick and disastrous over a run of them: the
+        # whole decision is remade every poll, so re-rolling swapped targets
+        # ~15 times a second and re-aimed the D-pad with each swap. Measured
+        # live as the AI hunting between two enemies instead of committing.
+        winners = set()
+        for _ in range(50):
+            context, _, _ = self._tied_context()
+            winners.add(find_all(determine_priority_verb(context), Verb)[0])
+
+        self.assertEqual(
+            len(winners), 1, f"tie-break is not deterministic: {winners}"
+        )
 
 
 if __name__ == "__main__":

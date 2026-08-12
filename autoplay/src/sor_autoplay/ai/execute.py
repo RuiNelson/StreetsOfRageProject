@@ -349,7 +349,17 @@ def _walk_to_near_enemy_target(
     target_x = target.world_x + stop_dx if approach_from_right else target.world_x - stop_dx
 
     dx = abs(target.world_x - actor.world_x)
-    if is_dangerous(target.combat_phase) and dx > stop_dx:
+    dy = abs(target.world_y - actor.world_y)
+    if dx <= stop_dx:
+        # Arrived on X. Converge onto the enemy's lane so the punch lands
+        # (dy must clear PUNCH_RANGE_Y) -- this is the only place that aims
+        # at the enemy's own lane, and by now the approach is over.
+        target_y = target.world_y
+    elif is_dangerous(target.combat_phase) and dy < WALK_TO_ENEMY_LANE_SAFETY_Y:
+        # Still approaching a committed enemy and standing in its line of
+        # attack: leave the line, aiming at a *fixed* lane rather than a
+        # displacement from the actor's own, so repeated ticks converge on
+        # one point instead of stepping away forever.
         lo, hi = _lane_bounds(context)
         offset = (
             WALK_TO_ENEMY_LANE_SAFETY_Y
@@ -358,7 +368,24 @@ def _walk_to_near_enemy_target(
         )
         target_y = target.world_y + offset
     else:
-        target_y = target.world_y
+        # Still approaching, and not standing in a committed enemy's line:
+        # hold the current lane.
+        #
+        # This branch used to aim at ``target.world_y`` -- converge onto the
+        # enemy's lane from however far away. Combined with the branch above
+        # that made the lane aim flip by a full
+        # ``2 * WALK_TO_ENEMY_LANE_SAFETY_Y`` every time the enemy's phase
+        # crossed ``is_dangerous``, which in a real fight is every few ticks:
+        # commit -> sidestep off the lane, recover -> converge back onto it,
+        # commit again -> back off. Measured on the tick harness as a steady
+        # UP/DOWN alternation for the whole approach, and the last source of
+        # the reported up/down darting after the target churn was fixed.
+        #
+        # Holding the lane removes the phase dependence entirely while still
+        # serving the original intent better than converging did: the actor
+        # simply never walks down the enemy's line in the first place, which
+        # is what the sidestep above was compensating for after the fact.
+        target_y = actor.world_y
 
     return target_x, target_y
 

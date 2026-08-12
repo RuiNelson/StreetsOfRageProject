@@ -126,7 +126,12 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         client.hold_buttons.assert_called_once_with(player1=RIGHT | DOWN, player2=0)
 
     def test_walks_toward_enemy_to_the_left_and_above(self) -> None:
-        actor = _myself(world_x=50, world_y=50)
+        # dx=44 is inside Axel's stop_dx (46), so the walk has arrived on X
+        # and converges onto the enemy's lane -- the only branch that aims at
+        # the enemy's own Y. Further out it holds its own lane instead, so
+        # that the lane aim cannot depend on the enemy's combat phase (see
+        # _walk_to_near_enemy_target).
+        actor = _myself(world_x=44, world_y=50)
         target = _enemy(world_x=0, world_y=0)
         context = {actor, target}
         verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
@@ -135,6 +140,34 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         execute_verb(verb, context, gamepad)
 
         client.hold_buttons.assert_called_once_with(player1=LEFT | UP, player2=0)
+
+    def test_holds_its_own_lane_while_still_far_out_on_x(self) -> None:
+        # Regression: the lane aim must not depend on the enemy's combat
+        # phase. It used to converge onto the enemy's lane while far and
+        # sidestep off it while the enemy was committed, so every phase
+        # change flipped the aim by 2*WALK_TO_ENEMY_LANE_SAFETY_Y and the
+        # approach alternated UP/DOWN the whole way in. Same actor and enemy
+        # in both phases here; the commanded lane must match.
+        target_calm = _enemy(world_x=200, world_y=0)
+        target_committed = replace(target_calm, combat_phase=CombatPhase.ATTACKING)
+        masks = []
+        for target in (target_calm, target_committed):
+            actor = _myself(world_x=0, world_y=50)
+            gamepad, _ = _gamepad()
+            execute_verb(
+                WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+                {actor, target},
+                gamepad,
+            )
+            masks.append(gamepad.held)
+
+        self.assertEqual(
+            masks[0], masks[1], f"lane aim changed with the enemy's phase: {masks}"
+        )
+        self.assertFalse(
+            masks[0] & (UP | DOWN),
+            f"converged onto the enemy's lane while still far out: {hex(masks[0])}",
+        )
 
     def test_turns_toward_an_enemy_at_the_actors_back(self) -> None:
         # Holding a direction is what sets facing, so walking *toward* a
@@ -220,13 +253,15 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
 
         client.hold_buttons.assert_called_once_with(player1=0, player2=0)
 
-    def test_offsets_lane_from_a_dangerous_enemy_even_before_reaching_its_exact_lane(self) -> None:
+    def test_leaves_the_line_of_attack_of_a_committed_enemy(self) -> None:
         # Regression (live-diagnosed): gating the offset on already sitting
-        # on the enemy's exact lane reacted too late -- the approach
-        # converges onto that lane over several ticks regardless (nothing
-        # else holds it off), so by the time the old gate opened the enemy
-        # had often already reached ATTACKING and landed a hit. Aim for the
-        # offset lane for the whole dangerous approach instead.
+        # on the enemy's exact lane reacted too late -- the approach used to
+        # converge onto that lane over several ticks regardless, so by the
+        # time the old gate opened the enemy had often already reached
+        # ATTACKING and landed a hit. Nothing converges the lane while far
+        # any more, but standing *in* a committed enemy's line still has to
+        # be actively left, which is what this covers: actor 10px off the
+        # enemy's lane, inside WALK_TO_ENEMY_LANE_SAFETY_Y (28).
         #
         # The offset side is picked from the target's own position against
         # the lane's fixed midpoint, not from actor.world_y vs
@@ -234,14 +269,27 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         # no CameraRange in context, _lane_bounds defaults to lo=8, hi=106,
         # midpoint=57 -- target.world_y=50 sits below that, so the offset
         # pushes further up (-WALK_TO_ENEMY_LANE_SAFETY_Y), independent of
-        # the actor's own world_y=80.
-        actor = _myself(world_x=0, world_y=80)
+        # which side of it the actor stands on.
+        actor = _myself(world_x=0, world_y=60)
         target = replace(_enemy(world_x=200, world_y=50), combat_phase=CombatPhase.ATTACKING)
         context = {actor, target}
 
         target_x, target_y = _walk_to_near_enemy_target(actor, target, context)
 
         self.assertEqual(target_y, 50 - WALK_TO_ENEMY_LANE_SAFETY_Y)
+
+    def test_does_not_keep_sidestepping_once_clear_of_the_line_of_attack(self) -> None:
+        # The sidestep aims at a *fixed* lane, so once the actor is already
+        # clear (dy >= WALK_TO_ENEMY_LANE_SAFETY_Y) there is nothing left to
+        # do and it holds its lane -- rather than stepping away again from
+        # wherever it now stands, which would walk it off the screen edge.
+        actor = _myself(world_x=0, world_y=90)
+        target = replace(_enemy(world_x=200, world_y=50), combat_phase=CombatPhase.ATTACKING)
+        context = {actor, target}
+
+        _, target_y = _walk_to_near_enemy_target(actor, target, context)
+
+        self.assertEqual(target_y, 90)
 
     def test_does_not_sidestep_an_enemy_that_is_not_dangerous(self) -> None:
         actor = _myself(world_x=0, world_y=50)
@@ -456,10 +504,15 @@ class MovementDeadbandTests(unittest.TestCase):
 
     def test_does_not_steer_for_a_sub_step_x_residual(self) -> None:
         # Actor sits 3px from its stopping point on X (Axel stop_dx=46, enemy
-        # at 149 -> stop at 103) but a full lane away: it should travel purely
+        # at 143 -> stop at 97) but a full lane away: it should travel purely
         # down the lane, with no horizontal component at all.
+        #
+        # dx=43 is inside stop_dx, which is what puts _walk_to_near_enemy_target
+        # in its converge-onto-the-enemy's-lane branch -- while still further
+        # out on X it holds its own lane instead (see that function), and the
+        # tick would command nothing at all, testing nothing.
         actor = _myself(world_x=100, world_y=40)
-        target = _enemy(world_x=149, world_y=100)
+        target = _enemy(world_x=143, world_y=100)
         gamepad, client = _gamepad()
 
         execute_verb(

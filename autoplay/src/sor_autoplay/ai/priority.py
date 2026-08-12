@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import math
-import random
 from collections.abc import Callable
 
 from ..phases import HITSTUN_FRAMES, CombatPhase, is_dangerous
@@ -555,23 +554,39 @@ def determine_priority_verb(context: Context) -> Context:
     if len(tied) == 1:
         winner = tied[0]
     else:
-        # tied entries are never literally the same object here: Context is
-        # a set of frozen/hashable Verb dataclasses, so two candidates
-        # with identical priority/actor_slot/target_slot would already have
-        # deduplicated into one. Log full repr (not just the class name) so
-        # that distinguishing field -- almost always a different
-        # target_slot/actor_slot -- is visible instead of looking like a
-        # duplicate.
-        details = ", ".join(sorted(repr(verb) for verb in tied))
-        logger.warning(
+        # Break the tie *deterministically and stably*, never at random.
+        #
+        # This used to be random.choice, on the reasoning that verbs scoring
+        # identically are equally good so any of them will do. That is true
+        # of a single tick in isolation and false of a run of them: the same
+        # decision is remade from scratch every poll, so re-rolling a tie
+        # each time turns "either is fine" into "swap between them ~15 times
+        # a second". Candidates that tie are overwhelmingly the *same verb
+        # class aimed at different targets* -- one WalkToNearEnemy per
+        # reachable enemy, one Punch per enemy in range, by design (a could_*
+        # never pre-selects a best candidate) -- and their targets sit in
+        # different directions, so each re-roll re-aims the D-pad. Live
+        # symptom: the AI visibly hunting between two enemies instead of
+        # committing to either. Scoring was already made near-continuous
+        # (_distance_emergency) to make ties rarer, but ties remain routine
+        # at the floor of a distance-scored band and at any flat tier, so
+        # rarer was never enough on its own.
+        #
+        # repr is a stable total order over frozen dataclasses -- it depends
+        # only on field values, so the same set of candidates yields the same
+        # winner on every tick, which is exactly the stickiness this needs.
+        # Nothing here has to be *optimal*: reaching this line means the
+        # pipeline already judged these candidates equally urgent, so the
+        # only property that matters is that the answer stops changing.
+        winner = min(tied, key=repr)
+        logger.debug(
             "determine_priority_verb: %d verbs tied at emergency=%d "
-            "priority=%d (%s); picking one at random. Assign distinct "
-            "priorities to break this deterministically.",
+            "priority=%d (%s); resolved deterministically to %r.",
             len(tied),
             max_emergency,
             max_priority,
-            details,
+            ", ".join(sorted(repr(verb) for verb in tied)),
+            winner,
         )
-        winner = random.choice(tied)
 
     return {token for token in context if not isinstance(token, Verb)} | {winner}
