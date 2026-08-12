@@ -558,8 +558,21 @@ chords are not handled by these host-side cheats.
 | `Alt/Option+K` | Kill all instantiated enemies, including bosses, through their normal lethal states |
 | `Alt/Option+W` | Call the police for the active player without consuming a special attack |
 | `Alt/Option+1`–`8` | Jump to levels 1–8 and enter the corresponding level-intro state |
-| `Alt/Option+G` | Start the good ending |
-| `Alt/Option+B` | Start the bad ending |
+| `Alt/Option+G` | Kill every instantiated **Garcia** (types `$20`–`$23`) |
+| `Alt/Option+N` | Kill every instantiated **Haku-Ro** — the ninja (types `$25`, `$2A`) |
+| `Alt/Option+B` | Kill every instantiated **Signal** (type `$24`) |
+| `Alt/Option+J` | Kill every instantiated **Jack** (type `$27`) |
+| `Alt/Option+U` | Kill every instantiated **Nora** (type `$26`) |
+
+The per-family kills put each enemy through the same forced-death sweep as
+`Alt/Option+K`, so score, HUD, and cleanup run exactly as they do for a normal
+defeat. They cover ordinary enemies only: bosses have their own lethal paths
+and no family cheat names one. Each letter is the enemy's own initial where
+that was free — Signal takes `B` and Nora takes `U`, since `S` already adds a
+special attack and `N` is the ninja.
+
+> **The good/bad ending cheats are gone.** They were `Alt/Option+G` and
+> `Alt/Option+B`; those letters now kill Garcias and Signals.
 
 These are host debugging facilities, not part of the original cartridge input
 protocol. Use them only when investigating runtime behavior or exercising
