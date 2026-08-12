@@ -610,21 +610,32 @@ def state_machine_call_police(verb: CallPolice, context: Context, gamepad: Virtu
     _press(gamepad, CALL_POLICE_MASK, frames=CALL_POLICE_FRAMES)
 
 
-# Jump action families (controls-and-input.md "Action state machine"), with
-# the facing bit cleared. The unarmed family is $10 jump-start (a fixed
-# 5-frame crouch) -> $12 free flight -> $16 jump attack -> $14 land; a
-# held-weapon jump runs the parallel $3C-$43 family through the same physics
-# helpers.
+# The jump, state by state (controls-and-input.md "Action state machine"),
+# facing bit cleared: $10 jump-start -- a fixed 5-frame crouch -- then $12
+# free flight, $16 jump attack, $14 land. A held-weapon jump runs the
+# parallel $3C-$43 family through the same physics helpers, hence the second
+# id in each set; ``decide.could_jump_attack`` declines to jump while armed
+# in the first place, so those are belt-and-braces.
 #
-# The crouch is the one state that must never see a B press. $3914 turns B
-# into the kick only from **free flight**, and it needs a fresh edge (+$55
-# bit 4) -- but the AI re-decides every ~2 frames and _press holds each
-# button for 4, so a B issued during the crouch is simply still held when
-# free flight begins, produces no new edge there, and the kick never fires.
-# Live symptom, exactly as reported: the actor jumps at an enemy it could
-# kick and sails through the whole flight without ever attacking.
+# Every state is named explicitly rather than inferred from ``is_airborne``,
+# because that property spans the whole family and the states do not accept
+# the same inputs at all. Two ways to get it wrong, both measured live:
+#
+# - **B during the crouch does nothing.** $3914 turns B into the kick only
+#   from free flight, on a fresh edge of +$55 bit 4 -- but the AI re-decides
+#   every ~2 frames while ``_press`` holds each button for 4, so a B issued
+#   in the crouch is simply still held when free flight starts, no edge ever
+#   arrives, and the actor sails through the whole arc without attacking.
+# - **B on the landing frame becomes a punch.** $14 is still "airborne" by
+#   that property, but the actor is on the ground by the time the press is
+#   read, so it comes out as an ordinary punch aimed where the kick had been
+#   heading -- 100px away, after the flight carried it there. Recorded in a
+#   live run: a kick at a knocked-down enemy sliding away finished with a
+#   punch thrown at empty air on touchdown.
 JUMP_CROUCH_ACTIONS = frozenset({0x10, 0x3C})
-JUMP_ATTACK_ACTIONS = frozenset({0x16, 0x40, 0x42})
+JUMP_FREE_FLIGHT_ACTIONS = frozenset({0x12, 0x3E})
+JUMP_ATTACK_ACTIONS = frozenset({0x16, 0x42})
+JUMP_LAND_ACTIONS = frozenset({0x14, 0x40})
 
 
 def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: VirtualGamepad) -> None:
@@ -675,9 +686,11 @@ def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: Virtu
     face = _face_toward_mask(actor, target.world_x)
     base = actor.action_base
 
-    if base in JUMP_ATTACK_ACTIONS:
-        # The kick is already running and stays active until landing
-        # (controls-and-input.md). Keep the air steer, press nothing.
+    if base in JUMP_FREE_FLIGHT_ACTIONS:
+        # The one state the kick edge works from. Pressed on its own, with
+        # the direction re-held afterwards -- _press clears the hold, and air
+        # steer ($38C0) still reads it for the rest of the flight.
+        _press(gamepad, PUNCH_MASK, frames=JUMP_ATTACK_KICK_FRAMES)
         gamepad.hold(face)
         return
     if base in JUMP_CROUCH_ACTIONS:
@@ -685,11 +698,9 @@ def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: Virtu
         # alone so the B that starts the kick is a fresh edge.
         gamepad.hold(face or (LEFT_MASK if actor.facing_left else RIGHT_MASK))
         return
-    if actor.is_airborne:
-        # Free flight: this is the kick edge. Pressed on its own, with the
-        # direction re-held afterwards -- _press clears the hold, and air
-        # steer ($38C0) still reads it for the rest of the flight.
-        _press(gamepad, PUNCH_MASK, frames=JUMP_ATTACK_KICK_FRAMES)
+    if base in JUMP_ATTACK_ACTIONS or base in JUMP_LAND_ACTIONS or actor.is_airborne:
+        # Already kicking (it stays active until landing), touching down, or
+        # any other airborne state: nothing to press. Keep the air steer.
         gamepad.hold(face)
         return
     if face == 0:

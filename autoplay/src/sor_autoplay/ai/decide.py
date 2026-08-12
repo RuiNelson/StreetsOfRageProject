@@ -661,6 +661,19 @@ def could_jump_attack(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
+        if actor.held_weapon_type != 0:
+            # Unarmed only, like every other MeleeAttacks sibling. A held
+            # weapon puts the ROM in the *parallel* jump family ($3C-$43,
+            # controls-and-input.md) -- a different move, with a different
+            # reach, whose kick edge this pipeline models nowhere: the band
+            # below is the unarmed free-flight range (60/69/75) and
+            # execute's state machine names the unarmed states. Observed
+            # live with a bat in hand: 246 of 4859 ticks sat in $42, the
+            # armed jump attack, while the AI believed it was performing an
+            # ordinary jump kick. Armed, the answer is the weapon's own
+            # swing -- could_swing_bat_or_pipe and friends -- reached by
+            # walking in, which could_walk_to_near_enemy already does.
+            continue
         target_slots = set(reach.targets_of(context, InJumpAttackReach, actor.slot))
         if actor.is_airborne and not target_slots:
             nearest = min(

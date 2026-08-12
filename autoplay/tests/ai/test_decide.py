@@ -1246,6 +1246,20 @@ class CouldJumpAttackTests(unittest.TestCase):
 
         self.assertEqual(result, {JumpAttack(actor_slot="P1", target_slot="obj01")})
 
+    def test_never_jump_kicks_while_holding_a_weapon(self) -> None:
+        # A held weapon puts the ROM in the parallel $3C-$43 jump family --
+        # a different move whose reach and kick edge this pipeline models
+        # nowhere. Live: 246 of 4859 ticks sat in $42 with a bat in hand
+        # while the AI thought it was doing an ordinary jump kick.
+        armed = make_myself(
+            world_x=100, world_y=100, is_airborne=False, facing_left=False,
+            held_weapon_type=0x0A,  # baseball bat
+        )
+        enemy = make_enemy(world_x=160, world_y=100)
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+
+        self.assertEqual(could_jump_attack({armed, enemy, camera}), set())
+
     def test_grounded_still_needs_the_band(self) -> None:
         # The commitment is only about being already airborne; from the
         # ground this must stay as selective as it ever was.

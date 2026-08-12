@@ -768,6 +768,22 @@ class ExecuteJumpAttackTests(unittest.TestCase):
         client.press_buttons.assert_not_called()
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
+    def test_presses_nothing_on_the_landing_frame(self) -> None:
+        # $14 is the landing, and `is_airborne` covers the whole $10-$17
+        # family including it -- so a handler keyed on that property pressed
+        # B here, and by the time the ROM read it the actor was grounded, so
+        # it came out as a plain punch aimed at wherever the kick had been
+        # heading. Seen live: a kick at a knocked-down enemy sliding away
+        # finished with a punch thrown at empty air on touchdown.
+        actor = _myself(world_x=0, world_y=0, is_airborne=True, action_state=0x14)
+        enemy = _enemy(world_x=100, world_y=0)
+        verb = JumpAttack(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {actor, enemy}, gamepad)
+
+        client.press_buttons.assert_not_called()
+
     def test_presses_nothing_once_the_kick_is_already_running(self) -> None:
         # $16 stays active for the rest of the airtime; a second edge buys
         # nothing and risks being read on landing.
