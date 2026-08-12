@@ -81,6 +81,26 @@ class Enemy(Character):
         )
 
     @property
+    def is_defeated(self) -> bool:
+        """This enemy is already dead -- a body, not a target.
+
+        The same hard lifecycle rule ``world_map.MapEntity.is_defeated``
+        uses, and for the same reason: the ROM's ordinary-enemy lethal checks
+        are **signed**, so a health word of ``$8000``-``$FFFF`` has crossed
+        the lethal boundary while the object still sits in its slot with an
+        action family that has not caught up yet. Zero health has *not* --
+        that enemy is still alive and owed a finishing hit.
+
+        Judging "still a target" from ``combat_phase`` alone therefore keeps
+        a corpse in the target set for as long as its stale action family
+        lasts: the AI walks to it, ranks it against real enemies, and punches
+        it. That is exactly the "attacking enemies that are not there" a
+        player sees.
+        """
+
+        return self.health is not None and self.health >= 0x8000
+
+    @property
     def max_reach(self) -> int:
         """How far ahead this enemy can hit from where it stands, in px.
 
@@ -310,8 +330,9 @@ class InPunchReach(TargetInReach):
 
     Produced by ``inference.check_for_targets_in_reach`` when the enemy is
     inside ``reach.in_punch_band`` *and* in front of the actor (within
-    ``reach.PUNCH_BEHIND_TOLERANCE_X``) -- the raw band alone ignores facing
-    and describes a dead zone the actor cannot actually hit.
+    ``reach.punch_behind_tolerance_x``, which the box geometry makes 0 for
+    all three characters) -- the raw band alone ignores facing and describes
+    a dead zone the actor cannot actually hit.
     """
 
 

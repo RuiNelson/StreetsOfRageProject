@@ -35,6 +35,7 @@ from .attack_verbs import (
     WeaponAttacks,
 )
 from .character import (
+    BODY_OVERLAP_X,
     MELEE_WEAPON_TYPES,
     PUNCH_RANGE_Y,
     REAR_ATTACK_Y,
@@ -43,8 +44,10 @@ from .character import (
     Partner,
     PlayableCharacter,
     punch_inner_x,
+    punch_usable_inner_x,
     punch_outer_x,
     rear_attack_behind_max_x,
+    rear_attack_behind_min_x,
     rear_attack_front_max_x,
 )
 from .enemy import (

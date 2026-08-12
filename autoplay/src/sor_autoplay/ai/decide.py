@@ -144,6 +144,14 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
             continue
         if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
             continue
+        if actor.is_airborne:
+            # There is no such thing as a grounded strike in mid-air: the ROM
+            # reads B in free flight as the jump kick ($3914), which is
+            # JumpAttack's business and has its own launch/edge state machine
+            # (execute.state_machine_jump_attack). Producing a Punch here
+            # outranked that verb (20 vs 18) and pressed B straight through
+            # it, so the kick fired -- or not -- by accident of timing.
+            continue
         held_matches = (
             actor.held_weapon_type == 0 if held_types is None else actor.held_weapon_type in held_types
         )
@@ -613,16 +621,39 @@ def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
 
 def could_jump_attack(context: Context) -> Context:
     """Jump-kick only when a horizontal approach is useful — never hop in
-    place. Once already airborne, keep producing the same verb every tick
-    so the actor actually lands the follow-through B edge instead of
-    sailing through the air silent: ``execute.state_machine_jump_attack``
-    only presses B while a ``JumpAttack`` is still winning, and
-    ``reach.in_jump_attack_band`` is what keeps the target valid through
-    the flight (see its docstring) -- there is no other way for the AI to
-    remember it already committed to a kick, since a ``Verb`` carries no
-    state across ticks."""
+    place — and, once airborne, **always**.
+
+    Two different questions, and conflating them is what left the AI sailing
+    through jumps in silence:
+
+    - *grounded*: should this jump happen at all? Answered by
+      ``InJumpAttackReach`` (in front, past the punch's own outer edge,
+      inside the kick's free-flight range) plus the "never launch into a
+      committed attack" gate.
+    - *airborne*: nothing is left to decide. The trajectory is fixed at
+      takeoff (controls-and-input.md: no mid-air lane control, only limited
+      air steer), so the only question is whether to press the kick edge --
+      and pressing it is free, while not pressing it means landing having
+      done nothing at all.
+
+    That second case used to depend on ``InJumpAttackReach`` still holding
+    mid-flight, which it often does not: the target walks out of the band,
+    drifts a lane, or the flight simply carries the actor past it. Measured
+    on the flight harness, 66 of 556 launched jumps produced no kick at all
+    for exactly that reason -- and it is worse than a missing B, because a
+    tick with no verb reaches ``press_no_button``, which *releases the
+    directional hold*. Lose it during the 5-frame crouch and ``$384E`` reads
+    no direction at launch, so the jump goes straight up as well as landing
+    empty-handed. So while airborne this keeps the verb alive for the nearest
+    live enemy when no band target remains.
+    """
 
     verbs: set[Token] = set()
+    # Deliberately every *live* enemy, not just the on-screen ones, for the
+    # airborne fallback below: an actor already in the air is committed, and
+    # an enemy a pixel outside the camera is still a better thing to aim the
+    # kick at than releasing the controller mid-flight.
+    live = reach.live_enemies(context)
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -630,12 +661,23 @@ def could_jump_attack(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
+        target_slots = set(reach.targets_of(context, InJumpAttackReach, actor.slot))
+        if actor.is_airborne and not target_slots:
+            nearest = min(
+                live,
+                key=lambda e: math.hypot(
+                    e.world_x - actor.world_x, e.world_y - actor.world_y
+                ),
+                default=None,
+            )
+            if nearest is not None:
+                target_slots = {nearest.slot}
         # Never *launch* into a committed attack: the kick's own travel
         # would deliver the actor to the enemy mid-swing, airborne and
         # unable to change its mind. Once already airborne there is no
         # changing course either way, so this gate only applies pre-launch.
         threatening = reach.targets_of(context, IncomingMelee, actor.slot)
-        for target_slot in reach.targets_of(context, InJumpAttackReach, actor.slot):
+        for target_slot in target_slots:
             if not actor.is_airborne and target_slot in threatening:
                 continue
             verbs.add(JumpAttack(actor_slot=actor.slot, target_slot=target_slot))

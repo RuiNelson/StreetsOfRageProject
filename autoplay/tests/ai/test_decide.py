@@ -207,11 +207,27 @@ class CouldPunchTests(unittest.TestCase):
         self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj01")})
 
     def test_does_not_fire_inside_inner_dead_zone(self) -> None:
+        # The dead zone is the *usable* inner edge (punch_usable_inner_x): a
+        # body centred just inside the box's own 16px edge still overlaps it,
+        # so only dx under 10 is genuinely unhittable for Axel.
         myself = make_myself(world_x=100, world_y=100)
-        enemy = make_enemy(world_x=110, world_y=100)  # dx=10 < Axel inner 16
+        enemy = make_enemy(world_x=106, world_y=100)  # dx=6
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(could_punch(context), set())
+
+    def test_fires_at_a_body_overlapping_the_boxes_inner_edge(self) -> None:
+        # dx=10 is inside Axel's measured 16px box edge but the enemy's own
+        # ~13px-wide body still reaches into the box, so this connects. The
+        # AI used to refuse it, walk away to "re-establish range", turn
+        # around doing so, and then oscillate in punching range forever.
+        myself = make_myself(world_x=100, world_y=100)
+        enemy = make_enemy(world_x=110, world_y=100)
+        context: set[Token] = {myself, enemy}
+
+        self.assertEqual(
+            could_punch(context), {Punch(actor_slot="P1", target_slot="obj01")}
+        )
 
     def test_does_not_fire_out_of_range(self) -> None:
         myself = make_myself()
@@ -524,6 +540,36 @@ class CouldTechRecoverTests(unittest.TestCase):
         self.assertEqual(could_tech_recover(context), {TechRecover(actor_slot="P1")})
 
 
+class DefeatedEnemyTests(unittest.TestCase):
+    """A body is not a target -- the other half of "attacking enemies that
+    are not there". The ROM's lethal check is signed, so an enemy whose
+    health word has crossed $8000 is already dead while its object sits in
+    the slot with an action family that has not caught up."""
+
+    def test_no_punch_at_a_corpse(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        corpse = make_enemy(world_x=130, world_y=100, health=0xFFFF)
+
+        self.assertEqual(could_punch({myself, corpse}), set())
+
+    def test_no_chase_of_a_corpse(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        corpse = make_enemy(world_x=200, world_y=100, health=0x8000)
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+
+        self.assertEqual(could_walk_to_near_enemy({myself, corpse, camera}), set())
+
+    def test_a_dying_enemy_at_zero_health_is_still_fought(self) -> None:
+        # Zero is not defeated: the ROM counts it alive and wants the
+        # finishing hit.
+        myself = make_myself(world_x=100, world_y=100)
+        dying = make_enemy(world_x=130, world_y=100, health=0)
+
+        self.assertEqual(
+            could_punch({myself, dying}), {Punch(actor_slot="P1", target_slot="obj01")}
+        )
+
+
 class CouldWalkToNearEnemyTests(unittest.TestCase):
     def test_produces_one_candidate_per_reachable_enemy_not_just_the_nearest(self) -> None:
         # could_walk_to_near_enemy must not pre-select -- per AI.md, ranking
@@ -662,11 +708,11 @@ class CouldWalkToNearEnemyTests(unittest.TestCase):
         )
 
     def test_skips_an_enemy_behind_inside_the_punch_dead_zone(self) -> None:
-        # dx=-10 is closer than Axel's punch_inner (16): turning around still
-        # leaves it unhittable, so RearAttack genuinely owns this one and
-        # walking is not an alternative.
+        # dx=-6 is inside Axel's *usable* inner edge (punch_usable_inner_x,
+        # 10): turning around still leaves it unhittable, so RearAttack
+        # genuinely owns this one and walking is not an alternative.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        enemy = make_enemy(world_x=90, world_y=100)
+        enemy = make_enemy(world_x=94, world_y=100)
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(could_walk_to_near_enemy(context), set())
@@ -1172,6 +1218,50 @@ class CouldHoldActionsTests(unittest.TestCase):
 
 
 class CouldJumpAttackTests(unittest.TestCase):
+    def test_stays_committed_once_airborne_even_out_of_band(self) -> None:
+        # THE reported "jumps at an enemy it could kick and never presses B".
+        # Mid-flight the target walks out of the kick band -- or the flight
+        # carries the actor past it -- and the verb used to vanish with it.
+        # A tick with no verb reaches press_no_button, which *releases the
+        # directional hold*, so the jump both lands empty-handed and (if it
+        # happens during the 5-frame crouch) goes straight up: $384E reads no
+        # direction at launch. Measured on the flight harness: 66 of 556
+        # launched jumps produced no kick at all before this.
+        myself = make_myself(world_x=100, world_y=100, is_airborne=True, facing_left=False)
+        gone = make_enemy(world_x=260, world_y=100)  # far outside every band
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+
+        result = could_jump_attack({myself, gone, camera})
+
+        self.assertEqual(result, {JumpAttack(actor_slot="P1", target_slot="obj01")})
+
+    def test_stays_committed_to_an_enemy_just_off_camera(self) -> None:
+        # An enemy a pixel outside the camera is still a better thing to aim
+        # a committed flight at than releasing the controller.
+        myself = make_myself(world_x=100, world_y=100, is_airborne=True, facing_left=False)
+        offscreen = make_enemy(world_x=420, world_y=100)
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+
+        result = could_jump_attack({myself, offscreen, camera})
+
+        self.assertEqual(result, {JumpAttack(actor_slot="P1", target_slot="obj01")})
+
+    def test_grounded_still_needs_the_band(self) -> None:
+        # The commitment is only about being already airborne; from the
+        # ground this must stay as selective as it ever was.
+        myself = make_myself(world_x=100, world_y=100, is_airborne=False, facing_left=False)
+        gone = make_enemy(world_x=260, world_y=100)
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+
+        self.assertEqual(could_jump_attack({myself, gone, camera}), set())
+
+    def test_does_not_commit_to_a_corpse(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, is_airborne=True, facing_left=False)
+        dead = make_enemy(world_x=260, world_y=100, health=0xFFFF)
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+
+        self.assertEqual(could_jump_attack({myself, dead, camera}), set())
+
     def test_fires_when_horizontal_jump_kick_is_useful(self) -> None:
         # Jump-kick only beyond punch outer (Axel 50) with real ΔX, in front.
         myself = make_myself(world_x=100, world_y=100, is_airborne=False, facing_left=False)

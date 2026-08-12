@@ -313,5 +313,72 @@ class EnemyWillCloseSoonTests(unittest.TestCase):
         self.assertTrue(reach.enemy_will_close_soon(actor, garcia))
 
 
+class BodyWidthGeometryTests(unittest.TestCase):
+    """A hit is box-against-body, not box-against-point ($450C)."""
+
+    def test_a_body_overlapping_the_inner_edge_is_in_the_punch_band(self) -> None:
+        # dx=10 is inside Axel's measured 16px box edge, but the enemy's own
+        # ~13px body still reaches into the box. Treating this as a dead zone
+        # made the AI refuse to punch, walk away to re-establish range, turn
+        # around doing so, and then shuffle in punching range forever.
+        actor = _myself(world_x=100, character_id=0)
+        enemy = _garcia(world_x=110, world_y=100)
+
+        self.assertTrue(reach.punch_would_connect(actor, enemy))
+
+    def test_a_body_fully_inside_the_dead_zone_is_not(self) -> None:
+        actor = _myself(world_x=100, character_id=0)
+        enemy = _garcia(world_x=106, world_y=100)
+
+        self.assertFalse(reach.punch_would_connect(actor, enemy))
+
+    def test_a_forward_strike_never_reaches_behind(self) -> None:
+        # The punch box starts 8-18px *in front* depending on character, so
+        # no body centred behind the actor can overlap it. A flat 4px of
+        # "behind tolerance" said otherwise, and Adam -- who lands 4px past
+        # an enemy after a jump kick -- then stood there punching forward
+        # into empty air for as long as the enemy stayed put.
+        for character_id in (0, 1, 2):
+            with self.subTest(character_id=character_id):
+                self.assertEqual(reach.punch_behind_tolerance_x(character_id), 0)
+                actor = _myself(world_x=100, character_id=character_id, facing_left=False)
+                behind = _garcia(world_x=96, world_y=100)
+                self.assertFalse(reach.punch_would_connect(actor, behind))
+
+    def test_a_zero_width_front_chord_band_never_matches(self) -> None:
+        # Axel and Blaze have no forward reach with $322A at all, and `<=`
+        # against a zero-width band still matched dx == 0 -- which is exactly
+        # where a jump kick landing on its target leaves the actor, so the
+        # AI answered "nothing can hit this" with a backfist aimed the other
+        # way.
+        for character_id in (0, 2):
+            with self.subTest(character_id=character_id):
+                actor = _myself(world_x=100, character_id=character_id, facing_left=False)
+                on_top = _garcia(world_x=100, world_y=100)
+                self.assertFalse(reach.in_rear_band(actor, on_top))
+
+    def test_adams_forward_chord_still_reaches(self) -> None:
+        actor = _myself(world_x=100, character_id=1, facing_left=False)
+        self.assertTrue(reach.in_rear_band(actor, _garcia(world_x=110, world_y=100)))
+
+
+class LiveEnemyTests(unittest.TestCase):
+    def test_an_enemy_past_the_lethal_boundary_is_not_a_target(self) -> None:
+        # The ROM's lethal check is signed: $8000-$FFFF is already dead while
+        # the object still sits in its slot with a stale action family. The
+        # AI used to chase, rank and punch those corpses.
+        dead = _garcia(world_x=130, world_y=100, health=0xFFFF)
+
+        self.assertTrue(dead.is_defeated)
+        self.assertEqual(reach.live_enemies({dead}), [])
+
+    def test_zero_health_is_still_a_target(self) -> None:
+        # Not yet defeated -- the ROM counts it alive and wants one more hit.
+        dying = _garcia(world_x=130, world_y=100, health=0)
+
+        self.assertFalse(dying.is_defeated)
+        self.assertEqual(reach.live_enemies({dying}), [dying])
+
+
 if __name__ == "__main__":
     unittest.main()

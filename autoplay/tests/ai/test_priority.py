@@ -1190,11 +1190,12 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
         self.assertIsInstance(verbs[0], RearAttack)
 
     def test_outranks_turning_around_inside_the_punch_dead_zone(self) -> None:
-        # dx=-10 is closer than Axel's punch_inner (16): turning around
-        # leaves the enemy unhittable, so the chord is the right tool and
-        # keeps its top-tier score.
+        # dx=-6 is inside Axel's *usable* inner edge (punch_usable_inner_x,
+        # 10 -- the 16px box edge less the body width that still overlaps
+        # it): turning around leaves the enemy unhittable, so the chord is
+        # the right tool and keeps its top-tier score.
         myself = _myself(world_x=100, world_y=100)
-        behind = _enemy("obj01", CombatPhase.NORMAL, world_x=90, world_y=100)
+        behind = _enemy("obj01", CombatPhase.NORMAL, world_x=94, world_y=100)
         context = {
             myself,
             behind,

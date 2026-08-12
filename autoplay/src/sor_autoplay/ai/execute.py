@@ -610,7 +610,59 @@ def state_machine_call_police(verb: CallPolice, context: Context, gamepad: Virtu
     _press(gamepad, CALL_POLICE_MASK, frames=CALL_POLICE_FRAMES)
 
 
+# Jump action families (controls-and-input.md "Action state machine"), with
+# the facing bit cleared. The unarmed family is $10 jump-start (a fixed
+# 5-frame crouch) -> $12 free flight -> $16 jump attack -> $14 land; a
+# held-weapon jump runs the parallel $3C-$43 family through the same physics
+# helpers.
+#
+# The crouch is the one state that must never see a B press. $3914 turns B
+# into the kick only from **free flight**, and it needs a fresh edge (+$55
+# bit 4) -- but the AI re-decides every ~2 frames and _press holds each
+# button for 4, so a B issued during the crouch is simply still held when
+# free flight begins, produces no new edge there, and the kick never fires.
+# Live symptom, exactly as reported: the actor jumps at an enemy it could
+# kick and sails through the whole flight without ever attacking.
+JUMP_CROUCH_ACTIONS = frozenset({0x10, 0x3C})
+JUMP_ATTACK_ACTIONS = frozenset({0x16, 0x40, 0x42})
+
+
 def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: VirtualGamepad) -> None:
+    """C to launch, then one clean B edge once free flight has started.
+
+    Four distinct states, because the ROM has four and they take different
+    inputs (see JUMP_CROUCH_ACTIONS above):
+
+    - **grounded**: C plus the direction to travel in;
+    - **crouch ($10)**: the direction only, *no buttons at all*;
+    - **free flight ($12)**: the kick edge -- B;
+    - **already kicking ($16)**: nothing to press.
+
+    Two ROM facts drive the whole shape, and getting either wrong is a kick
+    that never happens or a kick that hits nothing:
+
+    **The launch direction must be held continuously, off the axis ramp.**
+    ``$384E`` reads the held direction once, at the end of the crouch, and
+    that read is the only thing that gives the kick its +-3.0 px/frame of
+    carry. The crouch is 5 frames; the virtual X axis needs
+    ``gamepad.AXIS_RAMP_TICKS`` (3 ticks = ~6 frames) to reach an edge, and
+    ``_press`` clears the hold before every press. So anything that routes
+    this through ``_hold_steered`` arrives too late and the actor jumps
+    **straight up** -- measured on the flight harness: the first jump of an
+    encounter never moved on X at all, kicked empty air where it stood, and
+    only the *second* jump carried, because by then the axis had ramped from
+    the previous flight's holds. Every branch here therefore calls
+    ``gamepad.hold`` directly, exactly as the launch already did.
+
+    **B must be a fresh edge, and only in free flight.** ``$3914`` turns B
+    into the kick from free flight alone, on a rising edge of ``+$55`` bit 4.
+    The AI re-decides every ~2 frames and ``_press`` holds each button for 4,
+    so a B issued during the crouch is simply *still held* when free flight
+    begins, produces no new edge there, and the kick never fires -- the
+    reported "jumps at an enemy it could kick and never attacks". Leaving the
+    crouch button-free is what guarantees the edge.
+    """
+
     actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         gamepad.release()
@@ -621,23 +673,32 @@ def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: Virtu
         gamepad.release()
         return
     face = _face_toward_mask(actor, target.world_x)
+    base = actor.action_base
+
+    if base in JUMP_ATTACK_ACTIONS:
+        # The kick is already running and stays active until landing
+        # (controls-and-input.md). Keep the air steer, press nothing.
+        gamepad.hold(face)
+        return
+    if base in JUMP_CROUCH_ACTIONS:
+        # Hold the travel direction for $384E to read, and leave every button
+        # alone so the B that starts the kick is a fresh edge.
+        gamepad.hold(face or (LEFT_MASK if actor.facing_left else RIGHT_MASK))
+        return
+    if actor.is_airborne:
+        # Free flight: this is the kick edge. Pressed on its own, with the
+        # direction re-held afterwards -- _press clears the hold, and air
+        # steer ($38C0) still reads it for the rest of the flight.
+        _press(gamepad, PUNCH_MASK, frames=JUMP_ATTACK_KICK_FRAMES)
+        gamepad.hold(face)
+        return
     if face == 0:
         # Already overlapping on X — punch, don't jump.
         _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
         return
-    if not actor.is_airborne:
-        # Launch with horizontal hold so crouch→flight carries ±3 px/frame.
-        # Deliberately bypasses _hold_steered/the virtual X axis: the whole
-        # flight is only a handful of ticks (JUMP_ATTACK_LAUNCH_FRAMES +
-        # JUMP_ATTACK_KICK_FRAMES), and every kick tick's _press clears the
-        # hold first (see _press's docstring) -- routing this through the
-        # multi-tick ramp would mean the axis rarely if ever reaches full
-        # deflection before the jump is over, silently dropping the carry
-        # the comment above describes.
-        _press(gamepad, JUMP_MASK | face, frames=JUMP_ATTACK_LAUNCH_FRAMES)
-        gamepad.hold(face)
-    else:
-        _press(gamepad, PUNCH_MASK | face, frames=JUMP_ATTACK_KICK_FRAMES)
+    # Grounded: launch, then hold the direction through the crouch.
+    _press(gamepad, JUMP_MASK | face, frames=JUMP_ATTACK_LAUNCH_FRAMES)
+    gamepad.hold(face)
 
 
 def state_machine_grab_enemy(verb: GrabEnemy, context: Context, gamepad: VirtualGamepad) -> None:

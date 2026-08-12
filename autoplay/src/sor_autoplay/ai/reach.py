@@ -24,6 +24,7 @@ from ..phases import should_ignore_as_target
 from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
 from .kinematics import enemy_projected
 from .tokens import (
+    BODY_OVERLAP_X,
     CameraRange,
     Context,
     Enemy,
@@ -34,15 +35,41 @@ from .tokens import (
     find,
     find_all,
     punch_inner_x,
+    punch_usable_inner_x,
     punch_outer_x,
     rear_attack_behind_max_x,
+    rear_attack_behind_min_x,
     rear_attack_front_max_x,
 )
 
-# Punch is a forward strike, but ``_could_melee_strike`` has always allowed a
-# few pixels of slack for an enemy that is nominally "behind" while standing
-# essentially on top of the actor.
-PUNCH_BEHIND_TOLERANCE_X = 4
+# Slack for an enemy that reads as nominally "behind" while standing
+# essentially on top of the actor. The *grab* keeps it: its contact test
+# ($AAA0) reads a walking frame's box, which starts at the actor's own origin,
+# so a body a few px the wrong side genuinely can still touch it.
+GRAB_BEHIND_TOLERANCE_X = 4
+
+
+def punch_behind_tolerance_x(character_id: int | None) -> int:
+    """How far *behind* the actor a forward strike can still reach a body.
+
+    Derived, not chosen: the punch box starts at ``punch_inner_x`` px **in
+    front** (8 for Adam, 16 Axel, 18 Blaze) and a body reaches about
+    ``BODY_OVERLAP_X`` past its own centre, so a body centred behind the
+    actor would have to span the whole dead zone to touch the box. It cannot,
+    for any of the three characters -- this evaluates to 0 for all of them
+    today, and would only become non-zero for a character whose box began
+    inside its own body.
+
+    It used to be a flat 4px of slack, and that flat number was a real,
+    measured failure: Adam jump-kicks past an enemy, lands 4px beyond it, and
+    then stands there punching *forward* into empty air for as long as the
+    enemy stays put -- the strike is aimed the way he faces, and the enemy is
+    behind him. Refusing it hands the tick to ``could_walk_to_near_enemy``,
+    whose turn-around aims past the enemy, flips facing, and lets the very
+    next tick punch it properly.
+    """
+
+    return max(0, BODY_OVERLAP_X - punch_inner_x(character_id))
 
 # Taking a hold of an enemy is not an input at all -- it is a *contact*
 # result. ``$AAA0`` (the shared contact routine) tests the actor's own attack
@@ -238,10 +265,28 @@ def in_playable_lane(world_y: int, context: Context) -> bool:
 
 
 def live_enemies(context: Context) -> list[Enemy]:
+    """Every enemy still worth acting on.
+
+    Three independent ways to stop being one, and all three are needed:
+
+    - ``should_ignore_as_target`` -- the phase says so (DEATH, or a SCRIPTED
+      sequence like the police-special sweep);
+    - ``Enemy.is_defeated`` -- the *health word* says so, which the phase can
+      lag behind by a long time: the ROM's lethal check is signed, so
+      ``$8000``-``$FFFF`` is already dead while the object sits there with a
+      stale action family. Without this the AI chases, ranks and punches
+      corpses, and blocks its own stage advance behind them;
+    - ``in_playable_lane`` -- it is somewhere the player can never reach
+      (stage 1's scripted "behind a door" placeholder is a real, tracked
+      Enemy at an unreachable lane).
+    """
+
     return [
         e
         for e in find_all(context, Enemy)
-        if not should_ignore_as_target(e.combat_phase) and in_playable_lane(e.world_y, context)
+        if not should_ignore_as_target(e.combat_phase)
+        and not e.is_defeated
+        and in_playable_lane(e.world_y, context)
     ]
 
 
@@ -262,7 +307,10 @@ def in_punch_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
     if dy > PUNCH_RANGE_Y:
         return False
     outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
-    return punch_inner_x(actor.character_id) <= dx <= outer
+    # The *usable* inner edge: a body centred just inside the box's own edge
+    # still overlaps it, and treating it as unhittable had the AI dithering
+    # in punching range (see tokens/character.py's BODY_OVERLAP_X).
+    return punch_usable_inner_x(actor.character_id) <= dx <= outer
 
 
 def punch_would_connect(actor: PlayableCharacter, enemy: Enemy) -> bool:
@@ -274,7 +322,8 @@ def punch_would_connect(actor: PlayableCharacter, enemy: Enemy) -> bool:
         return False
     return (
         enemy_in_front(actor, enemy)
-        or abs(enemy.world_x - actor.world_x) <= PUNCH_BEHIND_TOLERANCE_X
+        or abs(enemy.world_x - actor.world_x)
+        <= punch_behind_tolerance_x(actor.character_id)
     )
 
 
@@ -293,7 +342,7 @@ def grab_would_connect(actor: PlayableCharacter, enemy: Enemy) -> bool:
         return False
     if dx > punch_outer_x(actor.character_id):
         return False
-    return enemy_in_front(actor, enemy) or dx <= PUNCH_BEHIND_TOLERANCE_X
+    return enemy_in_front(actor, enemy) or dx <= GRAB_BEHIND_TOLERANCE_X
 
 
 def in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
@@ -301,7 +350,11 @@ def in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
 
     The behind and front bands differ per character (Axel/Blaze have zero
     forward reach), so this must pick the side-specific band, never their
-    union.
+    union -- and the behind band has an *inner* edge as well as an outer one
+    (``rear_attack_behind_min_x``): Axel's box starts 8px behind him, Blaze's
+    5px. A body closer than that sits under the box, exactly as one inside
+    ``punch_inner_x`` sits under the punch, and no amount of pressing B+C
+    will touch it.
     """
 
     dx = enemy.world_x - actor.world_x
@@ -310,8 +363,22 @@ def in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
         return False
     adx = abs(dx)
     if enemy_behind_actor(actor, enemy):
-        return adx <= rear_attack_behind_max_x(actor.character_id)
-    return adx <= rear_attack_front_max_x(actor.character_id)
+        return (
+            rear_attack_behind_min_x(actor.character_id)
+            <= adx
+            <= rear_attack_behind_max_x(actor.character_id)
+        )
+    front_max = rear_attack_front_max_x(actor.character_id)
+    if front_max <= 0:
+        # Axel and Blaze have *no* forward reach with this chord. A `<=`
+        # against a zero-width band still matches dx == 0, which is where a
+        # jump kick that lands exactly on its target leaves the actor -- so
+        # the AI answered "nothing can hit this" with a backfist aimed the
+        # other way. `check_for_closing_enemies` already guards the same
+        # zero-band case explicitly; this is the matching guard on the band
+        # itself.
+        return False
+    return adx <= front_max
 
 
 def in_jump_attack_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
@@ -374,7 +441,7 @@ def rear_attack_is_warranted(
        side, so spending the turn hands that one a free hit.
     """
 
-    if abs(enemy.world_x - actor.world_x) < punch_inner_x(actor.character_id):
+    if abs(enemy.world_x - actor.world_x) < punch_usable_inner_x(actor.character_id):
         return True
 
     target_behind = enemy_behind_actor(actor, enemy)

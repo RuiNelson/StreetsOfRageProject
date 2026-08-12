@@ -739,15 +739,46 @@ class ExecuteJumpAttackTests(unittest.TestCase):
 
         client.press_buttons.assert_called_once_with(player1=C | RIGHT, player2=0, frames=3)
 
-    def test_presses_punch_when_airborne(self) -> None:
-        actor = _myself(world_x=0, world_y=0, is_airborne=True)
+    def test_presses_a_clean_punch_edge_in_free_flight(self) -> None:
+        # Free flight ($12): B on its own -- $3914 needs a rising edge, and
+        # the direction is re-held afterwards for air steer rather than being
+        # baked into the press.
+        actor = _myself(world_x=0, world_y=0, is_airborne=True, action_state=0x12)
         enemy = _enemy(world_x=50, world_y=0)
         verb = JumpAttack(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
         execute_verb(verb, {actor, enemy}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B | RIGHT, player2=0, frames=4)
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+
+    def test_presses_nothing_during_the_launch_crouch(self) -> None:
+        # $10 is the 5-frame crouch. A B pressed here is still *held* when
+        # free flight begins, so $3914 never sees an edge and the kick never
+        # fires -- the reported "jumps at an enemy and never attacks". The
+        # direction is held directly (not through the axis ramp, which needs
+        # more ticks than the crouch lasts) so $384E reads it at launch.
+        actor = _myself(world_x=0, world_y=0, is_airborne=True, action_state=0x10)
+        enemy = _enemy(world_x=50, world_y=0)
+        verb = JumpAttack(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {actor, enemy}, gamepad)
+
+        client.press_buttons.assert_not_called()
+        client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
+
+    def test_presses_nothing_once_the_kick_is_already_running(self) -> None:
+        # $16 stays active for the rest of the airtime; a second edge buys
+        # nothing and risks being read on landing.
+        actor = _myself(world_x=0, world_y=0, is_airborne=True, action_state=0x16)
+        enemy = _enemy(world_x=50, world_y=0)
+        verb = JumpAttack(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {actor, enemy}, gamepad)
+
+        client.press_buttons.assert_not_called()
 
     def test_missing_actor_does_nothing(self) -> None:
         verb = JumpAttack(actor_slot="P1", target_slot="obj01")

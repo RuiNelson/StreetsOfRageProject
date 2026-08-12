@@ -337,6 +337,54 @@ kinematic result rather than an omission: a held enemy travels with the actor
 (zero relative velocity), a `Breakable` does not move at all, and
 `CallPolice` — a screen-wide scripted sweep — has no aim point to lead.
 
+### Hitting is box-against-body, and a body is not a corpse
+
+Two geometry facts the AI got wrong for a long time, both visible from the
+sofa as "it attacks thin air".
+
+`$450C` tests the attacker's attack box against the victim's **body** box,
+which is about 13px wide — so the usable reach runs a little past the box's
+measured edges at *both* ends. `controls-and-input.md` draws that conclusion
+for the outer edge; it matters far more at the inner one. Treating the
+measured inner edge as the dead zone made the AI refuse to punch a foe ten
+pixels in front of it, walk away to re-establish "proper" range, turn around
+in doing so, re-classify the same enemy as behind it, turn back — and
+oscillate there forever, in punching range of an enemy it never touched. The
+same false dead zone is what made the slow B+C chord look "warranted" at
+point-blank range. The correction is derived, never tuned
+(`tokens/character.py`'s `BODY_OVERLAP_X`), and it also makes the punch's
+*behind* tolerance fall out as zero: a box that starts 8–18px in front cannot
+reach a body centred behind the actor, whatever the slack.
+
+And an enemy stops being a target three different ways, all of which have to
+be checked: its phase says so, its **health word** says so, or it stands
+somewhere unreachable. The middle one is the ROM's signed lethal check —
+`$8000`–`$FFFF` is already dead while the object sits in its slot with an
+action family that has not caught up. Reading only the phase left the AI
+chasing, ranking and punching corpses.
+
+### Committing to a jump
+
+A jump kick is the one move the AI cannot change its mind about. The
+trajectory is fixed at takeoff, so once airborne there is nothing left to
+decide except whether to press B — and pressing it is free, while not
+pressing it means landing having done nothing.
+
+That makes the *airborne* question categorically different from the grounded
+one, and conflating them cost more than half of all jumps: the verb was kept
+alive only while the reach band still held, so a target that walked out of
+it, drifted a lane, or was simply flown past deleted the verb mid-flight. A
+tick with no verb releases the controller, which loses the kick **and** the
+launch direction if it happens during the crouch — a jump straight up,
+landing on nothing. So the AI now stays committed to the nearest live enemy
+for the whole flight.
+
+The same section of the ROM explains the input shape: the direction is read
+once, at the end of a fixed 5-frame crouch, and the kick needs a *rising
+edge* of B in free flight. Neither survives being routed through the
+smoothing that serves ordinary walking, and a B pressed during the crouch is
+simply still held when free flight begins, so no edge ever arrives.
+
 ### Stunned enemies
 
 `Grunt` carries the ROM's own stun counter (`+$50`) and reads as
