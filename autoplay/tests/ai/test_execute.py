@@ -1092,7 +1092,14 @@ class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):
 class ExecuteMovementPitAvoidanceTests(unittest.TestCase):
     """A Pit sitting on the walk path must be dodged, mirroring the existing
     Breakable-avoidance behavior above -- falling in costs a full life
-    (player-health-lives-and-combat.md), so this must never be a no-op."""
+    (player-health-lives-and-combat.md), so this must never be a no-op.
+
+    Unlike the Breakable dodge, a Pit is a rectangle wide/tall enough that
+    nudging Y while still closing X *at the same time* is not sufficient to
+    clear it -- a diagonal command can still cut through the footprint
+    before Y finishes moving. So X is held (no L/R bit) for as long as the
+    actor's own current Y still sits inside the pit's band; only once it has
+    actually cleared does X resume toward the original target."""
 
     def test_dodges_a_pit_that_is_actually_on_screen(self) -> None:
         actor = _myself(world_x=0, world_y=90)
@@ -1104,7 +1111,21 @@ class ExecuteMovementPitAvoidanceTests(unittest.TestCase):
 
         _settle(verb, {actor, target, pit, camera}, gamepad)
 
-        client.hold_buttons.assert_called_with(player1=RIGHT | UP, player2=0)
+        client.hold_buttons.assert_called_with(player1=UP, player2=0)
+
+    def test_resumes_x_once_actually_clear_of_the_pit_on_y(self) -> None:
+        # Same pit and target, but the actor's *current* Y already sits
+        # outside the pit's band (plus margin) -- safe to keep closing X.
+        actor = _myself(world_x=0, world_y=60)
+        pit = Pit(world_x=45, lane_y=84, width=10, height=12)
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        target = _enemy(world_x=100, world_y=60)
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, target, pit, camera}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
 
     def test_ignores_a_pit_far_outside_the_camera(self) -> None:
         actor = _myself(world_x=0, world_y=90)
@@ -1144,15 +1165,16 @@ class ExecuteTickPitEscapeTests(unittest.TestCase):
             execute_tick(verb, context, gamepad)
 
     def test_escapes_a_pit_even_with_no_winning_verb(self) -> None:
-        # Actor sits inside the pit, closer to its right edge; nothing else
-        # is happening this tick (no Verb survived priority ranking).
+        # Actor sits inside the pit, in the lower half of the lane -- the
+        # escape must stop X dead (no L/R bit at all) and clear Y first,
+        # never a diagonal that could still cut through the rectangle.
         actor = _myself(world_x=53, world_y=90)
         pit = Pit(world_x=45, lane_y=84, width=10, height=12)
         gamepad, client = _gamepad()
 
         self._settle_tick(None, {actor, pit}, gamepad)
 
-        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+        client.hold_buttons.assert_called_with(player1=UP, player2=0)
 
     def test_pit_escape_overrides_a_winning_attack_verb(self) -> None:
         # A Punch verb won this tick, but the actor is standing in a pit --
@@ -1165,17 +1187,18 @@ class ExecuteTickPitEscapeTests(unittest.TestCase):
 
         self._settle_tick(verb, {actor, target, pit}, gamepad)
 
-        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+        client.hold_buttons.assert_called_with(player1=UP, player2=0)
 
-    def test_escapes_toward_the_nearer_edge(self) -> None:
-        # Same pit, actor now sits closer to the left edge instead.
-        actor = _myself(world_x=47, world_y=90)
-        pit = Pit(world_x=45, lane_y=84, width=10, height=12)
+    def test_escapes_downward_from_the_upper_half_of_the_lane(self) -> None:
+        # Same shape pit, now sitting in the upper half of the lane --
+        # the dodge direction must flip to match (down, not up).
+        actor = _myself(world_x=53, world_y=15)
+        pit = Pit(world_x=45, lane_y=10, width=10, height=12)
         gamepad, client = _gamepad()
 
         self._settle_tick(None, {actor, pit}, gamepad)
 
-        client.hold_buttons.assert_called_with(player1=LEFT, player2=0)
+        client.hold_buttons.assert_called_with(player1=DOWN, player2=0)
 
     def test_no_override_when_not_near_any_pit(self) -> None:
         actor = _myself(world_x=0, world_y=90)

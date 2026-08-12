@@ -568,8 +568,20 @@ calls every tick, instead of choosing between `press_no_button` and
 `execute_verb` itself. It runs one override *before* either of those: when
 the actor's own current position sits inside a `Pit`'s footprint (plus
 `reach.PIT_AVOID_MARGIN`) — knocked there, or having walked or drifted in
-while nothing else was contesting it — it walks straight out to the nearest
-edge instead, regardless of which `Verb` (if any) won this tick.
+while nothing else was contesting it — it takes over the controller
+regardless of which `Verb` (if any) won this tick.
+
+A pit is a rectangle, not a line, so the escape does not aim diagonally at
+some point outside it: doing that can still cut back through the footprint
+before the vertical half of the move finishes. Horizontal movement is held
+at zero for as long as the actor's own current lane position still sits
+inside the pit's band, and only once it has actually cleared — not merely
+been asked to — does horizontal movement resume. Which way is up to
+whichever half of the lane the actor is already in (toward the near edge),
+the same rule `execute._movement_mask`'s own pit detour already uses below,
+since this override hands that same logic a point on the far side of the
+pit purely to make it recognise and take over — the geometry itself is
+entirely `_movement_mask`'s.
 
 This is deliberately *not* a `Verb` of its own for `generate_verb_tokens`
 and `determine_priority_verb` to rank against every other candidate. Every

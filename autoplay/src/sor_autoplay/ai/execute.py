@@ -45,7 +45,7 @@ from .tokens import (
 )
 from .gamepad import VirtualGamepad
 from .decide import BREAKABLE_PUNCH_X, in_smash_range
-from .reach import PIT_AVOID_MARGIN, enemy_behind_actor, pit_endangers, pit_escape_target
+from .reach import PIT_AVOID_MARGIN, enemy_behind_actor, pit_endangers
 from ..phases import is_dangerous
 from ..world_map import LANE_Y_MIN
 
@@ -256,6 +256,18 @@ def _movement_mask(
     # dodge idiom as the breakable loop above, but keyed off the pit's own
     # AABB (world_x/lane_y/width/height) instead of a fixed point margin,
     # since a pit's footprint is directly observed rather than assumed.
+    #
+    # A pit is a rectangle, not a line, so nudging to_y while still closing
+    # to_x at the same time (the way the breakable dodge above does) is not
+    # enough to clear it: the mask holds both axes at once, which walks the
+    # actor diagonally, and a wide/tall enough pit -- or a close enough
+    # approach -- means the diagonal still cuts through the footprint before
+    # Y finishes clearing it. Live-diagnosed: the AI kept falling in.
+    # Instead, X is held at from_x (frozen -- no L/R bit at all) for as long
+    # as the actor's *current* Y still sits inside the pit's own band; only
+    # once from_y has actually cleared it (not merely been asked to) does X
+    # resume toward the original to_x. Recomputed fresh every tick from the
+    # live position, so this self-corrects if the actor drifts back in.
     for pit in find_all(context, Pit):
         pit_right = pit.world_x + pit.width
         pit_bottom = pit.lane_y + pit.height
@@ -269,16 +281,19 @@ def _movement_mask(
         between = (from_x < pit_center_x < to_x) or (to_x < pit_center_x < from_x)
         if not between:
             continue
-        half_height = (pit_bottom - pit.lane_y) / 2 + PIT_AVOID_MARGIN
-        if abs(pit_center_y - from_y) > half_height and abs(pit_center_y - to_y) > half_height:
-            continue
         if abs(pit_center_x - from_x) > abs(to_x - from_x):
+            continue
+        danger_top = pit.lane_y - PIT_AVOID_MARGIN
+        danger_bottom = pit_bottom + PIT_AVOID_MARGIN
+        if from_y <= danger_top or from_y >= danger_bottom:
+            # Already clear vertically -- safe to keep closing X this tick.
             continue
         lo, hi = _lane_bounds(context)
         if from_y < (lo + hi) / 2:
             to_y = _clamp_target_y(context, pit_bottom + PIT_AVOID_MARGIN)
         else:
             to_y = _clamp_target_y(context, pit.lane_y - PIT_AVOID_MARGIN)
+        to_x = from_x
 
     mask = 0
     if to_x - from_x > MOVE_DEADBAND_X:
@@ -814,21 +829,37 @@ def execute_verb(verb: Verb, context: Context, gamepad: VirtualGamepad) -> None:
 
 
 def _pit_escape_mask(context: Context, actor: Myself) -> int | None:
-    """A movement mask that walks ``actor`` straight out of a ``Pit``'s
-    danger zone it currently stands in, or ``None`` when it doesn't.
+    """A movement mask that walks ``actor`` clear of a ``Pit``'s danger zone
+    it currently stands in, or ``None`` when it doesn't.
 
     Falling in costs a full life (player-health-lives-and-combat.md's
     ``$01C0`` fall-boundary check). Every *other* pit-awareness in this
     module only ever comes up incidentally, mid-route to some unrelated
-    destination (the dodge loop inside ``_movement_mask``) -- nothing
-    reacts to the actor already standing in the danger zone with no walk
-    verb underway to steer it. This is that reaction; see ``execute_tick``.
+    destination -- nothing reacts to the actor already standing in the
+    danger zone with no walk verb underway to steer it. This is that
+    reaction; see ``execute_tick``.
+
+    The actual escape geometry -- freeze X, clear Y first (a pit is a
+    rectangle, not a line: moving both axes at once can still cut through
+    it) -- lives in ``_movement_mask``'s own pit-dodge loop, the one
+    definition of that behaviour. So this only has to hand it a target on
+    the far side of the pit along X; ``_movement_mask`` recognises the same
+    pit sits between here and there and takes over from there. Which side
+    is arbitrary -- ``execute_tick`` re-checks ``pit_endangers`` fresh every
+    tick and stops calling this the moment the actor clears the pit on
+    *either* axis, which ``_movement_mask``'s Y-first dodge always reaches
+    well before X could ever travel as far as this target.
     """
 
     for pit in find_all(context, Pit):
-        if pit_endangers(pit, actor.world_x, actor.world_y):
-            target_x, target_y = pit_escape_target(pit, actor.world_x, actor.world_y)
-            return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)
+        if not pit_endangers(pit, actor.world_x, actor.world_y):
+            continue
+        pit_center_x = pit.world_x + pit.width / 2
+        if actor.world_x < pit_center_x:
+            far_x = pit.world_x + pit.width + PIT_AVOID_MARGIN + MOVE_DEADBAND_X + 1
+        else:
+            far_x = pit.world_x - PIT_AVOID_MARGIN - MOVE_DEADBAND_X - 1
+        return _movement_mask(context, actor.world_x, actor.world_y, far_x, actor.world_y)
     return None
 
 
