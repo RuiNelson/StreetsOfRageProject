@@ -660,14 +660,30 @@ def thrown_weapon_impact_point(actor: PlayableCharacter, enemy: Enemy, verb_cls)
     return kinematics.target_at_impact(verb_cls, actor, enemy)
 
 
-def thrown_weapon_would_connect(actor: PlayableCharacter, impact: Enemy) -> bool:
-    """Beyond melee, inside throw range -- judged at the impact point."""
+def _in_throw_envelope(actor: PlayableCharacter, target: Enemy) -> bool:
+    """Beyond melee, inside throw range, at this exact position."""
 
-    dx = abs(impact.world_x - actor.world_x)
-    dy = abs(impact.world_y - actor.world_y)
+    dx = abs(target.world_x - actor.world_x)
+    dy = abs(target.world_y - actor.world_y)
     if dy > KNIFE_RANGE_Y:
         return False
     return KNIFE_MELEE_X < dx <= KNIFE_RANGE_X
+
+
+def thrown_weapon_would_connect(
+    actor: PlayableCharacter, enemy: Enemy, verb_cls
+) -> bool:
+    """True when the throw is worth making, judged now *or* at the impact.
+
+    The union, like every other band in this pipeline
+    (``inference.check_for_targets_in_reach``): the prediction may add a
+    throw at a target that will have walked into the envelope, and may never
+    withdraw one the observed position already offers.
+    """
+
+    return _in_throw_envelope(actor, enemy) or _in_throw_envelope(
+        actor, thrown_weapon_impact_point(actor, enemy, verb_cls)
+    )
 
 
 def _could_throw_ranged_weapon(context: Context, *, weapon_type: int, verb_cls) -> Context:
@@ -688,8 +704,7 @@ def _could_throw_ranged_weapon(context: Context, *, weapon_type: int, verb_cls) 
         if actor.held_weapon_type != weapon_type:
             continue
         for enemy in enemies:
-            impact = thrown_weapon_impact_point(actor, enemy, verb_cls)
-            if thrown_weapon_would_connect(actor, impact):
+            if thrown_weapon_would_connect(actor, enemy, verb_cls):
                 verbs.add(verb_cls(actor_slot=actor.slot, target_slot=enemy.slot))
     return verbs
 

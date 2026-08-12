@@ -388,12 +388,7 @@ def rear_attack_is_warranted(
 
 
 def enemy_actionable(
-    actor: PlayableCharacter,
-    enemy: Enemy,
-    enemies: list[Enemy],
-    *,
-    punch_at: Enemy | None = None,
-    rear_at: Enemy | None = None,
+    actor: PlayableCharacter, enemy: Enemy, enemies: list[Enemy]
 ) -> bool:
     """True when an existing melee/rear-attack verb would actually fire
     on this enemy right now -- not just whether it sits inside
@@ -411,22 +406,16 @@ def enemy_actionable(
     vacuum -- nothing attacking it, and ``could_walk_to_near_enemy``
     declining to turn toward it.
 
-    ``punch_at``/``rear_at`` are the same enemy projected to where each of
-    those two moves would meet it (``kinematics``), and default to the enemy
-    itself. Any caller that also produces ``InPunchReach``/``InRearReach``
-    from projected positions must pass them -- ``inference.check_for_targets_
-    in_reach`` does -- because this answers "one of those two attacks would
-    fire", and judging the same bands at a different instant would contradict
-    the very tokens it is meant to agree with.
+    Answered about the observed position only, unlike the ``TargetInReach``
+    bands, which sweep their move's own timeline: this is the "stop walking,
+    you can already hit it" signal, and a future-tense answer to it halts the
+    approach while the enemy is still out of reach. See
+    ``inference.check_for_targets_in_reach``.
     """
 
-    rear_target = enemy if rear_at is None else rear_at
-    punch_target = enemy if punch_at is None else punch_at
-    if in_rear_band(actor, rear_target) and rear_attack_is_warranted(
-        actor, rear_target, enemies
-    ):
+    if in_rear_band(actor, enemy) and rear_attack_is_warranted(actor, enemy, enemies):
         return True
-    return punch_would_connect(actor, punch_target)
+    return punch_would_connect(actor, enemy)
 
 
 def enemy_forward_dx(enemy: Enemy, actor: PlayableCharacter) -> int:

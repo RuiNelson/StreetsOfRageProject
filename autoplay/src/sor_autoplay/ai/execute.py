@@ -565,7 +565,12 @@ def state_machine_melee_strike(verb: Verb, context: Context, gamepad: VirtualGam
     target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
     face = 0
     if actor is not None and target is not None:
-        face = _face_toward_mask(actor, _aim_point(verb, actor, target).world_x)
+        # Facing, unlike the throws below, is taken from the observed
+        # position: the strike's own damaging span is what covers the
+        # target's movement (inference.check_for_targets_in_reach), and
+        # turning toward where a body *will* be is how the actor ends up
+        # swinging past one standing next to it.
+        face = _face_toward_mask(actor, target.world_x)
     _press(gamepad, PUNCH_MASK | face, frames=PUNCH_FRAMES)
 
 
@@ -615,12 +620,9 @@ def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: Virtu
         # No target → do not hop in place.
         gamepad.release()
         return
-    # The kick is the longest-lead move the AI has (crouch plus a whole
-    # flight), so where the target *will* be decides both which way to launch
-    # and whether a jump is the right move at all.
-    face = _face_toward_mask(actor, _aim_point(verb, actor, target).world_x)
+    face = _face_toward_mask(actor, target.world_x)
     if face == 0:
-        # Will still be overlapping on X when it lands — punch, don't jump.
+        # Already overlapping on X — punch, don't jump.
         _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
         return
     if not actor.is_airborne:

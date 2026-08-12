@@ -17,11 +17,11 @@ from sor_autoplay.ai.tokens import (
     Abadede,
     Attack,
     Garcia,
-    JumpAttack,
     Myself,
     Punch,
     RearAttack,
     Signal,
+    Supplex,
     ThrowKnife,
     ThrowPepper,
 )
@@ -234,25 +234,26 @@ class LeadFramesTests(unittest.TestCase):
 
         self.assertGreater(predicted_x - garcia.world_x, 40)
 
-    def test_a_jump_kick_leads_by_crouch_plus_flight(self) -> None:
+    def test_a_jump_kick_leads_by_its_crouch_only(self) -> None:
+        # $1FC0's fixed 5-frame crouch is the dead time the launch decision
+        # cannot see. The flight is deliberately *not* added: how far it
+        # reaches is what reach.in_jump_attack_band already measures, and
+        # leading by the whole 25 frames launched kicks from over 100px.
         actor = _myself(character_id=AXEL, world_x=100)
-        # 100px out; the kick's box covers the last punch_outer_x (50), so
-        # 50px of flight at 3.0 px/frame ~ 17 frames, plus the 5-frame
-        # crouch and the poll latency.
-        garcia = _garcia(world_x=200, grunt_vel_x=0.0)
 
         self.assertEqual(
-            kinematics.jump_attack_lead_frames(actor, garcia),
-            kinematics.AI_LATENCY_FRAMES + kinematics.JUMP_CROUCH_FRAMES + 17,
+            kinematics.jump_attack_lead_frames(actor, _garcia(world_x=200)),
+            kinematics.AI_LATENCY_FRAMES + kinematics.JUMP_CROUCH_FRAMES,
         )
 
-    def test_a_jump_kick_leads_further_for_a_further_target(self) -> None:
+    def test_a_jump_kick_does_not_lead_further_for_a_further_target(self) -> None:
+        # See above: the lead is the crouch, so it does not grow with the gap.
         actor = _myself(world_x=100)
 
-        near = kinematics.jump_attack_lead_frames(actor, _garcia(world_x=170))
-        far = kinematics.jump_attack_lead_frames(actor, _garcia(world_x=230))
-
-        self.assertGreater(far, near)
+        self.assertEqual(
+            kinematics.jump_attack_lead_frames(actor, _garcia(world_x=230)),
+            kinematics.jump_attack_lead_frames(actor, _garcia(world_x=170)),
+        )
 
     def test_an_airborne_actor_only_leads_by_its_own_latency(self) -> None:
         # The crouch and most of the flight are already behind it, and the
@@ -298,16 +299,19 @@ class LeadFramesTests(unittest.TestCase):
             with self.subTest(model=model.__name__):
                 self.assertEqual(model(actor, _garcia()), 0)
 
-    def test_every_lead_stays_inside_the_trust_horizon(self) -> None:
+    def test_every_model_stays_inside_the_trust_horizon_and_starts_at_now(self) -> None:
         actor = _myself(world_x=100)
         # Far away and fleeing: the worst case for every model.
         fleeing = _garcia(world_x=400, grunt_vel_x=3.0)
 
-        for verb_cls, model in kinematics.ATTACK_LEAD_FRAMES.items():
+        for verb_cls, model in kinematics.ATTACK_CONNECT_FRAMES.items():
             with self.subTest(verb=verb_cls.__name__):
-                lead = model(actor, fleeing)
-                self.assertGreaterEqual(lead, 0)
-                self.assertLessEqual(lead, kinematics.MAX_LEAD_FRAMES)
+                frames = model(actor, fleeing)
+                # Frame 0 is what keeps every prediction additive: the band
+                # is always also tested where the enemy was actually seen.
+                self.assertEqual(frames[0], 0)
+                self.assertTrue(all(0 <= f <= kinematics.MAX_LEAD_FRAMES for f in frames))
+                self.assertEqual(list(frames), sorted(frames))
 
 
 def _concrete_attacks() -> list[type[Attack]]:
@@ -345,45 +349,54 @@ class RegistryTotalityTests(unittest.TestCase):
         missing = [
             cls.__name__
             for cls in _concrete_attacks()
-            if cls not in kinematics.ATTACK_LEAD_FRAMES
+            if cls not in kinematics.ATTACK_CONNECT_FRAMES
         ]
 
         self.assertEqual(
             missing,
             [],
             "every concrete Attack must declare how it predicts its target: "
-            "add it to kinematics.ATTACK_LEAD_FRAMES (a zero-lead model is a "
+            "add it to kinematics.ATTACK_CONNECT_FRAMES (`_now_only` is a "
             "valid answer -- see held_target_lead_frames)",
         )
 
     def test_the_registry_names_no_verb_that_is_not_an_attack(self) -> None:
-        for verb_cls in kinematics.ATTACK_LEAD_FRAMES:
+        for verb_cls in kinematics.ATTACK_CONNECT_FRAMES:
             with self.subTest(verb=verb_cls.__name__):
                 self.assertTrue(issubclass(verb_cls, Attack))
 
-    def test_lead_frames_dispatches_through_the_registry(self) -> None:
+    def test_connect_frames_are_now_and_the_frame_the_hit_arms(self) -> None:
+        # Blaze's punch: 5 startup plus the poll latency. The 10 active frames
+        # that follow are deliberately not swept -- see the note by the
+        # startup tables; they are why frame 0 stays, not a licence to lead
+        # by the whole span.
         actor = _myself(character_id=BLAZE)
 
         self.assertEqual(
-            kinematics.lead_frames(Punch, actor),
-            kinematics.melee_strike_lead_frames(actor),
+            kinematics.connect_frames(Punch, actor),
+            (0, kinematics.AI_LATENCY_FRAMES + 5),
         )
+
+    def test_lead_frames_is_the_last_frame_a_move_can_connect_on(self) -> None:
+        actor = _myself(character_id=ADAM)
+
         self.assertEqual(
             kinematics.lead_frames(RearAttack, actor),
-            kinematics.rear_attack_lead_frames(actor),
+            max(kinematics.connect_frames(RearAttack, actor)),
         )
+        self.assertEqual(kinematics.lead_frames(Supplex, actor), 0)
 
     def test_target_at_impact_moves_the_target_by_its_own_lead(self) -> None:
         actor = _myself(character_id=AXEL, world_x=100)
         garcia = _garcia(world_x=200, grunt_vel_x=-2.0)
 
         punched = kinematics.target_at_impact(Punch, actor, garcia)
-        kicked = kinematics.target_at_impact(JumpAttack, actor, garcia)
+        held = kinematics.target_at_impact(Supplex, actor, garcia)
 
-        # The kick's lead is much longer, so it predicts much further along
-        # the same approach.
-        self.assertLess(kicked.world_x, punched.world_x)
+        # The punch aims at the end of its damaging span; a hold move has
+        # nothing to predict and aims exactly where the body is.
         self.assertLess(punched.world_x, garcia.world_x)
+        self.assertEqual(held.world_x, garcia.world_x)
 
     def test_the_thrown_weapons_predict_differently_from_each_other(self) -> None:
         actor = _myself(world_x=100)

@@ -15,6 +15,7 @@ from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_
 from . import kinematics, reach
 from .tokens import Myself, Partner, PlayableCharacter
 from .tokens import Enemy, Grunt
+from .tokens import GrabEnemy, JumpAttack, Punch, RearAttack
 from .tokens import (
     ActionableTarget,
     ClosingEnemy,
@@ -196,6 +197,23 @@ def check_for_closing_enemies(context: Context) -> Context:
     return closing
 
 
+def _connects(band, actor: PlayableCharacter, enemy: Enemy, frames) -> bool:
+    """True when ``band`` holds at any frame of this move's own timeline.
+
+    A move is not an instant -- a punch damages for 10 frames, Adam's chord
+    for 18 -- so the target only has to be inside the box at *one* of the
+    frames ``kinematics.connect_frames`` names, and frame 0 (the observed
+    position) is always one of them. That last part is what keeps the
+    prediction additive: it can offer an attack the raw position does not,
+    and can never take away one it does.
+    """
+
+    return any(
+        band(actor, kinematics.enemy_projected_without_crossing(actor, enemy, frame))
+        for frame in frames
+    )
+
+
 def check_for_targets_in_reach(context: Context) -> Context:
     """Derive the per-move reach bands once per (actor, live enemy) pair.
 
@@ -204,23 +222,19 @@ def check_for_targets_in_reach(context: Context) -> Context:
     answer within a tick, and stops the same trigonometry from being redone
     once per verb family.
 
-    Each band is tested where its own move would **arrive**, not where the
-    enemy stands now: every one of these attacks costs time (``kinematics``
-    -- 3 to 21 frames of startup for the two button moves, a crouch plus a
-    whole flight for the kick, a walk-in for the grab), and the enemy keeps
-    moving through it. So the four move bands are evaluated against four
-    *different* projections of the same enemy, each at its own lead:
+    Each band is tested across its own move's timeline rather than only at
+    the instant the snapshot was taken (``kinematics.connect_frames``), so an
+    enemy walking *into* range arms the move as it arrives instead of after,
+    and a long move -- Adam's 21-frame chord above all -- is judged over the
+    span it is actually dangerous for. A stationary enemy projects to itself,
+    so nothing changes at all for a stunned, knocked-down or committed
+    target.
 
-    - an enemy walking out of range no longer produces the strike that would
-      whiff behind it -- the case ``RearAttack``'s docstring has always
-      described for Adam, whose 21-frame chord lets a walking target clear
-      the entire box before it arms;
-    - an enemy walking in produces it slightly early, so the move is already
-      arming as the enemy arrives instead of starting from scratch once it
-      has.
-
-    A stationary enemy projects to itself, so nothing changes for the many
-    targets that are not moving (stunned, knocked down, mid-attack).
+    ``ActionableTarget`` is deliberately left on the observed position. It is
+    not a "would this hit" question but the "stop walking, you can already
+    hit it" signal ``could_walk_to_near_enemy`` reads, and answering it about
+    the future stops the approach early -- the actor stands off and swings at
+    where the enemy is going to be instead of closing the last few pixels.
     """
 
     enemies = reach.live_enemies(context)
@@ -231,32 +245,35 @@ def check_for_targets_in_reach(context: Context) -> Context:
     for actor in _actors(context):
         for enemy in enemies:
             pair = {"actor_slot": actor.slot, "target_slot": enemy.slot}
-            punch_at = kinematics.enemy_projected(
-                enemy, kinematics.melee_strike_lead_frames(actor, enemy)
-            )
-            rear_at = kinematics.enemy_projected(
-                enemy, kinematics.rear_attack_lead_frames(actor, enemy)
-            )
-            jump_at = kinematics.enemy_projected(
-                enemy, kinematics.jump_attack_lead_frames(actor, enemy)
-            )
-            grab_at = kinematics.enemy_projected(
-                enemy, kinematics.grab_lead_frames(actor, enemy)
-            )
-            if reach.punch_would_connect(actor, punch_at):
-                tokens.add(InPunchReach(**pair))
-            if reach.in_rear_band(actor, rear_at):
-                tokens.add(InRearReach(**pair))
-            if reach.in_jump_attack_band(actor, jump_at):
-                tokens.add(InJumpAttackReach(**pair))
-            if reach.grab_would_connect(actor, grab_at):
-                tokens.add(InGrabReach(**pair))
-            # Same two projections the two tokens above were judged from --
-            # this is "one of those attacks would fire", so it must not
-            # re-judge the same bands at a different instant.
-            if reach.enemy_actionable(
-                actor, enemy, enemies, punch_at=punch_at, rear_at=rear_at
+            if _connects(
+                reach.punch_would_connect,
+                actor,
+                enemy,
+                kinematics.connect_frames(Punch, actor, enemy),
             ):
+                tokens.add(InPunchReach(**pair))
+            if _connects(
+                reach.in_rear_band,
+                actor,
+                enemy,
+                kinematics.connect_frames(RearAttack, actor, enemy),
+            ):
+                tokens.add(InRearReach(**pair))
+            if _connects(
+                reach.in_jump_attack_band,
+                actor,
+                enemy,
+                kinematics.connect_frames(JumpAttack, actor, enemy),
+            ):
+                tokens.add(InJumpAttackReach(**pair))
+            if _connects(
+                reach.grab_would_connect,
+                actor,
+                enemy,
+                kinematics.connect_frames(GrabEnemy, actor, enemy),
+            ):
+                tokens.add(InGrabReach(**pair))
+            if reach.enemy_actionable(actor, enemy, enemies):
                 tokens.add(ActionableTarget(**pair))
     return tokens
 

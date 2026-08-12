@@ -299,22 +299,11 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         self.assertNotIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
 
-    def test_an_enemy_walking_out_of_the_punch_band_is_not_in_punch_reach(self) -> None:
-        # dx=48, inside Axel's 16..50 band right now -- but the punch takes
-        # its measured 3 startup frames plus the poll latency to arm, and at
-        # 2 px per 60 Hz frame the enemy is 10px further out by then.
-        myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        leaving = make_enemy(slot="obj01", world_x=148, world_y=100, grunt_vel_x=2.0)
-
-        result = check_for_targets_in_reach({myself, leaving})
-
-        self.assertNotIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
-        self.assertNotIn(ActionableTarget(actor_slot="P1", target_slot="obj01"), result)
-
     def test_an_enemy_walking_into_the_punch_band_is_already_in_punch_reach(self) -> None:
-        # The mirror image: dx=58 is outside the band now, but the strike
-        # arms as the enemy arrives rather than starting from scratch once
-        # it has.
+        # dx=58 is outside Axel's 16..50 band right now, but the strike
+        # damages from frame 3 to frame 12, and the enemy is inside the box
+        # for most of that span: the punch arms as it arrives rather than
+        # starting from scratch once it has.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
         arriving = make_enemy(slot="obj01", world_x=158, world_y=100, grunt_vel_x=-2.0)
 
@@ -322,50 +311,85 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         self.assertIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
 
-    def test_adams_slow_chord_loses_a_walking_target_axels_keeps(self) -> None:
-        # The same enemy, 20px behind and walking away at 2 px/frame. Axel's
-        # chord arms in 3 frames and still covers it; Adam's takes 21
-        # (controls-and-input.md "Measured chord timing"), by which point the
-        # target has left his 42px box entirely -- exactly the whiff that
-        # manuscript warns about, now visible to the AI.
+    def test_an_enemy_walking_in_close_is_still_punchable(self) -> None:
+        # THE regression this whole family has to guard. Judging the punch at
+        # a single future instant projected this enemy into the punch's own
+        # *inner* dead zone (below Axel's 16px edge), which deleted the
+        # InPunchReach, handed the tick to could_walk_to_near_enemy and had
+        # the actor walk into an enemy it should have been hitting -- while
+        # promoting the slow RearAttack chord at point-blank range, since a
+        # target inside the dead zone is what makes that chord "warranted".
+        # Measured over a swept pipeline against the previous commit.
+        #
+        # The move's damaging span is what covers the target's movement, and
+        # frame 0 is always part of it, so a prediction can only ever add an
+        # attack -- never remove the one the observed position already gives.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        closing = make_enemy(slot="obj01", world_x=120, world_y=100, grunt_vel_x=-2.0)
+
+        result = check_for_targets_in_reach({myself, closing})
+
+        self.assertIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(ActionableTarget(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_a_walking_enemy_never_loses_a_band_it_currently_occupies(self) -> None:
+        # The additive guarantee, swept: whatever the observed position
+        # offers, every velocity must still offer.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        for dx in range(8, 130, 2):
+            still = make_enemy(slot="obj01", world_x=100 + dx, world_y=100)
+            baseline = check_for_targets_in_reach({myself, still})
+            for vel in (-3.0, -2.0, -1.0, 1.0, 2.0, 3.0):
+                moving = make_enemy(
+                    slot="obj01", world_x=100 + dx, world_y=100, grunt_vel_x=vel
+                )
+                with self.subTest(dx=dx, vel=vel):
+                    self.assertTrue(
+                        baseline <= check_for_targets_in_reach({myself, moving})
+                    )
+
+    def test_adams_slow_chord_reaches_a_target_walking_into_it(self) -> None:
+        # Adam's chord damages from frame 21 to frame 38 -- more than half a
+        # second -- so a target 90px behind him and walking in is inside his
+        # 42px box while it is still swinging. Axel's, damaging at frames
+        # 3..12, is long over before that same target arrives, and his box is
+        # 40px: the two characters genuinely disagree about this target, and
+        # only a per-character timeline can say so.
         axel = make_myself(world_x=100, world_y=100, facing_left=False)
         adam = make_myself(
             world_x=100, world_y=100, facing_left=False, character_id=1, character_name="Adam"
         )
-        leaving = make_enemy(slot="obj01", world_x=80, world_y=100, grunt_vel_x=-2.0)
+        arriving = make_enemy(slot="obj01", world_x=30, world_y=100, grunt_vel_x=2.0)
 
         self.assertIn(
             InRearReach(actor_slot="P1", target_slot="obj01"),
-            check_for_targets_in_reach({axel, leaving}),
+            check_for_targets_in_reach({adam, arriving}),
         )
         self.assertNotIn(
             InRearReach(actor_slot="P1", target_slot="obj01"),
-            check_for_targets_in_reach({adam, leaving}),
+            check_for_targets_in_reach({axel, arriving}),
         )
 
-    def test_a_fleeing_enemy_is_not_worth_a_jump_kick(self) -> None:
-        # dx=55 is inside Axel's 50..60 kick band now. The kick costs a
-        # 5-frame crouch and then closes at 3 px/frame, so a target fleeing
-        # at 2 is 79px away by the time the kick could land -- past the
-        # kick's own reach.
+    def test_a_jump_kick_arms_for_an_enemy_walking_into_its_range(self) -> None:
+        # dx=70 is past Axel's 50..60 kick band, but the launch is 5 crouch
+        # frames away ($1FC0) and the enemy covers 14px of that on its own.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        fleeing = make_enemy(slot="obj01", world_x=155, world_y=100, grunt_vel_x=2.0)
+        arriving = make_enemy(slot="obj01", world_x=170, world_y=100, grunt_vel_x=-2.0)
 
-        result = check_for_targets_in_reach({myself, fleeing})
+        result = check_for_targets_in_reach({myself, arriving})
+
+        self.assertIn(InJumpAttackReach(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_a_jump_kick_is_never_armed_from_beyond_its_own_flight(self) -> None:
+        # The kick's lead is its crouch, never its whole flight: solving the
+        # full interception instead launched kicks from 100+px on the
+        # assumption the target kept closing for all 25 frames.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        far = make_enemy(slot="obj01", world_x=204, world_y=100, grunt_vel_x=-2.0)
+
+        result = check_for_targets_in_reach({myself, far})
 
         self.assertNotIn(InJumpAttackReach(actor_slot="P1", target_slot="obj01"), result)
-
-    def test_an_enemy_closing_into_punch_range_is_punched_not_kicked(self) -> None:
-        # Same starting gap, walking in instead: by the time a kick could be
-        # launched the enemy is inside punch range, where a hop is the wrong
-        # move -- so the kick band drops it and the punch band takes it.
-        myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        closing = make_enemy(slot="obj01", world_x=155, world_y=100, grunt_vel_x=-2.0)
-
-        result = check_for_targets_in_reach({myself, closing})
-
-        self.assertNotIn(InJumpAttackReach(actor_slot="P1", target_slot="obj01"), result)
-        self.assertIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
 
     def test_a_grab_walk_in_still_offers_a_target_it_would_reach(self) -> None:
         # Already inside the walk-in range (dx=40) and retreating slowly:

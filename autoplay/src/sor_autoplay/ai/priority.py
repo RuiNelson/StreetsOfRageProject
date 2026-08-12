@@ -457,9 +457,11 @@ def _emergency_thrown_weapon(verb: Verb, context: Context, weight: int) -> int:
     actor = _find_actor(context, getattr(verb, "actor_slot", None))
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
-    impact = thrown_weapon_impact_point(actor, target, type(verb))
-    if not thrown_weapon_would_connect(actor, impact):
+    if not thrown_weapon_would_connect(actor, target, type(verb)):
         return _EMERGENCY_DEFAULT
+    # Rank by how far the weapon actually has to fly, so a target running
+    # away scores below one standing still at the same instantaneous gap.
+    impact = thrown_weapon_impact_point(actor, target, type(verb))
     distance = math.hypot(impact.world_x - actor.world_x, impact.world_y - actor.world_y)
     return _distance_emergency(distance, base=weight, floor=weight - 4, step_px=15)
 

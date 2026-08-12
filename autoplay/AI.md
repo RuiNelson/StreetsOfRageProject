@@ -302,19 +302,34 @@ silent factor-of-two error. A `Boss` predicts to where it stands, since it
 never populates those fields — "no better guess", not "stationary".
 
 `ai/kinematics.py` turns that into a lead time per move, from measured ROM
-timings and, for the two moves that are really approaches, the ROM's own
-walk-speed tables. Where a move has to *travel* — a jump kick, a grab
-walk-in, a thrown weapon — the lead is a one-dimensional pursuit solve
-against the target's own velocity, so a target walking in is met sooner, one
-walking away later, and one fleeing as fast as the actor can close is
-correctly judged uncatchable rather than chased.
+timings and, for the moves that are really approaches, the ROM's own
+walk-speed tables. Two rules keep it honest, and both were learned by
+sweeping the pipeline and comparing:
 
-`inference.check_for_targets_in_reach` then evaluates each move's band at
-that move's own arrival time, which is what makes the whole `TargetInReach`
-family predictive rather than reactive: the same enemy is projected four
-different distances for the punch, the chord, the kick and the grab. The
-ranking and the executor use the same projections, so a verb is produced,
-scored and aimed about one instant.
+- **A prediction may only ever add an attack, never take one away.** An
+  attack is not an instant — a punch damages for 10 frames, Adam's chord for
+  18 — so the band is tested at the observed position *as well as* at the
+  frame the hit arms, and the union decides. Judging only the future instant
+  projected an enemy walking into Axel from 20px into the punch's own inner
+  dead zone: the strike vanished, the walk verb took the tick, and the actor
+  walked into enemies it should have been hitting, reaching for the slow
+  point-blank chord instead.
+- **A move leads by its dead time, not by its whole reach.** A jump kick
+  leads by the 5-frame crouch it spends on the ground, because that is the
+  part the launch decision cannot see; how far the flight itself carries is
+  already what the kick's band measures. Leading by the full interception
+  instead launched kicks from over 100px, betting that the target would keep
+  walking in for all 25 frames — airborne, committed, and short if it stopped.
+
+Bodies also stop at contact rather than passing through one another, so an
+approaching enemy is never projected through the actor.
+
+`inference.check_for_targets_in_reach` evaluates each move's band across that
+move's own timeline, which is what makes the whole `TargetInReach` family
+predictive rather than reactive. `ActionableTarget` is the deliberate
+exception: it is not "would this hit" but "stop walking, you can already hit
+it", and a future-tense answer to that halts the approach while the enemy is
+still out of range.
 
 Every concrete `Attack` declares its model in `ATTACK_LEAD_FRAMES`, and a
 test fails if one does not. Some models are legitimately zero, and that is a

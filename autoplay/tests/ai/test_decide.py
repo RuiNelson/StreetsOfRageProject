@@ -1345,24 +1345,32 @@ class CouldThrowPepperTests(unittest.TestCase):
 
         self.assertEqual(could_throw_pepper(context), set())
 
-    def test_does_not_fire_at_a_target_the_slow_spray_would_never_reach(self) -> None:
-        # dx=60, comfortably inside the 90px throw range for both weapons on
-        # a static test. Pepper spray only travels 6 px/frame
-        # (weapons-range-and-damage.md), so against a target walking away at
-        # 2 it needs 15 frames of flight and meets it 100px out -- past that
-        # range. The knife's 16 px/frame closes the same gap in 4 and
-        # connects from the identical spot, which is exactly why the two
-        # weapons cannot share one static range test.
+    def test_fires_at_a_target_still_walking_into_throw_range(self) -> None:
+        # dx=100 is outside the 90px envelope right now. Pepper spray crawls
+        # at 6 px/frame (weapons-range-and-damage.md) against a target closing
+        # at 2, so the can and the target meet at 66px -- well inside it. The
+        # throw is judged where they meet, not where the target stands.
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
-        fleeing = make_enemy(world_x=160, world_y=100, grunt_vel_x=2.0)
+        closing = make_enemy(world_x=200, world_y=100, grunt_vel_x=-2.0)
 
-        self.assertEqual(could_throw_pepper({myself, fleeing}), set())
+        result = could_throw_pepper({myself, closing})
 
-        with_knife = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
-        self.assertEqual(
-            could_throw_knife({with_knife, fleeing}),
-            {ThrowKnife(actor_slot="P1", target_slot="obj01")},
-        )
+        self.assertEqual(result, {ThrowPepper(actor_slot="P1", target_slot="obj01")})
+
+    def test_never_withdraws_a_throw_the_current_position_allows(self) -> None:
+        # The additive rule, swept: a target inside the envelope now yields a
+        # throw whatever it is doing, exactly as it did before any prediction
+        # existed. A throw is cheap and the weapon is spent either way; losing
+        # one to a mis-modelled flight is the expensive mistake.
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
+        for dx in range(42, 90, 4):
+            for vel in (-3.0, -2.0, 0.0, 2.0, 3.0):
+                enemy = make_enemy(world_x=100 + dx, world_y=100, grunt_vel_x=vel)
+                with self.subTest(dx=dx, vel=vel):
+                    self.assertEqual(
+                        could_throw_pepper({myself, enemy}),
+                        {ThrowPepper(actor_slot="P1", target_slot="obj01")},
+                    )
 
 
 class CouldWalkToWeaponTests(unittest.TestCase):
