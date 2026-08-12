@@ -1,0 +1,6 @@
+#/bin/sh
+
+scripts/run  --turbo 2 --lang en --debugUtils --port 7777 --silent &
+scripts/autoplay  --poll-ms 16 --port 7777 --agent-p1 --reach-gameplay blaze
+
+
