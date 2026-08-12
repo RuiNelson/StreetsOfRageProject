@@ -15,7 +15,7 @@ from dataclasses import replace
 
 from sor_autoplay.ai.decide import generate_verb_tokens
 from sor_autoplay.ai.execute import execute_verb
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.priority import determine_priority_verb
 from sor_autoplay.ai.tokens import CameraRange, Enemy, Myself, Stage, Verb, find_all
@@ -103,6 +103,14 @@ def _run(
 
     masks: list[int] = []
     ax, ay, facing_left = actor_x, actor_y, False
+    # One VirtualGamepad for the whole run, matching production wiring
+    # (AgentLoop holds one persistent gamepad per player): its virtual
+    # left/right axis (see gamepad.VirtualGamepad.steer_x) only ramps toward
+    # full deflection across *consecutive* calls on the same instance, so a
+    # fresh gamepad every tick would never reach an edge and every D-pad
+    # press in this whole suite would silently vanish.
+    client = _FakeClient()
+    gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
     for tick in range(ticks):
         context = {
             _actor(ax, ay, facing_left, health_percent),
@@ -114,8 +122,6 @@ def _run(
         context |= generate_verb_tokens(context)
         context = determine_priority_verb(context)
 
-        client = _FakeClient()
-        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         verbs = find_all(context, Verb)
         if verbs:
             execute_verb(verbs[0], context, gamepad)
@@ -154,6 +160,9 @@ def _run_multi(
     masks: list[int] = []
     targets: list[str | None] = []
     ax, ay, facing_left = actor_x, actor_y, False
+    # See _run's comment: one persistent VirtualGamepad for the whole run.
+    client = _FakeClient()
+    gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
     for tick in range(ticks):
         context = {
             _actor(ax, ay, facing_left),
@@ -167,8 +176,6 @@ def _run_multi(
         context |= generate_verb_tokens(context)
         context = determine_priority_verb(context)
 
-        client = _FakeClient()
-        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         verbs = find_all(context, Verb)
         if verbs:
             execute_verb(verbs[0], context, gamepad)
@@ -330,7 +337,11 @@ class SingleEnemyDirectionStabilityTests(unittest.TestCase):
     def test_closes_in_again_once_the_enemy_is_no_longer_committed(self) -> None:
         # The suppression is gated on the enemy's dangerous phase, so it has
         # to lift by itself -- otherwise the fix would just trade a jitter
-        # bug for a passivity bug.
+        # bug for a passivity bug. The virtual left/right axis (gamepad.
+        # AXIS_RAMP_TICKS) means the first couple of ticks legitimately hold
+        # nothing yet while it ramps toward RIGHT; what must not happen is
+        # ever holding LEFT, or RIGHT still not being reached once the axis
+        # has had time to settle.
         masks = _run(
             ticks=6,
             actor_x=100,
@@ -340,9 +351,13 @@ class SingleEnemyDirectionStabilityTests(unittest.TestCase):
             phases=[CombatPhase.NORMAL],
         )
 
+        self.assertFalse(
+            any(mask & LEFT for mask in masks),
+            f"fled instead of closing on a harmless enemy: {[hex(m) for m in masks]}",
+        )
         self.assertTrue(
-            all(mask & RIGHT for mask in masks),
-            f"did not close on a harmless enemy: {[hex(m) for m in masks]}",
+            all(mask & RIGHT for mask in masks[AXIS_RAMP_TICKS - 1 :]),
+            f"did not close on a harmless enemy once the axis settled: {[hex(m) for m in masks]}",
         )
 
 

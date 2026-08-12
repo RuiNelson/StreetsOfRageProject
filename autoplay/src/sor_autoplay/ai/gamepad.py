@@ -20,6 +20,14 @@ if TYPE_CHECKING:
 # on the codebase's convention of deferring the megadrive_remote import).
 NONE_MASK = 0
 
+# Steps the virtual left/right axis needs, from center, to reach either edge.
+# At the default 33ms poll period that is 99ms -- a sustained direction must
+# survive AXIS_RAMP_TICKS consecutive ticks before it actually presses a
+# D-pad button, so a single flipped tick (position noise, a target swap, a
+# facing re-read) nudges the axis without ever reaching the controller. See
+# VirtualGamepad.steer_x.
+AXIS_RAMP_TICKS = 3
+
 
 class ButtonClient(Protocol):
     """The subset of ``MegaDriveClient`` the virtual gamepad needs."""
@@ -132,6 +140,7 @@ class VirtualGamepad:
         _validate_player_index(player_index)
         self._state = state
         self._player_index = player_index
+        self._axis_x = 0
 
     @property
     def player_index(self) -> int:
@@ -144,7 +153,43 @@ class VirtualGamepad:
     def hold(self, mask: "Buttons | int") -> None:
         self._state.hold(self._player_index, mask)
 
+    def steer_x(self, direction: int) -> int:
+        """Advance the virtual left/right axis by one tick and report which
+        side, if any, is now fully deflected.
+
+        ``direction`` is the executor's request for *this* tick only --
+        negative for "more left", positive for "more right", ``0`` for
+        "neither, let the axis fall back toward center" -- never an absolute
+        position. The axis moves at most one step per call toward that
+        request (or toward center when ``direction`` is 0), so a sustained
+        direction takes ``AXIS_RAMP_TICKS`` consecutive calls to reach an
+        edge, while a single contrary or neutral tick only pulls it one step
+        back rather than resetting it.
+
+        Returns -1 (fully left), 1 (fully right), or 0 (still short of
+        either edge -- callers must not press a D-pad button yet). Only the
+        two edges translate into an actual physical direction; this is what
+        stops a per-tick flip in the requested direction from ever reaching
+        the controller as a flip in the held button.
+        """
+
+        if direction > 0:
+            self._axis_x = min(AXIS_RAMP_TICKS, self._axis_x + 1)
+        elif direction < 0:
+            self._axis_x = max(-AXIS_RAMP_TICKS, self._axis_x - 1)
+        elif self._axis_x > 0:
+            self._axis_x -= 1
+        elif self._axis_x < 0:
+            self._axis_x += 1
+
+        if self._axis_x >= AXIS_RAMP_TICKS:
+            return 1
+        if self._axis_x <= -AXIS_RAMP_TICKS:
+            return -1
+        return 0
+
     def release(self) -> None:
+        self._axis_x = 0
         self._state.release(self._player_index)
 
     def press(self, mask: "Buttons | int", *, frames: int = 1) -> None:

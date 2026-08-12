@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, call
 
-from sor_autoplay.ai.gamepad import NONE_MASK, SharedGamepadState, VirtualGamepad
+from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, NONE_MASK, SharedGamepadState, VirtualGamepad
 
 RIGHT = 0x0008
 LEFT = 0x0004
@@ -174,6 +174,90 @@ class VirtualGamepadTests(unittest.TestCase):
         state = SharedGamepadState(client)
         with self.assertRaises(ValueError):
             VirtualGamepad(state, player_index=0)
+
+
+class VirtualGamepadSteerXTests(unittest.TestCase):
+    """The virtual left/right axis: a per-tick direction request only turns
+    into an actual reported side after AXIS_RAMP_TICKS consecutive ticks
+    asking for it, which is what stops a single flipped tick's decision from
+    reaching the controller as a flipped button."""
+
+    def _pad(self) -> VirtualGamepad:
+        return VirtualGamepad(SharedGamepadState(MagicMock()), player_index=1)
+
+    def test_center_reports_neither_side(self) -> None:
+        pad = self._pad()
+
+        self.assertEqual(pad.steer_x(0), 0)
+
+    def test_a_single_tick_of_a_direction_does_not_reach_the_edge(self) -> None:
+        pad = self._pad()
+
+        self.assertEqual(pad.steer_x(1), 0)
+
+    def test_sustained_direction_reaches_the_edge_after_ramp_ticks(self) -> None:
+        pad = self._pad()
+
+        results = [pad.steer_x(1) for _ in range(AXIS_RAMP_TICKS)]
+
+        self.assertEqual(results, [0] * (AXIS_RAMP_TICKS - 1) + [1])
+
+    def test_sustained_left_reaches_the_opposite_edge(self) -> None:
+        pad = self._pad()
+
+        results = [pad.steer_x(-1) for _ in range(AXIS_RAMP_TICKS)]
+
+        self.assertEqual(results, [0] * (AXIS_RAMP_TICKS - 1) + [-1])
+
+    def test_a_single_contrary_tick_only_pulls_one_step_back(self) -> None:
+        # At the edge after a sustained hold, one tick asking for the
+        # opposite side immediately drops the report to "neither" (it no
+        # longer clears the edge threshold) but the axis itself only moved
+        # one step, not all the way to center.
+        pad = self._pad()
+        for _ in range(AXIS_RAMP_TICKS):
+            pad.steer_x(1)
+
+        self.assertEqual(pad.steer_x(-1), 0)
+        # Confirm it is one step short of the edge, not reset: one more
+        # tick of the same direction reaches the edge, not two more.
+        self.assertEqual(pad.steer_x(1), 1)
+
+    def test_reversing_from_one_edge_to_the_other_takes_the_full_traverse(self) -> None:
+        # Center-to-edge is AXIS_RAMP_TICKS ticks, so edge-to-edge (through
+        # center) is 2x that -- the axis must actually cross zero, not jump.
+        pad = self._pad()
+        for _ in range(AXIS_RAMP_TICKS):
+            pad.steer_x(1)
+
+        results = [pad.steer_x(-1) for _ in range(2 * AXIS_RAMP_TICKS)]
+
+        self.assertEqual(results, [0] * (2 * AXIS_RAMP_TICKS - 1) + [-1])
+
+    def test_releasing_the_direction_falls_back_toward_center(self) -> None:
+        pad = self._pad()
+        for _ in range(AXIS_RAMP_TICKS):
+            pad.steer_x(1)
+
+        # Every neutral tick pulls one step back; reaching center again
+        # takes as many ticks as it took to leave it.
+        results = [pad.steer_x(0) for _ in range(AXIS_RAMP_TICKS)]
+
+        self.assertEqual(results, [0] * AXIS_RAMP_TICKS)
+        self.assertEqual(pad.steer_x(0), 0)
+
+    def test_release_resets_the_axis_immediately(self) -> None:
+        pad = self._pad()
+        for _ in range(AXIS_RAMP_TICKS):
+            pad.steer_x(1)
+
+        pad.release()
+
+        # From a hard reset, a fresh sustained direction needs the full
+        # AXIS_RAMP_TICKS again -- confirming release() didn't just leave it
+        # one step short of the edge the way a single neutral tick would.
+        results = [pad.steer_x(1) for _ in range(AXIS_RAMP_TICKS - 1)]
+        self.assertEqual(results, [0] * (AXIS_RAMP_TICKS - 1))
 
 
 if __name__ == "__main__":

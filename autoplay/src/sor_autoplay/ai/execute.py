@@ -161,6 +161,35 @@ def _press(gamepad: VirtualGamepad, mask: int, *, frames: int) -> None:
     gamepad.press(mask, frames=frames)
 
 
+def _hold_steered(gamepad: VirtualGamepad, mask: int) -> None:
+    """Hold ``mask``, routing its left/right bits through the gamepad's
+    virtual X axis first.
+
+    Every walk-verb handler still decides a direction the same way it always
+    did (deadbands, hysteresis, prop dodges); this is only the last step
+    before that decision reaches the controller. ``gamepad.steer_x`` reports
+    a side only once it has been requested for ``AXIS_RAMP_TICKS``
+    consecutive ticks, so a single-tick flip in the computed mask no longer
+    flips the physical D-pad -- it just nudges the axis one step and, most of
+    the time, gets reported back as still centered. Up/Down and every other
+    bit pass through unchanged: the reported oscillation was left/right only.
+    """
+
+    if mask & RIGHT_MASK:
+        x_direction = 1
+    elif mask & LEFT_MASK:
+        x_direction = -1
+    else:
+        x_direction = 0
+    steered = gamepad.steer_x(x_direction)
+    mask &= ~(LEFT_MASK | RIGHT_MASK)
+    if steered > 0:
+        mask |= RIGHT_MASK
+    elif steered < 0:
+        mask |= LEFT_MASK
+    gamepad.hold(mask)
+
+
 def _find_actor(context: Context, slot: str) -> Myself | Partner | None:
     for actor in (find(context, Myself), find(context, Partner)):
         if actor is not None and actor.slot == slot:
@@ -397,7 +426,7 @@ def state_machine_walk_to_near_enemy(verb: WalkToNearEnemy, context: Context, ga
         gamepad.release()
         return
     target_x, target_y = _walk_to_near_enemy_target(actor, target, context)
-    gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
+    _hold_steered(gamepad, _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
 
 
 # How far to step back per tick while retreating -- roughly clears the
@@ -452,7 +481,7 @@ def state_machine_retreat_from_danger(
         gamepad.release()
         return
     target_x, target_y = _retreat_from_danger_target(actor, target, context)
-    gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
+    _hold_steered(gamepad, _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
 
 
 def state_machine_walk_to_advance_stage(
@@ -460,15 +489,20 @@ def state_machine_walk_to_advance_stage(
 ) -> None:
     actor = _find_actor(context, verb.actor_slot)
     if actor is None:
-        gamepad.hold(RIGHT_MASK if verb.direction == "right" else LEFT_MASK)
+        _hold_steered(gamepad, RIGHT_MASK if verb.direction == "right" else LEFT_MASK)
         return
     # Pure lateral advance — do not add accidental Up/Down.
     mask = RIGHT_MASK if verb.direction == "right" else LEFT_MASK
     # If a breakable sits immediately ahead, approach with a slight Y offset
-    # so the next tick can smash rather than walk forever into it.
+    # so the next tick can smash rather than walk forever into it. The 40px
+    # lookahead always clears MOVE_DEADBAND_X, so _movement_mask's own L/R
+    # bit always agrees with the plain `mask` fallback -- `or mask` only
+    # ever matters for its Y bits' side effects, never for overriding a
+    # direction the axis hasn't reached full deflection on yet.
     ahead_x = actor.world_x + (40 if verb.direction == "right" else -40)
-    gamepad.hold(
-        _movement_mask(context, actor.world_x, actor.world_y, ahead_x, actor.world_y) or mask
+    _hold_steered(
+        gamepad,
+        _movement_mask(context, actor.world_x, actor.world_y, ahead_x, actor.world_y) or mask,
     )
 
 
@@ -539,6 +573,13 @@ def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: Virtu
         return
     if not actor.is_airborne:
         # Launch with horizontal hold so crouch→flight carries ±3 px/frame.
+        # Deliberately bypasses _hold_steered/the virtual X axis: the whole
+        # flight is only a handful of ticks (JUMP_ATTACK_LAUNCH_FRAMES +
+        # JUMP_ATTACK_KICK_FRAMES), and every kick tick's _press clears the
+        # hold first (see _press's docstring) -- routing this through the
+        # multi-tick ramp would mean the axis rarely if ever reaches full
+        # deflection before the jump is over, silently dropping the carry
+        # the comment above describes.
         _press(gamepad, JUMP_MASK | face, frames=JUMP_ATTACK_LAUNCH_FRAMES)
         gamepad.hold(face)
     else:
@@ -571,7 +612,7 @@ def state_machine_grab_enemy(verb: GrabEnemy, context: Context, gamepad: Virtual
         mask |= _face_toward_mask(actor, target.world_x) or (
             LEFT_MASK if actor.facing_left else RIGHT_MASK
         )
-    gamepad.hold(mask)
+    _hold_steered(gamepad, mask)
 
 
 def state_machine_supplex(verb: Supplex, context: Context, gamepad: VirtualGamepad) -> None:
@@ -620,7 +661,7 @@ def state_machine_release_grab(verb: ReleaseGrab, context: Context, gamepad: Vir
     if target is None:
         # Walk opposite current facing to break the link.
         mask = _back_direction_mask(actor)
-        gamepad.hold(mask)
+        _hold_steered(gamepad, mask)
         return
     # Walk away from the held body. Within DIRECTION_HYSTERESIS_X, use
     # facing (same fallback as the target-is-None branch above) instead of
@@ -634,8 +675,9 @@ def state_machine_release_grab(verb: ReleaseGrab, context: Context, gamepad: Vir
     else:
         away_right = dx < 0
     away_x = actor.world_x + (20 if away_right else -20)
-    gamepad.hold(
-        _movement_mask(context, actor.world_x, actor.world_y, away_x, actor.world_y)
+    _hold_steered(
+        gamepad,
+        _movement_mask(context, actor.world_x, actor.world_y, away_x, actor.world_y),
     )
 
 
@@ -666,10 +708,11 @@ def state_machine_walk_to_weapon(verb: WalkToWeapon, context: Context, gamepad: 
     if abs(target.world_x - actor.world_x) <= PICKUP_RANGE_X and abs(target.world_y - actor.world_y) <= PICKUP_RANGE_Y:
         _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
     else:
-        gamepad.hold(
+        _hold_steered(
+            gamepad,
             _movement_mask(
                 context, actor.world_x, actor.world_y, target.world_x, target.world_y
-            )
+            ),
         )
 
 
@@ -682,10 +725,11 @@ def state_machine_walk_to_pickup(verb: WalkToPickup, context: Context, gamepad: 
     if abs(target.world_x - actor.world_x) <= PICKUP_RANGE_X and abs(target.world_y - actor.world_y) <= PICKUP_RANGE_Y:
         _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
     else:
-        gamepad.hold(
+        _hold_steered(
+            gamepad,
             _movement_mask(
                 context, actor.world_x, actor.world_y, target.world_x, target.world_y
-            )
+            ),
         )
 
 
@@ -731,7 +775,7 @@ def state_machine_open_breakable(
         _press(gamepad, PUNCH_MASK | _face_toward_mask(actor, target.world_x), frames=PUNCH_FRAMES)
         return
     target_x, target_y = _walk_to_breakable_target(actor, target)
-    gamepad.hold(_movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
+    _hold_steered(gamepad, _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
 
 
 _HANDLERS = {
