@@ -1,0 +1,4 @@
+#/bin/sh
+
+scripts/run  --lang en --debugUtils --port 7777 --silent &
+scripts/autoplay  --port 7777 --reach-gameplay blaze --agent-p1
