@@ -29,7 +29,14 @@ from .tokens import (
     ThrowKnife,
     ThrowPepper,
 )
-from .tokens import Myself, Partner, PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
+from .tokens import (
+    Myself,
+    Partner,
+    PUNCH_RANGE_Y,
+    punch_inner_x,
+    punch_outer_x,
+    punch_usable_inner_x,
+)
 from .tokens import Enemy
 from .tokens import CameraRange
 from .tokens import Breakable, Pit, SafeSpot
@@ -46,7 +53,12 @@ from .tokens import (
 from .gamepad import VirtualGamepad
 from . import kinematics
 from .decide import BREAKABLE_PUNCH_X, in_smash_range
-from .reach import PIT_AVOID_MARGIN, enemy_behind_actor, pit_endangers
+from .reach import (
+    PIT_AVOID_MARGIN,
+    REACH_SAFETY_MARGIN,
+    enemy_behind_actor,
+    pit_endangers,
+)
 from ..phases import is_dangerous
 from ..world_map import LANE_Y_MIN
 
@@ -364,6 +376,39 @@ def _aim_point(verb: Verb, actor: Myself | Partner, target: Enemy) -> Enemy:
     return kinematics.target_at_impact(type(verb), actor, target)
 
 
+def _dead_zone_stop_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> int:
+    """Close *past* the enemy's own reach when it has a hole to stand in.
+
+    Some enemies cannot hit what is pressed against them: every attack they
+    own starts further out than contact, so there is a pocket between their
+    body and the inner edge of their reach where they are defenceless.
+    ``Enemy.min_reach`` is that inner edge, extracted from the ROM's own
+    shape tables, and today it picks out exactly one type -- Nora, whose whip
+    (shape ``$22``) covers 32 to 80 px.
+
+    Stopping at the actor's own punch edge ignores it completely: 46px for
+    Axel is *inside* the whip band, so the AI parked itself squarely where
+    she hits and nowhere else, which is what "the AI cannot deal with Noras"
+    looks like from the sofa. The rest of the pipeline already knows about
+    the pocket -- ``reach.in_enemy_dead_zone``, ``GrabIntoDeadZone`` -- but
+    the approach that decides where to *stand* never consulted it.
+
+    So when the pocket exists and the actor can still land its own strike
+    from inside it, aim there instead. The floor is the punch's usable inner
+    edge: closer than that and the pocket is safe but unhittable, which is
+    the grab's business (``GrabIntoDeadZone``), not this walk's. The margin
+    matches ``reach``'s own, so "inside the dead zone" means the same thing
+    to the verb that walks there and to the predicate that judges it.
+    """
+
+    dead_zone = target.min_reach
+    if dead_zone <= 0:
+        return stop_dx
+    inside = dead_zone - REACH_SAFETY_MARGIN
+    floor = punch_usable_inner_x(actor.character_id) + WALK_TO_ENEMY_STOP_BUFFER
+    return max(floor, min(stop_dx, inside))
+
+
 def _walk_to_near_enemy_target(
     actor: Myself | Partner, target: Enemy, context: Context
 ) -> tuple[int, int]:
@@ -409,6 +454,7 @@ def _walk_to_near_enemy_target(
     outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
     inner = punch_inner_x(actor.character_id)
     stop_dx = max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER)
+    stop_dx = _dead_zone_stop_dx(actor, target, stop_dx)
 
     dx = target.world_x - actor.world_x
     if abs(dx) <= DIRECTION_HYSTERESIS_X:

@@ -23,7 +23,7 @@ from sor_autoplay.ai.tokens import (
     ThrowPepper,
 )
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import Enemy
+from sor_autoplay.ai.tokens import AttackRange, Enemy, Nora, punch_usable_inner_x
 from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.execute import (
     BREAKABLE_STOP_BUFFER,
@@ -58,7 +58,12 @@ C = 0x0040
 
 
 def _myself(
-    *, world_x: int = 0, world_y: int = 0, action_state: int = 0, is_airborne: bool = False
+    *,
+    world_x: int = 0,
+    world_y: int = 0,
+    action_state: int = 0,
+    is_airborne: bool = False,
+    facing_left: bool = False,
 ) -> Myself:
     return Myself(
         slot="P1",
@@ -72,7 +77,7 @@ def _myself(
         lives=3,
         specials=1,
         held_weapon_type=0,
-        facing_left=False,
+        facing_left=facing_left,
         combat_phase=CombatPhase.NORMAL,
         action_state=action_state,
         is_airborne=is_airborne,
@@ -120,6 +125,72 @@ class PressNoButtonTests(unittest.TestCase):
 
         client.hold_buttons.assert_called_once_with(player1=0, player2=0)
         self.assertEqual(gamepad.held, 0)
+
+
+class DeadZoneApproachTests(unittest.TestCase):
+    """Nora's whip (shape $22) reaches 32..80px, so the pocket between her
+    body and 32 is the one place she cannot hit at all. Reported from play:
+    the AI could not deal with Noras -- it stopped at its own punch edge, 46px
+    for Axel, which is squarely inside the whip band."""
+
+    NORA_WHIP = AttackRange(
+        shape_id=0x22,
+        animation=10,
+        forward_min=32,
+        forward_max=80,
+        lane_min=-12,
+        lane_max=10,
+        height_min=-44,
+        height_max=-20,
+    )
+
+    def _nora(self, **overrides):
+        fields = dict(
+            slot="obj01",
+            type_id=0x26,
+            world_x=200,
+            world_y=100,
+            health=11,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+            attack_ranges=(self.NORA_WHIP,),
+        )
+        fields.update(overrides)
+        return Nora(**fields)
+
+    def test_stops_inside_the_whips_dead_zone(self) -> None:
+        actor = _myself(world_x=100, world_y=100)
+        nora = self._nora(world_x=200, world_y=100)
+
+        target_x, _ = _walk_to_near_enemy_target(actor, nora, set())
+
+        # Approaching from the left, so the stop point is short of her.
+        stop_dx = nora.world_x - target_x
+        self.assertLess(stop_dx, nora.min_reach, "still inside the whip band")
+        self.assertGreaterEqual(
+            stop_dx, punch_usable_inner_x(0), "too close for Axel's own punch"
+        )
+
+    def test_an_enemy_without_a_dead_zone_is_unaffected(self) -> None:
+        # Garcia's punch covers his own feet, so there is no pocket and the
+        # stop distance stays the actor's own punch edge.
+        actor = _myself(world_x=100, world_y=100)
+        garcia = _enemy(world_x=200, world_y=100)
+
+        target_x, _ = _walk_to_near_enemy_target(actor, garcia, set())
+
+        self.assertEqual(garcia.world_x - target_x, 46)  # punch_outer 50 - buffer
+
+    def test_the_pocket_is_still_reached_from_the_other_side(self) -> None:
+        actor = _myself(world_x=300, world_y=100, facing_left=True)
+        nora = self._nora(world_x=200, world_y=100, facing_left=False)
+
+        target_x, _ = _walk_to_near_enemy_target(actor, nora, set())
+
+        stop_dx = target_x - nora.world_x
+        self.assertLess(stop_dx, nora.min_reach)
+        self.assertGreaterEqual(stop_dx, punch_usable_inner_x(0))
 
 
 class ExecuteWalkToNearEnemyTests(unittest.TestCase):
