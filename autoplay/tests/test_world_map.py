@@ -548,6 +548,57 @@ class WorldMapParseTests(unittest.TestCase):
 
         self.assertFalse(any(e.kind == "enemy" for e in world.entities))
 
+    def test_a_wave_slot_written_before_it_is_hidden_is_not_observed(self) -> None:
+        """The one-frame gap between the spawn table and ``$937A``.
+
+        A wave's object slots are populated before the activation entry runs,
+        so for a frame they hold a complete entity that is *not* hidden yet
+        and whose primary state is still ``$0000``. Requiring the SAT-hidden
+        bit as well as the state left exactly that frame observable: recorded
+        live, five enemies appeared for one tick at state ``$00`` with zero
+        health and zero velocity, spread across the level ahead, and the AI
+        punched at the nearest -- 48px away, at nothing -- before they
+        vanished again.
+        """
+
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+
+        base = 0x100
+        _put_u8(actors, base + OBJ_TYPE, 0x21)
+        _put_u8(actors, base + OBJ_FLAGS, 0x0C)  # visible: the hidden bit is clear
+        _put_fixed16(actors, base + OBJ_POS_X, 848)
+        _put_fixed16(actors, base + OBJ_POS_Y, 80)
+        _put_fixed16(actors, base + OBJ_POS_Z, 160)
+        _put_u16(actors, base + OBJ_PRIMARY_STATE, 0x0000)
+        _put_u16(actors, base + OBJ_HEALTH, 0)
+
+        world = parse_world_map(actors_block=bytes(actors), camera_block=bytes(camera))
+
+        self.assertFalse(any(e.kind == "enemy" for e in world.entities))
+
+    def test_an_activated_enemy_at_zero_health_is_still_observed(self) -> None:
+        """Zero health is not defeated -- the ROM counts it alive and wants a
+        finishing hit -- so an *activated* enemy must survive the filter."""
+
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+
+        base = 0x100
+        _put_u8(actors, base + OBJ_TYPE, 0x21)
+        _put_u8(actors, base + OBJ_FLAGS, 0x0C)
+        _put_fixed16(actors, base + OBJ_POS_X, 848)
+        _put_fixed16(actors, base + OBJ_POS_Y, 80)
+        _put_fixed16(actors, base + OBJ_POS_Z, 160)
+        _put_u16(actors, base + OBJ_PRIMARY_STATE, 0x0100)  # activated
+        _put_u16(actors, base + OBJ_HEALTH, 0)
+
+        world = parse_world_map(actors_block=bytes(actors), camera_block=bytes(camera))
+
+        self.assertTrue(any(e.kind == "enemy" for e in world.entities))
+
 
 if __name__ == "__main__":
     unittest.main()

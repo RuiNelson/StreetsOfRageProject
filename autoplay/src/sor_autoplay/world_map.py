@@ -686,21 +686,28 @@ def _is_hidden(slot: bytes) -> bool:
 
 
 def _is_dormant_combatant(entity: MapEntity, slot: bytes) -> bool:
-    """Return whether a hidden combatant has not entered live gameplay yet.
+    """Return whether a combatant has not entered live gameplay yet.
 
     Ordinary enemies start at primary state ``$0000``.  Their activation entry
     (ROM ``$937A``) sets the SAT-hidden bit while testing eligibility; once the
     check succeeds, ``$B1D6`` advances +$30 to ``$0100`` and the hidden bit is
     cleared.  Active enemies can later toggle the hidden bit while flashing, so
-    the state word—not visibility alone—is the stable discriminator.
+    the state word—not visibility alone—is the stable discriminator, and the
+    state word alone is the whole test: the hidden bit is a *symptom* ``$937A``
+    sets while checking eligibility, not the definition of dormancy.
 
-    Boss families do not share that state machine.  A hidden boss with neither
-    state nor health has no evidence of activation and should likewise stay out
-    of observations until its handler initializes it.
+    Requiring both used to leave a real gap.  The wave's object slots are
+    populated before ``$937A`` runs, so for a frame they hold a full entity
+    that is not hidden yet and whose state is still ``$0000``.  Recorded live:
+    five enemies appearing for exactly one tick at ``$00``/health 0/zero
+    velocity, spaced across the whole level ahead, and the AI threw a punch at
+    the nearest of them — 48px away, at nothing — before they vanished again.
+
+    Boss families do not share that state machine.  A boss with neither state
+    nor health has no evidence of activation and should likewise stay out of
+    observations until its handler initializes it.
     """
 
-    if not _is_hidden(slot):
-        return False
     if entity.kind == "enemy":
         return entity.primary_state == 0
     if entity.kind == "boss":
