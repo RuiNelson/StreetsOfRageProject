@@ -331,7 +331,9 @@ class JumpAttack(MeleeAttacks):
     otherwise deliver it into a committed attack, airborne and unable to
     change its mind.
 
-    Raises emergency: (PunishWindow for the target)×28, Enemy×18.
+    Raises emergency: (PunishWindow for the target)×28, (Nora, not currently
+    dangerous, within priority.NORA_RECOVERY_PUNISH_TICKS of her own last
+    attack)×24, Enemy×18.
     """
 
     priority: int = 8  # below basic punch priority (10)

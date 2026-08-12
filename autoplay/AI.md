@@ -314,6 +314,20 @@ tier, so the AI never walks off mid-stun to fetch another enemy. This is
 strictly a ceiling: an attack already ranked lower — an unwarranted
 `RearAttack`, say — keeps its own lower score.
 
+### Nora's post-attack recovery
+
+Nora's own combat states are not the generic ordinary-enemy ones: her whip
+engage-and-swing and her scripted lunge are their own ROM states
+(`phases.py`'s per-type table), and after either one ends she is simply
+back to `NORMAL` — not a ROM-confirmed `PunishWindow` phase the way a
+knockdown or a stun is. `Nora.ticks_since_last_attack` (cross-tick memory,
+see `generate_direct_observation_tokens` above) is what lets `JumpAttack`
+still treat her as worth rushing for a short, deliberately conservative
+window after that: a jump kick covers ground fast enough to land before
+she can commit to another attack, which a routine walk-in cannot promise.
+This is a probabilistic opening, not a guaranteed one, so it ranks below a
+real `PunishWindow` and above the plain default — see
+`priority._emergency_jump_attack`.
 
 ### Grabbing an enemy
 
@@ -410,6 +424,14 @@ this effort must not be duplicated. Consequently, this function must reuse
 the HUD's own RAM poll, and the analysis it already performs on that poll
 must itself be extended to produce the corresponding `Information` tokens,
 rather than being polled or analysed a second time.
+
+It is otherwise a pure function of the `GameSnapshot` it is given, with one
+deliberate exception: `Nora.ticks_since_last_attack` is cross-tick memory
+(how long ago this specific Nora last held a dangerous phase), which no
+single snapshot can answer on its own. `observe.NoraAttackTracker` supplies
+it, owned one per `AgentLoop` instance and threaded in as an optional
+argument — the same precedent `gamepad.py`'s own per-tick steering state
+already set for the executor side of the loop.
 
 ### `generate_inference_tokens`
 

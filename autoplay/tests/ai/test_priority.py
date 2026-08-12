@@ -373,6 +373,113 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         self.assertEqual(len(verbs), 1)
         self.assertIsInstance(verbs[0], JumpAttack)
 
+    def test_jump_attack_prefers_a_nora_freshly_out_of_her_own_attack(self) -> None:
+        # Just stopped attacking (ticks_since_last_attack small, not
+        # dangerous, not in any ROM-confirmed PunishWindow phase either) --
+        # the probabilistic recovery tier (24) must still beat a routine
+        # WalkToNearEnemy toward a *different*, farther enemy competing for
+        # the same tick.
+        fresh_nora = Nora(
+            slot="obj01",
+            type_id=0x26,
+            world_x=0,
+            world_y=64,
+            health=10,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=False,
+            ticks_since_last_attack=2,
+        )
+        farther_enemy = _enemy("obj02", CombatPhase.NORMAL, world_x=200)
+        context = {
+            fresh_nora,
+            farther_enemy,
+            JumpAttack(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
+        self.assertIsInstance(verbs[0], JumpAttack)
+
+    def test_jump_attack_recovery_tier_expires_after_the_window(self) -> None:
+        fresh_nora = Nora(
+            slot="obj01",
+            type_id=0x26,
+            world_x=0,
+            world_y=64,
+            health=10,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=False,
+            ticks_since_last_attack=2,
+        )
+        stale_nora = Nora(
+            slot="obj02",
+            type_id=0x26,
+            world_x=0,
+            world_y=64,
+            health=10,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=False,
+            ticks_since_last_attack=999,
+        )
+        context = {
+            fresh_nora,
+            stale_nora,
+            JumpAttack(actor_slot="P1", target_slot="obj01"),
+            JumpAttack(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
+
+    def test_jump_attack_recovery_tier_does_not_apply_while_still_dangerous(self) -> None:
+        # ticks_since_last_attack resets to 0 while she is dangerous
+        # (observe.NoraAttackTracker), which must not be read as "freshly
+        # recovered" -- that would encourage jumping into her active attack.
+        still_dangerous = Nora(
+            slot="obj01",
+            type_id=0x26,
+            world_x=0,
+            world_y=64,
+            health=10,
+            combat_phase=CombatPhase.ATTACKING,
+            targets_player=1,
+            facing_left=False,
+            ticks_since_last_attack=0,
+        )
+        freshly_recovered = Nora(
+            slot="obj02",
+            type_id=0x26,
+            world_x=0,
+            world_y=64,
+            health=10,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=False,
+            ticks_since_last_attack=2,
+        )
+        context = {
+            still_dangerous,
+            freshly_recovered,
+            JumpAttack(actor_slot="P1", target_slot="obj01"),
+            JumpAttack(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj02")
+
 
 class DetermineEmergencyMeleeWeaponSiblingsTests(unittest.TestCase):
     """SwingBatOrPipe/StabWithKnifeOrBottle/SprayPepper share Punch's exact

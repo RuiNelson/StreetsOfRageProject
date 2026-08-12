@@ -7,6 +7,10 @@ observer's existing single-poll-per-tick discipline.
 ``inform_hud`` implements AI.md's UI step: it copies the surviving
 ``Verb`` (and every candidate that preceded it) into a thread-safe
 ``VerbState`` that the observer's Tk thread reads for the HUD.
+
+``_nora_tracker`` is the one piece of state that survives across ticks
+besides the virtual gamepad's own sticky hold -- see
+``observe.NoraAttackTracker``.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from .decide import generate_verb_tokens
 from .execute import execute_verb, press_no_button
 from .gamepad import VirtualGamepad
 from .inference import generate_inference_tokens
-from .observe import generate_direct_observation_tokens
+from .observe import NoraAttackTracker, generate_direct_observation_tokens
 from .priority import determine_priority_verb
 from .tokens import Context, Verb, find_all
 
@@ -45,6 +49,11 @@ class AgentLoop:
         self._gamepad = gamepad
         self._verb_state = VerbState(winning=None, pending=())
         self._state_lock = threading.Lock()
+        # Cross-tick memory for Nora.ticks_since_last_attack -- see
+        # observe.NoraAttackTracker. One per AgentLoop, matching the
+        # per-player granularity every other piece of per-tick state here
+        # already uses (e.g. VirtualGamepad's own steer_x).
+        self._nora_tracker = NoraAttackTracker()
 
     def inform_hud(self, context: Context, *, pending: tuple[Verb, ...] = ()) -> None:
         """Copy the current tick's verbs into the thread-safe HUD state.
@@ -83,7 +92,9 @@ class AgentLoop:
             self.inform_hud(set())
             return None
 
-        context = generate_direct_observation_tokens(snapshot, player_index=player_index)
+        context = generate_direct_observation_tokens(
+            snapshot, player_index=player_index, nora_tracker=self._nora_tracker
+        )
         context |= generate_inference_tokens(context)
         context |= generate_verb_tokens(context)
         pending = tuple(find_all(context, Verb))

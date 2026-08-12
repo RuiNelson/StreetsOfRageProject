@@ -4,10 +4,11 @@ from sor_autoplay.ai import decide as decide_module
 from sor_autoplay.ai import reach as reach_module
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.tokens import Myself, Partner
-from sor_autoplay.ai.tokens import Abadede, Enemy, Garcia, Jack, Souther
+from sor_autoplay.ai.tokens import Abadede, Enemy, Garcia, Jack, Nora, Souther
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
+from sor_autoplay.ai.tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
 from sor_autoplay.ai.tokens import Pit, Projectile
-from sor_autoplay.ai.observe import generate_direct_observation_tokens
+from sor_autoplay.ai.observe import NoraAttackTracker, generate_direct_observation_tokens
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import WalkToNearEnemy
 from sor_autoplay.ai.tokens import find, find_all
@@ -805,6 +806,128 @@ class GruntStunObservationTests(unittest.TestCase):
         boss = find(context, Abadede, slot="obj01")
         assert boss is not None
         self.assertFalse(hasattr(boss, "stun_timer"))
+
+
+class NoraAttackTrackerObservationTests(unittest.TestCase):
+    def _tick(self, tracker, *, combat_phase, slot="obj00"):
+        players = (
+            _player_snapshot(index=1),
+            _player_snapshot(index=2, is_playable=False),
+        )
+        entities = (
+            _player_entity(slot="P1", world_x=800, world_y=64),
+            _enemy_entity(
+                slot=slot,
+                type_id=0x26,
+                world_x=880,
+                world_y=64,
+                combat_phase=combat_phase,
+            ),
+        )
+        snapshot = _snapshot(players=players, entities=entities)
+        context = generate_direct_observation_tokens(
+            snapshot, player_index=1, nora_tracker=tracker
+        )
+        nora = find(context, Nora, slot=slot)
+        assert nora is not None
+        return nora
+
+    def test_no_tracker_defaults_to_unknown(self) -> None:
+        players = (
+            _player_snapshot(index=1),
+            _player_snapshot(index=2, is_playable=False),
+        )
+        entities = (
+            _player_entity(slot="P1", world_x=800, world_y=64),
+            _enemy_entity(slot="obj00", type_id=0x26, world_x=880, world_y=64),
+        )
+        snapshot = _snapshot(players=players, entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        nora = find(context, Nora, slot="obj00")
+        assert nora is not None
+        self.assertEqual(nora.ticks_since_last_attack, NORA_TICKS_SINCE_ATTACK_UNKNOWN)
+
+    def test_stays_zero_while_dangerous(self) -> None:
+        tracker = NoraAttackTracker()
+
+        first = self._tick(tracker, combat_phase=CombatPhase.ATTACKING)
+        second = self._tick(tracker, combat_phase=CombatPhase.CHARGE)
+
+        self.assertEqual(first.ticks_since_last_attack, 0)
+        self.assertEqual(second.ticks_since_last_attack, 0)
+
+    def test_counts_up_once_no_longer_dangerous(self) -> None:
+        tracker = NoraAttackTracker()
+
+        self._tick(tracker, combat_phase=CombatPhase.ATTACKING)
+        after_one = self._tick(tracker, combat_phase=CombatPhase.NORMAL)
+        after_two = self._tick(tracker, combat_phase=CombatPhase.NORMAL)
+
+        self.assertEqual(after_one.ticks_since_last_attack, 1)
+        self.assertEqual(after_two.ticks_since_last_attack, 2)
+
+    def test_resets_to_zero_on_a_fresh_attack(self) -> None:
+        tracker = NoraAttackTracker()
+
+        self._tick(tracker, combat_phase=CombatPhase.ATTACKING)
+        self._tick(tracker, combat_phase=CombatPhase.NORMAL)
+        self._tick(tracker, combat_phase=CombatPhase.NORMAL)
+        resumed = self._tick(tracker, combat_phase=CombatPhase.ATTACKING)
+
+        self.assertEqual(resumed.ticks_since_last_attack, 0)
+
+    def test_a_reused_slot_does_not_inherit_a_stale_count(self) -> None:
+        tracker = NoraAttackTracker()
+
+        self._tick(tracker, combat_phase=CombatPhase.ATTACKING, slot="obj00")
+        self._tick(tracker, combat_phase=CombatPhase.NORMAL, slot="obj00")
+        self._tick(tracker, combat_phase=CombatPhase.NORMAL, slot="obj00")
+        # obj00 despawns; a different Nora spawns into the same slot later.
+        players = (
+            _player_snapshot(index=1),
+            _player_snapshot(index=2, is_playable=False),
+        )
+        despawned_snapshot = _snapshot(
+            players=players, entities=(_player_entity(slot="P1", world_x=800, world_y=64),)
+        )
+        generate_direct_observation_tokens(
+            despawned_snapshot, player_index=1, nora_tracker=tracker
+        )
+
+        fresh = self._tick(tracker, combat_phase=CombatPhase.NORMAL, slot="obj00")
+
+        self.assertEqual(fresh.ticks_since_last_attack, 1)
+
+    def test_two_slots_are_tracked_independently(self) -> None:
+        tracker = NoraAttackTracker()
+        players = (
+            _player_snapshot(index=1),
+            _player_snapshot(index=2, is_playable=False),
+        )
+        entities = (
+            _player_entity(slot="P1", world_x=800, world_y=64),
+            _enemy_entity(
+                slot="obj00", type_id=0x26, world_x=880, world_y=64,
+                combat_phase=CombatPhase.ATTACKING,
+            ),
+            _enemy_entity(
+                slot="obj01", type_id=0x26, world_x=900, world_y=64,
+                combat_phase=CombatPhase.NORMAL,
+            ),
+        )
+        snapshot = _snapshot(players=players, entities=entities)
+
+        context = generate_direct_observation_tokens(
+            snapshot, player_index=1, nora_tracker=tracker
+        )
+
+        attacking = find(context, Nora, slot="obj00")
+        idle = find(context, Nora, slot="obj01")
+        assert attacking is not None and idle is not None
+        self.assertEqual(attacking.ticks_since_last_attack, 0)
+        self.assertEqual(idle.ticks_since_last_attack, 1)
 
 
 if __name__ == "__main__":

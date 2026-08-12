@@ -52,7 +52,7 @@ from .tokens import (
     ThrowPepper,
 )
 from .tokens import Myself, Partner
-from .tokens import Breakable, Enemy, Grunt
+from .tokens import Breakable, Enemy, Grunt, Nora
 from .tokens import (
     GrabOpportunity,
     GrabIntoDeadZone,
@@ -145,7 +145,21 @@ _EMERGENCY_HOLD_FLIP = 66
 _EMERGENCY_HOLD_KNEE = 64
 _EMERGENCY_HOLD_RELEASE = 50
 _EMERGENCY_JUMP_ATTACK_PUNISHABLE = 28  # below punch; never prefer hop over strike
+# Nora specifically, freshly out of her own whip engage-and-swing or lunge
+# (Nora.ticks_since_last_attack -- observe.NoraAttackTracker) but not (yet)
+# re-armed and not in any ROM-confirmed PunishWindow phase, so this sits
+# below a real punish window (28) -- it is a probabilistic opening, not a
+# guaranteed one; her post-swing decision table was not traced to a hard
+# minimum-recovery number -- and above the plain default (18), so closing
+# the gap with a kick is preferred over a routine approach or a lower-
+# urgency target elsewhere for as long as the window looks fresh.
+_EMERGENCY_JUMP_ATTACK_NORA_RECOVERY = 24
 _EMERGENCY_JUMP_ATTACK_DEFAULT = 18
+# How many ticks after Nora's own attack ends she still counts as "freshly"
+# vulnerable for the tier above. Not a ROM-confirmed minimum recovery time --
+# deliberately conservative, comparable to reach.CLOSING_ENEMY_THREAT_TICKS's
+# own "how far ahead is trusted" horizon at the same ~33ms poll default.
+NORA_RECOVERY_PUNISH_TICKS = 10
 _EMERGENCY_THROW_KNIFE = 25
 _EMERGENCY_THROW_PEPPER = 25
 # One verb, two tiers -- the same two the former SmashBreakable (flat 16 in
@@ -154,13 +168,32 @@ _EMERGENCY_THROW_PEPPER = 25
 # own scale rather than a different verb.
 _EMERGENCY_OPEN_BREAKABLE_IN_RANGE = 16
 _EMERGENCY_OPEN_BREAKABLE_APPROACH = 14
-_EMERGENCY_WALK_TO_WEAPON = 8  # reference value: knife (rank 5) via _EMERGENCY_WALK_TO_WEAPON_BASE
-_EMERGENCY_WALK_TO_WEAPON_BASE = 3  # + weapon_rank (2..5) -> 5..8
+# WalkToNearEnemy's floor is 8 (see below), and an enemy is present on screen
+# almost continuously in this game, so any tier at or under 8 can *never* win
+# against it -- not "loses when an enemy is close", but mathematically
+# unreachable the instant any enemy exists anywhere in camera. That was a
+# live bug, not a design choice: with the old base of 3 (range 5..8), a
+# WalkToWeapon could tie WalkToNearEnemy's floor at best (rank 5, knife) and
+# never actually beat it, so the AI left upgrade weapons on the floor to go
+# fight instead. Raised so every rank clears the floor outright and the top
+# ranks (bat/pipe 4, knife 5) also beat a normal HealthPickup (15) -- "a
+# weapon upgrade is usually more durable value" (WalkToPickup's own
+# docstring) -- while staying under the weakest real attack tier
+# (_EMERGENCY_JUMP_ATTACK_DEFAULT, 18) so an already-possible strike is never
+# abandoned to fetch a weapon.
+_EMERGENCY_WALK_TO_WEAPON = 17  # reference value: knife (rank 5) via _EMERGENCY_WALK_TO_WEAPON_BASE
+_EMERGENCY_WALK_TO_WEAPON_BASE = 12  # + weapon_rank (2..5) -> 14..17
 _EMERGENCY_WALK_TO_PICKUP_CRITICAL_HEALTH = 50
 _EMERGENCY_WALK_TO_PICKUP_HEALTH = 15
 _EMERGENCY_WALK_TO_PICKUP_LIFE = 12
-_EMERGENCY_WALK_TO_PICKUP_SPECIAL = 9
-_EMERGENCY_WALK_TO_PICKUP_SCORE = 3
+# Special and Score raised for the same floor-of-8 reason as the weapon tiers
+# above (Score was 3, mathematically unreachable whenever any enemy existed
+# anywhere on screen -- the AI never once fetched a score pickup mid-stage).
+# Kept strictly below Life(12) and Health(15), and Special kept above Score,
+# preserving the original value-driven ordering Health > Life > Special >
+# Score; both now clear the floor.
+_EMERGENCY_WALK_TO_PICKUP_SPECIAL = 11
+_EMERGENCY_WALK_TO_PICKUP_SCORE = 9
 _EMERGENCY_WALK_TO_NEAR_ENEMY = 14
 # Must sit in the gap between WalkToNearEnemy's base (14) and the *lowest*
 # real attack tier (_EMERGENCY_JUMP_ATTACK_DEFAULT, 18) -- backing off an
@@ -292,6 +325,12 @@ def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
         return _EMERGENCY_DEFAULT
     if _is_punish_window(context, target.slot):
         return _EMERGENCY_JUMP_ATTACK_PUNISHABLE
+    if (
+        isinstance(target, Nora)
+        and not is_dangerous(target.combat_phase)
+        and target.ticks_since_last_attack <= NORA_RECOVERY_PUNISH_TICKS
+    ):
+        return _EMERGENCY_JUMP_ATTACK_NORA_RECOVERY
     return _EMERGENCY_JUMP_ATTACK_DEFAULT
 
 
@@ -355,10 +394,10 @@ def _emergency_walk_to_weapon(verb: WalkToWeapon, context: Context) -> int:
     rank = upgrade.rank
     # Scales with how much of an upgrade this weapon is (rank 2..5) instead
     # of a flat weight, so a better upgrade among several candidates ranks
-    # higher -- e.g. knife (rank 5) reaches the original flat value 8,
-    # pepper (rank 2) sits lower at 5. Stays inside the gap between
-    # ScorePickup (3) and SpecialPickup (9) so it never crosses into a
-    # different verb type's tier.
+    # higher -- e.g. knife (rank 5) reaches 17, pepper (rank 2) sits lower at
+    # 14. Every rank clears WalkToNearEnemy's floor (8) outright, and stays
+    # below the weakest real attack tier (_EMERGENCY_JUMP_ATTACK_DEFAULT, 18)
+    # so it never crosses into a different verb type's tier.
     return _EMERGENCY_WALK_TO_WEAPON_BASE + rank
 
 
@@ -500,8 +539,9 @@ def _stunned_target_ceiling(context: Context, target_slot: str | None) -> int | 
     ``PunishWindow`` (the token that exists precisely so this does not have
     to go back to raw observation fields) and falling back to the Grunt's
     own counter if no window is in context. Above ``HITSTUN_FRAMES`` the
-    timer can only belong to the long pepper-spray stun, since that is the
-    larger of the ROM's two seeds and both only count down. A pepper stun
+    timer either belongs to the long pepper-spray stun or to Nora's own
+    "feign injury" recovery (``phases.py``'s ``0x26`` table, state ``$0C``
+    seeds ``$80`` -- 128 frames), and both only count down. A pepper stun
     that *has* counted down into hitstun range is about to end, which is
     exactly when treating it as a combo window is right again.
     """

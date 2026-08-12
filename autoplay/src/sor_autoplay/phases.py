@@ -53,7 +53,7 @@ def player_is_held_by_enemy_action(action_byte: int) -> bool:
     return (action_byte & 0xFE) in PLAYER_HELD_BY_ENEMY_ACTIONS
 
 
-_GARCIA_MOVE_PHASES: dict[int, dict[int, CombatPhase]] = {
+_TYPE_SPECIFIC_MOVE_PHASES: dict[int, dict[int, CombatPhase]] = {
     # ROM dispatcher tables at $D60E, $D9A2, $DD80 and $E32E. In particular,
     # type $22 state $09 runs $E124 (attack approach) and state $0A runs
     # $E190 (the active punch). Leaving these as UNKNOWN made the agent walk
@@ -93,6 +93,69 @@ _GARCIA_MOVE_PHASES: dict[int, dict[int, CombatPhase]] = {
         0x0B: CombatPhase.ATTACKING,
         0x0C: CombatPhase.ATTACKING,
         0x0D: CombatPhase.RECOVERY,
+    },
+    # Nora $26: her own primary-state table (ROM word table at $10362,
+    # dispatched via nora_type26_dispatcher $F038 -- confirmed by dumping the
+    # raw ROM bytes there; entry N is state byte N, the same alignment
+    # $991A/ordinary_enemy_begin_knockdown at entry 3 already confirms for
+    # every ordinary type) was previously entirely absent here, so every one
+    # of these states fell through to UNKNOWN and the AI could not tell she
+    # was dangerous, closing, or actually stunned at all -- the root cause of
+    # both her attacking far more than her extracted whip range ($22/$23,
+    # forward 32..80) suggested and of the AI being unable to recognise a
+    # genuine punish window on her.
+    #
+    # $08 ($F1B0) is her whip engage state: while not yet committed
+    # (+$31 bit1 clear) she tests the whip shape directly against the
+    # target's *current* position every tick (the same manual $AD04 shortcut
+    # enemy-ai.md's confirmed-strike table already lists for her) and either
+    # commits to the swing or keeps closing distance; once committed she
+    # plays the strike animation and may loop up to three times before
+    # giving up. Both halves are covered by one state byte, so the whole
+    # state reads ATTACKING.
+    # $0A ($DDE6) is the same "damaging special" entry address already
+    # confirmed ATTACKING for Garcia $22's own state $13 below -- shared
+    # code, same meaning.
+    # $0B ($9B36) and $0C ($F078) are her post-hit recovery: $F062 (state
+    # $02's own handler, reached through the generic ALT/STUNNED hi-byte
+    # check above) always steps into $0B first, and -- only for the "some
+    # variants feign injury" case (object flag +$40 bit4) -- straight on into
+    # $0C, which runs its own health subtraction and seeds its own +$50
+    # timer at $80 (128 frames, not the ordinary 24-frame hitstun) before
+    # counting it down exactly like the generic hitstun handler does. Both
+    # are a real, timed, cannot-act window -- STUNNED, so Grunt.stun_timer
+    # and PunishWindow.frames_left read the ROM's own countdown correctly
+    # instead of silently reporting nothing. $0F is the same $9B36 handler
+    # reached a second way (from state $17, below) and gets the same phase.
+    # $10 ($F2AC) unconditionally clears her approach counter, sets the
+    # state to $11, and jumps straight into ordinary_enemy_begin_knockdown
+    # -- the same routine state $03 itself dispatches to.
+    # $12 ($F2BC) delegates every tick to $DBCC, the identical shared
+    # handler state $07 (BLOCKED) already uses for every type.
+    # $13 ($F5F2) and $14 ($F64A) are the lead-up to her special: picking a
+    # lane offset and gating on distance to the target before the lunge is
+    # allowed to fire. Committed, not yet the hit itself -- CHARGE.
+    # $15 ($F6BC) is the special itself: on entry it writes +$1C/+$20 (this
+    # codebase's grunt_vel_x/grunt_vel_y) directly to roughly 2.75/2.125 px
+    # per tick toward the target -- a scripted lunge with no attack shape of
+    # its own, the same pattern already confirmed for Signal's slide
+    # (enemy-ai.md "Signal's slide is velocity, not a hitbox") but faster on
+    # both axes. This state, not a wider whip box, is what closes the gap a
+    # human sees as "she takes a quick step in and hits" -- ATTACKING, which
+    # is what lets check_for_incoming_melee's velocity projection
+    # (reach.enemy_will_close_soon) see it coming from her real grunt_vel_x/
+    # grunt_vel_y instead of the AI discovering it only once already hit.
+    0x26: {
+        0x08: CombatPhase.ATTACKING,
+        0x0A: CombatPhase.ATTACKING,
+        0x0B: CombatPhase.STUNNED,
+        0x0C: CombatPhase.STUNNED,
+        0x0F: CombatPhase.STUNNED,
+        0x10: CombatPhase.KNOCKDOWN,
+        0x12: CombatPhase.BLOCKED,
+        0x13: CombatPhase.CHARGE,
+        0x14: CombatPhase.CHARGE,
+        0x15: CombatPhase.ATTACKING,
     },
 }
 
@@ -150,7 +213,7 @@ def ordinary_enemy_phase(
     if hi == mm.ENEMY_ST_BLOCKED:
         return CombatPhase.BLOCKED
     if type_id is not None:
-        family = _GARCIA_MOVE_PHASES.get(type_id & 0xFF)
+        family = _TYPE_SPECIFIC_MOVE_PHASES.get(type_id & 0xFF)
         if family is not None:
             return family.get((primary_state_word >> 8) & 0xFF, CombatPhase.NORMAL)
     return CombatPhase.UNKNOWN

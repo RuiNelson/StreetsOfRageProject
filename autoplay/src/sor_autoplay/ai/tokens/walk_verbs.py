@@ -80,9 +80,10 @@ class WalkToWeapon(Walk):
     than what this actor holds -- never just the best one;
     determine_priority_verb picks among the candidates.
 
-    Raises emergency: WeaponUpgrade×3+rank
-    (rank 2..5, so a better upgrade among several outranks a lesser one;
-    see priority._emergency_walk_to_weapon).
+    Raises emergency: WeaponUpgrade×12+rank
+    (rank 2..5, so a better upgrade among several outranks a lesser one, and
+    every rank clears WalkToNearEnemy's floor(8) outright rather than merely
+    tying it -- see priority._emergency_walk_to_weapon).
     """
 
     priority: int = 22
@@ -100,7 +101,7 @@ class WalkToPickup(Walk):
     tiers below.
 
     Raises emergency: (HealthPickup when the actor's health is critical)×50,
-    HealthPickup×15, LifePickup×12, SpecialPickup×9, ScorePickup×3.
+    HealthPickup×15, LifePickup×12, SpecialPickup×11, ScorePickup×9.
 
     Priority sits above stage advance and below weapons: a needed health item
     outranks wandering, but a weapon upgrade is usually more durable value

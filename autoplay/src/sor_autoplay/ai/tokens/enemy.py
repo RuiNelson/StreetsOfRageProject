@@ -115,9 +115,36 @@ class HakuRo(Grunt):
     """HakuRo ordinary enemy (types $25, $2A)."""
 
 
+# Default for a Nora the tracker has no history for yet (no NoraAttackTracker
+# supplied to generate_direct_observation_tokens, or a slot observed for the
+# first time this tick): large enough that nothing downstream mistakes an
+# unobserved Nora for one that has recently attacked. Not a frame count --
+# ticks_since_last_attack counts AI poll ticks (observe.NoraAttackTracker),
+# same unit as reach.CLOSING_ENEMY_THREAT_TICKS.
+NORA_TICKS_SINCE_ATTACK_UNKNOWN = 1_000
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Nora(Grunt):
-    """Nora ordinary enemy (type $26)."""
+    """Nora ordinary enemy (type $26).
+
+    ``ticks_since_last_attack`` is cross-tick memory, not a RAM field: it
+    counts AI poll ticks since this exact enemy slot was last observed in a
+    dangerous phase (``phases.is_dangerous`` -- her whip engage-and-swing at
+    state ``$08``/``$0A`` or the scripted lunge at ``$15``, per ``phases.py``'s
+    ``0x26`` table), reset to 0 while she is dangerous and counting up once
+    she stops. Maintained by ``observe.NoraAttackTracker`` and defaulted here
+    to :data:`NORA_TICKS_SINCE_ATTACK_UNKNOWN` for any caller that builds a
+    ``Nora`` without going through it (tests, or a tick with no tracker
+    supplied) -- see that class for why this is the one deliberate exception
+    to this pipeline's usual per-tick statelessness. Small values are the
+    signal ``priority._emergency_jump_attack`` uses to prefer a jump kick in
+    the brief window before she can attack again -- see
+    ``ai-analysis/enemy-ai.md``'s Nora state-8 swing loop, which can repeat
+    up to three times before she gives up and returns to normal chase.
+    """
+
+    ticks_since_last_attack: int = NORA_TICKS_SINCE_ATTACK_UNKNOWN
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

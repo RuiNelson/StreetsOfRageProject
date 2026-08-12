@@ -5,20 +5,75 @@ Per ``AI.md``, this reuses the HUD's own RAM poll/analysis rather than
 duplicating it: callers must pass in a ``GameSnapshot`` already produced by
 ``sor_autoplay.state.read_snapshot`` (or an equivalent fixture in tests).
 This module never reads RAM and never calls ``read_snapshot`` itself.
+
+``NoraAttackTracker`` is the one exception to ``generate_direct_observation_
+tokens`` otherwise being a pure function of its ``GameSnapshot`` argument --
+see its own docstring for why ``Nora.ticks_since_last_attack`` needs cross-
+tick memory that a single snapshot cannot supply.
 """
 
 from __future__ import annotations
 
-from sor_autoplay.phases import CombatPhase, player_phase
+from sor_autoplay.phases import CombatPhase, is_dangerous, player_phase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 from sor_autoplay.world_map import MapEntity
 
 from .tokens import Myself, Partner
-from .tokens import Boss, Enemy, Grunt, Jack, enemy_class_for_type
+from .tokens import Boss, Enemy, Grunt, Jack, Nora, enemy_class_for_type
 from .tokens import AnimationInProgress, CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile
+from .tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
 from .tokens import Weapon, build_pickup_token
 from .tokens import Context
+
+
+class NoraAttackTracker:
+    """Cross-tick memory of how long ago each on-screen Nora last attacked.
+
+    The one deliberate exception to this pipeline's usual statelessness --
+    AI.md's process loop rebuilds every token fresh from a single
+    ``GameSnapshot`` every tick, and ``execute.py``'s own docstring is
+    explicit that there is "no separate, longer-lived state kept between
+    ticks beyond the game's own RAM and the virtual gamepad's sticky hold".
+    This mirrors that hold's own precedent (``gamepad.py``'s ``steer_x``):
+    a single poll is a snapshot, never a transition, and "how long since
+    *this* Nora last attacked" is a transition-derived fact no single tick's
+    ``combat_phase`` can answer by itself.
+
+    Owned per ``AgentLoop`` instance -- one per AI-controlled player, the
+    same granularity every other piece of per-tick state in this codebase
+    already uses -- so it never needs to reconcile two players' views of the
+    same enemy. :meth:`forget_missing` must be called every tick with the
+    slots actually observed as a live Nora this tick, or a slot's stale
+    count would otherwise be inherited by whatever enemy the game later
+    reuses that slot for.
+    """
+
+    def __init__(self) -> None:
+        self._ticks: dict[str, int] = {}
+
+    def update(self, slot: str, *, dangerous: bool) -> int:
+        """Advance one Nora's counter by a tick and return its new value.
+
+        Reset to 0 while ``dangerous`` (``phases.is_dangerous`` on her
+        current ``combat_phase``) -- covering her whole whip engage-and-swing
+        state and the lunge's windup and strike alike, so the count starts
+        climbing from the moment she actually stops being dangerous, not
+        from whichever of those sub-states happened to be sampled.
+        """
+
+        ticks = 0 if dangerous else self._ticks.get(slot, 0) + 1
+        self._ticks[slot] = ticks
+        return ticks
+
+    def forget_missing(self, live_slots: frozenset[str]) -> None:
+        """Drop every tracked slot not in ``live_slots``, so a slot the game
+        later reuses for a different enemy starts over rather than
+        inheriting a stale count."""
+
+        for slot in tuple(self._ticks):
+            if slot not in live_slots:
+                del self._ticks[slot]
 
 
 def _stage_direction(level_index: int) -> str:
@@ -91,9 +146,13 @@ def _maybe_animation_in_progress(entity: MapEntity) -> AnimationInProgress | Non
 
 
 def generate_direct_observation_tokens(
-    snapshot: GameSnapshot, *, player_index: int
+    snapshot: GameSnapshot,
+    *,
+    player_index: int,
+    nora_tracker: NoraAttackTracker | None = None,
 ) -> Context:
     context: Context = set()
+    live_nora_slots: set[str] = set()
 
     myself_snapshot = snapshot.players[player_index - 1]
     myself_entity = _find_player_entity(snapshot, player_index)
@@ -132,6 +191,15 @@ def generate_direct_observation_tokens(
                 extra["stun_timer"] = entity.stun_timer
             if cls is Jack:
                 extra["has_projectile"] = bool(entity.family_state & 0x01)
+            elif cls is Nora:
+                live_nora_slots.add(entity.slot)
+                extra["ticks_since_last_attack"] = (
+                    nora_tracker.update(
+                        entity.slot, dangerous=is_dangerous(entity.combat_phase)
+                    )
+                    if nora_tracker is not None
+                    else NORA_TICKS_SINCE_ATTACK_UNKNOWN
+                )
             elif issubclass(cls, Boss):
                 extra.update(
                     tactical=entity.tactical,
@@ -208,6 +276,9 @@ def generate_direct_observation_tokens(
                         hitbox=entity.hitbox,
                     )
                 )
+
+    if nora_tracker is not None:
+        nora_tracker.forget_missing(frozenset(live_nora_slots))
 
     for hole in snapshot.floor_holes:
         context.add(

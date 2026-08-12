@@ -68,6 +68,7 @@ from .enemy import (
     IncomingMelee,
     Jack,
     MrX,
+    NORA_TICKS_SINCE_ATTACK_UNKNOWN,
     Nora,
     Onihime,
     PunishWindow,
