@@ -356,7 +356,9 @@ class OpenBreakable(Attack):
 
     Produced by ``could_open_breakable`` once per in-camera ``Breakable``
     that is either already in smash range or ahead on the stage path --
-    never just the nearest; determine_priority_verb picks among them.
+    never a crate already behind (walking back to one, then advancing
+    past it again, is the WalkToAdvanceStage limit cycle), and never just
+    the nearest; determine_priority_verb picks among them.
 
     Raises emergency: (Breakable in smash range)×16, Breakable×14 otherwise,
     closer scoring higher (distance-scored; see

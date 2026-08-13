@@ -18,7 +18,18 @@ from sor_autoplay.ai.execute import execute_verb
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.priority import determine_priority_verb
-from sor_autoplay.ai.tokens import CameraRange, Enemy, Myself, Stage, Verb, find, find_all
+from sor_autoplay.ai.tokens import (
+    Breakable,
+    CameraRange,
+    Enemy,
+    Myself,
+    OpenBreakable,
+    Stage,
+    Verb,
+    WalkToAdvanceStage,
+    find,
+    find_all,
+)
 from sor_autoplay.phases import CombatPhase
 
 UP = 0x0001
@@ -536,6 +547,114 @@ def _run_jump(enemy_x: int, frames: int = 40, enemy_vel: int = 0) -> dict:
             action = 0x02
         enemy_x += enemy_vel
     return result
+
+
+class BreakableAdvanceStabilityTests(unittest.TestCase):
+    """OpenBreakable vs WalkToAdvanceStage must not hand a crate back and
+    forth. Reported from play as the HUD flipping WalkToBreakable /
+    WalkToAdvanceStage for as long as a prop was on screen: the approach
+    score (14 down to 8) crosses the advance's flat 12 around 30-45px,
+    and the around-path walking left off a same-X crate made the hypot
+    distance grow until advance won, walked right, and handed it back."""
+
+    def _run_crate(
+        self, *, ticks: int, actor_x: int, actor_y: int, prop_x: int, prop_y: int
+    ) -> tuple[list[int], list[str]]:
+        masks: list[int] = []
+        names: list[str] = []
+        ax, ay, facing_left = actor_x, actor_y, False
+        client = _FakeClient()
+        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+        for _ in range(ticks):
+            context = {
+                _actor(ax, ay, facing_left),
+                Breakable(slot="obj09", world_x=prop_x, world_y=prop_y, type_id=0x40),
+                CameraRange(left=-100, right=500, top=0, bottom=112),
+                Stage(level_index=0, direction="right"),
+            }
+            context |= generate_inference_tokens(context)
+            context |= generate_verb_tokens(context)
+            context = determine_priority_verb(context)
+
+            verbs = find_all(context, Verb)
+            if verbs:
+                execute_verb(verbs[0], context, gamepad)
+            held = client.held
+            masks.append(held)
+            names.append(type(verbs[0]).__name__ if verbs else "")
+
+            if held & RIGHT:
+                ax += STEP_X
+                facing_left = False
+            elif held & LEFT:
+                ax -= STEP_X
+                facing_left = True
+            if held & DOWN:
+                ay += STEP_Y
+            elif held & UP:
+                ay -= STEP_Y
+        return masks, names
+
+    def test_does_not_flip_between_opening_and_advancing_at_a_crate(self) -> None:
+        # Same-lane crate ~60px ahead: far enough that the old approach
+        # score sat at or under WalkToAdvanceStage's 12, so every other
+        # tick swapped the verb and the D-pad reversed.
+        masks, names = self._run_crate(
+            ticks=24, actor_x=100, actor_y=64, prop_x=160, prop_y=64
+        )
+
+        self.assertNotIn(
+            WalkToAdvanceStage.__name__,
+            names,
+            f"WalkToAdvanceStage took ticks while a crate sat ahead: {names}",
+        )
+        self.assertTrue(
+            all(name == OpenBreakable.__name__ for name in names),
+            f"expected OpenBreakable throughout, got {names}",
+        )
+        self.assertLessEqual(
+            _reversals(masks, RIGHT, LEFT),
+            1,
+            f"horizontal direction chattered at a crate: {[hex(m) for m in masks]}",
+        )
+
+    def test_does_not_flip_when_the_crate_is_on_a_different_lane(self) -> None:
+        # The around-path holds Y and walks out to the smash X, which
+        # grows hypot-distance and used to drop the approach score below
+        # 12 -- the exact live loop.
+        masks, names = self._run_crate(
+            ticks=24, actor_x=160, actor_y=40, prop_x=160, prop_y=80
+        )
+
+        self.assertNotIn(
+            WalkToAdvanceStage.__name__,
+            names,
+            f"WalkToAdvanceStage interrupted the around-path: {names}",
+        )
+        self.assertLessEqual(
+            _reversals(masks, RIGHT, LEFT),
+            1,
+            f"around-path chattered left/right: {[hex(m) for m in masks]}",
+        )
+
+    def test_a_crate_already_behind_does_not_turn_the_actor_around(self) -> None:
+        masks, names = self._run_crate(
+            ticks=12, actor_x=200, actor_y=64, prop_x=80, prop_y=64
+        )
+
+        self.assertNotIn(
+            OpenBreakable.__name__,
+            names,
+            f"walked back to a crate already behind: {names}",
+        )
+        self.assertTrue(
+            all(name == WalkToAdvanceStage.__name__ for name in names),
+            f"expected WalkToAdvanceStage throughout, got {names}",
+        )
+        self.assertFalse(
+            any(mask & LEFT for mask in masks),
+            f"turned back toward a passed crate: {[hex(m) for m in masks]}",
+        )
 
 
 class JumpKickFlightTests(unittest.TestCase):

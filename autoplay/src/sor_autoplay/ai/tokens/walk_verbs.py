@@ -56,10 +56,11 @@ class WalkToAdvanceStage(Walk):
     Produced by ``could_walk_to_advance_stage`` when no live Enemy token
     remains anywhere -- except an off-screen enemy already at 0 health,
     which nothing in this pipeline will ever chase down to finish off (see
-    ``decide._advance_blocking_enemies``) -- and the stage has a progress
-    direction.
+    ``decide._advance_blocking_enemies``) -- no on-camera Breakable sits
+    on the stage path (``decide._advance_blocking_breakables``), and the
+    stage has a progress direction.
 
-    Raises emergency: (no blocking Enemy anywhere)×12.
+    Raises emergency: (no blocking Enemy or ahead Breakable)×12.
 
     Lowest of the Walk/Attack priorities: per AI.md, "picking up a weapon
     carries a higher priority than advancing to the next stage" -- this is

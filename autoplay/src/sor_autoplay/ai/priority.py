@@ -28,6 +28,7 @@ from .decide import (
     POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE,
     thrown_weapon_impact_point,
     thrown_weapon_would_connect,
+    _advance_blocking_breakables,
     _advance_blocking_enemies,
 )
 from .tokens import (
@@ -546,7 +547,7 @@ def _emergency_projectile_sidestep(verb: ProjectileSidestep, context: Context) -
 
 
 def _emergency_walk_to_advance_stage(verb: WalkToAdvanceStage, context: Context) -> int:
-    if _advance_blocking_enemies(context):
+    if _advance_blocking_enemies(context) or _advance_blocking_breakables(context):
         return _EMERGENCY_DEFAULT
     return _EMERGENCY_WALK_TO_ADVANCE_STAGE
 

@@ -1058,6 +1058,33 @@ class CouldWalkToAdvanceStageTests(unittest.TestCase):
 
         self.assertEqual(result, {WalkToAdvanceStage(actor_slot="P1", direction="left")})
 
+    def test_does_not_fire_when_a_breakable_sits_ahead_on_the_path(self) -> None:
+        # A crate blocks lateral progress. Producing WalkToAdvanceStage next
+        # to OpenBreakable is the limit cycle: the HUD flipped between them
+        # for as long as a prop was on screen.
+        myself = make_myself(world_x=100, world_y=100)
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+        stage = Stage(level_index=0, direction="right")
+        prop = Breakable(slot="obj09", world_x=200, world_y=100, type_id=0x40)
+        context: set[Token] = {myself, camera, stage, prop}
+
+        self.assertEqual(could_walk_to_advance_stage(context), set())
+
+    def test_fires_when_the_only_breakable_is_already_behind(self) -> None:
+        # A crate the actor has already walked past must not hold back
+        # advance -- otherwise every smashed-or-passed prop turns the
+        # actor around.
+        myself = make_myself(world_x=200, world_y=100)
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+        stage = Stage(level_index=0, direction="right")
+        prop = Breakable(slot="obj09", world_x=100, world_y=100, type_id=0x40)
+        context: set[Token] = {myself, camera, stage, prop}
+
+        self.assertEqual(
+            could_walk_to_advance_stage(context),
+            {WalkToAdvanceStage(actor_slot="P1", direction="right")},
+        )
+
 
 class CouldCallPoliceTests(unittest.TestCase):
     def test_fires_when_health_is_critical(self) -> None:
@@ -1790,6 +1817,18 @@ class CouldOpenBreakableTests(unittest.TestCase):
         result = could_open_breakable(context)
 
         self.assertEqual(result, {OpenBreakable(actor_slot="P1", target_slot="obj09")})
+
+    def test_does_not_walk_back_to_a_breakable_already_behind(self) -> None:
+        # The old fallback (if nothing is ahead, consider every crate)
+        # made the actor turn around after walking past one, then
+        # WalkToAdvanceStage walked past it again.
+        myself = make_myself(world_x=200, world_y=0)
+        camera = CameraRange(left=-50, right=400, top=-50, bottom=200)
+        stage = Stage(level_index=0, direction="right")
+        prop = Breakable(slot="obj09", world_x=60, world_y=0, type_id=0x40)
+        context: set[Token] = {myself, camera, stage, prop}
+
+        self.assertEqual(could_open_breakable(context), set())
 
 
 class JackJugglingMeleeTests(unittest.TestCase):

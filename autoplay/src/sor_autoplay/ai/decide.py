@@ -110,6 +110,11 @@ BREAKABLE_PUNCH_Y = 16
 # actor must walk out of before changing lane.
 BREAKABLE_BLOCK_X = 28
 BREAKABLE_BLOCK_Y = 20
+# How far past a prop the actor can step and still treat it as "ahead" on
+# the stage path. Without this slack, one pixel past the origin dropped
+# OpenBreakable and handed the tick to WalkToAdvanceStage, which walked
+# straight back into the crate -- the two verbs flipping every few ticks.
+BREAKABLE_AHEAD_SLACK = 8
 
 
 def _is_holding_enemy(actor: PlayableCharacter) -> bool:
@@ -604,6 +609,57 @@ def could_projectile_sidestep(context: Context) -> Context:
     return verbs
 
 
+def _ahead_on_stage_path(stage: Stage | None, actor_x: int, target_x: int) -> bool:
+    """Whether ``target_x`` still sits on the way to stage progress.
+
+    Shared by ``could_open_breakable`` (which props to walk to) and
+    ``_advance_blocking_breakables`` (which props hold back stage advance)
+    so the two cannot disagree about the same crate. No stage, or a stage
+    with no lateral direction, means every X is a candidate -- there is
+    nothing to be "behind".
+    """
+
+    if stage is None or stage.direction == "none":
+        return True
+    if stage.direction == "right":
+        return target_x >= actor_x - BREAKABLE_AHEAD_SLACK
+    if stage.direction == "left":
+        return target_x <= actor_x + BREAKABLE_AHEAD_SLACK
+    return True
+
+
+def _advance_blocking_breakables(context: Context) -> list[Breakable]:
+    """On-camera breakables sitting on the stage path.
+
+    A Breakable blocks lateral progress until destroyed. WalkToAdvanceStage
+    walking into one, then OpenBreakable walking back (or around) to smash
+    it, is a limit cycle: OpenBreakable's approach score is 14 down to 8
+    by distance, WalkToAdvanceStage is a flat 12, and they hand the tick
+    back and forth the moment hypot-distance crosses ~30-45px. Reported
+    from play as the HUD flipping WalkToBreakable / WalkToAdvanceStage
+    for as long as a crate was on screen.
+
+    Same camera and pit filters as ``could_open_breakable``, so a crate
+    this refuses to walk to cannot hold back advance either.
+    """
+
+    stage = find(context, Stage)
+    camera = find(context, CameraRange)
+    actors = _actors(context)
+    if not actors:
+        return []
+    actor = actors[0]
+    blocking: list[Breakable] = []
+    for prop in find_all(context, Breakable):
+        if camera is not None and not reach.in_camera(camera, prop.world_x, prop.world_y):
+            continue
+        if reach.any_pit_endangers(context, prop.world_x, prop.world_y):
+            continue
+        if _ahead_on_stage_path(stage, actor.world_x, prop.world_x):
+            blocking.append(prop)
+    return blocking
+
+
 def _advance_blocking_enemies(context: Context) -> list[Enemy]:
     """Live enemies that should hold back stage advance.
 
@@ -640,6 +696,11 @@ def could_walk_to_advance_stage(context: Context) -> Context:
     a reason to hold position, not a "next wave cue" to push past. The one
     exception is an off-screen enemy already at 0 health -- see
     ``_advance_blocking_enemies``.
+
+    Also gated on an on-camera Breakable sitting on the stage path: a crate
+    blocks lateral progress until smashed, and producing this verb next to
+    OpenBreakable is what made the two flip every few ticks (see
+    ``_advance_blocking_breakables``).
     """
 
     verbs: set[Token] = set()
@@ -647,6 +708,8 @@ def could_walk_to_advance_stage(context: Context) -> Context:
     if stage is None or stage.direction == "none":
         return verbs
     if _advance_blocking_enemies(context):
+        return verbs
+    if _advance_blocking_breakables(context):
         return verbs
     for actor in _actors(context):
         if _blocked(context, actor):
@@ -1134,17 +1197,15 @@ def could_open_breakable(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
-        # Prefer props ahead on the stage path -- but a prop already within
-        # reach is worth opening whichever side of the actor it is on, since
-        # opening it costs only the B press.
-        ahead = breakables
-        if stage is not None and stage.direction == "right":
-            ahead = [b for b in breakables if b.world_x >= actor.world_x - 8]
-        elif stage is not None and stage.direction == "left":
-            ahead = [b for b in breakables if b.world_x <= actor.world_x + 8]
-        if not ahead:
-            ahead = breakables
-        candidates = {b.slot: b for b in ahead}
+        # Ahead on the stage path -- never a crate already behind, which
+        # used to be the ``if not ahead: ahead = breakables`` fallback and
+        # made the actor turn around after walking past one. A prop already
+        # within smash range is still worth the B press on either side.
+        candidates = {
+            b.slot: b
+            for b in breakables
+            if _ahead_on_stage_path(stage, actor.world_x, b.world_x)
+        }
         candidates.update({b.slot: b for b in breakables if in_smash_range(actor, b)})
         # One candidate per reachable breakable -- priority.py's distance-
         # scored emergency picks the closest one.

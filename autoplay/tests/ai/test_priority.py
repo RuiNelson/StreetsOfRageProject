@@ -33,7 +33,7 @@ from sor_autoplay.ai.tokens import (
     InContinueMenu,
     InMrXDialog,
 )
-from sor_autoplay.ai.tokens import CameraRange
+from sor_autoplay.ai.tokens import CameraRange, Stage
 from sor_autoplay.ai.tokens import Projectile
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.priority import determine_priority_verb as _rank_verbs
@@ -819,6 +819,27 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         verbs = find_all(result, Verb)
         self.assertEqual(len(verbs), 1)
         self.assertEqual(verbs[0].target_slot, "near")
+
+    def test_advance_stage_scores_zero_when_a_breakable_sits_ahead(self) -> None:
+        # Same gate as decide.could_walk_to_advance_stage, so an injected
+        # WalkToAdvanceStage cannot outrank OpenBreakable just because the
+        # crate is far enough for the approach score to drop below 12.
+        myself = _myself(world_x=0, world_y=64)
+        prop = Breakable(slot="obj01", world_x=200, world_y=64, type_id=0x40)
+        context = {
+            myself,
+            prop,
+            CameraRange(left=0, right=400, top=0, bottom=200),
+            Stage(level_index=0, direction="right"),
+            OpenBreakable(actor_slot="P1", target_slot="obj01"),
+            WalkToAdvanceStage(actor_slot="P1", direction="right"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], OpenBreakable)
 
     def test_open_breakable_scores_zero_when_target_missing(self) -> None:
         enemy = _enemy("obj02", CombatPhase.NORMAL)
