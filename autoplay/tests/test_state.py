@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from sor_autoplay.memory_map import (
     MAX_HEALTH,
@@ -10,6 +11,7 @@ from sor_autoplay.memory_map import (
     OBJECT_SLOT_SIZE,
 )
 from sor_autoplay.state import snapshot_from_memory_blocks
+from sor_autoplay.world_map import CAMERA_BYTES
 
 
 def _put_u8(buf: bytearray, offset: int, value: int) -> None:
@@ -176,6 +178,74 @@ class StateSnapshotTests(unittest.TestCase):
         self.assertEqual(snap.game_mode, "Character select")
         self.assertEqual(snap.p1.character_name, "Adam")
         self.assertEqual(snap.p1.lives, 3)
+
+
+class ElevatorStageHazardTests(unittest.TestCase):
+    """Stage 7 (level_index 6) is an elevator: its moving platform is not
+    represented by the class-0/2 collision map the same way ordinary terrain
+    is, so both pit and barrier detection would read class-map noise instead
+    of real hazards. Barrier solids were already skipped there; pits need
+    the identical carve-out, or a phantom ``Pit`` token reaches the AI
+    pipeline (``ai/observe.py`` builds one per ``snapshot.floor_holes``
+    entry, unconditionally) and the HUD draws a hole that was never there.
+    """
+
+    def _ingame_blocks(self, *, level_index: int) -> tuple[bytes, bytes, bytes, bytes]:
+        globals_block = bytearray(0x40)
+        timer_block = bytearray(4)
+        objects = bytearray(0x100)
+        camera_block = bytearray(CAMERA_BYTES)
+
+        _put_u16(globals_block, 0x00, 0x0016)  # in-game
+        _put_u16(globals_block, 0x02, level_index)
+        _put_u8(globals_block, 0x18, 0x01)  # P1 only
+        _put_u8(objects, OBJ_TYPE, 0x01)
+        _put_u16(objects, OBJ_HEALTH, MAX_HEALTH)
+        _put_u8(objects, OBJ_CHARACTER_ID, 0x00)
+
+        return bytes(globals_block), bytes(timer_block), bytes(objects), bytes(camera_block)
+
+    def test_holes_and_barriers_skipped_on_the_elevator_stage(self) -> None:
+        globals_block, timer_block, objects, camera_block = self._ingame_blocks(level_index=6)
+
+        with patch("sor_autoplay.state.holes_for_level") as holes_mock, patch(
+            "sor_autoplay.state.barriers_for_level"
+        ) as barriers_mock:
+            snap = snapshot_from_memory_blocks(
+                globals_block=globals_block,
+                timer_block=timer_block,
+                objects_block=objects,
+                camera_block=camera_block,
+                collision_map=b"\x11" * 64,
+                blockmap_stride=8,
+            )
+
+        holes_mock.assert_not_called()
+        barriers_mock.assert_not_called()
+        self.assertEqual(snap.floor_holes, ())
+        self.assertEqual(snap.floor_barriers, ())
+
+    def test_holes_and_barriers_computed_on_an_ordinary_stage(self) -> None:
+        globals_block, timer_block, objects, camera_block = self._ingame_blocks(level_index=0)
+
+        with patch("sor_autoplay.state.holes_for_level") as holes_mock, patch(
+            "sor_autoplay.state.barriers_for_level"
+        ) as barriers_mock:
+            holes_mock.return_value = ("a-hole",)
+            barriers_mock.return_value = ("a-barrier",)
+            snap = snapshot_from_memory_blocks(
+                globals_block=globals_block,
+                timer_block=timer_block,
+                objects_block=objects,
+                camera_block=camera_block,
+                collision_map=b"\x11" * 64,
+                blockmap_stride=8,
+            )
+
+        holes_mock.assert_called_once()
+        barriers_mock.assert_called_once()
+        self.assertEqual(snap.floor_holes, ("a-hole",))
+        self.assertEqual(snap.floor_barriers, ("a-barrier",))
 
 
 if __name__ == "__main__":

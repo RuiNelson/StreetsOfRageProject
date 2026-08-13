@@ -349,16 +349,22 @@ def snapshot_from_memory_blocks(
         and camera_block is not None
         and game_state in _GAMEPLAY_TIMER_STATES
     ):
-        holes = holes_for_level(
-            collision_map,
-            stride=blockmap_stride,
-            level_index=level_index,
-            camera_x=world.camera_x,
-        )
-        # Elevator stages use a moving platform not represented by class-0/2
-        # the same way; skip barrier solids there so class map noise cannot
-        # invent walls on the lift.
+        # Elevator stages (level_index 6, stage 7) use a moving platform not
+        # represented by class-0/2 the same way as ordinary terrain: the
+        # class map's own "floor" and "hole" cells do not track the lift, so
+        # both hole and barrier detection read class-map noise instead of
+        # real hazards there. Barrier solids were already skipped for this
+        # reason ("class map noise cannot invent walls on the lift"); holes
+        # need the identical carve-out, or a stage-7 breakable/enemy walk
+        # sees a phantom Pit token and dodges/reroutes around nothing, and
+        # the HUD draws a floor hole that was never there.
         if level_index != 6:
+            holes = holes_for_level(
+                collision_map,
+                stride=blockmap_stride,
+                level_index=level_index,
+                camera_x=world.camera_x,
+            )
             barriers = barriers_for_level(
                 collision_map,
                 stride=blockmap_stride,
