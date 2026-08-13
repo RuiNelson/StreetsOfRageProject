@@ -157,8 +157,17 @@ OBJ_JACK_WEAPON_ATTACHED = 0x52
 # Bit7 set → high_score_name_entry_dispatcher; clear → continue Yes/No table at $5236.
 OBJ_CONTINUE_UI_FLAGS = 0x4B
 OBJ_CONTINUE_NAME_ENTRY_BIT = 0x80
+# Name-entry cursor ($57D2): word slot 0/2/4 for the three initials, word
+# letter index 0..26 (A..Z then END). Only meaningful while bit7 of +$4B is set.
+OBJ_CONTINUE_NAME_SLOT = 0x60
+OBJ_CONTINUE_NAME_LETTER = 0x62
 # Continue Yes/No selection: 0 = YES, nonzero (bit0) = NO. Toggled by UP/DOWN.
+# Shared with the low byte of the name-entry letter word -- ignore unless
+# name-entry bit7 is clear.
 OBJ_CONTINUE_CHOICE = 0x63
+# Mr. X offer-choice bits in object+$59 (story-mode-and-campaign-flow.md §7.4).
+OBJ_MR_X_CHOICE_NO_BIT = 0x08  # bit 3 set → NO; clear → YES
+OBJ_MR_X_CHOICE_ACTIVE_BIT = 0x10  # bit 4 set → this player's choice UI is live
 OBJ_ACTION_FLAGS = 0x58  # player combo/action flags; bit5 queues next normal hit
 # Throw-landing tech flags (controls-and-input.md "C+Up landing tech"):
 # +$45 armed by special throw releases ($284A/$28A2/$2AA4); C-edge+Up latches +$46

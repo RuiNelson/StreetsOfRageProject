@@ -172,3 +172,28 @@ class ProjectileSidestep(Walk):
     priority: int = 23
     actor_slot: str
     target_slot: str  # Projectile.slot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DodgeAntonioKick(Walk):
+    """Leave Antonio's kick lane -- or hop over the kick -- before it lands.
+
+    Produced by ``could_dodge_antonio_kick`` once per ``AntonioIsGoingToKick``
+    for this actor. The ROM's kick gate at ``$16EAE`` requires the target
+    to share Antonio's lane (``+$52 < $10``, or ``< $08`` when ``+$61`` is
+    set) and to sit inside a velocity-selected X window; standing still in
+    that window is itself a trigger. Sidestepping off the lane breaks the
+    gate; jumping over a kick that is already committed (primary state 2)
+    clears the ground hit. The executor picks which of those two the
+    current tick needs.
+
+    Raises emergency: AntonioIsGoingToKick×58 -- above HitAntonioBoomerang
+    (52) and every strike on an Antonio that can still act (20), because
+    standing still to punch is exactly what arms the kick. Below
+    CounterGrab/TechRecover/CallPolice, which stay the only answers to
+    those situations.
+    """
+
+    priority: int = 24
+    actor_slot: str
+    target_slot: str  # Antonio.slot

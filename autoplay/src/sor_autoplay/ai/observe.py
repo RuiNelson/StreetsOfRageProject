@@ -20,7 +20,7 @@ from sor_autoplay.world_map import MapEntity
 
 from .tokens import Myself, Partner
 from .tokens import Boss, Enemy, Grunt, Jack, Nora, enemy_class_for_type
-from .tokens import AnimationInProgress, CameraRange, Stage
+from .tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, Stage
 from .tokens import Breakable, Pit, Projectile
 from .tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
 from .tokens import Weapon, build_pickup_token
@@ -121,6 +121,7 @@ def _build_playable_character(
         action_flags=entity.action_flags,
         tech_armed=entity.tech_armed,
         hitbox=entity.hitbox,
+        vel_x=entity.player_vel_x,
     )
 
 
@@ -155,6 +156,23 @@ def generate_direct_observation_tokens(
     live_nora_slots: set[str] = set()
 
     myself_snapshot = snapshot.players[player_index - 1]
+    if myself_snapshot.is_continue_ui:
+        context.add(
+            InContinueMenu(
+                slot=f"P{player_index}",
+                name_entry=myself_snapshot.name_entry_active,
+                selects_no=myself_snapshot.continue_selects_no,
+                name_slot=myself_snapshot.name_slot,
+                name_letter_index=myself_snapshot.name_letter_index,
+            )
+        )
+    if snapshot.mr_x_offer_flag and myself_snapshot.mr_x_choice_active:
+        context.add(
+            InMrXDialog(
+                slot=f"P{player_index}",
+                selects_no=myself_snapshot.mr_x_selects_no,
+            )
+        )
     myself_entity = _find_player_entity(snapshot, player_index)
     if myself_entity is not None:
         context.add(
@@ -212,6 +230,7 @@ def generate_direct_observation_tokens(
                     ground_z=entity.ground_z,
                     vel_x=entity.vel_x,
                     vel_z=entity.vel_z,
+                    primary_state=entity.action_state,
                 )
             context.add(
                 cls(

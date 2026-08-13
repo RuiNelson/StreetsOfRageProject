@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from .tokens import (
     CounterGrab,
+    DodgeAntonioKick,
     FlipHold,
     GrabEnemy,
+    HitAntonioBoomerang,
     JumpAttack,
     AttackHeldEnemy,
     Punch,
@@ -42,8 +44,18 @@ from .tokens import CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile, SafeSpot
 from .tokens import Pickup, Weapon
 from .tokens import CallPolice
+from .tokens import (
+    NAME_ALPHABET_SIZE,
+    NAME_LETTER_A,
+    NAME_LETTER_I,
+    HandleContinueMenu,
+    HandleMrXDialog,
+    InContinueMenu,
+    InMrXDialog,
+)
 from .tokens import Context, Verb, find, find_all
 from .tokens import (
+    DodgeAntonioKick,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -71,8 +83,10 @@ RIGHT_MASK = 0x0008
 PUNCH_MASK = 0x0020  # physical B
 CALL_POLICE_MASK = 0x0010  # physical A
 JUMP_MASK = 0x0040  # physical C
+START_MASK = 0x0080
 PUNCH_FRAMES = 4
 CALL_POLICE_FRAMES = 4
+DIALOG_FRAMES = 4
 SUPPLEX_FRAMES = 4
 THROW_KNIFE_FRAMES = 4
 THROW_PEPPER_FRAMES = 4
@@ -736,6 +750,32 @@ def state_machine_projectile_sidestep(
     _walk_toward_target(verb, context, gamepad, Projectile, _projectile_sidestep_target)
 
 
+def state_machine_dodge_antonio_kick(
+    verb: DodgeAntonioKick, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Hop over the kick/dash, then kick.
+
+    A ground sidestep never leaves the ROM's X-velocity kick gate
+    (measured: minutes of sidestep, 0 damage dealt). Reuses the jump-
+    kick state machine so the airborne B edge punishes.
+    """
+
+    state_machine_jump_attack(verb, context, gamepad)
+
+
+def state_machine_hit_antonio_boomerang(
+    verb: HitAntonioBoomerang, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Face the boomerang and press B -- the same input as a punch."""
+
+    actor = _find_actor(context, verb.actor_slot)
+    projectile = find(context, Projectile, slot=verb.target_slot)
+    face = 0
+    if actor is not None and projectile is not None:
+        face = _face_toward_mask(actor, projectile.world_x)
+    _press(gamepad, PUNCH_MASK | face, frames=PUNCH_FRAMES)
+
+
 def state_machine_walk_to_advance_stage(
     verb: WalkToAdvanceStage, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -811,6 +851,74 @@ def state_machine_tech_recover(verb: TechRecover, context: Context, gamepad: Vir
 
 def state_machine_call_police(verb: CallPolice, context: Context, gamepad: VirtualGamepad) -> None:
     _press(gamepad, CALL_POLICE_MASK, frames=CALL_POLICE_FRAMES)
+
+
+def _name_entry_letter_mask(current: int, target: int) -> int:
+    """One Left/Right edge toward ``target``, or 0 when already there.
+
+    $57D2 wraps the 0..26 alphabet (A..Z, END) on both edges, so the short
+    way around is at most 13 steps.
+    """
+
+    delta = (target - current) % NAME_ALPHABET_SIZE
+    if delta == 0:
+        return 0
+    if delta <= NAME_ALPHABET_SIZE // 2:
+        return RIGHT_MASK
+    return LEFT_MASK
+
+
+def _name_entry_target_letter(name_slot: int) -> int | None:
+    """Letter the AI wants in this slot, or ``None`` to finish the entry.
+
+    Slot is object+$60 (0/2/4 for the three initials). ``AI `` is A then I
+    then finish: the third character stays the cleared-to-zero space.
+    """
+
+    if name_slot == 0:
+        return NAME_LETTER_A
+    if name_slot == 2:
+        return NAME_LETTER_I
+    return None
+
+
+def state_machine_handle_continue_menu(
+    verb: HandleContinueMenu, context: Context, gamepad: VirtualGamepad
+) -> None:
+    menu = find(context, InContinueMenu, slot=verb.actor_slot)
+    if menu is None:
+        press_no_button(gamepad)
+        return
+    if menu.name_entry:
+        target = _name_entry_target_letter(menu.name_slot)
+        if target is None:
+            _press(gamepad, START_MASK, frames=DIALOG_FRAMES)
+            return
+        step = _name_entry_letter_mask(menu.name_letter_index, target)
+        if step:
+            _press(gamepad, step, frames=DIALOG_FRAMES)
+            return
+        _press(gamepad, PUNCH_MASK, frames=DIALOG_FRAMES)
+        return
+    if menu.selects_no:
+        # $52AE toggles +$63 on any UP/DOWN edge of the global press byte.
+        _press(gamepad, UP_MASK, frames=DIALOG_FRAMES)
+        return
+    _press(gamepad, PUNCH_MASK, frames=DIALOG_FRAMES)
+
+
+def state_machine_handle_mr_x_dialog(
+    verb: HandleMrXDialog, context: Context, gamepad: VirtualGamepad
+) -> None:
+    dialog = find(context, InMrXDialog, slot=verb.actor_slot)
+    if dialog is None:
+        press_no_button(gamepad)
+        return
+    # $120EC reads *held* +$54: Down sets bit 3 (NO), a face bit confirms.
+    if not dialog.selects_no:
+        gamepad.hold(DOWN_MASK)
+        return
+    _press(gamepad, PUNCH_MASK, frames=DIALOG_FRAMES)
 
 
 # The jump, state by state (controls-and-input.md "Action state machine"),
@@ -1135,6 +1243,8 @@ _HANDLERS = {
     WalkToNearEnemy: state_machine_walk_to_near_enemy,
     RetreatFromDanger: state_machine_retreat_from_danger,
     ProjectileSidestep: state_machine_projectile_sidestep,
+    DodgeAntonioKick: state_machine_dodge_antonio_kick,
+    HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,
     Punch: state_machine_melee_strike,
     SwingBatOrPipe: state_machine_melee_strike,
@@ -1144,6 +1254,8 @@ _HANDLERS = {
     CounterGrab: state_machine_counter_grab,
     TechRecover: state_machine_tech_recover,
     CallPolice: state_machine_call_police,
+    HandleContinueMenu: state_machine_handle_continue_menu,
+    HandleMrXDialog: state_machine_handle_mr_x_dialog,
     JumpAttack: state_machine_jump_attack,
     GrabEnemy: state_machine_grab_enemy,
     Supplex: state_machine_supplex,

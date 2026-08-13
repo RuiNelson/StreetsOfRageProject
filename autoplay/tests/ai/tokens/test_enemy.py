@@ -27,6 +27,7 @@ from sor_autoplay.ai.tokens import (
     InJumpAttackReach,
     InPunchReach,
     InRearReach,
+    AntonioIsGoingToKick,
     IncomingMelee,
     PunishWindow,
     Surrounded,
@@ -194,6 +195,12 @@ class EnemyHierarchyTests(unittest.TestCase):
         self.assertIsInstance(mrx, Enemy)
         self.assertEqual(abadede.tactical, 0)
         self.assertIsNone(abadede.ground_z)
+
+    def test_antonio_is_going_to_kick_is_inferred(self) -> None:
+        self.assertTrue(issubclass(AntonioIsGoingToKick, Inferred))
+        token = AntonioIsGoingToKick(actor_slot="P1", target_slot="obj09")
+        self.assertEqual(token.actor_slot, "P1")
+        self.assertEqual(token.target_slot, "obj09")
 
     def test_boss_extra_fields_round_trip(self) -> None:
         souther = Souther(

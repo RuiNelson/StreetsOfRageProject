@@ -180,6 +180,9 @@ class MapEntity:
     # from the boss vel_x/vel_z above -- see memory_map.py).
     enemy_vel_x: float = 0.0  # +$1C signed 16.16
     enemy_vel_y: float = 0.0  # +$20 signed 16.16 (lane)
+    # Player X velocity at +$1C (same offset as ordinary-enemy X). Antonio's
+    # kick gate reads this word on the targeted player.
+    player_vel_x: float = 0.0
     combat_phase: CombatPhase = CombatPhase.UNKNOWN
     # The object's real body AABB. A player reads its own cached box straight
     # out of the object (+$70, written every frame by $4140) and needs no ROM
@@ -549,6 +552,7 @@ def _entity_from_object(
     vel_z = 0.0
     enemy_vel_x = 0.0
     enemy_vel_y = 0.0
+    player_vel_x = 0.0
     phase = CombatPhase.UNKNOWN
 
     if style.kind == "player":
@@ -561,6 +565,8 @@ def _entity_from_object(
         combo = _u8(slot, mm.OBJ_COMBO_STATE)
         facing_left = bool(action_state & 0x01)
         phase = player_phase(action_byte=action_state, held_type=held_type)
+        # Same +$1C X-velocity word Antonio's kick gate ($16EAE) reads.
+        player_vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X_ORDINARY)
     elif style.kind == "enemy":
         target_ptr = _u16(slot, mm.OBJ_TARGET_PTR)
         attacker_ptr = _u16(slot, mm.OBJ_ATTACKER_PTR)
@@ -668,6 +674,7 @@ def _entity_from_object(
         vel_z=vel_z,
         enemy_vel_x=enemy_vel_x,
         enemy_vel_y=enemy_vel_y,
+        player_vel_x=player_vel_x,
         boss_dist_lane=boss_dist_lane,
         combat_phase=phase,
     )

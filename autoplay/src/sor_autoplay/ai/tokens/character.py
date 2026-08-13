@@ -192,6 +192,10 @@ class PlayableCharacter(Character, ABC):
     action_flags: int = 0
     tech_armed: int = 0  # player +$45; bounce-cancel tech may still be latched
     hitbox: Hitbox | None = None
+    # Player X velocity at +$1C (signed 16.16, px per 60 Hz frame). Antonio's
+    # kick gate at $16EAE reads this exact word: a value of 0 is the
+    # standing-still path that fires the power kick during a ground combo.
+    vel_x: float = 0.0
 
     @property
     def action_base(self) -> int:

@@ -219,6 +219,9 @@ class Boss(Enemy, ABC):
     ground_z: int | None = None  # later-type +$4C ground/landing height
     vel_x: float = 0.0  # +$20 signed 16.16, ROM units per tick
     vel_z: float = 0.0  # +$24 signed 16.16, ROM units per tick
+    # Boss primary byte at +$30 (MapEntity.action_state). Antonio's kick is
+    # primary $02; the 1→2 transition is what AntonioIsGoingToKick predicts.
+    primary_state: int = 0
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -238,7 +241,14 @@ class Souther(Boss):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Antonio(Boss):
-    """Antonio boss (type $56)."""
+    """Antonio boss (type $56).
+
+    Primary state 1 (``$16DA0``) is active combat: facing, boomerang
+    maintain/throw (tactical ``$08``), and the proximity/velocity/facing
+    gate that advances him to state 2. Primary state 2 (``$171CC``) is the
+    committed close-range power kick. ``AntonioIsGoingToKick`` is the
+    inference that names that transition before -- and while -- it lands.
+    """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -485,3 +495,24 @@ class Surrounded(Inferred):
     actor_slot: str
     in_front: int
     behind: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AntonioIsGoingToKick(Inferred):
+    """Antonio is in -- or about to enter -- his close-range power kick.
+
+    Produced by ``inference.check_for_antonio_kick`` for a live ``Antonio``
+    whose ROM kick gate at ``$16EAE`` is already satisfied (state 1, target
+    available, X/lane inside the velocity-selected ``$50``/``$68``/``$78``
+    and ``$10`` windows) or who has already committed to primary state 2
+    (``$171CC antonio_state2_close_strike``). Standing still in front of
+    him is one of the trigger paths -- the player's own signature while
+    throwing a ground combo -- so this token exists to stop the AI punching
+    through a kick that will break the chain.
+
+    Reference-only: both ends are slot references, resolved with
+    ``find(context, Antonio, slot=...)`` / ``find(context, Myself, ...)``.
+    """
+
+    actor_slot: str
+    target_slot: str

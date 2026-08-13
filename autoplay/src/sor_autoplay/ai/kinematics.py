@@ -68,6 +68,7 @@ from .tokens import (
     Enemy,
     FlipHold,
     GrabEnemy,
+    HitAntonioBoomerang,
     JumpAttack,
     OpenBreakable,
     PlayableCharacter,
@@ -519,6 +520,7 @@ def no_aim_point_lead_frames(actor: PlayableCharacter, target: object = None) ->
 # about time" can never drift away from "all of them".
 ATTACK_CONNECT_FRAMES: dict[type[Attack], Callable[..., tuple[int, ...]]] = {
     Punch: melee_strike_connect_frames,
+    HitAntonioBoomerang: melee_strike_connect_frames,
     SwingBatOrPipe: melee_strike_connect_frames,
     StabWithKnifeOrBottle: melee_strike_connect_frames,
     SprayPepper: melee_strike_connect_frames,

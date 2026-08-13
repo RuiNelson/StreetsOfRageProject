@@ -1,9 +1,10 @@
 import unittest
 
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import Abadede, ClosingEnemy, Enemy, Garcia, Jack, Nora
+from sor_autoplay.ai.tokens import Abadede, Antonio, ClosingEnemy, Enemy, Garcia, Jack, Nora
 from sor_autoplay.ai.tokens import (
     ActionableTarget,
+    AntonioIsGoingToKick,
     GrabToClearRear,
     GrabIntoDeadZone,
     InGrabReach,
@@ -18,6 +19,9 @@ from sor_autoplay.ai.tokens import CameraRange, Pit, SafeSpot
 from sor_autoplay.ai.tokens import IncomingProjectile, Projectile
 from sor_autoplay.ai.tokens import Weapon, WeaponUpgrade
 from sor_autoplay.ai.inference import (
+    ANTONIO_BOOMERANG_TYPE_ID,
+    ANTONIO_KICK_DIST_STATIONARY,
+    check_for_antonio_kick,
     check_for_closing_enemies,
     check_for_grab_opportunities,
     check_for_incoming_melee,
@@ -866,6 +870,171 @@ class GenerateInferenceTokensTests(unittest.TestCase):
         generate_inference_tokens(context)
 
         self.assertEqual(context, original)
+
+
+def make_antonio(**overrides) -> Antonio:
+    fields = dict(
+        slot="obj09",
+        type_id=0x56,
+        world_x=200,
+        world_y=100,
+        health=40,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=1,
+        facing_left=True,
+        primary_state=1,
+        boss_dist_x=40,
+        boss_dist_lane=4,
+    )
+    fields.update(overrides)
+    return Antonio(**fields)
+
+
+class CheckForAntonioKickTests(unittest.TestCase):
+    def test_fires_when_already_in_state_2(self) -> None:
+        myself = make_myself(world_x=160, world_y=100)
+        antonio = make_antonio(
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            boss_dist_x=40,
+            boss_dist_lane=4,
+        )
+        result = check_for_antonio_kick({myself, antonio})
+        self.assertEqual(
+            result, {AntonioIsGoingToKick(actor_slot="P1", target_slot="obj09")}
+        )
+
+    def test_committed_kick_off_lane_is_not_a_threat(self) -> None:
+        myself = make_myself(world_x=160, world_y=100)
+        antonio = make_antonio(
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            boss_dist_x=40,
+            boss_dist_lane=24,
+        )
+        self.assertEqual(check_for_antonio_kick({myself, antonio}), set())
+
+    def test_fires_when_standing_still_inside_the_stationary_window(self) -> None:
+        myself = make_myself(world_x=160, world_y=100, vel_x=0.0)
+        antonio = make_antonio(
+            world_x=200,
+            facing_left=True,
+            boss_dist_x=40,
+            boss_dist_lane=4,
+            primary_state=1,
+        )
+        result = check_for_antonio_kick({myself, antonio})
+        self.assertEqual(
+            result, {AntonioIsGoingToKick(actor_slot="P1", target_slot="obj09")}
+        )
+
+    def test_fires_once_the_dash_is_committed(self) -> None:
+        myself = make_myself(world_x=3808, world_y=33)
+        antonio = make_antonio(
+            world_x=3848,
+            world_y=16,
+            boss_dist_x=40,
+            boss_dist_lane=17,
+            primary_state=1,
+            tactical=0x08,
+        )
+        result = check_for_antonio_kick({myself, antonio})
+        self.assertEqual(
+            result, {AntonioIsGoingToKick(actor_slot="P1", target_slot="obj09")}
+        )
+
+    def test_uncommitted_dash_window_is_not_enough(self) -> None:
+        # The dash *window* is the whole fight range; firing here made
+        # DodgeAntonioKick win every tick and never attack.
+        myself = make_myself(world_x=3808, world_y=33, vel_x=3.0)
+        antonio = make_antonio(
+            world_x=3848,
+            world_y=16,
+            boss_dist_x=40,
+            boss_dist_lane=17,
+            primary_state=1,
+            tactical=0,
+        )
+        self.assertEqual(check_for_antonio_kick({myself, antonio}), set())
+
+    def test_does_not_fire_when_off_lane(self) -> None:
+        myself = make_myself(world_x=160, world_y=100, vel_x=0.0)
+        antonio = make_antonio(
+            world_x=200,
+            boss_dist_x=40,
+            boss_dist_lane=24,
+            primary_state=1,
+        )
+        self.assertEqual(check_for_antonio_kick({myself, antonio}), set())
+
+    def test_does_not_fire_when_far_on_x(self) -> None:
+        myself = make_myself(world_x=40, world_y=100, vel_x=0.0)
+        antonio = make_antonio(
+            world_x=200,
+            boss_dist_x=0x80,  # 128, outside the dash window too
+            boss_dist_lane=4,
+            primary_state=1,
+        )
+        self.assertEqual(check_for_antonio_kick({myself, antonio}), set())
+
+    def test_does_not_fire_when_target_unavailable(self) -> None:
+        myself = make_myself(world_x=160, world_y=100)
+        antonio = make_antonio(target_unavailable=1, combat_phase=CombatPhase.ATTACKING)
+        self.assertEqual(check_for_antonio_kick({myself, antonio}), set())
+
+    def test_closing_uses_the_wider_window(self) -> None:
+        # Antonio faces left (looking at a player on his left). Player
+        # walking right (vel > 0) is walking toward him → $78 window.
+        myself = make_myself(world_x=100, world_y=100, vel_x=3.0)
+        antonio = make_antonio(
+            world_x=200,
+            facing_left=True,
+            boss_dist_x=0x70,  # 112, inside $78, outside $50/$68
+            boss_dist_lane=4,
+            primary_state=1,
+        )
+        result = check_for_antonio_kick({myself, antonio})
+        self.assertEqual(
+            result, {AntonioIsGoingToKick(actor_slot="P1", target_slot="obj09")}
+        )
+
+
+class AntonioBoomerangIncomingTests(unittest.TestCase):
+    def test_attached_boomerang_is_not_incoming(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        antonio = make_antonio(world_x=150, world_y=100)
+        boomerang = Projectile(
+            slot="obj10",
+            world_x=148,
+            world_y=100,
+            vel_x=-0.5,
+            vel_z=0.0,
+            type_id=ANTONIO_BOOMERANG_TYPE_ID,
+        )
+        self.assertEqual(
+            check_for_incoming_projectiles({myself, antonio, boomerang}), set()
+        )
+
+    def test_thrown_boomerang_is_incoming(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        antonio = make_antonio(world_x=300, world_y=100)
+        boomerang = Projectile(
+            slot="obj10",
+            world_x=150,
+            world_y=100,
+            vel_x=-8.0,
+            vel_z=0.0,
+            type_id=ANTONIO_BOOMERANG_TYPE_ID,
+        )
+        result = check_for_incoming_projectiles({myself, antonio, boomerang})
+        self.assertEqual(
+            result,
+            {
+                IncomingProjectile(
+                    slot="obj10", world_x=150, world_y=100, vel_x=-8.0, vel_z=0.0
+                )
+            },
+        )
 
 
 if __name__ == "__main__":

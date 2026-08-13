@@ -5,7 +5,7 @@ from sor_autoplay.ai import reach as reach_module
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay.ai.tokens import Abadede, Enemy, Garcia, Jack, Nora, Souther
-from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
+from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, Stage
 from sor_autoplay.ai.tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
 from sor_autoplay.ai.tokens import Pit, Projectile
 from sor_autoplay.ai.observe import NoraAttackTracker, generate_direct_observation_tokens
@@ -29,11 +29,20 @@ def _player_snapshot(
     health_percent: float | None = 100.0,
     lives: int = 3,
     specials: int = 2,
+    object_type: int | None = None,
+    name_entry_active: bool = False,
+    continue_selects_no: bool = False,
+    name_slot: int = 0,
+    name_letter_index: int = 0,
+    mr_x_choice_active: bool = False,
+    mr_x_selects_no: bool = False,
 ) -> PlayerSnapshot:
     return PlayerSnapshot(
         index=index,
         mode_active=is_playable,
-        object_type=1 if is_playable else 0,
+        object_type=(
+            object_type if object_type is not None else (1 if is_playable else 0)
+        ),
         character_id=character_id,
         character_name=character_name,
         health=health,
@@ -45,6 +54,12 @@ def _player_snapshot(
         continues=0,
         out_flag=0,
         is_playable=is_playable,
+        name_entry_active=name_entry_active,
+        continue_selects_no=continue_selects_no,
+        name_slot=name_slot,
+        name_letter_index=name_letter_index,
+        mr_x_choice_active=mr_x_choice_active,
+        mr_x_selects_no=mr_x_selects_no,
     )
 
 
@@ -243,6 +258,7 @@ def _snapshot(
     entities: tuple[MapEntity, ...] = (),
     level_index: int = 0,
     floor_holes: tuple[FloorHole, ...] = (),
+    mr_x_offer_flag: int = 0,
 ) -> GameSnapshot:
     return GameSnapshot(
         connected=True,
@@ -260,6 +276,7 @@ def _snapshot(
         players=players,
         world_map=_world_map(entities),
         floor_holes=floor_holes,
+        mr_x_offer_flag=mr_x_offer_flag,
     )
 
 
@@ -929,6 +946,64 @@ class NoraAttackTrackerObservationTests(unittest.TestCase):
         assert attacking is not None and idle is not None
         self.assertEqual(attacking.ticks_since_last_attack, 0)
         self.assertEqual(idle.ticks_since_last_attack, 1)
+
+
+class ContinueAndMrXObservationTests(unittest.TestCase):
+    def test_in_continue_menu_from_type_0f_object(self) -> None:
+        p1 = _player_snapshot(
+            index=1,
+            is_playable=False,
+            object_type=0x0F,
+            name_entry_active=True,
+            name_slot=2,
+            name_letter_index=8,
+        )
+        p2 = _player_snapshot(index=2, is_playable=False)
+        snapshot = _snapshot(players=(p1, p2))
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        menu = find(context, InContinueMenu)
+        self.assertEqual(
+            menu,
+            InContinueMenu(
+                slot="P1",
+                name_entry=True,
+                selects_no=False,
+                name_slot=2,
+                name_letter_index=8,
+            ),
+        )
+        self.assertIsNone(find(context, Myself))
+
+    def test_in_mr_x_dialog_needs_flag_and_choice_bit(self) -> None:
+        p1 = _player_snapshot(index=1, mr_x_choice_active=True, mr_x_selects_no=False)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        snapshot = _snapshot(
+            players=(p1, p2),
+            entities=(_player_entity(slot="P1"),),
+            mr_x_offer_flag=1,
+        )
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        self.assertEqual(
+            find(context, InMrXDialog),
+            InMrXDialog(slot="P1", selects_no=False),
+        )
+
+    def test_mr_x_flag_alone_does_not_produce_the_dialog(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        snapshot = _snapshot(
+            players=(p1, p2),
+            entities=(_player_entity(slot="P1"),),
+            mr_x_offer_flag=1,
+        )
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        self.assertIsNone(find(context, InMrXDialog))
 
 
 if __name__ == "__main__":

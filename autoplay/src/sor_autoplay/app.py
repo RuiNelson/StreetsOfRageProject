@@ -15,6 +15,7 @@ from typing import Callable, Sequence
 from . import __version__
 from .ai.gamepad import SharedGamepadState, VirtualGamepad
 from .ai.loop import AgentLoop
+from .debug_scenario import ENEMY_FAMILY_HOTKEYS, DebugScenario
 from .hud import HUD_PAINT_MS_DEFAULT, ObserverHud
 from .rom_data import RomData
 from .state import GameSnapshot, disconnected_snapshot, read_snapshot
@@ -225,6 +226,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Timeout for each menu-navigation step of --reach-gameplay (default: 30000)",
     )
     parser.add_argument(
+        "--start-level",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Debug: jump to level N (1-8) as soon as gameplay is reached, using "
+            "the host's own level hotkey. Requires the host to run with "
+            "--debugUtils. The AI is held off until the jump has been made."
+        ),
+    )
+    parser.add_argument(
+        "--only-enemy",
+        choices=sorted(ENEMY_FAMILY_HOTKEYS),
+        default=None,
+        help=(
+            "Debug: keep only this enemy family alive, killing every other "
+            "family repeatedly through the host's per-family kill hotkeys "
+            "(requires --debugUtils). Waves respawn, so the sweep runs for the "
+            "whole session."
+        ),
+    )
+    parser.add_argument(
+        "--kill-street-enemies",
+        action="store_true",
+        help=(
+            "Debug: kill every ordinary (non-boss) enemy family repeatedly "
+            "through the host's per-family kill hotkeys (requires --debugUtils). "
+            "Use to isolate a boss fight. Cannot be combined with --only-enemy."
+        ),
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -304,11 +336,13 @@ class ObserverApp:
         hud_ms: int = HUD_PAINT_MS_DEFAULT,
         agent_p1: bool = False,
         agent_p2: bool = False,
+        scenario: DebugScenario | None = None,
     ) -> None:
         self.host = host
         self.port = port
         self.poll_ms = max(1, poll_ms)
         self.hud_ms = max(16, hud_ms)
+        self.scenario = scenario
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._latest: GameSnapshot = disconnected_snapshot("starting")
@@ -392,6 +426,13 @@ class ObserverApp:
                 with self._lock:
                     self._latest = snapshot
 
+                if not self._apply_scenario(snapshot):
+                    elapsed = time.monotonic() - started
+                    remaining = poll_s - elapsed
+                    if remaining > 0:
+                        self._stop.wait(remaining)
+                    continue
+
                 if self.agent_p1_enabled.is_set():
                     self._agent_loops[1].tick(snapshot, player_index=1)
                 if self.agent_p2_enabled.is_set():
@@ -412,6 +453,33 @@ class ObserverApp:
                         pass
                 self._stop.wait(backoff_s)
                 backoff_s = min(2.0, backoff_s * 1.5)
+
+    def _apply_scenario(self, snapshot: GameSnapshot) -> bool:
+        """Run the debug scenario for this poll; True when the AI may tick.
+
+        The level jump is requested once, the moment gameplay is actually
+        playable, and the AI is held off until the game reports the requested
+        level: a verb decided during the intro is aimed at the scene the jump
+        is about to throw away.
+        """
+
+        scenario = self.scenario
+        if scenario is None or not scenario.active or self._client is None:
+            return True
+
+        playable = any(player.is_playable for player in snapshot.players)
+        if scenario.level_jump_pending:
+            if not playable:
+                return False
+            scenario.apply_start_level(self._client)
+            return False
+        if scenario.start_level is not None and (
+            not playable or snapshot.level_index != scenario.start_level - 1
+        ):
+            return False
+
+        scenario.sweep_other_families(self._client)
+        return True
 
     def stop(self) -> None:
         self._stop.set()
@@ -552,6 +620,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         hud_ms=args.hud_ms,
         agent_p1=args.agent_p1,
         agent_p2=args.agent_p2,
+        scenario=DebugScenario(
+            start_level=args.start_level,
+            only_enemy=args.only_enemy,
+            kill_street_enemies=args.kill_street_enemies,
+        ),
     )
     if args.once:
         # Snapshot-only mode has no GUI; still honor menu navigation first.
@@ -575,9 +648,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.reach_gameplay is not None
         else ""
     )
+    scenario_bits = []
+    if args.start_level is not None:
+        scenario_bits.append(f"level {args.start_level}")
+    if args.only_enemy is not None:
+        scenario_bits.append(f"only {args.only_enemy}")
+    if args.kill_street_enemies:
+        scenario_bits.append("kill street enemies")
+    scenario_text = f"; debug scenario: {', '.join(scenario_bits)}" if scenario_bits else ""
     print(
         f"Starting SoR Autoplay GUI → {args.host}:{args.port} "
-        f"(poll {args.poll_ms}ms{agent_text}{reach_text}; Esc/Q to quit)",
+        f"(poll {args.poll_ms}ms{agent_text}{reach_text}{scenario_text}; Esc/Q to quit)",
         file=sys.stderr,
     )
     return app.run_gui(

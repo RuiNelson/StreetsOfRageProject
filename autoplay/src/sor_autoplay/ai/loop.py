@@ -85,11 +85,16 @@ class AgentLoop:
         every tick.
         """
 
-        if (
-            snapshot.paused
-            or not snapshot.timer_valid
-            or not snapshot.players[player_index - 1].is_playable
-        ):
+        player = snapshot.players[player_index - 1]
+        # Continue / name-entry replaces the playable object with type $0F,
+        # so is_playable is false -- but the pipeline still has to answer
+        # Yes and type the initials. Mr. X's offer keeps the player playable.
+        in_continue_ui = player.is_continue_ui
+        if snapshot.paused:
+            self._gamepad.release()
+            self.inform_hud(set())
+            return None
+        if not in_continue_ui and (not snapshot.timer_valid or not player.is_playable):
             self._gamepad.release()
             self.inform_hud(set())
             return None

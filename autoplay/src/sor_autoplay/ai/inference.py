@@ -14,10 +14,11 @@ import math
 from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
 from . import kinematics, reach
 from .tokens import Myself, Partner, PlayableCharacter
-from .tokens import Enemy, Grunt, Jack
+from .tokens import Antonio, Enemy, Grunt, Jack
 from .tokens import GrabEnemy, JumpAttack, Punch, RearAttack
 from .tokens import (
     ActionableTarget,
+    AntonioIsGoingToKick,
     ClosingEnemy,
     GrabIntoDeadZone,
     GrabToClearRear,
@@ -51,6 +52,39 @@ JACK_PROJECTILE_TYPE_ID = 0x28
 # thrown it opens that gap on the very next tick. Generous enough to cover
 # the juggle's own spin without needing exact ROM offsets.
 JACK_JUGGLE_ATTACH_RADIUS = 40
+
+# Antonio's linked boomerang (object_catalog.py type $96). Same attach
+# problem as Jack's axe: the object exists while still in his hand, and
+# punching it then is just standing still in front of him.
+ANTONIO_BOOMERANG_TYPE_ID = 0x96
+ANTONIO_BOOMERANG_ATTACH_RADIUS = 40
+
+# Kick gate at $16EAE (enemy-ai.md "Body state machine"): X thresholds
+# selected by the target's +$1C velocity relative to Antonio's facing, and
+# a lane window of $10 (or $08 when +$61 is set -- we use the looser $10
+# so we never miss a kick). Distances are the ROM's own +$50/+ $52 words.
+#
+# After the ROM signs velocity into Antonio's facing frame (`neg` if he
+# faces left), `bmi` (moving *against* his facing, i.e. toward him) uses
+# $78; the non-negative / backing-away path uses $50. Standing still is
+# its own path at $50 or $68 -- we take the wider $68 so a kick is never
+# missed.
+ANTONIO_KICK_DIST_STATIONARY = 0x68  # 104px
+ANTONIO_KICK_DIST_CLOSING = 0x78  # 120px; target walking into him
+ANTONIO_KICK_DIST_AWAY = 0x50  # 80px; target walking off
+ANTONIO_KICK_LANE = 0x10  # 16px
+# Dash/throw commit at $16E74: X in [$28, $78) and lane < $14. This is
+# the opening hit of the fight -- he dashes as soon as the actor walks
+# into that window. The token covers it too: a sidestep cannot leave a
+# lane he tracks, so the same hop is the answer.
+ANTONIO_DASH_DIST_MIN = 0x28  # 40px
+ANTONIO_DASH_DIST_MAX = 0x78  # 120px
+ANTONIO_DASH_LANE = 0x14  # 20px
+# High-word of a 16.16 velocity is "zero" for the ROM's `tst.w $1C`. A
+# couple of tenths of a pixel of walk jitter must not flip the path.
+ANTONIO_STATIONARY_VEL = 0.5
+# Primary $02 is the committed kick ($171CC).
+ANTONIO_KICK_PRIMARY_STATE = 0x02
 
 # A Grunt outside this time-to-arrival window is not "closing fast" yet.
 # The horizon itself now lives in reach.CLOSING_ENEMY_THREAT_FRAMES --
@@ -117,6 +151,31 @@ def _projectile_threatens(projectile: Projectile, actor: PlayableCharacter) -> b
     return ticks <= PROJECTILE_THREAT_TICKS
 
 
+def _antonio_still_holding_boomerang(projectile: Projectile, context: Context) -> bool:
+    """True when this is Antonio's boomerang and it is still in his hand.
+
+    Type ``$96`` exists for the whole wind-up/catch, not only once thrown
+    (object_catalog.py). Punching or sidestepping it then is standing still
+    in front of Antonio -- the kick trigger. Matched to a live ``Antonio``
+    within ``ANTONIO_BOOMERANG_ATTACH_RADIUS``, the same attach test Jack's
+    axe uses.
+    """
+
+    if projectile.type_id != ANTONIO_BOOMERANG_TYPE_ID:
+        return False
+    for antonio in find_all(context, Antonio):
+        if (
+            abs(projectile.world_x - antonio.world_x) <= ANTONIO_BOOMERANG_ATTACH_RADIUS
+            and abs(projectile.world_y - antonio.world_y) <= ANTONIO_BOOMERANG_ATTACH_RADIUS
+        ):
+            # Still on him unless it already has a real independent throw
+            # velocity. A follow-along attached object tracks him at his
+            # own walk speed, well under a thrown boomerang.
+            if abs(projectile.vel_x) < 2.0:
+                return True
+    return False
+
+
 def _jack_still_juggling(projectile: Projectile, context: Context) -> bool:
     """True when this is Jack's axe/torch and he has not released it yet.
 
@@ -157,6 +216,8 @@ def check_for_incoming_projectiles(context: Context) -> Context:
     incoming: set[Token] = set()
     for projectile in find_all(context, Projectile):
         if _jack_still_juggling(projectile, context):
+            continue
+        if _antonio_still_holding_boomerang(projectile, context):
             continue
         if any(_projectile_threatens(projectile, actor) for actor in actors):
             incoming.add(
@@ -576,6 +637,91 @@ def check_for_safe_spots(context: Context) -> Context:
     return tokens
 
 
+def _antonio_kick_distance_threshold(
+    antonio: Antonio, actor: PlayableCharacter
+) -> int:
+    """The ROM's X window for the 1→2 kick, given how the actor is moving.
+
+    ``$16EAE`` reads the target's ``+$1C`` high word. Zero is the
+    standing-still path (thresholds ``$50``/``$68`` selected by facing and
+    ``+$31`` bit 1 -- we take the wider ``$68`` so a kick is never
+    missed). Non-zero is signed relative to Antonio's facing ``+$60``:
+    negative (approaching him) uses ``$50``, positive (retreating) uses
+    ``$78``.
+    """
+
+    vel = actor.vel_x
+    if abs(vel) < ANTONIO_STATIONARY_VEL:
+        return ANTONIO_KICK_DIST_STATIONARY
+    # Sign into Antonio's facing frame the way $16EB4 does: negate if he
+    # faces left, then `bmi` is "moving against his facing" = toward him.
+    relative = -vel if antonio.facing_left else vel
+    if relative < 0:
+        return ANTONIO_KICK_DIST_CLOSING
+    return ANTONIO_KICK_DIST_AWAY
+
+
+def _antonio_will_kick(antonio: Antonio, actor: PlayableCharacter) -> bool:
+    """True when Antonio's kick gate is already satisfied, or the kick is on.
+
+    Already-committed (primary ``$02`` / ``CombatPhase.ATTACKING``) is
+    always a kick. The predictive half mirrors ``$16E54``-``$16F0E``:
+    target available, in the velocity-selected X window, and inside the
+    ``$10`` lane window. ``boss_dist_*`` are the ROM's own ``+$50``/``+$52``
+    words; we fall back to a computed gap if they were not populated.
+    """
+
+    if antonio.target_unavailable:
+        return False
+    if antonio.combat_phase in (
+        CombatPhase.DEATH,
+        CombatPhase.GRABBED,
+        CombatPhase.RECOVERY,
+    ):
+        return False
+
+    dist_x = antonio.boss_dist_x or abs(antonio.world_x - actor.world_x)
+    dist_lane = antonio.boss_dist_lane or abs(antonio.world_y - actor.world_y)
+    if antonio.primary_state == ANTONIO_KICK_PRIMARY_STATE:
+        return dist_lane < ANTONIO_KICK_LANE
+    # Already in the dash/throw commit (tactical $08): a locked-in ground
+    # strike. Do *not* also fire on the uncommitted dash *window* -- that
+    # window is the whole fight range, and treating it as a kick made
+    # DodgeAntonioKick win every tick and never attack.
+    if antonio.tactical >= 0x08:
+        return dist_lane < ANTONIO_DASH_LANE and dist_x < ANTONIO_DASH_DIST_MAX
+    if dist_lane >= ANTONIO_KICK_LANE:
+        return False
+    return dist_x < _antonio_kick_distance_threshold(antonio, actor)
+
+
+def check_for_antonio_kick(context: Context) -> Context:
+    """Promote Antonio when his kick gate is live for a playable character.
+
+    Per ``AI.md``, this is a threat judgment, not a 1:1 copy of every
+    observed ``Antonio``. The kick is the user-reported combo-breaker:
+    standing still in front of him -- the player's own signature while
+    throwing a ground combo -- is one of the ROM trigger paths.
+    """
+
+    actors = _actors(context)
+    if not actors:
+        return set()
+
+    tokens: set[Token] = set()
+    for antonio in find_all(context, Antonio):
+        if antonio.is_defeated:
+            continue
+        for actor in actors:
+            if _antonio_will_kick(antonio, actor):
+                tokens.add(
+                    AntonioIsGoingToKick(
+                        actor_slot=actor.slot, target_slot=antonio.slot
+                    )
+                )
+    return tokens
+
+
 def check_for_weapon_upgrades(context: Context) -> Context:
     """Promote ground weapons that beat what the actor is carrying."""
 
@@ -623,6 +769,7 @@ def generate_inference_tokens(context: Context) -> Context:
         | check_for_closing_enemies(context)
         | check_for_targets_in_reach(context)
         | check_for_incoming_melee(context)
+        | check_for_antonio_kick(context)
         | check_for_grab_opportunities(context)
         | check_for_punish_windows(context)
         | check_for_surrounded(context)

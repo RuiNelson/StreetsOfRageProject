@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import math
 
-from ..phases import CombatPhase, is_dangerous
+from ..phases import CombatPhase, is_dangerous, is_punishable
 from . import kinematics, reach
 from .tokens import (
     CounterGrab,
     FlipHold,
     GrabEnemy,
+    HitAntonioBoomerang,
     JumpAttack,
     AttackHeldEnemy,
     Punch,
@@ -41,9 +42,10 @@ from .tokens import (
     PlayableCharacter,
     punch_usable_inner_x,
 )
-from .tokens import Enemy, Jack
+from .tokens import Antonio, Enemy, Jack
 from .tokens import (
     ActionableTarget,
+    AntonioIsGoingToKick,
     GrabOpportunity,
     InGrabReach,
     InJumpAttackReach,
@@ -54,7 +56,8 @@ from .tokens import (
     Surrounded,
 )
 from .tokens import AnimationInProgress, CameraRange, Stage
-from .tokens import Breakable
+from .tokens import Breakable, Projectile
+from .tokens import PUNCH_RANGE_Y, punch_outer_x
 from .tokens import (
     PLAYER_MAX_HEALTH,
     HealthPickup,
@@ -67,8 +70,10 @@ from .tokens import (
     is_weapon_type,
 )
 from .tokens import CallPolice
+from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDialog
 from .tokens import Context, Token, find, find_all
 from .tokens import (
+    DodgeAntonioKick,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -171,9 +176,21 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
             continue
         # InPunchReach already carries the "in front (within tolerance) and
         # inside the band" judgment this used to recompute inline.
+        kick_slots = {
+            token.target_slot
+            for token in find_all(context, AntonioIsGoingToKick)
+            if token.actor_slot == actor.slot
+        }
         for target_slot in reach.targets_of(context, InPunchReach, actor.slot):
             target = find(context, Enemy, slot=target_slot)
             if isinstance(target, Jack) and target.has_projectile:
+                continue
+            # Standing still to punch Antonio is the ROM's own kick trigger
+            # ($16EAE zero-velocity path). Only a real punish window is
+            # safe; otherwise DodgeAntonioKick / JumpAttack own him.
+            if isinstance(target, Antonio) and (
+                target_slot in kick_slots or not is_punishable(target.combat_phase)
+            ):
                 continue
             verbs.add(verb_cls(actor_slot=actor.slot, target_slot=target_slot))
     return verbs
@@ -449,6 +466,11 @@ def could_walk_to_near_enemy(context: Context) -> Context:
         # see could_retreat_from_danger for the facing-feedback cycle a
         # front-only skip creates.
         threatening = reach.targets_of(context, IncomingMelee, actor.slot)
+        kicking = {
+            token.target_slot
+            for token in find_all(context, AntonioIsGoingToKick)
+            if token.actor_slot == actor.slot
+        }
         standing_off = _retreat_is_worth_it(context, actor)
         for enemy in enemies:
             if reach.any_pit_endangers(context, enemy.world_x, enemy.world_y):
@@ -459,6 +481,19 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 # could_retreat_from_danger covers this one instead -- don't
                 # propose closing the last stretch of distance into a
                 # committed attack that isn't hittable yet.
+                continue
+            if enemy.slot in kicking:
+                # could_dodge_antonio_kick owns this pair -- walking in to
+                # stand still in front of him is how the kick starts.
+                continue
+            if (
+                isinstance(enemy, Antonio)
+                and abs(enemy.world_x - actor.world_x)
+                <= reach.jump_attack_max_dx(actor.character_id)
+            ):
+                # Already inside jump-kick range. Walking closer parks the
+                # actor inside the standing-still kick window. JumpAttack
+                # owns the last stretch.
                 continue
             if (
                 standing_off
@@ -637,15 +672,25 @@ def could_call_police(context: Context) -> Context:
     return verbs
 
 
+def _has_live_enemy(context: Context) -> bool:
+    """A special with nobody to sweep is a waste of the one panic button."""
+
+    return any(not enemy.is_defeated for enemy in find_all(context, Enemy))
+
+
 def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
     """The two situations the special is for: about to die, or boxed in.
 
-    ``Surrounded`` is the second one -- it is the only move that clears
-    every side at once, so a crowd the actor cannot fight its way out of is
-    as good a reason as low health, just at a laxer health gate so it is
-    never spent while comfortably healthy.
+    Both still need at least one live enemy -- calling the police into an
+    empty street spends the special for nothing. ``Surrounded`` is the
+    second reason: it is the only move that clears every side at once, so a
+    crowd the actor cannot fight its way out of is as good a reason as low
+    health, just at a laxer health gate so it is never spent while
+    comfortably healthy.
     """
 
+    if not _has_live_enemy(context):
+        return False
     threshold = (
         POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE
         if actor.lives <= 1
@@ -657,6 +702,26 @@ def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
         token.actor_slot == actor.slot for token in find_all(context, Surrounded)
     )
     return surrounded and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD_SURROUNDED
+
+
+def could_handle_continue_menu(context: Context) -> Context:
+    """Always continue, and type ``AI `` on the high-score initials."""
+
+    verbs: set[Token] = set()
+    menu = find(context, InContinueMenu)
+    if menu is not None:
+        verbs.add(HandleContinueMenu(actor_slot=menu.slot))
+    return verbs
+
+
+def could_handle_mr_x_dialog(context: Context) -> Context:
+    """Always refuse Mr. X's offer."""
+
+    verbs: set[Token] = set()
+    dialog = find(context, InMrXDialog)
+    if dialog is not None:
+        verbs.add(HandleMrXDialog(actor_slot=dialog.slot))
+    return verbs
 
 
 def could_jump_attack(context: Context) -> Context:
@@ -715,6 +780,27 @@ def could_jump_attack(context: Context) -> Context:
             # walking in, which could_walk_to_near_enemy already does.
             continue
         target_slots = set(reach.targets_of(context, InJumpAttackReach, actor.slot))
+        # Hopping over Antonio's kick is the reaction to AntonioIsGoingToKick
+        # when the actor is already in the air (or about to be): the kick
+        # is a ground strike, and the jump's own travel is the dodge. Added
+        # even without InJumpAttackReach so a close-range hop still fires.
+        kick_slots = {
+            token.target_slot
+            for token in find_all(context, AntonioIsGoingToKick)
+            if token.actor_slot == actor.slot
+        }
+        target_slots |= kick_slots
+        # Jump-kicking is the safe way to hit Antonio -- a grounded punch
+        # is the kick trigger. Offer a hop whenever he is inside the
+        # kick's free-flight range, not only in the usual "beyond punch"
+        # band.
+        for antonio in find_all(context, Antonio):
+            if antonio.is_defeated:
+                continue
+            if abs(antonio.world_x - actor.world_x) <= reach.jump_attack_max_dx(
+                actor.character_id
+            ):
+                target_slots.add(antonio.slot)
         if actor.is_airborne and not target_slots:
             nearest = min(
                 live,
@@ -731,9 +817,112 @@ def could_jump_attack(context: Context) -> Context:
         # changing course either way, so this gate only applies pre-launch.
         threatening = reach.targets_of(context, IncomingMelee, actor.slot)
         for target_slot in target_slots:
-            if not actor.is_airborne and target_slot in threatening:
+            if (
+                not actor.is_airborne
+                and target_slot in threatening
+                and target_slot not in kick_slots
+                and not isinstance(find(context, Enemy, slot=target_slot), Antonio)
+            ):
                 continue
             verbs.add(JumpAttack(actor_slot=actor.slot, target_slot=target_slot))
+    return verbs
+
+
+def could_dodge_antonio_kick(context: Context) -> Context:
+    """Leave Antonio's kick lane, or hop, before the kick lands.
+
+    One candidate per ``AntonioIsGoingToKick``. Suppressed once the actor
+    is already airborne -- ``could_jump_attack`` owns the hop-over then,
+    and producing a sidestep mid-crouch would release the jump direction
+    ``$384E`` samples. Grounded, this is the reaction that does not stand
+    still in front of him.
+    """
+
+    verbs: set[Token] = set()
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.is_airborne:
+            continue
+        for token in find_all(context, AntonioIsGoingToKick):
+            if token.actor_slot != actor.slot:
+                continue
+            verbs.add(
+                DodgeAntonioKick(actor_slot=actor.slot, target_slot=token.target_slot)
+            )
+    return verbs
+
+
+def _boomerang_in_punch_band(
+    actor: PlayableCharacter, world_x: int, world_y: int
+) -> bool:
+    """Would a forward B connect with a point at ``(world_x, world_y)``.
+
+    Facing is ignored: ``execute`` faces toward the boomerang on the same
+    press, so a boomerang that is currently behind still counts if the
+    distance is inside the punch box. Lane uses ``PUNCH_RANGE_Y``.
+    """
+
+    if abs(world_y - actor.world_y) > PUNCH_RANGE_Y + 6:
+        return False
+    dx = abs(world_x - actor.world_x)
+    # A few extra px of outer slack: the boomerang is fast, and punching
+    # a tick early still connects, while punching a tick late eats the hit.
+    return dx <= punch_outer_x(actor.character_id, actor.held_weapon_type) + 12
+
+
+def could_hit_antonio_boomerang(context: Context) -> Context:
+    """Punch Antonio's boomerang at the moment it would hit the actor.
+
+    One candidate per in-flight type-``$96`` ``Projectile`` that is heading
+    at the actor (or already inside the punch box) and whose projected
+    position at punch-connect time still sits in that box. Attached/wind-up
+    copies are filtered by ``inference._antonio_still_holding_boomerang``.
+    """
+
+    from .inference import (
+        ANTONIO_BOOMERANG_TYPE_ID,
+        _antonio_still_holding_boomerang,
+        _projectile_threatens,
+    )
+
+    verbs: set[Token] = set()
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.is_airborne:
+            continue
+
+        for projectile in find_all(context, Projectile):
+            if projectile.type_id != ANTONIO_BOOMERANG_TYPE_ID:
+                continue
+            if _antonio_still_holding_boomerang(projectile, context):
+                continue
+            if not _projectile_threatens(projectile, actor) and not _boomerang_in_punch_band(
+                actor, projectile.world_x, projectile.world_y
+            ):
+                continue
+            frames = kinematics.connect_frames(HitAntonioBoomerang, actor, projectile)
+            if not any(
+                _boomerang_in_punch_band(
+                    actor,
+                    round(projectile.world_x + projectile.vel_x * frame),
+                    projectile.world_y,
+                )
+                for frame in frames
+            ):
+                continue
+            verbs.add(
+                HitAntonioBoomerang(actor_slot=actor.slot, target_slot=projectile.slot)
+            )
     return verbs
 
 
@@ -965,6 +1154,8 @@ def generate_verb_tokens(context: Context) -> Context:
 
     return (
         context
+        | could_handle_continue_menu(context)
+        | could_handle_mr_x_dialog(context)
         | could_counter_grab(context)
         | could_tech_recover(context)
         | could_hold_actions(context)
@@ -972,6 +1163,8 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_walk_to_near_enemy(context)
         | could_retreat_from_danger(context)
         | could_projectile_sidestep(context)
+        | could_dodge_antonio_kick(context)
+        | could_hit_antonio_boomerang(context)
         | could_walk_to_advance_stage(context)
         | could_punch(context)
         | could_swing_bat_or_pipe(context)

@@ -33,8 +33,10 @@ from .decide import (
 from .tokens import (
     Attack,
     CounterGrab,
+    DodgeAntonioKick,
     FlipHold,
     GrabEnemy,
+    HitAntonioBoomerang,
     JumpAttack,
     AttackHeldEnemy,
     Punch,
@@ -53,6 +55,7 @@ from .tokens import (
 from .tokens import Myself, Partner
 from .tokens import Breakable, Enemy, Grunt, Nora
 from .tokens import (
+    AntonioIsGoingToKick,
     GrabOpportunity,
     GrabIntoDeadZone,
     GrabToClearRear,
@@ -70,6 +73,7 @@ from .tokens import (
     SpecialPickup,
 )
 from .tokens import CallPolice
+from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDialog
 from .tokens import Context, Verb, find, find_all
 from .tokens import (
     ProjectileSidestep,
@@ -84,6 +88,11 @@ logger = logging.getLogger(__name__)
 
 # 0-100 emergency scale.
 _EMERGENCY_COUNTER_GRAB = 100  # already held — only useful action
+# UI prompts lock the actor: continue / Mr. X are the only useful action
+# while their Observed token is present (combat verbs may still be generated
+# during the Mr. X offer because Myself is still playable).
+_EMERGENCY_HANDLE_CONTINUE = 99
+_EMERGENCY_HANDLE_MR_X = 99
 _EMERGENCY_TECH_RECOVER = 90  # narrow window, free to act at nothing else
 _EMERGENCY_CALL_POLICE = 88
 # Boxed in but not yet at the health thresholds above: still the only move
@@ -235,6 +244,20 @@ _EMERGENCY_RETREAT_FROM_DANGER = 17  # closer scoring higher, floor 15
 # that might still be avoided on its own trades a certain gain for an
 # uncertain one.
 _EMERGENCY_PROJECTILE_SIDESTEP = 45  # sooner-to-impact scoring higher, floor 30
+# Punching Antonio's incoming boomerang (type $96) back. Above the kick
+# dodge: jumping into a boomerang that is already in the punch box is
+# how the opening hit of the fight lands. The kick's own startup is
+# longer than a punch, so the boomerang is answered first.
+_EMERGENCY_HIT_ANTONIO_BOOMERANG = 62
+# Sidestep / hop out of Antonio's kick window. Above HitAntonioBoomerang
+# and every strike on an Antonio that can still act: standing still to
+# punch is exactly what arms the kick ($16EAE zero-velocity path).
+_EMERGENCY_DODGE_ANTONIO_KICK = 58
+# Jump-kick over a kick that is already coming -- used only while the
+# actor is airborne/crouching (DodgeAntonioKick is suppressed then). Just
+# under the grounded dodge so a hop that has already started is not
+# abandoned, well above a routine jump (18).
+_EMERGENCY_JUMP_OVER_ANTONIO_KICK = 56
 # No live enemy left anywhere (on-screen or not) → push stage (was 5).
 _EMERGENCY_WALK_TO_ADVANCE_STAGE = 12
 _EMERGENCY_DEFAULT = 0
@@ -281,6 +304,20 @@ def _emergency_tech_recover(verb: TechRecover, context: Context) -> int:
     actor = _find_actor(context, verb.actor_slot)
     if actor is not None and actor.throw_tech_ready:
         return _EMERGENCY_TECH_RECOVER
+    return _EMERGENCY_DEFAULT
+
+
+def _emergency_handle_continue_menu(verb: HandleContinueMenu, context: Context) -> int:
+    menu = find(context, InContinueMenu, slot=verb.actor_slot)
+    if menu is not None:
+        return _EMERGENCY_HANDLE_CONTINUE
+    return _EMERGENCY_DEFAULT
+
+
+def _emergency_handle_mr_x_dialog(verb: HandleMrXDialog, context: Context) -> int:
+    dialog = find(context, InMrXDialog, slot=verb.actor_slot)
+    if dialog is not None:
+        return _EMERGENCY_HANDLE_MR_X
     return _EMERGENCY_DEFAULT
 
 
@@ -353,6 +390,11 @@ def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
     target = find(context, Enemy, slot=verb.target_slot)
     if target is None:
         return _EMERGENCY_DEFAULT
+    if any(
+        token.actor_slot == verb.actor_slot and token.target_slot == verb.target_slot
+        for token in find_all(context, AntonioIsGoingToKick)
+    ):
+        return _EMERGENCY_JUMP_OVER_ANTONIO_KICK
     if _is_punish_window(context, target.slot):
         return _EMERGENCY_JUMP_ATTACK_PUNISHABLE
     if (
@@ -362,6 +404,24 @@ def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
     ):
         return _EMERGENCY_JUMP_ATTACK_NORA_RECOVERY
     return _EMERGENCY_JUMP_ATTACK_DEFAULT
+
+
+def _emergency_dodge_antonio_kick(verb: DodgeAntonioKick, context: Context) -> int:
+    if any(
+        token.actor_slot == verb.actor_slot and token.target_slot == verb.target_slot
+        for token in find_all(context, AntonioIsGoingToKick)
+    ):
+        return _EMERGENCY_DODGE_ANTONIO_KICK
+    return _EMERGENCY_DEFAULT
+
+
+def _emergency_hit_antonio_boomerang(verb: HitAntonioBoomerang, context: Context) -> int:
+    from .tokens import Projectile
+
+    projectile = find(context, Projectile, slot=verb.target_slot)
+    if projectile is None:
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_HIT_ANTONIO_BOOMERANG
 
 
 def _emergency_grab_enemy(verb: GrabEnemy, context: Context) -> int:
@@ -560,6 +620,8 @@ def _held_enemy_emergency(weight: int) -> Callable[[Verb, Context], int]:
 
 
 _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
+    HandleContinueMenu: _emergency_handle_continue_menu,
+    HandleMrXDialog: _emergency_handle_mr_x_dialog,
     CounterGrab: _emergency_counter_grab,
     TechRecover: _emergency_tech_recover,
     CallPolice: _emergency_call_police,
@@ -583,6 +645,8 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     WalkToNearEnemy: _emergency_walk_to_near_enemy,
     RetreatFromDanger: _emergency_retreat_from_danger,
     ProjectileSidestep: _emergency_projectile_sidestep,
+    DodgeAntonioKick: _emergency_dodge_antonio_kick,
+    HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
 }
 

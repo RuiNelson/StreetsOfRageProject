@@ -5,8 +5,11 @@ from sor_autoplay.memory_map import (
     MAX_HEALTH,
     OBJ_CHARACTER_ID,
     OBJ_CONTINUE_CHOICE,
+    OBJ_CONTINUE_NAME_LETTER,
+    OBJ_CONTINUE_NAME_SLOT,
     OBJ_CONTINUE_UI_FLAGS,
     OBJ_HEALTH,
+    OBJ_PLAYER_FLAGS_59,
     OBJ_TYPE,
     OBJECT_SLOT_SIZE,
 )
@@ -144,7 +147,8 @@ class StateSnapshotTests(unittest.TestCase):
 
         _put_u8(objects, OBJ_TYPE, 0x0F)
         _put_u8(objects, OBJ_CONTINUE_UI_FLAGS, 0x80)
-        _put_u8(objects, OBJ_CONTINUE_CHOICE, 0x01)
+        _put_u16(objects, OBJ_CONTINUE_NAME_SLOT, 0x0002)
+        _put_u16(objects, OBJ_CONTINUE_NAME_LETTER, 0x0008)
 
         snap = snapshot_from_memory_blocks(
             globals_block=bytes(globals_block),
@@ -154,10 +158,52 @@ class StateSnapshotTests(unittest.TestCase):
         self.assertTrue(snap.p1.is_continue_ui)
         self.assertFalse(snap.p1.is_playable)
         self.assertTrue(snap.p1.name_entry_active)
-        self.assertTrue(snap.p1.continue_selects_no)
+        # +$63 is the letter-index low byte during name-entry, not Yes/No.
+        self.assertFalse(snap.p1.continue_selects_no)
+        self.assertEqual(snap.p1.name_slot, 2)
+        self.assertEqual(snap.p1.name_letter_index, 8)
         self.assertEqual(snap.p1.continues, 2)
         self.assertEqual(snap.raw["p1_name_entry"], 1)
-        self.assertEqual(snap.raw["p1_continue_no"], 1)
+        self.assertEqual(snap.raw["p1_continue_no"], 0)
+
+    def test_continue_yes_no_choice_from_object(self) -> None:
+        globals_block = bytearray(0x40)
+        timer_block = bytearray(4)
+        objects = bytearray(0x100)
+
+        _put_u16(globals_block, 0x00, 0x0016)
+        _put_u8(objects, OBJ_TYPE, 0x0F)
+        _put_u8(objects, OBJ_CONTINUE_CHOICE, 0x01)
+
+        snap = snapshot_from_memory_blocks(
+            globals_block=bytes(globals_block),
+            timer_block=bytes(timer_block),
+            objects_block=bytes(objects),
+        )
+        self.assertTrue(snap.p1.is_continue_ui)
+        self.assertFalse(snap.p1.name_entry_active)
+        self.assertTrue(snap.p1.continue_selects_no)
+
+    def test_mr_x_choice_bits_from_object(self) -> None:
+        globals_block = bytearray(0x40)
+        timer_block = bytearray(4)
+        objects = bytearray(0x100)
+
+        _put_u16(globals_block, 0x00, 0x0016)
+        _put_u8(objects, OBJ_TYPE, 0x01)
+        _put_u8(objects, OBJ_PLAYER_FLAGS_59, 0x18)  # bit4 active + bit3 NO
+
+        snap = snapshot_from_memory_blocks(
+            globals_block=bytes(globals_block),
+            timer_block=bytes(timer_block),
+            objects_block=bytes(objects),
+            mr_x_offer_flag=1,
+            mr_x_offer_state=0x81,
+        )
+        self.assertTrue(snap.p1.mr_x_choice_active)
+        self.assertTrue(snap.p1.mr_x_selects_no)
+        self.assertEqual(snap.mr_x_offer_flag, 1)
+        self.assertEqual(snap.mr_x_offer_state, 0x81)
 
     def test_character_select_keeps_selection(self) -> None:
         globals_block = bytearray(0x40)

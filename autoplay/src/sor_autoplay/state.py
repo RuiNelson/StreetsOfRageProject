@@ -45,6 +45,13 @@ class PlayerSnapshot:
     # Type-$0F continue / name-entry UI (ignored when not continue object).
     name_entry_active: bool = False
     continue_selects_no: bool = False
+    # Name-entry cursor (object +$60 / +$62). Meaningful only while
+    # ``name_entry_active`` -- slot is 0/2/4, letter is 0..26 (A..Z, END).
+    name_slot: int = 0
+    name_letter_index: int = 0
+    # Mr. X offer-choice bits on this player's object+$59.
+    mr_x_choice_active: bool = False
+    mr_x_selects_no: bool = False
 
     @property
     def is_continue_ui(self) -> bool:
@@ -112,6 +119,10 @@ class GameSnapshot:
     players: tuple[PlayerSnapshot, PlayerSnapshot] = ()
     world_map: WorldMap = field(default_factory=empty_world_map)
     error: str | None = None
+    # Mr. X final-offer machine (round 8). ``mr_x_offer_flag`` is $FFDE00;
+    # the per-player choice bits live on ``PlayerSnapshot``.
+    mr_x_offer_flag: int = 0
+    mr_x_offer_state: int = 0
     raw: dict[str, int] = field(default_factory=dict, repr=False)
 
     @property
@@ -207,10 +218,20 @@ def _player_from_blocks(
 
     name_entry_active = False
     continue_selects_no = False
+    name_slot = 0
+    name_letter_index = 0
     if object_type == mm.OBJ_TYPE_CONTINUE_UI and len(obj) > mm.OBJ_CONTINUE_CHOICE:
         flags_4b = _u8(obj, mm.OBJ_CONTINUE_UI_FLAGS)
         name_entry_active = bool(flags_4b & mm.OBJ_CONTINUE_NAME_ENTRY_BIT)
-        continue_selects_no = bool(_u8(obj, mm.OBJ_CONTINUE_CHOICE))
+        if name_entry_active:
+            name_slot = _u16(obj, mm.OBJ_CONTINUE_NAME_SLOT)
+            name_letter_index = _u16(obj, mm.OBJ_CONTINUE_NAME_LETTER)
+        else:
+            # +$63 is the Yes/No byte only on the continue table; during
+            # name-entry it is the low byte of the letter-index word.
+            continue_selects_no = bool(_u8(obj, mm.OBJ_CONTINUE_CHOICE))
+
+    flags_59 = _u8(obj, mm.OBJ_PLAYER_FLAGS_59) if len(obj) > mm.OBJ_PLAYER_FLAGS_59 else 0
 
     return PlayerSnapshot(
         index=index,
@@ -229,6 +250,10 @@ def _player_from_blocks(
         is_playable=is_playable,
         name_entry_active=name_entry_active,
         continue_selects_no=continue_selects_no,
+        name_slot=name_slot,
+        name_letter_index=name_letter_index,
+        mr_x_choice_active=bool(flags_59 & mm.OBJ_MR_X_CHOICE_ACTIVE_BIT),
+        mr_x_selects_no=bool(flags_59 & mm.OBJ_MR_X_CHOICE_NO_BIT),
     )
 
 
@@ -401,6 +426,8 @@ def snapshot_from_memory_blocks(
         players=(p1, p2),
         world_map=world,
         error=error,
+        mr_x_offer_flag=mr_x_offer_flag & 0xFF,
+        mr_x_offer_state=mr_x_offer_state & 0xFFFF,
         raw={
             "game_state": game_state,
             "level": level_index,

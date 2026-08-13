@@ -10,11 +10,11 @@ from sor_autoplay.phases import CombatPhase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 
 
-def _player(*, is_playable: bool) -> PlayerSnapshot:
+def _player(*, is_playable: bool, is_continue_ui: bool = False) -> PlayerSnapshot:
     return PlayerSnapshot(
         index=1,
         mode_active=True,
-        object_type=1,
+        object_type=0x0F if is_continue_ui else (1 if is_playable else 0),
         character_id=0,
         character_name="Axel",
         health=100,
@@ -94,6 +94,34 @@ class AgentLoopGatingTests(unittest.TestCase):
 
         self.assertEqual(gamepad.held, 0)
         self.assertIsNone(result)
+
+    def test_continue_ui_runs_the_pipeline_when_not_playable(self) -> None:
+        gamepad, _client = _gamepad()
+        loop = AgentLoop(gamepad)
+        p1 = _player(is_playable=False, is_continue_ui=True)
+        p2 = _player(is_playable=False)
+        snapshot = GameSnapshot(
+            connected=True,
+            game_state=0x14,
+            game_mode="In game",
+            level_index=0,
+            level_display=1,
+            wave=0,
+            player_mode=1,
+            time_left=99,
+            time_left_raw=0x99,
+            round_timer_bcd=0,
+            clock_stopped=False,
+            timer_valid=True,
+            players=(p1, p2),
+        )
+
+        with patch(
+            "sor_autoplay.ai.loop.generate_direct_observation_tokens",
+            return_value=set(),
+        ) as observe:
+            loop.tick(snapshot, player_index=1)
+            observe.assert_called_once()
 
 
 class AgentLoopPipelineTests(unittest.TestCase):

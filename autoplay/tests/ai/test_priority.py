@@ -1,11 +1,14 @@
 import unittest
 
 from sor_autoplay.ai.tokens import (
+    Antonio,
     AttackHeldEnemy,
     Breakable,
     CounterGrab,
+    DodgeAntonioKick,
     GrabEnemy,
     HealthPickup,
+    HitAntonioBoomerang,
     JumpAttack,
     LifePickup,
     Punch,
@@ -24,12 +27,19 @@ from sor_autoplay.ai.tokens import (
 from sor_autoplay.ai.tokens import Myself
 from sor_autoplay.ai.tokens import AttackRange, ClosingEnemy, Enemy, Garcia, Nora
 from sor_autoplay.ai.tokens import CallPolice
+from sor_autoplay.ai.tokens import (
+    HandleContinueMenu,
+    HandleMrXDialog,
+    InContinueMenu,
+    InMrXDialog,
+)
 from sor_autoplay.ai.tokens import CameraRange
 from sor_autoplay.ai.tokens import Projectile
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.priority import determine_priority_verb as _rank_verbs
 from sor_autoplay.ai.tokens import Verb, find_all
 from sor_autoplay.ai.tokens import (
+    DodgeAntonioKick,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -112,6 +122,35 @@ def _myself(**overrides) -> Myself:
 
 
 class DetermineEmergencyWinnerTests(unittest.TestCase):
+    def test_handle_continue_menu_beats_everything_else(self) -> None:
+        context = {
+            InContinueMenu(slot="P1", name_entry=False, selects_no=False),
+            HandleContinueMenu(actor_slot="P1"),
+            Punch(actor_slot="P1", target_slot="obj01"),
+            _enemy("obj01", CombatPhase.KNOCKDOWN),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], HandleContinueMenu)
+
+    def test_handle_mr_x_dialog_beats_a_punishable_punch(self) -> None:
+        context = {
+            InMrXDialog(slot="P1", selects_no=False),
+            HandleMrXDialog(actor_slot="P1"),
+            Punch(actor_slot="P1", target_slot="obj01"),
+            _enemy("obj01", CombatPhase.KNOCKDOWN),
+            _myself(),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], HandleMrXDialog)
+
     def test_call_police_beats_punch_on_punishable_enemy(self) -> None:
         punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
         myself = _myself(health_percent=10.0)
@@ -1548,6 +1587,122 @@ class DeterminePriorityTieTests(unittest.TestCase):
         self.assertEqual(
             len(winners), 1, f"tie-break is not deterministic: {winners}"
         )
+
+
+class AntonioVerbEmergencyTests(unittest.TestCase):
+    def test_dodge_outranks_punching_antonio(self) -> None:
+        myself = Myself(
+            slot="P1",
+            player_index=1,
+            character_id=0,
+            character_name="Axel",
+            world_x=120,
+            world_y=100,
+            health=80,
+            health_percent=100.0,
+            lives=3,
+            specials=1,
+            held_weapon_type=0,
+            facing_left=False,
+            combat_phase=CombatPhase.NORMAL,
+            action_state=0,
+            is_airborne=False,
+        )
+        antonio = Antonio(
+            slot="obj09",
+            type_id=0x56,
+            world_x=160,
+            world_y=100,
+            health=40,
+            combat_phase=CombatPhase.ATTACKING,
+            targets_player=1,
+            facing_left=True,
+            primary_state=2,
+            boss_dist_x=40,
+            boss_dist_lane=4,
+        )
+        context = {
+            myself,
+            antonio,
+            Punch(actor_slot="P1", target_slot="obj09"),
+            DodgeAntonioKick(actor_slot="P1", target_slot="obj09"),
+        }
+        winner = find_all(determine_priority_verb(context), Verb)[0]
+        self.assertIsInstance(winner, DodgeAntonioKick)
+
+    def test_hitting_the_boomerang_outranks_sidestepping_it(self) -> None:
+        myself = Myself(
+            slot="P1",
+            player_index=1,
+            character_id=0,
+            character_name="Axel",
+            world_x=100,
+            world_y=100,
+            health=80,
+            health_percent=100.0,
+            lives=3,
+            specials=1,
+            held_weapon_type=0,
+            facing_left=False,
+            combat_phase=CombatPhase.NORMAL,
+            action_state=0,
+            is_airborne=False,
+        )
+        boomerang = Projectile(
+            slot="obj10", world_x=130, world_y=100, vel_x=-8.0, vel_z=0.0, type_id=0x96
+        )
+        context = {
+            myself,
+            boomerang,
+            HitAntonioBoomerang(actor_slot="P1", target_slot="obj10"),
+            ProjectileSidestep(actor_slot="P1", target_slot="obj10"),
+        }
+        winner = find_all(determine_priority_verb(context), Verb)[0]
+        self.assertIsInstance(winner, HitAntonioBoomerang)
+
+    def test_punching_the_boomerang_beats_jumping_the_kick(self) -> None:
+        myself = Myself(
+            slot="P1",
+            player_index=1,
+            character_id=0,
+            character_name="Axel",
+            world_x=100,
+            world_y=100,
+            health=80,
+            health_percent=100.0,
+            lives=3,
+            specials=1,
+            held_weapon_type=0,
+            facing_left=False,
+            combat_phase=CombatPhase.NORMAL,
+            action_state=0,
+            is_airborne=False,
+        )
+        antonio = Antonio(
+            slot="obj09",
+            type_id=0x56,
+            world_x=160,
+            world_y=100,
+            health=40,
+            combat_phase=CombatPhase.ATTACKING,
+            targets_player=1,
+            facing_left=True,
+            primary_state=2,
+            boss_dist_x=40,
+            boss_dist_lane=4,
+        )
+        boomerang = Projectile(
+            slot="obj10", world_x=130, world_y=100, vel_x=-8.0, vel_z=0.0, type_id=0x96
+        )
+        context = {
+            myself,
+            antonio,
+            boomerang,
+            HitAntonioBoomerang(actor_slot="P1", target_slot="obj10"),
+            DodgeAntonioKick(actor_slot="P1", target_slot="obj09"),
+        }
+        winner = find_all(determine_priority_verb(context), Verb)[0]
+        self.assertIsInstance(winner, HitAntonioBoomerang)
 
 
 if __name__ == "__main__":

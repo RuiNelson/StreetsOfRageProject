@@ -18,6 +18,7 @@ from .attack_verbs import (
     FlipHold,
     GrabEnemy,
     GrabMechanics,
+    HitAntonioBoomerang,
     JumpAttack,
     MeleeAttacks,
     MeleeWeaponAttacks,
@@ -54,6 +55,7 @@ from .enemy import (
     Abadede,
     ActionableTarget,
     Antonio,
+    AntonioIsGoingToKick,
     Bongo,
     Boss,
     ClosingEnemy,
@@ -81,7 +83,24 @@ from .enemy import (
     TargetInReach,
     enemy_class_for_type,
 )
-from .essential import AnimationInProgress, CameraRange, Essential, Stage
+from .dialog_verbs import (
+    CONTINUE_INITIALS,
+    NAME_ALPHABET_SIZE,
+    NAME_LETTER_A,
+    NAME_LETTER_END,
+    NAME_LETTER_I,
+    Dialog,
+    HandleContinueMenu,
+    HandleMrXDialog,
+)
+from .essential import (
+    AnimationInProgress,
+    CameraRange,
+    Essential,
+    InContinueMenu,
+    InMrXDialog,
+    Stage,
+)
 from .hazard_tokens import (
     Breakable,
     IncomingProjectile,
@@ -122,6 +141,7 @@ from .tokens import (
     find_all,
 )
 from .walk_verbs import (
+    DodgeAntonioKick,
     ProjectileSidestep,
     RetreatFromDanger,
     Walk,

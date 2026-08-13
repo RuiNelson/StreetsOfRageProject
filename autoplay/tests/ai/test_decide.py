@@ -7,6 +7,7 @@ from sor_autoplay.ai.tokens import (
     GrabEnemy,
     JumpAttack,
     AttackHeldEnemy,
+    HitAntonioBoomerang,
     OpenBreakable,
     Punch,
     RearAttack,
@@ -23,7 +24,11 @@ from sor_autoplay.ai.decide import (
     generate_verb_tokens,
     could_call_police,
     could_counter_grab,
+    could_handle_continue_menu,
+    could_handle_mr_x_dialog,
+    could_dodge_antonio_kick,
     could_grab_enemy,
+    could_hit_antonio_boomerang,
     could_hold_actions,
     could_jump_attack,
     could_projectile_sidestep,
@@ -42,11 +47,27 @@ from sor_autoplay.ai.decide import (
     could_walk_to_pickup,
     could_walk_to_weapon,
 )
-from sor_autoplay.ai.tokens import AttackRange, ClosingEnemy, Enemy, Garcia, Jack, Nora
+from sor_autoplay.ai.tokens import (
+    Antonio,
+    AttackRange,
+    ClosingEnemy,
+    DodgeAntonioKick,
+    Enemy,
+    Garcia,
+    HitAntonioBoomerang,
+    Jack,
+    Nora,
+)
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
 from sor_autoplay.ai.tokens import Breakable, Pit, Projectile
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
+from sor_autoplay.ai.tokens import (
+    HandleContinueMenu,
+    HandleMrXDialog,
+    InContinueMenu,
+    InMrXDialog,
+)
 from sor_autoplay.ai.tokens import Verb, Token
 from sor_autoplay.ai.tokens import (
     ProjectileSidestep,
@@ -80,7 +101,11 @@ def _with_inference(generator):
 
 could_call_police = _with_inference(could_call_police)
 could_counter_grab = _with_inference(could_counter_grab)
+could_handle_continue_menu = _with_inference(could_handle_continue_menu)
+could_handle_mr_x_dialog = _with_inference(could_handle_mr_x_dialog)
+could_dodge_antonio_kick = _with_inference(could_dodge_antonio_kick)
 could_grab_enemy = _with_inference(could_grab_enemy)
+could_hit_antonio_boomerang = _with_inference(could_hit_antonio_boomerang)
 could_hold_actions = _with_inference(could_hold_actions)
 could_jump_attack = _with_inference(could_jump_attack)
 could_projectile_sidestep = _with_inference(could_projectile_sidestep)
@@ -207,6 +232,8 @@ class VerbDataclassContractTests(unittest.TestCase):
         self.assertTrue(issubclass(CallPolice, Verb))
         self.assertTrue(issubclass(WalkToNearEnemy, Walk))
         self.assertTrue(issubclass(Punch, Attack))
+        self.assertTrue(issubclass(HandleContinueMenu, Verb))
+        self.assertTrue(issubclass(HandleMrXDialog, Verb))
 
     def test_priority_defaults(self) -> None:
         self.assertEqual(Punch(actor_slot="P1", target_slot="obj01").priority, 10)
@@ -1035,31 +1062,37 @@ class CouldWalkToAdvanceStageTests(unittest.TestCase):
 class CouldCallPoliceTests(unittest.TestCase):
     def test_fires_when_health_is_critical(self) -> None:
         myself = make_myself(specials=1, health_percent=10.0)
-        context: set[Token] = {myself}
+        context: set[Token] = {myself, make_enemy()}
 
         self.assertEqual(could_call_police(context), {CallPolice(actor_slot="P1")})
 
+    def test_does_not_fire_with_no_enemies_even_when_critical(self) -> None:
+        myself = make_myself(specials=1, health_percent=10.0)
+        context: set[Token] = {myself}
+
+        self.assertEqual(could_call_police(context), set())
+
     def test_does_not_fire_at_the_critical_threshold(self) -> None:
         myself = make_myself(specials=1, health_percent=18.0)
-        context: set[Token] = {myself}
+        context: set[Token] = {myself, make_enemy()}
 
         self.assertEqual(could_call_police(context), set())
 
     def test_does_not_fire_when_health_is_not_critical(self) -> None:
         myself = make_myself(specials=1, health_percent=30.0)
-        context: set[Token] = {myself}
+        context: set[Token] = {myself, make_enemy()}
 
         self.assertEqual(could_call_police(context), set())
 
     def test_never_fires_with_zero_specials(self) -> None:
         myself = make_myself(specials=0, health_percent=1.0)
-        context: set[Token] = {myself}
+        context: set[Token] = {myself, make_enemy()}
 
         self.assertEqual(could_call_police(context), set())
 
     def test_never_fires_when_holding_an_enemy(self) -> None:
         myself = make_myself(specials=1, health_percent=10.0, held_weapon_type=0x10)
-        context: set[Token] = {myself}
+        context: set[Token] = {myself, make_enemy()}
 
         self.assertEqual(could_call_police(context), set())
 
@@ -1095,15 +1128,39 @@ class CouldCallPoliceTests(unittest.TestCase):
         # respawn (player-health-lives-and-combat.md) -- 30% is above the
         # ordinary 18% threshold but below the last-life 35% one.
         myself = make_myself(specials=1, health_percent=30.0, lives=1)
-        context: set[Token] = {myself}
+        context: set[Token] = {myself, make_enemy()}
 
         self.assertEqual(could_call_police(context), {CallPolice(actor_slot="P1")})
 
     def test_last_life_still_respects_its_own_higher_threshold(self) -> None:
         myself = make_myself(specials=1, health_percent=40.0, lives=1)
-        context: set[Token] = {myself}
+        context: set[Token] = {myself, make_enemy()}
 
         self.assertEqual(could_call_police(context), set())
+
+
+class CouldHandleContinueMenuTests(unittest.TestCase):
+    def test_fires_on_in_continue_menu(self) -> None:
+        menu = InContinueMenu(slot="P1", name_entry=False, selects_no=False)
+        self.assertEqual(
+            could_handle_continue_menu({menu}),
+            {HandleContinueMenu(actor_slot="P1")},
+        )
+
+    def test_does_not_fire_without_the_menu(self) -> None:
+        self.assertEqual(could_handle_continue_menu({make_myself()}), set())
+
+
+class CouldHandleMrXDialogTests(unittest.TestCase):
+    def test_fires_on_in_mr_x_dialog(self) -> None:
+        dialog = InMrXDialog(slot="P1", selects_no=False)
+        self.assertEqual(
+            could_handle_mr_x_dialog({dialog}),
+            {HandleMrXDialog(actor_slot="P1")},
+        )
+
+    def test_does_not_fire_without_the_dialog(self) -> None:
+        self.assertEqual(could_handle_mr_x_dialog({make_myself()}), set())
 
 
 class CouldGrabEnemyTests(unittest.TestCase):
@@ -1851,6 +1908,87 @@ class CouldProjectileSidestepTests(unittest.TestCase):
         context: set[Token] = {partner, projectile}
 
         self.assertEqual(could_projectile_sidestep(context), set())
+
+
+def _antonio(**overrides) -> Antonio:
+    fields = dict(
+        slot="obj09",
+        type_id=0x56,
+        world_x=160,
+        world_y=100,
+        health=40,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=1,
+        facing_left=True,
+        primary_state=1,
+        boss_dist_x=40,
+        boss_dist_lane=4,
+    )
+    fields.update(overrides)
+    return Antonio(**fields)
+
+
+class CouldDodgeAntonioKickTests(unittest.TestCase):
+    def test_fires_when_the_kick_token_is_present(self) -> None:
+        myself = make_myself(world_x=120, world_y=100)
+        antonio = _antonio(world_x=160, combat_phase=CombatPhase.ATTACKING, primary_state=2)
+        result = could_dodge_antonio_kick({myself, antonio})
+        self.assertTrue(
+            any(isinstance(v, DodgeAntonioKick) and v.target_slot == "obj09" for v in result)
+        )
+
+    def test_does_not_fire_while_airborne(self) -> None:
+        myself = make_myself(world_x=120, world_y=100, is_airborne=True, action_state=0x12)
+        antonio = _antonio(world_x=160, combat_phase=CombatPhase.ATTACKING, primary_state=2)
+        self.assertFalse(
+            any(isinstance(v, DodgeAntonioKick) for v in could_dodge_antonio_kick({myself, antonio}))
+        )
+
+
+class CouldHitAntonioBoomerangTests(unittest.TestCase):
+    def test_fires_when_the_thrown_boomerang_is_in_punch_range(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        antonio = _antonio(world_x=300, world_y=100, boss_dist_x=200, boss_dist_lane=0)
+        boomerang = Projectile(
+            slot="obj10", world_x=130, world_y=100, vel_x=-8.0, vel_z=0.0, type_id=0x96
+        )
+        result = could_hit_antonio_boomerang({myself, antonio, boomerang})
+        self.assertTrue(
+            any(
+                isinstance(v, HitAntonioBoomerang) and v.target_slot == "obj10"
+                for v in result
+            )
+        )
+
+    def test_does_not_fire_at_an_attached_boomerang(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        antonio = _antonio(world_x=150, world_y=100, boss_dist_x=50, boss_dist_lane=0)
+        boomerang = Projectile(
+            slot="obj10", world_x=148, world_y=100, vel_x=-0.4, vel_z=0.0, type_id=0x96
+        )
+        self.assertFalse(
+            any(
+                isinstance(v, HitAntonioBoomerang)
+                for v in could_hit_antonio_boomerang({myself, antonio, boomerang})
+            )
+        )
+
+
+class PunchSkippedDuringAntonioKickTests(unittest.TestCase):
+    def test_does_not_punch_antonio_while_he_is_about_to_kick(self) -> None:
+        myself = make_myself(world_x=120, world_y=100, facing_left=False)
+        antonio = _antonio(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            boss_dist_x=40,
+            boss_dist_lane=0,
+        )
+        punches = [
+            v for v in could_punch({myself, antonio}) if isinstance(v, Punch)
+        ]
+        self.assertEqual(punches, [])
 
 
 if __name__ == "__main__":

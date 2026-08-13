@@ -7,8 +7,11 @@ from sor_autoplay.ai import execute as execute_module
 from sor_autoplay.ai import loop as loop_module
 from sor_autoplay.ai import priority as priority_module
 from sor_autoplay.ai.tokens import (
+    Antonio,
     CounterGrab,
+    DodgeAntonioKick,
     GrabEnemy,
+    HitAntonioBoomerang,
     JumpAttack,
     OpenBreakable,
     Punch,
@@ -41,6 +44,12 @@ from sor_autoplay.ai.tokens import Breakable, Pit, Projectile, SafeSpot
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
+    HandleContinueMenu,
+    HandleMrXDialog,
+    InContinueMenu,
+    InMrXDialog,
+)
+from sor_autoplay.ai.tokens import (
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -57,6 +66,7 @@ RIGHT = 0x0008
 A = 0x0010
 B = 0x0020
 C = 0x0040
+START = 0x0080
 
 
 def _myself(
@@ -958,6 +968,91 @@ class ExecuteCallPoliceTests(unittest.TestCase):
         client.press_buttons.assert_called_once_with(player1=A, player2=0, frames=4)
 
 
+class ExecuteHandleContinueMenuTests(unittest.TestCase):
+    def test_confirms_yes_with_a_face_button(self) -> None:
+        verb = HandleContinueMenu(actor_slot="P1")
+        menu = InContinueMenu(slot="P1", name_entry=False, selects_no=False)
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {menu}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+
+    def test_toggles_off_no_with_up(self) -> None:
+        verb = HandleContinueMenu(actor_slot="P1")
+        menu = InContinueMenu(slot="P1", name_entry=False, selects_no=True)
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {menu}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=UP, player2=0, frames=4)
+
+    def test_name_entry_confirms_a_when_already_on_a(self) -> None:
+        verb = HandleContinueMenu(actor_slot="P1")
+        menu = InContinueMenu(
+            slot="P1",
+            name_entry=True,
+            selects_no=False,
+            name_slot=0,
+            name_letter_index=0,
+        )
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {menu}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+
+    def test_name_entry_steps_right_toward_i(self) -> None:
+        verb = HandleContinueMenu(actor_slot="P1")
+        menu = InContinueMenu(
+            slot="P1",
+            name_entry=True,
+            selects_no=False,
+            name_slot=2,
+            name_letter_index=0,
+        )
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {menu}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=RIGHT, player2=0, frames=4)
+
+    def test_name_entry_finishes_with_start_after_two_letters(self) -> None:
+        verb = HandleContinueMenu(actor_slot="P1")
+        menu = InContinueMenu(
+            slot="P1",
+            name_entry=True,
+            selects_no=False,
+            name_slot=4,
+            name_letter_index=0,
+        )
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {menu}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=START, player2=0, frames=4)
+
+
+class ExecuteHandleMrXDialogTests(unittest.TestCase):
+    def test_holds_down_until_no_is_selected(self) -> None:
+        verb = HandleMrXDialog(actor_slot="P1")
+        dialog = InMrXDialog(slot="P1", selects_no=False)
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {dialog}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=DOWN, player2=0)
+
+    def test_confirms_no_with_a_face_button(self) -> None:
+        verb = HandleMrXDialog(actor_slot="P1")
+        dialog = InMrXDialog(slot="P1", selects_no=True)
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {dialog}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+
+
 class ExecuteJumpAttackTests(unittest.TestCase):
     def test_presses_jump_with_direction_when_grounded(self) -> None:
         actor = _myself(world_x=0, world_y=0, is_airborne=False)
@@ -1727,6 +1822,54 @@ class NoRawMemoryWritesTests(unittest.TestCase):
             source = inspect.getsource(module)
             self.assertNotIn("write_memory", source)
             self.assertNotIn("write_value", source)
+
+
+class HitAntonioBoomerangExecuteTests(unittest.TestCase):
+    def test_presses_b_toward_the_boomerang(self) -> None:
+        actor = _myself(world_x=100, world_y=100, facing_left=False)
+        boomerang = Projectile(
+            slot="obj10", world_x=130, world_y=100, vel_x=-8.0, vel_z=0.0, type_id=0x96
+        )
+        client = MagicMock()
+        gamepad = VirtualGamepad(
+            SharedGamepadState(client), player_index=1
+        )
+        execute_verb(
+            HitAntonioBoomerang(actor_slot="P1", target_slot="obj10"),
+            {actor, boomerang},
+            gamepad,
+        )
+        client.press_buttons.assert_called_once_with(
+            player1=B | RIGHT, player2=0, frames=4
+        )
+
+
+class DodgeAntonioKickExecuteTests(unittest.TestCase):
+    def test_jumps_over_the_kick(self) -> None:
+        actor = _myself(world_x=120, world_y=100)
+        antonio = Antonio(
+            slot="obj09",
+            type_id=0x56,
+            world_x=160,
+            world_y=100,
+            health=40,
+            combat_phase=CombatPhase.ATTACKING,
+            targets_player=1,
+            facing_left=True,
+            primary_state=2,
+        )
+        client = MagicMock()
+        gamepad = VirtualGamepad(
+            SharedGamepadState(client), player_index=1
+        )
+        execute_verb(
+            DodgeAntonioKick(actor_slot="P1", target_slot="obj09"),
+            {actor, antonio},
+            gamepad,
+        )
+        client.press_buttons.assert_called_once()
+        pressed = client.press_buttons.call_args.kwargs["player1"]
+        self.assertTrue(pressed & C)
 
 
 if __name__ == "__main__":

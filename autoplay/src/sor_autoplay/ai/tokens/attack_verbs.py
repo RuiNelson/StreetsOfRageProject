@@ -415,3 +415,24 @@ class CounterGrab(GrabMechanics):
     priority: int = 40
     actor_slot: str
 
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class HitAntonioBoomerang(MeleeAttacks):
+    """Timed B-punch that knocks Antonio's boomerang (type ``$96``) away
+    the moment it would hit the actor.
+
+    Produced by ``could_hit_antonio_boomerang`` when an in-flight type-``$96``
+    ``Projectile`` is heading at the actor, in lane, and inside the punch
+    box at punch-connect time (startup + pipeline latency). Not produced
+    while the boomerang is still attached to Antonio -- punching his hand
+    is just standing still in front of him, which is how his kick starts.
+
+    Raises emergency: IncomingProjectile×62 -- above DodgeAntonioKick
+    (58), because jumping into a boomerang that is already in the punch
+    box is a free hit, and a punch is faster than the kick's own startup.
+    """
+
+    priority: int = 25
+    actor_slot: str
+    target_slot: str  # Projectile.slot of the boomerang
+

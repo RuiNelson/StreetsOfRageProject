@@ -122,7 +122,13 @@ parametrized intent that precedes any concrete action.
   Taking a hold, on the other hand, is its own verb and its own
   *absence* of an input — see [Grabbing an enemy](#grabbing-an-enemy).
   `CallPolice`, which activates the police special attack, is an `Attack`
-  descendant.
+  descendant. It only fires when health is running out (or the actor is
+  surrounded below the laxer health gate), a special remains, **and** at
+  least one live enemy is in context.
+
+A third `Verb` branch, `Dialog`, answers game UI prompts rather than
+acting in combat: `HandleContinueMenu` (always Yes, initials `AI `) and
+`HandleMrXDialog` (always No).
 
 Weapon upgrade ranking follows ROM damage constants
 (`StreetsOfRageRecompilation/ai-analysis/items-and-weapons.md`):
@@ -155,7 +161,28 @@ a new verb.
 
 **`IncomingProjectile`** encapsulates the trajectory of a projectile
 already in flight, allowing the AI to react to it before it reaches the
-character.
+character. Antonio's boomerang (type `$96`) is withheld while it is still
+attached to him — punching his hand is standing still in front of him,
+which is how his kick starts.
+
+**`AntonioIsGoingToKick`** flags that Antonio's ROM kick gate at `$16EAE`
+is already satisfied (or that he has committed to primary state 2, the
+close-range power kick). Standing still in front of him is one of the
+trigger paths — the player's own signature while throwing a ground combo —
+so this token exists to stop the AI punching through a kick that will
+break the chain. `DodgeAntonioKick` sidesteps off his lane, or hops if
+the kick is already committed; `HitAntonioBoomerang` punches the thrown
+boomerang at punch-connect time when it would hit the actor.
+
+**`InContinueMenu`** is observed when this player's object is the type-`$0F`
+continue / high-score name-entry UI (the slot is no longer playable).
+`HandleContinueMenu` always chooses Yes and types the initials `AI `
+(A, I, then Start so the third character stays the cleared-to-zero space).
+
+**`InMrXDialog`** is observed when Mr. X's final offer is live *and* this
+player's object `+$59` bit 4 marks the choice UI as active.
+`HandleMrXDialog` always answers No (held Down, then a face button).
+Accepting writes the bad ending.
 
 **`ClosingEnemy`** flags an ordinary enemy whose own velocity — not just
 its current position — puts it on course to close into rear-attack range
@@ -525,6 +552,12 @@ sleep_until_next_ram_poll()
 
 `execute_tick` is the single entry point that replaces choosing between
 `press_no_button`/`execute_verb` itself — see that section below for why.
+
+The loop normally skips a tick when the player is not playable, but the
+type-`$0F` continue / name-entry object is the exception: `InContinueMenu`
+and `HandleContinueMenu` still have to answer Yes and type the initials.
+Mr. X's offer keeps the player playable, so `InMrXDialog` rides the
+ordinary path.
 
 ### `generate_direct_observation_tokens`
 

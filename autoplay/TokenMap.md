@@ -18,6 +18,8 @@ classDiagram
     Essential <|-- Stage
     Essential <|-- CameraRange
     Essential <|-- AnimationInProgress
+    Essential <|-- InContinueMenu
+    Essential <|-- InMrXDialog
 
     Observed <|-- Projectile
     Inferred <|-- IncomingProjectile
@@ -67,6 +69,7 @@ classDiagram
     Inferred <|-- GrabOpportunity
     GrabOpportunity <|-- GrabToClearRear
     GrabOpportunity <|-- GrabIntoDeadZone
+    Inferred <|-- AntonioIsGoingToKick
 
     Verb <|-- Walk
     Walk <|-- WalkToNearEnemy
@@ -75,11 +78,13 @@ classDiagram
     Walk <|-- WalkToPickup
     Walk <|-- RetreatFromDanger
     Walk <|-- ProjectileSidestep
+    Walk <|-- DodgeAntonioKick
 
     Verb <|-- Attack
     Attack <|-- MeleeAttacks
     Attack <|-- GrabMechanics
     MeleeAttacks <|-- Punch
+    MeleeAttacks <|-- HitAntonioBoomerang
     Attack <|-- MeleeWeaponAttacks
     MeleeWeaponAttacks <|-- SwingBatOrPipe
     MeleeWeaponAttacks <|-- StabWithKnifeOrBottle
@@ -99,6 +104,10 @@ classDiagram
     GrabMechanics <|-- CounterGrab
 
     Attack <|-- CallPolice
+
+    Verb <|-- Dialog
+    Dialog <|-- HandleContinueMenu
+    Dialog <|-- HandleMrXDialog
 
     Verb <|-- Recovery
     Recovery <|-- TechRecover
