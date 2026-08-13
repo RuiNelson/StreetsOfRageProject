@@ -35,8 +35,8 @@ class HandleContinueMenu(Dialog):
     Produced by ``could_handle_continue_menu`` whenever ``InContinueMenu``
     is in context. Yes/No toggles on an UP/DOWN edge of ``$FFFC05`` and a
     face button confirms (``$52AE``); name-entry walks the letter index at
-    object+$62 with Left/Right, confirms with B/C, and finishes with Start
-    (``$57D2``).
+    object+$62 with Left/Right, confirms with C or A (``$57D2`` bits 5+6 --
+    B is backspace and a no-op on the first slot), and finishes with Start.
 
     Raises emergency: (InContinueMenu)×99 -- the only useful action while
     the type-$0F object owns the slot.

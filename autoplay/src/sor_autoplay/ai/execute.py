@@ -84,6 +84,12 @@ PUNCH_MASK = 0x0020  # physical B
 CALL_POLICE_MASK = 0x0010  # physical A
 JUMP_MASK = 0x0040  # physical C
 START_MASK = 0x0080
+# $57D2 confirms a high-score letter on +$55 bits 5+6 (logical C / A after
+# remap -- physical C / A in scheme 0). Bit 4 is physical B, the *back*
+# key: on slot 0 it is a no-op, so pressing B to "type A" left the AI
+# stuck on the first initial forever. Yes/No still accepts any $F0 face
+# bit ($52AE); name-entry does not.
+NAME_CONFIRM_MASK = JUMP_MASK
 PUNCH_FRAMES = 4
 CALL_POLICE_FRAMES = 4
 DIALOG_FRAMES = 4
@@ -925,7 +931,7 @@ def state_machine_handle_continue_menu(
         if step:
             _press(gamepad, step, frames=DIALOG_FRAMES)
             return
-        _press(gamepad, PUNCH_MASK, frames=DIALOG_FRAMES)
+        _press(gamepad, NAME_CONFIRM_MASK, frames=DIALOG_FRAMES)
         return
     if menu.selects_no:
         # $52AE toggles +$63 on any UP/DOWN edge of the global press byte.

@@ -989,6 +989,9 @@ class ExecuteHandleContinueMenuTests(unittest.TestCase):
         client.press_buttons.assert_called_once_with(player1=UP, player2=0, frames=4)
 
     def test_name_entry_confirms_a_when_already_on_a(self) -> None:
+        # $57D2 confirms on +$55 bits 5+6 (C/A). B is bit 4 -- backspace --
+        # and a no-op on slot 0, which is how the AI sat on the first
+        # initial forever pressing the attack button.
         verb = HandleContinueMenu(actor_slot="P1")
         menu = InContinueMenu(
             slot="P1",
@@ -1001,7 +1004,22 @@ class ExecuteHandleContinueMenuTests(unittest.TestCase):
 
         execute_verb(verb, {menu}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.press_buttons.assert_called_once_with(player1=C, player2=0, frames=4)
+
+    def test_name_entry_confirms_i_with_c_not_b(self) -> None:
+        verb = HandleContinueMenu(actor_slot="P1")
+        menu = InContinueMenu(
+            slot="P1",
+            name_entry=True,
+            selects_no=False,
+            name_slot=2,
+            name_letter_index=8,
+        )
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {menu}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=C, player2=0, frames=4)
 
     def test_name_entry_steps_right_toward_i(self) -> None:
         verb = HandleContinueMenu(actor_slot="P1")
