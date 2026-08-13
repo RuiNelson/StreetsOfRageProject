@@ -26,6 +26,7 @@ from sor_autoplay.ai.decide import (
     could_grab_enemy,
     could_hold_actions,
     could_jump_attack,
+    could_projectile_sidestep,
     could_punch,
     could_rear_attack,
     could_retreat_from_danger,
@@ -41,13 +42,14 @@ from sor_autoplay.ai.decide import (
     could_walk_to_pickup,
     could_walk_to_weapon,
 )
-from sor_autoplay.ai.tokens import AttackRange, ClosingEnemy, Enemy, Garcia, Nora
+from sor_autoplay.ai.tokens import AttackRange, ClosingEnemy, Enemy, Garcia, Jack, Nora
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
-from sor_autoplay.ai.tokens import Breakable, Pit
+from sor_autoplay.ai.tokens import Breakable, Pit, Projectile
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import Verb, Token
 from sor_autoplay.ai.tokens import (
+    ProjectileSidestep,
     RetreatFromDanger,
     Walk,
     WalkToAdvanceStage,
@@ -81,6 +83,7 @@ could_counter_grab = _with_inference(could_counter_grab)
 could_grab_enemy = _with_inference(could_grab_enemy)
 could_hold_actions = _with_inference(could_hold_actions)
 could_jump_attack = _with_inference(could_jump_attack)
+could_projectile_sidestep = _with_inference(could_projectile_sidestep)
 could_punch = _with_inference(could_punch)
 could_rear_attack = _with_inference(could_rear_attack)
 could_retreat_from_danger = _with_inference(could_retreat_from_danger)
@@ -179,6 +182,22 @@ def make_nora(**overrides) -> Nora:
     )
     fields.update(overrides)
     return Nora(**fields)
+
+
+def make_jack(**overrides) -> Jack:
+    fields = dict(
+        slot="obj01",
+        type_id=0x27,
+        world_x=100,
+        world_y=100,
+        health=10,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=1,
+        facing_left=True,
+        has_projectile=False,
+    )
+    fields.update(overrides)
+    return Jack(**fields)
 
 
 class VerbDataclassContractTests(unittest.TestCase):
@@ -1714,6 +1733,124 @@ class CouldOpenBreakableTests(unittest.TestCase):
         result = could_open_breakable(context)
 
         self.assertEqual(result, {OpenBreakable(actor_slot="P1", target_slot="obj09")})
+
+
+class JackJugglingMeleeTests(unittest.TestCase):
+    """While Jack juggles his axe/torch (has_projectile), a punch or an
+    armed melee swing is refused -- only the jump kick and the from-behind
+    chord are safe finishers (decide._could_melee_strike)."""
+
+    def test_could_punch_refuses_a_juggling_jack(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        jack = make_jack(world_x=130, world_y=105, has_projectile=True)
+        context: set[Token] = {myself, jack}
+
+        self.assertEqual(could_punch(context), set())
+
+    def test_could_punch_fires_once_the_weapon_is_gone(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        jack = make_jack(world_x=130, world_y=105, has_projectile=False)
+        context: set[Token] = {myself, jack}
+
+        result = could_punch(context)
+
+        self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj01")})
+
+    def test_could_swing_bat_or_pipe_also_refuses_a_juggling_jack(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)  # baseball bat
+        jack = make_jack(world_x=130, world_y=105, has_projectile=True)
+        context: set[Token] = {myself, jack}
+
+        self.assertEqual(could_swing_bat_or_pipe(context), set())
+
+    def test_a_non_juggling_jack_does_not_affect_a_different_juggling_jack(self) -> None:
+        # The refusal is per-target, read from each Jack's own has_projectile
+        # -- not a blanket "no melee on any Jack this tick".
+        myself = make_myself(world_x=100, world_y=100)
+        juggling = make_jack(slot="obj01", world_x=130, world_y=105, has_projectile=True)
+        idle = make_jack(slot="obj02", world_x=135, world_y=100, has_projectile=False)
+        context: set[Token] = {myself, juggling, idle}
+
+        result = could_punch(context)
+
+        self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj02")})
+
+    def test_could_rear_attack_is_unaffected(self) -> None:
+        # From behind, juggling or not, the chord still answers him -- the
+        # exception only covers the four melee-strike siblings.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        jack = make_jack(world_x=80, world_y=100, has_projectile=True)  # behind
+
+        result = could_rear_attack({myself, jack})
+
+        self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
+
+    def test_could_jump_attack_is_unaffected(self) -> None:
+        # The kick arrives from above, not through the juggling itself.
+        myself = make_myself(world_x=100, world_y=100, is_airborne=False, facing_left=False)
+        jack = make_jack(world_x=160, world_y=105, has_projectile=True)
+        camera = CameraRange(left=0, right=400, top=0, bottom=200)
+
+        result = could_jump_attack({myself, jack, camera})
+
+        self.assertEqual(result, {JumpAttack(actor_slot="P1", target_slot="obj01")})
+
+
+class CouldProjectileSidestepTests(unittest.TestCase):
+    def test_fires_for_a_threatening_projectile(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0)
+        context: set[Token] = {myself, projectile}
+
+        result = could_projectile_sidestep(context)
+
+        self.assertEqual(result, {ProjectileSidestep(actor_slot="P1", target_slot="obj10")})
+
+    def test_does_not_fire_for_a_projectile_heading_away(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=5.0, vel_z=0.0)
+        context: set[Token] = {myself, projectile}
+
+        self.assertEqual(could_projectile_sidestep(context), set())
+
+    def test_does_not_fire_when_animation_in_progress(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0)
+        context: set[Token] = {myself, projectile, AnimationInProgress(slot="P1")}
+
+        self.assertEqual(could_projectile_sidestep(context), set())
+
+    def test_does_not_fire_while_held_by_enemy(self) -> None:
+        myself = make_myself(
+            world_x=100, world_y=100, combat_phase=CombatPhase.HELD_BY_ENEMY
+        )
+        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0)
+        context: set[Token] = {myself, projectile}
+
+        self.assertEqual(could_projectile_sidestep(context), set())
+
+    def test_never_fires_for_the_partner(self) -> None:
+        partner = Partner(
+            slot="P2",
+            player_index=2,
+            character_id=1,
+            character_name="Adam",
+            world_x=150,
+            world_y=100,
+            health=100,
+            health_percent=100.0,
+            lives=3,
+            specials=1,
+            held_weapon_type=0,
+            facing_left=False,
+            combat_phase=CombatPhase.NORMAL,
+            action_state=0,
+            is_airborne=False,
+        )
+        projectile = Projectile(slot="obj10", world_x=200, world_y=100, vel_x=-5.0, vel_z=0.0)
+        context: set[Token] = {partner, projectile}
+
+        self.assertEqual(could_projectile_sidestep(context), set())
 
 
 if __name__ == "__main__":

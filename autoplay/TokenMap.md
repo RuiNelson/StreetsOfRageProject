@@ -74,6 +74,7 @@ classDiagram
     Walk <|-- WalkToWeapon
     Walk <|-- WalkToPickup
     Walk <|-- RetreatFromDanger
+    Walk <|-- ProjectileSidestep
 
     Verb <|-- Attack
     Attack <|-- MeleeAttacks

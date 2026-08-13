@@ -39,11 +39,12 @@ from .tokens import (
 )
 from .tokens import Enemy
 from .tokens import CameraRange, Stage
-from .tokens import Breakable, Pit, SafeSpot
+from .tokens import Breakable, Pit, Projectile, SafeSpot
 from .tokens import Pickup, Weapon
 from .tokens import CallPolice
 from .tokens import Context, Verb, find, find_all
 from .tokens import (
+    ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
     WalkToNearEnemy,
@@ -624,6 +625,50 @@ def state_machine_retreat_from_danger(
     _hold_steered(gamepad, _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
 
 
+# How far to step off a projectile's lane per tick -- comfortably past
+# inference.PROJECTILE_LANE_SLACK (24) so the step actually clears the band
+# check_for_incoming_projectiles used to judge the throw a threat, rather
+# than landing just inside it.
+PROJECTILE_SIDESTEP_DISTANCE = 40
+
+
+def _projectile_sidestep_target(
+    actor: Myself | Partner, projectile: Projectile, context: Context
+) -> tuple[int, int]:
+    """Where to step to clear the projectile's own lane.
+
+    A lateral step only -- X holds at the actor's current position, since the
+    projectile's danger is entirely about sharing its Y column
+    (``inference._projectile_threatens`` is lane-gated, not X-gated: it only
+    cares that the throw is heading toward the actor's X). Which way to step
+    is picked the same way ``_movement_mask``'s own prop/pit dodges pick a
+    side -- away from the nearer lane edge -- rather than away from the
+    projectile's Y, since the actor already shares that Y (that is what made
+    the throw a threat) and stepping "away from it" is therefore not a stable
+    direction: it would flip every tick as ordinary walk jitter nudges which
+    side of the projectile's Y the actor's own Y reads as.
+    """
+
+    lo, hi = _lane_bounds(context)
+    if actor.world_y < (lo + hi) / 2:
+        target_y = actor.world_y + PROJECTILE_SIDESTEP_DISTANCE
+    else:
+        target_y = actor.world_y - PROJECTILE_SIDESTEP_DISTANCE
+    return actor.world_x, target_y
+
+
+def state_machine_projectile_sidestep(
+    verb: ProjectileSidestep, context: Context, gamepad: VirtualGamepad
+) -> None:
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Projectile, slot=verb.target_slot)
+    if actor is None or target is None:
+        gamepad.release()
+        return
+    target_x, target_y = _projectile_sidestep_target(actor, target, context)
+    _hold_steered(gamepad, _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
+
+
 def state_machine_walk_to_advance_stage(
     verb: WalkToAdvanceStage, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -1020,6 +1065,7 @@ def state_machine_open_breakable(
 _HANDLERS = {
     WalkToNearEnemy: state_machine_walk_to_near_enemy,
     RetreatFromDanger: state_machine_retreat_from_danger,
+    ProjectileSidestep: state_machine_projectile_sidestep,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,
     Punch: state_machine_melee_strike,
     SwingBatOrPipe: state_machine_melee_strike,

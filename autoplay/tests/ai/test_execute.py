@@ -37,10 +37,11 @@ from sor_autoplay.ai.execute import (
 )
 from sor_autoplay.ai.decide import BREAKABLE_PUNCH_X, in_smash_range
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.tokens import Breakable, Pit, SafeSpot
+from sor_autoplay.ai.tokens import Breakable, Pit, Projectile, SafeSpot
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
+    ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
     WalkToNearEnemy,
@@ -649,6 +650,47 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
     def test_missing_actor_or_target_does_nothing(self) -> None:
         context: set = {_enemy()}
         verb = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, context, gamepad)
+
+        client.hold_buttons.assert_not_called()
+
+
+def _projectile(*, world_x: int = 0, world_y: int = 0, vel_x: float = -5.0) -> Projectile:
+    return Projectile(slot="obj10", world_x=world_x, world_y=world_y, vel_x=vel_x, vel_z=0.0)
+
+
+class ExecuteProjectileSidestepTests(unittest.TestCase):
+    def test_steps_down_from_the_upper_half_of_the_lane(self) -> None:
+        # No CameraRange in context -> _lane_bounds' own fallback (2..112,
+        # minus LANE_EDGE_MARGIN each side) puts the midpoint at 57; world_y
+        # 50 sits above it, so the dodge steps toward larger Y ("down").
+        actor = _myself(world_x=100, world_y=50)
+        projectile = _projectile(world_x=150, world_y=50)
+        context = {actor, projectile}
+        verb = ProjectileSidestep(actor_slot="P1", target_slot="obj10")
+        gamepad, client = _gamepad()
+
+        _settle(verb, context, gamepad)
+
+        # Lateral only: no L/R component, since the dodge never moves X.
+        client.hold_buttons.assert_called_with(player1=DOWN, player2=0)
+
+    def test_steps_up_from_the_lower_half_of_the_lane(self) -> None:
+        actor = _myself(world_x=100, world_y=90)
+        projectile = _projectile(world_x=150, world_y=90)
+        context = {actor, projectile}
+        verb = ProjectileSidestep(actor_slot="P1", target_slot="obj10")
+        gamepad, client = _gamepad()
+
+        _settle(verb, context, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=UP, player2=0)
+
+    def test_missing_actor_or_target_does_nothing(self) -> None:
+        context: set = {_projectile()}
+        verb = ProjectileSidestep(actor_slot="P1", target_slot="obj10")
         gamepad, client = _gamepad()
 
         execute_verb(verb, context, gamepad)

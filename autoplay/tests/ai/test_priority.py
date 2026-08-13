@@ -25,10 +25,12 @@ from sor_autoplay.ai.tokens import Myself
 from sor_autoplay.ai.tokens import AttackRange, ClosingEnemy, Enemy, Garcia, Nora
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import CameraRange
+from sor_autoplay.ai.tokens import Projectile
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.priority import determine_priority_verb as _rank_verbs
 from sor_autoplay.ai.tokens import Verb, find_all
 from sor_autoplay.ai.tokens import (
+    ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
     WalkToNearEnemy,
@@ -1410,6 +1412,82 @@ class DetermineEmergencyRetreatFromDangerTests(unittest.TestCase):
             myself,
             present,
             RetreatFromDanger(actor_slot="P1", target_slot="obj01"),  # obj01 missing
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
+
+
+class DetermineEmergencyProjectileSidestepTests(unittest.TestCase):
+    def test_outranks_walking_toward_a_different_far_enemy(self) -> None:
+        # A confirmed incoming projectile has no melee answer -- getting out
+        # of its lane must win over still approaching an unrelated target.
+        myself = _myself(world_x=100, world_y=64)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=64, vel_x=-5.0, vel_z=0.0)
+        calm_far = _enemy("obj02", CombatPhase.NORMAL, world_x=400, world_y=64)
+        context = {
+            myself,
+            projectile,
+            calm_far,
+            ProjectileSidestep(actor_slot="P1", target_slot="obj10"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], ProjectileSidestep)
+
+    def test_outranks_a_routine_punch_on_a_non_punishable_enemy(self) -> None:
+        myself = _myself(world_x=100, world_y=64)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=64, vel_x=-5.0, vel_z=0.0)
+        punchable = _enemy("obj02", CombatPhase.NORMAL, world_x=120, world_y=64)
+        context = {
+            myself,
+            projectile,
+            punchable,
+            ProjectileSidestep(actor_slot="P1", target_slot="obj10"),
+            Punch(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], ProjectileSidestep)
+
+    def test_loses_to_a_punishable_punch(self) -> None:
+        # A free hit on a punish window (60) beats dodging a throw that might
+        # still be avoided on its own -- see the constant's own comment.
+        myself = _myself(world_x=100, world_y=64)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=64, vel_x=-5.0, vel_z=0.0)
+        stunned = _enemy("obj02", CombatPhase.STUNNED, world_x=120, world_y=64)
+        context = {
+            myself,
+            projectile,
+            stunned,
+            ProjectileSidestep(actor_slot="P1", target_slot="obj10"),
+            Punch(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], Punch)
+
+    def test_scores_zero_when_projectile_missing(self) -> None:
+        myself = _myself(world_x=0, world_y=64)
+        present = _enemy("obj02", CombatPhase.NORMAL, world_x=10, world_y=64)
+        context = {
+            myself,
+            present,
+            ProjectileSidestep(actor_slot="P1", target_slot="obj10"),  # obj10 missing
             WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
         }
 

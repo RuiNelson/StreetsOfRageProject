@@ -142,3 +142,30 @@ class RetreatFromDanger(Walk):
     priority: int = 21
     actor_slot: str
     target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ProjectileSidestep(Walk):
+    """Step off an incoming projectile's own lane rather than stand in it.
+
+    Produced by ``could_projectile_sidestep`` once per ``IncomingProjectile``
+    for this actor -- a projectile already judged approaching, in lane, and
+    within the impact window (``inference.check_for_incoming_projectiles``).
+    Jack's thrown axe/torch (object_catalog.py type ``$28``) is the case this
+    was built for -- juggling him is unsafe to melee (see ``could_punch``'s
+    Jack exception) and once he lets go, the axe/torch itself is a fast
+    in-lane projectile with no answer but getting out of its way -- but the
+    verb reacts to any ``Projectile`` inference judges a threat, not just
+    his.
+
+    Raises emergency: IncomingProjectile×45, sooner-to-impact scoring higher,
+    floor 30 (see priority._emergency_projectile_sidestep) -- above every
+    ordinary approach/retreat tier so the actor clears the lane before the
+    weapon lands, below a guaranteed PunishWindow strike (60) and the
+    RearAttack/GrabToClearRear escapes, which stay the right answer even
+    with a projectile also in flight.
+    """
+
+    priority: int = 23
+    actor_slot: str
+    target_slot: str  # Projectile.slot

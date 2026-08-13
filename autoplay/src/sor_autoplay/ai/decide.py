@@ -41,7 +41,7 @@ from .tokens import (
     PlayableCharacter,
     punch_usable_inner_x,
 )
-from .tokens import Enemy
+from .tokens import Enemy, Jack
 from .tokens import (
     ActionableTarget,
     GrabOpportunity,
@@ -50,6 +50,7 @@ from .tokens import (
     InPunchReach,
     InRearReach,
     IncomingMelee,
+    IncomingProjectile,
     Surrounded,
 )
 from .tokens import AnimationInProgress, CameraRange, Stage
@@ -68,6 +69,7 @@ from .tokens import (
 from .tokens import CallPolice
 from .tokens import Context, Token, find, find_all
 from .tokens import (
+    ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
     WalkToNearEnemy,
@@ -137,7 +139,16 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
     ``could_stab_with_knife_or_bottle`` / ``could_spray_pepper``: they
     issue the identical B-button input (see execute.py's
     ``state_machine_melee_strike``), gated only on which weapon type (if any)
-    the actor holds. ``held_types=None`` means unarmed (``Punch``)."""
+    the actor holds. ``held_types=None`` means unarmed (``Punch``).
+
+    Refuses a Jack currently juggling his axe/torch (``Jack.has_projectile``)
+    for all four -- while he is spinning the weapon, closing in with a punch
+    or an armed swing trades hits with it instead of connecting cleanly.
+    ``could_jump_attack``'s kick and ``could_rear_attack``'s from-behind chord
+    are untouched: both answer him from outside the swing (the kick arrives
+    from above, the chord from a side he isn't juggling toward), so they stay
+    the only safe finishers on him until he lets the weapon go.
+    """
 
     verbs: set[Token] = set()
     for actor in _actors(context):
@@ -161,6 +172,9 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
         # InPunchReach already carries the "in front (within tolerance) and
         # inside the band" judgment this used to recompute inline.
         for target_slot in reach.targets_of(context, InPunchReach, actor.slot):
+            target = find(context, Enemy, slot=target_slot)
+            if isinstance(target, Jack) and target.has_projectile:
+                continue
             verbs.add(verb_cls(actor_slot=actor.slot, target_slot=target_slot))
     return verbs
 
@@ -523,6 +537,31 @@ def could_retreat_from_danger(context: Context) -> Context:
             if target_slot in actionable:
                 continue  # already hittable -- attack instead of retreating
             verbs.add(RetreatFromDanger(actor_slot=actor.slot, target_slot=target_slot))
+    return verbs
+
+
+def could_projectile_sidestep(context: Context) -> Context:
+    """Step off an incoming projectile's lane before it lands.
+
+    One candidate per ``IncomingProjectile`` in context -- inference has
+    already judged each one approaching, in this actor's lane, and within
+    the impact window (``inference.check_for_incoming_projectiles``), so
+    nothing here recomputes that geometry. Gated the same way as every other
+    reactive verb: not mid-animation, not caught in an enemy's grab, and not
+    itself holding one (a hold locks the actor's own input options, same
+    reasoning as ``could_walk_to_near_enemy``/``could_retreat_from_danger``).
+    """
+
+    verbs: set[Token] = set()
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        for projectile in find_all(context, IncomingProjectile):
+            verbs.add(ProjectileSidestep(actor_slot=actor.slot, target_slot=projectile.slot))
     return verbs
 
 
@@ -932,6 +971,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_grab_enemy(context)
         | could_walk_to_near_enemy(context)
         | could_retreat_from_danger(context)
+        | could_projectile_sidestep(context)
         | could_walk_to_advance_stage(context)
         | could_punch(context)
         | could_swing_bat_or_pipe(context)

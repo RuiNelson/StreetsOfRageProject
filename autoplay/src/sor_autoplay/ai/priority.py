@@ -57,6 +57,7 @@ from .tokens import (
     GrabIntoDeadZone,
     GrabToClearRear,
     IncomingMelee,
+    IncomingProjectile,
     PunishWindow,
     Surrounded,
     WeaponUpgrade,
@@ -71,6 +72,7 @@ from .tokens import (
 from .tokens import CallPolice
 from .tokens import Context, Verb, find, find_all
 from .tokens import (
+    ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
     WalkToNearEnemy,
@@ -223,6 +225,16 @@ _EMERGENCY_WALK_TO_NEAR_ENEMY = 14
 # enemy closing in made the actor back away from a *different* enemy it
 # could already hit.
 _EMERGENCY_RETREAT_FROM_DANGER = 17  # closer scoring higher, floor 15
+# A confirmed incoming projectile (Jack's thrown axe/torch, or any other
+# Projectile inference judges a real threat) has no melee answer at all --
+# only getting out of its lane does. Sits above every ordinary approach/
+# retreat tier so the actor clears the lane before the weapon lands, but
+# below a guaranteed PunishWindow strike (60) and the RearAttack/
+# GrabToClearRear escapes (55/58/60): those stay the right answer even with
+# a projectile also in flight, since abandoning a free hit to dodge a throw
+# that might still be avoided on its own trades a certain gain for an
+# uncertain one.
+_EMERGENCY_PROJECTILE_SIDESTEP = 45  # sooner-to-impact scoring higher, floor 30
 # No live enemy left anywhere (on-screen or not) → push stage (was 5).
 _EMERGENCY_WALK_TO_ADVANCE_STAGE = 12
 _EMERGENCY_DEFAULT = 0
@@ -453,6 +465,26 @@ def _emergency_retreat_from_danger(verb: RetreatFromDanger, context: Context) ->
     return _distance_emergency(distance, base=_EMERGENCY_RETREAT_FROM_DANGER, floor=15, step_px=25)
 
 
+def _emergency_projectile_sidestep(verb: ProjectileSidestep, context: Context) -> int:
+    """Sooner-to-impact scores higher, using the same ticks-to-impact
+    ``inference._projectile_threatens`` computed to promote this
+    ``IncomingProjectile`` in the first place -- reusing ``_distance_emergency``
+    with a tick count standing in for its usual pixel distance, since both
+    are "how much runway is left before this needs to be answered"."""
+
+    projectile = find(context, IncomingProjectile, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
+    if projectile is None or actor is None:
+        return _EMERGENCY_DEFAULT
+    if projectile.vel_x == 0:
+        ticks = 0.0
+    else:
+        ticks = abs(projectile.world_x - actor.world_x) / abs(projectile.vel_x)
+    return _distance_emergency(
+        ticks, base=_EMERGENCY_PROJECTILE_SIDESTEP, floor=30, step_px=2
+    )
+
+
 def _emergency_walk_to_advance_stage(verb: WalkToAdvanceStage, context: Context) -> int:
     if _advance_blocking_enemies(context):
         return _EMERGENCY_DEFAULT
@@ -550,6 +582,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     WalkToPickup: _emergency_walk_to_pickup,
     WalkToNearEnemy: _emergency_walk_to_near_enemy,
     RetreatFromDanger: _emergency_retreat_from_danger,
+    ProjectileSidestep: _emergency_projectile_sidestep,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
 }
 
