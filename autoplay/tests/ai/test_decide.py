@@ -1799,7 +1799,7 @@ class JackJugglingMeleeTests(unittest.TestCase):
 class CouldProjectileSidestepTests(unittest.TestCase):
     def test_fires_for_a_threatening_projectile(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
-        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0, type_id=0x1E)
         context: set[Token] = {myself, projectile}
 
         result = could_projectile_sidestep(context)
@@ -1808,14 +1808,14 @@ class CouldProjectileSidestepTests(unittest.TestCase):
 
     def test_does_not_fire_for_a_projectile_heading_away(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
-        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=5.0, vel_z=0.0)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=5.0, vel_z=0.0, type_id=0x1E)
         context: set[Token] = {myself, projectile}
 
         self.assertEqual(could_projectile_sidestep(context), set())
 
     def test_does_not_fire_when_animation_in_progress(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
-        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0, type_id=0x1E)
         context: set[Token] = {myself, projectile, AnimationInProgress(slot="P1")}
 
         self.assertEqual(could_projectile_sidestep(context), set())
@@ -1824,7 +1824,7 @@ class CouldProjectileSidestepTests(unittest.TestCase):
         myself = make_myself(
             world_x=100, world_y=100, combat_phase=CombatPhase.HELD_BY_ENEMY
         )
-        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0, type_id=0x1E)
         context: set[Token] = {myself, projectile}
 
         self.assertEqual(could_projectile_sidestep(context), set())
@@ -1847,7 +1847,7 @@ class CouldProjectileSidestepTests(unittest.TestCase):
             action_state=0,
             is_airborne=False,
         )
-        projectile = Projectile(slot="obj10", world_x=200, world_y=100, vel_x=-5.0, vel_z=0.0)
+        projectile = Projectile(slot="obj10", world_x=200, world_y=100, vel_x=-5.0, vel_z=0.0, type_id=0x1E)
         context: set[Token] = {partner, projectile}
 
         self.assertEqual(could_projectile_sidestep(context), set())

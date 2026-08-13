@@ -1,7 +1,7 @@
 import unittest
 
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import Abadede, ClosingEnemy, Enemy, Garcia, Nora
+from sor_autoplay.ai.tokens import Abadede, ClosingEnemy, Enemy, Garcia, Jack, Nora
 from sor_autoplay.ai.tokens import (
     ActionableTarget,
     GrabToClearRear,
@@ -86,6 +86,22 @@ def make_garcia(**overrides) -> Garcia:
     return Garcia(**fields)
 
 
+def make_jack(**overrides) -> Jack:
+    fields = dict(
+        slot="obj01",
+        type_id=0x27,
+        world_x=100,
+        world_y=100,
+        health=10,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=1,
+        facing_left=True,
+        has_projectile=False,
+    )
+    fields.update(overrides)
+    return Jack(**fields)
+
+
 # Nora's real whip reach, exactly as attack_ranges.py extracts it from
 # $242F8's animation 10 (shape $22). The dead-zone judgment is driven by this
 # data, not by the enemy's class, so the fixture has to carry it.
@@ -121,9 +137,13 @@ class CheckForIncomingProjectilesTests(unittest.TestCase):
     def test_promotes_only_projectiles_heading_toward_a_player(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
         # Closing from the right.
-        threat = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0)
+        threat = Projectile(
+            slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0, type_id=0x1E
+        )
         # Flying away / irrelevant lane.
-        benign = Projectile(slot="obj11", world_x=30, world_y=200, vel_x=-1.5, vel_z=0.5)
+        benign = Projectile(
+            slot="obj11", world_x=30, world_y=200, vel_x=-1.5, vel_z=0.5, type_id=0x1E
+        )
         context: set[Token] = {myself, threat, benign}
 
         result = check_for_incoming_projectiles(context)
@@ -141,8 +161,43 @@ class CheckForIncomingProjectilesTests(unittest.TestCase):
         self.assertEqual(check_for_incoming_projectiles(set()), set())
 
     def test_no_actors_no_output(self) -> None:
-        p = Projectile(slot="obj10", world_x=10, world_y=20, vel_x=1.0, vel_z=0.0)
+        p = Projectile(slot="obj10", world_x=10, world_y=20, vel_x=1.0, vel_z=0.0, type_id=0x1E)
         self.assertEqual(check_for_incoming_projectiles({p}), set())
+
+    def test_jack_axe_ignored_while_still_juggling(self) -> None:
+        # Same geometry as the promoted threat above, but this is Jack's own
+        # axe/torch (type $28) still spinning through his juggle -- the
+        # instantaneous velocity happens to point at the actor, but nothing
+        # has actually been thrown yet.
+        myself = make_myself(world_x=100, world_y=100)
+        jack = make_jack(slot="obj20", world_x=140, world_y=100, has_projectile=True)
+        axe = Projectile(
+            slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0, type_id=0x28
+        )
+        context: set[Token] = {myself, jack, axe}
+
+        self.assertEqual(check_for_incoming_projectiles(context), set())
+
+    def test_jack_axe_promoted_once_thrown(self) -> None:
+        # has_projectile false: Jack has let go, so this is a real thrown
+        # axe/torch and should be sidestepped like any other projectile.
+        myself = make_myself(world_x=100, world_y=100)
+        jack = make_jack(slot="obj20", world_x=300, world_y=100, has_projectile=False)
+        axe = Projectile(
+            slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0, type_id=0x28
+        )
+        context: set[Token] = {myself, jack, axe}
+
+        result = check_for_incoming_projectiles(context)
+
+        self.assertEqual(
+            result,
+            {
+                IncomingProjectile(
+                    slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0
+                ),
+            },
+        )
 
 
 class CheckForClosingEnemiesTests(unittest.TestCase):
@@ -779,7 +834,9 @@ class GenerateInferenceTokensTests(unittest.TestCase):
         myself = make_myself(world_x=100, world_y=100)
         enemy = make_enemy(world_x=105, world_y=100, targets_player=1)
         # Closing projectile so IncomingProjectile is emitted.
-        projectile = Projectile(slot="obj10", world_x=150, world_y=100, vel_x=-4.0, vel_z=0.0)
+        projectile = Projectile(
+            slot="obj10", world_x=150, world_y=100, vel_x=-4.0, vel_z=0.0, type_id=0x1E
+        )
         context: set[Token] = {myself, enemy, projectile}
 
         result = generate_inference_tokens(context)

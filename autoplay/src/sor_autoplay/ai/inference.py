@@ -14,7 +14,7 @@ import math
 from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
 from . import kinematics, reach
 from .tokens import Myself, Partner, PlayableCharacter
-from .tokens import Enemy, Grunt
+from .tokens import Enemy, Grunt, Jack
 from .tokens import GrabEnemy, JumpAttack, Punch, RearAttack
 from .tokens import (
     ActionableTarget,
@@ -39,6 +39,18 @@ from .tokens import rear_attack_behind_max_x, rear_attack_front_max_x
 PROJECTILE_THREAT_TICKS = 30
 PROJECTILE_LANE_SLACK = 24
 CAUTION_RANGE_X = 40
+
+# object_catalog.py's Jack axe/torch helper. Unlike every other projectile
+# family, this object exists while still tethered to Jack's own juggle
+# animation, not only once thrown -- so its momentary spin velocity can
+# point straight at the actor and satisfy _projectile_threatens without a
+# real throw ever happening.
+JACK_PROJECTILE_TYPE_ID = 0x28
+
+# The juggled axe/torch stays within this radius of Jack himself; once
+# thrown it opens that gap on the very next tick. Generous enough to cover
+# the juggle's own spin without needing exact ROM offsets.
+JACK_JUGGLE_ATTACH_RADIUS = 40
 
 # A Grunt outside this time-to-arrival window is not "closing fast" yet.
 # The horizon itself now lives in reach.CLOSING_ENEMY_THREAT_FRAMES --
@@ -105,11 +117,37 @@ def _projectile_threatens(projectile: Projectile, actor: PlayableCharacter) -> b
     return ticks <= PROJECTILE_THREAT_TICKS
 
 
+def _jack_still_juggling(projectile: Projectile, context: Context) -> bool:
+    """True when this is Jack's axe/torch and he has not released it yet.
+
+    The weapon spins tethered to him for the whole juggle, so its
+    instantaneous velocity can momentarily point straight at the actor and
+    read exactly like an incoming throw. Matched to whichever live,
+    still-juggling (``has_projectile``) Jack sits within
+    ``JACK_JUGGLE_ATTACH_RADIUS`` of it, since the object carries no
+    explicit owner slot.
+    """
+
+    if projectile.type_id != JACK_PROJECTILE_TYPE_ID:
+        return False
+    for jack in find_all(context, Jack):
+        if not jack.has_projectile:
+            continue
+        if (
+            abs(projectile.world_x - jack.world_x) <= JACK_JUGGLE_ATTACH_RADIUS
+            and abs(projectile.world_y - jack.world_y) <= JACK_JUGGLE_ATTACH_RADIUS
+        ):
+            return True
+    return False
+
+
 def check_for_incoming_projectiles(context: Context) -> Context:
     """Promote only projectiles that threaten at least one playable character.
 
     Per ``AI.md``, ``IncomingProjectile`` is a threat judgment, not a 1:1 copy
-    of every observed ``Projectile``.
+    of every observed ``Projectile``. Jack's axe/torch is additionally held
+    back while he is still juggling it (``_jack_still_juggling``) -- only a
+    released throw is a real threat.
     """
 
     actors = _actors(context)
@@ -118,6 +156,8 @@ def check_for_incoming_projectiles(context: Context) -> Context:
 
     incoming: set[Token] = set()
     for projectile in find_all(context, Projectile):
+        if _jack_still_juggling(projectile, context):
+            continue
         if any(_projectile_threatens(projectile, actor) for actor in actors):
             incoming.add(
                 IncomingProjectile(

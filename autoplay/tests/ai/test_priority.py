@@ -1427,7 +1427,7 @@ class DetermineEmergencyProjectileSidestepTests(unittest.TestCase):
         # A confirmed incoming projectile has no melee answer -- getting out
         # of its lane must win over still approaching an unrelated target.
         myself = _myself(world_x=100, world_y=64)
-        projectile = Projectile(slot="obj10", world_x=150, world_y=64, vel_x=-5.0, vel_z=0.0)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=64, vel_x=-5.0, vel_z=0.0, type_id=0x1E)
         calm_far = _enemy("obj02", CombatPhase.NORMAL, world_x=400, world_y=64)
         context = {
             myself,
@@ -1445,7 +1445,7 @@ class DetermineEmergencyProjectileSidestepTests(unittest.TestCase):
 
     def test_outranks_a_routine_punch_on_a_non_punishable_enemy(self) -> None:
         myself = _myself(world_x=100, world_y=64)
-        projectile = Projectile(slot="obj10", world_x=150, world_y=64, vel_x=-5.0, vel_z=0.0)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=64, vel_x=-5.0, vel_z=0.0, type_id=0x1E)
         punchable = _enemy("obj02", CombatPhase.NORMAL, world_x=120, world_y=64)
         context = {
             myself,
@@ -1465,7 +1465,7 @@ class DetermineEmergencyProjectileSidestepTests(unittest.TestCase):
         # A free hit on a punish window (60) beats dodging a throw that might
         # still be avoided on its own -- see the constant's own comment.
         myself = _myself(world_x=100, world_y=64)
-        projectile = Projectile(slot="obj10", world_x=150, world_y=64, vel_x=-5.0, vel_z=0.0)
+        projectile = Projectile(slot="obj10", world_x=150, world_y=64, vel_x=-5.0, vel_z=0.0, type_id=0x1E)
         stunned = _enemy("obj02", CombatPhase.STUNNED, world_x=120, world_y=64)
         context = {
             myself,

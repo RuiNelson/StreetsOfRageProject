@@ -677,7 +677,9 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
 
 
 def _projectile(*, world_x: int = 0, world_y: int = 0, vel_x: float = -5.0) -> Projectile:
-    return Projectile(slot="obj10", world_x=world_x, world_y=world_y, vel_x=vel_x, vel_z=0.0)
+    return Projectile(
+        slot="obj10", world_x=world_x, world_y=world_y, vel_x=vel_x, vel_z=0.0, type_id=0x1E
+    )
 
 
 class ExecuteProjectileSidestepTests(unittest.TestCase):

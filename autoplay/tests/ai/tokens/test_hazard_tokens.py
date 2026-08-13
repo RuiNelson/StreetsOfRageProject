@@ -26,13 +26,14 @@ class HazardTokenTests(unittest.TestCase):
 
     def test_projectile_fields(self) -> None:
         projectile = Projectile(
-            slot="obj09", world_x=900, world_y=64, vel_x=-1.5, vel_z=0.0
+            slot="obj09", world_x=900, world_y=64, vel_x=-1.5, vel_z=0.0, type_id=0x1E
         )
         self.assertEqual(projectile.slot, "obj09")
         self.assertEqual(projectile.world_x, 900)
         self.assertEqual(projectile.world_y, 64)
         self.assertEqual(projectile.vel_x, -1.5)
         self.assertEqual(projectile.vel_z, 0.0)
+        self.assertEqual(projectile.type_id, 0x1E)
 
     def test_incoming_projectile_fields(self) -> None:
         incoming = IncomingProjectile(
@@ -43,7 +44,7 @@ class HazardTokenTests(unittest.TestCase):
 
     def test_frozen_and_hashable(self) -> None:
         projectile = Projectile(
-            slot="obj09", world_x=900, world_y=64, vel_x=0.0, vel_z=0.0
+            slot="obj09", world_x=900, world_y=64, vel_x=0.0, vel_z=0.0, type_id=0x1E
         )
         with self.assertRaises(Exception):
             projectile.vel_x = 1.0  # type: ignore[misc]

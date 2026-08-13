@@ -579,6 +579,7 @@ class ProjectileObservationTests(unittest.TestCase):
         self.assertEqual(len(projectiles), 1)
         self.assertEqual(projectiles[0].slot, "obj09")
         self.assertEqual(projectiles[0].vel_x, -1.5)
+        self.assertEqual(projectiles[0].type_id, 0x1E)
 
 
 class PitObservationTests(unittest.TestCase):

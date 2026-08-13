@@ -154,9 +154,12 @@ class ProjectileSidestep(Walk):
     Jack's thrown axe/torch (object_catalog.py type ``$28``) is the case this
     was built for -- juggling him is unsafe to melee (see ``could_punch``'s
     Jack exception) and once he lets go, the axe/torch itself is a fast
-    in-lane projectile with no answer but getting out of its way -- but the
-    verb reacts to any ``Projectile`` inference judges a threat, not just
-    his.
+    in-lane projectile with no answer but getting out of its way. While he
+    is still juggling it, though, ``inference._jack_still_juggling`` keeps it
+    out of ``IncomingProjectile`` entirely -- the weapon's own spin can point
+    its velocity straight at the actor without ever being thrown, and this
+    verb has nothing to sidestep in that case. The verb still reacts to any
+    other ``Projectile`` inference judges a threat, not just his.
 
     Raises emergency: IncomingProjectile×45, sooner-to-impact scoring higher,
     floor 30 (see priority._emergency_projectile_sidestep) -- above every

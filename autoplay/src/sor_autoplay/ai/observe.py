@@ -238,6 +238,7 @@ def generate_direct_observation_tokens(
                     world_y=entity.world_y,
                     vel_x=entity.vel_x,
                     vel_z=entity.vel_z,
+                    type_id=entity.type_id,
                 )
             )
         elif entity.kind == "weapon" and entity.is_free_ground_item:
