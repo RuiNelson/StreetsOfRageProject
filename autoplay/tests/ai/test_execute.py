@@ -179,6 +179,25 @@ class BreakableApproachSideTests(unittest.TestCase):
 
         self.assertLess(target_x, prop.world_x)
 
+    def test_stage_seven_side_is_stable_however_the_actor_faces(self) -> None:
+        # Stage 7 (AI.md: "progression does not require lateral movement")
+        # reports Stage.direction == "none", which has no lateral anchor to
+        # read -- the same "standing on the prop" case as the facing test
+        # above, just with no stage direction to fall back on. Falling back
+        # to actor.facing_left there reintroduces the identical live-measured
+        # oscillation this whole class guards against.
+        prop = self._prop(200)
+        context = {self._stage("none")}
+
+        left = _walk_to_breakable_target(
+            _myself(world_x=200, world_y=100, facing_left=True), prop, context
+        )
+        right = _walk_to_breakable_target(
+            _myself(world_x=200, world_y=100, facing_left=False), prop, context
+        )
+
+        self.assertEqual(left, right)
+
 
 class DeadZoneApproachTests(unittest.TestCase):
     """Nora's whip (shape $22) reaches 32..80px, so the pocket between her

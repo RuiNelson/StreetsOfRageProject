@@ -123,7 +123,6 @@ DIRECTION_HYSTERESIS_X = 10
 PICKUP_RANGE_X = 18
 PICKUP_RANGE_Y = 14
 LANE_EDGE_MARGIN = 6
-BREAKABLE_AVOID_X = 28
 BREAKABLE_AVOID_Y = 22
 # Pit clearance (reach.PIT_AVOID_MARGIN) stays smaller than BREAKABLE_AVOID_Y
 # only because the pit's real height is already added on top of it (see the
@@ -560,14 +559,35 @@ def _walk_to_near_enemy_target(
     return target_x, target_y
 
 
-def state_machine_walk_to_near_enemy(verb: WalkToNearEnemy, context: Context, gamepad: VirtualGamepad) -> None:
+def _walk_toward_target(
+    verb: Verb,
+    context: Context,
+    gamepad: VirtualGamepad,
+    target_type: type,
+    compute_target,
+) -> None:
+    """Shared body for every state machine that is nothing but "find the
+    (actor, target) pair and steer toward a computed point": look both up,
+    release when either is missing, otherwise hand the pair to
+    ``compute_target`` and steer there.
+
+    ``WalkToNearEnemy``, ``RetreatFromDanger`` and ``ProjectileSidestep``
+    used to repeat this lookup/guard/steer shell verbatim, each differing
+    only in which token type the target slot resolves to and which
+    ``_*_target`` function computes the stopping point.
+    """
+
     actor = _find_actor(context, verb.actor_slot)
-    target = find(context, Enemy, slot=verb.target_slot)
+    target = find(context, target_type, slot=verb.target_slot)
     if actor is None or target is None:
         gamepad.release()
         return
-    target_x, target_y = _walk_to_near_enemy_target(actor, target, context)
+    target_x, target_y = compute_target(actor, target, context)
     _hold_steered(gamepad, _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
+
+
+def state_machine_walk_to_near_enemy(verb: WalkToNearEnemy, context: Context, gamepad: VirtualGamepad) -> None:
+    _walk_toward_target(verb, context, gamepad, Enemy, _walk_to_near_enemy_target)
 
 
 # How far to step back per tick while retreating -- roughly clears the
@@ -616,13 +636,7 @@ def _retreat_from_danger_target(
 def state_machine_retreat_from_danger(
     verb: RetreatFromDanger, context: Context, gamepad: VirtualGamepad
 ) -> None:
-    actor = _find_actor(context, verb.actor_slot)
-    target = find(context, Enemy, slot=verb.target_slot)
-    if actor is None or target is None:
-        gamepad.release()
-        return
-    target_x, target_y = _retreat_from_danger_target(actor, target, context)
-    _hold_steered(gamepad, _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
+    _walk_toward_target(verb, context, gamepad, Enemy, _retreat_from_danger_target)
 
 
 # How far to step off a projectile's lane per tick -- comfortably past
@@ -660,13 +674,7 @@ def _projectile_sidestep_target(
 def state_machine_projectile_sidestep(
     verb: ProjectileSidestep, context: Context, gamepad: VirtualGamepad
 ) -> None:
-    actor = _find_actor(context, verb.actor_slot)
-    target = find(context, Projectile, slot=verb.target_slot)
-    if actor is None or target is None:
-        gamepad.release()
-        return
-    target_x, target_y = _projectile_sidestep_target(actor, target, context)
-    _hold_steered(gamepad, _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
+    _walk_toward_target(verb, context, gamepad, Projectile, _projectile_sidestep_target)
 
 
 def state_machine_walk_to_advance_stage(
@@ -947,56 +955,53 @@ def state_machine_release_grab(verb: ReleaseGrab, context: Context, gamepad: Vir
     )
 
 
-def state_machine_throw_knife(verb: ThrowKnife, context: Context, gamepad: VirtualGamepad) -> None:
+def _throw_ranged_weapon(verb: Verb, context: Context, gamepad: VirtualGamepad, *, frames: int) -> None:
+    """Shared body for ``ThrowKnife``/``ThrowPepper``: identical B press
+    aimed at the interception point, differing only in the frame count."""
+
     actor = _find_actor(context, verb.actor_slot)
     target = find(context, Enemy, slot=verb.target_slot)
     face = 0
     if actor is not None and target is not None:
         face = _face_toward_mask(actor, _aim_point(verb, actor, target).world_x)
-    _press(gamepad, PUNCH_MASK | face, frames=THROW_KNIFE_FRAMES)
+    _press(gamepad, PUNCH_MASK | face, frames=frames)
+
+
+def state_machine_throw_knife(verb: ThrowKnife, context: Context, gamepad: VirtualGamepad) -> None:
+    _throw_ranged_weapon(verb, context, gamepad, frames=THROW_KNIFE_FRAMES)
 
 
 def state_machine_throw_pepper(verb: ThrowPepper, context: Context, gamepad: VirtualGamepad) -> None:
+    _throw_ranged_weapon(verb, context, gamepad, frames=THROW_PEPPER_FRAMES)
+
+
+def _walk_to_item(verb: Verb, context: Context, gamepad: VirtualGamepad, target_type: type) -> None:
+    """Shared body for ``WalkToWeapon``/``WalkToPickup``: identical arrival
+    test (press once inside pickup range, otherwise keep closing) --
+    differing only in which token type the target slot resolves to."""
+
     actor = _find_actor(context, verb.actor_slot)
-    target = find(context, Enemy, slot=verb.target_slot)
-    face = 0
-    if actor is not None and target is not None:
-        face = _face_toward_mask(actor, _aim_point(verb, actor, target).world_x)
-    _press(gamepad, PUNCH_MASK | face, frames=THROW_PEPPER_FRAMES)
+    target = find(context, target_type, slot=verb.target_slot)
+    if actor is None or target is None:
+        gamepad.release()
+        return
+    if abs(target.world_x - actor.world_x) <= PICKUP_RANGE_X and abs(target.world_y - actor.world_y) <= PICKUP_RANGE_Y:
+        _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
+    else:
+        _hold_steered(
+            gamepad,
+            _movement_mask(
+                context, actor.world_x, actor.world_y, target.world_x, target.world_y
+            ),
+        )
 
 
 def state_machine_walk_to_weapon(verb: WalkToWeapon, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, verb.actor_slot)
-    target = find(context, Weapon, slot=verb.target_slot)
-    if actor is None or target is None:
-        gamepad.release()
-        return
-    if abs(target.world_x - actor.world_x) <= PICKUP_RANGE_X and abs(target.world_y - actor.world_y) <= PICKUP_RANGE_Y:
-        _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
-    else:
-        _hold_steered(
-            gamepad,
-            _movement_mask(
-                context, actor.world_x, actor.world_y, target.world_x, target.world_y
-            ),
-        )
+    _walk_to_item(verb, context, gamepad, Weapon)
 
 
 def state_machine_walk_to_pickup(verb: WalkToPickup, context: Context, gamepad: VirtualGamepad) -> None:
-    actor = _find_actor(context, verb.actor_slot)
-    target = find(context, Pickup, slot=verb.target_slot)
-    if actor is None or target is None:
-        gamepad.release()
-        return
-    if abs(target.world_x - actor.world_x) <= PICKUP_RANGE_X and abs(target.world_y - actor.world_y) <= PICKUP_RANGE_Y:
-        _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
-    else:
-        _hold_steered(
-            gamepad,
-            _movement_mask(
-                context, actor.world_x, actor.world_y, target.world_x, target.world_y
-            ),
-        )
+    _walk_to_item(verb, context, gamepad, Pickup)
 
 
 def _walk_to_breakable_target(
@@ -1021,6 +1026,16 @@ def _walk_to_breakable_target(
     The stage's own progress direction is the anchor instead: fixed for the
     whole level, so it cannot oscillate, and it leaves the actor on the side
     it is coming from -- already lined up to carry on once the prop is gone.
+
+    Stage 7 (``AI.md``: "in stage 7, progression does not require lateral
+    movement") reports ``direction == "none"``, which has no lateral anchor
+    to read. Falling back to ``actor.facing_left`` there -- as this used to
+    -- reintroduces the exact live-measured oscillation above, since a
+    stage-7 breakable is exactly the "dx within hysteresis" case this whole
+    branch exists for. So "none" gets the same fixed, non-input-derived
+    answer as "right" rather than the feedback-prone one: stable is more
+    important than which side, and either side reaches smash range equally
+    well from dead center.
     """
 
     stop_dx = max(0, BREAKABLE_PUNCH_X - BREAKABLE_STOP_BUFFER)
@@ -1028,12 +1043,7 @@ def _walk_to_breakable_target(
     if abs(dx) <= DIRECTION_HYSTERESIS_X:
         stage = find(context, Stage)
         direction = stage.direction if stage is not None else "right"
-        if direction == "left":
-            approach_from_right = True
-        elif direction == "right":
-            approach_from_right = False
-        else:
-            approach_from_right = actor.facing_left
+        approach_from_right = direction == "left"
     else:
         approach_from_right = dx < 0
     target_x = target.world_x + stop_dx if approach_from_right else target.world_x - stop_dx
