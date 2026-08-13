@@ -41,6 +41,7 @@ from sor_autoplay.ai.execute import (
 from sor_autoplay.ai.decide import BREAKABLE_PUNCH_X, in_smash_range
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.tokens import Breakable, Pit, Projectile, SafeSpot
+from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
@@ -1422,6 +1423,83 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
         prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
 
         self.assertTrue(in_smash_range(actor, prop))
+
+    def test_above_the_prop_walks_out_to_the_side_before_changing_lane(self) -> None:
+        # Smash range is a side pocket. Walking a diagonal from above the
+        # crate to that pocket cuts through the solid -- the actor pins
+        # itself against the body and never arrives. Hold Y, walk X first.
+        actor = _myself(world_x=100, world_y=50)
+        prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
+        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, prop, Stage(level_index=0, direction="right")}, gamepad)
+
+        held = client.hold_buttons.call_args.kwargs["player1"]
+        self.assertTrue(held & (LEFT | RIGHT), f"expected a side step, got {held:#x}")
+        self.assertFalse(held & (UP | DOWN), f"must not walk into the crate on Y, got {held:#x}")
+
+    def test_below_the_prop_walks_out_to_the_side_before_changing_lane(self) -> None:
+        # Stay inside the default lane clamp (LANE_Y_MIN+6 .. 0x70-6) so a
+        # DOWN/UP bit here can only come from walking into the crate, not
+        # from _clamp_target_y dragging an off-lane Y back in.
+        actor = _myself(world_x=100, world_y=100)
+        prop = Breakable(slot="obj09", world_x=100, world_y=70, type_id=0x40)
+        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, prop, Stage(level_index=0, direction="right")}, gamepad)
+
+        held = client.hold_buttons.call_args.kwargs["player1"]
+        self.assertTrue(held & (LEFT | RIGHT), f"expected a side step, got {held:#x}")
+        self.assertFalse(held & (UP | DOWN), f"must not walk into the crate on Y, got {held:#x}")
+
+    def test_already_beside_the_prop_then_converges_on_its_lane(self) -> None:
+        # Once X has reached the smash pocket, Y is allowed to move -- that
+        # is the second half of the around-path.
+        stop_dx = BREAKABLE_PUNCH_X - BREAKABLE_STOP_BUFFER
+        actor = _myself(world_x=100 - stop_dx, world_y=50)
+        prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
+        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, prop, Stage(level_index=0, direction="right")}, gamepad)
+
+        held = client.hold_buttons.call_args.kwargs["player1"]
+        self.assertTrue(held & DOWN, f"expected to walk onto the smash lane, got {held:#x}")
+        self.assertFalse(held & (LEFT | RIGHT), f"X has arrived; must not wander, got {held:#x}")
+
+    def test_wide_hitbox_still_walks_around_rather_than_through(self) -> None:
+        # Different props have different footprints. The around-path must
+        # read the real body, not assume every crate is a point at world_x.
+        box = Hitbox(x0=80, x1=120, y0=70, y1=110, z0=0, z1=40)
+        actor = _myself(world_x=100, world_y=50)
+        prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x11, hitbox=box)
+        target_x, target_y = _walk_to_breakable_target(
+            actor, prop, {Stage(level_index=0, direction="right")}
+        )
+
+        self.assertLess(target_x, box.x0)
+        self.assertEqual(target_y, actor.world_y)
+
+    def test_approach_does_not_dodge_the_prop_it_is_trying_to_smash(self) -> None:
+        # _movement_mask's incidental dodge treats any breakable on the
+        # walk's X span as an obstacle. The smash target *is* on that span
+        # (from near-center to the side pocket), so dodging it pushed Y off
+        # the punch band every tick of the walk-in.
+        # dx=5 is inside the punch inner edge, so this is a walk, not a smash
+        # -- and still close enough that the prop's origin sits between the
+        # actor and the smash pocket, which is what used to trip the dodge.
+        actor = _myself(world_x=95, world_y=90)
+        prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
+        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, prop, Stage(level_index=0, direction="right")}, gamepad)
+
+        held = client.hold_buttons.call_args.kwargs["player1"]
+        self.assertTrue(held & LEFT, f"expected to walk out to the smash pocket, got {held:#x}")
+        self.assertFalse(held & (UP | DOWN), f"must not dodge the smash target, got {held:#x}")
 
 
 class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):

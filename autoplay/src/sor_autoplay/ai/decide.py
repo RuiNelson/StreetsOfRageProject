@@ -104,7 +104,11 @@ HEALTH_CRITICAL_PERCENT = 40.0
 
 BREAKABLE_PUNCH_X = 36
 BREAKABLE_PUNCH_Y = 16
-BREAKABLE_BLOCK_X = 28  # treat as path obstacle within this X of the walk line
+# Fallback solid footprint when Breakable.hitbox is missing. execute.py's
+# around-path (_breakable_block_x / _walk_to_breakable_target) reads these
+# so a crate with no reconstructed body is still treated as a column the
+# actor must walk out of before changing lane.
+BREAKABLE_BLOCK_X = 28
 BREAKABLE_BLOCK_Y = 20
 
 

@@ -65,7 +65,7 @@ from .tokens import (
 )
 from .gamepad import VirtualGamepad
 from . import kinematics
-from .decide import BREAKABLE_PUNCH_X, in_smash_range
+from .decide import BREAKABLE_BLOCK_X, BREAKABLE_PUNCH_X, in_smash_range
 from .reach import (
     PIT_AVOID_MARGIN,
     REACH_SAFETY_MARGIN,
@@ -173,6 +173,10 @@ WALK_TO_ENEMY_LANE_SAFETY_Y = PUNCH_RANGE_Y + 16
 # moves to close the last pixel itself: the actor arrived and never threw a
 # punch. Live-diagnosed; keep this comfortably above MOVE_DEADBAND_X.
 BREAKABLE_STOP_BUFFER = 12
+# Slack around the prop's blocking X column so the around-path starts
+# before the exact body edge, and so a one-pixel walk jitter on that edge
+# cannot flip between "still in the column, hold Y" and "clear, converge Y".
+BREAKABLE_AROUND_SLACK_X = MOVE_DEADBAND_X
 
 
 def press_no_button(gamepad: VirtualGamepad) -> None:
@@ -309,12 +313,28 @@ def _pit_dodge_target_y(context: Context, pit: Pit, from_y: int) -> int:
     return lo if (danger_top - lo) >= (hi - danger_bottom) else hi
 
 
+def _breakable_block_x(prop: Breakable) -> tuple[int, int]:
+    """X span the actor cannot walk through.
+
+    The prop's real body when we have one (``Breakable.hitbox``), otherwise
+    the ``BREAKABLE_BLOCK_X`` margin around its origin -- the constant
+    ``decide.py`` already named for this and nothing else was reading.
+    """
+
+    box = prop.hitbox
+    if box is not None and not box.is_degenerate:
+        return box.x0, box.x1
+    return prop.world_x - BREAKABLE_BLOCK_X, prop.world_x + BREAKABLE_BLOCK_X
+
+
 def _movement_mask(
     context: Context,
     from_x: int,
     from_y: int,
     to_x: int,
     to_y: int,
+    *,
+    ignore_slots: frozenset[str] = frozenset(),
 ) -> int:
     """Build a D-pad mask, clamped to lane bounds and steered around props."""
 
@@ -322,6 +342,13 @@ def _movement_mask(
     camera = find(context, CameraRange)
     # Nudge path around intact breakables sitting on the straight-line route.
     for prop in find_all(context, Breakable):
+        # The prop we are walking *to* smash (OpenBreakable) is not an
+        # obstacle on the way to something else -- it is the destination.
+        # Dodging it here pushes Y off the smash lane while the walk-in
+        # closes X, so the actor arrives beside the crate a full
+        # BREAKABLE_AVOID_Y off the punch band and never strikes.
+        if prop.slot in ignore_slots:
+            continue
         # world_map tracks entities up to two screens beyond each camera edge
         # (hunt-target lookahead), far past what's actually walkable right
         # now. Without this filter, a breakable anywhere in that huge tracked
@@ -1179,6 +1206,13 @@ def _walk_to_breakable_target(
     already occupies rather than walking to the breakable's exact (and
     unreachable) center.
 
+    Smash range is a *side* pocket (same lane, X offset). A straight line
+    from above or below the crate to that pocket cuts through the solid, so
+    while the actor still shares the prop's blocking X column the Y target
+    is held at the actor's own lane -- walk out to the smash X first, then
+    converge on Y from the side. Without that around-path the actor pins
+    itself against the body and never arrives at a point that can punch.
+
     Standing essentially *on* the prop, which side that is has to be decided
     by something the AI does not itself change every tick. Reading it off
     ``actor.facing_left`` -- the idiom ``_walk_to_near_enemy_target`` uses --
@@ -1214,6 +1248,23 @@ def _walk_to_breakable_target(
     else:
         approach_from_right = dx < 0
     target_x = target.world_x + stop_dx if approach_from_right else target.world_x - stop_dx
+    # Smash range is a side pocket (same lane, X offset). Walking a
+    # straight line from above/below the crate to that pocket cuts through
+    # the solid -- the actor pins itself against the body and never arrives.
+    # While still sharing the prop's blocking X column, hold Y and walk out
+    # to the smash X first; the next tick, now beside it, converges on Y.
+    # ``at_smash_x`` is the escape when the smash pocket itself sits inside
+    # the fallback column (BREAKABLE_BLOCK_X is wider than stop_dx): once
+    # X has arrived, Y must be allowed to move or the actor freezes off-lane.
+    lo_x, hi_x = _breakable_block_x(target)
+    in_column = (
+        lo_x - BREAKABLE_AROUND_SLACK_X
+        <= actor.world_x
+        <= hi_x + BREAKABLE_AROUND_SLACK_X
+    )
+    at_smash_x = abs(actor.world_x - target_x) <= MOVE_DEADBAND_X
+    if in_column and not at_smash_x:
+        return target_x, actor.world_y
     return target_x, target.world_y
 
 
@@ -1236,7 +1287,17 @@ def state_machine_open_breakable(
         _press(gamepad, PUNCH_MASK | _face_toward_mask(actor, target.world_x), frames=PUNCH_FRAMES)
         return
     target_x, target_y = _walk_to_breakable_target(actor, target, context)
-    _hold_steered(gamepad, _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
+    _hold_steered(
+        gamepad,
+        _movement_mask(
+            context,
+            actor.world_x,
+            actor.world_y,
+            target_x,
+            target_y,
+            ignore_slots=frozenset({target.slot}),
+        ),
+    )
 
 
 _HANDLERS = {

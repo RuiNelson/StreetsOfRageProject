@@ -104,6 +104,7 @@ class Breakable(StageObjects):
     world_y: int
     type_id: int
     # The prop's real footprint, rebuilt from the ROM shape tables. A
-    # Breakable is a solid obstacle, so this is what execute.py's path
-    # avoidance ought to steer around rather than a fixed margin.
+    # Breakable is a solid obstacle: execute._breakable_block_x / the
+    # OpenBreakable around-path read this when present, and fall back to
+    # decide.BREAKABLE_BLOCK_X around the origin when it is not.
     hitbox: Hitbox | None = None
