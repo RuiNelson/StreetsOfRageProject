@@ -1430,6 +1430,130 @@ class ExecuteMovementPitAvoidanceTests(unittest.TestCase):
         client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
 
 
+class PitDodgeSideStabilityTests(unittest.TestCase):
+    """Which side of a pit to escape to must come from the pit's own danger
+    edges, never from the lane midpoint.
+
+    The pit dodge *freezes X*, so nothing else is moving to break a tie --
+    an unstable side pick here is permanent, unlike the Breakable dodge
+    above (which keeps closing X and walks past the prop regardless). The
+    lane midpoint has nothing to do with the pit and routinely falls inside
+    its danger band, and the old rule steered the actor *toward* it (upper
+    half aimed below, lower half aimed above): the actor crossed the
+    midpoint, the pick flipped, and it crossed back forever.
+    """
+
+    def _sim(self, pit, start_y, ticks=60):
+        """Drive WalkToAdvanceStage past ``pit`` and report the path.
+
+        ~6px/tick on X and ~4px on Y -- ground walk (3.0/2.375 px per 60Hz
+        frame) over the default 33ms poll's ~2 frames.
+        """
+
+        gamepad, _ = _gamepad()
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        x, y = 340, start_y
+        reversals, last = 0, 0
+        for _ in range(ticks):
+            actor = _myself(world_x=x, world_y=y)
+            camera = CameraRange(left=x - 128, right=x + 128, top=0, bottom=112)
+            stage = Stage(level_index=3, direction="right")
+            execute_tick(verb, {actor, camera, stage, pit}, gamepad)
+            held = gamepad.held
+            step = 1 if held & RIGHT else (-1 if held & LEFT else 0)
+            if step and last and step != last:
+                reversals += 1
+            if step:
+                last = step
+            x += step * 6
+            if held & DOWN:
+                y += 4
+            elif held & UP:
+                y -= 4
+        return x, y, reversals
+
+    def test_advance_stage_gets_past_a_pit_without_oscillating(self) -> None:
+        # The reported failure: "no Pit, a AI falha em WalkToAdvanceStage,
+        # fica a alternar direção no Pit". Reproduced on this harness with a
+        # 96x40 pit at lane 40..80 -- danger band 32..88, lane midpoint 57,
+        # inside it -- the actor stopped dead at the pit's edge and
+        # alternated UP/DOWN between y=56 and y=60 forever, X frozen at 394,
+        # never advancing.
+        pit = Pit(world_x=400, lane_y=40, width=96, height=40)
+
+        x, _, reversals = self._sim(pit, start_y=60)
+
+        self.assertEqual(reversals, 0, "reversed direction at the pit")
+        self.assertGreater(x, pit.world_x + pit.width, "never got past the pit")
+
+    def test_escape_side_does_not_flip_across_the_lane_midpoint(self) -> None:
+        # Straddling the lane midpoint is what used to flip the pick. Both
+        # sides of it must choose the same escape direction, since the pit --
+        # the only thing the choice should depend on -- is identical.
+        pit = Pit(world_x=400, lane_y=40, width=96, height=40)
+        camera = CameraRange(left=300, right=560, top=0, bottom=112)
+        stage = Stage(level_index=3, direction="right")
+
+        sides = []
+        for y in (56, 60):
+            gamepad, _ = _gamepad()
+            actor = _myself(world_x=394, world_y=y)
+            execute_tick(
+                WalkToAdvanceStage(actor_slot="P1", direction="right"),
+                {actor, camera, stage, pit},
+                gamepad,
+            )
+            sides.append(gamepad.held & (UP | DOWN))
+
+        self.assertEqual(sides[0], sides[1], f"escape side flipped: {sides}")
+
+    def test_takes_the_nearer_way_out_of_the_pits_band(self) -> None:
+        # Self-reinforcing, and the shortest escape: an actor near the top of
+        # the band leaves upward, one near the bottom leaves downward.
+        pit = Pit(world_x=400, lane_y=30, width=96, height=50)
+        camera = CameraRange(left=300, right=560, top=0, bottom=112)
+        stage = Stage(level_index=3, direction="right")
+
+        masks = {}
+        for label, y in (("near top", 30), ("near bottom", 78)):
+            gamepad, _ = _gamepad()
+            actor = _myself(world_x=394, world_y=y)
+            execute_tick(
+                WalkToAdvanceStage(actor_slot="P1", direction="right"),
+                {actor, camera, stage, pit},
+                gamepad,
+            )
+            masks[label] = gamepad.held
+
+        self.assertTrue(masks["near top"] & UP, masks)
+        self.assertTrue(masks["near bottom"] & DOWN, masks)
+
+    def test_never_walks_laterally_into_the_pit_while_still_in_its_band(self) -> None:
+        # state_machine_walk_to_advance_stage falls back to the raw lateral
+        # direction whenever _movement_mask returns 0 (`or mask`), so a dodge
+        # that produces an empty mask does not merely stall -- it commands
+        # the actor straight into the pit. Every Y inside the band must
+        # therefore yield a non-empty, purely vertical command.
+        pit = Pit(world_x=400, lane_y=20, width=96, height=60)
+        camera = CameraRange(left=300, right=560, top=0, bottom=112)
+        stage = Stage(level_index=3, direction="right")
+
+        for y in range(12, 89, 4):
+            gamepad, _ = _gamepad()
+            actor = _myself(world_x=394, world_y=y)
+            execute_tick(
+                WalkToAdvanceStage(actor_slot="P1", direction="right"),
+                {actor, camera, stage, pit},
+                gamepad,
+            )
+            held = gamepad.held
+            self.assertFalse(
+                held & RIGHT,
+                f"walked laterally into the pit at y={y} (mask {held})",
+            )
+            self.assertTrue(held & (UP | DOWN), f"empty command at y={y}")
+
+
 class ExecuteTickPitEscapeTests(unittest.TestCase):
     """``execute_tick`` -- not ``_movement_mask``'s incidental path dodge --
     is what reacts to the actor already *standing* in a pit's danger zone,

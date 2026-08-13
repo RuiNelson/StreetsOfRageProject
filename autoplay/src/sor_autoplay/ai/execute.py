@@ -233,6 +233,68 @@ def _clamp_target_y(context: Context, y: int) -> int:
     return int(max(lo, min(hi, y)))
 
 
+def _pit_dodge_target_y(context: Context, pit: Pit, from_y: int) -> int:
+    """Which side of ``pit`` to clear to, as an absolute lane coordinate.
+
+    The dodge target must clear the danger boundary by more than
+    MOVE_DEADBAND_Y, not land exactly on it: live-diagnosed deadlock --
+    aiming at danger_top/danger_bottom itself means that once ``from_y``
+    drifts to within MOVE_DEADBAND_Y of that same point, the Y mask bits go
+    quiet (deadband) *while X is still frozen and "not cleared" is still
+    true* (the boundary is inclusive on both checks), so the whole mask goes
+    to 0 and the actor freezes a few pixels short of actually escaping.
+    ``PIT_DODGE_OVERSHOOT`` pushes the aim point far enough past the boundary
+    that "not cleared" and "within the deadband of the target" can never both
+    hold at once.
+
+    **Which** side is picked from the pit's own danger edges, never from the
+    lane midpoint. Reading it off ``from_y < (lo + hi) / 2`` -- as this used
+    to -- is a feedback loop of exactly the kind
+    ``_walk_to_near_enemy_target`` and ``_walk_to_breakable_target`` already
+    document, and a permanent one here because the pit dodge *freezes X*:
+    nothing else is moving to break the tie. The lane midpoint has nothing to
+    do with the pit and routinely falls **inside** its danger band, and the
+    old rule steered the actor *toward* that midpoint (upper half aimed
+    below, lower half aimed above) -- so the actor crossed it, the pick
+    flipped, and it crossed back. Reproduced on the tick harness with a
+    96x40 pit at lane 40..80 (danger 32..88, lane midpoint 57, inside it):
+    the actor stopped dead at the pit's edge and alternated UP/DOWN between
+    y=56 and y=60 forever, X frozen, never advancing the stage.
+
+    The nearer danger edge is stable where the lane midpoint is not, because
+    it is *self-reinforcing*: the flip point is the band's own centre and the
+    chosen direction always moves the actor **away** from it, so a pick can
+    never undo itself. It is also the shortest way out.
+
+    A side only counts when its aim point survives the lane clamp still clear
+    of the danger band; otherwise ``_clamp_target_y`` drags it back inside,
+    the Y bits go quiet while X is frozen, and the mask collapses to 0 --
+    which for ``state_machine_walk_to_advance_stage`` is worse than useless,
+    since its ``or mask`` fallback then commands the raw lateral direction
+    straight into the pit. When neither side clears, the roomier lane edge is
+    the best available answer (an impassable pit: press against the edge and
+    stall rather than walk in), and it is still picked from the pit and the
+    lane alone, so it cannot oscillate either.
+    """
+
+    lo, hi = _lane_bounds(context)
+    pit_bottom = pit.lane_y + pit.height
+    danger_top = pit.lane_y - PIT_AVOID_MARGIN
+    danger_bottom = pit_bottom + PIT_AVOID_MARGIN
+    above = danger_top - PIT_DODGE_OVERSHOOT
+    below = danger_bottom + PIT_DODGE_OVERSHOOT
+
+    can_go_up = above >= lo
+    can_go_down = below <= hi
+    if can_go_up and can_go_down:
+        return above if (from_y - danger_top) <= (danger_bottom - from_y) else below
+    if can_go_up:
+        return above
+    if can_go_down:
+        return below
+    return lo if (danger_top - lo) >= (hi - danger_bottom) else hi
+
+
 def _movement_mask(
     context: Context,
     from_x: int,
@@ -307,25 +369,22 @@ def _movement_mask(
             continue
         danger_top = pit.lane_y - PIT_AVOID_MARGIN
         danger_bottom = pit_bottom + PIT_AVOID_MARGIN
-        if from_y <= danger_top or from_y >= danger_bottom:
+        if from_y < danger_top or from_y > danger_bottom:
             # Already clear vertically -- safe to keep closing X this tick.
+            #
+            # Strict, because ``reach.pit_endangers``' own band is inclusive
+            # on both edges: with `<=`/`>=` here the two disagreed about the
+            # single boundary pixel, and that one pixel was enough to
+            # deadlock. The escape stops the moment this says "clear", so the
+            # actor settled exactly on ``danger_top`` -- where
+            # ``_movement_mask`` let X run while ``_pit_escape_mask`` still
+            # read ``pit_endangers`` as true and overrode with a lateral
+            # shove. Reproduced on the tick harness: having cleared a 96px
+            # pit's band and walked across it, the actor reached the pit's
+            # exact centre X and was pushed back LEFT, then stalled. Both
+            # sides must mean the same thing by "clear of this pit on Y".
             continue
-        # The dodge target must clear the danger boundary by more than
-        # MOVE_DEADBAND_Y, not land exactly on it: live-diagnosed deadlock --
-        # aiming at danger_top/danger_bottom itself means that once from_y
-        # drifts to within MOVE_DEADBAND_Y of that same point, the Y mask
-        # bits go quiet (deadband) *while X is still frozen and "not
-        # cleared" is still true* (the boundary is inclusive on both
-        # checks), so the whole mask goes to 0 and the actor freezes a few
-        # pixels short of actually escaping -- reachable well before the
-        # true edge, not just exactly on it. PIT_DODGE_OVERSHOOT pushes the
-        # aim point far enough past the boundary that "not cleared" and
-        # "within the deadband of the target" can never both hold at once.
-        lo, hi = _lane_bounds(context)
-        if from_y < (lo + hi) / 2:
-            to_y = _clamp_target_y(context, pit_bottom + PIT_AVOID_MARGIN + PIT_DODGE_OVERSHOOT)
-        else:
-            to_y = _clamp_target_y(context, pit.lane_y - PIT_AVOID_MARGIN - PIT_DODGE_OVERSHOOT)
+        to_y = _clamp_target_y(context, _pit_dodge_target_y(context, pit, from_y))
         to_x = from_x
 
     mask = 0
@@ -1151,8 +1210,17 @@ def _pit_escape_mask(context: Context, actor: Myself) -> int | None:
         mask = _movement_mask(context, actor.world_x, actor.world_y, far_x, actor.world_y)
         if mask != 0:
             return mask
+        # Same side ``_movement_mask``'s own dodge would have chosen, so the
+        # two can never disagree about which way out is which. This used to
+        # read `DOWN if actor.world_y < pit_center_y else UP`, which is the
+        # direction *toward* the pit's centre -- the exact opposite of this
+        # fallback's own stated job, and a push deeper into the hole on the
+        # one tick the pipeline is certain the actor is standing in one.
+        target_y = _pit_dodge_target_y(context, pit, actor.world_y)
+        if target_y != actor.world_y:
+            return DOWN_MASK if target_y > actor.world_y else UP_MASK
         pit_center_y = pit.lane_y + pit.height / 2
-        return DOWN_MASK if actor.world_y < pit_center_y else UP_MASK
+        return UP_MASK if actor.world_y < pit_center_y else DOWN_MASK
     return None
 
 
