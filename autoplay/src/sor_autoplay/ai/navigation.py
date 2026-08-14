@@ -121,47 +121,6 @@ MIN_STRIKE_CONTACT_Y = 8
 # since every obstacle in that reach is still real, observed geometry.
 WORLD_MARGIN_X = 96
 
-# Object types that are one compound sprite wearing two (or more) ROM
-# objects' worth of hitboxes, rather than genuinely separate props that
-# happen to sit close together -- see :func:`_cluster_breakable_rects`.
-#
-# $1F ("Round 5 prop", object_catalog.py) is confirmed live: a paused game
-# on stage 5 had a pair of machine-housing objects at the same world_x,
-# lane_y 40px apart, each body box 20px tall -- a real, uncollided 20px gap
-# between them -- yet a screenshot crop shows one continuous drawn shape
-# with the two halves' edges touching pixel-for-pixel, an isometric-camera
-# trick for a taller sprite than one lane band can express. Routing through
-# that real-but-invisible gap walks the actor into the visually solid middle
-# of the prop.
-#
-# Deliberately an allowlist rather than "any two same-type boxes close
-# together": CheckForSafeSpotsTests.test_no_safe_spot_when_every_candidate_is
-# _boxed_in builds four separate walls of one synthetic type that are just as
-# close and just as axis-aligned as a real $1F pair, to specifically pin a
-# hollow room (a frame, not a solid slab) apart -- bounding-box-merging that
-# quartet the same way would paper over the actor's own clearing in the
-# middle and manufacture a route through a wall. Type identity alone cannot
-# tell a two-piece stack from a four-wall room; only a type this codebase has
-# actually looked at and confirmed compound belongs here.
-COMPOUND_BREAKABLE_TYPES = frozenset({0x1F})
-
-# How tall the real, uncollided lane_y gap between two same-column
-# compound-prop boxes may be and still be the fold :data:`COMPOUND_
-# BREAKABLE_TYPES` exists to close, in px. 32 clears the live-measured 20px
-# gap with margin.
-#
-# This is deliberately not also the merge test's X tolerance: the live pair's
-# other, genuinely separate machine sits a real 24px away on X, closer than
-# this margin, and a symmetric "boxes within N px of each other" rule that
-# does not first require the boxes to already share a lane column would fuse
-# the two machines into one obstacle spanning the walkable gap between them
-# -- caught by a first attempt at this fix, which used exactly that
-# symmetric test and merged both machines into one 104px-wide slab.
-# :func:`_cluster_breakable_rects` therefore only ever measures this gap
-# between boxes whose *unmodified* X ranges already overlap; two boxes that
-# do not is a real column apart, at any distance.
-BREAKABLE_STACK_GAP = 32
-
 
 def _rect_from_hitbox(box: Hitbox) -> Rect:
     """The lane-plane footprint of a ROM box (``z`` is height, not depth)."""
@@ -245,82 +204,6 @@ def _breakable_rect(
     )
 
 
-def _shares_lane_column(a: Rect, b: Rect) -> bool:
-    """Do the two rects' *unmodified* X ranges genuinely overlap?
-
-    Deliberately not a grown/tolerant test: two side-by-side compound props
-    (a real column apart, walkable ground between them) must never pass
-    this on X alone, however small that gap is, or the gap-closing below
-    would close their walkable ground along with it. Only the vertical gap
-    of two boxes already in the same column is ever fused.
-    """
-
-    return a.left < b.right and b.left < a.right
-
-
-def _lane_gap(a: Rect, b: Rect) -> float:
-    """The uncollided lane_y span between two same-column boxes, 0 if none."""
-
-    if a.bottom <= b.top:
-        return b.top - a.bottom
-    if b.bottom <= a.top:
-        return a.top - b.bottom
-    return 0.0
-
-
-def _cluster_breakable_rects(
-    props: Sequence[Breakable], block_x: int, keep_reachable_within: int | None
-) -> list[Rect]:
-    """One routing rect per breakable, except a :data:`COMPOUND_BREAKABLE_TYPES`
-    stack fuses.
-
-    Fusing is scoped to that allowlist alone -- see its docstring for why
-    type identity plus proximity is not by itself a safe enough signal -- and
-    within it, to boxes already sharing a lane column (:func:`_shares_lane_
-    column`) whose vertical gap is small (:func:`_lane_gap`,
-    :data:`BREAKABLE_STACK_GAP`). That closes exactly the fold gap
-    :data:`COMPOUND_BREAKABLE_TYPES` documents without touching the
-    per-target geometry ``_walk_to_breakable_target`` / ``strike_goal`` build
-    from each prop's own precise box, and without swallowing the walkable
-    ground between two side-by-side compound props (see ``BREAKABLE_STACK_
-    GAP``'s own note on a first attempt that did exactly that).
-    """
-
-    ordinary = [
-        _breakable_rect(prop, block_x, keep_reachable_within)
-        for prop in props
-        if prop.type_id not in COMPOUND_BREAKABLE_TYPES
-    ]
-    groups: list[tuple[int, Rect]] = [
-        (prop.type_id, _breakable_rect(prop, block_x, keep_reachable_within))
-        for prop in props
-        if prop.type_id in COMPOUND_BREAKABLE_TYPES
-    ]
-    # Fixed-point pairwise merge so a three-or-more chain (A close to B,
-    # B close to C, A not directly close to C) still ends up as one rect
-    # regardless of scan order.
-    merged = True
-    while merged:
-        merged = False
-        for i in range(len(groups)):
-            type_i, rect_i = groups[i]
-            for j in range(i + 1, len(groups)):
-                type_j, rect_j = groups[j]
-                if type_i != type_j:
-                    continue
-                if not _shares_lane_column(rect_i, rect_j):
-                    continue
-                if _lane_gap(rect_i, rect_j) > BREAKABLE_STACK_GAP:
-                    continue
-                groups[i] = (type_i, rect_i.union(rect_j))
-                del groups[j]
-                merged = True
-                break
-            if merged:
-                break
-    return ordinary + [rect for _, rect in groups]
-
-
 def solid_obstacles(
     context: Context,
     *,
@@ -349,12 +232,11 @@ def solid_obstacles(
     origin is within the margin" -- the same sentence ``pit_endangers`` says.
     """
 
-    props = [
-        prop for prop in find_all(context, Breakable) if prop.slot not in ignore_slots
-    ]
-    rects: list[Rect] = _cluster_breakable_rects(
-        props, block_x, keep_reachable_within
-    )
+    rects: list[Rect] = []
+    for prop in find_all(context, Breakable):
+        if prop.slot in ignore_slots:
+            continue
+        rects.append(_breakable_rect(prop, block_x, keep_reachable_within))
     inset_x = body.width / 2 if body is not None else 0.0
     inset_y = body.height / 2 if body is not None else 0.0
     for pit in find_all(context, Pit):
