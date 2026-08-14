@@ -65,56 +65,12 @@ def test_every_vector_is_a_multiple_of_the_step_and_never_shorter() -> None:
         assert step.length % 8 == 0
 
 
-def test_the_first_half_of_an_open_diagonal_is_diagonal_then_it_straightens() -> None:
-    # Both axes are 48px; X wins the tie. The first 24px may cut the
-    # corner; after that every vector is a cardinal.
+def test_a_free_diagonal_is_taken_as_one_vector() -> None:
     path = plan(start=BODY, goal=PointGoal(Point(64, 64)))
 
     assert path.reached
-    assert path.steps[0].direction is Direction.DOWN_RIGHT
-    assert path.steps[0].length == 24
-    assert all(not step.direction.is_diagonal for step in path.steps[1:])
-    assert path.final == Rect(48, 48, 16, 16)
-
-
-def test_a_small_off_axis_gap_is_picked_up_diagonally_then_the_long_axis_runs_straight() -> None:
-    # 184px of X, 16px of Y: dominant is X, so the first 92px of X may
-    # include the diagonal that soaks up Y, and everything after that is
-    # a single RIGHT.
-    path = plan(start=BODY, goal=PointGoal(Point(200, 32)))
-
-    assert path.reached
-    assert path.steps[0].direction is Direction.DOWN_RIGHT
-    assert all(not step.direction.is_diagonal for step in path.steps[1:])
-    assert path.steps[-1].direction is Direction.RIGHT
-
-
-def test_a_taller_goal_straightens_on_y() -> None:
-    # Y is the farther axis, so the split is a horizontal midline: X is
-    # soaked up with a diagonal while more than half of Y remains, and
-    # the last stretch is DOWN.
-    path = plan(start=BODY, goal=PointGoal(Point(32, 96)))
-
-    assert path.reached
-    assert any(step.direction.is_diagonal for step in path.steps)
-    assert path.steps[-1].direction is Direction.DOWN
-    assert not path.steps[-1].direction.is_diagonal
-
-
-def test_a_late_diagonal_is_used_when_cardinals_cannot_arrive() -> None:
-    # Already touching the crate's corner, so both axis gaps are zero and
-    # the whole search is the "second half" -- cardinals unless they
-    # cannot arrive. Hanging out of the world on both axes, the first
-    # cardinal step lands still outside and only DOWN_RIGHT walks back in.
-    start = Rect(-8, -8, 16, 16)
-    crate = Rect(8, 8, 16, 16)
-    goal = RectGoal(crate, frozenset({(Edge.LEFT, Edge.RIGHT)}))
-    path = plan(start=start, goal=goal)
-
-    assert not goal.is_reached(start)
-    assert start.gap_to(goal.bounding_box()) == (0.0, 0.0)
-    assert path.reached
-    assert path.steps[0].direction is Direction.DOWN_RIGHT
+    assert [step.direction for step in path.steps] == [Direction.DOWN_RIGHT]
+    assert path.length == pytest.approx(48 * math.sqrt(2))
 
 
 def test_diagonals_can_be_turned_off() -> None:
@@ -441,10 +397,7 @@ def test_the_route_around_an_obstacle_is_not_much_longer_than_the_direct_one() -
     path = plan(start=BODY.moved_to(0, 0), goal=PointGoal(Point(160, 8)), obstacles=obstacles)
 
     assert path.reached
-    # A straight run would be ~144. Going around a 40px wall on cardinals
-    # plus a first-half diagonal is a bit over 200; anything much larger
-    # would be a wild detour, not a go-around.
-    assert path.length < 220
+    assert path.length < 200  # a straight run would be ~144
 
 
 def test_positions_and_walked_offsets_agree_with_the_final_rectangle() -> None:
