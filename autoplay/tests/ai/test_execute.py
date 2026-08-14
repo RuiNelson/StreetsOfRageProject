@@ -913,6 +913,87 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
 
         client.hold_buttons.assert_called_with(player1=LEFT, player2=0)
 
+    def test_pure_lateral_advance_with_nothing_in_the_way(self) -> None:
+        # Routed through the path finder now, but with an empty playfield
+        # ahead the route is a straight RIGHT vector and no accidental
+        # Up/Down should appear -- this is the actor-present counterpart of
+        # test_direction_right_holds_right above (which never resolves an
+        # actor at all).
+        actor = _myself(world_x=100, world_y=64)
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+    def test_routes_around_a_breakable_on_the_lookahead_line(self) -> None:
+        # Breakables are still solid obstacles for this verb's router (the
+        # same set the pre-routing ad-hoc dodge avoided), so a crate sitting
+        # squarely on the 40px lookahead point must be routed around on Y,
+        # never walked through -- and the lateral bit must never disappear
+        # while doing it, since nothing here freezes X the way the pit dodge
+        # does.
+        prop = Breakable(slot="obj09", world_x=200, world_y=64, type_id=0x40)
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
+
+        # Starts well clear of the solid's own rect (prop.world_x +/-
+        # BREAKABLE_BLOCK_X, 28px): a body that already overlaps a solid at
+        # the start has that obstacle dropped from the whole search (the
+        # path finder's "already stuck in it" rule), which would make this
+        # test pass by construction rather than by actually routing around
+        # it.
+        trail = _walk(verb, _myself(world_x=100, world_y=64), {prop}, ticks=60)
+
+        prop_body = Rect(prop.world_x - BREAKABLE_STOP_BUFFER, prop.world_y - 8, 2 * BREAKABLE_STOP_BUFFER, 16)
+        overlapped = [a for a in trail if _body_of(a).overlaps(prop_body)]
+        self.assertFalse(overlapped, f"walked into the breakable at {overlapped[:3]}")
+        self.assertGreater(
+            trail[-1].world_x, prop.world_x + 40, "never advanced past the crate"
+        )
+
+    def test_lateral_bit_survives_a_dangerous_enemy_on_the_lookahead_line(self) -> None:
+        # Live enemy reach is deliberately *not* routed around by this verb
+        # (see the comment in state_machine_walk_to_advance_stage on why --
+        # a lookahead goal that lands inside a nearby enemy's own reach box
+        # makes nav.plan_route's danger-aware pass unable to ever "reach",
+        # which falls through to the danger-blind solids-only pass and is
+        # worse than doing nothing). So this is a guard against a future
+        # change reintroducing danger obstacles here without also fixing
+        # that failure mode: the direction bit must never drop, tick after
+        # tick, even with a committed enemy sitting directly in the way.
+        swing = AttackRange(
+            shape_id=0x22,
+            animation=0,
+            forward_min=0,
+            forward_max=48,
+            lane_min=-8,
+            lane_max=8,
+            height_min=0,
+            height_max=32,
+        )
+        enemy = replace(
+            _enemy(world_x=180, world_y=64),
+            combat_phase=CombatPhase.ATTACKING,
+            attack_ranges=(swing,),
+            facing_left=True,
+        )
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        gamepad, _client = _gamepad()
+        # Settle the virtual steering axis first -- a brand new gamepad needs
+        # AXIS_RAMP_TICKS of a steady command before it reports an edge at
+        # all (see gamepad.py), which is orthogonal to what this test is
+        # checking and would otherwise read as a spurious "lost the lateral
+        # bit" at tick 0.
+        _settle(verb, {_myself(world_x=100, world_y=64), enemy}, gamepad)
+        x = 100
+        for _ in range(40):
+            actor = _myself(world_x=x, world_y=64)
+            execute_verb(verb, {actor, enemy}, gamepad)
+            held = gamepad.held
+            self.assertTrue(held & RIGHT, f"lost the lateral bit at x={x} (mask {hex(held)})")
+            x += WALK_PX_PER_TICK
+
 
 class MovementDeadbandTests(unittest.TestCase):
     """The controller is a bang-bang actuator sampled every ~33 ms while the

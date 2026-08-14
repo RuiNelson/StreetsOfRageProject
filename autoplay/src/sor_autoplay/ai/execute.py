@@ -1088,6 +1088,16 @@ def state_machine_hit_antonio_boomerang(
 def state_machine_walk_to_advance_stage(
     verb: WalkToAdvanceStage, context: Context, gamepad: VirtualGamepad
 ) -> None:
+    """Keep making lateral progress in ``verb.direction`` -- the AI's
+    lowest-priority fallback, produced only when nothing more important
+    scores. Routed like ``WalkToNearEnemy``/``OpenBreakable``'s Y-dodging,
+    but with one deliberate difference: this verb has no target token and no
+    "arrived" state of its own, only a lookahead point that is re-picked
+    every tick, so the guarantee that matters here is not "the router found
+    *something*" but "the D-pad still carries verb.direction's bit no matter
+    what the router found".
+    """
+
     actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         _hold_steered(gamepad, RIGHT_MASK if verb.direction == "right" else LEFT_MASK)
@@ -1096,15 +1106,76 @@ def state_machine_walk_to_advance_stage(
     mask = RIGHT_MASK if verb.direction == "right" else LEFT_MASK
     # If a breakable sits immediately ahead, approach with a slight Y offset
     # so the next tick can smash rather than walk forever into it. The 40px
-    # lookahead always clears MOVE_DEADBAND_X, so _movement_mask's own L/R
-    # bit always agrees with the plain `mask` fallback -- `or mask` only
-    # ever matters for its Y bits' side effects, never for overriding a
-    # direction the axis hasn't reached full deflection on yet.
+    # lookahead always clears MOVE_DEADBAND_X, so a routed vector's own L/R
+    # bit (when it has one at all) always agrees with the plain `mask`
+    # fallback -- the `or mask` below only ever matters for its Y bits' side
+    # effects, or for a route with no lateral component this tick, never for
+    # overriding a direction the axis hasn't reached full deflection on yet.
     ahead_x = actor.world_x + (40 if verb.direction == "right" else -40)
-    _hold_steered(
-        gamepad,
-        _movement_mask(context, actor.world_x, actor.world_y, ahead_x, actor.world_y) or mask,
+
+    def straight_line() -> int:
+        return (
+            _movement_mask(context, actor.world_x, actor.world_y, ahead_x, actor.world_y)
+            or mask
+        )
+
+    goal = nav.PointGoal(nav.Point(ahead_x, actor.world_y))
+    # Solids only (breakables + pits) -- deliberately no danger obstacles,
+    # unlike WalkToNearEnemy/OpenBreakable. Tried it: nav.plan_route's two
+    # passes are "avoid danger and reach the goal, else ignore danger
+    # entirely and reach it through solids alone" -- right when the goal is a
+    # real destination, but this verb's goal is a 40px lookahead point that
+    # slides along with the actor every tick, and once a nearby dangerous
+    # enemy's own reach box is wide enough to contain that point, the
+    # danger-aware pass can never "reach" it (arriving there always means
+    # standing inside the thing being avoided), so plan_route falls straight
+    # through to the solids-only pass -- which does not know danger exists at
+    # all -- and the actor walks straight at the enemy, worse than doing
+    # nothing. Measured on a synthetic sweep (an ATTACKING enemy with a
+    # 48px reach box placed so the lookahead point lands inside it): the
+    # actor closed to within the reach box for several ticks with no dodge
+    # at all before the danger-aware pass happened to briefly succeed,
+    # confirming the failure mode rather than curing it. Solids alone do not
+    # have this problem -- a breakable or pit is real geometry the goal point
+    # itself is never placed inside of the way a lookahead 40px ahead
+    # routinely lands inside a nearby enemy's reach -- and matches exactly
+    # what the pre-routing ad-hoc dodge already avoided for this verb, so
+    # nothing about its danger handling regresses; only the breakable/pit
+    # detour quality improves.
+    solids = nav.solid_obstacles(context, block_x=BREAKABLE_BLOCK_X, body=nav.body_rect(actor))
+    # _routed_mask's own fallback discipline ("only fall back when the router
+    # produced literally nothing and the goal isn't already satisfied") is
+    # right for WalkToNearEnemy/OpenBreakable, which have a real destination
+    # to arrive at and stop. This verb never arrives -- ahead_x slides
+    # forward with the actor every tick -- so a route that legitimately finds
+    # only a vertical dodge around a wide obstacle (no lateral component
+    # *yet*, the rest of the detour still to come) is a perfectly good route,
+    # not a failure, and _routed_mask returns it unchanged.
+    #
+    # The final `or mask` is the same short-circuit idiom the pre-routing
+    # code used, not a bitwise merge: when the routed mask is already
+    # non-zero (including a Y-only vector with no lateral bit, exactly the
+    # shape a frozen-X pit dodge produces) it is used as-is, and `mask` only
+    # substitutes in when the router comes back completely empty. That is
+    # deliberate, not a gap -- PitDodgeSideStabilityTests below asserts a
+    # pit dodge must *not* carry the lateral bit while X is still frozen, the
+    # same property the ad-hoc `_movement_mask(...) or mask` line guaranteed
+    # before this change. What both versions guarantee is: the actor is
+    # never left holding nothing (`mask` covers the router's total-failure
+    # case) and is never handed a direction that walks it back into what it
+    # is actively dodging (the router's own vector, whatever it is, always
+    # wins over the raw `mask`) -- see BreakableAdvanceStabilityTests in
+    # test_stability.py for the cross-verb regression this whole fallback
+    # discipline exists to protect against.
+    routed = _routed_mask(
+        context,
+        actor,
+        goal,
+        solids=solids,
+        dangers=(),
+        fallback=straight_line,
     )
+    _hold_steered(gamepad, routed or mask)
 
 
 def state_machine_melee_strike(verb: Verb, context: Context, gamepad: VirtualGamepad) -> None:
