@@ -86,6 +86,29 @@ class Edge(enum.Enum):
     TOP = "top"
     BOTTOM = "bottom"
 
+    @property
+    def is_horizontal(self) -> bool:
+        """Does this edge run along the x axis? (``TOP``/``BOTTOM``.)"""
+
+        return self in (Edge.TOP, Edge.BOTTOM)
+
+    @property
+    def opposite(self) -> Edge:
+        return _OPPOSITE_EDGES[self]
+
+
+_OPPOSITE_EDGES = {
+    Edge.LEFT: Edge.RIGHT,
+    Edge.RIGHT: Edge.LEFT,
+    Edge.TOP: Edge.BOTTOM,
+    Edge.BOTTOM: Edge.TOP,
+}
+
+# The two edges that run along x, and the two that run along y. Named so a
+# caller can say "the horizontal edges must meet" in those words.
+HORIZONTAL_EDGES: frozenset[Edge] = frozenset({Edge.TOP, Edge.BOTTOM})
+VERTICAL_EDGES: frozenset[Edge] = frozenset({Edge.LEFT, Edge.RIGHT})
+
 
 class Direction(enum.Enum):
     """One of the eight unit directions a step may take.

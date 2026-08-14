@@ -12,6 +12,7 @@ from sor_autoplay.ai.pathfind import (
     Point,
     PointGoal,
     Rect,
+    RectGoal,
     Segment,
     SegmentGoal,
     find_path,
@@ -175,6 +176,54 @@ def test_a_diagonal_segment_goal_is_reachable() -> None:
 
     assert path.reached
     assert goal.is_reached(path.final)
+
+
+def test_a_rect_goal_arrives_stacked_not_merely_near() -> None:
+    # The crate is solid as well as the destination: the body must stop
+    # flush above or below it, never beside it.
+    crate = Rect(160, 48, 16, 16)
+    goal = RectGoal.horizontal(crate)
+    path = plan(start=BODY, goal=goal, obstacles=[crate])
+
+    assert path.reached
+    assert goal.is_reached(path.final)
+    assert not path.final.overlaps(crate)
+    assert path.final.bottom == pytest.approx(48) or path.final.top == pytest.approx(64)
+
+
+def test_a_rect_goal_from_one_side_only_walks_around_the_target() -> None:
+    crate = Rect(160, 48, 16, 16)
+    # Only "my top edge on its bottom edge": the body must end up *below*
+    # the crate even though above is much closer to where it starts.
+    goal = RectGoal(crate, frozenset({(Edge.TOP, Edge.BOTTOM)}))
+    path = plan(start=BODY, goal=goal, obstacles=[crate])
+
+    assert path.reached
+    assert path.final.top == pytest.approx(64)
+    for rect in path.positions():
+        assert not rect.overlaps(crate)
+
+
+def test_a_vertical_rect_goal_arrives_side_by_side() -> None:
+    crate = Rect(160, 48, 16, 16)
+    goal = RectGoal.vertical(crate)
+    path = plan(start=BODY, goal=goal, obstacles=[crate])
+
+    assert path.reached
+    assert path.final.right == pytest.approx(160) or path.final.left == pytest.approx(176)
+
+
+def test_a_rect_goal_the_body_cannot_line_up_with_fails_cleanly() -> None:
+    # The crate sits flush against the top of the world, so nothing can ever
+    # place a body's bottom edge on the crate's top edge or its top edge on
+    # the crate's bottom edge without leaving the world... except from below,
+    # which this pairing forbids.
+    crate = Rect(160, 0, 16, 8)
+    goal = RectGoal(crate, frozenset({(Edge.BOTTOM, Edge.TOP)}))
+    path = plan(start=BODY.moved_to(0, 40), goal=goal, obstacles=[crate])
+
+    assert not path.reached
+    assert WORLD.contains(path.final)
 
 
 def test_a_body_starting_inside_an_obstacle_can_still_escape() -> None:

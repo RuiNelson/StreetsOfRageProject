@@ -11,8 +11,11 @@ The model is deliberately small:
 - the world is a rectangle, and the moving body must stay entirely inside it;
 - everything solid is a rectangle, and the body may touch one but never
   overlap it;
-- the destination is either a point to stand on (:class:`PointGoal`) or a
-  line to reach with named sides of the body (:class:`SegmentGoal`);
+- the destination is a point to stand on (:class:`PointGoal`), a line to
+  reach with named sides of the body (:class:`SegmentGoal`), or another
+  rectangle whose named edges must meet named edges of the body
+  (:class:`RectGoal` -- ``RectGoal.horizontal(crate)`` is "arrive stacked
+  above or below that crate", never merely "arrive near it");
 - the answer is a list of vectors in the eight compass directions, each at
   least ``step`` long and a whole multiple of it.
 
@@ -45,6 +48,8 @@ from .geometry import (
     ALL_DIRECTIONS,
     CARDINALS,
     DIAGONALS,
+    HORIZONTAL_EDGES,
+    VERTICAL_EDGES,
     Direction,
     Edge,
     Point,
@@ -52,7 +57,7 @@ from .geometry import (
     Segment,
     octile_distance,
 )
-from .goals import Goal, PointGoal, SegmentGoal
+from .goals import Goal, PointGoal, RectGoal, SegmentGoal
 from .grid import Lattice
 from .search import DEFAULT_MAX_NODES, Path, Step, find_path
 
@@ -64,13 +69,16 @@ __all__ = [
     "Direction",
     "Edge",
     "Goal",
+    "HORIZONTAL_EDGES",
     "Lattice",
     "Path",
     "Point",
     "PointGoal",
     "Rect",
+    "RectGoal",
     "Segment",
     "SegmentGoal",
+    "VERTICAL_EDGES",
     "Step",
     "find_path",
     "octile_distance",
