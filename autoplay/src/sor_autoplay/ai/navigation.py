@@ -100,10 +100,26 @@ NOMINAL_BODY_H = 16
 # alignment it is about to invalidate is how an approach becomes a dance.
 MIN_STRIKE_CONTACT_Y = 8
 
-# How far past the camera edge a route may be planned. The camera is what is
-# reachable *now*; a little slack ahead lets a walk aim at something entering
-# the screen without the world clipping the goal away.
-WORLD_MARGIN_X = 32
+# How far past the camera edge a route may be planned.
+#
+# Must comfortably exceed every goal offset any routed verb can place beyond
+# the actor's own position: WalkToAdvanceStage's fixed 40px lookahead, and a
+# strike goal's stop_dx (up to punch_outer_x, ~56px, plus half the goal
+# rectangle's own inset). 32 did not -- live-diagnosed: an actor standing
+# within 8px of the camera's trailing edge got a WalkToAdvanceStage lookahead
+# point (ahead_x = world_x + 40) that landed outside `world_rect` by exactly
+# that overshoot, so no lattice position could ever satisfy the goal,
+# `plan_route` reported `reached=False` every tick forever, and the actor
+# stalled dead on the camera's own edge -- not merely poorly routed, unable
+# to make progress at all, since advancing is what would have scrolled the
+# camera and made the goal reachable again. Reproduced live at world_x=3808,
+# exactly `camera.right` (the margin had already been spent getting there).
+#
+# 96 clears the largest goal offset with room to spare and stays well inside
+# what `world_map` already tracks past each camera edge (two screens, per its
+# own docs) -- planning slightly further than the camera shows is harmless,
+# since every obstacle in that reach is still real, observed geometry.
+WORLD_MARGIN_X = 96
 
 
 def _rect_from_hitbox(box: Hitbox) -> Rect:

@@ -95,6 +95,24 @@ class WorldRectTests(unittest.TestCase):
         self.assertLess(world.width, 1e7)
         self.assertGreater(world.width, 1000)
 
+    def test_the_margin_always_contains_advance_stages_own_lookahead(self) -> None:
+        # Live-diagnosed: an actor standing at the camera's trailing edge got
+        # a WalkToAdvanceStage lookahead point 40px ahead of its own position
+        # -- which, with too small a margin, landed outside `world_rect`
+        # entirely. No lattice position could then ever satisfy the goal,
+        # `plan_route` reported `reached=False` forever, and the actor
+        # stalled dead on the camera's own edge: not poorly routed, unable to
+        # progress at all, since advancing is exactly what would have
+        # scrolled the camera and made the goal reachable again.
+        camera = CameraRange(left=3520, right=3808, top=0, bottom=112)
+        context = {Stage(level_index=0, direction="right"), camera}
+        world = nav.world_rect(context)
+
+        actor_x = camera.right  # the exact live-reproduced stall position
+        lookahead_x = actor_x + 40  # WalkToAdvanceStage's fixed lookahead
+
+        self.assertLessEqual(lookahead_x, world.right)
+
 
 class ObstacleTests(unittest.TestCase):
     def test_a_pit_keeps_a_hair_more_clearance_than_the_predicate(self) -> None:
