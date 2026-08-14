@@ -70,9 +70,9 @@ from .gamepad import VirtualGamepad
 from . import kinematics
 from . import navigation as nav
 from .decide import (
-    BREAKABLE_BLOCK_X,
     BREAKABLE_PUNCH_X,
     BREAKABLE_PUNCH_Y,
+    breakable_smash_outer_x,
     in_smash_range,
 )
 from .reach import (
@@ -82,6 +82,7 @@ from .reach import (
     enemy_lane_covers,
     pit_endangers,
 )
+from .. import prop_solids
 from ..phases import is_dangerous
 from ..world_map import LANE_Y_MIN
 
@@ -152,11 +153,23 @@ DIRECTION_HYSTERESIS_X = 10
 PICKUP_RANGE_X = 18
 PICKUP_RANGE_Y = 14
 LANE_EDGE_MARGIN = 6
-BREAKABLE_AVOID_Y = 22
-# Pit clearance (reach.PIT_AVOID_MARGIN) stays smaller than BREAKABLE_AVOID_Y
-# only because the pit's real height is already added on top of it (see the
-# dodge loop below). It is shared with inference.check_for_safe_spots, which
-# must reject the same ground this steers around.
+# How far past a prop's push-back rectangle the straight-line dodge aims,
+# and how close to it a lane has to be for the prop to count as in the way.
+#
+# A *clearance*, measured from the real edge -- it used to be a margin around
+# the prop's origin instead, which only worked while the two were roughly the
+# same thing. They are not: prop_solids' rectangles reach up to 28px behind
+# an origin and only ever 4px in front of it. Small for the same reason
+# PIT_DODGE_OVERSHOOT is small on the other side of that comparison -- it
+# only has to exceed MOVE_DEADBAND_Y so the aim point cannot sit inside the
+# deadband of a from_y that has not actually cleared the prop yet -- and
+# small matters here: stage 5 stacks two rows of props with a 16px corridor
+# between them, and any clearance wide enough to overshoot that corridor aims
+# the dodge straight into the next prop down.
+BREAKABLE_AVOID_Y = MOVE_DEADBAND_Y + 5
+# Pit clearance (reach.PIT_AVOID_MARGIN) is shared with
+# inference.check_for_safe_spots, which must reject the same ground this
+# steers around.
 #
 # How far past PIT_AVOID_MARGIN's own boundary the pit dodge's Y target aims
 # -- must exceed MOVE_DEADBAND_Y, or the target can land within the deadband
@@ -188,6 +201,11 @@ WALK_TO_ENEMY_LANE_SAFETY_Y = PUNCH_RANGE_Y + 16
 # moves to close the last pixel itself: the actor arrived and never threw a
 # punch. Live-diagnosed; keep this comfortably above MOVE_DEADBAND_X.
 BREAKABLE_STOP_BUFFER = 12
+# How far outside a prop's push-back rectangle the straight-line approach
+# aims when the stop buffer alone would put the stop point inside it. Past
+# MOVE_DEADBAND_X, so the deadband cannot let the walk settle on the wall
+# itself and spend the approach being pushed back out of it.
+BREAKABLE_WALL_GAP_X = MOVE_DEADBAND_X + 1
 # Slack around the prop's blocking X column so the around-path starts
 # before the exact body edge, and so a one-pixel walk jitter on that edge
 # cannot flip between "still in the column, hold Y" and "clear, converge Y".
@@ -329,17 +347,17 @@ def _pit_dodge_target_y(context: Context, pit: Pit, from_y: int) -> int:
 
 
 def _breakable_block_x(prop: Breakable) -> tuple[int, int]:
-    """X span the actor cannot walk through.
+    """X span the actor's own position cannot be inside.
 
-    The prop's real body when we have one (``Breakable.hitbox``), otherwise
-    the ``BREAKABLE_BLOCK_X`` margin around its origin -- the constant
-    ``decide.py`` already named for this and nothing else was reading.
+    The ROM's per-type push-back rectangle (``prop_solids``), not the prop's
+    animation body box: the two are different rectangles, and it is this one
+    the game tests the actor's position against. Origin-space is also what
+    the caller wants -- ``_walk_to_breakable_target`` compares
+    ``actor.world_x`` to it directly.
     """
 
-    box = prop.hitbox
-    if box is not None and not box.is_degenerate:
-        return box.x0, box.x1
-    return prop.world_x - BREAKABLE_BLOCK_X, prop.world_x + BREAKABLE_BLOCK_X
+    solid = prop_solids.solid_box(prop.type_id, prop.world_x, prop.world_y)
+    return solid.x0, solid.x1
 
 
 def _clamp_mask_to_lane(context: Context, from_y: int, mask: int) -> int:
@@ -447,16 +465,26 @@ def _movement_mask(
         between = (from_x < prop.world_x < to_x) or (to_x < prop.world_x < from_x)
         if not between:
             continue
-        if abs(prop.world_y - from_y) > BREAKABLE_AVOID_Y and abs(prop.world_y - to_y) > BREAKABLE_AVOID_Y:
+        # The band to steer out of is the prop's own push-back rectangle
+        # (prop_solids), not a fixed margin around its origin. The ROM's
+        # rectangles are not centred on the origin -- a round-5 prop's runs
+        # from 20px behind it to 4px in front -- so a symmetric margin aims
+        # the dodge at a lane that is still solid as often as not. On stage
+        # 5's stacked fence that meant dodging one prop by walking into the
+        # one below it.
+        solid = prop_solids.solid_box(prop.type_id, prop.world_x, prop.world_y)
+        top = solid.y0 - BREAKABLE_AVOID_Y
+        bottom = solid.y1 + BREAKABLE_AVOID_Y
+        if not (top <= from_y <= bottom or top <= to_y <= bottom):
             continue
         if abs(prop.world_x - from_x) > abs(to_x - from_x):
             continue
         # Step vertically around the prop (prefer away from lane edge).
         lo, hi = _lane_bounds(context)
         if from_y < (lo + hi) / 2:
-            to_y = _clamp_target_y(context, prop.world_y + BREAKABLE_AVOID_Y)
+            to_y = _clamp_target_y(context, bottom)
         else:
-            to_y = _clamp_target_y(context, prop.world_y - BREAKABLE_AVOID_Y)
+            to_y = _clamp_target_y(context, top)
 
     # Nudge path around floor pits — same camera-filtered, path-intersecting
     # dodge idiom as the breakable loop above, but keyed off the pit's own
@@ -530,6 +558,36 @@ def _face_toward_mask(actor: Myself | Partner, target_x: int) -> int:
     if dx > DIRECTION_HYSTERESIS_X:
         return RIGHT_MASK
     return 0
+
+
+def _face_prop_mask(actor: Myself | Partner, prop: Breakable, context: Context) -> int:
+    """Which way to turn before hitting ``prop`` -- never "stay as you are".
+
+    ``_face_toward_mask`` answers 0 inside ``DIRECTION_HYSTERESIS_X``, and it
+    is right to for an enemy: the two bodies end up almost on top of each
+    other, ordinary jitter flips the raw sign every tick, and holding the
+    resulting direction is what sets facing, so the flip feeds itself. None
+    of that reasoning survives a target that cannot move. What is left is the
+    failure mode: measured live, the actor stood 10px from a round-5 prop --
+    exactly the hysteresis width -- facing away from it, threw 2,300 punches
+    into empty air over 76 seconds and never turned round, because every one
+    of them asked for no direction at all.
+
+    Ten pixels away *is* hitting distance: the same run broke the identical
+    prop from 11px while facing it. So a prop gets the raw sign, and the
+    dead-centre case gets the fixed, non-input-derived tie-break
+    ``_walk_to_breakable_target`` already uses for the same reason -- the
+    stage's own progress direction, which cannot oscillate.
+    """
+
+    dx = prop.world_x - actor.world_x
+    if dx > 0:
+        return RIGHT_MASK
+    if dx < 0:
+        return LEFT_MASK
+    stage = find(context, Stage)
+    direction = stage.direction if stage is not None else "right"
+    return LEFT_MASK if direction == "left" else RIGHT_MASK
 
 
 def _back_direction_mask(actor: Myself | Partner) -> int:
@@ -846,10 +904,11 @@ def state_machine_walk_to_near_enemy(
     # stand on, so keeping it would make the goal unreachable. While still
     # closing, it is a hazard like any other, which is what keeps the
     # approach off its line of attack instead of walking straight down it.
+    body, origin = nav.actor_footprint(actor)
     solids, dangers = nav.obstacle_sets(
         context,
-        block_x=BREAKABLE_BLOCK_X,
-        body=nav.body_rect(actor),
+        body=body,
+        origin=origin,
         ignore_enemy_slots=frozenset({target.slot}) if alongside else frozenset(),
     )
 
@@ -948,11 +1007,8 @@ def state_machine_retreat_from_danger(
 
     target_x, target_y = _retreat_from_danger_target(actor, target, context)
     goal = PointGoal(Point(target_x, target_y), tolerance=MOVE_DEADBAND_X)
-    solids, dangers = nav.obstacle_sets(
-        context,
-        block_x=BREAKABLE_BLOCK_X,
-        body=nav.body_rect(actor),
-    )
+    body, origin = nav.actor_footprint(actor)
+    solids, dangers = nav.obstacle_sets(context, body=body, origin=origin)
 
     def straight_line() -> int:
         return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)
@@ -1037,11 +1093,8 @@ def state_machine_projectile_sidestep(
 
     target_x, target_y = _projectile_sidestep_target(actor, target, context)
     goal = nav.PointGoal(nav.Point(target_x, target_y), tolerance=MOVE_DEADBAND_X)
-    solids, dangers = nav.obstacle_sets(
-        context,
-        block_x=BREAKABLE_BLOCK_X,
-        body=nav.body_rect(actor),
-    )
+    body, origin = nav.actor_footprint(actor)
+    solids, dangers = nav.obstacle_sets(context, body=body, origin=origin)
 
     def straight_line() -> int:
         return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)
@@ -1142,7 +1195,8 @@ def state_machine_walk_to_advance_stage(
     # what the pre-routing ad-hoc dodge already avoided for this verb, so
     # nothing about its danger handling regresses; only the breakable/pit
     # detour quality improves.
-    solids = nav.solid_obstacles(context, block_x=BREAKABLE_BLOCK_X, body=nav.body_rect(actor))
+    body, origin = nav.actor_footprint(actor)
+    solids = nav.solid_obstacles(context, body=body, origin=origin)
     # _routed_mask's own fallback discipline ("only fall back when the router
     # produced literally nothing and the goal isn't already satisfied") is
     # right for WalkToNearEnemy/OpenBreakable, which have a real destination
@@ -1568,7 +1622,8 @@ def _walk_to_item(verb: Verb, context: Context, gamepad: VirtualGamepad, target_
         stop_dx=PICKUP_RANGE_X,
         lane_slack=PICKUP_RANGE_Y,
     )
-    solids, dangers = nav.obstacle_sets(context, block_x=BREAKABLE_BLOCK_X, body=nav.body_rect(actor))
+    body, origin = nav.actor_footprint(actor)
+    solids, dangers = nav.obstacle_sets(context, body=body, origin=origin)
 
     def straight_line() -> int:
         return _movement_mask(
@@ -1637,7 +1692,14 @@ def _walk_to_breakable_target(
     well from dead center.
     """
 
-    stop_dx = max(0, BREAKABLE_PUNCH_X - BREAKABLE_STOP_BUFFER)
+    # Inside the prop's own reach window: near enough that in_smash_range is
+    # true, far enough that the push-back rectangle is not what stops the
+    # walk. Aiming at the reach minus the deadband buffer alone put the stop
+    # point *inside* the wall for every prop whose wall is wider than that,
+    # leaving the actor to arrive by bumping into it.
+    outer = breakable_smash_outer_x(target)
+    wall = prop_solids.solid_half_width(target.type_id)
+    stop_dx = max(0, min(outer, max(outer - BREAKABLE_STOP_BUFFER, wall + BREAKABLE_WALL_GAP_X)))
     dx = target.world_x - actor.world_x
     if abs(dx) <= DIRECTION_HYSTERESIS_X:
         stage = find(context, Stage)
@@ -1651,9 +1713,9 @@ def _walk_to_breakable_target(
     # the solid -- the actor pins itself against the body and never arrives.
     # While still sharing the prop's blocking X column, hold Y and walk out
     # to the smash X first; the next tick, now beside it, converges on Y.
-    # ``at_smash_x`` is the escape when the smash pocket itself sits inside
-    # the fallback column (BREAKABLE_BLOCK_X is wider than stop_dx): once
-    # X has arrived, Y must be allowed to move or the actor freezes off-lane.
+    # ``at_smash_x`` is the escape for a stop point that still lands inside
+    # the column plus its slack: once X has arrived, Y must be allowed to
+    # move or the actor freezes off-lane.
     lo_x, hi_x = _breakable_block_x(target)
     in_column = (
         lo_x - BREAKABLE_AROUND_SLACK_X
@@ -1694,7 +1756,11 @@ def state_machine_open_breakable(
         gamepad.release()
         return
     if in_smash_range(actor, target):
-        _press(gamepad, PUNCH_MASK | _face_toward_mask(actor, target.world_x), frames=PUNCH_FRAMES)
+        _press(
+            gamepad,
+            PUNCH_MASK | _face_prop_mask(actor, target, context),
+            frames=PUNCH_FRAMES,
+        )
         return
 
     # The crate stays in its own obstacle set. It is the destination *and* a
@@ -1721,17 +1787,13 @@ def state_machine_open_breakable(
         actor.world_y,
         target.world_x,
         target.world_y,
-        stop_dx=BREAKABLE_PUNCH_X,
+        stop_dx=breakable_smash_outer_x(target),
         lane_slack=BREAKABLE_PUNCH_Y,
         inner_dx=punch_usable_inner_x(actor.character_id),
         side=side,
     )
-    solids, dangers = nav.obstacle_sets(
-        context,
-        block_x=BREAKABLE_BLOCK_X,
-        body=nav.body_rect(actor),
-        keep_reachable_within=BREAKABLE_PUNCH_X,
-    )
+    body, origin = nav.actor_footprint(actor)
+    solids, dangers = nav.obstacle_sets(context, body=body, origin=origin)
 
     def straight_line() -> int:
         target_x, target_y = _walk_to_breakable_target(actor, target, context)

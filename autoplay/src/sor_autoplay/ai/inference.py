@@ -14,7 +14,6 @@ import math
 from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
 from . import kinematics, reach
 from . import navigation as nav
-from .decide import BREAKABLE_BLOCK_X
 from .pathfind import Point, PointGoal
 from .tokens import Myself, Partner, PlayableCharacter
 from .tokens import Antonio, Enemy, Grunt, Jack
@@ -621,10 +620,11 @@ def check_for_safe_spots(context: Context) -> Context:
         # chasing you does not excuse walking through a second enemy's swing
         # or a crate on the way.
         threat_slots = frozenset(enemy.slot for enemy in threatening)
+        body, origin = nav.actor_footprint(actor)
         solids, dangers = nav.obstacle_sets(
             context,
-            block_x=BREAKABLE_BLOCK_X,
-            body=nav.body_rect(actor),
+            body=body,
+            origin=origin,
             ignore_enemy_slots=threat_slots,
         )
 

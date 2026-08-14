@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 
+from .. import prop_solids
 from ..phases import CombatPhase, is_dangerous, is_punishable
 from . import kinematics, reach
 from .tokens import (
@@ -104,12 +105,13 @@ HEALTH_CRITICAL_PERCENT = 40.0
 
 BREAKABLE_PUNCH_X = 36
 BREAKABLE_PUNCH_Y = 16
-# Fallback solid footprint when Breakable.hitbox is missing. execute.py's
-# around-path (_breakable_block_x / _walk_to_breakable_target) reads these
-# so a crate with no reconstructed body is still treated as a column the
-# actor must walk out of before changing lane.
-BREAKABLE_BLOCK_X = 28
-BREAKABLE_BLOCK_Y = 20
+# Extra room past a prop's own wall (prop_solids) before a strike is judged
+# in range, for the props whose wall out-reaches BREAKABLE_PUNCH_X. Must
+# clear both the path finder's lattice step (NAV_STEP, 4) and the executor's
+# walk deadband (MOVE_DEADBAND_X, 5), which are the two reasons the actor
+# comes to rest short of the exact position it aimed at. See
+# ``breakable_smash_outer_x``.
+SMASH_WALL_CLEARANCE_X = 8
 # How far past a prop the actor can step and still treat it as "ahead" on
 # the stage path. Without this slack, one pixel past the origin dropped
 # OpenBreakable and handed the tick to WalkToAdvanceStage, which walked
@@ -1146,6 +1148,39 @@ def could_walk_to_pickup(context: Context) -> Context:
     return verbs
 
 
+def breakable_smash_outer_x(prop: Breakable) -> int:
+    """How far from a prop's origin the actor may stand and still hit it.
+
+    ``BREAKABLE_PUNCH_X`` alone is an origin-to-origin distance, which is
+    only meaningful while the prop is narrower than the punch reaches. It is
+    not, for every type: ``prop_solids`` says a round-6 prop's wall already
+    reaches 36px from its own origin -- exactly ``BREAKABLE_PUNCH_X`` -- so
+    every position the ROM lets the actor stand in is one this would call out
+    of range, and the verb would approach a prop it can never report having
+    arrived at. That is the stall this whole pair of constants exists to
+    avoid, arrived at from the other side.
+
+    So the reach grows with the wall, and only with the wall: for every prop
+    whose wall is already inside ``BREAKABLE_PUNCH_X`` (the phone booth, the
+    crate, the round-3 prop) this is exactly the constant it always was, and
+    nothing about their approach changes. ``SMASH_WALL_CLEARANCE_X`` is what
+    the wider ones get on top of their wall -- enough that a lattice position
+    (``NAV_STEP``, 4) or a deadband stop (``MOVE_DEADBAND_X``, 5) just
+    outside the wall still counts as arrived, rather than landing in the gap
+    between "as close as physics allows" and "close enough to punch".
+
+    The geometry backs the wider number up: the punch box itself runs to
+    ~44px in front of Axel, and a prop's *damage* box is its sprite body,
+    which for the round-6 prop reaches ~26px back toward the actor from the
+    origin -- so a strike thrown from 44px away still lands well inside it.
+    """
+
+    return max(
+        BREAKABLE_PUNCH_X,
+        prop_solids.solid_half_width(prop.type_id) + SMASH_WALL_CLEARANCE_X,
+    )
+
+
 def in_smash_range(actor: PlayableCharacter, prop: Breakable) -> bool:
     """Close enough that B hits the prop without moving first.
 
@@ -1165,7 +1200,7 @@ def in_smash_range(actor: PlayableCharacter, prop: Breakable) -> bool:
 
     dx = abs(prop.world_x - actor.world_x)
     return (
-        punch_usable_inner_x(actor.character_id) <= dx <= BREAKABLE_PUNCH_X
+        punch_usable_inner_x(actor.character_id) <= dx <= breakable_smash_outer_x(prop)
         and abs(prop.world_y - actor.world_y) <= BREAKABLE_PUNCH_Y
     )
 

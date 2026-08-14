@@ -121,7 +121,7 @@ class ObstacleTests(unittest.TestCase):
         # escape will shove it off, which is a one-pixel deadlock.
         pit = Pit(world_x=40, lane_y=60, width=20, height=10)
 
-        (rect,) = nav.solid_obstacles({pit}, block_x=28)
+        (rect,) = nav.solid_obstacles({pit})
 
         self.assertEqual(rect.left, 40 - PIT_AVOID_MARGIN - 1)
         self.assertEqual(rect.width, 20 + 2 * (PIT_AVOID_MARGIN + 1))
@@ -136,45 +136,73 @@ class ObstacleTests(unittest.TestCase):
         pit = Pit(world_x=40, lane_y=60, width=20, height=10)
         body = Rect(0, 0, 16, 16)
 
-        (loose,) = nav.solid_obstacles({pit}, block_x=28)
-        (inset,) = nav.solid_obstacles({pit}, block_x=28, body=body)
+        (loose,) = nav.solid_obstacles({pit})
+        (inset,) = nav.solid_obstacles({pit}, body=body)
 
         self.assertEqual(inset.width, loose.width - body.width)
         self.assertEqual(inset.height, loose.height - body.height)
 
-    def test_a_breakable_uses_its_real_footprint_when_known(self) -> None:
+    def test_a_breakable_uses_the_roms_push_back_box_not_its_sprite(self) -> None:
+        # The two are different rectangles, and it is the push-back one that
+        # stops a walking actor: a round-5 prop's sprite sits in front of its
+        # origin while its wall runs 20px behind it. Routing off the sprite
+        # planned through solid ground -- the stage-5 stall.
         prop = Breakable(
             slot="obj09",
             world_x=100,
             world_y=50,
-            type_id=0x40,
-            hitbox=Hitbox(x0=92, x1=108, y0=44, y1=56, z0=0, z1=40),
+            type_id=0x1F,
+            hitbox=Hitbox(x0=80, x1=120, y0=40, y1=60, z0=0, z1=40),
         )
 
-        (rect,) = nav.solid_obstacles({prop}, block_x=28)
+        (rect,) = nav.solid_obstacles({prop})
 
-        self.assertEqual(rect, Rect(92, 44, 16, 12))
+        self.assertEqual(rect, Rect(70, 30, 60, 24))
 
-    def test_an_assumed_footprint_never_closes_the_pocket_it_is_hit_from(self) -> None:
-        # 28px of assumed body plus half a 16px actor is exactly the 36px a
-        # punch reaches: the standing room in between is one pixel, which no
-        # lattice lands in, and the actor stalls beside a crate it is allowed
-        # to hit. An assumed box is therefore capped; a measured one is not.
-        prop = Breakable(slot="obj09", world_x=100, world_y=50, type_id=0x40)
+    def test_a_breakable_is_measured_against_the_actors_origin(self) -> None:
+        # sub_00003BAE tests the mover's own position against the box, never
+        # its body, so the obstacle a body-collision search needs is the box
+        # shrunk by the body -- the same restatement a pit already gets.
+        prop = Breakable(slot="obj09", world_x=100, world_y=50, type_id=0x1F)
+        body = Rect(0, 0, 16, 16)
 
-        (loose,) = nav.solid_obstacles({prop}, block_x=28)
-        (capped,) = nav.solid_obstacles(
-            {prop}, block_x=28, keep_reachable_within=36
-        )
+        (loose,) = nav.solid_obstacles({prop})
+        (inset,) = nav.solid_obstacles({prop}, body=body)
 
-        self.assertEqual(loose.width, 56)
-        self.assertLessEqual(capped.width / 2 + nav.NOMINAL_BODY_W / 2, 36 - nav.NAV_STEP)
+        self.assertEqual(inset.width, loose.width - body.width)
+        self.assertEqual(inset.height, loose.height - body.height)
+
+    def test_the_conversion_follows_an_off_centre_body(self) -> None:
+        # A cached player box is not centred on the actor's own position --
+        # Axel's spans -7..+3 of it facing left. Assuming it is centred left
+        # a 2px sliver of wall the route was happy to step into, and the ROM
+        # was not: recorded live, the actor held DOWN against a round-5 prop
+        # for 42 seconds from 2px inside its box.
+        prop = Breakable(slot="obj09", world_x=4512, world_y=72, type_id=0x1F)
+        body = Rect(4477, 42, 10, 16)  # origin (4484, 50), facing left
+
+        (rect,) = nav.solid_obstacles({prop}, body=body, origin=(4484.0, 50.0))
+
+        # The wall is x 4482..4542; standing at 4484 is inside it, so the
+        # body drawn around 4484 must overlap what the search collides with.
+        self.assertTrue(rect.overlaps(Rect(4477, 62, 10, 16)))
+        self.assertFalse(rect.overlaps(Rect(4475, 62, 10, 16)))
+
+    def test_a_wall_shallower_than_the_body_still_blocks(self) -> None:
+        # A phone booth's band is 14px against a 16px actor. Insetting it to
+        # nothing would let the lattice drop it and treat the booth as air.
+        prop = Breakable(slot="obj09", world_x=100, world_y=50, type_id=0x11)
+
+        (inset,) = nav.solid_obstacles({prop}, body=Rect(0, 0, 16, 16))
+
+        self.assertGreater(inset.width, 0)
+        self.assertGreater(inset.height, 0)
 
     def test_an_ignored_breakable_is_not_an_obstacle(self) -> None:
         prop = Breakable(slot="obj09", world_x=100, world_y=50, type_id=0x40)
 
         self.assertEqual(
-            nav.solid_obstacles({prop}, block_x=28, ignore_slots=frozenset({"obj09"})),
+            nav.solid_obstacles({prop}, ignore_slots=frozenset({"obj09"})),
             [],
         )
 
@@ -370,7 +398,7 @@ class PlanRouteTests(unittest.TestCase):
     def test_a_solid_is_never_dropped_by_the_fallback(self) -> None:
         prop = Breakable(slot="obj09", world_x=140, world_y=60, type_id=0x40)
         context = self._context(prop)
-        solids = nav.solid_obstacles(context, block_x=28)
+        solids = nav.solid_obstacles(context)
 
         route = nav.plan_route(
             context,

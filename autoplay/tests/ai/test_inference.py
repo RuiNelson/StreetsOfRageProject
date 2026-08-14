@@ -806,20 +806,14 @@ class CheckForSafeSpotsTests(unittest.TestCase):
 
     def test_rejects_a_candidate_whose_route_is_blocked_by_a_breakable(self) -> None:
         # The plain retreat (index 0) lands at (68, 60) -- straight line from
-        # the actor's (100, 60). A crate sitting on exactly that spot (real
-        # hitbox, so navigation.solid_obstacles uses it verbatim) makes the
-        # candidate itself unreachable, even though it survives every
+        # the actor's (100, 60). A prop whose push-back box (x 38..98, lane
+        # 48..80 for one standing at (68, 76)) covers exactly that spot makes
+        # the candidate unreachable, even though it survives every
         # pre-existing filter (in lane, in camera, not a pit). The two
-        # sidesteps that also step to x=68 clear the crate's y-range (52..68)
-        # and must win instead.
+        # sidesteps that also step to x=68 clear the box's lane range and
+        # must win instead.
         context = self._threatened() | {
-            Breakable(
-                slot="crate1",
-                world_x=68,
-                world_y=60,
-                type_id=0x10,
-                hitbox=Hitbox(x0=60, x1=76, y0=52, y1=68, z0=0, z1=16),
-            )
+            Breakable(slot="crate1", world_x=68, world_y=76, type_id=0x1D)
         }
 
         result = check_for_safe_spots(context)
@@ -858,36 +852,16 @@ class CheckForSafeSpotsTests(unittest.TestCase):
         # SafeSpot at all (today's existing "no candidate survives" outcome,
         # `best is None: continue`), rather than handing execute.py a
         # destination that cannot actually be walked to.
+        # Rows of wide round-6 props (push-back box x +/-36, lane -20..+4)
+        # tile the lanes above and below, overlapping so no one-pixel line
+        # between two boxes is left standable, and a deep prop (lane -28..+4)
+        # seals the actor's own lane on the side it would retreat toward.
+        # The actor's lane is the one gap none of them reach into.
         context = self._threatened() | {
-            Breakable(
-                slot="wall_n",
-                world_x=100,
-                world_y=35,
-                type_id=0x10,
-                hitbox=Hitbox(x0=50, x1=150, y0=20, y1=51, z0=0, z1=16),
-            ),
-            Breakable(
-                slot="wall_s",
-                world_x=100,
-                world_y=85,
-                type_id=0x10,
-                hitbox=Hitbox(x0=50, x1=150, y0=69, y1=100, z0=0, z1=16),
-            ),
-            Breakable(
-                slot="wall_w",
-                world_x=45,
-                world_y=60,
-                type_id=0x10,
-                hitbox=Hitbox(x0=0, x1=91, y0=20, y1=100, z0=0, z1=16),
-            ),
-            Breakable(
-                slot="wall_e",
-                world_x=155,
-                world_y=60,
-                type_id=0x10,
-                hitbox=Hitbox(x0=109, x1=200, y0=20, y1=100, z0=0, z1=16),
-            ),
-        }
+            Breakable(slot=f"wall{x}_{y}", world_x=x, world_y=y, type_id=0x41)
+            for x in (40, 76, 112)
+            for y in (40, 52, 88, 104)
+        } | {Breakable(slot="wall_w", world_x=68, world_y=76, type_id=0x1D)}
 
         result = check_for_safe_spots(context)
 

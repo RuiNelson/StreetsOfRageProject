@@ -46,12 +46,17 @@ from sor_autoplay.ai.execute import (
     execute_verb,
     press_no_button,
 )
-from sor_autoplay.ai.decide import BREAKABLE_BLOCK_X, BREAKABLE_PUNCH_X, in_smash_range
+from sor_autoplay.ai.decide import (
+    BREAKABLE_PUNCH_X,
+    breakable_smash_outer_x,
+    in_smash_range,
+)
 from sor_autoplay.ai.pathfind import Rect
 from sor_autoplay.ai.reach import PIT_AVOID_MARGIN, pit_endangers
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.tokens import Breakable, Pit, Projectile, SafeSpot
 from sor_autoplay.hitboxes import Hitbox
+from sor_autoplay import prop_solids
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
@@ -937,16 +942,16 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
         prop = Breakable(slot="obj09", world_x=200, world_y=64, type_id=0x40)
         verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
 
-        # Starts well clear of the solid's own rect (prop.world_x +/-
-        # BREAKABLE_BLOCK_X, 28px): a body that already overlaps a solid at
+        # Starts well clear of the solid's own push-back rect: a body that
+        # already overlaps a solid at
         # the start has that obstacle dropped from the whole search (the
         # path finder's "already stuck in it" rule), which would make this
         # test pass by construction rather than by actually routing around
         # it.
         trail = _walk(verb, _myself(world_x=100, world_y=64), {prop}, ticks=60)
 
-        prop_body = Rect(prop.world_x - BREAKABLE_STOP_BUFFER, prop.world_y - 8, 2 * BREAKABLE_STOP_BUFFER, 16)
-        overlapped = [a for a in trail if _body_of(a).overlaps(prop_body)]
+        wall = prop_solids.solid_box(prop.type_id, prop.world_x, prop.world_y)
+        overlapped = [(a.world_x, a.world_y) for a in trail if wall.blocks(a.world_x, a.world_y)]
         self.assertFalse(overlapped, f"walked into the breakable at {overlapped[:3]}")
         self.assertGreater(
             trail[-1].world_x, prop.world_x + 40, "never advanced past the crate"
@@ -1683,9 +1688,11 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
         # outside BREAKABLE_PUNCH_X: in_smash_range then stayed false
         # forever against a target that never moves to close the gap itself,
         # so the actor arrived and never threw a punch.
-        worst_case_dx = (BREAKABLE_PUNCH_X - BREAKABLE_STOP_BUFFER) + MOVE_DEADBAND_X
-        actor = _myself(world_x=100 - worst_case_dx, world_y=90)
         prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
+        worst_case_dx = (
+            breakable_smash_outer_x(prop) - BREAKABLE_STOP_BUFFER
+        ) + MOVE_DEADBAND_X
+        actor = _myself(world_x=100 - worst_case_dx, world_y=90)
 
         self.assertTrue(in_smash_range(actor, prop))
 
@@ -1696,21 +1703,18 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
         This used to be asserted as "no vertical bit on this tick": the
         straight-line approach had to walk out to the crate's side *first*,
         because a diagonal to the smash pocket cut through the solid. The
-        route now has the crate's own footprint, so the shape of the path is
-        its business -- what must hold is that the body never overlaps the
-        prop and that the walk ends somewhere ``in_smash_range``.
+        route now has the crate's own push-back box, so the shape of the path
+        is its business -- what must hold is that the actor's own position is
+        never inside that box (which is what the ROM tests) and that the walk
+        ends somewhere ``in_smash_range``.
         """
 
-        from sor_autoplay.ai import navigation as nav
-
-        solid = nav.solid_obstacles(
-            {prop}, block_x=BREAKABLE_BLOCK_X, keep_reachable_within=BREAKABLE_PUNCH_X
-        )[0]
+        wall = prop_solids.solid_box(prop.type_id, prop.world_x, prop.world_y)
         verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
 
         trail = _walk(verb, actor, {prop, Stage(level_index=0, direction="right")})
 
-        inside = [(a.world_x, a.world_y) for a in trail if _body_of(a).overlaps(solid)]
+        inside = [(a.world_x, a.world_y) for a in trail if wall.blocks(a.world_x, a.world_y)]
         self.assertFalse(inside, f"walked into the crate at {inside[:3]}")
         self.assertTrue(
             any(in_smash_range(a, prop) for a in trail),
@@ -1780,41 +1784,185 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
         self.assertFalse(held & (UP | DOWN), f"must not dodge the smash target, got {held:#x}")
 
 
+class OpenBreakableFacingTests(unittest.TestCase):
+    """A prop cannot move, so "which way is it" never needs hysteresis --
+    and answering "no direction" there is a hard stall.
+
+    Measured live on stage 5: the actor came to rest 10px from a round-5
+    prop, exactly DIRECTION_HYSTERESIS_X, facing away from it after walking
+    in from the far side. Every tick it asked for a punch with no direction
+    bit, so it never turned, and it threw ~2,300 of them into empty air over
+    76 seconds. The same run had already broken an identical prop from 11px
+    while facing it, so the position was fine; only the facing was not.
+    """
+
+    def _punch_mask(self, actor_x: int, prop_x: int) -> int:
+        prop = Breakable(slot="obj09", world_x=prop_x, world_y=48, type_id=0x1F)
+        actor = _myself(world_x=actor_x, world_y=57, facing_left=True)
+        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {actor, prop, Stage(level_index=4, direction="right")}, gamepad)
+
+        return client.press_buttons.call_args.kwargs["player1"]
+
+    def test_turns_toward_a_prop_inside_the_hysteresis_band(self) -> None:
+        # dx of exactly DIRECTION_HYSTERESIS_X: the live stall's geometry.
+        mask = self._punch_mask(actor_x=2870, prop_x=2880)
+
+        self.assertTrue(mask & B, f"expected a punch, got {mask:#x}")
+        self.assertTrue(mask & RIGHT, f"expected to turn toward the prop, got {mask:#x}")
+
+    def test_turns_the_other_way_for_a_prop_on_the_other_side(self) -> None:
+        mask = self._punch_mask(actor_x=2890, prop_x=2880)
+
+        self.assertTrue(mask & LEFT, f"expected to turn toward the prop, got {mask:#x}")
+
+    def test_dead_centre_still_commits_to_a_side(self) -> None:
+        # No sign to read: the stage's own direction decides, the same fixed
+        # anchor the approach uses, so it cannot flip tick to tick. Standing
+        # dead centre is short of smash range, so this asks the helper
+        # directly rather than through a punch that would not be thrown.
+        prop = Breakable(slot="obj09", world_x=2880, world_y=48, type_id=0x1F)
+        actor = _myself(world_x=2880, world_y=57, facing_left=True)
+
+        for direction, expected in (("right", RIGHT), ("left", LEFT)):
+            with self.subTest(direction=direction):
+                mask = execute_module._face_prop_mask(
+                    actor, prop, {Stage(level_index=4, direction=direction)}
+                )
+                self.assertEqual(mask, expected)
+
+
+class Stage5PropFenceTests(unittest.TestCase):
+    """The live stall this whole push-back model exists for.
+
+    Stage 5 stands its round-5 props ($1F) in a 2x2 fence: two at lane 56 and
+    two at lane 96, 64px apart on x. Their *sprite* boxes leave a comfortable
+    24px gap on x and a 20px corridor on lane. Their push-back boxes leave a
+    3px gap on x and a 16px corridor on lane -- so an AI planning against the
+    sprites walks confidently into ground it cannot occupy.
+
+    Recorded live before the fix: the actor reached (1625, 74), was told by
+    its own route to step down to lane 94, held DOWN into the fence and did
+    not move for the remaining 2,500 ticks of the run.
+    """
+
+    STALL = (1625, 74)
+
+    def _fence(self):
+        return {
+            Breakable(slot=f"obj{i:02d}", world_x=x, world_y=y, type_id=0x1F)
+            for i, (x, y) in enumerate(
+                ((1584, 56), (1648, 56), (1584, 96), (1648, 96))
+            )
+        }
+
+    def _scene(self):
+        return self._fence() | {
+            CameraRange(left=1454, right=1710, top=0, bottom=112),
+            Stage(level_index=4, direction="right"),
+        }
+
+    def _walls(self, scene):
+        return [
+            prop_solids.solid_box(p.type_id, p.world_x, p.world_y)
+            for p in scene
+            if isinstance(p, Breakable)
+        ]
+
+    def test_the_corridor_between_the_two_rows_is_where_it_walks(self) -> None:
+        scene = self._scene()
+        target = next(
+            p for p in scene if isinstance(p, Breakable) and (p.world_x, p.world_y) == (1648, 96)
+        )
+        verb = OpenBreakable(actor_slot="P1", target_slot=target.slot)
+        actor = _myself(world_x=self.STALL[0], world_y=self.STALL[1])
+
+        trail = _walk(verb, actor, scene)
+
+        walls = self._walls(scene)
+        inside = [
+            (a.world_x, a.world_y)
+            for a in trail
+            if any(w.blocks(a.world_x, a.world_y) for w in walls)
+        ]
+        self.assertFalse(inside, f"walked into the fence at {inside[:3]}")
+        self.assertTrue(
+            any(in_smash_range(a, target) for a in trail),
+            f"never reached smash range; ended at "
+            f"{(trail[-1].world_x, trail[-1].world_y)}",
+        )
+
+    def test_it_does_not_stand_still_against_the_fence(self) -> None:
+        # The symptom, stated directly: the old model produced a mask that
+        # commanded a move the game refused, forever. Whatever the route
+        # decides, the actor must actually get somewhere.
+        scene = self._scene()
+        target = next(
+            p for p in scene if isinstance(p, Breakable) and (p.world_x, p.world_y) == (1648, 96)
+        )
+        verb = OpenBreakable(actor_slot="P1", target_slot=target.slot)
+
+        trail = _walk(verb, _myself(world_x=self.STALL[0], world_y=self.STALL[1]), scene)
+
+        self.assertNotEqual((trail[-1].world_x, trail[-1].world_y), self.STALL)
+
+
 class ExecuteMovementBreakableAvoidanceTests(unittest.TestCase):
-    """Regression: _movement_mask must only dodge on-screen breakables.
+    """Regression: the straight-line fallback must only dodge on-screen props.
 
     world_map tracks entities up to two screens beyond each camera edge for
     hunt-target lookahead, far past what's actually walkable. Without a
     camera filter, any breakable in that huge tracked radius could trip the
-    dodge on a pure horizontal walk -- and since the dodge always steers
-    toward smaller Y ("up") when the actor is in the lane's lower half (the
-    common case), that made the AI drift up for reasons unrelated to
-    anything on screen.
+    dodge on a pure horizontal walk -- and since the dodge steers toward
+    smaller Y when the actor is in the lane's lower half (the common case),
+    that made the AI drift up for reasons unrelated to anything on screen.
+
+    Tested against ``_movement_mask`` itself rather than through a walk verb:
+    the filter lives there, and every routed verb reaches it only when the
+    path finder comes back with nothing -- which, for one prop on an
+    otherwise empty screen, it never does.
     """
 
-    def test_dodges_a_breakable_that_is_actually_on_screen(self) -> None:
-        actor = _myself(world_x=0, world_y=90)
+    # Standing on the lane its push-back box covers (a round-6 prop at lane
+    # 90 walls lane 70..94), 50px to the actor's left of the walk's target.
+    ACTOR = (0, 90)
+    TARGET = (100, 90)
+
+    def _mask(self, camera: CameraRange) -> int:
         prop = Breakable(slot="obj09", world_x=50, world_y=90, type_id=0x40)
-        camera = CameraRange(left=0, right=200, top=0, bottom=112)
-        target = _enemy(world_x=100, world_y=90)
-        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
-        gamepad, client = _gamepad()
+        return execute_module._movement_mask(
+            {prop, camera}, *self.ACTOR, *self.TARGET
+        )
 
-        _settle(verb, {actor, target, prop, camera}, gamepad)
+    def test_dodges_a_breakable_that_is_actually_on_screen(self) -> None:
+        mask = self._mask(CameraRange(left=0, right=200, top=0, bottom=112))
 
-        client.hold_buttons.assert_called_with(player1=RIGHT | UP, player2=0)
+        self.assertEqual(mask, RIGHT | UP)
 
     def test_ignores_a_breakable_far_outside_the_camera(self) -> None:
-        actor = _myself(world_x=0, world_y=90)
+        mask = self._mask(CameraRange(left=200, right=400, top=0, bottom=112))
+
+        self.assertEqual(mask, RIGHT)
+
+    def test_the_dodge_aims_clear_of_the_push_back_box(self) -> None:
+        # The dodge used to aim at a fixed margin around the prop's *origin*,
+        # which is not where its wall is: the ROM's boxes run up to 28px
+        # behind an origin and only 4px in front of it. On stage 5's stacked
+        # fence that aimed one prop's dodge into the prop below it.
         prop = Breakable(slot="obj09", world_x=50, world_y=90, type_id=0x40)
-        camera = CameraRange(left=200, right=400, top=0, bottom=112)
-        target = _enemy(world_x=100, world_y=90)
-        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
-        gamepad, client = _gamepad()
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        wall = prop_solids.solid_box(prop.type_id, prop.world_x, prop.world_y)
 
-        _settle(verb, {actor, target, prop, camera}, gamepad)
+        trail = _walk(
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+            _myself(world_x=self.ACTOR[0], world_y=self.ACTOR[1]),
+            {_enemy(world_x=self.TARGET[0], world_y=self.TARGET[1]), prop, camera},
+        )
 
-        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+        inside = [(a.world_x, a.world_y) for a in trail if wall.blocks(a.world_x, a.world_y)]
+        self.assertFalse(inside, f"walked into the prop at {inside[:3]}")
 
 
 class ExecuteMovementPitAvoidanceTests(unittest.TestCase):

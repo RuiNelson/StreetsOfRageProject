@@ -103,8 +103,10 @@ class Breakable(StageObjects):
     world_x: int
     world_y: int
     type_id: int
-    # The prop's real footprint, rebuilt from the ROM shape tables. A
-    # Breakable is a solid obstacle: execute._breakable_block_x / the
-    # OpenBreakable around-path read this when present, and fall back to
-    # decide.BREAKABLE_BLOCK_X around the origin when it is not.
+    # The prop's animation body box, rebuilt from the ROM shape tables.
+    # This is what the prop *draws*, and it is not what stops a walking
+    # actor: the wall is the per-type push-back rectangle in
+    # ``sor_autoplay.prop_solids``, which navigation/execute route against
+    # and which needs only ``type_id``. Kept for display and for anything
+    # that wants the sprite's own extent.
     hitbox: Hitbox | None = None

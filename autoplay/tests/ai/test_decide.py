@@ -19,7 +19,10 @@ from sor_autoplay.ai.tokens import (
     ThrowPepper,
 )
 from sor_autoplay.ai.tokens import Myself, Partner
+from sor_autoplay import prop_solids
 from sor_autoplay.ai.decide import (
+    BREAKABLE_PUNCH_X,
+    breakable_smash_outer_x,
     in_smash_range,
     generate_verb_tokens,
     could_call_police,
@@ -1610,6 +1613,26 @@ class InSmashRangeTests(unittest.TestCase):
         actor = make_myself(world_x=100, world_y=100)
 
         self.assertFalse(in_smash_range(actor, self._prop(dx=60)))
+
+    def test_a_narrow_props_reach_is_the_plain_constant(self) -> None:
+        # Every prop whose own wall is inside BREAKABLE_PUNCH_X keeps exactly
+        # the reach it always had.
+        for type_id in (0x11, 0x19, 0x18):
+            with self.subTest(type_id=type_id):
+                prop = Breakable(slot="prop", world_x=100, world_y=100, type_id=type_id)
+                self.assertEqual(breakable_smash_outer_x(prop), BREAKABLE_PUNCH_X)
+
+    def test_a_prop_wider_than_the_punch_can_still_be_reached(self) -> None:
+        # A round-6 prop's push-back box already reaches 36px from its own
+        # origin -- exactly BREAKABLE_PUNCH_X -- so an origin-distance reach
+        # of 36 would call every position the ROM allows out of range, and
+        # the verb would approach a prop it can never arrive at.
+        prop = Breakable(slot="prop", world_x=100, world_y=100, type_id=0x41)
+        wall = prop_solids.solid_half_width(prop.type_id)
+
+        self.assertGreater(breakable_smash_outer_x(prop), wall)
+        actor = make_myself(world_x=100 - (wall + 1), world_y=100)
+        self.assertTrue(in_smash_range(actor, prop))
 
 
 class CouldWalkToWeaponTests(unittest.TestCase):

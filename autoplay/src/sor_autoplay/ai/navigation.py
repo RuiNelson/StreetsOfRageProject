@@ -57,6 +57,7 @@ from .tokens import (
     find,
     find_all,
 )
+from .. import prop_solids
 from ..hitboxes import Hitbox
 from ..phases import is_dangerous
 from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
@@ -172,73 +173,108 @@ def world_rect(context: Context) -> Rect:
     return Rect(left, lo, (camera.right + WORLD_MARGIN_X) - left, hi - lo)
 
 
-def _breakable_rect(
-    prop: Breakable, block_x: int, keep_reachable_within: int | None
-) -> Rect:
-    box = prop.hitbox
-    if box is not None and not box.is_degenerate:
-        return _rect_from_hitbox(box)
-    # No observed footprint: the margin decide.py already names for this,
-    # around the origin, with a nominal lane depth so it is a rectangle and
-    # not a line.
-    #
-    # That margin is a deliberately generous *guess*, and pairing a generous
-    # guess with a measured strike range can close the gap between them
-    # entirely: 28px of assumed body plus half a 16px actor is exactly the
-    # 36px a punch reaches, leaving a pocket one pixel deep that no lattice
-    # will ever land in -- the actor then walks up to a crate it is allowed
-    # to hit, is told the goal is unreachable, and stops. So an *assumed*
-    # footprint is never allowed to be wider than the reach it would have to
-    # be hit from. A real, observed hitbox is left alone: if the ROM says the
-    # box is that big, it is that big.
-    if keep_reachable_within is not None:
-        block_x = min(
-            block_x,
-            max(1, keep_reachable_within - int(NOMINAL_BODY_W / 2) - NAV_STEP),
-        )
-    return Rect(
-        prop.world_x - block_x,
-        prop.world_y - NOMINAL_BODY_H / 2,
-        2 * block_x,
-        NOMINAL_BODY_H,
-    )
+class _OriginRule:
+    """Restates rules about an *origin* as rectangles a *body* may not touch.
+
+    Both kinds of solid geometry in this game are point rules -- the ROM
+    tests the moving object's own position against them, never its box --
+    while the path finder collides whole bodies. This is the conversion, and
+    it is exact: for a body reaching ``a`` behind the origin and ``b`` in
+    front of it, "the body overlaps ``[x0 + b, x1 - a]``" and "the origin is
+    strictly inside ``(x0, x1)``" are the same statement.
+
+    Half the body on each side is *not* the same statement, and the
+    difference is a stall. A real cached box is not centred on the origin:
+    measured live, Axel's spans -7..+3 of his own position facing left. Off
+    by those 2px, the route stepped down at an x the ROM counted as inside a
+    round-5 prop and the actor held DOWN against it for 42 seconds -- the
+    identical symptom this whole model was written to remove, one prop
+    further along the stage. ``strike_goal`` carries the same correction, for
+    the same reason.
+
+    Without an origin the body is assumed centred, which is the best
+    available answer and the one the pre-existing pit inset already made.
+    """
+
+    def __init__(self, body: Rect | None, origin: tuple[float, float] | None) -> None:
+        if body is None:
+            self.behind_x = self.ahead_x = self.behind_y = self.ahead_y = 0.0
+        elif origin is None:
+            self.behind_x = self.ahead_x = body.width / 2
+            self.behind_y = self.ahead_y = body.height / 2
+        else:
+            origin_x, origin_y = origin
+            self.behind_x = origin_x - body.left
+            self.ahead_x = body.right - origin_x
+            self.behind_y = origin_y - body.top
+            self.ahead_y = body.bottom - origin_y
+
+    def rect(self, rect: Rect) -> Rect:
+        """``rect`` as the ground the body must keep off."""
+
+        left, width = _shrunk(rect.x, rect.right, self.ahead_x, self.behind_x)
+        top, height = _shrunk(rect.y, rect.bottom, self.ahead_y, self.behind_y)
+        return Rect(left, top, width, height)
+
+
+def _shrunk(lo: float, hi: float, ahead: float, behind: float) -> tuple[float, float]:
+    """One axis of the conversion, never narrower than a pixel.
+
+    A rule can legitimately be shallower than the body is deep -- the phone
+    booth's is 14px against a 16px actor -- and no rectangle can then say
+    "the origin is inside" exactly. A zero-width one says nothing at all and
+    is dropped by the lattice outright, turning the shallowest walls into no
+    wall, so the floor is one pixel centred on the same ground: it
+    over-states such a rule slightly, which is the safe direction.
+    """
+
+    low, high = lo + ahead, hi - behind
+    if high - low >= 1.0:
+        return low, high - low
+    middle = (low + high) / 2
+    return middle - 0.5, 1.0
 
 
 def solid_obstacles(
     context: Context,
     *,
-    block_x: int,
     body: Rect | None = None,
-    keep_reachable_within: int | None = None,
+    origin: tuple[float, float] | None = None,
     ignore_slots: frozenset[str] = frozenset(),
 ) -> list[Rect]:
     """Geometry that is physically impassable: intact props and floor holes.
 
-    A crate and a pit are not the same kind of obstacle, and modelling them
-    alike is wrong in a way that costs whole approaches. A **crate** is a
-    wall: it is the *body* that must not overlap it. A **pit** is a floor
-    rule the ROM applies to the object's own position, and every other pit
-    check in the AI agrees -- ``reach.pit_endangers`` tests a point against
-    the hole plus ``PIT_AVOID_MARGIN``. Growing the hole by that margin and
-    *also* colliding a 16px-tall body against it counts the clearance twice:
-    an actor standing 2px clear of the danger band, which the rest of the
+    Both are **point rules**, and both are therefore restated through
+    :class:`_OriginRule` rather than collided against directly.
+
+    A **prop** is a wall, but not the wall its sprite draws: ``prop_solids``
+    carries the ROM's own per-type push-back rectangle, which for some types
+    sits mostly *behind* the origin while the animation box sits in front of
+    it. Routing off the sprite box planned straight through solid ground --
+    the stage-5 stall that module's docstring records.
+
+    A **pit** is a floor rule, and every other pit check in the AI agrees:
+    ``reach.pit_endangers`` tests a point against the hole plus
+    ``PIT_AVOID_MARGIN``. Growing the hole by that margin and *also*
+    colliding a 16px-tall body against it counts the clearance twice: an
+    actor standing 2px clear of the danger band, which the rest of the
     pipeline calls safe, reads as already inside it here.
 
     Measured, on the sweep: the actor started legally beside a pit, this
     said it was standing in one, the route left the lane to escape a hole it
     was never in, and it spent the whole run walking back around instead of
-    reaching the enemy it had been punching before. So a pit is inset by
-    half the body, which makes "the body overlaps this" mean exactly "the
-    origin is within the margin" -- the same sentence ``pit_endangers`` says.
+    reaching the enemy it had been punching before.
     """
 
     rects: list[Rect] = []
+    rule = _OriginRule(body, origin)
     for prop in find_all(context, Breakable):
         if prop.slot in ignore_slots:
             continue
-        rects.append(_breakable_rect(prop, block_x, keep_reachable_within))
-    inset_x = body.width / 2 if body is not None else 0.0
-    inset_y = body.height / 2 if body is not None else 0.0
+        solid = prop_solids.solid_box(prop.type_id, prop.world_x, prop.world_y)
+        rects.append(
+            rule.rect(Rect(solid.x0, solid.y0, solid.width, solid.height))
+        )
     for pit in find_all(context, Pit):
         # One px wider than the predicate, because the predicate is inclusive
         # (``pit_endangers`` uses ``<=``) and collision here is not (touching
@@ -250,14 +286,7 @@ def solid_obstacles(
         danger = Rect(pit.world_x, pit.lane_y, pit.width, pit.height).grown_by(
             PIT_AVOID_MARGIN + 1
         )
-        rects.append(
-            Rect(
-                danger.x + inset_x,
-                danger.y + inset_y,
-                max(0.0, danger.width - 2 * inset_x),
-                max(0.0, danger.height - 2 * inset_y),
-            )
-        )
+        rects.append(rule.rect(danger))
     return rects
 
 
@@ -499,21 +528,27 @@ def route_mask(
 def obstacle_sets(
     context: Context,
     *,
-    block_x: int,
     body: Rect | None = None,
-    keep_reachable_within: int | None = None,
+    origin: tuple[float, float] | None = None,
     ignore_slots: frozenset[str] = frozenset(),
     ignore_enemy_slots: frozenset[str] = frozenset(),
 ) -> tuple[list[Rect], list[Rect]]:
     """The two obstacle sets ``plan_route`` takes, built in one pass."""
 
     return (
-        solid_obstacles(
-            context,
-            block_x=block_x,
-            body=body,
-            keep_reachable_within=keep_reachable_within,
-            ignore_slots=ignore_slots,
-        ),
+        solid_obstacles(context, body=body, origin=origin, ignore_slots=ignore_slots),
         danger_obstacles(context, ignore_slots=ignore_enemy_slots),
     )
+
+
+def actor_footprint(
+    actor: Myself | Partner,
+) -> tuple[Rect, tuple[float, float]]:
+    """The pair every obstacle set wants: the body, and where the actor's own
+    position sits inside it.
+
+    Together, not separately -- an origin paired with somebody else's body is
+    exactly the mismatch :class:`_OriginRule` exists to get right.
+    """
+
+    return body_rect(actor), (float(actor.world_x), float(actor.world_y))
