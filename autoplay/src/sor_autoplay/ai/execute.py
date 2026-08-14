@@ -1005,7 +1005,58 @@ def _projectile_sidestep_target(
 def state_machine_projectile_sidestep(
     verb: ProjectileSidestep, context: Context, gamepad: VirtualGamepad
 ) -> None:
-    _walk_toward_target(verb, context, gamepad, Projectile, _projectile_sidestep_target)
+    """Step off the lane, routed around whatever else is standing in it.
+
+    Same two-pass planning as ``state_machine_walk_to_near_enemy``, not the
+    straight line ``_walk_toward_target`` gives every other lookup/guard/
+    steer verb: a plain sidestep has no notion of "this enemy is the
+    destination, exempt it", so every live enemy's body and committed reach
+    counts as danger here, unlike the near-enemy approach's target exemption.
+    The destination itself is unchanged from before this routed --
+    ``_projectile_sidestep_target`` still owns which way is safe from the
+    throw; this only changes how the actor gets there.
+
+    A thrown weapon is time-critical in a way a walk-in or a retreat is not,
+    which makes the router's own detours a real risk here in principle. In
+    practice the step is short (PROJECTILE_SIDESTEP_DISTANCE, 40px) and
+    purely lateral, so the fast path -- danger-aware planning reaching the
+    goal on the first pass -- is the case that matters, and it costs the same
+    single vector as the straight line would. The only way this gets slower
+    than a straight step is a body or reach square parked exactly on the 40px
+    lane the actor would have taken, in which case the straight line was
+    about to walk into it -- eating that enemy's incidental reach while
+    clearing the thrown lane is the better trade of the two, not a
+    regression.
+    """
+
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Projectile, slot=verb.target_slot)
+    if actor is None or target is None:
+        gamepad.release()
+        return
+
+    target_x, target_y = _projectile_sidestep_target(actor, target, context)
+    goal = nav.PointGoal(nav.Point(target_x, target_y), tolerance=MOVE_DEADBAND_X)
+    solids, dangers = nav.obstacle_sets(
+        context,
+        block_x=BREAKABLE_BLOCK_X,
+        body=nav.body_rect(actor),
+    )
+
+    def straight_line() -> int:
+        return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)
+
+    _hold_steered(
+        gamepad,
+        _routed_mask(
+            context,
+            actor,
+            goal,
+            solids=solids,
+            dangers=dangers,
+            fallback=straight_line,
+        ),
+    )
 
 
 def state_machine_dodge_antonio_kick(

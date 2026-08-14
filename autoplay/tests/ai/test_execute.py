@@ -832,6 +832,67 @@ class ExecuteProjectileSidestepTests(unittest.TestCase):
 
         client.hold_buttons.assert_not_called()
 
+    def test_routes_around_a_committed_enemys_reach_on_the_straight_lane(self) -> None:
+        # The straight-line sidestep is blind to anything but the crate/pit
+        # dodges baked into _movement_mask, so a swing sitting on the 40px
+        # lane it steps through used to be walked straight into. The routed
+        # version treats every live enemy's *committed* reach as danger
+        # (navigation.enemy_rects: "only committed enemies contribute
+        # reach"), same as WalkToNearEnemy/OpenBreakable already do, so it
+        # must bend around this one instead.
+        #
+        # Enemy body sits off to the side (x=140) so only its projected
+        # AttackRange -- not its body -- covers the straight path at x=100.
+        swing = AttackRange(
+            shape_id=0x22,
+            animation=0,
+            forward_min=0,
+            forward_max=48,
+            lane_min=-8,
+            lane_max=8,
+            height_min=0,
+            height_max=32,
+        )
+        enemy = replace(
+            _enemy(world_x=140, world_y=70),
+            combat_phase=CombatPhase.ATTACKING,
+            attack_ranges=(swing,),
+            facing_left=True,
+        )
+        # facing_left=True projects the swing behind (to smaller x than) the
+        # enemy's own origin: x in [140-48, 140-0] = [92, 140], y in [62, 78]
+        # -- squarely across the actor's straight vertical path at x=100.
+        reach_band = Rect(92, 62, 48, 16)
+
+        actor = _myself(world_x=100, world_y=50)
+        projectile = _projectile(world_x=150, world_y=50)
+        verb = ProjectileSidestep(actor_slot="P1", target_slot="obj10")
+
+        # A short window, not a run to convergence: _projectile_sidestep_
+        # target recomputes its aim from the actor's *current* position every
+        # tick (unchanged by this routing work -- see its own docstring), so
+        # driven long enough it settles the actor near the lane's midpoint
+        # regardless of routing, the same way the unrouted straight-line
+        # version already does. That is this verb's existing, out-of-scope
+        # behaviour; what belongs to this change is only that the first
+        # several ticks -- the window a real incoming throw is actually
+        # judged a threat in -- both clear real distance off the lane and
+        # never cross the swing while doing it.
+        trail = _walk(verb, actor, {projectile, enemy}, ticks=15)
+
+        crossed = [
+            (a.world_x, a.world_y) for a in trail if _body_of(a).overlaps(reach_band)
+        ]
+        self.assertFalse(crossed, f"walked into the swing at {crossed[:3]}")
+        # Still clears the lane: upper half at world_y=50 steps toward larger
+        # y, same direction the straight line would have picked, and the
+        # detour around the swing does not erase that progress.
+        cleared = max(a.world_y for a in trail) - trail[0].world_y
+        self.assertGreaterEqual(cleared, 8, "never made real progress off the lane")
+        # And it actually routed -- stepped off the straight vertical line to
+        # get around the swing -- rather than being blocked in place on X.
+        self.assertTrue(any(a.world_x != trail[0].world_x for a in trail))
+
 
 class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
     def test_direction_right_holds_right(self) -> None:
