@@ -196,7 +196,7 @@ DIAGONALS: tuple[Direction, ...] = (
     Direction.DOWN_LEFT,
 )
 
-ALL_DIRECTIONS: tuple[Direction, ...] = CARDINALS + DIAGONALS
+ALL_DIRECTIONS: tuple[Direction, ...] = DIAGONALS + CARDINALS
 
 _BY_OFFSET = {direction.value: direction for direction in ALL_DIRECTIONS}
 
