@@ -37,6 +37,8 @@ from sor_autoplay.ai.tokens import CameraRange, Stage
 from sor_autoplay.ai.execute import (
     BREAKABLE_STOP_BUFFER,
     MOVE_DEADBAND_X,
+    PICKUP_RANGE_X,
+    PICKUP_RANGE_Y,
     WALK_TO_ENEMY_LANE_SAFETY_Y,
     _walk_to_breakable_target,
     _walk_to_near_enemy_target,
@@ -2058,6 +2060,34 @@ class ExecuteTickPitEscapeTests(unittest.TestCase):
         client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
 
 
+def _swinging_enemy_ahead(world_x: int, world_y: int) -> Enemy:
+    """A committed enemy whose swing extends further along the actor's own
+    direction of travel -- the shape ``ExecuteWalkToNearEnemyTests``' own
+    routing test uses, reused here so the two verb families are held to the
+    same obstacle. ``facing_left=False`` projects ``AttackRange.projected``'s
+    reach to ``world_x + forward_min .. world_x + forward_max`` (see
+    ``attack_ranges.AttackRange.projected``), i.e. onto the ground between
+    the enemy and wherever the actor is walking past it to -- not merely the
+    enemy's own body, which the old straight line never saw either way."""
+
+    swing = AttackRange(
+        shape_id=0x22,
+        animation=0,
+        forward_min=0,
+        forward_max=48,
+        lane_min=-8,
+        lane_max=8,
+        height_min=0,
+        height_max=32,
+    )
+    return replace(
+        _enemy(world_x=world_x, world_y=world_y),
+        combat_phase=CombatPhase.ATTACKING,
+        attack_ranges=(swing,),
+        facing_left=False,
+    )
+
+
 class ExecuteWalkToWeaponTests(unittest.TestCase):
     def test_holds_movement_when_far_from_weapon(self) -> None:
         actor = _myself(world_x=0, world_y=0)
@@ -2088,6 +2118,35 @@ class ExecuteWalkToWeaponTests(unittest.TestCase):
         client.hold_buttons.assert_not_called()
         client.press_buttons.assert_not_called()
 
+    def test_routes_around_a_dangerous_enemys_swing_on_the_way_to_the_weapon(
+        self,
+    ) -> None:
+        # The bug this fixes: the old straight-line walk had no enemy
+        # awareness at all, so grabbing a weapon could cross straight through
+        # a live enemy's active attack band. Put the enemy's swing squarely
+        # on the direct line between the actor and the weapon and require
+        # the whole trail to stay out of it, the same standard
+        # ExecuteWalkToNearEnemyTests already holds the enemy approach to.
+        target = _swinging_enemy_ahead(world_x=150, world_y=50)
+        band = Rect(150, 50 - 8, 48, 16)
+        weapon = Weapon(slot="obj05", world_x=300, world_y=50, weapon_type=0x08)
+        verb = WalkToWeapon(actor_slot="P1", target_slot="obj05")
+
+        trail = _walk(verb, _myself(world_x=0, world_y=50), {target, weapon}, ticks=140)
+
+        crossed = [
+            (a.world_x, a.world_y) for a in trail if _body_of(a).overlaps(band)
+        ]
+        self.assertFalse(crossed, f"walked through the swing at {crossed[:3]}")
+        self.assertTrue(
+            any(
+                abs(weapon.world_x - a.world_x) <= PICKUP_RANGE_X
+                and abs(weapon.world_y - a.world_y) <= PICKUP_RANGE_Y
+                for a in trail
+            ),
+            "never got within pickup range of the weapon",
+        )
+
 
 class ExecuteWalkToPickupTests(unittest.TestCase):
     def test_presses_punch_when_adjacent(self) -> None:
@@ -2101,6 +2160,34 @@ class ExecuteWalkToPickupTests(unittest.TestCase):
         execute_verb(verb, {actor, food}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+
+    def test_routes_around_a_dangerous_enemys_swing_on_the_way_to_the_pickup(
+        self,
+    ) -> None:
+        # Same obstacle, same standard, for the health-pickup sibling: a
+        # slightly longer route around a live swing beats walking through it
+        # mid-fight to grab health.
+        target = _swinging_enemy_ahead(world_x=150, world_y=50)
+        band = Rect(150, 50 - 8, 48, 16)
+        food = HealthPickup(
+            slot="obj06", world_x=300, world_y=50, pickup_type=0x4B, health_delta=20
+        )
+        verb = WalkToPickup(actor_slot="P1", target_slot="obj06")
+
+        trail = _walk(verb, _myself(world_x=0, world_y=50), {target, food}, ticks=140)
+
+        crossed = [
+            (a.world_x, a.world_y) for a in trail if _body_of(a).overlaps(band)
+        ]
+        self.assertFalse(crossed, f"walked through the swing at {crossed[:3]}")
+        self.assertTrue(
+            any(
+                abs(food.world_x - a.world_x) <= PICKUP_RANGE_X
+                and abs(food.world_y - a.world_y) <= PICKUP_RANGE_Y
+                for a in trail
+            ),
+            "never got within pickup range of the food",
+        )
 
 
 class NoRawMemoryWritesTests(unittest.TestCase):

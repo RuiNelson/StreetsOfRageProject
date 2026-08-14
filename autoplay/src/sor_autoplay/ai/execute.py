@@ -1454,7 +1454,30 @@ def state_machine_throw_pepper(verb: ThrowPepper, context: Context, gamepad: Vir
 def _walk_to_item(verb: Verb, context: Context, gamepad: VirtualGamepad, target_type: type) -> None:
     """Shared body for ``WalkToWeapon``/``WalkToPickup``: identical arrival
     test (press once inside pickup range, otherwise keep closing) --
-    differing only in which token type the target slot resolves to."""
+    differing only in which token type the target slot resolves to.
+
+    The walk itself is routed (``_routed_mask``) the same way
+    ``state_machine_walk_to_near_enemy`` is, but this is the simplest of the
+    routed approaches: no side-selection subtlety, and unlike a punch's
+    annulus (a dead zone under the fist), standing on top of a weapon or
+    pickup is exactly the point. The goal reuses ``strike_goal`` with
+    ``inner_dx=0`` (one plain region, not a two-sided band) and
+    ``stop_dx``/``lane_slack`` set to ``PICKUP_RANGE_X``/``PICKUP_RANGE_Y`` --
+    not a ``PointGoal`` with a single scalar tolerance, because that would
+    grow the arrival test symmetrically on both axes and stop disagreeing
+    with the asymmetric ``PICKUP_RANGE_X``/``_Y`` check above only by
+    accident. Measured on this very approach: a ``PointGoal`` tolerance wide
+    enough to satisfy the X axis let the router call the goal "reached" (and
+    the route mask go quiet) up to 4px short on Y, freezing the actor there
+    forever since ``_routed_mask`` never falls back once ``goal.is_reached``
+    is true. ``strike_goal``'s region is built from the same
+    origin-vs-threshold sentence the check above already states, so the two
+    can never disagree. Every live enemy and its active reach is an obstacle
+    (``nav.obstacle_sets``' danger pass), which is the bug this fixes: the
+    old straight line had no enemy awareness at all, so grabbing a pickup
+    could walk straight through a live enemy's body or its active attack
+    band when a slightly longer route around it existed.
+    """
 
     actor = _find_actor(context, verb.actor_slot)
     target = find(context, target_type, slot=verb.target_slot)
@@ -1463,13 +1486,35 @@ def _walk_to_item(verb: Verb, context: Context, gamepad: VirtualGamepad, target_
         return
     if abs(target.world_x - actor.world_x) <= PICKUP_RANGE_X and abs(target.world_y - actor.world_y) <= PICKUP_RANGE_Y:
         _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
-    else:
-        _hold_steered(
-            gamepad,
-            _movement_mask(
-                context, actor.world_x, actor.world_y, target.world_x, target.world_y
-            ),
+        return
+
+    goal = nav.strike_goal(
+        nav.body_rect(actor),
+        actor.world_x,
+        actor.world_y,
+        target.world_x,
+        target.world_y,
+        stop_dx=PICKUP_RANGE_X,
+        lane_slack=PICKUP_RANGE_Y,
+    )
+    solids, dangers = nav.obstacle_sets(context, block_x=BREAKABLE_BLOCK_X, body=nav.body_rect(actor))
+
+    def straight_line() -> int:
+        return _movement_mask(
+            context, actor.world_x, actor.world_y, target.world_x, target.world_y
         )
+
+    _hold_steered(
+        gamepad,
+        _routed_mask(
+            context,
+            actor,
+            goal,
+            solids=solids,
+            dangers=dangers,
+            fallback=straight_line,
+        ),
+    )
 
 
 def state_machine_walk_to_weapon(verb: WalkToWeapon, context: Context, gamepad: VirtualGamepad) -> None:
