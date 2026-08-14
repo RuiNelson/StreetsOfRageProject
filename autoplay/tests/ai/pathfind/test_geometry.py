@@ -7,7 +7,11 @@ import math
 import pytest
 
 from sor_autoplay.ai.pathfind import Direction, Edge, Point, Rect, Segment
-from sor_autoplay.ai.pathfind.geometry import direction_from_offset, octile_distance
+from sor_autoplay.ai.pathfind.geometry import (
+    direction_from_offset,
+    manhattan_distance,
+    octile_distance,
+)
 
 
 def test_rectangle_rejects_negative_extent() -> None:
@@ -80,3 +84,9 @@ def test_octile_distance_matches_eight_direction_travel() -> None:
     assert octile_distance(5, 0) == pytest.approx(5)
     assert octile_distance(4, 4) == pytest.approx(4 * math.sqrt(2))
     assert octile_distance(10, 4) == pytest.approx(4 * math.sqrt(2) + 6)
+
+
+def test_manhattan_distance_is_the_cardinal_walk() -> None:
+    assert manhattan_distance(5, 0) == pytest.approx(5)
+    assert manhattan_distance(-4, 4) == pytest.approx(8)
+    assert manhattan_distance(10, 4) == pytest.approx(14)

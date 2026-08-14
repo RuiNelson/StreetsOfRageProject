@@ -65,12 +65,19 @@ def test_every_vector_is_a_multiple_of_the_step_and_never_shorter() -> None:
         assert step.length % 8 == 0
 
 
-def test_a_free_diagonal_is_taken_as_one_vector() -> None:
+def test_an_open_diagonal_is_walked_as_two_cardinals() -> None:
+    # The destination sits equally far on both axes, so a single DOWN_RIGHT
+    # would be the shortest walk. The search still refuses it: a diagonal
+    # is only for a goal no cardinal route can reach.
     path = plan(start=BODY, goal=PointGoal(Point(64, 64)))
 
     assert path.reached
-    assert [step.direction for step in path.steps] == [Direction.DOWN_RIGHT]
-    assert path.length == pytest.approx(48 * math.sqrt(2))
+    assert [step.direction for step in path.steps] == [
+        Direction.RIGHT,
+        Direction.DOWN,
+    ]
+    assert all(not step.direction.is_diagonal for step in path.steps)
+    assert path.length == pytest.approx(96)
 
 
 def test_diagonals_can_be_turned_off() -> None:
@@ -80,11 +87,29 @@ def test_diagonals_can_be_turned_off() -> None:
     assert all(not step.direction.is_diagonal for step in path.steps)
 
 
+def test_a_diagonal_is_taken_only_when_cardinals_cannot_reach() -> None:
+    # Hanging out of the world on both axes: the first cardinal step lands
+    # still outside, and only DOWN_RIGHT walks the body back in. That is
+    # the rare case the eight-direction neighbours exist for.
+    start = Rect(-8, -8, 16, 16)
+    path = plan(start=start, goal=PointGoal(Point(12, 12)))
+
+    assert path.reached
+    assert path.steps[0].direction is Direction.DOWN_RIGHT
+    assert any(step.direction.is_diagonal for step in path.steps)
+
+    blocked = plan(
+        start=start, goal=PointGoal(Point(12, 12)), allow_diagonals=False
+    )
+    assert not blocked.reached
+
+
 def test_the_body_walks_around_an_obstacle_instead_of_through_it() -> None:
     wall = Rect(48, 0, 16, 64)
     path = plan(start=BODY, goal=PointGoal(Point(120, 8)), obstacles=[wall])
 
     assert path.reached
+    assert all(not step.direction.is_diagonal for step in path.steps)
     for rect in path.positions():
         assert not rect.overlaps(wall)
         assert WORLD.contains(rect)
@@ -397,7 +422,10 @@ def test_the_route_around_an_obstacle_is_not_much_longer_than_the_direct_one() -
     path = plan(start=BODY.moved_to(0, 0), goal=PointGoal(Point(160, 8)), obstacles=obstacles)
 
     assert path.reached
-    assert path.length < 200  # a straight run would be ~144
+    # Cardinals around a 40px wall: the extra is down the side and back
+    # up, so a bit under 144 + 80. A diagonal cut of that corner would
+    # be shorter; the search refuses it because cardinals still arrive.
+    assert path.length < 230
 
 
 def test_positions_and_walked_offsets_agree_with_the_final_rectangle() -> None:
