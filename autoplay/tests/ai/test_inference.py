@@ -15,7 +15,8 @@ from sor_autoplay.ai.tokens import (
     PunishWindow,
     Surrounded,
 )
-from sor_autoplay.ai.tokens import CameraRange, Pit, SafeSpot
+from sor_autoplay.ai.tokens import Breakable, CameraRange, Pit, SafeSpot
+from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay.ai.tokens import IncomingProjectile, Projectile
 from sor_autoplay.ai.tokens import Weapon, WeaponUpgrade
 from sor_autoplay.ai.inference import (
@@ -802,6 +803,95 @@ class CheckForSafeSpotsTests(unittest.TestCase):
 
         spot = next(iter(result))
         self.assertEqual((spot.world_x, spot.world_y), (68, 60))
+
+    def test_rejects_a_candidate_whose_route_is_blocked_by_a_breakable(self) -> None:
+        # The plain retreat (index 0) lands at (68, 60) -- straight line from
+        # the actor's (100, 60). A crate sitting on exactly that spot (real
+        # hitbox, so navigation.solid_obstacles uses it verbatim) makes the
+        # candidate itself unreachable, even though it survives every
+        # pre-existing filter (in lane, in camera, not a pit). The two
+        # sidesteps that also step to x=68 clear the crate's y-range (52..68)
+        # and must win instead.
+        context = self._threatened() | {
+            Breakable(
+                slot="crate1",
+                world_x=68,
+                world_y=60,
+                type_id=0x10,
+                hitbox=Hitbox(x0=60, x1=76, y0=52, y1=68, z0=0, z1=16),
+            )
+        }
+
+        result = check_for_safe_spots(context)
+
+        spot = next(iter(result))
+        self.assertNotEqual((spot.world_x, spot.world_y), (68, 60))
+        self.assertEqual(spot.world_x, 68)
+        self.assertIn(spot.world_y, (84, 36))
+
+    def test_threats_own_presence_does_not_reject_every_candidate(self) -> None:
+        # The threat being fled sits close enough (12px) that, if its own
+        # body/reach were counted as danger for this reachability gate, it
+        # would sit on or near several candidates by construction -- exactly
+        # the failure mode point 2 of the task warns about. With no other
+        # obstacles at all, a plausible candidate (the plain retreat) is
+        # still produced.
+        myself = make_myself(world_x=100, world_y=60, facing_left=False)
+        threat = make_enemy(
+            slot="obj01", world_x=112, world_y=60, combat_phase=CombatPhase.ATTACKING
+        )
+        camera = CameraRange(left=0, right=400, top=0, bottom=112)
+        context = {myself, threat, camera}
+        context = context | check_for_incoming_melee(context)
+
+        result = check_for_safe_spots(context)
+
+        self.assertEqual(len(result), 1)
+        spot = next(iter(result))
+        self.assertEqual((spot.world_x, spot.world_y), (68, 60))
+
+    def test_no_safe_spot_when_every_candidate_is_boxed_in(self) -> None:
+        # Every candidate step _safe_spot_candidates offers is walled off by
+        # crates on all four sides, tight enough that the actor's own 16x16
+        # body has no room to move at all -- not even the plain retreat can
+        # find a route. check_for_safe_spots must fall back to producing no
+        # SafeSpot at all (today's existing "no candidate survives" outcome,
+        # `best is None: continue`), rather than handing execute.py a
+        # destination that cannot actually be walked to.
+        context = self._threatened() | {
+            Breakable(
+                slot="wall_n",
+                world_x=100,
+                world_y=35,
+                type_id=0x10,
+                hitbox=Hitbox(x0=50, x1=150, y0=20, y1=51, z0=0, z1=16),
+            ),
+            Breakable(
+                slot="wall_s",
+                world_x=100,
+                world_y=85,
+                type_id=0x10,
+                hitbox=Hitbox(x0=50, x1=150, y0=69, y1=100, z0=0, z1=16),
+            ),
+            Breakable(
+                slot="wall_w",
+                world_x=45,
+                world_y=60,
+                type_id=0x10,
+                hitbox=Hitbox(x0=0, x1=91, y0=20, y1=100, z0=0, z1=16),
+            ),
+            Breakable(
+                slot="wall_e",
+                world_x=155,
+                world_y=60,
+                type_id=0x10,
+                hitbox=Hitbox(x0=109, x1=200, y0=20, y1=100, z0=0, z1=16),
+            ),
+        }
+
+        result = check_for_safe_spots(context)
+
+        self.assertEqual(result, set())
 
 
 class CheckForWeaponUpgradesTests(unittest.TestCase):

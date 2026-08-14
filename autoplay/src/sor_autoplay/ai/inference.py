@@ -13,6 +13,9 @@ import math
 
 from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
 from . import kinematics, reach
+from . import navigation as nav
+from .decide import BREAKABLE_BLOCK_X
+from .pathfind import Point, PointGoal
 from .tokens import Myself, Partner, PlayableCharacter
 from .tokens import Antonio, Enemy, Grunt, Jack
 from .tokens import GrabEnemy, JumpAttack, Punch, RearAttack
@@ -602,6 +605,29 @@ def check_for_safe_spots(context: Context) -> Context:
             key=lambda e: math.hypot(e.world_x - actor.world_x, e.world_y - actor.world_y),
         )
 
+        # Obstacle sets for the reachability gate below, built once per actor
+        # rather than per candidate (they do not depend on which candidate is
+        # being judged). The threatening enemies themselves are excluded from
+        # the danger set -- the actor is fleeing *because* it is already
+        # right next to them, so their own reach necessarily covers the
+        # ground between the actor and every candidate by construction (the
+        # same reasoning execute._walk_to_near_enemy's ``alongside`` exemption
+        # documents for the opposite verb: a nearby enemy currently owns the
+        # patch of ground the actor stands on). Counting it as danger would
+        # not steer around a *different* threat, it would just make every
+        # candidate near the actor read as unreachable and disable this gate
+        # entirely. Other, unrelated enemies' danger zones -- and every
+        # breakable/pit -- are still real obstacles: escaping past the thing
+        # chasing you does not excuse walking through a second enemy's swing
+        # or a crate on the way.
+        threat_slots = frozenset(enemy.slot for enemy in threatening)
+        solids, dangers = nav.obstacle_sets(
+            context,
+            block_x=BREAKABLE_BLOCK_X,
+            body=nav.body_rect(actor),
+            ignore_enemy_slots=threat_slots,
+        )
+
         # index 0 (the plain X-away retreat) is the stability anchor: every
         # other candidate must clear it by SAFE_SPOT_PREFERENCE_MARGIN to
         # win, so a near-tie keeps resolving to the same simple retreat
@@ -615,6 +641,22 @@ def check_for_safe_spots(context: Context) -> Context:
             if camera is not None and not reach.in_camera(camera, candidate_x, candidate_y):
                 continue
             if _inside_pit(context, candidate_x, candidate_y):
+                continue
+            # The candidate itself is clear, but the straight-line route to
+            # it might not be -- a crate, a pit, or an unrelated enemy's
+            # reach can sit between the actor and an otherwise fine spot.
+            # nav.plan_route already tries a danger-free route first and
+            # falls back to solids-only when no such route exists (a busy
+            # screen should not make every retreat "unreachable"), so this
+            # reuses that same policy rather than reinventing it.
+            path = nav.plan_route(
+                context,
+                actor,
+                PointGoal(Point(candidate_x, candidate_y)),
+                solids=solids,
+                dangers=dangers,
+            )
+            if not path.reached:
                 continue
             clearance = min(
                 math.hypot(enemy.world_x - candidate_x, enemy.world_y - candidate_y)
