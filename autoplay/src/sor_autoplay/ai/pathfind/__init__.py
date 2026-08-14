@@ -16,6 +16,10 @@ The model is deliberately small:
   rectangle whose named edges must meet named edges of the body
   (:class:`RectGoal` -- ``RectGoal.horizontal(crate)`` is "arrive stacked
   above or below that crate", never merely "arrive near it");
+- a destination that is an *area* rather than a boundary
+  (:class:`RegionGoal`) -- "get your body onto this patch of ground". The
+  other three are measure-zero targets a lattice can miss forever; a region
+  always has something inside it, which is what "close enough to act" means;
 - how *well* the edges have to meet is a separate question, and an opt-in
   one: ``enough_contact`` requires a number of px of shared edge before an
   arrival counts, ``maximize_contact`` prefers the flushest arrival the
@@ -64,7 +68,7 @@ from .geometry import (
     contact_shortfall,
     octile_distance,
 )
-from .goals import Goal, PointGoal, RectGoal, SegmentGoal
+from .goals import Goal, PointGoal, RectGoal, RegionGoal, SegmentGoal
 from .grid import Lattice
 from .search import (
     DEFAULT_ALIGNMENT_WEIGHT,
@@ -90,6 +94,7 @@ __all__ = [
     "PointGoal",
     "Rect",
     "RectGoal",
+    "RegionGoal",
     "Segment",
     "SegmentGoal",
     "VERTICAL_EDGES",

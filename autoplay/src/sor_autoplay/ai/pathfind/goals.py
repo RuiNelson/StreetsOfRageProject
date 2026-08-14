@@ -1,7 +1,12 @@
 """What counts as "arrived".
 
-Three kinds of destination, because navigation asks three different
-questions.
+Four kinds of destination, because navigation asks four different
+questions -- three of them boundary conditions (cover this point, touch this
+line, meet this edge) and one of them, :class:`RegionGoal`, an area. That
+last one exists because a boundary is measure-zero: on a lattice of whole
+steps it is essentially never hit exactly, so a caller aiming at one gets
+best-effort routes forever. Anything that means "close enough to act" wants
+the region.
 
 "Stand on that spot" is a *point*: the moving rectangle has arrived once it
 covers the point. "Get to the far side of this line" is a *segment*, and
@@ -40,6 +45,7 @@ from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from .geometry import (
+    EPS,
     HORIZONTAL_EDGES,
     VERTICAL_EDGES,
     Edge,
@@ -49,6 +55,21 @@ from .geometry import (
     contact_length,
     contact_shortfall,
 )
+
+
+def _touches(a: Rect, b: Rect) -> bool:
+    """Do the rectangles share any point, flush contact included?
+
+    The inclusive counterpart of ``Rect.overlaps``, which is deliberately
+    strict because it answers a *collision* question.
+    """
+
+    return (
+        a.left <= b.right + EPS
+        and b.left <= a.right + EPS
+        and a.top <= b.bottom + EPS
+        and b.top <= a.bottom + EPS
+    )
 
 
 @runtime_checkable
@@ -175,6 +196,118 @@ class SegmentGoal:
 
 
 @dataclass(frozen=True)
+class RegionGoal:
+    """Reached when the moving rectangle *overlaps* ``region``.
+
+    The other three goals are all boundary conditions -- cover this point,
+    touch this line, meet this edge -- and a boundary is a measure-zero
+    target. On a lattice of whole steps, with a region that did not come from
+    the same lattice, an exact touch is essentially never achievable, so a
+    caller aiming at one gets best-effort routes forever. A region has area:
+    something always lands inside it.
+
+    That is what "close enough to act" usually is. In a beat-em-up a hit is
+    an overlap of two boxes, not a tangency, so "walk until my strike would
+    connect" is naturally a region, and the search stopping at the *cheapest*
+    arrival means the body stops as soon as it enters -- at the far edge,
+    the moment it is in range, rather than walking on top of the target.
+
+    ``axis`` says which overlap counts as contact: ``"y"`` for a lane-depth
+    game where the x gap is the strike distance and the y overlap is the
+    alignment that decides whether it lands, ``"x"`` for the transpose,
+    ``"both"`` for the smaller of the two. Contact plateaus at
+    ``min(own, region)`` extent while the smaller is fully inside the larger,
+    then falls off px for px, reaching 0 exactly at the region's edge -- so
+    ``enough_contact`` reads as "px of margin to spare" and
+    ``maximize_contact`` as "line up square".
+
+    Several regions are allowed, and *any* of them satisfies the goal. That
+    is not a convenience: the ground a strike lands from is usually an
+    annulus -- close enough to reach, far enough not to be standing on the
+    target -- and an annulus is two bands with a hole between them, which no
+    single rectangle can be. Passing both lets the search pick a side by
+    cost, and passing one is how a caller insists on a side.
+    """
+
+    regions: tuple[Rect, ...]
+    axis: str = "both"
+
+    def __post_init__(self) -> None:
+        if self.axis not in ("x", "y", "both"):
+            raise ValueError("a region goal measures contact on 'x', 'y' or 'both'")
+        if not self.regions:
+            raise ValueError("a region goal needs at least one region")
+
+    @classmethod
+    def of(cls, *regions: Rect, axis: str = "both") -> RegionGoal:
+        return cls(tuple(regions), axis)
+
+    def is_reached(self, rect: Rect) -> bool:
+        """Touching counts, as it does for every other goal here.
+
+        Only *collision* treats flush contact as clearance; arriving has
+        always been inclusive (a point on the body's border, an edge landing
+        exactly on a line). It matters more here than anywhere else: the
+        outer edge of a region is routinely the exact position a body is
+        pushed to by the obstacle it is standing against -- a crate's smash
+        pocket can be precisely one body-width from its own solid -- and a
+        strict test would call that arrival a miss and plan forever. What
+        separates a real arrival from a graze is :meth:`contact`, which the
+        caller filters with ``enough_contact``.
+        """
+
+        return any(_touches(rect, region) for region in self.regions)
+
+    def bounding_box(self) -> Rect:
+        box = self.regions[0]
+        for region in self.regions[1:]:
+            box = box.union(region)
+        return box
+
+    def _contact_with(self, rect: Rect, region: Rect) -> float:
+        x = max(0.0, min(rect.right, region.right) - max(rect.left, region.left))
+        y = max(0.0, min(rect.bottom, region.bottom) - max(rect.top, region.top))
+        if self.axis == "x":
+            return x
+        if self.axis == "y":
+            return y
+        return min(x, y)
+
+    def _extent(self, rect: Rect) -> float:
+        if self.axis == "x":
+            return rect.width
+        if self.axis == "y":
+            return rect.height
+        return min(rect.width, rect.height)
+
+    def contact(self, rect: Rect) -> float:
+        return max(
+            (
+                self._contact_with(rect, region)
+                for region in self.regions
+                if _touches(rect, region)
+            ),
+            default=0.0,
+        )
+
+    def misalignment(self, rect: Rect) -> float:
+        """Measured against the region the body is actually standing in."""
+
+        return min(
+            (
+                max(
+                    0.0,
+                    min(self._extent(rect), self._extent(region))
+                    - self._contact_with(rect, region),
+                )
+                for region in self.regions
+                if _touches(rect, region)
+            ),
+            default=0.0,
+        )
+
+
+@dataclass(frozen=True)
 class RectGoal:
     """Reached when a named edge of the body meets a named edge of ``target``.
 
@@ -284,6 +417,7 @@ __all__ = [
     "HORIZONTAL_EDGES",
     "PointGoal",
     "RectGoal",
+    "RegionGoal",
     "SegmentGoal",
     "VERTICAL_EDGES",
 ]

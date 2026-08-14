@@ -65,7 +65,13 @@ from .tokens import (
 )
 from .gamepad import VirtualGamepad
 from . import kinematics
-from .decide import BREAKABLE_BLOCK_X, BREAKABLE_PUNCH_X, in_smash_range
+from . import navigation as nav
+from .decide import (
+    BREAKABLE_BLOCK_X,
+    BREAKABLE_PUNCH_X,
+    BREAKABLE_PUNCH_Y,
+    in_smash_range,
+)
 from .reach import (
     PIT_AVOID_MARGIN,
     REACH_SAFETY_MARGIN,
@@ -333,6 +339,56 @@ def _breakable_block_x(prop: Breakable) -> tuple[int, int]:
     return prop.world_x - BREAKABLE_BLOCK_X, prop.world_x + BREAKABLE_BLOCK_X
 
 
+def _clamp_mask_to_lane(context: Context, from_y: int, mask: int) -> int:
+    """Never hold into the lane clamp."""
+
+    lo, hi = _lane_bounds(context)
+    if from_y >= hi:
+        mask &= ~DOWN_MASK
+    if from_y <= lo:
+        mask &= ~UP_MASK
+    return mask
+
+
+def _routed_mask(
+    context: Context,
+    actor: Myself | Partner,
+    goal,
+    *,
+    solids,
+    dangers,
+    enough_contact: float = 0.0,
+    maximize_contact: bool = False,
+    fallback,
+) -> int:
+    """First vector of a planned route, or ``fallback()`` when there is none.
+
+    Only the **first** vector, and the whole route is thrown away and rebuilt
+    next tick. That looks wasteful and is not: the world moves under a plan
+    -- enemies walk, crates break, phases flip -- so a plan kept across ticks
+    is a plan that is quietly wrong, while a search of this playfield costs
+    well under a millisecond against a 33 ms tick.
+
+    An empty mask means one of two very different things, and they must not
+    be confused. Either the goal is already satisfied -- stand still, which
+    is the answer -- or the actor is boxed in on every side and the search
+    produced nothing at all. Only the second falls back.
+    """
+
+    mask = nav.route_mask(
+        context,
+        actor,
+        goal,
+        solids=solids,
+        dangers=dangers,
+        enough_contact=enough_contact,
+        maximize_contact=maximize_contact,
+    )
+    if not mask and not goal.is_reached(nav.body_rect(actor)):
+        mask = fallback()
+    return _clamp_mask_to_lane(context, actor.world_y, mask)
+
+
 def _movement_mask(
     context: Context,
     from_x: int,
@@ -445,13 +501,7 @@ def _movement_mask(
     elif from_y - to_y > MOVE_DEADBAND_Y:
         mask |= UP_MASK
 
-    # Never hold into the lane clamp.
-    lo, hi = _lane_bounds(context)
-    if from_y >= hi:
-        mask &= ~DOWN_MASK
-    if from_y <= lo:
-        mask &= ~UP_MASK
-    return mask
+    return _clamp_mask_to_lane(context, from_y, mask)
 
 
 def _face_toward_mask(actor: Myself | Partner, target_x: int) -> int:
@@ -599,10 +649,7 @@ def _walk_to_near_enemy_target(
     swing) against a single, barely-moving dangerous enemy.
     """
 
-    outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
-    inner = punch_inner_x(actor.character_id)
-    stop_dx = max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER)
-    stop_dx = _dead_zone_stop_dx(actor, target, stop_dx)
+    stop_dx = _enemy_stop_dx(actor, target)
 
     if _crossing_would_walk_into_the_swing(actor, target):
         return actor.world_x, actor.world_y
@@ -689,11 +736,118 @@ def _walk_toward_target(
         gamepad.release()
         return
     target_x, target_y = compute_target(actor, target, context)
-    _hold_steered(gamepad, _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y))
+    _hold_steered(
+        gamepad,
+        _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y),
+    )
 
 
-def state_machine_walk_to_near_enemy(verb: WalkToNearEnemy, context: Context, gamepad: VirtualGamepad) -> None:
-    _walk_toward_target(verb, context, gamepad, Enemy, _walk_to_near_enemy_target)
+def _enemy_stop_dx(actor: Myself | Partner, target: Enemy) -> int:
+    """How far from an enemy's origin this actor wants to stand.
+
+    Split out of ``_walk_to_near_enemy_target`` so the routed approach and
+    the straight-line fallback cannot disagree about it. Everything tactical
+    lives here -- the punch's own outer edge, and the dead-zone pocket some
+    enemies have (``_dead_zone_stop_dx``) -- while the route itself is
+    geometry the path finder owns.
+    """
+
+    outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
+    inner = punch_inner_x(actor.character_id)
+    return _dead_zone_stop_dx(actor, target, max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER))
+
+
+def state_machine_walk_to_near_enemy(
+    verb: WalkToNearEnemy, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Walk until the punch would land, and no further.
+
+    The destination is a *region* -- everywhere the strike connects from --
+    rather than a computed point, so the search stops at the first position
+    that can act instead of converging on one chosen spot. ``enough_contact``
+    is what "would land" means: at least ``MIN_STRIKE_CONTACT_Y`` px of lane
+    margin to spare, so an arrival that only clips the edge of the punch band
+    does not count. It is deliberately a floor and not a preference -- an
+    enemy is a moving target, and spending steps perfecting an alignment it
+    is about to invalidate is how an approach turns into a dance.
+
+    Every *other* live enemy, and the ground each of them can currently
+    strike, is an obstacle (``navigation.plan_route``'s first pass), so the
+    approach no longer walks down a third party's line of attack. The target
+    itself is exempt: it is the destination.
+    """
+
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Enemy, slot=verb.target_slot)
+    if actor is None or target is None:
+        gamepad.release()
+        return
+    if _crossing_would_walk_into_the_swing(actor, target):
+        _hold_steered(gamepad, 0)
+        return
+
+    stop_dx = _enemy_stop_dx(actor, target)
+    # Close on X in the actor's *own* lane, and only converge onto the
+    # enemy's once alongside it. The straight-line approach reached the same
+    # conclusion the hard way (see ``_walk_to_near_enemy_target``): a
+    # diagonal converges the lane early and then walks the last stretch
+    # straight down the enemy's line of attack, which is the ground it hits.
+    # Routing cannot fix that by itself, because the enemy being approached
+    # is exempt from its own danger set -- its reach *contains* the place the
+    # actor is trying to stand.
+    alongside = abs(target.world_x - actor.world_x) <= stop_dx
+    # An enemy at the actor's back gets the *far* band only. Holding a
+    # direction is what sets facing, so aiming past the enemy is the turn-
+    # around; letting the search pick the near band by cost would back the
+    # actor off still facing the wrong way, leaving the slow chord as the
+    # only thing that could reach it.
+    side = "both"
+    if abs(target.world_x - actor.world_x) <= DIRECTION_HYSTERESIS_X:
+        # Practically on top of it: the raw position compare is noise here
+        # (see DIRECTION_HYSTERESIS_X), and crossing to the far band would
+        # walk through the enemy and end up facing away from it. Step out on
+        # the side the actor already faces from, which keeps it facing the
+        # enemy the whole time.
+        side = "right" if actor.facing_left else "left"
+    elif enemy_behind_actor(actor, target):
+        side = "right" if actor.world_x <= target.world_x else "left"
+    goal = nav.strike_goal(
+        nav.body_rect(actor),
+        target.world_x,
+        target.world_y if alongside else actor.world_y,
+        stop_dx=stop_dx,
+        lane_slack=PUNCH_RANGE_Y,
+        inner_dx=punch_usable_inner_x(actor.character_id),
+        side=side,
+    )
+    # The target stops counting as a hazard only once the actor is alongside
+    # it -- from there its reach *contains* the ground the actor is trying to
+    # stand on, so keeping it would make the goal unreachable. While still
+    # closing, it is a hazard like any other, which is what keeps the
+    # approach off its line of attack instead of walking straight down it.
+    solids, dangers = nav.obstacle_sets(
+        context,
+        block_x=BREAKABLE_BLOCK_X,
+        body=nav.body_rect(actor),
+        ignore_enemy_slots=frozenset({target.slot}) if alongside else frozenset(),
+    )
+
+    def straight_line() -> int:
+        target_x, target_y = _walk_to_near_enemy_target(actor, target, context)
+        return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)
+
+    _hold_steered(
+        gamepad,
+        _routed_mask(
+            context,
+            actor,
+            goal,
+            solids=solids,
+            dangers=dangers,
+            enough_contact=nav.MIN_STRIKE_CONTACT_Y,
+            fallback=straight_line,
+        ),
+    )
 
 
 # How far to step back per tick while retreating -- roughly clears the
@@ -1282,6 +1436,18 @@ def state_machine_open_breakable(
     The switch is ``decide.in_smash_range``, the same predicate
     ``priority._emergency_open_breakable`` scores with, so the tier the verb
     won on and the action it takes can never describe different situations.
+
+    The approach ``maximize_contact``s: a crate does not move, so there is
+    nothing to lose by spending a step or two lining the punch band up square
+    with its face, and a lot to lose by arriving at the corner of the smash
+    pocket -- the strike then depends on a lane the actor is only just inside
+    of. It is the opposite trade from an enemy approach, and for the opposite
+    reason: the target holds still.
+
+    The crate is exempt from its own obstacle set (``ignore``) -- it is the
+    destination, not something to route around -- while every *other* crate
+    and pit still is, which is what replaces the hand-written around-path
+    this used to need to get out of the prop's own column.
     """
 
     actor = _find_actor(context, verb.actor_slot)
@@ -1292,16 +1458,62 @@ def state_machine_open_breakable(
     if in_smash_range(actor, target):
         _press(gamepad, PUNCH_MASK | _face_toward_mask(actor, target.world_x), frames=PUNCH_FRAMES)
         return
-    target_x, target_y = _walk_to_breakable_target(actor, target, context)
-    _hold_steered(
-        gamepad,
-        _movement_mask(
+
+    # The crate stays in its own obstacle set. It is the destination *and* a
+    # solid, and dropping it -- the way an approached enemy is dropped --
+    # routes the actor straight through it: from directly above, the shortest
+    # line to the smash pocket is down through the box. The goal is the
+    # pocket beside it, so the two never contradict each other.
+    # Standing essentially on the prop, the two sides cost the same and the
+    # search picks one arbitrarily -- which is how the actor ended up *past*
+    # the crate, where ``could_open_breakable`` stops calling it "ahead" and
+    # hands the tick to WalkToAdvanceStage, back into the crate, forever. So
+    # the tie is broken the way the straight-line approach already breaks it:
+    # by the stage's own progress direction, fixed for the whole level and
+    # therefore unable to oscillate, leaving the actor on the side it is
+    # coming from. Anywhere else the sides genuinely differ, and cost decides.
+    side = "both"
+    if abs(target.world_x - actor.world_x) <= DIRECTION_HYSTERESIS_X:
+        stage = find(context, Stage)
+        direction = stage.direction if stage is not None else "right"
+        side = "right" if direction == "left" else "left"
+    goal = nav.strike_goal(
+        nav.body_rect(actor),
+        target.world_x,
+        target.world_y,
+        stop_dx=BREAKABLE_PUNCH_X,
+        lane_slack=BREAKABLE_PUNCH_Y,
+        inner_dx=punch_usable_inner_x(actor.character_id),
+        side=side,
+    )
+    solids, dangers = nav.obstacle_sets(
+        context,
+        block_x=BREAKABLE_BLOCK_X,
+        body=nav.body_rect(actor),
+        keep_reachable_within=BREAKABLE_PUNCH_X,
+    )
+
+    def straight_line() -> int:
+        target_x, target_y = _walk_to_breakable_target(actor, target, context)
+        return _movement_mask(
             context,
             actor.world_x,
             actor.world_y,
             target_x,
             target_y,
             ignore_slots=frozenset({target.slot}),
+        )
+
+    _hold_steered(
+        gamepad,
+        _routed_mask(
+            context,
+            actor,
+            goal,
+            solids=solids,
+            dangers=dangers,
+            maximize_contact=True,
+            fallback=straight_line,
         ),
     )
 

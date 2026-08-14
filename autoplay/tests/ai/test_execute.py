@@ -26,7 +26,13 @@ from sor_autoplay.ai.tokens import (
     ThrowPepper,
 )
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import AttackRange, Enemy, Nora, punch_usable_inner_x
+from sor_autoplay.ai.tokens import (
+    AttackRange,
+    Enemy,
+    Nora,
+    punch_outer_x,
+    punch_usable_inner_x,
+)
 from sor_autoplay.ai.tokens import CameraRange, Stage
 from sor_autoplay.ai.execute import (
     BREAKABLE_STOP_BUFFER,
@@ -38,7 +44,9 @@ from sor_autoplay.ai.execute import (
     execute_verb,
     press_no_button,
 )
-from sor_autoplay.ai.decide import BREAKABLE_PUNCH_X, in_smash_range
+from sor_autoplay.ai.decide import BREAKABLE_BLOCK_X, BREAKABLE_PUNCH_X, in_smash_range
+from sor_autoplay.ai.pathfind import Rect
+from sor_autoplay.ai.reach import PIT_AVOID_MARGIN, pit_endangers
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.tokens import Breakable, Pit, Projectile, SafeSpot
 from sor_autoplay.hitboxes import Hitbox
@@ -126,6 +134,40 @@ def _settle(verb, context, gamepad, ticks: int = AXIS_RAMP_TICKS) -> None:
 
     for _ in range(ticks):
         execute_verb(verb, context, gamepad)
+
+
+# Roughly a ground walk's travel per AI tick (a couple of px per 60 Hz frame,
+# ~2 frames per poll). Only the trajectory's *shape* depends on it.
+WALK_PX_PER_TICK = 3
+
+
+def _walk(verb, actor, others, *, ticks: int = 80):
+    """Run the executor in a loop and let the actor actually move.
+
+    A single tick's mask says very little now that the route is replanned
+    every tick: what matters is where the actor ends up and what it walked
+    through on the way. These tests therefore drive the real handler, apply
+    its mask to the actor's position, and inspect the whole trail.
+    """
+
+    gamepad, _client = _gamepad()
+    trail = [actor]
+    for _ in range(ticks):
+        execute_verb(verb, {actor, *others}, gamepad)
+        mask = gamepad.held
+        dx = (WALK_PX_PER_TICK if mask & RIGHT else 0) - (WALK_PX_PER_TICK if mask & LEFT else 0)
+        dy = (WALK_PX_PER_TICK if mask & DOWN else 0) - (WALK_PX_PER_TICK if mask & UP else 0)
+        actor = replace(actor, world_x=actor.world_x + dx, world_y=actor.world_y + dy)
+        if dx:
+            actor = replace(actor, facing_left=dx < 0)
+        trail.append(actor)
+    return trail
+
+
+def _body_of(actor) -> Rect:
+    from sor_autoplay.ai import navigation as nav
+
+    return nav.body_rect(actor)
 
 
 class PressNoButtonTests(unittest.TestCase):
@@ -434,20 +476,43 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
 
         client.hold_buttons.assert_not_called()
 
-    def test_sidesteps_a_dangerous_enemys_exact_lane_while_still_far_away(self) -> None:
-        actor = _myself(world_x=0, world_y=50)
-        target = replace(_enemy(world_x=200, world_y=50), combat_phase=CombatPhase.ATTACKING)
-        context = {actor, target}
+    def test_the_approach_leaves_a_dangerous_enemys_attack_band_alone(self) -> None:
+        # The approach must not walk down the ground a committed enemy is
+        # swinging through. It used to sidestep the enemy's *lane* on sight,
+        # 200px out, because a lane was all it could see; now the swing's own
+        # box is an obstacle, so the route stays out of the box itself and
+        # only bends around it where it actually is.
+        swing = AttackRange(
+            shape_id=0x22,
+            animation=0,
+            forward_min=0,
+            forward_max=48,
+            lane_min=-8,
+            lane_max=8,
+            height_min=0,
+            height_max=32,
+        )
+        target = replace(
+            _enemy(world_x=200, world_y=50),
+            combat_phase=CombatPhase.ATTACKING,
+            attack_ranges=(swing,),
+            facing_left=True,
+        )
+        band = Rect(200 - 48, 50 - 8, 48, 16)
         verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
-        gamepad, client = _gamepad()
 
-        _settle(verb, context, gamepad)
+        trail = _walk(verb, _myself(world_x=0, world_y=50), {target})
 
-        # Same lane (dy=0) and far away (dx=200) from an actively attacking
-        # enemy -> step off its lane instead of walking straight down it.
-        # Side picked from target.world_y=50 against the lane's fixed
-        # midpoint (57 with no CameraRange in context) -> below it -> UP.
-        client.hold_buttons.assert_called_with(player1=RIGHT | UP, player2=0)
+        stop_dx = execute_module._enemy_stop_dx(trail[0], target)
+        crossed = [
+            (a.world_x, a.world_y)
+            for a in trail
+            if abs(target.world_x - a.world_x) > stop_dx and _body_of(a).overlaps(band)
+        ]
+        self.assertFalse(crossed, f"walked through the swing at {crossed[:3]}")
+        self.assertGreater(
+            trail[-1].world_x, trail[0].world_x + 100, "never closed the distance"
+        )
 
     def test_does_not_sidestep_a_dangerous_enemy_once_close_enough_to_punch(self) -> None:
         # dx=46 == stop_dx: already at the stopping point, so the actor
@@ -1442,35 +1507,48 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
 
         self.assertTrue(in_smash_range(actor, prop))
 
-    def test_above_the_prop_walks_out_to_the_side_before_changing_lane(self) -> None:
-        # Smash range is a side pocket. Walking a diagonal from above the
-        # crate to that pocket cuts through the solid -- the actor pins
-        # itself against the body and never arrives. Hold Y, walk X first.
-        actor = _myself(world_x=100, world_y=50)
-        prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
+    def _assert_reaches_the_smash_pocket(self, actor, prop) -> None:
+        """Arrives somewhere it can actually hit the crate, without ever
+        standing inside it.
+
+        This used to be asserted as "no vertical bit on this tick": the
+        straight-line approach had to walk out to the crate's side *first*,
+        because a diagonal to the smash pocket cut through the solid. The
+        route now has the crate's own footprint, so the shape of the path is
+        its business -- what must hold is that the body never overlaps the
+        prop and that the walk ends somewhere ``in_smash_range``.
+        """
+
+        from sor_autoplay.ai import navigation as nav
+
+        solid = nav.solid_obstacles(
+            {prop}, block_x=BREAKABLE_BLOCK_X, keep_reachable_within=BREAKABLE_PUNCH_X
+        )[0]
         verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
-        gamepad, client = _gamepad()
 
-        _settle(verb, {actor, prop, Stage(level_index=0, direction="right")}, gamepad)
+        trail = _walk(verb, actor, {prop, Stage(level_index=0, direction="right")})
 
-        held = client.hold_buttons.call_args.kwargs["player1"]
-        self.assertTrue(held & (LEFT | RIGHT), f"expected a side step, got {held:#x}")
-        self.assertFalse(held & (UP | DOWN), f"must not walk into the crate on Y, got {held:#x}")
+        inside = [(a.world_x, a.world_y) for a in trail if _body_of(a).overlaps(solid)]
+        self.assertFalse(inside, f"walked into the crate at {inside[:3]}")
+        self.assertTrue(
+            any(in_smash_range(a, prop) for a in trail),
+            f"never reached smash range; ended at "
+            f"{(trail[-1].world_x, trail[-1].world_y)}",
+        )
 
-    def test_below_the_prop_walks_out_to_the_side_before_changing_lane(self) -> None:
-        # Stay inside the default lane clamp (LANE_Y_MIN+6 .. 0x70-6) so a
-        # DOWN/UP bit here can only come from walking into the crate, not
-        # from _clamp_target_y dragging an off-lane Y back in.
-        actor = _myself(world_x=100, world_y=100)
-        prop = Breakable(slot="obj09", world_x=100, world_y=70, type_id=0x40)
-        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
-        gamepad, client = _gamepad()
+    def test_above_the_prop_reaches_the_smash_pocket_without_entering_it(self) -> None:
+        self._assert_reaches_the_smash_pocket(
+            _myself(world_x=100, world_y=50),
+            Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40),
+        )
 
-        _settle(verb, {actor, prop, Stage(level_index=0, direction="right")}, gamepad)
-
-        held = client.hold_buttons.call_args.kwargs["player1"]
-        self.assertTrue(held & (LEFT | RIGHT), f"expected a side step, got {held:#x}")
-        self.assertFalse(held & (UP | DOWN), f"must not walk into the crate on Y, got {held:#x}")
+    def test_below_the_prop_reaches_the_smash_pocket_without_entering_it(self) -> None:
+        # Inside the default lane clamp (LANE_Y_MIN+6 .. 0x70-6), so nothing
+        # here depends on the clamp dragging an off-lane target back in.
+        self._assert_reaches_the_smash_pocket(
+            _myself(world_x=100, world_y=100),
+            Breakable(slot="obj09", world_x=100, world_y=70, type_id=0x40),
+        )
 
     def test_already_beside_the_prop_then_converges_on_its_lane(self) -> None:
         # Once X has reached the smash pocket, Y is allowed to move -- that
@@ -1569,17 +1647,34 @@ class ExecuteMovementPitAvoidanceTests(unittest.TestCase):
     actor's own current Y still sits inside the pit's band; only once it has
     actually cleared does X resume toward the original target."""
 
-    def test_dodges_a_pit_that_is_actually_on_screen(self) -> None:
-        actor = _myself(world_x=0, world_y=90)
+    def test_walks_around_a_pit_that_is_actually_on_screen(self) -> None:
+        # The straight-line approach froze X until Y had cleared the pit,
+        # because a diagonal it could not see the footprint of might still
+        # cut the corner. The route has the footprint (grown by
+        # PIT_AVOID_MARGIN, the same clearance every other pit check uses),
+        # so the shape of the detour is its business -- what must hold is
+        # that the actor never enters the danger zone and still arrives.
         pit = Pit(world_x=45, lane_y=84, width=10, height=12)
         camera = CameraRange(left=0, right=200, top=0, bottom=112)
         target = _enemy(world_x=100, world_y=90)
         verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
-        gamepad, client = _gamepad()
 
-        _settle(verb, {actor, target, pit, camera}, gamepad)
+        trail = _walk(verb, _myself(world_x=0, world_y=90), {target, pit, camera})
 
-        client.hold_buttons.assert_called_with(player1=UP, player2=0)
+        # Judged by the AI's own predicate, on the actor's origin -- the
+        # same sentence reach/inference/_pit_escape_mask all use.
+        fell_in = [
+            (a.world_x, a.world_y)
+            for a in trail
+            if pit_endangers(pit, a.world_x, a.world_y)
+        ]
+        self.assertFalse(fell_in, f"walked into the pit at {fell_in[:3]}")
+        arrived = trail[-1]
+        self.assertLessEqual(
+            abs(target.world_x - arrived.world_x),
+            punch_outer_x(arrived.character_id, arrived.held_weapon_type),
+            f"never got in range: ended at {(arrived.world_x, arrived.world_y)}",
+        )
 
     def test_resumes_x_once_actually_clear_of_the_pit_on_y(self) -> None:
         # Same pit and target, but the actor's *current* Y already sits
