@@ -1682,10 +1682,11 @@ def state_machine_open_breakable(
     of. It is the opposite trade from an enemy approach, and for the opposite
     reason: the target holds still.
 
-    The crate is exempt from its own obstacle set (``ignore``) -- it is the
-    destination, not something to route around -- while every *other* crate
-    and pit still is, which is what replaces the hand-written around-path
-    this used to need to get out of the prop's own column.
+    The crate stays in its own obstacle set, unlike an approached enemy --
+    dropping it would let the router cut straight through the box from
+    directly above/below, since the goal is the pocket *beside* it rather
+    than the crate itself. See the ``goal``/``solids`` construction below for
+    why the two never conflict.
     """
 
     actor = _find_actor(context, verb.actor_slot)
