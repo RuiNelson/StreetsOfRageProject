@@ -139,6 +139,7 @@ class MapEntity:
     # Agent combat fields (defaults keep older call sites valid).
     action_state: int = 0  # low byte of +$30 (player action / boss primary)
     primary_state: int = 0  # full word at +$30 (ordinary enemy $0100 steps)
+    character_id: int | None = None  # player-only; 0/1/2 = Axel/Adam/Blaze
     held_type: int = 0  # player +$60; nonzero while holding weapon/grab target
     held_ptr: int = 0  # player +$5E low word
     contact_ptr: int = 0  # player +$4C contact/grab partner (live hold uses this)
@@ -502,6 +503,7 @@ def _entity_from_object(
     style: EntityStyle,
     type_id: int,
     camera_x: int,
+    character_id: int | None = None,
     police_special_active: bool = False,
     rom: RomData | None = None,
 ) -> MapEntity | None:
@@ -644,6 +646,7 @@ def _entity_from_object(
         slot=slot_name,
         action_state=action_state,
         primary_state=primary_state,
+        character_id=character_id,
         held_type=held_type,
         hitbox=hitbox,
         attack_ranges=ranges,
@@ -845,6 +848,7 @@ def parse_world_map(
             style=style,
             type_id=type_id,
             camera_x=camera_x,
+            character_id=char_id,
             rom=rom,
         )
         # Players: always keep while type-1; ignore SAT blink/hidden bit.

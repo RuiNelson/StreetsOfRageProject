@@ -6,10 +6,17 @@ from sor_autoplay.ai.tokens import CounterGrab, Punch
 from sor_autoplay.ai.loop import VerbState
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import WalkToAdvanceStage
+from sor_autoplay.ai.tokens.character import PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
 from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay.hud import ObserverHud, _window_config_path
 from sor_autoplay.hud import _describe_verb, _describe_pending
-from sor_autoplay.hud import _blend_hex, _closing_projection, _expand_to_min, _hitbox_to_canvas
+from sor_autoplay.hud import (
+    _blend_hex,
+    _closing_projection,
+    _display_attack_ranges,
+    _expand_to_min,
+    _hitbox_to_canvas,
+)
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.world_map import MapEntity, WorldMap
 
@@ -107,6 +114,70 @@ def _enemy_entity(**overrides) -> MapEntity:
     )
     fields.update(overrides)
     return MapEntity(**fields)
+
+
+def _player_entity(**overrides) -> MapEntity:
+    fields = dict(
+        kind="player",
+        family="Axel",
+        symbol="1",
+        color="#7dc8ff",
+        label="Axel",
+        type_id=0x00,
+        world_x=200,
+        world_y=64,
+        world_z=0,
+        map_x=200.0,
+        map_y=64.0,
+        health=100,
+        slot="P1",
+        combat_phase=CombatPhase.NORMAL,
+        facing_left=False,
+        character_id=0,
+        held_type=0,
+    )
+    fields.update(overrides)
+    return MapEntity(**fields)
+
+
+class DisplayAttackRangesTests(unittest.TestCase):
+    """The HUD owes a player the same translucent hit-range square an enemy
+    gets (world_map.py deliberately never populates MapEntity.attack_ranges
+    for a player -- that reach lives in tokens/character.py instead), so
+    _display_attack_ranges synthesizes it display-side from the same
+    punch_inner_x/punch_outer_x numbers the AI's own band tests use."""
+
+    def test_non_player_entities_are_unaffected(self) -> None:
+        entity = _enemy_entity()
+
+        self.assertIs(_display_attack_ranges(entity), entity.attack_ranges)
+
+    def test_player_gets_exactly_one_synthesized_punch_range(self) -> None:
+        entity = _player_entity(character_id=0, held_type=0)
+
+        ranges = _display_attack_ranges(entity)
+
+        self.assertEqual(len(ranges), 1)
+        punch = ranges[0]
+        self.assertEqual(punch.forward_min, punch_inner_x(0))
+        self.assertEqual(punch.forward_max, punch_outer_x(0, 0))
+        self.assertEqual(punch.lane_min, -PUNCH_RANGE_Y)
+        self.assertEqual(punch.lane_max, PUNCH_RANGE_Y)
+
+    def test_a_held_melee_weapon_widens_the_range_like_an_enemys_own(self) -> None:
+        unarmed = _display_attack_ranges(_player_entity(character_id=0, held_type=0))[0]
+        armed = _display_attack_ranges(_player_entity(character_id=0, held_type=0x0A))[0]
+
+        self.assertGreater(armed.forward_max, 0)
+        self.assertNotEqual(armed.forward_max, unarmed.forward_max)
+
+    def test_different_characters_get_their_own_measured_reach(self) -> None:
+        axel = _display_attack_ranges(_player_entity(character_id=0))[0]
+        blaze = _display_attack_ranges(_player_entity(character_id=2))[0]
+
+        self.assertEqual(axel.forward_max, punch_outer_x(0, 0))
+        self.assertEqual(blaze.forward_max, punch_outer_x(2, 0))
+        self.assertNotEqual(axel.forward_max, blaze.forward_max)
 
 
 class ClosingProjectionTests(unittest.TestCase):

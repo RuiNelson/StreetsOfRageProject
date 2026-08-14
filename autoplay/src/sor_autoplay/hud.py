@@ -17,6 +17,8 @@ from typing import Callable
 from .ai.loop import VerbState
 from .ai.reach import CLOSING_ENEMY_THREAT_FRAMES
 from .ai.tokens import Verb
+from .ai.tokens.character import PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
+from .attack_ranges import AttackRange
 from .hitboxes import Hitbox
 from .phases import CombatPhase, is_dangerous, phase_color
 from .state import GameSnapshot, PlayerSnapshot
@@ -749,7 +751,7 @@ class ObserverHud:
         self._ensure_marker_pool(len(entities))
         # Upper bound: some entities will fall outside the plot and draw none
         # of their ranges, so this only ever over-allocates, never under-.
-        self._ensure_range_pool(sum(len(e.attack_ranges) for e in entities))
+        self._ensure_range_pool(sum(len(_display_attack_ranges(e)) for e in entities))
         self._ensure_closing_pool(len(entities))  # at most one arrow each
 
         plot_left = ox
@@ -812,7 +814,7 @@ class ObserverHud:
             canvas.tag_raise(text_id)
             drawn += 1
 
-            for attack_range in entity.attack_ranges:
+            for attack_range in _display_attack_ranges(entity):
                 projected = attack_range.projected(
                     world_x=entity.world_x,
                     lane_y=entity.world_y,
@@ -1108,6 +1110,34 @@ def _closing_projection(entity: MapEntity) -> tuple[float, float] | None:
         entity.map_x + entity.enemy_vel_x * CLOSING_ENEMY_THREAT_FRAMES,
         entity.map_y + entity.enemy_vel_y * CLOSING_ENEMY_THREAT_FRAMES,
     )
+
+
+def _display_attack_ranges(entity: MapEntity) -> tuple[AttackRange, ...]:
+    """``entity.attack_ranges``, plus a player's own punch reach.
+
+    ``MapEntity.attack_ranges`` is deliberately empty for a player --
+    world_map.py's own docstring: that reach is per-character/per-weapon
+    punch geometry (``tokens/character.py``), not a per-animation-frame
+    extraction, and does not belong in that field. The HUD still owes a
+    player the same translucent hit-range square an enemy gets, so it is
+    synthesized here, display-side only, from the same measured
+    ``punch_inner_x``/``punch_outer_x`` numbers the AI's own band tests use
+    -- never a second set of numbers.
+    """
+
+    if entity.kind != "player":
+        return entity.attack_ranges
+    punch = AttackRange(
+        shape_id=0,
+        animation=-1,
+        forward_min=punch_inner_x(entity.character_id),
+        forward_max=punch_outer_x(entity.character_id, entity.held_type),
+        lane_min=-PUNCH_RANGE_Y,
+        lane_max=PUNCH_RANGE_Y,
+        height_min=-60,
+        height_max=0,
+    )
+    return entity.attack_ranges + (punch,)
 
 
 def _expand_to_min(a: float, b: float, minimum: float) -> tuple[float, float]:
