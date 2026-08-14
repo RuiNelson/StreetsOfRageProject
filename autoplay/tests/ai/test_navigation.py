@@ -217,15 +217,35 @@ class StrikeGoalTests(unittest.TestCase):
         return Rect(cx - 8, cy - 8, 16, 16)
 
     def test_arrival_means_the_reach_predicate_would_agree(self) -> None:
-        goal = nav.strike_goal(self.body, 100, 50, stop_dx=40, lane_slack=12)
+        goal = nav.strike_goal(self.body, 8, 8, 100, 50, stop_dx=40, lane_slack=12)
 
         self.assertTrue(goal.is_reached(self._at(64, 50)))  # dx=36
         self.assertTrue(goal.is_reached(self._at(60, 50)))  # dx=40, flush
         self.assertFalse(goal.is_reached(self._at(56, 50)))  # dx=44, short
         self.assertFalse(goal.is_reached(self._at(64, 66)))  # lane too far off
 
+    def test_arrival_is_measured_from_the_origin_not_the_body_centre(self) -> None:
+        # A real cached box is not centred on the actor's position: recorded
+        # live, Axel's spans 2153..2163 with his origin at 2156, i.e. -3..+7.
+        # Every reach predicate compares origins, so a region that quietly
+        # measured the body's centre instead stopped the actor 2px outside
+        # the range it then refused to punch from -- 1600 of 2500 ticks of a
+        # live run spent standing against one crate, pressing nothing.
+        body = Rect(2153, 28, 10, 16)
+        origin_x, origin_y = 2156, 36
+        goal = nav.strike_goal(
+            body, origin_x, origin_y, 2192, 32, stop_dx=36, lane_slack=16, inner_dx=10
+        )
+
+        def at(origin_x: float) -> Rect:
+            return Rect(origin_x - 3, 28, 10, 16)
+
+        self.assertTrue(goal.is_reached(at(2192 - 36)))  # exactly in range
+        self.assertTrue(goal.is_reached(at(2192 - 30)))
+        self.assertFalse(goal.is_reached(at(2192 - 38)))  # the stall's spot
+
     def test_contact_is_the_lane_margin_left_over(self) -> None:
-        goal = nav.strike_goal(self.body, 100, 50, stop_dx=40, lane_slack=12)
+        goal = nav.strike_goal(self.body, 8, 8, 100, 50, stop_dx=40, lane_slack=12)
 
         square = goal.contact(self._at(70, 50))
         drifted = goal.contact(self._at(70, 56))
@@ -235,7 +255,7 @@ class StrikeGoalTests(unittest.TestCase):
 
     def test_a_dead_zone_makes_the_ground_two_bands_with_a_hole(self) -> None:
         goal = nav.strike_goal(
-            self.body, 100, 50, stop_dx=40, lane_slack=12, inner_dx=10
+            self.body, 8, 8, 100, 50, stop_dx=40, lane_slack=12, inner_dx=10
         )
 
         self.assertIsInstance(goal, RegionGoal)
@@ -246,7 +266,7 @@ class StrikeGoalTests(unittest.TestCase):
 
     def test_a_side_restricts_it_to_one_band(self) -> None:
         goal = nav.strike_goal(
-            self.body, 100, 50, stop_dx=40, lane_slack=12, inner_dx=10, side="left"
+            self.body, 8, 8, 100, 50, stop_dx=40, lane_slack=12, inner_dx=10, side="left"
         )
 
         self.assertEqual(len(goal.regions), 1)
@@ -254,7 +274,7 @@ class StrikeGoalTests(unittest.TestCase):
         self.assertFalse(goal.is_reached(self._at(130, 50)))
 
     def test_a_body_bigger_than_the_band_falls_back_to_a_point(self) -> None:
-        goal = nav.strike_goal(Rect(0, 0, 64, 64), 100, 50, stop_dx=20, lane_slack=8)
+        goal = nav.strike_goal(Rect(0, 0, 64, 64), 32, 32, 100, 50, stop_dx=20, lane_slack=8)
 
         self.assertIsInstance(goal, PointGoal)
 

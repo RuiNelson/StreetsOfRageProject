@@ -91,7 +91,14 @@ NOMINAL_BODY_H = 16
 # How much of the strike's lane slack must be left over on arrival for the
 # blow to be worth throwing, in px. Zero would accept a corner touch -- the
 # exact lane offset at which the attack box stops covering the target body.
-MIN_STRIKE_CONTACT_Y = 4
+#
+# 8 rather than 4, from three 90 s live runs per value: settling for 4 lets
+# the actor fight from the very edge of its own band, where its punch barely
+# reaches and the enemy's covers it completely, and it took 29 damage/min
+# doing so against 25 at 8 -- for the same damage dealt. It is still a floor
+# and not a preference: an enemy moves, and spending steps perfecting an
+# alignment it is about to invalidate is how an approach becomes a dance.
+MIN_STRIKE_CONTACT_Y = 8
 
 # How far past the camera edge a route may be planned. The camera is what is
 # reachable *now*; a little slack ahead lets a walk aim at something entering
@@ -298,6 +305,8 @@ def danger_obstacles(
 
 def strike_goal(
     body: Rect,
+    origin_x: float,
+    origin_y: float,
     target_x: float,
     target_y: float,
     *,
@@ -341,6 +350,20 @@ def strike_goal(
     Falls back to a tolerant :class:`PointGoal` when the body is bigger than
     the band is deep, which would leave no region to aim at.
     """
+
+    # The region is tested against the body *rectangle*, but every reach
+    # predicate is about the actor's **origin**, and a real cached box is not
+    # centred on it: measured live, Axel's body spans -3..+7 of his own
+    # position. Ignoring that 2px offset is not a rounding error -- it is a
+    # stall. The actor parks where the region says it has arrived, 38px from
+    # a crate that `in_smash_range` will only accept at 36, presses nothing,
+    # and stands there: 1600 of 2500 ticks of a live run spent against one
+    # crate. Shifting the region by the offset makes "the body overlaps this"
+    # mean "my origin is within stop_dx", which is the predicate's sentence.
+    origin_offset_x = body.center.x - origin_x
+    origin_offset_y = body.center.y - origin_y
+    target_x = target_x + origin_offset_x
+    target_y = target_y + origin_offset_y
 
     half_w, half_h = body.width / 2, body.height / 2
     height = 2 * lane_slack - body.height

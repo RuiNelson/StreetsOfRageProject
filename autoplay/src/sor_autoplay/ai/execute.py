@@ -813,6 +813,8 @@ def state_machine_walk_to_near_enemy(
         side = "right" if actor.world_x <= target.world_x else "left"
     goal = nav.strike_goal(
         nav.body_rect(actor),
+        actor.world_x,
+        actor.world_y,
         target.world_x,
         target.world_y if alongside else actor.world_y,
         stop_dx=stop_dx,
@@ -1479,6 +1481,8 @@ def state_machine_open_breakable(
         side = "right" if direction == "left" else "left"
     goal = nav.strike_goal(
         nav.body_rect(actor),
+        actor.world_x,
+        actor.world_y,
         target.world_x,
         target.world_y,
         stop_dx=BREAKABLE_PUNCH_X,
