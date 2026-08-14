@@ -25,8 +25,9 @@ from .execute import execute_tick
 from .gamepad import VirtualGamepad
 from .inference import generate_inference_tokens
 from .observe import NoraAttackTracker, generate_direct_observation_tokens
+from .pathfind import Path
 from .priority import determine_priority_verb
-from .tokens import Context, Verb, find_all
+from .tokens import Context, Myself, Verb, find, find_all
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -38,10 +39,16 @@ class VerbState:
     to be) carrying out. ``pending`` holds every candidate ``Verb`` the
     tick considered before that collapse, so the HUD can also show what the
     AI was choosing between.
+
+    ``route`` is the path finder's own plan for this tick, when ``winning``
+    was a verb that routes (``WalkToNearEnemy``, ``OpenBreakable`` today) --
+    ``None`` for every other verb, not an empty path, so the HUD can tell
+    "nothing to route" from "routed and found no way through".
     """
 
     winning: Verb | None
     pending: tuple[Verb, ...]
+    route: Path | None = None
 
 
 class AgentLoop:
@@ -55,19 +62,31 @@ class AgentLoop:
         # already uses (e.g. VirtualGamepad's own steer_x).
         self._nora_tracker = NoraAttackTracker()
 
-    def inform_hud(self, context: Context, *, pending: tuple[Verb, ...] = ()) -> None:
+    def inform_hud(
+        self,
+        context: Context,
+        *,
+        pending: tuple[Verb, ...] = (),
+        route: Path | None = None,
+    ) -> None:
         """Copy the current tick's verbs into the thread-safe HUD state.
 
         ``context`` is the post-collapse context (at most one ``Verb``);
         ``pending`` carries the pre-collapse candidate list so the HUD can
         also show what the AI was choosing between. Callers may also pass an
-        empty context (e.g. right after disabling the agent) to clear it.
+        empty context (e.g. right after disabling the agent) to clear it --
+        which clears ``route`` too, since an empty context has no actor for
+        one to belong to.
+
+        ``route`` is the path finder's plan for this tick (``execute_tick``'s
+        own ``route_trace``, already filtered down to this actor's slot) --
+        ``None`` unless ``winning`` was a verb that actually routes.
         """
 
         verbs = tuple(find_all(context, Verb))
         winning = verbs[0] if verbs else None
         with self._state_lock:
-            self._verb_state = VerbState(winning=winning, pending=pending)
+            self._verb_state = VerbState(winning=winning, pending=pending, route=route)
 
     def verb_state(self) -> VerbState:
         with self._state_lock:
@@ -106,9 +125,18 @@ class AgentLoop:
         context |= generate_verb_tokens(context)
         pending = tuple(find_all(context, Verb))
         context = determine_priority_verb(context)
-        self.inform_hud(context, pending=pending)
 
         verbs = find_all(context, Verb)
         verb = verbs[0] if verbs else None
-        execute_tick(verb, context, self._gamepad)
+
+        # A route only exists once execute_tick has actually planned one, so
+        # inform_hud waits until after this call -- the HUD reads verb_state()
+        # from a different thread under its own lock, so the brief delay
+        # within one tick is invisible to it.
+        route_trace: dict[str, Path] = {}
+        execute_tick(verb, context, self._gamepad, route_trace=route_trace)
+
+        myself = find(context, Myself)
+        route = route_trace.get(myself.slot) if myself is not None else None
+        self.inform_hud(context, pending=pending, route=route)
         return verb

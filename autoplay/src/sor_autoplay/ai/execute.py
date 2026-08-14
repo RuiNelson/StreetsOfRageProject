@@ -10,6 +10,9 @@ Police special = physical A (0x0010), Jump = physical C (0x0040).
 
 from __future__ import annotations
 
+from contextvars import ContextVar
+
+from .pathfind import Path
 from .tokens import (
     CounterGrab,
     DodgeAntonioKick,
@@ -350,6 +353,18 @@ def _clamp_mask_to_lane(context: Context, from_y: int, mask: int) -> int:
     return mask
 
 
+# The HUD wants to draw the planner's actual output, but every routed
+# handler is reached through _HANDLERS' generic (verb, context, gamepad)
+# dispatch, which cannot carry an extra parameter without widening every
+# other handler's signature to match. A ContextVar sidesteps that: only
+# execute_tick (the one entry point that already knows whether a caller
+# wants a trace) sets it, only _routed_mask (the one place a route is
+# actually produced) reads it, and nothing in between has to know it exists.
+# Safe without locking because a tick runs synchronously start to finish on
+# one thread (app.py's single poll thread runs P1 then P2 in turn).
+_ROUTE_TRACE: ContextVar[dict[str, Path] | None] = ContextVar("_ROUTE_TRACE", default=None)
+
+
 def _routed_mask(
     context: Context,
     actor: Myself | Partner,
@@ -375,7 +390,7 @@ def _routed_mask(
     produced nothing at all. Only the second falls back.
     """
 
-    mask = nav.route_mask(
+    path = nav.plan_route(
         context,
         actor,
         goal,
@@ -384,6 +399,10 @@ def _routed_mask(
         enough_contact=enough_contact,
         maximize_contact=maximize_contact,
     )
+    sink = _ROUTE_TRACE.get()
+    if sink is not None:
+        sink[actor.slot] = path
+    mask = nav.first_vector_mask(path)
     if not mask and not goal.is_reached(nav.body_rect(actor)):
         mask = fallback()
     return _clamp_mask_to_lane(context, actor.world_y, mask)
@@ -1619,7 +1638,13 @@ def _pit_escape_mask(context: Context, actor: Myself) -> int | None:
     return None
 
 
-def execute_tick(verb: Verb | None, context: Context, gamepad: VirtualGamepad) -> None:
+def execute_tick(
+    verb: Verb | None,
+    context: Context,
+    gamepad: VirtualGamepad,
+    *,
+    route_trace: dict[str, Path] | None = None,
+) -> None:
     """The one place every tick's controller output actually comes from --
     ``AgentLoop.tick`` calls this instead of choosing between
     ``press_no_button``/``execute_verb`` itself, so the pit override below
@@ -1634,15 +1659,26 @@ def execute_tick(verb: Verb | None, context: Context, gamepad: VirtualGamepad) -
     apply regardless of which verb -- if any -- won this tick, including
     a plain melee strike or no verb at all, neither of which any Pit token
     reaches otherwise.
+
+    ``route_trace``, keyed by actor slot, is filled with the planner's most
+    recent :class:`~sor_autoplay.ai.pathfind.Path` whenever a routed handler
+    (``WalkToNearEnemy``, ``OpenBreakable`` today) actually plans one --
+    HUD-only, never read back into the pipeline. Omitted (the default),
+    nothing records anything and this call is exactly as before.
     """
 
-    actor = find(context, Myself)
-    if actor is not None:
-        mask = _pit_escape_mask(context, actor)
-        if mask is not None:
-            _hold_steered(gamepad, mask)
+    token = _ROUTE_TRACE.set(route_trace) if route_trace is not None else None
+    try:
+        actor = find(context, Myself)
+        if actor is not None:
+            mask = _pit_escape_mask(context, actor)
+            if mask is not None:
+                _hold_steered(gamepad, mask)
+                return
+        if verb is None:
+            press_no_button(gamepad)
             return
-    if verb is None:
-        press_no_button(gamepad)
-        return
-    execute_verb(verb, context, gamepad)
+        execute_verb(verb, context, gamepad)
+    finally:
+        if token is not None:
+            _ROUTE_TRACE.reset(token)

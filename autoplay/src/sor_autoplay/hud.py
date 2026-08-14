@@ -15,6 +15,7 @@ from tkinter import font as tkfont
 from typing import Callable
 
 from .ai.loop import VerbState
+from .ai.pathfind import Path as RoutePath
 from .ai.reach import CLOSING_ENEMY_THREAT_FRAMES
 from .ai.tokens import Verb
 from .ai.tokens.character import PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
@@ -90,6 +91,12 @@ MIN_MARKER_PX = 6
 # attack shape at all, so nothing would ever paint a range square for them
 # without this.
 _CLOSING_COLOR = "#ff9f0a"
+# The path finder's own plan (pathfind/viewer.py's route colour, reused so
+# the same geometry reads the same way in both tools): green when it reaches
+# the goal, red for a best-effort route that does not -- see
+# pathfind.search's own docstring on what "does not reach" means there.
+_ROUTE_COLOR = "#5ce1a0"
+_ROUTE_FAIL_COLOR = "#ff6b6b"
 
 # Draw order: props under fighters so players/bosses stay readable.
 _KIND_Z = {
@@ -122,6 +129,7 @@ class ObserverHud:
         self._on_toggle_agent = on_toggle_agent
         self._latest_map: WorldMap | None = None
         self._latest_holes: tuple = ()
+        self._latest_routes: dict[str, RoutePath] = {}
         self._map_draw_job: str | None = None
         # Stable canvas items — avoid delete("all") every poll (that flashes).
         self._bg_rect: int | None = None
@@ -134,6 +142,8 @@ class ObserverHud:
         self._hole_rects: list[int] = []
         self._range_rects: list[int] = []  # AttackRange squares, pooled like holes
         self._closing_lines: list[int] = []  # velocity-projection arrows
+        self._route_lines: list[int] = []  # pathfind.Path vectors, one per Step
+        self._route_marker: int | None = None  # ring at the planned final position
         self._last_canvas_size: tuple[int, int] = (0, 0)
         self._last_plot_geom: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
         self._last_meta_text: str = ""
@@ -256,6 +266,7 @@ class ObserverHud:
                 "letters only · square outline = state  "
                 "(green=down  orange=charge  red=atk  cyan=block  purple=held  gray=dead)  "
                 "dashed box = camera · dim letters = off-camera  "
+                "green line = planned route (red = no path found), ring = target  "
                 "1/2  G/S/H/N/J  B boss  k/b/|/p weapons  a/+ food"
             ),
             fg=_DIM,
@@ -495,7 +506,7 @@ class ObserverHud:
     def _redraw_map_if_any(self) -> None:
         self._map_draw_job = None
         if self._latest_map is not None:
-            self._draw_map(self._latest_map, self._latest_holes)
+            self._draw_map(self._latest_map, self._latest_holes, self._latest_routes)
 
     def update(
         self,
@@ -576,9 +587,21 @@ class ObserverHud:
         self._render_agent_toggle(self._p1_agent_toggle, agent_p1_enabled)
         self._render_agent_toggle(self._p2_agent_toggle, agent_p2_enabled)
 
+        # Keyed by actor slot ("P1"/"P2") so each column's route draws next
+        # to the actor it belongs to. A verb that does not route (or no verb
+        # at all) simply contributes nothing -- not an empty route, since an
+        # empty ``Path`` is meaningful ("routed, already arrived") and must
+        # not be drawn as if it were that.
+        routes: dict[str, RoutePath] = {}
+        if agent_p1_enabled and p1_state is not None and p1_state.route is not None:
+            routes["P1"] = p1_state.route
+        if agent_p2_enabled and p2_state is not None and p2_state.route is not None:
+            routes["P2"] = p2_state.route
+
         self._latest_map = snapshot.world_map
         self._latest_holes = snapshot.floor_holes
-        self._draw_map(snapshot.world_map, snapshot.floor_holes)
+        self._latest_routes = routes
+        self._draw_map(snapshot.world_map, snapshot.floor_holes, routes)
 
     def _render_agent_toggle(self, label: tk.Label, enabled: bool) -> None:
         if enabled:
@@ -639,7 +662,9 @@ class ObserverHud:
         )
         score.configure(text=f"Score   {player.score_text}")
 
-    def _draw_map(self, world: WorldMap, holes: tuple = ()) -> None:
+    def _draw_map(
+        self, world: WorldMap, holes: tuple = (), routes: dict[str, RoutePath] | None = None
+    ) -> None:
         """Update the map in place (letterboxed to the live *view* aspect)."""
 
         canvas = self._canvas
@@ -866,6 +891,54 @@ class ObserverHud:
         for index in range(closing_drawn, len(self._closing_lines)):
             canvas.itemconfigure(self._closing_lines[index], state="hidden")
 
+        route_drawn = 0
+        route_final: tuple[float, float] | None = None
+        for path in (routes or {}).values():
+            # Only the first route drawn each frame gets the "final position"
+            # ring -- with both agents on, drawing two would be one ring per
+            # actor, which is more useful, but today only one Myself exists
+            # per Context/tick, so at most one route is ever non-None anyway.
+            positions = path.positions()
+            for before, after in zip(positions, positions[1:]):
+                x0 = _map_x(before.center.x - world.camera_x, world, ox, plot_w)
+                y0 = _map_y(before.center.y, world, oy, plot_h)
+                x1 = _map_x(after.center.x - world.camera_x, world, ox, plot_w)
+                y1 = _map_y(after.center.y, world, oy, plot_h)
+                if route_drawn >= len(self._route_lines):
+                    self._ensure_route_pool(route_drawn + 1)
+                line_id = self._route_lines[route_drawn]
+                canvas.coords(line_id, x0, y0, x1, y1)
+                color = _ROUTE_COLOR if path.reached else _ROUTE_FAIL_COLOR
+                canvas.itemconfigure(line_id, state="normal", fill=color, arrow=tk.LAST)
+                canvas.tag_raise(line_id, "cam")
+                canvas.tag_lower(line_id, "marker")
+                route_drawn += 1
+            if path.steps and route_final is None:
+                final = path.positions()[-1].center
+                route_final = (
+                    _map_x(final.x - world.camera_x, world, ox, plot_w),
+                    _map_y(final.y, world, oy, plot_h),
+                )
+
+        for index in range(route_drawn, len(self._route_lines)):
+            canvas.itemconfigure(self._route_lines[index], state="hidden")
+
+        if route_final is not None:
+            fx, fy = route_final
+            r = 5
+            if self._route_marker is None:
+                self._route_marker = canvas.create_oval(
+                    fx - r, fy - r, fx + r, fy + r,
+                    outline=_ROUTE_COLOR, width=2, tags=("route",),
+                )
+            else:
+                canvas.coords(self._route_marker, fx - r, fy - r, fx + r, fy + r)
+                canvas.itemconfigure(self._route_marker, state="normal", outline=_ROUTE_COLOR)
+            canvas.tag_raise(self._route_marker, "cam")
+            canvas.tag_lower(self._route_marker, "marker")
+        elif self._route_marker is not None:
+            canvas.itemconfigure(self._route_marker, state="hidden")
+
         empty_cx = ox + plot_w / 2
         empty_cy = oy + plot_h / 2
         if self._empty_label is None:
@@ -996,6 +1069,32 @@ class ObserverHud:
                     arrow=tk.LAST,
                     state="hidden",
                     tags=("closing",),
+                )
+            )
+
+    def _ensure_route_pool(self, count: int) -> None:
+        """Grow the reusable path-finder vector pool to at least ``count``.
+
+        One line per merged ``Step`` in the plan, not per lattice cell --
+        ``pathfind.search`` already merges consecutive same-direction moves
+        into one vector before returning the ``Path``, so this only has to
+        draw what it is given. Colour is set per-draw (green/red for
+        reached/not), so the pool item's own fill is a placeholder.
+        """
+
+        canvas = self._canvas
+        while len(self._route_lines) < count:
+            self._route_lines.append(
+                canvas.create_line(
+                    0,
+                    0,
+                    0,
+                    0,
+                    fill=_ROUTE_COLOR,
+                    width=2,
+                    arrow=tk.LAST,
+                    state="hidden",
+                    tags=("route",),
                 )
             )
 
