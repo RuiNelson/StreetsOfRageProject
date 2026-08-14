@@ -13,8 +13,12 @@ would call sensible is the route that comes out -- how a corridor one body
 wide is threaded, what the minimum step length does to a detour, where a
 best-effort route gives up. That is a question for eyes.
 
-Launch it with a Python that has Tk (the default ``python3`` on this machine
-does not)::
+Launch it from the meta-repo root, which finds a Python with Tk for you (the
+default ``python3`` on this machine has none)::
+
+    ./scripts/pathfind_viewer
+
+or directly::
 
     cd autoplay
     PYTHONPATH=src python3.11 -m sor_autoplay.ai.pathfind.viewer
@@ -28,6 +32,7 @@ between.
 from __future__ import annotations
 
 import argparse
+import os
 import tkinter as tk
 from dataclasses import dataclass
 
@@ -819,10 +824,21 @@ class PathfindViewer:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--width", type=int, default=int(DEFAULT_WORLD.width))
-    parser.add_argument("--height", type=int, default=int(DEFAULT_WORLD.height))
-    parser.add_argument("--step", type=int, default=DEFAULT_STEP)
+    parser = argparse.ArgumentParser(
+        # The meta-repo wrapper sets this so --help names the script the user
+        # actually typed rather than the module path.
+        prog=os.environ.get("SOR_PATHFIND_PROG") or None,
+        description=__doc__.splitlines()[0],
+    )
+    parser.add_argument(
+        "--width", type=int, default=int(DEFAULT_WORLD.width), help="world width in px"
+    )
+    parser.add_argument(
+        "--height", type=int, default=int(DEFAULT_WORLD.height), help="world height in px"
+    )
+    parser.add_argument(
+        "--step", type=int, default=DEFAULT_STEP, help="minimum length of every vector"
+    )
     parser.add_argument("--body", type=int, default=16, help="side of the starting body")
     args = parser.parse_args(argv)
 

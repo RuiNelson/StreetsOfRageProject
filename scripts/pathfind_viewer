@@ -1,0 +1,55 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+# Launch the standalone path-finding viewer: a Tk window for drawing a body,
+# obstacles and a destination, and looking at the vectors the planner returns.
+#
+# Nothing needs to be running. The viewer never connects to sor, never reads
+# RAM, and imports nothing from the rest of sor_autoplay -- unlike
+# ./scripts/autoplay, it has no host and no port.
+#
+# Prerequisites:
+#   - Python 3.11+ with Tk (_tkinter); this machine prefers python3.11
+#
+# Full CLI options are defined in the Python module (argparse):
+#   ./scripts/pathfind_viewer --help
+#
+# Examples:
+#   ./scripts/pathfind_viewer
+#   ./scripts/pathfind_viewer --width 480 --height 200 --step 4 --body 24
+
+SCRIPT_DIR="${0:A:h}"
+META_ROOT="${SCRIPT_DIR:h}"
+AUTOPLAY_SRC="$META_ROOT/autoplay/src"
+# Shown as argparse prog= so --help matches how this script is invoked.
+export SOR_PATHFIND_PROG="${0:t}"
+
+if [[ ! -d "$AUTOPLAY_SRC/sor_autoplay/ai/pathfind" ]]; then
+    print -u2 "pathfind package not found: $AUTOPLAY_SRC/sor_autoplay/ai/pathfind"
+    exit 1
+fi
+
+# Prefer a Python with Tk. Homebrew/uv 3.13+ on this host often lacks _tkinter.
+# Do not seed the search from $PYTHON -- an empty/invalid value would pollute
+# the candidate list.
+PYTHON=""
+for candidate in python3.11 python3.12 python3; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        if "$candidate" -c 'import tkinter' >/dev/null 2>&1; then
+            PYTHON="$candidate"
+            break
+        fi
+    fi
+done
+
+if [[ -z "$PYTHON" ]]; then
+    print -u2 "No Python with Tk (_tkinter) found."
+    print -u2 "Install python@3.11 (or another build with Tk) and retry."
+    exit 1
+fi
+
+export PYTHONPATH="${AUTOPLAY_SRC}${PYTHONPATH:+:$PYTHONPATH}"
+
+# Plain "$@" -- never "${@:-}", which becomes a single empty word when no args
+# are given and can break argparse.
+exec "$PYTHON" -m sor_autoplay.ai.pathfind.viewer "$@"

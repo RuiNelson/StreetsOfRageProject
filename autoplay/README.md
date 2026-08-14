@@ -105,6 +105,29 @@ The window starts maximized (title bar kept; not exclusive fullscreen). Layout:
 1. **Top status row** — three equal columns: **State / P1 / P2**
 2. **Map** — fills all remaining window space
 
+## Run the path-finding viewer
+
+A separate, standalone Tk window for the AI's path finder
+(`sor_autoplay/ai/pathfind/`). It connects to nothing: no host, no port, no
+running `sor`. Draw a body, draw obstacles, pick a destination, and look at
+the vectors the planner returns.
+
+```bash
+./scripts/pathfind_viewer
+./scripts/pathfind_viewer --width 480 --height 200 --step 4 --body 24
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--width 320` / `--height 112` | World size in px (defaults are the SoR walkable band) |
+| `--step 8` | Minimum length of every returned vector |
+| `--body 16` | Side of the starting body |
+
+Pick a mode in the toolbar (**Corpo** / **Obstáculo** / **Destino** /
+**Apagar**) and drag on the canvas. The right-hand panel chooses the
+destination kind — point, segment, or rectangle — and, for the last two,
+*which* edges must meet. **Esc** quits.
+
 ## Tests
 
 ```bash
