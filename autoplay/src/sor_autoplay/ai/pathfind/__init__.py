@@ -26,7 +26,8 @@ The model is deliberately small:
   search can find. Neither is on by default -- without them, edges meeting
   corner to corner count as arrival;
 - the answer is a list of vectors in the eight compass directions, each at
-  least ``step`` long and a whole multiple of it.
+  least ``step`` long and a whole multiple of it -- diagonals cheap on the
+  first half of the farther axis, then only if cardinals cannot arrive.
 
 That last property is the reason the search exists at all. A beat-em-up AI
 does not steer with a continuous heading; it holds a direction on a d-pad for
