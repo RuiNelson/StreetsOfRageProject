@@ -1,16 +1,9 @@
 """A* over the lattice, and the vectors it hands back.
 
-The search itself is ordinary A*: eight neighbours, cardinals costing their
-true length, and the Manhattan heuristic, which is exactly the free-space
-optimum once diagonals are a last resort and therefore both admissible and
-consistent. A diagonal is charged more than walking the entire node budget
-on cardinals, so any cardinal-only route beats every route that uses one.
-The eight-direction neighbours stay available for the rare case where no
-cardinal path can reach the goal -- typically a first step back into the
-world from a start that sits outside it, because the no-corner-cut rule
-already means every in-world diagonal has a walkable L-shaped detour.
-
-Two other things are worth knowing about the result.
+The search itself is ordinary A*: eight neighbours, a move costing its true
+euclidean length, and the octile heuristic, which is exactly the free-space
+optimum for those costs and therefore both admissible and consistent. Two
+things are worth knowing about the result.
 
 **The vectors are merged, not one per cell.** A route of nine cells to the
 right is one ``Step`` of ``9 * step`` px, not nine of ``step``. That is the
@@ -45,10 +38,9 @@ parameters address that, and they are different tools:
   Off by default, because it costs extra expansions and most callers want
   the cheapest route that qualifies.
 
-The weight has to exceed 1 to ever walk further for alignment, because a
-pixel of extra overlap costs at least a pixel of walking. At exactly 1 the
-two cancel and the search keeps the flusher of those equal-score arrivals
-rather than whichever it found first.
+The weight has to exceed 1 to ever change anything, because a pixel of extra
+overlap costs at least a pixel of walking -- at exactly 1 the two cancel and
+the first arrival wins every tie.
 """
 
 from __future__ import annotations
@@ -64,7 +56,7 @@ from .geometry import (
     Direction,
     Rect,
     direction_from_offset,
-    manhattan_distance,
+    octile_distance,
 )
 from .goals import Goal
 from .grid import Lattice
@@ -171,12 +163,7 @@ def find_path(
 
     def heuristic(node: tuple[int, int]) -> float:
         dx, dy = lattice.rect_at(node).gap_to(target_box)
-        return manhattan_distance(dx, dy)
-
-    # Any route that uses a diagonal must lose to every cardinal-only
-    # route, even one that visits every budgeted node. Among routes with
-    # the same number of diagonals the geometric length still breaks ties.
-    diagonal_penalty = max_nodes * step * DIAGONAL_COST + 1.0
+        return octile_distance(dx, dy)
 
     weight = alignment_weight if maximize_contact else 0.0
 
@@ -206,7 +193,6 @@ def find_path(
     expanded = 0
     goal_node: tuple[int, int] | None = None
     goal_score = math.inf
-    goal_misalignment = math.inf
     # A cheaper route to an already-queued node pushes a second entry rather
     # than sifting the heap; the stale one is dropped here when it surfaces.
     closed: set[tuple[int, int]] = set()
@@ -215,12 +201,10 @@ def find_path(
         f, _, _, node = heapq.heappop(queue)
         if node in closed:
             continue
-        # Nothing still queued can arrive *better* than the best arrival
-        # so far: `f` is a lower bound on the cost of any route through
-        # this node, and an arrival's score is never below its own cost.
-        # Equal `f` is still expanded -- a same-score flusher is exactly
-        # the "detour no longer than the alignment it buys" case.
-        if f > goal_score + 1e-12:
+        # Nothing still queued can arrive better than the best arrival so
+        # far: `f` is a lower bound on the cost of any route through this
+        # node, and an arrival's score is never below its own cost.
+        if f >= goal_score - 1e-12:
             break
         closed.add(node)
         cost = best_cost[node]
@@ -230,17 +214,8 @@ def find_path(
         if arrived(rect):
             misalignment = goal.misalignment(rect) if weight else 0.0
             score = cost + weight * misalignment
-            # Equal scores prefer the flusher arrival: the weight is
-            # documented as paying for alignment whenever the detour is
-            # *no longer* than the overlap it buys, equality included.
-            better = score < goal_score - 1e-12 or (
-                weight > 0
-                and abs(score - goal_score) <= 1e-12
-                and misalignment < goal_misalignment
-            )
-            if better:
+            if score < goal_score:
                 goal_score = score
-                goal_misalignment = misalignment
                 goal_node = node
             if misalignment <= 0:
                 # Flush arrival: nothing cheaper can also be better aligned.
@@ -254,10 +229,7 @@ def find_path(
             if not lattice.can_move(node, direction):
                 continue
             neighbour = (node[0] + direction.dx, node[1] + direction.dy)
-            if direction.is_diagonal:
-                move_cost = diagonal_penalty + step * DIAGONAL_COST
-            else:
-                move_cost = step
+            move_cost = step * (DIAGONAL_COST if direction.is_diagonal else 1.0)
             tentative = cost + move_cost
             if tentative >= best_cost.get(neighbour, math.inf) - 1e-12:
                 continue

@@ -363,26 +363,13 @@ def contact_shortfall(a: Segment, b: Segment) -> float:
     return max(0.0, min(a.length, b.length) - overlap)
 
 
-def manhattan_distance(dx: float, dy: float) -> float:
-    """Cheapest 4-direction travel distance covering the offsets ``dx``/``dy``.
-
-    Cardinals cost their true length, and a diagonal is never cheaper than
-    the two-leg detour it stands in for (the search only takes one when no
-    cardinal route exists), so this is exactly the free-space optimum and
-    an admissible, consistent A* heuristic.
-    """
-
-    return abs(dx) + abs(dy)
-
-
 def octile_distance(dx: float, dy: float) -> float:
     """Cheapest 8-direction travel distance covering the offsets ``dx``/``dy``.
 
     With diagonal moves costing their true euclidean length, this is exactly
-    the cost of the best obstacle-free route. The search itself does not
-    use it -- diagonals are a last resort, so Manhattan is the matching
-    bound -- but it remains the right answer for "how far in eight
-    directions" questions outside the planner.
+    the cost of the best obstacle-free route, which makes it both admissible
+    and consistent as an A* heuristic -- straight-line distance would also be
+    admissible but is a weaker bound and expands more nodes.
     """
 
     dx, dy = abs(dx), abs(dy)

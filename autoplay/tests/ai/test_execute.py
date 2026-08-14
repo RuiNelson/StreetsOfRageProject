@@ -387,11 +387,10 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
 
     def test_walks_toward_enemy_to_the_left_and_above(self) -> None:
         # dx=44 is inside Axel's stop_dx (46), so the walk has arrived on X
-        # and the goal is the far band (the enemy sits behind a right-facing
-        # actor). The route is two cardinals -- left to the far side, then
-        # up onto the lane -- and only the first vector is held this tick.
-        # A diagonal would do both at once; the search refuses it because
-        # cardinals still arrive.
+        # and converges onto the enemy's lane -- the only branch that aims at
+        # the enemy's own Y. Further out it holds its own lane instead, so
+        # that the lane aim cannot depend on the enemy's combat phase (see
+        # _walk_to_near_enemy_target).
         actor = _myself(world_x=44, world_y=50)
         target = _enemy(world_x=0, world_y=0)
         context = {actor, target}
@@ -400,7 +399,7 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
 
         _settle(verb, context, gamepad)
 
-        client.hold_buttons.assert_called_with(player1=LEFT, player2=0)
+        client.hold_buttons.assert_called_with(player1=LEFT | UP, player2=0)
 
     def test_holds_its_own_lane_while_still_far_out_on_x(self) -> None:
         # Regression: the lane aim must not depend on the enemy's combat

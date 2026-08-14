@@ -26,8 +26,7 @@ The model is deliberately small:
   search can find. Neither is on by default -- without them, edges meeting
   corner to corner count as arrival;
 - the answer is a list of vectors in the eight compass directions, each at
-  least ``step`` long and a whole multiple of it -- diagonals only when no
-  cardinal route can reach the goal.
+  least ``step`` long and a whole multiple of it.
 
 That last property is the reason the search exists at all. A beat-em-up AI
 does not steer with a continuous heading; it holds a direction on a d-pad for
@@ -67,7 +66,6 @@ from .geometry import (
     Segment,
     contact_length,
     contact_shortfall,
-    manhattan_distance,
     octile_distance,
 )
 from .goals import Goal, PointGoal, RectGoal, RegionGoal, SegmentGoal
@@ -104,6 +102,5 @@ __all__ = [
     "contact_length",
     "contact_shortfall",
     "find_path",
-    "manhattan_distance",
     "octile_distance",
 ]
