@@ -17,6 +17,30 @@ came closest to the goal -- with ``reached=False``. An AI that must act every
 tick is better served by "walk this far towards it and re-plan when the world
 has moved" than by an empty answer, and the flag keeps the two cases
 distinguishable for callers that do care.
+
+**Arriving is not always enough; arriving lined up can matter.** Two edges
+that meet corner to corner satisfy a goal and are useless in practice -- a
+body barely clipping the top of a crate cannot act on it. Two opt-in
+parameters address that, and they are different tools:
+
+- ``enough_contact`` is a *requirement*. It raises the bar for arrival
+  itself: nothing counts until the body shares at least that many px of edge
+  with the goal. Use it when a number is genuinely needed ("my attack box is
+  16px wide, so 16px of overlap or it was not a hit"). If no reachable
+  position clears the bar, the search reports the usual best effort with
+  ``reached=False`` rather than pretending.
+- ``maximize_contact`` is a *preference*. It leaves arrival alone and makes
+  the search prefer the flushest arrival it can find: each one is scored
+  ``cost + alignment_weight * misalignment`` and the search keeps going
+  until no unexplored node could beat the best score, which the admissible
+  heuristic makes a cheap test (``f`` is a lower bound on the cost of any
+  route through that node, and an arrival's score is never below its cost).
+  Off by default, because it costs extra expansions and most callers want
+  the cheapest route that qualifies.
+
+The weight has to exceed 1 to ever change anything, because a pixel of extra
+overlap costs at least a pixel of walking -- at exactly 1 the two cancel and
+the first arrival wins every tie.
 """
 
 from __future__ import annotations
@@ -45,6 +69,14 @@ DIAGONAL_COST = math.sqrt(2.0)
 # or a tiny step gets anywhere near this.
 DEFAULT_MAX_NODES = 20_000
 
+# How many px of travel one px of missing edge overlap is worth while
+# ``maximize_contact`` is on. Anything at or below 1 is inert (see the module
+# docstring); 2 means the search will spend the walk needed to line an edge
+# up whenever the detour is no longer than the alignment it buys, which is
+# the "as flush as the geometry allows" reading without chasing arbitrarily
+# long detours for it.
+DEFAULT_ALIGNMENT_WEIGHT = 2.0
+
 
 @dataclass(frozen=True)
 class Step:
@@ -71,6 +103,13 @@ class Path:
     start: Rect
     final: Rect
     nodes_expanded: int
+    # How much of the shorter contact edge did not line up on arrival, in px;
+    # 0 for a flush arrival, and for goals that have no edges to line up.
+    misalignment: float = 0.0
+    # How much edge the arrival actually shares with the goal, in px;
+    # ``inf`` when the goal has no measurable contact (a point, an oblique
+    # segment) and 0.0 when the goal was not reached at all.
+    contact: float = 0.0
 
     def __bool__(self) -> bool:
         return bool(self.steps)
@@ -98,6 +137,9 @@ def find_path(
     obstacles: Sequence[Rect] = (),
     step: float,
     allow_diagonals: bool = True,
+    enough_contact: float = 0.0,
+    maximize_contact: bool = False,
+    alignment_weight: float = DEFAULT_ALIGNMENT_WEIGHT,
     max_nodes: int = DEFAULT_MAX_NODES,
 ) -> Path:
     """Plan a route for ``start`` to reach ``goal`` without hitting anything.
@@ -106,6 +148,13 @@ def find_path(
     whole multiple of it. ``world`` bounds the plane -- the body must stay
     entirely inside it -- and ``obstacles`` are rectangles it may touch but
     never overlap.
+
+    ``enough_contact`` raises the bar for arrival: the body must share at
+    least that many px of edge with the goal for the position to count at
+    all. ``maximize_contact`` instead leaves arrival alone and prefers the
+    flushest arrival it can find, paying up to ``alignment_weight`` px of
+    extra route per px of overlap gained. They combine: a floor plus a
+    preference for doing better than the floor.
     """
 
     lattice = Lattice(start=start, world=world, obstacles=obstacles, step=step)
@@ -116,9 +165,18 @@ def find_path(
         dx, dy = lattice.rect_at(node).gap_to(target_box)
         return octile_distance(dx, dy)
 
+    weight = alignment_weight if maximize_contact else 0.0
+
+    def arrived(rect: Rect) -> bool:
+        """Goal satisfied *and*, if one was asked for, contact enough."""
+
+        if not goal.is_reached(rect):
+            return False
+        return enough_contact <= 0 or goal.contact(rect) >= enough_contact - 1e-9
+
     origin = (0, 0)
-    if goal.is_reached(start):
-        return Path((), True, start, start, 0)
+    if arrived(start) and (weight <= 0 or goal.misalignment(start) <= 0):
+        return Path((), True, start, start, 0, goal.misalignment(start), goal.contact(start))
 
     came_from: dict[tuple[int, int], tuple[int, int]] = {}
     best_cost: dict[tuple[int, int], float] = {origin: 0.0}
@@ -134,22 +192,36 @@ def find_path(
     closest_key = (start_h, 0.0)
     expanded = 0
     goal_node: tuple[int, int] | None = None
+    goal_score = math.inf
     # A cheaper route to an already-queued node pushes a second entry rather
     # than sifting the heap; the stale one is dropped here when it surfaces.
     closed: set[tuple[int, int]] = set()
 
     while queue:
-        _, _, _, node = heapq.heappop(queue)
+        f, _, _, node = heapq.heappop(queue)
         if node in closed:
             continue
+        # Nothing still queued can arrive better than the best arrival so
+        # far: `f` is a lower bound on the cost of any route through this
+        # node, and an arrival's score is never below its own cost.
+        if f >= goal_score - 1e-12:
+            break
         closed.add(node)
         cost = best_cost[node]
 
         expanded += 1
         rect = lattice.rect_at(node)
-        if goal.is_reached(rect):
-            goal_node = node
-            break
+        if arrived(rect):
+            misalignment = goal.misalignment(rect) if weight else 0.0
+            score = cost + weight * misalignment
+            if score < goal_score:
+                goal_score = score
+                goal_node = node
+            if misalignment <= 0:
+                # Flush arrival: nothing cheaper can also be better aligned.
+                break
+            # Otherwise keep expanding *through* this position -- the better
+            # lined-up spot is usually a step or two further along.
         if expanded >= max_nodes:
             break
 
@@ -177,13 +249,20 @@ def find_path(
                 closest = neighbour
 
     end = goal_node if goal_node is not None else closest
+    final = lattice.rect_at(end)
     steps = _merge(_reconstruct(came_from, origin, end), step)
+    # Measured once, on the position actually chosen: the caller wants to
+    # know how flush the arrival was whether or not the search was told to
+    # care about it.
+    reached = goal_node is not None
     return Path(
         steps=steps,
-        reached=goal_node is not None,
+        reached=reached,
         start=start,
-        final=lattice.rect_at(end),
+        final=final,
         nodes_expanded=expanded,
+        misalignment=goal.misalignment(final) if reached else 0.0,
+        contact=goal.contact(final) if reached else 0.0,
     )
 
 

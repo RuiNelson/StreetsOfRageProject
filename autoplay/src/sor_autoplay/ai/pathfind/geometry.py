@@ -49,6 +49,50 @@ class Segment:
     end: Point
 
     @property
+    def length(self) -> float:
+        return math.hypot(self.end.x - self.start.x, self.end.y - self.start.y)
+
+    @property
+    def axis(self) -> str | None:
+        """``"x"`` for a horizontal segment, ``"y"`` for a vertical one.
+
+        ``None`` for anything oblique -- and for those, "how much do these
+        two edges coincide" has no length to measure, which is why the
+        alignment preference simply does not apply to a diagonal goal.
+        """
+
+        if abs(self.start.y - self.end.y) <= EPS:
+            return "x"
+        if abs(self.start.x - self.end.x) <= EPS:
+            return "y"
+        return None
+
+    def collinear_overlap(self, other: Segment) -> float:
+        """How much of the same line the two segments share, in px.
+
+        Zero unless both are axis-aligned the same way *and* sit on the same
+        line -- two vertical edges 4px apart overlap not at all, however much
+        their y spans agree.
+        """
+
+        axis = self.axis
+        if axis is None or other.axis != axis:
+            return 0.0
+
+        if axis == "x":
+            if abs(self.start.y - other.start.y) > EPS:
+                return 0.0
+            mine = (min(self.start.x, self.end.x), max(self.start.x, self.end.x))
+            theirs = (min(other.start.x, other.end.x), max(other.start.x, other.end.x))
+        else:
+            if abs(self.start.x - other.start.x) > EPS:
+                return 0.0
+            mine = (min(self.start.y, self.end.y), max(self.start.y, self.end.y))
+            theirs = (min(other.start.y, other.end.y), max(other.start.y, other.end.y))
+
+        return max(0.0, min(mine[1], theirs[1]) - max(mine[0], theirs[0]))
+
+    @property
     def bounds(self) -> Rect:
         """The smallest rectangle containing the segment (possibly flat)."""
 
@@ -286,6 +330,37 @@ class Rect:
         dx = max(0.0, other.left - self.right, self.left - other.right)
         dy = max(0.0, other.top - self.bottom, self.top - other.bottom)
         return dx, dy
+
+
+def contact_length(a: Segment, b: Segment) -> float | None:
+    """How much of the two edges lie against each other, in px.
+
+    ``None`` when the question does not apply -- an oblique segment, or two
+    perpendicular edges, meet at a point wherever they meet at all, so there
+    is no length to measure and nothing to prefer. Callers treat that as
+    "unlimited contact" rather than "no contact", so a contact requirement
+    never silently makes such a goal unreachable.
+    """
+
+    if a.axis is None or a.axis != b.axis:
+        return None
+    return a.collinear_overlap(b)
+
+
+def contact_shortfall(a: Segment, b: Segment) -> float:
+    """How much of the shorter edge fails to lie against the other, in px.
+
+    Zero when the shorter of the two is entirely covered by the longer --
+    the "fully lined up" case -- and zero, too, when the pair has no length
+    to measure. Touching corner to corner scores the full length of the
+    shorter edge: the worst contact that still counts as contact at all, and
+    exactly the outcome ``maximize_contact`` exists to walk away from.
+    """
+
+    overlap = contact_length(a, b)
+    if overlap is None:
+        return 0.0
+    return max(0.0, min(a.length, b.length) - overlap)
 
 
 def octile_distance(dx: float, dy: float) -> float:

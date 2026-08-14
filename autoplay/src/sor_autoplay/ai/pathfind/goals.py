@@ -34,11 +34,21 @@ even inside the world.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-from .geometry import HORIZONTAL_EDGES, VERTICAL_EDGES, Edge, Point, Rect, Segment
+from .geometry import (
+    HORIZONTAL_EDGES,
+    VERTICAL_EDGES,
+    Edge,
+    Point,
+    Rect,
+    Segment,
+    contact_length,
+    contact_shortfall,
+)
 
 
 @runtime_checkable
@@ -50,6 +60,27 @@ class Goal(Protocol):
 
     def bounding_box(self) -> Rect:
         """A rectangle the goal lies within, for the heuristic's lower bound."""
+
+    def contact(self, rect: Rect) -> float:
+        """How much edge an *arrived* body actually shares with the goal, in px.
+
+        ``math.inf`` when the goal has no measurable contact -- covering a
+        point, or meeting an oblique line -- so that a caller's
+        ``enough_contact`` requirement passes rather than making such a goal
+        permanently unreachable.
+        """
+
+    def misalignment(self, rect: Rect) -> float:
+        """How badly an *arrived* body is lined up, in px, 0 being perfect.
+
+        Arrival is a yes/no question, but not every arrival is as good as
+        every other: an edge that meets its counterpart corner to corner has
+        technically arrived and is useless in practice. This grades the ones
+        that qualify, and ``find_path``'s ``maximize_contact`` decides
+        whether extra walking may be spent improving it.
+
+        Only ever called on a rectangle that :meth:`is_reached` accepted.
+        """
 
 
 @dataclass(frozen=True)
@@ -71,6 +102,16 @@ class PointGoal:
 
     def bounding_box(self) -> Rect:
         return Rect(self.point.x, self.point.y, 0.0, 0.0).grown_by(self.tolerance)
+
+    def contact(self, rect: Rect) -> float:
+        """Not applicable: a point has no edge to share."""
+
+        return math.inf
+
+    def misalignment(self, rect: Rect) -> float:
+        """Always 0: covering a point has no better or worse way of doing it."""
+
+        return 0.0
 
 
 @dataclass(frozen=True)
@@ -101,6 +142,36 @@ class SegmentGoal:
 
     def bounding_box(self) -> Rect:
         return self.segment.bounds
+
+    def _touching(self, rect: Rect) -> list[Segment]:
+        return [
+            rect.edge(edge)
+            for edge in self.edges
+            if rect.edge(edge).intersects(self.segment)
+        ]
+
+    def contact(self, rect: Rect) -> float:
+        """The most edge any arriving side shares with the segment."""
+
+        lengths = [
+            length
+            for edge in self._touching(rect)
+            if (length := contact_length(edge, self.segment)) is not None
+        ]
+        return max(lengths, default=math.inf)
+
+    def misalignment(self, rect: Rect) -> float:
+        """The best (smallest) shortfall among the edges that have arrived.
+
+        Zero for an oblique segment: an axis-aligned edge crossing a diagonal
+        line touches it at a point no matter where along it the body stands,
+        so there is nothing to prefer.
+        """
+
+        return min(
+            (contact_shortfall(edge, self.segment) for edge in self._touching(rect)),
+            default=0.0,
+        )
 
 
 @dataclass(frozen=True)
@@ -175,6 +246,37 @@ class RectGoal:
 
     def bounding_box(self) -> Rect:
         return self.target
+
+    def _touching(self, rect: Rect) -> list[tuple[Segment, Segment]]:
+        pairs = []
+        for own, other in self.contacts:
+            mine, theirs = rect.edge(own), self.target.edge(other)
+            if mine.intersects(theirs):
+                pairs.append((mine, theirs))
+        return pairs
+
+    def contact(self, rect: Rect) -> float:
+        """The most edge any met pairing actually shares."""
+
+        lengths = [
+            length
+            for mine, theirs in self._touching(rect)
+            if (length := contact_length(mine, theirs)) is not None
+        ]
+        return max(lengths, default=math.inf)
+
+    def misalignment(self, rect: Rect) -> float:
+        """The best (smallest) shortfall among the pairings that have met.
+
+        Two boxes stacked but barely overlapping score their whole shared
+        width here; slid until the narrower one sits entirely over the other,
+        they score 0.
+        """
+
+        return min(
+            (contact_shortfall(mine, theirs) for mine, theirs in self._touching(rect)),
+            default=0.0,
+        )
 
 
 __all__ = [

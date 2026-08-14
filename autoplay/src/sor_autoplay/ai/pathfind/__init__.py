@@ -16,6 +16,11 @@ The model is deliberately small:
   rectangle whose named edges must meet named edges of the body
   (:class:`RectGoal` -- ``RectGoal.horizontal(crate)`` is "arrive stacked
   above or below that crate", never merely "arrive near it");
+- how *well* the edges have to meet is a separate question, and an opt-in
+  one: ``enough_contact`` requires a number of px of shared edge before an
+  arrival counts, ``maximize_contact`` prefers the flushest arrival the
+  search can find. Neither is on by default -- without them, edges meeting
+  corner to corner count as arrival;
 - the answer is a list of vectors in the eight compass directions, each at
   least ``step`` long and a whole multiple of it.
 
@@ -55,15 +60,24 @@ from .geometry import (
     Point,
     Rect,
     Segment,
+    contact_length,
+    contact_shortfall,
     octile_distance,
 )
 from .goals import Goal, PointGoal, RectGoal, SegmentGoal
 from .grid import Lattice
-from .search import DEFAULT_MAX_NODES, Path, Step, find_path
+from .search import (
+    DEFAULT_ALIGNMENT_WEIGHT,
+    DEFAULT_MAX_NODES,
+    Path,
+    Step,
+    find_path,
+)
 
 __all__ = [
     "ALL_DIRECTIONS",
     "CARDINALS",
+    "DEFAULT_ALIGNMENT_WEIGHT",
     "DEFAULT_MAX_NODES",
     "DIAGONALS",
     "Direction",
@@ -80,6 +94,8 @@ __all__ = [
     "SegmentGoal",
     "VERTICAL_EDGES",
     "Step",
+    "contact_length",
+    "contact_shortfall",
     "find_path",
     "octile_distance",
 ]

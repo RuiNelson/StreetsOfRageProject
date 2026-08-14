@@ -156,6 +156,8 @@ class PathfindViewer:
         self.tolerance = tk.IntVar(value=0)
         self.max_nodes = tk.IntVar(value=DEFAULT_MAX_NODES)
         self.allow_diagonals = tk.BooleanVar(value=True)
+        self.maximize_contact = tk.BooleanVar(value=False)
+        self.enough_contact = tk.IntVar(value=0)
         self.target_is_obstacle = tk.BooleanVar(value=True)
         self.include_aligned = tk.BooleanVar(value=False)
         self.show_lattice = tk.BooleanVar(value=False)
@@ -177,6 +179,8 @@ class PathfindViewer:
             self.tolerance,
             self.max_nodes,
             self.allow_diagonals,
+            self.maximize_contact,
+            self.enough_contact,
             self.target_is_obstacle,
             self.include_aligned,
             self.show_lattice,
@@ -343,6 +347,8 @@ class PathfindViewer:
         self._spin(panel, "passo mínimo", self.step, 1, 64)
         self._spin(panel, "máx. nós", self.max_nodes, 10, 200_000, increment=1000)
         self._check(panel, "diagonais", self.allow_diagonals)
+        self._check(panel, "maximizar contacto", self.maximize_contact)
+        self._spin(panel, "contacto suficiente", self.enough_contact, 0, 256)
 
         self._heading(panel, "Desenho")
         self._check(panel, "mostrar lattice", self.show_lattice)
@@ -594,6 +600,8 @@ class PathfindViewer:
                     obstacles=self._obstacles(),
                     step=self._int(self.step, DEFAULT_STEP),
                     allow_diagonals=self.allow_diagonals.get(),
+                    enough_contact=self._int(self.enough_contact, 0),
+                    maximize_contact=self.maximize_contact.get(),
                     max_nodes=max(1, self._int(self.max_nodes, DEFAULT_MAX_NODES)),
                 )
             except ValueError as exc:
@@ -795,10 +803,13 @@ class PathfindViewer:
         assert path is not None
         vectors = ", ".join(f"{step.direction.name} {step.length:g}" for step in path.steps)
         head = "alcançado" if path.reached else "NÃO alcançado (melhor esforço)"
+        contact = ""
+        if path.reached and path.contact != float("inf"):
+            contact = f", contacto {path.contact:g} (falta {path.misalignment:g})"
         self.status.configure(
             text=(
-                f"{head} — {len(path.steps)} vectores, comprimento {path.length:.1f}, "
-                f"{path.nodes_expanded} nós expandidos    {vectors}"
+                f"{head} — {len(path.steps)} vectores, comprimento {path.length:.1f}"
+                f"{contact}, {path.nodes_expanded} nós expandidos    {vectors}"
             ),
             fg=_ROUTE if path.reached else _FAIL,
         )

@@ -226,6 +226,115 @@ def test_a_rect_goal_the_body_cannot_line_up_with_fails_cleanly() -> None:
     assert WORLD.contains(path.final)
 
 
+def test_by_default_a_corner_touch_is_a_good_enough_arrival() -> None:
+    # The cheapest way to put a left edge on the crate's right edge is to
+    # clip its corner, and that is what the search settles for unless it is
+    # told otherwise.
+    crate = Rect(160, 48, 16, 16)
+    goal = RectGoal(crate, frozenset({(Edge.LEFT, Edge.RIGHT)}))
+    path = plan(start=BODY, goal=goal, obstacles=[crate])
+
+    assert path.reached
+    assert path.final.left == pytest.approx(176)
+    assert path.misalignment > 0
+    assert path.contact < 16
+
+
+def test_maximize_contact_walks_the_extra_bit_to_line_up() -> None:
+    crate = Rect(160, 48, 16, 16)
+    goal = RectGoal(crate, frozenset({(Edge.LEFT, Edge.RIGHT)}))
+    loose = plan(start=BODY, goal=goal, obstacles=[crate])
+    flush = plan(start=BODY, goal=goal, obstacles=[crate], maximize_contact=True)
+
+    assert flush.reached
+    assert flush.misalignment == 0
+    assert flush.contact == pytest.approx(16)  # the whole shared edge
+    assert flush.final.left == pytest.approx(176)
+    assert flush.final.top == pytest.approx(crate.top)
+    assert flush.length >= loose.length  # alignment is paid for in walking
+
+
+def test_maximize_contact_costs_more_expansions() -> None:
+    crate = Rect(160, 48, 16, 16)
+    goal = RectGoal.horizontal(crate)
+    loose = plan(start=BODY, goal=goal, obstacles=[crate])
+    flush = plan(start=BODY, goal=goal, obstacles=[crate], maximize_contact=True)
+
+    assert flush.nodes_expanded >= loose.nodes_expanded
+
+
+def test_enough_contact_refuses_arrivals_below_the_bar() -> None:
+    crate = Rect(160, 48, 16, 16)
+    goal = RectGoal(crate, frozenset({(Edge.LEFT, Edge.RIGHT)}))
+    path = plan(start=BODY, goal=goal, obstacles=[crate], enough_contact=16)
+
+    assert path.reached
+    assert path.contact >= 16
+    assert path.final.top == pytest.approx(crate.top)
+
+
+def test_enough_contact_that_cannot_be_met_fails_cleanly() -> None:
+    # Side-by-side contact is measured along the *vertical* edges, so it is
+    # the crate's 8px height that caps it: a 16px body can never share more
+    # than 8px of edge with it, however it approaches.
+    crate = Rect(160, 48, 16, 8)
+    path = plan(
+        start=BODY,
+        goal=RectGoal.vertical(crate),
+        obstacles=[crate],
+        enough_contact=16,
+    )
+
+    assert not path.reached
+
+
+def test_enough_contact_ignores_goals_with_nothing_to_measure() -> None:
+    # A point has no edge to share, so a contact requirement cannot make it
+    # unreachable.
+    path = plan(start=BODY, goal=PointGoal(Point(120, 40)), enough_contact=999)
+
+    assert path.reached
+    assert path.contact == math.inf
+
+
+def test_maximize_contact_applies_to_a_parallel_segment_goal() -> None:
+    # A vertical line only half as tall as the world: arriving at its very
+    # end touches it with 0px of the body's edge, arriving level with it
+    # touches with all 16.
+    threshold = Segment(Point(200, 60), Point(200, 112))
+    goal = SegmentGoal.of(threshold, {Edge.RIGHT})
+    loose = plan(start=BODY, goal=goal)
+    flush = plan(start=BODY, goal=goal, maximize_contact=True)
+
+    assert loose.reached and flush.reached
+    assert flush.contact >= loose.contact
+    assert flush.contact == pytest.approx(16)
+    assert flush.misalignment == 0
+
+
+def test_an_oblique_segment_expresses_no_alignment_preference() -> None:
+    goal = SegmentGoal.of(Segment(Point(120, 0), Point(200, 112)), {Edge.RIGHT})
+    path = plan(start=BODY, goal=goal, maximize_contact=True, enough_contact=8)
+
+    assert path.reached
+    assert path.misalignment == 0
+    assert path.contact == math.inf
+
+
+def test_a_start_that_already_arrived_still_lines_up_when_asked() -> None:
+    crate = Rect(48, 48, 16, 16)
+    body = Rect(32, 56, 16, 16)  # left edge already on the crate's left side
+    goal = RectGoal(crate, frozenset({(Edge.RIGHT, Edge.LEFT)}))
+
+    assert goal.is_reached(body)
+    assert not plan(start=body, goal=goal, obstacles=[crate]).steps
+
+    flush = plan(start=body, goal=goal, obstacles=[crate], maximize_contact=True)
+    assert flush.steps
+    assert flush.misalignment == 0
+    assert flush.final.top == pytest.approx(crate.top)
+
+
 def test_a_body_starting_inside_an_obstacle_can_still_escape() -> None:
     # It cannot get out in one step, so the crate it stands in is dropped
     # from the collision set -- but every *other* obstacle still applies.
