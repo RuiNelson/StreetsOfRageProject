@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 
-from .pathfind import Path
+from .pathfind import Path, Point, PointGoal
 from .tokens import (
     CounterGrab,
     DodgeAntonioKick,
@@ -917,7 +917,57 @@ def _retreat_from_danger_target(
 def state_machine_retreat_from_danger(
     verb: RetreatFromDanger, context: Context, gamepad: VirtualGamepad
 ) -> None:
-    _walk_toward_target(verb, context, gamepad, Enemy, _retreat_from_danger_target)
+    """Back off to ``_retreat_from_danger_target``'s point, routed.
+
+    The destination itself is untouched -- SafeSpot preference, hysteresis-
+    anchored fallback direction, all still `_retreat_from_danger_target`'s
+    call, tuned from live measurement. What was missing was *how* to get
+    there: an un-routed retreat walks a straight line, which can cross
+    another enemy's body or reach band, or cut through ground a pit actually
+    blocks even where the straight-line dodge in `_movement_mask` happens to
+    miss it -- exactly the geometry `navigation.py`'s obstacle sets exist to
+    avoid.
+
+    Every live enemy counts as danger here, not only the one being fled --
+    unlike the approach verbs there is no "target is exempt" case: retreating
+    is never trying to stand *in* anyone's reach, so nothing needs to be
+    excused from its own danger set the way `state_machine_walk_to_near_
+    enemy` excuses the enemy it is walking up to.
+
+    Tolerance is `MOVE_DEADBAND_X`, the same scale `_movement_mask`'s own
+    deadbands already treat as "close enough to stop steering" -- a `PointGoal`
+    would otherwise never be satisfied on a lattice whose steps don't land
+    exactly on an arbitrary target pixel.
+    """
+
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Enemy, slot=verb.target_slot)
+    if actor is None or target is None:
+        gamepad.release()
+        return
+
+    target_x, target_y = _retreat_from_danger_target(actor, target, context)
+    goal = PointGoal(Point(target_x, target_y), tolerance=MOVE_DEADBAND_X)
+    solids, dangers = nav.obstacle_sets(
+        context,
+        block_x=BREAKABLE_BLOCK_X,
+        body=nav.body_rect(actor),
+    )
+
+    def straight_line() -> int:
+        return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)
+
+    _hold_steered(
+        gamepad,
+        _routed_mask(
+            context,
+            actor,
+            goal,
+            solids=solids,
+            dangers=dangers,
+            fallback=straight_line,
+        ),
+    )
 
 
 # How far to step off a projectile's lane per tick -- comfortably past

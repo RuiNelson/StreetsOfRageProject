@@ -751,6 +751,44 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
 
         client.hold_buttons.assert_not_called()
 
+    def test_routes_around_another_enemy_on_the_straight_retreat_line(self) -> None:
+        """`_movement_mask`'s straight-line fallback only ever dodges pits
+        and breakables -- it has no idea a *third* enemy's body sits on the
+        way to safety, exactly the geometry `navigation.py`'s obstacle sets
+        exist to avoid. Put one squarely on the straight retreat line and
+        check the whole trail steers clear of it while still ending up
+        farther from the fleeing threat than it started.
+
+        Uses a ``SafeSpot`` 80px away rather than the 32px default retreat
+        distance -- that's still `_retreat_from_danger_target`'s existing,
+        untouched SafeSpot preference, just given a destination far enough
+        out to leave clearance for a second enemy's body on both sides of
+        it (RETREAT_FROM_DANGER_DISTANCE alone is too short for any body to
+        fit between two 16px-wide actors without touching one of them).
+        """
+
+        from sor_autoplay.ai import navigation as nav
+
+        actor = _myself(world_x=100, world_y=50)
+        threat = replace(_enemy(world_x=150, world_y=50), combat_phase=CombatPhase.ATTACKING)
+        safe_spot = SafeSpot(actor_slot="P1", world_x=20, world_y=50)
+        blocker = replace(_enemy(world_x=60, world_y=50), slot="obj02")
+        verb = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
+
+        trail = _walk(verb, actor, [threat, blocker, safe_spot])
+
+        blocker_rect = nav.enemy_rects(blocker)[0]
+        for state in trail:
+            self.assertFalse(
+                _body_of(state).overlaps(blocker_rect),
+                f"retreat walked through the blocker at {state.world_x},{state.world_y}",
+            )
+        self.assertLess(trail[-1].world_x, trail[0].world_x)
+        self.assertGreater(
+            abs(trail[-1].world_x - threat.world_x),
+            abs(trail[0].world_x - threat.world_x),
+        )
+
 
 def _projectile(*, world_x: int = 0, world_y: int = 0, vel_x: float = -5.0) -> Projectile:
     return Projectile(
