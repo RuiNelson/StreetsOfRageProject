@@ -633,11 +633,14 @@ def _advance_blocking_breakables(context: Context) -> list[Breakable]:
 
     A Breakable blocks lateral progress until destroyed. WalkToAdvanceStage
     walking into one, then OpenBreakable walking back (or around) to smash
-    it, is a limit cycle: OpenBreakable's approach score is 14 down to 8
-    by distance, WalkToAdvanceStage is a flat 12, and they hand the tick
-    back and forth the moment hypot-distance crosses ~30-45px. Reported
-    from play as the HUD flipping WalkToBreakable / WalkToAdvanceStage
-    for as long as a crate was on screen.
+    it, used to be a limit cycle: OpenBreakable's approach score is 14 down
+    to 8 by distance, and WalkToAdvanceStage used to be a flat 12, so they
+    handed the tick back and forth the moment hypot-distance crossed
+    ~30-45px. Reported from play as the HUD flipping WalkToBreakable /
+    WalkToAdvanceStage for as long as a crate was on screen. Advance now
+    scores 1 (and 0 while a blocking crate exists), so the cycle cannot
+    return, but this gate still refuses to produce the verb next to
+    OpenBreakable.
 
     Same camera and pit filters as ``could_open_breakable``, so a crate
     this refuses to walk to cannot hold back advance either.

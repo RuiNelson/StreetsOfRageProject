@@ -14,6 +14,7 @@ from sor_autoplay.ai.tokens import (
     Punch,
     RearAttack,
     ScorePickup,
+    SpecialPickup,
     OpenBreakable,
     SprayPepper,
     StabWithKnifeOrBottle,
@@ -25,7 +26,7 @@ from sor_autoplay.ai.tokens import (
     Weapon,
 )
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import AttackRange, ClosingEnemy, Enemy, Garcia, Nora
+from sor_autoplay.ai.tokens import AttackRange, ClosingEnemy, Enemy, Garcia, Jack, Nora
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
     HandleContinueMenu,
@@ -823,7 +824,8 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
     def test_advance_stage_scores_zero_when_a_breakable_sits_ahead(self) -> None:
         # Same gate as decide.could_walk_to_advance_stage, so an injected
         # WalkToAdvanceStage cannot outrank OpenBreakable just because the
-        # crate is far enough for the approach score to drop below 12.
+        # crate is far enough that the approach score would once have
+        # dropped below the old advance floor of 12.
         myself = _myself(world_x=0, world_y=64)
         prop = Breakable(slot="obj01", world_x=200, world_y=64, type_id=0x40)
         context = {
@@ -1556,6 +1558,196 @@ class DetermineEmergencyProjectileSidestepTests(unittest.TestCase):
         verbs = find_all(result, Verb)
         self.assertEqual(len(verbs), 1)
         self.assertIsInstance(verbs[0], WalkToNearEnemy)
+
+
+class DetermineEmergencyAdvanceStageLowestTests(unittest.TestCase):
+    """WalkToAdvanceStage is the last-resort fallback: any other live verb
+    must beat it, including the lowest pickup tier."""
+
+    def test_score_pickup_beats_walk_to_advance_stage(self) -> None:
+        pickup = ScorePickup(slot="obj01", world_x=0, world_y=64, pickup_type=0x3F, points=3000)
+        context = {
+            _myself(),
+            pickup,
+            WalkToPickup(actor_slot="P1", target_slot="obj01"),
+            WalkToAdvanceStage(actor_slot="P1", direction="right"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToPickup)
+
+    def test_special_pickup_beats_walk_to_advance_stage(self) -> None:
+        pickup = SpecialPickup(slot="obj01", world_x=0, world_y=64, pickup_type=0x4F)
+        context = {
+            _myself(),
+            pickup,
+            WalkToPickup(actor_slot="P1", target_slot="obj01"),
+            WalkToAdvanceStage(actor_slot="P1", direction="right"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToPickup)
+
+
+def _garcia(slot: str, combat_phase: CombatPhase, **overrides) -> Garcia:
+    fields = dict(
+        slot=slot,
+        type_id=0x20,
+        world_x=0,
+        world_y=64,
+        health=10,
+        combat_phase=combat_phase,
+        targets_player=1,
+        facing_left=False,
+    )
+    fields.update(overrides)
+    return Garcia(**fields)
+
+
+def _jack(slot: str, combat_phase: CombatPhase, **overrides) -> Jack:
+    fields = dict(
+        slot=slot,
+        type_id=0x27,
+        world_x=0,
+        world_y=64,
+        health=10,
+        combat_phase=combat_phase,
+        targets_player=1,
+        facing_left=False,
+        has_projectile=False,
+    )
+    fields.update(overrides)
+    return Jack(**fields)
+
+
+def _antonio(slot: str, combat_phase: CombatPhase, **overrides) -> Antonio:
+    fields = dict(
+        slot=slot,
+        type_id=0x56,
+        world_x=0,
+        world_y=64,
+        health=20,
+        combat_phase=combat_phase,
+        targets_player=1,
+        facing_left=False,
+    )
+    fields.update(overrides)
+    return Antonio(**fields)
+
+
+class DetermineEmergencyTargetClassTests(unittest.TestCase):
+    """Armed ordinary enemies outrank other grunts; bosses outrank both.
+
+    The raise is sized to dominate WalkToNearEnemy's distance span, so a
+    far armed foe still beats a close unarmed one, and a far boss still
+    beats a close armed one.
+    """
+
+    def test_walk_prefers_a_far_armed_enemy_over_a_close_unarmed_one(self) -> None:
+        myself = _myself(world_x=0, world_y=64)
+        close = _garcia("obj01", CombatPhase.NORMAL, world_x=10, world_y=64)
+        far_armed = _garcia(
+            "obj02", CombatPhase.NORMAL, world_x=150, world_y=64, held_weapon_type=0x0A
+        )
+        context = {
+            myself,
+            close,
+            far_armed,
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj02")
+
+    def test_walk_prefers_a_far_boss_over_a_close_armed_enemy(self) -> None:
+        myself = _myself(world_x=0, world_y=64)
+        close_armed = _garcia(
+            "obj01", CombatPhase.NORMAL, world_x=10, world_y=64, held_weapon_type=0x08
+        )
+        far_boss = _antonio("obj02", CombatPhase.NORMAL, world_x=150, world_y=64)
+        context = {
+            myself,
+            close_armed,
+            far_boss,
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj02")
+
+    def test_punch_prefers_an_armed_enemy_over_an_unarmed_one(self) -> None:
+        myself = _myself(world_x=0, world_y=64)
+        unarmed = _garcia("obj01", CombatPhase.NORMAL, world_x=30, world_y=64)
+        armed = _garcia(
+            "obj02", CombatPhase.NORMAL, world_x=40, world_y=64, held_weapon_type=0x0B
+        )
+        context = {
+            myself,
+            unarmed,
+            armed,
+            Punch(actor_slot="P1", target_slot="obj01"),
+            Punch(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj02")
+
+    def test_jack_juggling_counts_as_armed(self) -> None:
+        myself = _myself(world_x=0, world_y=64)
+        close = _garcia("obj01", CombatPhase.NORMAL, world_x=10, world_y=64)
+        jack = _jack(
+            "obj02", CombatPhase.NORMAL, world_x=150, world_y=64, has_projectile=True
+        )
+        context = {
+            myself,
+            close,
+            jack,
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj02")
+
+    def test_jack_without_the_axe_does_not_outrank_a_closer_grunt(self) -> None:
+        myself = _myself(world_x=0, world_y=64)
+        close = _garcia("obj01", CombatPhase.NORMAL, world_x=10, world_y=64)
+        jack = _jack(
+            "obj02", CombatPhase.NORMAL, world_x=150, world_y=64, has_projectile=False
+        )
+        context = {
+            myself,
+            close,
+            jack,
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertEqual(verbs[0].target_slot, "obj01")
 
 
 class DeterminePriorityTieBreakTests(unittest.TestCase):

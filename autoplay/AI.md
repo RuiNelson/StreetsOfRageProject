@@ -677,7 +677,14 @@ Where multiple `Verb` tokens share the same rank of emergency
 (typically because their emergency is zero), each `Token` additionally
 carries a `priority` property, independent of the rest of the context,
 used to break the tie — for example, picking up a weapon carries a higher
-priority than advancing to the next stage.
+priority than advancing to the next stage. `WalkToAdvanceStage` itself
+always has the lowest emergency of any verb that still scores, so a
+pickup, a walk-in, or an attack will beat it whenever one is available.
+
+Among enemy targets, a `Boss` outranks an armed ordinary enemy, and an
+armed ordinary enemy (pickup `$08-$0C`, or Jack still juggling his axe)
+outranks every other grunt. That class raise is applied to engagement
+verbs and is large enough that distance cannot invert it.
 
 Where multiple tokens still share the same emergency and the same
 priority, the AI selects one of them at random. This is treated as a

@@ -153,6 +153,11 @@ OBJ_BOSS_DIST_LANE = 0x52
 # when state $0E launches it. Keep this distinct from the boss distance alias.
 OBJ_FAMILY_STATE = 0x52
 OBJ_JACK_WEAPON_ATTACHED = 0x52
+# Weapon +$52: holder object pointer (low 16 of the 68000 address). Same
+# offset as ordinary-enemy family_state / later-boss lane distance; only
+# meaningful for kind=="weapon" while interaction==1 (held). Enemies do not
+# store the weapon type at +$60 (that word is their scripted approach X).
+OBJ_WEAPON_HOLDER = 0x52
 # Type-$0F continue / high-score name-entry object (see player-health-lives-and-combat.md).
 # Bit7 set → high_score_name_entry_dispatcher; clear → continue Yes/No table at $5236.
 OBJ_CONTINUE_UI_FLAGS = 0x4B

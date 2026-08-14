@@ -75,6 +75,19 @@ class EnemyTests(unittest.TestCase):
         self.assertIsNone(enemy.health)
         self.assertIsNone(enemy.targets_player)
 
+    def test_held_weapon_type_defaults_to_zero(self) -> None:
+        enemy = Enemy(
+            slot="obj07",
+            type_id=0x20,
+            world_x=900,
+            world_y=64,
+            health=6,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=None,
+            facing_left=False,
+        )
+        self.assertEqual(enemy.held_weapon_type, 0)
+
     def test_grunt_velocity_defaults_to_zero(self) -> None:
         enemy = Enemy(
             slot="obj07",

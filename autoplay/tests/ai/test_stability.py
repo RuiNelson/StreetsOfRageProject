@@ -553,9 +553,11 @@ class BreakableAdvanceStabilityTests(unittest.TestCase):
     """OpenBreakable vs WalkToAdvanceStage must not hand a crate back and
     forth. Reported from play as the HUD flipping WalkToBreakable /
     WalkToAdvanceStage for as long as a prop was on screen: the approach
-    score (14 down to 8) crosses the advance's flat 12 around 30-45px,
-    and the around-path walking left off a same-X crate made the hypot
-    distance grow until advance won, walked right, and handed it back."""
+    score (14 down to 8) used to cross the advance's then-flat 12 around
+    30-45px, and the around-path walking left off a same-X crate made the
+    hypot distance grow until advance won, walked right, and handed it
+    back. Advance now sits at 1 (and scores 0 while a blocking crate
+    exists), so the cycle cannot return from ranking alone."""
 
     def _run_crate(
         self, *, ticks: int, actor_x: int, actor_y: int, prop_x: int, prop_y: int
@@ -597,8 +599,8 @@ class BreakableAdvanceStabilityTests(unittest.TestCase):
 
     def test_does_not_flip_between_opening_and_advancing_at_a_crate(self) -> None:
         # Same-lane crate ~60px ahead: far enough that the old approach
-        # score sat at or under WalkToAdvanceStage's 12, so every other
-        # tick swapped the verb and the D-pad reversed.
+        # score sat at or under WalkToAdvanceStage's then-12, so every
+        # other tick swapped the verb and the D-pad reversed.
         masks, names = self._run_crate(
             ticks=24, actor_x=100, actor_y=64, prop_x=160, prop_y=64
         )

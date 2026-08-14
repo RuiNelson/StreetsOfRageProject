@@ -9,6 +9,7 @@ from sor_autoplay.memory_map import (
     OBJ_INTERACTION,
     OBJ_ITEM_PARAM,
     OBJ_JACK_WEAPON_ATTACHED,
+    OBJ_WEAPON_HOLDER,
     OBJ_POS_X,
     OBJ_POS_Y,
     OBJ_POS_Z,
@@ -385,6 +386,41 @@ class WorldMapParseTests(unittest.TestCase):
         )
         jack = next(entity for entity in world.entities if entity.type_id == 0x27)
         self.assertEqual(jack.family_state, 0x01)
+
+    def test_enemy_held_weapon_is_stamped_from_the_weapon_holder_pointer(self) -> None:
+        # Ordinary-enemy +$60 is the scripted approach X, not a weapon type.
+        # The held bat lives as its own object with +$51==1 and +$52 pointing
+        # at the enemy slot; parse_world_map copies that type onto the enemy.
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+
+        enemy_base = 0x100
+        _put_u8(actors, enemy_base + OBJ_TYPE, 0x20)
+        _put_u8(actors, enemy_base + OBJ_FLAGS, 0x0C)
+        _put_fixed16(actors, enemy_base + OBJ_POS_X, 848)
+        _put_fixed16(actors, enemy_base + OBJ_POS_Y, 64)
+        _put_fixed16(actors, enemy_base + OBJ_POS_Z, 160)
+        _put_u16(actors, enemy_base + OBJ_PRIMARY_STATE, 0x0100)
+        _put_u16(actors, enemy_base + OBJ_HEALTH, 10)
+
+        weapon_base = 0x100 + OBJECT_SLOT_SIZE
+        _put_u8(actors, weapon_base + OBJ_TYPE, 0x0A)  # bat
+        _put_u8(actors, weapon_base + OBJ_FLAGS, 0x00)
+        _put_fixed16(actors, weapon_base + OBJ_POS_X, 848)
+        _put_fixed16(actors, weapon_base + OBJ_POS_Y, 64)
+        _put_fixed16(actors, weapon_base + OBJ_POS_Z, 160)
+        _put_u8(actors, weapon_base + OBJ_ITEM_PARAM, 0)
+        _put_u8(actors, weapon_base + OBJ_INTERACTION, 1)
+        # Object-table slot 0 lives at $FFB900; the ROM stores the low word.
+        _put_u16(actors, weapon_base + OBJ_WEAPON_HOLDER, 0xB900)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+        enemy = next(entity for entity in world.entities if entity.type_id == 0x20)
+        self.assertEqual(enemy.slot, "obj00")
+        self.assertEqual(enemy.held_type, 0x0A)
 
     def test_bottom_of_lane_is_bottom_of_camera(self) -> None:
         actors = bytearray(ACTORS_BYTES)

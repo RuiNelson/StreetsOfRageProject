@@ -41,7 +41,10 @@ class WalkToNearEnemy(Walk):
     caution-zone skip below is front-only.
 
     Raises emergency: Enemy×14, closer scoring higher (distance-scored;
-    see priority._emergency_walk_to_near_enemy).
+    see priority._emergency_walk_to_near_enemy). An armed ordinary enemy
+    adds ``priority._EMERGENCY_ARMED_TARGET`` and a ``Boss`` adds
+    ``priority._EMERGENCY_BOSS_TARGET``, so a far armed foe still outranks
+    a close unarmed one and a boss outranks both.
     """
 
     priority: int = 20
@@ -60,11 +63,12 @@ class WalkToAdvanceStage(Walk):
     on the stage path (``decide._advance_blocking_breakables``), and the
     stage has a progress direction.
 
-    Raises emergency: (no blocking Enemy or ahead Breakable)×12.
+    Raises emergency: (no blocking Enemy or ahead Breakable)×1.
 
-    Lowest of the Walk/Attack priorities: per AI.md, "picking up a weapon
-    carries a higher priority than advancing to the next stage" -- this is
-    the fallback when nothing more specific applies.
+    Lowest emergency of any verb that still scores: per AI.md, "picking up
+    a weapon carries a higher priority than advancing to the next stage"
+    -- this is the fallback when nothing more specific applies, and it
+    must lose to every other live candidate (including a ScorePickup).
     """
 
     priority: int = 5

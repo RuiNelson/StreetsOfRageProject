@@ -49,6 +49,11 @@ class Enemy(Character):
     grunt_vel_y: float = 0.0  # +$20 signed 16.16 (lane), ordinary enemies only
     hitbox: Hitbox | None = None
     attack_ranges: tuple[AttackRange, ...] = ()
+    # Pickup weapon type $08-$0C while this enemy is holding one, else 0.
+    # Ordinary enemies do not store this at +$60 (that word is their
+    # scripted approach X); observe copies it from MapEntity.held_type,
+    # which world_map resolves from the held weapon's +$52 holder pointer.
+    held_weapon_type: int = 0
 
     def predict_position_after_n_frames(self, n_frames: int) -> tuple[int, int]:
         """Where this enemy stands ``n_frames`` from now, on its own velocity.

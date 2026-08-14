@@ -120,7 +120,8 @@ class Punch(MeleeAttacks):
     Produced by ``could_punch`` when the actor holds no weapon and an
     ``InPunchReach`` names an enemy its forward strike would connect with.
 
-    Raises emergency: (PunishWindow for the target)×60, Enemy×20.
+    Raises emergency: (PunishWindow for the target)×60, Enemy×20; plus
+    the armed/boss target-class raise (see priority._with_target_class).
     """
 
     priority: int = 10

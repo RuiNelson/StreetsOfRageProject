@@ -246,6 +246,7 @@ def generate_direct_observation_tokens(
                     grunt_vel_y=entity.enemy_vel_y,
                     hitbox=entity.hitbox,
                     attack_ranges=entity.attack_ranges,
+                    held_weapon_type=entity.held_type,
                     **extra,
                 )
             )

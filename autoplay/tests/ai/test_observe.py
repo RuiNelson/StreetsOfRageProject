@@ -120,6 +120,7 @@ def _enemy_entity(
     enemy_vel_x: float = 0.0,
     enemy_vel_y: float = 0.0,
     stun_timer: int = 0,
+    held_type: int = 0,
 ) -> MapEntity:
     return MapEntity(
         kind=kind,
@@ -151,6 +152,7 @@ def _enemy_entity(
         enemy_vel_x=enemy_vel_x,
         enemy_vel_y=enemy_vel_y,
         stun_timer=stun_timer,
+        held_type=held_type,
     )
 
 
@@ -453,6 +455,22 @@ class EnemySubclassObservationTests(unittest.TestCase):
         enemies = find_all(context, Enemy)
         self.assertEqual(len(enemies), 1)
         self.assertIsInstance(enemies[0], Garcia)
+
+    def test_garcia_carries_held_weapon_type(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        entities = (
+            _player_entity(slot="P1"),
+            _enemy_entity(slot="obj00", type_id=0x20, held_type=0x0A),
+        )
+        snapshot = _snapshot(players=(p1, p2), entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        garcia = find(context, Garcia, slot="obj00")
+        self.assertIsNotNone(garcia)
+        assert garcia is not None
+        self.assertEqual(garcia.held_weapon_type, 0x0A)
 
     def test_jack_type_derives_has_projectile_from_family_state_bit0(self) -> None:
         p1 = _player_snapshot(index=1)

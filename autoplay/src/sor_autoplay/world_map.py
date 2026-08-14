@@ -140,7 +140,10 @@ class MapEntity:
     action_state: int = 0  # low byte of +$30 (player action / boss primary)
     primary_state: int = 0  # full word at +$30 (ordinary enemy $0100 steps)
     character_id: int | None = None  # player-only; 0/1/2 = Axel/Adam/Blaze
-    held_type: int = 0  # player +$60; nonzero while holding weapon/grab target
+    # Player +$60 (weapon/grab type), or an ordinary enemy's currently held
+    # pickup weapon ($08-$0C) resolved from the weapon object's +$52 holder
+    # pointer. Enemies do not store the weapon type on themselves.
+    held_type: int = 0
     held_ptr: int = 0  # player +$5E low word
     contact_ptr: int = 0  # player +$4C contact/grab partner (live hold uses this)
     outgoing_damage: int = 0  # +$34 active hit frame damage nibble
@@ -390,6 +393,51 @@ class WorldMap:
         return counts
 
 
+def _slot_name_from_object_ptr(ptr: int) -> str | None:
+    """Map a 68000 object pointer (low 16) to the slot name ``parse_world_map`` uses.
+
+    Live dumps store only the low word (``$B800`` for P1, ``$B900`` for
+    object-table slot 0). Returns ``None`` for a null or out-of-range pointer.
+    """
+
+    low = ptr & 0xFFFF
+    p1 = mm.ADDR_P1_OBJECT & 0xFFFF
+    p2 = mm.ADDR_P2_OBJECT & 0xFFFF
+    table = mm.ADDR_OBJECT_TABLE & 0xFFFF
+    if p1 <= low < p2:
+        return "P1"
+    if p2 <= low < table:
+        return "P2"
+    if low >= table:
+        index = (low - table) // OBJECT_SLOT_SIZE
+        if 0 <= index < OBJECT_SLOT_COUNT:
+            return f"obj{index:02d}"
+    return None
+
+
+def _held_weapons_by_holder(table: bytes) -> dict[str, int]:
+    """Holder slot name → weapon type for weapons currently reserved/held.
+
+    Scans the raw object table so a SAT-hidden held weapon (the sprite is
+    attached to the holder) still stamps the enemy that is carrying it.
+    ``interaction == 1`` is the held/used command (items-and-weapons.md).
+    """
+
+    held: dict[str, int] = {}
+    for i in range(OBJECT_SLOT_COUNT):
+        off = i * OBJECT_SLOT_SIZE
+        slot = table[off : off + OBJECT_SLOT_SIZE]
+        type_id = _u8(slot, mm.OBJ_TYPE)
+        if not (0x08 <= type_id <= 0x0C):
+            continue
+        if _u8(slot, mm.OBJ_INTERACTION) != 1:
+            continue
+        name = _slot_name_from_object_ptr(_u16(slot, mm.OBJ_WEAPON_HOLDER))
+        if name is not None:
+            held[name] = type_id
+    return held
+
+
 def _u8(data: bytes, offset: int) -> int:
     return data[offset]
 
@@ -506,6 +554,7 @@ def _entity_from_object(
     character_id: int | None = None,
     police_special_active: bool = False,
     rom: RomData | None = None,
+    held_weapon_type: int = 0,
 ) -> MapEntity | None:
     if len(slot) < OBJECT_SLOT_SIZE:
         return None
@@ -570,6 +619,9 @@ def _entity_from_object(
         # Same +$1C X-velocity word Antonio's kick gate ($16EAE) reads.
         player_vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X_ORDINARY)
     elif style.kind == "enemy":
+        # Resolved from the weapon object's +$52 holder pointer, not from
+        # this slot: ordinary-enemy +$60 is the scripted approach X.
+        held_type = held_weapon_type
         target_ptr = _u16(slot, mm.OBJ_TARGET_PTR)
         attacker_ptr = _u16(slot, mm.OBJ_ATTACKER_PTR)
         family_state = _u8(slot, mm.OBJ_FAMILY_STATE)
@@ -856,6 +908,7 @@ def parse_world_map(
             entities.append(entity)
 
     table = actors_block[0x100 : 0x100 + OBJECT_TABLE_BYTES]
+    held_by_holder = _held_weapons_by_holder(table)
     for i in range(OBJECT_SLOT_COUNT):
         off = i * OBJECT_SLOT_SIZE
         slot = table[off : off + OBJECT_SLOT_SIZE]
@@ -868,14 +921,18 @@ def parse_world_map(
         )
         if style is None or style.kind == "player":
             continue
+        slot_name = f"obj{i:02d}"
         entity = _entity_from_object(
             slot,
-            slot_name=f"obj{i:02d}",
+            slot_name=slot_name,
             style=style,
             type_id=type_id,
             camera_x=camera_x,
             police_special_active=police_special_active,
             rom=rom,
+            held_weapon_type=(
+                held_by_holder.get(slot_name, 0) if style.kind == "enemy" else 0
+            ),
         )
         if entity is not None and _include_entity(entity, slot, lane_max=lane_max):
             entities.append(entity)

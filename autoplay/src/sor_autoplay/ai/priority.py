@@ -54,7 +54,7 @@ from .tokens import (
     ThrowPepper,
 )
 from .tokens import Myself, Partner
-from .tokens import Breakable, Enemy, Grunt, Nora
+from .tokens import Boss, Breakable, Enemy, Grunt, Jack, Nora
 from .tokens import (
     AntonioIsGoingToKick,
     GrabOpportunity,
@@ -72,6 +72,7 @@ from .tokens import (
     Pickup,
     ScorePickup,
     SpecialPickup,
+    is_weapon_type,
 )
 from .tokens import CallPolice
 from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDialog
@@ -259,8 +260,21 @@ _EMERGENCY_DODGE_ANTONIO_KICK = 58
 # under the grounded dodge so a hop that has already started is not
 # abandoned, well above a routine jump (18).
 _EMERGENCY_JUMP_OVER_ANTONIO_KICK = 56
-# No live enemy left anywhere (on-screen or not) → push stage (was 5).
-_EMERGENCY_WALK_TO_ADVANCE_STAGE = 12
+# Lowest of any verb that still scores. Must sit under every other live
+# candidate -- including ScorePickup (9), SpecialPickup (11), LifePickup
+# (12), and WalkToNearEnemy's floor (8) -- so stage advance is only chosen
+# when nothing else applies. The previous 12 beat pickups and distant
+# approaches; the blocking-enemy / blocking-breakable gates already zero
+# this verb when those targets exist, so the high floor is no longer needed
+# to win those contests.
+_EMERGENCY_WALK_TO_ADVANCE_STAGE = 1
+# Added to an engagement verb (walk-in, strike, grab, throw) whose target
+# is an armed ordinary enemy or a Boss. Sized to dominate WalkToNearEnemy's
+# 6-point distance span (base 14, floor 8) so a far armed foe still beats a
+# close unarmed one, and a far boss still beats a close armed one. Bosses
+# are excepted from the armed bonus -- they get this larger raise instead.
+_EMERGENCY_ARMED_TARGET = 7
+_EMERGENCY_BOSS_TARGET = 14
 _EMERGENCY_DEFAULT = 0
 
 
@@ -292,6 +306,48 @@ def _distance_emergency(distance: float, *, base: int, floor: int, step_px: floa
     """
 
     return max(floor, base - int(distance // step_px))
+
+
+def _enemy_is_armed(target: Enemy) -> bool:
+    """Whether this ordinary enemy is carrying a weapon right now.
+
+    A pickup ($08-$0C) on ``held_weapon_type``, or Jack still juggling his
+    axe/torch. Bosses are not "armed" in this sense -- they have their own
+    raise -- so callers check ``Boss`` first.
+    """
+
+    if is_weapon_type(target.held_weapon_type):
+        return True
+    return isinstance(target, Jack) and target.has_projectile
+
+
+def _target_class_bonus(target: Enemy | None) -> int:
+    """How much extra an engagement verb is worth against this enemy.
+
+    Bosses first, then armed ordinary enemies, then everyone else. The
+    bonuses dominate distance scoring so the class rank cannot lose to a
+    closer but less important body.
+    """
+
+    if target is None:
+        return 0
+    if isinstance(target, Boss):
+        return _EMERGENCY_BOSS_TARGET
+    if _enemy_is_armed(target):
+        return _EMERGENCY_ARMED_TARGET
+    return 0
+
+
+def _with_target_class(score: int, target: Enemy | None) -> int:
+    """Apply the boss/armed raise to a score that already qualified.
+
+    A 0 stays 0: a verb whose own condition failed (target gone, threat
+    over, out of range) must not be revived by who it was aimed at.
+    """
+
+    if score <= _EMERGENCY_DEFAULT:
+        return score
+    return score + _target_class_bonus(target)
 
 
 def _emergency_counter_grab(verb: CounterGrab, context: Context) -> int:
@@ -354,12 +410,14 @@ def _emergency_rear_attack(verb: RearAttack, context: Context) -> int:
         actor, target, reach.live_enemies(context)
     )
     if warranted:
-        return _EMERGENCY_REAR_ATTACK_DANGEROUS if dangerous else _EMERGENCY_REAR_ATTACK
-    return (
-        _EMERGENCY_REAR_ATTACK_UNWARRANTED_DANGEROUS
-        if dangerous
-        else _EMERGENCY_REAR_ATTACK_UNWARRANTED
-    )
+        score = _EMERGENCY_REAR_ATTACK_DANGEROUS if dangerous else _EMERGENCY_REAR_ATTACK
+    else:
+        score = (
+            _EMERGENCY_REAR_ATTACK_UNWARRANTED_DANGEROUS
+            if dangerous
+            else _EMERGENCY_REAR_ATTACK_UNWARRANTED
+        )
+    return _with_target_class(score, target)
 
 
 def _is_punish_window(context: Context, target_slot: str | None) -> bool:
@@ -383,8 +441,8 @@ def _emergency_melee_strike(verb: Verb, context: Context) -> int:
     if target is None:
         return _EMERGENCY_DEFAULT
     if _is_punish_window(context, target.slot):
-        return _EMERGENCY_PUNCH_PUNISHABLE
-    return _EMERGENCY_PUNCH_DEFAULT
+        return _with_target_class(_EMERGENCY_PUNCH_PUNISHABLE, target)
+    return _with_target_class(_EMERGENCY_PUNCH_DEFAULT, target)
 
 
 def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
@@ -395,16 +453,16 @@ def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
         token.actor_slot == verb.actor_slot and token.target_slot == verb.target_slot
         for token in find_all(context, AntonioIsGoingToKick)
     ):
-        return _EMERGENCY_JUMP_OVER_ANTONIO_KICK
+        return _with_target_class(_EMERGENCY_JUMP_OVER_ANTONIO_KICK, target)
     if _is_punish_window(context, target.slot):
-        return _EMERGENCY_JUMP_ATTACK_PUNISHABLE
+        return _with_target_class(_EMERGENCY_JUMP_ATTACK_PUNISHABLE, target)
     if (
         isinstance(target, Nora)
         and not is_dangerous(target.combat_phase)
         and target.ticks_since_last_attack <= NORA_RECOVERY_PUNISH_TICKS
     ):
-        return _EMERGENCY_JUMP_ATTACK_NORA_RECOVERY
-    return _EMERGENCY_JUMP_ATTACK_DEFAULT
+        return _with_target_class(_EMERGENCY_JUMP_ATTACK_NORA_RECOVERY, target)
+    return _with_target_class(_EMERGENCY_JUMP_ATTACK_DEFAULT, target)
 
 
 def _emergency_dodge_antonio_kick(verb: DodgeAntonioKick, context: Context) -> int:
@@ -449,7 +507,7 @@ def _emergency_grab_enemy(verb: GrabEnemy, context: Context) -> int:
         score = max(score, _EMERGENCY_GRAB_CLEAR_REAR)
     if any(isinstance(token, GrabIntoDeadZone) for token in opportunities):
         score = max(score, _EMERGENCY_GRAB_DEAD_ZONE)
-    return score
+    return _with_target_class(score, find(context, Enemy, slot=verb.target_slot))
 
 
 def _emergency_open_breakable(verb: OpenBreakable, context: Context) -> int:
@@ -498,7 +556,10 @@ def _emergency_walk_to_near_enemy(verb: WalkToNearEnemy, context: Context) -> in
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
     distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
-    return _distance_emergency(distance, base=_EMERGENCY_WALK_TO_NEAR_ENEMY, floor=8, step_px=15)
+    return _with_target_class(
+        _distance_emergency(distance, base=_EMERGENCY_WALK_TO_NEAR_ENEMY, floor=8, step_px=15),
+        target,
+    )
 
 
 def _emergency_retreat_from_danger(verb: RetreatFromDanger, context: Context) -> int:
@@ -575,7 +636,10 @@ def _emergency_thrown_weapon(verb: Verb, context: Context, weight: int) -> int:
     # away scores below one standing still at the same instantaneous gap.
     impact = thrown_weapon_impact_point(actor, target, type(verb))
     distance = math.hypot(impact.world_x - actor.world_x, impact.world_y - actor.world_y)
-    return _distance_emergency(distance, base=weight, floor=weight - 4, step_px=15)
+    return _with_target_class(
+        _distance_emergency(distance, base=weight, floor=weight - 4, step_px=15),
+        target,
+    )
 
 
 def _emergency_throw_knife(verb: ThrowKnife, context: Context) -> int:
