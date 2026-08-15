@@ -932,6 +932,33 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
 
         client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
 
+    def test_sidesteps_a_pit_on_the_current_lane_instead_of_walking_in(self) -> None:
+        # Live-reported: the AI walked into a pit it had room to go around.
+        # A 40px PointGoal on the current Y sat inside the hole, the route
+        # was best-effort RIGHT, and the actor stepped in. The lookahead is
+        # now a vertical strip, so the walk must leave that lane and pass
+        # the hole without the origin ever sitting in it.
+        pit = Pit(world_x=400, lane_y=40, width=96, height=40)
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        trail = _walk(
+            verb,
+            _myself(world_x=360, world_y=60),
+            {pit, Stage(level_index=3, direction="right")},
+            ticks=80,
+        )
+
+        entered = [
+            (a.world_x, a.world_y)
+            for a in trail
+            if pit_endangers(pit, a.world_x, a.world_y)
+        ]
+        self.assertFalse(entered, f"walked into the pit at {entered[:3]}")
+        self.assertGreater(trail[-1].world_x, pit.world_x + pit.width)
+        self.assertTrue(
+            any(a.world_y != 60 for a in trail),
+            "stayed on the pit's lane the whole way",
+        )
+
     def test_routes_around_a_breakable_on_the_lookahead_line(self) -> None:
         # Breakables are still solid obstacles for this verb's router (the
         # same set the pre-routing ad-hoc dodge avoided), so a crate sitting

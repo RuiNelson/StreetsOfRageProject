@@ -255,6 +255,33 @@ class ObstacleTests(unittest.TestCase):
         )
 
 
+class AdvanceGoalTests(unittest.TestCase):
+    def test_a_pit_on_the_current_lane_is_walked_around_not_into(self) -> None:
+        # WalkToAdvanceStage used to aim a PointGoal 40px ahead on the
+        # actor's own Y. Once that point sat in the pit every covering
+        # cell was inside the hole, the search reported best-effort, and
+        # the first vector was RIGHT into the pit -- with room above it.
+        pit = Pit(world_x=400, lane_y=40, width=96, height=40)
+        actor = _myself(world_x=360, world_y=60)
+        camera = CameraRange(left=232, right=488, top=0, bottom=112)
+        context = {
+            actor,
+            pit,
+            camera,
+            Stage(level_index=3, direction="right"),
+        }
+        body, origin = nav.actor_footprint(actor)
+        solids = nav.solid_obstacles(context, body=body, origin=origin)
+        goal = nav.advance_goal(context, actor.world_x + 40)
+        path = nav.plan_route(context, actor, goal, solids=solids)
+
+        self.assertTrue(path.reached)
+        self.assertTrue(path.steps)
+        self.assertIsNot(path.steps[0].direction, nav.Direction.RIGHT)
+        for rect in path.positions():
+            self.assertFalse(any(rect.overlaps(solid) for solid in solids))
+
+
 class StrikeGoalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.body = Rect(0, 0, 16, 16)

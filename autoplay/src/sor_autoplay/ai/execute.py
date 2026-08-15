@@ -1172,29 +1172,34 @@ def state_machine_walk_to_advance_stage(
             or mask
         )
 
-    goal = nav.PointGoal(nav.Point(ahead_x, actor.world_y))
+    # A vertical strip, not a point on the current lane. This verb does not
+    # care which Y it advances on; pinning the lookahead to actor.world_y
+    # made a pit on that lane an unreachable point (every covering cell sat
+    # in the hole) and the search's best effort walked straight into it
+    # while the lane still had room above or below. The strip says "get
+    # 40px forward, take whichever Y is clear".
+    goal = nav.advance_goal(context, ahead_x)
     # Solids only (breakables + pits) -- deliberately no danger obstacles,
     # unlike WalkToNearEnemy/OpenBreakable. Tried it: nav.plan_route's two
     # passes are "avoid danger and reach the goal, else ignore danger
     # entirely and reach it through solids alone" -- right when the goal is a
-    # real destination, but this verb's goal is a 40px lookahead point that
-    # slides along with the actor every tick, and once a nearby dangerous
-    # enemy's own reach box is wide enough to contain that point, the
-    # danger-aware pass can never "reach" it (arriving there always means
-    # standing inside the thing being avoided), so plan_route falls straight
-    # through to the solids-only pass -- which does not know danger exists at
-    # all -- and the actor walks straight at the enemy, worse than doing
-    # nothing. Measured on a synthetic sweep (an ATTACKING enemy with a
-    # 48px reach box placed so the lookahead point lands inside it): the
-    # actor closed to within the reach box for several ticks with no dodge
-    # at all before the danger-aware pass happened to briefly succeed,
-    # confirming the failure mode rather than curing it. Solids alone do not
-    # have this problem -- a breakable or pit is real geometry the goal point
-    # itself is never placed inside of the way a lookahead 40px ahead
-    # routinely lands inside a nearby enemy's reach -- and matches exactly
-    # what the pre-routing ad-hoc dodge already avoided for this verb, so
-    # nothing about its danger handling regresses; only the breakable/pit
-    # detour quality improves.
+    # real destination, but this verb's goal slides forward with the actor
+    # every tick, and once a nearby dangerous enemy's own reach box is wide
+    # enough to contain that strip, the danger-aware pass can never "reach"
+    # it (arriving there always means standing inside the thing being
+    # avoided), so plan_route falls straight through to the solids-only pass
+    # -- which does not know danger exists at all -- and the actor walks
+    # straight at the enemy, worse than doing nothing. Measured on a
+    # synthetic sweep (an ATTACKING enemy with a 48px reach box placed so
+    # the lookahead lands inside it): the actor closed to within the reach
+    # box for several ticks with no dodge at all before the danger-aware
+    # pass happened to briefly succeed, confirming the failure mode rather
+    # than curing it. Solids alone do not have this problem -- a breakable
+    # or pit is real geometry the lookahead is never placed *inside* of the
+    # way a 40px-ahead mark routinely lands inside a nearby enemy's reach --
+    # and matches exactly what the pre-routing ad-hoc dodge already avoided
+    # for this verb, so nothing about its danger handling regresses; only
+    # the breakable/pit detour quality improves.
     body, origin = nav.actor_footprint(actor)
     solids = nav.solid_obstacles(context, body=body, origin=origin)
     # _routed_mask's own fallback discipline ("only fall back when the router

@@ -436,6 +436,21 @@ def strike_goal(
     return RegionGoal(tuple(regions), axis="y")
 
 
+def advance_goal(context: Context, ahead_x: float) -> Goal:
+    """A vertical strip at ``ahead_x``: any lane that has made that progress.
+
+    ``WalkToAdvanceStage`` has no lane to keep. A point on the actor's own
+    Y that sits in or behind a pit is unreachable -- every covering cell
+    is inside the hole -- so the search's best effort is "walk up to the
+    wall", which is a straight line into the pit on a lane that had room
+    above or below. The strip is the sentence the verb actually means:
+    get this far forward, take whichever Y is walkable.
+    """
+
+    lo, hi = lane_bounds(context)
+    return RegionGoal.of(Rect(ahead_x, lo, 1.0, max(1.0, hi - lo)), axis="x")
+
+
 def plan_route(
     context: Context,
     actor: Myself | Partner,
