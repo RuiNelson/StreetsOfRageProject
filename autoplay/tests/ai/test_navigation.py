@@ -20,6 +20,7 @@ from sor_autoplay.ai.reach import PIT_AVOID_MARGIN
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay.world_map import LANE_Y_MIN
+from sor_autoplay import prop_solids
 
 
 def _myself(*, world_x=0, world_y=0, hitbox=None) -> Myself:
@@ -197,6 +198,29 @@ class ObstacleTests(unittest.TestCase):
 
         self.assertGreater(inset.width, 0)
         self.assertGreater(inset.height, 0)
+
+    def test_standing_in_front_of_a_phone_booth_is_a_graze_not_burial(self) -> None:
+        # Type-$11 (and $19) is 14px on lane, walkable in front of its feet.
+        # The 1px floor of that rule overlaps a body standing legally just
+        # in front -- that must stay a graze. If the lattice treats it as
+        # "already inside" the wall vanishes and the route walks UP into
+        # the real solid.
+        from sor_autoplay.ai.pathfind.grid import Lattice
+
+        prop = Breakable(slot="obj09", world_x=280, world_y=40, type_id=0x11)
+        origin = (280.0, 44.0)
+        body = Rect(272, 36, 16, 16)
+        (inset,) = nav.solid_obstacles({prop}, body=body, origin=origin)
+        world = Rect(0, 0, 640, 112)
+        lattice = Lattice(start=body, world=world, obstacles=[inset], step=4)
+
+        self.assertTrue(inset.overlaps(body), "the 1px floor must still exist")
+        self.assertFalse(
+            prop_solids.solid_box(0x11, 280, 40).blocks(280, 44),
+            "y=44 is the first legal-in-front origin",
+        )
+        self.assertEqual(lattice.ignored, ())
+        self.assertEqual(lattice.obstacles, (inset,))
 
     def test_an_ignored_breakable_is_not_an_obstacle(self) -> None:
         prop = Breakable(slot="obj09", world_x=100, world_y=50, type_id=0x40)

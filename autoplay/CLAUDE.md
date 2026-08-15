@@ -17,6 +17,14 @@ pipeline and manuscript-grounded combat facts already wired in. Still future
 work: two-player coordination, six-button `--altControls`, and per-boss
 tactics beyond Antonio.
 
+**First-level breakables (user):** Round-1 phone booths (`$11`) and the
+type-`$19` family share the shallowest ROM solid (14px on lane vs a 16px
+body, walkable in front of the feet). The 1px conversion of that rule
+overlaps a body standing legally just in front -- that is a graze, not
+"already inside". The path finder may only ignore an obstacle whose
+interior contains the body's centre. Dropping any overlapping wall made
+the actor lose the booth, hold UP into the real solid, and freeze.
+
 **Target ranking (user):** `WalkToAdvanceStage` always has the lowest
 emergency of any verb that still scores. Among enemy targets, a `Boss`
 outranks an armed ordinary enemy, and an armed ordinary enemy (pickup

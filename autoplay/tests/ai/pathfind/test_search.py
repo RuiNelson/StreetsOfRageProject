@@ -427,6 +427,21 @@ def test_a_body_starting_inside_an_obstacle_can_still_escape() -> None:
         assert not rect.overlaps(wall)
 
 
+def test_a_one_pixel_graze_does_not_drop_the_wall() -> None:
+    # A body whose edge merely clips a 1px-tall floor is not "already
+    # inside" it. Dropping that wall is how a first-level phone booth
+    # vanished from the search while the actor stood legally in front.
+    from sor_autoplay.ai.pathfind.grid import Lattice
+
+    wall = Rect(80, 36.5, 40, 1.0)
+    start = Rect(92, 36, 16, 16)  # overlaps the 1px, centre at y=44
+    lattice = Lattice(start=start, world=WORLD, obstacles=[wall], step=4)
+
+    assert wall.overlaps(start)
+    assert lattice.ignored == ()
+    assert wall in lattice.obstacles
+
+
 def test_a_start_hanging_out_of_the_world_can_walk_back_in() -> None:
     path = plan(start=Rect(-8, 0, 16, 16), goal=PointGoal(Point(40, 8)))
 

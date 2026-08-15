@@ -225,7 +225,17 @@ def _shrunk(lo: float, hi: float, ahead: float, behind: float) -> tuple[float, f
     "the origin is inside" exactly. A zero-width one says nothing at all and
     is dropped by the lattice outright, turning the shallowest walls into no
     wall, so the floor is one pixel centred on the same ground: it
-    over-states such a rule slightly, which is the safe direction.
+    over-states such a rule slightly.
+
+    That over-statement reaches into the walkable-in-front band (every ROM
+    record ends 4px past the origin on lane). A body standing legally just
+    in front therefore overlaps the pixel. That is a *graze*, not "already
+    inside": the lattice must keep the wall (it only drops an obstacle whose
+    interior contains the body's centre) so the first step is sideways out
+    of the column, not UP through the real solid. Pinning the pixel to the
+    back of the interval instead left the front approach unblocked -- the
+    search walked UP, the ROM undid it, and the actor froze. Centre is the
+    placement that still blocks that UP step while leaving a DOWN escape.
     """
 
     low, high = lo + ahead, hi - behind

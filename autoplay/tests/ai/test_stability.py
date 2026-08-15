@@ -13,7 +13,7 @@ output back in the way the game would, and assert on the resulting sequence.
 import unittest
 from dataclasses import replace
 
-from sor_autoplay.ai.decide import generate_verb_tokens
+from sor_autoplay.ai.decide import generate_verb_tokens, in_smash_range
 from sor_autoplay.ai.execute import execute_verb
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.inference import generate_inference_tokens
@@ -31,6 +31,7 @@ from sor_autoplay.ai.tokens import (
     find_all,
 )
 from sor_autoplay.phases import CombatPhase
+from sor_autoplay import prop_solids
 
 UP = 0x0001
 DOWN = 0x0002
@@ -49,11 +50,13 @@ class _FakeClient:
 
     def __init__(self) -> None:
         self.held = 0
+        self.pressed = 0
 
     def hold_buttons(self, player1=0, player2=0):
         self.held = player1
 
     def press_buttons(self, player1=0, player2=0, frames=1):
+        self.pressed = player1
         self.held = player1
 
     def release_buttons(self, player1=0, player2=0):
@@ -657,6 +660,101 @@ class BreakableAdvanceStabilityTests(unittest.TestCase):
             any(mask & LEFT for mask in masks),
             f"turned back toward a passed crate: {[hex(m) for m in masks]}",
         )
+
+
+class FirstLevelBreakableStallTests(unittest.TestCase):
+    """Type-$11 phone booths (round 1) and type-$19 crates share the
+    shallowest ROM solid: 14px on lane against a 16px body, walkable in
+    front of the feet. Standing legally just in front used to drop that
+    wall from the search, after which OpenBreakable held UP into the real
+    solid forever."""
+
+    BOOTH_X = 280
+    BOOTH_Y = 40
+
+    def _run(
+        self, *, actor_x: int, actor_y: int, type_id: int = 0x11, ticks: int = 60
+    ) -> tuple[list[tuple[int, int]], list[int], bool]:
+        prop = Breakable(
+            slot="obj09", world_x=self.BOOTH_X, world_y=self.BOOTH_Y, type_id=type_id
+        )
+        wall = prop_solids.solid_box(type_id, self.BOOTH_X, self.BOOTH_Y)
+        ax, ay, facing_left = actor_x, actor_y, False
+        client = _FakeClient()
+        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+        trail: list[tuple[int, int]] = []
+        masks: list[int] = []
+        punched = False
+        for _ in range(ticks):
+            actor = _actor(ax, ay, facing_left)
+            context = {
+                actor,
+                prop,
+                CameraRange(left=0, right=640, top=0, bottom=112),
+                Stage(level_index=0, direction="right"),
+            }
+            context |= generate_inference_tokens(context)
+            context |= generate_verb_tokens(context)
+            context = determine_priority_verb(context)
+            verbs = find_all(context, Verb)
+            if verbs:
+                execute_verb(verbs[0], context, gamepad)
+            held = client.held
+            masks.append(held)
+            trail.append((ax, ay))
+            if client.pressed & B:
+                punched = True
+                break
+            nx = ax + (STEP_X if held & RIGHT else 0) - (STEP_X if held & LEFT else 0)
+            ny = ay + (STEP_Y if held & DOWN else 0) - (STEP_Y if held & UP else 0)
+            if wall.blocks(nx, ny):
+                nx, ny = ax, ay
+            if nx != ax:
+                facing_left = nx < ax
+            ax, ay = nx, ny
+        return trail, masks, punched
+
+    def test_does_not_freeze_in_front_of_a_phone_booth(self) -> None:
+        # First legal-in-front origin, same X as the booth -- the live stall.
+        trail, masks, punched = self._run(actor_x=self.BOOTH_X, actor_y=44)
+
+        self.assertTrue(
+            punched or any(
+                in_smash_range(_actor(x, y, False), Breakable(
+                    slot="obj09",
+                    world_x=self.BOOTH_X,
+                    world_y=self.BOOTH_Y,
+                    type_id=0x11,
+                ))
+                for x, y in trail
+            ),
+            f"never reached smash range; trail={trail[-8:]} masks={[hex(m) for m in masks[-8:]]}",
+        )
+        self.assertLess(
+            trail.count((self.BOOTH_X, 44)),
+            12,
+            f"stood still against the booth: trail={trail[-12:]}",
+        )
+
+    def test_does_not_freeze_in_front_of_a_type19_crate(self) -> None:
+        trail, _masks, punched = self._run(
+            actor_x=self.BOOTH_X, actor_y=44, type_id=0x19
+        )
+
+        self.assertTrue(punched or any(
+            in_smash_range(_actor(x, y, False), Breakable(
+                slot="obj09",
+                world_x=self.BOOTH_X,
+                world_y=self.BOOTH_Y,
+                type_id=0x19,
+            ))
+            for x, y in trail
+        ), f"never reached smash range; trail={trail[-8:]}")
+
+    def test_still_opens_a_booth_approached_from_the_street(self) -> None:
+        trail, _masks, punched = self._run(actor_x=200, actor_y=80)
+
+        self.assertTrue(punched, f"never punched; ended at {trail[-1] if trail else None}")
 
 
 class JumpKickFlightTests(unittest.TestCase):

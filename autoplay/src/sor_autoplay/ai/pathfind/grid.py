@@ -27,13 +27,34 @@ search, because a body sitting in the middle of a crate cannot leave it in
 one step and would otherwise be planned as permanently stuck. It costs
 nothing in practice: a route that re-entered an obstacle it had already left
 is never cheaper than one that did not, so the search does not produce one.
+
+"Inside" means the body's **centre** sits in the obstacle's interior, not
+that the rectangles merely overlap. A 1px-tall floor (a wall shallower than
+the body) is routinely overlapped by a body standing legally in front of it;
+treating that graze as "already inside" dropped the wall and routed through
+the real solid -- the first-level phone-booth stall.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from .geometry import Direction, Rect
+from .geometry import EPS, Direction, Rect
+
+
+def _center_buried_in(start: Rect, obstacle: Rect) -> bool:
+    """True when the body is sitting *in* the obstacle, not merely clipping it.
+
+    A graze -- the 1px floor of a wall shallower than the body -- is not
+    "already inside". Dropping those lets the search walk through the real
+    solid the over-statement was standing in for.
+    """
+
+    centre = start.center
+    return (
+        obstacle.left + EPS < centre.x < obstacle.right - EPS
+        and obstacle.top + EPS < centre.y < obstacle.bottom - EPS
+    )
 
 
 class Lattice:
@@ -63,10 +84,10 @@ class Lattice:
             if obstacle.width > 0 and obstacle.height > 0 and obstacle.overlaps(world)
         )
         self.ignored = tuple(
-            obstacle for obstacle in relevant if obstacle.overlaps(start)
+            obstacle for obstacle in relevant if _center_buried_in(start, obstacle)
         )
         self.obstacles = tuple(
-            obstacle for obstacle in relevant if not obstacle.overlaps(start)
+            obstacle for obstacle in relevant if obstacle not in self.ignored
         )
         self.start_is_free = self._is_free(start)
         self._free: dict[tuple[int, int], bool] = {}
