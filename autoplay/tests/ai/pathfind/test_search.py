@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 
 import pytest
 
@@ -492,6 +493,21 @@ def test_positions_and_walked_offsets_agree_with_the_final_rectangle() -> None:
 
     assert path.positions()[-1] == path.final
     assert path.final == BODY.moved_by(dx, dy)
+
+
+def test_a_walled_off_search_stays_cheap_at_a_fine_step() -> None:
+    # Scanning every Y-then-X cell from every expanded node froze the
+    # viewer at step=1 behind a full-height wall (~60s for a segment).
+    started = time.perf_counter()
+    path = plan(
+        start=BODY,
+        goal=PointGoal(Point(280, 56)),
+        obstacles=[Rect(64, 0, 16, 112)],
+        step=1,
+    )
+
+    assert time.perf_counter() - started < 0.5
+    assert not path.reached
 
 
 def test_a_zero_or_negative_step_is_rejected() -> None:

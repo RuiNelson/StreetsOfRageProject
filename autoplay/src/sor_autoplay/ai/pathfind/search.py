@@ -93,6 +93,11 @@ DEFAULT_MAX_NODES = 20_000
 # long detours for it.
 DEFAULT_ALIGNMENT_WEIGHT = 2.0
 
+# A crate-sized goal window is a handful of lattice cells and is cheap to
+# try in full. A full-height segment at a 1px step is thousands, and trying
+# every one from every expanded node is what froze the viewer.
+MAX_YX_WINDOW = 64
+
 
 @dataclass(frozen=True)
 class Step:
@@ -216,7 +221,7 @@ def find_path(
     # When the search finishes by Y-then-X from an expanded node, this is
     # that node; reconstruction walks A* to it and then appends the two legs.
     yx_from: tuple[int, int] | None = None
-    walks: dict[tuple[tuple[int, int], Direction], list[tuple[int, int]]] = {}
+    goal_window = _touch_window(lattice, target_box)
     # A cheaper route to an already-queued node pushes a second entry rather
     # than sifting the heap; the stale one is dropped here when it surfaces.
     closed: set[tuple[int, int]] = set()
@@ -252,9 +257,8 @@ def find_path(
             node,
             arrived,
             goal,
-            target_box,
+            goal_window,
             require_flush=weight > 0,
-            cache=walks,
         )
         if finish is not None:
             arrival, arrival_rect = finish
@@ -324,93 +328,143 @@ def _best_yx_from(
     origin: tuple[int, int],
     arrived: Callable[[Rect], bool],
     goal: Goal,
-    target_box: Rect,
+    window: tuple[int, int, int, int] | None,
     *,
     require_flush: bool,
-    cache: dict[tuple[tuple[int, int], Direction], list[tuple[int, int]]],
 ) -> tuple[tuple[int, int], Rect] | None:
-    """Cheapest Y-then-X (or single-axis) arrival from ``origin``, or ``None``.
+    """Y-then-X arrival from ``origin`` onto the goal window, or ``None``.
 
-    ``None`` when no arrival sits on that corridor, the only one is
-    ``origin`` itself (the caller already handled standing still), or
-    ``require_flush`` is set and the two legs cannot line up.
+    Small windows (a crate, a point at a coarse step) are tried in full.
+    Large ones (a full-height segment at 1px) only aim at the cheapest
+    cell and the aligned one -- walking every row from every expanded
+    node is what froze the viewer.
     """
 
-    i0, j0 = origin
-    column = [origin, *_walk_line(lattice, origin, Direction.UP, cache)]
-    column.extend(_walk_line(lattice, origin, Direction.DOWN, cache))
-    # Nearer rows first so a cheap arrival can prune farther ones.
-    column.sort(key=lambda node: abs(node[1] - j0))
+    if window is None:
+        return None
 
     best_key: tuple[int, float, int, int, int, int] | None = None
     best_node: tuple[int, int] | None = None
     best_rect: Rect | None = None
-    best_manh: int | None = None
 
-    for node_y in column:
-        dj = abs(node_y[1] - j0)
-        if best_manh is not None and dj >= best_manh:
+    for node in _yx_aims(origin, window, require_flush):
+        if node == origin:
             continue
-        # X does not change y. A row whose body misses the goal's y-span
-        # cannot arrive no matter how far it walks.
-        if not _y_could_reach(lattice.rect_at(node_y), target_box):
+        if not _yx_clear(lattice, origin, node):
             continue
-        row = [node_y, *_walk_line(lattice, node_y, Direction.LEFT, cache)]
-        row.extend(_walk_line(lattice, node_y, Direction.RIGHT, cache))
-        for node in row:
-            if node == origin:
-                continue
-            di = abs(node[0] - i0)
-            if best_manh is not None and di + dj >= best_manh:
-                continue
-            rect = lattice.rect_at(node)
-            if not arrived(rect):
-                continue
-            misalignment = goal.misalignment(rect)
-            if require_flush and misalignment > 0:
-                continue
-            key = (di + dj, misalignment, dj, di, node[1], node[0])
-            if best_key is None or key < best_key:
-                best_key = key
-                best_node = node
-                best_rect = rect
-                best_manh = di + dj
+        rect = lattice.rect_at(node)
+        if not arrived(rect):
+            continue
+        misalignment = goal.misalignment(rect)
+        if require_flush and misalignment > 0:
+            continue
+        di = abs(node[0] - origin[0])
+        dj = abs(node[1] - origin[1])
+        key = (di + dj, misalignment, dj, di, node[1], node[0])
+        if best_key is None or key < best_key:
+            best_key = key
+            best_node = node
+            best_rect = rect
 
     if best_node is None or best_rect is None:
         return None
     return best_node, best_rect
 
 
-def _y_could_reach(rect: Rect, box: Rect) -> bool:
-    """Could this body meet ``box`` after an X-only move?"""
+def _touch_window(lattice: Lattice, box: Rect) -> tuple[int, int, int, int] | None:
+    """Inclusive lattice ranges whose body can touch ``box``, or ``None``."""
 
-    return rect.bottom >= box.top - EPS and rect.top <= box.bottom + EPS
+    start, step = lattice.start, lattice.step
+    i_lo = math.ceil((box.left - start.x - start.width) / step - EPS)
+    i_hi = math.floor((box.right - start.x) / step + EPS)
+    j_lo = math.ceil((box.top - start.y - start.height) / step - EPS)
+    j_hi = math.floor((box.bottom - start.y) / step + EPS)
+    if i_lo > i_hi or j_lo > j_hi:
+        return None
+    return i_lo, i_hi, j_lo, j_hi
 
 
-def _walk_line(
-    lattice: Lattice,
-    start: tuple[int, int],
-    direction: Direction,
-    cache: dict[tuple[tuple[int, int], Direction], list[tuple[int, int]]],
+def _yx_aims(
+    origin: tuple[int, int],
+    window: tuple[int, int, int, int],
+    require_flush: bool,
 ) -> list[tuple[int, int]]:
-    """Every lattice node reachable by repeating ``direction`` from ``start``."""
+    """Window cells worth finishing toward from ``origin``."""
 
-    key = (start, direction)
-    cached = cache.get(key)
-    if cached is not None:
-        return cached
+    i_lo, i_hi, j_lo, j_hi = window
+    i0, j0 = origin
+    cheap = (_clamp(i0, i_lo, i_hi), _clamp(j0, j_lo, j_hi))
+    aligned = (_align_index(i_lo, i_hi), _align_index(j_lo, j_hi))
+    size = (i_hi - i_lo + 1) * (j_hi - j_lo + 1)
+    if size <= MAX_YX_WINDOW:
+        cells = [
+            (i, j) for j in range(j_lo, j_hi + 1) for i in range(i_lo, i_hi + 1)
+        ]
+        # Flush wants the centred face first; otherwise the cheapest L.
+        if require_flush:
+            cells.sort(
+                key=lambda node: (
+                    abs(node[0] - aligned[0]) + abs(node[1] - aligned[1]),
+                    abs(node[1] - aligned[1]),
+                    abs(node[0] - aligned[0]),
+                )
+            )
+        else:
+            cells.sort(
+                key=lambda node: (
+                    abs(node[0] - i0) + abs(node[1] - j0),
+                    abs(node[1] - j0),
+                    abs(node[0] - i0),
+                )
+            )
+        return cells
+    if require_flush:
+        return [aligned]
+    if aligned == cheap:
+        return [cheap]
+    return [cheap, aligned]
 
-    # The playable band is a few hundred px; this is a fuse, not a budget.
-    limit = max(8, int(max(lattice.world.width, lattice.world.height) / lattice.step) + 8)
-    nodes: list[tuple[int, int]] = []
-    node = start
-    while len(nodes) < limit:
-        if not lattice.can_move(node, direction):
-            break
-        node = (node[0] + direction.dx, node[1] + direction.dy)
-        nodes.append(node)
-    cache[key] = nodes
-    return nodes
+
+def _align_index(lo: int, hi: int) -> int:
+    """Lattice index at the middle of the window -- the flush-aligned aim."""
+
+    return int(round((lo + hi) / 2.0))
+
+
+def _clamp(value: int, lo: int, hi: int) -> int:
+    return lo if value < lo else hi if value > hi else value
+
+
+def _yx_clear(lattice: Lattice, start: tuple[int, int], end: tuple[int, int]) -> bool:
+    """Can the body walk Y then X from ``start`` to ``end`` in two sweeps?"""
+
+    corner = (start[0], end[1])
+    return _axis_clear(lattice, start, corner) and _axis_clear(lattice, corner, end)
+
+
+def _axis_clear(lattice: Lattice, start: tuple[int, int], end: tuple[int, int]) -> bool:
+    """Is the axis-aligned run from ``start`` to ``end`` standable and unswept?"""
+
+    if start == end:
+        return start == (0, 0) or lattice.is_free(start)
+    if start[0] != end[0] and start[1] != end[1]:
+        return False
+    if not lattice.is_free(end):
+        return False
+    if start == (0, 0) and not lattice.start_is_free:
+        # A hanging origin cannot be judged by one big sweep: intermediates
+        # still have to walk back into the world one cell at a time.
+        di = 0 if end[0] == start[0] else (1 if end[0] > start[0] else -1)
+        dj = 0 if end[1] == start[1] else (1 if end[1] > start[1] else -1)
+        direction = direction_from_offset(di, dj)
+        node = start
+        while node != end:
+            if not lattice.can_move(node, direction):
+                return False
+            node = (node[0] + di, node[1] + dj)
+        return True
+    swept = lattice.rect_at(start).union(lattice.rect_at(end))
+    return not any(swept.overlaps(obstacle) for obstacle in lattice.obstacles)
 
 
 def _yx_steps(i: int, j: int, step: float) -> tuple[Step, ...]:
