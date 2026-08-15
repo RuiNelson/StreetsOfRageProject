@@ -1,9 +1,23 @@
 """A* over the lattice, and the vectors it hands back.
 
-The search itself is ordinary A*: eight neighbours, a move costing its true
-euclidean length, and the octile heuristic, which is exactly the free-space
-optimum for those costs and therefore both admissible and consistent. Two
-things are worth knowing about the result.
+**One or two axis-aligned legs beat A*.** Before any search, the planner
+asks whether the goal can be reached by walking only along Y, only along X,
+or Y and then X -- never the other way around, and never a diagonal. That
+is how a beat-em-up body actually closes: get on the lane, then walk in.
+A free-space diagonal is shorter and is rejected anyway. The corridor is
+accepted only when every step of both legs is walkable and the arrival
+satisfies the same ``arrived`` test A* would use (``enough_contact``
+included). Among such arrivals the cheapest wins. ``maximize_contact``
+is stricter: the two legs have to line up flush, otherwise a corner clip
+would steal the tick from the around-the-crate walk A* is there to find.
+Anything the two legs cannot reach -- a crate that has to be walked
+around, a goal sitting behind a wall -- falls through to the A* below,
+diagonals and all.
+
+The search itself is then ordinary A*: eight neighbours, a move costing its
+true euclidean length, and the octile heuristic, which is exactly the
+free-space optimum for those costs and therefore both admissible and
+consistent. Two things are worth knowing about the result.
 
 **The vectors are merged, not one per cell.** A route of nine cells to the
 right is one ``Step`` of ``9 * step`` px, not nine of ``step``. That is the
@@ -47,7 +61,7 @@ from __future__ import annotations
 
 import heapq
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from .geometry import (
@@ -155,6 +169,9 @@ def find_path(
     flushest arrival it can find, paying up to ``alignment_weight`` px of
     extra route per px of overlap gained. They combine: a floor plus a
     preference for doing better than the floor.
+
+    When a one- or two-leg axis-aligned route (Y first, then X) already
+    reaches, that route is returned and A* is not run.
     """
 
     lattice = Lattice(start=start, world=world, obstacles=obstacles, step=step)
@@ -177,6 +194,10 @@ def find_path(
     origin = (0, 0)
     if arrived(start) and (weight <= 0 or goal.misalignment(start) <= 0):
         return Path((), True, start, start, 0, goal.misalignment(start), goal.contact(start))
+
+    axis = _axis_aligned_yx(lattice=lattice, goal=goal, arrived=arrived, weight=weight)
+    if axis is not None:
+        return axis
 
     came_from: dict[tuple[int, int], tuple[int, int]] = {}
     best_cost: dict[tuple[int, int], float] = {origin: 0.0}
@@ -264,6 +285,99 @@ def find_path(
         misalignment=goal.misalignment(final) if reached else 0.0,
         contact=goal.contact(final) if reached else 0.0,
     )
+
+
+def _axis_aligned_yx(
+    *,
+    lattice: Lattice,
+    goal: Goal,
+    arrived: Callable[[Rect], bool],
+    weight: float,
+) -> Path | None:
+    """A Y-then-X (or single-axis) route to the goal, or ``None``.
+
+    ``None`` means "A* should decide": no arrival sat on that corridor, the
+    only one was the origin itself, or ``maximize_contact`` is on and the
+    two legs cannot line up. Staying put is ``find_path``'s early return;
+    a start that has already arrived but is not flush, and a corner clip
+    that would satisfy a bare arrival, both still want A* when alignment
+    was asked for -- walking around a crate to stand square on its face is
+    not a Y-then-X corridor.
+    """
+
+    column = [(0, 0), *_walk_line(lattice, (0, 0), Direction.UP)]
+    column.extend(_walk_line(lattice, (0, 0), Direction.DOWN))
+
+    best_key: tuple[float, float, int, int, int, int] | None = None
+    best_node: tuple[int, int] | None = None
+    best_rect: Rect | None = None
+    visited = 0
+
+    for _, j in column:
+        row = [(0, j), *_walk_line(lattice, (0, j), Direction.LEFT)]
+        row.extend(_walk_line(lattice, (0, j), Direction.RIGHT))
+        visited += len(row)
+        for i, _ in row:
+            node = (i, j)
+            rect = lattice.rect_at(node)
+            if not arrived(rect):
+                continue
+            cost = lattice.step * (abs(i) + abs(j))
+            misalignment = goal.misalignment(rect) if weight else 0.0
+            # Misalignment is the second key so a score tie prefers the
+            # flusher arrival -- at the default weight, 4 px of overlap
+            # costs the same as the 8 px walk that buys them.
+            key = (cost + weight * misalignment, misalignment, abs(j), abs(i), j, i)
+            if best_key is None or key < best_key:
+                best_key = key
+                best_node = node
+                best_rect = rect
+
+    if best_node is None or best_node == (0, 0) or best_rect is None:
+        return None
+    if weight and goal.misalignment(best_rect) > 0:
+        return None
+
+    i, j = best_node
+    return Path(
+        steps=_yx_steps(i, j, lattice.step),
+        reached=True,
+        start=lattice.start,
+        final=best_rect,
+        nodes_expanded=visited,
+        misalignment=goal.misalignment(best_rect),
+        contact=goal.contact(best_rect),
+    )
+
+
+def _walk_line(
+    lattice: Lattice,
+    start: tuple[int, int],
+    direction: Direction,
+) -> list[tuple[int, int]]:
+    """Every lattice node reachable by repeating ``direction`` from ``start``."""
+
+    # The playable band is a few hundred px; this is a fuse, not a budget.
+    limit = max(8, int(max(lattice.world.width, lattice.world.height) / lattice.step) + 8)
+    nodes: list[tuple[int, int]] = []
+    node = start
+    while len(nodes) < limit:
+        if not lattice.can_move(node, direction):
+            break
+        node = (node[0] + direction.dx, node[1] + direction.dy)
+        nodes.append(node)
+    return nodes
+
+
+def _yx_steps(i: int, j: int, step: float) -> tuple[Step, ...]:
+    """The one or two vectors that walk to lattice node ``(i, j)``, Y first."""
+
+    steps: list[Step] = []
+    if j:
+        steps.append(Step(Direction.UP if j < 0 else Direction.DOWN, abs(j) * step))
+    if i:
+        steps.append(Step(Direction.LEFT if i < 0 else Direction.RIGHT, abs(i) * step))
+    return tuple(steps)
 
 
 def _reconstruct(

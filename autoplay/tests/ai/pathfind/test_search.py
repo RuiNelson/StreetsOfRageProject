@@ -65,19 +65,65 @@ def test_every_vector_is_a_multiple_of_the_step_and_never_shorter() -> None:
         assert step.length % 8 == 0
 
 
-def test_a_free_diagonal_is_taken_as_one_vector() -> None:
+def test_a_clear_offset_is_two_axis_aligned_vectors_y_then_x() -> None:
     path = plan(start=BODY, goal=PointGoal(Point(64, 64)))
 
     assert path.reached
-    assert [step.direction for step in path.steps] == [Direction.DOWN_RIGHT]
-    assert path.length == pytest.approx(48 * math.sqrt(2))
+    assert [step.direction for step in path.steps] == [Direction.DOWN, Direction.RIGHT]
+    assert path.steps[0].length == 48
+    assert path.steps[1].length == 48
+    assert path.length == pytest.approx(96)
+
+
+def test_a_straight_vertical_run_is_one_merged_vector() -> None:
+    path = plan(start=BODY, goal=PointGoal(Point(8, 80)))
+
+    assert path.reached
+    assert len(path.steps) == 1
+    assert path.steps[0].direction is Direction.DOWN
+    assert path.steps[0].length == 64
+
+
+def test_y_then_x_walks_up_then_left_when_that_is_the_offset() -> None:
+    path = plan(start=BODY.moved_to(200, 80), goal=PointGoal(Point(40, 8)))
+
+    assert path.reached
+    assert [step.direction for step in path.steps] == [Direction.UP, Direction.LEFT]
+
+
+def test_y_then_x_is_used_when_it_clears_a_wall_the_direct_x_run_hits() -> None:
+    # Wall sits in the starting row, so walking right first is impossible,
+    # but dropping to the goal's row first walks under it.
+    wall = Rect(48, 0, 16, 32)
+    path = plan(start=BODY, goal=PointGoal(Point(120, 64)), obstacles=[wall])
+
+    assert path.reached
+    assert [step.direction for step in path.steps] == [Direction.DOWN, Direction.RIGHT]
+    for rect in path.positions():
+        assert not rect.overlaps(wall)
 
 
 def test_diagonals_can_be_turned_off() -> None:
-    path = plan(start=BODY, goal=PointGoal(Point(64, 64)), allow_diagonals=False)
+    # Block the Y column so the shortcut cannot fire and A* has to route.
+    wall = Rect(0, 16, 16, 16)
+    path = plan(
+        start=BODY,
+        goal=PointGoal(Point(64, 64)),
+        obstacles=[wall],
+        allow_diagonals=False,
+    )
 
     assert path.reached
     assert all(not step.direction.is_diagonal for step in path.steps)
+
+
+def test_a_blocked_y_column_still_lets_a_star_route_around() -> None:
+    wall = Rect(0, 16, 16, 16)
+    path = plan(start=BODY, goal=PointGoal(Point(64, 64)), obstacles=[wall])
+
+    assert path.reached
+    assert path.steps[0].direction is not Direction.DOWN
+    assert PointGoal(Point(64, 64)).is_reached(path.final)
 
 
 def test_the_body_walks_around_an_obstacle_instead_of_through_it() -> None:
@@ -251,7 +297,28 @@ def test_maximize_contact_walks_the_extra_bit_to_line_up() -> None:
     assert flush.contact == pytest.approx(16)  # the whole shared edge
     assert flush.final.left == pytest.approx(176)
     assert flush.final.top == pytest.approx(crate.top)
-    assert flush.length >= loose.length  # alignment is paid for in walking
+    # The bare arrival is the Y-then-X corner clip -- lining up square
+    # means walking around the crate, which those two legs cannot do.
+    assert loose.reached
+    assert loose.misalignment > 0
+    assert [step.direction for step in loose.steps] == [Direction.DOWN, Direction.RIGHT]
+
+
+def test_maximize_contact_still_uses_y_then_x_when_that_corridor_is_flush() -> None:
+    # Stacked on the crate is a Y-then-X arrival and a flush one, so
+    # maximize_contact must not fall through to a diagonal A* route.
+    crate = Rect(160, 48, 16, 16)
+    path = plan(
+        start=BODY,
+        goal=RectGoal.horizontal(crate),
+        obstacles=[crate],
+        maximize_contact=True,
+    )
+
+    assert path.reached
+    assert path.misalignment == 0
+    assert path.steps[0].direction is Direction.DOWN
+    assert all(not step.direction.is_diagonal for step in path.steps)
 
 
 def test_maximize_contact_costs_more_expansions() -> None:
@@ -378,7 +445,15 @@ def test_a_goal_outside_the_world_fails_without_raising() -> None:
 
 
 def test_the_node_budget_bounds_the_work() -> None:
-    path = plan(start=BODY, goal=PointGoal(Point(300, 100)), max_nodes=5)
+    # A full-height wall so the Y-then-X shortcut cannot reach the far side
+    # and A* is the one that has to stop at the budget.
+    wall = Rect(64, 0, 16, 112)
+    path = plan(
+        start=BODY,
+        goal=PointGoal(Point(300, 100)),
+        obstacles=[wall],
+        max_nodes=5,
+    )
 
     assert not path.reached
     assert path.nodes_expanded <= 5
