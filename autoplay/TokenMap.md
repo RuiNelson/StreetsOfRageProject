@@ -70,6 +70,7 @@ classDiagram
     GrabOpportunity <|-- GrabToClearRear
     GrabOpportunity <|-- GrabIntoDeadZone
     GrabOpportunity <|-- GrabJackFromBehind
+    GrabOpportunity <|-- GrabAntonioOnPunish
     Inferred <|-- AntonioIsGoingToKick
 
     Verb <|-- Walk

@@ -5,6 +5,7 @@ from sor_autoplay.ai.tokens import Abadede, Antonio, ClosingEnemy, Enemy, Garcia
 from sor_autoplay.ai.tokens import (
     ActionableTarget,
     AntonioIsGoingToKick,
+    GrabAntonioOnPunish,
     GrabToClearRear,
     GrabIntoDeadZone,
     GrabJackFromBehind,
@@ -598,6 +599,35 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
         # actor's back); the Grunt behind is only its own rear threat, which
         # is not a reason to grab it.
         self.assertEqual(check_for_grab_opportunities({myself, boss, behind}), set())
+
+    def test_promotes_antonio_once_he_is_in_hitstun(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        antonio = make_antonio(
+            slot="obj09",
+            world_x=130,
+            world_y=100,
+            combat_phase=CombatPhase.RECOVERY,
+            primary_state=3,
+        )
+
+        result = check_for_grab_opportunities({myself, antonio})
+
+        self.assertEqual(
+            result, {GrabAntonioOnPunish(actor_slot="P1", target_slot="obj09")}
+        )
+
+    def test_a_ready_antonio_is_not_a_grab_opportunity(self) -> None:
+        # Walking into him before the punch lands is how the kick hits first.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        antonio = make_antonio(
+            slot="obj09",
+            world_x=130,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+        )
+
+        self.assertEqual(check_for_grab_opportunities({myself, antonio}), set())
 
 
 class CheckForIncomingMeleeTests(unittest.TestCase):

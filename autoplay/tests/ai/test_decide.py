@@ -2054,12 +2054,27 @@ def _antonio(**overrides) -> Antonio:
 
 
 class CouldDodgeAntonioKickTests(unittest.TestCase):
-    def test_fires_when_the_kick_token_is_present(self) -> None:
+    def test_fires_when_the_kick_is_committed(self) -> None:
         myself = make_myself(world_x=120, world_y=100)
         antonio = _antonio(world_x=160, combat_phase=CombatPhase.ATTACKING, primary_state=2)
         result = could_dodge_antonio_kick({myself, antonio})
         self.assertTrue(
             any(isinstance(v, DodgeAntonioKick) and v.target_slot == "obj09" for v in result)
+        )
+
+    def test_does_not_fire_on_a_predicted_window_alone(self) -> None:
+        # Standing in the $16EAE window is how the opener punch lands.
+        # Sidestepping here is the dodge loop that never reaches grab range.
+        myself = make_myself(world_x=120, world_y=100, vel_x=0.0)
+        antonio = _antonio(
+            world_x=160,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=40,
+            boss_dist_lane=4,
+        )
+        self.assertFalse(
+            any(isinstance(v, DodgeAntonioKick) for v in could_dodge_antonio_kick({myself, antonio}))
         )
 
     def test_does_not_fire_while_airborne(self) -> None:
@@ -2100,7 +2115,7 @@ class CouldHitAntonioBoomerangTests(unittest.TestCase):
 
 
 class PunchSkippedDuringAntonioKickTests(unittest.TestCase):
-    def test_does_not_punch_antonio_while_he_is_about_to_kick(self) -> None:
+    def test_does_not_punch_antonio_while_the_kick_is_committed(self) -> None:
         myself = make_myself(world_x=120, world_y=100, facing_left=False)
         antonio = _antonio(
             world_x=160,
@@ -2114,6 +2129,64 @@ class PunchSkippedDuringAntonioKickTests(unittest.TestCase):
             v for v in could_punch({myself, antonio}) if isinstance(v, Punch)
         ]
         self.assertEqual(punches, [])
+
+    def test_punches_a_live_antonio_to_open_the_grab(self) -> None:
+        myself = make_myself(world_x=120, world_y=100, facing_left=False)
+        antonio = _antonio(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=40,
+            boss_dist_lane=4,
+        )
+        punches = [
+            v for v in could_punch({myself, antonio}) if isinstance(v, Punch)
+        ]
+        self.assertEqual(punches, [Punch(actor_slot="P1", target_slot="obj09")])
+
+    def test_does_not_punch_a_stunned_antonio(self) -> None:
+        # The punish is the grab, not a second punch that stands still.
+        myself = make_myself(world_x=120, world_y=100, facing_left=False)
+        antonio = _antonio(
+            world_x=150,
+            world_y=100,
+            combat_phase=CombatPhase.RECOVERY,
+            primary_state=3,
+            boss_dist_x=30,
+            boss_dist_lane=0,
+        )
+        punches = [
+            v for v in could_punch({myself, antonio}) if isinstance(v, Punch)
+        ]
+        self.assertEqual(punches, [])
+
+
+class CouldGrabAntonioOnPunishTests(unittest.TestCase):
+    def test_grabs_antonio_in_hitstun(self) -> None:
+        myself = make_myself(world_x=120, world_y=100, facing_left=False)
+        antonio = _antonio(
+            world_x=150,
+            world_y=100,
+            combat_phase=CombatPhase.RECOVERY,
+            primary_state=3,
+            boss_dist_x=30,
+            boss_dist_lane=0,
+        )
+        result = could_grab_enemy({myself, antonio})
+        self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="obj09")})
+
+    def test_does_not_grab_a_ready_antonio(self) -> None:
+        myself = make_myself(world_x=120, world_y=100, facing_left=False)
+        antonio = _antonio(
+            world_x=150,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=30,
+            boss_dist_lane=0,
+        )
+        self.assertEqual(could_grab_enemy({myself, antonio}), set())
 
 
 if __name__ == "__main__":

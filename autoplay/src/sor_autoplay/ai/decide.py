@@ -206,13 +206,14 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
                 and target.has_projectile
             ):
                 continue
-            # Standing still to punch Antonio is the ROM's own kick trigger
-            # ($16EAE zero-velocity path). Only a real punish window is
-            # safe; otherwise DodgeAntonioKick / JumpAttack own him.
-            if isinstance(target, Antonio) and (
-                target_slot in kick_slots or not is_punishable(target.combat_phase)
-            ):
-                continue
+            # Antonio: one punch opens the grab; a second punch is standing
+            # still in front of him -- the $16EAE kick trigger. Dodge owns
+            # only a kick/dash that is already locked in.
+            if isinstance(target, Antonio):
+                if is_punishable(target.combat_phase):
+                    continue
+                if target_slot in kick_slots and target.strike_is_committed():
+                    continue
             verbs.add(verb_cls(actor_slot=actor.slot, target_slot=target_slot))
     return verbs
 
@@ -512,18 +513,14 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 # propose closing the last stretch of distance into a
                 # committed attack that isn't hittable yet.
                 continue
-            if enemy.slot in kicking:
-                # could_dodge_antonio_kick owns this pair -- walking in to
-                # stand still in front of him is how the kick starts.
-                continue
             if (
                 isinstance(enemy, Antonio)
-                and abs(enemy.world_x - actor.world_x)
-                <= reach.jump_attack_max_dx(actor.character_id)
+                and enemy.slot in kicking
+                and enemy.strike_is_committed()
             ):
-                # Already inside jump-kick range. Walking closer parks the
-                # actor inside the standing-still kick window. JumpAttack
-                # owns the last stretch.
+                # could_dodge_antonio_kick owns a locked-in kick/dash.
+                # A predicted window is not a reason to stop walking in:
+                # the opener punch has to close to punch range first.
                 continue
             if (
                 standing_off
@@ -871,26 +868,20 @@ def could_jump_attack(context: Context) -> Context:
             # walking in, which could_walk_to_near_enemy already does.
             continue
         target_slots = set(reach.targets_of(context, InJumpAttackReach, actor.slot))
-        # Hopping over Antonio's kick is the reaction to AntonioIsGoingToKick
-        # when the actor is already in the air (or about to be): the kick
-        # is a ground strike, and the jump's own travel is the dodge. Added
-        # even without InJumpAttackReach so a close-range hop still fires.
+        # Hopping over Antonio's *committed* kick is the reaction to
+        # AntonioIsGoingToKick when the actor is already in the air (or
+        # about to be). A predicted window is the punch-then-grab opener,
+        # not a hop. Added even without InJumpAttackReach so a close-range
+        # hop still fires once he has locked in.
         kick_slots = {
             token.target_slot
             for token in find_all(context, AntonioIsGoingToKick)
             if token.actor_slot == actor.slot
         }
-        target_slots |= kick_slots
-        # Jump-kicking is the safe way to hit Antonio -- a grounded punch
-        # is the kick trigger. Offer a hop whenever he is inside the
-        # kick's free-flight range, not only in the usual "beyond punch"
-        # band.
         for antonio in find_all(context, Antonio):
             if antonio.is_defeated:
                 continue
-            if abs(antonio.world_x - actor.world_x) <= reach.jump_attack_max_dx(
-                actor.character_id
-            ):
+            if antonio.slot in kick_slots and antonio.strike_is_committed():
                 target_slots.add(antonio.slot)
         if actor.is_airborne and not target_slots:
             nearest = min(
@@ -920,13 +911,14 @@ def could_jump_attack(context: Context) -> Context:
 
 
 def could_dodge_antonio_kick(context: Context) -> Context:
-    """Leave Antonio's kick lane, or hop, before the kick lands.
+    """Hop a kick or dash that Antonio has already locked in.
 
-    One candidate per ``AntonioIsGoingToKick``. Suppressed once the actor
-    is already airborne -- ``could_jump_attack`` owns the hop-over then,
+    One candidate per ``AntonioIsGoingToKick`` whose Antonio is in
+    primary ``$02`` or tactical ``$08``. A predicted window alone is the
+    punch-then-grab opener, not a dodge. Suppressed once the actor is
+    already airborne -- ``could_jump_attack`` owns the hop-over then,
     and producing a sidestep mid-crouch would release the jump direction
-    ``$384E`` samples. Grounded, this is the reaction that does not stand
-    still in front of him.
+    ``$384E`` samples.
     """
 
     verbs: set[Token] = set()
@@ -941,6 +933,12 @@ def could_dodge_antonio_kick(context: Context) -> Context:
             continue
         for token in find_all(context, AntonioIsGoingToKick):
             if token.actor_slot != actor.slot:
+                continue
+            antonio = find(context, Antonio, slot=token.target_slot)
+            if antonio is None or not antonio.strike_is_committed():
+                # Predicted window only: walking in and punching is the
+                # opener. Sidestepping here is the dodge loop that never
+                # reaches grab range.
                 continue
             verbs.add(
                 DodgeAntonioKick(actor_slot=actor.slot, target_slot=token.target_slot)

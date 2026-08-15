@@ -168,10 +168,12 @@ which is how his kick starts.
 **`AntonioIsGoingToKick`** flags that Antonio's ROM kick gate at `$16EAE`
 is already satisfied (or that he has committed to primary state 2, the
 close-range power kick). Standing still in front of him is one of the
-trigger paths — the player's own signature while throwing a ground combo —
-so this token exists to stop the AI punching through a kick that will
-break the chain. `DodgeAntonioKick` sidesteps off his lane, or hops if
-the kick is already committed; `HitAntonioBoomerang` punches the thrown
+trigger paths — the player's own signature while throwing a ground combo.
+The human answer is a single punch to put him in later-boss hitstun
+(primary `$03`/`$04`, decoded as `RECOVERY`), then a grab and a suplex;
+`DodgeAntonioKick` and the jump-over tier fire only once the kick or the
+tactical-`$08` dash is actually locked in. A predicted window is not a
+reason to leave punch range. `HitAntonioBoomerang` punches the thrown
 boomerang at punch-connect time when it would hit the actor.
 
 **`InContinueMenu`** is observed when this player's object is the type-`$0F`
@@ -501,11 +503,18 @@ extracted `AttackRange`s rather than from the enemy's class, so a corrected
 extraction changes the AI's behaviour without changing any code. A third,
 `GrabJackFromBehind`, fires when the actor is already on Jack's back
 (he is facing away): take the hold before the axe or the lunge turns
-around. They are subclasses rather
+around. A fourth, `GrabAntonioOnPunish`, fires when Antonio is in
+later-boss hitstun (`RECOVERY`, primary `$03`/`$04` after
+`$17C36 boss_apply_pending_damage`): punch him once to open that window,
+walk in without attacking, then flip-hold into a suplex. Standing still
+to combo him is the `$16EAE` zero-velocity kick trigger, so a second
+punch is refused and the hold is the punish. They are subclasses rather
 than one token with a reason field, per this document's own rule, and they
 rank differently: clearing the rear beats every strike on an enemy that can
-still act, catching Jack from behind is just under that, and the whip case
-is an improvement on an ordinary exchange and ranks just above a jump kick.
+still act, catching Jack from behind is just under that, grabbing a
+stunned Antonio sits above punching him again (the hold is the punish)
+and above every strike on him, and the whip case is an improvement on an
+ordinary exchange and ranks just above a jump kick.
 
 `InGrabReach` answers the other half — whether walking in would actually
 reach — and, like every other `TargetInReach`, comes from one geometry

@@ -290,38 +290,33 @@ def boss_phase(
     if type_id == 0x56 and p == 0x02:
         return CombatPhase.ATTACKING
 
+    # Shared later-boss framework states $03+ (enemy-ai.md Onihime table
+    # $158D8; Antonio/Souther/Bongo use the same handlers). Previously
+    # only the twins decoded $03/$04 as RECOVERY, so a punched Antonio
+    # fell through to NORMAL and the AI never saw the grab window.
+    if type_id in (0x55, 0x56, 0x57, 0x58):
+        if p in (0x03, 0x04):
+            return CombatPhase.RECOVERY  # $163D0 / $164CA hit reaction
+        if p == 0x05 or p >= 0x0C:
+            return CombatPhase.DEATH  # $164FC lethal gate
+        if p == 0x0A:
+            return CombatPhase.RECOVERY  # police special
+        if 0x06 <= p <= 0x09:
+            return CombatPhase.GRABBED  # shared grabbee / throw cleanup
+
     # Onihime/Yasha (type $58) — ROM tables at $158D8 / $15A5E / $15BE0:
     #   primary $01 active combat: +$67 $00 idle, $01 chase/walk, $02 jump
     #   attack, $03 leap-to-grab. Only $02/$03 (and primary $02 commit) are
     #   damaging commits. Treating chase ($01) as ATTACKING made the agent
-    #   perpetual-evade and never punch/jump/grab.
+    #   perpetual-evade and never punch/jump/grab. Shared $03+ is above.
     if type_id == 0x58:
         if p == 0x02:
             return CombatPhase.ATTACKING  # $15D0C grab/throw commit
-        if p == 0x0A:
-            return CombatPhase.RECOVERY  # police special
-        if p == 0x05 or p >= 0x0C:
-            return CombatPhase.DEATH
-        if p in (0x03, 0x04):
-            return CombatPhase.RECOVERY  # hit reaction / recover → punish
-        # Shared later-boss grabbee / throw cleanup — player is holding them.
-        if p in (0x06, 0x07, 0x08, 0x09):
-            return CombatPhase.GRABBED
         if p == 0x01:
             if t in (0x02, 0x03):
                 return CombatPhase.ATTACKING  # jump attack / leap-to-grab
             return CombatPhase.NORMAL  # idle $00 or chase $01 — free to strike
         return CombatPhase.NORMAL
-
-    # Later bosses $55-$58 (non-twin paths above): police reaction shared $0A
-    if p == 0x0A:
-        return CombatPhase.RECOVERY
-    if p >= 0x0C:
-        return CombatPhase.DEATH
-    # Shared grabbee / throw cleanup while a player holds the boss body.
-    # Must be GRABBED (not CHARGE) so hold detection / knee-suplex run.
-    if type_id in (0x55, 0x56, 0x57, 0x58) and 0x06 <= p <= 0x09:
-        return CombatPhase.GRABBED
     # Higher primary indices are usually attack/airborne families.
     if p >= 0x06:
         return CombatPhase.ATTACKING if t != 0 else CombatPhase.CHARGE

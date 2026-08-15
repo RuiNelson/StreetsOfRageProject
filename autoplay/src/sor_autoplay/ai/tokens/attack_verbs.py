@@ -95,7 +95,7 @@ class GrabEnemy(GrabMechanics):
     a committed attack is how the actor gets hit rather than the hold.
 
     Raises emergency: GrabToClearRear×58, GrabJackFromBehind×56,
-    GrabIntoDeadZone×30.
+    GrabAntonioOnPunish×61, GrabIntoDeadZone×30.
 
     The rear tier sits above every strike on an enemy that can still act
     (punch 20, jump 18/28), above the unwarranted ``RearAttack`` chord
@@ -333,9 +333,10 @@ class JumpAttack(MeleeAttacks):
     otherwise deliver it into a committed attack, airborne and unable to
     change its mind.
 
-    Raises emergency: (PunishWindow for the target)×28, (Nora, not currently
-    dangerous, within priority.NORA_RECOVERY_PUNISH_TICKS of her own last
-    attack)×24, Enemy×18.
+    Raises emergency: AntonioIsGoingToKick (committed)×56, (PunishWindow
+    for the target)×28, (Nora, not currently dangerous, within
+    priority.NORA_RECOVERY_PUNISH_TICKS of her own last attack)×24,
+    Enemy×18.
     """
 
     priority: int = 8  # below basic punch priority (10)

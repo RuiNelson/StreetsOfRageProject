@@ -22,6 +22,7 @@ from .tokens import (
     ActionableTarget,
     AntonioIsGoingToKick,
     ClosingEnemy,
+    GrabAntonioOnPunish,
     GrabIntoDeadZone,
     GrabJackFromBehind,
     GrabToClearRear,
@@ -452,8 +453,10 @@ def check_for_grab_opportunities(context: Context) -> Context:
     separate question, answered by ``InGrabReach`` above;
     ``decide.could_grab_enemy`` requires both.
 
-    ``Grunt`` only, like ``check_for_closing_enemies``: the ROM does let a
-    player hold the later bosses, but per-boss tactics are out of scope.
+    Most opportunities are ``Grunt``-only. Antonio is the exception:
+    after a landed hit he is in later-boss ``RECOVERY`` (primary ``$03``/
+    ``$04``) and a hold-then-suplex beats standing still to combo him --
+    that combo is his own kick trigger. Other bosses stay out of scope.
     """
 
     enemies = reach.on_screen_enemies(context)
@@ -468,9 +471,13 @@ def check_for_grab_opportunities(context: Context) -> Context:
     for actor in _actors(context):
         rear = reach.rear_threats(actor, enemies)
         for enemy in grabbable:
+            pair = {"actor_slot": actor.slot, "target_slot": enemy.slot}
+            if isinstance(enemy, Antonio):
+                if is_punishable(enemy.combat_phase):
+                    tokens.add(GrabAntonioOnPunish(**pair))
+                continue
             if not isinstance(enemy, Grunt):
                 continue
-            pair = {"actor_slot": actor.slot, "target_slot": enemy.slot}
             # A rear threat that *is* the candidate is not a pincer -- the
             # actor would be walking backwards into the same enemy it is
             # already worried about, and reach.grab_would_connect (forward
@@ -736,7 +743,7 @@ def _antonio_will_kick(antonio: Antonio, actor: PlayableCharacter) -> bool:
     # strike. Do *not* also fire on the uncommitted dash *window* -- that
     # window is the whole fight range, and treating it as a kick made
     # DodgeAntonioKick win every tick and never attack.
-    if antonio.tactical >= 0x08:
+    if antonio.tactical == 0x08:
         return dist_lane < ANTONIO_DASH_LANE and dist_x < ANTONIO_DASH_DIST_MAX
     if dist_lane >= ANTONIO_KICK_LANE:
         return False

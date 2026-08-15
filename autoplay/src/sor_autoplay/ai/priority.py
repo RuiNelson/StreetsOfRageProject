@@ -54,10 +54,11 @@ from .tokens import (
     ThrowPepper,
 )
 from .tokens import Myself, Partner
-from .tokens import Boss, Breakable, Enemy, Grunt, Jack, Nora
+from .tokens import Antonio, Boss, Breakable, Enemy, Grunt, Jack, Nora
 from .tokens import (
     AntonioIsGoingToKick,
     GrabOpportunity,
+    GrabAntonioOnPunish,
     GrabIntoDeadZone,
     GrabJackFromBehind,
     GrabToClearRear,
@@ -177,6 +178,14 @@ _EMERGENCY_GRAB_JACK_FROM_BEHIND = 56
 # fight, not an escape from a bad one, so it sits just above the
 # jump-kick-on-a-punishable tier (28) and well under the punish/escape tiers.
 _EMERGENCY_GRAB_DEAD_ZONE = 30
+# Antonio in hitstun: grab-then-suplex instead of standing still to
+# combo him. The boss raise (+14) is applied on top, so this must
+# clear punch-on-punish (60+14 = 74): otherwise an injected or stale
+# Punch still wins the tick and the hold never starts. Below
+# CounterGrab/TechRecover/CallPolice (100/90/88). Hold moves on an
+# existing grab (64..70) do not coexist -- could_grab skips while
+# holding.
+_EMERGENCY_GRAB_ANTONIO_ON_PUNISH = 61
 _EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
 _EMERGENCY_HOLD_SUPPLEX = 68
 _EMERGENCY_HOLD_FLIP = 66
@@ -456,9 +465,13 @@ def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
     target = find(context, Enemy, slot=verb.target_slot)
     if target is None:
         return _EMERGENCY_DEFAULT
-    if any(
-        token.actor_slot == verb.actor_slot and token.target_slot == verb.target_slot
-        for token in find_all(context, AntonioIsGoingToKick)
+    if (
+        isinstance(target, Antonio)
+        and target.strike_is_committed()
+        and any(
+            token.actor_slot == verb.actor_slot and token.target_slot == verb.target_slot
+            for token in find_all(context, AntonioIsGoingToKick)
+        )
     ):
         return _with_target_class(_EMERGENCY_JUMP_OVER_ANTONIO_KICK, target)
     if _is_punish_window(context, target.slot):
@@ -516,6 +529,8 @@ def _emergency_grab_enemy(verb: GrabEnemy, context: Context) -> int:
         score = max(score, _EMERGENCY_GRAB_JACK_FROM_BEHIND)
     if any(isinstance(token, GrabIntoDeadZone) for token in opportunities):
         score = max(score, _EMERGENCY_GRAB_DEAD_ZONE)
+    if any(isinstance(token, GrabAntonioOnPunish) for token in opportunities):
+        score = max(score, _EMERGENCY_GRAB_ANTONIO_ON_PUNISH)
     return _with_target_class(score, find(context, Enemy, slot=verb.target_slot))
 
 

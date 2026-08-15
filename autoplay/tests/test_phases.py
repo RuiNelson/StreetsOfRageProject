@@ -166,6 +166,26 @@ class PhaseDecodeTests(unittest.TestCase):
             CombatPhase.ATTACKING,
         )
 
+    def test_later_boss_hit_reaction_is_recovery_for_every_family(self) -> None:
+        """Shared $163D0/$164CA (primary $03/$04) is hitstun for Antonio
+        too, not just the twins. Without this a punched Antonio decoded
+        as NORMAL and the punch-grab-suplex window never opened."""
+
+        for type_id in (0x55, 0x56, 0x57, 0x58):
+            with self.subTest(type_id=type_id):
+                self.assertEqual(
+                    boss_phase(type_id=type_id, primary_byte=0x03, tactical=0),
+                    CombatPhase.RECOVERY,
+                )
+                self.assertEqual(
+                    boss_phase(type_id=type_id, primary_byte=0x04, tactical=0),
+                    CombatPhase.RECOVERY,
+                )
+                self.assertEqual(
+                    boss_phase(type_id=type_id, primary_byte=0x05, tactical=0),
+                    CombatPhase.DEATH,
+                )
+
     def test_target_seat(self) -> None:
         self.assertEqual(decode_target_seat(0xB800), 1)
         self.assertEqual(decode_target_seat(0xB880), 2)

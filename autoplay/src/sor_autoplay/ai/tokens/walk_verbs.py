@@ -185,17 +185,15 @@ class DodgeAntonioKick(Walk):
     """Leave Antonio's kick lane -- or hop over the kick -- before it lands.
 
     Produced by ``could_dodge_antonio_kick`` once per ``AntonioIsGoingToKick``
-    for this actor. The ROM's kick gate at ``$16EAE`` requires the target
-    to share Antonio's lane (``+$52 < $10``, or ``< $08`` when ``+$61`` is
-    set) and to sit inside a velocity-selected X window; standing still in
-    that window is itself a trigger. Sidestepping off the lane breaks the
-    gate; jumping over a kick that is already committed (primary state 2)
-    clears the ground hit. The executor picks which of those two the
-    current tick needs.
+    whose Antonio has already locked in the kick (primary ``$02``) or the
+    dash/throw (tactical ``$08``). A predicted ``$16EAE`` window is not
+    enough: sidestepping that made the AI leave punch range forever and
+    never take the hold. The executor hops over the committed strike.
 
-    Raises emergency: AntonioIsGoingToKick×58 -- above HitAntonioBoomerang
-    (52) and every strike on an Antonio that can still act (20), because
-    standing still to punch is exactly what arms the kick. Below
+    Raises emergency: AntonioIsGoingToKick (committed)×58 -- above every
+    strike on an Antonio that can still act (20). A punish grab on
+    hitstun (61+boss) outranks this, but the two do not coexist: a
+    recovering Antonio does not raise the kick token. Below
     CounterGrab/TechRecover/CallPolice, which stay the only answers to
     those situations.
     """

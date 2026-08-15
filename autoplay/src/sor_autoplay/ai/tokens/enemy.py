@@ -255,6 +255,18 @@ class Antonio(Boss):
     inference that names that transition before -- and while -- it lands.
     """
 
+    def strike_is_committed(self) -> bool:
+        """True when the kick or the dash/throw is already locked in.
+
+        Primary ``$02`` is the close-range kick (``$171CC``). Tactical
+        ``$08`` is the boomerang dash/throw commit (``$16E88``). Turning
+        (tactical ``$09``) and merely standing inside the ``$16EAE``
+        prediction window are not commits -- those are when a punch can
+        still land and open the grab.
+        """
+
+        return self.primary_state == 0x02 or self.tactical == 0x08
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Bongo(Boss):
@@ -404,9 +416,10 @@ class GrabOpportunity(Inferred, ABC):
     Abstract because the situations that make a grab pay off are unrelated
     to each other and rank differently; each concrete subclass is one such
     situation, per ``AI.md``'s "subclasses, not discriminator fields". All of
-    them are produced by ``inference.check_for_grab_opportunities``, and only
-    for a ``Grunt``: boss grabs exist in the ROM (types $55-$58 have the
-    shared grabbee states) but bespoke boss tactics are out of scope.
+    them are produced by ``inference.check_for_grab_opportunities``. Most
+    are ``Grunt``-only; ``GrabAntonioOnPunish`` is the exception, because
+    Antonio's punish window is the opening of the punch-grab-suplex that
+    beats standing still to combo him (the combo is his own kick trigger).
 
     Reference-only, like the ``TargetInReach`` family: both ends are slot
     references. ``decide.could_grab_enemy`` pairs one of these with an
@@ -460,6 +473,22 @@ class GrabJackFromBehind(GrabOpportunity):
     back grab skips both. The walk-in still has to face him
     (``InGrabReach``), so this is "caught him from behind", not "he is
     behind us" -- that side is ``RearAttack``.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GrabAntonioOnPunish(GrabOpportunity):
+    """Antonio is in hitstun -- walk in and hold him, then suplex.
+
+    Produced by ``inference.check_for_grab_opportunities`` when a live
+    ``Antonio`` is in a punishable phase (``RECOVERY`` after
+    ``$17C36 boss_apply_pending_damage`` writes shared later-boss states
+    ``$03``/``$04``). A second punch here is standing still in front of
+    him, which is the ``$16EAE`` zero-velocity kick path; the hold is
+    how a human actually beats him.
+
+    Not produced while he can still act: walking into a ready Antonio
+    is how the kick lands first.
     """
 
 

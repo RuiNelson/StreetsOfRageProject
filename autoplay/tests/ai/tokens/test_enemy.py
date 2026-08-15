@@ -24,6 +24,7 @@ from sor_autoplay.ai.tokens import (
     GrabToClearRear,
     GrabIntoDeadZone,
     GrabJackFromBehind,
+    GrabAntonioOnPunish,
     InGrabReach,
     InJumpAttackReach,
     InPunchReach,
@@ -216,6 +217,13 @@ class EnemyHierarchyTests(unittest.TestCase):
         self.assertEqual(token.actor_slot, "P1")
         self.assertEqual(token.target_slot, "obj09")
 
+    def test_antonio_strike_is_committed_only_for_kick_or_dash(self) -> None:
+        base = _base_kwargs(type_id=0x56, health=40)
+        self.assertFalse(Antonio(**base).strike_is_committed())
+        self.assertTrue(Antonio(**base, primary_state=2).strike_is_committed())
+        self.assertTrue(Antonio(**base, tactical=0x08).strike_is_committed())
+        self.assertFalse(Antonio(**base, tactical=0x09).strike_is_committed())
+
     def test_boss_extra_fields_round_trip(self) -> None:
         souther = Souther(
             **_base_kwargs(type_id=0x55, health=200),
@@ -304,6 +312,7 @@ class ReachAndThreatTokenTests(unittest.TestCase):
             GrabToClearRear,
             GrabIntoDeadZone,
             GrabJackFromBehind,
+            GrabAntonioOnPunish,
             IncomingMelee,
             PunishWindow,
             Surrounded,
@@ -337,7 +346,12 @@ class ReachAndThreatTokenTests(unittest.TestCase):
         self.assertEqual(PunishWindow(target_slot="obj07").frames_left, 0)
 
     def test_grab_opportunity_family_shares_one_base(self) -> None:
-        for cls in (GrabToClearRear, GrabIntoDeadZone, GrabJackFromBehind):
+        for cls in (
+            GrabToClearRear,
+            GrabIntoDeadZone,
+            GrabJackFromBehind,
+            GrabAntonioOnPunish,
+        ):
             self.assertTrue(issubclass(cls, GrabOpportunity), cls.__name__)
 
     def test_grab_opportunities_are_distinct_reasons_for_one_pair(self) -> None:

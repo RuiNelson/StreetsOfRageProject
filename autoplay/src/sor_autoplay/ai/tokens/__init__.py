@@ -62,6 +62,7 @@ from .enemy import (
     Enemy,
     Garcia,
     GrabOpportunity,
+    GrabAntonioOnPunish,
     GrabIntoDeadZone,
     GrabJackFromBehind,
     GrabToClearRear,
