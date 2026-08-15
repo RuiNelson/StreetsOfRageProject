@@ -48,6 +48,7 @@ from .tokens import (
     ActionableTarget,
     AntonioIsGoingToKick,
     GrabOpportunity,
+    GrabJackFromBehind,
     InGrabReach,
     InJumpAttackReach,
     InPunchReach,
@@ -254,7 +255,16 @@ def could_rear_attack(context: Context) -> Context:
         # rather than turning around and punching -- is a ranking question,
         # and lives in priority._emergency_rear_attack via
         # reach.rear_attack_is_warranted.
+        # On Jack's back (a jump that overshot, still facing the wrong
+        # way): the chord would fire away from him. Walk around and grab.
+        on_jacks_back = {
+            token.target_slot
+            for token in find_all(context, GrabJackFromBehind)
+            if token.actor_slot == actor.slot
+        }
         for target_slot in reach.targets_of(context, InRearReach, actor.slot):
+            if target_slot in on_jacks_back:
+                continue
             verbs.add(RearAttack(actor_slot=actor.slot, target_slot=target_slot))
     return verbs
 

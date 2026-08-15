@@ -124,7 +124,7 @@ class EnemyForwardDxTests(unittest.TestCase):
 
 
 class RearAttackWarrantedTests(unittest.TestCase):
-    def test_jack_in_the_rear_band_is_always_warranted(self) -> None:
+    def test_jack_facing_the_actor_from_behind_is_warranted(self) -> None:
         actor = _myself(world_x=100, world_y=100)
         jack = Jack(
             slot="obj01",
@@ -138,6 +138,22 @@ class RearAttackWarrantedTests(unittest.TestCase):
             has_projectile=False,
         )
         self.assertTrue(reach.rear_attack_is_warranted(actor, jack, [jack]))
+
+    def test_on_jacks_back_the_chord_is_not_warranted(self) -> None:
+        # Actor overshot to x=150 facing right; Jack at 130 facing left.
+        actor = _myself(world_x=150, world_y=100, facing_left=False)
+        jack = Jack(
+            slot="obj01",
+            type_id=0x27,
+            world_x=130,
+            world_y=100,
+            health=10,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+            has_projectile=False,
+        )
+        self.assertFalse(reach.rear_attack_is_warranted(actor, jack, [jack]))
 
     def test_a_lone_garcia_behind_is_not_warranted(self) -> None:
         actor = _myself(world_x=100, world_y=100)

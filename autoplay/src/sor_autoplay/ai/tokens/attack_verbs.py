@@ -383,10 +383,11 @@ class RearAttack(MeleeAttacks):
     Adam (up to 14px — his chord is a forward-reaching hop, not a backfist).
 
     Raises emergency, when ``reach.rear_attack_is_warranted`` holds --
-    boxed in, punch dead zone, or the target is ``Jack`` (his axe and
+    boxed in, punch dead zone, or ``Jack`` facing the actor (his axe and
     lunge punish a turn-and-punch): (Enemy when in a dangerous phase)×60,
-    Enemy×55. Otherwise, with a turn-and-punch available: (Enemy when in
-    a dangerous phase)×11, Enemy×9.
+    Enemy×55. On Jack's back the chord is refused -- turn and grab
+    (``GrabJackFromBehind``). Otherwise, with a turn-and-punch available:
+    (Enemy when in a dangerous phase)×11, Enemy×9.
 
     The chord costs up to 21 frames of startup and hits only by current
     position, so it whiffs whenever the target drifts during that window and

@@ -440,13 +440,19 @@ def rear_attack_is_warranted(
        so it stays unhittable by a normal strike even after the turn.
     2. **Boxed in** -- another live enemy is close on the actor's opposite
        side, so spending the turn hands that one a free hit.
-    3. **Jack** -- his axe juggle and shared lunge punish a turn-and-punch:
-       the extra frames spent flipping facing are the ones he uses to
-       throw or slide. The chord hits him where he is, now.
+    3. **Jack, when he is facing the actor** -- his axe juggle and shared
+       lunge punish a turn-and-punch: the extra frames spent flipping
+       facing are the ones he uses to throw or slide. The chord hits him
+       where he is, now. The opposite geometry -- the actor already on
+       *his* back, just facing the wrong way (a jump kick that overshot)
+       -- is a grab, not a chord: ``enemy_forward_dx < 0`` means turn
+       around and take the hold (``GrabJackFromBehind``).
     """
 
     if isinstance(enemy, Jack):
-        return True
+        # On his back: the chord would fire the wrong way. Walk around
+        # to face him and grab.
+        return enemy_forward_dx(enemy, actor) >= 0
 
     if abs(enemy.world_x - actor.world_x) < punch_usable_inner_x(actor.character_id):
         return True

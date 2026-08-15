@@ -534,6 +534,19 @@ class CouldRearAttackTests(unittest.TestCase):
 
         self.assertEqual(result, set())
 
+    def test_does_not_fire_when_already_on_jacks_back(self) -> None:
+        # Jump kick overshoots: actor at 150 facing right, Jack at 130
+        # facing left. On his back, but facing the wrong way. The chord
+        # would fire away from him -- walk around and grab instead.
+        myself = make_myself(world_x=150, world_y=100, facing_left=False)
+        jack = make_jack(world_x=130, world_y=100, facing_left=True)
+
+        self.assertEqual(could_rear_attack({myself, jack}), set())
+        self.assertEqual(
+            could_walk_to_near_enemy({myself, jack}),
+            {WalkToNearEnemy(actor_slot="P1", target_slot="obj01")},
+        )
+
     def test_still_fires_by_the_real_band_regardless_of_a_closing_enemy_token(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
         enemy = make_enemy(world_x=80, world_y=100)  # behind while facing right
@@ -1903,10 +1916,12 @@ class JackJugglingMeleeTests(unittest.TestCase):
         self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj02")})
 
     def test_could_rear_attack_is_unaffected(self) -> None:
-        # From behind, juggling or not, the chord still answers him -- the
-        # exception only covers the four melee-strike siblings.
+        # Jack at the actor's back *facing them* (chasing): the chord still
+        # answers him, juggling or not. The melee-strike refusal does not
+        # apply. He must face the actor -- otherwise this is "on his back"
+        # and the grab owns it (see CouldRearAttackTests).
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        jack = make_jack(world_x=80, world_y=100, has_projectile=True)  # behind
+        jack = make_jack(world_x=80, world_y=100, facing_left=False, has_projectile=True)
 
         result = could_rear_attack({myself, jack})
 

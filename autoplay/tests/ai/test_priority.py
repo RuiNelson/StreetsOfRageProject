@@ -1296,10 +1296,12 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
         self.assertIs(verbs[0], rear_dangerous)
 
     def test_jack_at_the_back_outranks_turning_around(self) -> None:
-        # Jack's axe and lunge punish a turn-and-punch. The chord is the
-        # answer when he is in the rear band -- "usar muito o BackAttack".
+        # Jack behind the actor *facing them* (chasing). His axe and lunge
+        # punish a turn-and-punch, so the chord wins -- "usar muito o
+        # BackAttack". facing_left=False keeps the actor in front of him;
+        # the opposite (on his back, facing away) is a grab, not a chord.
         myself = _myself(world_x=100, world_y=100)
-        jack = _jack("obj01", CombatPhase.NORMAL, world_x=70, world_y=100)
+        jack = _jack("obj01", CombatPhase.NORMAL, world_x=70, world_y=100, facing_left=False)
         context = {
             myself,
             jack,
@@ -1312,6 +1314,25 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
         verbs = find_all(result, Verb)
         self.assertEqual(len(verbs), 1)
         self.assertIsInstance(verbs[0], RearAttack)
+
+    def test_on_jacks_back_turns_around_to_grab_instead_of_the_chord(self) -> None:
+        # Jump overshoot: actor at 150 facing right, Jack at 130 facing
+        # left. On his back, facing away. Walk around and grab -- the
+        # chord would fire the wrong way.
+        myself = _myself(world_x=150, world_y=100, facing_left=False)
+        jack = _jack("obj01", CombatPhase.NORMAL, world_x=130, world_y=100, facing_left=True)
+        context = {
+            myself,
+            jack,
+            RearAttack(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
 
     def test_loses_to_turning_around_when_the_chord_is_not_warranted(self) -> None:
         # The abuse case: a lone enemy at the actor's back, far enough out of
