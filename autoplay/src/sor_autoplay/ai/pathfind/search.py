@@ -1,23 +1,24 @@
 """A* over the lattice, and the vectors it hands back.
 
-**One or two axis-aligned legs beat A*.** Before any search, the planner
-asks whether the goal can be reached by walking only along Y, only along X,
-or Y and then X -- never the other way around, and never a diagonal. That
-is how a beat-em-up body actually closes: get on the lane, then walk in.
-A free-space diagonal is shorter and is rejected anyway. The corridor is
-accepted only when every step of both legs is walkable and the arrival
-satisfies the same ``arrived`` test A* would use (``enough_contact``
-included). Among such arrivals the cheapest wins. ``maximize_contact``
-is stricter: the two legs have to line up flush, otherwise a corner clip
-would steal the tick from the around-the-crate walk A* is there to find.
-Anything the two legs cannot reach -- a crate that has to be walked
-around, a goal sitting behind a wall -- falls through to the A* below,
-diagonals and all.
+The search itself is ordinary A*: eight neighbours, a move costing its true
+euclidean length, and the octile heuristic, which is exactly the free-space
+optimum for those costs and therefore both admissible and consistent.
 
-The search itself is then ordinary A*: eight neighbours, a move costing its
-true euclidean length, and the octile heuristic, which is exactly the
-free-space optimum for those costs and therefore both admissible and
-consistent. Two things are worth knowing about the result.
+**A reachable Y-then-X finish cuts the search short.** After a node is
+expanded, and before its eight neighbours are generated, the planner asks
+whether the goal can be reached from *here* by walking only along Y, only
+along X, or Y and then X -- never the other way around, and never a
+diagonal. That is how a beat-em-up body actually closes: get on the lane,
+then walk in. If those one or two legs are walkable and satisfy the same
+``arrived`` test A* would use (``enough_contact`` included), the route is
+the A* prefix to this node plus those legs, and the search stops. A
+free-space start therefore comes out as Y then X even though a diagonal is
+shorter; a start boxed in still walks around with A* and only straightens
+once a node can see the goal that way. ``maximize_contact`` is stricter:
+the two legs have to line up flush, otherwise a corner clip would hide the
+around-the-crate walk the rest of A* is there to find.
+
+Two other things are worth knowing about the result.
 
 **The vectors are merged, not one per cell.** A route of nine cells to the
 right is one ``Step`` of ``9 * step`` px, not nine of ``step``. That is the
@@ -67,6 +68,7 @@ from dataclasses import dataclass
 from .geometry import (
     ALL_DIRECTIONS,
     CARDINALS,
+    EPS,
     Direction,
     Rect,
     direction_from_offset,
@@ -170,8 +172,9 @@ def find_path(
     extra route per px of overlap gained. They combine: a floor plus a
     preference for doing better than the floor.
 
-    When a one- or two-leg axis-aligned route (Y first, then X) already
-    reaches, that route is returned and A* is not run.
+    Mid-search, a node from which the goal is one or two axis-aligned legs
+    away (Y first, then X) finishes that way instead of generating more
+    neighbours.
     """
 
     lattice = Lattice(start=start, world=world, obstacles=obstacles, step=step)
@@ -195,10 +198,6 @@ def find_path(
     if arrived(start) and (weight <= 0 or goal.misalignment(start) <= 0):
         return Path((), True, start, start, 0, goal.misalignment(start), goal.contact(start))
 
-    axis = _axis_aligned_yx(lattice=lattice, goal=goal, arrived=arrived, weight=weight)
-    if axis is not None:
-        return axis
-
     came_from: dict[tuple[int, int], tuple[int, int]] = {}
     best_cost: dict[tuple[int, int], float] = {origin: 0.0}
     # Ties are broken by insertion order so the same world always plans the
@@ -214,6 +213,10 @@ def find_path(
     expanded = 0
     goal_node: tuple[int, int] | None = None
     goal_score = math.inf
+    # When the search finishes by Y-then-X from an expanded node, this is
+    # that node; reconstruction walks A* to it and then appends the two legs.
+    yx_from: tuple[int, int] | None = None
+    walks: dict[tuple[tuple[int, int], Direction], list[tuple[int, int]]] = {}
     # A cheaper route to an already-queued node pushes a second entry rather
     # than sifting the heap; the stale one is dropped here when it surfaces.
     closed: set[tuple[int, int]] = set()
@@ -238,11 +241,34 @@ def find_path(
             if score < goal_score:
                 goal_score = score
                 goal_node = node
+                yx_from = None
             if misalignment <= 0:
                 # Flush arrival: nothing cheaper can also be better aligned.
                 break
             # Otherwise keep expanding *through* this position -- the better
             # lined-up spot is usually a step or two further along.
+        finish = _best_yx_from(
+            lattice,
+            node,
+            arrived,
+            goal,
+            target_box,
+            require_flush=weight > 0,
+            cache=walks,
+        )
+        if finish is not None:
+            arrival, arrival_rect = finish
+            extra = step * (
+                abs(arrival[0] - node[0]) + abs(arrival[1] - node[1])
+            )
+            misalignment = goal.misalignment(arrival_rect) if weight else 0.0
+            score = cost + extra + weight * misalignment
+            if score < goal_score:
+                goal_score = score
+                goal_node = arrival
+                yx_from = node
+            if misalignment <= 0:
+                break
         if expanded >= max_nodes:
             break
 
@@ -271,7 +297,13 @@ def find_path(
 
     end = goal_node if goal_node is not None else closest
     final = lattice.rect_at(end)
-    steps = _merge(_reconstruct(came_from, origin, end), step)
+    if yx_from is not None and goal_node is not None:
+        prefix = _reconstruct(came_from, origin, yx_from)
+        di = goal_node[0] - yx_from[0]
+        dj = goal_node[1] - yx_from[1]
+        steps = _merge(prefix, step) + _yx_steps(di, dj, step)
+    else:
+        steps = _merge(_reconstruct(came_from, origin, end), step)
     # Measured once, on the position actually chosen: the caller wants to
     # know how flush the arrival was whether or not the search was told to
     # care about it.
@@ -287,75 +319,86 @@ def find_path(
     )
 
 
-def _axis_aligned_yx(
-    *,
+def _best_yx_from(
     lattice: Lattice,
-    goal: Goal,
+    origin: tuple[int, int],
     arrived: Callable[[Rect], bool],
-    weight: float,
-) -> Path | None:
-    """A Y-then-X (or single-axis) route to the goal, or ``None``.
+    goal: Goal,
+    target_box: Rect,
+    *,
+    require_flush: bool,
+    cache: dict[tuple[tuple[int, int], Direction], list[tuple[int, int]]],
+) -> tuple[tuple[int, int], Rect] | None:
+    """Cheapest Y-then-X (or single-axis) arrival from ``origin``, or ``None``.
 
-    ``None`` means "A* should decide": no arrival sat on that corridor, the
-    only one was the origin itself, or ``maximize_contact`` is on and the
-    two legs cannot line up. Staying put is ``find_path``'s early return;
-    a start that has already arrived but is not flush, and a corner clip
-    that would satisfy a bare arrival, both still want A* when alignment
-    was asked for -- walking around a crate to stand square on its face is
-    not a Y-then-X corridor.
+    ``None`` when no arrival sits on that corridor, the only one is
+    ``origin`` itself (the caller already handled standing still), or
+    ``require_flush`` is set and the two legs cannot line up.
     """
 
-    column = [(0, 0), *_walk_line(lattice, (0, 0), Direction.UP)]
-    column.extend(_walk_line(lattice, (0, 0), Direction.DOWN))
+    i0, j0 = origin
+    column = [origin, *_walk_line(lattice, origin, Direction.UP, cache)]
+    column.extend(_walk_line(lattice, origin, Direction.DOWN, cache))
+    # Nearer rows first so a cheap arrival can prune farther ones.
+    column.sort(key=lambda node: abs(node[1] - j0))
 
-    best_key: tuple[float, float, int, int, int, int] | None = None
+    best_key: tuple[int, float, int, int, int, int] | None = None
     best_node: tuple[int, int] | None = None
     best_rect: Rect | None = None
-    visited = 0
+    best_manh: int | None = None
 
-    for _, j in column:
-        row = [(0, j), *_walk_line(lattice, (0, j), Direction.LEFT)]
-        row.extend(_walk_line(lattice, (0, j), Direction.RIGHT))
-        visited += len(row)
-        for i, _ in row:
-            node = (i, j)
+    for node_y in column:
+        dj = abs(node_y[1] - j0)
+        if best_manh is not None and dj >= best_manh:
+            continue
+        # X does not change y. A row whose body misses the goal's y-span
+        # cannot arrive no matter how far it walks.
+        if not _y_could_reach(lattice.rect_at(node_y), target_box):
+            continue
+        row = [node_y, *_walk_line(lattice, node_y, Direction.LEFT, cache)]
+        row.extend(_walk_line(lattice, node_y, Direction.RIGHT, cache))
+        for node in row:
+            if node == origin:
+                continue
+            di = abs(node[0] - i0)
+            if best_manh is not None and di + dj >= best_manh:
+                continue
             rect = lattice.rect_at(node)
             if not arrived(rect):
                 continue
-            cost = lattice.step * (abs(i) + abs(j))
-            misalignment = goal.misalignment(rect) if weight else 0.0
-            # Misalignment is the second key so a score tie prefers the
-            # flusher arrival -- at the default weight, 4 px of overlap
-            # costs the same as the 8 px walk that buys them.
-            key = (cost + weight * misalignment, misalignment, abs(j), abs(i), j, i)
+            misalignment = goal.misalignment(rect)
+            if require_flush and misalignment > 0:
+                continue
+            key = (di + dj, misalignment, dj, di, node[1], node[0])
             if best_key is None or key < best_key:
                 best_key = key
                 best_node = node
                 best_rect = rect
+                best_manh = di + dj
 
-    if best_node is None or best_node == (0, 0) or best_rect is None:
+    if best_node is None or best_rect is None:
         return None
-    if weight and goal.misalignment(best_rect) > 0:
-        return None
+    return best_node, best_rect
 
-    i, j = best_node
-    return Path(
-        steps=_yx_steps(i, j, lattice.step),
-        reached=True,
-        start=lattice.start,
-        final=best_rect,
-        nodes_expanded=visited,
-        misalignment=goal.misalignment(best_rect),
-        contact=goal.contact(best_rect),
-    )
+
+def _y_could_reach(rect: Rect, box: Rect) -> bool:
+    """Could this body meet ``box`` after an X-only move?"""
+
+    return rect.bottom >= box.top - EPS and rect.top <= box.bottom + EPS
 
 
 def _walk_line(
     lattice: Lattice,
     start: tuple[int, int],
     direction: Direction,
+    cache: dict[tuple[tuple[int, int], Direction], list[tuple[int, int]]],
 ) -> list[tuple[int, int]]:
     """Every lattice node reachable by repeating ``direction`` from ``start``."""
+
+    key = (start, direction)
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
 
     # The playable band is a few hundred px; this is a fuse, not a budget.
     limit = max(8, int(max(lattice.world.width, lattice.world.height) / lattice.step) + 8)
@@ -366,6 +409,7 @@ def _walk_line(
             break
         node = (node[0] + direction.dx, node[1] + direction.dy)
         nodes.append(node)
+    cache[key] = nodes
     return nodes
 
 

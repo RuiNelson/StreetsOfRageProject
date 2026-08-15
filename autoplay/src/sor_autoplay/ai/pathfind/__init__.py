@@ -26,10 +26,9 @@ The model is deliberately small:
   search can find. Neither is on by default -- without them, edges meeting
   corner to corner count as arrival;
 - the answer is a list of vectors in the eight compass directions, each at
-  least ``step`` long and a whole multiple of it. When the goal can be
-  reached by one axis-aligned run or by walking Y and then X, that corridor
-  is used and A* is not -- a free-space diagonal is shorter and is rejected
-  anyway, because a beat-em-up body closes by getting on the lane first.
+  least ``step`` long and a whole multiple of it. Mid-search, a node from
+  which the goal is one or two axis-aligned legs away (Y first, then X)
+  finishes that way: the A* prefix plus those legs, not a diagonal dash.
 
 That last property is the reason the search exists at all. A beat-em-up AI
 does not steer with a continuous heading; it holds a direction on a d-pad for

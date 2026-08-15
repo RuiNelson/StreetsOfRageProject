@@ -104,7 +104,6 @@ def test_y_then_x_is_used_when_it_clears_a_wall_the_direct_x_run_hits() -> None:
 
 
 def test_diagonals_can_be_turned_off() -> None:
-    # Block the Y column so the shortcut cannot fire and A* has to route.
     wall = Rect(0, 16, 16, 16)
     path = plan(
         start=BODY,
@@ -117,12 +116,20 @@ def test_diagonals_can_be_turned_off() -> None:
     assert all(not step.direction.is_diagonal for step in path.steps)
 
 
-def test_a_blocked_y_column_still_lets_a_star_route_around() -> None:
+def test_a_star_finishes_with_y_then_x_once_the_corridor_opens() -> None:
+    # Wall blocks the starting column, so A* has to step aside first.
+    # The first expanded node that can see the goal by Y then X finishes
+    # that way -- no diagonal dash for the remainder.
     wall = Rect(0, 16, 16, 16)
     path = plan(start=BODY, goal=PointGoal(Point(64, 64)), obstacles=[wall])
 
     assert path.reached
-    assert path.steps[0].direction is not Direction.DOWN
+    assert path.steps[0].direction is Direction.RIGHT
+    assert not any(step.direction.is_diagonal for step in path.steps)
+    assert [step.direction for step in path.steps[-2:]] == [
+        Direction.DOWN,
+        Direction.RIGHT,
+    ]
     assert PointGoal(Point(64, 64)).is_reached(path.final)
 
 
@@ -445,8 +452,8 @@ def test_a_goal_outside_the_world_fails_without_raising() -> None:
 
 
 def test_the_node_budget_bounds_the_work() -> None:
-    # A full-height wall so the Y-then-X shortcut cannot reach the far side
-    # and A* is the one that has to stop at the budget.
+    # A full-height wall so no node can finish by Y-then-X, and A* is the
+    # one that has to stop at the budget.
     wall = Rect(64, 0, 16, 112)
     path = plan(
         start=BODY,
