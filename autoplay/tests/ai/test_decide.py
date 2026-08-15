@@ -2189,5 +2189,73 @@ class CouldGrabAntonioOnPunishTests(unittest.TestCase):
         self.assertEqual(could_grab_enemy({myself, antonio}), set())
 
 
+class JumpKickAntonioTests(unittest.TestCase):
+    def test_offers_a_hop_on_a_live_antonio_inside_kick_range(self) -> None:
+        # dx=40 is inside Axel's punch (50) *and* kick (60). The usual
+        # InJumpAttackReach band starts past punch outer, so without the
+        # Antonio-specific offer this hop never fires.
+        myself = make_myself(world_x=120, world_y=100, facing_left=False)
+        antonio = _antonio(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=40,
+            boss_dist_lane=4,
+        )
+        result = could_jump_attack({myself, antonio})
+        self.assertIn(JumpAttack(actor_slot="P1", target_slot="obj09"), result)
+
+    def test_does_not_hop_a_stunned_antonio_from_the_ground(self) -> None:
+        # Hitstun is the grab, not another hop.
+        myself = make_myself(world_x=120, world_y=100, facing_left=False)
+        antonio = _antonio(
+            world_x=150,
+            world_y=100,
+            combat_phase=CombatPhase.RECOVERY,
+            primary_state=3,
+            boss_dist_x=30,
+            boss_dist_lane=0,
+        )
+        self.assertFalse(
+            any(isinstance(v, JumpAttack) for v in could_jump_attack({myself, antonio}))
+        )
+
+    def test_does_not_walk_through_jump_range_on_a_live_antonio(self) -> None:
+        # dx=55 is past punch outer and inside kick max: the hop owns it.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        antonio = _antonio(
+            world_x=155,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=55,
+            boss_dist_lane=4,
+        )
+        self.assertFalse(
+            any(
+                isinstance(v, WalkToNearEnemy) and v.target_slot == "obj09"
+                for v in could_walk_to_near_enemy({myself, antonio})
+            )
+        )
+
+    def test_still_walks_in_to_grab_a_stunned_antonio(self) -> None:
+        # Past grab reach (Axel punch outer 50) so the hold is not live
+        # yet -- walking in is how we get there.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        antonio = _antonio(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.RECOVERY,
+            primary_state=3,
+            boss_dist_x=60,
+            boss_dist_lane=0,
+        )
+        self.assertIn(
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj09"),
+            could_walk_to_near_enemy({myself, antonio}),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -169,12 +169,16 @@ which is how his kick starts.
 is already satisfied (or that he has committed to primary state 2, the
 close-range power kick). Standing still in front of him is one of the
 trigger paths — the player's own signature while throwing a ground combo.
-The human answer is a single punch to put him in later-boss hitstun
-(primary `$03`/`$04`, decoded as `RECOVERY`), then a grab and a suplex;
-`DodgeAntonioKick` and the jump-over tier fire only once the kick or the
-tactical-`$08` dash is actually locked in. A predicted window is not a
-reason to leave punch range. `HitAntonioBoomerang` punches the thrown
-boomerang at punch-connect time when it would hit the actor.
+The human answer is a single punch *or* a jump kick to put him in
+later-boss hitstun (primary `$03`/`$04`, decoded as `RECOVERY`), then a
+grab and a suplex. Jump-kicking him is offered anywhere inside the
+kick's free-flight range -- the usual "past punch outer" band is only
+~10px on Axel and never fires -- and owns the approach once he is that
+close; a punch still wins in punch range. `DodgeAntonioKick` and the
+jump-over tier fire only once the kick or the tactical-`$08` dash is
+actually locked in. A predicted window is not a reason to leave punch
+range. `HitAntonioBoomerang` punches the thrown boomerang at
+punch-connect time when it would hit the actor.
 
 **`InContinueMenu`** is observed when this player's object is the type-`$0F`
 continue / high-score name-entry UI (the slot is no longer playable).

@@ -2054,6 +2054,46 @@ class AntonioVerbEmergencyTests(unittest.TestCase):
         winner = find_all(determine_priority_verb(context), Verb)[0]
         self.assertIsInstance(winner, Punch)
 
+    def test_jump_kick_outranks_walking_into_a_live_antonio(self) -> None:
+        myself = Myself(
+            slot="P1",
+            player_index=1,
+            character_id=0,
+            character_name="Axel",
+            world_x=100,
+            world_y=100,
+            health=80,
+            health_percent=100.0,
+            lives=3,
+            specials=1,
+            held_weapon_type=0,
+            facing_left=False,
+            combat_phase=CombatPhase.NORMAL,
+            action_state=0,
+            is_airborne=False,
+        )
+        antonio = Antonio(
+            slot="obj09",
+            type_id=0x56,
+            world_x=155,
+            world_y=100,
+            health=40,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+            primary_state=1,
+            boss_dist_x=55,
+            boss_dist_lane=4,
+        )
+        context = {
+            myself,
+            antonio,
+            JumpAttack(actor_slot="P1", target_slot="obj09"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj09"),
+        }
+        winner = find_all(determine_priority_verb(context), Verb)[0]
+        self.assertIsInstance(winner, JumpAttack)
+
 
 if __name__ == "__main__":
     unittest.main()

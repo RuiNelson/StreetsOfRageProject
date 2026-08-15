@@ -336,7 +336,9 @@ class JumpAttack(MeleeAttacks):
     Raises emergency: AntonioIsGoingToKick (committed)×56, (PunishWindow
     for the target)×28, (Nora, not currently dangerous, within
     priority.NORA_RECOVERY_PUNISH_TICKS of her own last attack)×24,
-    Enemy×18.
+    Enemy×18. Against a live Antonio the hop is also offered anywhere
+    inside the kick's free-flight range (not only past punch outer);
+    punch still wins in punch range, the grab still wins on hitstun.
     """
 
     priority: int = 8  # below basic punch priority (10)

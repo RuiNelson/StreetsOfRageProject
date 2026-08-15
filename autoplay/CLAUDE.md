@@ -15,9 +15,9 @@ flags), plus an opt-in **symbolic AI** (`ai/` — Phase A of the design in
 module docstrings and [`AI.md`](AI.md) for the Token/Information/Verb
 pipeline and manuscript-grounded combat facts already wired in. Still future
 work: two-player coordination, six-button `--altControls`, and per-boss
-tactics beyond Antonio (Antonio himself is punch → grab → suplex:
-one B to open later-boss hitstun, then walk in and `Supplex`; dodge
-only a kick/dash that is already locked in).
+tactics beyond Antonio (Antonio himself is punch or jump-kick →
+grab → suplex: one B or a hop to open later-boss hitstun, then walk
+in and `Supplex`; dodge only a kick/dash that is already locked in).
 
 **First-level breakables (user):** Round-1 phone booths (`$11`) and the
 type-`$19` family share the shallowest ROM solid (14px on lane vs a 16px
@@ -215,13 +215,16 @@ Out of scope, per [`AI.md`](AI.md)'s own text: two-player coordination rules
 `--altControls` scheme ("planned for a future iteration"). Antonio is the
 first later-boss with dedicated tactics (`AntonioIsGoingToKick` /
 `DodgeAntonioKick` / `HitAntonioBoomerang` / `GrabAntonioOnPunish`). The
-fight is punch → grab → suplex: `_could_melee_strike` allows the opener
-punch on a live Antonio and refuses a second punch once he is punishable
-(standing still to combo him is the `$16EAE` kick trigger); later-boss
-primary `$03`/`$04` decode as `RECOVERY` so that window is visible;
-`DodgeAntonioKick` and the jump-over tier fire only on a locked-in kick
-(primary `$02`) or dash (tactical `$08`). The other bosses still only
-have the subclass hierarchy populated.
+fight is punch or jump-kick → grab → suplex: `_could_melee_strike`
+allows the opener punch on a live Antonio and refuses a second punch
+once he is punishable (standing still to combo him is the `$16EAE` kick
+trigger); `could_jump_attack` offers a hop anywhere inside the kick's
+free-flight range (the usual band past punch outer is ~10px on Axel and
+never fires) and `could_walk_to_near_enemy` hands that last stretch to
+the hop; later-boss primary `$03`/`$04` decode as `RECOVERY` so the
+grab window is visible; `DodgeAntonioKick` and the jump-over tier fire
+only on a locked-in kick (primary `$02`) or dash (tactical `$08`). The
+other bosses still only have the subclass hierarchy populated.
 
 ## TokenMap (keep updated)
 

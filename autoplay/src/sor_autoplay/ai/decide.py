@@ -519,8 +519,17 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 and enemy.strike_is_committed()
             ):
                 # could_dodge_antonio_kick owns a locked-in kick/dash.
-                # A predicted window is not a reason to stop walking in:
-                # the opener punch has to close to punch range first.
+                continue
+            if (
+                isinstance(enemy, Antonio)
+                and not is_punishable(enemy.combat_phase)
+                and abs(enemy.world_x - actor.world_x)
+                <= reach.jump_attack_max_dx(actor.character_id)
+            ):
+                # Jump-kick owns the last stretch on a live Antonio.
+                # Walking through that band parks the actor in punch
+                # range and skips the hop. A punishable Antonio is a
+                # grab walk-in instead.
                 continue
             if (
                 standing_off
@@ -868,11 +877,12 @@ def could_jump_attack(context: Context) -> Context:
             # walking in, which could_walk_to_near_enemy already does.
             continue
         target_slots = set(reach.targets_of(context, InJumpAttackReach, actor.slot))
-        # Hopping over Antonio's *committed* kick is the reaction to
-        # AntonioIsGoingToKick when the actor is already in the air (or
-        # about to be). A predicted window is the punch-then-grab opener,
-        # not a hop. Added even without InJumpAttackReach so a close-range
-        # hop still fires once he has locked in.
+        # Jump-kicking Antonio is a real opener, not only a hop over his
+        # kick: the usual InJumpAttackReach band is just past punch outer
+        # (Axel: ~10px), which is too thin to ever fire. Offer a hop
+        # anywhere inside the kick's free-flight range. A punishable
+        # Antonio is a grab, not another hop -- unless already airborne,
+        # when the flight has to finish.
         kick_slots = {
             token.target_slot
             for token in find_all(context, AntonioIsGoingToKick)
@@ -881,7 +891,11 @@ def could_jump_attack(context: Context) -> Context:
         for antonio in find_all(context, Antonio):
             if antonio.is_defeated:
                 continue
-            if antonio.slot in kick_slots and antonio.strike_is_committed():
+            if is_punishable(antonio.combat_phase) and not actor.is_airborne:
+                continue
+            if abs(antonio.world_x - actor.world_x) <= reach.jump_attack_max_dx(
+                actor.character_id
+            ):
                 target_slots.add(antonio.slot)
         if actor.is_airborne and not target_slots:
             nearest = min(
