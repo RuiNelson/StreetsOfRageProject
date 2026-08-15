@@ -157,8 +157,9 @@ class ProjectileSidestep(Walk):
     for this actor -- a projectile already judged approaching, in lane, and
     within the impact window (``inference.check_for_incoming_projectiles``).
     Jack's thrown axe/torch (object_catalog.py type ``$28``) is the case this
-    was built for -- juggling him is unsafe to melee (see ``could_punch``'s
-    Jack exception) and once he lets go, the axe/torch itself is a fast
+    was built for -- an unarmed punch into the juggle trades hits (see
+    ``could_punch``'s Jack exception; a held weapon still swings) and once
+    he lets go, the axe/torch itself is a fast
     in-lane projectile with no answer but getting out of its way. While he
     is still juggling it, though, ``inference._jack_still_juggling`` keeps it
     out of ``IncomingProjectile`` entirely -- the weapon's own spin can point

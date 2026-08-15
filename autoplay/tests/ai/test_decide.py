@@ -1876,9 +1876,9 @@ class CouldOpenBreakableTests(unittest.TestCase):
 
 
 class JackJugglingMeleeTests(unittest.TestCase):
-    """While Jack juggles his axe/torch (has_projectile), a punch or an
-    armed melee swing is refused -- only the jump kick and the from-behind
-    chord are safe finishers (decide._could_melee_strike)."""
+    """While Jack juggles his axe/torch (has_projectile), an unarmed punch
+    is refused -- closing in with fists trades hits with the spin. A held
+    weapon reaches past it and must be used."""
 
     def test_could_punch_refuses_a_juggling_jack(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
@@ -1896,12 +1896,25 @@ class JackJugglingMeleeTests(unittest.TestCase):
 
         self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj01")})
 
-    def test_could_swing_bat_or_pipe_also_refuses_a_juggling_jack(self) -> None:
+    def test_could_swing_bat_or_pipe_still_fires_on_a_juggling_jack(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)  # baseball bat
         jack = make_jack(world_x=130, world_y=105, has_projectile=True)
         context: set[Token] = {myself, jack}
 
-        self.assertEqual(could_swing_bat_or_pipe(context), set())
+        self.assertEqual(
+            could_swing_bat_or_pipe(context),
+            {SwingBatOrPipe(actor_slot="P1", target_slot="obj01")},
+        )
+
+    def test_could_stab_with_knife_or_bottle_still_fires_on_a_juggling_jack(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)  # knife
+        jack = make_jack(world_x=130, world_y=105, has_projectile=True)
+        context: set[Token] = {myself, jack}
+
+        self.assertEqual(
+            could_stab_with_knife_or_bottle(context),
+            {StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01")},
+        )
 
     def test_a_non_juggling_jack_does_not_affect_a_different_juggling_jack(self) -> None:
         # The refusal is per-target, read from each Jack's own has_projectile

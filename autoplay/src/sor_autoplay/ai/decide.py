@@ -158,13 +158,13 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
     ``state_machine_melee_strike``), gated only on which weapon type (if any)
     the actor holds. ``held_types=None`` means unarmed (``Punch``).
 
-    Refuses a Jack currently juggling his axe/torch (``Jack.has_projectile``)
-    for all four -- while he is spinning the weapon, closing in with a punch
-    or an armed swing trades hits with it instead of connecting cleanly.
-    ``could_jump_attack``'s kick and ``could_rear_attack``'s from-behind chord
-    are untouched: both answer him from outside the swing (the kick arrives
-    from above, the chord from a side he isn't juggling toward), so they stay
-    the only safe finishers on him until he lets the weapon go.
+    Refuses an *unarmed* punch on a Jack currently juggling his axe/torch
+    (``Jack.has_projectile``): closing in with bare fists trades hits with
+    the spin. A held weapon reaches past that spin -- bat, pipe, knife,
+    bottle, pepper -- and must be used; ``could_jump_attack`` is already
+    refused while armed, so skipping the swing left the AI walking around
+    him doing nothing. The kick and the from-behind chord stay available
+    unarmed.
     """
 
     verbs: set[Token] = set()
@@ -195,7 +195,11 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
         }
         for target_slot in reach.targets_of(context, InPunchReach, actor.slot):
             target = find(context, Enemy, slot=target_slot)
-            if isinstance(target, Jack) and target.has_projectile:
+            if (
+                held_types is None
+                and isinstance(target, Jack)
+                and target.has_projectile
+            ):
                 continue
             # Standing still to punch Antonio is the ROM's own kick trigger
             # ($16EAE zero-velocity path). Only a real punish window is

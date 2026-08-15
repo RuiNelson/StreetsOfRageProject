@@ -27,7 +27,9 @@ grab immediately (`GrabJackFromBehind`). A jump kick that overshoots leaves
 the actor on his back but facing the wrong way -- that is a turn-and-grab,
 not `RearAttack` (the chord would fire away from him). Prefer `RearAttack`
 when Jack is at the actor's back *and facing them*. His axe juggle and
-lunge punish a turn-and-punch in that geometry.
+lunge punish a turn-and-punch in that geometry. If the actor is holding a
+weapon, use it on Jack -- including while he juggles. Only the unarmed
+punch is refused against the spin.
 
 ## Ownership
 
