@@ -10,7 +10,7 @@ ROM's own geometry.
 import unittest
 
 from sor_autoplay.ai import reach
-from sor_autoplay.ai.tokens import AttackRange, Enemy, Garcia, Myself, Nora, Signal
+from sor_autoplay.ai.tokens import AttackRange, Enemy, Garcia, Jack, Myself, Nora, Signal
 from sor_autoplay.phases import CombatPhase
 
 # Nora's whip and Garcia's straight punch, exactly as attack_ranges.py pulls
@@ -121,6 +121,28 @@ class EnemyForwardDxTests(unittest.TestCase):
         enemy = _garcia(world_x=200, facing_left=False)
         self.assertEqual(reach.enemy_forward_dx(enemy, _myself(world_x=240)), 40)
         self.assertEqual(reach.enemy_forward_dx(enemy, _myself(world_x=160)), -40)
+
+
+class RearAttackWarrantedTests(unittest.TestCase):
+    def test_jack_in_the_rear_band_is_always_warranted(self) -> None:
+        actor = _myself(world_x=100, world_y=100)
+        jack = Jack(
+            slot="obj01",
+            type_id=0x27,
+            world_x=70,
+            world_y=100,
+            health=10,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=False,
+            has_projectile=False,
+        )
+        self.assertTrue(reach.rear_attack_is_warranted(actor, jack, [jack]))
+
+    def test_a_lone_garcia_behind_is_not_warranted(self) -> None:
+        actor = _myself(world_x=100, world_y=100)
+        garcia = _garcia(world_x=70, world_y=100)
+        self.assertFalse(reach.rear_attack_is_warranted(actor, garcia, [garcia]))
 
 
 class EnemyCanReachTests(unittest.TestCase):

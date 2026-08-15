@@ -63,6 +63,7 @@ from .enemy import (
     Garcia,
     GrabOpportunity,
     GrabIntoDeadZone,
+    GrabJackFromBehind,
     GrabToClearRear,
     Grunt,
     HakuRo,

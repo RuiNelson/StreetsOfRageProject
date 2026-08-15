@@ -7,6 +7,7 @@ from sor_autoplay.ai.tokens import (
     AntonioIsGoingToKick,
     GrabToClearRear,
     GrabIntoDeadZone,
+    GrabJackFromBehind,
     InGrabReach,
     InJumpAttackReach,
     InPunchReach,
@@ -534,6 +535,22 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
         front = make_garcia(slot="obj01", world_x=130, world_y=100)
 
         self.assertEqual(check_for_grab_opportunities({myself, front}), set())
+
+    def test_promotes_jack_when_the_actor_is_on_his_back(self) -> None:
+        # Jack faces left at x=130; the actor at x=150 is behind him and
+        # facing him -- the hold that lands before the axe turns around.
+        myself = make_myself(world_x=150, world_y=100, facing_left=True)
+        jack = make_jack(slot="obj01", world_x=130, world_y=100, facing_left=True)
+
+        result = check_for_grab_opportunities({myself, jack})
+
+        self.assertEqual(result, {GrabJackFromBehind(actor_slot="P1", target_slot="obj01")})
+
+    def test_does_not_promote_jack_when_he_is_facing_the_actor(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        jack = make_jack(slot="obj01", world_x=130, world_y=100, facing_left=True)
+
+        self.assertEqual(check_for_grab_opportunities({myself, jack}), set())
 
     def test_promotes_nora_on_her_own(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)

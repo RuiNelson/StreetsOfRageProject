@@ -451,6 +451,19 @@ class GrabIntoDeadZone(GrabOpportunity):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class GrabJackFromBehind(GrabOpportunity):
+    """The actor is already on Jack's back -- take the hold before he turns.
+
+    Produced by ``inference.check_for_grab_opportunities`` when the actor
+    stands behind a live ``Jack`` (``reach.enemy_forward_dx`` negative: Jack
+    is facing away). His axe juggle and lunge punish a front exchange; a
+    back grab skips both. The walk-in still has to face him
+    (``InGrabReach``), so this is "caught him from behind", not "he is
+    behind us" -- that side is ``RearAttack``.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class IncomingMelee(Inferred):
     """An enemy whose committed attack is close enough to land on the actor
     -- or, on its own current velocity, soon will be.

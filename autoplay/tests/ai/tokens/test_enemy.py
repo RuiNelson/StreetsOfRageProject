@@ -23,6 +23,7 @@ from sor_autoplay.ai.tokens import (
     GrabOpportunity,
     GrabToClearRear,
     GrabIntoDeadZone,
+    GrabJackFromBehind,
     InGrabReach,
     InJumpAttackReach,
     InPunchReach,
@@ -302,6 +303,7 @@ class ReachAndThreatTokenTests(unittest.TestCase):
             GrabOpportunity,
             GrabToClearRear,
             GrabIntoDeadZone,
+            GrabJackFromBehind,
             IncomingMelee,
             PunishWindow,
             Surrounded,
@@ -335,7 +337,7 @@ class ReachAndThreatTokenTests(unittest.TestCase):
         self.assertEqual(PunishWindow(target_slot="obj07").frames_left, 0)
 
     def test_grab_opportunity_family_shares_one_base(self) -> None:
-        for cls in (GrabToClearRear, GrabIntoDeadZone):
+        for cls in (GrabToClearRear, GrabIntoDeadZone, GrabJackFromBehind):
             self.assertTrue(issubclass(cls, GrabOpportunity), cls.__name__)
 
     def test_grab_opportunities_are_distinct_reasons_for_one_pair(self) -> None:

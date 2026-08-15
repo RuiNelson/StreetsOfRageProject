@@ -22,6 +22,11 @@ emergency of any verb that still scores. Among enemy targets, a `Boss`
 outranks an armed ordinary enemy, and an armed ordinary enemy (pickup
 `$08-$0C`, or Jack still juggling his axe) outranks every other grunt.
 
+**Jack (user):** If the actor is already on Jack's back (Jack facing away),
+grab immediately (`GrabJackFromBehind`). Prefer `RearAttack` whenever Jack
+is in the chord's band -- do not turn around to punch him. His axe juggle
+and lunge punish the extra facing-flip frames.
+
 ## Ownership
 
 - Project-owned directory in the StreetsOfRageProject workspace.

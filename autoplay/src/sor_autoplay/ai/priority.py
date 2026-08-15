@@ -59,6 +59,7 @@ from .tokens import (
     AntonioIsGoingToKick,
     GrabOpportunity,
     GrabIntoDeadZone,
+    GrabJackFromBehind,
     GrabToClearRear,
     IncomingMelee,
     IncomingProjectile,
@@ -164,6 +165,12 @@ _EMERGENCY_ATTACK_PARKED_UNDER_THREAT = 10
 # committed behind (_EMERGENCY_REAR_ATTACK_DANGEROUS, 60): there is no time to
 # walk into anything then.
 _EMERGENCY_GRAB_CLEAR_REAR = 58
+# Caught Jack from behind: take the hold before he turns. Above every
+# strike on an enemy that can still act (20) and above the jump-kick
+# punish (28), just under clearing a pincer (58) -- a rear threat still
+# outranks finishing Jack -- and under the chord against a *committed*
+# Jack at the actor's own back (60), which has no time to walk in.
+_EMERGENCY_GRAB_JACK_FROM_BEHIND = 56
 # An enemy whose every attack starts further out than contact (Nora, per the
 # extracted ranges) has nothing to answer a body pressed against it, so
 # holding it beats trading strikes -- but it is an improvement on an ordinary
@@ -505,6 +512,8 @@ def _emergency_grab_enemy(verb: GrabEnemy, context: Context) -> int:
     score = _EMERGENCY_DEFAULT
     if any(isinstance(token, GrabToClearRear) for token in opportunities):
         score = max(score, _EMERGENCY_GRAB_CLEAR_REAR)
+    if any(isinstance(token, GrabJackFromBehind) for token in opportunities):
+        score = max(score, _EMERGENCY_GRAB_JACK_FROM_BEHIND)
     if any(isinstance(token, GrabIntoDeadZone) for token in opportunities):
         score = max(score, _EMERGENCY_GRAB_DEAD_ZONE)
     return _with_target_class(score, find(context, Enemy, slot=verb.target_slot))

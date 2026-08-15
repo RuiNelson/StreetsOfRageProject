@@ -69,6 +69,7 @@ classDiagram
     Inferred <|-- GrabOpportunity
     GrabOpportunity <|-- GrabToClearRear
     GrabOpportunity <|-- GrabIntoDeadZone
+    GrabOpportunity <|-- GrabJackFromBehind
     Inferred <|-- AntonioIsGoingToKick
 
     Verb <|-- Walk

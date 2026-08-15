@@ -1210,6 +1210,14 @@ class CouldGrabEnemyTests(unittest.TestCase):
 
         self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="front")})
 
+    def test_fires_on_jack_when_already_on_his_back(self) -> None:
+        myself = make_myself(world_x=150, world_y=100, facing_left=True)
+        jack = make_jack(slot="jack", world_x=130, world_y=100, facing_left=True)
+
+        result = could_grab_enemy({myself, jack})
+
+        self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="jack")})
+
     def test_fires_on_nora_without_any_rear_threat(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
         nora = make_nora(slot="nora", world_x=130, world_y=100)

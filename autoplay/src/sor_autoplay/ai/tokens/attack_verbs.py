@@ -94,7 +94,8 @@ class GrabEnemy(GrabMechanics):
     ``GrabOpportunity`` (worth it), and no ``IncomingMelee`` -- walking into
     a committed attack is how the actor gets hit rather than the hold.
 
-    Raises emergency: GrabToClearRear×58, GrabIntoDeadZone×30.
+    Raises emergency: GrabToClearRear×58, GrabJackFromBehind×56,
+    GrabIntoDeadZone×30.
 
     The rear tier sits above every strike on an enemy that can still act
     (punch 20, jump 18/28), above the unwarranted ``RearAttack`` chord
@@ -382,11 +383,10 @@ class RearAttack(MeleeAttacks):
     Adam (up to 14px — his chord is a forward-reaching hop, not a backfist).
 
     Raises emergency, when ``reach.rear_attack_is_warranted`` holds --
-    i.e. the actor is boxed in between two enemies, or the target is inside
-    the punch dead zone, the two cases where turning around solves nothing:
-    (Enemy when in a dangerous phase)×60, Enemy×55. Otherwise, with a
-    turn-and-punch available: (Enemy when in a dangerous phase)×11,
-    Enemy×9.
+    boxed in, punch dead zone, or the target is ``Jack`` (his axe and
+    lunge punish a turn-and-punch): (Enemy when in a dangerous phase)×60,
+    Enemy×55. Otherwise, with a turn-and-punch available: (Enemy when in
+    a dangerous phase)×11, Enemy×9.
 
     The chord costs up to 21 frames of startup and hits only by current
     position, so it whiffs whenever the target drifts during that window and

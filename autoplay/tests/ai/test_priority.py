@@ -1126,6 +1126,24 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
         fields.update(overrides)
         return Garcia(**fields)
 
+    def test_grabbing_jack_from_behind_outranks_punching_him(self) -> None:
+        # Actor at 150 facing left, Jack at 130 facing left: on his back.
+        # The hold has to beat the punch -- "apanhar pelas costas".
+        myself = _myself(world_x=150, world_y=100, facing_left=True)
+        jack = _jack("jack", CombatPhase.NORMAL, world_x=130, world_y=100, facing_left=True)
+        context = {
+            myself,
+            jack,
+            GrabEnemy(actor_slot="P1", target_slot="jack"),
+            Punch(actor_slot="P1", target_slot="jack"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], GrabEnemy)
+
     def test_clearing_the_rear_outranks_punching_the_same_enemy(self) -> None:
         # Axel at 100 facing right, one enemy in grab reach in front and one
         # inside the rear-threat box behind: the hold is what converts that
@@ -1276,6 +1294,24 @@ class DetermineEmergencyRearAttackTests(unittest.TestCase):
         verbs = find_all(result, Verb)
         self.assertEqual(len(verbs), 1)
         self.assertIs(verbs[0], rear_dangerous)
+
+    def test_jack_at_the_back_outranks_turning_around(self) -> None:
+        # Jack's axe and lunge punish a turn-and-punch. The chord is the
+        # answer when he is in the rear band -- "usar muito o BackAttack".
+        myself = _myself(world_x=100, world_y=100)
+        jack = _jack("obj01", CombatPhase.NORMAL, world_x=70, world_y=100)
+        context = {
+            myself,
+            jack,
+            RearAttack(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], RearAttack)
 
     def test_loses_to_turning_around_when_the_chord_is_not_warranted(self) -> None:
         # The abuse case: a lone enemy at the actor's back, far enough out of

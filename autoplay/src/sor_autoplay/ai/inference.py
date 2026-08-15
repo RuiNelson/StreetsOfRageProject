@@ -23,6 +23,7 @@ from .tokens import (
     AntonioIsGoingToKick,
     ClosingEnemy,
     GrabIntoDeadZone,
+    GrabJackFromBehind,
     GrabToClearRear,
     InGrabReach,
     InJumpAttackReach,
@@ -476,6 +477,11 @@ def check_for_grab_opportunities(context: Context) -> Context:
             # only) would not have offered it anyway.
             if any(other.slot != enemy.slot for other in rear):
                 tokens.add(GrabToClearRear(**pair))
+            if isinstance(enemy, Jack) and reach.enemy_forward_dx(enemy, actor) < 0:
+                # Facing away: the hold lands before the axe or the lunge
+                # can turn around. The opposite geometry -- Jack at the
+                # actor's back -- is RearAttack, not a backwards walk-in.
+                tokens.add(GrabJackFromBehind(**pair))
             if enemy.min_reach > 0:
                 # Every attack it owns starts further out than contact --
                 # read from the ROM shape its animations select, not from

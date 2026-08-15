@@ -28,6 +28,7 @@ from .tokens import (
     CameraRange,
     Context,
     Enemy,
+    Jack,
     PlayableCharacter,
     Pit,
     PUNCH_RANGE_Y,
@@ -439,7 +440,13 @@ def rear_attack_is_warranted(
        so it stays unhittable by a normal strike even after the turn.
     2. **Boxed in** -- another live enemy is close on the actor's opposite
        side, so spending the turn hands that one a free hit.
+    3. **Jack** -- his axe juggle and shared lunge punish a turn-and-punch:
+       the extra frames spent flipping facing are the ones he uses to
+       throw or slide. The chord hits him where he is, now.
     """
+
+    if isinstance(enemy, Jack):
+        return True
 
     if abs(enemy.world_x - actor.world_x) < punch_usable_inner_x(actor.character_id):
         return True

@@ -495,14 +495,17 @@ Why it is worth spending an attack on:
   The ROM picks out exactly one today: `Nora`, whose only attacking
   animation reaches 32 to 80 pixels ahead and nothing closer.
 
-Those are exactly the two `GrabOpportunity` descendants —
+Those are two `GrabOpportunity` descendants —
 `GrabToClearRear` and `GrabIntoDeadZone`. The second is derived from the
 extracted `AttackRange`s rather than from the enemy's class, so a corrected
-extraction changes the AI's behaviour without changing any code. They are subclasses rather
+extraction changes the AI's behaviour without changing any code. A third,
+`GrabJackFromBehind`, fires when the actor is already on Jack's back
+(he is facing away): take the hold before the axe or the lunge turns
+around. They are subclasses rather
 than one token with a reason field, per this document's own rule, and they
 rank differently: clearing the rear beats every strike on an enemy that can
-still act, while the whip case is an improvement on an ordinary exchange
-and ranks just above a jump kick.
+still act, catching Jack from behind is just under that, and the whip case
+is an improvement on an ordinary exchange and ranks just above a jump kick.
 
 `InGrabReach` answers the other half — whether walking in would actually
 reach — and, like every other `TargetInReach`, comes from one geometry
