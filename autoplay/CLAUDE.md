@@ -25,6 +25,14 @@ overlaps a body standing legally just in front -- that is a graze, not
 interior contains the body's centre. Dropping any overlapping wall made
 the actor lose the booth, hold UP into the real solid, and freeze.
 
+The *first* thing the AI meets on round 1 is not a smashable object. The
+yellow sidewalk trash can at the first wave gate is background art (never
+in the object table). The actor stops at world x=1504 because `$43AA`
+clamps the player to `camera_x+$20..+$120` until the wave clears;
+`WalkToAdvanceStage` used to keep holding RIGHT into that edge. The first
+real breakable is a type-`$11` booth at (2016, 32). Never hold into the
+camera walk clamp.
+
 **Target ranking (user):** `WalkToAdvanceStage` always has the lowest
 emergency of any verb that still scores. Among enemy targets, a `Boss`
 outranks an armed ordinary enemy, and an armed ordinary enemy (pickup

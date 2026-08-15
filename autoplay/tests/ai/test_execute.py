@@ -1026,6 +1026,30 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
             self.assertTrue(held & RIGHT, f"lost the lateral bit at x={x} (mask {hex(held)})")
             x += WALK_PX_PER_TICK
 
+    def test_does_not_hold_into_the_camera_walk_clamp(self) -> None:
+        # Live level-1 wave gate: actor at world x=1504, camera.right=1504,
+        # WalkToAdvanceStage held RIGHT and the ROM undid every step. The
+        # sidewalk trash can in frame is not even an object.
+        actor = _myself(world_x=1504, world_y=64)
+        camera = CameraRange(left=1248, right=1504, top=0, bottom=112)
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, camera, Stage(level_index=0, direction="right")}, gamepad)
+
+        held = gamepad.held
+        self.assertFalse(held & RIGHT, f"pushed into the camera clamp: {held:#x}")
+
+    def test_still_advances_when_the_camera_has_room(self) -> None:
+        actor = _myself(world_x=1400, world_y=64)
+        camera = CameraRange(left=1216, right=1472, top=0, bottom=112)
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, camera, Stage(level_index=0, direction="right")}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
 
 class MovementDeadbandTests(unittest.TestCase):
     """The controller is a bang-bang actuator sampled every ~33 ms while the

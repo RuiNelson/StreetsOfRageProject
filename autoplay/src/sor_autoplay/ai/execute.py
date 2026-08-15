@@ -371,6 +371,31 @@ def _clamp_mask_to_lane(context: Context, from_y: int, mask: int) -> int:
     return mask
 
 
+def _clamp_mask_to_camera(context: Context, from_x: int, mask: int) -> int:
+    """Never hold into the camera's walk clamp.
+
+    ``$43AA`` keeps the player in ``camera_x + $20 .. + $120``. WalkToAdvance
+    Stage's 40px lookahead sits *past* that edge, so the router keeps asking
+    for RIGHT (or LEFT on stage 8) while the ROM undoes every step: the
+    first-level wave gate at world x=1504, with a sidewalk trash can in
+    frame that is not even an object. Holding the blocked direction does
+    nothing and looks like the actor is stuck on that scenery.
+    """
+
+    camera = find(context, CameraRange)
+    if camera is None:
+        return mask
+    if from_x >= camera.right - MOVE_DEADBAND_X:
+        mask &= ~RIGHT_MASK
+    if from_x <= camera.left + MOVE_DEADBAND_X:
+        mask &= ~LEFT_MASK
+    return mask
+
+
+def _clamp_mask(context: Context, from_x: int, from_y: int, mask: int) -> int:
+    return _clamp_mask_to_camera(context, from_x, _clamp_mask_to_lane(context, from_y, mask))
+
+
 # The HUD wants to draw the planner's actual output, but every routed
 # handler is reached through _HANDLERS' generic (verb, context, gamepad)
 # dispatch, which cannot carry an extra parameter without widening every
@@ -423,7 +448,7 @@ def _routed_mask(
     mask = nav.first_vector_mask(path)
     if not mask and not goal.is_reached(nav.body_rect(actor)):
         mask = fallback()
-    return _clamp_mask_to_lane(context, actor.world_y, mask)
+    return _clamp_mask(context, actor.world_x, actor.world_y, mask)
 
 
 def _movement_mask(
@@ -548,7 +573,7 @@ def _movement_mask(
     elif from_y - to_y > MOVE_DEADBAND_Y:
         mask |= UP_MASK
 
-    return _clamp_mask_to_lane(context, from_y, mask)
+    return _clamp_mask(context, from_x, from_y, mask)
 
 
 def _face_toward_mask(actor: Myself | Partner, target_x: int) -> int:
@@ -1234,7 +1259,12 @@ def state_machine_walk_to_advance_stage(
         dangers=(),
         fallback=straight_line,
     )
-    _hold_steered(gamepad, routed or mask)
+    # `or mask` must not re-introduce a direction the camera clamp just
+    # stripped: at a wave gate the lookahead is past the walk edge, the
+    # router asks for it, the ROM refuses, and forcing the bit back is
+    # how the actor stands there holding RIGHT forever.
+    held = routed or mask
+    _hold_steered(gamepad, _clamp_mask(context, actor.world_x, actor.world_y, held))
 
 
 def state_machine_melee_strike(verb: Verb, context: Context, gamepad: VirtualGamepad) -> None:
