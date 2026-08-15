@@ -71,7 +71,7 @@ from . import kinematics
 from . import navigation as nav
 from .decide import (
     BREAKABLE_PUNCH_X,
-    BREAKABLE_PUNCH_Y,
+    BREAKABLE_APPROACH_Y,
     breakable_smash_outer_x,
     in_smash_range,
 )
@@ -1823,7 +1823,7 @@ def state_machine_open_breakable(
         target.world_x,
         target.world_y,
         stop_dx=breakable_smash_outer_x(target),
-        lane_slack=BREAKABLE_PUNCH_Y,
+        lane_slack=BREAKABLE_APPROACH_Y,
         inner_dx=punch_usable_inner_x(actor.character_id),
         side=side,
     )

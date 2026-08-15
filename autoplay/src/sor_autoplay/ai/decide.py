@@ -105,7 +105,12 @@ HEALTH_PICKUP_MISSING_MIN = 16
 HEALTH_CRITICAL_PERCENT = 40.0
 
 BREAKABLE_PUNCH_X = 36
-BREAKABLE_PUNCH_Y = 16
+# When to press B: the punch attack box is ±8 on lane. A larger number
+# fired the strike from a corner the box cannot reach and the booth
+# never broke. The *walk* goal still uses BREAKABLE_APPROACH_Y -- a
+# 16px body needs more than 8px of slack to have a region at all.
+BREAKABLE_PUNCH_Y = 8
+BREAKABLE_APPROACH_Y = 16
 # Extra room past a prop's own wall (prop_solids) before a strike is judged
 # in range, for the props whose wall out-reaches BREAKABLE_PUNCH_X. Must
 # clear both the path finder's lattice step (NAV_STEP, 4) and the executor's
@@ -1213,10 +1218,18 @@ def in_smash_range(actor: PlayableCharacter, prop: Breakable) -> bool:
     """
 
     dx = abs(prop.world_x - actor.world_x)
-    return (
+    if not (
         punch_usable_inner_x(actor.character_id) <= dx <= breakable_smash_outer_x(prop)
-        and abs(prop.world_y - actor.world_y) <= BREAKABLE_PUNCH_Y
-    )
+    ):
+        return False
+    # Prefer the ROM's own test: attack-box lane vs the prop's body lane.
+    # Origin slack of 16 punched through air when the body sat behind the
+    # origin (every solid record ends 4px in front of the feet).
+    if prop.hitbox is not None and not prop.hitbox.is_degenerate:
+        punch_y0 = actor.world_y - BREAKABLE_PUNCH_Y
+        punch_y1 = actor.world_y + BREAKABLE_PUNCH_Y
+        return punch_y0 < prop.hitbox.y1 and prop.hitbox.y0 < punch_y1
+    return abs(prop.world_y - actor.world_y) <= BREAKABLE_PUNCH_Y
 
 
 def could_open_breakable(context: Context) -> Context:

@@ -1700,7 +1700,7 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
     def test_side_pick_does_not_glitch_exactly_on_alignment(self) -> None:
         # Regression, same shape as the enemy/retreat/release-grab side
         # picks: dy=40 keeps the actor outside smash range on Y (in_smash_
-        # range requires BREAKABLE_PUNCH_Y=16) so the walk-in target,
+        # range requires BREAKABLE_PUNCH_Y=8) so the walk-in target,
         # not the punch, is what's under test. A raw compare on
         # actor.world_x vs the prop's flipped which side to stop on for a
         # couple of px of jitter right at alignment.
@@ -1848,7 +1848,7 @@ class OpenBreakableFacingTests(unittest.TestCase):
 
     def _punch_mask(self, actor_x: int, prop_x: int) -> int:
         prop = Breakable(slot="obj09", world_x=prop_x, world_y=48, type_id=0x1F)
-        actor = _myself(world_x=actor_x, world_y=57, facing_left=True)
+        actor = _myself(world_x=actor_x, world_y=56, facing_left=True)
         verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
         gamepad, client = _gamepad()
 

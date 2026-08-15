@@ -1635,6 +1635,33 @@ class InSmashRangeTests(unittest.TestCase):
 
         self.assertFalse(in_smash_range(actor, self._prop(dx=60)))
 
+    def test_a_prop_past_the_punch_box_lane_is_not(self) -> None:
+        # The attack box is ±8 on lane. 16 used to say yes here, so the AI
+        # punched from a corner the box cannot reach and the booth never
+        # broke.
+        actor = make_myself(world_x=100, world_y=100)
+
+        self.assertFalse(in_smash_range(actor, self._prop(dx=24, dy=16)))
+        self.assertTrue(in_smash_range(actor, self._prop(dx=24, dy=8)))
+
+    def test_a_prop_body_behind_the_origin_is_judged_by_its_box(self) -> None:
+        from sor_autoplay.hitboxes import Hitbox
+
+        actor = make_myself(world_x=100, world_y=48)
+        # Origin at 32, body only behind the feet (the ROM solid's shape).
+        prop = Breakable(
+            slot="prop",
+            world_x=124,
+            world_y=32,
+            type_id=0x11,
+            hitbox=Hitbox(x0=96, x1=152, y0=22, y1=36, z0=80, z1=160),
+        )
+        # dy origin=16 would have been "in range" under the old slack;
+        # the body ends at 36 and the punch box at 48±8 is 40..56 -- miss.
+        self.assertFalse(in_smash_range(actor, prop))
+        actor_close = make_myself(world_x=100, world_y=40)
+        self.assertTrue(in_smash_range(actor_close, prop))
+
     def test_a_narrow_props_reach_is_the_plain_constant(self) -> None:
         # Every prop whose own wall is inside BREAKABLE_PUNCH_X keeps exactly
         # the reach it always had.

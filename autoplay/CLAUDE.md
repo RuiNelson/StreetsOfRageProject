@@ -31,7 +31,9 @@ in the object table). The actor stops at world x=1504 because `$43AA`
 clamps the player to `camera_x+$20..+$120` until the wave clears;
 `WalkToAdvanceStage` used to keep holding RIGHT into that edge. The first
 real breakable is a type-`$11` booth at (2016, 32). Never hold into the
-camera walk clamp.
+camera walk clamp. `in_smash_range` must use the punch box's own ±8 lane
+extent -- 16 fired B from a corner the box cannot reach, so the booth
+never broke.
 
 **Target ranking (user):** `WalkToAdvanceStage` always has the lowest
 emergency of any verb that still scores. Among enemy targets, a `Boss`
