@@ -66,6 +66,7 @@ from .enemy import (
     GrabIntoDeadZone,
     GrabJackFromBehind,
     GrabToClearRear,
+    GrabWhileSurrounded,
     Grunt,
     HakuRo,
     InGrabReach,

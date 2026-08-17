@@ -26,6 +26,7 @@ from .tokens import (
     GrabIntoDeadZone,
     GrabJackFromBehind,
     GrabToClearRear,
+    GrabWhileSurrounded,
     InGrabReach,
     InJumpAttackReach,
     InPunchReach,
@@ -457,6 +458,11 @@ def check_for_grab_opportunities(context: Context) -> Context:
     after a landed hit he is in later-boss ``RECOVERY`` (primary ``$03``/
     ``$04``) and a hold-then-suplex beats standing still to combo him --
     that combo is his own kick trigger. Other bosses stay out of scope.
+
+    Reads the ``Surrounded`` tokens ``check_for_surrounded`` produced earlier
+    in ``generate_inference_tokens``' chain -- see ``GrabWhileSurrounded``,
+    the one opportunity here that is about the actor's whole situation rather
+    than about the candidate enemy itself.
     """
 
     enemies = reach.on_screen_enemies(context)
@@ -466,6 +472,8 @@ def check_for_grab_opportunities(context: Context) -> Context:
     grabbable = [enemy for enemy in enemies if enemy.combat_phase in GRABBABLE_PHASES]
     if not grabbable:
         return set()
+
+    surrounded_actors = {token.actor_slot for token in find_all(context, Surrounded)}
 
     tokens: set[Token] = set()
     for actor in _actors(context):
@@ -478,6 +486,11 @@ def check_for_grab_opportunities(context: Context) -> Context:
                 continue
             if not isinstance(enemy, Grunt):
                 continue
+            if actor.slot in surrounded_actors:
+                # Boxed in: a body in the hands beats a strike whichever side
+                # the crowd is on. GrabToClearRear below only covers the
+                # subset with a *confirmed rear* enemy.
+                tokens.add(GrabWhileSurrounded(**pair))
             # A rear threat that *is* the candidate is not a pincer -- the
             # actor would be walking backwards into the same enemy it is
             # already worried about, and reach.grab_would_connect (forward
@@ -815,9 +828,19 @@ def check_for_weapon_upgrades(context: Context) -> Context:
 def generate_inference_tokens(context: Context) -> Context:
     """Derive every ``Inferred`` token from direct observation.
 
-    ``check_for_safe_spots`` reads the ``IncomingMelee`` tokens produced
-    earlier in this same chain, so the context is threaded through the
-    calls in order rather than unioned from independent snapshots.
+    Three stages, because two checks read judgments the others make rather
+    than raw observation, and a ``|`` chain does **not** give them that: every
+    ``check_for_x(context)`` inside one expression is handed the *same*
+    original set, since the name is only rebound once the whole expression has
+    been evaluated. Anything that needs an earlier token therefore has to sit
+    in a later statement.
+
+    - stage 1 derives from direct observation alone;
+    - ``check_for_grab_opportunities`` additionally reads ``Surrounded``
+      (``GrabWhileSurrounded``), so it runs after stage 1 rather than inside
+      it -- it used to sit in the chain *above* ``check_for_surrounded`` and
+      would have seen nothing;
+    - ``check_for_safe_spots`` reads ``IncomingMelee``.
     """
 
     context = (
@@ -827,9 +850,9 @@ def generate_inference_tokens(context: Context) -> Context:
         | check_for_targets_in_reach(context)
         | check_for_incoming_melee(context)
         | check_for_antonio_kick(context)
-        | check_for_grab_opportunities(context)
         | check_for_punish_windows(context)
         | check_for_surrounded(context)
         | check_for_weapon_upgrades(context)
     )
+    context = context | check_for_grab_opportunities(context)
     return context | check_for_safe_spots(context)

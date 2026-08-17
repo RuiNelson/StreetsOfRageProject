@@ -62,6 +62,7 @@ from .tokens import (
     GrabIntoDeadZone,
     GrabJackFromBehind,
     GrabToClearRear,
+    GrabWhileSurrounded,
     IncomingMelee,
     IncomingProjectile,
     PunishWindow,
@@ -178,6 +179,38 @@ _EMERGENCY_GRAB_JACK_FROM_BEHIND = 56
 # fight, not an escape from a bad one, so it sits just above the
 # jump-kick-on-a-punishable tier (28) and well under the punish/escape tiers.
 _EMERGENCY_GRAB_DEAD_ZONE = 30
+# Boxed in by a crowd: take a hold rather than trade strikes with it.
+#
+# The only grab tier that outranks the chord, and deliberately so. Measured on
+# the pipeline before this existed, both halves of the user-reported "the AI
+# does not deal well when surrounded":
+#
+# - three enemies in the close box with none strictly *behind* produced no
+#   GrabOpportunity at all (GrabToClearRear needs a confirmed rear enemy), so
+#   the winning verb was a plain Punch(20) thrown into the crowd;
+# - in a real pincer the grab *was* offered, and lost anyway --
+#   _EMERGENCY_REAR_ATTACK_DANGEROUS(60) beat GrabToClearRear(58).
+#
+# That second case is the one worth being precise about, because 60 is not an
+# arbitrary number: it is "escape a commit from behind", and walking into a
+# committed attack is normally how the actor takes the hit instead of the
+# hold. It does not apply here. A grab candidate has already passed
+# InGrabReach *and* GRABBABLE_PHASES, so the body is within contact range and
+# is itself not mid-swing -- there is no walk across the room to be punished
+# for. And the hold answers the pincer better than the chord does: the chord
+# hits one enemy by current position and whiffs if it drifts, while the hold
+# removes one body outright and could_hold_actions then throws it *into* the
+# rear threat (ThrowHeldEnemy, B+back), which is the "especially if the thrown
+# enemy hits other enemies" case.
+#
+# So: above the chord (60) and above punch-on-punish (60), below
+# HitAntonioBoomerang(62) -- an incoming projectile still has to be answered
+# first -- and below every hold move (64..70), which cannot coexist anyway
+# since could_grab_enemy skips while already holding. Shares 61 with
+# GrabAntonioOnPunish, which is coherent rather than a collision: both say
+# "the hold is the answer here", and _emergency_grab_enemy takes the max over
+# whichever opportunities hold.
+_EMERGENCY_GRAB_WHILE_SURROUNDED = 61
 # Antonio in hitstun: grab-then-suplex instead of standing still to
 # combo him. The boss raise (+14) is applied on top, so this must
 # clear punch-on-punish (60+14 = 74): otherwise an injected or stale
@@ -531,6 +564,8 @@ def _emergency_grab_enemy(verb: GrabEnemy, context: Context) -> int:
         score = max(score, _EMERGENCY_GRAB_DEAD_ZONE)
     if any(isinstance(token, GrabAntonioOnPunish) for token in opportunities):
         score = max(score, _EMERGENCY_GRAB_ANTONIO_ON_PUNISH)
+    if any(isinstance(token, GrabWhileSurrounded) for token in opportunities):
+        score = max(score, _EMERGENCY_GRAB_WHILE_SURROUNDED)
     return _with_target_class(score, find(context, Enemy, slot=verb.target_slot))
 
 

@@ -477,6 +477,33 @@ class GrabJackFromBehind(GrabOpportunity):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class GrabWhileSurrounded(GrabOpportunity):
+    """The actor is boxed in -- a body in its hands is the way out.
+
+    Produced by ``inference.check_for_grab_opportunities`` for any grabbable
+    ``Grunt`` while this actor carries a ``Surrounded`` token. It is the
+    crowd counterpart of ``GrabToClearRear``, which only fires on a
+    *confirmed rear* enemy (``reach.rear_threats``): a crowd standing in
+    front of and beside the actor -- three bodies inside the close box with
+    none strictly behind -- produced no grab opportunity at all, so the AI
+    answered being surrounded with a plain ``Punch`` at one of them.
+
+    A hold is worth more than a strike here for reasons that do not apply
+    one-on-one. It takes one of the bodies out of the fight for its whole
+    duration, and it ends in damage the crowd cannot interrupt: the front
+    hold's own follow-ups are already ``FlipHold`` -> ``Supplex``, or
+    ``ThrowHeldEnemy`` when ``could_hold_actions`` sees a rear threat to
+    throw the body *into*. ``Surrounded``'s own docstring says no amount of
+    facing answers being hit from both sides at once; a hold is the answer
+    that does not require choosing a side.
+
+    Whether the hold is *reachable* is still ``InGrabReach``'s question --
+    ``decide.could_grab_enemy`` needs both -- so this never proposes walking
+    across a crowd to reach someone.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class GrabAntonioOnPunish(GrabOpportunity):
     """Antonio is in hitstun -- walk in and hold him, then suplex.
 

@@ -512,10 +512,20 @@ later-boss hitstun (`RECOVERY`, primary `$03`/`$04` after
 `$17C36 boss_apply_pending_damage`): punch him once to open that window,
 walk in without attacking, then flip-hold into a suplex. Standing still
 to combo him is the `$16EAE` zero-velocity kick trigger, so a second
-punch is refused and the hold is the punish. They are subclasses rather
+punch is refused and the hold is the punish. A fifth,
+`GrabWhileSurrounded`, fires for any grabbable `Grunt` while the actor
+carries a `Surrounded` token: being boxed in is answered by a hold whichever
+side the crowd is on. It is the one that reads another *inference* rather
+than the candidate enemy itself, which is why
+`check_for_grab_opportunities` runs after `check_for_surrounded` instead of
+beside it in the same `|` chain — every `check_for_*` inside one expression
+is handed the same original context, so a chain cannot express that
+dependency. They are subclasses rather
 than one token with a reason field, per this document's own rule, and they
-rank differently: clearing the rear beats every strike on an enemy that can
-still act, catching Jack from behind is just under that, grabbing a
+rank differently: being surrounded is the only one that outranks the
+`$322A` escape chord (a pincer's hold becomes a throw *into* the enemy the
+chord was aimed at), clearing the rear beats every strike on an enemy that
+can still act, catching Jack from behind is just under that, grabbing a
 stunned Antonio sits above punching him again (the hold is the punish)
 and above every strike on him, and the whip case is an improvement on an
 ordinary exchange and ranks just above a jump kick.

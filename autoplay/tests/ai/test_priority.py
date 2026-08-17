@@ -1126,6 +1126,47 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
         fields.update(overrides)
         return Garcia(**fields)
 
+    def test_a_frontal_crowd_is_answered_by_a_hold_not_a_punch(self) -> None:
+        # The user-reported case, and the one GrabToClearRear never covered:
+        # three enemies inside the close box with *none* strictly behind, so
+        # reach.rear_threats is empty and no grab opportunity existed at all.
+        # The winning verb used to be a plain Punch thrown into the crowd.
+        myself = _myself(world_x=100, world_y=100)
+        target = self._grunt("front", world_x=130, world_y=100)
+        context = {
+            myself,
+            target,
+            self._grunt("side", world_x=145, world_y=110, combat_phase=CombatPhase.ATTACKING),
+            self._grunt("other", world_x=120, world_y=85, combat_phase=CombatPhase.ATTACKING),
+            _camera(),
+            GrabEnemy(actor_slot="P1", target_slot="front"),
+            Punch(actor_slot="P1", target_slot="front"),
+        }
+
+        verbs = find_all(determine_priority_verb(context), Verb)
+
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], GrabEnemy)
+
+    def test_a_lone_enemy_is_still_punched_not_grabbed(self) -> None:
+        # The counterweight: GrabWhileSurrounded must not turn every ordinary
+        # one-on-one exchange into a grab. Without a crowd there is no
+        # Surrounded token, so nothing raises the grab above the strike.
+        myself = _myself(world_x=100, world_y=100)
+        target = self._grunt("front", world_x=130, world_y=100)
+        context = {
+            myself,
+            target,
+            _camera(),
+            GrabEnemy(actor_slot="P1", target_slot="front"),
+            Punch(actor_slot="P1", target_slot="front"),
+        }
+
+        verbs = find_all(determine_priority_verb(context), Verb)
+
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], Punch)
+
     def test_grabbing_jack_from_behind_outranks_punching_him(self) -> None:
         # Actor at 150 facing left, Jack at 130 facing left: on his back.
         # The hold has to beat the punch -- "apanhar pelas costas".
@@ -1166,9 +1207,24 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
         self.assertEqual(len(verbs), 1)
         self.assertIsInstance(verbs[0], GrabEnemy)
 
-    def test_clearing_the_rear_loses_to_the_escape_chord_against_a_commit(self) -> None:
-        # An enemy already committed behind is not something to turn your
-        # back on to walk into another body: the $322A escape wins.
+    def test_clearing_the_rear_beats_the_escape_chord_against_a_commit(self) -> None:
+        # This assertion used to be the other way round: an enemy committed
+        # behind was "not something to turn your back on to walk into another
+        # body", so the $322A escape won.
+        #
+        # Reversed on user report -- the AI handles being surrounded badly,
+        # and a hold ending in a suplex or a throw is the better answer,
+        # *especially when the thrown body hits other enemies*. This exact
+        # geometry is that case: front hold + a rear threat is what makes
+        # could_hold_actions choose ThrowHeldEnemy (B+back), which throws the
+        # held enemy backwards into the very enemy the chord was aimed at --
+        # two enemies answered by one action, and the held one is removed
+        # from the fight either way.
+        #
+        # The old reasoning's "walk into another body" cost is also smaller
+        # than it reads: a GrabEnemy candidate has already passed
+        # InGrabReach, so the target is inside contact range, not across the
+        # room. See priority._EMERGENCY_GRAB_WHILE_SURROUNDED.
         myself = _myself(world_x=100, world_y=100)
         front = self._grunt("front", world_x=130, world_y=100)
         behind = self._grunt(
@@ -1187,7 +1243,7 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
 
         verbs = find_all(result, Verb)
         self.assertEqual(len(verbs), 1)
-        self.assertIsInstance(verbs[0], RearAttack)
+        self.assertIsInstance(verbs[0], GrabEnemy)
 
     def test_grabbing_nora_outranks_punching_her(self) -> None:
         myself = _myself(world_x=100, world_y=100)

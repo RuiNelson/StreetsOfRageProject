@@ -9,6 +9,7 @@ from sor_autoplay.ai.tokens import (
     GrabToClearRear,
     GrabIntoDeadZone,
     GrabJackFromBehind,
+    GrabWhileSurrounded,
     InGrabReach,
     InJumpAttackReach,
     InPunchReach,
@@ -522,6 +523,53 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
         result = check_for_grab_opportunities({myself, front, behind})
 
         self.assertIn(GrabToClearRear(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_a_frontal_crowd_promotes_the_grabbable_body(self) -> None:
+        # Three enemies inside the close box, none of them strictly behind:
+        # reach.rear_threats is empty, so GrabToClearRear never fires and the
+        # actor had no grab opportunity at all while boxed in.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        front = make_garcia(slot="obj01", world_x=130, world_y=100)
+        side_a = make_garcia(slot="obj02", world_x=145, world_y=110)
+        side_b = make_garcia(slot="obj03", world_x=120, world_y=85)
+        context = {myself, front, side_a, side_b}
+        context |= check_for_surrounded(context)
+
+        result = check_for_grab_opportunities(context)
+
+        self.assertIn(GrabWhileSurrounded(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_no_crowd_opportunity_without_the_surrounded_judgment(self) -> None:
+        # The gate is the Surrounded token itself, not proximity: two enemies
+        # on the same side are an ordinary fight, not an encirclement.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        front = make_garcia(slot="obj01", world_x=130, world_y=100)
+        second = make_garcia(slot="obj02", world_x=145, world_y=110)
+        context = {myself, front, second}
+        context |= check_for_surrounded(context)
+
+        result = check_for_grab_opportunities(context)
+
+        self.assertEqual(
+            [t for t in result if isinstance(t, GrabWhileSurrounded)], []
+        )
+
+    def test_the_full_chain_makes_surrounded_visible_to_grab_opportunities(self) -> None:
+        # Ordering regression: every check_for_* inside one `|` chain is
+        # handed the *same* original context, so a grab opportunity that reads
+        # Surrounded sees nothing unless generate_inference_tokens runs it in
+        # a later statement. Asserted through the real entry point.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        context = {
+            myself,
+            make_garcia(slot="obj01", world_x=130, world_y=100),
+            make_garcia(slot="obj02", world_x=145, world_y=110),
+            make_garcia(slot="obj03", world_x=120, world_y=85),
+        }
+
+        result = generate_inference_tokens(context)
+
+        self.assertIn(GrabWhileSurrounded(actor_slot="P1", target_slot="obj01"), result)
 
     def test_the_rear_enemy_alone_is_not_its_own_reason_to_be_grabbed(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
