@@ -70,6 +70,17 @@ def collision_class_at(
       row = lane_y >> 3
       byte = cmap[row * stride + col]
       nibble = high if (world_x & 0xF) < 8 else low
+
+    ``stride`` is the row pitch **and** the map's own width in columns, so a
+    level is exactly ``stride * 16`` px wide. A column past that is off the
+    map and must read as 0 -- ``row * stride + col`` would otherwise land in
+    the *next lane row*'s bytes and report that row's terrain here. The
+    scanners above routinely ask: ``holes_for_level``/``barriers_for_level``
+    sweep ``camera_x - 512 .. camera_x + 832``, which runs past the blockmap
+    near the end of every stage, and class 0 is the pit class -- so the wrap
+    invented a pit (or a class-2 barrier) out of an adjacent lane's data,
+    which reaches the AI as a phantom ``Pit`` token and the HUD as a hole
+    that is not there.
     """
 
     if stride <= 0 or not cmap:
@@ -80,6 +91,8 @@ def collision_class_at(
         lane_y = 0
     col = world_x >> 4
     row = lane_y >> 3
+    if col >= stride:
+        return 0
     index = row * stride + col
     if index < 0 or index >= len(cmap):
         return 0
@@ -100,13 +113,29 @@ def _find_class_regions(
     min_width: int = 16,
     min_height: int = 16,
 ) -> tuple[FloorHole, ...]:
-    """Connected AABBs for cells where ``match(class)`` is true."""
+    """Connected AABBs for cells where ``match(class)`` is true.
+
+    Only cells that are actually **on the map** are considered. The callers'
+    scan window is deliberately wider than the level (``holes_for_level``
+    sweeps ``camera_x - 512 .. camera_x + 832``), and the map itself is
+    exactly ``stride * 16`` px wide, so the window runs off the end near
+    every stage's end. Off-map cells cannot be told apart from real terrain
+    by their class alone -- ``collision_class_at`` reports 0 for them, which
+    is *also* the pit class -- so the bound has to be applied here, or the
+    entire off-map tail scans as one enormous hole.
+
+    The same holds on the lane axis for rows the caller never read: the
+    buffer is ``len(cmap) // stride`` rows tall, and a row past that is
+    "not sampled", not "open floor".
+    """
 
     if stride <= 0 or not cmap:
         return ()
 
     cell_w = 8
     cell_h = 8
+    map_width = stride * 16
+    map_rows = len(cmap) // stride
     cols = max(1, (world_x_max - world_x_min + cell_w - 1) // cell_w)
     rows = max(1, (lane_max + cell_h) // cell_h)
     grid = [[False] * cols for _ in range(rows)]
@@ -115,8 +144,12 @@ def _find_class_regions(
         lane = row * cell_h
         if lane > lane_max:
             break
+        if lane >> 3 >= map_rows:
+            break
         for col in range(cols):
             wx = world_x_min + col * cell_w
+            if wx < 0 or wx >= map_width:
+                continue
             klass = collision_class_at(cmap, stride=stride, world_x=wx, lane_y=lane)
             if match(klass):
                 grid[row][col] = True

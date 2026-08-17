@@ -678,7 +678,10 @@ def _emergency_walk_to_pickup(verb: WalkToPickup, context: Context) -> int:
     pickup = find(context, Pickup, slot=verb.target_slot)
     actor = _find_actor(context, verb.actor_slot)
     if pickup is None:
-        return _EMERGENCY_WALK_TO_PICKUP_SCORE
+        # Target gone this tick -- same answer every other _emergency_* gives
+        # for a missing target. Returning the ScorePickup tier instead kept a
+        # verb aimed at nothing ranked above WalkToAdvanceStage(1).
+        return _EMERGENCY_DEFAULT
     if isinstance(pickup, HealthPickup):
         # Same threshold decide._pickup_is_useful uses to decide the pickup
         # is worth walking to at all -- a second literal here would silently

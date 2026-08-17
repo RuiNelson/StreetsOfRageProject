@@ -701,8 +701,10 @@ def _antonio_kick_distance_threshold(
     standing-still path (thresholds ``$50``/``$68`` selected by facing and
     ``+$31`` bit 1 -- we take the wider ``$68`` so a kick is never
     missed). Non-zero is signed relative to Antonio's facing ``+$60``:
-    negative (approaching him) uses ``$50``, positive (retreating) uses
-    ``$78``.
+    negative (moving *against* his facing, i.e. approaching him -- the
+    ROM's ``bmi`` path) uses ``$78``, non-negative (backing away) uses
+    ``$50``. Same reading as ``ANTONIO_KICK_DIST_CLOSING``/``_AWAY``'s own
+    comments above, which is what this function returns.
     """
 
     vel = actor.vel_x
