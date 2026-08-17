@@ -16,6 +16,7 @@ from .pathfind import Path, Point, PointGoal
 from .tokens import (
     CounterGrab,
     DodgeAntonioKick,
+    DodgeSoutherSlash,
     FlipHold,
     GrabEnemy,
     HitAntonioBoomerang,
@@ -42,7 +43,7 @@ from .tokens import (
     punch_outer_x,
     punch_usable_inner_x,
 )
-from .tokens import Enemy
+from .tokens import Enemy, Souther
 from .tokens import CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile, SafeSpot
 from .tokens import Pickup, Weapon
@@ -59,6 +60,7 @@ from .tokens import (
 from .tokens import Context, Verb, find, find_all
 from .tokens import (
     DodgeAntonioKick,
+    DodgeSoutherSlash,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -1057,6 +1059,17 @@ def state_machine_retreat_from_danger(
 # than landing just inside it.
 PROJECTILE_SIDESTEP_DISTANCE = 40
 
+# How far clear of *Souther's own lane* the dodge aims -- an absolute
+# clearance, not a step length, because the side pick is derived from his lane
+# rather than from the actor's (see _souther_slash_sidestep_target). The claw
+# dash resolves only with the target within $18 (24px) of its lane
+# ($161C6 souther_state2_claw_dash) and the state-1 commit gate at
+# $15EDA needs $1C (28px), so this has to clear 28 -- plus more than
+# MOVE_DEADBAND_Y, or the Y bits go quiet while X is still frozen and the actor
+# stalls a few px short of actually escaping, the same deadlock
+# PIT_DODGE_OVERSHOOT exists to prevent.
+SOUTHER_SLASH_LANE_CLEARANCE = 0x1C + MOVE_DEADBAND_Y + 5
+
 
 def _projectile_sidestep_target(
     actor: Myself | Partner, projectile: Projectile, context: Context
@@ -1077,10 +1090,65 @@ def _projectile_sidestep_target(
 
     lo, hi = _lane_bounds(context)
     if actor.world_y < (lo + hi) / 2:
-        target_y = actor.world_y + PROJECTILE_SIDESTEP_DISTANCE
-    else:
-        target_y = actor.world_y - PROJECTILE_SIDESTEP_DISTANCE
-    return actor.world_x, target_y
+        return actor.world_x, actor.world_y + PROJECTILE_SIDESTEP_DISTANCE
+    return actor.world_x, actor.world_y - PROJECTILE_SIDESTEP_DISTANCE
+
+
+def _souther_slash_sidestep_target(
+    actor: Myself | Partner, souther: Souther, context: Context
+) -> tuple[int, int]:
+    """Where to step to make Souther's committed claw dash overshoot.
+
+    X holds, as it does for a thrown weapon:
+    ``$161C6 (souther_state2_claw_dash)`` closes the X gap itself at 8px/frame,
+    far faster than any character walks, so contesting X is pointless. What it
+    never does is write ``+$20`` -- the dash cannot correct lane once committed
+    -- and it only resolves with the target inside ``$18`` of its lane, so the
+    lane is the whole fight.
+
+    **Which** side is picked from **Souther's own lane**, never from the lane
+    midpoint, the same way ``_pit_dodge_target_y`` picks from the pit's danger
+    edges and for exactly the same reason. The midpoint rule
+    ``_projectile_sidestep_target`` above uses steers the actor *toward* the
+    middle of the lane and across it (upper half aims down, lower half aims
+    up), so the pick undoes itself the moment the actor crosses -- harmless for
+    a throw, which is over in a tick or two, and a permanent oscillation here,
+    because this dodge freezes X and the claw lasts many ticks. Caught on the
+    tick harness (``tests/ai/test_stability.py``): with the actor at lane 60 in
+    a 0..112 lane, the commanded lane direction reversed 18 times in 40 ticks,
+    alternating UP/DOWN across the midpoint at 56.
+
+    Souther's own lane is stable because it is self-reinforcing: the flip point
+    is his lane, and the chosen direction always moves the actor further from
+    it. A side only counts if its aim point survives the lane clamp still clear
+    of the band; when neither does, the roomier side is the best answer
+    available and is still picked from his lane and the lane bounds alone, so
+    it cannot oscillate either.
+    """
+
+    lo, hi = _lane_bounds(context)
+    above = souther.world_y - SOUTHER_SLASH_LANE_CLEARANCE
+    below = souther.world_y + SOUTHER_SLASH_LANE_CLEARANCE
+    can_go_up = above >= lo
+    can_go_down = below <= hi
+
+    dy = actor.world_y - souther.world_y
+    if dy < 0 and can_go_up:
+        return actor.world_x, int(above)
+    if dy > 0 and can_go_down:
+        return actor.world_x, int(below)
+    if can_go_up and can_go_down:
+        # Exactly on his lane: no sign to read, so fall back to whichever side
+        # has more room. One tick of movement gives the test above a sign, and
+        # from then on it reinforces itself.
+        roomier_is_up = (souther.world_y - lo) >= (hi - souther.world_y)
+        return actor.world_x, int(above if roomier_is_up else below)
+    if can_go_up:
+        return actor.world_x, int(above)
+    if can_go_down:
+        return actor.world_x, int(below)
+    roomier_is_up = (souther.world_y - lo) >= (hi - souther.world_y)
+    return actor.world_x, int(lo if roomier_is_up else hi)
 
 
 def state_machine_projectile_sidestep(
@@ -1148,6 +1216,50 @@ def state_machine_dodge_antonio_kick(
     """
 
     state_machine_jump_attack(verb, context, gamepad)
+
+
+def state_machine_dodge_souther_slash(
+    verb: DodgeSoutherSlash, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Step off the lane the claw dash resolves on -- and never jump.
+
+    Deliberately *not* delegating to ``state_machine_jump_attack`` the way
+    ``state_machine_dodge_antonio_kick`` does. Against Antonio the hop is the
+    answer because his dash tracks lane; against Souther the hop is the one
+    input ``$16234 (souther_counter_jump_attack)`` watches for, and it answers a
+    jump-attack action state inside 120px x 18px by promoting him straight to
+    the committed claw with every distance gate bypassed. So this reuses the
+    routed lateral step instead, planned exactly like
+    ``state_machine_projectile_sidestep``: every live enemy counts as danger
+    (a dodge is never trying to stand in anyone's reach) and only the
+    destination differs.
+    """
+
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Souther, slot=verb.target_slot)
+    if actor is None or target is None:
+        gamepad.release()
+        return
+
+    target_x, target_y = _souther_slash_sidestep_target(actor, target, context)
+    goal = nav.PointGoal(nav.Point(target_x, target_y), tolerance=MOVE_DEADBAND_X)
+    body, origin = nav.actor_footprint(actor)
+    solids, dangers = nav.obstacle_sets(context, body=body, origin=origin)
+
+    def straight_line() -> int:
+        return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)
+
+    _hold_steered(
+        gamepad,
+        _routed_mask(
+            context,
+            actor,
+            goal,
+            solids=solids,
+            dangers=dangers,
+            fallback=straight_line,
+        ),
+    )
 
 
 def state_machine_hit_antonio_boomerang(
@@ -1876,6 +1988,7 @@ _HANDLERS = {
     RetreatFromDanger: state_machine_retreat_from_danger,
     ProjectileSidestep: state_machine_projectile_sidestep,
     DodgeAntonioKick: state_machine_dodge_antonio_kick,
+    DodgeSoutherSlash: state_machine_dodge_souther_slash,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,
     Punch: state_machine_melee_strike,

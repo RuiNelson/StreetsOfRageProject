@@ -25,6 +25,7 @@ from sor_autoplay.ai.tokens import (
     GrabIntoDeadZone,
     GrabJackFromBehind,
     GrabAntonioOnPunish,
+    GrabSoutherOnPunish,
     InGrabReach,
     InJumpAttackReach,
     InPunchReach,
@@ -32,6 +33,8 @@ from sor_autoplay.ai.tokens import (
     AntonioIsGoingToKick,
     IncomingMelee,
     PunishWindow,
+    SoutherCountersJump,
+    SoutherIsGoingToSlash,
     Surrounded,
     TargetInReach,
 )
@@ -224,6 +227,33 @@ class EnemyHierarchyTests(unittest.TestCase):
         self.assertTrue(Antonio(**base, tactical=0x08).strike_is_committed())
         self.assertFalse(Antonio(**base, tactical=0x09).strike_is_committed())
 
+    def test_souther_strike_is_committed_only_in_primary_2(self) -> None:
+        base = _base_kwargs(type_id=0x55, health=32)
+        self.assertFalse(Souther(**base).strike_is_committed())
+        self.assertTrue(Souther(**base, primary_state=2).strike_is_committed())
+        # Unlike Antonio there is no separate tactical commit value: $16118
+        # (souther_state2_claw_commit) is entered *by* clearing +$67, and every
+        # tactical value inside primary $02 is already part of the claw.
+        self.assertFalse(Souther(**base, primary_state=1, tactical=0x08).strike_is_committed())
+        for tactical in (0, 1, 2):
+            self.assertTrue(
+                Souther(**base, primary_state=2, tactical=tactical).strike_is_committed()
+            )
+
+    def test_souther_inferences_are_inferred(self) -> None:
+        self.assertTrue(issubclass(SoutherIsGoingToSlash, Inferred))
+        self.assertTrue(issubclass(SoutherCountersJump, Inferred))
+        slash = SoutherIsGoingToSlash(actor_slot="P1", target_slot="obj11")
+        self.assertEqual(slash.target_slot, "obj11")
+        # Keyed on the actor alone: $162A4 reads the player's action state and
+        # nothing about which enemy the jump was aimed at.
+        counter = SoutherCountersJump(actor_slot="P1")
+        self.assertEqual(counter.actor_slot, "P1")
+        self.assertFalse(hasattr(counter, "target_slot"))
+
+    def test_grab_souther_on_punish_is_a_grab_opportunity(self) -> None:
+        self.assertTrue(issubclass(GrabSoutherOnPunish, GrabOpportunity))
+
     def test_boss_extra_fields_round_trip(self) -> None:
         souther = Souther(
             **_base_kwargs(type_id=0x55, health=200),
@@ -313,8 +343,11 @@ class ReachAndThreatTokenTests(unittest.TestCase):
             GrabIntoDeadZone,
             GrabJackFromBehind,
             GrabAntonioOnPunish,
+            GrabSoutherOnPunish,
             IncomingMelee,
             PunishWindow,
+            SoutherCountersJump,
+            SoutherIsGoingToSlash,
             Surrounded,
         ):
             self.assertTrue(issubclass(cls, Inferred), cls.__name__)
@@ -351,6 +384,7 @@ class ReachAndThreatTokenTests(unittest.TestCase):
             GrabIntoDeadZone,
             GrabJackFromBehind,
             GrabAntonioOnPunish,
+            GrabSoutherOnPunish,
         ):
             self.assertTrue(issubclass(cls, GrabOpportunity), cls.__name__)
 

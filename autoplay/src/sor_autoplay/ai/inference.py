@@ -16,7 +16,7 @@ from . import kinematics, reach
 from . import navigation as nav
 from .pathfind import Point, PointGoal
 from .tokens import Myself, Partner, PlayableCharacter
-from .tokens import Antonio, Enemy, Grunt, Jack
+from .tokens import Antonio, Enemy, Grunt, Jack, Souther
 from .tokens import GrabEnemy, JumpAttack, Punch, RearAttack
 from .tokens import (
     ActionableTarget,
@@ -25,6 +25,7 @@ from .tokens import (
     GrabAntonioOnPunish,
     GrabIntoDeadZone,
     GrabJackFromBehind,
+    GrabSoutherOnPunish,
     GrabToClearRear,
     GrabToDodgeCharge,
     GrabWhileSurrounded,
@@ -34,6 +35,8 @@ from .tokens import (
     InRearReach,
     IncomingMelee,
     PunishWindow,
+    SoutherCountersJump,
+    SoutherIsGoingToSlash,
     Surrounded,
 )
 from .tokens import CameraRange, Pit, SafeSpot
@@ -91,6 +94,49 @@ ANTONIO_DASH_LANE = 0x14  # 20px
 ANTONIO_STATIONARY_VEL = 0.5
 # Primary $02 is the committed kick ($171CC).
 ANTONIO_KICK_PRIMARY_STATE = 0x02
+
+# Souther's linked claw/afterimage (object_catalog.py types $98/$99, created by
+# $16C2E (souther_create_claw) / $16BC6 (souther_create_afterimage)). These are
+# animation-synchronized attack objects that live and die with the claw
+# sequence, never thrown -- so unlike Antonio's $96 they are withheld from
+# IncomingProjectile *unconditionally* rather than only while attached. The
+# claw is answered by DodgeSoutherSlash, which reads Souther's own state; a
+# ProjectileSidestep competing with it would just split the tick.
+SOUTHER_CLAW_TYPE_IDS = frozenset({0x98, 0x99})
+
+# Souther's state 1 -> state 2 commit gate at $15EDA
+# (souther_state1_active_combat). Same shape as Antonio's $16EAE kick gate: the
+# X window is picked by the sign of the *target's* +$1C velocity after the ROM
+# signs it into Souther's own facing frame (`neg` when +$60 is nonzero), so
+# `bmi` -- walking into him -- gets the widest window.
+SOUTHER_SLASH_DIST_CLOSING = 0x68  # 104px; target walking into him
+SOUTHER_SLASH_DIST_STATIONARY = 0x58  # 88px
+SOUTHER_SLASH_DIST_AWAY = 0x50  # 80px; target walking off
+# The inner abort (`cmpi.w #$0018,d2 / bcs`): he cannot *begin* the slash from
+# inside 24px and has to walk back out first. Note this is not a safe pocket --
+# $161C6 (souther_state2_claw_dash) resolves an already-committed dash at
+# +$50 in [$18,$40) -- it only denies the state-1 start.
+SOUTHER_SLASH_DIST_MIN = 0x18  # 24px
+# Lane gate: $0A when +$61 is set, else $1C. We take the wider $1C for the same
+# reason the Antonio constants above take their wider pair -- never miss a
+# strike by under-stating the box.
+SOUTHER_SLASH_LANE = 0x1C  # 28px
+# Primary $02 is the whole committed claw ($16118 souther_state2_claw_commit).
+SOUTHER_SLASH_PRIMARY_STATE = 0x02
+
+# The $16234 (souther_counter_jump_attack) box. $162A4
+# (souther_flag_target_jump_attack) arms it from the *player's* own action state
+# ($16/$17/$42/$43 -- the unarmed and armed jump-attack pairs), and $16234 then
+# forces Souther straight to primary $02, bypassing every distance band, the
+# inner abort and the +$66/+$77 gates.
+SOUTHER_JUMP_COUNTER_LANE = 0x12  # 18px
+SOUTHER_JUMP_COUNTER_DIST_X = 0x78  # 120px
+# The counter is armed while $16234 is on the tick's call path: $15EDA runs it
+# on every state-1 tick before dispatching, and $16158 (state 2, tactical $00)
+# runs it during the claw wind-up. $1619E/$161C6 -- the launch and the dash --
+# never call it, so a jump during the committed dash is not countered.
+SOUTHER_COUNTER_ARMED_PRIMARY = 0x01
+SOUTHER_COUNTER_ARMED_WINDUP_TACTICAL = 0x00
 
 # A Grunt outside this time-to-arrival window is not "closing fast" yet.
 # The horizon itself now lives in reach.CLOSING_ENEMY_THREAT_FRAMES --
@@ -182,6 +228,20 @@ def _antonio_still_holding_boomerang(projectile: Projectile, context: Context) -
     return False
 
 
+def _is_souther_claw(projectile: Projectile) -> bool:
+    """True for Souther's linked claw/afterimage objects (types ``$98``/``$99``).
+
+    Withheld from ``IncomingProjectile`` for the whole of their existence, not
+    just while attached: enemy-ai.md describes them as animation-synchronized
+    attack/afterimage objects, and ``$161C6 (souther_state2_claw_dash)``
+    re-creates the afterimage every dash tick from Souther's own position. They
+    have no independent flight to intercept, so the only honest answer is
+    Souther's own state, which ``DodgeSoutherSlash`` reads.
+    """
+
+    return projectile.type_id in SOUTHER_CLAW_TYPE_IDS
+
+
 def _jack_still_juggling(projectile: Projectile, context: Context) -> bool:
     """True when this is Jack's axe/torch and he has not released it yet.
 
@@ -224,6 +284,8 @@ def check_for_incoming_projectiles(context: Context) -> Context:
         if _jack_still_juggling(projectile, context):
             continue
         if _antonio_still_holding_boomerang(projectile, context):
+            continue
+        if _is_souther_claw(projectile):
             continue
         if any(_projectile_threatens(projectile, actor) for actor in actors):
             incoming.add(
@@ -455,10 +517,13 @@ def check_for_grab_opportunities(context: Context) -> Context:
     separate question, answered by ``InGrabReach`` above;
     ``decide.could_grab_enemy`` requires both.
 
-    Most opportunities are ``Grunt``-only. Antonio is the exception:
-    after a landed hit he is in later-boss ``RECOVERY`` (primary ``$03``/
-    ``$04``) and a hold-then-suplex beats standing still to combo him --
-    that combo is his own kick trigger. Other bosses stay out of scope.
+    Most opportunities are ``Grunt``-only. Antonio and Souther are the
+    exceptions: after a landed hit both sit in the shared later-boss
+    ``RECOVERY`` states (primary ``$03``/``$04``), and a hold-then-suplex beats
+    following up with another strike -- for Antonio because the combo is his own
+    kick trigger, for Souther because ``$15EDA
+    (souther_state1_active_combat)`` cannot re-arm the claw from recovery, so
+    the walk-in is free. Bongo, the twins, Abadede and Mr. X stay out of scope.
 
     Reads the ``Surrounded`` tokens ``check_for_surrounded`` produced earlier
     in ``generate_inference_tokens``' chain -- see ``GrabWhileSurrounded``,
@@ -495,6 +560,10 @@ def check_for_grab_opportunities(context: Context) -> Context:
             if isinstance(enemy, Antonio):
                 if is_punishable(enemy.combat_phase):
                     tokens.add(GrabAntonioOnPunish(**pair))
+                continue
+            if isinstance(enemy, Souther):
+                if is_punishable(enemy.combat_phase):
+                    tokens.add(GrabSoutherOnPunish(**pair))
                 continue
             if not isinstance(enemy, Grunt):
                 continue
@@ -818,6 +887,148 @@ def check_for_antonio_kick(context: Context) -> Context:
     return tokens
 
 
+def _souther_slash_distance_threshold(
+    souther: Souther, actor: PlayableCharacter
+) -> int:
+    """The ROM's X window for the 1→2 claw commit, given the actor's motion.
+
+    ``$15EDA (souther_state1_active_combat)`` reads the target's ``+$1C``, and
+    ``beq`` on it is the standing-still path (``$58``). Non-zero is negated when
+    ``+$60`` is nonzero -- signed into Souther's own frame -- so the ``bmi``
+    path is "walking into him" and takes the widest window (``$68``), while
+    ``bpl`` (backing away) takes the tightest (``$50``).
+
+    The same reading as Antonio's ``_antonio_kick_distance_threshold``, and the
+    same practical consequence: closing the distance is what lets him start
+    from furthest out.
+    """
+
+    vel = actor.vel_x
+    if abs(vel) < ANTONIO_STATIONARY_VEL:
+        return SOUTHER_SLASH_DIST_STATIONARY
+    relative = -vel if souther.facing_left else vel
+    if relative < 0:
+        return SOUTHER_SLASH_DIST_CLOSING
+    return SOUTHER_SLASH_DIST_AWAY
+
+
+def _souther_will_slash(souther: Souther, actor: PlayableCharacter) -> bool:
+    """True when Souther's commit gate is satisfied, or the claw is already on.
+
+    Already-committed (primary ``$02``) is always a slash. The predictive half
+    mirrors ``$15EDA``: target available, ``+$66`` hard-hold clear, inside the
+    lane window, and inside the velocity-selected X window but **outside** the
+    ``$18`` inner abort -- that abort is a real part of the gate, not a
+    conservatism, so leaving it out would report a slash from a range the ROM
+    refuses to start one at.
+    """
+
+    if souther.target_unavailable:
+        return False
+    if souther.combat_phase in (
+        CombatPhase.DEATH,
+        CombatPhase.GRABBED,
+        CombatPhase.RECOVERY,
+    ):
+        return False
+
+    dist_x = souther.boss_dist_x or abs(souther.world_x - actor.world_x)
+    dist_lane = souther.boss_dist_lane or abs(souther.world_y - actor.world_y)
+    if souther.primary_state == SOUTHER_SLASH_PRIMARY_STATE:
+        return True
+    if dist_lane >= SOUTHER_SLASH_LANE:
+        return False
+    if dist_x < SOUTHER_SLASH_DIST_MIN:
+        return False
+    return dist_x < _souther_slash_distance_threshold(souther, actor)
+
+
+def check_for_souther_slash(context: Context) -> Context:
+    """Promote Souther when his claw gate is live for a playable character."""
+
+    actors = _actors(context)
+    if not actors:
+        return set()
+
+    tokens: set[Token] = set()
+    for souther in find_all(context, Souther):
+        if souther.is_defeated:
+            continue
+        for actor in actors:
+            if _souther_will_slash(souther, actor):
+                tokens.add(
+                    SoutherIsGoingToSlash(
+                        actor_slot=actor.slot, target_slot=souther.slot
+                    )
+                )
+    return tokens
+
+
+def _souther_counter_is_armed(souther: Souther) -> bool:
+    """True while ``$16234 (souther_counter_jump_attack)`` is on the call path.
+
+    ``$15EDA`` runs it on every state-1 tick before the tactical dispatch, so
+    all of primary ``$01`` counts whatever ``+$67`` says. In primary ``$02``
+    only the wind-up (tactical ``$00``, ``$16158``) still runs it; the launch
+    and the dash (``$1619E``/``$161C6``) do not, which is the one window where
+    a jump is not punished.
+    """
+
+    if souther.primary_state == SOUTHER_COUNTER_ARMED_PRIMARY:
+        return True
+    return (
+        souther.primary_state == SOUTHER_SLASH_PRIMARY_STATE
+        and souther.tactical == SOUTHER_COUNTER_ARMED_WINDUP_TACTICAL
+    )
+
+
+def check_for_souther_jump_counter(context: Context) -> Context:
+    """Promote the actor whose next jump attack would be countered.
+
+    Keyed on the actor alone, because ``$162A4
+    (souther_flag_target_jump_attack)`` reads the player's own action state and
+    nothing about the jump's target: a hop aimed at an unrelated grunt inside
+    the box is countered identically.
+
+    The X half-width is widened by the character's own free-flight reach
+    (``reach.jump_attack_max_dx``). ``+$79`` stays set for as long as the kick
+    action does, so Souther gets to re-test the box on every frame of the
+    flight, not only at its onset -- a launch from just outside 120px flies
+    straight into it. The lane half-width is *not* widened: the AI's
+    ``JumpAttack`` is horizontal only, so the flight cannot leave the lane it
+    started on.
+    """
+
+    actors = _actors(context)
+    if not actors:
+        return set()
+
+    southers = [
+        souther
+        for souther in find_all(context, Souther)
+        if not souther.is_defeated and _souther_counter_is_armed(souther)
+    ]
+    if not southers:
+        return set()
+
+    tokens: set[Token] = set()
+    for actor in actors:
+        # The actor's own deltas rather than Souther's cached +$50/+$52: those
+        # words measure to *his* selected target, which in 2P need not be this
+        # actor, while the flag itself is armed by either player jumping.
+        flight = reach.jump_attack_max_dx(actor.character_id)
+        for souther in southers:
+            if abs(souther.world_y - actor.world_y) >= SOUTHER_JUMP_COUNTER_LANE:
+                continue
+            if abs(souther.world_x - actor.world_x) >= (
+                SOUTHER_JUMP_COUNTER_DIST_X + flight
+            ):
+                continue
+            tokens.add(SoutherCountersJump(actor_slot=actor.slot))
+            break
+    return tokens
+
+
 def check_for_weapon_upgrades(context: Context) -> Context:
     """Promote ground weapons that beat what the actor is carrying."""
 
@@ -876,6 +1087,8 @@ def generate_inference_tokens(context: Context) -> Context:
         | check_for_targets_in_reach(context)
         | check_for_incoming_melee(context)
         | check_for_antonio_kick(context)
+        | check_for_souther_slash(context)
+        | check_for_souther_jump_counter(context)
         | check_for_punish_windows(context)
         | check_for_surrounded(context)
         | check_for_weapon_upgrades(context)

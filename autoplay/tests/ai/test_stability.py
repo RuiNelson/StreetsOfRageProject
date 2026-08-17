@@ -21,9 +21,12 @@ from sor_autoplay.ai.priority import determine_priority_verb
 from sor_autoplay.ai.tokens import (
     Breakable,
     CameraRange,
+    DodgeSoutherSlash,
     Enemy,
+    JumpAttack,
     Myself,
     OpenBreakable,
+    Souther,
     Stage,
     Verb,
     WalkToAdvanceStage,
@@ -550,6 +553,140 @@ def _run_jump(enemy_x: int, frames: int = 40, enemy_vel: int = 0) -> dict:
             action = 0x02
         enemy_x += enemy_vel
     return result
+
+
+def _souther(world_x: int, world_y: int, primary_state: int, tactical: int) -> Souther:
+    return Souther(
+        slot="obj11",
+        type_id=0x55,
+        world_x=world_x,
+        world_y=world_y,
+        health=32,
+        combat_phase=(
+            CombatPhase.ATTACKING if primary_state == 2 else CombatPhase.NORMAL
+        ),
+        targets_player=1,
+        facing_left=True,
+        primary_state=primary_state,
+        tactical=tactical,
+    )
+
+
+def _run_souther(
+    *,
+    ticks: int,
+    actor_x: int,
+    actor_y: int,
+    souther_x: int,
+    souther_y: int,
+    states,
+) -> tuple[list[int], list[str]]:
+    """Drive the pipeline against one Souther, cycling his own ROM states.
+
+    ``states`` supplies ``(primary_state, tactical)`` per tick (cycled), which
+    is what decides between the three verbs that can own the tick here: the
+    approach, the lane dodge, and -- while the jump counter is armed -- nothing
+    at all where a jump used to be. Returns each tick's held mask and the
+    winning verb's class name, since *which verb owns the actor* is the thing
+    that can chatter.
+    """
+
+    masks: list[int] = []
+    winners: list[str] = []
+    ax, ay, facing_left = actor_x, actor_y, False
+    # See _run's comment: one persistent VirtualGamepad for the whole run.
+    client = _FakeClient()
+    gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+    for tick in range(ticks):
+        primary, tactical = states[tick % len(states)]
+        context = {
+            _actor(ax, ay, facing_left),
+            _souther(souther_x, souther_y, primary, tactical),
+            CameraRange(left=-100, right=500, top=0, bottom=112),
+            Stage(level_index=1, direction="right"),
+        }
+        context |= generate_inference_tokens(context)
+        context |= generate_verb_tokens(context)
+        context = determine_priority_verb(context)
+
+        verbs = find_all(context, Verb)
+        if verbs:
+            execute_verb(verbs[0], context, gamepad)
+            winners.append(type(verbs[0]).__name__)
+        else:
+            winners.append("none")
+        held = client.held
+        masks.append(held)
+
+        if held & RIGHT:
+            ax += STEP_X
+            facing_left = False
+        elif held & LEFT:
+            ax -= STEP_X
+            facing_left = True
+        if held & DOWN:
+            ay += STEP_Y
+        elif held & UP:
+            ay -= STEP_Y
+    return masks, winners
+
+
+class SoutherStabilityTests(unittest.TestCase):
+    """The lane dodge and the X approach are exactly the pair that produced
+    the two shipped limit cycles in other verbs: one freezes X and moves Y,
+    the other closes X and converges Y, and Souther crosses in and out of his
+    committed claw every few ticks in a real fight.
+    """
+
+    def test_alternating_commitment_does_not_chatter_the_lane(self) -> None:
+        # Four ticks committed, four not -- roughly the real cadence of
+        # $16118 (souther_state2_claw_commit) resolving and re-arming.
+        masks, _ = _run_souther(
+            ticks=40,
+            actor_x=100,
+            actor_y=60,
+            souther_x=180,
+            souther_y=60,
+            states=[(2, 2)] * 4 + [(1, 0)] * 4,
+        )
+        self.assertLessEqual(
+            _reversals(masks, DOWN, UP),
+            4,
+            f"lane direction chattered: {[hex(m) for m in masks]}",
+        )
+        self.assertLessEqual(
+            _reversals(masks, RIGHT, LEFT),
+            4,
+            f"X direction chattered: {[hex(m) for m in masks]}",
+        )
+
+    def test_never_jumps_while_the_counter_is_armed(self) -> None:
+        # The whole point of the refusal: over a run where Souther stays in
+        # state 1, C must never be pressed and no JumpAttack may ever win.
+        masks, winners = _run_souther(
+            ticks=40,
+            actor_x=100,
+            actor_y=60,
+            souther_x=180,
+            souther_y=60,
+            states=[(1, 0)],
+        )
+        self.assertNotIn(JumpAttack.__name__, winners)
+        self.assertFalse(
+            any(mask & JUMP for mask in masks),
+            f"pressed jump inside the counter box: {[hex(m) for m in masks]}",
+        )
+
+    def test_the_dodge_owns_every_committed_tick(self) -> None:
+        masks, winners = _run_souther(
+            ticks=20,
+            actor_x=100,
+            actor_y=60,
+            souther_x=180,
+            souther_y=60,
+            states=[(2, 2)],
+        )
+        self.assertEqual(set(winners), {DodgeSoutherSlash.__name__})
 
 
 class BreakableAdvanceStabilityTests(unittest.TestCase):

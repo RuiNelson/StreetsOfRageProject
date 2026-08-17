@@ -69,8 +69,20 @@ _BOSS_STYLES: dict[int, EntityStyle] = {
 # (needs framebuffer tracing), so treat it like Jack's $28 helper default:
 # always a dangerous projectile. Untracked before this, Antonio's boomerang was
 # invisible to the whole agent pipeline (no map entity => never evaded).
+#
+# Souther's `$98`/`$99` (`$16C2E (souther_create_claw)` /
+# `$16BC6 (souther_create_afterimage)`) are catalogued for the same reason --
+# without an entry they never become map entities and the slash is invisible --
+# but they are *not* thrown weapons: enemy-ai.md calls them
+# animation-synchronized attack/afterimage objects, and they are created and
+# positioned relative to Souther for the whole claw sequence. So
+# `inference.check_for_incoming_projectiles` withholds them unconditionally,
+# unlike Antonio's `$96`, which is only withheld while still attached. Their
+# value here is the HUD and the danger geometry, never a `ProjectileSidestep`.
 _BOSS_PROJECTILE_STYLES: dict[int, EntityStyle] = {
     0x96: EntityStyle("projectile", "Antonio", "~", "#af52de", "Antonio boomerang"),
+    0x98: EntityStyle("projectile", "Souther", "%", "#ff9500", "Souther claw"),
+    0x99: EntityStyle("projectile", "Souther", "'", "#ffb340", "Souther afterimage"),
 }
 
 # Carried / ground weapons.

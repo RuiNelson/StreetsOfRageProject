@@ -163,7 +163,10 @@ a new verb.
 already in flight, allowing the AI to react to it before it reaches the
 character. Antonio's boomerang (type `$96`) is withheld while it is still
 attached to him — punching his hand is standing still in front of him,
-which is how his kick starts.
+which is how his kick starts. Souther's claw and afterimage (types
+`$98`/`$99`) are withheld *unconditionally*: they are animation-synchronized
+attack objects re-created from his own position every dash tick, with no flight
+to intercept, so his own state is the only honest thing to read.
 
 **`AntonioIsGoingToKick`** flags that Antonio's ROM kick gate at `$16EAE`
 is already satisfied (or that he has committed to primary state 2, the
@@ -179,6 +182,28 @@ jump-over tier fire only once the kick or the tactical-`$08` dash is
 actually locked in. A predicted window is not a reason to leave punch
 range. `HitAntonioBoomerang` punches the thrown boomerang at
 punch-connect time when it would hit the actor.
+
+**`SoutherIsGoingToSlash`** is the same idea for Souther's commit gate at
+`$15EDA (souther_state1_active_combat)`: the velocity-selected
+`$50`/`$58`/`$68` X windows, the `$1C` lane window, and the `$18` inner abort
+that means he cannot *begin* the slash from inside 24px at all. Only once he is
+actually committed (primary `$02`) does `DodgeSoutherSlash` fire, and it is a
+pure lane step — `$161C6 (souther_state2_claw_dash)` writes only `+$1C`, so it
+cannot follow a lane change, and it resolves only with the target within `$18`
+of its lane.
+
+**`SoutherCountersJump`** is the one inference keyed on the actor alone rather
+than on an actor/target pair, and the reason is the ROM's own:
+`$162A4 (souther_flag_target_jump_attack)` watches the *player's* action state
+(`$16`/`$17`/`$42`/`$43` — the unarmed and armed jump attacks) and nothing about
+who the jump was aimed at, so `$16234 (souther_counter_jump_attack)` answers a
+hop aimed at an unrelated grunt exactly as it answers one aimed at him: straight
+to primary `$02` with the claw spawned, every distance band and gate bypassed.
+So the whole of `could_jump_attack` is refused for that actor while the counter
+is armed (primary `$01`, or primary `$02` with tactical `$00`) and his
+`$78`-by-`$12` box covers where the flight will take the actor — the exact
+opposite of Antonio, whose fight *needs* the hop. Only the launch is refused;
+an actor already airborne is committed and still gets a verb.
 
 **`InContinueMenu`** is observed when this player's object is the type-`$0F`
 continue / high-score name-entry UI (the slot is no longer playable).
@@ -528,7 +553,13 @@ later-boss hitstun (`RECOVERY`, primary `$03`/`$04` after
 `$17C36 boss_apply_pending_damage`): punch him once to open that window,
 walk in without attacking, then flip-hold into a suplex. Standing still
 to combo him is the `$16EAE` zero-velocity kick trigger, so a second
-punch is refused and the hold is the punish. A fifth,
+punch is refused and the hold is the punish. A fifth, `GrabSoutherOnPunish`, is
+its Souther counterpart on the same shared later-boss `RECOVERY` states, and it
+is a separate class rather than a shared later-boss token because the *reason*
+differs: Antonio's is that a second punch is his own kick trigger, Souther's is
+simply that `$15EDA (souther_state1_active_combat)` cannot re-arm the claw from
+recovery, so the walk-in is free — and with base health `$20` against Antonio's
+`$18`, the suplex chain matters more, not less. A sixth,
 `GrabWhileSurrounded`, fires for any grabbable `Grunt` while the actor
 carries a `Surrounded` token: being boxed in is answered by a hold whichever
 side the crowd is on. It is the one that reads another *inference* rather
@@ -542,9 +573,9 @@ rank differently: being surrounded is the only one that outranks the
 `$322A` escape chord (a pincer's hold becomes a throw *into* the enemy the
 chord was aimed at), clearing the rear beats every strike on an enemy that
 can still act, catching Jack from behind is just under that, grabbing a
-stunned Antonio sits above punching him again (the hold is the punish)
-and above every strike on him, and the whip case is an improvement on an
-ordinary exchange and ranks just above a jump kick.
+stunned Antonio or Souther sits above punching them again (the hold is the
+punish) and above every strike on them, and the whip case is an improvement on
+an ordinary exchange and ranks just above a jump kick.
 
 `InGrabReach` answers the other half — whether walking in would actually
 reach — and, like every other `TargetInReach`, comes from one geometry

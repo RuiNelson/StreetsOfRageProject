@@ -71,9 +71,12 @@ classDiagram
     GrabOpportunity <|-- GrabIntoDeadZone
     GrabOpportunity <|-- GrabJackFromBehind
     GrabOpportunity <|-- GrabAntonioOnPunish
+    GrabOpportunity <|-- GrabSoutherOnPunish
     GrabOpportunity <|-- GrabWhileSurrounded
     GrabOpportunity <|-- GrabToDodgeCharge
     Inferred <|-- AntonioIsGoingToKick
+    Inferred <|-- SoutherIsGoingToSlash
+    Inferred <|-- SoutherCountersJump
 
     Verb <|-- Walk
     Walk <|-- WalkToNearEnemy
@@ -83,6 +86,7 @@ classDiagram
     Walk <|-- RetreatFromDanger
     Walk <|-- ProjectileSidestep
     Walk <|-- DodgeAntonioKick
+    Walk <|-- DodgeSoutherSlash
 
     Verb <|-- Attack
     Attack <|-- MeleeAttacks

@@ -63,6 +63,7 @@ from .enemy import (
     Garcia,
     GrabOpportunity,
     GrabAntonioOnPunish,
+    GrabSoutherOnPunish,
     GrabIntoDeadZone,
     GrabJackFromBehind,
     GrabToClearRear,
@@ -83,6 +84,8 @@ from .enemy import (
     PunishWindow,
     Signal,
     Souther,
+    SoutherCountersJump,
+    SoutherIsGoingToSlash,
     Surrounded,
     TargetInReach,
     enemy_class_for_type,
@@ -146,6 +149,7 @@ from .tokens import (
 )
 from .walk_verbs import (
     DodgeAntonioKick,
+    DodgeSoutherSlash,
     ProjectileSidestep,
     RetreatFromDanger,
     Walk,

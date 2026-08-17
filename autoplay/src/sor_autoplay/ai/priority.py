@@ -35,6 +35,7 @@ from .tokens import (
     Attack,
     CounterGrab,
     DodgeAntonioKick,
+    DodgeSoutherSlash,
     FlipHold,
     GrabEnemy,
     HitAntonioBoomerang,
@@ -61,12 +62,14 @@ from .tokens import (
     GrabAntonioOnPunish,
     GrabIntoDeadZone,
     GrabJackFromBehind,
+    GrabSoutherOnPunish,
     GrabToClearRear,
     GrabToDodgeCharge,
     GrabWhileSurrounded,
     IncomingMelee,
     IncomingProjectile,
     PunishWindow,
+    SoutherIsGoingToSlash,
     Surrounded,
     WeaponUpgrade,
 )
@@ -230,6 +233,11 @@ _EMERGENCY_GRAB_WHILE_SURROUNDED = 61
 # existing grab (64..70) do not coexist -- could_grab skips while
 # holding.
 _EMERGENCY_GRAB_ANTONIO_ON_PUNISH = 61
+# Souther in hitstun: identical reasoning and identical tier. He has more
+# health than Antonio ($20 vs $18 from $17EDC boss_init_combat_stats), so the
+# suplex chain is worth more here, and the same "must clear punch-on-punish
+# once the boss raise is applied to both" arithmetic applies.
+_EMERGENCY_GRAB_SOUTHER_ON_PUNISH = 61
 _EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
 _EMERGENCY_HOLD_SUPPLEX = 68
 _EMERGENCY_HOLD_FLIP = 66
@@ -320,6 +328,16 @@ _EMERGENCY_DODGE_ANTONIO_KICK = 58
 # under the grounded dodge so a hop that has already started is not
 # abandoned, well above a routine jump (18).
 _EMERGENCY_JUMP_OVER_ANTONIO_KICK = 56
+# Step off the lane of Souther's committed claw dash. Deliberately *not* at the
+# Antonio dodge's 58: that tier had to beat the strike-on-a-live-boss because
+# standing still is what arms Antonio's kick, whereas Souther's own commit gate
+# narrows when the actor stands still ($58) and widens when it walks in ($68),
+# so there is nothing here to out-rank a punch for. What this does have to beat
+# is every approach/retreat tier and ProjectileSidestep's ceiling (45), so the
+# claw is answered before an unrelated throw. Below the real escapes
+# (RearAttack 55/60, the punish grab 61) and below
+# CounterGrab/TechRecover/CallPolice.
+_EMERGENCY_DODGE_SOUTHER_SLASH = 46
 # Lowest of any verb that still scores. Must sit under every other live
 # candidate -- including ScorePickup (9), SpecialPickup (11), LifePickup
 # (12), and WalkToNearEnemy's floor (8) -- so stage advance is only chosen
@@ -538,6 +556,15 @@ def _emergency_dodge_antonio_kick(verb: DodgeAntonioKick, context: Context) -> i
     return _EMERGENCY_DEFAULT
 
 
+def _emergency_dodge_souther_slash(verb: DodgeSoutherSlash, context: Context) -> int:
+    if any(
+        token.actor_slot == verb.actor_slot and token.target_slot == verb.target_slot
+        for token in find_all(context, SoutherIsGoingToSlash)
+    ):
+        return _EMERGENCY_DODGE_SOUTHER_SLASH
+    return _EMERGENCY_DEFAULT
+
+
 def _emergency_hit_antonio_boomerang(verb: HitAntonioBoomerang, context: Context) -> int:
     from .tokens import Projectile
 
@@ -575,6 +602,8 @@ def _emergency_grab_enemy(verb: GrabEnemy, context: Context) -> int:
         score = max(score, _EMERGENCY_GRAB_DEAD_ZONE)
     if any(isinstance(token, GrabAntonioOnPunish) for token in opportunities):
         score = max(score, _EMERGENCY_GRAB_ANTONIO_ON_PUNISH)
+    if any(isinstance(token, GrabSoutherOnPunish) for token in opportunities):
+        score = max(score, _EMERGENCY_GRAB_SOUTHER_ON_PUNISH)
     if any(isinstance(token, GrabWhileSurrounded) for token in opportunities):
         score = max(score, _EMERGENCY_GRAB_WHILE_SURROUNDED)
     if any(isinstance(token, GrabToDodgeCharge) for token in opportunities):
@@ -786,6 +815,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     RetreatFromDanger: _emergency_retreat_from_danger,
     ProjectileSidestep: _emergency_projectile_sidestep,
     DodgeAntonioKick: _emergency_dodge_antonio_kick,
+    DodgeSoutherSlash: _emergency_dodge_souther_slash,
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
 }

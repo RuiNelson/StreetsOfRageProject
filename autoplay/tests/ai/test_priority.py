@@ -6,6 +6,7 @@ from sor_autoplay.ai.tokens import (
     Breakable,
     CounterGrab,
     DodgeAntonioKick,
+    DodgeSoutherSlash,
     GrabEnemy,
     HealthPickup,
     HitAntonioBoomerang,
@@ -26,7 +27,15 @@ from sor_autoplay.ai.tokens import (
     Weapon,
 )
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import AttackRange, ClosingEnemy, Enemy, Garcia, Jack, Nora
+from sor_autoplay.ai.tokens import (
+    AttackRange,
+    ClosingEnemy,
+    Enemy,
+    Garcia,
+    Jack,
+    Nora,
+    Souther,
+)
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
     HandleContinueMenu,
@@ -41,6 +50,7 @@ from sor_autoplay.ai.priority import determine_priority_verb as _rank_verbs
 from sor_autoplay.ai.tokens import Verb, find_all
 from sor_autoplay.ai.tokens import (
     DodgeAntonioKick,
+    DodgeSoutherSlash,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -2153,3 +2163,104 @@ class AntonioVerbEmergencyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _souther(slot: str, combat_phase: CombatPhase, **overrides) -> Souther:
+    fields = dict(
+        slot=slot,
+        type_id=0x55,
+        world_x=160,
+        world_y=100,
+        health=32,
+        combat_phase=combat_phase,
+        targets_player=1,
+        facing_left=True,
+        primary_state=1,
+        tactical=0,
+        boss_dist_x=40,
+        boss_dist_lane=4,
+    )
+    fields.update(overrides)
+    return Souther(**fields)
+
+
+def _souther_actor(**overrides) -> Myself:
+    fields = dict(
+        slot="P1",
+        player_index=1,
+        character_id=0,
+        character_name="Axel",
+        world_x=120,
+        world_y=100,
+        health=80,
+        health_percent=100.0,
+        lives=3,
+        specials=1,
+        held_weapon_type=0,
+        facing_left=False,
+        combat_phase=CombatPhase.NORMAL,
+        action_state=0,
+        is_airborne=False,
+    )
+    fields.update(overrides)
+    return Myself(**fields)
+
+
+class SoutherVerbEmergencyTests(unittest.TestCase):
+    def test_the_punish_grab_outranks_punching_him_again(self) -> None:
+        myself = _souther_actor()
+        souther = _souther("obj11", CombatPhase.RECOVERY)
+        context = {
+            myself,
+            CameraRange(left=0, right=640, top=0, bottom=224),
+            souther,
+            Punch(actor_slot="P1", target_slot="obj11"),
+            GrabEnemy(actor_slot="P1", target_slot="obj11"),
+        }
+        winner = find_all(determine_priority_verb(context), Verb)[0]
+        self.assertIsInstance(winner, GrabEnemy)
+
+    def test_the_dodge_outranks_approaching_him(self) -> None:
+        myself = _souther_actor()
+        souther = _souther(
+            "obj11", CombatPhase.ATTACKING, primary_state=2, tactical=2
+        )
+        context = {
+            myself,
+            souther,
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj11"),
+            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
+        }
+        winner = find_all(determine_priority_verb(context), Verb)[0]
+        self.assertIsInstance(winner, DodgeSoutherSlash)
+
+    def test_the_dodge_outranks_a_competing_projectile_sidestep(self) -> None:
+        myself = _souther_actor()
+        souther = _souther(
+            "obj11", CombatPhase.ATTACKING, primary_state=2, tactical=2
+        )
+        thrown = Projectile(
+            slot="obj20", world_x=100, world_y=100, vel_x=6.0, vel_z=0.0, type_id=0x28
+        )
+        context = {
+            myself,
+            souther,
+            thrown,
+            ProjectileSidestep(actor_slot="P1", target_slot="obj20"),
+            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
+        }
+        winner = find_all(determine_priority_verb(context), Verb)[0]
+        self.assertIsInstance(winner, DodgeSoutherSlash)
+
+    def test_the_dodge_scores_nothing_without_its_own_inference(self) -> None:
+        # An injected or stale verb must not win on its class alone.
+        myself = _souther_actor()
+        souther = _souther("obj11", CombatPhase.RECOVERY)
+        context = {
+            myself,
+            souther,
+            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj11"),
+        }
+        winner = find_all(determine_priority_verb(context), Verb)[0]
+        self.assertIsInstance(winner, WalkToNearEnemy)

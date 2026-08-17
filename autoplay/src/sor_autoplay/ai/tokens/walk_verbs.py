@@ -201,3 +201,29 @@ class DodgeAntonioKick(Walk):
     priority: int = 24
     actor_slot: str
     target_slot: str  # Antonio.slot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DodgeSoutherSlash(Walk):
+    """Step off the lane Souther's committed claw dash resolves on.
+
+    Produced by ``could_dodge_souther_slash`` once per ``Souther`` whose
+    ``strike_is_committed()`` holds (primary ``$02``). A lane step is the whole
+    answer here, and specifically **not** a hop: the dash at
+    ``$161C6 (souther_state2_claw_dash)`` writes only ``+$1C``, so it cannot
+    follow a lane change once committed, and it only resolves with the target
+    within ``$18`` (24px) of its lane -- while a jump is the one input
+    ``$16234 (souther_counter_jump_attack)`` punishes outright. The exact
+    mirror of ``DodgeAntonioKick``, whose dash *does* track lane and therefore
+    has to be hopped instead.
+
+    Raises emergency: SoutherIsGoingToSlash (committed)×46 -- above every
+    approach/retreat tier and above ProjectileSidestep's own ceiling (45), so
+    the claw is answered first when both are live. Below the real escapes
+    (RearAttack 55/60, the punish grab 61) and below
+    CounterGrab/TechRecover/CallPolice.
+    """
+
+    priority: int = 24
+    actor_slot: str
+    target_slot: str  # Souther.slot

@@ -10,6 +10,7 @@ from sor_autoplay.ai.tokens import (
     Antonio,
     CounterGrab,
     DodgeAntonioKick,
+    DodgeSoutherSlash,
     GrabEnemy,
     HitAntonioBoomerang,
     JumpAttack,
@@ -30,6 +31,7 @@ from sor_autoplay.ai.tokens import (
     AttackRange,
     Enemy,
     Nora,
+    Souther,
     punch_outer_x,
     punch_usable_inner_x,
 )
@@ -2588,6 +2590,87 @@ class DodgeAntonioKickExecuteTests(unittest.TestCase):
         client.press_buttons.assert_called_once()
         pressed = client.press_buttons.call_args.kwargs["player1"]
         self.assertTrue(pressed & C)
+
+
+
+class DodgeSoutherSlashExecuteTests(unittest.TestCase):
+    def _souther(self, **overrides) -> Souther:
+        fields = dict(
+            slot="obj11",
+            type_id=0x55,
+            world_x=160,
+            world_y=100,
+            health=32,
+            combat_phase=CombatPhase.ATTACKING,
+            targets_player=1,
+            facing_left=True,
+            primary_state=2,
+            tactical=2,
+        )
+        fields.update(overrides)
+        return Souther(**fields)
+
+    def _run(self, actor, souther_y=None):
+        client = MagicMock()
+        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+        lane = actor.world_y if souther_y is None else souther_y
+        execute_verb(
+            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
+            {actor, self._souther(world_y=lane)},
+            gamepad,
+        )
+        return client
+
+    def test_steps_off_the_lane_and_never_jumps(self) -> None:
+        # $16234 (souther_counter_jump_attack) punishes the jump-attack action
+        # states, so this dodge must never press C -- the exact opposite of
+        # DodgeAntonioKick, which delegates to the jump state machine.
+        client = self._run(_myself(world_x=120, world_y=40))
+        client.press_buttons.assert_not_called()
+        held = client.hold_buttons.call_args.kwargs["player1"]
+        self.assertTrue(held & (UP | DOWN), f"expected a lane step, got {held:#06x}")
+        self.assertFalse(held & C)
+        self.assertFalse(held & B)
+
+    def test_side_is_picked_from_southers_own_lane(self) -> None:
+        # Self-reinforcing, like _pit_dodge_target_y: the flip point is his
+        # lane and the chosen direction always moves further from it, so the
+        # pick cannot undo itself while X is frozen. Reading it off the lane
+        # midpoint instead reversed 18 times in 40 ticks on the tick harness.
+        above = self._run(_myself(world_x=120, world_y=50), souther_y=60)
+        self.assertTrue(above.hold_buttons.call_args.kwargs["player1"] & UP)
+        below = self._run(_myself(world_x=120, world_y=70), souther_y=60)
+        self.assertTrue(below.hold_buttons.call_args.kwargs["player1"] & DOWN)
+
+    def test_clears_the_lane_gate_the_rom_actually_reads(self) -> None:
+        # $1C (28px) is the wider of Souther's two lane gates and the one the
+        # inference deliberately assumes, so the aim point has to clear it --
+        # and clear it by more than the executor's own Y deadband.
+        from sor_autoplay.ai.execute import (
+            MOVE_DEADBAND_Y,
+            SOUTHER_SLASH_LANE_CLEARANCE,
+        )
+
+        self.assertGreater(SOUTHER_SLASH_LANE_CLEARANCE, 0x1C + MOVE_DEADBAND_Y)
+
+    def test_a_side_with_no_lane_room_is_not_chosen(self) -> None:
+        # An aim point the lane clamp would drag back inside the band is worse
+        # than useless: the Y bits go quiet while X stays frozen.
+        actor = _myself(world_x=120, world_y=4)
+        client = self._run(actor, souther_y=8)
+        held = client.hold_buttons.call_args.kwargs["player1"]
+        self.assertTrue(held & DOWN, f"expected the roomier side, got {held:#06x}")
+
+    def test_releases_when_the_souther_is_gone(self) -> None:
+        actor = _myself(world_x=120, world_y=40)
+        client = MagicMock()
+        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+        execute_verb(
+            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
+            {actor},
+            gamepad,
+        )
+        client.press_buttons.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -241,7 +241,27 @@ class MrX(Boss):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Souther(Boss):
-    """Souther boss (type $55)."""
+    """Souther boss (type $55).
+
+    Primary state 1 (``$15EDA (souther_state1_active_combat)``) is active
+    combat: the standoff bands, the lane closing, and the proximity/velocity
+    gate that advances him to state 2. Primary state 2
+    (``$16118 (souther_state2_claw_commit)``) is the committed claw --
+    wind-up, launch, then an 8px/frame dash that only ever steers on X.
+    """
+
+    def strike_is_committed(self) -> bool:
+        """True when the claw is already locked in.
+
+        Primary ``$02`` is the whole committed sequence; unlike Antonio there
+        is no separate tactical commit value, because
+        ``$16118 (souther_state2_claw_commit)`` is entered *by* clearing
+        ``+$67`` and every one of its tactical handlers is already part of the
+        claw. The uncommitted state-1 gate is
+        ``SoutherIsGoingToSlash``'s business, not this.
+        """
+
+        return self.primary_state == 0x02
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -549,6 +569,25 @@ class GrabAntonioOnPunish(GrabOpportunity):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class GrabSoutherOnPunish(GrabOpportunity):
+    """Souther is in hitstun -- walk in and hold him, then suplex.
+
+    Produced by ``inference.check_for_grab_opportunities`` when a live
+    ``Souther`` is in a punishable phase, the same shared later-boss
+    ``RECOVERY`` states ``$03``/``$04`` that ``$17C36
+    boss_apply_pending_damage`` writes for Antonio. His base health is
+    ``$20`` against ``$18`` for Antonio (``$17EDC boss_init_combat_stats``),
+    so the suplex chain matters more here, not less.
+
+    Deliberately its own class rather than a shared later-boss token: the
+    *reason* the hold pays off differs. Antonio's is that a second punch is
+    his own kick trigger; Souther's is simply that ``$15EDA
+    (souther_state1_active_combat)`` cannot re-arm the slash while he is in
+    recovery, so the walk-in is free.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class IncomingMelee(Inferred):
     """An enemy whose committed attack is close enough to land on the actor
     -- or, on its own current velocity, soon will be.
@@ -619,3 +658,45 @@ class AntonioIsGoingToKick(Inferred):
 
     actor_slot: str
     target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SoutherIsGoingToSlash(Inferred):
+    """Souther is in -- or about to commit to -- his claw slash.
+
+    Produced by ``inference.check_for_souther_slash`` for a live ``Souther``
+    whose ROM gate at ``$15EDA (souther_state1_active_combat)`` is already
+    satisfied (target available, ``+$66`` clear, inside the lane window and
+    inside the velocity-selected ``$50``/``$58``/``$68`` X window but *outside*
+    the ``$18`` inner abort) or who has already reached primary state 2
+    (``$16118 (souther_state2_claw_commit)``).
+
+    Reference-only: both ends are slot references.
+    """
+
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SoutherCountersJump(Inferred):
+    """Jumping right now hands Souther a free counter into the claw.
+
+    Produced by ``inference.check_for_souther_jump_counter`` when a live
+    ``Souther`` has the ``$16234 (souther_counter_jump_attack)`` counter armed
+    -- primary ``$01`` (any tactical), or primary ``$02`` with tactical ``$00``
+    -- and its ``$78`` by ``$12`` box covers where the actor will be when the
+    kick's own action state begins. ``$162A4
+    (souther_flag_target_jump_attack)`` watches the *player's* action state
+    (``$16``/``$17``/``$42``/``$43``) and nothing about who the jump was aimed
+    at, which is why this token is keyed on the actor alone: jumping at an
+    unrelated grunt inside that box is countered exactly the same.
+
+    The counter bypasses every distance band, the ``$18`` inner abort and the
+    ``+$66``/``+$77`` gates of the ordinary commit, so there is no geometry
+    that makes a jump safe inside the box -- only staying out of it, or
+    waiting until he is already dashing (tactical ``$01``/``$02``, which never
+    call ``$16234``).
+    """
+
+    actor_slot: str

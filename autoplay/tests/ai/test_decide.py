@@ -30,6 +30,7 @@ from sor_autoplay.ai.decide import (
     could_handle_continue_menu,
     could_handle_mr_x_dialog,
     could_dodge_antonio_kick,
+    could_dodge_souther_slash,
     could_grab_enemy,
     could_hit_antonio_boomerang,
     could_hold_actions,
@@ -55,11 +56,13 @@ from sor_autoplay.ai.tokens import (
     AttackRange,
     ClosingEnemy,
     DodgeAntonioKick,
+    DodgeSoutherSlash,
     Enemy,
     Garcia,
     HitAntonioBoomerang,
     Jack,
     Nora,
+    Souther,
 )
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
 from sor_autoplay.ai.tokens import Breakable, Pit, Projectile
@@ -107,6 +110,7 @@ could_counter_grab = _with_inference(could_counter_grab)
 could_handle_continue_menu = _with_inference(could_handle_continue_menu)
 could_handle_mr_x_dialog = _with_inference(could_handle_mr_x_dialog)
 could_dodge_antonio_kick = _with_inference(could_dodge_antonio_kick)
+could_dodge_souther_slash = _with_inference(could_dodge_souther_slash)
 could_grab_enemy = _with_inference(could_grab_enemy)
 could_hit_antonio_boomerang = _with_inference(could_hit_antonio_boomerang)
 could_hold_actions = _with_inference(could_hold_actions)
@@ -2329,3 +2333,151 @@ class JumpKickAntonioTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _souther(**overrides) -> Souther:
+    fields = dict(
+        slot="obj11",
+        type_id=0x55,
+        world_x=160,
+        world_y=100,
+        health=32,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=1,
+        facing_left=True,
+        primary_state=1,
+        tactical=0,
+        boss_dist_x=40,
+        boss_dist_lane=4,
+    )
+    fields.update(overrides)
+    return Souther(**fields)
+
+
+class JumpRefusedNearSoutherTests(unittest.TestCase):
+    def test_no_jump_launch_while_the_counter_is_armed(self) -> None:
+        myself = make_myself(world_x=120, world_y=100)
+        souther = _souther(world_x=160, world_y=100, primary_state=1)
+        self.assertEqual(could_jump_attack({myself, souther}), set())
+
+    def test_refusal_lifts_once_the_dash_is_launched(self) -> None:
+        # $1619E/$161C6 never call $16234, so the hop is not countered there.
+        # Tested against a grunt target on purpose: Souther gets no
+        # Antonio-style "hop anywhere in free-flight range" exception, so
+        # whether *he* is a jump target is the ordinary band's question and
+        # would confuse what this test is about.
+        myself = make_myself(world_x=120, world_y=100)
+        grunt = make_enemy(slot="obj01", world_x=180, world_y=100)
+        dashing = _souther(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            tactical=2,
+        )
+        self.assertEqual(
+            could_jump_attack({myself, grunt, dashing}),
+            {JumpAttack(actor_slot="P1", target_slot="obj01")},
+        )
+
+    def test_souther_gets_no_free_flight_jump_exception(self) -> None:
+        # Antonio has one (decide.could_jump_attack) because his own thin band
+        # never fires; Souther deliberately does not, since the hop is the move
+        # his counter exists to punish.
+        myself = make_myself(world_x=120, world_y=100)
+        dashing = _souther(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            tactical=2,
+        )
+        self.assertEqual(could_jump_attack({myself, dashing}), set())
+
+    def test_jump_at_an_unrelated_grunt_is_refused_too(self) -> None:
+        # $162A4 reads the *player's* action state, not the jump's target, so
+        # a hop aimed anywhere inside Souther's box is countered identically.
+        myself = make_myself(world_x=120, world_y=100)
+        grunt = make_enemy(slot="obj01", world_x=180, world_y=100)
+        souther = _souther(world_x=160, world_y=100, primary_state=1)
+        with_souther = could_jump_attack({myself, grunt, souther})
+        self.assertEqual(with_souther, set())
+        # Same geometry without him: the grunt is a perfectly good hop target,
+        # so the refusal above is Souther's doing and not the grunt's distance.
+        self.assertNotEqual(could_jump_attack({myself, grunt}), set())
+
+    def test_an_airborne_actor_is_still_committed(self) -> None:
+        # Only the launch is refused: a tick with no verb mid-flight reaches
+        # press_no_button and costs both the kick and the held direction.
+        myself = make_myself(
+            world_x=120, world_y=100, is_airborne=True, action_state=0x12
+        )
+        souther = _souther(world_x=160, world_y=100, primary_state=1)
+        self.assertNotEqual(could_jump_attack({myself, souther}), set())
+
+
+class CouldDodgeSoutherSlashTests(unittest.TestCase):
+    def test_fires_once_the_claw_is_committed(self) -> None:
+        myself = make_myself(world_x=120, world_y=100)
+        souther = _souther(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            tactical=2,
+        )
+        result = could_dodge_souther_slash({myself, souther})
+        self.assertEqual(
+            result, {DodgeSoutherSlash(actor_slot="P1", target_slot="obj11")}
+        )
+
+    def test_the_uncommitted_gate_is_not_enough(self) -> None:
+        # Leaving the lane while he is still choosing is the dodge loop that
+        # never gets close enough to hit him -- same rule as the Antonio dodge.
+        myself = make_myself(world_x=120, world_y=100, vel_x=0.0)
+        souther = _souther(world_x=160, world_y=100, primary_state=1)
+        self.assertEqual(could_dodge_souther_slash({myself, souther}), set())
+
+    def test_suppressed_while_airborne(self) -> None:
+        myself = make_myself(
+            world_x=120, world_y=100, is_airborne=True, action_state=0x12
+        )
+        souther = _souther(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            tactical=2,
+        )
+        self.assertEqual(could_dodge_souther_slash({myself, souther}), set())
+
+    def test_does_not_fire_when_animation_in_progress(self) -> None:
+        myself = make_myself(world_x=120, world_y=100)
+        souther = _souther(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            tactical=2,
+        )
+        self.assertEqual(
+            could_dodge_souther_slash({myself, souther, AnimationInProgress(slot="P1")}),
+            set(),
+        )
+
+
+class CouldGrabSoutherOnPunishTests(unittest.TestCase):
+    def test_grab_offered_on_a_recovering_souther(self) -> None:
+        myself = make_myself(world_x=140, world_y=100)
+        camera = CameraRange(left=0, right=640, top=0, bottom=224)
+        souther = _souther(
+            world_x=160, world_y=100, combat_phase=CombatPhase.RECOVERY
+        )
+        result = could_grab_enemy({myself, camera, souther})
+        self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="obj11")})
+
+    def test_no_grab_while_he_can_still_act(self) -> None:
+        myself = make_myself(world_x=140, world_y=100)
+        camera = CameraRange(left=0, right=640, top=0, bottom=224)
+        souther = _souther(world_x=160, world_y=100)
+        self.assertEqual(could_grab_enemy({myself, camera, souther}), set())

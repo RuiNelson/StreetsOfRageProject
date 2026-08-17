@@ -43,7 +43,7 @@ from .tokens import (
     PlayableCharacter,
     punch_usable_inner_x,
 )
-from .tokens import Antonio, Enemy, Jack
+from .tokens import Antonio, Enemy, Jack, Souther
 from .tokens import (
     ActionableTarget,
     AntonioIsGoingToKick,
@@ -55,6 +55,8 @@ from .tokens import (
     InRearReach,
     IncomingMelee,
     IncomingProjectile,
+    SoutherCountersJump,
+    SoutherIsGoingToSlash,
     Surrounded,
 )
 from .tokens import AnimationInProgress, CameraRange, Stage
@@ -76,6 +78,7 @@ from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDi
 from .tokens import Context, Token, find, find_all
 from .tokens import (
     DodgeAntonioKick,
+    DodgeSoutherSlash,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -891,6 +894,24 @@ def could_jump_attack(context: Context) -> Context:
             # swing -- could_swing_bat_or_pipe and friends -- reached by
             # walking in, which could_walk_to_near_enemy already does.
             continue
+        if not actor.is_airborne and any(
+            token.actor_slot == actor.slot
+            for token in find_all(context, SoutherCountersJump)
+        ):
+            # The exact opposite of the Antonio exception below. Souther's
+            # $16234 (souther_counter_jump_attack) reads the *player's* action
+            # state -- $16/$17/$42/$43, this very move -- and answers it by
+            # jumping straight to primary $02 with the claw already spawned,
+            # ignoring every distance band and gate the ordinary commit has to
+            # satisfy. So there is no geometry that makes the launch safe: the
+            # refusal is per-actor and covers every target, because a hop aimed
+            # at an unrelated grunt inside his box is countered identically.
+            #
+            # Only the *launch* is refused. Once airborne the flight is
+            # committed and the fallback below still has to produce a verb, or
+            # the tick reaches press_no_button and costs both the kick and the
+            # held direction $384E samples.
+            continue
         target_slots = set(reach.targets_of(context, InJumpAttackReach, actor.slot))
         # Jump-kicking Antonio is a real opener, not only a hop over his
         # kick: the usual InJumpAttackReach band is just past punch outer
@@ -981,6 +1002,45 @@ def could_dodge_antonio_kick(context: Context) -> Context:
                 continue
             verbs.add(
                 DodgeAntonioKick(actor_slot=actor.slot, target_slot=token.target_slot)
+            )
+    return verbs
+
+
+def could_dodge_souther_slash(context: Context) -> Context:
+    """Step off the lane of a claw dash Souther has already committed to.
+
+    One candidate per ``SoutherIsGoingToSlash`` whose Souther is in primary
+    ``$02`` (``Souther.strike_is_committed``). The uncommitted state-1 gate is
+    deliberately not enough, for the same reason ``could_dodge_antonio_kick``
+    refuses it: leaving the lane while he is still choosing is the dodge loop
+    that never gets close enough to hit him.
+
+    A lane step is the *whole* answer, and specifically not a hop --
+    ``$161C6 (souther_state2_claw_dash)`` writes only ``+$1C`` and so cannot
+    follow the lane change, while ``$16234
+    (souther_counter_jump_attack)`` punishes exactly the jump that answers
+    Antonio. Suppressed while airborne, like the Antonio dodge, since
+    ``could_jump_attack`` owns a flight already underway.
+    """
+
+    verbs: set[Token] = set()
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.is_airborne:
+            continue
+        for token in find_all(context, SoutherIsGoingToSlash):
+            if token.actor_slot != actor.slot:
+                continue
+            souther = find(context, Souther, slot=token.target_slot)
+            if souther is None or not souther.strike_is_committed():
+                continue
+            verbs.add(
+                DodgeSoutherSlash(actor_slot=actor.slot, target_slot=token.target_slot)
             )
     return verbs
 
@@ -1331,6 +1391,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_retreat_from_danger(context)
         | could_projectile_sidestep(context)
         | could_dodge_antonio_kick(context)
+        | could_dodge_souther_slash(context)
         | could_hit_antonio_boomerang(context)
         | could_walk_to_advance_stage(context)
         | could_punch(context)

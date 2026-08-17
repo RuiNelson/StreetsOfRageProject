@@ -1,7 +1,17 @@
 import unittest
 
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import Abadede, Antonio, ClosingEnemy, Enemy, Garcia, Jack, Nora, Signal
+from sor_autoplay.ai.tokens import (
+    Abadede,
+    Antonio,
+    ClosingEnemy,
+    Enemy,
+    Garcia,
+    Jack,
+    Nora,
+    Signal,
+    Souther,
+)
 from sor_autoplay.ai.tokens import (
     ActionableTarget,
     AntonioIsGoingToKick,
@@ -9,6 +19,7 @@ from sor_autoplay.ai.tokens import (
     GrabToClearRear,
     GrabIntoDeadZone,
     GrabJackFromBehind,
+    GrabSoutherOnPunish,
     GrabToDodgeCharge,
     GrabWhileSurrounded,
     InGrabReach,
@@ -17,6 +28,8 @@ from sor_autoplay.ai.tokens import (
     InRearReach,
     IncomingMelee,
     PunishWindow,
+    SoutherCountersJump,
+    SoutherIsGoingToSlash,
     Surrounded,
 )
 from sor_autoplay.ai.tokens import Breakable, CameraRange, Pit, SafeSpot
@@ -26,7 +39,16 @@ from sor_autoplay.ai.tokens import Weapon, WeaponUpgrade
 from sor_autoplay.ai.inference import (
     ANTONIO_BOOMERANG_TYPE_ID,
     ANTONIO_KICK_DIST_STATIONARY,
+    SOUTHER_JUMP_COUNTER_DIST_X,
+    SOUTHER_JUMP_COUNTER_LANE,
+    SOUTHER_SLASH_DIST_AWAY,
+    SOUTHER_SLASH_DIST_CLOSING,
+    SOUTHER_SLASH_DIST_MIN,
+    SOUTHER_SLASH_DIST_STATIONARY,
+    SOUTHER_SLASH_LANE,
     check_for_antonio_kick,
+    check_for_souther_jump_counter,
+    check_for_souther_slash,
     check_for_closing_enemies,
     check_for_grab_opportunities,
     check_for_incoming_melee,
@@ -1270,3 +1292,222 @@ class AntonioBoomerangIncomingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def make_souther(**overrides) -> Souther:
+    fields = dict(
+        slot="obj11",
+        type_id=0x55,
+        world_x=200,
+        world_y=100,
+        health=32,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=1,
+        facing_left=True,
+        primary_state=1,
+        tactical=0,
+        boss_dist_x=40,
+        boss_dist_lane=4,
+    )
+    fields.update(overrides)
+    return Souther(**fields)
+
+
+SLASH = SoutherIsGoingToSlash(actor_slot="P1", target_slot="obj11")
+
+
+class CheckForSoutherSlashTests(unittest.TestCase):
+    def test_fires_when_already_committed(self) -> None:
+        myself = make_myself(world_x=160, world_y=100)
+        souther = make_souther(
+            combat_phase=CombatPhase.ATTACKING, primary_state=2, boss_dist_lane=60
+        )
+        # Primary $02 is the whole committed claw; unlike Antonio's kick there
+        # is no lane gate left to satisfy -- $161C6 closes the lane itself.
+        self.assertEqual(check_for_souther_slash({myself, souther}), {SLASH})
+
+    def test_stationary_actor_uses_the_middle_window(self) -> None:
+        myself = make_myself(world_x=160, world_y=100, vel_x=0.0)
+        inside = make_souther(boss_dist_x=SOUTHER_SLASH_DIST_STATIONARY - 1)
+        self.assertEqual(check_for_souther_slash({myself, inside}), {SLASH})
+        outside = make_souther(boss_dist_x=SOUTHER_SLASH_DIST_STATIONARY)
+        self.assertEqual(check_for_souther_slash({myself, outside}), set())
+
+    def test_closing_actor_gets_the_widest_window(self) -> None:
+        # Souther faces left, so a positive vel_x is the actor walking into
+        # him: the ROM's `neg`-then-`bmi` path, threshold $68.
+        myself = make_myself(world_x=160, world_y=100, vel_x=3.0)
+        souther = make_souther(
+            facing_left=True, boss_dist_x=SOUTHER_SLASH_DIST_CLOSING - 1
+        )
+        self.assertEqual(check_for_souther_slash({myself, souther}), {SLASH})
+        # The same distance while backing away is outside the tighter window.
+        fleeing = make_myself(world_x=160, world_y=100, vel_x=-3.0)
+        self.assertGreater(SOUTHER_SLASH_DIST_CLOSING - 1, SOUTHER_SLASH_DIST_AWAY)
+        self.assertEqual(check_for_souther_slash({fleeing, souther}), set())
+
+    def test_retreating_actor_uses_the_tightest_window(self) -> None:
+        myself = make_myself(world_x=160, world_y=100, vel_x=-3.0)
+        inside = make_souther(
+            facing_left=True, boss_dist_x=SOUTHER_SLASH_DIST_AWAY - 1
+        )
+        self.assertEqual(check_for_souther_slash({myself, inside}), {SLASH})
+
+    def test_inner_abort_denies_the_start(self) -> None:
+        # `cmpi.w #$0018,d2 / bcs` -- he cannot begin the slash from inside
+        # 24px, so this is not a threat even though every other gate holds.
+        myself = make_myself(world_x=160, world_y=100, vel_x=0.0)
+        souther = make_souther(boss_dist_x=SOUTHER_SLASH_DIST_MIN - 1)
+        self.assertEqual(check_for_souther_slash({myself, souther}), set())
+        at_edge = make_souther(boss_dist_x=SOUTHER_SLASH_DIST_MIN)
+        self.assertEqual(check_for_souther_slash({myself, at_edge}), {SLASH})
+
+    def test_off_lane_denies_the_start(self) -> None:
+        myself = make_myself(world_x=160, world_y=100, vel_x=0.0)
+        souther = make_souther(boss_dist_lane=SOUTHER_SLASH_LANE)
+        self.assertEqual(check_for_souther_slash({myself, souther}), set())
+
+    def test_unavailable_target_never_fires(self) -> None:
+        myself = make_myself(world_x=160, world_y=100, vel_x=0.0)
+        souther = make_souther(target_unavailable=1)
+        self.assertEqual(check_for_souther_slash({myself, souther}), set())
+
+    def test_recovering_souther_is_not_a_threat(self) -> None:
+        myself = make_myself(world_x=160, world_y=100, vel_x=0.0)
+        souther = make_souther(combat_phase=CombatPhase.RECOVERY)
+        self.assertEqual(check_for_souther_slash({myself, souther}), set())
+
+    def test_defeated_souther_is_not_a_threat(self) -> None:
+        myself = make_myself(world_x=160, world_y=100, vel_x=0.0)
+        souther = make_souther(health=0xFFFF)
+        self.assertEqual(check_for_souther_slash({myself, souther}), set())
+
+
+COUNTER = SoutherCountersJump(actor_slot="P1")
+
+
+class SoutherJumpCounterTests(unittest.TestCase):
+    def test_armed_in_state_1(self) -> None:
+        myself = make_myself(world_x=160, world_y=100)
+        souther = make_souther(world_x=200, world_y=100, primary_state=1, tactical=2)
+        self.assertEqual(check_for_souther_jump_counter({myself, souther}), {COUNTER})
+
+    def test_armed_during_the_claw_windup(self) -> None:
+        myself = make_myself(world_x=160, world_y=100)
+        souther = make_souther(
+            world_x=200,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            tactical=0,
+        )
+        self.assertEqual(check_for_souther_jump_counter({myself, souther}), {COUNTER})
+
+    def test_not_armed_once_the_dash_is_launched(self) -> None:
+        # $1619E / $161C6 never call $16234, so a hop during the dash is not
+        # countered -- which is also the one window DodgeSoutherSlash owns.
+        myself = make_myself(world_x=160, world_y=100)
+        for tactical in (1, 2):
+            souther = make_souther(
+                world_x=200,
+                world_y=100,
+                combat_phase=CombatPhase.ATTACKING,
+                primary_state=2,
+                tactical=tactical,
+            )
+            self.assertEqual(
+                check_for_souther_jump_counter({myself, souther}),
+                set(),
+                f"tactical {tactical:#04x}",
+            )
+
+    def test_not_armed_in_state_0(self) -> None:
+        myself = make_myself(world_x=160, world_y=100)
+        souther = make_souther(world_x=200, world_y=100, primary_state=0)
+        self.assertEqual(check_for_souther_jump_counter({myself, souther}), set())
+
+    def test_off_lane_is_outside_the_box(self) -> None:
+        myself = make_myself(world_x=160, world_y=100)
+        souther = make_souther(
+            world_x=200, world_y=100 + SOUTHER_JUMP_COUNTER_LANE, primary_state=1
+        )
+        self.assertEqual(check_for_souther_jump_counter({myself, souther}), set())
+
+    def test_launch_from_just_outside_the_box_still_flies_into_it(self) -> None:
+        # +$79 stays set for the whole kick action, so Souther re-tests the
+        # box on every frame of the flight: the X half-width has to include
+        # the character's own free-flight reach.
+        from sor_autoplay.ai import reach
+
+        myself = make_myself(world_x=0, world_y=100)
+        flight = reach.jump_attack_max_dx(myself.character_id)
+        self.assertGreater(flight, 0)
+        inside = make_souther(
+            world_x=SOUTHER_JUMP_COUNTER_DIST_X + flight - 1,
+            world_y=100,
+            primary_state=1,
+        )
+        self.assertEqual(check_for_souther_jump_counter({myself, inside}), {COUNTER})
+        beyond = make_souther(
+            world_x=SOUTHER_JUMP_COUNTER_DIST_X + flight,
+            world_y=100,
+            primary_state=1,
+        )
+        self.assertEqual(check_for_souther_jump_counter({myself, beyond}), set())
+
+    def test_defeated_souther_never_counters(self) -> None:
+        myself = make_myself(world_x=160, world_y=100)
+        souther = make_souther(
+            world_x=200, world_y=100, primary_state=1, health=0xFFFF
+        )
+        self.assertEqual(check_for_souther_jump_counter({myself, souther}), set())
+
+    def test_one_token_per_actor_not_per_souther(self) -> None:
+        # Keyed on the actor alone: two Southers in the box (round 6's pair)
+        # are still one refusal, not two.
+        myself = make_myself(world_x=160, world_y=100)
+        first = make_souther(slot="obj11", world_x=200, world_y=100, primary_state=1)
+        second = make_souther(slot="obj12", world_x=120, world_y=100, primary_state=1)
+        self.assertEqual(
+            check_for_souther_jump_counter({myself, first, second}), {COUNTER}
+        )
+
+
+class SoutherClawProjectileTests(unittest.TestCase):
+    def test_claw_and_afterimage_are_never_incoming_projectiles(self) -> None:
+        # Animation-synchronized attack objects, not throws: the answer is
+        # DodgeSoutherSlash, and a ProjectileSidestep would only split the tick.
+        myself = make_myself(world_x=160, world_y=100)
+        for type_id in (0x98, 0x99):
+            claw = Projectile(
+                slot="obj20",
+                type_id=type_id,
+                world_x=180,
+                world_y=100,
+                vel_x=-8.0,
+                vel_z=0.0,
+            )
+            self.assertEqual(
+                check_for_incoming_projectiles({myself, claw}),
+                set(),
+                f"type {type_id:#04x}",
+            )
+
+
+class CheckForSoutherGrabOnPunishTests(unittest.TestCase):
+    def test_punishable_souther_offers_the_hold(self) -> None:
+        myself = make_myself(world_x=160, world_y=100)
+        camera = CameraRange(left=0, right=640, top=0, bottom=224)
+        souther = make_souther(
+            world_x=180, world_y=100, combat_phase=CombatPhase.RECOVERY
+        )
+        result = check_for_grab_opportunities({myself, camera, souther})
+        self.assertEqual(
+            result, {GrabSoutherOnPunish(actor_slot="P1", target_slot="obj11")}
+        )
+
+    def test_a_souther_that_can_still_act_offers_nothing(self) -> None:
+        myself = make_myself(world_x=160, world_y=100)
+        camera = CameraRange(left=0, right=640, top=0, bottom=224)
+        souther = make_souther(world_x=180, world_y=100)
+        self.assertEqual(check_for_grab_opportunities({myself, camera, souther}), set())
