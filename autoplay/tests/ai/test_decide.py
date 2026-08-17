@@ -2360,12 +2360,12 @@ class JumpRefusedNearSoutherTests(unittest.TestCase):
         souther = _souther(world_x=160, world_y=100, primary_state=1)
         self.assertEqual(could_jump_attack({myself, souther}), set())
 
-    def test_refusal_lifts_once_the_dash_is_launched(self) -> None:
-        # $1619E/$161C6 never call $16234, so the hop is not countered there.
-        # Tested against a grunt target on purpose: Souther gets no
-        # Antonio-style "hop anywhere in free-flight range" exception, so
-        # whether *he* is a jump target is the ordinary band's question and
-        # would confuse what this test is about.
+    def test_still_refused_once_the_dash_is_launched(self) -> None:
+        # The live-reported bug. $1619E/$161C6 skip $16234 because he is
+        # already attacking, with the type-$98 claw out -- so this is the most
+        # dangerous window to hop in, not a safe one. Tested against a grunt
+        # target on purpose: the refusal is per-actor, so it must hold even
+        # when the jump is aimed somewhere else entirely.
         myself = make_myself(world_x=120, world_y=100)
         grunt = make_enemy(slot="obj01", world_x=180, world_y=100)
         dashing = _souther(
@@ -2375,8 +2375,16 @@ class JumpRefusedNearSoutherTests(unittest.TestCase):
             primary_state=2,
             tactical=2,
         )
+        self.assertEqual(could_jump_attack({myself, grunt, dashing}), set())
+
+    def test_refusal_lifts_only_once_he_cannot_act(self) -> None:
+        myself = make_myself(world_x=120, world_y=100)
+        grunt = make_enemy(slot="obj01", world_x=180, world_y=100)
+        recovering = _souther(
+            world_x=160, world_y=100, combat_phase=CombatPhase.RECOVERY
+        )
         self.assertEqual(
-            could_jump_attack({myself, grunt, dashing}),
+            could_jump_attack({myself, grunt, recovering}),
             {JumpAttack(actor_slot="P1", target_slot="obj01")},
         )
 
@@ -2393,6 +2401,15 @@ class JumpRefusedNearSoutherTests(unittest.TestCase):
             tactical=2,
         )
         self.assertEqual(could_jump_attack({myself, dashing}), set())
+
+    def test_off_lane_launches_are_refused_too(self) -> None:
+        # He closes lane at 4px/frame, so an off-lane launch is back in his
+        # line long before the flight ends. This is the other half of what put
+        # the AI into the claws.
+        myself = make_myself(world_x=120, world_y=100)
+        grunt = make_enemy(slot="obj01", world_x=180, world_y=100)
+        off_lane = _souther(world_x=160, world_y=140, primary_state=1)
+        self.assertEqual(could_jump_attack({myself, grunt, off_lane}), set())
 
     def test_jump_at_an_unrelated_grunt_is_refused_too(self) -> None:
         # $162A4 reads the *player's* action state, not the jump's target, so

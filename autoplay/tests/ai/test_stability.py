@@ -677,6 +677,41 @@ class SoutherStabilityTests(unittest.TestCase):
             f"pressed jump inside the counter box: {[hex(m) for m in masks]}",
         )
 
+    def test_never_jumps_into_the_claw(self) -> None:
+        """No jump is ever launched over a run against a live Souther.
+
+        A run-level guard, **not** the regression pin for the live-reported
+        "salta diretamente para as gadanhas": checked explicitly, this test
+        passes against the old, broken gates too, because on those ground ticks
+        DodgeSoutherSlash (46) outranks JumpAttack (32) anyway and no jump gets
+        launched here regardless. The actual pins are
+        `test_decide.JumpRefusedNearSoutherTests`'
+        `test_still_refused_once_the_dash_is_launched` and
+        `test_off_lane_launches_are_refused_too`, both of which do fail against
+        the old gates.
+
+        Kept because it covers the composition those two do not: the whole
+        state cycle 1 -> wind-up -> launch -> dash, fed back tick by tick, at
+        three lane offsets.
+        """
+
+        for lane in (0, 24, 40):
+            masks, winners = _run_souther(
+                ticks=60,
+                actor_x=100,
+                actor_y=60,
+                souther_x=180,
+                souther_y=60 + lane,
+                states=[(1, 0)] * 6 + [(2, 0)] * 3 + [(2, 1)] * 3 + [(2, 2)] * 6,
+            )
+            self.assertNotIn(
+                JumpAttack.__name__, winners, f"jumped at Souther, lane {lane}"
+            )
+            self.assertFalse(
+                any(mask & JUMP for mask in masks),
+                f"pressed jump near Souther, lane {lane}",
+            )
+
     def test_the_dodge_owns_every_committed_tick(self) -> None:
         masks, winners = _run_souther(
             ticks=20,

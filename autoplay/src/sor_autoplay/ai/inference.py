@@ -35,8 +35,8 @@ from .tokens import (
     InRearReach,
     IncomingMelee,
     PunishWindow,
-    SoutherCountersJump,
     SoutherIsGoingToSlash,
+    SoutherPunishesJump,
     Surrounded,
 )
 from .tokens import CameraRange, Pit, SafeSpot
@@ -124,19 +124,31 @@ SOUTHER_SLASH_LANE = 0x1C  # 28px
 # Primary $02 is the whole committed claw ($16118 souther_state2_claw_commit).
 SOUTHER_SLASH_PRIMARY_STATE = 0x02
 
-# The $16234 (souther_counter_jump_attack) box. $162A4
-# (souther_flag_target_jump_attack) arms it from the *player's* own action state
-# ($16/$17/$42/$43 -- the unarmed and armed jump-attack pairs), and $16234 then
-# forces Souther straight to primary $02, bypassing every distance band, the
-# inner abort and the +$66/+$77 gates.
-SOUTHER_JUMP_COUNTER_LANE = 0x12  # 18px
+# The X reach of "do not jump near Souther". $16234
+# (souther_counter_jump_attack) is where the number comes from: $162A4
+# (souther_flag_target_jump_attack) arms +$79 from the *player's* own action
+# state ($16/$17/$42/$43 -- the unarmed and armed jump-attack pairs), and
+# $16234 then forces Souther straight to primary $02 with the claw spawned,
+# bypassing every distance band, the inner abort and the +$66/+$77 gates.
 SOUTHER_JUMP_COUNTER_DIST_X = 0x78  # 120px
-# The counter is armed while $16234 is on the tick's call path: $15EDA runs it
-# on every state-1 tick before dispatching, and $16158 (state 2, tactical $00)
-# runs it during the claw wind-up. $1619E/$161C6 -- the launch and the dash --
-# never call it, so a jump during the committed dash is not countered.
-SOUTHER_COUNTER_ARMED_PRIMARY = 0x01
-SOUTHER_COUNTER_ARMED_WINDUP_TACTICAL = 0x00
+# Two gates the ROM has here are deliberately **not** reproduced, both
+# live-diagnosed after the AI was seen jumping straight into the claws:
+#
+# * $16234's own lane window ($12, 18px). The jump is horizontal, so the
+#   *flight* cannot leave the lane it started on -- but Souther closes lane at
+#   4px/frame ($15F98/$160D0), which erases an 18px gap in about five frames,
+#   well inside the flight's own ~25. Gating on lane let the AI launch from
+#   just off-lane and get counter-hit anyway.
+#
+# * "is the counter armed" ($15EDA and $16158 call $16234; $1619E/$161C6 do
+#   not). Reading that as "then a jump is safe there" was the actual error:
+#   the reason the dash handlers skip the counter is that he is *already
+#   attacking*, with the type-$98 claw live and carrying hitbox/damage
+#   descriptor $225C. Not being countered is not the same as not being hit,
+#   and that window is the most dangerous one, not the safe one.
+#
+# What is genuinely safe is a Souther who cannot act at all, which
+# is_punishable already names -- and there the grab outranks the hop anyway.
 
 # A Grunt outside this time-to-arrival window is not "closing fast" yet.
 # The horizon itself now lives in reach.CLOSING_ENEMY_THREAT_FRAMES --
@@ -964,39 +976,26 @@ def check_for_souther_slash(context: Context) -> Context:
     return tokens
 
 
-def _souther_counter_is_armed(souther: Souther) -> bool:
-    """True while ``$16234 (souther_counter_jump_attack)`` is on the call path.
-
-    ``$15EDA`` runs it on every state-1 tick before the tactical dispatch, so
-    all of primary ``$01`` counts whatever ``+$67`` says. In primary ``$02``
-    only the wind-up (tactical ``$00``, ``$16158``) still runs it; the launch
-    and the dash (``$1619E``/``$161C6``) do not, which is the one window where
-    a jump is not punished.
-    """
-
-    if souther.primary_state == SOUTHER_COUNTER_ARMED_PRIMARY:
-        return True
-    return (
-        souther.primary_state == SOUTHER_SLASH_PRIMARY_STATE
-        and souther.tactical == SOUTHER_COUNTER_ARMED_WINDUP_TACTICAL
-    )
-
-
 def check_for_souther_jump_counter(context: Context) -> Context:
-    """Promote the actor whose next jump attack would be countered.
+    """Promote the actor whose next jump attack would be punished.
 
     Keyed on the actor alone, because ``$162A4
     (souther_flag_target_jump_attack)`` reads the player's own action state and
     nothing about the jump's target: a hop aimed at an unrelated grunt inside
-    the box is countered identically.
+    the box is answered identically.
+
+    A jump near a live Souther loses in two independent ways, which is why this
+    does not test whether ``$16234`` is currently on his call path (see the
+    constants above): while he can still choose, the jump-attack action state
+    hands him the counter; while he is already dashing, the type-``$98`` claw
+    is a live attack object and the flight lands in it. The only Souther worth
+    hopping at is one who cannot act -- and ``GrabSoutherOnPunish`` outranks the
+    hop there anyway.
 
     The X half-width is widened by the character's own free-flight reach
-    (``reach.jump_attack_max_dx``). ``+$79`` stays set for as long as the kick
-    action does, so Souther gets to re-test the box on every frame of the
-    flight, not only at its onset -- a launch from just outside 120px flies
-    straight into it. The lane half-width is *not* widened: the AI's
-    ``JumpAttack`` is horizontal only, so the flight cannot leave the lane it
-    started on.
+    (``reach.jump_attack_max_dx``), because ``+$79`` stays set for as long as
+    the kick action does and Souther re-tests every frame of the flight rather
+    than only its onset: a launch from just outside 120px flies straight in.
     """
 
     actors = _actors(context)
@@ -1006,7 +1005,7 @@ def check_for_souther_jump_counter(context: Context) -> Context:
     southers = [
         souther
         for souther in find_all(context, Souther)
-        if not souther.is_defeated and _souther_counter_is_armed(souther)
+        if not souther.is_defeated and not is_punishable(souther.combat_phase)
     ]
     if not southers:
         return set()
@@ -1018,13 +1017,11 @@ def check_for_souther_jump_counter(context: Context) -> Context:
         # actor, while the flag itself is armed by either player jumping.
         flight = reach.jump_attack_max_dx(actor.character_id)
         for souther in southers:
-            if abs(souther.world_y - actor.world_y) >= SOUTHER_JUMP_COUNTER_LANE:
-                continue
             if abs(souther.world_x - actor.world_x) >= (
                 SOUTHER_JUMP_COUNTER_DIST_X + flight
             ):
                 continue
-            tokens.add(SoutherCountersJump(actor_slot=actor.slot))
+            tokens.add(SoutherPunishesJump(actor_slot=actor.slot))
             break
     return tokens
 

@@ -679,24 +679,26 @@ class SoutherIsGoingToSlash(Inferred):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class SoutherCountersJump(Inferred):
-    """Jumping right now hands Souther a free counter into the claw.
+class SoutherPunishesJump(Inferred):
+    """Jumping right now loses to Souther, whichever thing he is doing.
 
-    Produced by ``inference.check_for_souther_jump_counter`` when a live
-    ``Souther`` has the ``$16234 (souther_counter_jump_attack)`` counter armed
-    -- primary ``$01`` (any tactical), or primary ``$02`` with tactical ``$00``
-    -- and its ``$78`` by ``$12`` box covers where the actor will be when the
-    kick's own action state begins. ``$162A4
+    Produced by ``inference.check_for_souther_jump_counter`` for any live
+    ``Souther`` who is not punishable and whose ``$78``-plus-free-flight X box
+    covers the actor. Keyed on the actor alone because ``$162A4
     (souther_flag_target_jump_attack)`` watches the *player's* action state
     (``$16``/``$17``/``$42``/``$43``) and nothing about who the jump was aimed
-    at, which is why this token is keyed on the actor alone: jumping at an
-    unrelated grunt inside that box is countered exactly the same.
+    at: hopping at an unrelated grunt in that box loses identically.
 
-    The counter bypasses every distance band, the ``$18`` inner abort and the
-    ``+$66``/``+$77`` gates of the ordinary commit, so there is no geometry
-    that makes a jump safe inside the box -- only staying out of it, or
-    waiting until he is already dashing (tactical ``$01``/``$02``, which never
-    call ``$16234``).
+    Two independent losses, which is why this is deliberately **not** gated on
+    ``$16234 (souther_counter_jump_attack)`` being on his current call path.
+    While he can still choose, the jump-attack action state hands him the
+    counter, which bypasses every distance band, the ``$18`` inner abort and
+    the ``+$66``/``+$77`` gates. While he is already dashing
+    (``$1619E``/``$161C6``, the handlers that skip ``$16234``), the type-``$98``
+    claw is live and the flight lands in it. Reading "the counter is not armed"
+    as "the jump is safe" is exactly backwards -- those handlers skip the
+    counter *because he is already attacking* -- and it is what put the AI into
+    the claws in play.
     """
 
     actor_slot: str

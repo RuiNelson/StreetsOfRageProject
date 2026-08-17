@@ -76,7 +76,7 @@ classDiagram
     GrabOpportunity <|-- GrabToDodgeCharge
     Inferred <|-- AntonioIsGoingToKick
     Inferred <|-- SoutherIsGoingToSlash
-    Inferred <|-- SoutherCountersJump
+    Inferred <|-- SoutherPunishesJump
 
     Verb <|-- Walk
     Walk <|-- WalkToNearEnemy

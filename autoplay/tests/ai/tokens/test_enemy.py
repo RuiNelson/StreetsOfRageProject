@@ -33,7 +33,7 @@ from sor_autoplay.ai.tokens import (
     AntonioIsGoingToKick,
     IncomingMelee,
     PunishWindow,
-    SoutherCountersJump,
+    SoutherPunishesJump,
     SoutherIsGoingToSlash,
     Surrounded,
     TargetInReach,
@@ -242,14 +242,22 @@ class EnemyHierarchyTests(unittest.TestCase):
 
     def test_souther_inferences_are_inferred(self) -> None:
         self.assertTrue(issubclass(SoutherIsGoingToSlash, Inferred))
-        self.assertTrue(issubclass(SoutherCountersJump, Inferred))
+        self.assertTrue(issubclass(SoutherPunishesJump, Inferred))
         slash = SoutherIsGoingToSlash(actor_slot="P1", target_slot="obj11")
         self.assertEqual(slash.target_slot, "obj11")
         # Keyed on the actor alone: $162A4 reads the player's action state and
         # nothing about which enemy the jump was aimed at.
-        counter = SoutherCountersJump(actor_slot="P1")
+        counter = SoutherPunishesJump(actor_slot="P1")
         self.assertEqual(counter.actor_slot, "P1")
         self.assertFalse(hasattr(counter, "target_slot"))
+
+    def test_souther_punishes_jump_is_named_for_the_whole_reason(self) -> None:
+        # Named "punishes", not "counters", on purpose: the counter ($16234) is
+        # only one of the two ways a jump loses. Reading the old name as "he is
+        # not counter-armed, so the hop is safe" is what flew the AI into the
+        # live claw during the dash, where $1619E/$161C6 skip $16234 precisely
+        # because he is already attacking.
+        self.assertIn("Punishes", SoutherPunishesJump.__name__)
 
     def test_grab_souther_on_punish_is_a_grab_opportunity(self) -> None:
         self.assertTrue(issubclass(GrabSoutherOnPunish, GrabOpportunity))
@@ -346,7 +354,7 @@ class ReachAndThreatTokenTests(unittest.TestCase):
             GrabSoutherOnPunish,
             IncomingMelee,
             PunishWindow,
-            SoutherCountersJump,
+            SoutherPunishesJump,
             SoutherIsGoingToSlash,
             Surrounded,
         ):

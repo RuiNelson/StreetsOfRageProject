@@ -55,8 +55,8 @@ from .tokens import (
     InRearReach,
     IncomingMelee,
     IncomingProjectile,
-    SoutherCountersJump,
     SoutherIsGoingToSlash,
+    SoutherPunishesJump,
     Surrounded,
 )
 from .tokens import AnimationInProgress, CameraRange, Stage
@@ -896,7 +896,7 @@ def could_jump_attack(context: Context) -> Context:
             continue
         if not actor.is_airborne and any(
             token.actor_slot == actor.slot
-            for token in find_all(context, SoutherCountersJump)
+            for token in find_all(context, SoutherPunishesJump)
         ):
             # The exact opposite of the Antonio exception below. Souther's
             # $16234 (souther_counter_jump_attack) reads the *player's* action
@@ -906,6 +906,12 @@ def could_jump_attack(context: Context) -> Context:
             # satisfy. So there is no geometry that makes the launch safe: the
             # refusal is per-actor and covers every target, because a hop aimed
             # at an unrelated grunt inside his box is countered identically.
+            #
+            # It is also not limited to the states that arm the counter, which
+            # is how the first version of this let the AI jump into the claws
+            # anyway: the handlers that skip $16234 skip it because he is
+            # *already attacking*, so that window is the one where a live claw
+            # is waiting for the flight. See SoutherPunishesJump.
             #
             # Only the *launch* is refused. Once airborne the flight is
             # committed and the fallback below still has to produce a verb, or

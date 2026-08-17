@@ -28,8 +28,8 @@ from sor_autoplay.ai.tokens import (
     InRearReach,
     IncomingMelee,
     PunishWindow,
-    SoutherCountersJump,
     SoutherIsGoingToSlash,
+    SoutherPunishesJump,
     Surrounded,
 )
 from sor_autoplay.ai.tokens import Breakable, CameraRange, Pit, SafeSpot
@@ -40,7 +40,6 @@ from sor_autoplay.ai.inference import (
     ANTONIO_BOOMERANG_TYPE_ID,
     ANTONIO_KICK_DIST_STATIONARY,
     SOUTHER_JUMP_COUNTER_DIST_X,
-    SOUTHER_JUMP_COUNTER_LANE,
     SOUTHER_SLASH_DIST_AWAY,
     SOUTHER_SLASH_DIST_CLOSING,
     SOUTHER_SLASH_DIST_MIN,
@@ -1383,7 +1382,7 @@ class CheckForSoutherSlashTests(unittest.TestCase):
         self.assertEqual(check_for_souther_slash({myself, souther}), set())
 
 
-COUNTER = SoutherCountersJump(actor_slot="P1")
+COUNTER = SoutherPunishesJump(actor_slot="P1")
 
 
 class SoutherJumpCounterTests(unittest.TestCase):
@@ -1403,9 +1402,11 @@ class SoutherJumpCounterTests(unittest.TestCase):
         )
         self.assertEqual(check_for_souther_jump_counter({myself, souther}), {COUNTER})
 
-    def test_not_armed_once_the_dash_is_launched(self) -> None:
-        # $1619E / $161C6 never call $16234, so a hop during the dash is not
-        # countered -- which is also the one window DodgeSoutherSlash owns.
+    def test_still_refused_once_the_dash_is_launched(self) -> None:
+        # $1619E / $161C6 never call $16234 -- but they skip it because he is
+        # *already attacking*, with the type-$98 claw live. This was the
+        # live-reported bug: treating "not counter-armed" as "safe to jump"
+        # flew the AI straight into the claws.
         myself = make_myself(world_x=160, world_y=100)
         for tactical in (1, 2):
             souther = make_souther(
@@ -1417,21 +1418,27 @@ class SoutherJumpCounterTests(unittest.TestCase):
             )
             self.assertEqual(
                 check_for_souther_jump_counter({myself, souther}),
-                set(),
+                {COUNTER},
                 f"tactical {tactical:#04x}",
             )
 
-    def test_not_armed_in_state_0(self) -> None:
-        myself = make_myself(world_x=160, world_y=100)
-        souther = make_souther(world_x=200, world_y=100, primary_state=0)
-        self.assertEqual(check_for_souther_jump_counter({myself, souther}), set())
-
-    def test_off_lane_is_outside_the_box(self) -> None:
+    def test_a_punishable_souther_is_the_one_safe_case(self) -> None:
+        # He cannot act and no claw is out; the grab outranks the hop anyway.
         myself = make_myself(world_x=160, world_y=100)
         souther = make_souther(
-            world_x=200, world_y=100 + SOUTHER_JUMP_COUNTER_LANE, primary_state=1
+            world_x=200, world_y=100, combat_phase=CombatPhase.RECOVERY
         )
         self.assertEqual(check_for_souther_jump_counter({myself, souther}), set())
+
+    def test_off_lane_is_still_refused(self) -> None:
+        # The ROM's own $12 lane window is deliberately not reproduced: the
+        # flight cannot leave its lane, but Souther closes lane at 4px/frame
+        # ($15F98/$160D0), which erases 18px in about five of the flight's ~25
+        # frames. Gating on lane is what let the AI launch from just off-lane
+        # and get hit anyway.
+        myself = make_myself(world_x=160, world_y=100)
+        souther = make_souther(world_x=200, world_y=140, primary_state=1)
+        self.assertEqual(check_for_souther_jump_counter({myself, souther}), {COUNTER})
 
     def test_launch_from_just_outside_the_box_still_flies_into_it(self) -> None:
         # +$79 stays set for the whole kick action, so Souther re-tests the

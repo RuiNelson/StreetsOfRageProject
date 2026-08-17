@@ -192,18 +192,34 @@ pure lane step — `$161C6 (souther_state2_claw_dash)` writes only `+$1C`, so it
 cannot follow a lane change, and it resolves only with the target within `$18`
 of its lane.
 
-**`SoutherCountersJump`** is the one inference keyed on the actor alone rather
+**`SoutherPunishesJump`** is the one inference keyed on the actor alone rather
 than on an actor/target pair, and the reason is the ROM's own:
 `$162A4 (souther_flag_target_jump_attack)` watches the *player's* action state
 (`$16`/`$17`/`$42`/`$43` — the unarmed and armed jump attacks) and nothing about
 who the jump was aimed at, so `$16234 (souther_counter_jump_attack)` answers a
 hop aimed at an unrelated grunt exactly as it answers one aimed at him: straight
 to primary `$02` with the claw spawned, every distance band and gate bypassed.
-So the whole of `could_jump_attack` is refused for that actor while the counter
-is armed (primary `$01`, or primary `$02` with tactical `$00`) and his
-`$78`-by-`$12` box covers where the flight will take the actor — the exact
+So the whole of `could_jump_attack` is refused for that actor whenever a live,
+non-punishable Souther is within `$78`-plus-free-flight on X — the exact
 opposite of Antonio, whose fight *needs* the hop. Only the launch is refused;
 an actor already airborne is committed and still gets a verb.
+
+The token is named *punishes* rather than *counters* because the counter is
+only one of the two ways a jump loses, and conflating them is a mistake this
+codebase actually made: the first version gated the refusal on `$16234` being
+on his call path and on the ROM's `$12` lane window, and the AI was reported
+jumping straight into the claws. Both gates were wrong for the same underlying
+reason — they describe *him*, not the flight.
+
+- `$1619E`/`$161C6` skip `$16234` **because he is already attacking**, with the
+  type-`$98` claw live. "Not counter-armed" is the most dangerous window, not a
+  safe one.
+- The `$12` lane window bounds the flight correctly (a `JumpAttack` is
+  horizontal) but not Souther, who closes lane at 4px/frame and erases 18px in
+  about five of the flight's ~25 frames.
+
+The only Souther worth hopping at is one who cannot act at all, and there
+`GrabSoutherOnPunish` outranks the hop anyway.
 
 **`InContinueMenu`** is observed when this player's object is the type-`$0F`
 continue / high-score name-entry UI (the slot is no longer playable).
