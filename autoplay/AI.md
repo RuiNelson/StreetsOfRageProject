@@ -403,6 +403,22 @@ trajectory is fixed at takeoff, so once airborne there is nothing left to
 decide except whether to press B — and pressing it is free, while not
 pressing it means landing having done nothing.
 
+The **grounded** launch is also a pathfinder question
+(`navigation.jump_landing_is_safe`). A jump has no mid-air lane control,
+so the planner is asked whether a body can slide to the landing X on the
+actor's current Y without hitting a pit. Three answers: the lane is
+clear (jump); a 2D walk can get there by leaving the lane (do not jump —
+`WalkToNearEnemy` will go around); no walk reaches and the landing is
+solid (hop *over* the pit). A landing inside a `Pit` is never launched.
+Stage 4's bridge gaps are the case this exists for: a kick toward an
+enemy across a hole used to fly in, and `execute_tick`'s pit override
+then froze X mid-air because `pit_endangers` is a lane-plane test.
+Airborne, that override is skipped so a hop that is already clearing
+the gap keeps its launch velocity. `WalkToAdvanceStage` uses the same
+planner: when `plan_route` cannot walk the 40px strip (a pit spans the
+playable Y) it hops via `hop_landing_x` if the far side is in kick
+range, and never injects raw RIGHT/LEFT into the hole.
+
 That makes the *airborne* question categorically different from the grounded
 one, and conflating them cost more than half of all jumps: the verb was kept
 alive only while the reach band still held, so a target that walked out of

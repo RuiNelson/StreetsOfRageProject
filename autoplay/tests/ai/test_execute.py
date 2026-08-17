@@ -959,6 +959,54 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
             "stayed on the pit's lane the whole way",
         )
 
+    def test_hops_when_the_pathfinder_cannot_walk_around_a_pit(self) -> None:
+        # Full-width pit, landing in Axel's 60px kick range. Walking cannot
+        # go around, so the executor must launch (C + RIGHT), not walk in.
+        pit = Pit(world_x=120, lane_y=0, width=24, height=130)
+        actor = _myself(world_x=100, world_y=64)
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        gamepad, _client = _gamepad()
+        context = {
+            actor,
+            pit,
+            Stage(level_index=3, direction="right"),
+            CameraRange(left=0, right=400, top=0, bottom=112),
+        }
+
+        execute_verb(verb, context, gamepad)
+
+        # Launch is a press (C + RIGHT), then hold keeps only the direction
+        # -- same shape as JumpAttack. gamepad.held is the sticky latch,
+        # so the hop is visible on press_buttons.
+        _client.press_buttons.assert_called_once_with(player1=C | RIGHT, player2=0, frames=3)
+
+    def test_does_not_walk_into_an_unjumpable_full_width_pit(self) -> None:
+        # 96px gap, wider than Axel's kick. Pathfinder cannot walk around
+        # and cannot hop. The old `or RIGHT` fallback walked in.
+        pit = Pit(world_x=400, lane_y=0, width=96, height=130)
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        trail = _walk(
+            verb,
+            _myself(world_x=360, world_y=60),
+            {
+                pit,
+                Stage(level_index=3, direction="right"),
+                CameraRange(left=200, right=560, top=0, bottom=112),
+            },
+            ticks=40,
+        )
+
+        entered = [
+            (a.world_x, a.world_y)
+            for a in trail
+            if pit_endangers(pit, a.world_x, a.world_y)
+        ]
+        self.assertFalse(entered, f"walked into the pit at {entered[:3]}")
+        self.assertFalse(
+            any(a.world_x > pit.world_x for a in trail),
+            "advanced past the pit wall without hopping",
+        )
+
     def test_routes_around_a_breakable_on_the_lookahead_line(self) -> None:
         # Breakables are still solid obstacles for this verb's router (the
         # same set the pre-routing ad-hoc dodge avoided), so a crate sitting
@@ -1396,6 +1444,20 @@ class ExecuteJumpAttackTests(unittest.TestCase):
         gamepad, client = _gamepad()
 
         execute_verb(verb, {actor, enemy}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+
+    def test_pit_override_does_not_steal_an_airborne_actor(self) -> None:
+        # Mid-jump, X overlaps the pit and pit_endangers is true (it is a
+        # lane-plane test). The override used to freeze X and drop the kick
+        # -- which is how a hop that would have cleared the gap fell in.
+        pit = Pit(world_x=20, lane_y=0, width=80, height=40)
+        actor = _myself(world_x=50, world_y=20, is_airborne=True, action_state=0x12)
+        enemy = _enemy(world_x=100, world_y=20)
+        verb = JumpAttack(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        execute_tick(verb, {actor, enemy, pit}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 

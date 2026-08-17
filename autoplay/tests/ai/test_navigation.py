@@ -489,5 +489,54 @@ class FirstVectorTests(unittest.TestCase):
         self.assertEqual(mask, 0)
 
 
+class JumpLandingTests(unittest.TestCase):
+    """The pathfinder decides whether a jump toward an X is safe."""
+
+    def _world(self, *tokens):
+        return {
+            CameraRange(left=0, right=400, top=0, bottom=112),
+            Stage(level_index=3, direction="right"),
+            *tokens,
+        }
+
+    def test_a_clear_lane_is_safe(self) -> None:
+        actor = _myself(world_x=100, world_y=60)
+        self.assertTrue(nav.jump_landing_is_safe(self._world(actor), actor, 160))
+
+    def test_refuses_a_landing_inside_a_pit(self) -> None:
+        pit = Pit(world_x=140, lane_y=40, width=80, height=40)
+        actor = _myself(world_x=100, world_y=60)
+        self.assertFalse(nav.jump_landing_is_safe(self._world(actor, pit), actor, 180))
+
+    def test_refuses_when_the_pathfinder_can_walk_around(self) -> None:
+        # Pit on this Y, room above it. Jumping on this lane would fly
+        # through the hole; walking around is the pathfinder's answer.
+        pit = Pit(world_x=140, lane_y=40, width=40, height=40)
+        actor = _myself(world_x=100, world_y=60)
+        self.assertFalse(nav.plan_lane_route(self._world(actor, pit), actor, 220).reached)
+        self.assertFalse(nav.jump_landing_is_safe(self._world(actor, pit), actor, 220))
+
+    def test_allows_a_hop_over_an_impassable_pit(self) -> None:
+        # Pit spans the whole playable Y. Walking cannot go around.
+        # Landing past it is solid, so the pathfinder says jump over.
+        pit = Pit(world_x=140, lane_y=0, width=32, height=120)
+        actor = _myself(world_x=110, world_y=60)
+        self.assertTrue(nav.jump_landing_is_safe(self._world(actor, pit), actor, 200))
+
+    def test_hop_landing_x_is_just_past_the_nearest_pit(self) -> None:
+        pit = Pit(world_x=140, lane_y=0, width=24, height=120)
+        actor = _myself(world_x=120, world_y=60)
+        landing = nav.hop_landing_x(self._world(actor, pit), actor, "right")
+        self.assertIsNotNone(landing)
+        assert landing is not None
+        self.assertGreaterEqual(landing, pit.world_x + pit.width + PIT_AVOID_MARGIN)
+        self.assertLessEqual(landing - actor.world_x, 60)
+
+    def test_hop_landing_x_is_none_when_the_gap_is_too_wide(self) -> None:
+        pit = Pit(world_x=140, lane_y=0, width=96, height=120)
+        actor = _myself(world_x=100, world_y=60)
+        self.assertIsNone(nav.hop_landing_x(self._world(actor, pit), actor, "right"))
+
+
 if __name__ == "__main__":
     unittest.main()

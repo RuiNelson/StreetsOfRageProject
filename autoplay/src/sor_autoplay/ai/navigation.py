@@ -24,6 +24,13 @@ the same thing. That construction is what gives ``enough_contact`` and
 "the punch actually lands" and "maximise contact" as "line up square with
 the crate's face".
 
+**Whether a jump may launch.** A jump has no mid-air Y, so
+:func:`jump_landing_is_safe` asks the pathfinder the flight's own
+question (slide this lane to the landing, pits as solids) and, when that
+fails, whether a 2D walk can go around instead. :func:`hop_landing_x` is
+the advance-stage counterpart: the X just past a pit the walk cannot
+route around.
+
 **Nothing about tactics.** Which side to approach from, how far to stop
 short, whether to wait out a swing -- those stay in ``execute.py``, where
 they were each measured into existence. This module answers only "how do I
@@ -44,7 +51,12 @@ from .pathfind import (
     RegionGoal,
     find_path,
 )
-from .reach import PIT_AVOID_MARGIN, live_enemies
+from .reach import (
+    PIT_AVOID_MARGIN,
+    any_pit_endangers,
+    jump_attack_max_dx,
+    live_enemies,
+)
 from .tokens import (
     Breakable,
     CameraRange,
@@ -285,6 +297,25 @@ def solid_obstacles(
         rects.append(
             rule.rect(Rect(solid.x0, solid.y0, solid.width, solid.height))
         )
+    rects.extend(pit_obstacles(context, body=body, origin=origin))
+    return rects
+
+
+def pit_obstacles(
+    context: Context,
+    *,
+    body: Rect | None = None,
+    origin: tuple[float, float] | None = None,
+) -> list[Rect]:
+    """Pit solids only -- the floor holes a jump flies over but must not land in.
+
+    Same restatement as :func:`solid_obstacles` (origin rule, inclusive
+    predicate grown by one px). Breakables are omitted: a jump clears them
+    in Z. Callers that need both use ``solid_obstacles``.
+    """
+
+    rule = _OriginRule(body, origin)
+    rects: list[Rect] = []
     for pit in find_all(context, Pit):
         # One px wider than the predicate, because the predicate is inclusive
         # (``pit_endangers`` uses ``<=``) and collision here is not (touching
@@ -577,3 +608,108 @@ def actor_footprint(
     """
 
     return body_rect(actor), (float(actor.world_x), float(actor.world_y))
+
+
+def plan_lane_route(
+    context: Context,
+    actor: Myself | Partner,
+    target_x: float,
+) -> Path:
+    """Pathfinder answer to: can this body slide to ``target_x`` on its lane?
+
+    A jump has no mid-air Y, so the world is a corridor whose height is
+    exactly the body's -- the search cannot dodge around a pit the way a
+    walk can. Only pits are solids: a crate is jumpable, a hole is not.
+    ``reached`` means the landing origin can sit at ``target_x`` without
+    overlapping a pit.
+    """
+
+    body, origin = actor_footprint(actor)
+    world = world_rect(context)
+    corridor = Rect(world.left, body.top, world.width, max(body.height, 1.0))
+    goal = PointGoal(Point(target_x, origin[1]), tolerance=NAV_STEP)
+    return find_path(
+        start=body,
+        goal=goal,
+        world=corridor,
+        obstacles=pit_obstacles(context, body=body, origin=origin),
+        step=NAV_STEP,
+        max_nodes=NAV_MAX_NODES,
+    )
+
+
+def jump_landing_is_safe(
+    context: Context,
+    actor: Myself | Partner,
+    target_x: int,
+) -> bool:
+    """May a jump toward ``target_x`` launch, according to the pathfinder.
+
+    A jump flies on the actor's current lane (no mid-air Y). Three answers:
+
+    - The lane itself is clear to ``target_x`` (``plan_lane_route.reached``):
+      yes.
+    - A 2D walk can get there by leaving the lane (going around a pit):
+      no -- jumping would skip the detour and fly through the hole.
+    - No walk reaches (the pit spans the playable Y): yes only if the
+      landing origin is not itself in a pit, i.e. this is a jump *over* to
+      solid ground, not a jump *into* the hole.
+    """
+
+    if any_pit_endangers(context, target_x, actor.world_y):
+        return False
+    if plan_lane_route(context, actor, target_x).reached:
+        return True
+    body, origin = actor_footprint(actor)
+    walk = plan_route(
+        context,
+        actor,
+        PointGoal(Point(float(target_x), origin[1]), tolerance=NAV_STEP),
+        solids=solid_obstacles(context, body=body, origin=origin),
+        dangers=(),
+    )
+    if walk.reached:
+        return False
+    return True
+
+
+def hop_landing_x(
+    context: Context,
+    actor: Myself | Partner,
+    direction: str,
+) -> int | None:
+    """X just past the nearest pit that blocks this lane, if a jump can land there.
+
+    Callers ask this only after ``plan_route`` failed to walk around.
+    ``None`` when no pit sits on this Y in ``direction``, the far side is
+    still a hole, or the gap is wider than this character's kick range.
+    """
+
+    going_right = direction != "left"
+    max_dx = jump_attack_max_dx(actor.character_id)
+    y = actor.world_y
+    x = actor.world_x
+    best: int | None = None
+    best_dist: int | None = None
+    for pit in find_all(context, Pit):
+        pit_right = pit.world_x + pit.width
+        pit_bottom = pit.lane_y + pit.height
+        if y < pit.lane_y - PIT_AVOID_MARGIN or y > pit_bottom + PIT_AVOID_MARGIN:
+            continue
+        if going_right:
+            if pit_right <= x:
+                continue
+            landing = pit_right + PIT_AVOID_MARGIN + NAV_STEP
+        else:
+            if pit.world_x >= x:
+                continue
+            landing = pit.world_x - PIT_AVOID_MARGIN - NAV_STEP
+        if any_pit_endangers(context, landing, y):
+            continue
+        dist = abs(landing - x)
+        if dist > max_dx:
+            continue
+        if best_dist is None or dist < best_dist:
+            best = landing
+            best_dist = dist
+    return best

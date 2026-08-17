@@ -1180,6 +1180,15 @@ def state_machine_walk_to_advance_stage(
     if actor is None:
         _hold_steered(gamepad, RIGHT_MASK if verb.direction == "right" else LEFT_MASK)
         return
+    if actor.is_airborne or actor.action_base in JUMP_CROUCH_ACTIONS:
+        # Finish a hop the pathfinder launched last tick -- do not start
+        # walking mid-crouch or the hold $384E samples is lost.
+        landing = nav.hop_landing_x(context, actor, verb.direction)
+        target_x = landing if landing is not None else (
+            actor.world_x + (40 if verb.direction == "right" else -40)
+        )
+        _jump_toward(actor, target_x, gamepad)
+        return
     # Pure lateral advance — do not add accidental Up/Down.
     mask = RIGHT_MASK if verb.direction == "right" else LEFT_MASK
     # If a breakable sits immediately ahead, approach with a slight Y offset
@@ -1227,15 +1236,22 @@ def state_machine_walk_to_advance_stage(
     # the breakable/pit detour quality improves.
     body, origin = nav.actor_footprint(actor)
     solids = nav.solid_obstacles(context, body=body, origin=origin)
-    # _routed_mask's own fallback discipline ("only fall back when the router
-    # produced literally nothing and the goal isn't already satisfied") is
-    # right for WalkToNearEnemy/OpenBreakable, which have a real destination
-    # to arrive at and stop. This verb never arrives -- ahead_x slides
-    # forward with the actor every tick -- so a route that legitimately finds
-    # only a vertical dodge around a wide obstacle (no lateral component
-    # *yet*, the rest of the detour still to come) is a perfectly good route,
-    # not a failure, and _routed_mask returns it unchanged.
-    #
+    path = nav.plan_route(context, actor, goal, solids=solids, dangers=())
+    sink = _ROUTE_TRACE.get()
+    if sink is not None:
+        sink[actor.slot] = path
+    if not path.reached:
+        # Pathfinder cannot walk to the strip -- typically a pit that spans
+        # the playable Y. Hop over if the landing is in kick range; otherwise
+        # follow the best-effort first vector (up to the pit wall) and never
+        # inject raw RIGHT/LEFT, which is how this verb used to walk in.
+        landing = nav.hop_landing_x(context, actor, verb.direction)
+        if landing is not None:
+            _jump_toward(actor, landing, gamepad)
+            return
+        routed = nav.first_vector_mask(path)
+        _hold_steered(gamepad, _clamp_mask(context, actor.world_x, actor.world_y, routed))
+        return
     # The final `or mask` is the same short-circuit idiom the pre-routing
     # code used, not a bitwise merge: when the routed mask is already
     # non-zero (including a Y-only vector with no lateral bit, exactly the
@@ -1251,14 +1267,7 @@ def state_machine_walk_to_advance_stage(
     # wins over the raw `mask`) -- see BreakableAdvanceStabilityTests in
     # test_stability.py for the cross-verb regression this whole fallback
     # discipline exists to protect against.
-    routed = _routed_mask(
-        context,
-        actor,
-        goal,
-        solids=solids,
-        dangers=(),
-        fallback=straight_line,
-    )
+    routed = nav.first_vector_mask(path) or straight_line()
     # `or mask` must not re-introduce a direction the camera clamp just
     # stripped: at a wave gate the lookahead is past the walk edge, the
     # router asks for it, the ROM refuses, and forcing the bit back is
@@ -1418,6 +1427,32 @@ JUMP_ATTACK_ACTIONS = frozenset({0x16, 0x42})
 JUMP_LAND_ACTIONS = frozenset({0x14, 0x40})
 
 
+def _jump_toward(actor: Myself | Partner, target_x: int, gamepad: VirtualGamepad) -> None:
+    """Hold a jump toward ``target_x`` -- launch, crouch, kick, or air steer.
+
+    Shared by ``JumpAttack`` and a ``WalkToAdvanceStage`` hop over a pit the
+    pathfinder cannot walk around. Kick in free flight: the extra hang time
+    is how a hop clears a gap the walk could not.
+    """
+
+    face = _face_toward_mask(actor, target_x)
+    if face == 0:
+        face = LEFT_MASK if actor.facing_left else RIGHT_MASK
+    base = actor.action_base
+    if base in JUMP_FREE_FLIGHT_ACTIONS:
+        _press(gamepad, PUNCH_MASK, frames=JUMP_ATTACK_KICK_FRAMES)
+        gamepad.hold(face)
+        return
+    if base in JUMP_CROUCH_ACTIONS:
+        gamepad.hold(face)
+        return
+    if base in JUMP_ATTACK_ACTIONS or base in JUMP_LAND_ACTIONS or actor.is_airborne:
+        gamepad.hold(face)
+        return
+    _press(gamepad, JUMP_MASK | face, frames=JUMP_ATTACK_LAUNCH_FRAMES)
+    gamepad.hold(face)
+
+
 def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: VirtualGamepad) -> None:
     """C to launch, then one clean B edge once free flight has started.
 
@@ -1464,32 +1499,13 @@ def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: Virtu
         gamepad.release()
         return
     face = _face_toward_mask(actor, target.world_x)
-    base = actor.action_base
-
-    if base in JUMP_FREE_FLIGHT_ACTIONS:
-        # The one state the kick edge works from. Pressed on its own, with
-        # the direction re-held afterwards -- _press clears the hold, and air
-        # steer ($38C0) still reads it for the rest of the flight.
-        _press(gamepad, PUNCH_MASK, frames=JUMP_ATTACK_KICK_FRAMES)
-        gamepad.hold(face)
-        return
-    if base in JUMP_CROUCH_ACTIONS:
-        # Hold the travel direction for $384E to read, and leave every button
-        # alone so the B that starts the kick is a fresh edge.
-        gamepad.hold(face or (LEFT_MASK if actor.facing_left else RIGHT_MASK))
-        return
-    if base in JUMP_ATTACK_ACTIONS or base in JUMP_LAND_ACTIONS or actor.is_airborne:
-        # Already kicking (it stays active until landing), touching down, or
-        # any other airborne state: nothing to press. Keep the air steer.
-        gamepad.hold(face)
-        return
-    if face == 0:
+    if face == 0 and not actor.is_airborne and actor.action_base not in (
+        JUMP_CROUCH_ACTIONS | JUMP_FREE_FLIGHT_ACTIONS | JUMP_ATTACK_ACTIONS | JUMP_LAND_ACTIONS
+    ):
         # Already overlapping on X — punch, don't jump.
         _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
         return
-    # Grounded: launch, then hold the direction through the crouch.
-    _press(gamepad, JUMP_MASK | face, frames=JUMP_ATTACK_LAUNCH_FRAMES)
-    gamepad.hold(face)
+    _jump_toward(actor, target.world_x, gamepad)
 
 
 def state_machine_grab_enemy(verb: GrabEnemy, context: Context, gamepad: VirtualGamepad) -> None:
@@ -1984,7 +2000,12 @@ def execute_tick(
     token = _ROUTE_TRACE.set(route_trace) if route_trace is not None else None
     try:
         actor = find(context, Myself)
-        if actor is not None:
+        # A jump flies over pits in Z. pit_endangers is a lane-plane test,
+        # so mid-air it reads "standing in the hole" the moment X overlaps
+        # and this override would freeze the launch vx -- the stage-4
+        # suicide when the kick was actually clearing the gap. Grounded
+        # only: once airborne the trajectory is committed.
+        if actor is not None and not actor.is_airborne:
             mask = _pit_escape_mask(context, actor)
             if mask is not None:
                 _hold_steered(gamepad, mask)

@@ -16,7 +16,7 @@ import math
 
 from .. import prop_solids
 from ..phases import CombatPhase, is_dangerous, is_punishable
-from . import kinematics, reach
+from . import kinematics, navigation as nav, reach
 from .tokens import (
     CounterGrab,
     FlipHold,
@@ -843,8 +843,10 @@ def could_jump_attack(context: Context) -> Context:
 
     - *grounded*: should this jump happen at all? Answered by
       ``InJumpAttackReach`` (in front, past the punch's own outer edge,
-      inside the kick's free-flight range) plus the "never launch into a
-      committed attack" gate.
+      inside the kick's free-flight range), the "never launch into a
+      committed attack" gate, and ``navigation.jump_landing_is_safe`` --
+      the pathfinder refuses a launch whose current-lane flight would
+      skip a walk-around and land in a pit.
     - *airborne*: nothing is left to decide. The trajectory is fixed at
       takeoff (controls-and-input.md: no mid-air lane control, only limited
       air steer), so the only question is whether to press the kick edge --
@@ -933,6 +935,16 @@ def could_jump_attack(context: Context) -> Context:
                 and not isinstance(find(context, Enemy, slot=target_slot), Antonio)
             ):
                 continue
+            if not actor.is_airborne:
+                target = find(context, Enemy, slot=target_slot)
+                if target is None:
+                    continue
+                # The pathfinder owns "would this jump land in a pit / skip
+                # a walk-around": a grounded launch that fails that test is
+                # the stage-4 suicide (kick toward an enemy across a hole).
+                # Airborne the trajectory is already committed.
+                if not nav.jump_landing_is_safe(context, actor, target.world_x):
+                    continue
             verbs.add(JumpAttack(actor_slot=actor.slot, target_slot=target_slot))
     return verbs
 

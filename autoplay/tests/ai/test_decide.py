@@ -1524,6 +1524,53 @@ class CouldJumpAttackTests(unittest.TestCase):
 
         self.assertEqual(result, {JumpAttack(actor_slot="P1", target_slot="obj01")})
 
+    def test_does_not_launch_through_a_pit_the_pathfinder_can_walk_around(self) -> None:
+        # Stage-4 suicide: enemy 60px ahead on this lane, pit in between,
+        # room above. JumpAttack used to fire (band only) and fly into the
+        # hole. The pathfinder can walk around, so the kick must not launch.
+        myself = make_myself(world_x=100, world_y=60, is_airborne=False, facing_left=False)
+        enemy = make_enemy(world_x=175, world_y=60)
+        pit = Pit(world_x=120, lane_y=40, width=32, height=40)
+        camera = CameraRange(left=0, right=400, top=0, bottom=112)
+        stage = Stage(level_index=3, direction="right")
+
+        self.assertEqual(could_jump_attack({myself, enemy, pit, camera, stage}), set())
+
+    def test_launches_over_an_impassable_pit_onto_solid_ground(self) -> None:
+        # Pit spans the playable Y. Walking cannot go around. Landing at
+        # the enemy is past the hole, so the pathfinder says hop over.
+        myself = make_myself(world_x=100, world_y=60, is_airborne=False, facing_left=False)
+        enemy = make_enemy(world_x=155, world_y=60)
+        pit = Pit(world_x=120, lane_y=0, width=24, height=120)
+        camera = CameraRange(left=0, right=400, top=0, bottom=112)
+        stage = Stage(level_index=3, direction="right")
+
+        self.assertEqual(
+            could_jump_attack({myself, enemy, pit, camera, stage}),
+            {JumpAttack(actor_slot="P1", target_slot="obj01")},
+        )
+
+    def test_does_not_launch_at_an_enemy_standing_in_a_pit(self) -> None:
+        myself = make_myself(world_x=100, world_y=60, is_airborne=False, facing_left=False)
+        enemy = make_enemy(world_x=160, world_y=60)
+        pit = Pit(world_x=140, lane_y=40, width=80, height=40)
+        camera = CameraRange(left=0, right=400, top=0, bottom=112)
+
+        self.assertEqual(could_jump_attack({myself, enemy, pit, camera}), set())
+
+    def test_airborne_follow_through_ignores_the_pit_gate(self) -> None:
+        # Once committed, releasing the hold is worse than finishing over
+        # a hole the launch already accepted.
+        myself = make_myself(world_x=130, world_y=60, is_airborne=True, facing_left=False)
+        enemy = make_enemy(world_x=160, world_y=60)
+        pit = Pit(world_x=120, lane_y=40, width=80, height=40)
+        camera = CameraRange(left=0, right=400, top=0, bottom=112)
+
+        self.assertEqual(
+            could_jump_attack({myself, enemy, pit, camera}),
+            {JumpAttack(actor_slot="P1", target_slot="obj01")},
+        )
+
 
 class CouldThrowKnifeTests(unittest.TestCase):
     def test_fires_when_holding_knife_and_enemy_outside_melee_but_in_knife_range(self) -> None:
