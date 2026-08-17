@@ -100,9 +100,39 @@ JUMP_ATTACK_MAX_DX_DEFAULT = 72
 JUMP_ATTACK_RANGE_Y = 14
 
 # Box around the actor inside which another enemy counts as "the other side is
-# covered too" for RearAttack, and as a crowd member for Surrounded.
+# covered too" for RearAttack -- i.e. close enough to land a free hit while the
+# actor spends frames turning around. A *hitting* distance, which is why it is
+# the chord's own reach.
 REAR_THREAT_X = 56
 REAR_THREAT_Y = 24
+
+# How close an enemy has to be to count as part of *this fight* -- the box
+# ``inference.check_for_surrounded`` judges encirclement with.
+#
+# Deliberately no longer REAR_THREAT_X/Y. Those describe "can it hit me from
+# there", and reusing them for "am I boxed in" made the judgment far too tight
+# to survive the actor's own movement: traced on the tick harness, an actor
+# with three enemies around it walked **12 px** toward one of them, the third
+# fell out of the 56px box, the crowd count dropped 3 -> 2 with both survivors
+# on one side, and ``Surrounded`` vanished. Everything keyed on it vanished
+# with it -- including the grab opportunity the actor was in the middle of
+# walking in to take, which is why a crowd read as "the AI starts a grab and
+# then just punches" from the sofa.
+#
+# X is anchored to the distance the AI itself already treats as "still worth
+# walking to": ``priority._emergency_walk_to_near_enemy`` scores an enemy down
+# from 14 to its floor of 8 one point per 15 px, so it saturates at 90 px --
+# inside that, the pipeline considers an enemy part of the current engagement.
+# 96 is just past it, and comfortably more than one exchange's worth of the
+# actor's own walking, so stepping toward one enemy cannot delete another.
+#
+# Lane is the approach's own sidestep expressed the same way execute.py's
+# WALK_TO_ENEMY_LANE_SAFETY_Y is (PUNCH_RANGE_Y + 16 = 28): an enemy still
+# within roughly that of the actor's lane has *not* been left behind, so it is
+# still part of the fight. Kept here rather than imported, since inference.py
+# must not depend on the executor.
+SURROUNDED_NEAR_X = 96
+SURROUNDED_NEAR_Y = PUNCH_RANGE_Y + 20  # 32
 
 # Extra px beyond punch_outer_x where a still-approaching dangerous enemy
 # switches from "keep walking closer" to "back off instead" (see

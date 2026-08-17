@@ -863,15 +863,38 @@ class CouldRetreatFromDangerTests(unittest.TestCase):
 
         self.assertEqual(could_retreat_from_danger(context), set())
 
-    def test_fires_while_healthy_when_surrounded(self) -> None:
-        # The other reason to concede: no amount of facing answers being hit
-        # from both sides at once, so space is worth more than damage even at
-        # full health. Pincer -- one enemy each side of the actor, both inside
-        # REAR_THREAT_X (56). dx=54 for the committed one is the window where
-        # it is close enough to count toward Surrounded and to threaten, but
-        # still outside punch_outer (50) and so not yet ActionableTarget --
-        # a hittable enemy is attacked, never retreated from.
+    def test_does_not_fire_while_healthy_when_merely_surrounded(self) -> None:
+        # This assertion used to be the reverse: being surrounded was a second
+        # reason to concede, because "no amount of facing answers being hit
+        # from both sides at once, so space is worth more than damage".
+        #
+        # Reversed on user report. Space is not the fix for a crowd -- a hold
+        # is (grab one of them and suplex or throw it, see
+        # inference.GrabWhileSurrounded), and backing away from a crowd at
+        # full health is exactly the failure this generator's own comment
+        # already warns about: the AI backs off, the crowd follows, and the
+        # round goes nowhere.
+        #
+        # It was also measurable. Widening check_for_surrounded's box so the
+        # judgment stops collapsing after a dozen px of the actor's own
+        # walking made this gate fire nearly everywhere: over 1155 swept
+        # crowd scenes RetreatFromDanger went 173 -> 376 and WalkToNearEnemy
+        # 381 -> 204 before this clause was dropped.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        front = make_enemy(
+            slot="obj01", world_x=154, world_y=100, combat_phase=CombatPhase.ATTACKING
+        )
+        behind = make_enemy(slot="obj02", world_x=60, world_y=100)
+        context: set[Token] = {myself, front, behind}
+        context |= generate_inference_tokens(context)
+
+        self.assertEqual(could_retreat_from_danger(context), set())
+
+    def test_still_fires_when_surrounded_and_hurt(self) -> None:
+        # Health is the reason that remains: below
+        # RETREAT_HEALTH_PERCENT_THRESHOLD there is no room to trade at all,
+        # crowd or not.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False, health_percent=20.0)
         front = make_enemy(
             slot="obj01", world_x=154, world_y=100, combat_phase=CombatPhase.ATTACKING
         )

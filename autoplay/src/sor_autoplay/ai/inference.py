@@ -26,6 +26,7 @@ from .tokens import (
     GrabIntoDeadZone,
     GrabJackFromBehind,
     GrabToClearRear,
+    GrabToDodgeCharge,
     GrabWhileSurrounded,
     InGrabReach,
     InJumpAttackReach,
@@ -478,6 +479,17 @@ def check_for_grab_opportunities(context: Context) -> Context:
     tokens: set[Token] = set()
     for actor in _actors(context):
         rear = reach.rear_threats(actor, enemies)
+        # Committed enemies already judged able to land on this actor. A
+        # charge coming in from behind the body being grabbed is what
+        # GrabToDodgeCharge answers -- Signal's hitbox-less slide above all.
+        charging = [
+            enemy
+            for enemy in enemies
+            if any(
+                token.actor_slot == actor.slot and token.target_slot == enemy.slot
+                for token in find_all(context, IncomingMelee)
+            )
+        ]
         for enemy in grabbable:
             pair = {"actor_slot": actor.slot, "target_slot": enemy.slot}
             if isinstance(enemy, Antonio):
@@ -486,6 +498,16 @@ def check_for_grab_opportunities(context: Context) -> Context:
                 continue
             if not isinstance(enemy, Grunt):
                 continue
+            candidate_dx = enemy.world_x - actor.world_x
+            if any(
+                other.slot != enemy.slot
+                # Same side of the actor, and further out than the body being
+                # grabbed: the charge is coming in *through* it.
+                and (other.world_x - actor.world_x) * candidate_dx > 0
+                and abs(other.world_x - actor.world_x) > abs(candidate_dx)
+                for other in charging
+            ):
+                tokens.add(GrabToDodgeCharge(**pair))
             if actor.slot in surrounded_actors:
                 # Boxed in: a body in the hands beats a strike whichever side
                 # the crowd is on. GrabToClearRear below only covers the
@@ -540,9 +562,13 @@ def check_for_punish_windows(context: Context) -> Context:
 def check_for_surrounded(context: Context) -> Context:
     """Judge whether an actor is boxed in rather than facing a queue.
 
-    Uses the same close box as ``reach.rear_attack_is_warranted``'s
-    boxed-in test, so "surrounded" and "the chord is warranted" cannot
-    disagree about what counts as close.
+    Judged with ``reach.SURROUNDED_NEAR_X``/``_Y`` -- the "part of this fight"
+    box -- **not** the tighter ``REAR_THREAT_X``/``_Y`` this used to share
+    with ``reach.rear_attack_is_warranted``. The two questions are different:
+    the chord's box asks "can that enemy hit me while I turn", which is a
+    hitting distance, while encirclement asks "are these enemies all in this
+    exchange with me". Sharing the tighter one made the judgment collapse
+    after a dozen pixels of the actor's own walking -- see that constant.
     """
 
     enemies = reach.on_screen_enemies(context)
@@ -554,8 +580,8 @@ def check_for_surrounded(context: Context) -> Context:
         near = [
             enemy
             for enemy in enemies
-            if abs(enemy.world_x - actor.world_x) <= reach.REAR_THREAT_X
-            and abs(enemy.world_y - actor.world_y) <= reach.REAR_THREAT_Y
+            if abs(enemy.world_x - actor.world_x) <= reach.SURROUNDED_NEAR_X
+            and abs(enemy.world_y - actor.world_y) <= reach.SURROUNDED_NEAR_Y
         ]
         behind = sum(1 for enemy in near if reach.enemy_behind_actor(actor, enemy))
         in_front = len(near) - behind

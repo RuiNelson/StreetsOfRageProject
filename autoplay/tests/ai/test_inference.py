@@ -1,7 +1,7 @@
 import unittest
 
 from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import Abadede, Antonio, ClosingEnemy, Enemy, Garcia, Jack, Nora
+from sor_autoplay.ai.tokens import Abadede, Antonio, ClosingEnemy, Enemy, Garcia, Jack, Nora, Signal
 from sor_autoplay.ai.tokens import (
     ActionableTarget,
     AntonioIsGoingToKick,
@@ -9,6 +9,7 @@ from sor_autoplay.ai.tokens import (
     GrabToClearRear,
     GrabIntoDeadZone,
     GrabJackFromBehind,
+    GrabToDodgeCharge,
     GrabWhileSurrounded,
     InGrabReach,
     InJumpAttackReach,
@@ -524,6 +525,55 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
 
         self.assertIn(GrabToClearRear(actor_slot="P1", target_slot="obj01"), result)
 
+    def test_promotes_a_body_with_a_charge_coming_in_behind_it(self) -> None:
+        # The user's geometry: an enemy in front, and behind it a Signal
+        # sliding in. His slide is velocity with no attack shape at all
+        # (enemy-ai.md), so there is nothing to sidestep -- take the hold.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        front = make_garcia(slot="obj01", world_x=136, world_y=100)
+        signal = Signal(
+            slot="obj02",
+            type_id=0x24,
+            world_x=190,
+            world_y=100,
+            health=10,
+            combat_phase=CombatPhase.ATTACKING,
+            targets_player=1,
+            facing_left=True,
+            grunt_vel_x=-2.5,
+        )
+        context = {myself, front, signal}
+        context |= check_for_incoming_melee(context)
+
+        result = check_for_grab_opportunities(context)
+
+        self.assertIn(GrabToDodgeCharge(actor_slot="P1", target_slot="obj01"), result)
+
+    def test_a_charge_on_the_far_side_is_not_coming_through_the_body(self) -> None:
+        # Same two enemies, but the Signal is on the *other* side of the
+        # actor, so holding the front body puts nothing between them. The
+        # same-side/further-away test is what keeps this from becoming
+        # "grab whenever anybody swings".
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        front = make_garcia(slot="obj01", world_x=136, world_y=100)
+        signal = Signal(
+            slot="obj02",
+            type_id=0x24,
+            world_x=40,
+            world_y=100,
+            health=10,
+            combat_phase=CombatPhase.ATTACKING,
+            targets_player=1,
+            facing_left=False,
+            grunt_vel_x=2.5,
+        )
+        context = {myself, front, signal}
+        context |= check_for_incoming_melee(context)
+
+        result = check_for_grab_opportunities(context)
+
+        self.assertEqual([t for t in result if isinstance(t, GrabToDodgeCharge)], [])
+
     def test_a_frontal_crowd_promotes_the_grabbable_body(self) -> None:
         # Three enemies inside the close box, none of them strictly behind:
         # reach.rear_threats is empty, so GrabToClearRear never fires and the
@@ -813,6 +863,28 @@ class CheckForSurroundedTests(unittest.TestCase):
         result = check_for_surrounded({myself, *crowd})
 
         self.assertEqual(result, {Surrounded(actor_slot="P1", in_front=3, behind=0)})
+
+    def test_survives_the_actor_walking_toward_one_of_them(self) -> None:
+        # The bug behind "I see no effect": judged with the chord's own
+        # REAR_THREAT_X (56), a crowd evaporated after the actor took two
+        # steps. Traced on the tick harness -- the actor walked 12px toward
+        # one enemy, the third fell out of the box, the count dropped 3 -> 2
+        # with both survivors on one side, and every judgment keyed on
+        # Surrounded went with it, including a grab already being walked in.
+        crowd_x = (246, 250, 152)
+        for actor_x in (200, 206, 212, 224, 236):
+            with self.subTest(actor_x=actor_x):
+                myself = make_myself(world_x=actor_x, world_y=64, facing_left=False)
+                crowd = [
+                    make_enemy(slot=f"obj{i:02d}", world_x=x, world_y=64)
+                    for i, x in enumerate(crowd_x)
+                ]
+
+                result = check_for_surrounded({myself, *crowd})
+
+                self.assertTrue(
+                    result, f"crowd judgment collapsed at actor_x={actor_x}"
+                )
 
 
 class CheckForSafeSpotsTests(unittest.TestCase):

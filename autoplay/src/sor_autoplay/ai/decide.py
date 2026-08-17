@@ -414,17 +414,32 @@ def could_hold_actions(context: Context) -> Context:
 # live limit cycle: retreat and approach fighting over the same enemy, see
 # could_retreat_from_danger.)
 #
-# So retreat is gated on the two situations where the exchange genuinely is
-# not survivable and space is worth more than damage:
+# So retreat is gated on the one situation where the exchange genuinely is not
+# survivable and space is worth more than damage: **hurt** -- below this much
+# health there is no room to trade, and a KO costs a whole life. Shares
+# HEALTH_CRITICAL_PERCENT's reading of "hurt enough to change plans", which
+# _pickup_is_useful already uses.
 #
-# 1. **Hurt** -- below this much health there is no room to trade, and a KO
-#    costs a whole life. Shares HEALTH_CRITICAL_PERCENT's reading of "hurt
-#    enough to change plans", which _pickup_is_useful already uses.
-# 2. **Surrounded** -- 3+ enemies in the close box or a pincer
-#    (inference.check_for_surrounded). No amount of facing answers being hit
-#    from both sides at once; the only fix is space.
+# **Being surrounded used to be a second reason, and is not any more.** That
+# clause read "no amount of facing answers being hit from both sides at once;
+# the only fix is space" -- and space is not the fix. Per the user, a crowd is
+# answered by taking a hold: grab one of the bodies and suplex or throw it
+# (see inference.GrabWhileSurrounded). Backing away from a crowd at full
+# health is the failure this whole comment already describes one paragraph up
+# -- the AI backs off, the crowd follows, and the round goes nowhere -- it was
+# just exempted from its own rule.
 #
-# Healthy and one-on-one, the AI walks in and takes the hit it has to take.
+# Measured, and this is why it had to go rather than merely be re-tuned:
+# widening check_for_surrounded's box (reach.SURROUNDED_NEAR_X/_Y) so the
+# judgment stops collapsing after a dozen pixels made *this* gate fire
+# everywhere, and over 1155 swept crowd scenes RetreatFromDanger went 173 ->
+# 376 while WalkToNearEnemy went 381 -> 204. The AI got dramatically more
+# passive as a direct side effect of making the crowd judgment work.
+#
+# Surrounded still matters -- it raises CallPolice (the actual panic button,
+# still health-gated) and GrabWhileSurrounded. It just no longer means "flee".
+#
+# Healthy, the AI walks in and takes the hit it has to take, crowd or not.
 RETREAT_HEALTH_PERCENT_THRESHOLD = HEALTH_CRITICAL_PERCENT
 
 
@@ -438,9 +453,7 @@ def _retreat_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
     enemy, which is what keeps them from handing it back and forth.
     """
 
-    if actor.health_percent < RETREAT_HEALTH_PERCENT_THRESHOLD:
-        return True
-    return any(token.actor_slot == actor.slot for token in find_all(context, Surrounded))
+    return actor.health_percent < RETREAT_HEALTH_PERCENT_THRESHOLD
 
 
 def _ahead_in_stage_direction(actor_world_x: int, enemy_world_x: int, direction: str) -> bool:

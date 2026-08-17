@@ -62,6 +62,7 @@ from .tokens import (
     GrabIntoDeadZone,
     GrabJackFromBehind,
     GrabToClearRear,
+    GrabToDodgeCharge,
     GrabWhileSurrounded,
     IncomingMelee,
     IncomingProjectile,
@@ -179,6 +180,16 @@ _EMERGENCY_GRAB_JACK_FROM_BEHIND = 56
 # fight, not an escape from a bad one, so it sits just above the
 # jump-kick-on-a-punishable tier (28) and well under the punish/escape tiers.
 _EMERGENCY_GRAB_DEAD_ZONE = 30
+# A committed charge coming in from behind the body being grabbed -- Signal's
+# slide is the case (enemy-ai.md: "velocity, not a hitbox", so nothing to
+# sidestep and ~2.5 px/frame to do it in, and it costs a knockdown).
+#
+# Same tier as being surrounded, and for the same reason: both are situations
+# a strike does not answer, where the hold is the escape *and* the damage. It
+# therefore also outranks the $322A chord (60) -- the actor is not turning to
+# swing at a slide it cannot reach, it is taking a body out of the charge's
+# line and suplexing it.
+_EMERGENCY_GRAB_TO_DODGE_CHARGE = 61
 # Boxed in by a crowd: take a hold rather than trade strikes with it.
 #
 # The only grab tier that outranks the chord, and deliberately so. Measured on
@@ -566,6 +577,8 @@ def _emergency_grab_enemy(verb: GrabEnemy, context: Context) -> int:
         score = max(score, _EMERGENCY_GRAB_ANTONIO_ON_PUNISH)
     if any(isinstance(token, GrabWhileSurrounded) for token in opportunities):
         score = max(score, _EMERGENCY_GRAB_WHILE_SURROUNDED)
+    if any(isinstance(token, GrabToDodgeCharge) for token in opportunities):
+        score = max(score, _EMERGENCY_GRAB_TO_DODGE_CHARGE)
     return _with_target_class(score, find(context, Enemy, slot=verb.target_slot))
 
 

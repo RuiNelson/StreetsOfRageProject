@@ -477,6 +477,35 @@ class GrabJackFromBehind(GrabOpportunity):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class GrabToDodgeCharge(GrabOpportunity):
+    """A committed enemy is charging in from *behind* this grabbable one.
+
+    Produced by ``inference.check_for_grab_opportunities`` when another live
+    enemy already carries an ``IncomingMelee`` for this actor, sits on the
+    **same side** as the grab candidate, and is **further away** than it --
+    the user's own description: "an enemy in front, and behind it, a Signal".
+
+    Signal is the case this exists for, and the ROM is why it is nasty:
+    his slide (state ``$0A``) is *velocity, not a hitbox* -- enemy-ai.md's
+    own phrase -- so it carries no attack shape for any reach check to find
+    and it closes about 2.5 px per frame. There is nothing to sidestep and
+    little time to sidestep it in, and what it costs is a knockdown, which
+    is the most expensive thing that can happen in a crowd.
+
+    Taking the hold is the answer: the actor stops being a free-standing
+    target for the slide's whole approach, the held body is between it and
+    the charge, and ``could_hold_actions`` converts the hold into damage
+    (``FlipHold`` -> ``Supplex`` with nothing behind to throw into) rather
+    than into a wasted defensive action.
+
+    Deliberately *not* "any committed enemy anywhere". The same-side and
+    further-away tests are what make it the described geometry rather than a
+    blanket "grab whenever anyone swings", which would turn every ordinary
+    exchange into a grab.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class GrabWhileSurrounded(GrabOpportunity):
     """The actor is boxed in -- a body in its hands is the way out.
 

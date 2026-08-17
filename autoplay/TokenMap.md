@@ -72,6 +72,7 @@ classDiagram
     GrabOpportunity <|-- GrabJackFromBehind
     GrabOpportunity <|-- GrabAntonioOnPunish
     GrabOpportunity <|-- GrabWhileSurrounded
+    GrabOpportunity <|-- GrabToDodgeCharge
     Inferred <|-- AntonioIsGoingToKick
 
     Verb <|-- Walk
