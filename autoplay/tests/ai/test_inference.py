@@ -1518,3 +1518,61 @@ class CheckForSoutherGrabOnPunishTests(unittest.TestCase):
         camera = CameraRange(left=0, right=640, top=0, bottom=224)
         souther = make_souther(world_x=180, world_y=100)
         self.assertEqual(check_for_grab_opportunities({myself, camera, souther}), set())
+
+
+class SoutherDashIsAnIncomingMeleeTests(unittest.TestCase):
+    """A committed Souther closes faster than any grunt and was invisible.
+
+    Both of ``check_for_incoming_melee``'s ordinary tests are blind to him: a
+    ``Boss`` populates no ``attack_ranges`` (so the caution box falls back to
+    the actor's own punch reach) and no ``grunt_vel_*`` (so the predictive half
+    projects him standing still). ``$161C6`` closes at 8px/frame.
+    """
+
+    def _melee(self, context):
+        return {t.target_slot for t in check_for_incoming_melee(context)}
+
+    def test_the_committed_dash_promotes_from_beyond_the_caution_box(self) -> None:
+        myself = make_myself(world_x=100, world_y=60)
+        souther = make_souther(
+            world_x=190,
+            world_y=60,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            tactical=2,
+            boss_dist_x=90,
+        )
+        self.assertIn("obj11", self._melee({myself, souther}))
+
+    def test_an_uncommitted_souther_at_the_same_range_does_not(self) -> None:
+        myself = make_myself(world_x=100, world_y=60)
+        souther = make_souther(world_x=190, world_y=60, primary_state=1, boss_dist_x=90)
+        self.assertEqual(self._melee({myself, souther}), set())
+
+    def test_off_lane_is_not_incoming_because_the_dash_cannot_steer(self) -> None:
+        # $161C6 writes only +$1C and resolves within $18 of its lane, so an
+        # actor already off that lane is genuinely not about to be hit --
+        # which is exactly what DodgeSoutherSlash spent the tick achieving.
+        myself = make_myself(world_x=100, world_y=60)
+        souther = make_souther(
+            world_x=190,
+            world_y=110,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            tactical=2,
+            boss_dist_x=90,
+            boss_dist_lane=50,
+        )
+        self.assertEqual(self._melee({myself, souther}), set())
+
+    def test_beyond_the_dash_reach_is_not_incoming(self) -> None:
+        myself = make_myself(world_x=100, world_y=60)
+        souther = make_souther(
+            world_x=400,
+            world_y=60,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            tactical=2,
+            boss_dist_x=300,
+        )
+        self.assertEqual(self._melee({myself, souther}), set())

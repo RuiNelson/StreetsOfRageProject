@@ -2498,3 +2498,34 @@ class CouldGrabSoutherOnPunishTests(unittest.TestCase):
         camera = CameraRange(left=0, right=640, top=0, bottom=224)
         souther = _souther(world_x=160, world_y=100)
         self.assertEqual(could_grab_enemy({myself, camera, souther}), set())
+
+
+class BossNotIgnoredForASideshowTests(unittest.TestCase):
+    """The live-reported "ataca o outro inimigo".
+
+    ``could_walk_to_near_enemy``'s "already in range, don't walk closer" skip
+    used to be global -- *any* actionable enemy suppressed the verb for **all**
+    of them -- so a grunt in punch range deleted the boss from the tick
+    entirely and its own punch won by default. The skip is per-enemy now.
+    """
+
+    def test_the_boss_still_gets_an_approach_while_a_grunt_is_in_range(self) -> None:
+        myself = make_myself(world_x=100, world_y=60)
+        grunt = make_enemy(slot="obj01", world_x=140, world_y=60)
+        boss = _souther(world_x=190, world_y=60, boss_dist_x=90)
+        walks = could_walk_to_near_enemy({myself, grunt, boss})
+        self.assertIn(
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj11"),
+            walks,
+            "the boss must still be offered as a target",
+        )
+
+    def test_no_approach_is_offered_to_the_enemy_already_in_range(self) -> None:
+        # The half of the skip that was always right.
+        myself = make_myself(world_x=100, world_y=60)
+        grunt = make_enemy(slot="obj01", world_x=140, world_y=60)
+        boss = _souther(world_x=190, world_y=60, boss_dist_x=90)
+        walks = could_walk_to_near_enemy({myself, grunt, boss})
+        self.assertNotIn(
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"), walks
+        )

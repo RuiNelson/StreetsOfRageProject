@@ -131,6 +131,15 @@ SOUTHER_SLASH_PRIMARY_STATE = 0x02
 # $16234 then forces Souther straight to primary $02 with the claw spawned,
 # bypassing every distance band, the inner abort and the +$66/+$77 gates.
 SOUTHER_JUMP_COUNTER_DIST_X = 0x78  # 120px
+
+# The committed dash at $161C6 (souther_state2_claw_dash): +$1C = $00080000,
+# i.e. 8px per 60Hz frame, and it resolves only with the target inside $18
+# (24px) of its lane. Used by _souther_dash_arrives_soon, which exists because
+# a Boss populates neither attack_ranges nor grunt_vel_*, so both of
+# check_for_incoming_melee's ordinary tests report "no threat" while he closes
+# faster than any grunt.
+SOUTHER_DASH_SPEED_X = 8.0
+SOUTHER_DASH_RESOLVE_LANE = 0x18  # 24px
 # Two gates the ROM has here are deliberately **not** reproduced, both
 # live-diagnosed after the AI was seen jumping straight into the claws:
 #
@@ -493,13 +502,41 @@ def check_for_incoming_melee(context: Context) -> Context:
         for enemy in enemies:
             if not is_dangerous(enemy.combat_phase):
                 continue
-            imminent = reach.too_close_to_keep_approaching(
-                actor, enemy
-            ) or reach.enemy_will_close_soon(actor, enemy)
+            imminent = (
+                reach.too_close_to_keep_approaching(actor, enemy)
+                or reach.enemy_will_close_soon(actor, enemy)
+                or _souther_dash_arrives_soon(actor, enemy)
+            )
             if not imminent:
                 continue
             tokens.add(IncomingMelee(actor_slot=actor.slot, target_slot=enemy.slot))
     return tokens
+
+
+def _souther_dash_arrives_soon(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """Souther's committed claw dash, which neither test above can see.
+
+    Both of them are blind to it, for the same underlying reason: a ``Boss``
+    populates neither ``attack_ranges`` (so
+    ``too_close_to_keep_approaching`` falls back to a caution box built from
+    the *actor's* punch reach, ~46px) nor ``grunt_vel_x``/``grunt_vel_y`` (so
+    ``enemy_will_close_soon`` projects him to standing still). The dash at
+    ``$161C6 (souther_state2_claw_dash)`` closes at ``$00080000`` -- 8px per
+    60Hz frame, faster than any character walks -- so from 90px he arrives in
+    about eleven frames while both checks report no threat at all.
+
+    Lane is part of the test rather than slack around it: the dash writes only
+    ``+$1C`` and resolves only with the target inside ``$18`` of its lane, so
+    an actor already off that lane is genuinely not about to be hit -- which is
+    exactly what ``DodgeSoutherSlash`` is spending the tick achieving.
+    """
+
+    if not isinstance(enemy, Souther) or not enemy.strike_is_committed():
+        return False
+    if abs(enemy.world_y - actor.world_y) >= SOUTHER_DASH_RESOLVE_LANE:
+        return False
+    travel = SOUTHER_DASH_SPEED_X * reach.CLOSING_ENEMY_THREAT_FRAMES
+    return abs(enemy.world_x - actor.world_x) <= travel
 
 
 # Enemy phases a hold can actually be taken on. Deliberately not

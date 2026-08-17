@@ -27,6 +27,7 @@ from sor_autoplay.ai.tokens import (
     Weapon,
 )
 from sor_autoplay.ai.tokens import Myself
+from dataclasses import replace
 from sor_autoplay.ai.tokens import (
     AttackRange,
     ClosingEnemy,
@@ -2264,3 +2265,43 @@ class SoutherVerbEmergencyTests(unittest.TestCase):
         }
         winner = find_all(determine_priority_verb(context), Verb)[0]
         self.assertIsInstance(winner, WalkToNearEnemy)
+
+
+class ParkedTargetUnderBossThreatTests(unittest.TestCase):
+    """A body on the floor must not outrank a boss that is about to land.
+
+    Live-reported against Souther: with the claw committed two steps away,
+    punching a knocked-down grunt scored 60 against the dodge's 46 and won.
+    A knockdown keeps its full tier while nothing is incoming -- that window
+    really does end in a wake-up -- but under an incoming attack it is capped
+    like a stun, and for a sharper version of the same reason.
+    """
+
+    def _fight(self, boss_state, grunt_phase):
+        myself = _souther_actor(world_x=100, world_y=60)
+        boss = _souther("obj11", CombatPhase.ATTACKING, world_x=140, world_y=60,
+                        primary_state=boss_state[0], tactical=boss_state[1],
+                        boss_dist_x=40)
+        if boss_state == (1, 0):
+            boss = replace(boss, combat_phase=CombatPhase.NORMAL)
+        grunt = Garcia(slot="obj01", type_id=0x20, world_x=140, world_y=60,
+                       health=10, combat_phase=grunt_phase, targets_player=1,
+                       facing_left=True)
+        context = {
+            myself,
+            boss,
+            grunt,
+            CameraRange(left=-200, right=700, top=0, bottom=224),
+            Punch(actor_slot="P1", target_slot="obj01"),
+            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
+        }
+        return find_all(determine_priority_verb(context), Verb)[0]
+
+    def test_knockdown_loses_to_the_dodge_while_the_claw_is_committed(self) -> None:
+        self.assertIsInstance(self._fight((2, 2), CombatPhase.KNOCKDOWN),
+                              DodgeSoutherSlash)
+
+    def test_knockdown_keeps_its_tier_while_the_boss_is_idle(self) -> None:
+        winner = self._fight((1, 0), CombatPhase.KNOCKDOWN)
+        self.assertIsInstance(winner, Punch)
+        self.assertEqual(winner.target_slot, "obj01")

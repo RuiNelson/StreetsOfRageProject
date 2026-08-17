@@ -850,9 +850,14 @@ def _stunned_target_ceiling(
     from play as taking a punch in the back while hitting an enemy that was
     already stunned, and the reason this ceiling exists at all.
 
-    A **knockdown** is deliberately not treated the same way: that window
-    ends in a wake-up with invulnerability, so unlike a stun it really does
-    have to be used now.
+    A **knockdown** keeps its full tier while nothing is about to hit the
+    actor: that window ends in a wake-up with invulnerability, so unlike a
+    stun it really does have to be used now. Under an incoming attack it is
+    capped like a stun anyway, and for a sharper version of the same reason --
+    a body on the floor that is *about to become invulnerable* is the worst
+    thing on screen to trade a hit for. Live-reported against Souther ("ataca
+    o outro inimigo"): with his claw committed two steps away, punching a
+    knocked-down grunt scored 60 against the dodge's 46 and won the tick.
 
     The remaining time decides which ceiling, read from the target's
     ``PunishWindow`` (the token that exists precisely so this does not have
@@ -868,10 +873,17 @@ def _stunned_target_ceiling(
     if target_slot is None:
         return None
     target = find(context, Enemy, slot=target_slot)
-    if not (isinstance(target, Grunt) and target.is_stunned):
+    if not isinstance(target, Grunt):
+        return None
+    parked = target.is_stunned or target.combat_phase is CombatPhase.KNOCKDOWN
+    if not parked:
         return None
     if actor_slot is not None and _other_enemy_is_incoming(context, actor_slot, target_slot):
         return _EMERGENCY_ATTACK_PARKED_UNDER_THREAT
+    if not target.is_stunned:
+        # A knockdown with nothing incoming: no ceiling at all, exactly as
+        # before. Only the branch above is new for it.
+        return None
     window = next(
         (token for token in find_all(context, PunishWindow) if token.target_slot == target_slot),
         None,

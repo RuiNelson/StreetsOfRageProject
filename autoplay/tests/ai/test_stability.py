@@ -724,6 +724,60 @@ class SoutherStabilityTests(unittest.TestCase):
         self.assertEqual(set(winners), {DodgeSoutherSlash.__name__})
 
 
+class BossAndGruntTargetStabilityTests(unittest.TestCase):
+    """Making the actionable skip per-enemy adds a new way to chatter.
+
+    Before, a grunt in punch range suppressed the approach for everyone, so
+    there was only ever one candidate. Now the boss keeps its walk-in while the
+    grunt stays punchable, which is the point -- but it also means two verbs
+    aimed in different directions are live every tick, and that is exactly the
+    shape of the target-swap cycles this file already pins.
+    """
+
+    def test_the_boss_is_held_as_the_target_rather_than_swapped(self) -> None:
+        masks: list[int] = []
+        targets: list[str | None] = []
+        ax, ay, facing_left = 100, 60, False
+        client = _FakeClient()
+        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+        for _ in range(40):
+            context = {
+                _actor(ax, ay, facing_left),
+                _enemy(140, 60, CombatPhase.NORMAL),
+                _souther(220, 60, 1, 0),
+                CameraRange(left=-100, right=600, top=0, bottom=112),
+                Stage(level_index=1, direction="right"),
+            }
+            context |= generate_inference_tokens(context)
+            context |= generate_verb_tokens(context)
+            context = determine_priority_verb(context)
+            verbs = find_all(context, Verb)
+            if verbs:
+                execute_verb(verbs[0], context, gamepad)
+                targets.append(getattr(verbs[0], "target_slot", None))
+            else:
+                targets.append(None)
+            held = client.held
+            masks.append(held)
+            if held & RIGHT:
+                ax += STEP_X
+                facing_left = False
+            elif held & LEFT:
+                ax -= STEP_X
+                facing_left = True
+            if held & DOWN:
+                ay += STEP_Y
+            elif held & UP:
+                ay -= STEP_Y
+
+        self.assertLessEqual(
+            _switches(targets), 4, f"target chattered: {targets}"
+        )
+        self.assertLessEqual(
+            _reversals(masks, RIGHT, LEFT), 4, f"direction chattered: {masks}"
+        )
+
+
 class BreakableAdvanceStabilityTests(unittest.TestCase):
     """OpenBreakable vs WalkToAdvanceStage must not hand a crate back and
     forth. Reported from play as the HUD flipping WalkToBreakable /

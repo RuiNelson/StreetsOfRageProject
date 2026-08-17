@@ -497,8 +497,6 @@ def could_walk_to_near_enemy(context: Context) -> Context:
         if not enemies:
             continue
         actionable = reach.targets_of(context, ActionableTarget, actor.slot)
-        if any(enemy.slot in actionable for enemy in enemies):
-            continue
         # One candidate per reachable enemy -- determine_priority_verb
         # (priority.py's distance-scored emergency) picks the closest one,
         # per AI.md's own target-selection principle: this function only
@@ -520,6 +518,19 @@ def could_walk_to_near_enemy(context: Context) -> Context:
         }
         standing_off = _retreat_is_worth_it(context, actor)
         for enemy in enemies:
+            if enemy.slot in actionable:
+                # Already hittable: walking closer to *this* enemy is what the
+                # skip means. It is deliberately per-enemy and not "any enemy
+                # is actionable, so propose nothing" -- that global form was a
+                # live-reported bug, and a bad one, because it made the boss
+                # disappear from the tick entirely. With a grunt in punch range
+                # and Souther two steps away, no verb was produced for Souther
+                # at all, so the grunt's punch won by default and the AI stood
+                # there hitting the sideshow while the boss walked in. Ranking
+                # is what should settle that (the walk-in carries
+                # _EMERGENCY_BOSS_TARGET), and it cannot settle a contest it is
+                # never shown.
+                continue
             if reach.any_pit_endangers(context, enemy.world_x, enemy.world_y):
                 # Never walk toward a target that is itself standing in a
                 # pit's danger zone -- reaching it means standing there too.
