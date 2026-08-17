@@ -1050,12 +1050,33 @@ def could_dodge_souther_slash(context: Context) -> Context:
             continue
         if actor.is_airborne:
             continue
+        in_punch_range = reach.targets_of(context, InPunchReach, actor.slot)
         for token in find_all(context, SoutherIsGoingToSlash):
             if token.actor_slot != actor.slot:
                 continue
             souther = find(context, Souther, slot=token.target_slot)
-            if souther is None or not souther.strike_is_committed():
+            if souther is None:
                 continue
+            if not souther.strike_is_committed():
+                # The *predicted* gate counts too, unlike Antonio's. Measured
+                # live: 220 of the 240 health lost in a full Souther fight went
+                # in while he was in primary $02 tactical $00 -- the claw
+                # wind-up. Waiting for the commit means waiting until the
+                # type-$98 claw is already out, which is too late.
+                #
+                # Stepping off early is worth something here in a way it is not
+                # against Antonio: $15EDA's commit needs lane +$52 < $1C, so
+                # leaving that lane *denies the slash outright* rather than
+                # merely relocating it -- and it is self-limiting, because the
+                # token stops firing the moment the lane gate fails and the
+                # approach takes the tick straight back.
+                #
+                # Not while he is punchable from here, though: inside punch
+                # range the exchange is the whole point, and dodging at 46 over
+                # a 20-point punch is the "sidestep forever, never attack" loop
+                # that could_dodge_antonio_kick exists to avoid.
+                if token.target_slot in in_punch_range:
+                    continue
             verbs.add(
                 DodgeSoutherSlash(actor_slot=actor.slot, target_slot=token.target_slot)
             )

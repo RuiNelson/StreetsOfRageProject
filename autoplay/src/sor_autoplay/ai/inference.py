@@ -131,15 +131,6 @@ SOUTHER_SLASH_PRIMARY_STATE = 0x02
 # $16234 then forces Souther straight to primary $02 with the claw spawned,
 # bypassing every distance band, the inner abort and the +$66/+$77 gates.
 SOUTHER_JUMP_COUNTER_DIST_X = 0x78  # 120px
-
-# The committed dash at $161C6 (souther_state2_claw_dash): +$1C = $00080000,
-# i.e. 8px per 60Hz frame, and it resolves only with the target inside $18
-# (24px) of its lane. Used by _souther_dash_arrives_soon, which exists because
-# a Boss populates neither attack_ranges nor grunt_vel_*, so both of
-# check_for_incoming_melee's ordinary tests report "no threat" while he closes
-# faster than any grunt.
-SOUTHER_DASH_SPEED_X = 8.0
-SOUTHER_DASH_RESOLVE_LANE = 0x18  # 24px
 # Two gates the ROM has here are deliberately **not** reproduced, both
 # live-diagnosed after the AI was seen jumping straight into the claws:
 #
@@ -158,6 +149,22 @@ SOUTHER_DASH_RESOLVE_LANE = 0x18  # 24px
 #
 # What is genuinely safe is a Souther who cannot act at all, which
 # is_punishable already names -- and there the grab outranks the hop anyway.
+
+# The committed dash at $161C6 (souther_state2_claw_dash): +$1C = $00080000,
+# i.e. 8px per 60Hz frame, and it resolves only with the target inside $18
+# (24px) of its lane. Used by _souther_dash_arrives_soon, which exists because
+# a Boss populates neither attack_ranges nor grunt_vel_*, so both of
+# check_for_incoming_melee's ordinary tests report "no threat" while he closes
+# faster than any grunt.
+SOUTHER_DASH_SPEED_X = 8.0
+SOUTHER_DASH_RESOLVE_LANE = 0x18  # 24px
+
+# The shared later-boss hit reaction. $03 and $04 both decode as RECOVERY
+# (phases.py), but they are not the same situation: measured live over a full
+# Souther fight, $03 held 4% of ticks and $04 held 70%. $04 is where he sits,
+# so keying the punish grab on is_punishable handed the top of the emergency
+# table to a walk-in that never converted, for most of the fight.
+SOUTHER_HIT_REACTION_PRIMARY = 0x03
 
 # A Grunt outside this time-to-arrival window is not "closing fast" yet.
 # The horizon itself now lives in reach.CLOSING_ENEMY_THREAT_FRAMES --
@@ -611,7 +618,18 @@ def check_for_grab_opportunities(context: Context) -> Context:
                     tokens.add(GrabAntonioOnPunish(**pair))
                 continue
             if isinstance(enemy, Souther):
-                if is_punishable(enemy.combat_phase):
+                # Only the *brief* hit reaction, primary $03 -- deliberately
+                # not the whole of is_punishable the way Antonio's is.
+                #
+                # Measured live over a full 120s Souther fight: he sits in
+                # primary $04 for 70% of it (2304 of 3304 ticks) against 4% in
+                # $03, and both decode as RECOVERY. Keyed on is_punishable, the
+                # grab therefore scored 61+14 = 75 -- the top of the table --
+                # for most of the fight, and the walk-in never converted: 2318
+                # ticks of GrabEnemy, and Souther lost 11 health in two
+                # minutes while the actor lost a whole life. $04 is where he
+                # *sits*, not a window.
+                if enemy.primary_state == SOUTHER_HIT_REACTION_PRIMARY:
                     tokens.add(GrabSoutherOnPunish(**pair))
                 continue
             if not isinstance(enemy, Grunt):

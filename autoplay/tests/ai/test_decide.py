@@ -2484,14 +2484,28 @@ class CouldDodgeSoutherSlashTests(unittest.TestCase):
 
 
 class CouldGrabSoutherOnPunishTests(unittest.TestCase):
-    def test_grab_offered_on_a_recovering_souther(self) -> None:
+    def test_grab_offered_during_the_brief_hit_reaction(self) -> None:
         myself = make_myself(world_x=140, world_y=100)
         camera = CameraRange(left=0, right=640, top=0, bottom=224)
         souther = _souther(
-            world_x=160, world_y=100, combat_phase=CombatPhase.RECOVERY
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.RECOVERY,
+            primary_state=3,
         )
         result = could_grab_enemy({myself, camera, souther})
         self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="obj11")})
+
+    def test_no_grab_during_the_long_recovery_he_sits_in(self) -> None:
+        myself = make_myself(world_x=140, world_y=100)
+        camera = CameraRange(left=0, right=640, top=0, bottom=224)
+        souther = _souther(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.RECOVERY,
+            primary_state=4,
+        )
+        self.assertEqual(could_grab_enemy({myself, camera, souther}), set())
 
     def test_no_grab_while_he_can_still_act(self) -> None:
         myself = make_myself(world_x=140, world_y=100)

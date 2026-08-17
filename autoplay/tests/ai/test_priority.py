@@ -2210,7 +2210,7 @@ def _souther_actor(**overrides) -> Myself:
 class SoutherVerbEmergencyTests(unittest.TestCase):
     def test_the_punish_grab_outranks_punching_him_again(self) -> None:
         myself = _souther_actor()
-        souther = _souther("obj11", CombatPhase.RECOVERY)
+        souther = _souther("obj11", CombatPhase.RECOVERY, primary_state=3)
         context = {
             myself,
             CameraRange(left=0, right=640, top=0, bottom=224),

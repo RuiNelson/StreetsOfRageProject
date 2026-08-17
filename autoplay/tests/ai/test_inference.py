@@ -1502,16 +1502,35 @@ class SoutherClawProjectileTests(unittest.TestCase):
 
 
 class CheckForSoutherGrabOnPunishTests(unittest.TestCase):
-    def test_punishable_souther_offers_the_hold(self) -> None:
+    def test_the_brief_hit_reaction_offers_the_hold(self) -> None:
         myself = make_myself(world_x=160, world_y=100)
         camera = CameraRange(left=0, right=640, top=0, bottom=224)
         souther = make_souther(
-            world_x=180, world_y=100, combat_phase=CombatPhase.RECOVERY
+            world_x=180,
+            world_y=100,
+            combat_phase=CombatPhase.RECOVERY,
+            primary_state=3,
         )
         result = check_for_grab_opportunities({myself, camera, souther})
         self.assertEqual(
             result, {GrabSoutherOnPunish(actor_slot="P1", target_slot="obj11")}
         )
+
+    def test_the_long_recovery_state_does_not(self) -> None:
+        # Measured live: primary $04 held 70% of a 120s fight against $03's 4%,
+        # and both decode as RECOVERY. Keyed on the phase, the grab scored 75 --
+        # top of the table -- for most of the fight and never converted: 2318
+        # ticks of GrabEnemy while Souther lost 11 health and the actor lost a
+        # life. $04 is where he sits, not a window.
+        myself = make_myself(world_x=160, world_y=100)
+        camera = CameraRange(left=0, right=640, top=0, bottom=224)
+        souther = make_souther(
+            world_x=180,
+            world_y=100,
+            combat_phase=CombatPhase.RECOVERY,
+            primary_state=4,
+        )
+        self.assertEqual(check_for_grab_opportunities({myself, camera, souther}), set())
 
     def test_a_souther_that_can_still_act_offers_nothing(self) -> None:
         myself = make_myself(world_x=160, world_y=100)
