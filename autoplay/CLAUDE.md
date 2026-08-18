@@ -112,6 +112,9 @@ punch is refused against the spin.
 ./scripts/autoplay --once
 ./scripts/autoplay --poll-ms 33
 
+# Live AI testing (turbo host + matching poll cadence; see below)
+./scripts/both_turbo
+
 # Path-finding viewer (standalone Tk; connects to nothing, so no host/port)
 ./scripts/pathfind_viewer
 ./scripts/pathfind_viewer --width 480 --height 200 --step 4 --body 24
@@ -124,6 +127,24 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m unittest discove
 
 Use Python 3.11+ with Tk (`_tkinter`). System/Homebrew 3.13/3.14 builds on this
 machine may lack Tk.
+
+### Live AI testing
+
+When exercising the symbolic AI against a running host (not unit tests), do
+not use 1× speed with the default 33 ms poll. Turbo the host and raise the
+poll cadence so the agent still samples about two game frames per tick.
+`./scripts/both_turbo` is the canonical recipe (meta-repo root):
+
+```bash
+./scripts/run --turbo 4 --lang en --debugUtils --port 7777 --silent &
+./scripts/autoplay --poll-ms 8 --port 7777 --agent-p1 --reach-gameplay blaze
+```
+
+`--poll-ms 8` is ~2 frames at 240 Hz (`--turbo 4`). Leaving the default
+33 ms under turbo makes the AI see every eighth frame. Keep
+`scripts/both_turbo` as the source of truth for these flags. Use `--silent`
+whenever the game is launched for debug. Only start a live session when
+necessary; prefer the `autoplay` unit tests for logic changes.
 
 ## Observer surface
 

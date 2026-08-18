@@ -190,6 +190,37 @@ output: do not commit them unless the user explicitly asks to version that
 exact file. Use this map together with `ai-analysis/*.md` manuscripts and
 `labels.csv` when mapping control flow for reverse engineering or AI work.
 
+## Testing the symbolic AI live
+
+When a change needs a live session of the symbolic AI (not unit tests),
+run the host in turbo and raise autoplay's poll cadence so the agent
+still samples about two game frames per tick. Prefer the wrapper:
+
+```bash
+./scripts/both_turbo
+```
+
+That is equivalent to:
+
+```bash
+./scripts/run --turbo 4 --lang en --debugUtils --port 7777 --silent &
+./scripts/autoplay --poll-ms 8 --port 7777 --agent-p1 --reach-gameplay blaze
+```
+
+- `--turbo 4` (with the default `--vsync 0`) runs the internal VDP at
+  `60 × 4` Hz.
+- `--poll-ms 8` replaces the default 33 ms wall-clock poll (~2 frames
+  at 60 Hz) with ~2 frames at 240 Hz. Do not leave `--poll-ms` at 33
+  under turbo: the AI would see every eighth frame and miss holds,
+  jumps, and incoming attacks.
+- `--silent` is required whenever the game is launched for debug.
+- Only start a live `sor` session when necessary; prefer `autoplay`
+  unit tests for logic changes.
+
+Keep `scripts/both_turbo` as the source of truth for these flags. If the
+wrapper's turbo factor or `--poll-ms` changes, update this section to
+match.
+
 ## Validation and handoff
 
 - Documentation-only changes: check Markdown structure, links, paths, command
@@ -211,5 +242,6 @@ tested on the current host.
 - Keep this file and the other `CLAUDE.md` files updated as you work
 - Save in the `CLAUDE.md` all the information that charactizes the project that you obtain from the user.
 - If running the game for debug, only run if **necessary**, remember to use `--silent` to silence the sound
+- When testing the symbolic AI live, use turbo and a matching autoplay cadence (`./scripts/both_turbo`); see **Testing the symbolic AI live** above
 
  
