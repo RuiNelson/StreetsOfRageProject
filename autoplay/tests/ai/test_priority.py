@@ -13,15 +13,13 @@ from sor_autoplay.ai.tokens import (
     HitAntonioBoomerang,
     JumpAttack,
     LifePickup,
+    MeleeWeaponAttack,
     Punch,
     RearAttack,
     ScorePickup,
     SpecialPickup,
     OpenBreakable,
-    SprayPepper,
-    StabWithKnifeOrBottle,
     Supplex,
-    SwingBatOrPipe,
     TechRecover,
     ThrowKnife,
     ThrowPepper,
@@ -631,17 +629,17 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         self.assertEqual(verbs[0].target_slot, "obj02")
 
 
-class DetermineEmergencyMeleeWeaponSiblingsTests(unittest.TestCase):
-    """SwingBatOrPipe/StabWithKnifeOrBottle/SprayPepper share Punch's exact
-    emergency formula (_emergency_melee_strike) -- one representative check
-    per sibling that the shared wiring wins over a punishable-but-farther
+class DetermineEmergencyMeleeWeaponAttackTests(unittest.TestCase):
+    """MeleeWeaponAttack shares Punch's exact emergency formula
+    (_emergency_melee_strike) regardless of weapon_type -- one check per
+    weapon group that the shared wiring wins over a punishable-but-farther
     WalkToNearEnemy exactly like Punch does."""
 
-    def test_swing_bat_or_pipe_beats_walk_to_near_enemy_on_punishable_target(self) -> None:
+    def test_bat_or_pipe_beats_walk_to_near_enemy_on_punishable_target(self) -> None:
         punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
         context = {
             punishable,
-            SwingBatOrPipe(actor_slot="P1", target_slot="obj01"),
+            MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x0A),
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
@@ -649,13 +647,13 @@ class DetermineEmergencyMeleeWeaponSiblingsTests(unittest.TestCase):
 
         verbs = find_all(result, Verb)
         self.assertEqual(len(verbs), 1)
-        self.assertIsInstance(verbs[0], SwingBatOrPipe)
+        self.assertIsInstance(verbs[0], MeleeWeaponAttack)
 
-    def test_stab_with_knife_or_bottle_beats_walk_to_near_enemy_on_punishable_target(self) -> None:
+    def test_knife_or_bottle_beats_walk_to_near_enemy_on_punishable_target(self) -> None:
         punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
         context = {
             punishable,
-            StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01"),
+            MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x08),
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
@@ -663,13 +661,13 @@ class DetermineEmergencyMeleeWeaponSiblingsTests(unittest.TestCase):
 
         verbs = find_all(result, Verb)
         self.assertEqual(len(verbs), 1)
-        self.assertIsInstance(verbs[0], StabWithKnifeOrBottle)
+        self.assertIsInstance(verbs[0], MeleeWeaponAttack)
 
-    def test_spray_pepper_beats_walk_to_near_enemy_on_punishable_target(self) -> None:
+    def test_pepper_beats_walk_to_near_enemy_on_punishable_target(self) -> None:
         punishable = _enemy("obj01", CombatPhase.KNOCKDOWN)
         context = {
             punishable,
-            SprayPepper(actor_slot="P1", target_slot="obj01"),
+            MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x0C),
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
         }
 
@@ -677,7 +675,7 @@ class DetermineEmergencyMeleeWeaponSiblingsTests(unittest.TestCase):
 
         verbs = find_all(result, Verb)
         self.assertEqual(len(verbs), 1)
-        self.assertIsInstance(verbs[0], SprayPepper)
+        self.assertIsInstance(verbs[0], MeleeWeaponAttack)
 
 
 class DetermineEmergencyTokenConditionTests(unittest.TestCase):
@@ -1235,7 +1233,7 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
         return Garcia(**fields)
 
     def test_a_frontal_crowd_is_answered_by_a_hold_not_a_punch(self) -> None:
-        # The user-reported case, and the one GrabToClearRear never covered:
+        # The user-reported case, and the one CLEAR_REAR never covered:
         # three enemies inside the close box with *none* strictly behind, so
         # reach.rear_threats is empty and no grab opportunity existed at all.
         # The winning verb used to be a plain Punch thrown into the crowd.
@@ -1257,7 +1255,7 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
         self.assertIsInstance(verbs[0], GrabEnemy)
 
     def test_a_lone_enemy_is_still_punched_not_grabbed(self) -> None:
-        # The counterweight: GrabWhileSurrounded must not turn every ordinary
+        # The counterweight: WHILE_SURROUNDED must not turn every ordinary
         # one-on-one exchange into a grab. Without a crowd there is no
         # Surrounded token, so nothing raises the grab above the strike.
         myself = _myself(world_x=100, world_y=100)
@@ -1330,8 +1328,8 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
         # from the fight either way.
         #
         # The old reasoning's "walk into another body" cost is also smaller
-        # than it reads: a GrabEnemy candidate has already passed
-        # InGrabReach, so the target is inside contact range, not across the
+        # than it reads: a GrabEnemy candidate has already passed a
+        # TargetInReach (kind GRAB), so the target is inside contact range, not across the
         # room. See priority._EMERGENCY_GRAB_WHILE_SURROUNDED.
         myself = _myself(world_x=100, world_y=100)
         front = self._grunt("front", world_x=130, world_y=100)

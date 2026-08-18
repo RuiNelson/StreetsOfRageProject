@@ -12,14 +12,13 @@ read (player-health-lives-and-combat.md's "Input and action selection").
 A grab is therefore something a strike actively *prevents*: it is taken by
 walking into an enemy without attacking.
 
-``Punch``, ``SwingBatOrPipe``, ``StabWithKnifeOrBottle``, and ``SprayPepper``
-all issue the identical physical B-button press (see ``execute.py``'s shared
-``state_machine_melee_strike``) -- the ROM resolves a different move, reach, and
-damage purely from the actor's held weapon type. They are kept as distinct
-``Verb`` classes (rather than one ``Punch`` covering every held weapon)
-because they are not the same move: different animation, hitbox, and damage
-per weapons-range-and-damage.md / items-and-weapons.md, even though nothing
-about the *input* differs.
+``Punch`` and ``MeleeWeaponAttack`` both issue the identical physical
+B-button press (see ``execute.py``'s shared ``state_machine_melee_strike``)
+-- the ROM resolves a different move, reach, and damage purely from the
+actor's held weapon type at execution time, which is why ``MeleeWeaponAttack``
+carries that type as a plain ``weapon_type`` field rather than one class per
+weapon group: nothing in this codebase ever branches on which weapon group
+fired, only the ROM itself does, from state already on the actor.
 
 ``RearAttack`` is the simultaneous B+C chord (``$322A``): reaches *behind*
 the player. ``CounterGrab`` is the enemy-held sequence (C crossover then B
@@ -65,9 +64,8 @@ class MeleeAttacks(Attack, ABC):
     """Close-combat attacks that need no weapon.
 
     The family is exactly ``Punch`` / ``JumpAttack`` / ``RearAttack`` --
-    all fire only while the actor is unarmed. ``MeleeWeaponAttacks`` groups
-    the held-weapon melee siblings (``SwingBatOrPipe`` / ``StabWithKnife
-    OrBottle`` / ``SprayPepper``); ``WeaponAttacks`` groups the *thrown*
+    all fire only while the actor is unarmed. ``MeleeWeaponAttack`` is the
+    held-weapon melee sibling; ``WeaponAttacks`` groups the *thrown*
     weapon attacks (``ThrowKnife`` / ``ThrowPepper``); ``SmashBreakable``
     (hits a prop, not a foe) is a separate ``Attack`` branch, as is
     ``GrabMechanics``.
@@ -90,12 +88,15 @@ class GrabEnemy(GrabMechanics):
     """Walk into an enemy, without attacking, to take a hold of it.
 
     Produced by ``could_grab_enemy`` for an unarmed, free-to-act actor when
-    the same enemy carries both an ``InGrabReach`` (possible) and a
-    ``GrabOpportunity`` (worth it), and no ``IncomingMelee`` -- walking into
+    the same enemy carries both a ``TargetInReach`` of kind ``GRAB``
+    (possible) and a ``GrabOpportunity`` (worth it), and no
+    ``IncomingMelee`` -- walking into
     a committed attack is how the actor gets hit rather than the hold.
 
-    Raises emergency: GrabToClearRear×58, GrabJackFromBehind×56,
-    GrabAntonioOnPunish×61, GrabIntoDeadZone×30.
+    Raises emergency: (GrabOpportunity reason=CLEAR_REAR)×58,
+    (GrabOpportunity reason=JACK_FROM_BEHIND)×56,
+    (GrabOpportunity reason=ANTONIO_ON_PUNISH)×61,
+    (GrabOpportunity reason=DEAD_ZONE)×30.
 
     The rear tier sits above every strike on an enemy that can still act
     (punch 20, jump 18/28), above the unwarranted ``RearAttack`` chord
@@ -118,8 +119,9 @@ class Punch(MeleeAttacks):
     """Basic B-button punch while unarmed; repeated contact also triggers
     the grab.
 
-    Produced by ``could_punch`` when the actor holds no weapon and an
-    ``InPunchReach`` names an enemy its forward strike would connect with.
+    Produced by ``could_punch`` when the actor holds no weapon and a
+    ``TargetInReach`` of kind ``PUNCH`` names an enemy its forward strike
+    would connect with.
 
     Raises emergency: (PunishWindow for the target)×60, Enemy×20; plus
     the armed/boss target-class raise (see priority._with_target_class).
@@ -131,42 +133,29 @@ class Punch(MeleeAttacks):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class MeleeWeaponAttacks(Attack, ABC):
-    """Close-combat attacks that require holding a specific weapon type —
-    as opposed to ``MeleeAttacks`` (unarmed) and ``WeaponAttacks`` (thrown).
+class MeleeWeaponAttack(Attack):
+    """B-button melee strike while holding a weapon (bat/pipe, knife/bottle,
+    or pepper spray) — as opposed to ``MeleeAttacks`` (unarmed) and
+    ``WeaponAttacks`` (thrown).
 
     Same B-button press as ``Punch``, but the ROM resolves a different move,
-    reach, and damage depending on the held weapon: ``SwingBatOrPipe``
-    (bat/pipe, $0A/$0B), ``StabWithKnifeOrBottle`` (knife/bottle, $08/$09),
-    ``SprayPepper`` (pepper spray, $0C).
-    """
+    reach, and damage purely from ``weapon_type``, the pickup type the actor
+    holds at execution time: bat/pipe ($0A/$0B), knife/bottle ($08/$09), or
+    pepper spray ($0C). One class rather than one per weapon group
+    (``SwingBatOrPipe``/``StabWithKnifeOrBottle``/``SprayPepper`` before this)
+    because nothing here ever branched on which of the three fired — every
+    could_*, emergency and execute handler was already the identical shared
+    function, keyed by nothing but the class -- ``weapon_type`` carries the
+    one real distinction. For the two weapon groups whose own melee reach has
+    not been separately measured (knife/bottle, pepper), ``could_melee_
+    weapon_attack`` reuses the unarmed punch band as the closest available
+    evidence; bat/pipe uses its own measured 36px reach
+    (weapons-range-and-damage.md), shorter than any character's unarmed
+    punch_outer_x.
 
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SwingBatOrPipe(MeleeWeaponAttacks):
-    """B-button swing while holding a bat or pipe (types $0A/$0B).
-
-    Produced by ``could_swing_bat_or_pipe`` when an enemy sits within the
-    weapon's measured 36px reach (weapons-range-and-damage.md), shorter than
-    any character's unarmed punch_outer_x.
-
-    Raises emergency: (Enemy when in a punishable phase)×60, Enemy×20.
-    """
-
-    priority: int = 10
-    actor_slot: str
-    target_slot: str
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class StabWithKnifeOrBottle(MeleeWeaponAttacks):
-    """B-button stab while holding a knife or bottle (types $08/$09), used
-    when the enemy is too close to throw the knife instead.
-
-    Produced by ``could_stab_with_knife_or_bottle`` when an enemy sits
-    within the actor's unarmed punch band (this weapon's own melee reach
-    has not been separately measured, so the unarmed table is reused as the
-    closest available evidence).
+    Produced by ``could_melee_weapon_attack`` once per actor holding one of
+    these weapon types, for an enemy a ``TargetInReach`` of kind ``PUNCH``
+    names as connecting.
 
     Raises emergency: (Enemy when in a punishable phase)×60, Enemy×20.
     """
@@ -174,24 +163,7 @@ class StabWithKnifeOrBottle(MeleeWeaponAttacks):
     priority: int = 10
     actor_slot: str
     target_slot: str
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SprayPepper(MeleeWeaponAttacks):
-    """B-button melee spray while holding pepper spray (type $0C), used
-    when the enemy is too close to throw it instead.
-
-    Produced by ``could_spray_pepper`` when an enemy sits within the
-    actor's unarmed punch band (this weapon's own melee reach has not been
-    separately measured, so the unarmed table is reused as the closest
-    available evidence).
-
-    Raises emergency: (Enemy when in a punishable phase)×60, Enemy×20.
-    """
-
-    priority: int = 10
-    actor_slot: str
-    target_slot: str
+    weapon_type: int
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -200,7 +172,7 @@ class WeaponAttacks(Attack, ABC):
     ``ThrowPepper`` — the only two weapon types the ROM attack-throws,
     per items-and-weapons.md's ``$21E6 (player_release_thrown_weapon)``).
 
-    Distinct from ``MeleeWeaponAttacks``: this branch is specifically the
+    Distinct from ``MeleeWeaponAttack``: this branch is specifically the
     *thrown* use of a held weapon, not its close-combat use.
     """
 
@@ -327,8 +299,9 @@ class ReleaseGrab(GrabMechanics):
 class JumpAttack(MeleeAttacks):
     """Jump-kick only — never a stationary hop. Requires horizontal aim.
 
-    Produced by ``could_jump_attack`` for an ``InJumpAttackReach`` target
-    (forward, outside punch outer, within the kick's max ΔX) that has no
+    Produced by ``could_jump_attack`` for a ``TargetInReach`` of kind
+    ``JUMP_ATTACK`` target (forward, outside punch outer, within the
+    kick's max ΔX) that has no
     ``IncomingMelee`` against the actor -- the kick's own travel would
     otherwise deliver it into a committed attack, airborne and unable to
     change its mind.
@@ -379,8 +352,9 @@ class OpenBreakable(Attack):
 class RearAttack(MeleeAttacks):
     """Simultaneous B+C rear/escape attack (``$322A``).
 
-    Produced by ``could_rear_attack`` for an ``InRearReach`` target -- an
-    enemy inside the character-specific ``$322A`` attack box (measured live,
+    Produced by ``could_rear_attack`` for a ``TargetInReach`` of kind
+    ``REAR`` target -- an enemy inside the character-specific ``$322A``
+    attack box (measured live,
     controls-and-input.md): behind the player for all three characters
     (Axel/Adam/Blaze up to 40/42/53px), and additionally in front only for
     Adam (up to 14px — his chord is a forward-reaching hop, not a backfist).
@@ -389,7 +363,8 @@ class RearAttack(MeleeAttacks):
     boxed in, punch dead zone, or ``Jack`` facing the actor (his axe and
     lunge punish a turn-and-punch): (Enemy when in a dangerous phase)×60,
     Enemy×55. On Jack's back the chord is refused -- turn and grab
-    (``GrabJackFromBehind``). Otherwise, with a turn-and-punch available:
+    (``GrabOpportunity`` reason ``JACK_FROM_BEHIND``). Otherwise, with a
+    turn-and-punch available:
     (Enemy when in a dangerous phase)×11, Enemy×9.
 
     The chord costs up to 21 frames of startup and hits only by current

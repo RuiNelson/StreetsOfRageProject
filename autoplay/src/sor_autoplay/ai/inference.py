@@ -20,25 +20,17 @@ from .tokens import Myself, Partner, PlayableCharacter
 from .tokens import Antonio, Enemy, Grunt, Jack, Souther
 from .tokens import GrabEnemy, JumpAttack, Punch, RearAttack
 from .tokens import (
-    ActionableTarget,
     AntonioIsGoingToKick,
     ClosingEnemy,
-    GrabAntonioOnPunish,
-    GrabIntoDeadZone,
-    GrabJackFromBehind,
-    GrabSoutherOnPunish,
-    GrabToClearRear,
-    GrabToDodgeCharge,
-    GrabWhileSurrounded,
-    InGrabReach,
-    InJumpAttackReach,
-    InPunchReach,
-    InRearReach,
+    GrabOpportunity,
+    GrabReason,
     IncomingMelee,
     PunishWindow,
+    ReachKind,
     SoutherIsGoingToSlash,
     SoutherPunishesJump,
     Surrounded,
+    TargetInReach,
 )
 from .tokens import CameraRange, Pit, SafeSpot
 from .tokens import IncomingProjectile, Projectile
@@ -427,11 +419,12 @@ def check_for_targets_in_reach(context: Context) -> Context:
     so nothing changes at all for a stunned, knocked-down or committed
     target.
 
-    ``ActionableTarget`` is deliberately left on the observed position. It is
-    not a "would this hit" question but the "stop walking, you can already
-    hit it" signal ``could_walk_to_near_enemy`` reads, and answering it about
-    the future stops the approach early -- the actor stands off and swings at
-    where the enemy is going to be instead of closing the last few pixels.
+    ``ReachKind.ACTIONABLE`` is deliberately left on the observed position.
+    It is not a "would this hit" question but the "stop walking, you can
+    already hit it" signal ``could_walk_to_near_enemy`` reads, and answering
+    it about the future stops the approach early -- the actor stands off and
+    swings at where the enemy is going to be instead of closing the last few
+    pixels.
     """
 
     enemies = reach.live_enemies(context)
@@ -448,30 +441,30 @@ def check_for_targets_in_reach(context: Context) -> Context:
                 enemy,
                 kinematics.connect_frames(Punch, actor, enemy),
             ):
-                tokens.add(InPunchReach(**pair))
+                tokens.add(TargetInReach(**pair, kind=ReachKind.PUNCH))
             if _connects(
                 reach.in_rear_band,
                 actor,
                 enemy,
                 kinematics.connect_frames(RearAttack, actor, enemy),
             ):
-                tokens.add(InRearReach(**pair))
+                tokens.add(TargetInReach(**pair, kind=ReachKind.REAR))
             if _connects(
                 reach.in_jump_attack_band,
                 actor,
                 enemy,
                 kinematics.connect_frames(JumpAttack, actor, enemy),
             ):
-                tokens.add(InJumpAttackReach(**pair))
+                tokens.add(TargetInReach(**pair, kind=ReachKind.JUMP_ATTACK))
             if _connects(
                 reach.grab_would_connect,
                 actor,
                 enemy,
                 kinematics.connect_frames(GrabEnemy, actor, enemy),
             ):
-                tokens.add(InGrabReach(**pair))
+                tokens.add(TargetInReach(**pair, kind=ReachKind.GRAB))
             if reach.enemy_actionable(actor, enemy, enemies):
-                tokens.add(ActionableTarget(**pair))
+                tokens.add(TargetInReach(**pair, kind=ReachKind.ACTIONABLE))
     return tokens
 
 
@@ -568,10 +561,10 @@ def check_for_grab_opportunities(context: Context) -> Context:
 
     Not "every enemy that could be grabbed": a grab costs the actor its
     attack for the walk-in and locks both bodies together, so this only
-    fires for the situations where that trade pays off -- see the concrete
-    ``GrabOpportunity`` subclasses. Whether the grab is *reachable* is a
-    separate question, answered by ``InGrabReach`` above;
-    ``decide.could_grab_enemy`` requires both.
+    fires for the situations where that trade pays off -- see ``GrabReason``.
+    Whether the grab is *reachable* is a separate question, answered by
+    ``TargetInReach`` (``ReachKind.GRAB``) above; ``decide.could_grab_enemy``
+    requires both.
 
     Most opportunities are ``Grunt``-only. Antonio and Souther are the
     exceptions: after a landed hit both sit in the shared later-boss
@@ -582,9 +575,9 @@ def check_for_grab_opportunities(context: Context) -> Context:
     the walk-in is free. Bongo, the twins, Abadede and Mr. X stay out of scope.
 
     Reads the ``Surrounded`` tokens ``check_for_surrounded`` produced earlier
-    in ``generate_inference_tokens``' chain -- see ``GrabWhileSurrounded``,
-    the one opportunity here that is about the actor's whole situation rather
-    than about the candidate enemy itself.
+    in ``generate_inference_tokens``' chain -- see ``GrabReason.
+    WHILE_SURROUNDED``, the one reason here that is about the actor's whole
+    situation rather than about the candidate enemy itself.
     """
 
     enemies = reach.on_screen_enemies(context)
@@ -602,7 +595,7 @@ def check_for_grab_opportunities(context: Context) -> Context:
         rear = reach.rear_threats(actor, enemies)
         # Committed enemies already judged able to land on this actor. A
         # charge coming in from behind the body being grabbed is what
-        # GrabToDodgeCharge answers -- Signal's hitbox-less slide above all.
+        # GrabReason.DODGE_CHARGE answers -- Signal's hitbox-less slide above all.
         charging = [
             enemy
             for enemy in enemies
@@ -615,7 +608,7 @@ def check_for_grab_opportunities(context: Context) -> Context:
             pair = {"actor_slot": actor.slot, "target_slot": enemy.slot}
             if isinstance(enemy, Antonio):
                 if is_punishable(enemy.combat_phase):
-                    tokens.add(GrabAntonioOnPunish(**pair))
+                    tokens.add(GrabOpportunity(**pair, reason=GrabReason.ANTONIO_ON_PUNISH))
                 continue
             if isinstance(enemy, Souther):
                 # Only the *brief* hit reaction, primary $03 -- deliberately
@@ -630,7 +623,7 @@ def check_for_grab_opportunities(context: Context) -> Context:
                 # minutes while the actor lost a whole life. $04 is where he
                 # *sits*, not a window.
                 if enemy.primary_state == SOUTHER_HIT_REACTION_PRIMARY:
-                    tokens.add(GrabSoutherOnPunish(**pair))
+                    tokens.add(GrabOpportunity(**pair, reason=GrabReason.SOUTHER_ON_PUNISH))
                 continue
             if not isinstance(enemy, Grunt):
                 continue
@@ -643,28 +636,28 @@ def check_for_grab_opportunities(context: Context) -> Context:
                 and abs(other.world_x - actor.world_x) > abs(candidate_dx)
                 for other in charging
             ):
-                tokens.add(GrabToDodgeCharge(**pair))
+                tokens.add(GrabOpportunity(**pair, reason=GrabReason.DODGE_CHARGE))
             if actor.slot in surrounded_actors:
                 # Boxed in: a body in the hands beats a strike whichever side
-                # the crowd is on. GrabToClearRear below only covers the
-                # subset with a *confirmed rear* enemy.
-                tokens.add(GrabWhileSurrounded(**pair))
+                # the crowd is on. CLEAR_REAR below only covers the subset
+                # with a *confirmed rear* enemy.
+                tokens.add(GrabOpportunity(**pair, reason=GrabReason.WHILE_SURROUNDED))
             # A rear threat that *is* the candidate is not a pincer -- the
             # actor would be walking backwards into the same enemy it is
             # already worried about, and reach.grab_would_connect (forward
             # only) would not have offered it anyway.
             if any(other.slot != enemy.slot for other in rear):
-                tokens.add(GrabToClearRear(**pair))
+                tokens.add(GrabOpportunity(**pair, reason=GrabReason.CLEAR_REAR))
             if isinstance(enemy, Jack) and reach.enemy_forward_dx(enemy, actor) < 0:
                 # Facing away: the hold lands before the axe or the lunge
                 # can turn around. The opposite geometry -- Jack at the
                 # actor's back -- is RearAttack, not a backwards walk-in.
-                tokens.add(GrabJackFromBehind(**pair))
+                tokens.add(GrabOpportunity(**pair, reason=GrabReason.JACK_FROM_BEHIND))
             if enemy.min_reach > 0:
                 # Every attack it owns starts further out than contact --
                 # read from the ROM shape its animations select, not from
-                # the enemy's type. See GrabIntoDeadZone.
-                tokens.add(GrabIntoDeadZone(**pair))
+                # the enemy's type. See GrabReason.DEAD_ZONE.
+                tokens.add(GrabOpportunity(**pair, reason=GrabReason.DEAD_ZONE))
     return tokens
 
 
@@ -1044,8 +1037,8 @@ def check_for_souther_jump_counter(context: Context) -> Context:
     constants above): while he can still choose, the jump-attack action state
     hands him the counter; while he is already dashing, the type-``$98`` claw
     is a live attack object and the flight lands in it. The only Souther worth
-    hopping at is one who cannot act -- and ``GrabSoutherOnPunish`` outranks the
-    hop there anyway.
+    hopping at is one who cannot act -- and a ``GrabOpportunity`` with reason
+    ``SOUTHER_ON_PUNISH`` outranks the hop there anyway.
 
     The X half-width is widened by the character's own free-flight reach
     (``reach.jump_attack_max_dx``), because ``+$79`` stays set for as long as
@@ -1126,9 +1119,9 @@ def generate_inference_tokens(context: Context) -> Context:
 
     - stage 1 derives from direct observation alone;
     - ``check_for_grab_opportunities`` additionally reads ``Surrounded``
-      (``GrabWhileSurrounded``), so it runs after stage 1 rather than inside
-      it -- it used to sit in the chain *above* ``check_for_surrounded`` and
-      would have seen nothing;
+      (``GrabReason.WHILE_SURROUNDED``), so it runs after stage 1 rather
+      than inside it -- it used to sit in the chain *above*
+      ``check_for_surrounded`` and would have seen nothing;
     - ``check_for_safe_spots`` reads ``IncomingMelee``.
     """
 

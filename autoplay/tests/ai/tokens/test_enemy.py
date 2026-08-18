@@ -19,20 +19,12 @@ from sor_autoplay.ai.tokens import (
     enemy_class_for_type,
 )
 from sor_autoplay.ai.tokens import (
-    ActionableTarget,
     GrabOpportunity,
-    GrabToClearRear,
-    GrabIntoDeadZone,
-    GrabJackFromBehind,
-    GrabAntonioOnPunish,
-    GrabSoutherOnPunish,
-    InGrabReach,
-    InJumpAttackReach,
-    InPunchReach,
-    InRearReach,
+    GrabReason,
     AntonioIsGoingToKick,
     IncomingMelee,
     PunishWindow,
+    ReachKind,
     SoutherPunishesJump,
     SoutherIsGoingToSlash,
     Surrounded,
@@ -259,8 +251,11 @@ class EnemyHierarchyTests(unittest.TestCase):
         # because he is already attacking.
         self.assertIn("Punishes", SoutherPunishesJump.__name__)
 
-    def test_grab_souther_on_punish_is_a_grab_opportunity(self) -> None:
-        self.assertTrue(issubclass(GrabSoutherOnPunish, GrabOpportunity))
+    def test_grab_opportunity_carries_a_souther_on_punish_reason(self) -> None:
+        grab = GrabOpportunity(
+            actor_slot="P1", target_slot="obj07", reason=GrabReason.SOUTHER_ON_PUNISH
+        )
+        self.assertIs(grab.reason, GrabReason.SOUTHER_ON_PUNISH)
 
     def test_boss_extra_fields_round_trip(self) -> None:
         souther = Souther(
@@ -341,17 +336,7 @@ class ReachAndThreatTokenTests(unittest.TestCase):
     def test_all_are_inferred(self) -> None:
         for cls in (
             TargetInReach,
-            InPunchReach,
-            InRearReach,
-            InJumpAttackReach,
-            InGrabReach,
-            ActionableTarget,
             GrabOpportunity,
-            GrabToClearRear,
-            GrabIntoDeadZone,
-            GrabJackFromBehind,
-            GrabAntonioOnPunish,
-            GrabSoutherOnPunish,
             IncomingMelee,
             PunishWindow,
             SoutherPunishesJump,
@@ -360,50 +345,42 @@ class ReachAndThreatTokenTests(unittest.TestCase):
         ):
             self.assertTrue(issubclass(cls, Inferred), cls.__name__)
 
-    def test_reach_family_shares_one_base(self) -> None:
-        for cls in (
-            InPunchReach,
-            InRearReach,
-            InJumpAttackReach,
-            InGrabReach,
-            ActionableTarget,
-        ):
-            self.assertTrue(issubclass(cls, TargetInReach), cls.__name__)
+    def test_target_in_reach_covers_every_kind(self) -> None:
+        for kind in ReachKind:
+            token = TargetInReach(actor_slot="P1", target_slot="obj07", kind=kind)
+            self.assertIs(token.kind, kind)
 
     def test_reach_tokens_reference_both_ends_by_slot(self) -> None:
-        token = InPunchReach(actor_slot="P1", target_slot="obj07")
+        token = TargetInReach(actor_slot="P1", target_slot="obj07", kind=ReachKind.PUNCH)
         self.assertEqual(token.actor_slot, "P1")
         self.assertEqual(token.target_slot, "obj07")
         self.assertIn(token, {token})
 
     def test_sibling_reach_tokens_are_distinct_values(self) -> None:
         # Same pair, different move: these must not collapse in the context.
-        punch = InPunchReach(actor_slot="P1", target_slot="obj07")
-        rear = InRearReach(actor_slot="P1", target_slot="obj07")
+        punch = TargetInReach(actor_slot="P1", target_slot="obj07", kind=ReachKind.PUNCH)
+        rear = TargetInReach(actor_slot="P1", target_slot="obj07", kind=ReachKind.REAR)
         self.assertNotEqual(punch, rear)
         self.assertEqual(len({punch, rear}), 2)
 
     def test_punish_window_frames_default_to_zero(self) -> None:
         self.assertEqual(PunishWindow(target_slot="obj07").frames_left, 0)
 
-    def test_grab_opportunity_family_shares_one_base(self) -> None:
-        for cls in (
-            GrabToClearRear,
-            GrabIntoDeadZone,
-            GrabJackFromBehind,
-            GrabAntonioOnPunish,
-            GrabSoutherOnPunish,
-        ):
-            self.assertTrue(issubclass(cls, GrabOpportunity), cls.__name__)
+    def test_grab_opportunity_covers_every_reason(self) -> None:
+        for reason in GrabReason:
+            grab = GrabOpportunity(actor_slot="P1", target_slot="obj07", reason=reason)
+            self.assertIs(grab.reason, reason)
 
     def test_grab_opportunities_are_distinct_reasons_for_one_pair(self) -> None:
         # A whip enemy in front *and* a body at the actor's back: two
         # independent reasons to take the same hold, so they must coexist in
         # the context rather than collapse into one another.
-        rear = GrabToClearRear(actor_slot="P1", target_slot="obj07")
-        whip = GrabIntoDeadZone(actor_slot="P1", target_slot="obj07")
-        self.assertNotEqual(rear, whip)
-        self.assertEqual(len({rear, whip}), 2)
+        rear = GrabOpportunity(actor_slot="P1", target_slot="obj07", reason=GrabReason.CLEAR_REAR)
+        dead_zone = GrabOpportunity(
+            actor_slot="P1", target_slot="obj07", reason=GrabReason.DEAD_ZONE
+        )
+        self.assertNotEqual(rear, dead_zone)
+        self.assertEqual(len({rear, dead_zone}), 2)
 
 
 if __name__ == "__main__":

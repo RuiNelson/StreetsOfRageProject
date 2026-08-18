@@ -320,9 +320,9 @@ def _concrete_attacks() -> list[type[Attack]]:
     Two wrinkles in walking ``__subclasses__`` over this hierarchy:
 
     - the branch ABCs (``MeleeAttacks``, ``GrabMechanics``,
-      ``MeleeWeaponAttacks``, ``WeaponAttacks``) are plain dataclasses with
-      no abstract methods, so they are recognised the way they are declared:
-      by listing ``ABC`` among their own bases;
+      ``WeaponAttacks``) are plain dataclasses with no abstract methods, so
+      they are recognised the way they are declared: by listing ``ABC``
+      among their own bases;
     - every token here is ``@dataclass(slots=True)``, which cannot add
       ``__slots__`` to an existing class and therefore *replaces* it with a
       new one. The original stays registered as a subclass of ``Attack``, so

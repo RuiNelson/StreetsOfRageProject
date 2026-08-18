@@ -13,24 +13,16 @@ from sor_autoplay.ai.tokens import (
     Souther,
 )
 from sor_autoplay.ai.tokens import (
-    ActionableTarget,
     AntonioIsGoingToKick,
-    GrabAntonioOnPunish,
-    GrabToClearRear,
-    GrabIntoDeadZone,
-    GrabJackFromBehind,
-    GrabSoutherOnPunish,
-    GrabToDodgeCharge,
-    GrabWhileSurrounded,
-    InGrabReach,
-    InJumpAttackReach,
-    InPunchReach,
-    InRearReach,
+    GrabOpportunity,
+    GrabReason,
     IncomingMelee,
     PunishWindow,
+    ReachKind,
     SoutherIsGoingToSlash,
     SoutherPunishesJump,
     Surrounded,
+    TargetInReach,
 )
 from sor_autoplay.ai.tokens import Breakable, CameraRange, Pit, SafeSpot
 from sor_autoplay.hitboxes import Hitbox
@@ -326,9 +318,9 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, enemy})
 
-        self.assertIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
-        self.assertIn(ActionableTarget(actor_slot="P1", target_slot="obj01"), result)
-        self.assertNotIn(InJumpAttackReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.PUNCH), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.ACTIONABLE), result)
+        self.assertNotIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.JUMP_ATTACK), result)
 
     def test_enemy_behind_beyond_the_tolerance_is_not_punch_reach(self) -> None:
         # The raw band ignores facing; a forward strike cannot hit backwards.
@@ -337,8 +329,8 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, enemy})
 
-        self.assertNotIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
-        self.assertIn(InRearReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertNotIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.PUNCH), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.REAR), result)
 
     def test_rear_band_alone_is_not_actionable(self) -> None:
         # A behind enemy the actor could simply turn toward: the chord is not
@@ -349,7 +341,7 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, enemy})
 
-        self.assertNotIn(ActionableTarget(actor_slot="P1", target_slot="obj01"), result)
+        self.assertNotIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.ACTIONABLE), result)
 
     def test_jump_kick_gap(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
@@ -357,8 +349,8 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, enemy})
 
-        self.assertIn(InJumpAttackReach(actor_slot="P1", target_slot="obj01"), result)
-        self.assertNotIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.JUMP_ATTACK), result)
+        self.assertNotIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.PUNCH), result)
 
     def test_ignores_enemies_outside_the_playable_lane(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
@@ -372,7 +364,7 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, enemy})
 
-        self.assertIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.GRAB), result)
 
     def test_enemy_beyond_the_punch_outer_edge_is_not_grab_reach(self) -> None:
         # Axel's outer edge is 50px; the walk-in is only worth committing to
@@ -382,7 +374,7 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, enemy})
 
-        self.assertNotIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertNotIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.GRAB), result)
 
     def test_an_enemy_walking_into_the_punch_band_is_already_in_punch_reach(self) -> None:
         # dx=58 is outside Axel's 16..50 band right now, but the strike
@@ -394,13 +386,13 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, arriving})
 
-        self.assertIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.PUNCH), result)
 
     def test_an_enemy_walking_in_close_is_still_punchable(self) -> None:
         # THE regression this whole family has to guard. Judging the punch at
         # a single future instant projected this enemy into the punch's own
         # *inner* dead zone (below Axel's 16px edge), which deleted the
-        # InPunchReach, handed the tick to could_walk_to_near_enemy and had
+        # PUNCH reach token, handed the tick to could_walk_to_near_enemy and had
         # the actor walk into an enemy it should have been hitting -- while
         # promoting the slow RearAttack chord at point-blank range, since a
         # target inside the dead zone is what makes that chord "warranted".
@@ -414,8 +406,8 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, closing})
 
-        self.assertIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
-        self.assertIn(ActionableTarget(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.PUNCH), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.ACTIONABLE), result)
 
     def test_a_walking_enemy_never_loses_a_band_it_currently_occupies(self) -> None:
         # The additive guarantee, swept: whatever the observed position
@@ -447,11 +439,11 @@ class CheckForTargetsInReachTests(unittest.TestCase):
         arriving = make_enemy(slot="obj01", world_x=30, world_y=100, grunt_vel_x=2.0)
 
         self.assertIn(
-            InRearReach(actor_slot="P1", target_slot="obj01"),
+            TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.REAR),
             check_for_targets_in_reach({adam, arriving}),
         )
         self.assertNotIn(
-            InRearReach(actor_slot="P1", target_slot="obj01"),
+            TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.REAR),
             check_for_targets_in_reach({axel, arriving}),
         )
 
@@ -463,7 +455,7 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, arriving})
 
-        self.assertIn(InJumpAttackReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.JUMP_ATTACK), result)
 
     def test_a_jump_kick_is_never_armed_from_beyond_its_own_flight(self) -> None:
         # The kick's lead is its crouch, never its whole flight: solving the
@@ -474,7 +466,7 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, far})
 
-        self.assertNotIn(InJumpAttackReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertNotIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.JUMP_ATTACK), result)
 
     def test_a_grab_walk_in_still_offers_a_target_it_would_reach(self) -> None:
         # Already inside the walk-in range (dx=40) and retreating slowly:
@@ -485,7 +477,7 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, retreating})
 
-        self.assertIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.GRAB), result)
 
     def test_a_walk_in_that_would_never_catch_up_is_not_grab_reach(self) -> None:
         # 25px beyond Axel's own close-combat edge and retreating at 2 px per
@@ -497,7 +489,7 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, retreating})
 
-        self.assertNotIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertNotIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.GRAB), result)
 
     def test_a_stationary_enemy_is_judged_exactly_where_it_stands(self) -> None:
         # The no-velocity case must be untouched by any of the above: every
@@ -507,9 +499,9 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, still})
 
-        self.assertIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
-        self.assertIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
-        self.assertIn(ActionableTarget(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.PUNCH), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.GRAB), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.ACTIONABLE), result)
 
     def test_enemy_off_lane_is_not_grab_reach_even_inside_punch_reach(self) -> None:
         # dy=11 still clears PUNCH_RANGE_Y (12) but not GRAB_RANGE_Y (10):
@@ -519,8 +511,8 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, enemy})
 
-        self.assertIn(InPunchReach(actor_slot="P1", target_slot="obj01"), result)
-        self.assertNotIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.PUNCH), result)
+        self.assertNotIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.GRAB), result)
 
     def test_enemy_behind_beyond_the_tolerance_is_not_grab_reach(self) -> None:
         # The ROM's contact test reads the actor's *attack* box, which points
@@ -530,7 +522,7 @@ class CheckForTargetsInReachTests(unittest.TestCase):
 
         result = check_for_targets_in_reach({myself, enemy})
 
-        self.assertNotIn(InGrabReach(actor_slot="P1", target_slot="obj01"), result)
+        self.assertNotIn(TargetInReach(actor_slot="P1", target_slot="obj01", kind=ReachKind.GRAB), result)
 
 
 class CheckForGrabOpportunitiesTests(unittest.TestCase):
@@ -544,7 +536,10 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
 
         result = check_for_grab_opportunities({myself, front, behind})
 
-        self.assertIn(GrabToClearRear(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(
+            GrabOpportunity(actor_slot="P1", target_slot="obj01", reason=GrabReason.CLEAR_REAR),
+            result,
+        )
 
     def test_promotes_a_body_with_a_charge_coming_in_behind_it(self) -> None:
         # The user's geometry: an enemy in front, and behind it a Signal
@@ -568,7 +563,10 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
 
         result = check_for_grab_opportunities(context)
 
-        self.assertIn(GrabToDodgeCharge(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(
+            GrabOpportunity(actor_slot="P1", target_slot="obj01", reason=GrabReason.DODGE_CHARGE),
+            result,
+        )
 
     def test_a_charge_on_the_far_side_is_not_coming_through_the_body(self) -> None:
         # Same two enemies, but the Signal is on the *other* side of the
@@ -593,11 +591,11 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
 
         result = check_for_grab_opportunities(context)
 
-        self.assertEqual([t for t in result if isinstance(t, GrabToDodgeCharge)], [])
+        self.assertEqual([t for t in result if t.reason is GrabReason.DODGE_CHARGE], [])
 
     def test_a_frontal_crowd_promotes_the_grabbable_body(self) -> None:
         # Three enemies inside the close box, none of them strictly behind:
-        # reach.rear_threats is empty, so GrabToClearRear never fires and the
+        # reach.rear_threats is empty, so CLEAR_REAR never fires and the
         # actor had no grab opportunity at all while boxed in.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
         front = make_garcia(slot="obj01", world_x=130, world_y=100)
@@ -608,7 +606,12 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
 
         result = check_for_grab_opportunities(context)
 
-        self.assertIn(GrabWhileSurrounded(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(
+            GrabOpportunity(
+                actor_slot="P1", target_slot="obj01", reason=GrabReason.WHILE_SURROUNDED
+            ),
+            result,
+        )
 
     def test_no_crowd_opportunity_without_the_surrounded_judgment(self) -> None:
         # The gate is the Surrounded token itself, not proximity: two enemies
@@ -622,7 +625,7 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
         result = check_for_grab_opportunities(context)
 
         self.assertEqual(
-            [t for t in result if isinstance(t, GrabWhileSurrounded)], []
+            [t for t in result if t.reason is GrabReason.WHILE_SURROUNDED], []
         )
 
     def test_the_full_chain_makes_surrounded_visible_to_grab_opportunities(self) -> None:
@@ -640,7 +643,12 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
 
         result = generate_inference_tokens(context)
 
-        self.assertIn(GrabWhileSurrounded(actor_slot="P1", target_slot="obj01"), result)
+        self.assertIn(
+            GrabOpportunity(
+                actor_slot="P1", target_slot="obj01", reason=GrabReason.WHILE_SURROUNDED
+            ),
+            result,
+        )
 
     def test_the_rear_enemy_alone_is_not_its_own_reason_to_be_grabbed(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
@@ -664,7 +672,14 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
 
         result = check_for_grab_opportunities({myself, jack})
 
-        self.assertEqual(result, {GrabJackFromBehind(actor_slot="P1", target_slot="obj01")})
+        self.assertEqual(
+            result,
+            {
+                GrabOpportunity(
+                    actor_slot="P1", target_slot="obj01", reason=GrabReason.JACK_FROM_BEHIND
+                )
+            },
+        )
 
     def test_does_not_promote_jack_when_he_is_facing_the_actor(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
@@ -678,7 +693,10 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
 
         result = check_for_grab_opportunities({myself, nora})
 
-        self.assertEqual(result, {GrabIntoDeadZone(actor_slot="P1", target_slot="obj02")})
+        self.assertEqual(
+            result,
+            {GrabOpportunity(actor_slot="P1", target_slot="obj02", reason=GrabReason.DEAD_ZONE)},
+        )
 
     def test_a_committed_enemy_is_not_grabbable(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
@@ -698,7 +716,10 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
 
         result = check_for_grab_opportunities({myself, nora})
 
-        self.assertEqual(result, {GrabIntoDeadZone(actor_slot="P1", target_slot="obj02")})
+        self.assertEqual(
+            result,
+            {GrabOpportunity(actor_slot="P1", target_slot="obj02", reason=GrabReason.DEAD_ZONE)},
+        )
 
     def test_bosses_are_out_of_scope(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
@@ -732,7 +753,12 @@ class CheckForGrabOpportunitiesTests(unittest.TestCase):
         result = check_for_grab_opportunities({myself, antonio})
 
         self.assertEqual(
-            result, {GrabAntonioOnPunish(actor_slot="P1", target_slot="obj09")}
+            result,
+            {
+                GrabOpportunity(
+                    actor_slot="P1", target_slot="obj09", reason=GrabReason.ANTONIO_ON_PUNISH
+                )
+            },
         )
 
     def test_a_ready_antonio_is_not_a_grab_opportunity(self) -> None:
@@ -1513,7 +1539,12 @@ class CheckForSoutherGrabOnPunishTests(unittest.TestCase):
         )
         result = check_for_grab_opportunities({myself, camera, souther})
         self.assertEqual(
-            result, {GrabSoutherOnPunish(actor_slot="P1", target_slot="obj11")}
+            result,
+            {
+                GrabOpportunity(
+                    actor_slot="P1", target_slot="obj11", reason=GrabReason.SOUTHER_ON_PUNISH
+                )
+            },
         )
 
     def test_the_long_recovery_state_does_not(self) -> None:

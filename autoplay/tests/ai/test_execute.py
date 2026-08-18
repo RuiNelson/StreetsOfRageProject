@@ -14,14 +14,12 @@ from sor_autoplay.ai.tokens import (
     GrabEnemy,
     HitAntonioBoomerang,
     JumpAttack,
+    MeleeWeaponAttack,
     OpenBreakable,
     Punch,
     RearAttack,
     ReleaseGrab,
-    SprayPepper,
-    StabWithKnifeOrBottle,
     Supplex,
-    SwingBatOrPipe,
     TechRecover,
     ThrowKnife,
     ThrowPepper,
@@ -1344,8 +1342,8 @@ class ExecutePunchTests(unittest.TestCase):
 
     def test_still_punches_while_holding_a_weapon(self) -> None:
         # could_punch no longer produces Punch while armed (that's
-        # SwingBatOrPipe/StabWithKnifeOrBottle/SprayPepper's job now), but
-        # execution itself is unconditional on whatever Verb it's given.
+        # could_melee_weapon_attack's job now), but execution itself is
+        # unconditional on whatever Verb it's given.
         actor = replace(_myself(), held_weapon_type=0x0A)  # baseball bat
         verb = Punch(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
@@ -1355,29 +1353,25 @@ class ExecutePunchTests(unittest.TestCase):
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
 
-class ExecuteSwingBatOrPipeTests(unittest.TestCase):
-    def test_presses_button_b(self) -> None:
-        verb = SwingBatOrPipe(actor_slot="P1", target_slot="obj01")
+class ExecuteMeleeWeaponAttackTests(unittest.TestCase):
+    def test_presses_button_b_for_bat_or_pipe(self) -> None:
+        verb = MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x0A)
         gamepad, client = _gamepad()
 
         execute_verb(verb, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
-
-class ExecuteStabWithKnifeOrBottleTests(unittest.TestCase):
-    def test_presses_button_b(self) -> None:
-        verb = StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01")
+    def test_presses_button_b_for_knife_or_bottle(self) -> None:
+        verb = MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x08)
         gamepad, client = _gamepad()
 
         execute_verb(verb, set(), gamepad)
 
         client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
 
-
-class ExecuteSprayPepperTests(unittest.TestCase):
-    def test_presses_button_b(self) -> None:
-        verb = SprayPepper(actor_slot="P1", target_slot="obj01")
+    def test_presses_button_b_for_pepper(self) -> None:
+        verb = MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x0C)
         gamepad, client = _gamepad()
 
         execute_verb(verb, set(), gamepad)

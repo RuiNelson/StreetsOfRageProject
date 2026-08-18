@@ -19,7 +19,8 @@ class WalkToNearEnemy(Walk):
 
     Produced by ``could_walk_to_near_enemy`` once per reachable enemy when
     at least one on-screen enemy exists and none carries an
-    ``ActionableTarget`` for this actor yet (``reach.enemy_actionable``:
+    ``TargetInReach`` of kind ``ACTIONABLE`` for this actor yet
+    (``reach.enemy_actionable``:
     within rear range *and* worth the RearAttack chord there, or within
     punch range and actually in front -- not just inside the punch box's raw
     distance, which ignores facing and would otherwise make this skip a
@@ -126,7 +127,7 @@ class RetreatFromDanger(Walk):
     Produced by ``could_retreat_from_danger`` once per ``IncomingMelee``
     (an on-screen enemy in a dangerous phase, close enough that continuing
     to approach risks arriving right as its hit lands) that carries no
-    ``ActionableTarget`` -- not really hittable yet -- and **only while
+    ``TargetInReach`` of kind ``ACTIONABLE`` -- not really hittable yet -- and **only while
     ``decide._retreat_is_worth_it``**: the actor is hurt, or ``Surrounded``.
     Danger alone is deliberately not enough, since no enemy can be defeated
     without standing in the range it hits back from. Never just the nearest;
@@ -171,7 +172,7 @@ class ProjectileSidestep(Walk):
     floor 30 (see priority._emergency_projectile_sidestep) -- above every
     ordinary approach/retreat tier so the actor clears the lane before the
     weapon lands, below a guaranteed PunishWindow strike (60) and the
-    RearAttack/GrabToClearRear escapes, which stay the right answer even
+    RearAttack/CLEAR_REAR grab escapes, which stay the right answer even
     with a projectile also in flight.
     """
 

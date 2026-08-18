@@ -13,6 +13,7 @@ tokens.
 from __future__ import annotations
 
 import math
+from typing import Callable
 
 from .. import prop_solids
 from ..phases import CombatPhase, is_dangerous, is_punishable
@@ -24,14 +25,12 @@ from .tokens import (
     HitAntonioBoomerang,
     JumpAttack,
     AttackHeldEnemy,
+    MeleeWeaponAttack,
     Punch,
     RearAttack,
     ReleaseGrab,
     OpenBreakable,
-    SprayPepper,
-    StabWithKnifeOrBottle,
     Supplex,
-    SwingBatOrPipe,
     TechRecover,
     ThrowHeldEnemy,
     ThrowKnife,
@@ -45,18 +44,15 @@ from .tokens import (
 )
 from .tokens import Antonio, Boss, Enemy, Jack, Souther
 from .tokens import (
-    ActionableTarget,
     AntonioIsGoingToKick,
     GrabOpportunity,
-    GrabJackFromBehind,
-    InGrabReach,
-    InJumpAttackReach,
-    InPunchReach,
-    InRearReach,
+    GrabReason,
     IncomingMelee,
     IncomingProjectile,
+    ReachKind,
     SoutherIsGoingToSlash,
     SoutherPunishesJump,
+    TargetInReach,
     Surrounded,
 )
 from .tokens import AnimationInProgress, CameraRange, Stage
@@ -165,14 +161,20 @@ def _blocked(context: Context, actor: PlayableCharacter) -> bool:
 
 
 STAB_WEAPON_TYPES = frozenset({0x08, 0x09})  # knife, bottle
+# Every weapon type MeleeWeaponAttack covers: bat/pipe, knife/bottle, pepper.
+MELEE_WEAPON_HELD_TYPES = MELEE_WEAPON_TYPES | STAB_WEAPON_TYPES | frozenset({PEPPER_SPRAY_TYPE})
 
 
-def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, verb_cls) -> Context:
-    """Shared body for ``could_punch`` / ``could_swing_bat_or_pipe`` /
-    ``could_stab_with_knife_or_bottle`` / ``could_spray_pepper``: they
+def _could_melee_strike(
+    context: Context, *, held_types: frozenset[int] | None, make_verb: Callable[[str, str, int], Token]
+) -> Context:
+    """Shared body for ``could_punch`` / ``could_melee_weapon_attack``: they
     issue the identical B-button input (see execute.py's
     ``state_machine_melee_strike``), gated only on which weapon type (if any)
     the actor holds. ``held_types=None`` means unarmed (``Punch``).
+    ``make_verb(actor_slot, target_slot, held_weapon_type)`` builds the
+    concrete ``Verb`` -- ``Punch`` ignores the weapon type it is passed,
+    ``MeleeWeaponAttack`` carries it as its own ``weapon_type`` field.
 
     Refuses an *unarmed* punch on a Jack currently juggling his axe/torch
     (``Jack.has_projectile``): closing in with bare fists trades hits with
@@ -202,14 +204,16 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
         )
         if not held_matches:
             continue
-        # InPunchReach already carries the "in front (within tolerance) and
+        # TargetInReach(kind=PUNCH) already carries the "in front (within tolerance) and
         # inside the band" judgment this used to recompute inline.
         kick_slots = {
             token.target_slot
             for token in find_all(context, AntonioIsGoingToKick)
             if token.actor_slot == actor.slot
         }
-        for target_slot in reach.targets_of(context, InPunchReach, actor.slot):
+        for target_slot in reach.targets_of(
+            context, TargetInReach, actor.slot, kind=ReachKind.PUNCH
+        ):
             target = find(context, Enemy, slot=target_slot)
             if (
                 held_types is None
@@ -225,27 +229,27 @@ def _could_melee_strike(context: Context, *, held_types: frozenset[int] | None, 
                     continue
                 if target_slot in kick_slots and target.strike_is_committed():
                     continue
-            verbs.add(verb_cls(actor_slot=actor.slot, target_slot=target_slot))
+            verbs.add(make_verb(actor.slot, target_slot, actor.held_weapon_type))
     return verbs
 
 
 def could_punch(context: Context) -> Context:
-    return _could_melee_strike(context, held_types=None, verb_cls=Punch)
-
-
-def could_swing_bat_or_pipe(context: Context) -> Context:
-    return _could_melee_strike(context, held_types=MELEE_WEAPON_TYPES, verb_cls=SwingBatOrPipe)
-
-
-def could_stab_with_knife_or_bottle(context: Context) -> Context:
     return _could_melee_strike(
-        context, held_types=STAB_WEAPON_TYPES, verb_cls=StabWithKnifeOrBottle
+        context,
+        held_types=None,
+        make_verb=lambda actor_slot, target_slot, _weapon_type: Punch(
+            actor_slot=actor_slot, target_slot=target_slot
+        ),
     )
 
 
-def could_spray_pepper(context: Context) -> Context:
+def could_melee_weapon_attack(context: Context) -> Context:
     return _could_melee_strike(
-        context, held_types=frozenset({PEPPER_SPRAY_TYPE}), verb_cls=SprayPepper
+        context,
+        held_types=MELEE_WEAPON_HELD_TYPES,
+        make_verb=lambda actor_slot, target_slot, weapon_type: MeleeWeaponAttack(
+            actor_slot=actor_slot, target_slot=target_slot, weapon_type=weapon_type
+        ),
     )
 
 
@@ -260,7 +264,7 @@ def could_rear_attack(context: Context) -> Context:
             continue
         if actor.is_airborne:
             continue
-        # InRearReach, NOT ClosingEnemy: an earlier version also fired here
+        # TargetInReach(kind=REAR), NOT ClosingEnemy: an earlier version also fired here
         # purely on that early-warning inference, before the enemy was
         # actually in the chord's real range. Live testing showed that
         # backfires -- $322A only hits based on *current* position, so
@@ -280,10 +284,12 @@ def could_rear_attack(context: Context) -> Context:
         # way): the chord would fire away from him. Walk around and grab.
         on_jacks_back = {
             token.target_slot
-            for token in find_all(context, GrabJackFromBehind)
-            if token.actor_slot == actor.slot
+            for token in find_all(context, GrabOpportunity)
+            if token.actor_slot == actor.slot and token.reason is GrabReason.JACK_FROM_BEHIND
         }
-        for target_slot in reach.targets_of(context, InRearReach, actor.slot):
+        for target_slot in reach.targets_of(
+            context, TargetInReach, actor.slot, kind=ReachKind.REAR
+        ):
             if target_slot in on_jacks_back:
                 continue
             verbs.add(RearAttack(actor_slot=actor.slot, target_slot=target_slot))
@@ -320,9 +326,9 @@ def could_grab_enemy(context: Context) -> Context:
     """Walk into an enemy, unarmed and unattacking, to take a hold of it.
 
     Both halves of the question are already answered in the context:
-    ``InGrabReach`` says the walk-in would connect, ``GrabOpportunity`` says
-    the hold is worth more than a strike here. This function only adds the
-    gates about the *actor*.
+    ``TargetInReach`` (``kind=ReachKind.GRAB``) says the walk-in would
+    connect, ``GrabOpportunity`` says the hold is worth more than a strike
+    here. This function only adds the gates about the *actor*.
 
     Armed actors are excluded. The ROM's contact test does not care what the
     actor carries, but every held weapon has its own melee move with better
@@ -345,7 +351,7 @@ def could_grab_enemy(context: Context) -> Context:
             # $AAA0 aborts the grab code unless the two bodies are within 8px
             # of elevation, so an airborne actor cannot take a hold at all.
             continue
-        in_reach = reach.targets_of(context, InGrabReach, actor.slot)
+        in_reach = reach.targets_of(context, TargetInReach, actor.slot, kind=ReachKind.GRAB)
         threatening = reach.targets_of(context, IncomingMelee, actor.slot)
         for target_slot in reach.targets_of(context, GrabOpportunity, actor.slot):
             if target_slot not in in_reach:
@@ -435,10 +441,11 @@ def could_hold_actions(context: Context) -> Context:
 # clause read "no amount of facing answers being hit from both sides at once;
 # the only fix is space" -- and space is not the fix. Per the user, a crowd is
 # answered by taking a hold: grab one of the bodies and suplex or throw it
-# (see inference.GrabWhileSurrounded). Backing away from a crowd at full
-# health is the failure this whole comment already describes one paragraph up
-# -- the AI backs off, the crowd follows, and the round goes nowhere -- it was
-# just exempted from its own rule.
+# (see inference.check_for_grab_opportunities' GrabReason.WHILE_SURROUNDED
+# case). Backing away from a crowd at full health is the failure this whole
+# comment already describes one paragraph up -- the AI backs off, the crowd
+# follows, and the round goes nowhere -- it was just exempted from its own
+# rule.
 #
 # Measured, and this is why it had to go rather than merely be re-tuned:
 # widening check_for_surrounded's box (reach.SURROUNDED_NEAR_X/_Y) so the
@@ -448,7 +455,8 @@ def could_hold_actions(context: Context) -> Context:
 # passive as a direct side effect of making the crowd judgment work.
 #
 # Surrounded still matters -- it raises CallPolice (the actual panic button,
-# still health-gated) and GrabWhileSurrounded. It just no longer means "flee".
+# still health-gated) and the WHILE_SURROUNDED grab reason. It just no
+# longer means "flee".
 #
 # Healthy, the AI walks in and takes the hit it has to take, crowd or not.
 RETREAT_HEALTH_PERCENT_THRESHOLD = HEALTH_CRITICAL_PERCENT
@@ -504,7 +512,9 @@ def could_walk_to_near_enemy(context: Context) -> Context:
             ]
         if not enemies:
             continue
-        actionable = reach.targets_of(context, ActionableTarget, actor.slot)
+        actionable = reach.targets_of(
+            context, TargetInReach, actor.slot, kind=ReachKind.ACTIONABLE
+        )
         # One candidate per reachable enemy -- determine_priority_verb
         # (priority.py's distance-scored emergency) picks the closest one,
         # per AI.md's own target-selection principle: this function only
@@ -635,7 +645,9 @@ def could_retreat_from_danger(context: Context) -> Context:
             continue
         if not _retreat_is_worth_it(context, actor):
             continue  # healthy and not boxed in -- engage, don't flee
-        actionable = reach.targets_of(context, ActionableTarget, actor.slot)
+        actionable = reach.targets_of(
+            context, TargetInReach, actor.slot, kind=ReachKind.ACTIONABLE
+        )
         for target_slot in reach.targets_of(context, IncomingMelee, actor.slot):
             enemy = find(context, Enemy, slot=target_slot)
             if enemy is None:
@@ -871,8 +883,9 @@ def could_jump_attack(context: Context) -> Context:
     through jumps in silence:
 
     - *grounded*: should this jump happen at all? Answered by
-      ``InJumpAttackReach`` (in front, past the punch's own outer edge,
-      inside the kick's free-flight range), the "never launch into a
+      ``TargetInReach`` (``kind=ReachKind.JUMP_ATTACK``: in front, past
+      the punch's own outer edge, inside the kick's free-flight range),
+      the "never launch into a
       committed attack" gate, and ``navigation.jump_landing_is_safe`` --
       the pathfinder refuses a launch whose current-lane flight would
       skip a walk-around and land in a pit.
@@ -882,7 +895,8 @@ def could_jump_attack(context: Context) -> Context:
       and pressing it is free, while not pressing it means landing having
       done nothing at all.
 
-    That second case used to depend on ``InJumpAttackReach`` still holding
+    That second case used to depend on ``TargetInReach`` (``JUMP_ATTACK``)
+    still holding
     mid-flight, which it often does not: the target walks out of the band,
     drifts a lane, or the flight simply carries the actor past it. Measured
     on the flight harness, 66 of 556 launched jumps produced no kick at all
@@ -917,8 +931,8 @@ def could_jump_attack(context: Context) -> Context:
             # live with a bat in hand: 246 of 4859 ticks sat in $42, the
             # armed jump attack, while the AI believed it was performing an
             # ordinary jump kick. Armed, the answer is the weapon's own
-            # swing -- could_swing_bat_or_pipe and friends -- reached by
-            # walking in, which could_walk_to_near_enemy already does.
+            # swing -- could_melee_weapon_attack -- reached by walking in,
+            # which could_walk_to_near_enemy already does.
             continue
         if not actor.is_airborne and any(
             token.actor_slot == actor.slot
@@ -944,9 +958,11 @@ def could_jump_attack(context: Context) -> Context:
             # the tick reaches press_no_button and costs both the kick and the
             # held direction $384E samples.
             continue
-        target_slots = set(reach.targets_of(context, InJumpAttackReach, actor.slot))
+        target_slots = set(
+            reach.targets_of(context, TargetInReach, actor.slot, kind=ReachKind.JUMP_ATTACK)
+        )
         # Jump-kicking Antonio is a real opener, not only a hop over his
-        # kick: the usual InJumpAttackReach band is just past punch outer
+        # kick: the usual JUMP_ATTACK band is just past punch outer
         # (Axel: ~10px), which is too thin to ever fire. Offer a hop
         # anywhere inside the kick's free-flight range. A punishable
         # Antonio is a grab, not another hop -- unless already airborne,
@@ -1440,9 +1456,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_hit_antonio_boomerang(context)
         | could_walk_to_advance_stage(context)
         | could_punch(context)
-        | could_swing_bat_or_pipe(context)
-        | could_stab_with_knife_or_bottle(context)
-        | could_spray_pepper(context)
+        | could_melee_weapon_attack(context)
         | could_rear_attack(context)
         | could_call_police(context)
         | could_jump_attack(context)

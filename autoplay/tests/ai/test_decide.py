@@ -8,12 +8,10 @@ from sor_autoplay.ai.tokens import (
     JumpAttack,
     AttackHeldEnemy,
     HitAntonioBoomerang,
+    MeleeWeaponAttack,
     OpenBreakable,
     Punch,
     RearAttack,
-    SprayPepper,
-    StabWithKnifeOrBottle,
-    SwingBatOrPipe,
     TechRecover,
     ThrowKnife,
     ThrowPepper,
@@ -35,13 +33,11 @@ from sor_autoplay.ai.decide import (
     could_hit_antonio_boomerang,
     could_hold_actions,
     could_jump_attack,
+    could_melee_weapon_attack,
     could_projectile_sidestep,
     could_punch,
     could_rear_attack,
     could_retreat_from_danger,
-    could_spray_pepper,
-    could_stab_with_knife_or_bottle,
-    could_swing_bat_or_pipe,
     could_tech_recover,
     could_throw_knife,
     could_throw_pepper,
@@ -92,8 +88,8 @@ def _with_inference(generator):
     """Run ``generate_inference_tokens`` before the generator under test.
 
     AI.md's loop always derives the ``Inferred`` half of the context before
-    any ``could_*`` runs, and the generators read those tokens (``InPunchReach``,
-    ``ActionableTarget``, ``IncomingMelee``, ``WeaponUpgrade``, ...) instead of
+    any ``could_*`` runs, and the generators read those tokens (``TargetInReach``,
+    ``IncomingMelee``, ``WeaponUpgrade``, ...) instead of
     recomputing the geometry themselves. These tests hand-build the *observed*
     half, so they have to derive the inferred half the same way the loop does
     -- otherwise they would be exercising half a pipeline.
@@ -115,13 +111,11 @@ could_grab_enemy = _with_inference(could_grab_enemy)
 could_hit_antonio_boomerang = _with_inference(could_hit_antonio_boomerang)
 could_hold_actions = _with_inference(could_hold_actions)
 could_jump_attack = _with_inference(could_jump_attack)
+could_melee_weapon_attack = _with_inference(could_melee_weapon_attack)
 could_projectile_sidestep = _with_inference(could_projectile_sidestep)
 could_punch = _with_inference(could_punch)
 could_rear_attack = _with_inference(could_rear_attack)
 could_retreat_from_danger = _with_inference(could_retreat_from_danger)
-could_spray_pepper = _with_inference(could_spray_pepper)
-could_stab_with_knife_or_bottle = _with_inference(could_stab_with_knife_or_bottle)
-could_swing_bat_or_pipe = _with_inference(could_swing_bat_or_pipe)
 could_tech_recover = _with_inference(could_tech_recover)
 could_throw_knife = _with_inference(could_throw_knife)
 could_throw_pepper = _with_inference(could_throw_pepper)
@@ -392,102 +386,78 @@ class CouldPunchTests(unittest.TestCase):
 
     def test_does_not_fire_while_holding_any_weapon(self) -> None:
         # Punch is unarmed-only now -- a held bat/pipe/knife/bottle/pepper
-        # fires SwingBatOrPipe/StabWithKnifeOrBottle/SprayPepper instead
-        # (same B-button input, but a genuinely different ROM move/reach).
+        # fires MeleeWeaponAttack instead (same B-button input, but a
+        # genuinely different ROM move/reach, chosen by weapon_type).
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
         enemy = make_enemy(world_x=130, world_y=100)  # well within any of the bands
 
         self.assertEqual(could_punch({myself, enemy}), set())
 
 
-class CouldSwingBatOrPipeTests(unittest.TestCase):
-    def test_fires_within_the_measured_36px_reach(self) -> None:
+class CouldMeleeWeaponAttackTests(unittest.TestCase):
+    def test_bat_fires_within_the_measured_36px_reach(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
         enemy = make_enemy(world_x=130, world_y=100)  # dx=30, within bat's 36
 
-        result = could_swing_bat_or_pipe({myself, enemy})
+        result = could_melee_weapon_attack({myself, enemy})
 
-        self.assertEqual(result, {SwingBatOrPipe(actor_slot="P1", target_slot="obj01")})
+        self.assertEqual(
+            result, {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x0A)}
+        )
 
     def test_pipe_also_fires(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0B)
         enemy = make_enemy(world_x=130, world_y=100)
 
-        result = could_swing_bat_or_pipe({myself, enemy})
+        result = could_melee_weapon_attack({myself, enemy})
 
-        self.assertEqual(result, {SwingBatOrPipe(actor_slot="P1", target_slot="obj01")})
+        self.assertEqual(
+            result, {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x0B)}
+        )
 
-    def test_does_not_fire_beyond_the_36px_reach(self) -> None:
+    def test_bat_does_not_fire_beyond_the_36px_reach(self) -> None:
         # Axel's unarmed outer is 50, but a held bat's measured reach is 36
         # (weapons-range-and-damage.md) -- a target at dx=45 is unreachable.
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)
         enemy = make_enemy(world_x=145, world_y=100)
 
-        self.assertEqual(could_swing_bat_or_pipe({myself, enemy}), set())
+        self.assertEqual(could_melee_weapon_attack({myself, enemy}), set())
 
     def test_does_not_fire_when_unarmed(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
         enemy = make_enemy(world_x=130, world_y=100)
 
-        self.assertEqual(could_swing_bat_or_pipe({myself, enemy}), set())
+        self.assertEqual(could_melee_weapon_attack({myself, enemy}), set())
 
-    def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
-        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)  # knife
-        enemy = make_enemy(world_x=130, world_y=100)
-
-        self.assertEqual(could_swing_bat_or_pipe({myself, enemy}), set())
-
-
-class CouldStabWithKnifeOrBottleTests(unittest.TestCase):
-    def test_fires_within_the_unarmed_punch_band(self) -> None:
+    def test_knife_fires_within_the_unarmed_punch_band(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
         enemy = make_enemy(world_x=130, world_y=105)
 
-        result = could_stab_with_knife_or_bottle({myself, enemy})
+        result = could_melee_weapon_attack({myself, enemy})
 
-        self.assertEqual(result, {StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01")})
+        self.assertEqual(
+            result, {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x08)}
+        )
 
     def test_bottle_also_fires(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x09)
         enemy = make_enemy(world_x=130, world_y=105)
 
-        result = could_stab_with_knife_or_bottle({myself, enemy})
+        result = could_melee_weapon_attack({myself, enemy})
 
-        self.assertEqual(result, {StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01")})
+        self.assertEqual(
+            result, {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x09)}
+        )
 
-    def test_does_not_fire_when_unarmed(self) -> None:
-        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
-        enemy = make_enemy(world_x=130, world_y=105)
-
-        self.assertEqual(could_stab_with_knife_or_bottle({myself, enemy}), set())
-
-    def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
-        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)  # bat
-        enemy = make_enemy(world_x=130, world_y=105)
-
-        self.assertEqual(could_stab_with_knife_or_bottle({myself, enemy}), set())
-
-
-class CouldSprayPepperTests(unittest.TestCase):
-    def test_fires_within_the_unarmed_punch_band(self) -> None:
+    def test_pepper_fires_within_the_unarmed_punch_band(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
         enemy = make_enemy(world_x=130, world_y=105)
 
-        result = could_spray_pepper({myself, enemy})
+        result = could_melee_weapon_attack({myself, enemy})
 
-        self.assertEqual(result, {SprayPepper(actor_slot="P1", target_slot="obj01")})
-
-    def test_does_not_fire_when_unarmed(self) -> None:
-        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0)
-        enemy = make_enemy(world_x=130, world_y=105)
-
-        self.assertEqual(could_spray_pepper({myself, enemy}), set())
-
-    def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
-        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)  # knife
-        enemy = make_enemy(world_x=130, world_y=105)
-
-        self.assertEqual(could_spray_pepper({myself, enemy}), set())
+        self.assertEqual(
+            result, {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x0C)}
+        )
 
 
 class CouldRearAttackTests(unittest.TestCase):
@@ -874,10 +844,10 @@ class CouldRetreatFromDangerTests(unittest.TestCase):
         #
         # Reversed on user report. Space is not the fix for a crowd -- a hold
         # is (grab one of them and suplex or throw it, see
-        # inference.GrabWhileSurrounded), and backing away from a crowd at
-        # full health is exactly the failure this generator's own comment
-        # already warns about: the AI backs off, the crowd follows, and the
-        # round goes nowhere.
+        # inference.check_for_grab_opportunities' WHILE_SURROUNDED reason),
+        # and backing away from a crowd at full health is exactly the
+        # failure this generator's own comment already warns about: the AI
+        # backs off, the crowd follows, and the round goes nowhere.
         #
         # It was also measurable. Widening check_for_surrounded's box so the
         # judgment stops collapsing after a dozen px of the actor's own
@@ -2022,24 +1992,24 @@ class JackJugglingMeleeTests(unittest.TestCase):
 
         self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj01")})
 
-    def test_could_swing_bat_or_pipe_still_fires_on_a_juggling_jack(self) -> None:
+    def test_could_melee_weapon_attack_still_fires_on_a_juggling_jack_with_a_bat(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)  # baseball bat
         jack = make_jack(world_x=130, world_y=105, has_projectile=True)
         context: set[Token] = {myself, jack}
 
         self.assertEqual(
-            could_swing_bat_or_pipe(context),
-            {SwingBatOrPipe(actor_slot="P1", target_slot="obj01")},
+            could_melee_weapon_attack(context),
+            {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x0A)},
         )
 
-    def test_could_stab_with_knife_or_bottle_still_fires_on_a_juggling_jack(self) -> None:
+    def test_could_melee_weapon_attack_still_fires_on_a_juggling_jack_with_a_knife(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)  # knife
         jack = make_jack(world_x=130, world_y=105, has_projectile=True)
         context: set[Token] = {myself, jack}
 
         self.assertEqual(
-            could_stab_with_knife_or_bottle(context),
-            {StabWithKnifeOrBottle(actor_slot="P1", target_slot="obj01")},
+            could_melee_weapon_attack(context),
+            {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x08)},
         )
 
     def test_a_non_juggling_jack_does_not_affect_a_different_juggling_jack(self) -> None:
@@ -2291,7 +2261,7 @@ class CouldGrabAntonioOnPunishTests(unittest.TestCase):
 class JumpKickAntonioTests(unittest.TestCase):
     def test_offers_a_hop_on_a_live_antonio_inside_kick_range(self) -> None:
         # dx=40 is inside Axel's punch (50) *and* kick (60). The usual
-        # InJumpAttackReach band starts past punch outer, so without the
+        # JUMP_ATTACK band starts past punch outer, so without the
         # Antonio-specific offer this hop never fires.
         myself = make_myself(world_x=120, world_y=100, facing_left=False)
         antonio = _antonio(

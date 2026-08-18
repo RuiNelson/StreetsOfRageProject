@@ -42,14 +42,12 @@ from .tokens import (
     HitAntonioBoomerang,
     JumpAttack,
     AttackHeldEnemy,
+    MeleeWeaponAttack,
     Punch,
     RearAttack,
     OpenBreakable,
     ReleaseGrab,
-    SprayPepper,
-    StabWithKnifeOrBottle,
     Supplex,
-    SwingBatOrPipe,
     TechRecover,
     ThrowHeldEnemy,
     ThrowKnife,
@@ -60,13 +58,7 @@ from .tokens import Antonio, Boss, Breakable, Enemy, Grunt, Jack, Nora
 from .tokens import (
     AntonioIsGoingToKick,
     GrabOpportunity,
-    GrabAntonioOnPunish,
-    GrabIntoDeadZone,
-    GrabJackFromBehind,
-    GrabSoutherOnPunish,
-    GrabToClearRear,
-    GrabToDodgeCharge,
-    GrabWhileSurrounded,
+    GrabReason,
     IncomingMelee,
     IncomingProjectile,
     PunishWindow,
@@ -201,16 +193,16 @@ _EMERGENCY_GRAB_TO_DODGE_CHARGE = 61
 # does not deal well when surrounded":
 #
 # - three enemies in the close box with none strictly *behind* produced no
-#   GrabOpportunity at all (GrabToClearRear needs a confirmed rear enemy), so
+#   GrabOpportunity at all (CLEAR_REAR needs a confirmed rear enemy), so
 #   the winning verb was a plain Punch(20) thrown into the crowd;
 # - in a real pincer the grab *was* offered, and lost anyway --
-#   _EMERGENCY_REAR_ATTACK_DANGEROUS(60) beat GrabToClearRear(58).
+#   _EMERGENCY_REAR_ATTACK_DANGEROUS(60) beat _EMERGENCY_GRAB_CLEAR_REAR(58).
 #
 # That second case is the one worth being precise about, because 60 is not an
 # arbitrary number: it is "escape a commit from behind", and walking into a
 # committed attack is normally how the actor takes the hit instead of the
-# hold. It does not apply here. A grab candidate has already passed
-# InGrabReach *and* GRABBABLE_PHASES, so the body is within contact range and
+# hold. It does not apply here. A grab candidate has already passed a
+# TargetInReach (kind GRAB) *and* GRABBABLE_PHASES, so the body is within contact range and
 # is itself not mid-swing -- there is no walk across the room to be punished
 # for. And the hold answers the pincer better than the chord does: the chord
 # hits one enemy by current position and whiffs if it drifts, while the hold
@@ -222,7 +214,7 @@ _EMERGENCY_GRAB_TO_DODGE_CHARGE = 61
 # HitAntonioBoomerang(62) -- an incoming projectile still has to be answered
 # first -- and below every hold move (64..70), which cannot coexist anyway
 # since could_grab_enemy skips while already holding. Shares 61 with
-# GrabAntonioOnPunish, which is coherent rather than a collision: both say
+# ANTONIO_ON_PUNISH, which is coherent rather than a collision: both say
 # "the hold is the answer here", and _emergency_grab_enemy takes the max over
 # whichever opportunities hold.
 _EMERGENCY_GRAB_WHILE_SURROUNDED = 61
@@ -324,7 +316,7 @@ _EMERGENCY_RETREAT_FROM_DANGER = 17  # closer scoring higher, floor 15
 # only getting out of its lane does. Sits above every ordinary approach/
 # retreat tier so the actor clears the lane before the weapon lands, but
 # below a guaranteed PunishWindow strike (60) and the RearAttack/
-# GrabToClearRear escapes (55/58/60): those stay the right answer even with
+# CLEAR_REAR grab escapes (55/58/60): those stay the right answer even with
 # a projectile also in flight, since abandoning a free hit to dodge a throw
 # that might still be avoided on its own trades a certain gain for an
 # uncertain one.
@@ -541,10 +533,9 @@ def _is_punish_window(context: Context, target_slot: str | None) -> bool:
 
 
 def _emergency_melee_strike(verb: Verb, context: Context) -> int:
-    """Shared scoring for ``Punch`` / ``SwingBatOrPipe`` /
-    ``StabWithKnifeOrBottle`` / ``SprayPepper`` -- same formula regardless
-    of held weapon, since none of these has evidence of a different
-    punishable-phase payoff."""
+    """Shared scoring for ``Punch`` / ``MeleeWeaponAttack`` -- same formula
+    regardless of held weapon, since none of these has evidence of a
+    different punishable-phase payoff."""
 
     target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
     if target is None:
@@ -605,6 +596,19 @@ def _emergency_hit_antonio_boomerang(verb: HitAntonioBoomerang, context: Context
     return _EMERGENCY_HIT_ANTONIO_BOOMERANG
 
 
+# Score per GrabReason, looked up by _emergency_grab_enemy. See the
+# _EMERGENCY_GRAB_* constants above for why each tier is where it is.
+_GRAB_REASON_SCORE: dict[GrabReason, int] = {
+    GrabReason.CLEAR_REAR: _EMERGENCY_GRAB_CLEAR_REAR,
+    GrabReason.JACK_FROM_BEHIND: _EMERGENCY_GRAB_JACK_FROM_BEHIND,
+    GrabReason.DEAD_ZONE: _EMERGENCY_GRAB_DEAD_ZONE,
+    GrabReason.ANTONIO_ON_PUNISH: _EMERGENCY_GRAB_ANTONIO_ON_PUNISH,
+    GrabReason.SOUTHER_ON_PUNISH: _EMERGENCY_GRAB_SOUTHER_ON_PUNISH,
+    GrabReason.WHILE_SURROUNDED: _EMERGENCY_GRAB_WHILE_SURROUNDED,
+    GrabReason.DODGE_CHARGE: _EMERGENCY_GRAB_TO_DODGE_CHARGE,
+}
+
+
 def _emergency_grab_enemy(verb: GrabEnemy, context: Context) -> int:
     """The best tier among the ``GrabOpportunity`` tokens for this pair.
 
@@ -624,22 +628,12 @@ def _emergency_grab_enemy(verb: GrabEnemy, context: Context) -> int:
     if not opportunities:
         return _EMERGENCY_DEFAULT
 
-    score = _EMERGENCY_DEFAULT
-    if any(isinstance(token, GrabToClearRear) for token in opportunities):
-        score = max(score, _EMERGENCY_GRAB_CLEAR_REAR)
-    if any(isinstance(token, GrabJackFromBehind) for token in opportunities):
-        score = max(score, _EMERGENCY_GRAB_JACK_FROM_BEHIND)
-    if any(isinstance(token, GrabIntoDeadZone) for token in opportunities):
-        score = max(score, _EMERGENCY_GRAB_DEAD_ZONE)
-    if any(isinstance(token, GrabAntonioOnPunish) for token in opportunities):
-        score = max(score, _EMERGENCY_GRAB_ANTONIO_ON_PUNISH)
-    if any(isinstance(token, GrabSoutherOnPunish) for token in opportunities):
-        score = max(score, _EMERGENCY_GRAB_SOUTHER_ON_PUNISH)
-    if any(isinstance(token, GrabWhileSurrounded) for token in opportunities):
-        score = max(score, _EMERGENCY_GRAB_WHILE_SURROUNDED)
-    if any(isinstance(token, GrabToDodgeCharge) for token in opportunities):
-        score = max(score, _EMERGENCY_GRAB_TO_DODGE_CHARGE)
+    score = max(
+        (_GRAB_REASON_SCORE[token.reason] for token in opportunities),
+        default=_EMERGENCY_DEFAULT,
+    )
     return _with_target_class(score, find(context, Enemy, slot=verb.target_slot))
+
 
 
 def _emergency_open_breakable(verb: OpenBreakable, context: Context) -> int:
@@ -848,9 +842,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     CallPolice: _emergency_call_police,
     RearAttack: _emergency_rear_attack,
     Punch: _emergency_melee_strike,
-    SwingBatOrPipe: _emergency_melee_strike,
-    StabWithKnifeOrBottle: _emergency_melee_strike,
-    SprayPepper: _emergency_melee_strike,
+    MeleeWeaponAttack: _emergency_melee_strike,
     OpenBreakable: _emergency_open_breakable,
     GrabEnemy: _emergency_grab_enemy,
     ThrowHeldEnemy: _held_enemy_emergency(_EMERGENCY_HOLD_THROW),

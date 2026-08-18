@@ -22,14 +22,12 @@ from .tokens import (
     HitAntonioBoomerang,
     JumpAttack,
     AttackHeldEnemy,
+    MeleeWeaponAttack,
     Punch,
     RearAttack,
     OpenBreakable,
     ReleaseGrab,
-    SprayPepper,
-    StabWithKnifeOrBottle,
     Supplex,
-    SwingBatOrPipe,
     TechRecover,
     ThrowHeldEnemy,
     ThrowKnife,
@@ -652,13 +650,14 @@ def _dead_zone_stop_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> 
     Axel is *inside* the whip band, so the AI parked itself squarely where
     she hits and nowhere else, which is what "the AI cannot deal with Noras"
     looks like from the sofa. The rest of the pipeline already knows about
-    the pocket -- ``reach.in_enemy_dead_zone``, ``GrabIntoDeadZone`` -- but
-    the approach that decides where to *stand* never consulted it.
+    the pocket -- ``reach.in_enemy_dead_zone``, ``GrabOpportunity`` reason
+    ``DEAD_ZONE`` -- but the approach that decides where to *stand* never
+    consulted it.
 
     So when the pocket exists and the actor can still land its own strike
     from inside it, aim there instead. The floor is the punch's usable inner
     edge: closer than that and the pocket is safe but unhittable, which is
-    the grab's business (``GrabIntoDeadZone``), not this walk's. The margin
+    the grab's business (``DEAD_ZONE``), not this walk's. The margin
     matches ``reach``'s own, so "inside the dead zone" means the same thing
     to the verb that walks there and to the predicate that judges it.
     """
@@ -1422,10 +1421,9 @@ def state_machine_walk_to_advance_stage(
 
 
 def state_machine_melee_strike(verb: Verb, context: Context, gamepad: VirtualGamepad) -> None:
-    """Shared handler for ``Punch`` / ``SwingBatOrPipe`` /
-    ``StabWithKnifeOrBottle`` / ``SprayPepper`` -- identical B-button press
-    regardless of which (if any) weapon is held; only the ROM-side move that
-    resolves from it differs."""
+    """Shared handler for ``Punch`` / ``MeleeWeaponAttack`` -- identical
+    B-button press regardless of which (if any) weapon is held; only the
+    ROM-side move that resolves from it differs."""
 
     actor = _find_actor(context, getattr(verb, "actor_slot", None))
     target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
@@ -2025,9 +2023,7 @@ _HANDLERS = {
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,
     Punch: state_machine_melee_strike,
-    SwingBatOrPipe: state_machine_melee_strike,
-    StabWithKnifeOrBottle: state_machine_melee_strike,
-    SprayPepper: state_machine_melee_strike,
+    MeleeWeaponAttack: state_machine_melee_strike,
     RearAttack: state_machine_rear_attack,
     CounterGrab: state_machine_counter_grab,
     TechRecover: state_machine_tech_recover,

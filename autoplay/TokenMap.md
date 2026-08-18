@@ -61,19 +61,7 @@ classDiagram
     Inferred <|-- PunishWindow
     Inferred <|-- Surrounded
     Inferred <|-- TargetInReach
-    TargetInReach <|-- InPunchReach
-    TargetInReach <|-- InRearReach
-    TargetInReach <|-- InJumpAttackReach
-    TargetInReach <|-- InGrabReach
-    TargetInReach <|-- ActionableTarget
     Inferred <|-- GrabOpportunity
-    GrabOpportunity <|-- GrabToClearRear
-    GrabOpportunity <|-- GrabIntoDeadZone
-    GrabOpportunity <|-- GrabJackFromBehind
-    GrabOpportunity <|-- GrabAntonioOnPunish
-    GrabOpportunity <|-- GrabSoutherOnPunish
-    GrabOpportunity <|-- GrabWhileSurrounded
-    GrabOpportunity <|-- GrabToDodgeCharge
     Inferred <|-- AntonioIsGoingToKick
     Inferred <|-- SoutherIsGoingToSlash
     Inferred <|-- SoutherPunishesJump
@@ -93,10 +81,7 @@ classDiagram
     Attack <|-- GrabMechanics
     MeleeAttacks <|-- Punch
     MeleeAttacks <|-- HitAntonioBoomerang
-    Attack <|-- MeleeWeaponAttacks
-    MeleeWeaponAttacks <|-- SwingBatOrPipe
-    MeleeWeaponAttacks <|-- StabWithKnifeOrBottle
-    MeleeWeaponAttacks <|-- SprayPepper
+    Attack <|-- MeleeWeaponAttack
     Attack <|-- WeaponAttacks
     WeaponAttacks <|-- ThrowKnife
     WeaponAttacks <|-- ThrowPepper

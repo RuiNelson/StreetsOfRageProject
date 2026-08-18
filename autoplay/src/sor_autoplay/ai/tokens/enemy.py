@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass
+from enum import Enum, auto
 
 from ...attack_ranges import AttackRange
 from ...hitboxes import Hitbox
@@ -350,160 +351,145 @@ class ClosingEnemy(Inferred):
     slot: str
 
 
+class ReachKind(Enum):
+    """Which of the actor's moves ``TargetInReach`` says would connect.
+
+    Each member is one move family ``inference.check_for_targets_in_reach``
+    tests, once per (actor, enemy) pair, from the geometry in
+    ``ai/reach.py``. Kept as an enum rather than one ``TargetInReach``
+    subclass per move because every member is produced by that same single
+    loop and consumed the same way -- ``reach.targets_of(context,
+    TargetInReach, actor.slot, kind=...)`` -- with only which band/kinematics
+    call differing per kind; nothing here ever branches on the token's type,
+    only on which ``kind`` it carries.
+    """
+
+    PUNCH = auto()
+    """A forward strike (B) would connect with this enemy now.
+
+    Produced when the enemy is inside ``reach.in_punch_band`` *and* in
+    front of the actor (within ``reach.punch_behind_tolerance_x``, which
+    the box geometry makes 0 for all three characters) -- the raw band
+    alone ignores facing and describes a dead zone the actor cannot
+    actually hit.
+    """
+
+    REAR = auto()
+    """The ``$322A`` rear/escape chord would reach this enemy now.
+
+    Produced when the enemy is inside ``reach.in_rear_band`` -- the
+    chord's real reach on the enemy's own side (behind vs front), never
+    the union of both, since Axel and Blaze have zero forward reach.
+    """
+
+    JUMP_ATTACK = auto()
+    """A jump kick would cover the gap to this enemy now.
+
+    Produced when the enemy is in front, in lane, beyond the actor's
+    punch outer edge and inside the kick's own free-flight range
+    (``reach.in_jump_attack_band``).
+    """
+
+    ACTIONABLE = auto()
+    """An enemy some already-available attack would really fire on now.
+
+    Produced when ``reach.enemy_actionable`` holds: inside the punch
+    reach, or inside the rear band *and* the chord is the right answer
+    there (``reach.rear_attack_is_warranted``). This is the "stop
+    walking, you can already hit it" signal ``could_walk_to_near_enemy``
+    consumes, and it is deliberately narrower than the union of the
+    bands above.
+    """
+
+    GRAB = auto()
+    """Walking into this enemy would take a hold of it.
+
+    Produced when ``reach.grab_would_connect`` holds -- in front, in
+    lane, and inside the actor's own close-combat range. The hold itself
+    is a contact result, not an input (see ``reach.GRAB_RANGE_Y``), so
+    "in reach" here means "one walk-in away", not "one button away".
+    """
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
-class TargetInReach(Inferred, ABC):
+class TargetInReach(Inferred):
     """An enemy that one of the actor's moves can reach *right now*.
 
     Produced by ``inference.check_for_targets_in_reach`` once per (actor,
-    enemy) pair and per move family, from the geometry in ``ai/reach.py``.
-    Reference-only: both ends are slot references, resolved with
-    ``find(context, Enemy, slot=...)`` / ``_find_actor``.
+    enemy) pair and per move family (``ReachKind``) -- see that enum for
+    what each kind answers. Reference-only: both ends are slot references,
+    resolved with ``find(context, Enemy, slot=...)`` / ``_find_actor``.
 
-    Every concrete subclass answers a different move's question, which is
-    why this is a hierarchy rather than one token with a "kind" field: a
-    ``could_*`` asks for exactly the band its own move uses, and the
-    inference stage computes each band once per tick instead of every
-    ``could_*`` and every ``_emergency_*`` recomputing it from raw
-    coordinates.
+    Several kinds can hold for the same pair at once (an enemy can be both
+    ``ACTIONABLE`` and in ``GRAB`` range), so a pair may carry more than one
+    ``TargetInReach``, one per kind.
     """
 
     actor_slot: str
     target_slot: str
+    kind: ReachKind
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class InPunchReach(TargetInReach):
-    """A forward strike (B) would connect with this enemy now.
+class GrabReason(Enum):
+    """Why a grab is judged worth more than a strike right now.
 
-    Produced by ``inference.check_for_targets_in_reach`` when the enemy is
-    inside ``reach.in_punch_band`` *and* in front of the actor (within
-    ``reach.punch_behind_tolerance_x``, which the box geometry makes 0 for
-    all three characters) -- the raw band alone ignores facing and describes
-    a dead zone the actor cannot actually hit.
+    Each member is one situation ``inference.check_for_grab_opportunities``
+    recognises, kept as an enum rather than one ``GrabOpportunity`` subclass
+    per situation because every situation already produces the identical
+    ``GrabOpportunity(actor_slot, target_slot, reason=...)`` shape and is
+    scored by the identical ``priority._emergency_grab_enemy`` -- "best tier
+    among reasons present for this pair" -- with only the tier constant
+    differing per reason. Most reasons are ``Grunt``-only; ``ANTONIO_ON_
+    PUNISH`` is the exception, because Antonio's punish window is the
+    opening of the punch-grab-suplex that beats standing still to combo him
+    (the combo is his own kick trigger).
     """
 
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class InRearReach(TargetInReach):
-    """The ``$322A`` rear/escape chord would reach this enemy now.
-
-    Produced by ``inference.check_for_targets_in_reach`` when the enemy is
-    inside ``reach.in_rear_band`` -- the chord's real reach on the enemy's
-    own side (behind vs front), never the union of both, since Axel and
-    Blaze have zero forward reach.
-    """
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class InJumpAttackReach(TargetInReach):
-    """A jump kick would cover the gap to this enemy now.
-
-    Produced by ``inference.check_for_targets_in_reach`` when the enemy is
-    in front, in lane, beyond the actor's punch outer edge and inside the
-    kick's own free-flight range (``reach.in_jump_attack_band``).
-    """
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ActionableTarget(TargetInReach):
-    """An enemy some already-available attack would really fire on now.
-
-    Produced by ``inference.check_for_targets_in_reach`` when
-    ``reach.enemy_actionable`` holds: inside the punch reach, or inside the
-    rear band *and* the chord is the right answer there
-    (``reach.rear_attack_is_warranted``). This is the "stop walking, you can
-    already hit it" signal ``could_walk_to_near_enemy`` consumes, and it is
-    deliberately narrower than the union of the bands above.
-    """
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class InGrabReach(TargetInReach):
-    """Walking into this enemy would take a hold of it.
-
-    Produced by ``inference.check_for_targets_in_reach`` when
-    ``reach.grab_would_connect`` holds -- in front, in lane, and inside the
-    actor's own close-combat range. The hold itself is a contact result, not
-    an input (see ``reach.GRAB_RANGE_Y``), so "in reach" here means "one
-    walk-in away", not "one button away".
-    """
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class GrabOpportunity(Inferred, ABC):
-    """Holding this enemy is worth more right now than hitting it.
-
-    Abstract because the situations that make a grab pay off are unrelated
-    to each other and rank differently; each concrete subclass is one such
-    situation, per ``AI.md``'s "subclasses, not discriminator fields". All of
-    them are produced by ``inference.check_for_grab_opportunities``. Most
-    are ``Grunt``-only; ``GrabAntonioOnPunish`` is the exception, because
-    Antonio's punish window is the opening of the punch-grab-suplex that
-    beats standing still to combo him (the combo is his own kick trigger).
-
-    Reference-only, like the ``TargetInReach`` family: both ends are slot
-    references. ``decide.could_grab_enemy`` pairs one of these with an
-    ``InGrabReach`` for the same pair -- the opportunity says it is *worth*
-    grabbing, the reach token says it is *possible*.
-    """
-
-    actor_slot: str
-    target_slot: str
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class GrabToClearRear(GrabOpportunity):
+    CLEAR_REAR = auto()
     """A hold on this enemy is the way out of being caught between two.
 
-    Produced by ``inference.check_for_grab_opportunities`` when another live
-    enemy is inside ``reach.rear_threats``' box behind the actor. Taking the
-    front body turns that pincer into a weapon: ``could_hold_actions``
-    already answers a rear threat with ``ThrowHeldEnemy`` (B+back), which
-    throws the held enemy backwards *into* the one behind, and offers
-    ``FlipHold`` as the alternate that ends up facing that way.
+    Produced when another live enemy is inside ``reach.rear_threats``' box
+    behind the actor. Taking the front body turns that pincer into a
+    weapon: ``could_hold_actions`` already answers a rear threat with
+    ``ThrowHeldEnemy`` (B+back), which throws the held enemy backwards
+    *into* the one behind, and offers ``FlipHold`` as the alternate that
+    ends up facing that way.
     """
 
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class GrabIntoDeadZone(GrabOpportunity):
+    DEAD_ZONE = auto()
     """Every attack this enemy has starts further out than the actor can be.
 
-    Produced by ``inference.check_for_grab_opportunities`` when the enemy's
-    extracted ``attack_ranges`` all have a positive ``forward_min``
-    (``Enemy.min_reach``), so closing to contact leaves it with no move that
-    connects at all.
+    Produced when the enemy's extracted ``attack_ranges`` all have a
+    positive ``forward_min`` (``Enemy.min_reach``), so closing to contact
+    leaves it with no move that connects at all.
 
     Today the ROM picks out exactly one enemy this way: ``Nora``, whose only
     attacking animation selects shape ``$22``, reaching 32 to 80 pixels
     ahead. Every other ordinary type has at least one box that covers its own
     feet. That is deliberately *not* hardcoded here -- an enemy earns this
     because of its extracted geometry, so a corrected extraction or a
-    newly-covered type changes the AI's behaviour without changing this
-    class.
+    newly-covered type changes the AI's behaviour without changing anything
+    here.
     """
 
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class GrabJackFromBehind(GrabOpportunity):
+    JACK_FROM_BEHIND = auto()
     """The actor is already on Jack's back -- take the hold before he turns.
 
-    Produced by ``inference.check_for_grab_opportunities`` when the actor
-    stands behind a live ``Jack`` (``reach.enemy_forward_dx`` negative: Jack
-    is facing away). His axe juggle and lunge punish a front exchange; a
-    back grab skips both. The walk-in still has to face him
-    (``InGrabReach``), so this is "caught him from behind", not "he is
-    behind us" -- that side is ``RearAttack``.
+    Produced when the actor stands behind a live ``Jack``
+    (``reach.enemy_forward_dx`` negative: Jack is facing away). His axe
+    juggle and lunge punish a front exchange; a back grab skips both. The
+    walk-in still has to face him (``TargetInReach`` kind ``GRAB``), so this
+    is "caught him from behind", not "he is behind us" -- that side is
+    ``RearAttack``.
     """
 
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class GrabToDodgeCharge(GrabOpportunity):
+    DODGE_CHARGE = auto()
     """A committed enemy is charging in from *behind* this grabbable one.
 
-    Produced by ``inference.check_for_grab_opportunities`` when another live
-    enemy already carries an ``IncomingMelee`` for this actor, sits on the
-    **same side** as the grab candidate, and is **further away** than it --
-    the user's own description: "an enemy in front, and behind it, a Signal".
+    Produced when another live enemy already carries an ``IncomingMelee``
+    for this actor, sits on the **same side** as the grab candidate, and is
+    **further away** than it -- the user's own description: "an enemy in
+    front, and behind it, a Signal".
 
     Signal is the case this exists for, and the ROM is why it is nasty:
     his slide (state ``$0A``) is *velocity, not a hitbox* -- enemy-ai.md's
@@ -524,18 +510,16 @@ class GrabToDodgeCharge(GrabOpportunity):
     exchange into a grab.
     """
 
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class GrabWhileSurrounded(GrabOpportunity):
+    WHILE_SURROUNDED = auto()
     """The actor is boxed in -- a body in its hands is the way out.
 
-    Produced by ``inference.check_for_grab_opportunities`` for any grabbable
-    ``Grunt`` while this actor carries a ``Surrounded`` token. It is the
-    crowd counterpart of ``GrabToClearRear``, which only fires on a
-    *confirmed rear* enemy (``reach.rear_threats``): a crowd standing in
-    front of and beside the actor -- three bodies inside the close box with
-    none strictly behind -- produced no grab opportunity at all, so the AI
-    answered being surrounded with a plain ``Punch`` at one of them.
+    Produced for any grabbable ``Grunt`` while this actor carries a
+    ``Surrounded`` token. It is the crowd counterpart of ``CLEAR_REAR``,
+    which only fires on a *confirmed rear* enemy (``reach.rear_threats``):
+    a crowd standing in front of and beside the actor -- three bodies
+    inside the close box with none strictly behind -- produced no grab
+    opportunity at all, so the AI answered being surrounded with a plain
+    ``Punch`` at one of them.
 
     A hold is worth more than a strike here for reasons that do not apply
     one-on-one. It takes one of the bodies out of the fight for its whole
@@ -546,45 +530,61 @@ class GrabWhileSurrounded(GrabOpportunity):
     facing answers being hit from both sides at once; a hold is the answer
     that does not require choosing a side.
 
-    Whether the hold is *reachable* is still ``InGrabReach``'s question --
-    ``decide.could_grab_enemy`` needs both -- so this never proposes walking
-    across a crowd to reach someone.
+    Whether the hold is *reachable* is still ``TargetInReach`` (kind
+    ``GRAB``)'s question -- ``decide.could_grab_enemy`` needs both -- so
+    this never proposes walking across a crowd to reach someone.
     """
 
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class GrabAntonioOnPunish(GrabOpportunity):
+    ANTONIO_ON_PUNISH = auto()
     """Antonio is in hitstun -- walk in and hold him, then suplex.
 
-    Produced by ``inference.check_for_grab_opportunities`` when a live
-    ``Antonio`` is in a punishable phase (``RECOVERY`` after
-    ``$17C36 boss_apply_pending_damage`` writes shared later-boss states
-    ``$03``/``$04``). A second punch here is standing still in front of
-    him, which is the ``$16EAE`` zero-velocity kick path; the hold is
+    Produced when a live ``Antonio`` is in a punishable phase (``RECOVERY``
+    after ``$17C36 boss_apply_pending_damage`` writes shared later-boss
+    states ``$03``/``$04``). A second punch here is standing still in front
+    of him, which is the ``$16EAE`` zero-velocity kick path; the hold is
     how a human actually beats him.
 
     Not produced while he can still act: walking into a ready Antonio
     is how the kick lands first.
     """
 
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class GrabSoutherOnPunish(GrabOpportunity):
+    SOUTHER_ON_PUNISH = auto()
     """Souther is in hitstun -- walk in and hold him, then suplex.
 
-    Produced by ``inference.check_for_grab_opportunities`` when a live
-    ``Souther`` is in a punishable phase, the same shared later-boss
-    ``RECOVERY`` states ``$03``/``$04`` that ``$17C36
+    Produced when a live ``Souther`` is in a punishable phase, the same
+    shared later-boss ``RECOVERY`` states ``$03``/``$04`` that ``$17C36
     boss_apply_pending_damage`` writes for Antonio. His base health is
     ``$20`` against ``$18`` for Antonio (``$17EDC boss_init_combat_stats``),
     so the suplex chain matters more here, not less.
 
-    Deliberately its own class rather than a shared later-boss token: the
-    *reason* the hold pays off differs. Antonio's is that a second punch is
-    his own kick trigger; Souther's is simply that ``$15EDA
+    Deliberately its own reason rather than sharing Antonio's: the *reason*
+    the hold pays off differs. Antonio's is that a second punch is his own
+    kick trigger; Souther's is simply that ``$15EDA
     (souther_state1_active_combat)`` cannot re-arm the slash while he is in
     recovery, so the walk-in is free.
     """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GrabOpportunity(Inferred):
+    """Holding this enemy is worth more right now than hitting it.
+
+    Produced by ``inference.check_for_grab_opportunities`` -- see
+    ``GrabReason`` for the situations it recognises and why each is worth a
+    hold. Several reasons can hold for the same pair at once (a whip enemy
+    in front *and* a body at the actor's back), so a pair may carry more
+    than one ``GrabOpportunity``, one per reason; ``priority.
+    _emergency_grab_enemy`` takes the best tier among them.
+
+    Reference-only, like ``TargetInReach``: both ends are slot references.
+    ``decide.could_grab_enemy`` pairs one of these with a ``TargetInReach``
+    of kind ``GRAB`` for the same pair -- the opportunity says it is
+    *worth* grabbing, the reach token says it is *possible*.
+    """
+
+    actor_slot: str
+    target_slot: str
+    reason: GrabReason
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

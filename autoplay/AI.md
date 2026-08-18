@@ -49,6 +49,27 @@ properties, such as `enemy.type`, are to be avoided, as they would
 complicate the implementation as the system grows; subclassing is the
 preferred mechanism for expressing such distinctions.
 
+**Exception.** When several sibling subclasses share exactly the same
+fields, the same production function, and the same scoring formula — that
+is, the only difference between them is which constant or branch a
+consumer selects, never an `isinstance` check outside a simple
+enum-to-value mapping — a discriminator field (an `Enum`) is preferable to
+`N` classes whose sole reason to exist is to serve as a dispatch key. Three
+cases in `tokens/` fit this exactly and were merged on that basis:
+`MeleeWeaponAttack` (`weapon_type`, replacing `SwingBatOrPipe` /
+`StabWithKnifeOrBottle` / `SprayPepper`, which shared every `could_*`,
+`_emergency_*` and `state_machine_*` function outright), `GrabOpportunity`
+(`reason: GrabReason`, replacing seven near-identical marker subclasses
+scored by `priority._emergency_grab_enemy`'s single "best tier among
+reasons present" formula), and `TargetInReach` (`kind: ReachKind`,
+replacing five reach-band markers all produced by the same
+`inference.check_for_targets_in_reach` loop and consumed only through
+`reach.targets_of`'s presence/absence lookup). This exception is narrow: it
+does not reopen the door to generic discriminators like `enemy.type` on
+`Enemy`, where concrete behaviour (fields, production conditions, or
+per-class dispatch) genuinely differs. Subclassing remains the default for
+everything else.
+
 A `Token` must never embed another `Token` by value. Since the context is
 a flat unordered collection, any relationship between two tokens — for instance, a
 `WalkToNearEnemy` verb naming the enemy it targets must be expressed as a reference to
@@ -218,8 +239,8 @@ reason — they describe *him*, not the flight.
   horizontal) but not Souther, who closes lane at 4px/frame and erases 18px in
   about five of the flight's ~25 frames.
 
-The only Souther worth hopping at is one who cannot act at all, and there
-`GrabSoutherOnPunish` outranks the hop anyway.
+The only Souther worth hopping at is one who cannot act at all, and there a
+`GrabOpportunity` with reason `SOUTHER_ON_PUNISH` outranks the hop anyway.
 
 **`InContinueMenu`** is observed when this player's object is the type-`$0F`
 continue / high-score name-entry UI (the slot is no longer playable).
@@ -251,16 +272,16 @@ sidestep/reposition verb), not an early commit to the same
 reactive-only attack.
 
 **`TargetInReach`** answers, once per tick and per (actor, enemy) pair,
-"which of my moves can reach that enemy from here". It is abstract; its
-concrete descendants are one per move family — `InPunchReach` (a forward
-strike would connect: inside the punch band *and* actually in front),
-`InRearReach` (inside the `$322A` chord's real reach on the enemy's own
-side), `InJumpAttackReach` (in front, beyond punch outer, inside the
-kick's free-flight range) and `ActionableTarget` (some attack the AI
-already has would really fire on this enemy now — the "stop walking, you
-can already hit it" signal). The geometry behind them lives in `reach.py`,
-shared with the verb and ranking stages, so all three agree on one
-definition of every band instead of each recomputing it.
+"which of my moves can reach that enemy from here". It carries a `kind:
+ReachKind` field, one member per move family — `PUNCH` (a forward strike
+would connect: inside the punch band *and* actually in front), `REAR`
+(inside the `$322A` chord's real reach on the enemy's own side),
+`JUMP_ATTACK` (in front, beyond punch outer, inside the kick's free-flight
+range), `GRAB` (walking in would take a hold) and `ACTIONABLE` (some
+attack the AI already has would really fire on this enemy now — the "stop
+walking, you can already hit it" signal). The geometry behind them lives in
+`reach.py`, shared with the verb and ranking stages, so all three agree on
+one definition of every band instead of each recomputing it.
 
 "From here" is really "from here, when that move arrives": each band is
 judged against the enemy projected forward by its own move's lead time —
@@ -311,9 +332,9 @@ back on X when it does not.
 usable, and better than what the actor is carrying, carrying the rank and
 the rank gain so nothing downstream re-reads the damage table.
 
-**`InGrabReach`** and **`GrabOpportunity`** are the two halves of the grab
-question — can I, and should I. They are described in
-[Grabbing an enemy](#grabbing-an-enemy) below.
+**`TargetInReach`** (`kind=ReachKind.GRAB`) and **`GrabOpportunity`** are
+the two halves of the grab question — can I, and should I. They are
+described in [Grabbing an enemy](#grabbing-an-enemy) below.
 
 ### Hitbox and AttackRange
 
@@ -399,8 +420,8 @@ Bodies also stop at contact rather than passing through one another, so an
 approaching enemy is never projected through the actor.
 
 `inference.check_for_targets_in_reach` evaluates each move's band across that
-move's own timeline, which is what makes the whole `TargetInReach` family
-predictive rather than reactive. `ActionableTarget` is the deliberate
+move's own timeline, which is what makes `TargetInReach` predictive rather
+than reactive for most kinds. `kind=ReachKind.ACTIONABLE` is the deliberate
 exception: it is not "would this hit" but "stop walking, you can already hit
 it", and a future-tense answer to that halts the approach while the enemy is
 still out of range.
@@ -558,50 +579,52 @@ Why it is worth spending an attack on:
   The ROM picks out exactly one today: `Nora`, whose only attacking
   animation reaches 32 to 80 pixels ahead and nothing closer.
 
-Those are two `GrabOpportunity` descendants —
-`GrabToClearRear` and `GrabIntoDeadZone`. The second is derived from the
+Those are two `GrabOpportunity` reasons —
+`CLEAR_REAR` and `DEAD_ZONE`. The second is derived from the
 extracted `AttackRange`s rather than from the enemy's class, so a corrected
 extraction changes the AI's behaviour without changing any code. A third,
-`GrabJackFromBehind`, fires when the actor is already on Jack's back
+`JACK_FROM_BEHIND`, fires when the actor is already on Jack's back
 (he is facing away): take the hold before the axe or the lunge turns
-around. A fourth, `GrabAntonioOnPunish`, fires when Antonio is in
+around. A fourth, `ANTONIO_ON_PUNISH`, fires when Antonio is in
 later-boss hitstun (`RECOVERY`, primary `$03`/`$04` after
 `$17C36 boss_apply_pending_damage`): punch him once to open that window,
 walk in without attacking, then flip-hold into a suplex. Standing still
 to combo him is the `$16EAE` zero-velocity kick trigger, so a second
-punch is refused and the hold is the punish. A fifth, `GrabSoutherOnPunish`, is
+punch is refused and the hold is the punish. A fifth, `SOUTHER_ON_PUNISH`, is
 its Souther counterpart on the same shared later-boss `RECOVERY` states, and it
-is a separate class rather than a shared later-boss token because the *reason*
+is a separate reason rather than sharing Antonio's because the *reason*
 differs: Antonio's is that a second punch is his own kick trigger, Souther's is
 simply that `$15EDA (souther_state1_active_combat)` cannot re-arm the claw from
 recovery, so the walk-in is free — and with base health `$20` against Antonio's
 `$18`, the suplex chain matters more, not less. A sixth,
-`GrabWhileSurrounded`, fires for any grabbable `Grunt` while the actor
+`WHILE_SURROUNDED`, fires for any grabbable `Grunt` while the actor
 carries a `Surrounded` token: being boxed in is answered by a hold whichever
 side the crowd is on. It is the one that reads another *inference* rather
 than the candidate enemy itself, which is why
 `check_for_grab_opportunities` runs after `check_for_surrounded` instead of
 beside it in the same `|` chain — every `check_for_*` inside one expression
 is handed the same original context, so a chain cannot express that
-dependency. They are subclasses rather
-than one token with a reason field, per this document's own rule, and they
-rank differently: being surrounded is the only one that outranks the
-`$322A` escape chord (a pincer's hold becomes a throw *into* the enemy the
-chord was aimed at), clearing the rear beats every strike on an enemy that
-can still act, catching Jack from behind is just under that, grabbing a
-stunned Antonio or Souther sits above punching them again (the hold is the
-punish) and above every strike on them, and the whip case is an improvement on
-an ordinary exchange and ranks just above a jump kick.
+dependency. `GrabOpportunity` carries these as a `reason: GrabReason` field
+per this document's own discriminator-field exception (every reason shares
+the identical token shape and the identical `priority._emergency_grab_enemy`
+scoring formula), and they rank differently: being surrounded is the only one
+that outranks the `$322A` escape chord (a pincer's hold becomes a throw
+*into* the enemy the chord was aimed at), clearing the rear beats every
+strike on an enemy that can still act, catching Jack from behind is just
+under that, grabbing a stunned Antonio or Souther sits above punching them
+again (the hold is the punish) and above every strike on them, and the whip
+case is an improvement on an ordinary exchange and ranks just above a jump
+kick.
 
-`InGrabReach` answers the other half — whether walking in would actually
-reach — and, like every other `TargetInReach`, comes from one geometry
-definition in `reach.py`. `could_grab_enemy` requires both, because a grab
-that is possible is not automatically a grab that is worth taking, and
-neither is the reverse.
+`TargetInReach` with `kind=ReachKind.GRAB` answers the other half —
+whether walking in would actually reach — and, like every other
+`TargetInReach` kind, comes from one geometry definition in `reach.py`.
+`could_grab_enemy` requires both, because a grab that is possible is not
+automatically a grab that is worth taking, and neither is the reverse.
 
 This list is meant to grow. Any further situation where a hold beats a
-strike belongs here as another `GrabOpportunity` subclass with its own
-tier, not as a new field on an existing one.
+strike belongs here as another `GrabReason` member with its own tier, not
+as a bespoke new field on `GrabOpportunity`.
 
 ## Process
 

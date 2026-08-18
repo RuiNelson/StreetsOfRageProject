@@ -259,18 +259,25 @@ SOUTHER_SLASH_DIST_MIN = 0x18  # 24px
 CLOSING_ENEMY_THREAT_FRAMES = 12
 
 
-def targets_of(context: Context, cls: type, actor_slot: str) -> set[str]:
+def targets_of(context: Context, cls: type, actor_slot: str, *, kind=None) -> set[str]:
     """Target slots of every ``cls`` token in ``context`` for one actor.
 
     ``find``/``find_all`` match on a ``slot`` attribute, which the
     actor-and-target inference tokens deliberately do not have (they
     reference two tokens, not one), so this is their lookup.
+
+    ``kind``, when given, additionally narrows to tokens whose own ``kind``
+    field matches -- the way callers pick one move family out of the single
+    ``TargetInReach`` class (``ReachKind.PUNCH``, ``.REAR``, and so on).
+    Tokens with no ``kind`` field (everything else ``targets_of`` is used
+    for) never match a ``kind``-qualified lookup.
     """
 
     return {
         token.target_slot
         for token in find_all(context, cls)
         if getattr(token, "actor_slot", None) == actor_slot
+        and (kind is None or getattr(token, "kind", None) == kind)
     }
 
 
@@ -489,7 +496,8 @@ def rear_attack_is_warranted(
        where he is, now. The opposite geometry -- the actor already on
        *his* back, just facing the wrong way (a jump kick that overshot)
        -- is a grab, not a chord: ``enemy_forward_dx < 0`` means turn
-       around and take the hold (``GrabJackFromBehind``).
+       around and take the hold (``GrabOpportunity`` reason
+       ``JACK_FROM_BEHIND``).
     """
 
     if isinstance(enemy, Jack):
