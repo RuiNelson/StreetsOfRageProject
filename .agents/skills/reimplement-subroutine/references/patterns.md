@@ -176,6 +176,7 @@ writing the manual body. This was required for OPTIONS handlers `$1404` and
 | `$010514` | `sync_z80_2` | `SorManualFunctions.cpp` | Mailbox wait 2 |
 | `$01069E` | `queue_sound_id` | `SoRSound.cpp` | Mid-entry `$106CA` |
 | `$011B12` | `play_level_music` | `SoRSound.cpp` | Level BGM queue |
+| `$073298` | `sound_ym2612_acquire` | `SoRSound.cpp` | BUSREQ/DAC/YM wait; sleep, not `waitForInterrupt` (called from VBlank) |
 | `$000FE8`–`$00AD8E` | select/OPTIONS/character-select set | `SoRMainMenus.cpp` | 27 roots; includes mid-entry `$AE10` |
 
 ## Build / run
