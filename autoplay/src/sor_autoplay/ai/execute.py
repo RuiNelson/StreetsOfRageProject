@@ -80,6 +80,7 @@ from .decide import (
 from .reach import (
     PIT_AVOID_MARGIN,
     REACH_SAFETY_MARGIN,
+    SOUTHER_SLASH_DIST_MIN,
     enemy_behind_actor,
     enemy_lane_covers,
     pit_endangers,
@@ -670,6 +671,34 @@ def _dead_zone_stop_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> 
     return max(floor, min(stop_dx, inside))
 
 
+def _souther_pocket_stop_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> int:
+    """Stand inside Souther's own state-1 inner abort, not at punch's outer edge.
+
+    ``reach.SOUTHER_SLASH_DIST_MIN`` (24px) is where ``$15EDA
+    (souther_state1_active_combat)`` cannot *begin* the slash at all -- see
+    that constant's own docstring for the ROM evidence. Stopping at the
+    punch's outer edge instead (46px for Axel) sits squarely inside his
+    state-1 commit window (the velocity-selected ``$50``/``$58``/``$68``
+    bands), which is exactly where the claw comes from: measured live, 220 of
+    240 health lost across a full fight went in during the wind-up that
+    follows that commit. Aiming for the pocket denies the commit outright
+    instead of merely giving the actor a worse angle to be hit from.
+
+    Only while he is **not** already ``strike_is_committed()``. Once the claw
+    is out, this same distance is where ``$161C6
+    (souther_state2_claw_dash)`` *resolves* -- reach.SOUTHER_SLASH_DIST_MIN's
+    own docstring says so -- so it has stopped being a pocket and become the
+    thing being dodged; ``DodgeSoutherSlash`` owns that window, not this stop
+    point.
+    """
+
+    if not isinstance(target, Souther) or target.strike_is_committed():
+        return stop_dx
+    inside = SOUTHER_SLASH_DIST_MIN - REACH_SAFETY_MARGIN
+    floor = punch_usable_inner_x(actor.character_id) + WALK_TO_ENEMY_STOP_BUFFER
+    return max(floor, min(stop_dx, inside))
+
+
 def _crossing_would_walk_into_the_swing(actor: Myself | Partner, target: Enemy) -> bool:
     """True while starting the walk into a dead-zone enemy would cross a
     live swing.
@@ -851,14 +880,18 @@ def _enemy_stop_dx(actor: Myself | Partner, target: Enemy) -> int:
 
     Split out of ``_walk_to_near_enemy_target`` so the routed approach and
     the straight-line fallback cannot disagree about it. Everything tactical
-    lives here -- the punch's own outer edge, and the dead-zone pocket some
-    enemies have (``_dead_zone_stop_dx``) -- while the route itself is
-    geometry the path finder owns.
+    lives here -- the punch's own outer edge, the dead-zone pocket some
+    enemies have (``_dead_zone_stop_dx``), and Souther's own inner-abort
+    pocket (``_souther_pocket_stop_dx``) -- while the route itself is
+    geometry the path finder owns. The two pockets never both apply (a
+    ``Souther`` has no extracted ``attack_ranges``, so ``_dead_zone_stop_dx``
+    is a no-op on one and passes its input straight through).
     """
 
     outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
     inner = punch_inner_x(actor.character_id)
-    return _dead_zone_stop_dx(actor, target, max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER))
+    stop_dx = _dead_zone_stop_dx(actor, target, max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER))
+    return _souther_pocket_stop_dx(actor, target, stop_dx)
 
 
 def state_machine_walk_to_near_enemy(

@@ -43,7 +43,7 @@ from .tokens import (
     PlayableCharacter,
     punch_usable_inner_x,
 )
-from .tokens import Antonio, Enemy, Jack, Souther
+from .tokens import Antonio, Boss, Enemy, Jack, Souther
 from .tokens import (
     ActionableTarget,
     AntonioIsGoingToKick,
@@ -98,6 +98,14 @@ POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE = 35.0
 # strictly than the "about to die" thresholds above: spending it while
 # healthy wastes the one panic button of the life.
 POLICE_HEALTH_PERCENT_THRESHOLD_SURROUNDED = 60.0
+# A live Boss is a third reason, at the same laxer gate as Surrounded: $16A60
+# (later_boss_police_special_reaction) does a flat -10 HP against the
+# $55-$58 family's shared 32-max health pool ($17EDC boss_init_combat_stats),
+# so one press is roughly a third of a later-boss's whole bar -- an order of
+# magnitude better than the special's ordinary value against a street enemy.
+# Hoarding it for the panic thresholds above and dying with it unspent is
+# worse than spending it well before that against a boss.
+POLICE_HEALTH_PERCENT_THRESHOLD_BOSS = 60.0
 
 KNIFE_RANGE_X = 90
 KNIFE_RANGE_Y = 16
@@ -803,14 +811,18 @@ def _has_live_enemy(context: Context) -> bool:
 
 
 def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
-    """The two situations the special is for: about to die, or boxed in.
+    """The three situations the special is for: about to die, boxed in, or a
+    live boss.
 
-    Both still need at least one live enemy -- calling the police into an
-    empty street spends the special for nothing. ``Surrounded`` is the
-    second reason: it is the only move that clears every side at once, so a
-    crowd the actor cannot fight its way out of is as good a reason as low
-    health, just at a laxer health gate so it is never spent while
-    comfortably healthy.
+    All three still need at least one live enemy -- calling the police into
+    an empty street spends the special for nothing (the boss case implies
+    this already, but the shared early return keeps the rule in one place).
+    ``Surrounded`` and a live ``Boss`` are both laxer-gate reasons: the
+    special is the one move that clears every side at once, and against
+    ``$16A60``'s flat -10 HP it is worth roughly a third of a later-boss's
+    whole health bar in one press -- both good enough reasons to spend it
+    well before the "about to die" thresholds, at a health gate just lax
+    enough that it is never spent while comfortably healthy either.
     """
 
     if not _has_live_enemy(context):
@@ -825,7 +837,10 @@ def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
     surrounded = any(
         token.actor_slot == actor.slot for token in find_all(context, Surrounded)
     )
-    return surrounded and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD_SURROUNDED
+    if surrounded and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD_SURROUNDED:
+        return True
+    boss_alive = any(not boss.is_defeated for boss in find_all(context, Boss))
+    return boss_alive and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD_BOSS
 
 
 def could_handle_continue_menu(context: Context) -> Context:
@@ -1050,33 +1065,25 @@ def could_dodge_souther_slash(context: Context) -> Context:
             continue
         if actor.is_airborne:
             continue
-        in_punch_range = reach.targets_of(context, InPunchReach, actor.slot)
         for token in find_all(context, SoutherIsGoingToSlash):
             if token.actor_slot != actor.slot:
                 continue
             souther = find(context, Souther, slot=token.target_slot)
-            if souther is None:
+            if souther is None or not souther.strike_is_committed():
+                # Predicted window only: walking in and punching is the
+                # opener, same as could_dodge_antonio_kick. A pre-emptive
+                # version of this branch shipped once (the predicted
+                # $15EDA gate alone was enough to dodge) and was reverted:
+                # measured live over a full fight it fired on only 28 of
+                # 1794 ticks, no measurable benefit, and it is redundant
+                # with execute._souther_pocket_stop_dx now denying the
+                # commit outright by keeping the approach inside the $18
+                # inner abort in the first place -- from there
+                # SoutherIsGoingToSlash's own predictive gate cannot even
+                # fire (dist_x < SOUTHER_SLASH_DIST_MIN refuses it), so a
+                # pre-emptive dodge branch would mostly be dead weight,
+                # not more coverage.
                 continue
-            if not souther.strike_is_committed():
-                # The *predicted* gate counts too, unlike Antonio's. Measured
-                # live: 220 of the 240 health lost in a full Souther fight went
-                # in while he was in primary $02 tactical $00 -- the claw
-                # wind-up. Waiting for the commit means waiting until the
-                # type-$98 claw is already out, which is too late.
-                #
-                # Stepping off early is worth something here in a way it is not
-                # against Antonio: $15EDA's commit needs lane +$52 < $1C, so
-                # leaving that lane *denies the slash outright* rather than
-                # merely relocating it -- and it is self-limiting, because the
-                # token stops firing the moment the lane gate fails and the
-                # approach takes the tick straight back.
-                #
-                # Not while he is punchable from here, though: inside punch
-                # range the exchange is the whole point, and dodging at 46 over
-                # a 20-point punch is the "sidestep forever, never attack" loop
-                # that could_dodge_antonio_kick exists to avoid.
-                if token.target_slot in in_punch_range:
-                    continue
             verbs.add(
                 DodgeSoutherSlash(actor_slot=actor.slot, target_slot=token.target_slot)
             )

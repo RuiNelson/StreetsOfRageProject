@@ -7,6 +7,7 @@ from sor_autoplay.ai.tokens import (
     CounterGrab,
     DodgeAntonioKick,
     DodgeSoutherSlash,
+    FlipHold,
     GrabEnemy,
     HealthPickup,
     HitAntonioBoomerang,
@@ -48,6 +49,7 @@ from sor_autoplay.ai.tokens import CameraRange, Stage
 from sor_autoplay.ai.tokens import Projectile
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.priority import determine_priority_verb as _rank_verbs
+from sor_autoplay.ai.priority import HOLD_KNEE_TICKS
 from sor_autoplay.ai.tokens import Verb, find_all
 from sor_autoplay.ai.tokens import (
     DodgeAntonioKick,
@@ -215,6 +217,42 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         self.assertEqual(len(verbs), 1)
         self.assertIsInstance(verbs[0], Punch)
 
+    def test_call_police_beats_a_combo_on_a_live_boss_below_boss_threshold(self) -> None:
+        # $16A60's flat -10 HP is roughly a third of a later-boss's whole
+        # health bar -- worth outranking an in-progress combo (the punishable
+        # tier, 60) once the boss health gate applies, the same top tier as
+        # the "about to die" case.
+        souther = _souther("obj11", CombatPhase.KNOCKDOWN, health=32)
+        myself = _myself(health_percent=50.0)
+        context = {
+            souther,
+            myself,
+            CallPolice(actor_slot="P1"),
+            Punch(actor_slot="P1", target_slot="obj11"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], CallPolice)
+
+    def test_call_police_vs_boss_loses_above_the_boss_threshold(self) -> None:
+        souther = _souther("obj11", CombatPhase.KNOCKDOWN, health=32)
+        myself = _myself(health_percent=90.0)
+        context = {
+            souther,
+            myself,
+            CallPolice(actor_slot="P1"),
+            Punch(actor_slot="P1", target_slot="obj11"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], Punch)
+
     def test_no_verbs_returns_context_unchanged(self) -> None:
         enemy = _enemy("obj01", CombatPhase.NORMAL)
         context = {enemy}
@@ -315,6 +353,65 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         verbs = find_all(result, Verb)
         self.assertEqual(len(verbs), 1)
         self.assertIsInstance(verbs[0], Punch)
+
+    def test_knee_outranks_flip_while_the_hold_is_fresh(self) -> None:
+        # Live-reported: the AI grabbed and flipped straight to Supplex,
+        # landing zero knees. A fresh hold (hold_ticks under HOLD_KNEE_TICKS)
+        # must let AttackHeldEnemy win over FlipHold, the reverse of the
+        # previous fixed 66-over-64 ordering.
+        myself = _myself(hold_ticks=1)
+        held = _enemy("obj01", CombatPhase.GRABBED)
+        context = {
+            myself,
+            held,
+            AttackHeldEnemy(actor_slot="P1", target_slot="obj01"),
+            FlipHold(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], AttackHeldEnemy)
+
+    def test_flip_takes_over_once_the_hold_has_been_milked(self) -> None:
+        myself = _myself(hold_ticks=HOLD_KNEE_TICKS + 1)
+        held = _enemy("obj01", CombatPhase.GRABBED)
+        context = {
+            myself,
+            held,
+            AttackHeldEnemy(actor_slot="P1", target_slot="obj01"),
+            FlipHold(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], FlipHold)
+
+    def test_knee_never_beats_throw_or_supplex_regardless_of_hold_age(self) -> None:
+        # Throw/Supplex only ever appear alongside a back hold or a rear
+        # threat, both mutually exclusive with the front-hold branch
+        # AttackHeldEnemy lives in -- but score it directly anyway, since nothing
+        # stops a stale/injected AttackHeldEnemy sharing a tick with them.
+        from sor_autoplay.ai.tokens import ThrowHeldEnemy
+
+        myself = _myself(hold_ticks=0)
+        held = _enemy("obj01", CombatPhase.GRABBED)
+        context = {
+            myself,
+            held,
+            AttackHeldEnemy(actor_slot="P1", target_slot="obj01"),
+            ThrowHeldEnemy(actor_slot="P1", target_slot="obj01"),
+            Supplex(actor_slot="P1", target_slot="obj01"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], ThrowHeldEnemy)
 
     def test_counter_grab_beats_call_police(self) -> None:
         myself = _myself(combat_phase=CombatPhase.HELD_BY_ENEMY, health_percent=10.0)

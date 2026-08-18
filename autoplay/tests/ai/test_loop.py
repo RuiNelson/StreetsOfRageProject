@@ -161,7 +161,10 @@ class AgentLoopPipelineTests(unittest.TestCase):
             result = loop.tick(snapshot, player_index=1)
 
             observe.assert_called_once_with(
-                snapshot, player_index=1, nora_tracker=loop._nora_tracker
+                snapshot,
+                player_index=1,
+                nora_tracker=loop._nora_tracker,
+                hold_tracker=loop._hold_tracker,
             )
             inference.assert_called_once_with(observed_context)
             decide.assert_called_once()

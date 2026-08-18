@@ -25,6 +25,7 @@ from .decide import (
     HEALTH_CRITICAL_PERCENT,
     in_smash_range,
     POLICE_HEALTH_PERCENT_THRESHOLD,
+    POLICE_HEALTH_PERCENT_THRESHOLD_BOSS,
     POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE,
     thrown_weapon_impact_point,
     thrown_weapon_would_connect,
@@ -241,8 +242,22 @@ _EMERGENCY_GRAB_SOUTHER_ON_PUNISH = 61
 _EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
 _EMERGENCY_HOLD_SUPPLEX = 68
 _EMERGENCY_HOLD_FLIP = 66
-_EMERGENCY_HOLD_KNEE = 64
+# A fresh knee must clear FlipHold's fixed 66 -- see
+# _emergency_attack_held_enemy -- so "milk the hold" wins the front-hold
+# choice while young, and the moment hold_ticks passes HOLD_KNEE_TICKS this
+# reverts to _EMERGENCY_DEFAULT and FlipHold's constant tier finishes it.
+# Never competes with Supplex(68)/Throw(70): those only ever appear alongside
+# a *back* hold or a rear threat, both mutually exclusive with the front-hold
+# branch this score lives in (decide.could_hold_actions).
+_EMERGENCY_HOLD_KNEE_FRESH = 67
 _EMERGENCY_HOLD_RELEASE = 50
+# How many ticks of a front hold favor another knee over the flip->suplex
+# finish. Not a ROM-confirmed escape timer -- none is decoded (enemy-ai.md's
+# later-boss grabbee states $06-$09 name no such counter) -- a deliberate
+# cross-tick heuristic in the same category NoraAttackTracker already is.
+# Live-reported against Souther: the AI grabbed and flipped immediately,
+# landing zero knees before the finish.
+HOLD_KNEE_TICKS = 6
 _EMERGENCY_JUMP_ATTACK_PUNISHABLE = 28  # below punch; never prefer hop over strike
 # Nora specifically, freshly out of her own whip engage-and-swing or lunge
 # (Nora.ticks_since_last_attack -- observe.NoraAttackTracker) but not (yet)
@@ -457,6 +472,17 @@ def _emergency_handle_mr_x_dialog(verb: HandleMrXDialog, context: Context) -> in
 
 
 def _emergency_call_police(verb: CallPolice, context: Context) -> int:
+    """Mirrors ``decide._police_is_worth_it``'s three reasons, same tiers.
+
+    A live ``Boss`` scores the *same* top tier as "about to die"
+    (``_EMERGENCY_CALL_POLICE``, 88), not a lesser one: ``$16A60``'s flat
+    -10 HP is worth roughly a third of a later-boss's whole health bar in
+    one press, which is an order of magnitude better than the special's
+    ordinary value against a street enemy and easily worth outranking a
+    combo in progress once it applies at all (``decide._police_is_worth_it``
+    already keeps it from firing outside the boss's own laxer health gate).
+    """
+
     actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         return _EMERGENCY_DEFAULT
@@ -469,6 +495,11 @@ def _emergency_call_police(verb: CallPolice, context: Context) -> int:
         return _EMERGENCY_CALL_POLICE
     if any(token.actor_slot == actor.slot for token in find_all(context, Surrounded)):
         return _EMERGENCY_CALL_POLICE_SURROUNDED
+    if (
+        any(not boss.is_defeated for boss in find_all(context, Boss))
+        and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD_BOSS
+    ):
+        return _EMERGENCY_CALL_POLICE
     return _EMERGENCY_DEFAULT
 
 
@@ -775,6 +806,27 @@ def _emergency_walk_to_pickup(verb: WalkToPickup, context: Context) -> int:
     return _EMERGENCY_WALK_TO_PICKUP_SCORE
 
 
+def _emergency_attack_held_enemy(verb: AttackHeldEnemy, context: Context) -> int:
+    """The knee: full tier while the hold is young, otherwise stand down.
+
+    ``_EMERGENCY_HOLD_KNEE_FRESH`` (67) beats ``FlipHold``'s fixed 66 for as
+    long as ``actor.hold_ticks <= HOLD_KNEE_TICKS``, milking a few knees
+    before the flip->suplex finish is allowed to win -- see
+    ``observe.HoldTracker`` for why this is tick-based rather than reading a
+    ROM escape counter (none is decoded). Once the hold ages past that, this
+    drops to ``_EMERGENCY_DEFAULT`` so ``FlipHold``'s own constant score
+    finishes it, the same as it always did before this existed.
+    """
+
+    target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
+    if target is None or target.combat_phase is not CombatPhase.GRABBED:
+        return _EMERGENCY_DEFAULT
+    actor = _find_actor(context, verb.actor_slot)
+    if actor is not None and actor.hold_ticks > HOLD_KNEE_TICKS:
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_HOLD_KNEE_FRESH
+
+
 def _held_enemy_emergency(weight: int) -> Callable[[Verb, Context], int]:
     """Build an ``_emergency_*`` for a hold move: ``weight`` only while its
     target ``Enemy`` is actually held (``CombatPhase.GRABBED``)."""
@@ -804,7 +856,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     ThrowHeldEnemy: _held_enemy_emergency(_EMERGENCY_HOLD_THROW),
     Supplex: _held_enemy_emergency(_EMERGENCY_HOLD_SUPPLEX),
     FlipHold: _held_enemy_emergency(_EMERGENCY_HOLD_FLIP),
-    AttackHeldEnemy: _held_enemy_emergency(_EMERGENCY_HOLD_KNEE),
+    AttackHeldEnemy: _emergency_attack_held_enemy,
     ReleaseGrab: _held_enemy_emergency(_EMERGENCY_HOLD_RELEASE),
     JumpAttack: _emergency_jump_attack,
     ThrowKnife: _emergency_throw_knife,

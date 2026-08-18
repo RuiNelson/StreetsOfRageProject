@@ -8,9 +8,9 @@ observer's existing single-poll-per-tick discipline.
 ``Verb`` (and every candidate that preceded it) into a thread-safe
 ``VerbState`` that the observer's Tk thread reads for the HUD.
 
-``_nora_tracker`` is the one piece of state that survives across ticks
-besides the virtual gamepad's own sticky hold -- see
-``observe.NoraAttackTracker``.
+``_nora_tracker`` and ``_hold_tracker`` are the pieces of state that survive
+across ticks besides the virtual gamepad's own sticky hold -- see
+``observe.NoraAttackTracker`` and ``observe.HoldTracker``.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from .decide import generate_verb_tokens
 from .execute import execute_tick
 from .gamepad import VirtualGamepad
 from .inference import generate_inference_tokens
-from .observe import NoraAttackTracker, generate_direct_observation_tokens
+from .observe import HoldTracker, NoraAttackTracker, generate_direct_observation_tokens
 from .pathfind import Path
 from .priority import determine_priority_verb
 from .tokens import Context, Myself, Verb, find, find_all
@@ -61,6 +61,9 @@ class AgentLoop:
         # per-player granularity every other piece of per-tick state here
         # already uses (e.g. VirtualGamepad's own steer_x).
         self._nora_tracker = NoraAttackTracker()
+        # Cross-tick memory for PlayableCharacter.hold_ticks -- see
+        # observe.HoldTracker. Same per-AgentLoop granularity as above.
+        self._hold_tracker = HoldTracker()
 
     def inform_hud(
         self,
@@ -119,7 +122,10 @@ class AgentLoop:
             return None
 
         context = generate_direct_observation_tokens(
-            snapshot, player_index=player_index, nora_tracker=self._nora_tracker
+            snapshot,
+            player_index=player_index,
+            nora_tracker=self._nora_tracker,
+            hold_tracker=self._hold_tracker,
         )
         context |= generate_inference_tokens(context)
         context |= generate_verb_tokens(context)

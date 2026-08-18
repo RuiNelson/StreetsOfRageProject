@@ -76,6 +76,49 @@ class NoraAttackTracker:
                 del self._ticks[slot]
 
 
+class HoldTracker:
+    """Cross-tick memory of how many ticks this actor has held an enemy.
+
+    The second deliberate exception to ``generate_direct_observation_tokens``
+    otherwise being a pure function of its ``GameSnapshot`` argument, for the
+    same reason ``NoraAttackTracker`` is the first: "how long has *this* hold
+    lasted" is a transition-derived fact no single tick's ``action_state`` can
+    answer, and there is no ROM-decoded escape/struggle counter on the held
+    enemy to read instead (checked: neither ``enemy-ai.md`` nor the later-boss
+    grabbee states ``$06``-``$09`` name one).
+
+    Owned per ``AgentLoop`` instance, keyed by the *actor's* own slot
+    (``P1``/``P2``) rather than the held enemy's -- a hold is 1:1 with the
+    actor holding it, and unlike ``NoraAttackTracker`` there is no risk of the
+    game reusing an actor's own player slot for something else, so this needs
+    no ``forget_missing`` companion.
+    """
+
+    def __init__(self) -> None:
+        self._ticks: dict[str, int] = {}
+
+    def update(self, actor_slot: str, *, holding: bool) -> int:
+        """Advance one actor's hold counter by a tick and return its new value.
+
+        Reset to 0 the instant ``holding`` goes false -- released, thrown, or
+        the enemy escaped -- so a fresh hold always starts its own knee count
+        rather than inheriting a stale one.
+        """
+
+        ticks = self._ticks.get(actor_slot, 0) + 1 if holding else 0
+        self._ticks[actor_slot] = ticks
+        return ticks
+
+
+# Front hold ($60) and back hold ($66) -- see PlayableCharacter's own
+# docstring. Tracked identically even though only the front hold's knee-vs-
+# flip choice reads hold_ticks: a flip crosses front to back, and counting
+# through that transition (rather than resetting the moment $66 begins) is
+# what lets HOLD_KNEE_TICKS describe "since this enemy was first grabbed",
+# matching the docstring on PlayableCharacter.hold_ticks.
+HOLD_ACTION_BASES = frozenset({0x60, 0x66})
+
+
 def _stage_direction(level_index: int) -> str:
     if level_index == 6:
         return "none"
@@ -97,6 +140,7 @@ def _build_playable_character(
     *,
     player_snapshot: PlayerSnapshot,
     entity: MapEntity,
+    hold_ticks: int = 0,
 ) -> Myself | Partner:
     return cls(
         slot=f"P{player_snapshot.index}",
@@ -122,6 +166,7 @@ def _build_playable_character(
         tech_armed=entity.tech_armed,
         hitbox=entity.hitbox,
         vel_x=entity.player_vel_x,
+        hold_ticks=hold_ticks,
     )
 
 
@@ -151,6 +196,7 @@ def generate_direct_observation_tokens(
     *,
     player_index: int,
     nora_tracker: NoraAttackTracker | None = None,
+    hold_tracker: HoldTracker | None = None,
 ) -> Context:
     context: Context = set()
     live_nora_slots: set[str] = set()
@@ -175,9 +221,21 @@ def generate_direct_observation_tokens(
         )
     myself_entity = _find_player_entity(snapshot, player_index)
     if myself_entity is not None:
+        myself_slot = f"P{player_index}"
+        myself_hold_ticks = (
+            hold_tracker.update(
+                myself_slot,
+                holding=(myself_entity.action_state & 0xFE) in HOLD_ACTION_BASES,
+            )
+            if hold_tracker is not None
+            else 0
+        )
         context.add(
             _build_playable_character(
-                Myself, player_snapshot=myself_snapshot, entity=myself_entity
+                Myself,
+                player_snapshot=myself_snapshot,
+                entity=myself_entity,
+                hold_ticks=myself_hold_ticks,
             )
         )
         animation = _maybe_animation_in_progress(myself_entity)
@@ -189,9 +247,21 @@ def generate_direct_observation_tokens(
     if partner_snapshot.is_playable:
         partner_entity = _find_player_entity(snapshot, partner_index)
         if partner_entity is not None:
+            partner_slot = f"P{partner_index}"
+            partner_hold_ticks = (
+                hold_tracker.update(
+                    partner_slot,
+                    holding=(partner_entity.action_state & 0xFE) in HOLD_ACTION_BASES,
+                )
+                if hold_tracker is not None
+                else 0
+            )
             context.add(
                 _build_playable_character(
-                    Partner, player_snapshot=partner_snapshot, entity=partner_entity
+                    Partner,
+                    player_snapshot=partner_snapshot,
+                    entity=partner_entity,
+                    hold_ticks=partner_hold_ticks,
                 )
             )
             animation = _maybe_animation_in_progress(partner_entity)

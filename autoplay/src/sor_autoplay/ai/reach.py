@@ -224,6 +224,19 @@ def any_pit_endangers(context: Context, world_x: int, world_y: int) -> bool:
 # bigger than it is.
 REACH_SAFETY_MARGIN = 8
 
+# Souther's state 1 -> state 2 commit gate at $15EDA
+# (souther_state1_active_combat) has an inner abort (`cmpi.w #$0018,d2 / bcs`):
+# he cannot *begin* the slash from inside 24px and has to walk back out first.
+# Shared with execute.py (the approach's own stop point, ``_souther_pocket_
+# stop_dx``) and inference.py (the fuller commit-gate geometry, ``check_for_
+# souther_slash``) -- lives here rather than in either, per this module's own
+# charter as the one shared definition, the same reason ``REACH_SAFETY_MARGIN``
+# above does. Not a safe pocket once he is *already* committed: $161C6
+# (souther_state2_claw_dash) resolves an already-in-progress dash at
+# +$50 in [$18,$40), the same band -- this constant only denies the state-1
+# start, so a caller must gate on ``Souther.strike_is_committed()`` too.
+SOUTHER_SLASH_DIST_MIN = 0x18  # 24px
+
 # How far ahead a Grunt's own committed velocity (grunt_vel_x/grunt_vel_y) is
 # trusted to extrapolate -- shared between inference.check_for_closing_enemies
 # (the rear-band early warning) and check_for_incoming_melee's predictive

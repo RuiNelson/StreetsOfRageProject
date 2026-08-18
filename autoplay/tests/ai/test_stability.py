@@ -19,15 +19,18 @@ from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, Virtual
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.priority import determine_priority_verb
 from sor_autoplay.ai.tokens import (
+    AttackHeldEnemy,
     Breakable,
     CameraRange,
     DodgeSoutherSlash,
     Enemy,
+    FlipHold,
     JumpAttack,
     Myself,
     OpenBreakable,
     Souther,
     Stage,
+    Supplex,
     Verb,
     WalkToAdvanceStage,
     find,
@@ -722,6 +725,103 @@ class SoutherStabilityTests(unittest.TestCase):
             states=[(2, 2)],
         )
         self.assertEqual(set(winners), {DodgeSoutherSlash.__name__})
+
+
+def _run_hold_sequence(*, ticks: int = 20) -> list[str]:
+    """Drive the real hold chain over a run of ticks: knee(s) -> flip -> suplex.
+
+    Bypasses ``observe.py`` like every other harness in this file -- tokens
+    are built directly rather than from a ``GameSnapshot`` -- so
+    ``Myself.hold_ticks`` is threaded by hand here the same way
+    ``observe.HoldTracker`` threads it live: incremented once per tick,
+    reset only if the hold itself ends. ``action_state`` is advanced the way
+    ``execute.state_machine_flip_hold``'s own docstring describes: front
+    hold ``$60`` -> a ``FlipHold`` win crosses to back hold ``$66`` -> a
+    ``Supplex`` win finishes it, which is where the run stops.
+
+    Live-reported regression this exists to catch: a single-tick test cannot
+    tell "grab, then finish immediately" from "grab, knee a few times, then
+    finish" -- only a sequence can, which is why this is here and not in
+    ``test_priority.py``.
+    """
+
+    winners: list[str] = []
+    action_state = 0x60
+    hold_ticks = 0
+    client = _FakeClient()
+    gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+    for _ in range(ticks):
+        actor = replace(
+            _actor(100, 60, False),
+            held_weapon_type=0x20,  # non-weapon type id -> holding an enemy
+            action_state=action_state,
+            hold_ticks=hold_ticks,
+        )
+        held = _enemy(120, 60, CombatPhase.GRABBED)
+        context = {
+            actor,
+            held,
+            CameraRange(left=-100, right=500, top=0, bottom=112),
+            Stage(level_index=0, direction="right"),
+        }
+        context |= generate_verb_tokens(context)
+        context = determine_priority_verb(context)
+
+        verbs = find_all(context, Verb)
+        winner = verbs[0] if verbs else None
+        winners.append(type(winner).__name__ if winner is not None else "None")
+        if winner is not None:
+            execute_verb(winner, context, gamepad)
+
+        hold_ticks += 1
+        if isinstance(winner, FlipHold):
+            action_state = 0x66
+        if isinstance(winner, Supplex):
+            break
+    return winners
+
+
+class HoldSequenceStabilityTests(unittest.TestCase):
+    """The live-reported failure: grab -> flip -> suplex, zero knees milked."""
+
+    def test_knee_is_milked_before_the_finish(self) -> None:
+        winners = _run_hold_sequence()
+
+        self.assertGreaterEqual(
+            winners.count(AttackHeldEnemy.__name__),
+            1,
+            f"no knee landed before the finish: {winners}",
+        )
+
+    def test_the_sequence_ends_in_a_supplex(self) -> None:
+        winners = _run_hold_sequence()
+
+        self.assertEqual(winners[-1], Supplex.__name__)
+
+    def test_every_knee_precedes_the_flip(self) -> None:
+        # Once FlipHold wins, the hold has crossed to the back and no further
+        # AttackHeldEnemy can legally follow it -- $AttackHeldEnemy is a
+        # front-hold-only move.
+        winners = _run_hold_sequence()
+        if FlipHold.__name__ not in winners:
+            self.skipTest("flip did not win in this run")
+        flip_index = winners.index(FlipHold.__name__)
+
+        self.assertNotIn(AttackHeldEnemy.__name__, winners[flip_index + 1 :])
+
+    def test_knee_count_matches_hold_knee_ticks(self) -> None:
+        # HOLD_KNEE_TICKS is the exact boundary priority.py scores on, so the
+        # knee run this produces should be that long, not merely "some".
+        from sor_autoplay.ai.priority import HOLD_KNEE_TICKS
+
+        winners = _run_hold_sequence()
+        knee_run = 0
+        for name in winners:
+            if name != AttackHeldEnemy.__name__:
+                break
+            knee_run += 1
+
+        self.assertEqual(knee_run, HOLD_KNEE_TICKS + 1)
 
 
 class BossAndGruntTargetStabilityTests(unittest.TestCase):

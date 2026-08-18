@@ -1208,6 +1208,31 @@ class CouldCallPoliceTests(unittest.TestCase):
 
         self.assertEqual(could_call_police(context), set())
 
+    def test_fires_against_a_live_boss_below_the_boss_threshold(self) -> None:
+        # $16A60's flat -10 HP is roughly a third of a later-boss's whole
+        # health bar (32 max) -- worth spending well before the "about to
+        # die" thresholds, not hoarded until near-death against a street
+        # enemy that never comes.
+        myself = make_myself(specials=1, health_percent=50.0)
+        souther = _souther()
+        context: set[Token] = {myself, souther}
+
+        self.assertEqual(could_call_police(context), {CallPolice(actor_slot="P1")})
+
+    def test_does_not_fire_against_a_live_boss_while_comfortably_healthy(self) -> None:
+        myself = make_myself(specials=1, health_percent=90.0)
+        souther = _souther()
+        context: set[Token] = {myself, souther}
+
+        self.assertEqual(could_call_police(context), set())
+
+    def test_does_not_fire_against_a_defeated_boss(self) -> None:
+        myself = make_myself(specials=1, health_percent=50.0)
+        souther = _souther(health=0xFFFF)
+        context: set[Token] = {myself, souther}
+
+        self.assertEqual(could_call_police(context), set())
+
 
 class CouldHandleContinueMenuTests(unittest.TestCase):
     def test_fires_on_in_continue_menu(self) -> None:
@@ -2453,6 +2478,22 @@ class CouldDodgeSoutherSlashTests(unittest.TestCase):
         # never gets close enough to hit him -- same rule as the Antonio dodge.
         myself = make_myself(world_x=120, world_y=100, vel_x=0.0)
         souther = _souther(world_x=160, world_y=100, primary_state=1)
+        self.assertEqual(could_dodge_souther_slash({myself, souther}), set())
+
+    def test_predicted_gate_alone_does_not_fire_even_outside_punch_range(self) -> None:
+        # A stricter version of the case above: a pre-emptive branch shipped
+        # once (dodge on the predicted $15EDA gate whenever the target was
+        # not also in punch range) and was reverted -- measured live over a
+        # full fight it fired on only 28 of 1794 ticks, no measurable
+        # benefit, and it is redundant with execute._souther_pocket_stop_dx
+        # now keeping the approach inside the $18 inner abort in the first
+        # place. dx=70 here is comfortably outside Axel's punch reach (~50),
+        # so the old branch would have fired; only the commit
+        # (strike_is_committed()) may produce this verb now.
+        myself = make_myself(world_x=100, world_y=100, vel_x=0.0)
+        souther = _souther(
+            world_x=170, world_y=100, primary_state=1, boss_dist_x=70, boss_dist_lane=0
+        )
         self.assertEqual(could_dodge_souther_slash({myself, souther}), set())
 
     def test_suppressed_while_airborne(self) -> None:

@@ -13,6 +13,7 @@ import math
 
 from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
 from . import kinematics, reach
+from .reach import SOUTHER_SLASH_DIST_MIN
 from . import navigation as nav
 from .pathfind import Point, PointGoal
 from .tokens import Myself, Partner, PlayableCharacter
@@ -112,11 +113,10 @@ SOUTHER_CLAW_TYPE_IDS = frozenset({0x98, 0x99})
 SOUTHER_SLASH_DIST_CLOSING = 0x68  # 104px; target walking into him
 SOUTHER_SLASH_DIST_STATIONARY = 0x58  # 88px
 SOUTHER_SLASH_DIST_AWAY = 0x50  # 80px; target walking off
-# The inner abort (`cmpi.w #$0018,d2 / bcs`): he cannot *begin* the slash from
-# inside 24px and has to walk back out first. Note this is not a safe pocket --
-# $161C6 (souther_state2_claw_dash) resolves an already-committed dash at
-# +$50 in [$18,$40) -- it only denies the state-1 start.
-SOUTHER_SLASH_DIST_MIN = 0x18  # 24px
+# The inner abort itself -- reach.SOUTHER_SLASH_DIST_MIN -- lives in reach.py,
+# shared with execute.py's own use of the same pocket; re-imported by name
+# here so existing call sites and tests keep reading it as
+# ``SOUTHER_SLASH_DIST_MIN``.
 # Lane gate: $0A when +$61 is set, else $1C. We take the wider $1C for the same
 # reason the Antonio constants above take their wider pair -- never miss a
 # strike by under-stating the box.

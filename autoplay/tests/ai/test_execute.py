@@ -54,7 +54,7 @@ from sor_autoplay.ai.decide import (
     in_smash_range,
 )
 from sor_autoplay.ai.pathfind import Rect
-from sor_autoplay.ai.reach import PIT_AVOID_MARGIN, pit_endangers
+from sor_autoplay.ai.reach import PIT_AVOID_MARGIN, SOUTHER_SLASH_DIST_MIN, pit_endangers
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.tokens import Breakable, Pit, Projectile, SafeSpot
 from sor_autoplay.hitboxes import Hitbox
@@ -369,6 +369,79 @@ class DeadZoneApproachTests(unittest.TestCase):
         stop_dx = target_x - nora.world_x
         self.assertLess(stop_dx, nora.min_reach)
         self.assertGreaterEqual(stop_dx, punch_usable_inner_x(0))
+
+
+class SoutherPocketApproachTests(unittest.TestCase):
+    """reach.SOUTHER_SLASH_DIST_MIN (24px) is where $15EDA cannot begin the
+    slash at all. Measured live: 220 of 240 health lost across a full fight
+    went in during the wind-up that follows his state-1 commit, which the
+    punch's own outer edge (46px for Axel) sits squarely inside."""
+
+    def _souther(self, **overrides) -> Souther:
+        fields = dict(
+            slot="obj11",
+            type_id=0x55,
+            world_x=200,
+            world_y=100,
+            health=32,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+            primary_state=1,
+            tactical=0,
+        )
+        fields.update(overrides)
+        return Souther(**fields)
+
+    def test_stops_inside_the_inner_abort(self) -> None:
+        actor = _myself(world_x=100, world_y=100)
+        souther = self._souther(world_x=200, world_y=100)
+
+        target_x, _ = _walk_to_near_enemy_target(actor, souther, set())
+
+        stop_dx = souther.world_x - target_x
+        self.assertLess(stop_dx, SOUTHER_SLASH_DIST_MIN, "still outside the commit gate")
+        self.assertGreaterEqual(
+            stop_dx, punch_usable_inner_x(0), "too close for Axel's own punch"
+        )
+
+    def test_committed_souther_is_not_pocketed(self) -> None:
+        # Once the claw is out, 24px is where $161C6 resolves the dash, not a
+        # pocket -- DodgeSoutherSlash owns that window, not the approach.
+        actor = _myself(world_x=100, world_y=100)
+        committed = self._souther(
+            world_x=200,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            tactical=2,
+        )
+
+        target_x, _ = _walk_to_near_enemy_target(actor, committed, set())
+
+        stop_dx = committed.world_x - target_x
+        self.assertGreaterEqual(stop_dx, SOUTHER_SLASH_DIST_MIN)
+
+    def test_pocket_is_reached_from_the_other_side(self) -> None:
+        actor = _myself(world_x=300, world_y=100, facing_left=True)
+        souther = self._souther(world_x=200, world_y=100, facing_left=False)
+
+        target_x, _ = _walk_to_near_enemy_target(actor, souther, set())
+
+        stop_dx = target_x - souther.world_x
+        self.assertLess(stop_dx, SOUTHER_SLASH_DIST_MIN)
+        self.assertGreaterEqual(stop_dx, punch_usable_inner_x(0))
+
+    def test_every_character_stays_above_their_own_punch_floor(self) -> None:
+        for cid in (0, 1, 2):
+            actor = replace(_myself(world_x=100, world_y=100), character_id=cid)
+            souther = self._souther(world_x=200, world_y=100)
+
+            target_x, _ = _walk_to_near_enemy_target(actor, souther, set())
+
+            stop_dx = souther.world_x - target_x
+            self.assertGreaterEqual(stop_dx, punch_usable_inner_x(cid), f"character {cid}")
+            self.assertLess(stop_dx, SOUTHER_SLASH_DIST_MIN, f"character {cid}")
 
 
 class ExecuteWalkToNearEnemyTests(unittest.TestCase):

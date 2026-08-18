@@ -196,6 +196,14 @@ class PlayableCharacter(Character, ABC):
     # kick gate at $16EAE reads this exact word: a value of 0 is the
     # standing-still path that fires the power kick during a ground combo.
     vel_x: float = 0.0
+    # Ticks since this actor took its current hold (front $60 or back $66),
+    # cross-tick memory from observe.HoldTracker -- there is no ROM-decoded
+    # escape/struggle timer on the held enemy to read instead. 0 while not
+    # holding. priority.py's held-move scoring reads this to knee a few times
+    # before the flip->suplex finish takes over, rather than finishing the
+    # instant a hold is taken (measured live against Souther: the AI grabbed
+    # and immediately flipped, milking zero knees).
+    hold_ticks: int = 0
 
     @property
     def action_base(self) -> int:

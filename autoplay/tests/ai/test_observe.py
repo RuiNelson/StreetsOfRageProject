@@ -8,7 +8,11 @@ from sor_autoplay.ai.tokens import Abadede, Enemy, Garcia, Jack, Nora, Souther
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, Stage
 from sor_autoplay.ai.tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
 from sor_autoplay.ai.tokens import Pit, Projectile
-from sor_autoplay.ai.observe import NoraAttackTracker, generate_direct_observation_tokens
+from sor_autoplay.ai.observe import (
+    HoldTracker,
+    NoraAttackTracker,
+    generate_direct_observation_tokens,
+)
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import WalkToNearEnemy
 from sor_autoplay.ai.tokens import find, find_all
@@ -964,6 +968,113 @@ class NoraAttackTrackerObservationTests(unittest.TestCase):
         assert attacking is not None and idle is not None
         self.assertEqual(attacking.ticks_since_last_attack, 0)
         self.assertEqual(idle.ticks_since_last_attack, 1)
+
+
+class HoldTrackerObservationTests(unittest.TestCase):
+    def _tick(self, tracker, *, action_state: int, slot: str = "P1"):
+        players = (
+            _player_snapshot(index=1),
+            _player_snapshot(index=2, is_playable=False),
+        )
+        entities = (_player_entity(slot=slot, action_state=action_state),)
+        snapshot = _snapshot(players=players, entities=entities)
+        context = generate_direct_observation_tokens(
+            snapshot, player_index=1, hold_tracker=tracker
+        )
+        myself = find(context, Myself, slot=slot)
+        assert myself is not None
+        return myself
+
+    def test_no_tracker_defaults_to_zero(self) -> None:
+        players = (
+            _player_snapshot(index=1),
+            _player_snapshot(index=2, is_playable=False),
+        )
+        entities = (_player_entity(slot="P1", action_state=0x60),)
+        snapshot = _snapshot(players=players, entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        myself = find(context, Myself, slot="P1")
+        assert myself is not None
+        self.assertEqual(myself.hold_ticks, 0)
+
+    def test_stays_zero_while_not_holding(self) -> None:
+        tracker = HoldTracker()
+
+        first = self._tick(tracker, action_state=0x02)
+        second = self._tick(tracker, action_state=0x02)
+
+        self.assertEqual(first.hold_ticks, 0)
+        self.assertEqual(second.hold_ticks, 0)
+
+    def test_counts_up_across_a_front_hold(self) -> None:
+        tracker = HoldTracker()
+
+        first = self._tick(tracker, action_state=0x60)
+        second = self._tick(tracker, action_state=0x60)
+        third = self._tick(tracker, action_state=0x60)
+
+        self.assertEqual(first.hold_ticks, 1)
+        self.assertEqual(second.hold_ticks, 2)
+        self.assertEqual(third.hold_ticks, 3)
+
+    def test_counts_through_the_flip_into_a_back_hold(self) -> None:
+        # A flip crosses front $60 -> back $66; the count is "since first
+        # grabbed", so it must not reset at that transition.
+        tracker = HoldTracker()
+
+        self._tick(tracker, action_state=0x60)
+        self._tick(tracker, action_state=0x60)
+        after_flip = self._tick(tracker, action_state=0x66)
+
+        self.assertEqual(after_flip.hold_ticks, 3)
+
+    def test_resets_to_zero_once_the_hold_ends(self) -> None:
+        tracker = HoldTracker()
+
+        self._tick(tracker, action_state=0x60)
+        self._tick(tracker, action_state=0x60)
+        released = self._tick(tracker, action_state=0x02)
+
+        self.assertEqual(released.hold_ticks, 0)
+
+    def test_a_fresh_hold_after_release_starts_over(self) -> None:
+        tracker = HoldTracker()
+
+        self._tick(tracker, action_state=0x60)
+        self._tick(tracker, action_state=0x60)
+        self._tick(tracker, action_state=0x02)
+        fresh = self._tick(tracker, action_state=0x60)
+
+        self.assertEqual(fresh.hold_ticks, 1)
+
+    def test_facing_bit_does_not_affect_the_hold_action_base(self) -> None:
+        # +$30 bit 0 is facing; a held enemy can be grabbed facing either way.
+        tracker = HoldTracker()
+
+        result = self._tick(tracker, action_state=0x61)
+
+        self.assertEqual(result.hold_ticks, 1)
+
+    def test_myself_and_partner_are_tracked_independently(self) -> None:
+        tracker = HoldTracker()
+        players = (_player_snapshot(index=1), _player_snapshot(index=2))
+        entities = (
+            _player_entity(slot="P1", action_state=0x60),
+            _player_entity(slot="P2", action_state=0x02),
+        )
+        snapshot = _snapshot(players=players, entities=entities)
+
+        context = generate_direct_observation_tokens(
+            snapshot, player_index=1, hold_tracker=tracker
+        )
+
+        myself = find(context, Myself, slot="P1")
+        partner = find(context, Partner, slot="P2")
+        assert myself is not None and partner is not None
+        self.assertEqual(myself.hold_ticks, 1)
+        self.assertEqual(partner.hold_ticks, 0)
 
 
 class ContinueAndMrXObservationTests(unittest.TestCase):
