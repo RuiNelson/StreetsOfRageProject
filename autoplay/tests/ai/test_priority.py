@@ -2163,12 +2163,13 @@ class AntonioVerbEmergencyTests(unittest.TestCase):
             myself,
             antonio,
             Punch(actor_slot="P1", target_slot="obj09"),
+            JumpAttack(actor_slot="P1", target_slot="obj09"),
             GrabEnemy(actor_slot="P1", target_slot="obj09"),
         }
         winner = find_all(determine_priority_verb(context), Verb)[0]
         self.assertIsInstance(winner, GrabEnemy)
 
-    def test_opener_punch_outranks_jumping_a_live_antonio(self) -> None:
+    def test_opener_hop_outranks_punching_a_live_antonio(self) -> None:
         myself = Myself(
             slot="P1",
             player_index=1,
@@ -2206,7 +2207,7 @@ class AntonioVerbEmergencyTests(unittest.TestCase):
             JumpAttack(actor_slot="P1", target_slot="obj09"),
         }
         winner = find_all(determine_priority_verb(context), Verb)[0]
-        self.assertIsInstance(winner, Punch)
+        self.assertIsInstance(winner, JumpAttack)
 
     def test_jump_kick_outranks_walking_into_a_live_antonio(self) -> None:
         myself = Myself(

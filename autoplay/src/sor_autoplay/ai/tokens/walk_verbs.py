@@ -191,8 +191,9 @@ class DodgeAntonioKick(Walk):
     gate (``reach.antonio_will_kick``) is live and who has already locked in
     the kick (primary ``$02``) or the dash/throw (tactical ``$08``). A
     predicted ``$16EAE`` window is not enough: sidestepping that made the AI
-    leave punch range forever and never take the hold. The executor hops
-    over the committed strike.
+    leave hop range forever and never take the hold. The executor hops
+    over the committed strike. The opener hop on a live Antonio is
+    ``JumpAttack``, not this.
 
     Raises emergency: a committed Antonio kick gate×58 -- above every
     strike on an Antonio that can still act (20). A punish grab on

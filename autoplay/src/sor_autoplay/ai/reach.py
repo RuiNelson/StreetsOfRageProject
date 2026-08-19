@@ -1175,7 +1175,7 @@ def grab_reasons(
     Most reasons are ``Grunt``-only. Antonio and Souther are the exceptions:
     after a landed hit both sit in the shared later-boss ``RECOVERY`` states
     (primary ``$03``/``$04``), and a hold-then-suplex beats following up with
-    another strike -- for Antonio because the combo is his own kick trigger,
+    another strike -- for Antonio because a grounded punch is his own kick trigger,
     for Souther because ``$15EDA (souther_state1_active_combat)`` cannot
     re-arm the claw from recovery, so the walk-in is free. Bongo, the twins,
     Abadede and Mr. X stay out of scope.

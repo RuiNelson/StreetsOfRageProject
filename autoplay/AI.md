@@ -207,16 +207,24 @@ Antonio's ROM kick gate at `$16EAE` (already satisfied, or committed to
 primary state 2, the close-range power kick) is answered by `reach.
 antonio_will_kick(antonio, actor)`. Standing still in front of him is one
 of the trigger paths — the player's own signature while throwing a ground
-combo. The human answer is a single punch *or* a jump kick to put him in
-later-boss hitstun (primary `$03`/`$04`, decoded as `RECOVERY`), then a
-grab and a suplex. Jump-kicking him is offered anywhere inside the
-kick's free-flight range -- the usual "past punch outer" band is only
-~10px on Axel and never fires -- and owns the approach once he is that
-close; a punch still wins in punch range. `DodgeAntonioKick` and the
-jump-over tier fire only once the kick or the tactical-`$08` dash is
-actually locked in. A predicted window is not a reason to leave punch
-range. `HitAntonioBoomerang` punches the thrown boomerang at
-punch-connect time when it would hit the actor.
+combo, and equally the signature of a standing punch. The human answer is
+a jump kick to put him in later-boss hitstun (primary `$03`/`$04`,
+decoded as `RECOVERY`), then a grab and a suplex. A grounded B is
+refused entirely: the first punch stood in the same window as a combo
+and lost the ranking contest to the hop (20+boss vs 18+boss), which is
+why the fight looked weak. Jump-kicking him is offered anywhere inside
+the kick's free-flight range -- the usual "past punch outer" band is
+only ~10px on Axel and never fires -- and owns the approach once he is
+that close; the hop also wins the ranking
+(`priority._EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER` 22).
+From inside punch range the hop is in place, so the actor lands where
+the grab can connect -- a directed hop from there lands on his far
+side, facing away, and the hold never starts.
+`DodgeAntonioKick` and the jump-over tier fire only
+once the kick or the tactical-`$08` dash is actually locked in. A
+predicted window is not a reason to leave hop range. Overlapping him on
+X hops in place rather than punching. `HitAntonioBoomerang` punches the
+thrown boomerang at punch-connect time when it would hit the actor.
 
 Souther's commit gate at `$15EDA (souther_state1_active_combat)` — the
 velocity-selected `$50`/`$58`/`$68` X windows, the `$1C` lane window, and the
@@ -635,10 +643,10 @@ behaviour without changing any code. A third, `JACK_FROM_BEHIND`, fires
 when the actor is already on Jack's back (he is facing away): take the
 hold before the axe or the lunge turns around. A fourth, `ANTONIO_ON_
 PUNISH`, fires when Antonio is in later-boss hitstun (`RECOVERY`, primary
-`$03`/`$04` after `$17C36 boss_apply_pending_damage`): punch him once to
+`$03`/`$04` after `$17C36 boss_apply_pending_damage`): hop him once to
 open that window, walk in without attacking, then flip-hold into a
-suplex. Standing still to combo him is the `$16EAE` zero-velocity kick
-trigger, so a second punch is refused and the hold is the punish. A
+suplex. Standing still to punch him is the `$16EAE` zero-velocity kick
+trigger, so every grounded B is refused and the hold is the punish. A
 fifth, `SOUTHER_ON_PUNISH`, is its Souther counterpart on the same shared
 later-boss `RECOVERY` states, and it is a separate reason rather than
 sharing Antonio's because the *reason* differs: Antonio's is that a second

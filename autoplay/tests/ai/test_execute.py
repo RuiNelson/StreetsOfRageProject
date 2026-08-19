@@ -1643,6 +1643,50 @@ class ExecuteJumpAttackTests(unittest.TestCase):
 
         client.press_buttons.assert_called_once_with(player1=C | RIGHT, player2=0, frames=3)
 
+    def test_hops_in_place_on_antonio_inside_punch_range(self) -> None:
+        # A directed hop from dx=40 (Axel punch outer 50) carries ~3 px/frame
+        # past him; the actor lands facing away and grab_would_connect fails.
+        # Measured live: 374 JumpAttack, 0 GrabEnemy. C with no direction
+        # is the hop that lands in grab range.
+        actor = _myself(world_x=120, world_y=100)
+        antonio = Antonio(
+            slot="obj09",
+            type_id=0x56,
+            world_x=160,
+            world_y=100,
+            health=40,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+            primary_state=1,
+        )
+        verb = JumpAttack(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {actor, antonio}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=C, player2=0, frames=3)
+
+    def test_still_hops_toward_antonio_outside_punch_range(self) -> None:
+        actor = _myself(world_x=100, world_y=100)
+        antonio = Antonio(
+            slot="obj09",
+            type_id=0x56,
+            world_x=155,
+            world_y=100,
+            health=40,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+            primary_state=1,
+        )
+        verb = JumpAttack(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {actor, antonio}, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=C | RIGHT, player2=0, frames=3)
+
     def test_presses_a_clean_punch_edge_in_free_flight(self) -> None:
         # Free flight ($12): B on its own -- $3914 needs a rising edge, and
         # the direction is re-held afterwards for air steer rather than being
@@ -2797,7 +2841,39 @@ class DodgeAntonioKickExecuteTests(unittest.TestCase):
         client.press_buttons.assert_called_once()
         pressed = client.press_buttons.call_args.kwargs["player1"]
         self.assertTrue(pressed & C)
+        self.assertFalse(pressed & (LEFT | RIGHT))
 
+    def test_hops_even_when_overlapping_on_x(self) -> None:
+        # JumpAttack's generic fallback punches when overlapping on X.
+        # Against Antonio that is the $16EAE kick trigger, and this dodge
+        # reuses that handler, so the fallback would turn a dodge into a
+        # standing punch. Hop in place instead.
+        actor = _myself(world_x=160, world_y=100)
+        antonio = Antonio(
+            slot="obj09",
+            type_id=0x56,
+            world_x=160,
+            world_y=100,
+            health=40,
+            combat_phase=CombatPhase.ATTACKING,
+            targets_player=1,
+            facing_left=True,
+            primary_state=2,
+        )
+        client = MagicMock()
+        gamepad = VirtualGamepad(
+            SharedGamepadState(client), player_index=1
+        )
+        execute_verb(
+            DodgeAntonioKick(actor_slot="P1", target_slot="obj09"),
+            {actor, antonio},
+            gamepad,
+        )
+        client.press_buttons.assert_called_once()
+        pressed = client.press_buttons.call_args.kwargs["player1"]
+        self.assertTrue(pressed & C)
+        self.assertFalse(pressed & B)
+        self.assertFalse(pressed & (LEFT | RIGHT))
 
 
 class DodgeSoutherSlashExecuteTests(unittest.TestCase):

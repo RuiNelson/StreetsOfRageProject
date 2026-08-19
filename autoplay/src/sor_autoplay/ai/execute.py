@@ -42,7 +42,7 @@ from .tokens import (
     punch_outer_x,
     punch_usable_inner_x,
 )
-from .tokens import Enemy, Souther
+from .tokens import Antonio, Enemy, Souther
 from .tokens import CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile
 from .tokens import Pickup, Weapon
@@ -1390,7 +1390,9 @@ def state_machine_dodge_antonio_kick(
 
     A ground sidestep never leaves the ROM's X-velocity kick gate
     (measured: minutes of sidestep, 0 damage dealt). Reuses the jump-
-    kick state machine so the airborne B edge punishes.
+    kick state machine so the airborne B edge punishes. Inside punch
+    range that hop is in place -- a directed hop from there lands past
+    him, facing away, and the grab on landing never happens.
     """
 
     state_machine_jump_attack(verb, context, gamepad)
@@ -1716,30 +1718,67 @@ JUMP_ATTACK_ACTIONS = frozenset({0x16, 0x42})
 JUMP_LAND_ACTIONS = frozenset({0x14, 0x40})
 
 
-def _jump_toward(actor: Myself | Partner, target_x: int, gamepad: VirtualGamepad) -> None:
+def _hop_without_x_carry(actor: Myself | Partner, target: Enemy) -> bool:
+    """True when a directed hop at this distance would fly past ``target``.
+
+    Antonio's punish is the grab on landing. A directed hop from inside
+    punch range carries ~3 px/frame for the whole flight and lands on his
+    far side, facing away -- ``grab_would_connect`` then fails (he is
+    behind) and the next live tick hops again. Measured live: a full
+    Antonio fight under the directed opener was 374 ``JumpAttack`` and
+    0 ``GrabEnemy``.
+    """
+
+    if not isinstance(target, Antonio):
+        return False
+    return abs(target.world_x - actor.world_x) <= punch_outer_x(actor.character_id)
+
+
+def _jump_toward(
+    actor: Myself | Partner,
+    target_x: int,
+    gamepad: VirtualGamepad,
+    *,
+    horizontal: bool = True,
+) -> None:
     """Hold a jump toward ``target_x`` -- launch, crouch, kick, or air steer.
 
     Shared by ``JumpAttack`` and a ``WalkToAdvanceStage`` hop over a pit the
     pathfinder cannot walk around. Kick in free flight: the extra hang time
     is how a hop clears a gap the walk could not.
+
+    ``horizontal=False`` is an in-place hop: ``$384E`` reads the held
+    direction at the end of the crouch, so any leftover LEFT/RIGHT from
+    the walk-in becomes carry. Against Antonio inside punch range that
+    carry is how the actor lands past him and never grabs.
     """
 
-    face = _face_toward_mask(actor, target_x)
-    if face == 0:
-        face = LEFT_MASK if actor.facing_left else RIGHT_MASK
+    face = 0
+    if horizontal:
+        face = _face_toward_mask(actor, target_x)
+        if face == 0:
+            face = LEFT_MASK if actor.facing_left else RIGHT_MASK
     base = actor.action_base
     if base in JUMP_FREE_FLIGHT_ACTIONS:
         _press(gamepad, PUNCH_MASK, frames=JUMP_ATTACK_KICK_FRAMES)
-        gamepad.hold(face)
+        if face:
+            gamepad.hold(face)
         return
     if base in JUMP_CROUCH_ACTIONS:
-        gamepad.hold(face)
+        if face:
+            gamepad.hold(face)
+        else:
+            gamepad.hold(0)
         return
     if base in JUMP_ATTACK_ACTIONS or base in JUMP_LAND_ACTIONS or actor.is_airborne:
-        gamepad.hold(face)
+        if face:
+            gamepad.hold(face)
+        else:
+            gamepad.hold(0)
         return
     _press(gamepad, JUMP_MASK | face, frames=JUMP_ATTACK_LAUNCH_FRAMES)
-    gamepad.hold(face)
+    if face:
+        gamepad.hold(face)
 
 
 def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: VirtualGamepad) -> None:
@@ -1788,13 +1827,27 @@ def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: Virtu
         gamepad.release()
         return
     face = _face_toward_mask(actor, target.world_x)
-    if face == 0 and not actor.is_airborne and actor.action_base not in (
-        JUMP_CROUCH_ACTIONS | JUMP_FREE_FLIGHT_ACTIONS | JUMP_ATTACK_ACTIONS | JUMP_LAND_ACTIONS
+    if (
+        face == 0
+        and not actor.is_airborne
+        and actor.action_base not in (
+            JUMP_CROUCH_ACTIONS | JUMP_FREE_FLIGHT_ACTIONS | JUMP_ATTACK_ACTIONS | JUMP_LAND_ACTIONS
+        )
+        and not isinstance(target, Antonio)
     ):
-        # Already overlapping on X — punch, don't jump.
+        # Already overlapping on X — punch, don't jump. Antonio is the
+        # exception: overlapping him on X is exactly when the hop has to
+        # go straight up over the kick/dash. A grounded B here is the
+        # $16EAE zero-velocity trigger, and DodgeAntonioKick reuses this
+        # handler, so the fallback would turn a dodge into a punch.
         _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
         return
-    _jump_toward(actor, target.world_x, gamepad)
+    _jump_toward(
+        actor,
+        target.world_x,
+        gamepad,
+        horizontal=not _hop_without_x_carry(actor, target),
+    )
 
 
 def state_machine_grab_enemy(verb: GrabEnemy, context: Context, gamepad: VirtualGamepad) -> None:

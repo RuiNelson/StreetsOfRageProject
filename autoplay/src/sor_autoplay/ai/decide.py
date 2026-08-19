@@ -236,14 +236,17 @@ def _could_melee_strike(
                 and target.has_projectile
             ):
                 continue
-            # Antonio: one punch opens the grab; a second punch is standing
-            # still in front of him -- the $16EAE kick trigger. Dodge owns
-            # only a kick/dash that is already locked in.
+            # Antonio: a grounded B is standing still in front of him, and
+            # $16EAE's zero-velocity path is the kick trigger. That is the
+            # first punch as much as a follow-up combo -- the previous
+            # "one punch opens the grab" exception stood in the window
+            # that arms the kick and lost the ranking contest to the hop
+            # that should have been the opener (punch 20+boss vs jump 18+
+            # boss). The hop is the opener (could_jump_attack); the grab
+            # is the punish (ANTONIO_ON_PUNISH); DodgeAntonioKick owns a
+            # kick/dash that is already locked in.
             if isinstance(target, Antonio):
-                if is_punishable(target.combat_phase):
-                    continue
-                if reach.antonio_will_kick(target, actor) and target.strike_is_committed():
-                    continue
+                continue
             verbs.add(make_verb(actor.slot, target_slot, actor.held_weapon_type))
     return verbs
 
@@ -972,12 +975,13 @@ def could_jump_attack(context: Context) -> Context:
             # held direction $384E samples.
             continue
         target_slots = _targets_in_reach(context, actor, reach.in_jump_attack_band, JumpAttack)
-        # Jump-kicking Antonio is a real opener, not only a hop over his
-        # kick: the usual JUMP_ATTACK band is just past punch outer
-        # (Axel: ~10px), which is too thin to ever fire. Offer a hop
-        # anywhere inside the kick's free-flight range. A punishable
-        # Antonio is a grab, not another hop -- unless already airborne,
-        # when the flight has to finish.
+        # Jump-kicking Antonio is the opener, not a backup to a grounded
+        # punch: a standing B is the $16EAE zero-velocity kick trigger,
+        # and the usual JUMP_ATTACK band is just past punch outer (Axel:
+        # ~10px), too thin to ever fire. Offer a hop anywhere inside the
+        # kick's free-flight range. A punishable Antonio is a grab, not
+        # another hop -- unless already airborne, when the flight has to
+        # finish.
         kick_slots = {
             antonio.slot
             for antonio in find_all(context, Antonio)
@@ -1056,9 +1060,9 @@ def could_dodge_antonio_kick(context: Context) -> Context:
             if not reach.antonio_will_kick(antonio, actor):
                 continue
             if not antonio.strike_is_committed():
-                # Predicted window only: walking in and punching is the
-                # opener. Sidestepping here is the dodge loop that never
-                # reaches grab range.
+                # Predicted window only: jumping in is the opener
+                # (could_jump_attack). Sidestepping here is the dodge
+                # loop that never reaches grab range.
                 continue
             verbs.add(
                 DodgeAntonioKick(actor_slot=actor.slot, target_slot=antonio.slot)

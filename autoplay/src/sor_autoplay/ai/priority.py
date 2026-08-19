@@ -247,6 +247,11 @@ _EMERGENCY_HOLD_RELEASE = 50
 # landing zero knees before the finish.
 HOLD_KNEE_TICKS = 6
 _EMERGENCY_JUMP_ATTACK_PUNISHABLE = 28  # below punch; never prefer hop over strike
+# Hop on a live Antonio. Must clear _EMERGENCY_PUNCH_DEFAULT (20) so the
+# opener is the jump-kick even if a Punch is still in context: standing
+# still to throw that punch is $16EAE's zero-velocity kick trigger.
+# Below the committed jump-over (56) and the grounded dodge (58).
+_EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER = 22
 # Nora specifically, freshly out of her own whip engage-and-swing or lunge
 # (Nora.ticks_since_last_attack -- observe.NoraAttackTracker) but not (yet)
 # re-armed and not in any ROM-confirmed is_punishable phase, so this sits
@@ -535,13 +540,15 @@ def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
     actor = _find_actor(context, verb.actor_slot)
     if target is None:
         return _EMERGENCY_DEFAULT
-    if (
-        isinstance(target, Antonio)
-        and target.strike_is_committed()
-        and actor is not None
-        and reach.antonio_will_kick(target, actor)
-    ):
-        return _with_target_class(_EMERGENCY_JUMP_OVER_ANTONIO_KICK, target)
+    if isinstance(target, Antonio):
+        if (
+            target.strike_is_committed()
+            and actor is not None
+            and reach.antonio_will_kick(target, actor)
+        ):
+            return _with_target_class(_EMERGENCY_JUMP_OVER_ANTONIO_KICK, target)
+        if not is_punishable(target.combat_phase):
+            return _with_target_class(_EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER, target)
     if is_punishable(target.combat_phase):
         return _with_target_class(_EMERGENCY_JUMP_ATTACK_PUNISHABLE, target)
     if (

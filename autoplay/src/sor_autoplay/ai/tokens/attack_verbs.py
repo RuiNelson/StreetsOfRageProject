@@ -297,7 +297,8 @@ class ReleaseGrab(GrabMechanics):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class JumpAttack(MeleeAttacks):
-    """Jump-kick only — never a stationary hop. Requires horizontal aim.
+    """Jump-kick — a directed hop, except an in-place hop on Antonio
+    already inside punch range.
 
     Produced by ``could_jump_attack`` for a target ``reach.in_jump_attack_
     band`` names (forward, outside punch outer, within the kick's max ΔX)
@@ -305,12 +306,16 @@ class JumpAttack(MeleeAttacks):
     the kick's own travel would otherwise deliver it into a committed
     attack, airborne and unable to change its mind.
 
-    Raises emergency: a committed Antonio kick gate×56, (target is
-    punishable)×28, (Nora, not currently dangerous, within
-    priority.NORA_RECOVERY_PUNISH_TICKS of her own last attack)×24,
-    Enemy×18. Against a live Antonio the hop is also offered anywhere
-    inside the kick's free-flight range (not only past punch outer);
-    punch still wins in punch range, the grab still wins on hitstun.
+    Raises emergency: a committed Antonio kick gate×56, a live
+    Antonio opener×22 (clears a grounded punch: standing still is
+    his kick trigger), (target is punishable)×28, (Nora, not currently
+    dangerous, within priority.NORA_RECOVERY_PUNISH_TICKS of her own
+    last attack)×24, Enemy×18. Against a live Antonio the hop is also
+    offered anywhere inside the kick's free-flight range (not only
+    past punch outer) and is the opener; the grab still wins on
+    hitstun. From inside punch range the executor hops in place -- a
+    directed hop from there lands on his far side, facing away, and
+    the grab never happens.
     """
 
     priority: int = 8  # below basic punch priority (10)

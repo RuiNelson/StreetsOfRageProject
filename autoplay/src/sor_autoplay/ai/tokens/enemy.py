@@ -273,7 +273,9 @@ class Antonio(Boss):
     maintain/throw (tactical ``$08``), and the proximity/velocity/facing
     gate that advances him to state 2. Primary state 2 (``$171CC``) is the
     committed close-range power kick. ``reach.antonio_will_kick`` names that
-    transition before -- and while -- it lands.
+    transition before -- and while -- it lands. A grounded punch on a live
+    Antonio is the ``$16EAE`` zero-velocity kick trigger, so the opener is
+    the hop, not a standing B.
     """
 
     def strike_is_committed(self) -> bool:
@@ -342,8 +344,8 @@ class GrabReason(Enum):
     tier among reasons present for this pair" -- with only the tier constant
     differing per reason. Most reasons are ``Grunt``-only; ``ANTONIO_ON_
     PUNISH`` is the exception, because Antonio's punish window is the
-    opening of the punch-grab-suplex that beats standing still to combo him
-    (the combo is his own kick trigger).
+    opening of the hop-grab-suplex that beats standing still to punch him
+    (a grounded B is his own kick trigger).
     """
 
     CLEAR_REAR = auto()
@@ -441,9 +443,9 @@ class GrabReason(Enum):
 
     Produced when a live ``Antonio`` is in a punishable phase (``RECOVERY``
     after ``$17C36 boss_apply_pending_damage`` writes shared later-boss
-    states ``$03``/``$04``). A second punch here is standing still in front
-    of him, which is the ``$16EAE`` zero-velocity kick path; the hold is
-    how a human actually beats him.
+    states ``$03``/``$04``). A grounded punch here is standing still in
+    front of him, which is the ``$16EAE`` zero-velocity kick path; the
+    hold is how a human actually beats him.
 
     Not produced while he can still act: walking into a ready Antonio
     is how the kick lands first.
@@ -459,8 +461,8 @@ class GrabReason(Enum):
     so the suplex chain matters more here, not less.
 
     Deliberately its own reason rather than sharing Antonio's: the *reason*
-    the hold pays off differs. Antonio's is that a second punch is his own
-    kick trigger; Souther's is simply that ``$15EDA
+    the hold pays off differs. Antonio's is that a grounded punch is his
+    own kick trigger; Souther's is simply that ``$15EDA
     (souther_state1_active_combat)`` cannot re-arm the slash while he is in
     recovery, so the walk-in is free.
     """
