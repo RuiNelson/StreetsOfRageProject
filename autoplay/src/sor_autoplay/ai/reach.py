@@ -4,9 +4,10 @@ These predicates used to be private helpers inside ``decide.py``, recomputed
 independently by ``priority.py`` (through cross-module imports of those
 privates) and deliberately *duplicated* by ``inference.py``, which must not
 import ``decide``. Keeping them here gives every stage one definition to
-agree on: ``inference.py`` turns them into ``TargetInReach`` tokens once per
-tick, ``decide.py``/``priority.py`` read those tokens, and ``execute.py``
-reuses the same lane/pit clearance values it has to steer around.
+agree on: ``decide.py``/``priority.py``/``execute.py`` call the same
+functions directly, each tick, rather than reading a value pre-computed
+into a token -- the single shared definition is what keeps them from
+disagreeing, not a cache.
 
 Nothing in this module reads RAM or produces tokens -- it only answers
 questions about tokens already in the context.
@@ -20,19 +21,26 @@ not duplicated for the predictive case.
 
 from __future__ import annotations
 
-from ..phases import should_ignore_as_target
+from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
 from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
-from .kinematics import enemy_projected
+from .kinematics import enemy_projected, enemy_projected_without_crossing
 from .tokens import (
+    Antonio,
     BODY_OVERLAP_X,
     CameraRange,
     Context,
     Enemy,
+    GrabReason,
+    Grunt,
     Jack,
     PlayableCharacter,
     Pit,
+    Projectile,
     PUNCH_RANGE_Y,
+    Souther,
     Stage,
+    Surrounded,
+    Weapon,
     find,
     find_all,
     punch_inner_x,
@@ -41,6 +49,7 @@ from .tokens import (
     rear_attack_behind_max_x,
     rear_attack_behind_min_x,
     rear_attack_front_max_x,
+    weapon_rank,
 )
 
 # Slack for an enemy that reads as nominally "behind" while standing
@@ -156,7 +165,7 @@ RETREAT_CAUTION_MARGIN_Y = PUNCH_RANGE_Y + 12
 # textbook limit cycle, and it reproduced immediately when the pipeline was
 # driven over synthetic ticks against a single ATTACKING enemy: one retreat
 # step (RETREAT_FROM_DANGER_DISTANCE) carries the actor a few px past the
-# boundary, which deletes the IncomingMelee token, which un-skips
+# boundary, which flips is_incoming_melee false, which un-skips
 # could_walk_to_near_enemy, which walks straight back in and re-arms the
 # threat on the very next tick. The observed period was *one tick* -- a
 # LEFT/RIGHT alternation at the full poll rate, plus a slow lane drift from
@@ -257,28 +266,6 @@ SOUTHER_SLASH_DIST_MIN = 0x18  # 24px
 # all -- the danger *is* the velocity, tested here by the enemy's own body
 # reaching the caution zone, not by anything in attack_ranges.py.
 CLOSING_ENEMY_THREAT_FRAMES = 12
-
-
-def targets_of(context: Context, cls: type, actor_slot: str, *, kind=None) -> set[str]:
-    """Target slots of every ``cls`` token in ``context`` for one actor.
-
-    ``find``/``find_all`` match on a ``slot`` attribute, which the
-    actor-and-target inference tokens deliberately do not have (they
-    reference two tokens, not one), so this is their lookup.
-
-    ``kind``, when given, additionally narrows to tokens whose own ``kind``
-    field matches -- the way callers pick one move family out of the single
-    ``TargetInReach`` class (``ReachKind.PUNCH``, ``.REAR``, and so on).
-    Tokens with no ``kind`` field (everything else ``targets_of`` is used
-    for) never match a ``kind``-qualified lookup.
-    """
-
-    return {
-        token.target_slot
-        for token in find_all(context, cls)
-        if getattr(token, "actor_slot", None) == actor_slot
-        and (kind is None or getattr(token, "kind", None) == kind)
-    }
 
 
 def jump_attack_max_dx(character_id: int | None) -> int:
@@ -496,7 +483,7 @@ def rear_attack_is_warranted(
        where he is, now. The opposite geometry -- the actor already on
        *his* back, just facing the wrong way (a jump kick that overshot)
        -- is a grab, not a chord: ``enemy_forward_dx < 0`` means turn
-       around and take the hold (``GrabOpportunity`` reason
+       around and take the hold (``grab_reasons`` includes
        ``JACK_FROM_BEHIND``).
     """
 
@@ -537,11 +524,11 @@ def enemy_actionable(
     vacuum -- nothing attacking it, and ``could_walk_to_near_enemy``
     declining to turn toward it.
 
-    Answered about the observed position only, unlike the ``TargetInReach``
-    bands, which sweep their move's own timeline: this is the "stop walking,
-    you can already hit it" signal, and a future-tense answer to it halts the
+    Answered about the observed position only, unlike ``connects``' bands,
+    which sweep their move's own timeline: this is the "stop walking, you
+    can already hit it" signal, and a future-tense answer to it halts the
     approach while the enemy is still out of reach. See
-    ``inference.check_for_targets_in_reach``.
+    ``decide._actionable_targets``.
     """
 
     if in_rear_band(actor, enemy) and rear_attack_is_warranted(actor, enemy, enemies):
@@ -681,3 +668,581 @@ def enemy_will_close_soon(
     """
 
     return too_close_to_keep_approaching(actor, enemy_projected(enemy, frames))
+
+
+# The committed dash at $161C6 (souther_state2_claw_dash): +$1C = $00080000,
+# i.e. 8px per 60Hz frame, and it resolves only with the target inside $18
+# (24px) of its lane. Used by souther_dash_arrives_soon, which exists because
+# a Boss populates neither attack_ranges nor grunt_vel_*, so both of
+# is_incoming_melee's ordinary tests report "no threat" while he closes
+# faster than any grunt.
+SOUTHER_DASH_SPEED_X = 8.0
+SOUTHER_DASH_RESOLVE_LANE = 0x18  # 24px
+
+
+def souther_dash_arrives_soon(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """Souther's committed claw dash, which neither test above can see.
+
+    Both of them are blind to it, for the same underlying reason: a ``Boss``
+    populates neither ``attack_ranges`` (so ``too_close_to_keep_approaching``
+    falls back to a caution box built from the *actor's* punch reach, ~46px)
+    nor ``grunt_vel_x``/``grunt_vel_y`` (so ``enemy_will_close_soon`` projects
+    him to standing still). The dash at ``$161C6
+    (souther_state2_claw_dash)`` closes at ``$00080000`` -- 8px per 60Hz
+    frame, faster than any character walks -- so from 90px he arrives in
+    about eleven frames while both checks report no threat at all.
+
+    Lane is part of the test rather than slack around it: the dash writes
+    only ``+$1C`` and resolves only with the target inside ``$18`` of its
+    lane, so an actor already off that lane is genuinely not about to be hit
+    -- which is exactly what ``DodgeSoutherSlash`` is spending the tick
+    achieving.
+    """
+
+    if not isinstance(enemy, Souther) or not enemy.strike_is_committed():
+        return False
+    if abs(enemy.world_y - actor.world_y) >= SOUTHER_DASH_RESOLVE_LANE:
+        return False
+    travel = SOUTHER_DASH_SPEED_X * CLOSING_ENEMY_THREAT_FRAMES
+    return abs(enemy.world_x - actor.world_x) <= travel
+
+
+def is_incoming_melee(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """Is ``enemy`` committed and close enough to land on ``actor`` -- now,
+    or soon on its own current velocity?
+
+    A dangerous phase alone is not a threat (an enemy swinging at nothing
+    three lanes away is not), and neither is proximity alone.
+    ``too_close_to_keep_approaching`` alone only sees the enemy's *current*
+    position, which misses a committed fast mover: Signal's slide is the
+    ROM-confirmed case (enemy-ai.md "Signal's slide is velocity, not a
+    hitbox") -- state ``$0A`` sets ``+$1C``/``+$20`` directly (~2.5 px/frame
+    toward the target) with no attack shape anywhere in its animation set, so
+    ``Enemy.attack_ranges`` is empty for it and there is nothing for a static
+    reach check to find. ``enemy_will_close_soon`` re-tests the same caution
+    predicate ``CLOSING_ENEMY_THREAT_FRAMES`` frames ahead, so a
+    dangerous-phase enemy already closing distance is judged incoming before
+    it arrives, not only once it has. ``souther_dash_arrives_soon`` is the
+    third path, for the one enemy invisible to both the other tests -- see
+    its own docstring.
+    """
+
+    if not is_dangerous(enemy.combat_phase):
+        return False
+    return (
+        too_close_to_keep_approaching(actor, enemy)
+        or enemy_will_close_soon(actor, enemy)
+        or souther_dash_arrives_soon(actor, enemy)
+    )
+
+
+def incoming_melee_targets(context: Context, actor: PlayableCharacter) -> set[str]:
+    """Slots of on-screen enemies ``is_incoming_melee`` judges about to land
+    on ``actor``. Only on-screen enemies qualify -- an off-screen one cannot
+    connect this tick."""
+
+    return {enemy.slot for enemy in on_screen_enemies(context) if is_incoming_melee(actor, enemy)}
+
+
+# Kick gate at $16EAE (enemy-ai.md "Body state machine"): X thresholds
+# selected by the target's +$1C velocity relative to Antonio's facing, and
+# a lane window of $10 (or $08 when +$61 is set -- we use the looser $10
+# so we never miss a kick). Distances are the ROM's own +$50/+ $52 words.
+#
+# After the ROM signs velocity into Antonio's facing frame (`neg` if he
+# faces left), `bmi` (moving *against* his facing, i.e. toward him) uses
+# $78; the non-negative / backing-away path uses $50. Standing still is
+# its own path at $50 or $68 -- we take the wider $68 so a kick is never
+# missed.
+ANTONIO_KICK_DIST_STATIONARY = 0x68  # 104px
+ANTONIO_KICK_DIST_CLOSING = 0x78  # 120px; target walking into him
+ANTONIO_KICK_DIST_AWAY = 0x50  # 80px; target walking off
+ANTONIO_KICK_LANE = 0x10  # 16px
+# Dash/throw commit at $16E74: X in [$28, $78) and lane < $14. This is
+# the opening hit of the fight -- he dashes as soon as the actor walks
+# into that window. The token covers it too: a sidestep cannot leave a
+# lane he tracks, so the same hop is the answer.
+ANTONIO_DASH_DIST_MIN = 0x28  # 40px
+ANTONIO_DASH_DIST_MAX = 0x78  # 120px
+ANTONIO_DASH_LANE = 0x14  # 20px
+# High-word of a 16.16 velocity is "zero" for the ROM's `tst.w $1C`. A
+# couple of tenths of a pixel of walk jitter must not flip the path.
+ANTONIO_STATIONARY_VEL = 0.5
+# Primary $02 is the committed kick ($171CC).
+ANTONIO_KICK_PRIMARY_STATE = 0x02
+
+# Souther's state 1 -> state 2 commit gate at $15EDA
+# (souther_state1_active_combat). Same shape as Antonio's $16EAE kick gate: the
+# X window is picked by the sign of the *target's* +$1C velocity after the ROM
+# signs it into Souther's own facing frame (`neg` when +$60 is nonzero), so
+# `bmi` -- walking into him -- gets the widest window.
+SOUTHER_SLASH_DIST_CLOSING = 0x68  # 104px; target walking into him
+SOUTHER_SLASH_DIST_STATIONARY = 0x58  # 88px
+SOUTHER_SLASH_DIST_AWAY = 0x50  # 80px; target walking off
+# Lane gate: $0A when +$61 is set, else $1C. We take the wider $1C for the same
+# reason the Antonio constants above take their wider pair -- never miss a
+# strike by under-stating the box.
+SOUTHER_SLASH_LANE = 0x1C  # 28px
+# Primary $02 is the whole committed claw ($16118 souther_state2_claw_commit).
+SOUTHER_SLASH_PRIMARY_STATE = 0x02
+
+# The X reach of "do not jump near Souther". $16234
+# (souther_counter_jump_attack) is where the number comes from: $162A4
+# (souther_flag_target_jump_attack) arms +$79 from the *player's* own action
+# state ($16/$17/$42/$43 -- the unarmed and armed jump-attack pairs), and
+# $16234 then forces Souther straight to primary $02 with the claw spawned,
+# bypassing every distance band, the inner abort and the +$66/+$77 gates.
+SOUTHER_JUMP_COUNTER_DIST_X = 0x78  # 120px
+# Two gates the ROM has here are deliberately **not** reproduced, both
+# live-diagnosed after the AI was seen jumping straight into the claws:
+#
+# * $16234's own lane window ($12, 18px). The jump is horizontal, so the
+#   *flight* cannot leave the lane it started on -- but Souther closes lane at
+#   4px/frame ($15F98/$160D0), which erases an 18px gap in about five frames,
+#   well inside the flight's own ~25. Gating on lane let the AI launch from
+#   just off-lane and get counter-hit anyway.
+#
+# * "is the counter armed" ($15EDA and $16158 call $16234; $1619E/$161C6 do
+#   not). Reading that as "then a jump is safe there" was the actual error:
+#   the reason the dash handlers skip the counter is that he is *already
+#   attacking*, with the type-$98 claw live and carrying hitbox/damage
+#   descriptor $225C. Not being countered is not the same as not being hit,
+#   and that window is the most dangerous one, not the safe one.
+#
+# What is genuinely safe is a Souther who cannot act at all, which
+# is_punishable already names -- and there the grab outranks the hop anyway.
+
+
+def _antonio_kick_distance_threshold(antonio: Antonio, actor: PlayableCharacter) -> int:
+    """The ROM's X window for the 1->2 kick, given how the actor is moving.
+
+    ``$16EAE`` reads the target's ``+$1C`` high word. Zero is the
+    standing-still path (thresholds ``$50``/``$68`` selected by facing and
+    ``+$31`` bit 1 -- we take the wider ``$68`` so a kick is never
+    missed). Non-zero is signed relative to Antonio's facing ``+$60``:
+    negative (moving *against* his facing, i.e. approaching him -- the
+    ROM's ``bmi`` path) uses ``$78``, non-negative (backing away) uses
+    ``$50``. Same reading as ``ANTONIO_KICK_DIST_CLOSING``/``_AWAY``'s own
+    comments above, which is what this function returns.
+    """
+
+    vel = actor.vel_x
+    if abs(vel) < ANTONIO_STATIONARY_VEL:
+        return ANTONIO_KICK_DIST_STATIONARY
+    # Sign into Antonio's facing frame the way $16EB4 does: negate if he
+    # faces left, then `bmi` is "moving against his facing" = toward him.
+    relative = -vel if antonio.facing_left else vel
+    if relative < 0:
+        return ANTONIO_KICK_DIST_CLOSING
+    return ANTONIO_KICK_DIST_AWAY
+
+
+def antonio_will_kick(antonio: Antonio, actor: PlayableCharacter) -> bool:
+    """True when Antonio's kick gate is already satisfied, or the kick is on.
+
+    Already-committed (primary ``$02`` / ``CombatPhase.ATTACKING``) is
+    always a kick. The predictive half mirrors ``$16E54``-``$16F0E``:
+    target available, in the velocity-selected X window, and inside the
+    ``$10`` lane window. ``boss_dist_*`` are the ROM's own ``+$50``/``+$52``
+    words; we fall back to a computed gap if they were not populated.
+    """
+
+    if antonio.target_unavailable:
+        return False
+    if antonio.combat_phase in (
+        CombatPhase.DEATH,
+        CombatPhase.GRABBED,
+        CombatPhase.RECOVERY,
+    ):
+        return False
+
+    dist_x = antonio.boss_dist_x or abs(antonio.world_x - actor.world_x)
+    dist_lane = antonio.boss_dist_lane or abs(antonio.world_y - actor.world_y)
+    if antonio.primary_state == ANTONIO_KICK_PRIMARY_STATE:
+        return dist_lane < ANTONIO_KICK_LANE
+    # Already in the dash/throw commit (tactical $08): a locked-in ground
+    # strike. Do *not* also fire on the uncommitted dash *window* -- that
+    # window is the whole fight range, and treating it as a kick made
+    # DodgeAntonioKick win every tick and never attack.
+    if antonio.tactical == 0x08:
+        return dist_lane < ANTONIO_DASH_LANE and dist_x < ANTONIO_DASH_DIST_MAX
+    if dist_lane >= ANTONIO_KICK_LANE:
+        return False
+    return dist_x < _antonio_kick_distance_threshold(antonio, actor)
+
+
+def _souther_slash_distance_threshold(souther: Souther, actor: PlayableCharacter) -> int:
+    """The ROM's X window for the 1->2 claw commit, given the actor's motion.
+
+    ``$15EDA (souther_state1_active_combat)`` reads the target's ``+$1C``, and
+    ``beq`` on it is the standing-still path (``$58``). Non-zero is negated when
+    ``+$60`` is nonzero -- signed into Souther's own frame -- so the ``bmi``
+    path is "walking into him" and takes the widest window (``$68``), while
+    ``bpl`` (backing away) takes the tightest (``$50``).
+
+    The same reading as Antonio's ``_antonio_kick_distance_threshold``, and the
+    same practical consequence: closing the distance is what lets him start
+    from furthest out.
+    """
+
+    vel = actor.vel_x
+    if abs(vel) < ANTONIO_STATIONARY_VEL:
+        return SOUTHER_SLASH_DIST_STATIONARY
+    relative = -vel if souther.facing_left else vel
+    if relative < 0:
+        return SOUTHER_SLASH_DIST_CLOSING
+    return SOUTHER_SLASH_DIST_AWAY
+
+
+def souther_will_slash(souther: Souther, actor: PlayableCharacter) -> bool:
+    """True when Souther's commit gate is satisfied, or the claw is already on.
+
+    Already-committed (primary ``$02``) is always a slash. The predictive half
+    mirrors ``$15EDA``: target available, ``+$66`` hard-hold clear, inside the
+    lane window, and inside the velocity-selected X window but **outside** the
+    ``$18`` inner abort -- that abort is a real part of the gate, not a
+    conservatism, so leaving it out would report a slash from a range the ROM
+    refuses to start one at.
+    """
+
+    if souther.target_unavailable:
+        return False
+    if souther.combat_phase in (
+        CombatPhase.DEATH,
+        CombatPhase.GRABBED,
+        CombatPhase.RECOVERY,
+    ):
+        return False
+
+    dist_x = souther.boss_dist_x or abs(souther.world_x - actor.world_x)
+    dist_lane = souther.boss_dist_lane or abs(souther.world_y - actor.world_y)
+    if souther.primary_state == SOUTHER_SLASH_PRIMARY_STATE:
+        return True
+    if dist_lane >= SOUTHER_SLASH_LANE:
+        return False
+    if dist_x < SOUTHER_SLASH_DIST_MIN:
+        return False
+    return dist_x < _souther_slash_distance_threshold(souther, actor)
+
+
+def souther_would_punish_jump(actor: PlayableCharacter, context: Context) -> bool:
+    """True when a jump attack launched now would be countered by a live Souther.
+
+    Keyed on the actor alone, because ``$162A4
+    (souther_flag_target_jump_attack)`` reads the player's own action state and
+    nothing about the jump's target: a hop aimed at an unrelated grunt inside
+    the box is answered identically.
+
+    A jump near a live Souther loses in two independent ways, which is why this
+    does not test whether ``$16234`` is currently on his call path (see the
+    constants above): while he can still choose, the jump-attack action state
+    hands him the counter; while he is already dashing, the type-``$98`` claw
+    is a live attack object and the flight lands in it. The only Souther worth
+    hopping at is one who cannot act -- and there a grab (``GrabReason.
+    SOUTHER_ON_PUNISH``) outranks the hop anyway.
+
+    The X half-width is widened by the character's own free-flight reach
+    (``jump_attack_max_dx``), because ``+$79`` stays set for as long as
+    the kick action does and Souther re-tests every frame of the flight rather
+    than only its onset: a launch from just outside 120px flies straight in.
+    """
+
+    flight = jump_attack_max_dx(actor.character_id)
+    for souther in find_all(context, Souther):
+        if souther.is_defeated or is_punishable(souther.combat_phase):
+            continue
+        if abs(souther.world_x - actor.world_x) < SOUTHER_JUMP_COUNTER_DIST_X + flight:
+            return True
+    return False
+
+
+def weapon_upgrade_rank(
+    actor: PlayableCharacter, weapon: Weapon, camera: CameraRange | None
+) -> int | None:
+    """This weapon's rank if it is a genuine upgrade for ``actor`` right now,
+    else ``None``.
+
+    "Genuine upgrade" means: still usable (``wear < 3``), in camera, and a
+    higher ``weapon_rank`` than whatever ``actor`` already holds. Returns the
+    rank itself rather than a bare bool, since ``priority.
+    _emergency_walk_to_weapon`` scores by how much of an upgrade it is, not
+    just whether it is one.
+    """
+
+    if camera is None:
+        return None
+    if weapon.wear >= 3 or not in_camera(camera, weapon.world_x, weapon.world_y):
+        return None
+    rank = weapon_rank(weapon.weapon_type)
+    if rank <= weapon_rank(actor.held_weapon_type):
+        return None
+    return rank
+
+
+def connects(band, actor: PlayableCharacter, enemy: Enemy, frames) -> bool:
+    """True when ``band`` holds at any frame of this move's own timeline.
+
+    A move is not an instant -- a punch damages for 10 frames, Adam's chord
+    for 18 -- so the target only has to be inside the box at *one* of the
+    frames ``kinematics.connect_frames`` names, and frame 0 (the observed
+    position) is always one of them. That last part is what keeps the
+    prediction additive: it can offer an attack the raw position does not,
+    and can never take away one it does.
+    """
+
+    return any(
+        band(actor, enemy_projected_without_crossing(actor, enemy, frame))
+        for frame in frames
+    )
+
+
+# Projectiles outside this time-to-impact window are not "incoming" yet.
+PROJECTILE_THREAT_TICKS = 30
+PROJECTILE_LANE_SLACK = 24
+CAUTION_RANGE_X = 40
+
+# object_catalog.py's Jack axe/torch helper. Unlike every other projectile
+# family, this object exists while still tethered to Jack's own juggle
+# animation, not only once thrown -- so its momentary spin velocity can
+# point straight at the actor and satisfy projectile_threatens without a
+# real throw ever happening.
+JACK_PROJECTILE_TYPE_ID = 0x28
+
+# The juggled axe/torch stays within this radius of Jack himself; once
+# thrown it opens that gap on the very next tick. Generous enough to cover
+# the juggle's own spin without needing exact ROM offsets.
+JACK_JUGGLE_ATTACH_RADIUS = 40
+
+# Antonio's linked boomerang (object_catalog.py type $96). Same attach
+# problem as Jack's axe: the object exists while still in his hand, and
+# punching it then is just standing still in front of him.
+ANTONIO_BOOMERANG_TYPE_ID = 0x96
+ANTONIO_BOOMERANG_ATTACH_RADIUS = 40
+
+# Souther's linked claw/afterimage (object_catalog.py types $98/$99, created by
+# $16C2E (souther_create_claw) / $16BC6 (souther_create_afterimage)). These are
+# animation-synchronized attack objects that live and die with the claw
+# sequence, never thrown -- so unlike Antonio's $96 they are withheld from
+# an incoming-projectile threat *unconditionally* rather than only while
+# attached. The claw is answered by DodgeSoutherSlash, which reads Souther's
+# own state; a ProjectileSidestep competing with it would just split the tick.
+SOUTHER_CLAW_TYPE_IDS = frozenset({0x98, 0x99})
+
+
+def projectile_ticks_to_impact(projectile: Projectile, actor: PlayableCharacter) -> float:
+    """Ticks until this projectile's own X reaches ``actor``'s, treating a
+    stationary hazard (``vel_x == 0``) as already arrived.
+
+    Shared by ``projectile_threatens`` (the gate) and
+    ``priority._emergency_projectile_sidestep`` (the score), so a target
+    running away scores the same distance both stages agree it is at.
+    """
+
+    if projectile.vel_x == 0:
+        return 0.0
+    return abs(projectile.world_x - actor.world_x) / abs(projectile.vel_x)
+
+
+def projectile_threatens(projectile: Projectile, actor: PlayableCharacter) -> bool:
+    """True when the projectile is heading toward the actor in-lane soon.
+
+    Stage-hazard projectiles with zero X velocity (e.g. a vertical press) are
+    treated as threats when already overlapping the actor's X column.
+    """
+
+    if abs(projectile.world_y - actor.world_y) > PROJECTILE_LANE_SLACK:
+        return False
+
+    dx = projectile.world_x - actor.world_x
+    if projectile.vel_x == 0:
+        # Stationary/vertical hazard: only if already on or past the actor's X.
+        return abs(dx) <= CAUTION_RANGE_X
+
+    heading_toward = (dx > 0 and projectile.vel_x < 0) or (dx < 0 and projectile.vel_x > 0)
+    if not heading_toward:
+        return False
+    return projectile_ticks_to_impact(projectile, actor) <= PROJECTILE_THREAT_TICKS
+
+
+def antonio_still_holding_boomerang(projectile: Projectile, context: Context) -> bool:
+    """True when this is Antonio's boomerang and it is still in his hand.
+
+    Type ``$96`` exists for the whole wind-up/catch, not only once thrown
+    (object_catalog.py). Punching or sidestepping it then is standing still
+    in front of Antonio -- the kick trigger. Matched to a live ``Antonio``
+    within ``ANTONIO_BOOMERANG_ATTACH_RADIUS``, the same attach test Jack's
+    axe uses.
+    """
+
+    if projectile.type_id != ANTONIO_BOOMERANG_TYPE_ID:
+        return False
+    for antonio in find_all(context, Antonio):
+        if (
+            abs(projectile.world_x - antonio.world_x) <= ANTONIO_BOOMERANG_ATTACH_RADIUS
+            and abs(projectile.world_y - antonio.world_y) <= ANTONIO_BOOMERANG_ATTACH_RADIUS
+        ):
+            # Still on him unless it already has a real independent throw
+            # velocity. A follow-along attached object tracks him at his
+            # own walk speed, well under a thrown boomerang.
+            if abs(projectile.vel_x) < 2.0:
+                return True
+    return False
+
+
+def is_souther_claw(projectile: Projectile) -> bool:
+    """True for Souther's linked claw/afterimage objects (types ``$98``/``$99``).
+
+    Withheld from an incoming-projectile threat for the whole of their
+    existence, not just while attached: enemy-ai.md describes them as
+    animation-synchronized attack/afterimage objects, and ``$161C6
+    (souther_state2_claw_dash)`` re-creates the afterimage every dash tick
+    from Souther's own position. They have no independent flight to
+    intercept, so the only honest answer is Souther's own state, which
+    ``DodgeSoutherSlash`` reads.
+    """
+
+    return projectile.type_id in SOUTHER_CLAW_TYPE_IDS
+
+
+def jack_still_juggling(projectile: Projectile, context: Context) -> bool:
+    """True when this is Jack's axe/torch and he has not released it yet.
+
+    The weapon spins tethered to him for the whole juggle, so its
+    instantaneous velocity can momentarily point straight at the actor and
+    read exactly like an incoming throw. Matched to whichever live,
+    still-juggling (``has_projectile``) Jack sits within
+    ``JACK_JUGGLE_ATTACH_RADIUS`` of it, since the object carries no
+    explicit owner slot.
+    """
+
+    if projectile.type_id != JACK_PROJECTILE_TYPE_ID:
+        return False
+    for jack in find_all(context, Jack):
+        if not jack.has_projectile:
+            continue
+        if (
+            abs(projectile.world_x - jack.world_x) <= JACK_JUGGLE_ATTACH_RADIUS
+            and abs(projectile.world_y - jack.world_y) <= JACK_JUGGLE_ATTACH_RADIUS
+        ):
+            return True
+    return False
+
+
+# Enemy phases a hold can actually be taken on. Deliberately not
+# ``is_punishable``: that set includes KNOCKDOWN (a body on the floor, which
+# the contact test cannot hold) and GRABBED (already held). ATTACKING/CHARGE
+# are excluded for the opposite reason -- walking into a committed enemy is
+# how the actor takes the hit instead of the hold. What is left is an enemy
+# standing on its feet and able to be walked into: free to act, frozen on a
+# timed stun, stuck on geometry, or in the tail of its own move.
+GRABBABLE_PHASES = frozenset(
+    {
+        CombatPhase.NORMAL,
+        CombatPhase.STUNNED,
+        CombatPhase.BLOCKED,
+        CombatPhase.RECOVERY,
+    }
+)
+
+# The shared later-boss hit reaction. $03 and $04 both decode as RECOVERY
+# (phases.py), but they are not the same situation: measured live over a full
+# Souther fight, $03 held 4% of ticks and $04 held 70%. $04 is where he sits,
+# so keying the punish grab on is_punishable handed the top of the emergency
+# table to a walk-in that never converted, for most of the fight.
+SOUTHER_HIT_REACTION_PRIMARY = 0x03
+
+
+def actor_is_surrounded(context: Context, actor_slot: str) -> bool:
+    """True when ``actor_slot`` carries a live ``Surrounded`` judgment."""
+
+    return any(token.actor_slot == actor_slot for token in find_all(context, Surrounded))
+
+
+def grab_reasons(
+    context: Context,
+    actor: PlayableCharacter,
+    target: Enemy,
+    enemies: list[Enemy],
+) -> frozenset[GrabReason]:
+    """Every reason a hold on ``target`` beats a strike, right now.
+
+    Not "every enemy that could be grabbed": a grab costs the actor its
+    attack for the walk-in and locks both bodies together, so this only
+    reports the situations where that trade pays off -- see ``GrabReason``.
+    Whether the grab is *reachable* is a separate question, answered by
+    ``grab_would_connect``; ``decide.could_grab_enemy`` requires both.
+
+    Most reasons are ``Grunt``-only. Antonio and Souther are the exceptions:
+    after a landed hit both sit in the shared later-boss ``RECOVERY`` states
+    (primary ``$03``/``$04``), and a hold-then-suplex beats following up with
+    another strike -- for Antonio because the combo is his own kick trigger,
+    for Souther because ``$15EDA (souther_state1_active_combat)`` cannot
+    re-arm the claw from recovery, so the walk-in is free. Bongo, the twins,
+    Abadede and Mr. X stay out of scope.
+
+    ``enemies`` should be every on-screen enemy for this actor (the same set
+    ``target`` was drawn from) -- ``DODGE_CHARGE`` and ``CLEAR_REAR`` both
+    judge ``target`` against the rest of that group.
+    """
+
+    if target.combat_phase not in GRABBABLE_PHASES:
+        return frozenset()
+
+    if isinstance(target, Antonio):
+        if is_punishable(target.combat_phase):
+            return frozenset({GrabReason.ANTONIO_ON_PUNISH})
+        return frozenset()
+    if isinstance(target, Souther):
+        # Only the *brief* hit reaction, primary $03 -- deliberately not the
+        # whole of is_punishable the way Antonio's is.
+        #
+        # Measured live over a full 120s Souther fight: he sits in primary
+        # $04 for 70% of it (2304 of 3304 ticks) against 4% in $03, and both
+        # decode as RECOVERY. Keyed on is_punishable, the grab therefore
+        # scored 61+14 = 75 -- the top of the table -- for most of the
+        # fight, and the walk-in never converted: 2318 ticks of GrabEnemy,
+        # and Souther lost 11 health in two minutes while the actor lost a
+        # whole life. $04 is where he *sits*, not a window.
+        if target.primary_state == SOUTHER_HIT_REACTION_PRIMARY:
+            return frozenset({GrabReason.SOUTHER_ON_PUNISH})
+        return frozenset()
+    if not isinstance(target, Grunt):
+        return frozenset()
+
+    reasons: set[GrabReason] = set()
+    candidate_dx = target.world_x - actor.world_x
+    # Committed enemies already judged able to land on this actor. A charge
+    # coming in from behind the body being grabbed is what DODGE_CHARGE
+    # answers -- Signal's hitbox-less slide above all.
+    charging = [enemy for enemy in enemies if is_incoming_melee(actor, enemy)]
+    if any(
+        other.slot != target.slot
+        # Same side of the actor, and further out than the body being
+        # grabbed: the charge is coming in *through* it.
+        and (other.world_x - actor.world_x) * candidate_dx > 0
+        and abs(other.world_x - actor.world_x) > abs(candidate_dx)
+        for other in charging
+    ):
+        reasons.add(GrabReason.DODGE_CHARGE)
+    if actor_is_surrounded(context, actor.slot):
+        # Boxed in: a body in the hands beats a strike whichever side the
+        # crowd is on. CLEAR_REAR below only covers the subset with a
+        # *confirmed rear* enemy.
+        reasons.add(GrabReason.WHILE_SURROUNDED)
+    # A rear threat that *is* the candidate is not a pincer -- the actor
+    # would be walking backwards into the same enemy it is already worried
+    # about, and grab_would_connect (forward only) would not have offered
+    # it anyway.
+    if any(other.slot != target.slot for other in rear_threats(actor, enemies)):
+        reasons.add(GrabReason.CLEAR_REAR)
+    if isinstance(target, Jack) and enemy_forward_dx(target, actor) < 0:
+        # Facing away: the hold lands before the axe or the lunge can turn
+        # around. The opposite geometry -- Jack at the actor's back -- is
+        # RearAttack, not a backwards walk-in.
+        reasons.add(GrabReason.JACK_FROM_BEHIND)
+    if target.min_reach > 0:
+        # Every attack it owns starts further out than contact -- read from
+        # the ROM shape its animations select, not from the enemy's type.
+        # See GrabReason.DEAD_ZONE.
+        reasons.add(GrabReason.DEAD_ZONE)
+    return frozenset(reasons)

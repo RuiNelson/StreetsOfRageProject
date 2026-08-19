@@ -5,7 +5,6 @@ from sor_autoplay.ai.tokens import (
     Antonio,
     Bongo,
     Boss,
-    ClosingEnemy,
     Enemy,
     Garcia,
     Grunt,
@@ -18,18 +17,7 @@ from sor_autoplay.ai.tokens import (
     Souther,
     enemy_class_for_type,
 )
-from sor_autoplay.ai.tokens import (
-    GrabOpportunity,
-    GrabReason,
-    AntonioIsGoingToKick,
-    IncomingMelee,
-    PunishWindow,
-    ReachKind,
-    SoutherPunishesJump,
-    SoutherIsGoingToSlash,
-    Surrounded,
-    TargetInReach,
-)
+from sor_autoplay.ai.tokens import Surrounded
 from sor_autoplay.ai.tokens import Inferred, Information
 from sor_autoplay.phases import CombatPhase
 
@@ -206,12 +194,6 @@ class EnemyHierarchyTests(unittest.TestCase):
         self.assertEqual(abadede.tactical, 0)
         self.assertIsNone(abadede.ground_z)
 
-    def test_antonio_is_going_to_kick_is_inferred(self) -> None:
-        self.assertTrue(issubclass(AntonioIsGoingToKick, Inferred))
-        token = AntonioIsGoingToKick(actor_slot="P1", target_slot="obj09")
-        self.assertEqual(token.actor_slot, "P1")
-        self.assertEqual(token.target_slot, "obj09")
-
     def test_antonio_strike_is_committed_only_for_kick_or_dash(self) -> None:
         base = _base_kwargs(type_id=0x56, health=40)
         self.assertFalse(Antonio(**base).strike_is_committed())
@@ -231,31 +213,6 @@ class EnemyHierarchyTests(unittest.TestCase):
             self.assertTrue(
                 Souther(**base, primary_state=2, tactical=tactical).strike_is_committed()
             )
-
-    def test_souther_inferences_are_inferred(self) -> None:
-        self.assertTrue(issubclass(SoutherIsGoingToSlash, Inferred))
-        self.assertTrue(issubclass(SoutherPunishesJump, Inferred))
-        slash = SoutherIsGoingToSlash(actor_slot="P1", target_slot="obj11")
-        self.assertEqual(slash.target_slot, "obj11")
-        # Keyed on the actor alone: $162A4 reads the player's action state and
-        # nothing about which enemy the jump was aimed at.
-        counter = SoutherPunishesJump(actor_slot="P1")
-        self.assertEqual(counter.actor_slot, "P1")
-        self.assertFalse(hasattr(counter, "target_slot"))
-
-    def test_souther_punishes_jump_is_named_for_the_whole_reason(self) -> None:
-        # Named "punishes", not "counters", on purpose: the counter ($16234) is
-        # only one of the two ways a jump loses. Reading the old name as "he is
-        # not counter-armed, so the hop is safe" is what flew the AI into the
-        # live claw during the dash, where $1619E/$161C6 skip $16234 precisely
-        # because he is already attacking.
-        self.assertIn("Punishes", SoutherPunishesJump.__name__)
-
-    def test_grab_opportunity_carries_a_souther_on_punish_reason(self) -> None:
-        grab = GrabOpportunity(
-            actor_slot="P1", target_slot="obj07", reason=GrabReason.SOUTHER_ON_PUNISH
-        )
-        self.assertIs(grab.reason, GrabReason.SOUTHER_ON_PUNISH)
 
     def test_boss_extra_fields_round_trip(self) -> None:
         souther = Souther(
@@ -281,21 +238,6 @@ class EnemyHierarchyTests(unittest.TestCase):
         self.assertEqual(souther.ground_z, 160)
         self.assertEqual(souther.vel_x, 1.5)
         self.assertEqual(souther.vel_z, -0.5)
-
-
-class ClosingEnemyTests(unittest.TestCase):
-    def test_is_inferred(self) -> None:
-        self.assertTrue(issubclass(ClosingEnemy, Inferred))
-
-    def test_reference_only_slot_field(self) -> None:
-        closing = ClosingEnemy(slot="obj07")
-        self.assertEqual(closing.slot, "obj07")
-
-    def test_frozen_and_hashable(self) -> None:
-        closing = ClosingEnemy(slot="obj07")
-        with self.assertRaises(Exception):
-            closing.slot = "obj08"  # type: ignore[misc]
-        self.assertIn(closing, {closing})
 
 
 class GruntStunTests(unittest.TestCase):
@@ -334,53 +276,8 @@ class GruntStunTests(unittest.TestCase):
 
 class ReachAndThreatTokenTests(unittest.TestCase):
     def test_all_are_inferred(self) -> None:
-        for cls in (
-            TargetInReach,
-            GrabOpportunity,
-            IncomingMelee,
-            PunishWindow,
-            SoutherPunishesJump,
-            SoutherIsGoingToSlash,
-            Surrounded,
-        ):
+        for cls in (Surrounded,):
             self.assertTrue(issubclass(cls, Inferred), cls.__name__)
-
-    def test_target_in_reach_covers_every_kind(self) -> None:
-        for kind in ReachKind:
-            token = TargetInReach(actor_slot="P1", target_slot="obj07", kind=kind)
-            self.assertIs(token.kind, kind)
-
-    def test_reach_tokens_reference_both_ends_by_slot(self) -> None:
-        token = TargetInReach(actor_slot="P1", target_slot="obj07", kind=ReachKind.PUNCH)
-        self.assertEqual(token.actor_slot, "P1")
-        self.assertEqual(token.target_slot, "obj07")
-        self.assertIn(token, {token})
-
-    def test_sibling_reach_tokens_are_distinct_values(self) -> None:
-        # Same pair, different move: these must not collapse in the context.
-        punch = TargetInReach(actor_slot="P1", target_slot="obj07", kind=ReachKind.PUNCH)
-        rear = TargetInReach(actor_slot="P1", target_slot="obj07", kind=ReachKind.REAR)
-        self.assertNotEqual(punch, rear)
-        self.assertEqual(len({punch, rear}), 2)
-
-    def test_punish_window_frames_default_to_zero(self) -> None:
-        self.assertEqual(PunishWindow(target_slot="obj07").frames_left, 0)
-
-    def test_grab_opportunity_covers_every_reason(self) -> None:
-        for reason in GrabReason:
-            grab = GrabOpportunity(actor_slot="P1", target_slot="obj07", reason=reason)
-            self.assertIs(grab.reason, reason)
-
-    def test_grab_opportunities_are_distinct_reasons_for_one_pair(self) -> None:
-        # A whip enemy in front *and* a body at the actor's back: two
-        # independent reasons to take the same hold, so they must coexist in
-        # the context rather than collapse into one another.
-        rear = GrabOpportunity(actor_slot="P1", target_slot="obj07", reason=GrabReason.CLEAR_REAR)
-        dead_zone = GrabOpportunity(
-            actor_slot="P1", target_slot="obj07", reason=GrabReason.DEAD_ZONE
-        )
-        self.assertNotEqual(rear, dead_zone)
-        self.assertEqual(len({rear, dead_zone}), 2)
 
 
 if __name__ == "__main__":

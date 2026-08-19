@@ -18,9 +18,8 @@ class WalkToNearEnemy(Walk):
     """Walk to a nearby on-screen enemy to bring it into attack range.
 
     Produced by ``could_walk_to_near_enemy`` once per reachable enemy when
-    at least one on-screen enemy exists and none carries an
-    ``TargetInReach`` of kind ``ACTIONABLE`` for this actor yet
-    (``reach.enemy_actionable``:
+    at least one on-screen enemy exists and it is not yet actionable for
+    this actor (``reach.enemy_actionable``:
     within rear range *and* worth the RearAttack chord there, or within
     punch range and actually in front -- not just inside the punch box's raw
     distance, which ignores facing and would otherwise make this skip a
@@ -81,12 +80,12 @@ class WalkToAdvanceStage(Walk):
 class WalkToWeapon(Walk):
     """Walk to pick up a free ground weapon that outranks the held one.
 
-    Produced by ``could_walk_to_weapon`` once per ``WeaponUpgrade`` -- the
-    inference that a ground weapon is in camera, still usable, and better
-    than what this actor holds -- never just the best one;
-    determine_priority_verb picks among the candidates.
+    Produced by ``could_walk_to_weapon`` once per weapon
+    ``reach.weapon_upgrade_rank`` judges an upgrade -- in camera, still
+    usable, and better than what this actor holds -- never just the best
+    one; determine_priority_verb picks among the candidates.
 
-    Raises emergency: WeaponUpgrade×12+rank
+    Raises emergency: (weapon_upgrade_rank)×12+rank
     (rank 2..5, so a better upgrade among several outranks a lesser one, and
     every rank clears WalkToNearEnemy's floor(8) outright rather than merely
     tying it -- see priority._emergency_walk_to_weapon).
@@ -124,21 +123,22 @@ class RetreatFromDanger(Walk):
     """Give up ground to a dangerous enemy, when the exchange is one the
     actor cannot currently afford to take.
 
-    Produced by ``could_retreat_from_danger`` once per ``IncomingMelee``
-    (an on-screen enemy in a dangerous phase, close enough that continuing
-    to approach risks arriving right as its hit lands) that carries no
-    ``TargetInReach`` of kind ``ACTIONABLE`` -- not really hittable yet -- and **only while
-    ``decide._retreat_is_worth_it``**: the actor is hurt, or ``Surrounded``.
-    Danger alone is deliberately not enough, since no enemy can be defeated
-    without standing in the range it hits back from. Never just the nearest;
-    determine_priority_verb picks among the candidates.
+    Produced by ``could_retreat_from_danger`` once per on-screen enemy
+    ``reach.is_incoming_melee`` judges about to land on the actor (a
+    dangerous phase, close enough that continuing to approach risks
+    arriving right as its hit lands) that is not yet actionable -- not
+    really hittable yet -- and **only while ``decide._retreat_is_worth_it``**:
+    the actor is hurt, or ``Surrounded``. Danger alone is deliberately not
+    enough, since no enemy can be defeated without standing in the range it
+    hits back from. Never just the nearest; determine_priority_verb picks
+    among the candidates.
     That same predicate decides which verb owns the enemy: while it holds,
     ``could_walk_to_near_enemy`` stands off; while it does not, that verb
     closes in and this one produces nothing. Exactly one of the two ever
     holds a given enemy, from whichever side it stands on.
 
-    Raises emergency: IncomingMelee×17, closer scoring higher
-    (distance-scored; see
+    Raises emergency: (reach.is_incoming_melee for this target)×17, closer
+    scoring higher (distance-scored; see
     priority._emergency_retreat_from_danger) -- higher than
     WalkToNearEnemy(14) so this wins over still approaching, lower than any
     real attack (the lowest being JumpAttack×18) so attacking always wins
@@ -154,24 +154,26 @@ class RetreatFromDanger(Walk):
 class ProjectileSidestep(Walk):
     """Step off an incoming projectile's own lane rather than stand in it.
 
-    Produced by ``could_projectile_sidestep`` once per ``IncomingProjectile``
-    for this actor -- a projectile already judged approaching, in lane, and
-    within the impact window (``inference.check_for_incoming_projectiles``).
-    Jack's thrown axe/torch (object_catalog.py type ``$28``) is the case this
-    was built for -- an unarmed punch into the juggle trades hits (see
+    Produced by ``could_projectile_sidestep`` once per observed
+    ``Projectile`` ``reach.projectile_threatens`` judges approaching, in
+    lane, and within the impact window for this actor. Jack's thrown
+    axe/torch (object_catalog.py type ``$28``) is the case this was built
+    for -- an unarmed punch into the juggle trades hits (see
     ``could_punch``'s Jack exception; a held weapon still swings) and once
     he lets go, the axe/torch itself is a fast
     in-lane projectile with no answer but getting out of its way. While he
-    is still juggling it, though, ``inference._jack_still_juggling`` keeps it
-    out of ``IncomingProjectile`` entirely -- the weapon's own spin can point
-    its velocity straight at the actor without ever being thrown, and this
-    verb has nothing to sidestep in that case. The verb still reacts to any
-    other ``Projectile`` inference judges a threat, not just his.
+    is still juggling it, though, ``reach.jack_still_juggling`` keeps it out
+    of consideration entirely -- the weapon's own spin can point its
+    velocity straight at the actor without ever being thrown, and this verb
+    has nothing to sidestep in that case. The verb still reacts to any other
+    ``Projectile`` ``reach.projectile_threatens`` judges a threat, not just
+    his.
 
-    Raises emergency: IncomingProjectile×45, sooner-to-impact scoring higher,
-    floor 30 (see priority._emergency_projectile_sidestep) -- above every
-    ordinary approach/retreat tier so the actor clears the lane before the
-    weapon lands, below a guaranteed PunishWindow strike (60) and the
+    Raises emergency: (reach.projectile_threatens for this projectile)×45,
+    sooner-to-impact scoring higher, floor 30 (see
+    priority._emergency_projectile_sidestep) -- above every ordinary
+    approach/retreat tier so the actor clears the lane before the weapon
+    lands, below a guaranteed strike on a punishable target (60) and the
     RearAttack/CLEAR_REAR grab escapes, which stay the right answer even
     with a projectile also in flight.
     """
@@ -185,16 +187,17 @@ class ProjectileSidestep(Walk):
 class DodgeAntonioKick(Walk):
     """Leave Antonio's kick lane -- or hop over the kick -- before it lands.
 
-    Produced by ``could_dodge_antonio_kick`` once per ``AntonioIsGoingToKick``
-    whose Antonio has already locked in the kick (primary ``$02``) or the
-    dash/throw (tactical ``$08``). A predicted ``$16EAE`` window is not
-    enough: sidestepping that made the AI leave punch range forever and
-    never take the hold. The executor hops over the committed strike.
+    Produced by ``could_dodge_antonio_kick`` once per live Antonio whose kick
+    gate (``reach.antonio_will_kick``) is live and who has already locked in
+    the kick (primary ``$02``) or the dash/throw (tactical ``$08``). A
+    predicted ``$16EAE`` window is not enough: sidestepping that made the AI
+    leave punch range forever and never take the hold. The executor hops
+    over the committed strike.
 
-    Raises emergency: AntonioIsGoingToKick (committed)×58 -- above every
+    Raises emergency: a committed Antonio kick gate×58 -- above every
     strike on an Antonio that can still act (20). A punish grab on
     hitstun (61+boss) outranks this, but the two do not coexist: a
-    recovering Antonio does not raise the kick token. Below
+    recovering Antonio does not satisfy the kick gate. Below
     CounterGrab/TechRecover/CallPolice, which stay the only answers to
     those situations.
     """
@@ -218,7 +221,7 @@ class DodgeSoutherSlash(Walk):
     mirror of ``DodgeAntonioKick``, whose dash *does* track lane and therefore
     has to be hopped instead.
 
-    Raises emergency: SoutherIsGoingToSlash (committed)×46 -- above every
+    Raises emergency: a committed Souther claw gate×46 -- above every
     approach/retreat tier and above ProjectileSidestep's own ceiling (45), so
     the claw is answered first when both are live. Below the real escapes
     (RearAttack 55/60, the punish grab 61) and below

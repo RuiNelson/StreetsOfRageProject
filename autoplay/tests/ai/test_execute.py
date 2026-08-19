@@ -40,6 +40,8 @@ from sor_autoplay.ai.execute import (
     PICKUP_RANGE_X,
     PICKUP_RANGE_Y,
     WALK_TO_ENEMY_LANE_SAFETY_Y,
+    _find_safe_spot,
+    _safe_spot_candidates,
     _walk_to_breakable_target,
     _walk_to_near_enemy_target,
     execute_tick,
@@ -54,7 +56,7 @@ from sor_autoplay.ai.decide import (
 from sor_autoplay.ai.pathfind import Rect
 from sor_autoplay.ai.reach import PIT_AVOID_MARGIN, SOUTHER_SLASH_DIST_MIN, pit_endangers
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.tokens import Breakable, Pit, Projectile, SafeSpot
+from sor_autoplay.ai.tokens import Breakable, Pit, Projectile
 from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay import prop_solids
 from sor_autoplay.ai.tokens import HealthPickup, Weapon
@@ -737,6 +739,155 @@ class FaceTowardMaskHysteresisTests(unittest.TestCase):
         )
 
 
+class FindSafeSpotTests(unittest.TestCase):
+    """``execute._find_safe_spot`` -- where to back off to, for an actor with
+    a live incoming-melee threat."""
+
+    def _threatened(self):
+        myself = _myself(world_x=100, world_y=60, facing_left=False)
+        enemy = replace(
+            _enemy(world_x=160, world_y=60), combat_phase=CombatPhase.ATTACKING
+        )
+        camera = CameraRange(left=0, right=400, top=0, bottom=112)
+        return {myself, enemy, camera}
+
+    def test_no_threat_no_safe_spot(self) -> None:
+        myself = _myself()
+        enemy = _enemy()
+
+        self.assertIsNone(_find_safe_spot(myself, {myself, enemy}))
+
+    def test_backs_away_from_the_threat(self) -> None:
+        context = self._threatened()
+        myself = next(t for t in context if isinstance(t, Myself))
+
+        spot = _find_safe_spot(myself, context)
+
+        self.assertIsNotNone(spot)
+        self.assertLess(spot[0], 100)
+
+    def test_sidesteps_instead_of_backing_into_a_pit(self) -> None:
+        # The straight retreat lands at x=68 (RETREAT_FROM_DANGER_DISTANCE
+        # back from 100); a pit spanning that column, at every lane, must
+        # rule out all three of its candidates and leave only the two pure
+        # sidesteps.
+        context = self._threatened() | {Pit(world_x=40, lane_y=0, width=40, height=112)}
+        myself = next(t for t in context if isinstance(t, Myself))
+
+        spot = _find_safe_spot(myself, context)
+
+        self.assertIsNotNone(spot)
+        self.assertEqual(spot[0], 100)
+        self.assertNotEqual(spot[1], 60)
+
+    def test_side_pick_does_not_glitch_exactly_on_alignment(self) -> None:
+        # Regression (live-diagnosed, same shape as execute.py's other X
+        # picks): the old "away" sign was a raw compare between actor and
+        # threat X, so a couple of px of jitter right around alignment
+        # flipped every candidate here -- including the sidesteps -- to the
+        # opposite side.
+        actor = _myself(world_x=100, world_y=60, facing_left=True)
+        xs = []
+        for threat_x in (99, 100, 101):
+            threat = _enemy(world_x=threat_x, world_y=60)
+            xs.append(_safe_spot_candidates(actor, threat)[0][0])
+
+        self.assertEqual(len(set(xs)), 1, f"away side flipped across alignment: {xs}")
+
+    def test_prefers_the_plain_retreat_over_a_near_tied_sidestep(self) -> None:
+        # Regression: candidates used to be picked by raw max clearance, so
+        # two candidates within a couple of px of each other on ordinary
+        # jitter flipped which one won -- and since the candidates differ in
+        # whether they add a Y step, that flip read live as the actor
+        # darting into a vertical dash instead of holding a steady retreat
+        # line. Pits carve away every candidate except the plain retreat
+        # (index 0, x=68,y=60) and the X-away-plus-Y-up sidestep (x=68,
+        # y=36), and a bystander enemy at (68, 51) is placed so the
+        # sidestep's *raw* clearance (15px) edges out the plain retreat's
+        # (9px) by less than SAFE_SPOT_PREFERENCE_MARGIN -- old code picked
+        # the sidestep; the anchor bias must keep picking the plain retreat.
+        myself = _myself(world_x=100, world_y=60, facing_left=False)
+        threat = replace(
+            _enemy(world_x=160, world_y=60), combat_phase=CombatPhase.ATTACKING
+        )
+        bystander = replace(
+            _enemy(world_x=68, world_y=51), slot="obj02", combat_phase=CombatPhase.NORMAL
+        )
+        camera = CameraRange(left=0, right=400, top=0, bottom=112)
+        context = {myself, threat, bystander, camera}
+        context = context | {
+            Pit(world_x=0, lane_y=76, width=400, height=8),
+            Pit(world_x=90, lane_y=28, width=20, height=8),
+        }
+
+        spot = _find_safe_spot(myself, context)
+
+        self.assertEqual(spot, (68, 60))
+
+    def test_rejects_a_candidate_whose_route_is_blocked_by_a_breakable(self) -> None:
+        # The plain retreat (index 0) lands at (68, 60) -- straight line
+        # from the actor's (100, 60). A prop whose push-back box (x 38..98,
+        # lane 48..80 for one standing at (68, 76)) covers exactly that spot
+        # makes the candidate unreachable, even though it survives every
+        # pre-existing filter (in lane, in camera, not a pit). The two
+        # sidesteps that also step to x=68 clear the box's lane range and
+        # must win instead.
+        context = self._threatened() | {
+            Breakable(slot="crate1", world_x=68, world_y=76, type_id=0x1D)
+        }
+        myself = next(t for t in context if isinstance(t, Myself))
+
+        spot = _find_safe_spot(myself, context)
+
+        self.assertIsNotNone(spot)
+        self.assertNotEqual(spot, (68, 60))
+        self.assertEqual(spot[0], 68)
+        self.assertIn(spot[1], (84, 36))
+
+    def test_threats_own_presence_does_not_reject_every_candidate(self) -> None:
+        # The threat being fled sits close enough (12px) that, if its own
+        # body/reach were counted as danger for this reachability gate, it
+        # would sit on or near several candidates by construction. With no
+        # other obstacles at all, a plausible candidate (the plain retreat)
+        # is still produced.
+        myself = _myself(world_x=100, world_y=60, facing_left=False)
+        threat = replace(
+            _enemy(world_x=112, world_y=60), combat_phase=CombatPhase.ATTACKING
+        )
+        camera = CameraRange(left=0, right=400, top=0, bottom=112)
+        context = {myself, threat, camera}
+
+        spot = _find_safe_spot(myself, context)
+
+        self.assertEqual(spot, (68, 60))
+
+    def test_no_safe_spot_when_every_candidate_is_boxed_in(self) -> None:
+        # Every candidate step _safe_spot_candidates offers is walled off by
+        # crates on all four sides, tight enough that the actor's own 16x16
+        # body has no room to move at all -- not even the plain retreat can
+        # find a route. _find_safe_spot must fall back to producing no spot
+        # at all (today's existing "no candidate survives" outcome, `best is
+        # None`), rather than handing the executor a destination that
+        # cannot actually be walked to.
+        # Rows of wide round-6 props (push-back box x +/-36, lane -20..+4)
+        # tile the lanes above and below, overlapping so no one-pixel line
+        # between two boxes is left standable, and a deep prop (lane -28..+4)
+        # seals the actor's own lane on the side it would retreat toward.
+        # The actor's lane is the one gap none of them reach into.
+        context = (
+            self._threatened()
+            | {
+                Breakable(slot=f"wall{x}_{y}", world_x=x, world_y=y, type_id=0x41)
+                for x in (40, 76, 112)
+                for y in (40, 52, 88, 104)
+            }
+            | {Breakable(slot="wall_w", world_x=68, world_y=76, type_id=0x1D)}
+        )
+        myself = next(t for t in context if isinstance(t, Myself))
+
+        self.assertIsNone(_find_safe_spot(myself, context))
+
+
 class ExecuteRetreatFromDangerTests(unittest.TestCase):
     def test_steps_away_from_a_target_to_the_right(self) -> None:
         actor = _myself(world_x=100, world_y=50)
@@ -772,14 +923,18 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
         # Backing away moves on X only -- never toward the enemy's lane too.
         client.hold_buttons.assert_called_with(player1=LEFT, player2=0)
 
-    def test_prefers_the_inferred_safe_spot(self) -> None:
-        # inference.check_for_safe_spots already weighed the sidesteps
-        # against the straight retreat (clearance from every live enemy,
-        # lane/camera bounds, pits). When it produced one, the executor must
-        # steer there rather than re-deciding "straight back on X".
-        actor = _myself(world_x=100, world_y=50)
-        target = replace(_enemy(world_x=150, world_y=50), combat_phase=CombatPhase.ATTACKING)
-        context = {actor, target, SafeSpot(actor_slot="P1", world_x=100, world_y=74)}
+    def test_prefers_a_found_safe_spot(self) -> None:
+        # _find_safe_spot already weighs the sidesteps against the straight
+        # retreat (clearance from every live enemy, lane/camera bounds,
+        # pits). A pit spanning the whole lane at the straight-retreat X
+        # rules out every X-away candidate, leaving only the two pure
+        # Y-sidesteps -- the executor must steer there rather than
+        # re-deciding "straight back on X".
+        actor = _myself(world_x=100, world_y=60)
+        target = replace(_enemy(world_x=160, world_y=60), combat_phase=CombatPhase.ATTACKING)
+        camera = CameraRange(left=0, right=400, top=0, bottom=112)
+        pit = Pit(world_x=40, lane_y=0, width=40, height=112)
+        context = {actor, target, camera, pit}
         verb = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
         gamepad, client = _gamepad()
 
@@ -811,17 +966,6 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
             f"opposite horizontal commands straddling exact alignment: {masks}",
         )
 
-    def test_ignores_a_safe_spot_belonging_to_the_partner(self) -> None:
-        actor = _myself(world_x=100, world_y=50)
-        target = replace(_enemy(world_x=150, world_y=50), combat_phase=CombatPhase.ATTACKING)
-        context = {actor, target, SafeSpot(actor_slot="P2", world_x=100, world_y=74)}
-        verb = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
-        gamepad, client = _gamepad()
-
-        _settle(verb, context, gamepad)
-
-        client.hold_buttons.assert_called_with(player1=LEFT, player2=0)
-
     def test_missing_actor_or_target_does_nothing(self) -> None:
         context: set = {_enemy()}
         verb = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
@@ -835,27 +979,23 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
         """`_movement_mask`'s straight-line fallback only ever dodges pits
         and breakables -- it has no idea a *third* enemy's body sits on the
         way to safety, exactly the geometry `navigation.py`'s obstacle sets
-        exist to avoid. Put one squarely on the straight retreat line and
-        check the whole trail steers clear of it while still ending up
-        farther from the fleeing threat than it started.
-
-        Uses a ``SafeSpot`` 80px away rather than the 32px default retreat
-        distance -- that's still `_retreat_from_danger_target`'s existing,
-        untouched SafeSpot preference, just given a destination far enough
-        out to leave clearance for a second enemy's body on both sides of
-        it (RETREAT_FROM_DANGER_DISTANCE alone is too short for any body to
-        fit between two 16px-wide actors without touching one of them).
+        exist to avoid. Put one squarely on the second retreat step's line
+        (`RETREAT_FROM_DANGER_DISTANCE` alone is too short for any body to
+        fit between two 16px-wide actors without touching one of them, so
+        the multi-tick harness has to take two steps before the blocker is
+        actually in the way) and check the whole trail steers clear of it
+        while still ending up farther from the fleeing threat than it
+        started.
         """
 
         from sor_autoplay.ai import navigation as nav
 
         actor = _myself(world_x=100, world_y=50)
         threat = replace(_enemy(world_x=150, world_y=50), combat_phase=CombatPhase.ATTACKING)
-        safe_spot = SafeSpot(actor_slot="P1", world_x=20, world_y=50)
         blocker = replace(_enemy(world_x=60, world_y=50), slot="obj02")
         verb = RetreatFromDanger(actor_slot="P1", target_slot="obj01")
 
-        trail = _walk(verb, actor, [threat, blocker, safe_spot])
+        trail = _walk(verb, actor, [threat, blocker])
 
         blocker_rect = nav.enemy_rects(blocker)[0]
         for state in trail:

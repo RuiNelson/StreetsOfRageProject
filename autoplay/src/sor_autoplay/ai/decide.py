@@ -4,10 +4,10 @@ Per ``AI.md``, each ``could_*`` function is concerned only with whether a
 verb is possible and sensible — never with relative importance across
 verbs, which is ``determine_priority_verb``'s job (``priority.py``).
 
-Reach questions ("can this move hit that enemy from here?") are not answered
-here: ``inference.py`` answers them once per tick into ``TargetInReach``
-tokens, using the geometry in ``reach.py``, and these generators read those
-tokens.
+Reach questions ("can this move hit that enemy from here?") are answered by
+``reach.py``'s band predicates -- shared with ``priority.py`` so all stages
+agree on one definition of every band -- called through ``_targets_in_reach``/
+``_actionable_targets`` below.
 """
 
 from __future__ import annotations
@@ -44,15 +44,7 @@ from .tokens import (
 )
 from .tokens import Antonio, Boss, Enemy, Jack, Souther
 from .tokens import (
-    AntonioIsGoingToKick,
-    GrabOpportunity,
     GrabReason,
-    IncomingMelee,
-    IncomingProjectile,
-    ReachKind,
-    SoutherIsGoingToSlash,
-    SoutherPunishesJump,
-    TargetInReach,
     Surrounded,
 )
 from .tokens import AnimationInProgress, CameraRange, Stage
@@ -66,7 +58,6 @@ from .tokens import (
     ScorePickup,
     SpecialPickup,
     Weapon,
-    WeaponUpgrade,
     is_weapon_type,
 )
 from .tokens import CallPolice
@@ -160,6 +151,37 @@ def _blocked(context: Context, actor: PlayableCharacter) -> bool:
     return find(context, AnimationInProgress, slot=actor.slot) is not None
 
 
+def _targets_in_reach(context: Context, actor: PlayableCharacter, band, verb_cls) -> set[str]:
+    """Live enemies ``verb_cls`` would connect with from here, right now.
+
+    Tested across the move's own timeline (``reach.connects``,
+    ``kinematics.connect_frames(verb_cls, ...)``) rather than only at the
+    observed instant, so an enemy walking *into* range arms the move as it
+    arrives instead of after. Shared by every ``could_*`` that asks "can
+    this move reach that enemy" so the band is computed identically
+    wherever it is asked -- see ``reach.connects``.
+    """
+
+    return {
+        enemy.slot
+        for enemy in reach.live_enemies(context)
+        if reach.connects(band, actor, enemy, kinematics.connect_frames(verb_cls, actor, enemy))
+    }
+
+
+def _actionable_targets(context: Context, actor: PlayableCharacter) -> set[str]:
+    """Live enemies some already-available attack would really fire on now.
+
+    Answered about the observed position only, unlike ``_targets_in_reach``:
+    this is the "stop walking, you can already hit it" signal
+    ``could_walk_to_near_enemy`` reads, and answering it about the future
+    would stop the approach early. See ``reach.enemy_actionable``.
+    """
+
+    enemies = reach.live_enemies(context)
+    return {enemy.slot for enemy in enemies if reach.enemy_actionable(actor, enemy, enemies)}
+
+
 STAB_WEAPON_TYPES = frozenset({0x08, 0x09})  # knife, bottle
 # Every weapon type MeleeWeaponAttack covers: bat/pipe, knife/bottle, pepper.
 MELEE_WEAPON_HELD_TYPES = MELEE_WEAPON_TYPES | STAB_WEAPON_TYPES | frozenset({PEPPER_SPRAY_TYPE})
@@ -204,16 +226,9 @@ def _could_melee_strike(
         )
         if not held_matches:
             continue
-        # TargetInReach(kind=PUNCH) already carries the "in front (within tolerance) and
-        # inside the band" judgment this used to recompute inline.
-        kick_slots = {
-            token.target_slot
-            for token in find_all(context, AntonioIsGoingToKick)
-            if token.actor_slot == actor.slot
-        }
-        for target_slot in reach.targets_of(
-            context, TargetInReach, actor.slot, kind=ReachKind.PUNCH
-        ):
+        # _targets_in_reach already carries the "in front (within tolerance)
+        # and inside the band" judgment this used to recompute inline.
+        for target_slot in _targets_in_reach(context, actor, reach.punch_would_connect, Punch):
             target = find(context, Enemy, slot=target_slot)
             if (
                 held_types is None
@@ -227,7 +242,7 @@ def _could_melee_strike(
             if isinstance(target, Antonio):
                 if is_punishable(target.combat_phase):
                     continue
-                if target_slot in kick_slots and target.strike_is_committed():
+                if reach.antonio_will_kick(target, actor) and target.strike_is_committed():
                     continue
             verbs.add(make_verb(actor.slot, target_slot, actor.held_weapon_type))
     return verbs
@@ -264,16 +279,14 @@ def could_rear_attack(context: Context) -> Context:
             continue
         if actor.is_airborne:
             continue
-        # TargetInReach(kind=REAR), NOT ClosingEnemy: an earlier version also fired here
-        # purely on that early-warning inference, before the enemy was
-        # actually in the chord's real range. Live testing showed that
-        # backfires -- $322A only hits based on *current* position, so
-        # committing to it early is a guaranteed whiff that locks the actor
-        # in the attack's own recovery frames exactly when the still-closing
-        # enemy arrives and lands its hit for free. ClosingEnemy remains a
-        # real, tested signal (see inference.py) -- it just needs a genuine
-        # evasive reaction to consume it usefully, not an early commit to
-        # the same reactive-only attack.
+        # _targets_in_reach only, not a fast-closing enemy's own
+        # velocity: an earlier version also fired on that early-warning
+        # signal, before the enemy was actually in the chord's real range.
+        # Live testing showed that backfires -- $322A only hits based on
+        # *current* position, so committing to it early is a guaranteed
+        # whiff that locks the actor in the attack's own recovery frames
+        # exactly when the still-closing enemy arrives and lands its hit
+        # for free.
         # Produced on band membership alone, per AI.md: a could_* asks only
         # "is this possible and does it make some kind of sense", never "is
         # this the one to take". Whether the chord is the *right* answer --
@@ -282,14 +295,14 @@ def could_rear_attack(context: Context) -> Context:
         # reach.rear_attack_is_warranted.
         # On Jack's back (a jump that overshot, still facing the wrong
         # way): the chord would fire away from him. Walk around and grab.
+        on_screen = reach.on_screen_enemies(context)
         on_jacks_back = {
-            token.target_slot
-            for token in find_all(context, GrabOpportunity)
-            if token.actor_slot == actor.slot and token.reason is GrabReason.JACK_FROM_BEHIND
+            jack.slot
+            for jack in on_screen
+            if isinstance(jack, Jack)
+            and GrabReason.JACK_FROM_BEHIND in reach.grab_reasons(context, actor, jack, on_screen)
         }
-        for target_slot in reach.targets_of(
-            context, TargetInReach, actor.slot, kind=ReachKind.REAR
-        ):
+        for target_slot in _targets_in_reach(context, actor, reach.in_rear_band, RearAttack):
             if target_slot in on_jacks_back:
                 continue
             verbs.add(RearAttack(actor_slot=actor.slot, target_slot=target_slot))
@@ -325,10 +338,10 @@ def could_tech_recover(context: Context) -> Context:
 def could_grab_enemy(context: Context) -> Context:
     """Walk into an enemy, unarmed and unattacking, to take a hold of it.
 
-    Both halves of the question are already answered in the context:
-    ``TargetInReach`` (``kind=ReachKind.GRAB``) says the walk-in would
-    connect, ``GrabOpportunity`` says the hold is worth more than a strike
-    here. This function only adds the gates about the *actor*.
+    Both halves of the question are already answered: ``reach.grab_would_
+    connect`` says the walk-in would connect, ``reach.grab_reasons`` says the
+    hold is worth more than a strike here. This function only adds the
+    gates about the *actor*.
 
     Armed actors are excluded. The ROM's contact test does not care what the
     actor carries, but every held weapon has its own melee move with better
@@ -351,17 +364,20 @@ def could_grab_enemy(context: Context) -> Context:
             # $AAA0 aborts the grab code unless the two bodies are within 8px
             # of elevation, so an airborne actor cannot take a hold at all.
             continue
-        in_reach = reach.targets_of(context, TargetInReach, actor.slot, kind=ReachKind.GRAB)
-        threatening = reach.targets_of(context, IncomingMelee, actor.slot)
-        for target_slot in reach.targets_of(context, GrabOpportunity, actor.slot):
-            if target_slot not in in_reach:
+        in_reach = _targets_in_reach(context, actor, reach.grab_would_connect, GrabEnemy)
+        threatening = reach.incoming_melee_targets(context, actor)
+        on_screen = reach.on_screen_enemies(context)
+        for enemy in on_screen:
+            if enemy.slot not in in_reach:
                 continue
-            if target_slot in threatening:
+            if enemy.slot in threatening:
                 # Walking into a committed attack is how the actor takes the
                 # hit rather than the hold -- same reasoning that keeps
                 # could_jump_attack from kicking into one.
                 continue
-            verbs.add(GrabEnemy(actor_slot=actor.slot, target_slot=target_slot))
+            if not reach.grab_reasons(context, actor, enemy, on_screen):
+                continue
+            verbs.add(GrabEnemy(actor_slot=actor.slot, target_slot=enemy.slot))
     return verbs
 
 
@@ -512,9 +528,7 @@ def could_walk_to_near_enemy(context: Context) -> Context:
             ]
         if not enemies:
             continue
-        actionable = reach.targets_of(
-            context, TargetInReach, actor.slot, kind=ReachKind.ACTIONABLE
-        )
+        actionable = _actionable_targets(context, actor)
         # One candidate per reachable enemy -- determine_priority_verb
         # (priority.py's distance-scored emergency) picks the closest one,
         # per AI.md's own target-selection principle: this function only
@@ -528,12 +542,7 @@ def could_walk_to_near_enemy(context: Context) -> Context:
         # Neither skip tests which *side* the enemy is on, deliberately --
         # see could_retreat_from_danger for the facing-feedback cycle a
         # front-only skip creates.
-        threatening = reach.targets_of(context, IncomingMelee, actor.slot)
-        kicking = {
-            token.target_slot
-            for token in find_all(context, AntonioIsGoingToKick)
-            if token.actor_slot == actor.slot
-        }
+        threatening = reach.incoming_melee_targets(context, actor)
         standing_off = _retreat_is_worth_it(context, actor)
         for enemy in enemies:
             if enemy.slot in actionable:
@@ -560,8 +569,8 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 continue
             if (
                 isinstance(enemy, Antonio)
-                and enemy.slot in kicking
                 and enemy.strike_is_committed()
+                and reach.antonio_will_kick(enemy, actor)
             ):
                 # could_dodge_antonio_kick owns a locked-in kick/dash.
                 continue
@@ -584,9 +593,9 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 )
             ):
                 # Hysteresis (see reach.APPROACH_RELEASE_MARGIN). Skipping
-                # only on the IncomingMelee token above put approach and
+                # only on the incoming-melee judgment above put approach and
                 # retreat on one shared boundary: a single retreat step
-                # cleared the token, which un-skipped this walk, which walked
+                # cleared it, which un-skipped this walk, which walked
                 # straight back in and re-armed it -- a one-tick limit cycle
                 # against a single enemy, reproduced by driving the pipeline
                 # over synthetic ticks. Stay backed off until genuinely clear
@@ -645,10 +654,8 @@ def could_retreat_from_danger(context: Context) -> Context:
             continue
         if not _retreat_is_worth_it(context, actor):
             continue  # healthy and not boxed in -- engage, don't flee
-        actionable = reach.targets_of(
-            context, TargetInReach, actor.slot, kind=ReachKind.ACTIONABLE
-        )
-        for target_slot in reach.targets_of(context, IncomingMelee, actor.slot):
+        actionable = _actionable_targets(context, actor)
+        for target_slot in reach.incoming_melee_targets(context, actor):
             enemy = find(context, Enemy, slot=target_slot)
             if enemy is None:
                 continue
@@ -661,13 +668,15 @@ def could_retreat_from_danger(context: Context) -> Context:
 def could_projectile_sidestep(context: Context) -> Context:
     """Step off an incoming projectile's lane before it lands.
 
-    One candidate per ``IncomingProjectile`` in context -- inference has
-    already judged each one approaching, in this actor's lane, and within
-    the impact window (``inference.check_for_incoming_projectiles``), so
-    nothing here recomputes that geometry. Gated the same way as every other
-    reactive verb: not mid-animation, not caught in an enemy's grab, and not
-    itself holding one (a hold locks the actor's own input options, same
-    reasoning as ``could_walk_to_near_enemy``/``could_retreat_from_danger``).
+    One candidate per observed ``Projectile`` that ``reach.projectile_
+    threatens`` this actor -- approaching, in this actor's lane, and within
+    the impact window -- unless it is still tethered to whoever is carrying
+    it (``reach.jack_still_juggling``/``antonio_still_holding_boomerang``) or
+    is one of Souther's unthrowable claw/afterimage objects (``reach.is_
+    souther_claw``). Gated the same way as every other reactive verb: not
+    mid-animation, not caught in an enemy's grab, and not itself holding one
+    (a hold locks the actor's own input options, same reasoning as
+    ``could_walk_to_near_enemy``/``could_retreat_from_danger``).
     """
 
     verbs: set[Token] = set()
@@ -678,7 +687,15 @@ def could_projectile_sidestep(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
-        for projectile in find_all(context, IncomingProjectile):
+        for projectile in find_all(context, Projectile):
+            if reach.jack_still_juggling(projectile, context):
+                continue
+            if reach.antonio_still_holding_boomerang(projectile, context):
+                continue
+            if reach.is_souther_claw(projectile):
+                continue
+            if not reach.projectile_threatens(projectile, actor):
+                continue
             verbs.add(ProjectileSidestep(actor_slot=actor.slot, target_slot=projectile.slot))
     return verbs
 
@@ -883,20 +900,19 @@ def could_jump_attack(context: Context) -> Context:
     through jumps in silence:
 
     - *grounded*: should this jump happen at all? Answered by
-      ``TargetInReach`` (``kind=ReachKind.JUMP_ATTACK``: in front, past
-      the punch's own outer edge, inside the kick's free-flight range),
-      the "never launch into a
-      committed attack" gate, and ``navigation.jump_landing_is_safe`` --
-      the pathfinder refuses a launch whose current-lane flight would
-      skip a walk-around and land in a pit.
+      ``_targets_in_reach`` with ``reach.in_jump_attack_band`` (in front,
+      past the punch's own outer edge, inside the kick's free-flight
+      range), the "never launch into a committed attack" gate, and
+      ``navigation.jump_landing_is_safe`` -- the pathfinder refuses a
+      launch whose current-lane flight would skip a walk-around and land
+      in a pit.
     - *airborne*: nothing is left to decide. The trajectory is fixed at
       takeoff (controls-and-input.md: no mid-air lane control, only limited
       air steer), so the only question is whether to press the kick edge --
       and pressing it is free, while not pressing it means landing having
       done nothing at all.
 
-    That second case used to depend on ``TargetInReach`` (``JUMP_ATTACK``)
-    still holding
+    That second case used to depend on the jump-attack band still holding
     mid-flight, which it often does not: the target walks out of the band,
     drifts a lane, or the flight simply carries the actor past it. Measured
     on the flight harness, 66 of 556 launched jumps produced no kick at all
@@ -934,10 +950,7 @@ def could_jump_attack(context: Context) -> Context:
             # swing -- could_melee_weapon_attack -- reached by walking in,
             # which could_walk_to_near_enemy already does.
             continue
-        if not actor.is_airborne and any(
-            token.actor_slot == actor.slot
-            for token in find_all(context, SoutherPunishesJump)
-        ):
+        if not actor.is_airborne and reach.souther_would_punish_jump(actor, context):
             # The exact opposite of the Antonio exception below. Souther's
             # $16234 (souther_counter_jump_attack) reads the *player's* action
             # state -- $16/$17/$42/$43, this very move -- and answers it by
@@ -951,16 +964,14 @@ def could_jump_attack(context: Context) -> Context:
             # is how the first version of this let the AI jump into the claws
             # anyway: the handlers that skip $16234 skip it because he is
             # *already attacking*, so that window is the one where a live claw
-            # is waiting for the flight. See SoutherPunishesJump.
+            # is waiting for the flight. See reach.souther_would_punish_jump.
             #
             # Only the *launch* is refused. Once airborne the flight is
             # committed and the fallback below still has to produce a verb, or
             # the tick reaches press_no_button and costs both the kick and the
             # held direction $384E samples.
             continue
-        target_slots = set(
-            reach.targets_of(context, TargetInReach, actor.slot, kind=ReachKind.JUMP_ATTACK)
-        )
+        target_slots = _targets_in_reach(context, actor, reach.in_jump_attack_band, JumpAttack)
         # Jump-kicking Antonio is a real opener, not only a hop over his
         # kick: the usual JUMP_ATTACK band is just past punch outer
         # (Axel: ~10px), which is too thin to ever fire. Offer a hop
@@ -968,9 +979,9 @@ def could_jump_attack(context: Context) -> Context:
         # Antonio is a grab, not another hop -- unless already airborne,
         # when the flight has to finish.
         kick_slots = {
-            token.target_slot
-            for token in find_all(context, AntonioIsGoingToKick)
-            if token.actor_slot == actor.slot
+            antonio.slot
+            for antonio in find_all(context, Antonio)
+            if not antonio.is_defeated and reach.antonio_will_kick(antonio, actor)
         }
         for antonio in find_all(context, Antonio):
             if antonio.is_defeated:
@@ -995,7 +1006,7 @@ def could_jump_attack(context: Context) -> Context:
         # would deliver the actor to the enemy mid-swing, airborne and
         # unable to change its mind. Once already airborne there is no
         # changing course either way, so this gate only applies pre-launch.
-        threatening = reach.targets_of(context, IncomingMelee, actor.slot)
+        threatening = reach.incoming_melee_targets(context, actor)
         for target_slot in target_slots:
             if (
                 not actor.is_airborne
@@ -1021,12 +1032,12 @@ def could_jump_attack(context: Context) -> Context:
 def could_dodge_antonio_kick(context: Context) -> Context:
     """Hop a kick or dash that Antonio has already locked in.
 
-    One candidate per ``AntonioIsGoingToKick`` whose Antonio is in
-    primary ``$02`` or tactical ``$08``. A predicted window alone is the
-    punch-then-grab opener, not a dodge. Suppressed once the actor is
-    already airborne -- ``could_jump_attack`` owns the hop-over then,
-    and producing a sidestep mid-crouch would release the jump direction
-    ``$384E`` samples.
+    One candidate per live Antonio whose kick gate (``reach.antonio_will_
+    kick``) is live and who is in primary ``$02`` or tactical ``$08``. A
+    predicted window alone is the punch-then-grab opener, not a dodge.
+    Suppressed once the actor is already airborne -- ``could_jump_attack``
+    owns the hop-over then, and producing a sidestep mid-crouch would
+    release the jump direction ``$384E`` samples.
     """
 
     verbs: set[Token] = set()
@@ -1039,17 +1050,18 @@ def could_dodge_antonio_kick(context: Context) -> Context:
             continue
         if actor.is_airborne:
             continue
-        for token in find_all(context, AntonioIsGoingToKick):
-            if token.actor_slot != actor.slot:
+        for antonio in find_all(context, Antonio):
+            if antonio.is_defeated:
                 continue
-            antonio = find(context, Antonio, slot=token.target_slot)
-            if antonio is None or not antonio.strike_is_committed():
+            if not reach.antonio_will_kick(antonio, actor):
+                continue
+            if not antonio.strike_is_committed():
                 # Predicted window only: walking in and punching is the
                 # opener. Sidestepping here is the dodge loop that never
                 # reaches grab range.
                 continue
             verbs.add(
-                DodgeAntonioKick(actor_slot=actor.slot, target_slot=token.target_slot)
+                DodgeAntonioKick(actor_slot=actor.slot, target_slot=antonio.slot)
             )
     return verbs
 
@@ -1057,8 +1069,9 @@ def could_dodge_antonio_kick(context: Context) -> Context:
 def could_dodge_souther_slash(context: Context) -> Context:
     """Step off the lane of a claw dash Souther has already committed to.
 
-    One candidate per ``SoutherIsGoingToSlash`` whose Souther is in primary
-    ``$02`` (``Souther.strike_is_committed``). The uncommitted state-1 gate is
+    One candidate per live Souther whose claw gate (``reach.souther_will_
+    slash``) is live and who is in primary ``$02``
+    (``Souther.strike_is_committed``). The uncommitted state-1 gate is
     deliberately not enough, for the same reason ``could_dodge_antonio_kick``
     refuses it: leaving the lane while he is still choosing is the dodge loop
     that never gets close enough to hit him.
@@ -1081,11 +1094,12 @@ def could_dodge_souther_slash(context: Context) -> Context:
             continue
         if actor.is_airborne:
             continue
-        for token in find_all(context, SoutherIsGoingToSlash):
-            if token.actor_slot != actor.slot:
+        for souther in find_all(context, Souther):
+            if souther.is_defeated:
                 continue
-            souther = find(context, Souther, slot=token.target_slot)
-            if souther is None or not souther.strike_is_committed():
+            if not reach.souther_will_slash(souther, actor):
+                continue
+            if not souther.strike_is_committed():
                 # Predicted window only: walking in and punching is the
                 # opener, same as could_dodge_antonio_kick. A pre-emptive
                 # version of this branch shipped once (the predicted
@@ -1095,13 +1109,13 @@ def could_dodge_souther_slash(context: Context) -> Context:
                 # with execute._souther_pocket_stop_dx now denying the
                 # commit outright by keeping the approach inside the $18
                 # inner abort in the first place -- from there
-                # SoutherIsGoingToSlash's own predictive gate cannot even
+                # reach.souther_will_slash's own predictive gate cannot even
                 # fire (dist_x < SOUTHER_SLASH_DIST_MIN refuses it), so a
                 # pre-emptive dodge branch would mostly be dead weight,
                 # not more coverage.
                 continue
             verbs.add(
-                DodgeSoutherSlash(actor_slot=actor.slot, target_slot=token.target_slot)
+                DodgeSoutherSlash(actor_slot=actor.slot, target_slot=souther.slot)
             )
     return verbs
 
@@ -1130,14 +1144,8 @@ def could_hit_antonio_boomerang(context: Context) -> Context:
     One candidate per in-flight type-``$96`` ``Projectile`` that is heading
     at the actor (or already inside the punch box) and whose projected
     position at punch-connect time still sits in that box. Attached/wind-up
-    copies are filtered by ``inference._antonio_still_holding_boomerang``.
+    copies are filtered by ``reach.antonio_still_holding_boomerang``.
     """
-
-    from .inference import (
-        ANTONIO_BOOMERANG_TYPE_ID,
-        _antonio_still_holding_boomerang,
-        _projectile_threatens,
-    )
 
     verbs: set[Token] = set()
     for actor in _actors(context):
@@ -1151,11 +1159,11 @@ def could_hit_antonio_boomerang(context: Context) -> Context:
             continue
 
         for projectile in find_all(context, Projectile):
-            if projectile.type_id != ANTONIO_BOOMERANG_TYPE_ID:
+            if projectile.type_id != reach.ANTONIO_BOOMERANG_TYPE_ID:
                 continue
-            if _antonio_still_holding_boomerang(projectile, context):
+            if reach.antonio_still_holding_boomerang(projectile, context):
                 continue
-            if not _projectile_threatens(projectile, actor) and not _boomerang_in_punch_band(
+            if not reach.projectile_threatens(projectile, actor) and not _boomerang_in_punch_band(
                 actor, projectile.world_x, projectile.world_y
             ):
                 continue
@@ -1258,6 +1266,7 @@ def could_throw_pepper(context: Context) -> Context:
 
 def could_walk_to_weapon(context: Context) -> Context:
     verbs: set[Token] = set()
+    camera = find(context, CameraRange)
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -1265,18 +1274,17 @@ def could_walk_to_weapon(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
-        # WeaponUpgrade is the judgment "in camera, still usable, and better
-        # than what this actor holds" -- one candidate per upgrade, since
-        # priority.py's rank-scaled emergency favours the better one rather
-        # than a min/max pick made here.
-        for target_slot in reach.targets_of(context, WeaponUpgrade, actor.slot):
-            weapon = find(context, Weapon, slot=target_slot)
-            if weapon is None:
+        # reach.weapon_upgrade_rank is the judgment "in camera, still usable,
+        # and better than what this actor holds" -- one candidate per
+        # upgrade, since priority.py's rank-scaled emergency favours the
+        # better one rather than a min/max pick made here.
+        for weapon in find_all(context, Weapon):
+            if reach.weapon_upgrade_rank(actor, weapon, camera) is None:
                 continue
             if reach.any_pit_endangers(context, weapon.world_x, weapon.world_y):
                 # Never walk toward a target sitting in a pit's danger zone.
                 continue
-            verbs.add(WalkToWeapon(actor_slot=actor.slot, target_slot=target_slot))
+            verbs.add(WalkToWeapon(actor_slot=actor.slot, target_slot=weapon.slot))
     return verbs
 
 

@@ -41,7 +41,7 @@ class Attack(Verb, ABC):
     Branch-wide emergency rule: whatever a concrete subclass's own
     ``Raises emergency`` line says, an attack whose target is a **stunned**
     ``Grunt`` (``Grunt.is_stunned``) is capped -- never raised -- by how
-    much of the stun is left, read from the target's ``PunishWindow``:
+    much of the stun is left, read from the target's own ``stun_timer``:
 
     - a **hitstun** (at most ``phases.HITSTUN_FRAMES``) caps at
       ``priority._EMERGENCY_ATTACK_HITSTUN``, just above a plain strike, so
@@ -88,15 +88,15 @@ class GrabEnemy(GrabMechanics):
     """Walk into an enemy, without attacking, to take a hold of it.
 
     Produced by ``could_grab_enemy`` for an unarmed, free-to-act actor when
-    the same enemy carries both a ``TargetInReach`` of kind ``GRAB``
-    (possible) and a ``GrabOpportunity`` (worth it), and no
-    ``IncomingMelee`` -- walking into
-    a committed attack is how the actor gets hit rather than the hold.
+    ``reach.grab_would_connect`` holds for the same enemy (possible) and
+    ``reach.grab_reasons`` returns at least one reason (worth it), and
+    ``reach.is_incoming_melee`` does not hold for it -- walking into a
+    committed attack is how the actor gets hit rather than the hold.
 
-    Raises emergency: (GrabOpportunity reason=CLEAR_REAR)×58,
-    (GrabOpportunity reason=JACK_FROM_BEHIND)×56,
-    (GrabOpportunity reason=ANTONIO_ON_PUNISH)×61,
-    (GrabOpportunity reason=DEAD_ZONE)×30.
+    Raises emergency: (reach.grab_reasons includes CLEAR_REAR)×58,
+    (reach.grab_reasons includes JACK_FROM_BEHIND)×56,
+    (reach.grab_reasons includes ANTONIO_ON_PUNISH)×61,
+    (reach.grab_reasons includes DEAD_ZONE)×30.
 
     The rear tier sits above every strike on an enemy that can still act
     (punch 20, jump 18/28), above the unwarranted ``RearAttack`` chord
@@ -119,11 +119,11 @@ class Punch(MeleeAttacks):
     """Basic B-button punch while unarmed; repeated contact also triggers
     the grab.
 
-    Produced by ``could_punch`` when the actor holds no weapon and a
-    ``TargetInReach`` of kind ``PUNCH`` names an enemy its forward strike
+    Produced by ``could_punch`` when the actor holds no weapon and
+    ``reach.punch_would_connect`` names an enemy its forward strike
     would connect with.
 
-    Raises emergency: (PunishWindow for the target)×60, Enemy×20; plus
+    Raises emergency: (target is punishable)×60, Enemy×20; plus
     the armed/boss target-class raise (see priority._with_target_class).
     """
 
@@ -154,8 +154,8 @@ class MeleeWeaponAttack(Attack):
     punch_outer_x.
 
     Produced by ``could_melee_weapon_attack`` once per actor holding one of
-    these weapon types, for an enemy a ``TargetInReach`` of kind ``PUNCH``
-    names as connecting.
+    these weapon types, for an enemy ``reach.punch_would_connect`` names as
+    connecting.
 
     Raises emergency: (Enemy when in a punishable phase)×60, Enemy×20.
     """
@@ -299,15 +299,14 @@ class ReleaseGrab(GrabMechanics):
 class JumpAttack(MeleeAttacks):
     """Jump-kick only — never a stationary hop. Requires horizontal aim.
 
-    Produced by ``could_jump_attack`` for a ``TargetInReach`` of kind
-    ``JUMP_ATTACK`` target (forward, outside punch outer, within the
-    kick's max ΔX) that has no
-    ``IncomingMelee`` against the actor -- the kick's own travel would
-    otherwise deliver it into a committed attack, airborne and unable to
-    change its mind.
+    Produced by ``could_jump_attack`` for a target ``reach.in_jump_attack_
+    band`` names (forward, outside punch outer, within the kick's max ΔX)
+    for which ``reach.is_incoming_melee`` does not hold against the actor --
+    the kick's own travel would otherwise deliver it into a committed
+    attack, airborne and unable to change its mind.
 
-    Raises emergency: AntonioIsGoingToKick (committed)×56, (PunishWindow
-    for the target)×28, (Nora, not currently dangerous, within
+    Raises emergency: a committed Antonio kick gate×56, (target is
+    punishable)×28, (Nora, not currently dangerous, within
     priority.NORA_RECOVERY_PUNISH_TICKS of her own last attack)×24,
     Enemy×18. Against a live Antonio the hop is also offered anywhere
     inside the kick's free-flight range (not only past punch outer);
@@ -352,18 +351,18 @@ class OpenBreakable(Attack):
 class RearAttack(MeleeAttacks):
     """Simultaneous B+C rear/escape attack (``$322A``).
 
-    Produced by ``could_rear_attack`` for a ``TargetInReach`` of kind
-    ``REAR`` target -- an enemy inside the character-specific ``$322A``
-    attack box (measured live,
-    controls-and-input.md): behind the player for all three characters
+    Produced by ``could_rear_attack`` for a target ``reach.in_rear_band``
+    names -- an enemy inside the character-specific ``$322A`` attack box
+    (measured live, controls-and-input.md): behind the player for all
+    three characters
     (Axel/Adam/Blaze up to 40/42/53px), and additionally in front only for
     Adam (up to 14px — his chord is a forward-reaching hop, not a backfist).
 
     Raises emergency, when ``reach.rear_attack_is_warranted`` holds --
     boxed in, punch dead zone, or ``Jack`` facing the actor (his axe and
     lunge punish a turn-and-punch): (Enemy when in a dangerous phase)×60,
-    Enemy×55. On Jack's back the chord is refused -- turn and grab
-    (``GrabOpportunity`` reason ``JACK_FROM_BEHIND``). Otherwise, with a
+    Enemy×55. On Jack's back the chord is refused -- turn and grab (``reach.
+    grab_reasons`` includes ``JACK_FROM_BEHIND``). Otherwise, with a
     turn-and-punch available:
     (Enemy when in a dangerous phase)×11, Enemy×9.
 
@@ -409,9 +408,10 @@ class HitAntonioBoomerang(MeleeAttacks):
     while the boomerang is still attached to Antonio -- punching his hand
     is just standing still in front of him, which is how his kick starts.
 
-    Raises emergency: IncomingProjectile×62 -- above DodgeAntonioKick
-    (58), because jumping into a boomerang that is already in the punch
-    box is a free hit, and a punch is faster than the kick's own startup.
+    Raises emergency: (reach.projectile_threatens for this boomerang)×62 --
+    above DodgeAntonioKick (58), because jumping into a boomerang that is
+    already in the punch box is a free hit, and a punch is faster than the
+    kick's own startup.
     """
 
     priority: int = 25

@@ -38,8 +38,6 @@ Python app that attaches to a running
   the floor, and advancing the stage when no enemy is on screen.
 - Reacts to incoming projectiles (not just melee enemies) by predicting
   their flight path and picking a dodge direction in time.
-- Threat-filtered `IncomingProjectile` inference only — no separate danger
-  zone or sidestep machinery.
 - Calls police automatically when health drops below a critical threshold
   (and never while holding an enemy or with zero specials).
 - The HUD shows the AI's current winning `Verb` plus a pending-verb

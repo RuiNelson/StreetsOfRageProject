@@ -51,30 +51,21 @@ from .character import (
 from .enemy import (
     Abadede,
     Antonio,
-    AntonioIsGoingToKick,
     Bongo,
     Boss,
-    ClosingEnemy,
     Enemy,
     Garcia,
-    GrabOpportunity,
     GrabReason,
     Grunt,
     HakuRo,
-    IncomingMelee,
     Jack,
     MrX,
     NORA_TICKS_SINCE_ATTACK_UNKNOWN,
     Nora,
     Onihime,
-    PunishWindow,
-    ReachKind,
     Signal,
     Souther,
-    SoutherIsGoingToSlash,
-    SoutherPunishesJump,
     Surrounded,
-    TargetInReach,
     enemy_class_for_type,
 )
 from .dialog_verbs import (
@@ -97,10 +88,8 @@ from .essential import (
 )
 from .hazard_tokens import (
     Breakable,
-    IncomingProjectile,
     Pit,
     Projectile,
-    SafeSpot,
     StageObjects,
 )
 from .pickup_tokens import (
@@ -115,7 +104,6 @@ from .pickup_tokens import (
     ScorePickup,
     SpecialPickup,
     Weapon,
-    WeaponUpgrade,
     build_pickup_token,
     is_pickup_type,
     is_weapon_type,

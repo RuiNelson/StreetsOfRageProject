@@ -27,7 +27,7 @@ from abc import ABC
 from dataclasses import dataclass
 
 from ...hitboxes import Hitbox
-from .tokens import Inferred, Observed
+from .tokens import Observed
 
 # ROM init damage at weapon +$34 — also the upgrade rank for floor pickups.
 WEAPON_DAMAGE: dict[int, int] = {
@@ -86,22 +86,6 @@ class Weapon(Observed):
     # The weapon's own footprint on the ground, from the ROM shape tables --
     # the box $3136's pickup search really tests against.
     hitbox: Hitbox | None = None
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class WeaponUpgrade(Inferred):
-    """A ground ``Weapon`` worth walking to: it outranks what the actor holds.
-
-    Produced by ``inference.check_for_weapon_upgrades`` for every in-camera,
-    still-usable ``Weapon`` whose ``weapon_rank`` beats the actor's held
-    weapon. ``rank_gain`` is that difference, so ranking a knife against a
-    bottle does not mean re-reading the damage table downstream.
-    """
-
-    actor_slot: str
-    target_slot: str  # Weapon.slot
-    rank: int  # weapon_rank of the ground weapon
-    rank_gain: int  # rank minus the held weapon's rank; always > 0
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

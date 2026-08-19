@@ -10,6 +10,7 @@ Police special = physical A (0x0010), Jump = physical C (0x0040).
 
 from __future__ import annotations
 
+import math
 from contextvars import ContextVar
 
 from .pathfind import Path, Point, PointGoal
@@ -43,7 +44,7 @@ from .tokens import (
 )
 from .tokens import Enemy, Souther
 from .tokens import CameraRange, Stage
-from .tokens import Breakable, Pit, Projectile, SafeSpot
+from .tokens import Breakable, Pit, Projectile
 from .tokens import Pickup, Weapon
 from .tokens import CallPolice
 from .tokens import (
@@ -81,6 +82,10 @@ from .reach import (
     SOUTHER_SLASH_DIST_MIN,
     enemy_behind_actor,
     enemy_lane_covers,
+    in_camera,
+    in_playable_lane,
+    incoming_melee_targets,
+    live_enemies,
     pit_endangers,
 )
 from .. import prop_solids
@@ -650,7 +655,7 @@ def _dead_zone_stop_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> 
     Axel is *inside* the whip band, so the AI parked itself squarely where
     she hits and nowhere else, which is what "the AI cannot deal with Noras"
     looks like from the sofa. The rest of the pipeline already knows about
-    the pocket -- ``reach.in_enemy_dead_zone``, ``GrabOpportunity`` reason
+    the pocket -- ``reach.in_enemy_dead_zone``, ``reach.grab_reasons``'
     ``DEAD_ZONE`` -- but the approach that decides where to *stand* never
     consulted it.
 
@@ -991,8 +996,149 @@ def state_machine_walk_to_near_enemy(
 
 # How far to step back per tick while retreating -- roughly clears the
 # RETREAT_CAUTION_MARGIN zone decide.py gates this verb on, without
-# being a single-tick teleport.
+# being a single-tick teleport. Also the X step _safe_spot_candidates offers
+# below -- one retreat tick's worth of travel is one retreat tick's worth of
+# travel, whichever candidate is chosen.
 RETREAT_FROM_DANGER_DISTANCE = 32
+
+# The lane step _safe_spot_candidates offers alongside the straight retreat.
+# Clears PUNCH_RANGE_Y so a sidestep actually leaves the attacker's line
+# rather than shuffling inside it.
+SAFE_SPOT_STEP_Y = 24
+
+# Minimum clearance improvement a sidestep/diagonal candidate must offer
+# over the plain X-away retreat (the first candidate _safe_spot_candidates
+# returns) before _find_safe_spot prefers it. Without this, two candidates
+# scoring within a couple of px of each other on ordinary position jitter
+# flipped which one won every tick -- and since the candidates differ in
+# whether they add a Y step at all, that flip read live as the actor
+# darting into a vertical/diagonal dash instead of holding a steady retreat
+# line. Comfortably above the noise one tick of movement can introduce,
+# well below the real clearance gap a genuinely better sidestep provides.
+SAFE_SPOT_PREFERENCE_MARGIN = 12
+
+
+def _safe_spot_candidates(actor: Myself | Partner, threat: Enemy) -> list[tuple[int, int]]:
+    """Steps worth considering: away on X, and the two sidesteps, alone or
+    combined with the retreat. Standing still is not a candidate -- this
+    only exists to answer "back off to *where*".
+
+    Within ``DIRECTION_HYSTERESIS_X`` of the threat, which way is "away" is
+    read off ``actor.facing_left`` instead of the raw compare (same
+    convention as ``_back_direction_mask``: right when facing left) -- an
+    actor already backed into caution range sits close enough to its threat
+    that a couple of px of jitter would otherwise flip every candidate
+    here, including the sidesteps, to the opposite side on consecutive
+    ticks.
+    """
+
+    dx = threat.world_x - actor.world_x
+    if abs(dx) <= DIRECTION_HYSTERESIS_X:
+        away = RETREAT_FROM_DANGER_DISTANCE if actor.facing_left else -RETREAT_FROM_DANGER_DISTANCE
+    else:
+        away = -RETREAT_FROM_DANGER_DISTANCE if dx >= 0 else RETREAT_FROM_DANGER_DISTANCE
+    return [
+        (actor.world_x + away, actor.world_y),
+        (actor.world_x + away, actor.world_y + SAFE_SPOT_STEP_Y),
+        (actor.world_x + away, actor.world_y - SAFE_SPOT_STEP_Y),
+        (actor.world_x, actor.world_y + SAFE_SPOT_STEP_Y),
+        (actor.world_x, actor.world_y - SAFE_SPOT_STEP_Y),
+    ]
+
+
+def _inside_pit(context: Context, world_x: int, world_y: int) -> bool:
+    return any(pit_endangers(pit, world_x, world_y) for pit in find_all(context, Pit))
+
+
+def _find_safe_spot(actor: Myself | Partner, context: Context) -> tuple[int, int] | None:
+    """The best nearby point to back off to, weighed by clearance from
+    every live enemy -- or ``None`` if no candidate survives.
+
+    Computed lazily, only when ``_retreat_from_danger_target`` actually
+    needs a destination for this actor, rather than for every actor, every
+    tick, regardless of whether anything is retreating.
+
+    Candidates are reachability-gated, not chosen by clearance/lane/camera/
+    pit geometry alone: each survivor is routed through ``nav.plan_route``
+    (the same solids/danger obstacle sets and danger-then-solids-only
+    fallback ``WalkToNearEnemy``/``OpenBreakable`` use) and dropped if the
+    route does not reach it, so a spot that reads as clear in isolation but
+    sits behind a breakable or another enemy's reach is not returned as if
+    it were free. The threatening enemies themselves are excluded from that
+    danger set -- the actor is fleeing because it is already next to them,
+    so their own reach would otherwise cover the ground between the actor
+    and every candidate and disable the gate entirely (the same reasoning
+    ``_walk_to_near_enemy_target``'s ``alongside`` exemption documents for
+    the opposite verb) -- while unrelated enemies' danger and every
+    breakable/pit stay real obstacles.
+    """
+
+    enemies = live_enemies(context)
+    if not enemies:
+        return None
+    threat_slots = incoming_melee_targets(context, actor)
+    threatening = [enemy for enemy in enemies if enemy.slot in threat_slots]
+    if not threatening:
+        return None
+    nearest = min(
+        threatening,
+        key=lambda e: math.hypot(e.world_x - actor.world_x, e.world_y - actor.world_y),
+    )
+
+    camera = find(context, CameraRange)
+    threatening_slots = frozenset(enemy.slot for enemy in threatening)
+    body, origin = nav.actor_footprint(actor)
+    solids, dangers = nav.obstacle_sets(
+        context,
+        body=body,
+        origin=origin,
+        ignore_enemy_slots=threatening_slots,
+    )
+
+    # index 0 (the plain X-away retreat) is the stability anchor: every
+    # other candidate must clear it by SAFE_SPOT_PREFERENCE_MARGIN to win,
+    # so a near-tie keeps resolving to the same simple retreat instead of
+    # flipping to a sidestep on ordinary jitter (see that constant's
+    # comment).
+    best: tuple[float, tuple[int, int]] | None = None
+    anchor_clearance: float | None = None
+    for index, (candidate_x, candidate_y) in enumerate(_safe_spot_candidates(actor, nearest)):
+        if not in_playable_lane(candidate_y, context):
+            continue
+        if camera is not None and not in_camera(camera, candidate_x, candidate_y):
+            continue
+        if _inside_pit(context, candidate_x, candidate_y):
+            continue
+        # The candidate itself is clear, but the straight-line route to it
+        # might not be -- a crate, a pit, or an unrelated enemy's reach can
+        # sit between the actor and an otherwise fine spot. nav.plan_route
+        # already tries a danger-free route first and falls back to
+        # solids-only when no such route exists (a busy screen should not
+        # make every retreat "unreachable"), so this reuses that same
+        # policy rather than reinventing it.
+        path = nav.plan_route(
+            context,
+            actor,
+            PointGoal(Point(candidate_x, candidate_y)),
+            solids=solids,
+            dangers=dangers,
+        )
+        if not path.reached:
+            continue
+        clearance = min(
+            math.hypot(enemy.world_x - candidate_x, enemy.world_y - candidate_y)
+            for enemy in enemies
+        )
+        if index == 0:
+            anchor_clearance = clearance
+            score = clearance
+        elif anchor_clearance is None:
+            score = clearance
+        else:
+            score = clearance - SAFE_SPOT_PREFERENCE_MARGIN
+        if best is None or score > best[0]:
+            best = (score, (candidate_x, candidate_y))
+    return best[1] if best is not None else None
 
 
 def _retreat_from_danger_target(
@@ -1000,12 +1146,12 @@ def _retreat_from_danger_target(
 ) -> tuple[int, int]:
     """Where to back off to.
 
-    Prefers the ``SafeSpot`` inference for this actor: it has already
-    weighed the sidesteps against the straight retreat by clearance from
-    every live enemy, and rejected candidates that leave the lane, leave the
-    camera, or land on a pit. Falls back to stepping directly away from
-    ``target`` on X, holding the current lane, when no safe spot was found
-    -- backing off blindly still beats standing in the attack.
+    Prefers ``_find_safe_spot`` for this actor: it has already weighed the
+    sidesteps against the straight retreat by clearance from every live
+    enemy, and rejected candidates that leave the lane, leave the camera,
+    or land on a pit. Falls back to stepping directly away from ``target``
+    on X, holding the current lane, when no safe spot was found -- backing
+    off blindly still beats standing in the attack.
 
     Within ``DIRECTION_HYSTERESIS_X`` of the target, which way is "away" is
     read off ``actor.facing_left`` instead of the live position compare --
@@ -1015,9 +1161,9 @@ def _retreat_from_danger_target(
     tick.
     """
 
-    for spot in find_all(context, SafeSpot):
-        if spot.actor_slot == actor.slot:
-            return spot.world_x, spot.world_y
+    spot = _find_safe_spot(actor, context)
+    if spot is not None:
+        return spot
 
     dx = target.world_x - actor.world_x
     if abs(dx) <= DIRECTION_HYSTERESIS_X:
@@ -1037,7 +1183,7 @@ def state_machine_retreat_from_danger(
 ) -> None:
     """Back off to ``_retreat_from_danger_target``'s point, routed.
 
-    The destination itself is untouched -- SafeSpot preference, hysteresis-
+    The destination itself is untouched -- safe-spot preference, hysteresis-
     anchored fallback direction, all still `_retreat_from_danger_target`'s
     call, tuned from live measurement. What was missing was *how* to get
     there: an un-routed retreat walks a straight line, which can cross

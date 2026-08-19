@@ -1,13 +1,12 @@
 import unittest
 
-from sor_autoplay.ai.tokens import Breakable, IncomingProjectile, Pit, Projectile
+from sor_autoplay.ai.tokens import Breakable, Pit, Projectile
 from sor_autoplay.ai.tokens import Information, Observed, StageObjects
 
 
 class HazardTokenTests(unittest.TestCase):
     def test_all_are_information(self) -> None:
         self.assertTrue(issubclass(Projectile, Information))
-        self.assertTrue(issubclass(IncomingProjectile, Information))
         self.assertTrue(issubclass(Breakable, Information))
         self.assertTrue(issubclass(Pit, Information))
 
@@ -34,13 +33,6 @@ class HazardTokenTests(unittest.TestCase):
         self.assertEqual(projectile.vel_x, -1.5)
         self.assertEqual(projectile.vel_z, 0.0)
         self.assertEqual(projectile.type_id, 0x1E)
-
-    def test_incoming_projectile_fields(self) -> None:
-        incoming = IncomingProjectile(
-            slot="obj09", world_x=900, world_y=64, vel_x=-1.5, vel_z=0.0
-        )
-        self.assertEqual(incoming.slot, "obj09")
-        self.assertEqual(incoming.vel_x, -1.5)
 
     def test_frozen_and_hashable(self) -> None:
         projectile = Projectile(

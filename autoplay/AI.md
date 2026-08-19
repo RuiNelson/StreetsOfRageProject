@@ -54,21 +54,31 @@ fields, the same production function, and the same scoring formula — that
 is, the only difference between them is which constant or branch a
 consumer selects, never an `isinstance` check outside a simple
 enum-to-value mapping — a discriminator field (an `Enum`) is preferable to
-`N` classes whose sole reason to exist is to serve as a dispatch key. Three
-cases in `tokens/` fit this exactly and were merged on that basis:
+`N` classes whose sole reason to exist is to serve as a dispatch key. One
+case in `tokens/` fits this exactly and was merged on that basis:
 `MeleeWeaponAttack` (`weapon_type`, replacing `SwingBatOrPipe` /
 `StabWithKnifeOrBottle` / `SprayPepper`, which shared every `could_*`,
-`_emergency_*` and `state_machine_*` function outright), `GrabOpportunity`
-(`reason: GrabReason`, replacing seven near-identical marker subclasses
-scored by `priority._emergency_grab_enemy`'s single "best tier among
-reasons present" formula), and `TargetInReach` (`kind: ReachKind`,
-replacing five reach-band markers all produced by the same
-`inference.check_for_targets_in_reach` loop and consumed only through
-`reach.targets_of`'s presence/absence lookup). This exception is narrow: it
-does not reopen the door to generic discriminators like `enemy.type` on
-`Enemy`, where concrete behaviour (fields, production conditions, or
-per-class dispatch) genuinely differs. Subclassing remains the default for
-everything else.
+`_emergency_*` and `state_machine_*` function outright). This exception is
+narrow: it does not reopen the door to generic discriminators like
+`enemy.type` on `Enemy`, where concrete behaviour (fields, production
+conditions, or per-class dispatch) genuinely differs. Subclassing remains
+the default for everything else.
+
+Two further cases — `GrabOpportunity` (`reason: GrabReason`) and
+`TargetInReach` (`kind: ReachKind`) — were merged onto this same
+discriminator-field exception first, then, once every one of their
+producers turned out to already delegate its geometry to `reach.py`,
+removed as tokens entirely: `GrabReason` survives only as the return type
+of `reach.grab_reasons(context, actor, target, enemies) -> frozenset[
+GrabReason]`, and `ReachKind` does not survive at all — each of its five
+former band questions is now a direct call to the shared `reach.py`
+predicate it used to wrap (`reach.punch_would_connect`, `reach.in_rear_
+band`, `reach.in_jump_attack_band`, `reach.grab_would_connect`, `reach.
+enemy_actionable`). See [Judging without a cache](#judging-without-a-cache)
+below for why computing these fresh, on demand, at each of two or three
+call sites per tick is preferable to writing them into the context once —
+the same reasoning that took eleven of the twelve `Inferred` tokens this
+document used to describe down to one (`Surrounded`).
 
 A `Token` must never embed another `Token` by value. Since the context is
 a flat unordered collection, any relationship between two tokens — for instance, a
@@ -180,20 +190,24 @@ mere presence in the context signals to `generate_verb_tokens`,
 described below, that the corresponding character cannot presently act on
 a new verb.
 
-**`IncomingProjectile`** encapsulates the trajectory of a projectile
-already in flight, allowing the AI to react to it before it reaches the
-character. Antonio's boomerang (type `$96`) is withheld while it is still
-attached to him — punching his hand is standing still in front of him,
-which is how his kick starts. Souther's claw and afterimage (types
-`$98`/`$99`) are withheld *unconditionally*: they are animation-synchronized
-attack objects re-created from his own position every dash tick, with no flight
-to intercept, so his own state is the only honest thing to read.
+**`Projectile`** is a direct observation of a live projectile-kind object in
+flight. Whether one *threatens* the actor — heading toward it, in lane,
+within the impact window — is answered on demand by `reach.projectile_
+threatens(projectile, actor)`, not by a second token; see [Judging without
+a cache](#judging-without-a-cache) below for why. Antonio's boomerang
+(type `$96`) is withheld by `reach.antonio_still_holding_boomerang` while
+it is still attached to him — punching his hand is standing still in front
+of him, which is how his kick starts. Souther's claw and afterimage (types
+`$98`/`$99`) are withheld *unconditionally* by `reach.is_souther_claw`:
+they are animation-synchronized attack objects re-created from his own
+position every dash tick, with no flight to intercept, so his own state is
+the only honest thing to read.
 
-**`AntonioIsGoingToKick`** flags that Antonio's ROM kick gate at `$16EAE`
-is already satisfied (or that he has committed to primary state 2, the
-close-range power kick). Standing still in front of him is one of the
-trigger paths — the player's own signature while throwing a ground combo.
-The human answer is a single punch *or* a jump kick to put him in
+Antonio's ROM kick gate at `$16EAE` (already satisfied, or committed to
+primary state 2, the close-range power kick) is answered by `reach.
+antonio_will_kick(antonio, actor)`. Standing still in front of him is one
+of the trigger paths — the player's own signature while throwing a ground
+combo. The human answer is a single punch *or* a jump kick to put him in
 later-boss hitstun (primary `$03`/`$04`, decoded as `RECOVERY`), then a
 grab and a suplex. Jump-kicking him is offered anywhere inside the
 kick's free-flight range -- the usual "past punch outer" band is only
@@ -204,28 +218,29 @@ actually locked in. A predicted window is not a reason to leave punch
 range. `HitAntonioBoomerang` punches the thrown boomerang at
 punch-connect time when it would hit the actor.
 
-**`SoutherIsGoingToSlash`** is the same idea for Souther's commit gate at
-`$15EDA (souther_state1_active_combat)`: the velocity-selected
-`$50`/`$58`/`$68` X windows, the `$1C` lane window, and the `$18` inner abort
-that means he cannot *begin* the slash from inside 24px at all. Only once he is
-actually committed (primary `$02`) does `DodgeSoutherSlash` fire, and it is a
-pure lane step — `$161C6 (souther_state2_claw_dash)` writes only `+$1C`, so it
-cannot follow a lane change, and it resolves only with the target within `$18`
-of its lane.
+Souther's commit gate at `$15EDA (souther_state1_active_combat)` — the
+velocity-selected `$50`/`$58`/`$68` X windows, the `$1C` lane window, and the
+`$18` inner abort that means he cannot *begin* the slash from inside 24px at
+all — is answered by `reach.souther_will_slash(souther, actor)`. Only once
+he is actually committed (primary `$02`) does `DodgeSoutherSlash` fire, and
+it is a pure lane step — `$161C6 (souther_state2_claw_dash)` writes only
+`+$1C`, so it cannot follow a lane change, and it resolves only with the
+target within `$18` of its lane.
 
-**`SoutherPunishesJump`** is the one inference keyed on the actor alone rather
-than on an actor/target pair, and the reason is the ROM's own:
-`$162A4 (souther_flag_target_jump_attack)` watches the *player's* action state
-(`$16`/`$17`/`$42`/`$43` — the unarmed and armed jump attacks) and nothing about
-who the jump was aimed at, so `$16234 (souther_counter_jump_attack)` answers a
-hop aimed at an unrelated grunt exactly as it answers one aimed at him: straight
-to primary `$02` with the claw spawned, every distance band and gate bypassed.
-So the whole of `could_jump_attack` is refused for that actor whenever a live,
+`reach.souther_would_punish_jump(actor, context)` is the one predicate
+keyed on the actor alone rather than on an actor/target pair, and the
+reason is the ROM's own: `$162A4 (souther_flag_target_jump_attack)` watches
+the *player's* action state (`$16`/`$17`/`$42`/`$43` — the unarmed and armed
+jump attacks) and nothing about who the jump was aimed at, so `$16234
+(souther_counter_jump_attack)` answers a hop aimed at an unrelated grunt
+exactly as it answers one aimed at him: straight to primary `$02` with the
+claw spawned, every distance band and gate bypassed. So the whole of
+`could_jump_attack` is refused for that actor whenever a live,
 non-punishable Souther is within `$78`-plus-free-flight on X — the exact
-opposite of Antonio, whose fight *needs* the hop. Only the launch is refused;
-an actor already airborne is committed and still gets a verb.
+opposite of Antonio, whose fight *needs* the hop. Only the launch is
+refused; an actor already airborne is committed and still gets a verb.
 
-The token is named *punishes* rather than *counters* because the counter is
+The predicate is named *punish* rather than *counter* because the counter is
 only one of the two ways a jump loses, and conflating them is a mistake this
 codebase actually made: the first version gated the refusal on `$16234` being
 on his call path and on the ROM's `$12` lane window, and the AI was reported
@@ -240,7 +255,7 @@ reason — they describe *him*, not the flight.
   about five of the flight's ~25 frames.
 
 The only Souther worth hopping at is one who cannot act at all, and there a
-`GrabOpportunity` with reason `SOUTHER_ON_PUNISH` outranks the hop anyway.
+grab reason of `SOUTHER_ON_PUNISH` outranks the hop anyway.
 
 **`InContinueMenu`** is observed when this player's object is the type-`$0F`
 continue / high-score name-entry UI (the slot is no longer playable).
@@ -252,47 +267,33 @@ player's object `+$59` bit 4 marks the choice UI as active.
 `HandleMrXDialog` always answers No (held Down, then a face button).
 Accepting writes the bad ending.
 
-**`ClosingEnemy`** flags an ordinary enemy whose own velocity — not just
-its current position — puts it on course to close into rear-attack range
-within the next few ticks, even though it is not there yet. Ordinary
-enemies steer toward the player on both axes at once, so a fast diagonal
-approach can otherwise go from "outside every reaction band" to "already
-attacking" between two RAM polls with no warning, since the band checks
-elsewhere are purely instantaneous-position. Reference-only, like
-`AnimationInProgress`: its mere presence for a given enemy is the signal.
+"Which of my moves can reach that enemy from here" is answered directly by
+`reach.py`'s band predicates, one per move family — `reach.punch_would_
+connect` (a forward strike would connect: inside the punch band *and*
+actually in front), `reach.in_rear_band` (inside the `$322A` chord's real
+reach on the enemy's own side), `reach.in_jump_attack_band` (in front,
+beyond punch outer, inside the kick's free-flight range), `reach.grab_
+would_connect` (walking in would take a hold) and `reach.enemy_actionable`
+(some attack the AI already has would really fire on this enemy now — the
+"stop walking, you can already hit it" signal). `decide.py` and
+`priority.py` call these directly rather than reading a precomputed
+judgment; see [Judging without a cache](#judging-without-a-cache) below.
 
-Note: no `could_*` function currently consumes it. An earlier attempt had
-`could_rear_attack` fire on it directly, before the enemy was actually
-within `RearAttack`'s real range — live testing showed that backfires,
-since a Mega Drive attack only hits by current position: the early commit
-was a guaranteed whiff that left the character locked in its own recovery
-frames exactly when the still-closing enemy arrived and landed a free hit.
-Consuming this token usefully needs a genuine evasive reaction (e.g. a
-sidestep/reposition verb), not an early commit to the same
-reactive-only attack.
+"From here" is really "from here, when that move arrives": every band
+except `enemy_actionable` is judged through `reach.connects`, against the
+enemy projected forward by its own move's lead time — see
+[Kinematics](#kinematics-attacking-where-the-target-will-be) — so these
+answers are predictive rather than reactive. `enemy_actionable` is the
+deliberate exception: it is not "would this hit" but "stop walking, you can
+already hit it", and a future-tense answer to that halts the approach
+while the enemy is still out of range.
 
-**`TargetInReach`** answers, once per tick and per (actor, enemy) pair,
-"which of my moves can reach that enemy from here". It carries a `kind:
-ReachKind` field, one member per move family — `PUNCH` (a forward strike
-would connect: inside the punch band *and* actually in front), `REAR`
-(inside the `$322A` chord's real reach on the enemy's own side),
-`JUMP_ATTACK` (in front, beyond punch outer, inside the kick's free-flight
-range), `GRAB` (walking in would take a hold) and `ACTIONABLE` (some
-attack the AI already has would really fire on this enemy now — the "stop
-walking, you can already hit it" signal). The geometry behind them lives in
-`reach.py`, shared with the verb and ranking stages, so all three agree on
-one definition of every band instead of each recomputing it.
-
-"From here" is really "from here, when that move arrives": each band is
-judged against the enemy projected forward by its own move's lead time —
-see [Kinematics](#kinematics-attacking-where-the-target-will-be) — so the
-family is predictive rather than reactive.
-
-**`IncomingMelee`** is the melee counterpart of `IncomingProjectile`: an
-on-screen enemy in a committed attack phase, close enough that its hit can
-actually land on the actor — or, on the enemy's own current velocity, soon
-will be. A dangerous phase alone is not a threat and neither is proximity
-alone, so this is a judgment, not a copy of every attacking enemy on screen.
+`reach.is_incoming_melee(actor, enemy)` is the melee counterpart of
+`reach.projectile_threatens`: true for an on-screen enemy in a committed
+attack phase, close enough that its hit can actually land on the actor —
+or, on the enemy's own current velocity, soon will be. A dangerous phase
+alone is not a threat and neither is proximity alone, so this is a
+judgment, not a copy of every attacking enemy on screen.
 
 The predictive half exists because not every committed attack has a static
 reach to test: Signal's slide (`enemy-ai.md` "Signal's slide is velocity,
@@ -303,38 +304,85 @@ it had already arrived. `reach.enemy_will_close_soon` re-tests the same
 caution predicate a short horizon (`reach.CLOSING_ENEMY_THREAT_FRAMES`)
 ahead by projecting the enemy's own `grunt_vel_x`/`grunt_vel_y`, and a
 stationary enemy projects to itself, so this never promotes anything the
-current-position test would not already have caught. Unlike `ClosingEnemy`
-below, this reuses the *existing* `IncomingMelee` → `RetreatFromDanger`
-pipeline rather than needing a new verb, which is exactly the kind of
-"genuine evasive reaction" `ClosingEnemy`'s own note asks for — just
-reached through a different, broader signal (any direction, not only the
-rear band) rather than through `ClosingEnemy` itself.
+current-position test would not already have caught. `reach.souther_dash_
+arrives_soon` is a third path, for the one enemy invisible to both the
+other tests: a `Boss` populates neither `attack_ranges` nor `grunt_vel_*`,
+so Souther's committed claw dash (`$161C6`, 8px/frame) would otherwise go
+undetected by either.
 
-**`PunishWindow`** flags an enemy that cannot defend itself right now —
-knocked down, blocked, grabbed, in move recovery, or **stunned**. It
-carries `frames_left` when the ROM exposes a countdown, which today means
-a stunned `Grunt`'s own `+$50` timer (`$18` frames for hitstun, `$A0` for
-the pepper-spray immobilization).
+Whether an enemy cannot defend itself right now — knocked down, blocked,
+grabbed, in move recovery, or **stunned** — is `phases.is_punishable`,
+read directly off the enemy's own `combat_phase`; a stunned `Grunt`'s
+remaining time is its own `stun_timer` field (`$18` frames for hitstun,
+`$A0` for the pepper-spray immobilization), read directly rather than
+copied into a second token.
 
 **`Surrounded`** flags an actor boxed in by a crowd rather than facing a
 queue: three or more live enemies inside the close box around it, or a
 pincer with at least one on each side. It is what makes the police special
-worth spending on something other than imminent death.
+worth spending on something other than imminent death. This is the one
+judgment still computed once per tick and written into the context — see
+[Judging without a cache](#judging-without-a-cache) for why it, alone,
+earns that.
 
-**`SafeSpot`** answers "back off to *where*" for an actor that has an
-`IncomingMelee`: the best of a few candidate steps around it, judged by
-clearance from every live enemy and rejected outright when it leaves the
-playable lane or the camera, or lands on a `Pit`. `RetreatFromDanger`'s
-executor steers here when it exists and falls back to stepping straight
-back on X when it does not.
+Backing off to a safe spot, given a threat worth leaving, is `execute.
+_find_safe_spot(actor, context)`: the best of a few candidate steps around
+the nearest such threat, judged by clearance from every live enemy and
+rejected outright when it leaves the playable lane or the camera, lands on
+a `Pit`, or has no reachable route. `RetreatFromDanger`'s executor
+(`_retreat_from_danger_target`) calls it directly, lazily, only for the
+actor it is actually steering this tick, and falls back to stepping
+straight back on X when it returns nothing.
 
-**`WeaponUpgrade`** flags a ground `Weapon` that is in camera, still
-usable, and better than what the actor is carrying, carrying the rank and
-the rank gain so nothing downstream re-reads the damage table.
+Whether a ground `Weapon` is an upgrade — in camera, still usable, and
+better than what the actor is carrying — is `reach.weapon_upgrade_rank
+(actor, weapon, camera)`, returning the rank itself (not just a bool) so
+`priority._emergency_walk_to_weapon` can score by how much of an upgrade
+it is.
 
-**`TargetInReach`** (`kind=ReachKind.GRAB`) and **`GrabOpportunity`** are
+Whether walking in would take a hold, and whether it is worth taking, are
 the two halves of the grab question — can I, and should I. They are
 described in [Grabbing an enemy](#grabbing-an-enemy) below.
+
+### Judging without a cache
+
+Through most of this project's early life, every judgment above lived in
+its own `Inferred` token, written into the context once per tick by
+`generate_inference_tokens` so that `decide.py` (`could_*`) and
+`priority.py` (`_emergency_*`) never had to agree about a band by each
+recomputing it. That reasoning was sound, but it bundled two different
+things into one mechanism: *sharing one definition* of a judgment, and
+*caching* that judgment's result for the tick. Only the first one was ever
+load-bearing. `reach.py` (and `kinematics.py` for timing) already existed
+as the one shared definition every stage called into — the cache on top of
+it saved a recomputation, nothing more, and at the AI's own scale (a
+handful of enemies, polled every ~33ms) that recomputation is cheap enough
+not to matter.
+
+The token layer, meanwhile, cost real complexity: a token class per
+judgment, a `check_for_*` producer, careful `|`-chain ordering whenever one
+judgment read another's output within the same tick (`generate_inference_
+tokens`'s own docstring used to spend a paragraph on this), and a second
+place every geometry change had to be kept in sync. Eleven of this
+project's twelve `Inferred` tokens have since been removed on exactly this
+basis — `ClosingEnemy`, `PunishWindow`, `AntonioIsGoingToKick`, `SoutherIs
+GoingToSlash`, `SoutherPunishesJump`, `WeaponUpgrade`, `TargetInReach`,
+`IncomingMelee`, `IncomingProjectile`, `GrabOpportunity`, `SafeSpot` — each
+folded into a `reach.py` (or, for `SafeSpot`, `execute.py`) function called
+directly by whichever `could_*`/`_emergency_*`/state machine needs the
+answer, on demand, several times a tick rather than once. The rule that
+replaces the old cache: **whenever two stages need the same judgment for
+the same thing, both call the same function** — never each recomputing its
+own abbreviated version. That is what continues to prevent divergence; the
+cache never was.
+
+`Surrounded` is the one exception, and deliberately so: it is read by three
+or more call sites in a single tick (`priority._emergency_call_police`,
+`decide.py`'s police threshold, `reach.grab_reasons`'s `WHILE_SURROUNDED`
+case) and its own computation — a full enemy-count scan per actor — is
+heavier than a two-enemy geometry check, so it genuinely benefits from
+being computed once and shared, the way the whole `Inferred` stage used to
+justify itself.
 
 ### Hitbox and AttackRange
 
@@ -419,12 +467,12 @@ sweeping the pipeline and comparing:
 Bodies also stop at contact rather than passing through one another, so an
 approaching enemy is never projected through the actor.
 
-`inference.check_for_targets_in_reach` evaluates each move's band across that
-move's own timeline, which is what makes `TargetInReach` predictive rather
-than reactive for most kinds. `kind=ReachKind.ACTIONABLE` is the deliberate
-exception: it is not "would this hit" but "stop walking, you can already hit
-it", and a future-tense answer to that halts the approach while the enemy is
-still out of range.
+`reach.connects` evaluates each move's band across that move's own
+timeline, which is what makes most of `reach.py`'s band predicates
+predictive rather than reactive. `reach.enemy_actionable` is the
+deliberate exception: it is not "would this hit" but "stop walking, you can
+already hit it", and a future-tense answer to that halts the approach while
+the enemy is still out of range.
 
 Every concrete `Attack` declares its model in `ATTACK_LEAD_FRAMES`, and a
 test fails if one does not. Some models are legitimately zero, and that is a
@@ -541,15 +589,15 @@ strictly a ceiling: an attack already ranked lower — an unwarranted
 Nora's own combat states are not the generic ordinary-enemy ones: her whip
 engage-and-swing and her scripted lunge are their own ROM states
 (`phases.py`'s per-type table), and after either one ends she is simply
-back to `NORMAL` — not a ROM-confirmed `PunishWindow` phase the way a
-knockdown or a stun is. `Nora.ticks_since_last_attack` (cross-tick memory,
-see `generate_direct_observation_tokens` above) is what lets `JumpAttack`
-still treat her as worth rushing for a short, deliberately conservative
-window after that: a jump kick covers ground fast enough to land before
-she can commit to another attack, which a routine walk-in cannot promise.
-This is a probabilistic opening, not a guaranteed one, so it ranks below a
-real `PunishWindow` and above the plain default — see
-`priority._emergency_jump_attack`.
+back to `NORMAL` — not a ROM-confirmed punishable phase (`phases.is_
+punishable`) the way a knockdown or a stun is. `Nora.ticks_since_last_
+attack` (cross-tick memory, see `generate_direct_observation_tokens`
+above) is what lets `JumpAttack` still treat her as worth rushing for a
+short, deliberately conservative window after that: a jump kick covers
+ground fast enough to land before she can commit to another attack, which
+a routine walk-in cannot promise. This is a probabilistic opening, not a
+guaranteed one, so it ranks below a real punish window and above the plain
+default — see `priority._emergency_jump_attack`.
 
 ### Grabbing an enemy
 
@@ -579,52 +627,56 @@ Why it is worth spending an attack on:
   The ROM picks out exactly one today: `Nora`, whose only attacking
   animation reaches 32 to 80 pixels ahead and nothing closer.
 
-Those are two `GrabOpportunity` reasons —
-`CLEAR_REAR` and `DEAD_ZONE`. The second is derived from the
-extracted `AttackRange`s rather than from the enemy's class, so a corrected
-extraction changes the AI's behaviour without changing any code. A third,
-`JACK_FROM_BEHIND`, fires when the actor is already on Jack's back
-(he is facing away): take the hold before the axe or the lunge turns
-around. A fourth, `ANTONIO_ON_PUNISH`, fires when Antonio is in
-later-boss hitstun (`RECOVERY`, primary `$03`/`$04` after
-`$17C36 boss_apply_pending_damage`): punch him once to open that window,
-walk in without attacking, then flip-hold into a suplex. Standing still
-to combo him is the `$16EAE` zero-velocity kick trigger, so a second
-punch is refused and the hold is the punish. A fifth, `SOUTHER_ON_PUNISH`, is
-its Souther counterpart on the same shared later-boss `RECOVERY` states, and it
-is a separate reason rather than sharing Antonio's because the *reason*
-differs: Antonio's is that a second punch is his own kick trigger, Souther's is
-simply that `$15EDA (souther_state1_active_combat)` cannot re-arm the claw from
-recovery, so the walk-in is free — and with base health `$20` against Antonio's
-`$18`, the suplex chain matters more, not less. A sixth,
-`WHILE_SURROUNDED`, fires for any grabbable `Grunt` while the actor
-carries a `Surrounded` token: being boxed in is answered by a hold whichever
-side the crowd is on. It is the one that reads another *inference* rather
-than the candidate enemy itself, which is why
-`check_for_grab_opportunities` runs after `check_for_surrounded` instead of
-beside it in the same `|` chain — every `check_for_*` inside one expression
-is handed the same original context, so a chain cannot express that
-dependency. `GrabOpportunity` carries these as a `reason: GrabReason` field
-per this document's own discriminator-field exception (every reason shares
-the identical token shape and the identical `priority._emergency_grab_enemy`
-scoring formula), and they rank differently: being surrounded is the only one
-that outranks the `$322A` escape chord (a pincer's hold becomes a throw
-*into* the enemy the chord was aimed at), clearing the rear beats every
-strike on an enemy that can still act, catching Jack from behind is just
-under that, grabbing a stunned Antonio or Souther sits above punching them
-again (the hold is the punish) and above every strike on them, and the whip
-case is an improvement on an ordinary exchange and ranks just above a jump
-kick.
+Those are two of the reasons `reach.grab_reasons(context, actor, target,
+enemies) -> frozenset[GrabReason]` can return — `CLEAR_REAR` and
+`DEAD_ZONE`. The second is derived from the extracted `AttackRange`s rather
+than from the enemy's class, so a corrected extraction changes the AI's
+behaviour without changing any code. A third, `JACK_FROM_BEHIND`, fires
+when the actor is already on Jack's back (he is facing away): take the
+hold before the axe or the lunge turns around. A fourth, `ANTONIO_ON_
+PUNISH`, fires when Antonio is in later-boss hitstun (`RECOVERY`, primary
+`$03`/`$04` after `$17C36 boss_apply_pending_damage`): punch him once to
+open that window, walk in without attacking, then flip-hold into a
+suplex. Standing still to combo him is the `$16EAE` zero-velocity kick
+trigger, so a second punch is refused and the hold is the punish. A
+fifth, `SOUTHER_ON_PUNISH`, is its Souther counterpart on the same shared
+later-boss `RECOVERY` states, and it is a separate reason rather than
+sharing Antonio's because the *reason* differs: Antonio's is that a second
+punch is his own kick trigger, Souther's is simply that `$15EDA (souther_
+state1_active_combat)` cannot re-arm the claw from recovery, so the
+walk-in is free — and with base health `$20` against Antonio's `$18`, the
+suplex chain matters more, not less. A sixth, `WHILE_SURROUNDED`, fires
+for any grabbable `Grunt` while the actor is `Surrounded`: being boxed in
+is answered by a hold whichever side the crowd is on. It is the one
+reason keyed on the actor's whole situation rather than on the candidate
+enemy itself, which is why `grab_reasons` takes the actor's `Surrounded`
+state as a fresh, on-demand check (`reach.actor_is_surrounded`) rather
+than reading a value some earlier stage wrote — see [Judging without a
+cache](#judging-without-a-cache).
 
-`TargetInReach` with `kind=ReachKind.GRAB` answers the other half —
-whether walking in would actually reach — and, like every other
-`TargetInReach` kind, comes from one geometry definition in `reach.py`.
-`could_grab_enemy` requires both, because a grab that is possible is not
-automatically a grab that is worth taking, and neither is the reverse.
+`GrabReason` is an `Enum`, not a discriminator field on a token: it is the
+return type of a pure function now, and `grab_reasons` returns every
+reason that applies to a pair at once (a whip enemy in front *and* a body
+at the actor's back both hold), so `priority._emergency_grab_enemy` takes
+`max(_GRAB_REASON_SCORE[r] for r in reasons)` — "best tier among reasons
+present" — over whatever the set contains. The tiers rank differently:
+being surrounded is the only one that outranks the `$322A` escape chord (a
+pincer's hold becomes a throw *into* the enemy the chord was aimed at),
+clearing the rear beats every strike on an enemy that can still act,
+catching Jack from behind is just under that, grabbing a stunned Antonio
+or Souther sits above punching them again (the hold is the punish) and
+above every strike on them, and the whip case is an improvement on an
+ordinary exchange and ranks just above a jump kick.
+
+`reach.grab_would_connect` answers the other half — whether walking in
+would actually reach — from the same shared geometry definition every
+other reach question in this document comes from. `could_grab_enemy`
+requires both, because a grab that is possible is not automatically a grab
+that is worth taking, and neither is the reverse.
 
 This list is meant to grow. Any further situation where a hold beats a
-strike belongs here as another `GrabReason` member with its own tier, not
-as a bespoke new field on `GrabOpportunity`.
+strike belongs here as another `GrabReason` member with its own tier and
+its own branch in `grab_reasons`, not as a bespoke new token.
 
 ## Process
 
@@ -691,29 +743,22 @@ already set for the executor side of the loop.
 
 ### `generate_inference_tokens`
 
-This function invokes a set of subordinate functions, each of which reads
-the directly observed tokens and derives further tokens from them.
+In practice, this is just `context | check_for_surrounded(context)`.
+`Surrounded` is the one `Inferred` token this pipeline still writes into
+the context once per tick — see [Judging without a
+cache](#judging-without-a-cache) for why every other judgment this
+function used to produce (`check_for_incoming_projectiles`, `check_for_
+incoming_melee`, `check_for_grab_opportunities`, `check_for_targets_in_
+reach`, and the rest) was removed in favour of a direct, on-demand
+`reach.py` call at each site that needs the answer.
 
-Each such function is named with the prefix `check_for_`, for example
-`check_for_incoming_projectiles`. Every one of these functions produces a
-focused set of `Information` descendants — often no more than one — which
-is appended to the context.
-
-Most of them read only directly observed tokens and are therefore
-independent of one another; `check_for_safe_spots` is the exception, since
-a safe spot only means anything relative to a threat, so it runs last and
-reads the `IncomingMelee` tokens produced earlier in the same call.
-
-The `could_*` functions below, and the `_emergency_*` functions that rank
-their output, consume these tokens rather than re-deriving the same
-judgment from raw coordinates. That is the point of the stage: a band is
-computed once per tick, in one place, and every later stage sees the same
-answer.
-
-It is also where the AI's one prediction about the near future is applied:
-`check_for_targets_in_reach` measures each move's band at the moment that
-move would land, not at the moment the snapshot was taken
-(see [Kinematics](#kinematics-attacking-where-the-target-will-be)).
+The AI's one prediction about the near future — measuring each move's band
+at the moment that move would land, not at the moment the snapshot was
+taken — still happens, just later: `decide.py`'s `_targets_in_reach` helper
+calls `reach.connects(band, actor, enemy, kinematics.connect_frames(
+verb_cls, actor, enemy))` for each `could_*` that needs it (see
+[Kinematics](#kinematics-attacking-where-the-target-will-be)), instead of
+a single upstream stage computing it for every band at once.
 
 ### `generate_verb_tokens`
 

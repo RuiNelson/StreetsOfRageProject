@@ -50,7 +50,6 @@ from sor_autoplay.ai.decide import (
 from sor_autoplay.ai.tokens import (
     Antonio,
     AttackRange,
-    ClosingEnemy,
     DodgeAntonioKick,
     DodgeSoutherSlash,
     Enemy,
@@ -88,10 +87,10 @@ def _with_inference(generator):
     """Run ``generate_inference_tokens`` before the generator under test.
 
     AI.md's loop always derives the ``Inferred`` half of the context before
-    any ``could_*`` runs, and the generators read those tokens (``TargetInReach``,
-    ``IncomingMelee``, ``WeaponUpgrade``, ...) instead of
-    recomputing the geometry themselves. These tests hand-build the *observed*
-    half, so they have to derive the inferred half the same way the loop does
+    any ``could_*`` runs, and some generators still read those tokens
+    (``IncomingMelee``, ``GrabOpportunity``, ``Surrounded``). These tests
+    hand-build the *observed* half, so they have to derive the inferred
+    half the same way the loop does
     -- otherwise they would be exercising half a pipeline.
     """
 
@@ -493,16 +492,16 @@ class CouldRearAttackTests(unittest.TestCase):
 
         self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
 
-    def test_does_not_fire_early_for_a_closing_enemy_still_outside_the_band(self) -> None:
-        # Regression (live-diagnosed): an earlier version also fired here
-        # purely on ClosingEnemy, before the enemy was actually within
-        # _in_rear_band's real range. $322A only hits based on *current*
-        # position, so that committed Axel to a guaranteed-whiff attack and
-        # left him locked in its recovery frames exactly when the
+    def test_does_not_fire_early_for_an_enemy_still_outside_the_band(self) -> None:
+        # Regression (live-diagnosed): an earlier version also fired on a
+        # fast-closing enemy's own velocity, before the enemy was actually
+        # within _in_rear_band's real range. $322A only hits based on
+        # *current* position, so that committed Axel to a guaranteed-whiff
+        # attack and left him locked in its recovery frames exactly when the
         # still-closing enemy arrived and landed its own hit for free.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
         enemy = make_enemy(world_x=160, world_y=100)  # dx=60, outside Axel's 40px band
-        context: set[Token] = {myself, enemy, ClosingEnemy(slot="obj01")}
+        context: set[Token] = {myself, enemy}
 
         result = could_rear_attack(context)
 
@@ -520,15 +519,6 @@ class CouldRearAttackTests(unittest.TestCase):
             could_walk_to_near_enemy({myself, jack}),
             {WalkToNearEnemy(actor_slot="P1", target_slot="obj01")},
         )
-
-    def test_still_fires_by_the_real_band_regardless_of_a_closing_enemy_token(self) -> None:
-        myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        enemy = make_enemy(world_x=80, world_y=100)  # behind while facing right
-        context: set[Token] = {myself, enemy, ClosingEnemy(slot="obj01")}
-
-        result = could_rear_attack(context)
-
-        self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
 
 
 class CouldCounterGrabTests(unittest.TestCase):

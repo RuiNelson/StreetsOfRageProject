@@ -19,7 +19,7 @@ import logging
 import math
 from collections.abc import Callable
 
-from ..phases import HITSTUN_FRAMES, CombatPhase, is_dangerous
+from ..phases import HITSTUN_FRAMES, CombatPhase, is_dangerous, is_punishable
 from . import reach
 from .decide import (
     HEALTH_CRITICAL_PERCENT,
@@ -54,17 +54,10 @@ from .tokens import (
     ThrowPepper,
 )
 from .tokens import Myself, Partner
-from .tokens import Antonio, Boss, Breakable, Enemy, Grunt, Jack, Nora
+from .tokens import Antonio, Boss, Breakable, Enemy, Grunt, Jack, Nora, Souther
 from .tokens import (
-    AntonioIsGoingToKick,
-    GrabOpportunity,
     GrabReason,
-    IncomingMelee,
-    IncomingProjectile,
-    PunishWindow,
-    SoutherIsGoingToSlash,
     Surrounded,
-    WeaponUpgrade,
 )
 from .tokens import (
     HealthPickup,
@@ -72,9 +65,12 @@ from .tokens import (
     Pickup,
     ScorePickup,
     SpecialPickup,
+    Weapon,
     is_weapon_type,
 )
+from .tokens import CameraRange
 from .tokens import CallPolice
+from .tokens import Projectile
 from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDialog
 from .tokens import Context, Verb, find, find_all
 from .tokens import (
@@ -135,8 +131,8 @@ _EMERGENCY_ATTACK_HITSTUN = 21
 # instead of walking away to fetch another enemy.
 _EMERGENCY_ATTACK_LONG_STUN = 19
 # The same ceiling again, for the case the two above do not cover: another
-# enemy is *about to hit the actor* (an `IncomingMelee` naming a different
-# target) while the current one is parked.
+# enemy is *about to hit the actor* (`reach.is_incoming_melee` true for a
+# different target) while the current one is parked.
 #
 # This is the user-reported case, and the whole reason `_stunned_target_
 # ceiling` exists in the first place -- "a stunned enemy cannot act, cannot
@@ -153,7 +149,7 @@ _EMERGENCY_ATTACK_LONG_STUN = 19
 # distant one. On an exact tie the `priority` field settles it in the walk's
 # favour anyway (20 vs 10).
 _EMERGENCY_ATTACK_PARKED_UNDER_THREAT = 10
-# Taking a hold (GrabEnemy), one tier per GrabOpportunity present.
+# Taking a hold (GrabEnemy), one tier per reach.grab_reasons reason present.
 #
 # Clearing the rear is the strong case: with an enemy behind and a grabbable
 # body in front, the hold converts the pincer into ThrowHeldEnemy's B+back
@@ -193,7 +189,7 @@ _EMERGENCY_GRAB_TO_DODGE_CHARGE = 61
 # does not deal well when surrounded":
 #
 # - three enemies in the close box with none strictly *behind* produced no
-#   GrabOpportunity at all (CLEAR_REAR needs a confirmed rear enemy), so
+#   grab reason at all (CLEAR_REAR needs a confirmed rear enemy), so
 #   the winning verb was a plain Punch(20) thrown into the crowd;
 # - in a real pincer the grab *was* offered, and lost anyway --
 #   _EMERGENCY_REAR_ATTACK_DANGEROUS(60) beat _EMERGENCY_GRAB_CLEAR_REAR(58).
@@ -201,8 +197,8 @@ _EMERGENCY_GRAB_TO_DODGE_CHARGE = 61
 # That second case is the one worth being precise about, because 60 is not an
 # arbitrary number: it is "escape a commit from behind", and walking into a
 # committed attack is normally how the actor takes the hit instead of the
-# hold. It does not apply here. A grab candidate has already passed a
-# TargetInReach (kind GRAB) *and* GRABBABLE_PHASES, so the body is within contact range and
+# hold. It does not apply here. A grab candidate has already passed
+# reach.grab_would_connect *and* GRABBABLE_PHASES, so the body is within contact range and
 # is itself not mid-swing -- there is no walk across the room to be punished
 # for. And the hold answers the pincer better than the chord does: the chord
 # hits one enemy by current position and whiffs if it drifts, while the hold
@@ -253,7 +249,7 @@ HOLD_KNEE_TICKS = 6
 _EMERGENCY_JUMP_ATTACK_PUNISHABLE = 28  # below punch; never prefer hop over strike
 # Nora specifically, freshly out of her own whip engage-and-swing or lunge
 # (Nora.ticks_since_last_attack -- observe.NoraAttackTracker) but not (yet)
-# re-armed and not in any ROM-confirmed PunishWindow phase, so this sits
+# re-armed and not in any ROM-confirmed is_punishable phase, so this sits
 # below a real punish window (28) -- it is a probabilistic opening, not a
 # guaranteed one; her post-swing decision table was not traced to a hard
 # minimum-recovery number -- and above the plain default (18), so closing
@@ -315,7 +311,7 @@ _EMERGENCY_RETREAT_FROM_DANGER = 17  # closer scoring higher, floor 15
 # Projectile inference judges a real threat) has no melee answer at all --
 # only getting out of its lane does. Sits above every ordinary approach/
 # retreat tier so the actor clears the lane before the weapon lands, but
-# below a guaranteed PunishWindow strike (60) and the RearAttack/
+# below a guaranteed strike on a punishable target (60) and the RearAttack/
 # CLEAR_REAR grab escapes (55/58/60): those stay the right answer even with
 # a projectile also in flight, since abandoning a free hit to dodge a throw
 # that might still be avoided on its own trades a certain gain for an
@@ -521,17 +517,6 @@ def _emergency_rear_attack(verb: RearAttack, context: Context) -> int:
     return _with_target_class(score, target)
 
 
-def _is_punish_window(context: Context, target_slot: str | None) -> bool:
-    """Whether inference judged this target defenceless this tick.
-
-    Reads the ``PunishWindow`` token rather than re-testing the phase, so
-    "free damage" has one definition across the pipeline -- including the
-    stunned phases, which carry the ROM's own remaining-frames count.
-    """
-
-    return any(token.target_slot == target_slot for token in find_all(context, PunishWindow))
-
-
 def _emergency_melee_strike(verb: Verb, context: Context) -> int:
     """Shared scoring for ``Punch`` / ``MeleeWeaponAttack`` -- same formula
     regardless of held weapon, since none of these has evidence of a
@@ -540,25 +525,24 @@ def _emergency_melee_strike(verb: Verb, context: Context) -> int:
     target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
     if target is None:
         return _EMERGENCY_DEFAULT
-    if _is_punish_window(context, target.slot):
+    if is_punishable(target.combat_phase):
         return _with_target_class(_EMERGENCY_PUNCH_PUNISHABLE, target)
     return _with_target_class(_EMERGENCY_PUNCH_DEFAULT, target)
 
 
 def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
     target = find(context, Enemy, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
     if target is None:
         return _EMERGENCY_DEFAULT
     if (
         isinstance(target, Antonio)
         and target.strike_is_committed()
-        and any(
-            token.actor_slot == verb.actor_slot and token.target_slot == verb.target_slot
-            for token in find_all(context, AntonioIsGoingToKick)
-        )
+        and actor is not None
+        and reach.antonio_will_kick(target, actor)
     ):
         return _with_target_class(_EMERGENCY_JUMP_OVER_ANTONIO_KICK, target)
-    if _is_punish_window(context, target.slot):
+    if is_punishable(target.combat_phase):
         return _with_target_class(_EMERGENCY_JUMP_ATTACK_PUNISHABLE, target)
     if (
         isinstance(target, Nora)
@@ -570,26 +554,22 @@ def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
 
 
 def _emergency_dodge_antonio_kick(verb: DodgeAntonioKick, context: Context) -> int:
-    if any(
-        token.actor_slot == verb.actor_slot and token.target_slot == verb.target_slot
-        for token in find_all(context, AntonioIsGoingToKick)
-    ):
+    target = find(context, Antonio, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
+    if target is not None and actor is not None and reach.antonio_will_kick(target, actor):
         return _EMERGENCY_DODGE_ANTONIO_KICK
     return _EMERGENCY_DEFAULT
 
 
 def _emergency_dodge_souther_slash(verb: DodgeSoutherSlash, context: Context) -> int:
-    if any(
-        token.actor_slot == verb.actor_slot and token.target_slot == verb.target_slot
-        for token in find_all(context, SoutherIsGoingToSlash)
-    ):
+    target = find(context, Souther, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
+    if target is not None and actor is not None and reach.souther_will_slash(target, actor):
         return _EMERGENCY_DODGE_SOUTHER_SLASH
     return _EMERGENCY_DEFAULT
 
 
 def _emergency_hit_antonio_boomerang(verb: HitAntonioBoomerang, context: Context) -> int:
-    from .tokens import Projectile
-
     projectile = find(context, Projectile, slot=verb.target_slot)
     if projectile is None:
         return _EMERGENCY_DEFAULT
@@ -610,29 +590,26 @@ _GRAB_REASON_SCORE: dict[GrabReason, int] = {
 
 
 def _emergency_grab_enemy(verb: GrabEnemy, context: Context) -> int:
-    """The best tier among the ``GrabOpportunity`` tokens for this pair.
+    """The best tier among the ``reach.grab_reasons`` for this pair.
 
-    Several opportunities can hold at once (a whip enemy in front *and* a
-    body at the actor's back); the strongest reason is what the grab is
-    worth. No opportunity left this tick -- the rear enemy moved off, the
-    target stopped being grabbable -- means there is no longer a reason to
-    close in, so the walk-in drops out of contention entirely.
+    Several reasons can hold at once (a whip enemy in front *and* a body at
+    the actor's back); the strongest reason is what the grab is worth. No
+    reason left this tick -- the rear enemy moved off, the target stopped
+    being grabbable -- means there is no longer a reason to close in, so the
+    walk-in drops out of contention entirely.
     """
 
-    opportunities = [
-        token
-        for token in find_all(context, GrabOpportunity)
-        if token.actor_slot == verb.actor_slot
-        and token.target_slot == verb.target_slot
-    ]
-    if not opportunities:
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Enemy, slot=verb.target_slot)
+    if actor is None or target is None:
         return _EMERGENCY_DEFAULT
 
-    score = max(
-        (_GRAB_REASON_SCORE[token.reason] for token in opportunities),
-        default=_EMERGENCY_DEFAULT,
-    )
-    return _with_target_class(score, find(context, Enemy, slot=verb.target_slot))
+    reasons = reach.grab_reasons(context, actor, target, reach.on_screen_enemies(context))
+    if not reasons:
+        return _EMERGENCY_DEFAULT
+
+    score = max(_GRAB_REASON_SCORE[reason] for reason in reasons)
+    return _with_target_class(score, target)
 
 
 
@@ -653,20 +630,14 @@ def _emergency_open_breakable(verb: OpenBreakable, context: Context) -> int:
 
 
 def _emergency_walk_to_weapon(verb: WalkToWeapon, context: Context) -> int:
-    upgrade = next(
-        (
-            token
-            for token in find_all(context, WeaponUpgrade)
-            if token.actor_slot == verb.actor_slot
-            and token.target_slot == verb.target_slot
-        ),
-        None,
-    )
-    if upgrade is None:
+    weapon = find(context, Weapon, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
+    camera = find(context, CameraRange)
+    rank = None if weapon is None or actor is None else reach.weapon_upgrade_rank(actor, weapon, camera)
+    if rank is None:
         # No upgrade judgment for this pair this tick: the weapon is gone,
         # out of camera, worn out, or no longer better than what is held.
         return _EMERGENCY_DEFAULT
-    rank = upgrade.rank
     # Scales with how much of an upgrade this weapon is (rank 2..5) instead
     # of a flat weight, so a better upgrade among several candidates ranks
     # higher -- e.g. knife (rank 5) reaches 17, pepper (rank 2) sits lower at
@@ -693,11 +664,7 @@ def _emergency_retreat_from_danger(verb: RetreatFromDanger, context: Context) ->
     actor = _find_actor(context, verb.actor_slot)
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
-    threatening = any(
-        token.actor_slot == verb.actor_slot and token.target_slot == verb.target_slot
-        for token in find_all(context, IncomingMelee)
-    )
-    if not threatening:
+    if not reach.is_incoming_melee(actor, target):
         # The commit this verb was produced for is over (or the enemy
         # left the caution box): nothing left to back away from.
         return _EMERGENCY_DEFAULT
@@ -714,20 +681,18 @@ def _emergency_retreat_from_danger(verb: RetreatFromDanger, context: Context) ->
 
 
 def _emergency_projectile_sidestep(verb: ProjectileSidestep, context: Context) -> int:
-    """Sooner-to-impact scores higher, using the same ticks-to-impact
-    ``inference._projectile_threatens`` computed to promote this
-    ``IncomingProjectile`` in the first place -- reusing ``_distance_emergency``
-    with a tick count standing in for its usual pixel distance, since both
-    are "how much runway is left before this needs to be answered"."""
+    """Sooner-to-impact scores higher, using the same
+    ``reach.projectile_ticks_to_impact`` ``decide.could_projectile_sidestep``
+    used to judge this a threat in the first place -- reusing
+    ``_distance_emergency`` with a tick count standing in for its usual pixel
+    distance, since both are "how much runway is left before this needs to
+    be answered"."""
 
-    projectile = find(context, IncomingProjectile, slot=verb.target_slot)
+    projectile = find(context, Projectile, slot=verb.target_slot)
     actor = _find_actor(context, verb.actor_slot)
     if projectile is None or actor is None:
         return _EMERGENCY_DEFAULT
-    if projectile.vel_x == 0:
-        ticks = 0.0
-    else:
-        ticks = abs(projectile.world_x - actor.world_x) / abs(projectile.vel_x)
+    ticks = reach.projectile_ticks_to_impact(projectile, actor)
     return _distance_emergency(
         ticks, base=_EMERGENCY_PROJECTILE_SIDESTEP, floor=30, step_px=2
     )
@@ -868,13 +833,17 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
 def _other_enemy_is_incoming(context: Context, actor_slot: str, target_slot: str) -> bool:
     """Is something *other than* this target about to hit the actor?
 
-    Reads the `IncomingMelee` judgments inference already made, so "about to
-    hit me" has one definition across the pipeline.
+    Reads ``reach.is_incoming_melee``, the same shared judgment
+    ``decide.py`` uses, so "about to hit me" has one definition across the
+    pipeline.
     """
 
+    actor = _find_actor(context, actor_slot)
+    if actor is None:
+        return False
     return any(
-        token.actor_slot == actor_slot and token.target_slot != target_slot
-        for token in find_all(context, IncomingMelee)
+        enemy.slot != target_slot and reach.is_incoming_melee(actor, enemy)
+        for enemy in reach.on_screen_enemies(context)
     )
 
 
@@ -903,10 +872,8 @@ def _stunned_target_ceiling(
     o outro inimigo"): with his claw committed two steps away, punching a
     knocked-down grunt scored 60 against the dodge's 46 and won the tick.
 
-    The remaining time decides which ceiling, read from the target's
-    ``PunishWindow`` (the token that exists precisely so this does not have
-    to go back to raw observation fields) and falling back to the Grunt's
-    own counter if no window is in context. Above ``HITSTUN_FRAMES`` the
+    The remaining time decides which ceiling, read straight from the
+    stunned Grunt's own ``stun_timer`` (+$50). Above ``HITSTUN_FRAMES`` the
     timer either belongs to the long pepper-spray stun or to Nora's own
     "feign injury" recovery (``phases.py``'s ``0x26`` table, state ``$0C``
     seeds ``$80`` -- 128 frames), and both only count down. A pepper stun
@@ -928,11 +895,7 @@ def _stunned_target_ceiling(
         # A knockdown with nothing incoming: no ceiling at all, exactly as
         # before. Only the branch above is new for it.
         return None
-    window = next(
-        (token for token in find_all(context, PunishWindow) if token.target_slot == target_slot),
-        None,
-    )
-    frames_left = window.frames_left if window is not None else target.stun_timer
+    frames_left = target.stun_timer
     if frames_left > HITSTUN_FRAMES:
         return _EMERGENCY_ATTACK_LONG_STUN
     return _EMERGENCY_ATTACK_HITSTUN

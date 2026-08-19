@@ -124,8 +124,8 @@ _TYPE_SPECIFIC_MOVE_PHASES: dict[int, dict[int, CombatPhase]] = {
     # timer at $80 (128 frames, not the ordinary 24-frame hitstun) before
     # counting it down exactly like the generic hitstun handler does. Both
     # are a real, timed, cannot-act window -- STUNNED, so Grunt.stun_timer
-    # and PunishWindow.frames_left read the ROM's own countdown correctly
-    # instead of silently reporting nothing. $0F is the same $9B36 handler
+    # reads the ROM's own countdown correctly instead of silently reporting
+    # nothing. $0F is the same $9B36 handler
     # reached a second way (from state $17, below) and gets the same phase.
     # $10 ($F2AC) unconditionally clears her approach counter, sets the
     # state to $11, and jumps straight into ordinary_enemy_begin_knockdown

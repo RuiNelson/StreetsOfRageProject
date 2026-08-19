@@ -226,7 +226,7 @@ class Boss(Enemy, ABC):
     vel_x: float = 0.0  # +$20 signed 16.16, ROM units per tick
     vel_z: float = 0.0  # +$24 signed 16.16, ROM units per tick
     # Boss primary byte at +$30 (MapEntity.action_state). Antonio's kick is
-    # primary $02; the 1→2 transition is what AntonioIsGoingToKick predicts.
+    # primary $02; the 1→2 transition is what reach.antonio_will_kick predicts.
     primary_state: int = 0
 
 
@@ -259,7 +259,7 @@ class Souther(Boss):
         ``$16118 (souther_state2_claw_commit)`` is entered *by* clearing
         ``+$67`` and every one of its tactical handlers is already part of the
         claw. The uncommitted state-1 gate is
-        ``SoutherIsGoingToSlash``'s business, not this.
+        ``reach.souther_will_slash``'s business, not this.
         """
 
         return self.primary_state == 0x02
@@ -272,8 +272,8 @@ class Antonio(Boss):
     Primary state 1 (``$16DA0``) is active combat: facing, boomerang
     maintain/throw (tactical ``$08``), and the proximity/velocity/facing
     gate that advances him to state 2. Primary state 2 (``$171CC``) is the
-    committed close-range power kick. ``AntonioIsGoingToKick`` is the
-    inference that names that transition before -- and while -- it lands.
+    committed close-range power kick. ``reach.antonio_will_kick`` names that
+    transition before -- and while -- it lands.
     """
 
     def strike_is_committed(self) -> bool:
@@ -332,113 +332,14 @@ def enemy_class_for_type(type_id: int) -> type[Enemy]:
     return _TYPE_TO_CLASS.get(type_id & 0xFF, Enemy)
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ClosingEnemy(Inferred):
-    """A Grunt closing fast enough on X and lane to reach rear-attack range
-    within the next few ticks, even though its *current* position is not
-    there yet.
-
-    Produced by ``inference.check_for_closing_enemies`` from a Grunt's
-    ``grunt_vel_x``/``grunt_vel_y`` (never for a Boss -- out of scope). The
-    band-check helpers in ``decide.py`` are purely instantaneous-position, so
-    a fast diagonal closer can go from "outside every reaction band" to
-    "already attacking" between two polls with no warning; this token is the
-    early-warning signal that lets ``could_rear_attack`` react a few ticks
-    ahead of the raw position check. Reference-only per AI.md -- consumers
-    look up the full Enemy via ``find(context, Enemy, slot=...)``.
-    """
-
-    slot: str
-
-
-class ReachKind(Enum):
-    """Which of the actor's moves ``TargetInReach`` says would connect.
-
-    Each member is one move family ``inference.check_for_targets_in_reach``
-    tests, once per (actor, enemy) pair, from the geometry in
-    ``ai/reach.py``. Kept as an enum rather than one ``TargetInReach``
-    subclass per move because every member is produced by that same single
-    loop and consumed the same way -- ``reach.targets_of(context,
-    TargetInReach, actor.slot, kind=...)`` -- with only which band/kinematics
-    call differing per kind; nothing here ever branches on the token's type,
-    only on which ``kind`` it carries.
-    """
-
-    PUNCH = auto()
-    """A forward strike (B) would connect with this enemy now.
-
-    Produced when the enemy is inside ``reach.in_punch_band`` *and* in
-    front of the actor (within ``reach.punch_behind_tolerance_x``, which
-    the box geometry makes 0 for all three characters) -- the raw band
-    alone ignores facing and describes a dead zone the actor cannot
-    actually hit.
-    """
-
-    REAR = auto()
-    """The ``$322A`` rear/escape chord would reach this enemy now.
-
-    Produced when the enemy is inside ``reach.in_rear_band`` -- the
-    chord's real reach on the enemy's own side (behind vs front), never
-    the union of both, since Axel and Blaze have zero forward reach.
-    """
-
-    JUMP_ATTACK = auto()
-    """A jump kick would cover the gap to this enemy now.
-
-    Produced when the enemy is in front, in lane, beyond the actor's
-    punch outer edge and inside the kick's own free-flight range
-    (``reach.in_jump_attack_band``).
-    """
-
-    ACTIONABLE = auto()
-    """An enemy some already-available attack would really fire on now.
-
-    Produced when ``reach.enemy_actionable`` holds: inside the punch
-    reach, or inside the rear band *and* the chord is the right answer
-    there (``reach.rear_attack_is_warranted``). This is the "stop
-    walking, you can already hit it" signal ``could_walk_to_near_enemy``
-    consumes, and it is deliberately narrower than the union of the
-    bands above.
-    """
-
-    GRAB = auto()
-    """Walking into this enemy would take a hold of it.
-
-    Produced when ``reach.grab_would_connect`` holds -- in front, in
-    lane, and inside the actor's own close-combat range. The hold itself
-    is a contact result, not an input (see ``reach.GRAB_RANGE_Y``), so
-    "in reach" here means "one walk-in away", not "one button away".
-    """
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class TargetInReach(Inferred):
-    """An enemy that one of the actor's moves can reach *right now*.
-
-    Produced by ``inference.check_for_targets_in_reach`` once per (actor,
-    enemy) pair and per move family (``ReachKind``) -- see that enum for
-    what each kind answers. Reference-only: both ends are slot references,
-    resolved with ``find(context, Enemy, slot=...)`` / ``_find_actor``.
-
-    Several kinds can hold for the same pair at once (an enemy can be both
-    ``ACTIONABLE`` and in ``GRAB`` range), so a pair may carry more than one
-    ``TargetInReach``, one per kind.
-    """
-
-    actor_slot: str
-    target_slot: str
-    kind: ReachKind
-
-
 class GrabReason(Enum):
     """Why a grab is judged worth more than a strike right now.
 
-    Each member is one situation ``inference.check_for_grab_opportunities``
-    recognises, kept as an enum rather than one ``GrabOpportunity`` subclass
-    per situation because every situation already produces the identical
-    ``GrabOpportunity(actor_slot, target_slot, reason=...)`` shape and is
-    scored by the identical ``priority._emergency_grab_enemy`` -- "best tier
-    among reasons present for this pair" -- with only the tier constant
+    Each member is one situation ``reach.grab_reasons`` recognises, kept as
+    an enum rather than a discriminator on a dedicated token since it is a
+    pure function's return value now, not a stored judgment: every situation
+    is scored by the identical ``priority._emergency_grab_enemy`` -- "best
+    tier among reasons present for this pair" -- with only the tier constant
     differing per reason. Most reasons are ``Grunt``-only; ``ANTONIO_ON_
     PUNISH`` is the exception, because Antonio's punish window is the
     opening of the punch-grab-suplex that beats standing still to combo him
@@ -478,7 +379,7 @@ class GrabReason(Enum):
     Produced when the actor stands behind a live ``Jack``
     (``reach.enemy_forward_dx`` negative: Jack is facing away). His axe
     juggle and lunge punish a front exchange; a back grab skips both. The
-    walk-in still has to face him (``TargetInReach`` kind ``GRAB``), so this
+    walk-in still has to face him (``reach.grab_would_connect``), so this
     is "caught him from behind", not "he is behind us" -- that side is
     ``RearAttack``.
     """
@@ -486,10 +387,10 @@ class GrabReason(Enum):
     DODGE_CHARGE = auto()
     """A committed enemy is charging in from *behind* this grabbable one.
 
-    Produced when another live enemy already carries an ``IncomingMelee``
-    for this actor, sits on the **same side** as the grab candidate, and is
-    **further away** than it -- the user's own description: "an enemy in
-    front, and behind it, a Signal".
+    Produced when ``reach.is_incoming_melee`` already holds for another live
+    enemy against this actor, that enemy sits on the **same side** as the
+    grab candidate, and is **further away** than it -- the user's own
+    description: "an enemy in front, and behind it, a Signal".
 
     Signal is the case this exists for, and the ROM is why it is nasty:
     his slide (state ``$0A``) is *velocity, not a hitbox* -- enemy-ai.md's
@@ -530,9 +431,9 @@ class GrabReason(Enum):
     facing answers being hit from both sides at once; a hold is the answer
     that does not require choosing a side.
 
-    Whether the hold is *reachable* is still ``TargetInReach`` (kind
-    ``GRAB``)'s question -- ``decide.could_grab_enemy`` needs both -- so
-    this never proposes walking across a crowd to reach someone.
+    Whether the hold is *reachable* is still ``reach.grab_would_connect``'s
+    question -- ``decide.could_grab_enemy`` needs both -- so this never
+    proposes walking across a crowd to reach someone.
     """
 
     ANTONIO_ON_PUNISH = auto()
@@ -566,64 +467,6 @@ class GrabReason(Enum):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class GrabOpportunity(Inferred):
-    """Holding this enemy is worth more right now than hitting it.
-
-    Produced by ``inference.check_for_grab_opportunities`` -- see
-    ``GrabReason`` for the situations it recognises and why each is worth a
-    hold. Several reasons can hold for the same pair at once (a whip enemy
-    in front *and* a body at the actor's back), so a pair may carry more
-    than one ``GrabOpportunity``, one per reason; ``priority.
-    _emergency_grab_enemy`` takes the best tier among them.
-
-    Reference-only, like ``TargetInReach``: both ends are slot references.
-    ``decide.could_grab_enemy`` pairs one of these with a ``TargetInReach``
-    of kind ``GRAB`` for the same pair -- the opportunity says it is
-    *worth* grabbing, the reach token says it is *possible*.
-    """
-
-    actor_slot: str
-    target_slot: str
-    reason: GrabReason
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class IncomingMelee(Inferred):
-    """An enemy whose committed attack is close enough to land on the actor
-    -- or, on its own current velocity, soon will be.
-
-    Produced by ``inference.check_for_incoming_melee`` for an on-screen
-    enemy in a dangerous phase (ATTACKING/CHARGE) sitting inside
-    ``reach.too_close_to_keep_approaching``'s caution box now, or projected
-    into it within ``reach.CLOSING_ENEMY_THREAT_FRAMES``
-    (``reach.enemy_will_close_soon``) -- the predictive half exists for a
-    committed *closing* attack with no static reach to test at all, the
-    ROM-confirmed case being Signal's slide (enemy-ai.md "Signal's slide is
-    velocity, not a hitbox"). The melee-range counterpart of
-    ``IncomingProjectile``: a threat judgment, not a copy of every dangerous
-    enemy on screen.
-    """
-
-    actor_slot: str
-    target_slot: str
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class PunishWindow(Inferred):
-    """An enemy that cannot defend itself right now -- free damage.
-
-    Produced by ``inference.check_for_punish_windows`` for every live enemy
-    in a punishable phase (``phases.is_punishable``: knockdown, blocked,
-    stunned, grabbed, or move recovery). ``frames_left`` carries the ROM's
-    own countdown when it is known -- a stunned ``Grunt``'s ``stun_timer``
-    (+$50) -- and 0 when the phase has no readable timer.
-    """
-
-    target_slot: str
-    frames_left: int = 0
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
 class Surrounded(Inferred):
     """The actor is boxed in by a crowd rather than facing a queue.
 
@@ -639,66 +482,3 @@ class Surrounded(Inferred):
     behind: int
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class AntonioIsGoingToKick(Inferred):
-    """Antonio is in -- or about to enter -- his close-range power kick.
-
-    Produced by ``inference.check_for_antonio_kick`` for a live ``Antonio``
-    whose ROM kick gate at ``$16EAE`` is already satisfied (state 1, target
-    available, X/lane inside the velocity-selected ``$50``/``$68``/``$78``
-    and ``$10`` windows) or who has already committed to primary state 2
-    (``$171CC antonio_state2_close_strike``). Standing still in front of
-    him is one of the trigger paths -- the player's own signature while
-    throwing a ground combo -- so this token exists to stop the AI punching
-    through a kick that will break the chain.
-
-    Reference-only: both ends are slot references, resolved with
-    ``find(context, Antonio, slot=...)`` / ``find(context, Myself, ...)``.
-    """
-
-    actor_slot: str
-    target_slot: str
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SoutherIsGoingToSlash(Inferred):
-    """Souther is in -- or about to commit to -- his claw slash.
-
-    Produced by ``inference.check_for_souther_slash`` for a live ``Souther``
-    whose ROM gate at ``$15EDA (souther_state1_active_combat)`` is already
-    satisfied (target available, ``+$66`` clear, inside the lane window and
-    inside the velocity-selected ``$50``/``$58``/``$68`` X window but *outside*
-    the ``$18`` inner abort) or who has already reached primary state 2
-    (``$16118 (souther_state2_claw_commit)``).
-
-    Reference-only: both ends are slot references.
-    """
-
-    actor_slot: str
-    target_slot: str
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SoutherPunishesJump(Inferred):
-    """Jumping right now loses to Souther, whichever thing he is doing.
-
-    Produced by ``inference.check_for_souther_jump_counter`` for any live
-    ``Souther`` who is not punishable and whose ``$78``-plus-free-flight X box
-    covers the actor. Keyed on the actor alone because ``$162A4
-    (souther_flag_target_jump_attack)`` watches the *player's* action state
-    (``$16``/``$17``/``$42``/``$43``) and nothing about who the jump was aimed
-    at: hopping at an unrelated grunt in that box loses identically.
-
-    Two independent losses, which is why this is deliberately **not** gated on
-    ``$16234 (souther_counter_jump_attack)`` being on his current call path.
-    While he can still choose, the jump-attack action state hands him the
-    counter, which bypasses every distance band, the ``$18`` inner abort and
-    the ``+$66``/``+$77`` gates. While he is already dashing
-    (``$1619E``/``$161C6``, the handlers that skip ``$16234``), the type-``$98``
-    claw is live and the flight lands in it. Reading "the counter is not armed"
-    as "the jump is safe" is exactly backwards -- those handlers skip the
-    counter *because he is already attacking* -- and it is what put the AI into
-    the claws in play.
-    """
-
-    actor_slot: str

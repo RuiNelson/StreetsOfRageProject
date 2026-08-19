@@ -29,7 +29,6 @@ from sor_autoplay.ai.tokens import Myself
 from dataclasses import replace
 from sor_autoplay.ai.tokens import (
     AttackRange,
-    ClosingEnemy,
     Enemy,
     Garcia,
     Jack,
@@ -66,7 +65,7 @@ def determine_priority_verb(context):
     """Rank a context built the way AI.md's loop builds it.
 
     Several ``_emergency_*`` functions read ``Inferred`` tokens
-    (``PunishWindow``, ``IncomingMelee``, ``WeaponUpgrade``, ``Surrounded``)
+    (``IncomingMelee``, ``Surrounded``)
     rather than re-deriving the same judgment from raw coordinates, and the
     loop always produces those before ranking. These tests hand-build the
     observed half of the context, so they derive the inferred half here.
@@ -523,7 +522,7 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
 
     def test_jump_attack_prefers_a_nora_freshly_out_of_her_own_attack(self) -> None:
         # Just stopped attacking (ticks_since_last_attack small, not
-        # dangerous, not in any ROM-confirmed PunishWindow phase either) --
+        # dangerous, not in any ROM-confirmed is_punishable phase either) --
         # the probabilistic recovery tier (24) must still beat a routine
         # WalkToNearEnemy toward a *different*, farther enemy competing for
         # the same tick.
@@ -740,9 +739,9 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         self.assertEqual(verbs[0].target_slot, "obj01")
 
     def test_walk_to_weapon_scores_when_rank_beats_held(self) -> None:
-        # The camera matters: WeaponUpgrade is only inferred for a weapon
-        # actually on screen, and _emergency_walk_to_weapon reads that token
-        # rather than re-ranking the raw Weapon.
+        # The camera matters: reach.weapon_upgrade_rank only judges a weapon
+        # actually on screen, and _emergency_walk_to_weapon calls it directly
+        # rather than re-ranking the raw Weapon some other way.
         unarmed = _myself(held_weapon_type=0)
         knife = Weapon(slot="obj01", world_x=0, world_y=64, weapon_type=0x08)
         context = {unarmed, knife, _camera(), WalkToWeapon(actor_slot="P1", target_slot="obj01")}
@@ -1328,8 +1327,8 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
         # from the fight either way.
         #
         # The old reasoning's "walk into another body" cost is also smaller
-        # than it reads: a GrabEnemy candidate has already passed a
-        # TargetInReach (kind GRAB), so the target is inside contact range, not across the
+        # than it reads: a GrabEnemy candidate has already passed
+        # reach.grab_would_connect, so the target is inside contact range, not across the
         # room. See priority._EMERGENCY_GRAB_WHILE_SURROUNDED.
         myself = _myself(world_x=100, world_y=100)
         front = self._grunt("front", world_x=130, world_y=100)
@@ -1430,25 +1429,18 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
 
 
 class DetermineEmergencyRearAttackTests(unittest.TestCase):
-    """RearAttack's emergency only depends on the target's combat_phase, not
-    on whether the candidate was triggered by the real band check or by a
-    ClosingEnemy early-warning token -- confirms priority.py needed no
-    change when could_rear_attack learned to react to ClosingEnemy."""
+    """RearAttack's emergency depends only on the target's combat_phase."""
 
-    def test_dangerous_target_wins_regardless_of_a_closing_enemy_token(self) -> None:
+    def test_dangerous_target_outranks_a_calm_one(self) -> None:
         dangerous = _enemy("objA", CombatPhase.ATTACKING)
         calm = _enemy("objB", CombatPhase.NORMAL)
         rear_dangerous = RearAttack(actor_slot="P1", target_slot="objA")
         rear_calm = RearAttack(actor_slot="P1", target_slot="objB")
-        # objB's verb exists only because of the early-warning token, not
-        # because it is in the real band -- must not out-rank a genuine
-        # dangerous-phase target sitting in range.
         context = {
             dangerous,
             calm,
             rear_dangerous,
             rear_calm,
-            ClosingEnemy(slot="objB"),
         }
 
         result = determine_priority_verb(context)
