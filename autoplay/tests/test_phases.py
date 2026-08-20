@@ -199,6 +199,30 @@ class PhaseDecodeTests(unittest.TestCase):
                     CombatPhase.HELD_BY_ENEMY,
                 )
 
+    def test_weapon_swing_is_attacking_not_holding(self) -> None:
+        # $48 hit frames / $46 melee / $44 throw while a pipe is held are
+        # attack animations. Treating them as HOLDING (free to act) mashed
+        # B and cancelled the weapon's hit boxes — live round-1 booth stall.
+        for action in (0x44, 0x45, 0x46, 0x47, 0x48, 0x49):
+            with self.subTest(action=action):
+                self.assertEqual(
+                    player_phase(action_byte=action, held_type=0x0B),
+                    CombatPhase.ATTACKING,
+                )
+
+    def test_idle_with_a_weapon_stays_holding(self) -> None:
+        self.assertEqual(
+            player_phase(action_byte=0x02, held_type=0x0B),
+            CombatPhase.HOLDING,
+        )
+
+    def test_unarmed_grab_throw_stays_holding(self) -> None:
+        # held_type is the grabbed enemy, not a weapon.
+        self.assertEqual(
+            player_phase(action_byte=0x44, held_type=0x20),
+            CombatPhase.HOLDING,
+        )
+
     def test_ignore_death(self) -> None:
         self.assertTrue(should_ignore_as_target(CombatPhase.DEATH))
         self.assertFalse(should_ignore_as_target(CombatPhase.KNOCKDOWN))

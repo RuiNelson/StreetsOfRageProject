@@ -339,10 +339,19 @@ def player_phase(
     # Knockdown $50–$5F, ordinary throw air $70–$74, special-throw $82–$8F.
     if 0x50 <= base <= 0x5F or 0x70 <= base <= 0x74 or 0x82 <= base <= 0x8F:
         return CombatPhase.HURT_PLAYER
-    if held_type:
-        return CombatPhase.HOLDING
     if 0x18 <= base <= 0x1F or 0x20 <= base <= 0x27:
         return CombatPhase.ATTACKING
+    # Bat/pipe/knife melee ($46), throw ($44) and $48 hit frames share
+    # $44-$4F with the unarmed grab-throw family. While a *weapon* ($08-$0C)
+    # is held they are attack animations: B during $48 is sampled as a new
+    # swing and cancels the hit boxes before they exist. Live on round 1's
+    # type-$11 booth: Blaze action $49, held pipe $0B, atk_id=0 on both
+    # player and weapon, booth intact. The unarmed throw (held_type is the
+    # grabbed enemy) stays HOLDING so knees/throws remain free.
+    if 0x44 <= base <= 0x4F and 0x08 <= (held_type & 0xFF) <= 0x0C:
+        return CombatPhase.ATTACKING
+    if held_type:
+        return CombatPhase.HOLDING
     # $28 grab acquire, $30–$3F hold moves, $44 throw family, $60 hold/react.
     if (
         0x28 <= base <= 0x3F
