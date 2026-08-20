@@ -311,11 +311,12 @@ class JumpAttack(MeleeAttacks):
     his kick trigger), (target is punishable)×28, (Nora, not currently
     dangerous, within priority.NORA_RECOVERY_PUNISH_TICKS of her own
     last attack)×24, Enemy×18. Against a live Antonio the hop is also
-    offered anywhere inside the kick's free-flight range (not only
-    past punch outer) and is the opener; the grab still wins on
-    hitstun. From inside punch range the executor hops in place -- a
-    directed hop from there lands on his far side, facing away, and
-    the grab never happens.
+    offered inside punch range (a grounded B is his kick trigger) but
+    only when the kick would connect -- same lane, in front, within
+    free-flight range. Off-lane, walking onto his lane is the
+    approach. The grab still wins on hitstun. From inside punch range
+    the executor hops in place -- a directed hop from there lands on
+    his far side, facing away, and the grab never happens.
     """
 
     priority: int = 8  # below basic punch priority (10)

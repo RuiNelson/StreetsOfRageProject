@@ -286,10 +286,12 @@ grounded B on Antonio (the first punch is the same `$16EAE` zero-velocity
 kick trigger as a follow-up combo — measured as the reason the fight was
 weak: punch 20+boss beat the hop 18+boss in punch range, the actor stood
 still, and the kick landed); `could_jump_attack` offers a hop anywhere
-inside the kick's free-flight range (the usual band past punch outer is
-~10px on Axel and never fires), ranks it above a punch
-(`priority._EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER` 22), and
-`could_walk_to_near_enemy` hands that last stretch to the hop;
+inside the kick's free-flight range **on his lane and in front** (the
+usual band past punch outer is ~10px on Axel and never fires; an earlier
+X-only offer hopped from any lane and kicked empty air), ranks it above
+a punch (`priority._EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER` 22), and
+`could_walk_to_near_enemy` hands that last stretch to the hop only when
+the kick would connect -- off-lane it walks onto his lane first;
 overlapping him on X hops in place rather than falling through to a
 punch (`state_machine_jump_attack`, reused by `DodgeAntonioKick`);
 inside punch range the hop is **in place** (no LEFT/RIGHT) so the actor

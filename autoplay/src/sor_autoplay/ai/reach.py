@@ -432,6 +432,11 @@ def in_jump_attack_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
     disqualify the follow-through B edge (``$3914``) once the flight has
     naturally carried the actor closer than that edge -- see execute.py's
     ``state_machine_jump_attack`` airborne branch, which this band gates.
+
+    Antonio is the one grounded exception to that min-dx: a standing B is
+    his ``$16EAE`` kick trigger, so the hop is the opener inside punch
+    range too. Lane and facing still have to hold -- a jump kick is
+    horizontal, and hopping at an Antonio off the lane kicks empty air.
     """
 
     dx = abs(enemy.world_x - actor.world_x)
@@ -439,6 +444,8 @@ def in_jump_attack_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
     if dy > JUMP_ATTACK_RANGE_Y:
         return False
     min_dx = 0 if actor.is_airborne else max(JUMP_ATTACK_MIN_DX, punch_outer_x(actor.character_id))
+    if isinstance(enemy, Antonio):
+        min_dx = 0
     if dx < min_dx:
         return False
     if dx > jump_attack_max_dx(actor.character_id):

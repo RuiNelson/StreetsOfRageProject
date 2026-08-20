@@ -1138,6 +1138,18 @@ class ConnectsBandTimelineTests(unittest.TestCase):
         self.assertTrue(_connects(reach.in_jump_attack_band, myself, enemy, JumpAttack))
         self.assertFalse(_connects(reach.punch_would_connect, myself, enemy, Punch))
 
+    def test_antonio_opener_includes_punch_range_on_his_lane(self) -> None:
+        myself = _myself(world_x=120, world_y=100, facing_left=False)
+        antonio = _antonio(world_x=160, world_y=100, boss_dist_x=40, boss_dist_lane=0)
+
+        self.assertTrue(_connects(reach.in_jump_attack_band, myself, antonio, JumpAttack))
+
+    def test_antonio_opener_does_not_cover_another_lane(self) -> None:
+        myself = _myself(world_x=120, world_y=80, facing_left=False)
+        antonio = _antonio(world_x=160, world_y=100, boss_dist_x=40, boss_dist_lane=20)
+
+        self.assertFalse(_connects(reach.in_jump_attack_band, myself, antonio, JumpAttack))
+
     def test_ignores_enemies_outside_the_playable_lane(self) -> None:
         myself = _myself(world_x=100, world_y=100)
         unreachable = _enemy(world_x=130, world_y=400)

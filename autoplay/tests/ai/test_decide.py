@@ -2252,9 +2252,10 @@ class CouldGrabAntonioOnPunishTests(unittest.TestCase):
 
 class JumpKickAntonioTests(unittest.TestCase):
     def test_offers_a_hop_on_a_live_antonio_inside_kick_range(self) -> None:
-        # dx=40 is inside Axel's punch (50) *and* kick (60). The usual
-        # JUMP_ATTACK band starts past punch outer, so without the
-        # Antonio-specific offer this hop never fires.
+        # dx=40 is inside Axel's punch (50) *and* kick (60), same lane.
+        # The usual JUMP_ATTACK band starts past punch outer, so without
+        # the Antonio min-dx exception this hop never fires -- and a
+        # grounded B here is his kick trigger.
         myself = make_myself(world_x=120, world_y=100, facing_left=False)
         antonio = _antonio(
             world_x=160,
@@ -2266,6 +2267,51 @@ class JumpKickAntonioTests(unittest.TestCase):
         )
         result = could_jump_attack({myself, antonio})
         self.assertIn(JumpAttack(actor_slot="P1", target_slot="obj09"), result)
+
+    def test_does_not_hop_at_an_antonio_behind(self) -> None:
+        myself = make_myself(world_x=160, world_y=100, facing_left=False)
+        antonio = _antonio(
+            world_x=120,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=40,
+            boss_dist_lane=0,
+        )
+        self.assertFalse(
+            any(isinstance(v, JumpAttack) for v in could_jump_attack({myself, antonio}))
+        )
+
+    def test_does_not_hop_at_an_antonio_off_the_lane(self) -> None:
+        # Jump kick is horizontal. An X-only opener hopped at him from any
+        # lane and kicked empty air -- the live "sempre aos saltos" report.
+        myself = make_myself(world_x=120, world_y=80, facing_left=False)
+        antonio = _antonio(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=40,
+            boss_dist_lane=20,
+        )
+        self.assertFalse(
+            any(isinstance(v, JumpAttack) for v in could_jump_attack({myself, antonio}))
+        )
+
+    def test_walks_onto_an_off_lane_antonio_instead_of_hopping(self) -> None:
+        myself = make_myself(world_x=120, world_y=80, facing_left=False)
+        antonio = _antonio(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=40,
+            boss_dist_lane=20,
+        )
+        self.assertIn(
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj09"),
+            could_walk_to_near_enemy({myself, antonio}),
+        )
 
     def test_does_not_hop_a_stunned_antonio_from_the_ground(self) -> None:
         # Hitstun is the grab, not another hop.
@@ -2283,7 +2329,7 @@ class JumpKickAntonioTests(unittest.TestCase):
         )
 
     def test_does_not_walk_through_jump_range_on_a_live_antonio(self) -> None:
-        # dx=55 is past punch outer and inside kick max: the hop owns it.
+        # dx=55 is past punch outer and inside kick max, same lane: the hop owns it.
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
         antonio = _antonio(
             world_x=155,

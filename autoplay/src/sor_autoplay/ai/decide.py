@@ -580,13 +580,18 @@ def could_walk_to_near_enemy(context: Context) -> Context:
             if (
                 isinstance(enemy, Antonio)
                 and not is_punishable(enemy.combat_phase)
-                and abs(enemy.world_x - actor.world_x)
-                <= reach.jump_attack_max_dx(actor.character_id)
+                and reach.connects(
+                    reach.in_jump_attack_band,
+                    actor,
+                    enemy,
+                    kinematics.connect_frames(JumpAttack, actor, enemy),
+                )
             ):
-                # Jump-kick owns the last stretch on a live Antonio.
-                # Walking through that band parks the actor in punch
-                # range and skips the hop. A punishable Antonio is a
-                # grab walk-in instead.
+                # Jump-kick owns the last stretch only when the kick would
+                # actually connect (same lane, in front, in range). An
+                # X-only skip hopped at him from any lane and kicked air.
+                # Off-lane, walking onto his lane is the approach. A
+                # punishable Antonio is a grab walk-in instead.
                 continue
             if (
                 standing_off
@@ -904,8 +909,10 @@ def could_jump_attack(context: Context) -> Context:
 
     - *grounded*: should this jump happen at all? Answered by
       ``_targets_in_reach`` with ``reach.in_jump_attack_band`` (in front,
-      past the punch's own outer edge, inside the kick's free-flight
-      range), the "never launch into a committed attack" gate, and
+      in lane, inside the kick's free-flight range; past punch outer
+      except for Antonio, whose opener includes punch range because a
+      grounded B is his kick trigger), the "never launch into a committed
+      attack" gate, and
       ``navigation.jump_landing_is_safe`` -- the pathfinder refuses a
       launch whose current-lane flight would skip a walk-around and land
       in a pit.
@@ -975,27 +982,21 @@ def could_jump_attack(context: Context) -> Context:
             # held direction $384E samples.
             continue
         target_slots = _targets_in_reach(context, actor, reach.in_jump_attack_band, JumpAttack)
-        # Jump-kicking Antonio is the opener, not a backup to a grounded
-        # punch: a standing B is the $16EAE zero-velocity kick trigger,
-        # and the usual JUMP_ATTACK band is just past punch outer (Axel:
-        # ~10px), too thin to ever fire. Offer a hop anywhere inside the
-        # kick's free-flight range. A punishable Antonio is a grab, not
-        # another hop -- unless already airborne, when the flight has to
-        # finish.
+        # Jump-kicking Antonio is the opener inside punch range too
+        # (in_jump_attack_band drops its min-dx for him), but only when
+        # the kick would connect: same lane, in front, within free-flight
+        # range. An earlier X-only add hopped at him from any lane. A
+        # punishable Antonio is a grab, not another hop -- unless already
+        # airborne, when the flight has to finish.
         kick_slots = {
             antonio.slot
             for antonio in find_all(context, Antonio)
             if not antonio.is_defeated and reach.antonio_will_kick(antonio, actor)
         }
-        for antonio in find_all(context, Antonio):
-            if antonio.is_defeated:
-                continue
-            if is_punishable(antonio.combat_phase) and not actor.is_airborne:
-                continue
-            if abs(antonio.world_x - actor.world_x) <= reach.jump_attack_max_dx(
-                actor.character_id
-            ):
-                target_slots.add(antonio.slot)
+        if not actor.is_airborne:
+            for antonio in find_all(context, Antonio):
+                if is_punishable(antonio.combat_phase):
+                    target_slots.discard(antonio.slot)
         if actor.is_airborne and not target_slots:
             nearest = min(
                 live,

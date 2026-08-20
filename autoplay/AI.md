@@ -212,11 +212,12 @@ a jump kick to put him in later-boss hitstun (primary `$03`/`$04`,
 decoded as `RECOVERY`), then a grab and a suplex. A grounded B is
 refused entirely: the first punch stood in the same window as a combo
 and lost the ranking contest to the hop (20+boss vs 18+boss), which is
-why the fight looked weak. Jump-kicking him is offered anywhere inside
-the kick's free-flight range -- the usual "past punch outer" band is
-only ~10px on Axel and never fires -- and owns the approach once he is
-that close; the hop also wins the ranking
-(`priority._EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER` 22).
+why the fight looked weak. Jump-kicking him is offered inside punch range as well as the usual
+"past punch outer" band (~10px on Axel, too thin to fire) -- but only
+when the kick would connect (same lane, in front, within free-flight
+range). An X-only opener hopped from any lane and kicked empty air.
+Off-lane, walking onto his lane is the approach. The hop also wins
+the ranking (`priority._EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER` 22).
 From inside punch range the hop is in place, so the actor lands where
 the grab can connect -- a directed hop from there lands on his far
 side, facing away, and the hold never starts.
