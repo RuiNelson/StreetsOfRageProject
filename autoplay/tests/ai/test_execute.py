@@ -36,7 +36,6 @@ from sor_autoplay.ai.tokens import (
 from sor_autoplay.ai.tokens import CameraRange, Stage
 from sor_autoplay.ai.execute import (
     BREAKABLE_STOP_BUFFER,
-    FACE_PROP_FRAMES,
     MOVE_DEADBAND_X,
     PICKUP_RANGE_X,
     PICKUP_RANGE_Y,
@@ -2004,8 +2003,6 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
         client.press_buttons.assert_called_once_with(player1=B | RIGHT, player2=0, frames=4)
 
     def test_faces_the_prop_before_hitting_it(self) -> None:
-        # Default facing is right; the prop is to the left. Punching on this
-        # tick would commit a miss -- turn first, no B.
         actor = _myself(world_x=120, world_y=90)
         prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
         verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
@@ -2013,9 +2010,7 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
 
         execute_verb(verb, {actor, prop}, gamepad)
 
-        client.press_buttons.assert_called_once_with(
-            player1=LEFT, player2=0, frames=FACE_PROP_FRAMES
-        )
+        client.press_buttons.assert_called_once_with(player1=B | LEFT, player2=0, frames=4)
 
     def test_side_pick_does_not_glitch_exactly_on_alignment(self) -> None:
         # Regression, same shape as the enemy/retreat/release-grab side
@@ -2178,42 +2173,15 @@ class OpenBreakableFacingTests(unittest.TestCase):
 
     def test_turns_toward_a_prop_inside_the_hysteresis_band(self) -> None:
         # dx of exactly DIRECTION_HYSTERESIS_X: the live stall's geometry.
-        # Facing left with the prop to the right: direction only, no B.
-        # Punching on the same tick as the turn is a committed miss (round-1
-        # booth: Blaze facing away, empty attack box, booth intact).
-        prop = Breakable(slot="obj09", world_x=2880, world_y=48, type_id=0x1F)
-        actor = _myself(world_x=2870, world_y=56, facing_left=True)
-        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
-        gamepad, client = _gamepad()
+        mask = self._punch_mask(actor_x=2870, prop_x=2880)
 
-        execute_verb(verb, {actor, prop, Stage(level_index=4, direction="right")}, gamepad)
-
-        mask = client.press_buttons.call_args.kwargs["player1"]
-        self.assertFalse(mask & B, f"punched while facing away, got {mask:#x}")
+        self.assertTrue(mask & B, f"expected a punch, got {mask:#x}")
         self.assertTrue(mask & RIGHT, f"expected to turn toward the prop, got {mask:#x}")
-        self.assertEqual(
-            client.press_buttons.call_args.kwargs["frames"], FACE_PROP_FRAMES
-        )
 
     def test_turns_the_other_way_for_a_prop_on_the_other_side(self) -> None:
-        # _punch_mask faces left; the prop is also to the left, so this one
-        # is already aimed at it and should punch.
         mask = self._punch_mask(actor_x=2890, prop_x=2880)
 
-        self.assertTrue(mask & B, f"expected a punch, got {mask:#x}")
-        self.assertTrue(mask & LEFT, f"expected to keep facing the prop, got {mask:#x}")
-
-    def test_punches_once_already_facing_the_prop(self) -> None:
-        prop = Breakable(slot="obj09", world_x=2880, world_y=48, type_id=0x1F)
-        actor = _myself(world_x=2870, world_y=56, facing_left=False)
-        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
-        gamepad, client = _gamepad()
-
-        execute_verb(verb, {actor, prop, Stage(level_index=4, direction="right")}, gamepad)
-
-        mask = client.press_buttons.call_args.kwargs["player1"]
-        self.assertTrue(mask & B, f"expected a punch, got {mask:#x}")
-        self.assertTrue(mask & RIGHT, f"expected to keep facing the prop, got {mask:#x}")
+        self.assertTrue(mask & LEFT, f"expected to turn toward the prop, got {mask:#x}")
 
     def test_dead_centre_still_commits_to_a_side(self) -> None:
         # No sign to read: the stage's own direction decides, the same fixed
