@@ -12,6 +12,7 @@ from sor_autoplay.ai.tokens import (
     OpenBreakable,
     Punch,
     RearAttack,
+    Supplex,
     TechRecover,
     ThrowKnife,
     ThrowPepper,
@@ -282,6 +283,37 @@ class CouldPunchTests(unittest.TestCase):
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(could_punch(context), set())
+
+    def test_crossover_is_a_lock_and_offers_nothing(self) -> None:
+        # C from a front hold runs ~28 ticks in $76 before back hold $66
+        # arrives. It ignores fresh edges, so the hold family offers nothing --
+        # but the actor is still holding, which is what keeps every other
+        # could_* off the tick (test_walk_stands_down_during_the_crossover).
+        myself = make_myself(
+            world_x=100, world_y=100, action_state=0x76, held_enemy_slot="obj00"
+        )
+        boss = make_enemy(slot="obj00", world_x=140, world_y=100)
+        context: set[Token] = {myself, boss}
+
+        self.assertEqual(could_hold_actions(context), set())
+
+    def test_walk_stands_down_during_the_crossover(self) -> None:
+        # Measured live: mid-flip the AI issued WalkToNearEnemy and the $322A
+        # rear chord, between its own FlipHold and the Supplex that followed.
+        myself = make_myself(
+            world_x=100, world_y=100, action_state=0x76, held_enemy_slot="obj00"
+        )
+        boss = make_enemy(slot="obj00", world_x=140, world_y=100)
+        context: set[Token] = {myself, boss, CameraRange(left=0, right=400, top=0, bottom=200)}
+
+        self.assertEqual(could_walk_to_near_enemy(context), set())
+
+    def test_partner_vault_is_not_a_hold(self) -> None:
+        # Same $76 family, nothing in +$4C: the co-op vault holds no body, so
+        # the hold family must not claim it.
+        myself = make_myself(world_x=100, world_y=100, action_state=0x76)
+
+        self.assertFalse(myself.is_holding_enemy)
 
     def test_does_not_fire_when_animation_in_progress(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
@@ -1310,19 +1342,66 @@ class CouldHoldActionsTests(unittest.TestCase):
         self.assertIn(AttackHeldEnemy(actor_slot="P1", target_slot="near"), result)
         self.assertIn(FlipHold(actor_slot="P1", target_slot="near"), result)
 
-    def test_does_not_fire_when_holding_a_weapon(self) -> None:
-        myself = make_myself(held_weapon_type=0x08, action_state=0x60)
+    def test_does_not_fire_when_only_carrying_a_weapon(self) -> None:
+        # Carrying a pipe is not a grab -- but the action byte is what says
+        # so, not +$60: outside the $60-$6F hold family there is no hold.
+        myself = make_myself(held_weapon_type=0x08, action_state=0x02)
         enemy = make_enemy(world_x=110, world_y=100)
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(could_hold_actions(context), set())
 
     def test_does_not_fire_when_not_holding_anything(self) -> None:
-        myself = make_myself(held_weapon_type=0, action_state=0x60)
+        myself = make_myself(held_weapon_type=0, action_state=0x02)
         enemy = make_enemy(world_x=110, world_y=100)
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(could_hold_actions(context), set())
+
+    def test_front_hold_fires_with_a_weapon_still_carried(self) -> None:
+        # Measured live on Antonio: front hold $60 with +$60 reading $0B, the
+        # pipe the actor was still carrying. The old +$60-only test called
+        # that "not holding", and the AI stood in the hold until the stage
+        # timer killed it.
+        myself = make_myself(
+            world_x=100, world_y=100, held_weapon_type=0x0B, action_state=0x60
+        )
+        boss = make_enemy(slot="obj00", world_x=140, world_y=100)
+        context: set[Token] = {myself, boss}
+
+        result = could_hold_actions(context)
+
+        self.assertIn(AttackHeldEnemy(actor_slot="P1", target_slot="obj00"), result)
+        self.assertIn(FlipHold(actor_slot="P1", target_slot="obj00"), result)
+
+    def test_front_hold_fires_with_nothing_in_plus_60(self) -> None:
+        myself = make_myself(
+            world_x=100, world_y=100, held_weapon_type=0, action_state=0x60
+        )
+        boss = make_enemy(slot="obj00", world_x=140, world_y=100)
+        context: set[Token] = {myself, boss}
+
+        result = could_hold_actions(context)
+
+        self.assertIn(AttackHeldEnemy(actor_slot="P1", target_slot="obj00"), result)
+
+    def test_back_hold_suplexes_the_body_plus_4c_points_at(self) -> None:
+        # Two candidates equally close; the ROM's own hold link decides.
+        myself = make_myself(
+            world_x=100,
+            world_y=100,
+            held_weapon_type=0,
+            action_state=0x66,
+            held_enemy_slot="obj00",
+        )
+        held = make_enemy(slot="obj00", world_x=132, world_y=100)
+        bystander = make_enemy(slot="obj01", world_x=68, world_y=100)
+        context: set[Token] = {myself, held, bystander}
+
+        self.assertEqual(
+            could_hold_actions(context),
+            {Supplex(actor_slot="P1", target_slot="obj00")},
+        )
 
     def test_does_not_fire_when_animation_in_progress(self) -> None:
         myself = make_myself(held_weapon_type=0x01, action_state=0x60)

@@ -683,6 +683,30 @@ other reach question in this document comes from. `could_grab_enemy`
 requires both, because a grab that is possible is not automatically a grab
 that is worth taking, and neither is the reverse.
 
+`grab_reasons` returns the empty set outright while the actor is already
+holding something. That is not a policy choice: `$AAA0` only issues its
+grab code when the actor's own `+$4C` is clear, so walking into anything
+from a live hold cannot become a grab. The hold family owns those ticks.
+
+### Knowing that a hold exists at all
+
+The three questions "am I holding", "what am I holding", and "is that thing
+still in my hands" are answered from the ROM's own hold link, player `+$4C`
+(`world_map.MapEntity.contact_slot` → `PlayableCharacter.held_enemy_slot`),
+plus the `$60-$6F` action family and the `$76`/`$80` C crossover
+(`PlayableCharacter.is_holding_enemy`), and `reach.held_enemy` for the
+identity. **Not** `+$60`: that is the weapon/pickup link `$3136` writes, and
+a hold on a later boss leaves it reading `$00` or the weapon the actor is
+still carrying.
+
+The distinction is not academic. Against a held later boss the enemy side
+announces nothing either — a held Antonio sits in primary `$04`, the same
+byte as his ordinary hit reaction — so a `CombatPhase.GRABBED` gate scores
+every hold move at 0 and hands the tick back to the walk-in that already
+succeeded. Measured live: the AI took a front hold on Antonio and then
+issued no verb for 70 seconds, until the round clock killed it. See
+`autoplay/CLAUDE.md`'s **Holding a boss**.
+
 This list is meant to grow. Any further situation where a hold beats a
 strike belongs here as another `GrabReason` member with its own tier and
 its own branch in `grab_reasons`, not as a bespoke new token.

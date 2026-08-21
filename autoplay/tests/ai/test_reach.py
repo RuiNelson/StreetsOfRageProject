@@ -874,6 +874,71 @@ class SoutherDashArrivesSoonTests(unittest.TestCase):
         self.assertFalse(reach.souther_dash_arrives_soon(myself, souther))
 
 
+class HeldEnemyTests(unittest.TestCase):
+    """``reach.held_enemy`` -- which body is actually in the actor's hands."""
+
+    def test_the_rom_hold_link_wins_over_a_nearer_bystander(self) -> None:
+        myself = _myself(
+            world_x=100, world_y=100, action_state=0x60, held_enemy_slot="obj02"
+        )
+        near = _garcia(slot="obj01", world_x=112, world_y=100, attack_ranges=())
+        held = _garcia(slot="obj02", world_x=140, world_y=100, attack_ranges=())
+
+        self.assertIs(reach.held_enemy(myself, [near, held]), held)
+
+    def test_falls_back_to_the_grabbed_phase(self) -> None:
+        myself = _myself(world_x=100, world_y=100, action_state=0x60)
+        near = _garcia(slot="obj01", world_x=112, world_y=100, attack_ranges=())
+        held = _garcia(
+            slot="obj02",
+            world_x=140,
+            world_y=100,
+            attack_ranges=(),
+            combat_phase=CombatPhase.GRABBED,
+        )
+
+        self.assertIs(reach.held_enemy(myself, [near, held]), held)
+
+    def test_falls_back_to_contact_for_a_boss_that_announces_nothing(self) -> None:
+        # A held Antonio reads primary $04 -- RECOVERY, the same byte as his
+        # ordinary hit reaction -- and the player's +$60 keeps the weapon it
+        # was already carrying. Contact is all that is left.
+        myself = _myself(
+            world_x=100, world_y=100, action_state=0x60, held_weapon_type=0x0B
+        )
+        antonio = _antonio(
+            slot="obj00",
+            world_x=140,
+            world_y=100,
+            combat_phase=CombatPhase.RECOVERY,
+            primary_state=0x04,
+        )
+        far = _garcia(slot="obj01", world_x=400, world_y=100, attack_ranges=())
+
+        self.assertIs(reach.held_enemy(myself, [antonio, far]), antonio)
+
+    def test_nothing_while_not_holding(self) -> None:
+        myself = _myself(world_x=100, world_y=100, action_state=0x02)
+        near = _garcia(slot="obj01", world_x=112, world_y=100, attack_ranges=())
+
+        self.assertIsNone(reach.held_enemy(myself, [near]))
+
+    def test_no_grab_reason_survives_while_already_holding(self) -> None:
+        # $AAA0 refuses a fresh grab while the actor's own +$4C is set.
+        myself = _myself(
+            world_x=100, world_y=100, action_state=0x60, held_enemy_slot="obj00"
+        )
+        antonio = _antonio(
+            slot="obj00",
+            world_x=140,
+            world_y=100,
+            combat_phase=CombatPhase.RECOVERY,
+            primary_state=0x04,
+        )
+
+        self.assertEqual(reach.grab_reasons(set(), myself, antonio, [antonio]), frozenset())
+
+
 class GrabReasonsTests(unittest.TestCase):
     """``reach.grab_reasons`` -- why a hold beats a strike, right now.
 

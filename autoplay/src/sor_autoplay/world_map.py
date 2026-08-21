@@ -251,6 +251,25 @@ class MapEntity:
         return 0x10 <= base <= 0x17 or 0x3C <= base <= 0x42
 
     @property
+    def contact_slot(self) -> str | None:
+        """Slot name ``+$4C`` points at, or ``None``.
+
+        ``$AAA0``'s grab code is only issued when the actor's own ``+$4C`` is
+        clear ("not already holding anything", see ``ai/reach.py``'s
+        ``GRAB_RANGE_Y`` comment), and ``$3266`` fills it with the body it
+        just linked. That makes this the ROM's own answer to *which* object
+        is in this actor's hands -- confirmed live on a round-1 Antonio hold,
+        where the player's ``+$4C`` read ``$B900`` (object-table slot 0,
+        Antonio) while ``+$60`` still read ``$0B``, the pipe the actor was
+        carrying at the same time.
+
+        Meaningful only while the action byte is in a grab/hold family;
+        callers should gate on that, exactly as ``is_grabbing`` does.
+        """
+
+        return _slot_name_from_object_ptr(self.contact_ptr)
+
+    @property
     def is_grabbing(self) -> bool:
         # +$5E/+$60 also represent a carried weapon. A weapon hold must not be
         # mistaken for an enemy grapple by policy branches using this helper.

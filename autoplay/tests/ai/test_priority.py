@@ -351,6 +351,95 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         self.assertEqual(len(verbs), 1)
         self.assertIsInstance(verbs[0], Punch)
 
+    def test_suplex_outranks_the_walk_in_on_a_held_boss(self) -> None:
+        # The round-1 stall: a held Antonio reads primary $04 (RECOVERY), not
+        # GRABBED, so every hold move used to score 0 and GrabEnemy's punish
+        # tier kept winning a walk-in that had already succeeded. The ROM's
+        # own +$4C hold link says otherwise.
+        myself = _myself(action_state=0x66, held_enemy_slot="obj00", world_x=100)
+        antonio = Antonio(
+            slot="obj00",
+            type_id=0x56,
+            world_x=140,
+            world_y=64,
+            health=24,
+            combat_phase=CombatPhase.RECOVERY,
+            targets_player=1,
+            facing_left=True,
+            primary_state=0x04,
+        )
+        context = {
+            myself,
+            antonio,
+            Supplex(actor_slot="P1", target_slot="obj00"),
+            GrabEnemy(actor_slot="P1", target_slot="obj00"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], Supplex)
+
+    def test_held_boss_knee_scores_while_the_hold_is_fresh(self) -> None:
+        myself = _myself(
+            action_state=0x60, held_enemy_slot="obj00", world_x=100, hold_ticks=1
+        )
+        antonio = Antonio(
+            slot="obj00",
+            type_id=0x56,
+            world_x=140,
+            world_y=64,
+            health=24,
+            combat_phase=CombatPhase.RECOVERY,
+            targets_player=1,
+            facing_left=True,
+            primary_state=0x04,
+        )
+        context = {
+            myself,
+            antonio,
+            AttackHeldEnemy(actor_slot="P1", target_slot="obj00"),
+            FlipHold(actor_slot="P1", target_slot="obj00"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], AttackHeldEnemy)
+
+    def test_held_boss_flips_once_the_knees_are_spent(self) -> None:
+        myself = _myself(
+            action_state=0x60,
+            held_enemy_slot="obj00",
+            world_x=100,
+            hold_ticks=HOLD_KNEE_TICKS + 1,
+        )
+        antonio = Antonio(
+            slot="obj00",
+            type_id=0x56,
+            world_x=140,
+            world_y=64,
+            health=24,
+            combat_phase=CombatPhase.RECOVERY,
+            targets_player=1,
+            facing_left=True,
+            primary_state=0x04,
+        )
+        context = {
+            myself,
+            antonio,
+            AttackHeldEnemy(actor_slot="P1", target_slot="obj00"),
+            FlipHold(actor_slot="P1", target_slot="obj00"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], FlipHold)
+
     def test_knee_outranks_flip_while_the_hold_is_fresh(self) -> None:
         # Live-reported: the AI grabbed and flipped straight to Supplex,
         # landing zero knees. A fresh hold (hold_ticks under HOLD_KNEE_TICKS)
@@ -737,6 +826,77 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         verbs = find_all(result, Verb)
         self.assertEqual(len(verbs), 1)
         self.assertEqual(verbs[0].target_slot, "obj01")
+
+    def test_item_detours_stand_down_inside_antonios_kick_window(self) -> None:
+        # Measured over three round-1 fights: four of the eight hits Antonio
+        # landed came while WalkToPickup or WalkToWeapon held the tick.
+        actor = _myself(world_x=100, world_y=64, health_percent=100.0)
+        antonio = Antonio(
+            slot="obj00",
+            type_id=0x56,
+            world_x=180,
+            world_y=64,
+            health=24,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+            primary_state=0x01,
+            boss_dist_x=80,
+            boss_dist_lane=0,
+        )
+        knife = Weapon(slot="obj01", world_x=0, world_y=64, weapon_type=0x08)
+        score_pickup = ScorePickup(
+            slot="obj02", world_x=0, world_y=64, pickup_type=0x3F, points=3000
+        )
+        context = {
+            actor,
+            antonio,
+            knife,
+            score_pickup,
+            _camera(),
+            WalkToWeapon(actor_slot="P1", target_slot="obj01"),
+            WalkToPickup(actor_slot="P1", target_slot="obj02"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj00"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
+
+    def test_health_still_outranks_the_kick_window(self) -> None:
+        hurt = _myself(world_x=100, world_y=64, health_percent=30.0)
+        antonio = Antonio(
+            slot="obj00",
+            type_id=0x56,
+            world_x=180,
+            world_y=64,
+            health=24,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+            primary_state=0x01,
+            boss_dist_x=80,
+            boss_dist_lane=0,
+        )
+        apple = HealthPickup(
+            slot="obj01", world_x=0, world_y=64, pickup_type=0x4B, health_delta=20
+        )
+        context = {
+            hurt,
+            antonio,
+            apple,
+            _camera(),
+            WalkToPickup(actor_slot="P1", target_slot="obj01"),
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj00"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToPickup)
 
     def test_walk_to_weapon_scores_when_rank_beats_held(self) -> None:
         # The camera matters: reach.weapon_upgrade_rank only judges a weapon

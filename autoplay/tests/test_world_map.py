@@ -35,6 +35,7 @@ from sor_autoplay.world_map import (
     CAMERA_X_SPAN,
     LANE_Y_MAX_DEFAULT,
     LANE_Y_MAX_ROUND7,
+    MapEntity,
     OBJECT_TABLE_BYTES,
     SCREEN_WIDTH,
     lane_y_max_for_level,
@@ -135,6 +136,40 @@ class ProjectionTests(unittest.TestCase):
         self.assertEqual(LANE_Y_MAX_ROUND7, 0xA0)
         self.assertEqual(lane_y_max_for_level(0), 0x70)
         self.assertEqual(lane_y_max_for_level(6), 0xA0)
+
+
+class ContactSlotTests(unittest.TestCase):
+    """``MapEntity.contact_slot`` -- the ROM's own hold link at ``+$4C``."""
+
+    def _player(self, **overrides) -> MapEntity:
+        fields = dict(
+            kind="player",
+            family="player",
+            symbol="P",
+            color="#fff",
+            label="P1",
+            type_id=0x01,
+            world_x=100,
+            world_y=64,
+            world_z=0xA0,
+            map_x=0.0,
+            map_y=0.0,
+            health=80,
+            slot="P1",
+        )
+        fields.update(overrides)
+        return MapEntity(**fields)
+
+    def test_resolves_an_object_table_slot(self) -> None:
+        # $B900 is object-table slot 0 -- where a round-1 Antonio sits, and
+        # what a live front hold on him wrote into the player's +$4C.
+        self.assertEqual(self._player(contact_ptr=0xB900).contact_slot, "obj00")
+
+    def test_resolves_the_other_player(self) -> None:
+        self.assertEqual(self._player(contact_ptr=0xB880).contact_slot, "P2")
+
+    def test_null_pointer_is_nothing(self) -> None:
+        self.assertIsNone(self._player().contact_slot)
 
 
 class WorldMapParseTests(unittest.TestCase):

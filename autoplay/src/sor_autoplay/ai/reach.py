@@ -21,6 +21,8 @@ not duplicated for the predictive case.
 
 from __future__ import annotations
 
+import math
+
 from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
 from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
 from .kinematics import enemy_projected, enemy_projected_without_crossing
@@ -326,6 +328,69 @@ def live_enemies(context: Context) -> list[Enemy]:
         and not e.is_defeated
         and in_playable_lane(e.world_y, context)
     ]
+
+
+# How far apart the two bodies of a live hold sit. Not a band the AI aims
+# with -- the hold already happened -- only the fallback identity test for
+# "which of these enemies is the one in my hands", used when the ROM's own
+# +$4C link (PlayableCharacter.held_enemy_slot) did not resolve. Measured
+# live on Antonio: 40px on X with the actor in front hold $60, 32px the
+# other way after the C crossover into back hold $66, both at lane 0.
+HELD_CONTACT_X = 48
+HELD_CONTACT_Y = 12
+
+
+def in_held_contact(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """Whether ``enemy`` is close enough to be the body ``actor`` is holding.
+
+    Deliberately not directional, unlike ``grab_would_connect``: a crossover
+    (front hold ``$60`` --C--> back hold ``$66``) teleports the actor to the
+    enemy's other side, so the held body is on whichever side the animation
+    left it.
+    """
+
+    return (
+        abs(enemy.world_x - actor.world_x) <= HELD_CONTACT_X
+        and abs(enemy.world_y - actor.world_y) <= HELD_CONTACT_Y
+    )
+
+
+def held_enemy(actor: PlayableCharacter, enemies: list[Enemy]) -> Enemy | None:
+    """The enemy in ``actor``'s hands right now, or ``None``.
+
+    Three sources, most authoritative first:
+
+    1. ``actor.held_enemy_slot`` -- the ROM's own hold link at ``+$4C``
+       (``$3266`` writes it, ``$AAA0`` refuses a fresh grab while it is set).
+    2. an enemy whose own phase already decodes ``GRABBED`` -- true for
+       ordinary enemies (``$0500``) and for a later boss only in its
+       ``$06``-``$09`` throw-cleanup states.
+    3. the nearest enemy still in ``in_held_contact``.
+
+    (2) and (3) exist because a *held later boss* announces nothing: measured
+    live, a held Antonio sits in primary ``$04``, which is also his ordinary
+    hit reaction, and the player's ``+$60`` keeps reading either ``$00`` or
+    the weapon the actor is still carrying. Without this the whole hold
+    family scored ``_EMERGENCY_DEFAULT`` and the AI stood in a live front
+    hold on him for an entire round-1 fight.
+    """
+
+    if not actor.is_holding_enemy:
+        return None
+    if actor.held_enemy_slot is not None:
+        for enemy in enemies:
+            if enemy.slot == actor.held_enemy_slot:
+                return enemy
+    def _distance(enemy: Enemy) -> float:
+        return math.hypot(enemy.world_x - actor.world_x, enemy.world_y - actor.world_y)
+
+    grabbed = [e for e in enemies if e.combat_phase is CombatPhase.GRABBED]
+    if grabbed:
+        return min(grabbed, key=_distance)
+    contact = [e for e in enemies if in_held_contact(actor, e)]
+    if contact:
+        return min(contact, key=_distance)
+    return None
 
 
 def on_screen_enemies(context: Context) -> list[Enemy]:
@@ -1191,6 +1256,13 @@ def grab_reasons(
     ``target`` was drawn from) -- ``DODGE_CHARGE`` and ``CLEAR_REAR`` both
     judge ``target`` against the rest of that group.
     """
+
+    if actor.is_holding_enemy:
+        # The ROM refuses a fresh grab outright while the actor already has a
+        # body: $AAA0 only issues its grab code when the actor's own +$4C is
+        # clear. Walking into anything from here is never the answer -- the
+        # hold family owns the tick (decide.could_hold_actions).
+        return frozenset()
 
     if target.combat_phase not in GRABBABLE_PHASES:
         return frozenset()

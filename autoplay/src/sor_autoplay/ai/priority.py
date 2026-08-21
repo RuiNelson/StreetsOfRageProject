@@ -651,6 +651,11 @@ def _emergency_walk_to_weapon(verb: WalkToWeapon, context: Context) -> int:
     # 14. Every rank clears WalkToNearEnemy's floor (8) outright, and stays
     # below the weakest real attack tier (_EMERGENCY_JUMP_ATTACK_DEFAULT, 18)
     # so it never crosses into a different verb type's tier.
+    #
+    # ...unless a boss kick already covers the actor, in which case the whole
+    # detour is refused -- see _boss_attack_gate_is_live.
+    if _boss_attack_gate_is_live(context, verb.actor_slot):
+        return _EMERGENCY_DEFAULT
     return _EMERGENCY_WALK_TO_WEAPON_BASE + rank
 
 
@@ -748,9 +753,43 @@ def _emergency_throw_pepper(verb: ThrowPepper, context: Context) -> int:
     return _emergency_thrown_weapon(verb, context, _EMERGENCY_THROW_PEPPER)
 
 
+def _boss_attack_gate_is_live(context: Context, actor_slot: str | None) -> bool:
+    """True while a live Antonio's own kick gate already covers the actor.
+
+    An item detour is a walk that ignores the boss, and ``$16EAE`` punishes
+    exactly that: the X window it kicks from is picked by the *target's* own
+    velocity (up to 120px while closing, 104px standing still) with a 16px
+    lane window, and the hit is 20 damage -- a quarter of the health bar, for
+    an apple. Measured over three round-1 fights, four of the eight hits
+    Antonio landed came while the winning verb was ``WalkToPickup`` or
+    ``WalkToWeapon``; a pipe is worth even less than the apple, since
+    ``decide._could_melee_strike`` refuses every grounded B on him, so an
+    armed actor has no ground attack against him at all.
+
+    Antonio only, deliberately: Souther's fight has its own measured balance
+    (see ``autoplay/CLAUDE.md``) and giving him the same gate is untested.
+    """
+
+    actor = _find_actor(context, actor_slot)
+    if actor is None:
+        return False
+    return any(
+        not antonio.is_defeated and reach.antonio_will_kick(antonio, actor)
+        for antonio in find_all(context, Antonio)
+    )
+
+
 def _emergency_walk_to_pickup(verb: WalkToPickup, context: Context) -> int:
     pickup = find(context, Pickup, slot=verb.target_slot)
     actor = _find_actor(context, verb.actor_slot)
+    if (
+        not isinstance(pickup, HealthPickup)
+        and _boss_attack_gate_is_live(context, verb.actor_slot)
+    ):
+        # Health is the one thing worth a kick -- and only while it is worth
+        # a kick, which _emergency_walk_to_pickup's own critical tier below
+        # already decides.
+        return _EMERGENCY_DEFAULT
     if pickup is None:
         # Target gone this tick -- same answer every other _emergency_* gives
         # for a missing target. Returning the ScorePickup tier instead kept a
@@ -784,8 +823,7 @@ def _emergency_attack_held_enemy(verb: AttackHeldEnemy, context: Context) -> int
     finishes it, the same as it always did before this existed.
     """
 
-    target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
-    if target is None or target.combat_phase is not CombatPhase.GRABBED:
+    if not _target_is_in_hand(verb, context):
         return _EMERGENCY_DEFAULT
     actor = _find_actor(context, verb.actor_slot)
     if actor is not None and actor.hold_ticks > HOLD_KNEE_TICKS:
@@ -793,15 +831,38 @@ def _emergency_attack_held_enemy(verb: AttackHeldEnemy, context: Context) -> int
     return _EMERGENCY_HOLD_KNEE_FRESH
 
 
+def _target_is_in_hand(verb: Verb, context: Context) -> bool:
+    """Whether this hold move's target really is the body in the actor's hands.
+
+    ``CombatPhase.GRABBED`` answers it for an ordinary enemy (``$0500``) and
+    for a later boss only during the ``$06``-``$09`` throw cleanup. It is
+    **not** enough on its own: measured live, an Antonio held in a front hold
+    sits in primary ``$04`` -- decoded ``RECOVERY``, the same byte as his
+    ordinary hit reaction -- so every hold move scored ``_EMERGENCY_DEFAULT``,
+    lost the tick to the walk-in that had already succeeded, and the AI stood
+    there holding him until the stage timer ran out. ``reach.held_enemy``
+    covers that case from the ROM's own ``+$4C`` hold link.
+    """
+
+    target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
+    if target is None:
+        return False
+    if target.combat_phase is CombatPhase.GRABBED:
+        return True
+    actor = _find_actor(context, getattr(verb, "actor_slot", None))
+    if actor is None:
+        return False
+    in_hand = reach.held_enemy(actor, reach.live_enemies(context))
+    return in_hand is not None and in_hand.slot == target.slot
+
+
 def _held_enemy_emergency(weight: int) -> Callable[[Verb, Context], int]:
     """Build an ``_emergency_*`` for a hold move: ``weight`` only while its
-    target ``Enemy`` is actually held (``CombatPhase.GRABBED``)."""
+    target ``Enemy`` really is the body in the actor's hands
+    (``_target_is_in_hand``)."""
 
     def _emergency(verb: Verb, context: Context) -> int:
-        target = find(context, Enemy, slot=getattr(verb, "target_slot", None))
-        if target is not None and target.combat_phase is CombatPhase.GRABBED:
-            return weight
-        return _EMERGENCY_DEFAULT
+        return weight if _target_is_in_hand(verb, context) else _EMERGENCY_DEFAULT
 
     return _emergency
 

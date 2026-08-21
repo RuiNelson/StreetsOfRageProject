@@ -16,6 +16,7 @@ import math
 from typing import Callable
 
 from .. import prop_solids
+from ..memory_map import ACTION_HOLD_CROSSOVER
 from ..phases import CombatPhase, is_dangerous, is_punishable
 from . import kinematics, navigation as nav, reach
 from .tokens import (
@@ -124,8 +125,17 @@ BREAKABLE_AHEAD_SLACK = 8
 
 
 def _is_holding_enemy(actor: PlayableCharacter) -> bool:
-    held = actor.held_weapon_type
-    return held != 0 and not is_weapon_type(held)
+    """Whether ``actor`` has a body in its hands -- the gate every other
+    ``could_*`` stands down behind, so the hold family owns the tick.
+
+    Thin alias for ``PlayableCharacter.is_holding_enemy``, which reads the
+    ROM's own hold link (``+$4C``) and the action family rather than
+    ``+$60`` alone. ``+$60`` is the *weapon* link and says nothing about a
+    held later boss -- the bug that let the AI stand in a live front hold on
+    Antonio for a whole round-1 fight without ever pressing B.
+    """
+
+    return actor.is_holding_enemy
 
 
 def _actors(context: Context) -> list[PlayableCharacter]:
@@ -399,7 +409,12 @@ def could_hold_actions(context: Context) -> Context:
             continue
         base = actor.action_base
         # Grab-acquire / mid-throw animations: don't spam new edges.
+        # ...including the C crossover ($76/$80), which runs ~28 ticks and
+        # ignores every fresh edge: acting through it is what put a
+        # WalkToNearEnemy and a rear chord between a flip and its suplex.
         if base in (0x28, 0x2A, 0x2C, 0x2E, 0x62, 0x64, 0x68, 0x6A, 0x6C, 0x6E):
+            continue
+        if base in ACTION_HOLD_CROSSOVER:
             continue
 
         # Target the enemy actually in the grab, not merely the closest one:
@@ -412,8 +427,16 @@ def could_hold_actions(context: Context) -> Context:
         def _distance(enemy: Enemy) -> float:
             return math.hypot(enemy.world_x - actor.world_x, enemy.world_y - actor.world_y)
 
-        grabbed = [e for e in enemies if e.combat_phase is CombatPhase.GRABBED]
-        nearest = min(grabbed or enemies, key=_distance, default=None)
+        # reach.held_enemy answers this for a later boss too, which the
+        # GRABBED phase alone cannot: a held Antonio reads primary $04, the
+        # same byte as his ordinary hit reaction. Nearest-of-everything stays
+        # as the last resort so a hold whose partner cannot be identified at
+        # all still knees rather than idling.
+        nearest = reach.held_enemy(actor, enemies) or min(
+            [e for e in enemies if e.combat_phase is CombatPhase.GRABBED] or enemies,
+            key=_distance,
+            default=None,
+        )
         target_slot = nearest.slot if nearest is not None else actor.slot
         rear = reach.rear_threats(actor, enemies)
 

@@ -232,6 +232,29 @@ ACTION_THROW_AIR_TECHABLE = frozenset({0x5C, 0x72, 0x88})
 # Grab/throw reaction family used while holding an enemy (live: Axel $60/$6A/$6C).
 ACTION_HOLD_REACT = 0x60
 ACTION_HOLD_REACT_MAX = 0x6F
+# Every base in that family, facing bit already cleared. controls-and-input.md
+# "Grab, hold, throw": $60 (front) and $66 (back) are the *stable* holds that
+# accept a new B/C edge; $62/$64/$68/$6A/$6C/$6E are the animation locks that
+# ignore fresh edges. Both halves still mean "this actor has a body in its
+# hands", which is the question ai/decide.py asks -- and the **only** signal
+# that answers it for a later boss: +$60 (OBJ_HELD_TYPE) is written by the
+# weapon/pickup path, and a held Antonio leaves it reading 0 (or the weapon
+# still being carried). Measured live: the AI sat in $60/$61 holding Antonio
+# for a whole round-1 fight, dealing no damage, until the stage timer killed
+# it.
+ACTION_HOLD_FRONT = 0x60
+ACTION_HOLD_BACK = 0x66
+ACTION_HOLD_BASES = frozenset(range(ACTION_HOLD_REACT, ACTION_HOLD_REACT_MAX + 1, 2))
+# The crossover that C fires from a front hold: "$76 / $80 family -> back hold
+# $66" (controls-and-input.md). It sits *outside* $60-$6F, and the actor is
+# still holding the body throughout -- measured live on Antonio, the crossover
+# ran 28 ticks in $76 during which the AI, believing itself free, issued
+# WalkToNearEnemy and even the $322A rear chord in the middle of its own
+# flip->suplex. The same family is also the co-op partner vault, which is *not*
+# a hold, so callers must additionally require the ROM hold link +$4C to be
+# set (PlayableCharacter.is_holding_enemy does).
+ACTION_HOLD_CROSSOVER = frozenset({0x76, 0x80})
+ACTION_HOLDING = ACTION_HOLD_BASES | ACTION_HOLD_CROSSOVER
 
 # Fixed object bases (for decoding target pointers).
 ADDR_P1_OBJECT_LO = 0xB800  # low 16 of $FFB800

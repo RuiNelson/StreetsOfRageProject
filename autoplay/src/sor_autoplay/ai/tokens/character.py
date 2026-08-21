@@ -13,9 +13,10 @@ from abc import ABC
 from dataclasses import dataclass
 
 from sor_autoplay.hitboxes import Hitbox
-from sor_autoplay.memory_map import ACTION_THROW_AIR_TECHABLE
+from sor_autoplay.memory_map import ACTION_HOLD_BASES, ACTION_THROW_AIR_TECHABLE
 from sor_autoplay.phases import CombatPhase
 
+from .pickup_tokens import is_weapon_type
 from .tokens import Observed
 
 # Measured normal-punch attack boxes facing right (controls-and-input.md):
@@ -204,12 +205,52 @@ class PlayableCharacter(Character, ABC):
     # instant a hold is taken (measured live against Souther: the AI grabbed
     # and immediately flipped, milking zero knees).
     hold_ticks: int = 0
+    # Slot of the body this actor currently has in its hands, from the ROM's
+    # own hold link (+$4C, world_map.MapEntity.contact_slot) -- None when not
+    # holding, or when the pointer does not resolve to a live object. This is
+    # the *identity* half of is_holding_enemy below, which only answers
+    # whether a hold exists at all.
+    held_enemy_slot: str | None = None
 
     @property
     def action_base(self) -> int:
         """Action family with facing bit cleared."""
 
         return self.action_state & 0xFE
+
+    @property
+    def is_holding_enemy(self) -> bool:
+        """True while this actor has an enemy body in its hands.
+
+        Read from the **action byte**, not from ``held_weapon_type``
+        (``+$60``). ``+$60`` is the weapon/pickup link written by ``$3136
+        (find_close_interaction_target)``; the grab path only exchanges it
+        for *ordinary* enemies. Holding a later boss leaves it reading 0 --
+        or the weapon the actor is still carrying, since a hold and a
+        carried weapon coexist. Both were measured live on Antonio: the
+        actor sat in front hold ``$60``/``$61`` for an entire round-1 fight
+        with ``+$60`` reading ``$00`` in one run and ``$0B`` in another,
+        while B kneed him for 2 and C→B suplexed him for 5.
+
+        The action family is what ``controls-and-input.md`` documents as
+        authoritative and is character-independent: ``$60``/``$66`` are the
+        stable front/back holds and the rest of ``$60-$6F`` are their
+        animation locks (``ACTION_HOLD_BASES``).
+
+        ``held_weapon_type`` is still honoured as a second, independent
+        witness so an ordinary-enemy hold observed on a frame whose action
+        byte has already left the family is not lost.
+        """
+
+        if self.held_enemy_slot is not None:
+            # Includes the C crossover ($76/$80), which observe.py only fills
+            # in when +$4C actually points at a body -- that family is also
+            # the co-op partner vault, which holds nothing.
+            return True
+        if self.action_base in ACTION_HOLD_BASES:
+            return True
+        held = self.held_weapon_type
+        return held != 0 and not is_weapon_type(held)
 
     @property
     def counter_window_open(self) -> bool:

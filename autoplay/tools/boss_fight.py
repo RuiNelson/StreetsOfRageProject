@@ -91,6 +91,10 @@ def boss_is_dead(entity: MapEntity) -> bool:
     return entity.health is not None and entity.health >= 0x8000
 
 
+def verb_name_for(verb) -> str | None:
+    return type(verb).__name__ if verb else None
+
+
 def player_bucket(action_state: int, held_type: int) -> str:
     """Classify a tick with no winning verb: hitstun, knockdown, holding,
     attacking, or genuinely idle -- ``phases.player_phase``'s own decode,
@@ -138,6 +142,10 @@ def main() -> int:
         end_state = "timeout"
 
         deadline = time.monotonic() + args.seconds
+        # Heartbeat while walking the level: "boss_seen": false with nothing
+        # else in the summary is otherwise indistinguishable between "the
+        # level is simply long" and "the actor is stuck against a wall".
+        last_report = 0.0
         with open(args.out, "w", encoding="utf-8") as sink:
             while time.monotonic() < deadline:
                 started = time.monotonic()
@@ -193,6 +201,15 @@ def main() -> int:
                     print(f"boss up: hp={start_hp} lives={start_lives}", flush=True)
 
                 if not boss_seen:
+                    if started - last_report > 10.0:
+                        last_report = started
+                        print(
+                            f"walking: level={snap.level_index} "
+                            f"x={p1_entity.world_x if p1_entity else None} "
+                            f"hp={p1.health} lives={p1.lives} "
+                            f"verb={verb_name_for(verb)}",
+                            flush=True,
+                        )
                     time.sleep(max(0.0, poll_s - (time.monotonic() - started)))
                     continue
 
@@ -208,7 +225,7 @@ def main() -> int:
                 if p1.lives is not None:
                     last_lives = p1.lives
 
-                verb_name = type(verb).__name__ if verb else None
+                verb_name = verb_name_for(verb)
                 verb_counts[verb_name or "None"] += 1
                 if verb is None and p1_entity is not None:
                     no_verb_buckets[player_bucket(p1_entity.action_state, p1_entity.held_type)] += 1

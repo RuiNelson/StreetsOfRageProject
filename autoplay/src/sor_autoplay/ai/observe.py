@@ -14,6 +14,7 @@ tick memory that a single snapshot cannot supply.
 
 from __future__ import annotations
 
+from sor_autoplay.memory_map import ACTION_HOLDING
 from sor_autoplay.phases import CombatPhase, is_dangerous, player_phase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 from sor_autoplay.world_map import MapEntity
@@ -110,13 +111,15 @@ class HoldTracker:
         return ticks
 
 
-# Front hold ($60) and back hold ($66) -- see PlayableCharacter's own
-# docstring. Tracked identically even though only the front hold's knee-vs-
-# flip choice reads hold_ticks: a flip crosses front to back, and counting
-# through that transition (rather than resetting the moment $66 begins) is
-# what lets HOLD_KNEE_TICKS describe "since this enemy was first grabbed",
-# matching the docstring on PlayableCharacter.hold_ticks.
-HOLD_ACTION_BASES = frozenset({0x60, 0x66})
+# The whole hold family ($60-$6F) plus the C crossover ($76/$80), not only the
+# two stable holds $60/$66 --
+# see PlayableCharacter's own docstring. Counting the animation locks in
+# between ($62/$64/$68/$6A/$6C/$6E) is what lets HOLD_KNEE_TICKS describe
+# "since this enemy was first grabbed", matching the docstring on
+# PlayableCharacter.hold_ticks: a knee and a flip both pass through a lock
+# frame, and resetting the counter there would restart the knee budget after
+# every single knee.
+HOLD_ACTION_BASES = ACTION_HOLDING
 
 
 def _stage_direction(level_index: int) -> str:
@@ -142,6 +145,12 @@ def _build_playable_character(
     entity: MapEntity,
     hold_ticks: int = 0,
 ) -> Myself | Partner:
+    # The ROM's own hold link, but only while the action byte says a hold is
+    # what +$4C describes -- outside the grab/hold families it is a general
+    # contact pointer (world_map.MapEntity.contact_slot).
+    held_enemy_slot = (
+        entity.contact_slot if entity.action_base in ACTION_HOLDING else None
+    )
     return cls(
         slot=f"P{player_snapshot.index}",
         player_index=player_snapshot.index,
@@ -167,6 +176,7 @@ def _build_playable_character(
         hitbox=entity.hitbox,
         vel_x=entity.player_vel_x,
         hold_ticks=hold_ticks,
+        held_enemy_slot=held_enemy_slot,
     )
 
 
