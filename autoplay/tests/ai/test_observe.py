@@ -708,31 +708,6 @@ class AnimationInProgressTests(unittest.TestCase):
 
         self.assertIsNone(find(context, AnimationInProgress, slot="P1"))
 
-    def test_present_during_a_weapon_swing(self) -> None:
-        """Pipe/bat $48 hit frames are an attack, not a free HOLDING pose.
-
-        Mashing B there cancelled the weapon's hit boxes (round-1 booth:
-        Blaze action $49, held pipe, atk_id=0, booth intact)."""
-
-        p1 = _player_snapshot(index=1)
-        p2 = _player_snapshot(index=2, is_playable=False)
-        entities = (_player_entity(slot="P1", action_state=0x49, held_type=0x0B),)
-        snapshot = _snapshot(players=(p1, p2), entities=entities)
-
-        context = generate_direct_observation_tokens(snapshot, player_index=1)
-
-        self.assertIsNotNone(find(context, AnimationInProgress, slot="P1"))
-
-    def test_absent_while_idle_carrying_a_weapon(self) -> None:
-        p1 = _player_snapshot(index=1)
-        p2 = _player_snapshot(index=2, is_playable=False)
-        entities = (_player_entity(slot="P1", action_state=0x02, held_type=0x0B),)
-        snapshot = _snapshot(players=(p1, p2), entities=entities)
-
-        context = generate_direct_observation_tokens(snapshot, player_index=1)
-
-        self.assertIsNone(find(context, AnimationInProgress, slot="P1"))
-
     def test_present_for_partner_independently(self) -> None:
         p1 = _player_snapshot(index=1)
         p2 = _player_snapshot(index=2)

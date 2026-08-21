@@ -43,18 +43,6 @@ camera walk clamp. `in_smash_range` must use the punch box's own ±8 lane
 extent -- 16 fired B from a corner the box cannot reach, so the booth
 never broke.
 
-`in_smash_range` is origin-to-origin and ignores facing. A forward strike
-cannot hit backwards: B plus a turn on the same press is sampled as the
-current facing, so it is a committed miss. Live on a later round-1 booth:
-Blaze at (3660, 38) facing left, type-`$11` at (3672, 32), dx=12 (exactly
-her usable inner), held steel pipe, player attack box empty, weapon box
-ids 0, booth intact. `OpenBreakable` must turn without B until the actor
-already faces the prop. A held weapon's `$44` throw / `$46` melee / `$48`
-hit frames are `ATTACKING`, not `HOLDING`: `held_type` used to win first,
-so every swing was free-to-act, B was mashed every tick, and the weapon
-never reached a frame with collision. Idle carrying (`$02` + weapon) stays
-`HOLDING`. An unarmed grab-throw (`$44` + enemy type) stays `HOLDING`.
-
 **Target ranking (user):** `WalkToAdvanceStage` always has the lowest
 emergency of any verb that still scores. Among enemy targets, a `Boss`
 outranks an armed ordinary enemy, and an armed ordinary enemy (pickup

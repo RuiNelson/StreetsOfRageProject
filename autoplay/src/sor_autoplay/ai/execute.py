@@ -107,9 +107,6 @@ START_MASK = 0x0080
 # bit ($52AE); name-entry does not.
 NAME_CONFIRM_MASK = JUMP_MASK
 PUNCH_FRAMES = 4
-# A turn toward a prop that is already in smash range: long enough for the
-# ROM to sample the new facing, short enough not to walk out of the pocket.
-FACE_PROP_FRAMES = 1
 CALL_POLICE_FRAMES = 4
 DIALOG_FRAMES = 4
 SUPPLEX_FRAMES = 4
@@ -592,25 +589,6 @@ def _face_toward_mask(actor: Myself | Partner, target_x: int) -> int:
     if dx > DIRECTION_HYSTERESIS_X:
         return RIGHT_MASK
     return 0
-
-
-def _facing_prop(actor: Myself | Partner, prop: Breakable) -> bool:
-    """Whether a forward strike from here would be aimed at ``prop``.
-
-    ``in_smash_range`` is origin-to-origin and ignores facing, so a body
-    standing 12px from a booth while looking the other way still reads as
-    "punch now". The ROM samples facing at the start of the attack: B plus
-    a turn on the same press is a committed miss. Live on round 1: Blaze at
-    (3660, 38) facing left, type-$11 booth at (3672, 32), held pipe, player
-    attack box empty, weapon box ids 0, booth intact.
-    """
-
-    dx = prop.world_x - actor.world_x
-    if dx > 0:
-        return not actor.facing_left
-    if dx < 0:
-        return actor.facing_left
-    return True
 
 
 def _face_prop_mask(actor: Myself | Partner, prop: Breakable, context: Context) -> int:
@@ -2151,8 +2129,6 @@ def state_machine_open_breakable(
     The switch is ``decide.in_smash_range``, the same predicate
     ``priority._emergency_open_breakable`` scores with, so the tier the verb
     won on and the action it takes can never describe different situations.
-    Facing is a second gate on the strike: in range but looking the other
-    way turns without B, because the ROM samples facing at attack start.
 
     The approach ``maximize_contact``s: a crate does not move, so there is
     nothing to lose by spending a step or two lining the punch band up square
@@ -2173,15 +2149,11 @@ def state_machine_open_breakable(
         gamepad.release()
         return
     if in_smash_range(actor, target):
-        face = _face_prop_mask(actor, target, context)
-        if _facing_prop(actor, target):
-            _press(gamepad, PUNCH_MASK | face, frames=PUNCH_FRAMES)
-        else:
-            # Turn first. B on this tick is sampled as the current facing.
-            # One frame: PUNCH_FRAMES of RIGHT from the inner edge walks
-            # through the smash pocket and into the dead zone, which then
-            # routes back out facing away again.
-            _press(gamepad, face, frames=FACE_PROP_FRAMES)
+        _press(
+            gamepad,
+            PUNCH_MASK | _face_prop_mask(actor, target, context),
+            frames=PUNCH_FRAMES,
+        )
         return
 
     # The crate stays in its own obstacle set. It is the destination *and* a

@@ -172,9 +172,7 @@ def _build_playable_character(
 
 # Phases where the player is free to issue a new input right now, even
 # though they aren't idle:
-# - HOLDING covers idle-carrying a weapon and grabbing an enemy (B knee /
-#   throw). A held weapon's $44/$46/$48 swing is ATTACKING, not HOLDING —
-#   mashing B there cancels the hit boxes (round-1 booth, pipe, action $49).
+# - HOLDING covers carrying a weapon and grabbing an enemy (B knee / throw).
 # - HELD_BY_ENEMY is the enemy-grab counter sequence (C then B) — the player
 #   *must* be able to act or the AI freezes until thrown.
 _FREE_TO_ACT_PHASES = frozenset(
