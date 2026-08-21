@@ -999,19 +999,26 @@ class FirstLevelBreakableStallTests(unittest.TestCase):
     BOOTH_Y = 40
 
     def _run(
-        self, *, actor_x: int, actor_y: int, type_id: int = 0x11, ticks: int = 60
+        self,
+        *,
+        actor_x: int,
+        actor_y: int,
+        type_id: int = 0x11,
+        ticks: int = 60,
+        facing_left: bool = False,
     ) -> tuple[list[tuple[int, int]], list[int], bool]:
         prop = Breakable(
             slot="obj09", world_x=self.BOOTH_X, world_y=self.BOOTH_Y, type_id=type_id
         )
         wall = prop_solids.solid_box(type_id, self.BOOTH_X, self.BOOTH_Y)
-        ax, ay, facing_left = actor_x, actor_y, False
+        ax, ay = actor_x, actor_y
         client = _FakeClient()
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         trail: list[tuple[int, int]] = []
         masks: list[int] = []
         punched = False
         for _ in range(ticks):
+            client.pressed = 0
             actor = _actor(ax, ay, facing_left)
             context = {
                 actor,
@@ -1025,14 +1032,17 @@ class FirstLevelBreakableStallTests(unittest.TestCase):
             verbs = find_all(context, Verb)
             if verbs:
                 execute_verb(verbs[0], context, gamepad)
-            held = client.held
-            masks.append(held)
+            # `_press` re-arms the sticky hold to 0 after the tap, so a
+            # turn-without-B (facing away from a booth) only lives on
+            # `pressed`. Movement and the mask log have to see that tap.
+            commanded = client.held | client.pressed
+            masks.append(commanded)
             trail.append((ax, ay))
             if client.pressed & B:
                 punched = True
                 break
-            nx = ax + (STEP_X if held & RIGHT else 0) - (STEP_X if held & LEFT else 0)
-            ny = ay + (STEP_Y if held & DOWN else 0) - (STEP_Y if held & UP else 0)
+            nx = ax + (STEP_X if commanded & RIGHT else 0) - (STEP_X if commanded & LEFT else 0)
+            ny = ay + (STEP_Y if commanded & DOWN else 0) - (STEP_Y if commanded & UP else 0)
             if wall.blocks(nx, ny):
                 nx, ny = ax, ay
             if nx != ax:
@@ -1081,6 +1091,30 @@ class FirstLevelBreakableStallTests(unittest.TestCase):
         trail, _masks, punched = self._run(actor_x=200, actor_y=80)
 
         self.assertTrue(punched, f"never punched; ended at {trail[-1] if trail else None}")
+
+    def test_turns_before_punching_when_already_in_range_facing_away(self) -> None:
+        """Live round-1 stall: Blaze at dx=12 facing left, booth to her
+        right, in_smash_range true. Punching on that tick is a miss — the
+        ROM samples facing at attack start. First output must be a turn."""
+
+        # Live geometry, scaled to this booth: 12px to the left (Blaze's
+        # usable inner), 2px in front of the solid (y1 = origin-10+14 = 44),
+        # facing away. Standing on the origin's own lane is *inside* the
+        # solid, so a turn-RIGHT would be eaten by the wall and facing
+        # would never flip.
+        _trail, masks, _punched = self._run(
+            actor_x=self.BOOTH_X - 12, actor_y=46, facing_left=True
+        )
+
+        self.assertTrue(masks, "no output")
+        self.assertFalse(
+            masks[0] & B,
+            f"punched while facing away: {hex(masks[0])}",
+        )
+        self.assertTrue(
+            masks[0] & RIGHT,
+            f"expected to turn toward the booth: {hex(masks[0])}",
+        )
 
 
 class JumpKickFlightTests(unittest.TestCase):
