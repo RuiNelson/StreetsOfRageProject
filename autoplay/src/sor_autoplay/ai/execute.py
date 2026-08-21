@@ -210,6 +210,18 @@ WALK_TO_ENEMY_STOP_BUFFER = 4
 # near its exact lane, sidestep by this much instead of closing distance
 # straight down its line of attack.
 WALK_TO_ENEMY_LANE_SAFETY_Y = PUNCH_RANGE_Y + 16
+# Below this much lane separation the actor has no meaningful "side" of the
+# enemy to be on -- the raw compare is walk jitter -- so _approach_lane_y
+# stops reading it and picks the side with room instead.
+LANE_SIDE_DEADBAND_Y = 6
+# The offset an Antonio approach aims for, rather than the generic sidestep
+# above. The routed goal is a *region* with PUNCH_RANGE_Y of lane slack, so
+# an aim of WALK_TO_ENEMY_LANE_SAFETY_Y is satisfied by arriving 16px out --
+# which is exactly his `$16EAE` kick gate, satisfied. Adding the slack back
+# puts the nearest acceptable arrival at 28px, clear of both his `$10` kick
+# and `$14` dash windows with margin. Simulated over the real executor: 13px
+# of arrival offset before, 28 after.
+ANTONIO_APPROACH_LANE_Y = WALK_TO_ENEMY_LANE_SAFETY_Y + PUNCH_RANGE_Y
 # A Breakable is itself a solid obstacle -- walking straight to its exact
 # (world_x, world_y) means walking into it from whatever angle happens to be
 # a straight line, which can mean approaching from directly above/below and
@@ -827,7 +839,12 @@ def _approach_lane_y(
     if alongside:
         return target.world_y
     dy = abs(target.world_y - actor.world_y)
-    if dy >= WALK_TO_ENEMY_LANE_SAFETY_Y:
+    clear_of_the_line = (
+        ANTONIO_APPROACH_LANE_Y - PUNCH_RANGE_Y
+        if _holds_lane_offset_while_closing(target)
+        else WALK_TO_ENEMY_LANE_SAFETY_Y
+    )
+    if dy >= clear_of_the_line:
         # Already clear of the line; holding the current lane is enough.
         return actor.world_y
     if not (
@@ -837,13 +854,40 @@ def _approach_lane_y(
     # Leave the line, aiming at a *fixed* lane rather than a displacement
     # from the actor's own, so repeated ticks converge on one point instead
     # of stepping away forever.
+    #
+    # Which side: the one the actor is **already on**, so the walk never
+    # crosses the enemy's own lane to reach safety. Picking it from the
+    # lane's midpoint instead -- which is what this did, for the stability
+    # reason below -- puts the aim point on the far side whenever the enemy
+    # sits between the actor and the middle of the band, and the actor then
+    # walks straight through the one lane it is trying to leave. Simulated
+    # over the real executor: an approach starting 20px clear of Antonio
+    # crossed to 5px and then 2px of his lane while still 130px away on X,
+    # which is his `$16EAE` kick window with the lane gate satisfied.
+    #
+    # The midpoint rule was there because ``actor.world_y`` vs
+    # ``target.world_y`` crosses zero on a couple of px of walk jitter while
+    # both bodies converge. That is answered here by a deadband instead: an
+    # actor within LANE_SIDE_DEADBAND_Y of the enemy's lane has no side worth
+    # reading, and only then does the midpoint (or the room available in the
+    # band) decide.
     lo, hi = _lane_bounds(context)
-    offset = (
-        WALK_TO_ENEMY_LANE_SAFETY_Y
-        if target.world_y >= (lo + hi) / 2
-        else -WALK_TO_ENEMY_LANE_SAFETY_Y
+    width = (
+        ANTONIO_APPROACH_LANE_Y
+        if _holds_lane_offset_while_closing(target)
+        else WALK_TO_ENEMY_LANE_SAFETY_Y
     )
-    return target.world_y + offset
+    dy_signed = actor.world_y - target.world_y
+    if abs(dy_signed) >= LANE_SIDE_DEADBAND_Y:
+        offset = width if dy_signed > 0 else -width
+    else:
+        offset = width if target.world_y < (lo + hi) / 2 else -width
+    aim = target.world_y + offset
+    if not lo <= aim <= hi:
+        # No room that side of him; the band's other side is all there is,
+        # and crossing is then unavoidable rather than chosen.
+        aim = target.world_y - offset
+    return int(aim)
 
 
 def _walk_to_near_enemy_target(

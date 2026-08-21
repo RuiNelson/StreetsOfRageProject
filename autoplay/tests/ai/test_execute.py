@@ -39,6 +39,7 @@ from sor_autoplay.ai.execute import (
     MOVE_DEADBAND_X,
     PICKUP_RANGE_X,
     PICKUP_RANGE_Y,
+    ANTONIO_APPROACH_LANE_Y,
     WALK_TO_ENEMY_LANE_SAFETY_Y,
     _find_safe_spot,
     _safe_spot_candidates,
@@ -621,20 +622,64 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         # be actively left, which is what this covers: actor 10px off the
         # enemy's lane, inside WALK_TO_ENEMY_LANE_SAFETY_Y (28).
         #
-        # The offset side is picked from the target's own position against
-        # the lane's fixed midpoint, not from actor.world_y vs
-        # target.world_y (see _walk_to_near_enemy_target's docstring): with
-        # no CameraRange in context, _lane_bounds defaults to lo=8, hi=106,
-        # midpoint=57 -- target.world_y=50 sits below that, so the offset
-        # pushes further up (-WALK_TO_ENEMY_LANE_SAFETY_Y), independent of
-        # which side of it the actor stands on.
+        # The offset side is the one the actor is **already on**, so leaving
+        # the line never crosses it. Actor at 60 against a target at 50 steps
+        # further down, not up through the target's own lane -- picking the
+        # side from the lane midpoint instead (which is what this did) sent
+        # it straight through, measured over the real executor as an approach
+        # crossing from 20px clear to 2px of an Antonio's kick lane.
         actor = _myself(world_x=0, world_y=60)
         target = replace(_enemy(world_x=200, world_y=50), combat_phase=CombatPhase.ATTACKING)
         context = {actor, target}
 
         target_x, target_y = _walk_to_near_enemy_target(actor, target, context)
 
-        self.assertEqual(target_y, 50 - WALK_TO_ENEMY_LANE_SAFETY_Y)
+        self.assertEqual(target_y, 50 + WALK_TO_ENEMY_LANE_SAFETY_Y)
+
+    def test_picks_the_side_with_room_when_the_actor_has_no_side(self) -> None:
+        # Practically on the enemy's lane: the raw compare is walk jitter, so
+        # the side comes from where there is room in the band instead. With
+        # no CameraRange, _lane_bounds defaults to lo=8, hi=106 (midpoint 57)
+        # and a target at 20 has the room below it.
+        actor = _myself(world_x=0, world_y=22)
+        target = replace(_enemy(world_x=200, world_y=20), combat_phase=CombatPhase.ATTACKING)
+
+        _, target_y = _walk_to_near_enemy_target(actor, target, {actor, target})
+
+        self.assertEqual(target_y, 20 + WALK_TO_ENEMY_LANE_SAFETY_Y)
+
+    def test_crosses_only_when_the_actors_own_side_has_no_room(self) -> None:
+        # Actor above a target already near the top of the band: stepping
+        # further up leaves the playable lanes entirely, so the far side is
+        # all there is and crossing is forced rather than chosen.
+        actor = _myself(world_x=0, world_y=12)
+        target = replace(_enemy(world_x=200, world_y=30), combat_phase=CombatPhase.ATTACKING)
+
+        _, target_y = _walk_to_near_enemy_target(actor, target, {actor, target})
+
+        self.assertEqual(target_y, 30 + WALK_TO_ENEMY_LANE_SAFETY_Y)
+
+    def test_an_antonio_approach_aims_wider_than_his_kick_gate(self) -> None:
+        # The routed goal carries PUNCH_RANGE_Y of lane slack, so an aim of
+        # WALK_TO_ENEMY_LANE_SAFETY_Y is satisfied by arriving 16px out --
+        # his $10 kick gate, satisfied. ANTONIO_APPROACH_LANE_Y adds the
+        # slack back so the nearest acceptable arrival is 28px clear.
+        actor = _myself(world_x=0, world_y=60)
+        antonio = Antonio(
+            slot="obj00",
+            type_id=0x56,
+            world_x=200,
+            world_y=50,
+            health=24,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+            primary_state=1,
+        )
+
+        _, target_y = _walk_to_near_enemy_target(actor, antonio, {actor, antonio})
+
+        self.assertEqual(target_y, 50 + ANTONIO_APPROACH_LANE_Y)
 
     def test_does_not_keep_sidestepping_once_clear_of_the_line_of_attack(self) -> None:
         # The sidestep aims at a *fixed* lane, so once the actor is already

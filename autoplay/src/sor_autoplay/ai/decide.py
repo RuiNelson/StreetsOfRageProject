@@ -354,8 +354,17 @@ def _walk_in_beats_the_hop(actor: PlayableCharacter, antonio: Antonio) -> bool:
     Unarmed (a held weapon has no grab and no unarmed kick -- ``could_jump_
     attack`` refuses the launch armed anyway) and already inside the X range
     the hold is taken from, whatever the lane offset still is. The lane half
-    is deliberately *not* tested: the seconds while the approach converges
-    the last of its offset are exactly when the hop used to win the tick.
+    is deliberately *not* tested: the ticks while the approach converges the
+    last of its offset are exactly when the hop used to win.
+
+    The range is the **hold's**, not the hop's, and that boundary is
+    measured rather than reasoned. Widening it to the hop's own band (75px
+    on Blaze) does what it says -- hop episodes fell to 10-133 ticks a fight
+    -- and cost health: 40 / 60 / 60 damage taken against 60 / 20 / 20 / 20 /
+    20 for this version. Out at 60-75px on his lane the hop is the better
+    answer, because it closes the gap *and* attacks, where walking that band
+    just stands in the kick window for longer. The hop is not the enemy; the
+    hop **as the only plan** was.
     """
 
     if actor.held_weapon_type != 0 or actor.is_airborne:

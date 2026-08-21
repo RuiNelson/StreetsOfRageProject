@@ -128,9 +128,43 @@ fight (not ticks — a hop spans dozens of them):
 | before | 2, 2, 3, 6, 2 (median 2) | median 2 | 5/5 | 0 |
 | after | 1, 1, 1, 3, 8, 3, 0 (median 1) | median 2 | 7/7 | 0 |
 
-Damage taken is a wash (mean 40 → 46, against a 20-60 spread *within* each
-configuration), and so is fight length. What changed is what the fight looks
-like: the median fight now contains a single hop, and one contained none.
+Damage taken was a wash at that point (mean 40 → 46, against a 20-60 spread
+*within* each configuration) and so was fight length; what changed was what
+the fight looked like.
+
+**Then a live run lost a life -- not acceptable (user) -- and the approach
+turned out to be walking through the one lane it was there to avoid.**
+`_approach_lane_y` picked the offset side from the lane band's *midpoint*, a
+stability choice (`actor.world_y` vs `target.world_y` crosses zero on walk
+jitter), so whenever the enemy sat between the actor and the middle of the
+band the aim point was on the far side and the actor crossed his lane to
+reach it. Simulated over the real executor: an approach starting 20px clear
+of Antonio crossed to 5px and then 2px while still 130px away on X -- his
+kick window, with the lane gate satisfied. The side is now the one the actor
+is **already on**, with `LANE_SIDE_DEADBAND_Y` for the jitter case the
+midpoint rule existed for, falling back to the far side only when the
+actor's own side has no room in the band. `ANTONIO_APPROACH_LANE_Y` also
+adds the routed goal's own `PUNCH_RANGE_Y` of lane slack back on top of the
+offset, so the *nearest acceptable arrival* is 28px clear instead of 16 --
+16 being exactly his `$10` kick gate, satisfied.
+
+| | hits taken (20 damage each) | hops | suplexes |
+| --- | --- | --- | --- |
+| before the lane fix | 3, 2, 2, 6, 3, 3, 2 (mean 3.0, max 6) | 1, 1, 1, 3, 8, 3, 0 | median 2 |
+| after | 3, 1, 1, 1, 2, 1, 2 (mean 1.6, **max 3**) | 4, 3, 5, 7, 4, 4, 4 | median 2 |
+
+Four hits kill from full health, so the max is the number that matters: 6
+became 3.
+
+**The trade is real and it went the other way on hops**, and the reason is
+worth keeping. Antonio closes lane himself, so an approach that holds its
+offset meets him already aligned at 60-75px -- past contact range, inside
+the kick's free flight -- and out there the hop is the better answer,
+because it closes the gap *and* attacks where walking that band only stands
+in the kick window for longer. Withdrawing the hop there too (widening
+`_walk_in_beats_the_hop` from the hold's range to the hop's own band) does
+cut hops, and measured 40 / 60 / 60 damage taken against 60 / 20 / 20 / 20 /
+20 with it kept. The hop is not the enemy; the hop *as the only plan* was.
 
 **Three things tried for the rest of it and measured no better**, all
 reverted rather than kept on the strength of the reasoning:
@@ -272,6 +306,15 @@ poll cadence so the agent still samples about two game frames per tick.
 `scripts/both_turbo` as the source of truth for these flags. Use `--silent`
 whenever the game is launched for debug. Only start a live session when
 necessary; prefer the `autoplay` unit tests for logic changes.
+
+**Testing the AI against a boss (user):** always run with the debug flags
+that kill every enemy family except the boss -- `tools/boss_fight.py` and
+`tools/antonio_diag.py` already do this through
+`DebugScenario(kill_street_enemies=True)`, and it is not optional. A boss
+fight measured with the street waves still alive mixes two different
+questions (how the AI fights the boss, and how much health the level left
+it) and neither answer comes out of the run. Do not add a "real waves" mode
+to these tools; that was tried and rejected.
 
 ## Diagnostic tools (`tools/`)
 

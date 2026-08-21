@@ -2381,9 +2381,10 @@ class JumpKickAntonioTests(unittest.TestCase):
         self.assertEqual(could_jump_attack({myself, antonio}), set())
 
     def test_still_hops_from_past_the_range_a_hold_reaches(self) -> None:
-        # dx=55: outside Axel's punch outer (50), inside the kick's own
-        # free flight (60). No hold reaches from here, so the hop is still
-        # the opener that closes it.
+        # dx=55: outside Axel's punch outer (50), inside the kick's own free
+        # flight (60). No hold reaches from here and the hop still owns it --
+        # measured, not assumed: withdrawing the hop out here too cost 40 /
+        # 60 / 60 damage taken against 60 / 20 / 20 / 20 / 20 with it kept.
         myself = make_myself(world_x=105, world_y=100, facing_left=False)
         antonio = _antonio(
             world_x=160,
@@ -2475,7 +2476,9 @@ class JumpKickAntonioTests(unittest.TestCase):
         )
 
     def test_does_not_walk_through_jump_range_on_a_live_antonio(self) -> None:
-        # dx=55 is past punch outer and inside kick max, same lane: the hop owns it.
+        # dx=55 is past punch outer and inside kick max, same lane: the hop
+        # owns it, and measurably should (see the JumpKickAntonioTests case
+        # of the same name).
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
         antonio = _antonio(
             world_x=155,
