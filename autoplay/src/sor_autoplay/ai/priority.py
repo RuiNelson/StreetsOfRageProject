@@ -227,6 +227,14 @@ _EMERGENCY_GRAB_ANTONIO_ON_PUNISH = 61
 # suplex chain is worth more here, and the same "must clear punch-on-punish
 # once the boss raise is applied to both" arithmetic applies.
 _EMERGENCY_GRAB_SOUTHER_ON_PUNISH = 61
+# Taking the hold on a *ready* Antonio, from contact range. Has to clear the
+# hop it replaces -- _EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER (22), which is
+# raised by the same _EMERGENCY_BOSS_TARGET as this is, so comparing the raw
+# tiers is the right comparison -- while staying well below the punish grab
+# (61): a hold on a boss who cannot act is still strictly better than one on
+# a boss who can. Above _EMERGENCY_GRAB_DEAD_ZONE (30) because this is the
+# whole plan against him rather than an improvement on an exchange.
+_EMERGENCY_GRAB_ANTONIO_WALK_IN = 35
 _EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
 _EMERGENCY_HOLD_SUPPLEX = 68
 _EMERGENCY_HOLD_FLIP = 66
@@ -590,6 +598,7 @@ _GRAB_REASON_SCORE: dict[GrabReason, int] = {
     GrabReason.JACK_FROM_BEHIND: _EMERGENCY_GRAB_JACK_FROM_BEHIND,
     GrabReason.DEAD_ZONE: _EMERGENCY_GRAB_DEAD_ZONE,
     GrabReason.ANTONIO_ON_PUNISH: _EMERGENCY_GRAB_ANTONIO_ON_PUNISH,
+    GrabReason.ANTONIO_WALK_IN: _EMERGENCY_GRAB_ANTONIO_WALK_IN,
     GrabReason.SOUTHER_ON_PUNISH: _EMERGENCY_GRAB_SOUTHER_ON_PUNISH,
     GrabReason.WHILE_SURROUNDED: _EMERGENCY_GRAB_WHILE_SURROUNDED,
     GrabReason.DODGE_CHARGE: _EMERGENCY_GRAB_TO_DODGE_CHARGE,

@@ -447,8 +447,30 @@ class GrabReason(Enum):
     front of him, which is the ``$16EAE`` zero-velocity kick path; the
     hold is how a human actually beats him.
 
-    Not produced while he can still act: walking into a ready Antonio
-    is how the kick lands first.
+    Its counterpart on a *ready* Antonio is ``ANTONIO_WALK_IN`` below, which
+    only fires from contact range -- the walk across his kick window is
+    still not something to start.
+    """
+
+    ANTONIO_WALK_IN = auto()
+    """Already at contact range on a ready Antonio -- take the hold.
+
+    The alternative from here is not a punch (every grounded B on him is
+    refused: standing still in front of him *is* ``$16EAE``'s kick trigger)
+    but a **hop**, and the hop is the worse half of that trade. It commits
+    the actor to roughly 45 frames of fixed trajectory for about 2 damage,
+    and a kick that comes out during it hits a body that cannot answer --
+    measured, that airborne window is where every hit Antonio still lands
+    arrives. The hold instead denies him everything he owns, and converts
+    into knee + suplex for 7 and a knockdown.
+
+    Deliberately gated on ``grab_would_connect``'s contact range like every
+    other reason, so this is never "walk in from across the arena": the
+    approach that gets here keeps a lane offset wider than the ``$10`` kick
+    and ``$14`` dash windows (``execute._approach_lane_y``) and only
+    converges once alongside on X. It is also not produced against a
+    committed strike -- ``could_grab_enemy`` drops any target in
+    ``incoming_melee_targets`` first, and ``DodgeAntonioKick`` owns that.
     """
 
     SOUTHER_ON_PUNISH = auto()

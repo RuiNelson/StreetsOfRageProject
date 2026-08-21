@@ -20,6 +20,7 @@ from sor_autoplay.ai.tokens import (
 from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay import prop_solids
 from sor_autoplay.ai.decide import (
+    _walk_in_beats_the_hop,
     BREAKABLE_PUNCH_X,
     breakable_smash_outer_x,
     in_smash_range,
@@ -2316,7 +2317,10 @@ class CouldGrabAntonioOnPunishTests(unittest.TestCase):
         result = could_grab_enemy({myself, antonio})
         self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="obj09")})
 
-    def test_does_not_grab_a_ready_antonio(self) -> None:
+    def test_grabs_a_ready_antonio_from_contact_range(self) -> None:
+        # Changed deliberately: the hold beats the hop even on a ready
+        # Antonio (GrabReason.ANTONIO_WALK_IN). What still keeps this honest
+        # is the range gate -- see the next test.
         myself = make_myself(world_x=120, world_y=100, facing_left=False)
         antonio = _antonio(
             world_x=150,
@@ -2326,15 +2330,45 @@ class CouldGrabAntonioOnPunishTests(unittest.TestCase):
             boss_dist_x=30,
             boss_dist_lane=0,
         )
+        self.assertEqual(
+            could_grab_enemy({myself, antonio}),
+            {GrabEnemy(actor_slot="P1", target_slot="obj09")},
+        )
+
+    def test_does_not_walk_in_on_a_ready_antonio_from_across_the_arena(self) -> None:
+        myself = make_myself(world_x=20, world_y=100, facing_left=False)
+        antonio = _antonio(
+            world_x=200,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=180,
+            boss_dist_lane=0,
+        )
+        self.assertEqual(could_grab_enemy({myself, antonio}), set())
+
+    def test_does_not_walk_in_on_a_ready_antonio_off_his_lane(self) -> None:
+        # The approach holds a lane offset wider than his $10 kick window;
+        # the hold is only taken once it has converged.
+        myself = make_myself(world_x=120, world_y=72, facing_left=False)
+        antonio = _antonio(
+            world_x=150,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=30,
+            boss_dist_lane=28,
+        )
         self.assertEqual(could_grab_enemy({myself, antonio}), set())
 
 
 class JumpKickAntonioTests(unittest.TestCase):
-    def test_offers_a_hop_on_a_live_antonio_inside_kick_range(self) -> None:
-        # dx=40 is inside Axel's punch (50) *and* kick (60), same lane.
-        # The usual JUMP_ATTACK band starts past punch outer, so without
-        # the Antonio min-dx exception this hop never fires -- and a
-        # grounded B here is his kick trigger.
+    def test_the_hold_replaces_the_hop_at_contact_range(self) -> None:
+        # dx=40 is inside Axel's punch (50) *and* kick (60), same lane --
+        # the range the Antonio min-dx exception exists for. It is also the
+        # range a hold is taken from, and the hold wins: the hop is 45
+        # committed airborne frames for ~2 damage, and every hit he still
+        # lands arrives in that window (GrabReason.ANTONIO_WALK_IN).
         myself = make_myself(world_x=120, world_y=100, facing_left=False)
         antonio = _antonio(
             world_x=160,
@@ -2344,8 +2378,41 @@ class JumpKickAntonioTests(unittest.TestCase):
             boss_dist_x=40,
             boss_dist_lane=4,
         )
+        self.assertEqual(could_jump_attack({myself, antonio}), set())
+
+    def test_still_hops_from_past_the_range_a_hold_reaches(self) -> None:
+        # dx=55: outside Axel's punch outer (50), inside the kick's own
+        # free flight (60). No hold reaches from here, so the hop is still
+        # the opener that closes it.
+        myself = make_myself(world_x=105, world_y=100, facing_left=False)
+        antonio = _antonio(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=55,
+            boss_dist_lane=4,
+        )
         result = could_jump_attack({myself, antonio})
         self.assertIn(JumpAttack(actor_slot="P1", target_slot="obj09"), result)
+
+    def test_still_hops_at_contact_range_while_armed(self) -> None:
+        # Armed there is no hold to take instead... and no unarmed kick
+        # either, so could_jump_attack refuses the launch on its own. The
+        # point of the assertion is that _walk_in_beats_the_hop is what does
+        # *not* fire here -- the weapon gate does.
+        myself = make_myself(
+            world_x=120, world_y=100, facing_left=False, held_weapon_type=0x0B
+        )
+        antonio = _antonio(
+            world_x=160,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=40,
+            boss_dist_lane=4,
+        )
+        self.assertFalse(_walk_in_beats_the_hop(myself, antonio))
 
     def test_does_not_hop_at_an_antonio_behind(self) -> None:
         myself = make_myself(world_x=160, world_y=100, facing_left=False)

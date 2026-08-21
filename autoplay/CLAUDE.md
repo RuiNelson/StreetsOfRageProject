@@ -15,12 +15,14 @@ flags), plus an opt-in **symbolic AI** (`ai/` — Phase A of the design in
 module docstrings and [`AI.md`](AI.md) for the Token/Information/Verb
 pipeline and manuscript-grounded combat facts already wired in. Still future
 work: two-player coordination, six-button `--altControls`, and per-boss
-tactics beyond Antonio and Souther (Antonio is jump-kick → grab →
-suplex: a hop to open later-boss hitstun, then walk in and `Supplex`;
-never a grounded B — standing still is `$16EAE`'s kick trigger; dodge
-only a kick/dash that is already locked in; and see **Holding a boss**
-below, without which the walk-in succeeded and the AI then stood in the
-hold until the round clock killed it.
+tactics beyond Antonio and Souther (Antonio is **walk in off-lane → grab →
+suplex**: hold a lane offset wider than his `$10` kick and `$14` dash
+windows all the way in, converge only once alongside on X, then take the
+hold — knee, flip, `Supplex`. The hop is the fallback for the range a hold
+cannot reach from, not the plan; never a grounded B — standing still is
+`$16EAE`'s kick trigger; dodge only a kick/dash that is already locked in;
+and see **Holding a boss** below, without which the walk-in succeeded and
+the AI then stood in the hold until the round clock killed it.
 Souther is hitstun → grab → **knee, knee, ...** → suplex, with the hop
 **removed** entirely: he counters jump attacks outright, his committed claw
 is answered by a lane step rather than a hop, the approach stands inside his
@@ -89,6 +91,65 @@ gate, so it was reverted rather than kept on the strength of the reasoning.
 Whatever fixes this is more likely to be on the hop's own side --
 `DodgeAntonioKick` delegates to `state_machine_jump_attack`, which presses
 jump whether or not the actor is armed.
+
+**Jump-kicks dominated the fight (user: "os jump-kicks são seguros, mas é
+lento e perigoso atacar dessa maneira... ainda dominam a maneira da IA
+lutar"):** they did, and by construction. `could_walk_to_near_enemy` used to
+stand down as soon as `in_jump_attack_band` connected on a non-punishable
+Antonio, so from the moment the actor was on his lane inside the kick's
+free flight (75px on Blaze) the hop was the *only* verb on the table. The
+hop is 45 committed airborne frames for about 2 damage, and it is where
+every hit he lands arrives.
+
+Two changes, both ROM-derived:
+
+- **the approach keeps off his lane** (`execute._approach_lane_y`, shared by
+  the routed goal and the straight-line fallback so they cannot disagree).
+  Both his moves are lane-gated — the `$16EAE` kick needs the target within
+  `$10` (16px), the `$16E74` dash/boomerang commit within `$14` (20px) — so
+  an offset wider than either cannot arm them however the X distance closes.
+  `WALK_TO_ENEMY_LANE_SAFETY_Y` (28px) already clears both. The old generic
+  rule, "hold the actor's current lane while closing", is a coin flip on
+  exactly that question;
+- **the hold replaces the hop at contact range** (`GrabReason.ANTONIO_WALK_IN`,
+  tier 35 against the hop opener's 22, both raised by the same boss bonus).
+  `_walk_in_beats_the_hop` also withdraws the hop for those few ticks while
+  the approach converges the last of its lane offset — the window where the
+  grab is not yet offered (`grab_would_connect` wants `GRAB_RANGE_Y`) and
+  nothing else outranks a jump. A ready Antonio is now a grab opportunity,
+  which reverses the old `ANTONIO_ON_PUNISH`-only rule; the range gate is
+  what keeps it honest, so it is never a walk across his kick window.
+
+Measured over seven fights against the previous five, hop *episodes* per
+fight (not ticks — a hop spans dozens of them):
+
+| | hops per fight | suplexes | killed | deaths |
+| --- | --- | --- | --- | --- |
+| before | 2, 2, 3, 6, 2 (median 2) | median 2 | 5/5 | 0 |
+| after | 1, 1, 1, 3, 8, 3, 0 (median 1) | median 2 | 7/7 | 0 |
+
+Damage taken is a wash (mean 40 → 46, against a 20-60 spread *within* each
+configuration), and so is fight length. What changed is what the fight looks
+like: the median fight now contains a single hop, and one contained none.
+
+**Three things tried for the rest of it and measured no better**, all
+reverted rather than kept on the strength of the reasoning:
+
+- refusing the weapon detour whenever a live Antonio is on screen — armed,
+  the actor has no attack on him *and* no hold, so hops are all that is
+  left, and the two worst runs in a batch of ten were the two that spent
+  200+ ticks fetching a weapon. Tried twice, once before the walk-in hold
+  existed and once after: 20/40/160 with a death the first time, and the
+  second time it cut suplexes (median 2 → 1) while leaving hops alone;
+- lifting `could_grab_enemy`'s armed exclusion for Antonio alone (the ROM
+  contact grab does not care what the actor carries — a live front hold on
+  him was recorded with a pipe in `+$60`): 40 / 160 / 40 with a death, and
+  the hop it was meant to displace stayed;
+- see also the armed-jump note under **Holding a boss**.
+
+Still open: the actor takes a 20-damage hit in the first half-second of the
+fight in most runs, before it has done anything at all — Antonio's entrance,
+with the actor still mid-animation from the wave before.
 
 **First-level breakables (user):** Round-1 phone booths (`$11`) and the
 type-`$19` family share the shallowest ROM solid (14px on lane vs a 16px

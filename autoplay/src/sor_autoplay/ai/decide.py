@@ -348,6 +348,23 @@ def could_tech_recover(context: Context) -> Context:
     return verbs
 
 
+def _walk_in_beats_the_hop(actor: PlayableCharacter, antonio: Antonio) -> bool:
+    """True when this actor should take a hold on ``antonio`` rather than hop.
+
+    Unarmed (a held weapon has no grab and no unarmed kick -- ``could_jump_
+    attack`` refuses the launch armed anyway) and already inside the X range
+    the hold is taken from, whatever the lane offset still is. The lane half
+    is deliberately *not* tested: the seconds while the approach converges
+    the last of its offset are exactly when the hop used to win the tick.
+    """
+
+    if actor.held_weapon_type != 0 or actor.is_airborne:
+        return False
+    if antonio.is_defeated:
+        return False
+    return abs(antonio.world_x - actor.world_x) <= punch_outer_x(actor.character_id)
+
+
 def could_grab_enemy(context: Context) -> Context:
     """Walk into an enemy, unarmed and unattacking, to take a hold of it.
 
@@ -357,10 +374,18 @@ def could_grab_enemy(context: Context) -> Context:
     gates about the *actor*.
 
     Armed actors are excluded. The ROM's contact test does not care what the
-    actor carries, but every held weapon has its own melee move with better
-    reach or damage than a bare hold, and closing to contact would spend
-    that advantage -- so for the AI, holding a weapon is a reason not to
-    grab, exactly as it is a reason not to ``Punch``.
+    actor carries -- a live front hold on Antonio was recorded with a pipe
+    (``$0B``) still in ``+$60`` -- but every held weapon has its own melee
+    move with better reach or damage than a bare hold, and closing to contact
+    would spend that advantage, so for the AI holding a weapon is a reason
+    not to grab, exactly as it is a reason not to ``Punch``.
+
+    Lifting this for Antonio alone -- where the weapon really does buy
+    nothing, since every grounded B on him is refused armed or not -- was
+    tried and **measured worse**: three fights gave 40 / 160 / 40 damage
+    taken with a death, against 40 / 40 / 20 / 60 / 60 and none without it,
+    and the hop it was meant to displace did not go away. See
+    ``autoplay/CLAUDE.md``.
     """
 
     verbs: set[Token] = set()
@@ -603,6 +628,7 @@ def could_walk_to_near_enemy(context: Context) -> Context:
             if (
                 isinstance(enemy, Antonio)
                 and not is_punishable(enemy.combat_phase)
+                and not _walk_in_beats_the_hop(actor, enemy)
                 and reach.connects(
                     reach.in_jump_attack_band,
                     actor,
@@ -611,10 +637,14 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 )
             ):
                 # Jump-kick owns the last stretch only when the kick would
-                # actually connect (same lane, in front, in range). An
-                # X-only skip hopped at him from any lane and kicked air.
-                # Off-lane, walking onto his lane is the approach. A
-                # punishable Antonio is a grab walk-in instead.
+                # actually connect (same lane, in front, in range) *and*
+                # there is no hold to take instead -- armed, in other words,
+                # since that is the one case with no grab (and no unarmed
+                # kick either). An X-only skip hopped at him from any lane
+                # and kicked air. A punishable Antonio is a grab walk-in,
+                # and so, now, is a ready one already at contact X range:
+                # the walk has to keep the tick or nothing converges the
+                # lane offset the approach is holding.
                 continue
             if (
                 standing_off
@@ -1019,6 +1049,19 @@ def could_jump_attack(context: Context) -> Context:
         if not actor.is_airborne:
             for antonio in find_all(context, Antonio):
                 if is_punishable(antonio.combat_phase):
+                    target_slots.discard(antonio.slot)
+                elif _walk_in_beats_the_hop(actor, antonio):
+                    # Ready, and the approach has already brought the actor
+                    # to the X range a hold is taken from. The hop from here
+                    # is 45 committed airborne frames for ~2 damage; the
+                    # walk-in is a few frames and ends with him unable to
+                    # act at all (GrabReason.ANTONIO_WALK_IN). Withdrawing
+                    # the hop here is what stops it winning the couple of
+                    # ticks while the approach converges the last of the
+                    # lane offset, which is the only reason it still had the
+                    # tick: at that moment the grab is not yet offered
+                    # (grab_would_connect wants GRAB_RANGE_Y) and nothing
+                    # else outranks a jump.
                     target_slots.discard(antonio.slot)
         if actor.is_airborne and not target_slots:
             nearest = min(

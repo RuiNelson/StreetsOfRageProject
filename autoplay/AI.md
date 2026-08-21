@@ -644,11 +644,17 @@ behaviour without changing any code. A third, `JACK_FROM_BEHIND`, fires
 when the actor is already on Jack's back (he is facing away): take the
 hold before the axe or the lunge turns around. A fourth, `ANTONIO_ON_
 PUNISH`, fires when Antonio is in later-boss hitstun (`RECOVERY`, primary
-`$03`/`$04` after `$17C36 boss_apply_pending_damage`): hop him once to
-open that window, walk in without attacking, then flip-hold into a
-suplex. Standing still to punch him is the `$16EAE` zero-velocity kick
-trigger, so every grounded B is refused and the hold is the punish. A
-fifth, `SOUTHER_ON_PUNISH`, is its Souther counterpart on the same shared
+`$03`/`$04` after `$17C36 boss_apply_pending_damage`): walk in without
+attacking, then flip-hold into a suplex. Standing still to punch him is the
+`$16EAE` zero-velocity kick trigger, so every grounded B is refused and the
+hold is the punish. Its counterpart on a *ready* Antonio is `ANTONIO_WALK_
+IN`, produced from contact range only: the alternative there is not a punch
+but a hop, and a hop is 45 committed airborne frames for about 2 damage —
+the window every hit he lands arrives in — while the hold denies him
+everything he owns. The approach that reaches that range keeps a lane offset
+wider than his `$10` kick and `$14` dash windows (`execute._approach_lane_y`)
+and converges only once alongside on X, so this is never a walk across his
+kick range. A fifth, `SOUTHER_ON_PUNISH`, is its Souther counterpart on the same shared
 later-boss `RECOVERY` states, and it is a separate reason rather than
 sharing Antonio's because the *reason* differs: Antonio's is that a second
 punch is his own kick trigger, Souther's is simply that `$15EDA (souther_

@@ -1270,7 +1270,12 @@ def grab_reasons(
     if isinstance(target, Antonio):
         if is_punishable(target.combat_phase):
             return frozenset({GrabReason.ANTONIO_ON_PUNISH})
-        return frozenset()
+        # Ready, and already at contact range: the hold still beats the hop,
+        # which is the only other thing available against him. See
+        # GrabReason.ANTONIO_WALK_IN -- the range gate is grab_would_connect,
+        # which decide.could_grab_enemy requires anyway, so this reason never
+        # starts a walk across his kick window.
+        return frozenset({GrabReason.ANTONIO_WALK_IN})
     if isinstance(target, Souther):
         # Only the *brief* hit reaction, primary $03 -- deliberately not the
         # whole of is_punishable the way Antonio's is.

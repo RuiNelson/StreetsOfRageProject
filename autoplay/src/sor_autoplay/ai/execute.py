@@ -793,6 +793,59 @@ def _crossing_would_walk_into_the_swing(actor: Myself | Partner, target: Enemy) 
     return gap > target.max_reach + REACH_SAFETY_MARGIN
 
 
+def _holds_lane_offset_while_closing(target: Enemy) -> bool:
+    """Whether the approach must stay off this enemy's lane the whole way in.
+
+    True for a live ``Antonio`` regardless of what he is doing this instant,
+    which is the difference from the generic ``is_dangerous`` test below.
+    Both moves he owns are lane-gated -- the ``$16EAE`` power kick needs the
+    target within ``$10`` (16px) of his lane, the ``$16E74`` dash/boomerang
+    commit within ``$14`` (20px) -- so an approach that keeps more than that
+    cannot arm either one, no matter how the X distance closes. Holding
+    "the actor's current lane", which is what the generic branch does for a
+    non-committed enemy, is a coin flip on exactly that question.
+
+    ``WALK_TO_ENEMY_LANE_SAFETY_Y`` (28px) already clears both windows, so
+    the offset itself needs no Antonio-specific number.
+    """
+
+    return isinstance(target, Antonio) and not target.is_defeated
+
+
+def _approach_lane_y(
+    actor: Myself | Partner, target: Enemy, context: Context, *, alongside: bool
+) -> int:
+    """Which lane to aim at while closing on ``target``.
+
+    Shared by the routed goal and the straight-line fallback for the same
+    reason ``_enemy_stop_dx`` is: the two must not disagree about where the
+    approach is going. Once ``alongside`` on X the answer is always the
+    enemy's own lane -- the approach is over and the strike or the hold needs
+    the alignment.
+    """
+
+    if alongside:
+        return target.world_y
+    dy = abs(target.world_y - actor.world_y)
+    if dy >= WALK_TO_ENEMY_LANE_SAFETY_Y:
+        # Already clear of the line; holding the current lane is enough.
+        return actor.world_y
+    if not (
+        _holds_lane_offset_while_closing(target) or is_dangerous(target.combat_phase)
+    ):
+        return actor.world_y
+    # Leave the line, aiming at a *fixed* lane rather than a displacement
+    # from the actor's own, so repeated ticks converge on one point instead
+    # of stepping away forever.
+    lo, hi = _lane_bounds(context)
+    offset = (
+        WALK_TO_ENEMY_LANE_SAFETY_Y
+        if target.world_y >= (lo + hi) / 2
+        else -WALK_TO_ENEMY_LANE_SAFETY_Y
+    )
+    return target.world_y + offset
+
+
 def _walk_to_near_enemy_target(
     actor: Myself | Partner, target: Enemy, context: Context
 ) -> tuple[int, int]:
@@ -856,44 +909,25 @@ def _walk_to_near_enemy_target(
         approach_from_right = actor.world_x > target.world_x
     target_x = target.world_x + stop_dx if approach_from_right else target.world_x - stop_dx
 
+    # ``_approach_lane_y`` owns all three cases: arrived on X (converge onto
+    # the enemy's lane so the punch lands), still approaching while standing
+    # in a line of attack the enemy owns (leave the line), and otherwise hold
+    # the current lane.
+    #
+    # The last of those used to aim at ``target.world_y`` instead -- converge
+    # onto the enemy's lane from however far away. Combined with the sidestep
+    # case that made the lane aim flip by a full
+    # ``2 * WALK_TO_ENEMY_LANE_SAFETY_Y`` every time the enemy's phase crossed
+    # ``is_dangerous``, which in a real fight is every few ticks: commit ->
+    # sidestep off the lane, recover -> converge back onto it, commit again ->
+    # back off. Measured on the tick harness as a steady UP/DOWN alternation
+    # for the whole approach, and the last source of the reported up/down
+    # darting after the target churn was fixed. Holding the lane removes the
+    # phase dependence entirely while serving the original intent better than
+    # converging did: the actor simply never walks down the enemy's line in
+    # the first place.
     dx = abs(target.world_x - actor.world_x)
-    dy = abs(target.world_y - actor.world_y)
-    if dx <= stop_dx:
-        # Arrived on X. Converge onto the enemy's lane so the punch lands
-        # (dy must clear PUNCH_RANGE_Y) -- this is the only place that aims
-        # at the enemy's own lane, and by now the approach is over.
-        target_y = target.world_y
-    elif is_dangerous(target.combat_phase) and dy < WALK_TO_ENEMY_LANE_SAFETY_Y:
-        # Still approaching a committed enemy and standing in its line of
-        # attack: leave the line, aiming at a *fixed* lane rather than a
-        # displacement from the actor's own, so repeated ticks converge on
-        # one point instead of stepping away forever.
-        lo, hi = _lane_bounds(context)
-        offset = (
-            WALK_TO_ENEMY_LANE_SAFETY_Y
-            if target.world_y >= (lo + hi) / 2
-            else -WALK_TO_ENEMY_LANE_SAFETY_Y
-        )
-        target_y = target.world_y + offset
-    else:
-        # Still approaching, and not standing in a committed enemy's line:
-        # hold the current lane.
-        #
-        # This branch used to aim at ``target.world_y`` -- converge onto the
-        # enemy's lane from however far away. Combined with the branch above
-        # that made the lane aim flip by a full
-        # ``2 * WALK_TO_ENEMY_LANE_SAFETY_Y`` every time the enemy's phase
-        # crossed ``is_dangerous``, which in a real fight is every few ticks:
-        # commit -> sidestep off the lane, recover -> converge back onto it,
-        # commit again -> back off. Measured on the tick harness as a steady
-        # UP/DOWN alternation for the whole approach, and the last source of
-        # the reported up/down darting after the target churn was fixed.
-        #
-        # Holding the lane removes the phase dependence entirely while still
-        # serving the original intent better than converging did: the actor
-        # simply never walks down the enemy's line in the first place, which
-        # is what the sidestep above was compensating for after the fact.
-        target_y = actor.world_y
+    target_y = _approach_lane_y(actor, target, context, alongside=dx <= stop_dx)
 
     return target_x, target_y
 
@@ -1006,7 +1040,7 @@ def state_machine_walk_to_near_enemy(
         actor.world_x,
         actor.world_y,
         target.world_x,
-        target.world_y if alongside else actor.world_y,
+        _approach_lane_y(actor, target, context, alongside=alongside),
         stop_dx=stop_dx,
         lane_slack=PUNCH_RANGE_Y,
         inner_dx=punch_usable_inner_x(actor.character_id),

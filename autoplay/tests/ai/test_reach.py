@@ -1115,15 +1115,29 @@ class GrabReasonsTests(unittest.TestCase):
             frozenset({GrabReason.ANTONIO_ON_PUNISH}),
         )
 
-    def test_a_ready_antonio_is_not_a_grab_opportunity(self) -> None:
-        # Walking into him before the punch lands is how the kick hits first.
+    def test_a_ready_antonio_is_still_worth_the_hold(self) -> None:
+        # The only alternative from contact range is the hop, and the hop is
+        # 45 committed airborne frames for ~2 damage -- the window every hit
+        # he still lands arrives in. reach.grab_would_connect keeps this
+        # from ever becoming a walk across the arena.
         myself = _myself(world_x=100, world_y=100, facing_left=False)
         antonio = _antonio(
             slot="obj09", world_x=130, world_y=100, combat_phase=CombatPhase.NORMAL,
             primary_state=1,
         )
 
-        self.assertEqual(reach.grab_reasons(set(), myself, antonio, [antonio]), frozenset())
+        self.assertEqual(
+            reach.grab_reasons(set(), myself, antonio, [antonio]),
+            frozenset({GrabReason.ANTONIO_WALK_IN}),
+        )
+
+    def test_the_walk_in_reason_ranks_under_the_punish_one(self) -> None:
+        from sor_autoplay.ai.priority import _GRAB_REASON_SCORE
+
+        self.assertLess(
+            _GRAB_REASON_SCORE[GrabReason.ANTONIO_WALK_IN],
+            _GRAB_REASON_SCORE[GrabReason.ANTONIO_ON_PUNISH],
+        )
 
     def test_the_brief_souther_hit_reaction_offers_the_hold(self) -> None:
         myself = _myself(world_x=160, world_y=100)
