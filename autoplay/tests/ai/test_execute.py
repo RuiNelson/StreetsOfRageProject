@@ -2003,13 +2003,47 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
         client.press_buttons.assert_called_once_with(player1=B | RIGHT, player2=0, frames=4)
 
     def test_faces_the_prop_before_hitting_it(self) -> None:
-        actor = _myself(world_x=120, world_y=90)
+        # In range (dx=-20) but facing right when the prop needs left: never
+        # combine the turn with the punch on the same press (see
+        # OpenBreakableFacingTests for why -- the ROM samples facing at the
+        # start of the swing, so a same-tick turn+B is a committed miss).
+        # No press yet; walk toward the correct side first.
+        actor = _myself(world_x=120, world_y=90, facing_left=False)
         prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
         verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
         gamepad, client = _gamepad()
 
         execute_verb(verb, {actor, prop}, gamepad)
 
+        client.press_buttons.assert_not_called()
+
+    def test_eventually_faces_and_hits_the_prop(self) -> None:
+        # Same start as above, driven to completion: walking toward the
+        # correct side (never a bare one-frame turn press -- measured live,
+        # that left the actor frozen at the same position and action byte
+        # for 60 seconds, see BREAKABLE_FACE_NUDGE_X) flips facing as a side
+        # effect, and only then does the punch fire, facing the prop.
+        actor = _myself(world_x=120, world_y=90, facing_left=False)
+        prop = Breakable(slot="obj09", world_x=100, world_y=90, type_id=0x40)
+        verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
+        gamepad, client = _gamepad()
+
+        for _ in range(30):
+            execute_verb(verb, {actor, prop}, gamepad)
+            if client.press_buttons.called:
+                break
+            mask = gamepad.held
+            dx = (WALK_PX_PER_TICK if mask & RIGHT else 0) - (
+                WALK_PX_PER_TICK if mask & LEFT else 0
+            )
+            dy = (WALK_PX_PER_TICK if mask & DOWN else 0) - (
+                WALK_PX_PER_TICK if mask & UP else 0
+            )
+            actor = replace(actor, world_x=actor.world_x + dx, world_y=actor.world_y + dy)
+            if dx:
+                actor = replace(actor, facing_left=dx < 0)
+        else:
+            self.fail("never punched the prop")
         client.press_buttons.assert_called_once_with(player1=B | LEFT, player2=0, frames=4)
 
     def test_side_pick_does_not_glitch_exactly_on_alignment(self) -> None:
@@ -2159,27 +2193,48 @@ class OpenBreakableFacingTests(unittest.TestCase):
     bit, so it never turned, and it threw ~2,300 of them into empty air over
     76 seconds. The same run had already broken an identical prop from 11px
     while facing it, so the position was fine; only the facing was not.
+
+    The fix is never a same-tick turn+punch (the ROM samples facing at the
+    start of the swing, so that is a committed miss) and never a bare
+    one-frame turn press either (measured live: an isolated press did not
+    reliably register at all, freezing the actor for as long as 60 seconds
+    with no enemy nearby to jostle it loose). ``_drive_to_punch`` runs the
+    real executor tick by tick, applying its own mask back to the actor's
+    position the way the game would, until it actually punches.
     """
 
-    def _punch_mask(self, actor_x: int, prop_x: int) -> int:
+    def _drive_to_punch(self, actor_x: int, prop_x: int) -> int:
         prop = Breakable(slot="obj09", world_x=prop_x, world_y=48, type_id=0x1F)
         actor = _myself(world_x=actor_x, world_y=56, facing_left=True)
         verb = OpenBreakable(actor_slot="P1", target_slot="obj09")
         gamepad, client = _gamepad()
+        stage = Stage(level_index=4, direction="right")
 
-        execute_verb(verb, {actor, prop, Stage(level_index=4, direction="right")}, gamepad)
-
-        return client.press_buttons.call_args.kwargs["player1"]
+        for _ in range(30):
+            execute_verb(verb, {actor, prop, stage}, gamepad)
+            if client.press_buttons.called:
+                return client.press_buttons.call_args.kwargs["player1"]
+            mask = gamepad.held
+            dx = (WALK_PX_PER_TICK if mask & RIGHT else 0) - (
+                WALK_PX_PER_TICK if mask & LEFT else 0
+            )
+            dy = (WALK_PX_PER_TICK if mask & DOWN else 0) - (
+                WALK_PX_PER_TICK if mask & UP else 0
+            )
+            actor = replace(actor, world_x=actor.world_x + dx, world_y=actor.world_y + dy)
+            if dx:
+                actor = replace(actor, facing_left=dx < 0)
+        self.fail("never punched the prop")
 
     def test_turns_toward_a_prop_inside_the_hysteresis_band(self) -> None:
         # dx of exactly DIRECTION_HYSTERESIS_X: the live stall's geometry.
-        mask = self._punch_mask(actor_x=2870, prop_x=2880)
+        mask = self._drive_to_punch(actor_x=2870, prop_x=2880)
 
         self.assertTrue(mask & B, f"expected a punch, got {mask:#x}")
         self.assertTrue(mask & RIGHT, f"expected to turn toward the prop, got {mask:#x}")
 
     def test_turns_the_other_way_for_a_prop_on_the_other_side(self) -> None:
-        mask = self._punch_mask(actor_x=2890, prop_x=2880)
+        mask = self._drive_to_punch(actor_x=2890, prop_x=2880)
 
         self.assertTrue(mask & LEFT, f"expected to turn toward the prop, got {mask:#x}")
 

@@ -113,6 +113,7 @@ def main() -> int:
                         "p1_action_state": myself.action_state if myself else None,
                         "p1_held_weapon_type": myself.held_weapon_type if myself else None,
                         "p1_combat_phase": myself.combat_phase.name if myself else None,
+                        "p1_held_mask": hex(gamepad.held),
                         "verb": type(verb).__name__ if verb else None,
                         "pending": sorted({type(v).__name__ for v in pending}),
                         "breakables": [

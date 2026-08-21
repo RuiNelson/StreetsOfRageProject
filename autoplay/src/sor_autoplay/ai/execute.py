@@ -139,6 +139,25 @@ HOLD_FRAMES = 4
 MOVE_DEADBAND_X = 5
 MOVE_DEADBAND_Y = 3
 
+# How far past MOVE_DEADBAND_X to aim a pure facing-correction nudge for
+# OpenBreakable (see state_machine_open_breakable's wrong-facing branch).
+# Small versus the punch band's own width (BREAKABLE_PUNCH_X and friends),
+# so a body already in smash range but facing away steps just enough to
+# clear the deadband and flip facing without walking back out of range --
+# unlike _walk_to_breakable_target's stop point, which is anchored near the
+# band's *outer* edge for the far-approach case and can be on the far side
+# of the actor's current, already-adequate position.
+# Must clear the goal-coverage test the router uses to judge "arrived": a
+# PointGoal is satisfied once the actor's own body rect (grown by its
+# tolerance) covers the point, and a small nudge is trivially already
+# covered by a body that is itself NOMINAL_BODY_W/H (16x16) wide -- measured
+# directly: an 8px nudge with a 5px tolerance read "already there" and
+# produced zero movement, freezing the actor exactly like the one-frame
+# press this replaced. 16 clears NOMINAL_BODY_W's own half-width (8) plus
+# MOVE_DEADBAND_X (5) with margin, and is still small next to the punch
+# band's own width (BREAKABLE_PUNCH_X and friends).
+BREAKABLE_FACE_NUDGE_X = 16
+
 # Hysteresis around dx == 0 for "which side of the target" decisions --
 # facing (_face_toward_mask) and the near/far pick inside
 # _walk_to_near_enemy_target. Both used to re-derive their answer from a raw
@@ -619,6 +638,36 @@ def _face_prop_mask(actor: Myself | Partner, prop: Breakable, context: Context) 
     stage = find(context, Stage)
     direction = stage.direction if stage is not None else "right"
     return LEFT_MASK if direction == "left" else RIGHT_MASK
+
+
+def _facing_prop(actor: Myself | Partner, prop: Breakable) -> bool:
+    """Whether a forward strike from here would actually be aimed at ``prop``.
+
+    ``in_smash_range`` is origin-to-origin and ignores facing, so a body
+    standing in range but looking the other way still reads as "punch now".
+    The ROM samples facing at the start of the attack, and B plus a turn on
+    the very same press is sampled as the *current* (pre-turn) facing -- a
+    committed miss. Measured live: Blaze at dx=13 from a type-$11 booth,
+    facing away, pressed B+RIGHT every tick and never connected.
+
+    A prior fix answered this with a bare one-frame turn press
+    (``_press(gamepad, face, frames=1)``) before punching. Measured live
+    over a multi-minute run that press did not reliably register at all --
+    caught frozen at the same position and action byte for **60 seconds**
+    with no enemy nearby to jostle it loose. Every reliable turn elsewhere
+    in this codebase holds the direction continuously through
+    ``_hold_steered`` instead of an isolated press; see
+    ``state_machine_open_breakable``'s wrong-facing branch, which walks the
+    last bit toward the smash pocket (facing flips as a side effect of
+    holding a direction to walk in it) rather than trying to turn in place.
+    """
+
+    dx = prop.world_x - actor.world_x
+    if dx > 0:
+        return not actor.facing_left
+    if dx < 0:
+        return actor.facing_left
+    return True
 
 
 def _back_direction_mask(actor: Myself | Partner) -> int:
@@ -2137,6 +2186,28 @@ def state_machine_open_breakable(
     of. It is the opposite trade from an enemy approach, and for the opposite
     reason: the target holds still.
 
+    In range but facing the wrong way (``_facing_prop``) is answered by a
+    small routed walk toward the correct side rather than turning in place:
+    this game has no turn-without-walking input, and every reliable facing
+    change elsewhere in this codebase is a side effect of holding a
+    direction through ``_hold_steered``, never a bare press -- measured
+    live, a one-frame turn-only press left the actor frozen at the same
+    position and action byte for 60 seconds. The nudge target is
+    deliberately *not* ``_walk_to_breakable_target``'s far-approach pocket:
+    that stop point is anchored near the band's outer edge for the "still
+    walking in" case and can sit on the far side of a position that is
+    already perfectly good to strike from, which would walk the actor back
+    out of range just to fix facing. ``BREAKABLE_FACE_NUDGE_X`` is sized
+    only to clear the movement deadband, small enough to stay inside the
+    punch band it is already standing in -- but a raw straight-line step
+    that size is not itself obstacle-aware, and a tight corridor (stage 5's
+    2x2 prop fence, 16px between rows) can put another prop's push-back box
+    right there: caught live by ``Stage5PropFenceTests`` walking a nudge
+    straight into the neighbour's wall. Routed the same way every other
+    small positional correction in this file is (``_retreat_from_danger_
+    target``'s idiom: a ``PointGoal`` plus ``nav.obstacle_sets``), so the
+    pathfinder steps around a solid instead of into it.
+
     The crate is exempt from its own obstacle set (``ignore``) -- it is the
     destination, not something to route around -- while every *other* crate
     and pit still is, which is what replaces the hand-written around-path
@@ -2148,7 +2219,56 @@ def state_machine_open_breakable(
     if actor is None or target is None:
         gamepad.release()
         return
+
     if in_smash_range(actor, target):
+        if not _facing_prop(actor, target):
+            face = _face_prop_mask(actor, target, context)
+            toward_target = BREAKABLE_FACE_NUDGE_X if face == RIGHT_MASK else -BREAKABLE_FACE_NUDGE_X
+            # A step toward the target is also a step toward the punch
+            # band's own inner dead zone -- and right at
+            # DIRECTION_HYSTERESIS_X, which is exactly punch_usable_inner_x
+            # for Axel, there is no headroom left at all. Stepping in
+            # anyway crossed below the true inner edge, in_smash_range's
+            # own recovery walked straight back out to the edge it just
+            # left (undoing the very turn that recovery was answering), and
+            # the two alternated forever -- caught live driving the exact
+            # dx == DIRECTION_HYSTERESIS_X geometry the original stall had.
+            # Backing away first (away from the target, which does not
+            # touch facing since it is the same direction the actor is
+            # already -- wrongly -- facing) buys room for a real toward-
+            # target step next tick that lands *at* the inner edge rather
+            # than past it.
+            headroom = abs(target.world_x - actor.world_x) - punch_usable_inner_x(
+                actor.character_id
+            )
+            nudge_x = toward_target if headroom >= BREAKABLE_FACE_NUDGE_X else -toward_target
+            nudge_x_target = actor.world_x + nudge_x
+            nudge_goal = PointGoal(Point(nudge_x_target, actor.world_y), tolerance=MOVE_DEADBAND_X)
+            body, origin = nav.actor_footprint(actor)
+            solids, dangers = nav.obstacle_sets(context, body=body, origin=origin)
+
+            def face_nudge_straight_line() -> int:
+                return _movement_mask(
+                    context,
+                    actor.world_x,
+                    actor.world_y,
+                    nudge_x_target,
+                    actor.world_y,
+                    ignore_slots=frozenset({target.slot}),
+                )
+
+            _hold_steered(
+                gamepad,
+                _routed_mask(
+                    context,
+                    actor,
+                    nudge_goal,
+                    solids=solids,
+                    dangers=dangers,
+                    fallback=face_nudge_straight_line,
+                ),
+            )
+            return
         _press(
             gamepad,
             PUNCH_MASK | _face_prop_mask(actor, target, context),
