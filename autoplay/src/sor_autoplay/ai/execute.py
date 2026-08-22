@@ -854,34 +854,48 @@ def _approach_lane_y(
     # Leave the line, aiming at a *fixed* lane rather than a displacement
     # from the actor's own, so repeated ticks converge on one point instead
     # of stepping away forever.
-    #
-    # Which side: the one the actor is **already on**, so the walk never
-    # crosses the enemy's own lane to reach safety. Picking it from the
-    # lane's midpoint instead -- which is what this did, for the stability
-    # reason below -- puts the aim point on the far side whenever the enemy
-    # sits between the actor and the middle of the band, and the actor then
-    # walks straight through the one lane it is trying to leave. Simulated
-    # over the real executor: an approach starting 20px clear of Antonio
-    # crossed to 5px and then 2px of his lane while still 130px away on X,
-    # which is his `$16EAE` kick window with the lane gate satisfied.
-    #
-    # The midpoint rule was there because ``actor.world_y`` vs
-    # ``target.world_y`` crosses zero on a couple of px of walk jitter while
-    # both bodies converge. That is answered here by a deadband instead: an
-    # actor within LANE_SIDE_DEADBAND_Y of the enemy's lane has no side worth
-    # reading, and only then does the midpoint (or the room available in the
-    # band) decide.
     lo, hi = _lane_bounds(context)
-    width = (
-        ANTONIO_APPROACH_LANE_Y
-        if _holds_lane_offset_while_closing(target)
-        else WALK_TO_ENEMY_LANE_SAFETY_Y
-    )
+    if not _holds_lane_offset_while_closing(target):
+        # Side from the lane band's own midpoint, which does not move tick to
+        # tick -- ``actor.world_y`` vs ``target.world_y`` crosses zero on a
+        # couple of px of walk jitter while both bodies converge, and the
+        # live symptom of reading it was the actor darting up and down by a
+        # full 2 * WALK_TO_ENEMY_LANE_SAFETY_Y against one barely-moving
+        # enemy.
+        #
+        # The Antonio branch below reads the side instead, and measurably
+        # should, but that is **scoped to him on purpose**: it is measured on
+        # his fight and nowhere else. Souther crosses lanes constantly and
+        # grunts arrive in crowds, so a side that can flip is a real risk
+        # there and an unmeasured one -- see autoplay/CLAUDE.md.
+        offset = (
+            WALK_TO_ENEMY_LANE_SAFETY_Y
+            if target.world_y >= (lo + hi) / 2
+            else -WALK_TO_ENEMY_LANE_SAFETY_Y
+        )
+        return int(target.world_y + offset)
+
+    # Antonio: the side is the one the actor is **already on**, so the walk
+    # never crosses the lane it is leaving. The midpoint rule above puts the
+    # aim point on the far side whenever he sits between the actor and the
+    # middle of the band, and the actor then walks straight through his kick
+    # lane -- simulated over the real executor, an approach starting 20px
+    # clear crossed to 5px and then 2px while still 130px away on X.
+    #
+    # The jitter the midpoint rule exists for is answered by a deadband: an
+    # actor within LANE_SIDE_DEADBAND_Y of his lane has no side worth
+    # reading, and only then does the room in the band decide.
     dy_signed = actor.world_y - target.world_y
     if abs(dy_signed) >= LANE_SIDE_DEADBAND_Y:
-        offset = width if dy_signed > 0 else -width
+        offset = (
+            ANTONIO_APPROACH_LANE_Y if dy_signed > 0 else -ANTONIO_APPROACH_LANE_Y
+        )
     else:
-        offset = width if target.world_y < (lo + hi) / 2 else -width
+        offset = (
+            ANTONIO_APPROACH_LANE_Y
+            if target.world_y < (lo + hi) / 2
+            else -ANTONIO_APPROACH_LANE_Y
+        )
     aim = target.world_y + offset
     if not lo <= aim <= hi:
         # No room that side of him; the band's other side is all there is,
