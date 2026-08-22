@@ -151,10 +151,39 @@ offset, so the *nearest acceptable arrival* is 28px clear instead of 16 --
 | | hits taken (20 damage each) | hops | suplexes |
 | --- | --- | --- | --- |
 | before the lane fix | 3, 2, 2, 6, 3, 3, 2 (mean 3.0, max 6) | 1, 1, 1, 3, 8, 3, 0 | median 2 |
-| after | 3, 1, 1, 1, 2, 1, 2 (mean 1.6, **max 3**) | 4, 3, 5, 7, 4, 4, 4 | median 2 |
+| after | 3, 1, 1, 1, 2, 1, 2 (mean 1.6, max 3) | 4, 3, 5, 7, 4, 4, 4 | median 2 |
 
-Four hits kill from full health, so the max is the number that matters: 6
-became 3.
+Four hits kill from full health, so the max is the number that matters.
+**Over ten fights rather than seven** (three more on the same code path) it
+is `[3,1,1,1,2,1,2,2,2,4]`: mean 1.9, **max 4**, and the run that took four
+survived on a health pickup at 20 HP. The "max 3" above is the smaller
+sample talking -- three runs of the identical code came back 40 / 40 / 60
+against the first seven's 20-60, which is the noise floor of this fight and
+the reason nothing here is decided on fewer than five runs a side.
+
+**Where the hits actually land**, over those ten fights: every one of the 19
+arrives with Antonio in primary `$02`, and the five ticks before each read
+`1, 1, 1, 2, 2` -- he goes from ordinary state to committed kick and
+connects inside about two agent ticks, four game frames. `DodgeAntonioKick`
+fires on `strike_is_committed()`, which is that same tick, and a hop needs
+~45 frames to matter: **the kick cannot be answered reactively**, only by
+not being inside the gate when it can fire, which is what the lane offset
+buys. And **7 of the 19 land in the first three seconds** -- at `t=0.1` and
+`t=1.9` in run after run, which is his entrance with the actor still
+finishing an animation from the wave before. That is the largest single
+cluster and the obvious next thing to look at.
+
+**Souther, for contrast, is the weak fight now** (one run each, so read it
+as a shape rather than a number). `tools/boss_fight.py --level 2 --boss-type
+0x55`: killed, but 1-2 lives lost and 90-180 s, with **73-82% of the fight's
+ticks spent walking** and about 40 attack ticks in total -- 35 punches, 3
+knees, no suplex at all. The AI wins him by attrition, not by a plan. The
+near-side lane rule made that visibly worse while it applied to him (2 lives
+/ 177 s / 9 hits against 1 / 89 s / 6 after scoping it back to Antonio),
+which is what the scoping was for. Whatever is done for him next should
+start from why the hold chain almost never fires: `SOUTHER_ON_PUNISH` is
+keyed on the *brief* primary `$03` alone, deliberately, and the walk-in may
+simply not be converting inside it.
 
 **The trade is real and it went the other way on hops**, and the reason is
 worth keeping. Antonio closes lane himself, so an approach that holds its
