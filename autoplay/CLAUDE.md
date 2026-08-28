@@ -173,6 +173,23 @@ buys. And **7 of the 19 land in the first three seconds** -- at `t=0.1` and
 finishing an animation from the wave before. That is the largest single
 cluster and the obvious next thing to look at.
 
+**The arena's food is left where it is while he is alive (user):** "não
+comer a comida, a maioria dos jogadores precisa dela depois de enfrentar os
+inimigos do 1º stage". `decide._food_is_spoken_for` drops every
+`HealthPickup` from `could_walk_to_pickup`'s candidates while a live Antonio
+is on screen -- food only (a `LifePickup` is still taken) and only until he
+dies. It also overrides `_boss_attack_gate_is_live`'s old "health is the one
+thing worth a kick" exemption for him.
+
+This was worth checking rather than assuming, because the AI had been
+leaning on that pickup: over the ten fights above, the one that took four
+hits survived only by eating at 20 HP. Five fights with the food left alone:
+killed 5/5, **no deaths**, hits taken `[1,2,2,2,3]` (mean 2.0, max 3)
+against the ten-fight `[3,1,1,1,2,1,2,2,2,4]` (mean 1.9, max 4), and 19.6 s
+mean against 22.8. So the crutch cost nothing to remove -- and the rule
+holds cleanly: the only heal in the five landed at `t=12.6` with
+`boss_hp=0`, after he was already dead.
+
 **Souther, for contrast, is the weak fight now** (one run each, so read it
 as a shape rather than a number). `tools/boss_fight.py --level 2 --boss-type
 0x55`: killed, but 1-2 lives lost and 90-180 s, with **73-82% of the fight's

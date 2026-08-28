@@ -1368,6 +1368,25 @@ def could_walk_to_weapon(context: Context) -> Context:
     return verbs
 
 
+def _food_is_spoken_for(context: Context) -> bool:
+    """Whether the food on this screen must be left where it is.
+
+    True while a live Antonio is on screen (user): the round-1 arena's food
+    is what a player who has just fought the whole street arrives *needing*,
+    and the boss fight is not allowed to spend it. Measured, this is not a
+    small thing either -- across ten fights the one that took four hits (a
+    full bar) survived only by eating at 20 HP, so the AI was leaning on the
+    pickup as a crutch and the numbers were flattered by it.
+
+    Deliberately about the pickup, not the walk: `_boss_attack_gate_is_live`
+    already refuses *other* item detours inside his kick window and used to
+    exempt health from that as "the one thing worth a kick". This overrides
+    that exemption for him -- the fight has to be survivable without it.
+    """
+
+    return any(not antonio.is_defeated for antonio in find_all(context, Antonio))
+
+
 def _pickup_is_useful(actor: PlayableCharacter, pickup: Pickup) -> bool:
     if isinstance(pickup, HealthPickup):
         missing = PLAYER_MAX_HEALTH - actor.health
@@ -1404,7 +1423,13 @@ def could_walk_to_pickup(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
-        useful = [p for p in pickups if _pickup_is_useful(actor, p)]
+        leave_the_food = _food_is_spoken_for(context)
+        useful = [
+            p
+            for p in pickups
+            if _pickup_is_useful(actor, p)
+            and not (leave_the_food and isinstance(p, HealthPickup))
+        ]
         # One candidate per useful pickup -- priority.py's per-target
         # _emergency_walk_to_pickup already ranks by type/urgency, so no
         # selection belongs here.

@@ -795,9 +795,11 @@ def _emergency_walk_to_pickup(verb: WalkToPickup, context: Context) -> int:
         not isinstance(pickup, HealthPickup)
         and _boss_attack_gate_is_live(context, verb.actor_slot)
     ):
-        # Health is the one thing worth a kick -- and only while it is worth
-        # a kick, which _emergency_walk_to_pickup's own critical tier below
-        # already decides.
+        # Health used to be exempt here as "the one thing worth a kick".
+        # It no longer needs the exemption: against Antonio the food is not
+        # taken at all (decide._food_is_spoken_for), so no HealthPickup verb
+        # reaches this function during his fight. The isinstance check stays
+        # for every other boss, where the exemption still means what it said.
         return _EMERGENCY_DEFAULT
     if pickup is None:
         # Target gone this tick -- same answer every other _emergency_* gives

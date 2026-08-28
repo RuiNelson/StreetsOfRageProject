@@ -63,7 +63,7 @@ from sor_autoplay.ai.tokens import (
 )
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
 from sor_autoplay.ai.tokens import Breakable, Pit, Projectile
-from sor_autoplay.ai.tokens import HealthPickup, Weapon
+from sor_autoplay.ai.tokens import HealthPickup, LifePickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
     HandleContinueMenu,
@@ -1328,6 +1328,92 @@ class CouldGrabEnemyTests(unittest.TestCase):
         context: set[Token] = {myself, front, behind, AnimationInProgress(slot="P1")}
 
         self.assertEqual(could_grab_enemy(context), set())
+
+
+class FoodDuringTheAntonioFightTests(unittest.TestCase):
+    """The round-1 arena's food is left where it is while he is alive (user).
+
+    A player who has just fought the whole street arrives at the boss needing
+    that food; the fight is not allowed to spend it. Measured: across ten
+    fights the one that took four hits -- a full bar -- survived only by
+    eating at 20 HP.
+    """
+
+    def _apple(self):
+        return HealthPickup(
+            slot="obj02", world_x=140, world_y=100, pickup_type=0x4B, health_delta=80
+        )
+
+    def _live_antonio(self):
+        return _antonio(
+            world_x=200,
+            world_y=100,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=80,
+            boss_dist_lane=0,
+        )
+
+    def test_hurt_actor_still_leaves_the_food_while_antonio_lives(self) -> None:
+        actor = make_myself(world_x=100, world_y=100, health=20, health_percent=25.0)
+        context: set[Token] = {
+            actor,
+            self._apple(),
+            self._live_antonio(),
+            CameraRange(left=0, right=400, top=0, bottom=200),
+        }
+
+        self.assertEqual(could_walk_to_pickup(context), set())
+
+    def test_the_same_food_is_taken_once_he_is_gone(self) -> None:
+        actor = make_myself(world_x=100, world_y=100, health=20, health_percent=25.0)
+        context: set[Token] = {
+            actor,
+            self._apple(),
+            CameraRange(left=0, right=400, top=0, bottom=200),
+        }
+
+        self.assertEqual(
+            could_walk_to_pickup(context),
+            {WalkToPickup(actor_slot="P1", target_slot="obj02")},
+        )
+
+    def test_a_defeated_antonio_does_not_hold_the_food(self) -> None:
+        actor = make_myself(world_x=100, world_y=100, health=20, health_percent=25.0)
+        dead = _antonio(
+            world_x=200,
+            world_y=100,
+            health=0xFFFF,
+            combat_phase=CombatPhase.DEATH,
+            primary_state=5,
+        )
+        context: set[Token] = {
+            actor,
+            self._apple(),
+            dead,
+            CameraRange(left=0, right=400, top=0, bottom=200),
+        }
+
+        self.assertEqual(
+            could_walk_to_pickup(context),
+            {WalkToPickup(actor_slot="P1", target_slot="obj02")},
+        )
+
+    def test_a_life_pickup_is_still_taken_during_his_fight(self) -> None:
+        # The rule is about *food*, not about every collectible on the floor.
+        actor = make_myself(world_x=100, world_y=100)
+        life = LifePickup(slot="obj03", world_x=140, world_y=100, pickup_type=0x4C)
+        context: set[Token] = {
+            actor,
+            life,
+            self._live_antonio(),
+            CameraRange(left=0, right=400, top=0, bottom=200),
+        }
+
+        self.assertEqual(
+            could_walk_to_pickup(context),
+            {WalkToPickup(actor_slot="P1", target_slot="obj03")},
+        )
 
 
 class CouldHoldActionsTests(unittest.TestCase):
