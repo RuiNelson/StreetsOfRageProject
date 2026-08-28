@@ -1,0 +1,90 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+# Put the AI in front of one round's boss, with nothing else on screen.
+#
+# Starts the host in turbo and drives autoplay through the whole approach:
+# navigate the menus (--reach-gameplay), jump to the round (--start-level),
+# and keep every ordinary enemy family swept for the rest of the session
+# (--kill-street-enemies), so the only thing left to fight is the boss.
+#
+# Sweeping is not optional for boss work (see autoplay/CLAUDE.md): a boss
+# fight measured with the street waves alive mixes two different questions --
+# how the AI fights the boss, and how much health the level left it -- and
+# neither answer comes out of the run.
+#
+# Usage:
+#   ./scripts/go_to_boss <1-8> [extra autoplay args...]
+#   ./scripts/go_to_boss_1                  # same thing, per round
+#   ./scripts/go_to_boss_2 --agent-p2
+#
+# The numbered wrappers next to this file are the intended entry points;
+# this is the one place the shared flags live so eight copies cannot drift.
+#
+# The host is started in the background and killed again when this script
+# exits, however it exits -- including Ctrl-C. Leaving a stray `sor` holding
+# the port is what makes the *next* run fail to connect.
+
+SCRIPT_DIR="${0:A:h}"
+META_ROOT="${SCRIPT_DIR:h}"
+
+# Kept identical to scripts/both_turbo, which autoplay/CLAUDE.md names as the
+# source of truth: --turbo 4 runs the VDP at 60x4 Hz and --poll-ms 8 is ~2
+# game frames at that rate. Leaving the default 33 ms under turbo would make
+# the AI see every eighth frame and miss holds, jumps and incoming attacks.
+TURBO=4
+POLL_MS=8
+PORT=7777
+CHARACTER=blaze
+
+if (( $# < 1 )); then
+    print -u2 "usage: ${0:t} <level 1-8> [extra autoplay args...]"
+    exit 2
+fi
+LEVEL="$1"
+shift
+
+if [[ ! "$LEVEL" =~ '^[1-8]$' ]]; then
+    print -u2 "${0:t}: level must be 1-8, got '$LEVEL'"
+    exit 2
+fi
+
+host_pid=""
+cleanup() {
+    if [[ -n "$host_pid" ]] && kill -0 "$host_pid" 2>/dev/null; then
+        kill "$host_pid" 2>/dev/null || true
+        wait "$host_pid" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+"$META_ROOT/scripts/run" --turbo "$TURBO" --lang en --debugUtils --port "$PORT" --silent &
+host_pid=$!
+
+# Wait for the host to actually listen rather than sleeping a guessed amount:
+# autoplay's first connection fails outright if it arrives too early.
+for _ in {1..60}; do
+    if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+        break
+    fi
+    if ! kill -0 "$host_pid" 2>/dev/null; then
+        print -u2 "${0:t}: host exited before it started listening"
+        exit 1
+    fi
+    sleep 0.5
+done
+
+# Foreground, and deliberately not exec'd. exec would replace this shell and
+# take the EXIT trap with it, leaving `sor` on the port after the HUD is
+# closed -- which is the case that matters, since quitting the HUD with
+# Esc/Q is how a run normally ends and the next run needs that port back.
+# Ctrl-C is covered by the shell itself: SIGINT reaches the whole foreground
+# process group, so host and agent go down together.
+"$META_ROOT/scripts/autoplay" \
+    --poll-ms "$POLL_MS" \
+    --port "$PORT" \
+    --agent-p1 \
+    --reach-gameplay "$CHARACTER" \
+    --start-level "$LEVEL" \
+    --kill-street-enemies \
+    "$@"

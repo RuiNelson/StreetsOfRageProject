@@ -394,7 +394,10 @@ poll cadence so the agent still samples about two game frames per tick.
 whenever the game is launched for debug. Only start a live session when
 necessary; prefer the `autoplay` unit tests for logic changes.
 
-**Testing the AI against a boss (user):** always run with the debug flags
+**Testing the AI against a boss (user):** the meta-repo's
+`scripts/go_to_boss_1` … `go_to_boss_8` do exactly this and are the intended
+entry point — turbo host, matching poll cadence, `--start-level N` and
+`--kill-street-enemies` in one command. Always run with the debug flags
 that kill every enemy family except the boss -- `tools/boss_fight.py` and
 `tools/antonio_diag.py` already do this through
 `DebugScenario(kill_street_enemies=True)`, and it is not optional. A boss

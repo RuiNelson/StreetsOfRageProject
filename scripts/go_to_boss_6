@@ -1,0 +1,10 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+# Round 6: Bongo (type $57), then a Souther pair (type $55)
+#
+# Opens the host in turbo and drives autoplay through the menus, the jump to
+# round 6, and a continuous sweep of every non-boss enemy family. See
+# ./scripts/go_to_boss for the shared flags and why the sweep is required.
+
+exec "${0:A:h}/go_to_boss" 6 "$@"

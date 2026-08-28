@@ -221,6 +221,36 @@ Keep `scripts/both_turbo` as the source of truth for these flags. If the
 wrapper's turbo factor or `--poll-ms` changes, update this section to
 match.
 
+### Going straight to a boss
+
+`scripts/go_to_boss_1` … `scripts/go_to_boss_8` put the AI in front of one
+round's boss with nothing else on screen: same turbo host and poll cadence as
+`both_turbo`, plus `--start-level N` and `--kill-street-enemies`, so autoplay
+navigates the menus, jumps to the round, and keeps every ordinary family
+swept for the rest of the session.
+
+```bash
+./scripts/go_to_boss_1            # round 1, Antonio
+./scripts/go_to_boss_2 --agent-p2 # extra args pass through to autoplay
+./scripts/go_to_boss 5            # the shared implementation, by level
+```
+
+| Script | Round | Boss |
+| --- | --- | --- |
+| `go_to_boss_1` | 1 | Antonio (`$56`) |
+| `go_to_boss_2` | 2 | Souther (`$55`) |
+| `go_to_boss_3` | 3 | Abadede (`$30`) |
+| `go_to_boss_4` | 4 | Bongo (`$57`) |
+| `go_to_boss_5` | 5 | Onihime & Yasha (`$58` pair) |
+| `go_to_boss_6` | 6 | Bongo (`$57`), then a Souther pair (`$55`) |
+| `go_to_boss_7` | 7 | none — the ELC stream has no terminal boss section |
+| `go_to_boss_8` | 8 | boss rush, `$56` → `$55` → `$30` → `$57` → `$58` → Mr. X (`$35`) |
+
+The numbered scripts are one line each; the turbo/poll/port flags live only
+in `scripts/go_to_boss`, so eight copies cannot drift apart. Sweeping is not
+optional for boss work — see `autoplay/CLAUDE.md`. Quitting the HUD (Esc/Q)
+also shuts the host down, so the port is free for the next run.
+
 ## Validation and handoff
 
 - Documentation-only changes: check Markdown structure, links, paths, command

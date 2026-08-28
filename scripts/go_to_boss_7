@@ -1,0 +1,13 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+# Round 7: no terminal boss family -- round 7 is the elevator stage, and the ELC
+# stream has no boss section at its end (ai-analysis/enemy-ai.md). The script
+# exists so the set is complete and the round is still reachable with the
+# street swept; do not expect a boss to show up.
+#
+# Opens the host in turbo and drives autoplay through the menus, the jump to
+# round 7, and a continuous sweep of every non-boss enemy family. See
+# ./scripts/go_to_boss for the shared flags and why the sweep is required.
+
+exec "${0:A:h}/go_to_boss" 7 "$@"
