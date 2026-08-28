@@ -190,6 +190,47 @@ mean against 22.8. So the crutch cost nothing to remove -- and the rule
 holds cleanly: the only heal in the five landed at `t=12.6` with
 `boss_hp=0`, after he was already dead.
 
+**The entrance, and three attempts at it that all measured worse.** User:
+"a IA começa logo por levar dois pontapés evitáveis. Enquanto espera pelo
+Boss, devia ficar no meio da camara visível e estar aware de inimigos fora
+da camara visível." The diagnosis is right and the per-tick trace backs both
+halves of it -- but every implementation tried so far is worse than shipping
+nothing, so **the baseline stands and this is an open item, not a fix**.
+
+What the trace shows (`tools/antonio_diag.py`, round 1):
+
+- Antonio spends **21% of a fight's ticks at lane `0`**, below
+  `LANE_Y_MIN` -- the AI's own suplex throws him there. `reach.live_enemies`
+  drops anything failing `in_playable_lane`, so he stops being a live enemy
+  at all, nothing blocks `could_walk_to_advance_stage`, and the actor walks
+  off down the street (454 ticks of it in one fight, plus 91 fetching a
+  weapon) while he gets up and comes back. The blind spot is real.
+
+Three fixes, each measured against the shipped baseline of
+killed 5/5, no deaths, hits `[1,2,2,2,3]`:
+
+1. **exempting a `Boss` from the lane filter** (awareness). 160 / 40 / 40
+   damage with a life lost. The failure mode is not the old walk-off but a
+   *freeze*: he is a live enemy at a lane no route reaches, so
+   `could_walk_to_near_enemy` produces nothing either and the tick ends with
+   **no verb at all** -- 4731 idle ticks in the 74 s run. The filter's own
+   docstring already warned about this ("commits to a target it can never
+   connect with");
+2. **a `HoldArenaCentre` verb** (wait in the middle of the camera) on top of
+   1, gated on off-camera *or* off-lane. 60 / 60 / 40, and the gate was
+   wrong: `CameraRange` is the walk clamp (`$43AA`), not the visible screen,
+   and a boss is not clamped by it, so he read as off-camera in plain sight;
+3. the same verb gated on **off-lane only**, and ranked above the
+   boss-raised chase (30 vs 28, after 18 proved to lose to it). Worse still:
+   2 of 3 runs lost a life, one fight ran 74 s with the wait taking 3423 of
+   8055 ticks. Waiting is passive, and passivity against a boss who keeps
+   coming back is more kicks, not fewer.
+
+The honest reading is that "wait in the middle" needs a *timer or a trigger*
+-- wait for his re-entry, then move -- rather than a standing preference,
+and that the lane-0 window needs a verb that does something useful in it.
+Neither is written yet.
+
 **Souther, for contrast, is the weak fight now** (one run each, so read it
 as a shape rather than a number). `tools/boss_fight.py --level 2 --boss-type
 0x55`: killed, but 1-2 lives lost and 90-180 s, with **73-82% of the fight's
