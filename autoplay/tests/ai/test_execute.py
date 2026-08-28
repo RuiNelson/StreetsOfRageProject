@@ -129,50 +129,33 @@ def _enemy(*, world_x: int = 0, world_y: int = 0) -> Enemy:
     )
 
 
-def _live_antonio(*, world_x: int, world_y: int) -> Antonio:
-    return Antonio(
-        slot="obj00",
-        type_id=0x56,
-        world_x=world_x,
-        world_y=world_y,
-        health=24,
-        combat_phase=CombatPhase.NORMAL,
-        targets_player=1,
-        facing_left=True,
-        primary_state=1,
-    )
-
-
 class BreakableFacingNudgeAtTheCameraClampTests(unittest.TestCase):
     """In smash range, facing away, and pinned against the walk clamp.
 
     Recorded live on round 1 (``tools/breakable_diag.py``): the actor stood
     at world x=2458 beside a type-``$11`` booth at 2472 for **6919
     consecutive ticks** with the gamepad mask ``0x0`` on every one of them,
-    ``OpenBreakable`` winning every tick and the prop untouched. The same
-    freeze cost a whole measurement run its boss fight, stalling ~50 s at
-    x=3656.
+    ``OpenBreakable`` winning every tick and the prop untouched.
 
     The facing nudge prefers to back *away* first (it buys room for a clean
     toward-step), but ``$43AA`` clamps the player to ``camera_x + $20``, so
-    at that edge the step is a vector ``_clamp_mask`` strips -- after
+    at the edge that step is a vector ``_clamp_mask`` strips -- after
     ``_routed_mask`` has already decided not to use its fallback, because
-    what failed was the mask and not the goal. This branch has to end in a
+    what failed was the mask and not the goal. The branch has to end in a
     held direction or facing can never change.
-
-    It needs **no enemies**: with one nearby the actor moves on the lane axis
-    and the geometry breaks by itself (user), which is why this reproduces in
-    a swept run and hides in a busy one.
     """
 
-    def _run(self, camera_left: int) -> int:
-        prop = Breakable(
+    def _prop(self):
+        return Breakable(
             slot="obj02",
             world_x=2472,
             world_y=32,
             type_id=0x11,
             hitbox=Hitbox(x0=2456, x1=2488, y0=22, y1=42, z0=0, z1=32),
         )
+
+    def _run(self, camera_left: int) -> int:
+        prop = self._prop()
         actor = _myself(world_x=2458, world_y=48, facing_left=True)
         context = {
             actor,
@@ -191,11 +174,63 @@ class BreakableFacingNudgeAtTheCameraClampTests(unittest.TestCase):
         self.assertTrue(mask & RIGHT, "the prop is to the right; facing it is the point")
 
     def test_still_backs_away_first_with_room_to_do_it(self) -> None:
-        # Unchanged away from the clamp: backing off is the preferred half of
-        # the nudge and only the blocked case now overrides it.
+        # Unchanged away from the clamp: the headroom trick is the preferred
+        # half of the nudge and only the blocked case now overrides it.
         mask = self._run(camera_left=2300)
 
         self.assertTrue(mask & LEFT)
+
+
+class AntonioLaneBreakTests(unittest.TestCase):
+    """The uncommitted half of ``DodgeAntonioKick``: walk out of his gate.
+
+    Also the regression test for the class of bug that only showed live --
+    the executor's uncommitted branch had never been driven by a unit test,
+    so a missing import in it reached a real fight before anything caught it.
+    """
+
+    def test_steps_away_from_his_lane(self) -> None:
+        actor = _myself(world_x=100, world_y=60)
+        antonio = _live_antonio(world_x=140, world_y=54)
+        verb = DodgeAntonioKick(
+            actor_slot="P1", target_slot="obj00", committed=False
+        )
+        gamepad, _client = _gamepad()
+
+        context = {actor, antonio, CameraRange(left=0, right=320, top=0, bottom=112)}
+        _settle(verb, context, gamepad)
+
+        # Actor is below him, so it steps further down, and never jumps.
+        self.assertTrue(gamepad.held & DOWN)
+        self.assertFalse(gamepad.held & C)
+
+    def test_a_committed_kick_still_jumps(self) -> None:
+        actor = _myself(world_x=100, world_y=60)
+        antonio = _live_antonio(world_x=140, world_y=54)
+        verb = DodgeAntonioKick(actor_slot="P1", target_slot="obj00", committed=True)
+        gamepad, client = _gamepad()
+
+        execute_verb(
+            verb,
+            {actor, antonio, CameraRange(left=0, right=320, top=0, bottom=112)},
+            gamepad,
+        )
+
+        self.assertTrue(client.press_buttons.called or client.hold_buttons.called)
+
+
+def _live_antonio(*, world_x: int, world_y: int) -> Antonio:
+    return Antonio(
+        slot="obj00",
+        type_id=0x56,
+        world_x=world_x,
+        world_y=world_y,
+        health=24,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=1,
+        facing_left=True,
+        primary_state=1,
+    )
 
 
 def _gamepad() -> tuple[VirtualGamepad, MagicMock]:

@@ -1110,11 +1110,27 @@ def could_jump_attack(context: Context) -> Context:
 
 
 def could_dodge_antonio_kick(context: Context) -> Context:
-    """Hop a kick or dash that Antonio has already locked in.
+    """Answer his kick -- by hopping the one already locked in, or by
+    stepping out of the gate that has not fired yet.
 
     One candidate per live Antonio whose kick gate (``reach.antonio_will_
-    kick``) is live and who is in primary ``$02`` or tactical ``$08``. A
-    predicted window alone is the punch-then-grab opener, not a dodge.
+    kick``) is live. ``committed`` splits the two cases and they take
+    opposite inputs: primary ``$02`` or tactical ``$08`` is a strike already
+    coming and gets the hop, while a merely *satisfiable* gate gets a pure
+    lane step that denies it -- ``$16EAE`` needs the target within ``$10``
+    (16px) of his lane, so 16px of lane is the whole difference between a
+    kick and no kick.
+
+    The uncommitted half used to be refused outright ("a predicted window is
+    the opener, not a dodge"), on the reasoning that stepping out while he is
+    still choosing is a dodge loop that never reaches grab range. What that
+    missed is how much warning the gate actually gives: measured over nine
+    onsets in one fight, ``antonio_will_kick`` was true for **9-12 ticks**
+    before seven of them, with the actor sitting at 7px of lane and hopping
+    straight into it. `reach.can_break_antonio_kick_lane` is what keeps the
+    loop from returning -- it produces nothing once the actor is already
+    clear, so the step ends by itself.
+
     Suppressed once the actor is already airborne -- ``could_jump_attack``
     owns the hop-over then, and producing a sidestep mid-crouch would
     release the jump direction ``$384E`` samples.
@@ -1135,13 +1151,19 @@ def could_dodge_antonio_kick(context: Context) -> Context:
                 continue
             if not reach.antonio_will_kick(antonio, actor):
                 continue
-            if not antonio.strike_is_committed():
-                # Predicted window only: jumping in is the opener
-                # (could_jump_attack). Sidestepping here is the dodge
-                # loop that never reaches grab range.
+            committed = antonio.strike_is_committed()
+            if not committed and not reach.can_break_antonio_kick_lane(actor, antonio):
+                # Nothing a pre-emptive step could achieve: already clear of
+                # his lane, or with no room to get clear. Leaving the tick to
+                # the approach here is what keeps this from becoming the
+                # dodge loop that never reaches grab range.
                 continue
             verbs.add(
-                DodgeAntonioKick(actor_slot=actor.slot, target_slot=antonio.slot)
+                DodgeAntonioKick(
+                    actor_slot=actor.slot,
+                    target_slot=antonio.slot,
+                    committed=committed,
+                )
             )
     return verbs
 

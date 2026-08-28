@@ -568,10 +568,21 @@ def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
     return _with_target_class(_EMERGENCY_JUMP_ATTACK_DEFAULT, target)
 
 
+# Stepping out of a kick gate that has not fired yet. Must clear the hop it
+# replaces (_EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER 22 plus the boss raise's 14
+# = 36) and stay under the walk-in hold (_EMERGENCY_GRAB_ANTONIO_WALK_IN 35 +
+# 14 = 49): with the hold available the hold is the better answer, since a
+# held Antonio cannot kick at all, and only out of its range is leaving the
+# lane the best thing on the table.
+_EMERGENCY_BREAK_ANTONIO_KICK_LANE = 42
+
+
 def _emergency_dodge_antonio_kick(verb: DodgeAntonioKick, context: Context) -> int:
     target = find(context, Antonio, slot=verb.target_slot)
     actor = _find_actor(context, verb.actor_slot)
     if target is not None and actor is not None and reach.antonio_will_kick(target, actor):
+        if not verb.committed:
+            return _EMERGENCY_BREAK_ANTONIO_KICK_LANE
         return _EMERGENCY_DODGE_ANTONIO_KICK
     return _EMERGENCY_DEFAULT
 

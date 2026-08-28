@@ -206,6 +206,14 @@ class DodgeAntonioKick(Walk):
     priority: int = 24
     actor_slot: str
     target_slot: str  # Antonio.slot
+    # False while his gate is merely *satisfiable* -- the ~10 ticks of warning
+    # `reach.antonio_will_kick` gives before he actually commits, measured
+    # over nine onsets in one fight (9-12 ticks on seven of them, 0 on the two
+    # at his entrance). Committed is the old behaviour: hop the strike that is
+    # already coming. Uncommitted is a pure lane step that *denies the gate*,
+    # since `$16EAE` needs the target within `$10` (16px) of his lane and
+    # nothing at all happens outside it.
+    committed: bool = True
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

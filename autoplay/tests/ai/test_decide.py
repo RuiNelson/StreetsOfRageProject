@@ -2287,12 +2287,39 @@ class CouldDodgeAntonioKickTests(unittest.TestCase):
             any(isinstance(v, DodgeAntonioKick) and v.target_slot == "obj09" for v in result)
         )
 
-    def test_does_not_fire_on_a_predicted_window_alone(self) -> None:
-        # Standing in the $16EAE window is how the opener hop lands.
-        # Sidestepping here is the dodge loop that never reaches grab range.
+    def test_breaks_the_lane_on_a_predicted_window(self) -> None:
+        # The gate gives 9-12 ticks of warning before it fires (measured over
+        # nine onsets), and `$16EAE` cannot start at all past `$10` of lane.
+        # So a merely satisfiable gate is answered by walking those 16px --
+        # `committed=False`, a lane step, not the hop.
         myself = make_myself(world_x=120, world_y=100, vel_x=0.0)
         antonio = _antonio(
             world_x=160,
+            world_y=96,
+            combat_phase=CombatPhase.NORMAL,
+            primary_state=1,
+            boss_dist_x=40,
+            boss_dist_lane=4,
+        )
+
+        result = could_dodge_antonio_kick({myself, antonio})
+
+        self.assertEqual(
+            result,
+            {
+                DodgeAntonioKick(
+                    actor_slot="P1", target_slot="obj09", committed=False
+                )
+            },
+        )
+
+    def test_no_lane_break_once_already_clear_of_his_lane(self) -> None:
+        # Nothing left for the step to achieve, and producing it anyway is
+        # what would turn this into the stand-off the old refusal feared.
+        myself = make_myself(world_x=120, world_y=100, vel_x=0.0)
+        antonio = _antonio(
+            world_x=160,
+            world_y=60,
             combat_phase=CombatPhase.NORMAL,
             primary_state=1,
             boss_dist_x=40,
@@ -2301,6 +2328,21 @@ class CouldDodgeAntonioKickTests(unittest.TestCase):
         self.assertFalse(
             any(isinstance(v, DodgeAntonioKick) for v in could_dodge_antonio_kick({myself, antonio}))
         )
+
+    def test_a_committed_kick_is_still_the_hop(self) -> None:
+        myself = make_myself(world_x=120, world_y=100, vel_x=0.0)
+        antonio = _antonio(
+            world_x=160,
+            world_y=96,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            boss_dist_x=40,
+            boss_dist_lane=4,
+        )
+
+        result = could_dodge_antonio_kick({myself, antonio})
+
+        self.assertTrue(all(v.committed for v in result))
 
     def test_does_not_fire_while_airborne(self) -> None:
         myself = make_myself(world_x=120, world_y=100, is_airborne=True, action_state=0x12)

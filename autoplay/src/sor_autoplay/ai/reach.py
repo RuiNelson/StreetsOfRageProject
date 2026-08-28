@@ -943,6 +943,25 @@ def antonio_will_kick(antonio: Antonio, actor: PlayableCharacter) -> bool:
     return dist_x < _antonio_kick_distance_threshold(antonio, actor)
 
 
+# Lane the pre-emptive break aims to put between the actor and Antonio. His
+# kick gate is `+$52 < $10` (16px) and the dash/boomerang commit `< $14`
+# (20px), so clearing 20 disarms both; the margin past it is what stops the
+# step ending exactly on the boundary, where a px of walk jitter re-arms it.
+ANTONIO_KICK_LANE_BREAK = ANTONIO_DASH_LANE + 8
+
+
+def can_break_antonio_kick_lane(actor: PlayableCharacter, antonio: Antonio) -> bool:
+    """Whether stepping off his lane would actually disarm the gate.
+
+    False once the actor is already clear of ``ANTONIO_KICK_LANE_BREAK``:
+    the gate is then denied on lane alone and the step has nothing left to
+    do, which is what keeps the pre-emptive dodge from holding every tick
+    and becoming a stand-off.
+    """
+
+    return abs(antonio.world_y - actor.world_y) < ANTONIO_KICK_LANE_BREAK
+
+
 def _souther_slash_distance_threshold(souther: Souther, actor: PlayableCharacter) -> int:
     """The ROM's X window for the 1->2 claw commit, given the actor's motion.
 

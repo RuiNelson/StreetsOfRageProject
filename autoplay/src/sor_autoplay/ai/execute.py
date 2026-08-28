@@ -77,6 +77,7 @@ from .decide import (
     in_smash_range,
 )
 from .reach import (
+    ANTONIO_KICK_LANE_BREAK,
     PIT_AVOID_MARGIN,
     REACH_SAFETY_MARGIN,
     SOUTHER_SLASH_DIST_MIN,
@@ -1524,19 +1525,85 @@ def state_machine_projectile_sidestep(
     )
 
 
+def _antonio_lane_break_target(
+    actor: Myself | Partner, antonio: Antonio, context: Context
+) -> tuple[int, int]:
+    """Where to step to put ``reach.ANTONIO_KICK_LANE_BREAK`` of lane between
+    the actor and Antonio.
+
+    X holds: the gate's X half is 80-120px wide depending on how the actor is
+    moving, so contesting it means retreating most of the arena, while the
+    lane half is 16px and can be left in about three ticks. Side is picked
+    from **his** lane, never the lane midpoint, the same self-reinforcing
+    rule ``_souther_slash_sidestep_target`` and ``_pit_dodge_target_y`` use.
+    """
+
+    lo, hi = _lane_bounds(context)
+    clearance = ANTONIO_KICK_LANE_BREAK + MOVE_DEADBAND_Y
+    above = antonio.world_y - clearance
+    below = antonio.world_y + clearance
+    can_go_up = above >= lo
+    can_go_down = below <= hi
+
+    dy = actor.world_y - antonio.world_y
+    if dy < 0 and can_go_up:
+        return actor.world_x, int(above)
+    if dy > 0 and can_go_down:
+        return actor.world_x, int(below)
+    if can_go_up and can_go_down:
+        roomier_is_up = (antonio.world_y - lo) >= (hi - antonio.world_y)
+        return actor.world_x, int(above if roomier_is_up else below)
+    if can_go_up:
+        return actor.world_x, int(above)
+    if can_go_down:
+        return actor.world_x, int(below)
+    return actor.world_x, actor.world_y
+
+
 def state_machine_dodge_antonio_kick(
     verb: DodgeAntonioKick, context: Context, gamepad: VirtualGamepad
 ) -> None:
-    """Hop over the kick/dash, then kick.
+    """Hop the kick that is already coming; step out of the one that is not.
 
-    A ground sidestep never leaves the ROM's X-velocity kick gate
-    (measured: minutes of sidestep, 0 damage dealt). Reuses the jump-
-    kick state machine so the airborne B edge punishes. Inside punch
-    range that hop is in place -- a directed hop from there lands past
-    him, facing away, and the grab on landing never happens.
+    **Committed** (`verb.committed`, primary `$02` or tactical `$08`) is the
+    original behaviour: a ground sidestep does not leave the ROM's
+    X-velocity gate in time once the strike is locked in (measured: minutes
+    of sidestep, 0 damage dealt), so this reuses the jump-kick state machine
+    and the airborne B edge punishes. Inside punch range that hop is in
+    place -- a directed hop from there lands past him, facing away, and the
+    grab on landing never happens.
+
+    **Uncommitted** is the opposite input for the opposite situation: the
+    gate is merely satisfiable, there are ~10 ticks before it fires, and
+    `$16EAE` cannot start at all with the target more than `$10` (16px) off
+    his lane. So this walks that 16px rather than jumping into it. Hopping
+    here is what the trace caught the AI doing -- five of nine kick onsets
+    had `JumpAttack` holding the tick through the whole warning.
     """
 
-    state_machine_jump_attack(verb, context, gamepad)
+    if verb.committed:
+        state_machine_jump_attack(verb, context, gamepad)
+        return
+
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Antonio, slot=verb.target_slot)
+    if actor is None or target is None:
+        gamepad.release()
+        return
+    target_x, target_y = _antonio_lane_break_target(actor, target, context)
+    goal = nav.PointGoal(nav.Point(target_x, target_y), tolerance=MOVE_DEADBAND_X)
+    body, origin = nav.actor_footprint(actor)
+    solids, dangers = nav.obstacle_sets(context, body=body, origin=origin)
+
+    def straight_line() -> int:
+        return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)
+
+    _hold_steered(
+        gamepad,
+        _routed_mask(
+            context, actor, goal, solids=solids, dangers=dangers, fallback=straight_line
+        ),
+    )
 
 
 def state_machine_dodge_souther_slash(
@@ -2336,15 +2403,12 @@ def state_machine_open_breakable(
             nudge_x = toward_target if headroom >= BREAKABLE_FACE_NUDGE_X else -toward_target
             # ...but never into the camera's walk clamp. `$43AA` simply undoes
             # a step past `camera_x + $20`, so the route comes back as a vector
-            # `_clamp_mask` then strips -- and `_routed_mask` does not reach its
-            # fallback, because what failed was the mask and not the goal. The
+            # `_clamp_mask` then strips, and `_routed_mask` does not reach its
+            # fallback because the goal is not what failed -- the mask is. The
             # result is a **permanent** freeze: in smash range, facing away,
             # commanding nothing. Recorded live at world x=2458 against a
             # round-1 booth: 6919 consecutive ticks, mask `0x0` on every one,
-            # `OpenBreakable` winning every tick and the prop untouched. It
-            # needs no enemies -- with one around the actor moves on the lane
-            # axis and the geometry breaks by itself, which is why this shows
-            # up in a swept run and hides in a busy one.
+            # `OpenBreakable` winning every tick and the prop untouched.
             #
             # Backing away is only ever the *preferred* half of this nudge (it
             # buys room for a clean toward-step next tick, see above); toward
@@ -2377,11 +2441,11 @@ def state_machine_open_breakable(
                 fallback=face_nudge_straight_line,
             )
             # The invariant this branch cannot give up: it exists to change
-            # facing, facing only ever changes by holding a direction, so
+            # facing, facing only changes by holding a direction, so
             # commanding nothing is never a valid outcome here. Any remaining
             # way to reach an empty mask -- a clamp on the far side, a route
-            # boxed in by other props -- ends in the one direction that is
-            # always both meaningful and available: toward the prop itself.
+            # boxed in by props -- ends in the one direction that is always
+            # both meaningful and available: toward the prop itself.
             _hold_steered(gamepad, nudge_mask or _clamp_mask(
                 context, actor.world_x, actor.world_y, face
             ))
