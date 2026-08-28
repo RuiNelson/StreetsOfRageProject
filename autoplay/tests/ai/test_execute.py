@@ -143,6 +143,61 @@ def _live_antonio(*, world_x: int, world_y: int) -> Antonio:
     )
 
 
+class BreakableFacingNudgeAtTheCameraClampTests(unittest.TestCase):
+    """In smash range, facing away, and pinned against the walk clamp.
+
+    Recorded live on round 1 (``tools/breakable_diag.py``): the actor stood
+    at world x=2458 beside a type-``$11`` booth at 2472 for **6919
+    consecutive ticks** with the gamepad mask ``0x0`` on every one of them,
+    ``OpenBreakable`` winning every tick and the prop untouched. The same
+    freeze cost a whole measurement run its boss fight, stalling ~50 s at
+    x=3656.
+
+    The facing nudge prefers to back *away* first (it buys room for a clean
+    toward-step), but ``$43AA`` clamps the player to ``camera_x + $20``, so
+    at that edge the step is a vector ``_clamp_mask`` strips -- after
+    ``_routed_mask`` has already decided not to use its fallback, because
+    what failed was the mask and not the goal. This branch has to end in a
+    held direction or facing can never change.
+
+    It needs **no enemies**: with one nearby the actor moves on the lane axis
+    and the geometry breaks by itself (user), which is why this reproduces in
+    a swept run and hides in a busy one.
+    """
+
+    def _run(self, camera_left: int) -> int:
+        prop = Breakable(
+            slot="obj02",
+            world_x=2472,
+            world_y=32,
+            type_id=0x11,
+            hitbox=Hitbox(x0=2456, x1=2488, y0=22, y1=42, z0=0, z1=32),
+        )
+        actor = _myself(world_x=2458, world_y=48, facing_left=True)
+        context = {
+            actor,
+            prop,
+            CameraRange(left=camera_left, right=camera_left + 256, top=0, bottom=112),
+            Stage(level_index=0, direction="right"),
+        }
+        gamepad, _client = _gamepad()
+        _settle(OpenBreakable(actor_slot="P1", target_slot="obj02"), context, gamepad)
+        return gamepad.held
+
+    def test_commands_something_while_pinned_at_the_clamp(self) -> None:
+        mask = self._run(camera_left=2455)
+
+        self.assertTrue(mask & (LEFT | RIGHT), f"frozen at the clamp (mask {hex(mask)})")
+        self.assertTrue(mask & RIGHT, "the prop is to the right; facing it is the point")
+
+    def test_still_backs_away_first_with_room_to_do_it(self) -> None:
+        # Unchanged away from the clamp: backing off is the preferred half of
+        # the nudge and only the blocked case now overrides it.
+        mask = self._run(camera_left=2300)
+
+        self.assertTrue(mask & LEFT)
+
+
 def _gamepad() -> tuple[VirtualGamepad, MagicMock]:
     client = MagicMock()
     state = SharedGamepadState(client)

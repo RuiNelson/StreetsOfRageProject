@@ -2334,6 +2334,25 @@ def state_machine_open_breakable(
                 actor.character_id
             )
             nudge_x = toward_target if headroom >= BREAKABLE_FACE_NUDGE_X else -toward_target
+            # ...but never into the camera's walk clamp. `$43AA` simply undoes
+            # a step past `camera_x + $20`, so the route comes back as a vector
+            # `_clamp_mask` then strips -- and `_routed_mask` does not reach its
+            # fallback, because what failed was the mask and not the goal. The
+            # result is a **permanent** freeze: in smash range, facing away,
+            # commanding nothing. Recorded live at world x=2458 against a
+            # round-1 booth: 6919 consecutive ticks, mask `0x0` on every one,
+            # `OpenBreakable` winning every tick and the prop untouched. It
+            # needs no enemies -- with one around the actor moves on the lane
+            # axis and the geometry breaks by itself, which is why this shows
+            # up in a swept run and hides in a busy one.
+            #
+            # Backing away is only ever the *preferred* half of this nudge (it
+            # buys room for a clean toward-step next tick, see above); toward
+            # the prop still fixes facing, which is the whole job here. So a
+            # blocked away-step becomes a toward-step rather than nothing.
+            away_bit = LEFT_MASK if nudge_x < 0 else RIGHT_MASK
+            if not _clamp_mask_to_camera(context, actor.world_x, away_bit):
+                nudge_x = toward_target
             nudge_x_target = actor.world_x + nudge_x
             nudge_goal = PointGoal(Point(nudge_x_target, actor.world_y), tolerance=MOVE_DEADBAND_X)
             body, origin = nav.actor_footprint(actor)
@@ -2349,17 +2368,23 @@ def state_machine_open_breakable(
                     ignore_slots=frozenset({target.slot}),
                 )
 
-            _hold_steered(
-                gamepad,
-                _routed_mask(
-                    context,
-                    actor,
-                    nudge_goal,
-                    solids=solids,
-                    dangers=dangers,
-                    fallback=face_nudge_straight_line,
-                ),
+            nudge_mask = _routed_mask(
+                context,
+                actor,
+                nudge_goal,
+                solids=solids,
+                dangers=dangers,
+                fallback=face_nudge_straight_line,
             )
+            # The invariant this branch cannot give up: it exists to change
+            # facing, facing only ever changes by holding a direction, so
+            # commanding nothing is never a valid outcome here. Any remaining
+            # way to reach an empty mask -- a clamp on the far side, a route
+            # boxed in by other props -- ends in the one direction that is
+            # always both meaningful and available: toward the prop itself.
+            _hold_steered(gamepad, nudge_mask or _clamp_mask(
+                context, actor.world_x, actor.world_y, face
+            ))
             return
         _press(
             gamepad,
