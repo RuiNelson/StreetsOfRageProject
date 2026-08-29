@@ -461,6 +461,19 @@ class ObserverApp:
         playable, and the AI is held off until the game reports the requested
         level: a verb decided during the intro is aimed at the scene the jump
         is about to throw away.
+
+        Past the jump, the level-index gate below must not fire on a
+        continue/name-entry screen (object type $0F replaces the playable
+        object, so ``is_playable`` reads false there too). ``ai/loop.py``
+        already carves this case out for the same reason -- the pipeline
+        still has to answer Yes and type the initials -- but this gate runs
+        *before* ``AgentLoop.tick`` and used to hold it off regardless,
+        which left the continue prompt unanswered until its own timer
+        expired and the ROM fell back to the title screen: indistinguishable
+        from the game resetting mid-level, and far more likely on a long,
+        punishing level (round 2's boss costs 1-2 lives over a ~10 minute
+        traversal) than a short one. See ``tools/boss_fight.py``, which hit
+        the same gate and documents it as "hung this harness completely".
         """
 
         scenario = self.scenario
@@ -473,8 +486,11 @@ class ObserverApp:
                 return False
             scenario.apply_start_level(self._client)
             return False
-        if scenario.start_level is not None and (
-            not playable or snapshot.level_index != scenario.start_level - 1
+        in_continue_ui = any(player.is_continue_ui for player in snapshot.players)
+        if (
+            scenario.start_level is not None
+            and not in_continue_ui
+            and (not playable or snapshot.level_index != scenario.start_level - 1)
         ):
             return False
 
