@@ -12,6 +12,16 @@ disagreeing, not a cache.
 Nothing in this module reads RAM or produces tokens -- it only answers
 questions about tokens already in the context.
 
+The four band predicates (``in_punch_band``/``punch_would_connect``,
+``in_rear_band``, ``in_jump_attack_band``) and the facing helpers take a
+``Character``, not an ``Enemy``, although their parameter is still named
+``enemy`` for every caller that has one: the ROM asks the identical question
+about the *other player*. ``$4478 (resolve_player_vs_player_collision)``
+tests the attacker's attack box ``+$64`` against the other player's body box
+``+$70``, exactly as ``$450C`` does for an enemy, so ``partner.py``'s
+friendly-fire filter answers "would this strike land on the partner" by
+calling these rather than measuring the same boxes a second time.
+
 Every predicate here is about *this instant*. When a caller needs "will this
 still be true when my move actually lands", it projects the enemy first
 (``kinematics.py`` owns the lead times and ``enemy_projected``, re-exported
@@ -30,6 +40,7 @@ from .tokens import (
     Antonio,
     BODY_OVERLAP_X,
     CameraRange,
+    Character,
     Context,
     Enemy,
     GrabReason,
@@ -276,13 +287,13 @@ def jump_attack_max_dx(character_id: int | None) -> int:
     return JUMP_ATTACK_MAX_DX_BY_CHARACTER.get(character_id, JUMP_ATTACK_MAX_DX_DEFAULT)
 
 
-def enemy_behind_actor(actor: PlayableCharacter, enemy: Enemy) -> bool:
+def enemy_behind_actor(actor: PlayableCharacter, enemy: Character) -> bool:
     if actor.facing_left:
         return enemy.world_x > actor.world_x
     return enemy.world_x < actor.world_x
 
 
-def enemy_in_front(actor: PlayableCharacter, enemy: Enemy) -> bool:
+def enemy_in_front(actor: PlayableCharacter, enemy: Character) -> bool:
     return not enemy_behind_actor(actor, enemy)
 
 
@@ -401,7 +412,7 @@ def on_screen_enemies(context: Context) -> list[Enemy]:
     return [e for e in enemies if in_camera(camera, e.world_x, e.world_y)]
 
 
-def in_punch_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
+def in_punch_band(actor: PlayableCharacter, enemy: Character) -> bool:
     """Raw distance box only -- ignores facing. Callers that want "a strike
     would actually connect" want :func:`punch_would_connect` instead."""
 
@@ -416,7 +427,7 @@ def in_punch_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
     return punch_usable_inner_x(actor.character_id) <= dx <= outer
 
 
-def punch_would_connect(actor: PlayableCharacter, enemy: Enemy) -> bool:
+def punch_would_connect(actor: PlayableCharacter, enemy: Character) -> bool:
     """``in_punch_band`` *and* the enemy is actually in front (within the
     small behind tolerance). Punch is a forward strike, so the raw band on
     its own describes a dead zone the actor cannot hit."""
@@ -448,7 +459,7 @@ def grab_would_connect(actor: PlayableCharacter, enemy: Enemy) -> bool:
     return enemy_in_front(actor, enemy) or dx <= GRAB_BEHIND_TOLERANCE_X
 
 
-def in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
+def in_rear_band(actor: PlayableCharacter, enemy: Character) -> bool:
     """Inside the ``$322A`` chord's real reach on the enemy's own side.
 
     The behind and front bands differ per character (Axel/Blaze have zero
@@ -484,7 +495,7 @@ def in_rear_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
     return adx <= front_max
 
 
-def in_jump_attack_band(actor: PlayableCharacter, enemy: Enemy) -> bool:
+def in_jump_attack_band(actor: PlayableCharacter, enemy: Character) -> bool:
     """True when a jump kick is the move that covers this gap: in front, in
     lane, inside the kick's own free-flight range.
 

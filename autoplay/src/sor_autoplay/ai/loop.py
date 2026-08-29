@@ -25,6 +25,7 @@ from .execute import execute_tick
 from .gamepad import VirtualGamepad
 from .inference import generate_inference_tokens
 from .observe import HoldTracker, NoraAttackTracker, generate_direct_observation_tokens
+from .partner import do_not_harm_partner
 from .pathfind import Path
 from .priority import determine_priority_verb
 from .tokens import Context, Myself, Verb, find, find_all
@@ -129,6 +130,11 @@ class AgentLoop:
         )
         context |= generate_inference_tokens(context)
         context |= generate_verb_tokens(context)
+        # AI.md's loop: the co-op courtesy filter runs between the could_*
+        # generators and the ranking, so a verb that would land on the
+        # partner is never ranked -- and never shown as a pending candidate
+        # either, since it was never a candidate this tick.
+        context = do_not_harm_partner(context)
         pending = tuple(find_all(context, Verb))
         context = determine_priority_verb(context)
 

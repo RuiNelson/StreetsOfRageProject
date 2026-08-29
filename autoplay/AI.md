@@ -724,10 +724,14 @@ with the AI enabled for both players therefore runs two such instances
 concurrently, each producing its own `Myself`. Each instance should apply
 its own individual rules to avoid colliding with the other running
 instance — for example, preferring to leave a health item on the floor
-for the partner if the partner needs it more than `Myself` does. This
-coordination is a low priority, however, since the AI being enabled for
+for the partner if the partner needs it more than `Myself` does. That
+particular rule, and the harder constraint that an instance must not hit
+the other player, are `do_not_harm_partner`, described below; the rest of
+this coordination is a low priority, since the AI being enabled for
 both players at once — as opposed to one AI-controlled character alongside
-one human-controlled one — is not an expected scenario.
+one human-controlled one — is not an expected scenario. The filter itself
+is *not* limited to that scenario: friendly fire is just as real against a
+human-controlled partner, which is the case it mostly exists for.
 
 The AI operates according to the following iterative loop:
 
@@ -740,6 +744,7 @@ context |= generate_inference_tokens(context)
 
 # Verb tokens
 context |= generate_verb_tokens(context)
+context = do_not_harm_partner(context)
 context = determine_priority_verb(context)
 
 # UI
@@ -835,6 +840,78 @@ Most such functions must additionally decline to produce a token whenever
 an `AnimationInProgress` token for the relevant character is present in
 the context, since the character cannot act on a new verb until its
 current animation concludes.
+
+### `do_not_harm_partner`
+
+The one stage of the loop that only ever *removes* tokens, which is why it
+assigns rather than unions: `context = do_not_harm_partner(context)`. It
+runs after every `could_*` has spoken and before anything is ranked, so a
+verb it withdraws is never scored, never executed, and never even shown as
+a pending candidate. This is deliberately not a scoring penalty in
+`determine_priority_verb`: hitting the partner is not a worse idea than the
+alternatives, it is an idea that must not be on the table at all. Without a
+`Partner` token in the context — the ordinary one-player case, and equally
+a partner who is dead or not yet playable — it is a no-op and returns the
+context it was given.
+
+**Friendly fire is the ROM's own box-against-body test.** `$4478
+(resolve_player_vs_player_collision)` runs once per gameplay frame and
+compares the attacker's attack box `+$64` against the *other player's* body
+box `+$70`, exactly as `$450C` does for an enemy, converting the attack
+descriptor into the other player's reaction whenever the attacker's outgoing
+damage `+$34` is nonzero (`player-health-lives-and-combat.md`,
+"Player-versus-player contact"). That is the same geometry `reach.punch_
+would_connect`, `reach.in_rear_band` and `reach.in_jump_attack_band` already
+answer, so this filter asks *those* about the `Partner` rather than
+measuring the boxes a second time — the rule from [Judging without a
+cache](#judging-without-a-cache), applied to a second kind of body. Their
+parameter is still named `enemy`, but it is typed `Character`.
+
+One test per concrete `Verb` class, dispatched by `type(verb) → function`
+the way `priority.py` and `execute.py` already dispatch:
+
+- the forward strikes — `Punch`, `MeleeWeaponAttack`, `HitAntonioBoomerang`
+  — are withdrawn while `punch_would_connect` holds for the partner;
+- `OpenBreakable` only on the ticks it actually strikes (`decide.in_smash_
+  range`). Withdrawing the approach as well would park the actor in front of
+  a prop for as long as the partner stood nearby, and the next tick re-asks
+  the question anyway;
+- `JumpAttack` on the grounded launch only. Once airborne the actor is
+  committed (see [Committing to a jump](#committing-to-a-jump)): a tick with
+  no verb releases the controller, losing the kick *and* the launch
+  direction, and not kicking does not un-fly the jump;
+- `RearAttack` while the partner is inside the `$322A` chord's real band on
+  the side it stands;
+- `ThrowKnife`/`ThrowPepper` while the partner shares the flight lane, in
+  front, nearer than the enemy being aimed at. This one is conservative
+  rather than ROM-confirmed: `$5D84 (launch_released_weapon)` is a
+  projectile the actor aims down its own lane, and nothing decoded here says
+  whether it reads a player body on the way. Being wrong costs a tick of
+  damage output; being wrong the other way costs the partner health.
+
+Three families are deliberately *not* filtered, each for a reason from the
+same routine. `GrabEnemy` presses nothing — that is what makes it a hold
+rather than a hit (see [Grabbing an enemy](#grabbing-an-enemy)) — so its
+`+$34` is zero and `$4478` has nothing to convert. `CallPolice` cannot be
+friendly fire at all: `$4478` returns immediately while a police special is
+active. The hold moves (`AttackHeldEnemy`, `Supplex`, `ThrowHeldEnemy`,
+`FlipHold`) deal their damage to the body already in the actor's hands; a
+thrown body is its own object with its own collisions and no decoded player
+path, so nothing withdraws them today.
+
+The filter's second half is not about harm but about **not taking what the
+partner needs more** — the coordination the [Process](#process) section
+above asks for, expressed as a withdrawal for the same reason: a verb the
+actor should not take is a verb that should never reach the ranking.
+
+- `WalkToWeapon` is withdrawn while the partner is unarmed, or holds a
+  weapon ranked below the actor's own (knife 5 > bat/pipe 4 > bottle 3 >
+  pepper 2). `could_walk_to_weapon` only ever offers a genuine upgrade for
+  `Myself`, so what is left to decide is which of the two needs it more;
+- `WalkToPickup` is withdrawn for a `HealthPickup` while the partner's
+  health is the lower of the two, and for a `LifePickup` while the partner
+  has fewer lives left. A `SpecialPickup` and a `ScorePickup` are claimed by
+  neither rule and stay collectable.
 
 ### `determine_priority_verb`
 
