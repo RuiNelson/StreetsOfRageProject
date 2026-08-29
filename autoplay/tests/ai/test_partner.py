@@ -153,6 +153,18 @@ class ForwardStrikeTests(unittest.TestCase):
         kept = do_not_harm_partner(self._context(grab, partner_x=130))
         self.assertEqual(verbs(kept), {grab})
 
+    def test_a_throw_is_never_withdrawn(self):
+        """Even straight down the partner's own lane: see partner.py."""
+
+        throw = ThrowKnife(actor_slot="P1", target_slot="obj01")
+        context = {
+            make_myself(held_weapon_type=0x08),
+            make_partner(world_x=150),
+            make_enemy(world_x=180),
+            throw,
+        }
+        self.assertEqual(verbs(do_not_harm_partner(context)), {throw})
+
     def test_call_police_is_never_withdrawn(self):
         """``$4478`` returns outright while a police special is active."""
 
@@ -191,31 +203,6 @@ class JumpAttackTests(unittest.TestCase):
             hop,
         }
         self.assertEqual(verbs(do_not_harm_partner(context)), {hop})
-
-
-class ThrownWeaponTests(unittest.TestCase):
-    def _context(self, *, partner_x, partner_y=100, enemy_x=180):
-        return {
-            make_myself(held_weapon_type=0x08),
-            make_partner(world_x=partner_x, world_y=partner_y),
-            make_enemy(world_x=enemy_x),
-            ThrowKnife(actor_slot="P1", target_slot="obj01"),
-        }
-
-    def test_withdrawn_when_the_partner_is_in_the_line_of_fire(self):
-        self.assertEqual(verbs(do_not_harm_partner(self._context(partner_x=150))), set())
-
-    def test_kept_when_the_partner_is_past_the_target(self):
-        kept = do_not_harm_partner(self._context(partner_x=185))
-        self.assertEqual({type(v) for v in verbs(kept)}, {ThrowKnife})
-
-    def test_kept_when_the_partner_is_off_the_flight_lane(self):
-        kept = do_not_harm_partner(self._context(partner_x=150, partner_y=140))
-        self.assertEqual({type(v) for v in verbs(kept)}, {ThrowKnife})
-
-    def test_kept_when_the_partner_is_behind_the_thrower(self):
-        kept = do_not_harm_partner(self._context(partner_x=40))
-        self.assertEqual({type(v) for v in verbs(kept)}, {ThrowKnife})
 
 
 class OpenBreakableTests(unittest.TestCase):

@@ -881,23 +881,22 @@ the way `priority.py` and `execute.py` already dispatch:
   no verb releases the controller, losing the kick *and* the launch
   direction, and not kicking does not un-fly the jump;
 - `RearAttack` while the partner is inside the `$322A` chord's real band on
-  the side it stands;
-- `ThrowKnife`/`ThrowPepper` while the partner shares the flight lane, in
-  front, nearer than the enemy being aimed at. This one is conservative
-  rather than ROM-confirmed: `$5D84 (launch_released_weapon)` is a
-  projectile the actor aims down its own lane, and nothing decoded here says
-  whether it reads a player body on the way. Being wrong costs a tick of
-  damage output; being wrong the other way costs the partner health.
+  the side it stands.
 
-Three families are deliberately *not* filtered, each for a reason from the
-same routine. `GrabEnemy` presses nothing — that is what makes it a hold
-rather than a hit (see [Grabbing an enemy](#grabbing-an-enemy)) — so its
-`+$34` is zero and `$4478` has nothing to convert. `CallPolice` cannot be
+Four families are deliberately *not* filtered. `GrabEnemy` presses nothing
+— that is what makes it a hold rather than a hit (see [Grabbing an
+enemy](#grabbing-an-enemy)) — so its `+$34` is zero and `$4478` has nothing
+to convert. `CallPolice` cannot be
 friendly fire at all: `$4478` returns immediately while a police special is
 active. The hold moves (`AttackHeldEnemy`, `Supplex`, `ThrowHeldEnemy`,
 `FlipHold`) deal their damage to the body already in the actor's hands; a
 thrown body is its own object with its own collisions and no decoded player
-path, so nothing withdraws them today.
+path, so nothing withdraws them today. Neither are the two attack-thrown
+weapons (`$21E6 (player_release_thrown_weapon)` issues its throw command for
+the knife `$08` and the pepper `$0C`, and for nothing else): an earlier
+version of this filter withdrew a throw whose flight lane the partner shared,
+and it was removed on the user's own call — catching the partner with a throw
+is close to impossible in play, so the lane test only ever cost real throws.
 
 The filter's second half is not about harm but about **not taking what the
 partner needs more** — the coordination the [Process](#process) section

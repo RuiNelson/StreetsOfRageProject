@@ -33,12 +33,14 @@ Three consequences of that same ROM routine bound what is filtered here:
   player path, so nothing here withdraws them; if that turns out to hurt a
   partner standing behind the throw, this is the place to add it.
 
-The two thrown weapons *are* filtered, and that one is deliberately
-conservative rather than ROM-confirmed: ``$5D84 (launch_released_weapon)``
-is a projectile the actor aims down its own lane, and no manuscript here
-decodes whether it reads a player body on the way. Refusing a throw that
-would pass through the partner costs a tick of damage; being wrong the other
-way costs the partner health.
+The two attack-thrown weapons (``$21E6 (player_release_thrown_weapon)``
+issues its throw command for the knife ``$08`` and the pepper ``$0C``, and
+for nothing else) are not filtered either. A version of this filter did
+withdraw them while the partner shared the flight lane in front of the
+actor, on the grounds that ``$5D84 (launch_released_weapon)``'s projectile
+has no decoded player path either way -- **removed on the user's own call**:
+catching the partner with a throw is close to impossible in play, and the
+lane test cost real throws to buy a hazard that does not happen.
 
 The second half of this filter is not about harm at all but about **not
 taking what the partner needs more** — the coordination ``AI.md``'s
@@ -57,11 +59,10 @@ from __future__ import annotations
 from typing import Callable
 
 from . import reach
-from .decide import KNIFE_RANGE_X, KNIFE_RANGE_Y, in_smash_range
+from .decide import in_smash_range
 from .tokens import (
     Breakable,
     Context,
-    Enemy,
     HealthPickup,
     HitAntonioBoomerang,
     JumpAttack,
@@ -73,8 +74,6 @@ from .tokens import (
     Pickup,
     Punch,
     RearAttack,
-    ThrowKnife,
-    ThrowPepper,
     Token,
     Verb,
     WalkToPickup,
@@ -144,30 +143,6 @@ def _rear_attack_hits_partner(
     return reach.in_rear_band(actor, partner)
 
 
-def _throw_hits_partner(
-    context: Context, actor: Myself, partner: Partner, verb: Verb
-) -> bool:
-    """The partner is in the flight lane, in front, and nearer than the aim.
-
-    A thrown knife or canister travels forward along the actor's own lane,
-    so the partner is in the line of fire when it shares that lane and
-    stands between the actor and the enemy being thrown at. With the target
-    enemy no longer in context, the whole throw range counts as the line.
-    """
-
-    if abs(partner.world_y - actor.world_y) > KNIFE_RANGE_Y:
-        return False
-    if not reach.enemy_in_front(actor, partner):
-        return False
-    dx = abs(partner.world_x - actor.world_x)
-    if dx > KNIFE_RANGE_X:
-        return False
-    target = find(context, Enemy, slot=verb.target_slot)
-    if target is None:
-        return True
-    return dx <= abs(target.world_x - actor.world_x)
-
-
 def _weapon_belongs_to_partner(
     context: Context, actor: Myself, partner: Partner, verb: Verb
 ) -> bool:
@@ -211,8 +186,6 @@ _HARM_TESTS: dict[type[Verb], WithdrawTest] = {
     OpenBreakable: _open_breakable_hits_partner,
     JumpAttack: _jump_attack_hits_partner,
     RearAttack: _rear_attack_hits_partner,
-    ThrowKnife: _throw_hits_partner,
-    ThrowPepper: _throw_hits_partner,
 }
 
 # Verbs that would take a floor item the partner needs more.
