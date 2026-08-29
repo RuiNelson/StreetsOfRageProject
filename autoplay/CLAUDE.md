@@ -771,7 +771,14 @@ pause/non-gameplay gate). The token-class tests live in
 `tests/ai/tokens/` (`test_tokens.py`, `test_character.py`, `test_enemy.py`,
 `test_essential.py`, `test_hazard_tokens.py`, `test_pickup_tokens.py`),
 mirroring the `ai/` module split; pipeline tests stay in `tests/ai/`.
-There is no live host requirement for the unit suite.
+There is no live host requirement for the unit suite, and no pytest
+requirement either: every module under `tests/` is plain `unittest`, so the
+canonical command above must run clean on an interpreter that has never
+installed the `dev` extra. `tests/ai/pathfind/`'s three modules were the one
+exception until they were converted -- written for pytest, they failed to
+*load* rather than to assert, and the suite reported `FAILED (errors=3)`
+while 75 real tests silently never ran. Do not reintroduce a pytest-only
+test file for that reason.
 
 `tests/ai/test_stability.py` is the one **multi-tick** suite and exists for
 a reason worth preserving: every other test checks a single tick in
