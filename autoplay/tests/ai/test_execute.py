@@ -582,7 +582,7 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
 
         client.hold_buttons.assert_called_with(player1=LEFT | UP, player2=0)
 
-    def test_holds_its_own_lane_while_still_far_out_on_x(self) -> None:
+    def test_lane_aim_does_not_depend_on_the_enemys_phase(self) -> None:
         # Regression: the lane aim must not depend on the enemy's combat
         # phase. It used to converge onto the enemy's lane while far and
         # sidestep off it while the enemy was committed, so every phase
@@ -605,10 +605,12 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         self.assertEqual(
             masks[0], masks[1], f"lane aim changed with the enemy's phase: {masks}"
         )
-        self.assertFalse(
-            masks[0] & (UP | DOWN),
-            f"converged onto the enemy's lane while still far out: {hex(masks[0])}",
+        # It closes the lane rather than converging onto it: the aim is the
+        # approach's own offset from the enemy, not the enemy's lane.
+        _, target_y = _walk_to_near_enemy_target(
+            _myself(world_x=0, world_y=50), target_calm, {target_calm}
         )
+        self.assertEqual(target_y, 0 + WALK_TO_ENEMY_LANE_SAFETY_Y)
 
     def test_turns_toward_an_enemy_at_the_actors_back(self) -> None:
         # Holding a direction is what sets facing, so walking *toward* a
@@ -786,16 +788,20 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
 
     def test_does_not_keep_sidestepping_once_clear_of_the_line_of_attack(self) -> None:
         # The sidestep aims at a *fixed* lane, so once the actor is already
-        # clear (dy >= WALK_TO_ENEMY_LANE_SAFETY_Y) there is nothing left to
-        # do and it holds its lane -- rather than stepping away again from
-        # wherever it now stands, which would walk it off the screen edge.
+        # clear there is nothing left to step away from -- stepping away
+        # again from wherever it now stands would walk it off the screen
+        # edge. Past the offset the aim closes back *toward* the enemy
+        # instead, on the side the actor is already on, so it is always
+        # between the two bodies and never crosses the enemy's lane.
         actor = _myself(world_x=0, world_y=90)
         target = replace(_enemy(world_x=200, world_y=50), combat_phase=CombatPhase.ATTACKING)
         context = {actor, target}
 
         _, target_y = _walk_to_near_enemy_target(actor, target, context)
 
-        self.assertEqual(target_y, 90)
+        self.assertEqual(target_y, 50 + WALK_TO_ENEMY_LANE_SAFETY_Y)
+        self.assertLess(target_y, actor.world_y)
+        self.assertGreater(target_y, target.world_y)
 
     def test_does_not_sidestep_an_enemy_that_is_not_dangerous(self) -> None:
         actor = _myself(world_x=0, world_y=50)

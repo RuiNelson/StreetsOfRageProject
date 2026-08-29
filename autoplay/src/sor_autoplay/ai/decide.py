@@ -837,6 +837,12 @@ def _advance_blocking_enemies(context: Context) -> list[Enemy]:
     advance forever, which contradicts ``could_walk_to_near_enemy``'s own
     on-screen-only design intent ("so off-screen leftovers don't block
     stage advance forever").
+
+    "Off-screen" here has to mean the same thing it means there, which is
+    ``reach.in_visible_screen`` -- the CRT -- and not ``in_camera``'s walk
+    clamp. A body in the 32px strip down either side of the clamp *is*
+    chased now, so carving it out would hand the advance a target the
+    approach is still walking toward.
     """
 
     camera = find(context, CameraRange)
@@ -844,7 +850,7 @@ def _advance_blocking_enemies(context: Context) -> list[Enemy]:
     for enemy in reach.live_enemies(context):
         if (
             camera is not None
-            and not reach.in_camera(camera, enemy.world_x, enemy.world_y)
+            and not reach.in_visible_screen(camera, enemy.world_x, enemy.world_y)
             and enemy.health == 0
         ):
             continue

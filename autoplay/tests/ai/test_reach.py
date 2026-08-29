@@ -437,6 +437,41 @@ class LiveEnemyTests(unittest.TestCase):
         self.assertFalse(dying.is_defeated)
         self.assertEqual(reach.live_enemies({dying}), [dying])
 
+    def test_an_enemy_below_the_players_own_lane_floor_is_still_a_target(self) -> None:
+        # The two clamps differ by two pixels: players are held to $02..$70
+        # ($44 0A) and enemies to $00..$70 ($17AB8). Judging an enemy by the
+        # player's floor dropped Souther -- who fights from the top of the
+        # band -- out of the target list for a quarter of a round-2 fight,
+        # and with no target the AI walked away from a live boss.
+        high = _garcia(world_x=130, world_y=0)
+
+        self.assertTrue(reach.in_targetable_lane(high.world_y, {high}))
+        self.assertFalse(reach.in_playable_lane(high.world_y, {high}))
+        self.assertEqual(reach.live_enemies({high}), [high])
+
+    def test_an_enemy_past_the_lane_ceiling_is_not_a_target(self) -> None:
+        # The placeholder this filter exists for -- stage 1's scripted
+        # "behind a door" enemy -- is past the *ceiling*, which the enemy
+        # band rejects exactly as the player band did.
+        offstage = _garcia(world_x=130, world_y=400)
+
+        self.assertFalse(reach.in_targetable_lane(offstage.world_y, {offstage}))
+        self.assertEqual(reach.live_enemies({offstage}), [])
+
+    def test_an_enemy_in_the_screen_strip_outside_the_walk_clamp_is_on_screen(self) -> None:
+        # CameraRange is the player's walk clamp, 256px wide; the CRT is 320.
+        # An enemy in the 32px strip down either side is plainly visible and
+        # fighting, and used to vanish from every verb that asks
+        # on_screen_enemies -- Souther backs into the left strip constantly.
+        camera = CameraRange(left=3552, right=3808, top=0, bottom=112)
+        in_strip = _garcia(world_x=3536, world_y=40)
+        off_screen = _garcia(slot="obj02", world_x=3400, world_y=40)
+
+        self.assertFalse(reach.in_camera(camera, in_strip.world_x, in_strip.world_y))
+        self.assertEqual(
+            reach.on_screen_enemies({camera, in_strip, off_screen}), [in_strip]
+        )
+
 
 def _antonio(**overrides) -> Antonio:
     fields = dict(

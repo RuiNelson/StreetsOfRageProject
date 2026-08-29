@@ -845,8 +845,38 @@ def _approach_lane_y(
         if _holds_lane_offset_while_closing(target)
         else WALK_TO_ENEMY_LANE_SAFETY_Y
     )
+    hold_offset = (
+        ANTONIO_APPROACH_LANE_Y
+        if _holds_lane_offset_while_closing(target)
+        else WALK_TO_ENEMY_LANE_SAFETY_Y
+    )
+    if dy > hold_offset:
+        # Clear of the line -- but "clear" must not also mean "and never any
+        # closer". Returning ``actor.world_y`` here holds *whatever* offset
+        # the actor happens to have, however wide, and that is a deadlock
+        # rather than a plan: ``strike_goal`` builds its region around the
+        # lane this function names, so an approach 68px off-lane walks to the
+        # right X on its own lane, reports arrival, and stands there. Nothing
+        # is in range, so nothing attacks; the goal is met, so nothing moves.
+        # Measured against Souther, who fights from the top two rows of the
+        # band: the actor spent a 90 s fight at lane 59-88 against a boss at
+        # 0-27, holding no button for 4600 of 6513 approach ticks and landing
+        # one punch. ``alongside`` was supposed to converge the lane, but it
+        # only becomes true inside ``stop_dx`` on X, and against a boss that
+        # keeps re-opening the X gap the two conditions never coincide.
+        #
+        # So close the lane down to the offset the approach actually wants,
+        # on the side the actor is **already** on. That side is what makes
+        # this safe to do for every enemy rather than Antonio alone: the aim
+        # point lies strictly between the two bodies (dy is greater than the
+        # offset), so it can never route the walk across the target's own
+        # lane, which is the risk the midpoint rule below carries and the
+        # reason that rule stays scoped.
+        side = 1 if actor.world_y > target.world_y else -1
+        return int(target.world_y + side * hold_offset)
     if dy >= clear_of_the_line:
-        # Already clear of the line; holding the current lane is enough.
+        # Inside the band the approach wants; holding the current lane is
+        # enough, and a further nudge would only be jitter.
         return actor.world_y
     if not (
         _holds_lane_offset_while_closing(target) or is_dangerous(target.combat_phase)

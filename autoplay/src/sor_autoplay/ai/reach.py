@@ -34,7 +34,13 @@ from __future__ import annotations
 import math
 
 from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
-from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
+from ..world_map import (
+    CAMERA_X_MIN,
+    LANE_Y_MAX_DEFAULT,
+    LANE_Y_MIN,
+    LANE_Y_MIN_ENEMY,
+    lane_y_max_for_level,
+)
 from .kinematics import enemy_projected, enemy_projected_without_crossing
 from .tokens import (
     Antonio,
@@ -315,6 +321,33 @@ def in_playable_lane(world_y: int, context: Context) -> bool:
     return LANE_Y_MIN <= world_y <= lane_max
 
 
+def in_targetable_lane(world_y: int, context: Context) -> bool:
+    """``in_playable_lane``'s question asked about an *enemy* rather than a
+    stand point: is this body somewhere the actor can still fight it?
+
+    Same ceiling, two pixels lower a floor, and the two pixels are the whole
+    point. The ROM clamps the two kinds of body with two different routines:
+    players to ``$02..$70`` (``$44 0A``, inside
+    ``$43AA (clamp_players_to_gameplay_bounds)``) and enemies to ``$00..$70``
+    (``$17AB8``, ai-analysis/enemy-ai.md). Souther spends about a quarter of
+    a round-2 fight standing in those top two rows, and judging him by the
+    *player's* floor dropped him out of ``live_enemies`` outright: no target,
+    so no approach, no attack and no ranking -- the AI fell through to
+    ``WalkToAdvanceStage`` and walked away from a live boss. Measured over a
+    90 s fight, 2228 of 10220 ticks.
+
+    A lane the actor cannot stand in is not a lane it cannot *hit*: from the
+    player floor at ``$02`` an enemy at ``$00`` is 2px away, and every strike
+    in the game reaches ``PUNCH_RANGE_Y`` (12px) of lane. The unreachable
+    placeholder this filter exists for -- stage 1's scripted "behind a door"
+    enemy -- sits far past the *ceiling*, which both bands still reject.
+    """
+
+    stage = find(context, Stage)
+    lane_max = lane_y_max_for_level(stage.level_index) if stage is not None else LANE_Y_MAX_DEFAULT
+    return LANE_Y_MIN_ENEMY <= world_y <= lane_max
+
+
 def live_enemies(context: Context) -> list[Enemy]:
     """Every enemy still worth acting on.
 
@@ -327,9 +360,10 @@ def live_enemies(context: Context) -> list[Enemy]:
       ``$8000``-``$FFFF`` is already dead while the object sits there with a
       stale action family. Without this the AI chases, ranks and punches
       corpses, and blocks its own stage advance behind them;
-    - ``in_playable_lane`` -- it is somewhere the player can never reach
-      (stage 1's scripted "behind a door" placeholder is a real, tracked
-      Enemy at an unreachable lane).
+    - ``in_targetable_lane`` -- it is somewhere the actor can neither reach
+      nor hit (stage 1's scripted "behind a door" placeholder is a real,
+      tracked Enemy past the lane ceiling). Deliberately the *enemy* band and
+      not ``in_playable_lane``'s player band: see that function.
     """
 
     return [
@@ -337,7 +371,7 @@ def live_enemies(context: Context) -> list[Enemy]:
         for e in find_all(context, Enemy)
         if not should_ignore_as_target(e.combat_phase)
         and not e.is_defeated
-        and in_playable_lane(e.world_y, context)
+        and in_targetable_lane(e.world_y, context)
     ]
 
 
@@ -404,12 +438,36 @@ def held_enemy(actor: PlayableCharacter, enemies: list[Enemy]) -> Enemy | None:
     return None
 
 
+# ``CameraRange`` is the player's *walk clamp* (``camera_x + $20 .. + $120``),
+# not the visible CRT: ``observe.py`` builds it from ``world_map``'s
+# ``camera_left``/``camera_right``, which are that clamp. The screen is 320px
+# wide against the clamp's 256, so a 32px strip down each side is plainly
+# visible and fought in while sitting outside ``in_camera`` -- exactly what
+# ``world_map``'s own note means by "combat still uses the full CRT-relative
+# 0..320 X band". Souther backs into the left strip constantly: 1462 of 10220
+# ticks of a measured round-2 fight, each one a tick where the boss was on
+# screen, in front of the actor, and invisible to every verb that asks
+# ``on_screen_enemies``.
+SCREEN_STRIP_X = CAMERA_X_MIN  # 32px each side; (320 - $100) / 2
+
+
+def in_visible_screen(camera: CameraRange, world_x: int, world_y: int) -> bool:
+    """``in_camera`` widened from the walk clamp to the CRT -- see
+    ``SCREEN_STRIP_X``. Use this to ask "can the actor see and fight it";
+    ``in_camera`` stays the question "may the actor stand there"."""
+
+    return (
+        camera.left - SCREEN_STRIP_X <= world_x <= camera.right + SCREEN_STRIP_X
+        and camera.top <= world_y <= camera.bottom
+    )
+
+
 def on_screen_enemies(context: Context) -> list[Enemy]:
     camera = find(context, CameraRange)
     enemies = live_enemies(context)
     if camera is None:
         return enemies
-    return [e for e in enemies if in_camera(camera, e.world_x, e.world_y)]
+    return [e for e in enemies if in_visible_screen(camera, e.world_x, e.world_y)]
 
 
 def in_punch_band(actor: PlayableCharacter, enemy: Character) -> bool:

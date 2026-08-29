@@ -27,7 +27,10 @@ Souther is hitstun → grab → **knee, knee, ...** → suplex, with the hop
 **removed** entirely: he counters jump attacks outright, his committed claw
 is answered by a lane step rather than a hop, the approach stands inside his
 own inner-abort pocket instead of at punch range, and the police special is
-worth spending well before "about to die" against his low health pool).
+worth spending well before "about to die" against his low health pool; and
+he fights from the top two rows of the lane band, which is why the two
+targeting bands and the approach's lane convergence all had to be right
+before any of that tactic could run -- see **Souther was a stalemate**).
 
 **Holding a boss (user: "a IA não consegue lidar bem com o boss de
 primeiro nível"; "os jogadores profissionais são bem fãs de agarrar e fazer
@@ -231,17 +234,77 @@ The honest reading is that "wait in the middle" needs a *timer or a trigger*
 and that the lane-0 window needs a verb that does something useful in it.
 Neither is written yet.
 
-**Souther, for contrast, is the weak fight now** (one run each, so read it
-as a shape rather than a number). `tools/boss_fight.py --level 2 --boss-type
-0x55`: killed, but 1-2 lives lost and 90-180 s, with **73-82% of the fight's
-ticks spent walking** and about 40 attack ticks in total -- 35 punches, 3
-knees, no suplex at all. The AI wins him by attrition, not by a plan. The
-near-side lane rule made that visibly worse while it applied to him (2 lives
-/ 177 s / 9 hits against 1 / 89 s / 6 after scoping it back to Antonio),
-which is what the scoping was for. Whatever is done for him next should
-start from why the hold chain almost never fires: `SOUTHER_ON_PUNISH` is
-keyed on the *brief* primary `$03` alone, deliberately, and the walk-in may
-simply not be converting inside it.
+**Souther was a stalemate, and none of the three reasons were tactical**
+(user: "contra o boss do nível 2 fica empatada, não consegue atingir o boss,
+mas faz com que o boss não a consiga atingir"). The description was exact,
+and a per-tick trace of a 90 s fight (10 220 ticks, the real pipeline) says
+why: **the actor stood at lane 59-88 against a boss at lane 0-27 for the
+whole fight**, held no button at all on 4600 of its 6513 approach ticks, and
+landed one punch. Nothing could hit anything. Three independent bugs, all in
+"where is the enemy and how do I get to it", none of them about how to fight
+him:
+
+- **the boss was not a target at all for 2228 of the 10 220 ticks.** The ROM
+  clamps the two kinds of body with two different routines -- players to
+  `$02..$70` (`$44 0A`, inside `$43AA
+  (clamp_players_to_gameplay_bounds)`), enemies to `$00..$70` (`$17AB8`,
+  `ai-analysis/enemy-ai.md`) -- and Souther fights from those top two rows,
+  which is 24% of his ticks. `reach.live_enemies` judged him by the
+  *player's* floor (`in_playable_lane`), so he dropped out of the target
+  list entirely. A lane the actor cannot stand in is not a lane it cannot
+  hit: from `$02` an enemy at `$00` is 2px away against a 12px
+  `PUNCH_RANGE_Y`. `reach.in_targetable_lane` is the enemy-side band and is
+  what `live_enemies` asks now; `in_playable_lane` stays the player's, for
+  the actor's own stand points;
+- **and not on screen for another 1462.** `CameraRange` is the player's walk
+  clamp (`camera_x + $20 .. + $120`, 256px), not the CRT (320px), so the
+  32px strip down each side is plainly visible and fought in while sitting
+  outside `reach.in_camera` -- `world_map.py`'s own note already says
+  combat uses the full 0..320 band. Souther backs into the left strip
+  constantly. `reach.in_visible_screen` is that band, and
+  `on_screen_enemies` asks it; `in_camera` keeps its own question, "may the
+  actor stand here". `decide._advance_blocking_enemies` follows it, since
+  its off-screen carve-out exists precisely because the approach would not
+  chase such a body -- and now it does;
+- **with no target, the AI walked away.** `WalkToAdvanceStage` took 2333 to
+  5121 ticks per fight *while the boss was alive on screen*. It is gone
+  entirely from the fights after the fix (0 ticks, every run).
+
+The third bug is the one that made it a *stalemate* rather than a loss.
+`execute._approach_lane_y` returned `actor.world_y` whenever
+`dy >= WALK_TO_ENEMY_LANE_SAFETY_Y`, which holds **whatever** offset the
+actor happens to have, however wide. `nav.strike_goal` builds its region
+around the lane that function names, so an approach 68px off-lane walks to
+the right X on its own lane, reports arrival, and stops: nothing is in
+range, so nothing attacks; the goal is met, so nothing moves. `alongside`
+was supposed to converge the lane, but it only turns true inside `stop_dx`
+on X, and against a boss who keeps re-opening the X gap the two conditions
+never coincide. The fix closes the lane down to the offset the approach
+actually wants (`hold_offset`), **on the side the actor is already on** --
+which is what makes it safe for every enemy and not just Antonio: `dy` is
+greater than the offset in that branch, so the aim point lies strictly
+between the two bodies and can never route the walk across the target's own
+lane. That is the risk the midpoint rule carries, and why *that* rule stays
+scoped to Antonio.
+
+Measured with `tools/boss_fight.py --level 2 --boss-type 0x55`, Blaze, turbo
+4, against a pristine copy of the previous code on the same host:
+
+| | killed | lives lost | damage taken | fight length | `WalkToAdvanceStage` ticks |
+| --- | --- | --- | --- | --- | --- |
+| before | 3/3 | 1, 2, 2 | 160, 240, 240 | 82, 211, 157 s | 2333, 5121, 3877 |
+| after | 2/2 | 0, 1 | 60, 160 | 33, 46 s | 0, 0 |
+
+Still open, and unchanged by any of this: the hold chain almost never fires.
+`SOUTHER_ON_PUNISH` is keyed on the *brief* primary `$03` alone,
+deliberately, and the walk-in was not converting inside it -- though it
+never had a chance to, from 60px off his lane. Re-measure before designing
+anything for it.
+
+The near-side lane rule made the old fight visibly worse while it applied to
+him (2 lives / 177 s / 9 hits against 1 / 89 s / 6 after scoping it back to
+Antonio), which is what the scoping was for; the change above is the
+*magnitude* of the generic offset, not its side rule at small `dy`.
 
 **The trade is real and it went the other way on hops**, and the reason is
 worth keeping. Antonio closes lane himself, so an approach that holds its

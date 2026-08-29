@@ -40,6 +40,17 @@ SCREEN_WIDTH = 320
 LANE_Y_MIN = 0x02
 LANE_Y_MAX_DEFAULT = 0x70
 LANE_Y_MAX_ROUND7 = 0xA0  # level_index == 6
+# Enemies are clamped by a *different* routine with a *different* floor:
+# `$17AB8` (the shared later-boss/enemy axis integrator, ai-analysis/
+# enemy-ai.md) clamps lane Y to `$00-$70`, two pixels above the player's own
+# `$02` floor at `$44 0A`. So the top two rows of the band hold enemies the
+# player can never stand level with -- and Souther lives there: measured over
+# a round-2 fight, 24% of his ticks were at world_y $00/$01. They are still
+# well inside a punch's own PUNCH_RANGE_Y lane reach from y=$02, so "the
+# player cannot stand there" must not be read as "not a target". See
+# reach.in_targetable_lane, which is the enemy-side band, against
+# reach.in_playable_lane, which stays the player's.
+LANE_Y_MIN_ENEMY = 0x00
 CAMERA_X_MIN = 0x20  # left walk limit relative to camera
 CAMERA_X_SPAN = 0x100  # walkable width (not the full 320 px CRT)
 # Default camera height for aspect / empty maps (most rounds).
