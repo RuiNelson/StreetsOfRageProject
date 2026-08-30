@@ -42,7 +42,7 @@ from .tokens import (
     punch_outer_x,
     punch_usable_inner_x,
 )
-from .tokens import Antonio, Enemy, Souther
+from .tokens import Antonio, Enemy, GrabReason, Souther
 from .tokens import CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile
 from .tokens import Pickup, Weapon
@@ -84,6 +84,7 @@ from .reach import (
     SOUTHER_SLASH_LANE,
     enemy_behind_actor,
     enemy_lane_covers,
+    grab_reasons,
     in_camera,
     in_playable_lane,
     incoming_melee_targets,
@@ -235,9 +236,24 @@ ANTONIO_APPROACH_LANE_Y = WALK_TO_ENEMY_LANE_SAFETY_Y + PUNCH_RANGE_Y
 # is unsatisfied for the whole approach, the inner abort is unsatisfied from
 # the moment the lane is given up, and the two overlap, so there is no
 # instant at which `$15EDA` can commit. Antonio's number happens to be the
-# same 40; the two are written separately because they are derived from two
-# different gates and only one of them is 28px wide.
-SOUTHER_APPROACH_LANE_Y = SOUTHER_SLASH_LANE + PUNCH_RANGE_Y
+# same 40 without the margin below; the two are written separately because
+# they are derived from two different gates and only one of them is 28px
+# wide -- which is exactly why only one of them needed the margin.
+#
+# `_approach_lane_y` stops actively widening the lane once
+# `dy >= hold_offset - PUNCH_RANGE_Y` ("close enough, a further nudge is only
+# jitter") -- and for Antonio that lands on WALK_TO_ENEMY_LANE_SAFETY_Y (28),
+# a generic buffer that happens to sit 8-12px clear of his real 16/20px
+# gates. For Souther, without the margin, the identical subtraction landed
+# on SOUTHER_SLASH_LANE (28) *exactly* -- his own real gate, zero clearance.
+# Measured live: the approach stopped adjusting lane the moment dy reached
+# 28, and Souther, closing lane at 4px/tick while the actor holds still, was
+# in his committed claw two ticks later at dy=21 -- `DodgeSoutherSlash` fired
+# the same tick as the commit and had no time to matter. REACH_SAFETY_MARGIN
+# is the cushion already used elsewhere in this file to deny his gates
+# rather than sit on them (`_souther_pocket_stop_dx`); it belongs here for
+# the identical reason.
+SOUTHER_APPROACH_LANE_Y = SOUTHER_SLASH_LANE + PUNCH_RANGE_Y + REACH_SAFETY_MARGIN
 # A Breakable is itself a solid obstacle -- walking straight to its exact
 # (world_x, world_y) means walking into it from whatever angle happens to be
 # a straight line, which can mean approaching from directly above/below and
@@ -887,6 +903,11 @@ def _holds_lane_offset_while_closing(target: Enemy) -> bool:
     return _lane_offset_while_closing(target) is not None
 
 
+# The subset of GrabReason that means "already helpless, nothing left to
+# deny" rather than "grabbable in general" -- see _approach_lane_y.
+_ON_PUNISH_GRAB_REASONS = frozenset({GrabReason.ANTONIO_ON_PUNISH, GrabReason.SOUTHER_ON_PUNISH})
+
+
 def _approach_lane_y(
     actor: Myself | Partner, target: Enemy, context: Context, *, alongside: bool
 ) -> int:
@@ -897,9 +918,32 @@ def _approach_lane_y(
     approach is going. Once ``alongside`` on X the answer is always the
     enemy's own lane -- the approach is over and the strike or the hold needs
     the alignment.
+
+    A boss already in one of its own *punishable* primaries is the other
+    case that forces exact convergence, ahead of the generic bands below.
+    Those bands are sized for a *punch* -- ``WALK_TO_ENEMY_LANE_SAFETY_Y`` is
+    ``PUNCH_RANGE_Y`` plus slack -- and Souther's ``$03``/``$05``/``$0A`` or a
+    punishable Antonio need the much tighter ``reach.GRAB_RANGE_Y`` instead.
+    Measured live against Souther's police-reaction window (``$0A``, the
+    longest helpless state in the fight): the approach reached dy=26 while
+    closing, landed inside the punch band's own "close enough" branch below,
+    and parked there for the rest of the window -- ``grab_reasons`` stayed
+    ``SOUTHER_ON_PUNISH`` for hundreds of ticks and ``grab_would_connect``
+    never once went true, because 26px is comfortably inside the 28px punch
+    band and just as comfortably outside the 10px grab range.
+
+    Deliberately narrower than "``grab_reasons`` is nonempty": Antonio's
+    ``ANTONIO_WALK_IN`` fires for any live, ready, ungrabbed Antonio, at any
+    range -- that is the reason the lane-offset approach below exists at all,
+    and converging early on its strength alone reopens his kick gate (broke
+    three ``test_an_antonio_approach_*`` fixtures, all at his own
+    ``CombatPhase.NORMAL``, when tried). Only the two *on-punish* reasons --
+    the boss already helpless, nothing left to deny -- earn the bypass.
+    ``enemies=[]`` is safe here: both boss branches of ``grab_reasons``
+    return before ever touching that argument.
     """
 
-    if alongside:
+    if alongside or grab_reasons(context, actor, target, []) & _ON_PUNISH_GRAB_REASONS:
         return target.world_y
     dy = abs(target.world_y - actor.world_y)
     gated = _lane_offset_while_closing(target)

@@ -928,6 +928,27 @@ def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
     whole health bar in one press -- both good enough reasons to spend it
     well before the "about to die" thresholds, at a health gate just lax
     enough that it is never spent while comfortably healthy either.
+
+    Souther is carved out of the boss bonus (user: "a maioria do dano
+    deve-se a ataques de polícia, não usar ataques de polícia"). The call
+    does buy the flat 10 damage, but it also puts the *caller* into action
+    ``$3`` for the shared ``$16AEC`` delay -- 300 P1 / 390 P2 frames, about
+    5-6.5s, entirely unresponsive to input (measured live: 798 of 798 ticks
+    sampled in that action were at an unchanged position, the longest run
+    644 ticks starting on the exact tick ``CallPolice`` fired). That is also
+    the single longest window ``SOUTHER_ON_PUNISH`` ever gets -- Souther is
+    forced into the shared ``$0A`` reaction for the same span -- so the call
+    spends the fight's best grab-and-suplex opportunity on a frozen actor
+    and buys only the scripted 10, where a landed hold-into-suplex chain is
+    worth far more. The re-approach that follows from scratch is where
+    ``autoplay/CLAUDE.md``'s "every hit is primary $02, with WalkToNearEnemy
+    holding the tick through the second before" damage actually comes from,
+    which is the indirect sense in which the special *causes* it. The
+    near-death thresholds above stay: at 18%/35% health nothing is lost by
+    freezing, since Souther freezes with the actor, and a life lost there
+    (+``PLAYER_MAX_HEALTH`` on the scored damage total) is far worse than a
+    spent special. Scoped to Souther, not the shared mechanism, because
+    Antonio's numbers are separately measured and this has not been.
     """
 
     if not _has_live_enemy(context):
@@ -944,7 +965,10 @@ def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
     )
     if surrounded and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD_SURROUNDED:
         return True
-    boss_alive = any(not boss.is_defeated for boss in find_all(context, Boss))
+    boss_alive = any(
+        not boss.is_defeated and not isinstance(boss, Souther)
+        for boss in find_all(context, Boss)
+    )
     return boss_alive and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD_BOSS
 
 

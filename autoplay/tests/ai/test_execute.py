@@ -557,14 +557,27 @@ class SoutherPocketApproachTests(unittest.TestCase):
         _, target_y = _walk_to_near_enemy_target(far, souther, {far, souther})
         self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
 
-        # Already inside the offset but still clear of the gate: hold, since
-        # a nudge either way is jitter and the gate is unsatisfied anyway.
-        near = _myself(world_x=40, world_y=70)
+        # Already inside the offset but still clear of the gate *with a real
+        # margin*: hold, since a nudge either way is jitter and the gate is
+        # unsatisfied anyway.
+        near = _myself(world_x=40, world_y=80)
         _, held_y = _walk_to_near_enemy_target(near, souther, {near, souther})
         self.assertEqual(held_y, near.world_y)
         self.assertGreaterEqual(abs(held_y - souther.world_y), SOUTHER_SLASH_LANE)
 
-        self.assertGreaterEqual(
+        # The margin has to be a real cushion against his own closing speed
+        # (4px/tick, ai-analysis/enemy-ai.md), not merely non-negative: at
+        # dy=30 (2px of raw clearance over his 28px gate) the old formula
+        # held here too, and a live trace caught him closing that in two
+        # ticks and committing at dy=21 while DodgeSoutherSlash, firing on
+        # the same tick as the commit, had no time left to matter. The
+        # approach must still be *actively widening* at dy=30, not holding.
+        thin_margin = _myself(world_x=40, world_y=70)
+        _, widened_y = _walk_to_near_enemy_target(thin_margin, souther, {thin_margin, souther})
+        self.assertNotEqual(widened_y, thin_margin.world_y)
+        self.assertGreaterEqual(abs(widened_y - souther.world_y), SOUTHER_APPROACH_LANE_Y)
+
+        self.assertGreater(
             SOUTHER_APPROACH_LANE_Y - PUNCH_RANGE_Y, SOUTHER_SLASH_LANE
         )
 
@@ -3270,8 +3283,28 @@ class SoutherLaneOffsetIsDroppedWhenTheGateCannotFireTests(unittest.TestCase):
                 )
 
                 self.assertNotEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
-                self.assertLess(
-                    abs(target_y - souther.world_y),
-                    SOUTHER_APPROACH_LANE_Y,
-                    "still holding an offset he cannot punish",
-                )
+                # Exact convergence, not merely "closer than the offset": a
+                # residual within SOUTHER_APPROACH_LANE_Y still passed here
+                # while it was actually a fixed WALK_TO_ENEMY_LANE_SAFETY_Y
+                # (28px) -- comfortably outside reach.GRAB_RANGE_Y (10px) and
+                # a grab that never connects. See the dy=26 case below for
+                # the live trace this weaker bound let through.
+                self.assertEqual(target_y, souther.world_y)
+
+    def test_a_punishable_souther_inside_the_punch_band_still_converges(self) -> None:
+        # The live bug this guards: a punishable Souther with a residual dy
+        # already inside WALK_TO_ENEMY_LANE_SAFETY_Y (28px) but outside
+        # reach.GRAB_RANGE_Y (10px) landed in _approach_lane_y's "close
+        # enough, hold the current lane" branch -- built for a punch's own
+        # wide lane slack, not a grab's tight one. Measured live against
+        # Souther's police-reaction window: the approach parked at dy=26 for
+        # hundreds of ticks, grab_reasons stayed SOUTHER_ON_PUNISH the whole
+        # time, and grab_would_connect never once went true.
+        actor = _myself(world_x=40, world_y=66)
+        souther = self._souther(primary_state=0x0A, combat_phase=CombatPhase.RECOVERY)
+        self.assertEqual(souther.world_y, 40)
+        self.assertEqual(abs(actor.world_y - souther.world_y), 26)
+
+        _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
+
+        self.assertEqual(target_y, souther.world_y)

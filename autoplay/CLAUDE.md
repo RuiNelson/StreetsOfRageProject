@@ -27,10 +27,13 @@ Souther is hitstun → grab → **knee, knee, ...** → suplex, with the hop
 **removed** entirely: he counters jump attacks outright, his committed claw
 is answered by a lane step rather than a hop, the approach stands inside his
 own inner-abort pocket instead of at punch range, and the police special is
-worth spending well before "about to die" against his low health pool; and
-he fights from the top two rows of the lane band, which is why the two
+**not** spent on him below "about to die" -- the call freezes the caller for
+the length of his own longest helpless window, which is worth more as a
+grab-and-suplex than as the flat 10 damage the special buys alone; and he
+fights from the top two rows of the lane band, which is why the two
 targeting bands and the approach's lane convergence all had to be right
-before any of that tactic could run -- see **Souther was a stalemate**).
+before any of that tactic could run -- see **Souther was a stalemate** and
+**The grab still wasn't landing**).
 
 **Holding a boss (user: "a IA não consegue lidar bem com o boss de
 primeiro nível"; "os jogadores profissionais são bem fãs de agarrar e fazer
@@ -444,9 +447,92 @@ reverted rather than kept on the strength of the reasoning:
   the hop it was meant to displace stayed;
 - see also the armed-jump note under **Holding a boss**.
 
-Still open: the actor takes a 20-damage hit in the first half-second of the
-fight in most runs, before it has done anything at all — Antonio's entrance,
-with the actor still mid-animation from the wave before.
+**The grab still wasn't landing, and the police special was most of the
+damage (user: "ela não chega a agarrar"; "a maioria do dano deve-se a
+ataques de polícia, não usar ataques de polícia"; "corrigir até que o boss
+leve menos de meia vida").** Three separate bugs, none of them the grab
+window itself -- `SOUTHER_ON_PUNISH` was already firing on every one of his
+punishable primaries, as designed above.
+
+- **`_approach_lane_y` stopped widening the lane at the punch's own comfort
+  band, not the grab's.** `WalkToNearEnemy`'s "close enough, a further nudge
+  is only jitter" branch holds once `dy >= hold_offset - PUNCH_RANGE_Y`, which
+  is `reach.GRAB_RANGE_Y` (10px) only by accident for a punch -- for a boss
+  already in a live grab window it left dy parked around 26-28px, comfortably
+  inside the punch band and just as comfortably outside grab range. Measured
+  live against the police-reaction window (`$0A`, the longest helpless state
+  in the fight): `grab_reasons` held `SOUTHER_ON_PUNISH` for hundreds of
+  ticks in a row and `grab_would_connect` never once went true. Fixed by
+  converging exactly onto his lane whenever `grab_reasons` returns
+  `SOUTHER_ON_PUNISH`/`ANTONIO_ON_PUNISH` -- deliberately narrower than "any
+  grab reason", since Antonio's `ANTONIO_WALK_IN` fires for any live, ready,
+  ungrabbed Antonio at any range and converging on that alone reopens his
+  kick gate (see `_approach_lane_y`'s own docstring and the
+  `test_an_antonio_approach_*` fixtures this broke on the first attempt);
+- **the police special was worth spending well before "about to die" --
+  except that spending it locks the caller in action `$3` for the shared
+  `$16AEC` delay (300 P1 / 390 P2 frames, ~5-6.5s), input dead the whole
+  time.** Measured live: 798 of 798 sampled ticks in that action were at an
+  unchanged position, the longest run 644 ticks starting on the exact tick
+  `CallPolice` fired. That is also the single longest `SOUTHER_ON_PUNISH`
+  window in the fight -- Souther is forced into the shared `$0A` reaction for
+  the same span -- so the old 60%-health boss bonus was spending the fight's
+  best grab-and-suplex opportunity on a frozen actor for a flat 10 damage,
+  where a landed hold-into-suplex chain is worth far more. `_police_is_worth_
+  it` no longer counts a live Souther toward that bonus (`Boss` still does,
+  for Antonio and the rest of the family -- unmeasured for them, and their
+  numbers are separately tuned, so left alone). The near-death thresholds
+  (18%/35%) stay: at those health levels nothing is lost by freezing, since
+  Souther freezes with the actor, and a life lost there is far worse on the
+  scored total than a spent special;
+- **and `SOUTHER_APPROACH_LANE_Y` itself sat exactly on his commit gate with
+  no margin against his own closing speed.** `ANTONIO_APPROACH_LANE_Y` and
+  `SOUTHER_APPROACH_LANE_Y` both happen to equal 40 (noted above), but from
+  different arithmetic: Antonio's is `WALK_TO_ENEMY_LANE_SAFETY_Y +
+  PUNCH_RANGE_Y`, so subtracting `PUNCH_RANGE_Y` back out in `_approach_lane_
+  y`'s "close enough" check lands on `WALK_TO_ENEMY_LANE_SAFETY_Y` (28) -- a
+  generic buffer that happens to sit 8-12px clear of his real 16/20px gates.
+  Souther's was `SOUTHER_SLASH_LANE + PUNCH_RANGE_Y`, so the identical
+  subtraction landed on `SOUTHER_SLASH_LANE` (28) *exactly* -- his own real
+  gate, zero clearance. Measured live: the approach stopped widening the
+  instant dy reached 28, and Souther, closing lane at 4px/tick while the
+  actor held still, was in his committed claw two ticks later at dy=21 --
+  `DodgeSoutherSlash` fired the same tick as the commit and had no time left
+  to matter. Fixed by adding `reach.REACH_SAFETY_MARGIN` (8px), the same
+  cushion `_souther_pocket_stop_dx` already uses to deny his other gate
+  rather than sit on it.
+
+Measured with `tools/boss_fight.py --level 2 --boss-type 0x55 --no-food`,
+Blaze, turbo 4, three fights per configuration:
+
+| | killed | lives lost | damage | grab ticks | police calls |
+| --- | --- | --- | --- | --- | --- |
+| grab convergence + police carve-out only | 3/3 | 2, 1, 3 | 300%, 200%, 400% | 5, 10, 5 | 0, 0, 1 |
+| + lane margin (shipped) | 3/3 | 0, 1, 1 | 75%, 195%, 195% | 5, 0, — | 0, 0, 1 |
+
+The margin fix roughly halved mean damage (300% → 155%) by giving the
+approach a real cushion instead of an exact one, but it does not fully
+answer the brief -- **still open, and not what "meia vida" asked for**: in
+every one of the six fights above, the very first claw of the fight lands
+within about a second of the boss appearing, before any grab window has
+opened and before either fix above is even relevant. A clean trace shows
+why it survives a wider margin: at the start both bodies are converging on
+each other from a large separation (dy starting around 70-85px), Souther
+closing his own lane at 4px/tick while the actor closes X -- the two tracks
+meet in the middle regardless of how wide the *target* offset is, because
+`_approach_lane_y`'s first branch aims at a fixed point 48px off his lane
+rather than actively defending a widening margin as he advances.
+This is the same shape as Antonio's still-open entrance hit above, and the
+project's own history with that one (three attempts, all measured worse
+and reverted) is reason enough not to guess at a fourth number here without
+measuring it. `grab ticks` also reads 0 in the second table's worst run
+(fight5, 195% damage): the fix makes a grab *reachable* once a window
+opens, it does not create more windows, and a fight spent mostly on the
+defensive gives Souther fewer hit-reactions to open one from.
+
+Still open (Antonio): the actor takes a 20-damage hit in the first
+half-second of the fight in most runs, before it has done anything at all —
+Antonio's entrance, with the actor still mid-animation from the wave before.
 
 **First-level breakables (user):** Round-1 phone booths (`$11`) and the
 type-`$19` family share the shallowest ROM solid (14px on lane vs a 16px
@@ -605,6 +691,7 @@ do not commit `.jsonl` runs.
 | --- | --- |
 | `boss_fight.py` | **Scores** one boss fight: plays the level for real, then reports killed/died, damage taken, fight length and the verb histogram. `--level`/`--boss-type` select the fight (`--level 1 --boss-type 0x56` is Antonio, `--level 2 --boss-type 0x55` Souther, the default). Boss death is the raw signed health word only -- both `phases.boss_phase`'s `DEATH` decode and `MapEntity.is_defeated` false-positive on the transient `$164FC` lethality test, twice confirmed live |
 | `antonio_diag.py` | **Explains** a round-1 fight tick by tick: every candidate `Verb` with its own emergency, the actor's hold state (`+$4C` link and the action byte behind it), Antonio's primary/tactical bytes, and `antonio_will_kick`/`grab_reasons`/`grab_would_connect`. Written for, and found, the front-hold stall in **Holding a boss** above |
+| `souther_diag.py` | The round-2 equivalent, plus `dx`/`dy`, `_lane_offset_while_closing`, and `_souther_pocket_stop_dx` per tick. Stops on the boss's own death (raw signed health, like `boss_fight.py`) or a level reset after the boss was seen, with a `--fight-seconds` backstop -- do not run it, or any tool that drives a live host, without a real stop condition. Found the grab-convergence and lane-margin bugs in **The grab still wasn't landing** above |
 | `breakable_diag.py` | Round-1 breakable stall, with **real** enemies (the sweep did not reproduce it) |
 | `armed_combat_diag.py` | Held-weapon reach and swing timing |
 

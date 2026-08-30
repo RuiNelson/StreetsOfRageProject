@@ -1205,12 +1205,26 @@ class CouldCallPoliceTests(unittest.TestCase):
         # $16A60's flat -10 HP is roughly a third of a later-boss's whole
         # health bar (32 max) -- worth spending well before the "about to
         # die" thresholds, not hoarded until near-death against a street
-        # enemy that never comes.
+        # enemy that never comes. Antonio, not Souther: see the carve-out
+        # below.
+        myself = make_myself(specials=1, health_percent=50.0)
+        antonio = _antonio()
+        context: set[Token] = {myself, antonio}
+
+        self.assertEqual(could_call_police(context), {CallPolice(actor_slot="P1")})
+
+    def test_does_not_fire_against_a_live_souther_below_the_boss_threshold(self) -> None:
+        # Carved out (user: "a maioria do dano deve-se a ataques de polícia,
+        # não usar ataques de polícia"): the call locks the caller in action
+        # $3 for the ~300-frame $16AEC delay, which is also the longest
+        # SOUTHER_ON_PUNISH window in the fight -- see _police_is_worth_it.
+        # The near-death thresholds are untouched; only this early, healthy
+        # boss-bonus trigger is scoped away from him.
         myself = make_myself(specials=1, health_percent=50.0)
         souther = _souther()
         context: set[Token] = {myself, souther}
 
-        self.assertEqual(could_call_police(context), {CallPolice(actor_slot="P1")})
+        self.assertEqual(could_call_police(context), set())
 
     def test_does_not_fire_against_a_live_boss_while_comfortably_healthy(self) -> None:
         myself = make_myself(specials=1, health_percent=90.0)
