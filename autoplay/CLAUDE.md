@@ -363,10 +363,56 @@ strength of the reasoning:
   before and after. It is kept because it is free and correct, not because
   it was shown to pay.
 
-Still open: the entrance. Two hits land in the first 3.5 s, ten fights out
-of ten, with `WalkToNearEnemy` holding the tick and him stepping to primary
-`$02` at t~1.3 s. Four hits kill from full health, so that block alone is
-half the bar before the AI has done anything.
+**Where the remaining damage comes from, and why no lane trick fixes it**
+(user: "ainda apanha muito do boss, especialmente tentando se aproximar").
+Over the shipped configuration's five fights, 20 hits: **every one of them
+primary `$02`**, the committed claw, and 18 of the 20 with `WalkToNearEnemy`
+holding the tick through the second before. Half arrive in the first 4 s, at
+t~1.3 and t~3.1, in every fight.
+
+The measurement that explains it, taken from consecutive ticks of a live
+trace rather than from the tables:
+
+| | lane movement per agent tick |
+| --- | --- |
+| Blaze | +/-2 px (3 at most) |
+| Souther | +/-4 px |
+
+**He closes lane twice as fast as the actor opens it.** A lane offset is
+therefore something an approach can *arrive* at and never something it can
+*hold* -- which is why the corridor changed the shape of the fight and not
+the death count (1,1,1,1,1 each side). It also means the pocket is not
+merely the safest ground but the only *stable* ground in the fight: inside
+`$19` he takes `$1606A`, backing off at 1px/frame and **mirroring** lane
+rather than chasing it; outside it he chases at 4px/frame and wins.
+
+Two further attempts on this, both **measured worse and reverted**, so that
+nobody spends the runs again:
+
+- **keeping the lane offset while the claw is already out.** Mechanically
+  exact -- `$161C6` writes only `+$1C`, cannot follow a lane change once
+  committed, and resolves only with `+$52 < $18`, so an offset wider than
+  that ought to be the dodge. Measured 2 clean fights in 6 and 137 mean
+  damage against 3 in 5 and 96, with a second batch confirming it was not
+  small-sample noise;
+- **demoting the strike thrown from outside the pocket** below the walk
+  (13 vs 14+), with `reach.enemy_actionable` agreeing so the approach keeps
+  closing the last 32px. This is the *ranking* form of the refusal that
+  failed earlier, and it does avoid that version's vacuum -- the strike stays
+  on the table -- but it measured 0/1/1/2 lives across its four valid runs.
+
+**On jumping (user: "talvez saltar?").** The premise is right and is worth
+recording even though it is unused: `$162A4 (souther_flag_target_jump_
+attack)` arms `+$79` only for player action `$16`/`$17`/`$42`/`$43`, the
+jump-*attack* pairs. Free flight is `$12`/`$13` and `$3914` is what promotes
+it to `$16` when B is pressed, so **a hop with no kick is invisible to
+`$16234`** and the blanket refusal in `reach.souther_would_punish_jump` is
+stricter than the ROM requires. What it does not buy is a dodge: his claw
+boxes, extracted from his own animation set `$2E44A` (shapes `$6D`, `$71`,
+`$6F`), sit at z `-50..-26`, and Blaze's apex is about -50 -- the clearance
+window is real but narrow, and the flight passes through the band on the way
+up and down. A jump also freezes lane at takeoff, which is the axis he
+already wins. So it is a way to *cross*, not a way to *evade*.
 
 The near-side lane rule made the old fight visibly worse while it applied to
 him (2 lives / 177 s / 9 hits against 1 / 89 s / 6 after scoping it back to
