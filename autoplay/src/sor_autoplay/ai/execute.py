@@ -80,6 +80,7 @@ from .reach import (
     ANTONIO_KICK_LANE_BREAK,
     PIT_AVOID_MARGIN,
     REACH_SAFETY_MARGIN,
+    SOUTHER_SLASH_DIST_CLOSING,
     SOUTHER_SLASH_DIST_MIN,
     SOUTHER_SLASH_LANE,
     enemy_behind_actor,
@@ -244,16 +245,43 @@ ANTONIO_APPROACH_LANE_Y = WALK_TO_ENEMY_LANE_SAFETY_Y + PUNCH_RANGE_Y
 # `dy >= hold_offset - PUNCH_RANGE_Y` ("close enough, a further nudge is only
 # jitter") -- and for Antonio that lands on WALK_TO_ENEMY_LANE_SAFETY_Y (28),
 # a generic buffer that happens to sit 8-12px clear of his real 16/20px
-# gates. For Souther, without the margin, the identical subtraction landed
-# on SOUTHER_SLASH_LANE (28) *exactly* -- his own real gate, zero clearance.
+# gates. For Souther, without a margin, the identical subtraction landed on
+# SOUTHER_SLASH_LANE (28) *exactly* -- his own real gate, zero clearance.
 # Measured live: the approach stopped adjusting lane the moment dy reached
-# 28, and Souther, closing lane at 4px/tick while the actor holds still, was
-# in his committed claw two ticks later at dy=21 -- `DodgeSoutherSlash` fired
-# the same tick as the commit and had no time to matter. REACH_SAFETY_MARGIN
-# is the cushion already used elsewhere in this file to deny his gates
-# rather than sit on them (`_souther_pocket_stop_dx`); it belongs here for
-# the identical reason.
+# 28, and Souther was in his committed claw two ticks later at dy=21 --
+# `DodgeSoutherSlash` fired the same tick as the commit and had no time to
+# matter.
+#
 SOUTHER_APPROACH_LANE_Y = SOUTHER_SLASH_LANE + PUNCH_RANGE_Y + REACH_SAFETY_MARGIN
+# ai-analysis/enemy-ai.md's primary-1 tactical table names `+$67 == 1` as
+# `$160D0 (souther_state1_close_lane)` -- the one substate that should home
+# his lane onto the actor's, against `$00` (`$159F8` standoff) and `$02`
+# (`$16106` dash_timer) which should not. Five fresh clean-host traces say
+# that labelling does not match what actually moves: tactical 1 was entered
+# on 2 of 696 primary-1 ticks across a representative trace -- too rare to be
+# "the" closing state -- while tactical **2** carried essentially all of the
+# visible lane bursts (30 of 153 ticks nonzero, mean |delta| 3.9px on those,
+# against tactical 0's 1.4px on its own much rarer nonzero ticks). Either the
+# manuscript's two labels are swapped or `$160D0` fires for one transitional
+# tick that reads back as 2 before any snapshot catches it; either way,
+# `SOUTHER_LANE_CLOSING_TACTICALS` below is keyed off the measurement, not
+# the label, and includes both rather than re-guess which name is right.
+# reach.py's own comment on this handler puts the peak rate at 4px per 60Hz
+# frame, matching the ~3.9 observed at ~2 frames/agent tick.
+#
+# SOUTHER_APPROACH_LANE_Y's own REACH_SAFETY_MARGIN covers barely 2 ticks of
+# that before the gate reopens, which is not enough to survive a normal
+# approach's dozens of ticks -- confirmed live (see autoplay/CLAUDE.md's
+# "still open" note) -- but simply enlarging it for every tactical substate
+# broke `test_alternating_commitment_does_not_chatter_the_lane`: that test's
+# Souther never leaves tactical 0, so the only thing a blanket increase
+# changed for it was the *width* of a swing the test never asked to widen.
+# Scoping the extra margin to the substates that measurably move is not a
+# workaround for that test -- it is the more precise reading of "equacionar
+# o comportamento do boss": the wider margin is only ever the right answer
+# while he is actually the one closing.
+SOUTHER_LANE_CLOSING_TACTICALS = frozenset({0x01, 0x02})
+SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING = SOUTHER_APPROACH_LANE_Y + 24
 # A Breakable is itself a solid obstacle -- walking straight to its exact
 # (world_x, world_y) means walking into it from whatever angle happens to be
 # a straight line, which can mean approaching from directly above/below and
@@ -837,7 +865,7 @@ def _crossing_would_walk_into_the_swing(actor: Myself | Partner, target: Enemy) 
     return gap > target.max_reach + REACH_SAFETY_MARGIN
 
 
-def _lane_offset_while_closing(target: Enemy) -> int | None:
+def _lane_offset_while_closing(actor: Myself | Partner, target: Enemy) -> int | None:
     """The lane offset this enemy's own ROM gate makes mandatory, or ``None``.
 
     Not-``None`` for a live boss whose committed move is *lane-gated*,
@@ -857,11 +885,19 @@ def _lane_offset_while_closing(target: Enemy) -> int | None:
       gate plus the routed goal's own lane slack.
 
     Souther is the case where the offset is not merely safer but *closes the
-    gate for the entire approach*: his commit also needs ``+$50 >= $18``, and
-    the pocket ``_souther_pocket_stop_dx`` stops in is inside that, so the
-    lane offset covers the walk in and the inner abort covers the arrival,
-    with an overlap rather than a gap between them. See
-    ai-analysis/enemy-ai.md, "The uncommittable corridor".
+    gate for the entire approach*: his commit also needs ``+$50`` inside a
+    velocity-selected window (``reach.SOUTHER_SLASH_DIST_AWAY``/``_STATIONARY``/
+    ``_CLOSING`` -- 80/88/104px, widest while the target is walking into him,
+    which a live approach always is) **and** outside the ``$18`` inner abort,
+    and the pocket ``_souther_pocket_stop_dx`` stops in is inside that lower
+    bound -- so the lane offset covers the walk in and the inner abort covers
+    the arrival, with an overlap rather than a gap between them. See
+    ai-analysis/enemy-ai.md, "The uncommittable corridor". Past the *upper*
+    bound (104px, the widest of the three -- never assume a narrower one just
+    because this tick reads as stationary) he cannot commit at any lane, so
+    the offset is skipped there too: purely a bonus for a farther re-approach
+    after a knockback, since a fresh Souther fight starts inside 104px from
+    the first tick and never gets the benefit.
 
     An earlier attempt at this for Souther measured *worse* (2 lives / 177 s
     against 1 / 89 s) and was scoped back to Antonio. That measurement is not
@@ -893,14 +929,18 @@ def _lane_offset_while_closing(target: Enemy) -> int | None:
             # (`DodgeSoutherSlash` owns the committed case, and it wants the
             # lane too.)
             return None
+        if abs(target.world_x - actor.world_x) >= SOUTHER_SLASH_DIST_CLOSING:
+            return None
+        if target.tactical in SOUTHER_LANE_CLOSING_TACTICALS:
+            return SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING
         return SOUTHER_APPROACH_LANE_Y
     return None
 
 
-def _holds_lane_offset_while_closing(target: Enemy) -> bool:
+def _holds_lane_offset_while_closing(actor: Myself | Partner, target: Enemy) -> bool:
     """Whether the approach must stay off this enemy's lane the whole way in."""
 
-    return _lane_offset_while_closing(target) is not None
+    return _lane_offset_while_closing(actor, target) is not None
 
 
 # The subset of GrabReason that means "already helpless, nothing left to
@@ -946,7 +986,7 @@ def _approach_lane_y(
     if alongside or grab_reasons(context, actor, target, []) & _ON_PUNISH_GRAB_REASONS:
         return target.world_y
     dy = abs(target.world_y - actor.world_y)
-    gated = _lane_offset_while_closing(target)
+    gated = _lane_offset_while_closing(actor, target)
     hold_offset = gated if gated is not None else WALK_TO_ENEMY_LANE_SAFETY_Y
     clear_of_the_line = (
         hold_offset - PUNCH_RANGE_Y if gated is not None else WALK_TO_ENEMY_LANE_SAFETY_Y
@@ -980,14 +1020,14 @@ def _approach_lane_y(
         # enough, and a further nudge would only be jitter.
         return actor.world_y
     if not (
-        _holds_lane_offset_while_closing(target) or is_dangerous(target.combat_phase)
+        _holds_lane_offset_while_closing(actor, target) or is_dangerous(target.combat_phase)
     ):
         return actor.world_y
     # Leave the line, aiming at a *fixed* lane rather than a displacement
     # from the actor's own, so repeated ticks converge on one point instead
     # of stepping away forever.
     lo, hi = _lane_bounds(context)
-    if not _holds_lane_offset_while_closing(target):
+    if not _holds_lane_offset_while_closing(actor, target):
         # Side from the lane band's own midpoint, which does not move tick to
         # tick -- ``actor.world_y`` vs ``target.world_y`` crosses zero on a
         # couple of px of walk jitter while both bodies converge, and the

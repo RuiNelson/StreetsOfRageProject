@@ -187,12 +187,15 @@ def main() -> int:
                     "boss_y": boss.world_y,
                     "boss_hp": boss.health,
                     "boss_primary": boss.primary_state,
+                    "boss_tactical": boss.tactical,
                     "boss_grabbable": boss.primary_state in reach.SOUTHER_GRABBABLE_PRIMARIES,
                     "boss_committed": boss.strike_is_committed() if hasattr(boss, "strike_is_committed") else None,
                     "boss_phase": boss.combat_phase.name if boss.combat_phase else None,
                     "dx": dx,
                     "dy": dy,
-                    "lane_offset_gate": _lane_offset_while_closing(boss),
+                    "lane_offset_gate": (
+                        _lane_offset_while_closing(me, boss) if me is not None else None
+                    ),
                     "pocket_stop_dx": (
                         _souther_pocket_stop_dx(me, boss, 999) if me is not None else None
                     ),

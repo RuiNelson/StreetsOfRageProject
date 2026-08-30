@@ -503,32 +503,92 @@ punishable primaries, as designed above.
   rather than sit on it.
 
 Measured with `tools/boss_fight.py --level 2 --boss-type 0x55 --no-food`,
-Blaze, turbo 4, three fights per configuration:
+Blaze, turbo 4:
 
-| | killed | lives lost | damage | grab ticks | police calls |
-| --- | --- | --- | --- | --- | --- |
-| grab convergence + police carve-out only | 3/3 | 2, 1, 3 | 300%, 200%, 400% | 5, 10, 5 | 0, 0, 1 |
-| + lane margin (shipped) | 3/3 | 0, 1, 1 | 75%, 195%, 195% | 5, 0, — | 0, 0, 1 |
+| | n | killed | damage | mean |
+| --- | --- | --- | --- | --- |
+| grab convergence + police carve-out only | 3 | 3/3 | 300%, 200%, 400% | 300% |
+| + flat lane margin | 3 | 3/3 | 75%, 195%, 195% | 155% |
+| + tactical-scoped wider margin (shipped) | 5 | 5/5 | 200%, 200%, 400%, 75%, 300% | 235% |
 
-The margin fix roughly halved mean damage (300% → 155%) by giving the
-approach a real cushion instead of an exact one, but it does not fully
-answer the brief -- **still open, and not what "meia vida" asked for**: in
-every one of the six fights above, the very first claw of the fight lands
+**The margin work does not answer the brief, and the user asked for a
+fourth attempt anyway** (user: "Tenta chegar aos menos de 50%... tens de
+equacionar o comportamento do boss e programar a IA de acordo"), which
+found real bugs but not enough of an effect to claim over the noise floor:
+the eight fights across both margin rows range 75%-400% on identical code,
+so a three-run batch at 155% and a five-run batch at 235% are not evidence
+the second is worse -- they are evidence three runs is too few to tell, a
+point [[boss-fights-are-hard-to-measure]] already makes generally and this
+number reconfirms specifically for this fight.
+
+What the fourth attempt found, precisely (asked-for "equação"):
+`ai-analysis/enemy-ai.md`'s own gate table names the commit condition
+exactly -- `$15EDA`'s slash fires when `+$52 < $1C` (lane, 28px) **and**
+`+$50` sits in a velocity-selected window, `reach.SOUTHER_SLASH_DIST_AWAY`/
+`_STATIONARY`/`_CLOSING` (80/88/104px -- widest while the target is walking
+into him, which an approach always is). `_lane_offset_while_closing` had
+never encoded the *upper* bound at all; it now returns `None` past 104px,
+free correctness for a re-approach after a knockback (a fresh engagement
+starts inside 104px on tick one and never sees it).
+
+The lane number itself needed a real cushion against his own closing speed,
+not the single `REACH_SAFETY_MARGIN` (8px) it had: that handler's own
+comment puts his rate at **4px per 60Hz frame**, not per agent tick -- a
+units slip this same file had already made once (the "twice as fast" table
+above is titled "per agent tick" while citing the identical `$1606A` path in
+frame terms two lines later). At ~2 frames/tick under turbo that is 4px/tick
+or more, against an actor that measures 2-3, and confirmed against nothing
+more speculative than that: flatly widening `SOUTHER_APPROACH_LANE_Y` broke
+`test_alternating_commitment_does_not_chatter_the_lane`, an existing
+regression test for the live "changes direction very often, very quickly"
+bug this same corridor work has already caused once. That test's Souther
+never leaves tactical `$00`, so the fix is scoped to the tactical substates
+that actually move him -- and here the manuscript's own labels turned out to
+be unreliable: it names `+$67 == 1` (`$160D0`) as the one substate that
+homes lane onto the target, but five clean-host traces measured tactical 1
+on 2 of 696 primary-1 ticks -- too rare to be "the" closing state -- while
+tactical **2** (labelled `$16106 (souther_state1_dash_timer)`) carried
+essentially every visible lane burst (mean 3.9px on its nonzero ticks,
+against tactical 0's 1.4px on its own rarer ones). Either the two labels
+are swapped or `$160D0` is a one-tick transition that reads back as 2 before
+any snapshot lands on it; either way, `SOUTHER_LANE_CLOSING_TACTICALS` keys
+off what moves, not off which name is right, and is `{1, 2}` rather than
+re-guessing. A live trace confirmed the scoped margin actually engages in
+real play (72px on 88 of ~700 ticks in one fight) without touching the
+chatter test's fixture.
+
+None of that moved the mean, and the honest reading is *why not*, not
+*that it therefore failed*: every fight above still takes its first claw
 within about a second of the boss appearing, before any grab window has
-opened and before either fix above is even relevant. A clean trace shows
-why it survives a wider margin: at the start both bodies are converging on
-each other from a large separation (dy starting around 70-85px), Souther
-closing his own lane at 4px/tick while the actor closes X -- the two tracks
-meet in the middle regardless of how wide the *target* offset is, because
-`_approach_lane_y`'s first branch aims at a fixed point 48px off his lane
-rather than actively defending a widening margin as he advances.
-This is the same shape as Antonio's still-open entrance hit above, and the
-project's own history with that one (three attempts, all measured worse
-and reverted) is reason enough not to guess at a fourth number here without
-measuring it. `grab ticks` also reads 0 in the second table's worst run
-(fight5, 195% damage): the fix makes a grab *reachable* once a window
-opens, it does not create more windows, and a fight spent mostly on the
-defensive gives Souther fewer hit-reactions to open one from.
+opened and before fixes one through three are even relevant. A clean trace
+shows the mechanism -- at the start both bodies converge from a large
+separation (dy around 70-85px), Souther closing lane whenever tactical
+reads 1 or 2 while the actor closes X, and the two tracks meet in the
+middle regardless of how wide the *target* offset is, because reaching
+strike range at all necessarily means crossing the same band his gate
+lives in. A margin changes *where* that crossing is risky, not *whether*
+crossing it is. This is the same shape as Antonio's still-open entrance hit
+below, and the project's own history with that one (three attempts, all
+measured worse, reverted) is reason enough not to guess at a fifth margin
+number rather than change what kind of fix this is.
+
+**What a fifth attempt would need to be, if someone picks this back up:**
+not a wider margin, but *less time spent in the danger band in the first
+place*. `$15EDA`'s own inner abort (`+$50 < $18`, 24px) denies the commit
+unconditionally, independent of lane -- reaching it fast matters more than
+defending lane on the way there, since Souther's closing speed erodes any
+fixed cushion give enough ticks regardless of its width. Two concrete,
+unimplemented candidates from this investigation: (1) the approach's own
+side-selection (`approach_from_right` in `_walk_to_near_enemy_target` /
+`_enemy_stop_dx`'s `side`) reads a live position compare that can flip when
+a *fast, still-approaching* boss crosses a comparatively stationary actor
+mid-approach -- unlike the lane-side pick, which was already hardened
+against exactly this for Antonio -- and a flip there lengthens the crossing
+well past the direct distance; (2) prioritizing X-closure over lane
+defense specifically while `+$50` is still large would need either
+persistent per-approach state or a pathfinding-level change to express
+safely, both bigger and riskier than this session's other fixes and neither
+attempted here.
 
 Still open (Antonio): the actor takes a 20-damage hit in the first
 half-second of the fight in most runs, before it has done anything at all —

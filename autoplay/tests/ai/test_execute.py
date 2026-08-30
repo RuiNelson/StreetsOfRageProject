@@ -42,6 +42,8 @@ from sor_autoplay.ai.execute import (
     PICKUP_RANGE_Y,
     ANTONIO_APPROACH_LANE_Y,
     SOUTHER_APPROACH_LANE_Y,
+    SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING,
+    SOUTHER_LANE_CLOSING_TACTICALS,
     WALK_TO_ENEMY_LANE_SAFETY_Y,
     _enemy_stop_dx,
     _find_safe_spot,
@@ -549,8 +551,11 @@ class SoutherPocketApproachTests(unittest.TestCase):
         # $15EDA's slash needs +$52 < $1C (28px). The routed goal carries
         # PUNCH_RANGE_Y of lane slack, so the aim has to be 28 + 12 for the
         # *nearest acceptable arrival* to be 28 rather than 16 -- 16 being
-        # inside the gate, satisfied.
-        souther = self._souther(world_x=200, world_y=40)
+        # inside the gate, satisfied. world_x=120 keeps dx=80 for every actor
+        # below, comfortably inside SOUTHER_SLASH_DIST_CLOSING (104) so this
+        # test exercises the lane math, not the separate outer-bound
+        # relaxation (see test_a_far_souther_gets_no_offset_at_all).
+        souther = self._souther(world_x=120, world_y=40)
 
         # Wide of the offset: close the lane down to it, no further.
         far = _myself(world_x=40, world_y=100)
@@ -3261,12 +3266,46 @@ class SoutherLaneOffsetIsDroppedWhenTheGateCannotFireTests(unittest.TestCase):
         return Souther(**fields)
 
     def test_a_ready_souther_still_gets_the_offset(self) -> None:
-        actor = _myself(world_x=40, world_y=100)
+        # Comfortably inside SOUTHER_SLASH_DIST_CLOSING (104px): far enough
+        # that the offset test below (dx=160) is the one exercising the
+        # separate outer-bound relaxation, not this one.
+        actor = _myself(world_x=100, world_y=100)
         souther = self._souther()
 
         _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
 
         self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
+
+    def test_a_far_souther_gets_no_offset_at_all(self) -> None:
+        # Past SOUTHER_SLASH_DIST_CLOSING (104px, the widest of the three
+        # velocity-selected windows -- always assume the widest, since a
+        # live approach always reads as "walking into him"), $15EDA cannot
+        # commit at any lane, so denying one is pure overhead. Only matters
+        # for a re-approach after a knockback -- a fresh engagement starts
+        # inside 104px on tick one and never sees this branch.
+        actor = _myself(world_x=40, world_y=100)
+        souther = self._souther()  # world_x=200, dx=160
+
+        _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
+
+        self.assertEqual(target_y, 40 + WALK_TO_ENEMY_LANE_SAFETY_Y)
+
+    def test_actively_closing_lane_gets_the_wider_offset(self) -> None:
+        # Both tactical values measured live to actually move his lane (see
+        # SOUTHER_LANE_CLOSING_TACTICALS's own comment on why it is {1, 2}
+        # rather than just the manuscript's named $160D0/1) get the wider
+        # margin. Standoff (0) does not, which is why SoutherStabilityTests'
+        # alternating-commitment fixture (fixed at tactical 0) never sees
+        # this branch.
+        actor = _myself(world_x=100, world_y=150)
+        for tactical in SOUTHER_LANE_CLOSING_TACTICALS:
+            with self.subTest(tactical=tactical):
+                souther = self._souther(tactical=tactical)
+
+                _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
+
+                self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING)
+        self.assertGreater(SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING, SOUTHER_APPROACH_LANE_Y)
 
     def test_a_punishable_souther_is_walked_straight_at(self) -> None:
         for primary, phase in (
