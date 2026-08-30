@@ -707,12 +707,28 @@ class SoutherWouldPunishJumpTests(unittest.TestCase):
                 f"tactical {tactical:#04x}",
             )
 
-    def test_a_punishable_souther_is_the_one_safe_case(self) -> None:
-        # He cannot act and no claw is out; the grab outranks the hop anyway.
+    def test_even_a_punishable_souther_refuses_the_hop(self) -> None:
+        # There is no safe window, and this used to be treated as one. $16234
+        # is off the call path of the shared $03/$04 hit reaction, so the hop
+        # cannot be countered on the tick it launches -- but the flight is ~45
+        # frames against a recovery of a handful, and $16294
+        # (souther_select_target) re-runs $162A4 against the player's live
+        # action state every state-1 tick, which stays $16/$17 for the whole
+        # flight. The counter arms itself the moment he stands up, with the
+        # actor still airborne. A punishable Souther is a walk-in and a grab.
         myself = _myself(world_x=160, world_y=100)
         souther = _souther(
             world_x=200, world_y=100, combat_phase=CombatPhase.RECOVERY
         )
+        self.assertTrue(reach.souther_would_punish_jump(myself, {myself, souther}))
+
+    def test_a_dead_souther_stops_refusing_it(self) -> None:
+        # The refusal is about a boss who can still stand up, and nothing else
+        # on the screen should inherit it.
+        myself = _myself(world_x=160, world_y=100)
+        souther = _souther(world_x=200, world_y=100, health=0xFFFF)
+
+        self.assertTrue(souther.is_defeated)
         self.assertFalse(reach.souther_would_punish_jump(myself, {myself, souther}))
 
     def test_off_lane_is_still_refused(self) -> None:

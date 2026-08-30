@@ -181,8 +181,19 @@ class PhaseDecodeTests(unittest.TestCase):
                     boss_phase(type_id=type_id, primary_byte=0x04, tactical=0),
                     CombatPhase.RECOVERY,
                 )
+                # $05 is the shared *lethal gate* ($164FC), visited on
+                # every hit to test whether it was fatal -- not a death.
+                # Decoding it as DEATH made a living boss vanish from
+                # reach.live_enemies for the length of each of his own
+                # hitstuns; measured at 22, 15 and 8 health, and caught
+                # twice before that as a false "boss defeated" report at 25
+                # and 29 of 32. Death is the health word's job.
                 self.assertEqual(
                     boss_phase(type_id=type_id, primary_byte=0x05, tactical=0),
+                    CombatPhase.RECOVERY,
+                )
+                self.assertEqual(
+                    boss_phase(type_id=type_id, primary_byte=0x0C, tactical=0),
                     CombatPhase.DEATH,
                 )
 

@@ -2701,14 +2701,25 @@ class JumpRefusedNearSoutherTests(unittest.TestCase):
         )
         self.assertEqual(could_jump_attack({myself, grunt, dashing}), set())
 
-    def test_refusal_lifts_only_once_he_cannot_act(self) -> None:
+    def test_refusal_holds_even_while_he_is_punishable(self) -> None:
+        # His hit reaction is a handful of frames and the flight is ~45, and
+        # $16294 (souther_select_target) re-arms the counter from the player's
+        # live action state every state-1 tick -- so a hop launched during the
+        # recovery is countered as soon as he stands up. See
+        # reach.souther_would_punish_jump.
         myself = make_myself(world_x=120, world_y=100)
         grunt = make_enemy(slot="obj01", world_x=180, world_y=100)
         recovering = _souther(
             world_x=160, world_y=100, combat_phase=CombatPhase.RECOVERY
         )
+        self.assertEqual(could_jump_attack({myself, grunt, recovering}), set())
+
+    def test_refusal_lifts_once_he_is_dead(self) -> None:
+        myself = make_myself(world_x=120, world_y=100)
+        grunt = make_enemy(slot="obj01", world_x=180, world_y=100)
+        dead = _souther(world_x=160, world_y=100, health=0xFFFF)
         self.assertEqual(
-            could_jump_attack({myself, grunt, recovering}),
+            could_jump_attack({myself, grunt, dead}),
             {JumpAttack(actor_slot="P1", target_slot="obj01")},
         )
 
@@ -2882,4 +2893,33 @@ class BossNotIgnoredForASideshowTests(unittest.TestCase):
         walks = could_walk_to_near_enemy({myself, grunt, boss})
         self.assertNotIn(
             WalkToNearEnemy(actor_slot="P1", target_slot="obj01"), walks
+        )
+
+
+class WeaponDetourRefusedNearSoutherTests(unittest.TestCase):
+    """Armed, the AI has no move on him at all -- no hold (could_grab_enemy
+    excludes an armed actor), no punch (unarmed only), no hop (his counter).
+    MeleeWeaponAttack is what should replace them and fired zero times across
+    ten scored fights while WalkToWeapon took 137-223 ticks of five of them.
+    """
+
+    def _weapon(self):
+        return Weapon(slot="obj20", world_x=150, world_y=100, weapon_type=0x0A)
+
+    def test_no_weapon_detour_while_a_live_souther_is_on_screen(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        souther = _souther(world_x=200, world_y=100)
+        camera = CameraRange(left=0, right=400, top=0, bottom=112)
+
+        self.assertEqual(
+            could_walk_to_weapon({myself, souther, self._weapon(), camera}), set()
+        )
+
+    def test_the_detour_returns_once_he_is_dead(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
+        dead = _souther(world_x=200, world_y=100, health=0xFFFF)
+        camera = CameraRange(left=0, right=400, top=0, bottom=112)
+
+        self.assertTrue(
+            could_walk_to_weapon({myself, dead, self._weapon(), camera})
         )

@@ -6,5 +6,12 @@ set -euo pipefail
 # Opens the host in turbo and drives autoplay through the menus, the jump to
 # round 2, and a continuous sweep of every non-boss enemy family. See
 # ./scripts/go_to_boss for the shared flags and why the sweep is required.
+#
+# --no-food is passed here and nowhere else (user): the round-2 arena's food
+# is what made the fight *look* survivable. A heal hides every hit landed
+# after it -- boss_fight.py scores damage as a running minimum -- so the AI
+# was being credited for a plan the food was carrying. Souther has to be
+# beaten with the health the round left, and this is where that is enforced.
+# Put --no-food before "$@" so a caller can still argue with it.
 
-exec "${0:A:h}/go_to_boss" 2 "$@"
+exec "${0:A:h}/go_to_boss" 2 --no-food "$@"

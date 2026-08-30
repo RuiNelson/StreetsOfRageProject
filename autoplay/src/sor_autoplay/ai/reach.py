@@ -1097,9 +1097,19 @@ def souther_would_punish_jump(actor: PlayableCharacter, context: Context) -> boo
     does not test whether ``$16234`` is currently on his call path (see the
     constants above): while he can still choose, the jump-attack action state
     hands him the counter; while he is already dashing, the type-``$98`` claw
-    is a live attack object and the flight lands in it. The only Souther worth
-    hopping at is one who cannot act -- and there a grab (``GrabReason.
-    SOUTHER_ON_PUNISH``) outranks the hop anyway.
+    is a live attack object and the flight lands in it.
+
+    **Including while he is punishable**, which is the one exemption this used
+    to make and the ROM does not support. `$16234` is not on the call path of
+    the shared hit-reaction states `$03`/`$04`, so a hop launched *during* his
+    recovery cannot be countered on that tick -- but the flight is ~45 frames
+    and his recovery is a handful, and `$162A4` is re-run from
+    `$16294 (souther_select_target)` on every single state-1 tick against the
+    player's live action state, which stays `$16`/`$17` for the whole flight.
+    So the counter arms itself the instant he leaves recovery, with the actor
+    still in the air. Measured: with this exemption in place the AI spent 298
+    of 3541 fight ticks airborne against him. A punishable Souther is a walk-in
+    and a grab (``GrabReason.SOUTHER_ON_PUNISH``), never a hop.
 
     The X half-width is widened by the character's own free-flight reach
     (``jump_attack_max_dx``), because ``+$79`` stays set for as long as
@@ -1109,7 +1119,7 @@ def souther_would_punish_jump(actor: PlayableCharacter, context: Context) -> boo
 
     flight = jump_attack_max_dx(actor.character_id)
     for souther in find_all(context, Souther):
-        if souther.is_defeated or is_punishable(souther.combat_phase):
+        if souther.is_defeated:
             continue
         if abs(souther.world_x - actor.world_x) < SOUTHER_JUMP_COUNTER_DIST_X + flight:
             return True
@@ -1304,12 +1314,41 @@ GRABBABLE_PHASES = frozenset(
     }
 )
 
-# The shared later-boss hit reaction. $03 and $04 both decode as RECOVERY
-# (phases.py), but they are not the same situation: measured live over a full
-# Souther fight, $03 held 4% of ticks and $04 held 70%. $04 is where he sits,
-# so keying the punish grab on is_punishable handed the top of the emergency
-# table to a walk-in that never converted, for most of the fight.
+# The two primary states a Souther can be taken out of, and the reason the
+# grab is keyed on the state byte rather than on ``is_punishable``.
+#
+# `$03` is the shared later-boss hit reaction (`$163D0`). It is *not* the
+# blink the old note here called it: measured over two 90 s traces, its
+# episodes run about 55 agent ticks -- over half a second -- which is ample
+# time to take a hold. What actually kept the grab at zero was where the
+# actor was standing when they opened, not how long they lasted: across 221
+# in-`$03` ticks, `grab_would_connect` was true on 14 of them, and the actor
+# was carrying a weapon (which forbids the hold outright) on 107.
+#
+# `$0A` is the police-special reaction (`$16A60 (later_boss_police_special_
+# reaction)`), 5.6% of a measured fight and the longest window in it: he is
+# helpless for all of it, and there is nothing else worth doing with those
+# ticks.
+#
+# `$04` is deliberately *not* here even though `phases.py` decodes it as
+# RECOVERY too. An earlier note recorded it as 70% of a fight, which does not
+# reproduce -- two later traces put it at 4 ticks in 10 220 -- but the
+# conclusion stands on its own: `$04` is a state he *sits* in rather than a
+# window, and keying on `is_punishable` handed the top of the emergency table
+# to a walk-in that never converted.
 SOUTHER_HIT_REACTION_PRIMARY = 0x03
+SOUTHER_POLICE_REACTION_PRIMARY = 0x0A
+# `$05` is the shared lethal gate `$164FC`, which `phases.boss_phase` used to
+# decode as DEATH and no longer does -- he is in hitstun there, being tested,
+# and it is another window rather than a corpse. See that decode.
+SOUTHER_LETHAL_GATE_PRIMARY = 0x05
+SOUTHER_GRABBABLE_PRIMARIES = frozenset(
+    {
+        SOUTHER_HIT_REACTION_PRIMARY,
+        SOUTHER_LETHAL_GATE_PRIMARY,
+        SOUTHER_POLICE_REACTION_PRIMARY,
+    }
+)
 
 
 def actor_is_surrounded(context: Context, actor_slot: str) -> bool:
@@ -1365,8 +1404,9 @@ def grab_reasons(
         # starts a walk across his kick window.
         return frozenset({GrabReason.ANTONIO_WALK_IN})
     if isinstance(target, Souther):
-        # Only the *brief* hit reaction, primary $03 -- deliberately not the
-        # whole of is_punishable the way Antonio's is.
+        # The hit reaction, primary $03, and the police-special reaction,
+        # primary $0A -- deliberately not the whole of is_punishable the way
+        # Antonio's is.
         #
         # Measured live over a full 120s Souther fight: he sits in primary
         # $04 for 70% of it (2304 of 3304 ticks) against 4% in $03, and both
@@ -1375,7 +1415,7 @@ def grab_reasons(
         # fight, and the walk-in never converted: 2318 ticks of GrabEnemy,
         # and Souther lost 11 health in two minutes while the actor lost a
         # whole life. $04 is where he *sits*, not a window.
-        if target.primary_state == SOUTHER_HIT_REACTION_PRIMARY:
+        if target.primary_state in SOUTHER_GRABBABLE_PRIMARIES:
             return frozenset({GrabReason.SOUTHER_ON_PUNISH})
         return frozenset()
     if not isinstance(target, Grunt):

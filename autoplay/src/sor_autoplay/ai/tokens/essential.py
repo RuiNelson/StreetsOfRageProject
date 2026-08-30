@@ -74,3 +74,20 @@ class InMrXDialog(Essential):
 
     slot: str
     selects_no: bool
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DebugNoFood(Essential):
+    """Harness switch: leave every ``HealthPickup`` on the floor.
+
+    **Not an observation.** Nothing in the ROM produces this; it is added by
+    the runner (``--no-food``) so a boss fight can be *scored* without the
+    arena's food flattering the result. Health eaten mid-fight hides damage
+    the AI actually took -- ``boss_fight.py``'s ``damage_taken`` is a running
+    minimum, so hits landed after a heal cost nothing on paper -- and a plan
+    that only survives because it ate is not a plan.
+
+    The AI must never come to depend on the token *existing*: it can only
+    ever remove an option (``decide._food_is_spoken_for``), never add one, so
+    a session without it behaves exactly as before.
+    """

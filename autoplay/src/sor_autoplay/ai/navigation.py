@@ -53,6 +53,9 @@ from .pathfind import (
 )
 from .reach import (
     PIT_AVOID_MARGIN,
+    SOUTHER_SLASH_DIST_CLOSING,
+    SOUTHER_SLASH_DIST_MIN,
+    SOUTHER_SLASH_LANE,
     any_pit_endangers,
     jump_attack_max_dx,
     live_enemies,
@@ -65,13 +68,14 @@ from .tokens import (
     Myself,
     Partner,
     Pit,
+    Souther,
     Stage,
     find,
     find_all,
 )
 from .. import prop_solids
 from ..hitboxes import Hitbox
-from ..phases import is_dangerous
+from ..phases import is_dangerous, is_punishable
 from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
 
 # The minimum length of every planned vector, in px, and so the spacing of
@@ -331,6 +335,52 @@ def pit_obstacles(
     return rects
 
 
+def commit_gate_rects(enemy: Enemy) -> list[Rect]:
+    """Ground on which this enemy's committed move can still be *started*.
+
+    Not a swing -- ``enemy_rects`` already owns those, and only while one is
+    actually out. This is the ground a boss's own commit gate covers, so the
+    route can be planned around the gate rather than into it.
+
+    It exists because the two ways an approach can be safe pull in opposite
+    directions. ``_approach_lane_y`` puts the *destination* off the enemy's
+    lane, which is correct and not enough: the router is free to reach that
+    destination by any shortest path, and the shortest path from a lane the
+    enemy already shares runs diagonally through his own commit box.
+    Measured live against Souther, the same two hits landed at t=1.4 and
+    t=3.2 in five fights out of five, every one of them with
+    ``WalkToNearEnemy`` holding the tick and the gate satisfied mid-route.
+
+    Today that is Souther alone, from ``$15EDA (souther_state1_active_combat)``:
+    he commits when ``+$50`` is in ``[$18, $68)`` and ``+$52 < $1C``. The
+    ``$68`` edge is the widest of the three bands -- the one for a target
+    *walking into him*, which is what an approach is. Two rectangles, one
+    each side, with the ``$18`` inner abort as the hole between them: routing
+    around them and in through the hole *is*
+    ai-analysis/enemy-ai.md's uncommittable corridor, and the pocket the
+    approach stops in sits inside the hole.
+
+    Excluded while he cannot use the gate at all:
+
+    - **committed already** (``strike_is_committed``): the claw is out, the
+      box describes nothing, and ``DodgeSoutherSlash`` owns the answer;
+    - **punishable**: his hit reaction is the one window the fight is won in,
+      and walling it off would refuse the walk-in the grab needs.
+    """
+
+    if not isinstance(enemy, Souther) or enemy.is_defeated:
+        return []
+    if enemy.strike_is_committed() or is_punishable(enemy.combat_phase):
+        return []
+    height = 2.0 * SOUTHER_SLASH_LANE
+    top = enemy.world_y - SOUTHER_SLASH_LANE
+    width = float(SOUTHER_SLASH_DIST_CLOSING - SOUTHER_SLASH_DIST_MIN)
+    return [
+        Rect(enemy.world_x - SOUTHER_SLASH_DIST_CLOSING, top, width, height),
+        Rect(enemy.world_x + SOUTHER_SLASH_DIST_MIN, top, width, height),
+    ]
+
+
 def enemy_rects(enemy: Enemy) -> list[Rect]:
     """An enemy's body, and the bands it is swinging through *right now*.
 
@@ -386,6 +436,7 @@ def danger_obstacles(
         if enemy.slot in ignore_slots:
             continue
         rects.extend(enemy_rects(enemy))
+        rects.extend(commit_gate_rects(enemy))
     return rects
 
 

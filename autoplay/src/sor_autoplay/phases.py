@@ -297,8 +297,34 @@ def boss_phase(
     if type_id in (0x55, 0x56, 0x57, 0x58):
         if p in (0x03, 0x04):
             return CombatPhase.RECOVERY  # $163D0 / $164CA hit reaction
-        if p == 0x05 or p >= 0x0C:
-            return CombatPhase.DEATH  # $164FC lethal gate
+        if p >= 0x0C:
+            return CombatPhase.DEATH
+        if p == 0x05:
+            # `$164FC` is the shared *lethal gate*, not a death: it is
+            # visited transiently on every hit to test whether that hit was
+            # fatal, and decoding it as DEATH made a living boss disappear
+            # from the AI's world for the length of every one of its own
+            # hitstuns. `should_ignore_as_target` dropped him from
+            # `reach.live_enemies`, so for those ticks there was no boss on
+            # screen at all: measured over five scored fights, that is where
+            # every remaining weapon detour came from -- 76 and 230 ticks of
+            # `WalkToWeapon` in two of them, all of them at primary `$05`,
+            # with the boss reading 22, 15 and 8 health.
+            #
+            # Two earlier live traces had already caught the same byte
+            # lying, from the other side: `boss_state` stepping `3 -> 5` for
+            # one poll at 25 of 32 health and again at 29 of 32, each time
+            # reported as "boss defeated" by a harness that trusted this
+            # decode. `tools/boss_fight.py` works around it by reading the
+            # raw signed health word and says in its own docstring that the
+            # real fix belongs here.
+            #
+            # RECOVERY is what it actually is -- he is in hitstun, being
+            # tested -- and that makes it a *punish* window rather than a
+            # blind spot. Death is left to the health word, which cannot
+            # flicker: `MapEntity.is_defeated` checks `$8000`-`$FFFF`, and
+            # `live_enemies` asks it separately.
+            return CombatPhase.RECOVERY
         if p == 0x0A:
             return CombatPhase.RECOVERY  # police special
         if 0x06 <= p <= 0x09:

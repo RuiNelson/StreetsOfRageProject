@@ -41,7 +41,9 @@ from sor_autoplay.ai.execute import (
     PICKUP_RANGE_X,
     PICKUP_RANGE_Y,
     ANTONIO_APPROACH_LANE_Y,
+    SOUTHER_APPROACH_LANE_Y,
     WALK_TO_ENEMY_LANE_SAFETY_Y,
+    _enemy_stop_dx,
     _find_safe_spot,
     _safe_spot_candidates,
     _walk_to_breakable_target,
@@ -56,7 +58,12 @@ from sor_autoplay.ai.decide import (
     in_smash_range,
 )
 from sor_autoplay.ai.pathfind import Rect
-from sor_autoplay.ai.reach import PIT_AVOID_MARGIN, SOUTHER_SLASH_DIST_MIN, pit_endangers
+from sor_autoplay.ai.reach import (
+    PIT_AVOID_MARGIN,
+    SOUTHER_SLASH_DIST_MIN,
+    SOUTHER_SLASH_LANE,
+    pit_endangers,
+)
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.tokens import Breakable, Pit, Projectile
 from sor_autoplay.hitboxes import Hitbox
@@ -537,6 +544,53 @@ class SoutherPocketApproachTests(unittest.TestCase):
         stop_dx = target_x - souther.world_x
         self.assertLess(stop_dx, SOUTHER_SLASH_DIST_MIN)
         self.assertGreaterEqual(stop_dx, punch_usable_inner_x(0))
+
+    def test_the_approach_holds_a_lane_offset_wider_than_his_slash_gate(self) -> None:
+        # $15EDA's slash needs +$52 < $1C (28px). The routed goal carries
+        # PUNCH_RANGE_Y of lane slack, so the aim has to be 28 + 12 for the
+        # *nearest acceptable arrival* to be 28 rather than 16 -- 16 being
+        # inside the gate, satisfied.
+        souther = self._souther(world_x=200, world_y=40)
+
+        # Wide of the offset: close the lane down to it, no further.
+        far = _myself(world_x=40, world_y=100)
+        _, target_y = _walk_to_near_enemy_target(far, souther, {far, souther})
+        self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
+
+        # Already inside the offset but still clear of the gate: hold, since
+        # a nudge either way is jitter and the gate is unsatisfied anyway.
+        near = _myself(world_x=40, world_y=70)
+        _, held_y = _walk_to_near_enemy_target(near, souther, {near, souther})
+        self.assertEqual(held_y, near.world_y)
+        self.assertGreaterEqual(abs(held_y - souther.world_y), SOUTHER_SLASH_LANE)
+
+        self.assertGreaterEqual(
+            SOUTHER_APPROACH_LANE_Y - PUNCH_RANGE_Y, SOUTHER_SLASH_LANE
+        )
+
+    def test_the_offset_is_on_the_side_the_actor_already_stands(self) -> None:
+        # Crossing his lane to reach the aim point would walk straight through
+        # the gate the offset exists to keep unsatisfied.
+        below = _myself(world_x=40, world_y=90)
+        above = _myself(world_x=40, world_y=10)
+        souther = self._souther(world_x=200, world_y=50)
+
+        _, y_below = _walk_to_near_enemy_target(below, souther, {below, souther})
+        _, y_above = _walk_to_near_enemy_target(above, souther, {above, souther})
+
+        self.assertGreater(y_below, souther.world_y)
+        self.assertLess(y_above, souther.world_y)
+
+    def test_the_corridor_has_no_gap_between_its_two_halves(self) -> None:
+        # The whole point: the lane gate is unsatisfied for the approach and
+        # the $18 inner abort is unsatisfied at the arrival, and the two
+        # overlap rather than leaving a band where both are satisfied. The
+        # approach only gives the lane up once "alongside", which is inside
+        # stop_dx -- so stop_dx must itself be inside the inner abort.
+        actor = _myself(world_x=100, world_y=100)
+        souther = self._souther(world_x=200, world_y=100)
+
+        self.assertLess(_enemy_stop_dx(actor, souther), SOUTHER_SLASH_DIST_MIN)
 
     def test_every_character_stays_above_their_own_punch_floor(self) -> None:
         for cid in (0, 1, 2):
@@ -3167,3 +3221,57 @@ class DodgeSoutherSlashExecuteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SoutherLaneOffsetIsDroppedWhenTheGateCannotFireTests(unittest.TestCase):
+    """The offset denies $15EDA, and $15EDA is off the call path of the hit
+    reaction, the lethal gate, the police reaction and the committed claw.
+    Those are 47% of his ticks and the only ground a hold can be taken from;
+    holding the offset through them parked the actor at dx=76, dl=26 for 1136
+    ticks of a 3669-tick trace while grab_would_connect was true on 11.
+    """
+
+    def _souther(self, **overrides) -> Souther:
+        fields = dict(
+            slot="obj11",
+            type_id=0x55,
+            world_x=200,
+            world_y=40,
+            health=32,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+            primary_state=1,
+            tactical=0,
+        )
+        fields.update(overrides)
+        return Souther(**fields)
+
+    def test_a_ready_souther_still_gets_the_offset(self) -> None:
+        actor = _myself(world_x=40, world_y=100)
+        souther = self._souther()
+
+        _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
+
+        self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
+
+    def test_a_punishable_souther_is_walked_straight_at(self) -> None:
+        for primary, phase in (
+            (3, CombatPhase.RECOVERY),   # $163D0 hit reaction
+            (5, CombatPhase.RECOVERY),   # $164FC lethal gate
+            (10, CombatPhase.RECOVERY),  # $16A60 police reaction
+        ):
+            with self.subTest(primary=primary):
+                actor = _myself(world_x=40, world_y=100)
+                souther = self._souther(primary_state=primary, combat_phase=phase)
+
+                _, target_y = _walk_to_near_enemy_target(
+                    actor, souther, {actor, souther}
+                )
+
+                self.assertNotEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
+                self.assertLess(
+                    abs(target_y - souther.world_y),
+                    SOUTHER_APPROACH_LANE_Y,
+                    "still holding an offset he cannot punish",
+                )

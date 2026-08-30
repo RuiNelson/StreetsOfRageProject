@@ -295,11 +295,78 @@ Measured with `tools/boss_fight.py --level 2 --boss-type 0x55`, Blaze, turbo
 | before | 3/3 | 1, 2, 2 | 160, 240, 240 | 82, 211, 157 s | 2333, 5121, 3877 |
 | after | 2/2 | 0, 1 | 60, 160 | 33, 46 s | 0, 0 |
 
-Still open, and unchanged by any of this: the hold chain almost never fires.
-`SOUTHER_ON_PUNISH` is keyed on the *brief* primary `$03` alone,
-deliberately, and the walk-in was not converting inside it -- though it
-never had a chance to, from 60px off his lane. Re-measure before designing
-anything for it.
+**Then the hold (user: "e essencial agarrar o boss"), which took four
+things, none of which worked alone.** The hold chain fired essentially never
+-- `GrabEnemy` at 0 ticks in most scored fights -- and the reasons were not
+the one the old note here guessed at:
+
+- **the boss vanished on every hit.** `phases.boss_phase` decoded primary
+  `$05` as DEATH. `$164FC` is the shared *lethal gate*: visited transiently
+  on **every** hit to test whether it was fatal, not a death. So
+  `should_ignore_as_target` dropped him from `reach.live_enemies` for the
+  length of each of his own hitstuns -- caught by tracing the weapon detours
+  that survived the refusal below, all of them at primary `$05` with the boss
+  reading 22, 15 and 8 health. The same byte had already been caught lying
+  from the other side twice (a false "boss defeated" at 25 and 29 of 32,
+  which `tools/boss_fight.py` works around by reading the raw health word,
+  saying in its own docstring that the fix belonged in `phases`). It now
+  decodes RECOVERY, which also makes it a *punish window* rather than a blind
+  spot, and death is left to the signed health word, which cannot flicker;
+- **armed, the AI has no move on him at all.** `could_grab_enemy` excludes an
+  armed actor, `could_punch` is unarmed-only, `could_jump_attack` is refused
+  near him. `MeleeWeaponAttack` is what should replace them and fired **zero**
+  times across ten scored fights, while `WalkToWeapon` took 137-223 ticks of
+  five of them. `decide._a_weapon_would_disarm_the_plan` refuses the detour
+  while a live Souther is on screen -- scoped to him, since the same refusal
+  was measured no better for Antonio twice;
+- **the window was described wrongly.** `$03` is not the blink the old note
+  called it: its episodes run about 55 agent ticks, over half a second. What
+  kept the grab at zero was *where the actor stood* when they opened -- over
+  221 in-`$03` ticks, `grab_would_connect` was true on 14 and the actor was
+  armed on 107. `SOUTHER_GRABBABLE_PRIMARIES` now also carries `$05` (the
+  lethal gate above) and `$0A` (the police reaction, `$16A60`), which is the
+  longest helpless window in the fight. `$04` stays out: an earlier note put
+  it at 70% of a fight, which does not reproduce (4 ticks in 10 220), but it
+  is a state he *sits* in rather than a window;
+- **and then the corridor itself was the thing blocking the hold.** The lane
+  offset exists to deny `$15EDA`, and `$15EDA` is off the call path of `$03`,
+  `$05`, `$0A` and the committed claw -- 47% of his ticks, and the only
+  ground a hold can be taken from. Holding it there parked the actor at
+  dx=76, dl=26 (this offset, to the pixel) for 1136 ticks of a 3669-tick
+  trace while `grab_would_connect` was true on **11**.
+  `_lane_offset_while_closing` returns `None` for a punishable or committed
+  Souther, so the approach converges straight onto his lane and walks in.
+
+Measured with `--no-food` throughout (`scripts/go_to_boss_2` passes it; see
+`tokens.DebugNoFood`), five fights a configuration:
+
+| | lives lost | damage | length | grab ticks |
+| --- | --- | --- | --- | --- |
+| corridor only | 1, 1, 1, 1, 1 | 160 x5 | 25-32 s | 0, 0, 0, 0, 13 |
+| + lethal gate + weapon | 1, 0, 2, 1, 1 | 40-240 | 30-50 s | 0, 0, 13, 15, 0 |
+| + offset dropped (shipped) | 1, 0, 0, 0, 1 | 40-160 | 20-34 s | 0, 168, 0, 37, 13 |
+
+Two things measured **worse** and were reverted rather than kept on the
+strength of the reasoning:
+
+- refusing the punch from outside the pocket (`$18`), together with a hard
+  mask rule denying X movement inside his commit band. The reasoning is
+  sound -- B from the punch band's *outer* edge is 48px for Blaze, squarely
+  inside `[$18, $68)`, and since `Punch` outranks the walk the first tick
+  that edge came into range was the last tick of the approach -- but it
+  measured 1, 1, 2, 2, 2 lives against 1, 1, 1, 1, 1, with fights stretching
+  to 113 s. Note also that gating the *strike* alone opens a vacuum: at 30
+  and 40px no candidate verb was produced at all, because `enemy_actionable`
+  still called him hittable. Any retry has to move both together;
+- `navigation.commit_gate_rects` (his commit box as ground the router plans
+  around) is **kept** but did not on its own change deaths: 1, 1, 1, 1, 1
+  before and after. It is kept because it is free and correct, not because
+  it was shown to pay.
+
+Still open: the entrance. Two hits land in the first 3.5 s, ten fights out
+of ten, with `WalkToNearEnemy` holding the tick and him stepping to primary
+`$02` at t~1.3 s. Four hits kill from full health, so that block alone is
+half the bar before the AI has done anything.
 
 The near-side lane rule made the old fight visibly worse while it applied to
 him (2 lives / 177 s / 9 hits against 1 / 89 s / 6 after scoping it back to
@@ -438,6 +505,16 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m unittest discove
 
 Use Python 3.11+ with Tk (`_tkinter`). System/Homebrew 3.13/3.14 builds on this
 machine may lack Tk.
+
+### Scoring a fight without the food
+
+`--no-food` (autoplay and `tools/boss_fight.py`; `scripts/go_to_boss_2`
+passes it) leaves every `HealthPickup` on the floor for the whole session.
+Use it whenever a fight is being *scored*: `boss_fight.py`'s `damage_taken`
+is a running minimum, so every hit landed after a heal costs nothing on
+paper, and a plan that survives only because it ate is not a plan (user).
+It arrives as `tokens.DebugNoFood`, a harness token that can only ever
+remove an option -- a session without it behaves exactly as before.
 
 ### Live AI testing
 

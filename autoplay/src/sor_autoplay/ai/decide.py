@@ -48,7 +48,7 @@ from .tokens import (
     GrabReason,
     Surrounded,
 )
-from .tokens import AnimationInProgress, CameraRange, Stage
+from .tokens import AnimationInProgress, CameraRange, DebugNoFood, Stage
 from .tokens import Breakable, Projectile
 from .tokens import PUNCH_RANGE_Y, punch_outer_x
 from .tokens import (
@@ -1372,9 +1372,40 @@ def could_throw_pepper(context: Context) -> Context:
     return _could_throw_ranged_weapon(context, weapon_type=PEPPER_SPRAY_TYPE, verb_cls=ThrowPepper)
 
 
+def _a_weapon_would_disarm_the_plan(context: Context) -> bool:
+    """Whether picking a weapon up would cost more than it could ever pay.
+
+    True while a live Souther is on screen, and measured rather than
+    reasoned. Armed, the AI has **no move on him at all**: ``could_grab_
+    enemy`` excludes an armed actor outright, ``could_punch`` is unarmed-only,
+    and ``could_jump_attack`` is refused near him for his own counter. What
+    is supposed to replace them is ``MeleeWeaponAttack`` -- and across ten
+    scored fights it fired **zero** times, while ``WalkToWeapon`` took 137 to
+    223 ticks of five of them. The detour is pure loss: it spends the
+    approach and hands back nothing.
+
+    That matters more against him than against anyone else because the hold
+    is the plan (user: "e essencial agarrar o boss"), and being armed is the
+    one condition that forbids the hold outright. The ROM's own contact grab
+    does not care what the actor carries -- a live front hold on Antonio was
+    recorded with a pipe in ``+$60`` -- but lifting that exclusion was tried
+    for Antonio and measured worse, so the answer here is the other one: do
+    not pick the weapon up while the fight that needs bare hands is on.
+
+    Scoped to Souther deliberately. The same refusal was tried twice for
+    Antonio and measured no better both times (see autoplay/CLAUDE.md); his
+    fight has a hop in it that an armed actor can still throw, and this one
+    does not.
+    """
+
+    return any(not souther.is_defeated for souther in find_all(context, Souther))
+
+
 def could_walk_to_weapon(context: Context) -> Context:
     verbs: set[Token] = set()
     camera = find(context, CameraRange)
+    if _a_weapon_would_disarm_the_plan(context):
+        return verbs
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -1410,8 +1441,14 @@ def _food_is_spoken_for(context: Context) -> bool:
     already refuses *other* item detours inside his kick window and used to
     exempt health from that as "the one thing worth a kick". This overrides
     that exemption for him -- the fight has to be survivable without it.
+
+    ``DebugNoFood`` says the same thing for a whole session rather than for
+    one boss: it is the harness's ``--no-food``, so a measured fight cannot
+    be flattered by a heal. See that token.
     """
 
+    if find(context, DebugNoFood) is not None:
+        return True
     return any(not antonio.is_defeated for antonio in find_all(context, Antonio))
 
 

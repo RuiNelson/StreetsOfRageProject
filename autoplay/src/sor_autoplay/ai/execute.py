@@ -81,6 +81,7 @@ from .reach import (
     PIT_AVOID_MARGIN,
     REACH_SAFETY_MARGIN,
     SOUTHER_SLASH_DIST_MIN,
+    SOUTHER_SLASH_LANE,
     enemy_behind_actor,
     enemy_lane_covers,
     in_camera,
@@ -90,7 +91,7 @@ from .reach import (
     pit_endangers,
 )
 from .. import prop_solids
-from ..phases import is_dangerous
+from ..phases import is_dangerous, is_punishable
 from ..world_map import LANE_Y_MIN
 
 UP_MASK = 0x0001
@@ -223,6 +224,20 @@ LANE_SIDE_DEADBAND_Y = 6
 # and `$14` dash windows with margin. Simulated over the real executor: 13px
 # of arrival offset before, 28 after.
 ANTONIO_APPROACH_LANE_Y = WALK_TO_ENEMY_LANE_SAFETY_Y + PUNCH_RANGE_Y
+# The same construction for Souther, off his own gate rather than Antonio's.
+# `$15EDA (souther_state1_active_combat)` refuses the slash whenever
+# `+$52 >= $1C` (28px of lane), so 28 is the number the *arrival* has to
+# clear, and the routed goal's PUNCH_RANGE_Y of lane slack has to be added on
+# top of it for the nearest acceptable arrival to be 28 rather than 16.
+#
+# Paired with `_souther_pocket_stop_dx` (16px, inside the `$18` inner abort)
+# this is ai-analysis/enemy-ai.md's "uncommittable corridor": the lane gate
+# is unsatisfied for the whole approach, the inner abort is unsatisfied from
+# the moment the lane is given up, and the two overlap, so there is no
+# instant at which `$15EDA` can commit. Antonio's number happens to be the
+# same 40; the two are written separately because they are derived from two
+# different gates and only one of them is 28px wide.
+SOUTHER_APPROACH_LANE_Y = SOUTHER_SLASH_LANE + PUNCH_RANGE_Y
 # A Breakable is itself a solid obstacle -- walking straight to its exact
 # (world_x, world_y) means walking into it from whatever angle happens to be
 # a straight line, which can mean approaching from directly above/below and
@@ -806,23 +821,70 @@ def _crossing_would_walk_into_the_swing(actor: Myself | Partner, target: Enemy) 
     return gap > target.max_reach + REACH_SAFETY_MARGIN
 
 
-def _holds_lane_offset_while_closing(target: Enemy) -> bool:
-    """Whether the approach must stay off this enemy's lane the whole way in.
+def _lane_offset_while_closing(target: Enemy) -> int | None:
+    """The lane offset this enemy's own ROM gate makes mandatory, or ``None``.
 
-    True for a live ``Antonio`` regardless of what he is doing this instant,
-    which is the difference from the generic ``is_dangerous`` test below.
-    Both moves he owns are lane-gated -- the ``$16EAE`` power kick needs the
-    target within ``$10`` (16px) of his lane, the ``$16E74`` dash/boomerang
-    commit within ``$14`` (20px) -- so an approach that keeps more than that
-    cannot arm either one, no matter how the X distance closes. Holding
-    "the actor's current lane", which is what the generic branch does for a
-    non-committed enemy, is a coin flip on exactly that question.
+    Not-``None`` for a live boss whose committed move is *lane-gated*,
+    regardless of what he is doing this instant -- which is the difference
+    from the generic ``is_dangerous`` test below. For those, an approach that
+    keeps more lane than the gate allows cannot arm the move at all, however
+    the X distance closes; "hold the actor's current lane", which is what the
+    generic branch does, is a coin flip on exactly that question.
 
-    ``WALK_TO_ENEMY_LANE_SAFETY_Y`` (28px) already clears both windows, so
-    the offset itself needs no Antonio-specific number.
+    Two bosses qualify, from two separately derived numbers:
+
+    - **Antonio**, whose ``$16EAE`` power kick needs the target within
+      ``$10`` (16px) of his lane and whose ``$16E74`` dash/boomerang commit
+      needs ``$14`` (20px). ``ANTONIO_APPROACH_LANE_Y`` clears both;
+    - **Souther**, whose ``$15EDA (souther_state1_active_combat)`` slash
+      commit needs ``+$52 < $1C`` (28px). ``SOUTHER_APPROACH_LANE_Y`` is that
+      gate plus the routed goal's own lane slack.
+
+    Souther is the case where the offset is not merely safer but *closes the
+    gate for the entire approach*: his commit also needs ``+$50 >= $18``, and
+    the pocket ``_souther_pocket_stop_dx`` stops in is inside that, so the
+    lane offset covers the walk in and the inner abort covers the arrival,
+    with an overlap rather than a gap between them. See
+    ai-analysis/enemy-ai.md, "The uncommittable corridor".
+
+    An earlier attempt at this for Souther measured *worse* (2 lives / 177 s
+    against 1 / 89 s) and was scoped back to Antonio. That measurement is not
+    evidence against the corridor: it was taken while ``_approach_lane_y``
+    could not converge a lane at all, so holding an offset only deepened a
+    stalemate the actor had no way out of. Re-measured after that fix, with
+    ``--no-food`` so a heal cannot flatter it.
     """
 
-    return isinstance(target, Antonio) and not target.is_defeated
+    if target.is_defeated:
+        return None
+    if isinstance(target, Antonio):
+        return ANTONIO_APPROACH_LANE_Y
+    if isinstance(target, Souther):
+        if is_punishable(target.combat_phase) or target.strike_is_committed():
+            # The offset exists to deny `$15EDA`, and `$15EDA` is not on the
+            # call path of any of these states: the hit reaction `$03`, the
+            # lethal gate `$05`, the police reaction `$0A`, or the committed
+            # claw. Holding it anyway is not merely pointless, it is what
+            # loses the fight -- these are 47% of his ticks, they are the
+            # only ground the hold can be taken from, and the approach was
+            # spending all of them standing off-lane waiting for a commit
+            # that cannot come.
+            #
+            # Measured over a 3669-tick trace: `grab_reasons` offered
+            # `SOUTHER_ON_PUNISH` on 1672 ticks and `grab_would_connect` was
+            # true on **11**, with the actor parked at dx=76, dl=26 for 1136
+            # of them -- which is this function's own offset, to the pixel.
+            # (`DodgeSoutherSlash` owns the committed case, and it wants the
+            # lane too.)
+            return None
+        return SOUTHER_APPROACH_LANE_Y
+    return None
+
+
+def _holds_lane_offset_while_closing(target: Enemy) -> bool:
+    """Whether the approach must stay off this enemy's lane the whole way in."""
+
+    return _lane_offset_while_closing(target) is not None
 
 
 def _approach_lane_y(
@@ -840,15 +902,10 @@ def _approach_lane_y(
     if alongside:
         return target.world_y
     dy = abs(target.world_y - actor.world_y)
+    gated = _lane_offset_while_closing(target)
+    hold_offset = gated if gated is not None else WALK_TO_ENEMY_LANE_SAFETY_Y
     clear_of_the_line = (
-        ANTONIO_APPROACH_LANE_Y - PUNCH_RANGE_Y
-        if _holds_lane_offset_while_closing(target)
-        else WALK_TO_ENEMY_LANE_SAFETY_Y
-    )
-    hold_offset = (
-        ANTONIO_APPROACH_LANE_Y
-        if _holds_lane_offset_while_closing(target)
-        else WALK_TO_ENEMY_LANE_SAFETY_Y
+        hold_offset - PUNCH_RANGE_Y if gated is not None else WALK_TO_ENEMY_LANE_SAFETY_Y
     )
     if dy > hold_offset:
         # Clear of the line -- but "clear" must not also mean "and never any
@@ -906,26 +963,26 @@ def _approach_lane_y(
         )
         return int(target.world_y + offset)
 
-    # Antonio: the side is the one the actor is **already on**, so the walk
-    # never crosses the lane it is leaving. The midpoint rule above puts the
-    # aim point on the far side whenever he sits between the actor and the
-    # middle of the band, and the actor then walks straight through his kick
-    # lane -- simulated over the real executor, an approach starting 20px
-    # clear crossed to 5px and then 2px while still 130px away on X.
+    # A lane-gated boss: the side is the one the actor is **already on**, so
+    # the walk never crosses the lane it is leaving. The midpoint rule above
+    # puts the aim point on the far side whenever he sits between the actor
+    # and the middle of the band, and the actor then walks straight through
+    # his own gate -- simulated over the real executor against Antonio, an
+    # approach starting 20px clear crossed to 5px and then 2px while still
+    # 130px away on X. Crossing is exactly what the offset exists to prevent,
+    # so the side rule is part of the gate denial and not a separate taste.
     #
     # The jitter the midpoint rule exists for is answered by a deadband: an
     # actor within LANE_SIDE_DEADBAND_Y of his lane has no side worth
     # reading, and only then does the room in the band decide.
     dy_signed = actor.world_y - target.world_y
     if abs(dy_signed) >= LANE_SIDE_DEADBAND_Y:
-        offset = (
-            ANTONIO_APPROACH_LANE_Y if dy_signed > 0 else -ANTONIO_APPROACH_LANE_Y
-        )
+        offset = hold_offset if dy_signed > 0 else -hold_offset
     else:
         offset = (
-            ANTONIO_APPROACH_LANE_Y
+            hold_offset
             if target.world_y < (lo + hi) / 2
-            else -ANTONIO_APPROACH_LANE_Y
+            else -hold_offset
         )
     aim = target.world_y + offset
     if not lo <= aim <= hi:
@@ -933,6 +990,35 @@ def _approach_lane_y(
         # and crossing is then unavoidable rather than chosen.
         aim = target.world_y - offset
     return int(aim)
+
+
+def _lane_release_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> int:
+    """The X gap at which the approach may finally converge onto the lane.
+
+    ``stop_dx`` -- where the strike lands from -- for everything ordinary.
+    For a boss the offset is *denying a gate* rather than dodging a swing,
+    though, and then the honest boundary is the gate's own, not the
+    approach's: giving the lane up any later leaves the actor holding an
+    offset it no longer needs, inside a range where the enemy cannot commit
+    anyway, waiting on an X gap the enemy is actively opening.
+
+    Souther is that case and the reason this exists. ``$15EDA
+    (souther_state1_active_combat)`` aborts the slash outright below ``$18``
+    (24px) -- ``reach.SOUTHER_SLASH_DIST_MIN`` -- while ``_souther_pocket_
+    stop_dx`` stops at 16, so the eight pixels between them were a band where
+    the actor was already safe and still refusing to line the punch up.
+    Measured live: 3 punches thrown in a whole fight, with the approach
+    holding a 40px lane offset the entire time. Handing the lane over at the
+    ROM's own boundary closes that band.
+
+    Only while he is not already committed -- once the claw is out, 24px is
+    where ``$161C6`` *resolves* rather than a pocket, which is
+    ``_souther_pocket_stop_dx``'s own rule and ``DodgeSoutherSlash``'s window.
+    """
+
+    if isinstance(target, Souther) and not target.strike_is_committed():
+        return max(stop_dx, SOUTHER_SLASH_DIST_MIN - 1)
+    return stop_dx
 
 
 def _walk_to_near_enemy_target(
@@ -982,6 +1068,7 @@ def _walk_to_near_enemy_target(
     if _crossing_would_walk_into_the_swing(actor, target):
         return actor.world_x, actor.world_y
 
+    release_dx = _lane_release_dx(actor, target, stop_dx)
     dx = target.world_x - actor.world_x
     if abs(dx) <= DIRECTION_HYSTERESIS_X:
         approach_from_right = actor.facing_left
@@ -1016,7 +1103,7 @@ def _walk_to_near_enemy_target(
     # converging did: the actor simply never walks down the enemy's line in
     # the first place.
     dx = abs(target.world_x - actor.world_x)
-    target_y = _approach_lane_y(actor, target, context, alongside=dx <= stop_dx)
+    target_y = _approach_lane_y(actor, target, context, alongside=abs(dx) <= release_dx)
 
     return target_x, target_y
 
@@ -1108,7 +1195,9 @@ def state_machine_walk_to_near_enemy(
     # Routing cannot fix that by itself, because the enemy being approached
     # is exempt from its own danger set -- its reach *contains* the place the
     # actor is trying to stand.
-    alongside = abs(target.world_x - actor.world_x) <= stop_dx
+    alongside = abs(target.world_x - actor.world_x) <= _lane_release_dx(
+        actor, target, stop_dx
+    )
     # An enemy at the actor's back gets the *far* band only. Holding a
     # direction is what sets facing, so aiming past the enemy is the turn-
     # around; letting the search pick the near band by cost would back the

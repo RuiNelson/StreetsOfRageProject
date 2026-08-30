@@ -248,6 +248,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-food",
+        action="store_true",
+        help=(
+            "Debug: never walk to a health pickup, for the whole session. "
+            "Use when *scoring* a fight: a heal hides the damage taken after "
+            "it (damage is a running minimum), and a plan that survives only "
+            "because it ate is not a plan. Does not need --debugUtils."
+        ),
+    )
+    parser.add_argument(
         "--kill-street-enemies",
         action="store_true",
         help=(
@@ -337,6 +347,7 @@ class ObserverApp:
         agent_p1: bool = False,
         agent_p2: bool = False,
         scenario: DebugScenario | None = None,
+        no_food: bool = False,
     ) -> None:
         self.host = host
         self.port = port
@@ -366,8 +377,8 @@ class ObserverApp:
             2: VirtualGamepad(self._gamepad_state, player_index=2),
         }
         self._agent_loops = {
-            1: AgentLoop(self._gamepads[1]),
-            2: AgentLoop(self._gamepads[2]),
+            1: AgentLoop(self._gamepads[1], no_food=no_food),
+            2: AgentLoop(self._gamepads[2], no_food=no_food),
         }
 
     def set_agent_enabled(self, player_index: int, enabled: bool) -> None:
@@ -636,6 +647,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         hud_ms=args.hud_ms,
         agent_p1=args.agent_p1,
         agent_p2=args.agent_p2,
+        no_food=args.no_food,
         scenario=DebugScenario(
             start_level=args.start_level,
             only_enemy=args.only_enemy,

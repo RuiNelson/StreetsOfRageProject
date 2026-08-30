@@ -114,6 +114,15 @@ def main() -> int:
     ap.add_argument("--seconds", type=float, default=600.0)
     ap.add_argument("--poll-ms", type=int, default=16)
     ap.add_argument("--character", default="axel")
+    ap.add_argument(
+        "--no-food",
+        action="store_true",
+        help=(
+            "Leave every health pickup on the floor. A heal hides the damage "
+            "taken after it -- damage_taken is a running minimum -- so a "
+            "scored fight should normally set this."
+        ),
+    )
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     poll_s = args.poll_ms / 1000.0
@@ -127,7 +136,7 @@ def main() -> int:
     with MegaDriveClient(host=args.host, port=args.port) as client:
         rom = RomData.read(client)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
-        loop = AgentLoop(gamepad)
+        loop = AgentLoop(gamepad, no_food=args.no_food)
 
         boss_seen = False
         start_hp = start_lives = None
