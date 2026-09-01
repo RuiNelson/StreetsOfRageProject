@@ -1269,6 +1269,57 @@ def _connects(band, actor, enemy, verb_cls) -> bool:
     return reach.connects(band, actor, enemy, kinematics.connect_frames(verb_cls, actor, enemy))
 
 
+class FramesUntilMeleeLandsTests(unittest.TestCase):
+    """The clock the hold decision runs on -- see reach.frames_until_melee_lands.
+
+    "Is it incoming" and "when does it land" have to agree, so this is built
+    out of the same predicates rather than out of new arithmetic.
+    """
+
+    def test_a_calm_enemy_is_never_landing(self) -> None:
+        myself = _myself(world_x=100, world_y=100)
+        enemy = _enemy(world_x=110, world_y=100)
+
+        self.assertIsNone(reach.frames_until_melee_lands(myself, enemy))
+
+    def test_an_attacker_already_in_range_lands_now(self) -> None:
+        myself = _myself(world_x=100, world_y=100)
+        enemy = _enemy(world_x=110, world_y=100, combat_phase=CombatPhase.ATTACKING)
+
+        self.assertEqual(reach.frames_until_melee_lands(myself, enemy), 0)
+
+    def test_a_distant_attacker_is_not_coming_at_all(self) -> None:
+        myself = _myself(world_x=100, world_y=100)
+        enemy = _enemy(world_x=400, world_y=100, combat_phase=CombatPhase.ATTACKING)
+
+        self.assertIsNone(reach.frames_until_melee_lands(myself, enemy))
+
+    def test_the_soonest_of_several_is_what_is_left(self) -> None:
+        myself = _myself(world_x=100, world_y=100)
+        near = _enemy(
+            slot="obj01", world_x=110, world_y=100, combat_phase=CombatPhase.ATTACKING
+        )
+        far = _enemy(slot="obj02", world_x=400, world_y=100)
+
+        self.assertEqual(
+            reach.frames_until_any_melee_lands(myself, [near, far]), 0
+        )
+
+    def test_an_ignored_slot_does_not_shorten_the_clock(self) -> None:
+        # The body in the actor's hands: attacking or not, it cannot hit
+        # anyone while held.
+        myself = _myself(world_x=100, world_y=100)
+        held = _enemy(
+            slot="held", world_x=110, world_y=100, combat_phase=CombatPhase.ATTACKING
+        )
+
+        self.assertIsNone(
+            reach.frames_until_any_melee_lands(
+                myself, [held], ignore_slots=frozenset({"held"})
+            )
+        )
+
+
 class ConnectsBandTimelineTests(unittest.TestCase):
     """Axel (character_id 0): punch band 16..50, rear-behind band 40, jump
     kick 50..60 (controls-and-input.md).

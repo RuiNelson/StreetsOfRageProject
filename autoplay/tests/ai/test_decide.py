@@ -10,6 +10,7 @@ from sor_autoplay.ai.tokens import (
     GrabEnemy,
     JumpAttack,
     AttackHeldEnemy,
+    ThrowHeldEnemy,
     HitAntonioBoomerang,
     MeleeWeaponAttack,
     OpenBreakable,
@@ -1445,6 +1446,72 @@ class CouldHoldActionsTests(unittest.TestCase):
 
         self.assertIn(AttackHeldEnemy(actor_slot="P1", target_slot="near"), result)
         self.assertIn(FlipHold(actor_slot="P1", target_slot="near"), result)
+
+    def test_an_imminent_attack_ends_the_hold_with_a_throw(self) -> None:
+        # The user's rule, in the game's own frames: something lands sooner
+        # than a knee takes (17-18), so no knee is started -- a knee is an
+        # animation lock that ignores every fresh edge for its whole length.
+        # The throw is the only ending that fits (41-46 against the flip and
+        # suplex chain's ~115).
+        myself = make_myself(
+            world_x=100, world_y=100, held_weapon_type=0, action_state=0x60
+        )
+        held = make_enemy(slot="held", world_x=110, world_y=100)
+        attacker = make_enemy(
+            slot="threat",
+            world_x=132,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+        context: set[Token] = {myself, held, attacker}
+
+        result = could_hold_actions(context)
+
+        self.assertIn(ThrowHeldEnemy(actor_slot="P1", target_slot="held"), result)
+        self.assertNotIn(AttackHeldEnemy(actor_slot="P1", target_slot="held"), result)
+        self.assertNotIn(FlipHold(actor_slot="P1", target_slot="held"), result)
+
+    def test_the_body_in_hand_is_not_the_threat_it_is_measured_against(self) -> None:
+        # The held enemy is the one thing that cannot hit the actor, so it
+        # must not be what shortens the actor's own clock.
+        myself = make_myself(
+            world_x=100, world_y=100, held_weapon_type=0, action_state=0x60
+        )
+        held = make_enemy(
+            slot="held",
+            world_x=110,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+        context: set[Token] = {myself, held}
+
+        result = could_hold_actions(context)
+
+        self.assertIn(AttackHeldEnemy(actor_slot="P1", target_slot="held"), result)
+
+    def test_a_back_hold_still_suplexes_under_threat(self) -> None:
+        # From $66 the suplex is the only finisher there is: the crossover has
+        # already been paid for, and there is nothing else B can do here.
+        myself = make_myself(
+            world_x=100,
+            world_y=100,
+            held_weapon_type=0,
+            action_state=0x66,
+            held_enemy_slot="held",
+        )
+        held = make_enemy(slot="held", world_x=110, world_y=100)
+        attacker = make_enemy(
+            slot="threat",
+            world_x=132,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+        )
+        context: set[Token] = {myself, held, attacker}
+
+        self.assertEqual(
+            could_hold_actions(context),
+            {Supplex(actor_slot="P1", target_slot="held")},
+        )
 
     def test_does_not_fire_when_only_carrying_a_weapon(self) -> None:
         # Carrying a pipe is not a grab -- but the action byte is what says

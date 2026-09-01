@@ -716,6 +716,27 @@ or Souther sits above punching them again (the hold is the punish) and
 above every strike on them, and the whip case is an improvement on an
 ordinary exchange and ranks just above a jump kick.
 
+**How a hold ends is a timing decision, not a taste.** Every hold move is an
+animation lock that ignores fresh edges for its whole length, so issuing one
+commits the actor for a measured number of 60 Hz frames — a knee for 17-18, a
+throw for 41-46, a crossover-then-suplex for about 115
+(`kinematics.HOLD_*_FRAMES`, measured by `tools/hold_timing_diag.py` under a
+lockstep host, never derived from the animation records). So
+`decide.could_hold_actions` asks `reach.frames_until_melee_lands` how long the
+actor has before anything *else* on screen can hit it, and:
+
+- nothing coming → knee for `kinematics.hold_knee_budget_frames`, then
+  flip into the suplex;
+- something landing sooner than a knee takes → do not start one; throw,
+  which is the only ending that fits and puts the body in the way;
+- in between → the knee is still safe but the suplex chain is not, so the
+  finisher on offer becomes the throw;
+- already in a back hold → the suplex, which is the only finisher there is
+  from `$66`.
+
+The clock is built out of the same predicates `reach.is_incoming_melee` uses,
+so "is it coming" and "when" cannot disagree.
+
 `reach.grab_would_connect` answers the other half — whether walking in
 would actually reach — from the same shared geometry definition every
 other reach question in this document comes from. `could_grab_enemy`

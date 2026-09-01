@@ -34,6 +34,7 @@ from sor_autoplay.ai.tokens import (
     Souther,
     Stage,
     Supplex,
+    ThrowHeldEnemy,
     Verb,
     WalkToAdvanceStage,
     find,
@@ -781,7 +782,7 @@ class SoutherStabilityTests(unittest.TestCase):
         self.assertEqual(set(winners), {DodgeSoutherSlash.__name__})
 
 
-def _run_hold_sequence(*, ticks: int = 20) -> list[str]:
+def _run_hold_sequence(*, ticks: int = 34) -> list[str]:
     """Drive the real hold chain over a run of ticks: knee(s) -> flip -> suplex.
 
     Bypasses ``observe.py`` like every other harness in this file -- tokens
@@ -797,6 +798,13 @@ def _run_hold_sequence(*, ticks: int = 20) -> list[str]:
     tell "grab, then finish immediately" from "grab, knee a few times, then
     finish" -- only a sequence can, which is why this is here and not in
     ``test_priority.py``.
+
+    The default run length has to outlast the knee budget or the sequence
+    never reaches its finish: the budget is three knees' worth of *frames*
+    (``kinematics.hold_knee_budget_frames``), and this fixture spends one
+    tick per knee decision because it never enters the ROM's own animation
+    locks -- live, one knee is 17 frames of lock during which
+    ``could_hold_actions`` deliberately produces nothing.
     """
 
     winners: list[str] = []
@@ -863,10 +871,16 @@ class HoldSequenceStabilityTests(unittest.TestCase):
 
         self.assertNotIn(AttackHeldEnemy.__name__, winners[flip_index + 1 :])
 
-    def test_knee_count_matches_hold_knee_ticks(self) -> None:
-        # HOLD_KNEE_TICKS is the exact boundary priority.py scores on, so the
-        # knee run this produces should be that long, not merely "some".
-        from sor_autoplay.ai.priority import HOLD_KNEE_TICKS
+    def test_the_knee_run_lasts_the_measured_budget(self) -> None:
+        # The budget is frames now (kinematics.hold_knee_budget_frames --
+        # three knees at their measured 17-18 each), so the knee run is as
+        # many ticks as fit inside it, not a tick constant. Pinned as a
+        # length rather than "some knees": the bug this whole sequence test
+        # exists for was a run of *zero*.
+        from sor_autoplay.ai.kinematics import (
+            frames_for_ticks,
+            hold_knee_budget_frames,
+        )
 
         winners = _run_hold_sequence()
         knee_run = 0
@@ -875,7 +889,85 @@ class HoldSequenceStabilityTests(unittest.TestCase):
                 break
             knee_run += 1
 
-        self.assertEqual(knee_run, HOLD_KNEE_TICKS + 1)
+        budget = hold_knee_budget_frames(0)
+        self.assertGreater(knee_run, 1)
+        self.assertLessEqual(frames_for_ticks(knee_run - 1), budget)
+        self.assertGreater(frames_for_ticks(knee_run), budget)
+
+
+class HoldUnderThreatStabilityTests(unittest.TestCase):
+    """The hold has to *end* when something is coming, not merely re-decide.
+
+    A single-tick test cannot tell "throws it" from "offers a throw and then
+    knees anyway next tick", which is the shape of every limit cycle in this
+    file. This drives the real pipeline with a second enemy already
+    attacking and asserts on the sequence.
+    """
+
+    def _run(self, *, threat: bool, ticks: int = 12) -> list[str]:
+        winners: list[str] = []
+        action_state = 0x60
+        hold_ticks = 0
+        client = _FakeClient()
+        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+        for _ in range(ticks):
+            actor = replace(
+                _actor(100, 60, False),
+                held_weapon_type=0x20,
+                action_state=action_state,
+                hold_ticks=hold_ticks,
+                held_enemy_slot="obj01",
+            )
+            context = {
+                actor,
+                _enemy(120, 60, CombatPhase.GRABBED),
+                CameraRange(left=-100, right=500, top=0, bottom=112),
+                Stage(level_index=0, direction="right"),
+            }
+            if threat:
+                context.add(
+                    replace(
+                        _enemy(132, 60, CombatPhase.ATTACKING), slot="obj09"
+                    )
+                )
+            context |= generate_verb_tokens(context)
+            context = determine_priority_verb(context)
+            verbs = find_all(context, Verb)
+            winner = verbs[0] if verbs else None
+            winners.append(type(winner).__name__ if winner is not None else "None")
+            if winner is not None:
+                execute_verb(winner, context, gamepad)
+            hold_ticks += 1
+        return winners
+
+    def test_an_incoming_attack_throws_instead_of_kneeing(self) -> None:
+        winners = self._run(threat=True)
+
+        self.assertEqual(winners[0], ThrowHeldEnemy.__name__)
+        self.assertNotIn(AttackHeldEnemy.__name__, winners)
+        self.assertNotIn(FlipHold.__name__, winners)
+
+    def test_every_visible_threat_is_too_soon_for_a_knee(self) -> None:
+        # The relationship the hold decision turns on, pinned so that moving
+        # either number is visible: a closing velocity is only trusted for
+        # reach.CLOSING_ENEMY_THREAT_FRAMES, and a knee takes longer than
+        # that, so a threat the AI can see at all is a threat there is no
+        # time to knee through.
+        from sor_autoplay.ai import kinematics
+        from sor_autoplay.ai.reach import CLOSING_ENEMY_THREAT_FRAMES
+
+        for character_id in (0, 1, 2):
+            with self.subTest(character_id=character_id):
+                self.assertLess(
+                    CLOSING_ENEMY_THREAT_FRAMES,
+                    kinematics.hold_knee_frames(character_id),
+                )
+
+    def test_the_same_hold_knees_when_nothing_is_coming(self) -> None:
+        winners = self._run(threat=False)
+
+        self.assertEqual(winners[0], AttackHeldEnemy.__name__)
+        self.assertNotIn(ThrowHeldEnemy.__name__, winners)
 
 
 class BossAndGruntTargetStabilityTests(unittest.TestCase):

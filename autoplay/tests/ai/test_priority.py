@@ -46,7 +46,10 @@ from sor_autoplay.ai.tokens import CameraRange, Stage
 from sor_autoplay.ai.tokens import Projectile
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.priority import determine_priority_verb as _rank_verbs
-from sor_autoplay.ai.priority import HOLD_KNEE_TICKS
+from sor_autoplay.ai.kinematics import (
+    frames_for_ticks,
+    hold_knee_budget_frames,
+)
 from sor_autoplay.ai.tokens import Verb, find_all
 from sor_autoplay.ai.tokens import (
     DodgeAntonioKick,
@@ -130,6 +133,21 @@ def _myself(**overrides) -> Myself:
     )
     fields.update(overrides)
     return Myself(**fields)
+
+
+def _spent_knee_ticks(character_id: int = 0) -> int:
+    """The first tick count whose *frames* exceed the knee budget.
+
+    The budget is in frames now (kinematics.hold_knee_budget_frames), so a
+    test that wants "the hold has been milked" has to say so in ticks the
+    conversion actually rounds past.
+    """
+
+    ticks = 1
+    while frames_for_ticks(ticks) <= hold_knee_budget_frames(character_id):
+        ticks += 1
+    return ticks
+
 
 
 class DetermineEmergencyWinnerTests(unittest.TestCase):
@@ -414,7 +432,7 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
             action_state=0x60,
             held_enemy_slot="obj00",
             world_x=100,
-            hold_ticks=HOLD_KNEE_TICKS + 1,
+            hold_ticks=_spent_knee_ticks(),
         )
         antonio = Antonio(
             slot="obj00",
@@ -442,7 +460,7 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
 
     def test_knee_outranks_flip_while_the_hold_is_fresh(self) -> None:
         # Live-reported: the AI grabbed and flipped straight to Supplex,
-        # landing zero knees. A fresh hold (hold_ticks under HOLD_KNEE_TICKS)
+        # landing zero knees. A fresh hold (under the knee budget)
         # must let AttackHeldEnemy win over FlipHold, the reverse of the
         # previous fixed 66-over-64 ordering.
         myself = _myself(hold_ticks=1)
@@ -461,7 +479,7 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         self.assertIsInstance(verbs[0], AttackHeldEnemy)
 
     def test_flip_takes_over_once_the_hold_has_been_milked(self) -> None:
-        myself = _myself(hold_ticks=HOLD_KNEE_TICKS + 1)
+        myself = _myself(hold_ticks=_spent_knee_ticks())
         held = _enemy("obj01", CombatPhase.GRABBED)
         context = {
             myself,

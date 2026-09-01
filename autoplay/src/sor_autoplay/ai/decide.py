@@ -432,6 +432,29 @@ def could_hold_actions(context: Context) -> Context:
     """While grabbing an enemy: knee, throw-back, flip→suplex, or release.
 
     Never leave the AI idle in a hold — that was a common failure mode.
+
+    **What is offered depends on how long the actor has**, in the game's own
+    frames (user: "a IA deve fazer supplex ou atirar o inimigo se ele estiver
+    para atacar na IA... calcula exatamente o tempo que leva a fazer cada
+    animação para prever o futuro e decide com base nisso"). Every hold move
+    is an animation lock that ignores fresh edges for its whole length, so
+    starting one is a commitment, and the lengths are measured rather than
+    guessed (``tools/hold_timing_diag.py``, a lockstep host stepped one frame
+    at a time; the numbers live in ``kinematics.HOLD_*_FRAMES``):
+
+    - another knee costs 17-18 frames;
+    - finishing with a suplex from a *front* hold costs the crossover plus
+      the suplex, about 115;
+    - finishing with a throw costs 41-46, and throws the body at whatever the
+      actor's back is turned to.
+
+    So: with nothing coming, milk knees for
+    ``kinematics.hold_knee_budget_frames`` and finish with the suplex. With
+    something arriving sooner than a knee takes, do not start one -- throw
+    instead, which is the only ending that fits. In between, the knee is
+    still safe but the suplex chain is not, so the finisher on offer becomes
+    the throw. From a back hold the suplex is the only finisher there is, and
+    is offered regardless.
     """
 
     verbs: set[Token] = set()
@@ -474,21 +497,57 @@ def could_hold_actions(context: Context) -> Context:
         target_slot = nearest.slot if nearest is not None else actor.slot
         rear = reach.rear_threats(actor, enemies)
 
+        # How long the actor has before anything *else* on screen can hit it,
+        # in the same 60 Hz frames the hold moves are measured in. The body in
+        # hand is excluded: it is not a threat while held.
+        grace = reach.frames_until_any_melee_lands(
+            actor, enemies, ignore_slots=frozenset({target_slot})
+        )
+        knee_frames = kinematics.hold_knee_frames(actor.character_id)
+        suplex_frames = kinematics.hold_finisher_frames(
+            actor.character_id, from_back_hold=False
+        )
+
         if base == 0x66:
-            # Confirmed back hold → B is suplex.
+            # Confirmed back hold → B is suplex, and it is the only finisher
+            # reachable from here, threat or no threat.
             verbs.add(Supplex(actor_slot=actor.slot, target_slot=target_slot))
             continue
 
         if base == 0x60:
+            if grace is not None and grace < knee_frames:
+                # Not enough time left for another knee, so do not start one:
+                # the knee is an animation lock that ignores every fresh edge
+                # for its whole length, and being inside one when the blow
+                # lands is the worst version of this situation. End the hold
+                # instead, with the only finisher that fits -- the throw is
+                # 41-46 frames against the flip-and-suplex chain's ~115, and
+                # it puts the body between the actor and whatever is arriving.
+                verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
+                continue
+            # With today's numbers only the branch above can fire when there
+            # is a threat at all: ``reach.CLOSING_ENEMY_THREAT_FRAMES`` is 12
+            # -- how far a constant velocity is trusted, past which the answer
+            # is "not coming" -- and a knee is 17-18, so every *visible*
+            # threat is by definition too soon for one. The guard below is
+            # still written as a comparison rather than folded away, because
+            # it is the frame counts that decide it: widen the horizon and a
+            # knee becomes available again inside it, which is the right
+            # answer rather than a regression. ``test_stability`` pins the
+            # relationship so a change to either number is visible.
+            has_time_to_suplex = grace is None or grace >= suplex_frames
             if rear:
                 # Throw the held body into the rear threat (B+back).
                 verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
-                # Also offer flip→suplex as alternate (priority decides).
-                verbs.add(FlipHold(actor_slot=actor.slot, target_slot=target_slot))
             else:
                 # Standard: knee damage, or flip for a suplex finish.
                 verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
+            if has_time_to_suplex:
                 verbs.add(FlipHold(actor_slot=actor.slot, target_slot=target_slot))
+            elif not rear:
+                # There is time for another knee but not for the suplex chain,
+                # so the hold still needs an ending that fits in the window.
+                verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
             continue
 
         # Unknown hold-ish state with +$60 non-weapon: still act (knee or release).

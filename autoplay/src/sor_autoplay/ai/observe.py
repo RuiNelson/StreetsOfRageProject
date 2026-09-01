@@ -200,7 +200,7 @@ def _with_grab_stall_ticks(context: Context, tracker: GrabStallTracker | None) -
 # The whole hold family ($60-$6F) plus the C crossover ($76/$80), not only the
 # two stable holds $60/$66 --
 # see PlayableCharacter's own docstring. Counting the animation locks in
-# between ($62/$64/$68/$6A/$6C/$6E) is what lets HOLD_KNEE_TICKS describe
+# between ($62/$64/$68/$6A/$6C/$6E) is what lets the knee budget describe
 # "since this enemy was first grabbed", matching the docstring on
 # PlayableCharacter.hold_ticks: a knee and a flip both pass through a lock
 # frame, and resetting the counter there would restart the knee budget after

@@ -888,6 +888,72 @@ def is_incoming_melee(actor: PlayableCharacter, enemy: Enemy) -> bool:
     )
 
 
+def frames_until_melee_lands(actor: PlayableCharacter, enemy: Enemy) -> int | None:
+    """How many 60 Hz frames before this enemy's committed attack can reach
+    ``actor`` -- ``None`` when it is not coming at all.
+
+    ``is_incoming_melee`` answers *whether*; a caller deciding what it still
+    has time to do needs *when*, and the two must not disagree, so this is
+    built out of the same three tests rather than out of new arithmetic:
+
+    - already inside its own reach (``too_close_to_keep_approaching``) is
+      **0**: nothing about the current frame stops the blow;
+    - a committed Souther claw dash gets its own answer, because a ``Boss``
+      populates no velocity for the generic path to extrapolate: ``$161C6``
+      closes at ``SOUTHER_DASH_SPEED_X`` and resolves at
+      ``SOUTHER_SLASH_DIST_MIN``, so the frames left are the gap between them
+      over that speed;
+    - otherwise the enemy's own ROM velocity is walked forward one frame at a
+      time (``kinematics.enemy_projected``, the same projection
+      ``enemy_will_close_soon`` uses) until the caution box it is closing on
+      is satisfied. Scanning rather than dividing keeps this answering the
+      *same predicate* the "is it incoming" side answers, which a
+      distance-over-speed shortcut would quietly stop doing the moment either
+      side's geometry changed.
+
+    Beyond ``CLOSING_ENEMY_THREAT_FRAMES`` the answer is ``None``: past that
+    horizon a constant velocity is not evidence of anything (see
+    ``kinematics.MAX_LEAD_FRAMES``), and "not coming" is the honest reading.
+    """
+
+    if not is_dangerous(enemy.combat_phase):
+        return None
+    if too_close_to_keep_approaching(actor, enemy):
+        return 0
+    if souther_dash_arrives_soon(actor, enemy):
+        gap = abs(enemy.world_x - actor.world_x) - SOUTHER_SLASH_DIST_MIN
+        return max(0, int(gap / SOUTHER_DASH_SPEED_X))
+    for frames in range(1, CLOSING_ENEMY_THREAT_FRAMES + 1):
+        if too_close_to_keep_approaching(actor, enemy_projected(enemy, frames)):
+            return frames
+    return None
+
+
+def frames_until_any_melee_lands(
+    actor: PlayableCharacter,
+    enemies: list[Enemy],
+    *,
+    ignore_slots: frozenset[str] = frozenset(),
+) -> int | None:
+    """The soonest of ``frames_until_melee_lands`` over ``enemies``.
+
+    ``ignore_slots`` is for the body already in the actor's hands: it is not a
+    threat while held, and a caller asking "how long have I got" means from
+    everything *else*.
+    """
+
+    soonest: int | None = None
+    for enemy in enemies:
+        if enemy.slot in ignore_slots or enemy.is_defeated:
+            continue
+        frames = frames_until_melee_lands(actor, enemy)
+        if frames is None:
+            continue
+        if soonest is None or frames < soonest:
+            soonest = frames
+    return soonest
+
+
 def incoming_melee_targets(context: Context, actor: PlayableCharacter) -> set[str]:
     """Slots of on-screen enemies ``is_incoming_melee`` judges about to land
     on ``actor``. Only on-screen enemies qualify -- an off-screen one cannot

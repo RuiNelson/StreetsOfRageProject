@@ -20,7 +20,7 @@ import math
 from collections.abc import Callable
 
 from ..phases import HITSTUN_FRAMES, CombatPhase, is_dangerous, is_punishable
-from . import reach
+from . import kinematics, reach
 from .decide import (
     HEALTH_CRITICAL_PERCENT,
     in_smash_range,
@@ -251,20 +251,28 @@ _EMERGENCY_HOLD_SUPPLEX = 68
 _EMERGENCY_HOLD_FLIP = 66
 # A fresh knee must clear FlipHold's fixed 66 -- see
 # _emergency_attack_held_enemy -- so "milk the hold" wins the front-hold
-# choice while young, and the moment hold_ticks passes HOLD_KNEE_TICKS this
-# reverts to _EMERGENCY_DEFAULT and FlipHold's constant tier finishes it.
-# Never competes with Supplex(68)/Throw(70): those only ever appear alongside
-# a *back* hold or a rear threat, both mutually exclusive with the front-hold
-# branch this score lives in (decide.could_hold_actions).
+# choice while young, and the moment the hold outlasts
+# kinematics.hold_knee_budget_frames this reverts to _EMERGENCY_DEFAULT and
+# FlipHold's constant tier finishes it.
+#
+# Never competes with Supplex(68): that only ever appears on a *back* hold,
+# which is a different branch of decide.could_hold_actions. It **can** now
+# meet Throw(70), which wins -- and that ordering is the point rather than an
+# accident: the throw is only offered from a front hold when there is a rear
+# threat to throw into, or when something is landing too soon for a knee to
+# finish (decide.could_hold_actions, on kinematics' measured frame counts).
 _EMERGENCY_HOLD_KNEE_FRESH = 67
 _EMERGENCY_HOLD_RELEASE = 50
-# How many ticks of a front hold favor another knee over the flip->suplex
-# finish. Not a ROM-confirmed escape timer -- none is decoded (enemy-ai.md's
-# later-boss grabbee states $06-$09 name no such counter) -- a deliberate
-# cross-tick heuristic in the same category NoraAttackTracker already is.
-# Live-reported against Souther: the AI grabbed and flipped immediately,
-# landing zero knees before the finish.
-HOLD_KNEE_TICKS = 6
+# The knee budget moved to frames and to kinematics.py -- see
+# ``kinematics.hold_knee_budget_frames``. It was six *ticks*, which is not a
+# unit the game has: at ~2 frames a tick that is 12 frames against a knee's
+# measured 17-18, so the budget expired before the first knee could finish
+# and the flip won the very next tick. The replacement is three knees' worth
+# of frames, compared against ``kinematics.frames_for_ticks(hold_ticks)``.
+#
+# Still not a ROM-confirmed escape timer -- none is decoded (enemy-ai.md's
+# later-boss grabbee states $06-$09 name no such counter) -- so how *many*
+# knees stays a judgment. How long a knee takes no longer is.
 _EMERGENCY_JUMP_ATTACK_PUNISHABLE = 28  # below punch; never prefer hop over strike
 # Hop on a live Antonio. Must clear _EMERGENCY_PUNCH_DEFAULT (20) so the
 # opener is the jump-kick even if a Punch is still in context: standing
@@ -849,18 +857,27 @@ def _emergency_attack_held_enemy(verb: AttackHeldEnemy, context: Context) -> int
     """The knee: full tier while the hold is young, otherwise stand down.
 
     ``_EMERGENCY_HOLD_KNEE_FRESH`` (67) beats ``FlipHold``'s fixed 66 for as
-    long as ``actor.hold_ticks <= HOLD_KNEE_TICKS``, milking a few knees
+    long as the hold has run less than ``kinematics.hold_knee_budget_frames``,
+    milking a few knees
     before the flip->suplex finish is allowed to win -- see
     ``observe.HoldTracker`` for why this is tick-based rather than reading a
     ROM escape counter (none is decoded). Once the hold ages past that, this
     drops to ``_EMERGENCY_DEFAULT`` so ``FlipHold``'s own constant score
     finishes it, the same as it always did before this existed.
+
+    ``hold_ticks`` is converted to frames before the comparison rather than
+    the budget being converted to ticks: everything about a move's length in
+    this codebase lives in frames (``kinematics``'s own docstring), and the
+    poll period is a knob the user can move while a knee is 17 frames
+    whatever the AI is doing.
     """
 
     if not _target_is_in_hand(verb, context):
         return _EMERGENCY_DEFAULT
     actor = _find_actor(context, verb.actor_slot)
-    if actor is not None and actor.hold_ticks > HOLD_KNEE_TICKS:
+    if actor is not None and kinematics.frames_for_ticks(
+        actor.hold_ticks
+    ) > kinematics.hold_knee_budget_frames(actor.character_id):
         return _EMERGENCY_DEFAULT
     return _EMERGENCY_HOLD_KNEE_FRESH
 

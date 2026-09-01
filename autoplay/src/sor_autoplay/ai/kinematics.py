@@ -123,6 +123,98 @@ DEFAULT_PUNCH_STARTUP_FRAMES = 4
 REAR_ATTACK_STARTUP_FRAMES: dict[int, int] = {0: 3, 1: 21, 2: 7}
 DEFAULT_REAR_ATTACK_STARTUP_FRAMES = 10
 
+# How long each **hold move** commits the actor for, in frames, per
+# character_id (Axel, Adam, Blaze): the press, the animation lock that ignores
+# every fresh edge, and the return to a state that accepts the next input.
+#
+# Measured, not derived, by ``tools/hold_timing_diag.py``: a lockstep host
+# stepped one frame at a time out of a real hold, the move issued on frame 0,
+# and the player's own ``+$30`` sampled every frame until it settled. The
+# animation record's own ``frames x per-frame delay`` is **not** this number
+# -- the ROM's action handlers advance on specific animation frames, so that
+# product over-states Axel's chord by 2x and Blaze's by 3.5x -- and neither is
+# any count of AI ticks, which is not a unit the game has.
+#
+# A lockstep step is exactly one game frame at ``--turbo 1`` and ``--turbo 4``
+# alike (verified against ``get_game_uptime_frames``), so these are turbo-
+# independent. Anything timed by *wall clock* or by agent ticks is not.
+#
+# The knee is the cheapest thing that can be done with a hold and the only one
+# that keeps it; both throws end it. The suplex is reachable only through the
+# C crossover, so *finishing with a suplex from a front hold* costs
+# ``HOLD_CROSSOVER_FRAMES + HOLD_SUPLEX_FRAMES`` -- around 115, against the
+# throw's 41-46. That gap is the whole reason this table exists: under a
+# threat there is time for one of those two and not the other.
+# All three characters measured, 2026-09-01. They agree closely enough that
+# nothing here turns on which one is playing -- unlike the chord, whose
+# startup runs 3/21/7 -- but they are kept per character anyway, because the
+# animation data says they are not identical (Blaze's throw record is 4
+# frames at 27 against Axel's 3 at 15) and a shared number would be a guess.
+HOLD_KNEE_FRAMES: dict[int, int] = {0: 17, 1: 18, 2: 18}
+DEFAULT_HOLD_KNEE_FRAMES = 18
+HOLD_CROSSOVER_FRAMES: dict[int, int] = {0: 37, 1: 37, 2: 39}
+DEFAULT_HOLD_CROSSOVER_FRAMES = 39
+HOLD_SUPLEX_FRAMES: dict[int, int] = {0: 78, 1: 77, 2: 78}
+DEFAULT_HOLD_SUPLEX_FRAMES = 78
+HOLD_THROW_FRAMES: dict[int, int] = {0: 41, 1: 42, 2: 46}
+DEFAULT_HOLD_THROW_FRAMES = 46
+
+# How long a hold may be milked for knees while nothing is coming, in frames.
+# Three knees: the user's own "knee, knee, ... -> suplex", made countable. It
+# replaced a six *tick* budget, which at ~2 frames a tick could not even cover
+# one knee's 17 -- so the flip always won the tick after the first knee began,
+# which is exactly the "grabbed and flipped immediately, zero knees" symptom
+# that budget was added to fix.
+#
+# It is only ever the *unthreatened* budget. ``decide.could_hold_actions``
+# ends the hold early whenever something is about to land, and that decision
+# is made against these same frame counts rather than against this one.
+HOLD_KNEE_BUDGET_KNEES = 3
+
+
+def hold_knee_frames(character_id: int | None) -> int:
+    if character_id is None:
+        return DEFAULT_HOLD_KNEE_FRAMES
+    return HOLD_KNEE_FRAMES.get(character_id, DEFAULT_HOLD_KNEE_FRAMES)
+
+
+def hold_crossover_frames(character_id: int | None) -> int:
+    if character_id is None:
+        return DEFAULT_HOLD_CROSSOVER_FRAMES
+    return HOLD_CROSSOVER_FRAMES.get(character_id, DEFAULT_HOLD_CROSSOVER_FRAMES)
+
+
+def hold_suplex_frames(character_id: int | None) -> int:
+    if character_id is None:
+        return DEFAULT_HOLD_SUPLEX_FRAMES
+    return HOLD_SUPLEX_FRAMES.get(character_id, DEFAULT_HOLD_SUPLEX_FRAMES)
+
+
+def hold_throw_frames(character_id: int | None) -> int:
+    if character_id is None:
+        return DEFAULT_HOLD_THROW_FRAMES
+    return HOLD_THROW_FRAMES.get(character_id, DEFAULT_HOLD_THROW_FRAMES)
+
+
+def hold_finisher_frames(character_id: int | None, *, from_back_hold: bool) -> int:
+    """What ending this hold costs from where the actor is standing now.
+
+    From a back hold the suplex is one press away. From a front hold it is a
+    crossover first, and the two together are most of two seconds -- which is
+    why a *front* hold under threat is finished with the throw instead.
+    """
+
+    if from_back_hold:
+        return hold_suplex_frames(character_id)
+    return hold_crossover_frames(character_id) + hold_suplex_frames(character_id)
+
+
+def hold_knee_budget_frames(character_id: int | None) -> int:
+    """The unthreatened knee budget, in frames -- see HOLD_KNEE_BUDGET_KNEES."""
+
+    return HOLD_KNEE_BUDGET_KNEES * hold_knee_frames(character_id)
+
+
 # Those same two tables also give each move's *damaging* span -- the punch
 # stays active for 10 frames after its startup, the chord for 10/18/16 -- and
 # that span is why frame 0 always stays in the sample set below rather than
