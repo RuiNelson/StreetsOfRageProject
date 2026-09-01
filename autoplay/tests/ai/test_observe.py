@@ -9,6 +9,7 @@ from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, InContinueM
 from sor_autoplay.ai.tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
 from sor_autoplay.ai.tokens import Pit, Projectile
 from sor_autoplay.ai.observe import (
+    GrabStallTracker,
     HoldTracker,
     NoraAttackTracker,
     generate_direct_observation_tokens,
@@ -1075,6 +1076,100 @@ class HoldTrackerObservationTests(unittest.TestCase):
         assert myself is not None and partner is not None
         self.assertEqual(myself.hold_ticks, 1)
         self.assertEqual(partner.hold_ticks, 0)
+
+
+class GrabStallTrackerObservationTests(unittest.TestCase):
+    """The guard on Souther's walk-in grab -- see observe.GrabStallTracker.
+
+    "In contact and still not holding" is the only evidence the AI has that a
+    walk-in is not converting, and the failure it guards against is recorded:
+    2318 consecutive ticks of GrabEnemy while the boss lost 11 health.
+    """
+
+    def _tick(
+        self,
+        tracker,
+        *,
+        action_state: int = 0x02,
+        held_type: int = 0,
+        enemy_x: int = 810,
+        enemy_y: int = 64,
+    ):
+        players = (
+            _player_snapshot(index=1),
+            _player_snapshot(index=2, is_playable=False),
+        )
+        entities = (
+            _player_entity(slot="P1", action_state=action_state, held_type=held_type),
+            _enemy_entity(slot="obj00", world_x=enemy_x, world_y=enemy_y),
+        )
+        snapshot = _snapshot(players=players, entities=entities)
+        context = generate_direct_observation_tokens(
+            snapshot, player_index=1, grab_stall_tracker=tracker
+        )
+        myself = find(context, Myself, slot="P1")
+        assert myself is not None
+        return myself
+
+    def test_no_tracker_defaults_to_zero(self) -> None:
+        players = (
+            _player_snapshot(index=1),
+            _player_snapshot(index=2, is_playable=False),
+        )
+        entities = (
+            _player_entity(slot="P1"),
+            _enemy_entity(slot="obj00", world_x=810),
+        )
+        snapshot = _snapshot(players=players, entities=entities)
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        myself = find(context, Myself, slot="P1")
+        assert myself is not None
+        self.assertEqual(myself.grab_stall_ticks, 0)
+
+    def test_counts_up_while_in_contact_without_a_hold(self) -> None:
+        tracker = GrabStallTracker()
+
+        first = self._tick(tracker)
+        second = self._tick(tracker)
+
+        self.assertEqual(first.grab_stall_ticks, 1)
+        self.assertEqual(second.grab_stall_ticks, 2)
+
+    def test_a_hold_ends_the_attempt(self) -> None:
+        tracker = GrabStallTracker()
+
+        self._tick(tracker)
+        self._tick(tracker)
+        holding = self._tick(tracker, action_state=0x60)
+
+        self.assertEqual(holding.grab_stall_ticks, 0)
+
+    def test_losing_contact_ends_the_attempt(self) -> None:
+        tracker = GrabStallTracker()
+
+        self._tick(tracker)
+        self._tick(tracker)
+        knocked_away = self._tick(tracker, enemy_x=1200)
+
+        self.assertEqual(knocked_away.grab_stall_ticks, 0)
+
+    def test_an_armed_actor_is_not_attempting_a_grab_at_all(self) -> None:
+        # could_grab_enemy excludes an armed actor, so there is no walk-in to
+        # time out and no stall to accumulate.
+        tracker = GrabStallTracker()
+
+        armed = self._tick(tracker, held_type=0x0B)
+
+        self.assertEqual(armed.grab_stall_ticks, 0)
+
+    def test_an_enemy_off_the_lane_is_not_contact(self) -> None:
+        tracker = GrabStallTracker()
+
+        far_lane = self._tick(tracker, enemy_y=140)
+
+        self.assertEqual(far_lane.grab_stall_ticks, 0)
 
 
 class ContinueAndMrXObservationTests(unittest.TestCase):

@@ -8,6 +8,7 @@ assumed margin to the ROM's own geometry.
 """
 
 import unittest
+from dataclasses import replace
 
 from sor_autoplay.ai import kinematics, reach
 from sor_autoplay.ai.tokens import (
@@ -1201,25 +1202,67 @@ class GrabReasonsTests(unittest.TestCase):
             frozenset({GrabReason.SOUTHER_ON_PUNISH}),
         )
 
-    def test_the_long_souther_recovery_state_does_not(self) -> None:
-        # Measured live: primary $04 held 70% of a 120s fight against $03's
-        # 4%, and both decode as RECOVERY. Keyed on the phase alone, the
-        # grab scored 75 -- top of the table -- for most of the fight and
-        # never converted: 2318 ticks of GrabEnemy while Souther lost 11
+    def test_the_long_souther_recovery_state_is_only_the_walk_in(self) -> None:
+        # Measured live: primary $04 held 70% of one 120s fight against
+        # $03's 4%, and both decode as RECOVERY. Keyed on the phase alone,
+        # the grab scored 75 -- top of the table -- for most of the fight
+        # and never converted: 2318 ticks of GrabEnemy while Souther lost 11
         # health and the actor lost a life. $04 is where he sits, not a
-        # window.
+        # window, so it still does not earn the punish tier -- it gets the
+        # chase's own, which is both lower and timed out.
         myself = _myself(world_x=160, world_y=100)
         souther = _souther(
             world_x=180, world_y=100, combat_phase=CombatPhase.RECOVERY, primary_state=4
         )
 
-        self.assertEqual(reach.grab_reasons(set(), myself, souther, [souther]), frozenset())
+        self.assertEqual(
+            reach.grab_reasons(set(), myself, souther, [souther]),
+            frozenset({GrabReason.SOUTHER_WALK_IN}),
+        )
 
-    def test_a_souther_that_can_still_act_offers_nothing(self) -> None:
+    def test_a_souther_that_can_still_act_is_chased_for_the_hold(self) -> None:
         myself = _myself(world_x=160, world_y=100)
         souther = _souther(world_x=180, world_y=100)
 
-        self.assertEqual(reach.grab_reasons(set(), myself, souther, [souther]), frozenset())
+        self.assertEqual(
+            reach.grab_reasons(set(), myself, souther, [souther]),
+            frozenset({GrabReason.SOUTHER_WALK_IN}),
+        )
+
+    def test_the_souther_walk_in_ranks_under_the_punish_one(self) -> None:
+        from sor_autoplay.ai.priority import _GRAB_REASON_SCORE
+
+        self.assertLess(
+            _GRAB_REASON_SCORE[GrabReason.SOUTHER_WALK_IN],
+            _GRAB_REASON_SCORE[GrabReason.SOUTHER_ON_PUNISH],
+        )
+
+    def test_a_stalled_walk_in_hands_the_tick_back_to_the_strike(self) -> None:
+        # The guard on the chase: a walk-in that has not become a hold in
+        # SOUTHER_WALK_IN_STALL_TICKS stops outranking every strike, so the
+        # AI hits him instead -- and the hitstun that follows is what
+        # SOUTHER_ON_PUNISH grabs from.
+        souther = _souther(world_x=180, world_y=100)
+        stalled = _myself(world_x=160, world_y=100)
+        stalled = replace(
+            stalled, grab_stall_ticks=reach.SOUTHER_WALK_IN_STALL_TICKS + 1
+        )
+
+        self.assertEqual(reach.grab_reasons(set(), stalled, souther, [souther]), frozenset())
+
+    def test_the_hitstun_grab_survives_a_stalled_walk_in(self) -> None:
+        souther = _souther(
+            world_x=180, world_y=100, combat_phase=CombatPhase.RECOVERY, primary_state=3
+        )
+        stalled = replace(
+            _myself(world_x=160, world_y=100),
+            grab_stall_ticks=reach.SOUTHER_WALK_IN_STALL_TICKS + 1,
+        )
+
+        self.assertEqual(
+            reach.grab_reasons(set(), stalled, souther, [souther]),
+            frozenset({GrabReason.SOUTHER_ON_PUNISH}),
+        )
 
 
 def _connects(band, actor, enemy, verb_cls) -> bool:
@@ -1417,13 +1460,24 @@ class ConnectsBandTimelineTests(unittest.TestCase):
         self.assertTrue(_connects(reach.grab_would_connect, myself, still, GrabEnemy))
         self.assertTrue(reach.enemy_actionable(myself, still, [still]))
 
-    def test_enemy_off_lane_is_not_grab_reach_even_inside_punch_reach(self) -> None:
-        # dy=11 still clears PUNCH_RANGE_Y (12) but not GRAB_RANGE_Y (10):
-        # two bodies have to actually overlap for the contact test to fire.
+    def test_grab_reach_shares_the_punch_band_lane(self) -> None:
+        # `$AAA0` reads the actor's own forward attack box -- the punch's box
+        # -- so the two bands share a lane tolerance. They used to differ by
+        # two pixels (10 against 12), and those two pixels sat exactly where
+        # `decide._actionable_targets` stops the approach: the AI settled at
+        # 12px of lane, called the punch in range, and could never reach the
+        # hold from the position it had chosen to stop at. The bodies are
+        # 16px tall, so 12px of lane is still an overlap.
         myself = _myself(world_x=100, world_y=100, facing_left=False)
         enemy = _enemy(world_x=130, world_y=111)
 
         self.assertTrue(_connects(reach.punch_would_connect, myself, enemy, Punch))
+        self.assertTrue(_connects(reach.grab_would_connect, myself, enemy, GrabEnemy))
+
+    def test_enemy_further_off_lane_than_the_band_is_not_grab_reach(self) -> None:
+        myself = _myself(world_x=100, world_y=100, facing_left=False)
+        enemy = _enemy(world_x=130, world_y=100 + reach.GRAB_RANGE_Y + 8)
+
         self.assertFalse(_connects(reach.grab_would_connect, myself, enemy, GrabEnemy))
 
     def test_enemy_behind_beyond_the_tolerance_is_not_grab_reach(self) -> None:

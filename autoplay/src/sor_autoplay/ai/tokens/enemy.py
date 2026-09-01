@@ -473,6 +473,32 @@ class GrabReason(Enum):
     ``incoming_melee_targets`` first, and ``DodgeAntonioKick`` owns that.
     """
 
+    SOUTHER_WALK_IN = auto()
+    """Souther is ready but reachable -- chase him down and hold him.
+
+    The user's plan for this fight in one reason (user: "a melhor estrategia
+    e correr atras dele para o agarrar. Depois ataca-lo e terminar com
+    supplex"). It is Antonio's ``ANTONIO_WALK_IN`` applied to the boss whose
+    own ROM makes the hold even better value: ``$15EDA
+    (souther_state1_active_combat)`` cannot begin the claw inside ``$18``
+    (24px) of him, ``$161C6 (souther_state2_claw_dash)`` cannot resolve one
+    there either, and ``$15F98 (souther_state1_standoff)`` only drifts out of
+    that pocket at 1px/frame against the 2px/frame the actor follows at. The
+    ground a hold is taken from is the safest ground in the fight, and it is
+    ground he cannot leave.
+
+    Gated on ``grab_would_connect`` like every other reason, so it is never a
+    walk across the arena, and never produced against a committed claw
+    (``could_grab_enemy`` drops anything in ``incoming_melee_targets``
+    first). It is additionally **timed out** by
+    ``PlayableCharacter.grab_stall_ticks`` -- see
+    ``reach.SOUTHER_WALK_IN_STALL_TICKS`` and ``observe.GrabStallTracker``.
+    That guard is not decoration: a walk-in that outranks every strike and
+    never converts is this project's twice-recorded worst case against him,
+    once for 2318 consecutive ticks. Timed out, the tick goes to a strike,
+    and the strike's hitstun is what ``SOUTHER_ON_PUNISH`` below grabs from.
+    """
+
     SOUTHER_ON_PUNISH = auto()
     """Souther is in hitstun -- walk in and hold him, then suplex.
 

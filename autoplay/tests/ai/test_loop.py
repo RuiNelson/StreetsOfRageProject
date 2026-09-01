@@ -165,6 +165,7 @@ class AgentLoopPipelineTests(unittest.TestCase):
                 player_index=1,
                 nora_tracker=loop._nora_tracker,
                 hold_tracker=loop._hold_tracker,
+            grab_stall_tracker=loop._grab_stall_tracker,
             )
             inference.assert_called_once_with(observed_context)
             decide.assert_called_once()

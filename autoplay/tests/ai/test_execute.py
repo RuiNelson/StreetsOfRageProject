@@ -3207,15 +3207,24 @@ class DodgeSoutherSlashExecuteTests(unittest.TestCase):
         self.assertTrue(below.hold_buttons.call_args.kwargs["player1"] & DOWN)
 
     def test_clears_the_lane_gate_the_rom_actually_reads(self) -> None:
-        # $1C (28px) is the wider of Souther's two lane gates and the one the
-        # inference deliberately assumes, so the aim point has to clear it --
-        # and clear it by more than the executor's own Y deadband.
+        # By the time this dodge runs the claw is committed, so the gate it
+        # has to beat is $161C6's own resolve lane ($18, 24px) and not
+        # $15EDA's commit lane ($1C) -- clearing 24 by more than the
+        # executor's Y deadband is exactly "enough not to be hit", which is
+        # what the user asked this fight's evasion to be and no more.
         from sor_autoplay.ai.execute import (
             MOVE_DEADBAND_Y,
             SOUTHER_SLASH_LANE_CLEARANCE,
         )
+        from sor_autoplay.ai.reach import SOUTHER_DASH_RESOLVE_LANE
 
-        self.assertGreater(SOUTHER_SLASH_LANE_CLEARANCE, 0x1C + MOVE_DEADBAND_Y)
+        self.assertGreater(
+            SOUTHER_SLASH_LANE_CLEARANCE, SOUTHER_DASH_RESOLVE_LANE + MOVE_DEADBAND_Y
+        )
+        # ...and no further than it has to: a step that overshoots is a step
+        # that takes longer to arrive, and arriving late is this dodge's
+        # measured failure mode.
+        self.assertLess(SOUTHER_SLASH_LANE_CLEARANCE, 0x1C + MOVE_DEADBAND_Y + 5)
 
     def test_a_side_with_no_lane_room_is_not_chosen(self) -> None:
         # An aim point the lane clamp would drag back inside the band is worse
@@ -3247,6 +3256,11 @@ class SoutherLaneOffsetIsDroppedWhenTheGateCannotFireTests(unittest.TestCase):
     Those are 47% of his ticks and the only ground a hold can be taken from;
     holding the offset through them parked the actor at dx=76, dl=26 for 1136
     ticks of a 3669-tick trace while grab_would_connect was true on 11.
+
+    Dropping it for *every* state as well -- walking the approach straight
+    down his lane -- was tried and measured much worse (549 dodge ticks a
+    fight against 99, 3-4 lives against 1-2). See
+    execute._lane_offset_while_closing and autoplay/CLAUDE.md.
     """
 
     def _souther(self, **overrides) -> Souther:

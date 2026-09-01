@@ -80,6 +80,7 @@ from .reach import (
     ANTONIO_KICK_LANE_BREAK,
     PIT_AVOID_MARGIN,
     REACH_SAFETY_MARGIN,
+    SOUTHER_DASH_RESOLVE_LANE,
     SOUTHER_SLASH_DIST_CLOSING,
     SOUTHER_SLASH_DIST_MIN,
     SOUTHER_SLASH_LANE,
@@ -229,57 +230,42 @@ ANTONIO_APPROACH_LANE_Y = WALK_TO_ENEMY_LANE_SAFETY_Y + PUNCH_RANGE_Y
 # The same construction for Souther, off his own gate rather than Antonio's.
 # `$15EDA (souther_state1_active_combat)` refuses the slash whenever
 # `+$52 >= $1C` (28px of lane), so 28 is the number the *arrival* has to
-# clear, and the routed goal's PUNCH_RANGE_Y of lane slack has to be added on
-# top of it for the nearest acceptable arrival to be 28 rather than 16.
+# clear, plus the routed goal's own PUNCH_RANGE_Y of lane slack and a
+# REACH_SAFETY_MARGIN cushion against his own closing speed.
 #
 # Paired with `_souther_pocket_stop_dx` (16px, inside the `$18` inner abort)
 # this is ai-analysis/enemy-ai.md's "uncommittable corridor": the lane gate
 # is unsatisfied for the whole approach, the inner abort is unsatisfied from
 # the moment the lane is given up, and the two overlap, so there is no
-# instant at which `$15EDA` can commit. Antonio's number happens to be the
-# same 40 without the margin below; the two are written separately because
-# they are derived from two different gates and only one of them is 28px
-# wide -- which is exactly why only one of them needed the margin.
+# instant at which `$15EDA` can commit.
 #
-# `_approach_lane_y` stops actively widening the lane once
-# `dy >= hold_offset - PUNCH_RANGE_Y` ("close enough, a further nudge is only
-# jitter") -- and for Antonio that lands on WALK_TO_ENEMY_LANE_SAFETY_Y (28),
-# a generic buffer that happens to sit 8-12px clear of his real 16/20px
-# gates. For Souther, without a margin, the identical subtraction landed on
-# SOUTHER_SLASH_LANE (28) *exactly* -- his own real gate, zero clearance.
-# Measured live: the approach stopped adjusting lane the moment dy reached
-# 28, and Souther was in his committed claw two ticks later at dy=21 --
-# `DodgeSoutherSlash` fired the same tick as the commit and had no time to
-# matter.
+# **This was deleted for one session and put back on the measurement.**
+# Running the approach straight down his lane instead -- the literal reading
+# of "chase him" -- put the actor inside the commit gate for the whole walk
+# in, and he used it: `DodgeSoutherSlash` went from 99 ticks a fight to 549,
+# the actor spent 1387 ticks in hurt states against 613, and both scored
+# fights lost 3 lives at 400% damage against the corridor's 1 life at 200%.
+# The corridor's own worth had been recorded as "no measured gain" before,
+# but that was measured against *damage* while other bugs dominated it; what
+# it plainly does is deny commits, and denying them is the cheapest evasion
+# in the fight -- it costs a lane offset, not a single tick of approach.
 #
+# The chase is what happens *after* it, and it is not blocked by any of
+# this: the offset is dropped the moment he is punishable or committed
+# (below), `_lane_release_dx` hands the lane over at his own `$18` boundary,
+# and the hold is then taken from inside the pocket
+# (`GrabReason.SOUTHER_WALK_IN`).
 SOUTHER_APPROACH_LANE_Y = SOUTHER_SLASH_LANE + PUNCH_RANGE_Y + REACH_SAFETY_MARGIN
 # ai-analysis/enemy-ai.md's primary-1 tactical table names `+$67 == 1` as
 # `$160D0 (souther_state1_close_lane)` -- the one substate that should home
-# his lane onto the actor's, against `$00` (`$159F8` standoff) and `$02`
-# (`$16106` dash_timer) which should not. Five fresh clean-host traces say
-# that labelling does not match what actually moves: tactical 1 was entered
-# on 2 of 696 primary-1 ticks across a representative trace -- too rare to be
-# "the" closing state -- while tactical **2** carried essentially all of the
-# visible lane bursts (30 of 153 ticks nonzero, mean |delta| 3.9px on those,
-# against tactical 0's 1.4px on its own much rarer nonzero ticks). Either the
-# manuscript's two labels are swapped or `$160D0` fires for one transitional
-# tick that reads back as 2 before any snapshot catches it; either way,
-# `SOUTHER_LANE_CLOSING_TACTICALS` below is keyed off the measurement, not
-# the label, and includes both rather than re-guess which name is right.
-# reach.py's own comment on this handler puts the peak rate at 4px per 60Hz
-# frame, matching the ~3.9 observed at ~2 frames/agent tick.
-#
-# SOUTHER_APPROACH_LANE_Y's own REACH_SAFETY_MARGIN covers barely 2 ticks of
-# that before the gate reopens, which is not enough to survive a normal
-# approach's dozens of ticks -- confirmed live (see autoplay/CLAUDE.md's
-# "still open" note) -- but simply enlarging it for every tactical substate
-# broke `test_alternating_commitment_does_not_chatter_the_lane`: that test's
-# Souther never leaves tactical 0, so the only thing a blanket increase
-# changed for it was the *width* of a swing the test never asked to widen.
-# Scoping the extra margin to the substates that measurably move is not a
-# workaround for that test -- it is the more precise reading of "equacionar
-# o comportamento do boss": the wider margin is only ever the right answer
-# while he is actually the one closing.
+# his lane onto the actor's. Five clean-host traces say that labelling does
+# not match what moves: tactical 1 appeared on 2 of 696 primary-1 ticks,
+# while tactical **2** carried essentially all of the visible lane bursts
+# (30 of 153 ticks nonzero, mean |delta| 3.9px). Either the labels are
+# swapped or `$160D0` is a one-tick transition that reads back as 2 before
+# any snapshot lands on it; either way this is keyed off what moves, not off
+# which name is right, and covers both. While he is the one closing, the
+# offset needs more than REACH_SAFETY_MARGIN's ~2 ticks of cushion.
 SOUTHER_LANE_CLOSING_TACTICALS = frozenset({0x01, 0x02})
 SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING = SOUTHER_APPROACH_LANE_Y + 24
 # A Breakable is itself a solid obstacle -- walking straight to its exact
@@ -882,7 +868,7 @@ def _lane_offset_while_closing(actor: Myself | Partner, target: Enemy) -> int | 
       needs ``$14`` (20px). ``ANTONIO_APPROACH_LANE_Y`` clears both;
     - **Souther**, whose ``$15EDA (souther_state1_active_combat)`` slash
       commit needs ``+$52 < $1C`` (28px). ``SOUTHER_APPROACH_LANE_Y`` is that
-      gate plus the routed goal's own lane slack.
+      gate plus the routed goal's own lane slack and a margin.
 
     Souther is the case where the offset is not merely safer but *closes the
     gate for the entire approach*: his commit also needs ``+$50`` inside a
@@ -891,20 +877,18 @@ def _lane_offset_while_closing(actor: Myself | Partner, target: Enemy) -> int | 
     which a live approach always is) **and** outside the ``$18`` inner abort,
     and the pocket ``_souther_pocket_stop_dx`` stops in is inside that lower
     bound -- so the lane offset covers the walk in and the inner abort covers
-    the arrival, with an overlap rather than a gap between them. See
-    ai-analysis/enemy-ai.md, "The uncommittable corridor". Past the *upper*
-    bound (104px, the widest of the three -- never assume a narrower one just
-    because this tick reads as stationary) he cannot commit at any lane, so
-    the offset is skipped there too: purely a bonus for a farther re-approach
-    after a knockback, since a fresh Souther fight starts inside 104px from
-    the first tick and never gets the benefit.
+    the arrival, with an overlap rather than a gap between them. Past 104px
+    he cannot commit at any lane, so the offset is skipped there too.
 
-    An earlier attempt at this for Souther measured *worse* (2 lives / 177 s
-    against 1 / 89 s) and was scoped back to Antonio. That measurement is not
-    evidence against the corridor: it was taken while ``_approach_lane_y``
-    could not converge a lane at all, so holding an offset only deepened a
-    stalemate the actor had no way out of. Re-measured after that fix, with
-    ``--no-food`` so a heal cannot flatter it.
+    It is dropped for the states ``$15EDA`` is off the call path of -- the
+    hit reaction, the lethal gate, the police reaction, the committed claw --
+    because those are the only ground a hold can be taken from and holding an
+    offset through them was, measured, what lost the fight. That carve-out,
+    ``_lane_release_dx``'s early hand-over at his own ``$18`` boundary, and
+    ``GrabReason.SOUTHER_WALK_IN`` are together the chase: the corridor is
+    how the actor *reaches* the pocket, not a reason to stay out of it.
+    Deleting it entirely was tried and measured much worse -- see this
+    module's note by ``SOUTHER_APPROACH_LANE_Y`` and ``autoplay/CLAUDE.md``.
     """
 
     if target.is_defeated:
@@ -913,21 +897,12 @@ def _lane_offset_while_closing(actor: Myself | Partner, target: Enemy) -> int | 
         return ANTONIO_APPROACH_LANE_Y
     if isinstance(target, Souther):
         if is_punishable(target.combat_phase) or target.strike_is_committed():
-            # The offset exists to deny `$15EDA`, and `$15EDA` is not on the
-            # call path of any of these states: the hit reaction `$03`, the
+            # `$15EDA` is not on the call path of the hit reaction `$03`, the
             # lethal gate `$05`, the police reaction `$0A`, or the committed
-            # claw. Holding it anyway is not merely pointless, it is what
-            # loses the fight -- these are 47% of his ticks, they are the
-            # only ground the hold can be taken from, and the approach was
-            # spending all of them standing off-lane waiting for a commit
-            # that cannot come.
-            #
-            # Measured over a 3669-tick trace: `grab_reasons` offered
-            # `SOUTHER_ON_PUNISH` on 1672 ticks and `grab_would_connect` was
-            # true on **11**, with the actor parked at dx=76, dl=26 for 1136
-            # of them -- which is this function's own offset, to the pixel.
-            # (`DodgeSoutherSlash` owns the committed case, and it wants the
-            # lane too.)
+            # claw. These are 47% of his ticks and the only ground a hold can
+            # be taken from; holding the offset through them parked the actor
+            # at dx=76, dl=26 for 1136 ticks of a 3669-tick trace while
+            # `grab_would_connect` was true on 11.
             return None
         if abs(target.world_x - actor.world_x) >= SOUTHER_SLASH_DIST_CLOSING:
             return None
@@ -981,6 +956,15 @@ def _approach_lane_y(
     the boss already helpless, nothing left to deny -- earn the bypass.
     ``enemies=[]`` is safe here: both boss branches of ``grab_reasons``
     return before ever touching that argument.
+
+    A live Souther is *not* converged on for ``GrabReason.SOUTHER_WALK_IN``
+    alone, deliberately, even though the walk-in wants the lane: that reason
+    holds for any ready Souther at contact range, and converging on it walks
+    the approach down his commit lane for the whole way in. Measured, that is
+    the single most expensive thing the AI can do against him (549 dodge
+    ticks a fight against 99, 3 lives against 1). The lane is handed over by
+    ``_lane_release_dx`` instead, at his own ``$18`` inner abort, which is
+    where the hold is taken from anyway.
     """
 
     if alongside or grab_reasons(context, actor, target, []) & _ON_PUNISH_GRAB_REASONS:
@@ -1098,10 +1082,20 @@ def _lane_release_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> in
     Only while he is not already committed -- once the claw is out, 24px is
     where ``$161C6`` *resolves* rather than a pocket, which is
     ``_souther_pocket_stop_dx``'s own rule and ``DodgeSoutherSlash``'s window.
+
+    The boundary is ``$18`` itself and **not one pixel inside it**, and the
+    pixel matters: ``PointGoal`` is a *covering* test, so an approach that
+    aims at the pocket (16px) reports arrival anywhere its body covers that
+    point -- origin ``dx`` between 16 and 24. Landing on 24 with the release
+    at 23 meant the lane never converged, and with the lane never converged
+    nothing was ever in punch or grab range: the actor stood 24px out and
+    36px off his lane holding no button, with ``WalkToNearEnemy`` winning
+    every tick. That is the round-2 stalemate reproduced on the tick harness,
+    and the arithmetic that produced it was this comparison being strict.
     """
 
     if isinstance(target, Souther) and not target.strike_is_committed():
-        return max(stop_dx, SOUTHER_SLASH_DIST_MIN - 1)
+        return max(stop_dx, SOUTHER_SLASH_DIST_MIN)
     return stop_dx
 
 
@@ -1587,11 +1581,20 @@ PROJECTILE_SIDESTEP_DISTANCE = 40
 # rather than from the actor's (see _souther_slash_sidestep_target). The claw
 # dash resolves only with the target within $18 (24px) of its lane
 # ($161C6 souther_state2_claw_dash) and the state-1 commit gate at
-# $15EDA needs $1C (28px), so this has to clear 28 -- plus more than
-# MOVE_DEADBAND_Y, or the Y bits go quiet while X is still frozen and the actor
-# stalls a few px short of actually escaping, the same deadlock
-# PIT_DODGE_OVERSHOOT exists to prevent.
-SOUTHER_SLASH_LANE_CLEARANCE = 0x1C + MOVE_DEADBAND_Y + 5
+# $15EDA needs $1C (28px) -- but $15EDA is not what this dodge answers. By
+# the time the step is taken the claw is already committed, and the only
+# question left is whether the dash resolves, so the number to clear is the
+# dash's own $18 and not the commit gate's $1C. Clearing 28 as well used to
+# look free; it is not, because the measured failure of this dodge is that it
+# arrives too late (autoplay/CLAUDE.md: "fired the same tick as the commit and
+# had no time left to matter"), and four pixels is about two ticks of walking.
+# The user's rule for this fight is the same one: evade exactly enough not to
+# be hit, and spend everything else on the chase.
+#
+# Plus more than MOVE_DEADBAND_Y, or the Y bits go quiet while X is still
+# frozen and the actor stalls a few px short of actually escaping, the same
+# deadlock PIT_DODGE_OVERSHOOT exists to prevent.
+SOUTHER_SLASH_LANE_CLEARANCE = SOUTHER_DASH_RESOLVE_LANE + MOVE_DEADBAND_Y + 5
 
 
 def _projectile_sidestep_target(

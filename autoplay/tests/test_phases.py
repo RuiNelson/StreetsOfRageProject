@@ -166,6 +166,25 @@ class PhaseDecodeTests(unittest.TestCase):
             CombatPhase.ATTACKING,
         )
 
+    def test_souther_state1_is_never_an_attack(self) -> None:
+        """$15EDA (souther_state1_active_combat) is the approach, and none of
+        its three tactical handlers strike: $15F98 walks the standoff bands,
+        $160D0 writes an approach velocity, $16106 counts +$5C down. Only
+        primary $02 is the committed claw.
+
+        The generic `t != 0` tail called tactical $01/$02 ATTACKING, which is
+        about a fifth of his primary-$01 ticks, and dangerous is what forbids
+        the whole plan against him: ATTACKING is outside
+        reach.GRABBABLE_PHASES, so no hold could be taken on any of those
+        ticks. Same mistake the type-$58 chase state already records."""
+
+        for tactical in (0x00, 0x01, 0x02):
+            with self.subTest(tactical=tactical):
+                self.assertEqual(
+                    boss_phase(type_id=0x55, primary_byte=0x01, tactical=tactical),
+                    CombatPhase.NORMAL,
+                )
+
     def test_later_boss_hit_reaction_is_recovery_for_every_family(self) -> None:
         """Shared $163D0/$164CA (primary $03/$04) is hitstun for Antonio
         too, not just the twins. Without this a punched Antonio decoded

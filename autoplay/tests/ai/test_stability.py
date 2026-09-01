@@ -17,6 +17,7 @@ from sor_autoplay.ai.decide import generate_verb_tokens, in_smash_range
 from sor_autoplay.ai.execute import execute_verb
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.inference import generate_inference_tokens
+from sor_autoplay.ai import reach
 from sor_autoplay.ai.priority import determine_priority_verb
 from sor_autoplay.ai.tokens import (
     AttackHeldEnemy,
@@ -25,9 +26,11 @@ from sor_autoplay.ai.tokens import (
     DodgeSoutherSlash,
     Enemy,
     FlipHold,
+    GrabEnemy,
     JumpAttack,
     Myself,
     OpenBreakable,
+    Punch,
     Souther,
     Stage,
     Supplex,
@@ -583,6 +586,7 @@ def _run_souther(
     souther_x: int,
     souther_y: int,
     states,
+    grab_stall_ticks: int = 0,
 ) -> tuple[list[int], list[str]]:
     """Drive the pipeline against one Souther, cycling his own ROM states.
 
@@ -603,7 +607,7 @@ def _run_souther(
     for tick in range(ticks):
         primary, tactical = states[tick % len(states)]
         context = {
-            _actor(ax, ay, facing_left),
+            replace(_actor(ax, ay, facing_left), grab_stall_ticks=grab_stall_ticks),
             _souther(souther_x, souther_y, primary, tactical),
             CameraRange(left=-100, right=500, top=0, bottom=112),
             Stage(level_index=1, direction="right"),
@@ -632,6 +636,56 @@ def _run_souther(
         elif held & UP:
             ay -= STEP_Y
     return masks, winners
+
+
+class SoutherChaseTests(unittest.TestCase):
+    """The plan the user asked for, end to end (user: "a melhor estrategia e
+    correr atras dele para o agarrar. Depois ataca-lo e terminar com
+    supplex"): close on a ready Souther and take the hold, rather than trade
+    punches from the edge of the punch band while an offset lane is held.
+    """
+
+    def test_a_ready_souther_is_chased_down_and_grabbed(self) -> None:
+        # The whole approach, end to end, and the three separate bugs it
+        # pins: the corridor has to *arrive* (execute._lane_release_dx, and
+        # navigation.strike_goal's degenerate band), the lane has to converge
+        # once it does, and the hold has to be reachable from where the
+        # approach chooses to stop (reach.GRAB_RANGE_Y). With any one of them
+        # wrong this fixture parks the actor 24px out, off his lane, holding
+        # no button -- which is the round-2 stalemate.
+        _, winners = _run_souther(
+            ticks=60,
+            actor_x=100,
+            actor_y=60,
+            souther_x=180,
+            souther_y=60,
+            states=[(1, 0)],
+        )
+
+        self.assertIn(GrabEnemy.__name__, winners)
+        # ...and the hold is what it reaches for first, not a punch traded
+        # from the outer edge of the band his claw commits from.
+        self.assertLess(
+            winners.index(GrabEnemy.__name__),
+            winners.index(Punch.__name__) if Punch.__name__ in winners else len(winners),
+        )
+
+    def test_a_stalled_walk_in_hands_the_tick_to_the_strike(self) -> None:
+        # Same fixture, with the walk-in already timed out: the AI hits him
+        # instead of standing in a hold that is not happening -- and the
+        # hitstun that follows is what SOUTHER_ON_PUNISH grabs from.
+        _, winners = _run_souther(
+            ticks=60,
+            actor_x=100,
+            actor_y=60,
+            souther_x=180,
+            souther_y=60,
+            states=[(1, 0)],
+            grab_stall_ticks=reach.SOUTHER_WALK_IN_STALL_TICKS + 1,
+        )
+
+        self.assertIn(Punch.__name__, winners)
+        self.assertNotIn(GrabEnemy.__name__, winners)
 
 
 class SoutherStabilityTests(unittest.TestCase):

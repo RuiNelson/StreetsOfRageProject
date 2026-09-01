@@ -211,6 +211,14 @@ class PlayableCharacter(Character, ABC):
     # the *identity* half of is_holding_enemy below, which only answers
     # whether a hold exists at all.
     held_enemy_slot: str | None = None
+    # Consecutive ticks this actor has stood in grab contact with a live
+    # enemy, free to act, unarmed and *not* holding anything -- cross-tick
+    # memory from observe.GrabStallTracker, reset the moment a hold is taken
+    # or contact is lost. It is the AI's only evidence that a walk-in is not
+    # converting, which no single tick can show: reach.grab_reasons uses it
+    # to time out Souther's SOUTHER_WALK_IN and let a strike take the tick
+    # instead. 0 whenever there is nothing to time out.
+    grab_stall_ticks: int = 0
 
     @property
     def action_base(self) -> int:

@@ -53,9 +53,6 @@ from .pathfind import (
 )
 from .reach import (
     PIT_AVOID_MARGIN,
-    SOUTHER_SLASH_DIST_CLOSING,
-    SOUTHER_SLASH_DIST_MIN,
-    SOUTHER_SLASH_LANE,
     any_pit_endangers,
     jump_attack_max_dx,
     live_enemies,
@@ -68,14 +65,13 @@ from .tokens import (
     Myself,
     Partner,
     Pit,
-    Souther,
     Stage,
     find,
     find_all,
 )
 from .. import prop_solids
 from ..hitboxes import Hitbox
-from ..phases import is_dangerous, is_punishable
+from ..phases import is_dangerous
 from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
 
 # The minimum length of every planned vector, in px, and so the spacing of
@@ -335,50 +331,22 @@ def pit_obstacles(
     return rects
 
 
-def commit_gate_rects(enemy: Enemy) -> list[Rect]:
-    """Ground on which this enemy's committed move can still be *started*.
-
-    Not a swing -- ``enemy_rects`` already owns those, and only while one is
-    actually out. This is the ground a boss's own commit gate covers, so the
-    route can be planned around the gate rather than into it.
-
-    It exists because the two ways an approach can be safe pull in opposite
-    directions. ``_approach_lane_y`` puts the *destination* off the enemy's
-    lane, which is correct and not enough: the router is free to reach that
-    destination by any shortest path, and the shortest path from a lane the
-    enemy already shares runs diagonally through his own commit box.
-    Measured live against Souther, the same two hits landed at t=1.4 and
-    t=3.2 in five fights out of five, every one of them with
-    ``WalkToNearEnemy`` holding the tick and the gate satisfied mid-route.
-
-    Today that is Souther alone, from ``$15EDA (souther_state1_active_combat)``:
-    he commits when ``+$50`` is in ``[$18, $68)`` and ``+$52 < $1C``. The
-    ``$68`` edge is the widest of the three bands -- the one for a target
-    *walking into him*, which is what an approach is. Two rectangles, one
-    each side, with the ``$18`` inner abort as the hole between them: routing
-    around them and in through the hole *is*
-    ai-analysis/enemy-ai.md's uncommittable corridor, and the pocket the
-    approach stops in sits inside the hole.
-
-    Excluded while he cannot use the gate at all:
-
-    - **committed already** (``strike_is_committed``): the claw is out, the
-      box describes nothing, and ``DodgeSoutherSlash`` owns the answer;
-    - **punishable**: his hit reaction is the one window the fight is won in,
-      and walling it off would refuse the walk-in the grab needs.
-    """
-
-    if not isinstance(enemy, Souther) or enemy.is_defeated:
-        return []
-    if enemy.strike_is_committed() or is_punishable(enemy.combat_phase):
-        return []
-    height = 2.0 * SOUTHER_SLASH_LANE
-    top = enemy.world_y - SOUTHER_SLASH_LANE
-    width = float(SOUTHER_SLASH_DIST_CLOSING - SOUTHER_SLASH_DIST_MIN)
-    return [
-        Rect(enemy.world_x - SOUTHER_SLASH_DIST_CLOSING, top, width, height),
-        Rect(enemy.world_x + SOUTHER_SLASH_DIST_MIN, top, width, height),
-    ]
+# ``commit_gate_rects`` used to live here: two rectangles covering the ground
+# ``$15EDA (souther_state1_active_combat)`` can commit the claw from
+# (``+$50`` in ``[$18, $68)``, ``+$52 < $1C``), handed to the router as
+# danger so a route would plan *around* the gate and in through the ``$18``
+# hole -- the pathfinding half of the same uncommittable corridor
+# ``execute._lane_offset_while_closing`` used to hold on the goal side.
+#
+# It went with the corridor, and for the same reason (see that function, and
+# autoplay/CLAUDE.md): Souther closes lane at 4px/frame, so the box moves
+# with him faster than a route can be planned around it, and the detour buys
+# nothing measurable -- kept once already on "free and correct" rather than
+# on any measured gain, at 1,1,1,1,1 lives either way. With the approach now
+# converging straight onto his lane, the two would also actively contradict
+# each other: the goal sits in the hole and the wall sits across every direct
+# line to it, so the router would spend the fight walking around a band the
+# plan means to cross as fast as possible.
 
 
 def enemy_rects(enemy: Enemy) -> list[Rect]:
@@ -436,7 +404,6 @@ def danger_obstacles(
         if enemy.slot in ignore_slots:
             continue
         rects.extend(enemy_rects(enemy))
-        rects.extend(commit_gate_rects(enemy))
     return rects
 
 
@@ -484,8 +451,25 @@ def strike_goal(
     caller has a reason to insist (turning to face an enemy at your back is
     the reason that exists today).
 
-    Falls back to a tolerant :class:`PointGoal` when the body is bigger than
-    the band is deep, which would leave no region to aim at.
+    Falls back to a :class:`PointGoal` at the **stand point** when the body is
+    bigger than the band is deep, which would leave no region to aim at. That
+    fallback used to aim at the *target's own position* with a tolerance of
+    ``max(stop_dx, lane_slack)``, and it is the mechanism behind round 2's
+    stalemate: against Souther the pocket stop (16px) is nearer than the
+    punch's own dead zone plus a body width, so ``span`` goes negative, every
+    band is dropped, and the goal collapses to "be within 16px per axis of
+    the boss". The actor then reported *arrival* standing 24px out and 24px
+    off his lane -- too far to punch (``PUNCH_RANGE_Y`` is 12), far too far
+    to grab (``reach.GRAB_RANGE_Y`` is 10) -- and held no button at all,
+    while the approach that produced the goal was still the winning verb.
+    Reproduced on the tick harness against a stationary Souther: parked at
+    (dx 24, dy 24) with an empty mask for every remaining tick of the run.
+
+    The stand point is what the caller actually asked for: ``stop_dx`` out on
+    the side the approach is coming from, on the lane it named. Covering it
+    with the body (tolerance 0, and ``PointGoal`` is a *covering* test) puts
+    the origin within half a body of it, which is the precision the region
+    would have had.
     """
 
     # The region is tested against the body *rectangle*, but every reach
@@ -499,6 +483,7 @@ def strike_goal(
     # mean "my origin is within stop_dx", which is the predicate's sentence.
     origin_offset_x = body.center.x - origin_x
     origin_offset_y = body.center.y - origin_y
+    approach_from_left = origin_x <= target_x
     target_x = target_x + origin_offset_x
     target_y = target_y + origin_offset_y
 
@@ -524,7 +509,25 @@ def strike_goal(
         Rect(left, top, width, height) for left, width in bands if width > 0 and height > 0
     ]
     if not regions:
-        return PointGoal(Point(target_x, target_y), tolerance=max(stop_dx, lane_slack))
+        if side == "left":
+            stand_x = target_x - stop_dx
+        elif side == "right":
+            stand_x = target_x + stop_dx
+        else:
+            stand_x = target_x - stop_dx if approach_from_left else target_x + stop_dx
+        if height > 0:
+            # A one-pixel-wide *region* rather than a point, because the lane
+            # band is the half of this goal that still exists and a
+            # ``PointGoal`` throws it away: its ``contact`` is ``inf``, so
+            # ``enough_contact`` -- "px of lane margin to spare", the thing
+            # that stops an approach arriving on the loose edge of its own
+            # band -- stops applying. Measured on the tick harness: with a
+            # point here the approach settled at exactly ``PUNCH_RANGE_Y``
+            # (12px) of lane, where the ROM's own +-8px attack box does not
+            # reach and ``reach.GRAB_RANGE_Y`` (10px) is missed by two
+            # pixels, and then punched at that lane forever.
+            return RegionGoal((Rect(stand_x - 0.5, top, 1.0, height),), axis="y")
+        return PointGoal(Point(stand_x, target_y))
     return RegionGoal(tuple(regions), axis="y")
 
 

@@ -1,4 +1,7 @@
 import unittest
+from dataclasses import replace
+
+from sor_autoplay.ai import reach
 
 from sor_autoplay.ai.tokens import (
     Attack,
@@ -2861,7 +2864,9 @@ class CouldGrabSoutherOnPunishTests(unittest.TestCase):
         result = could_grab_enemy({myself, camera, souther})
         self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="obj11")})
 
-    def test_no_grab_during_the_long_recovery_he_sits_in(self) -> None:
+    def test_grab_offered_during_the_long_recovery_he_sits_in(self) -> None:
+        # Offered, but on the chase's own lower tier (GrabReason.SOUTHER_
+        # WALK_IN) rather than the punish one -- see test_reach.
         myself = make_myself(world_x=140, world_y=100)
         camera = CameraRange(left=0, right=640, top=0, bottom=224)
         souther = _souther(
@@ -2870,10 +2875,23 @@ class CouldGrabSoutherOnPunishTests(unittest.TestCase):
             combat_phase=CombatPhase.RECOVERY,
             primary_state=4,
         )
-        self.assertEqual(could_grab_enemy({myself, camera, souther}), set())
+        result = could_grab_enemy({myself, camera, souther})
+        self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="obj11")})
 
-    def test_no_grab_while_he_can_still_act(self) -> None:
+    def test_grab_offered_while_he_can_still_act(self) -> None:
+        # The chase itself: a ready Souther at contact range is walked into,
+        # not traded punches with.
         myself = make_myself(world_x=140, world_y=100)
+        camera = CameraRange(left=0, right=640, top=0, bottom=224)
+        souther = _souther(world_x=160, world_y=100)
+        result = could_grab_enemy({myself, camera, souther})
+        self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="obj11")})
+
+    def test_no_grab_once_the_walk_in_has_stalled(self) -> None:
+        myself = replace(
+            make_myself(world_x=140, world_y=100),
+            grab_stall_ticks=reach.SOUTHER_WALK_IN_STALL_TICKS + 1,
+        )
         camera = CameraRange(left=0, right=640, top=0, bottom=224)
         souther = _souther(world_x=160, world_y=100)
         self.assertEqual(could_grab_enemy({myself, camera, souther}), set())

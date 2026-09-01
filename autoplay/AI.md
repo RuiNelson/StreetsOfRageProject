@@ -234,7 +234,23 @@ all — is answered by `reach.souther_will_slash(souther, actor)`. Only once
 he is actually committed (primary `$02`) does `DodgeSoutherSlash` fire, and
 it is a pure lane step — `$161C6 (souther_state2_claw_dash)` writes only
 `+$1C`, so it cannot follow a lane change, and it resolves only with the
-target within `$18` of its lane.
+target within `$18` of its lane. The step is sized to that `$18` and nothing
+wider: by the time it runs the claw is committed, so the commit gate's `$1C`
+is no longer the number to clear, and every extra pixel is another tick
+before the actor is out of the way.
+
+The approach answers the same gate from the other side, and it is a
+*corridor* rather than a dodge: `execute._lane_offset_while_closing` holds a
+lane offset wider than `$1C` for the whole walk in, `_lane_release_dx` hands
+the lane over at his own `$18` inner abort, and `_souther_pocket_stop_dx`
+stops inside it — so the lane gate is unsatisfied while the X gap closes and
+the inner abort is unsatisfied once it has, with an overlap rather than a gap
+between them (ai-analysis/enemy-ai.md, "The uncommittable corridor").
+Deleting it and walking straight down his lane instead was tried and measured
+much worse: four to five times as many committed claws, and 3-4 lives a fight
+against 1-2. What *had* made the corridor look like a stalemate was four
+separate arrival bugs between it and the hold — see `autoplay/CLAUDE.md`,
+"The fifth attempt".
 
 `reach.souther_would_punish_jump(actor, context)` is the one predicate
 keyed on the actor alone rather than on an actor/target pair, and the
@@ -264,7 +280,13 @@ reason — they describe *him*, not the flight.
   about five of the flight's ~25 frames.
 
 The only Souther worth hopping at is one who cannot act at all, and there a
-grab reason of `SOUTHER_ON_PUNISH` outranks the hop anyway.
+grab reason of `SOUTHER_ON_PUNISH` outranks the hop anyway — as does
+`SOUTHER_WALK_IN`, its everyday counterpart: a live Souther at contact range
+is walked into for the hold rather than traded punches with, which is the
+whole plan against him. The walk-in is timed out by
+`PlayableCharacter.grab_stall_ticks` (`observe.GrabStallTracker`) so a hold
+that is not happening hands the tick back to the strike, and the strike's own
+hitstun is what `SOUTHER_ON_PUNISH` then grabs from.
 
 **`InContinueMenu`** is observed when this player's object is the type-`$0F`
 continue / high-score name-entry UI (the slot is no longer playable).
@@ -660,7 +682,18 @@ sharing Antonio's because the *reason* differs: Antonio's is that a second
 punch is his own kick trigger, Souther's is simply that `$15EDA (souther_
 state1_active_combat)` cannot re-arm the claw from recovery, so the
 walk-in is free — and with base health `$20` against Antonio's `$18`, the
-suplex chain matters more, not less. A sixth, `WHILE_SURROUNDED`, fires
+suplex chain matters more, not less. A sixth, `SOUTHER_WALK_IN`, is the
+Souther counterpart of `ANTONIO_WALK_IN`, and the plan against him rather
+than a fallback: the ground a hold is taken from is the `$18` pocket, which
+`$15EDA` cannot commit from, `$161C6` cannot resolve into, and `$15F98`
+leaves at 1px/frame against the 2px/frame it is followed at. Unlike every
+other reason it can be *withdrawn over time* — `PlayableCharacter.grab_stall_
+ticks` (`observe.GrabStallTracker`) counts ticks spent in contact without a
+hold, and past `reach.SOUTHER_WALK_IN_STALL_TICKS` the reason stops being
+produced so a strike takes the tick. A walk-in that outranks every strike
+and never converts is this project's worst recorded outcome against him, and
+the guard is what makes offering the reason at all defensible. A seventh,
+`WHILE_SURROUNDED`, fires
 for any grabbable `Grunt` while the actor is `Surrounded`: being boxed in
 is answered by a hold whichever side the crowd is on. It is the one
 reason keyed on the actor's whole situation rather than on the candidate

@@ -113,9 +113,20 @@ def punch_behind_tolerance_x(character_id: int | None) -> int:
 # attacking, which is why this band is not a hitbox measurement: it is how far
 # out the walk-in is still worth committing to. It reuses the actor's own
 # unarmed punch outer edge -- the distance the rest of the pipeline already
-# treats as close-combat range for that character -- with a lane tolerance
-# tighter than a punch's, since two bodies have to actually overlap.
-GRAB_RANGE_Y = 10
+# treats as close-combat range for that character -- and, since ``$AAA0``
+# reads that same forward attack box, the same lane tolerance.
+#
+# It used to be 10 against the punch's 12, "since two bodies have to actually
+# overlap" -- and they do overlap there: the bodies are 16px tall, so a 12px
+# lane gap is still an overlap, and the box the ROM tests is the punch's own.
+# The two pixels were not free. ``decide._actionable_targets`` stops the
+# approach the moment ``punch_would_connect`` is true, which is exactly
+# ``PUNCH_RANGE_Y``, so an approach settles at 12px of lane and the grab --
+# the *plan* against Antonio and Souther -- was unreachable by two pixels
+# from the position the AI itself chose to stop at. Reproduced on the tick
+# harness against a stationary Souther: alongside, in the pocket, punching
+# at dy=12 for every remaining tick and never once offering the hold.
+GRAB_RANGE_Y = PUNCH_RANGE_Y
 
 # Jump-kick is a *horizontal* attack — never a stationary hop.
 JUMP_ATTACK_MIN_DX = 28  # must leave punch outer / need air travel
@@ -1350,6 +1361,25 @@ SOUTHER_GRABBABLE_PRIMARIES = frozenset(
     }
 )
 
+# How many consecutive ticks of an unconverted walk-in are worth spending on
+# a *ready* Souther before the tick goes back to a strike -- the guard on
+# `GrabReason.SOUTHER_WALK_IN`, counted by `observe.GrabStallTracker` and
+# read off `PlayableCharacter.grab_stall_ticks`.
+#
+# Long enough that a genuine grab is never cut short: the contact code needs
+# a walking frame's attack box (`execute.state_machine_grab_enemy`'s own
+# docstring), so a hold can take a handful of ticks of walking into him even
+# when it is going to work. Short enough that the failure mode is a blip
+# rather than a fight: at the project's turbo cadence of about two 60Hz
+# frames per tick this is roughly 0.8s, against the 2318-tick stalemate the
+# unguarded version of this reason produced the last time it was tried.
+#
+# There is no cooldown on the other side of it. The counter resets the moment
+# contact breaks, which is what the strike that replaces the walk-in causes,
+# so the cycle is "chase, try the hold, hit him if he will not be held, chase
+# the hitstun" rather than a duty cycle of standing still.
+SOUTHER_WALK_IN_STALL_TICKS = 24
+
 
 def actor_is_surrounded(context: Context, actor_slot: str) -> bool:
     """True when ``actor_slot`` carries a live ``Surrounded`` judgment."""
@@ -1417,6 +1447,16 @@ def grab_reasons(
         # whole life. $04 is where he *sits*, not a window.
         if target.primary_state in SOUTHER_GRABBABLE_PRIMARIES:
             return frozenset({GrabReason.SOUTHER_ON_PUNISH})
+        # Ready, and already at contact range: hold him anyway. This is the
+        # chase (GrabReason.SOUTHER_WALK_IN) -- the pocket a hold is taken
+        # from is ground his own $15EDA cannot commit from and his own
+        # standoff leaves at 1px/frame, so waiting for hitstun to arrive
+        # before reaching for the hold spends the fight's safest ticks
+        # trading punches instead. Timed out by grab_stall_ticks so a
+        # walk-in that is not converting hands the tick back to the strike
+        # rather than repeating the stalemate this reason caused once.
+        if actor.grab_stall_ticks <= SOUTHER_WALK_IN_STALL_TICKS:
+            return frozenset({GrabReason.SOUTHER_WALK_IN})
         return frozenset()
     if not isinstance(target, Grunt):
         return frozenset()

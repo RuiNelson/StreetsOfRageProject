@@ -235,6 +235,17 @@ _EMERGENCY_GRAB_SOUTHER_ON_PUNISH = 61
 # a boss who can. Above _EMERGENCY_GRAB_DEAD_ZONE (30) because this is the
 # whole plan against him rather than an improvement on an exchange.
 _EMERGENCY_GRAB_ANTONIO_WALK_IN = 35
+# Taking the hold on a *ready* Souther, from contact range -- the chase. Same
+# tier as Antonio's walk-in and for the same reason: it is the plan against
+# him rather than an improvement on an exchange, so it has to clear the
+# strike it replaces (_EMERGENCY_PUNCH_DEFAULT, 20, with the same boss raise
+# applied to both) while staying well below the punish grab (61), since a
+# hold on a boss who cannot act is still strictly better than one on a boss
+# who can. Unlike Antonio's, the thing it displaces is a punch rather than a
+# hop -- against Souther the hop is refused outright ($16234 counters it) --
+# and the punch is not lost: reach.SOUTHER_WALK_IN_STALL_TICKS hands the tick
+# straight back to it if the walk-in is not converting.
+_EMERGENCY_GRAB_SOUTHER_WALK_IN = 35
 _EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
 _EMERGENCY_HOLD_SUPPLEX = 68
 _EMERGENCY_HOLD_FLIP = 66
@@ -611,6 +622,7 @@ _GRAB_REASON_SCORE: dict[GrabReason, int] = {
     GrabReason.ANTONIO_ON_PUNISH: _EMERGENCY_GRAB_ANTONIO_ON_PUNISH,
     GrabReason.ANTONIO_WALK_IN: _EMERGENCY_GRAB_ANTONIO_WALK_IN,
     GrabReason.SOUTHER_ON_PUNISH: _EMERGENCY_GRAB_SOUTHER_ON_PUNISH,
+    GrabReason.SOUTHER_WALK_IN: _EMERGENCY_GRAB_SOUTHER_WALK_IN,
     GrabReason.WHILE_SURROUNDED: _EMERGENCY_GRAB_WHILE_SURROUNDED,
     GrabReason.DODGE_CHARGE: _EMERGENCY_GRAB_TO_DODGE_CHARGE,
 }

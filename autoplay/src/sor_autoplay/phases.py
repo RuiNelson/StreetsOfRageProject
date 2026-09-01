@@ -279,6 +279,27 @@ def boss_phase(
     if type_id == 0x55 and p == 0x02:
         return CombatPhase.ATTACKING
 
+    # ...and primary $01 is *never* an attack, whatever tactical reads.
+    # `$15EDA (souther_state1_active_combat)` is the approach, and all three
+    # of its tactical handlers move or count rather than strike:
+    # `$15F98 (souther_state1_standoff)` walks the standoff bands,
+    # `$160D0 (souther_state1_close_lane)` writes an approach velocity, and
+    # `$16106 (souther_state1_dash_timer)` only counts `+$5C` down. The one
+    # damaging commit is primary $02, decoded just above.
+    #
+    # Without this the generic `t != 0` tail below called him ATTACKING for
+    # every tactical $01/$02 tick -- about a fifth of his primary-$01 time
+    # (autoplay/CLAUDE.md measured tactical $02 on 153 of 696) -- and
+    # dangerous is what forbids the whole plan against him: ATTACKING is not
+    # in `reach.GRABBABLE_PHASES`, so no hold could be taken during any of
+    # those ticks, `is_incoming_melee` could call a walking boss an incoming
+    # attack, and the approach treated his empty hands as a live swing.
+    # Exactly the type-$58 mistake the Onihime/Yasha branch below already
+    # records ("Treating chase ($01) as ATTACKING made the agent
+    # perpetual-evade and never punch/jump/grab").
+    if type_id == 0x55 and p == 0x01:
+        return CombatPhase.NORMAL
+
     # Antonio primary $02 ($171CC antonio_state2_close_strike, asm $16F0E):
     # a short committed action entered from state 1 on a target
     # proximity/velocity/facing gate (not a pure distance check like the

@@ -14,6 +14,8 @@ tick memory that a single snapshot cannot supply.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from sor_autoplay.memory_map import ACTION_HOLDING
 from sor_autoplay.phases import CombatPhase, is_dangerous, player_phase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
@@ -26,6 +28,7 @@ from .tokens import Breakable, Pit, Projectile
 from .tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
 from .tokens import Weapon, build_pickup_token
 from .tokens import Context
+from .reach import grab_would_connect
 
 
 class NoraAttackTracker:
@@ -109,6 +112,89 @@ class HoldTracker:
         ticks = self._ticks.get(actor_slot, 0) + 1 if holding else 0
         self._ticks[actor_slot] = ticks
         return ticks
+
+
+class GrabStallTracker:
+    """Cross-tick memory of how long a walk-in has failed to become a hold.
+
+    The third deliberate exception to this module's statelessness, for the
+    same reason as the two above: "the actor has been standing in contact
+    with a body it means to grab and no hold has happened" is a transition,
+    and no single tick can tell it apart from the tick a grab is about to
+    succeed on.
+
+    It exists for Souther. ``reach.grab_reasons`` offers
+    ``GrabReason.SOUTHER_WALK_IN`` on a boss who is merely *ready* rather
+    than in hitstun -- the chase the user asked for -- and the failure mode
+    of that reason, twice recorded in this project's history, is a walk-in
+    that never converts and outranks every strike while it does not: 2318
+    ticks of ``GrabEnemy`` with the boss losing 11 health in two minutes.
+    Timing the attempt out (``reach.SOUTHER_WALK_IN_STALL_TICKS``) turns that
+    stalemate into a strike, and the strike's own hitstun is what opens the
+    window ``SOUTHER_ON_PUNISH`` grabs from.
+
+    Reset to 0 the instant a hold is taken *or* contact is lost -- both are
+    "this attempt is over", one because it worked and one because there is
+    nothing to convert -- so a knockback re-arms the next walk-in without any
+    cooldown of its own. Owned per ``AgentLoop`` and keyed by the actor's own
+    slot, exactly like ``HoldTracker``.
+    """
+
+    def __init__(self) -> None:
+        self._ticks: dict[str, int] = {}
+
+    def update(self, actor_slot: str, *, stalling: bool) -> int:
+        ticks = self._ticks.get(actor_slot, 0) + 1 if stalling else 0
+        self._ticks[actor_slot] = ticks
+        return ticks
+
+
+def _walk_in_is_stalling(actor: Myself | Partner, enemies: list[Enemy]) -> bool:
+    """Whether this actor is spending the tick in an unconverted walk-in.
+
+    The three conditions ``decide.could_grab_enemy`` itself needs before a
+    hold can happen at all -- not holding, not armed, and a live body inside
+    ``reach.grab_would_connect`` -- so an actor that is armed, airborne mid-
+    hop or simply out of range is not accumulating a stall it never started.
+
+    Deliberately keyed on *any* live enemy in contact rather than on the
+    Souther the one consumer cares about: the signal is generic ("standing
+    in contact with something grabbable and not holding it"), and the worst
+    a grunt's contact can do to that consumer is make the AI strike a Souther
+    it would otherwise have walked into -- which is the fallback the guard
+    exists to reach anyway, not a new failure. Scoping it to a boss type
+    would put a fight's tactics in the observation layer for no gain.
+    """
+
+    if actor.is_holding_enemy or actor.held_weapon_type != 0:
+        return False
+    return any(
+        not enemy.is_defeated and grab_would_connect(actor, enemy) for enemy in enemies
+    )
+
+
+def _with_grab_stall_ticks(context: Context, tracker: GrabStallTracker | None) -> Context:
+    """Fill in ``PlayableCharacter.grab_stall_ticks`` for every actor built.
+
+    A post-pass rather than an argument to ``_build_playable_character``,
+    because the judgment needs the enemy tokens and those are built after the
+    players -- and rebuilding one frozen token is cheaper than reordering an
+    observation whose order is otherwise load-bearing (the Nora tracker's
+    ``forget_missing`` runs off the same enemy loop).
+    """
+
+    if tracker is None:
+        return context
+    enemies = [token for token in context if isinstance(token, Enemy)]
+    rebuilt: Context = set()
+    for token in context:
+        if isinstance(token, (Myself, Partner)):
+            ticks = tracker.update(
+                token.slot, stalling=_walk_in_is_stalling(token, enemies)
+            )
+            token = replace(token, grab_stall_ticks=ticks)
+        rebuilt.add(token)
+    return rebuilt
 
 
 # The whole hold family ($60-$6F) plus the C crossover ($76/$80), not only the
@@ -209,6 +295,7 @@ def generate_direct_observation_tokens(
     player_index: int,
     nora_tracker: NoraAttackTracker | None = None,
     hold_tracker: HoldTracker | None = None,
+    grab_stall_tracker: GrabStallTracker | None = None,
 ) -> Context:
     context: Context = set()
     live_nora_slots: set[str] = set()
@@ -417,4 +504,4 @@ def generate_direct_observation_tokens(
         )
     )
 
-    return context
+    return _with_grab_stall_ticks(context, grab_stall_tracker)
