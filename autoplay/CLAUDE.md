@@ -893,6 +893,7 @@ do not commit `.jsonl` runs.
 | `boss_fight.py` | **Scores** one boss fight: plays the level for real, then reports killed/died, damage taken, fight length and the verb histogram. `--level`/`--boss-type` select the fight (`--level 1 --boss-type 0x56` is Antonio, `--level 2 --boss-type 0x55` Souther, the default). Boss death is the raw signed health word only -- both `phases.boss_phase`'s `DEATH` decode and `MapEntity.is_defeated` false-positive on the transient `$164FC` lethality test, twice confirmed live |
 | `antonio_diag.py` | **Explains** a round-1 fight tick by tick: every candidate `Verb` with its own emergency, the actor's hold state (`+$4C` link and the action byte behind it), Antonio's primary/tactical bytes, and `antonio_will_kick`/`grab_reasons`/`grab_would_connect`. Written for, and found, the front-hold stall in **Holding a boss** above |
 | `hold_timing_diag.py` | **Measures** how long each hold move commits the actor for, in 60 Hz frames: the AI plays until it holds a body, then the host enters **lockstep** and the move is issued on frame 0 with the player's `+$30` sampled every frame until it settles. One fresh hold per session -- a throw and a suplex both end the hold, and re-entering lockstep on one that is already ending measures the ending. Feeds `kinematics.HOLD_*_FRAMES`; a lockstep step is one game frame regardless of `--turbo` |
+| `hold_threat_diag.py` | **Checks** the other half live: plays an ordinary level with the waves left **alive** (no sweep, deliberately) and logs every tick the actor is holding a body -- action base, the winning verb, live enemy count, and `reach.frames_until_any_melee_lands` with the held body excluded. Summarises the decision ticks only ($60/$66; the animation locks in between ignore fresh edges, so counting them would dilute the question), and reports `knees_while_threatened`, which must be 0 |
 | `souther_diag.py` | The round-2 equivalent, plus `dx`/`dy`, `_lane_offset_while_closing`, and `_souther_pocket_stop_dx` per tick. Stops on the boss's own death (raw signed health, like `boss_fight.py`) or a level reset after the boss was seen, with a `--fight-seconds` backstop -- do not run it, or any tool that drives a live host, without a real stop condition. Found the grab-convergence and lane-margin bugs in **The grab still wasn't landing** above |
 | `breakable_diag.py` | Round-1 breakable stall, with **real** enemies (the sweep did not reproduce it) |
 | `armed_combat_diag.py` | Held-weapon reach and swing timing |
@@ -1223,14 +1224,37 @@ which is the right answer rather than a regression.
 `test_stability.HoldUnderThreatStabilityTests` pins the relationship so
 moving either number is visible.
 
-What is **not** measured live is the threatened branch itself. Round 2 is
-1v1 -- the only enemy is the body in the actor's hands, which is excluded
-from its own clock -- so the scored fights exercise the unthreatened path
-(knees, then the finish) and nothing else. Three scored fights after the
-change: 25%, 200%, 75% damage and 0, 1, 0 lives, against the four before it
-at 50/200/200/75% and 0/1/1/0 -- no regression (and no claim of an
-improvement: that is the same noise floor), with the boss dead in all three
-and the fastest round-2 kill recorded here, 24 s. The
+Three scored round-2 fights after the change: 25%, 200%, 75% damage and 0, 1,
+0 lives, against the four before it at 50/200/200/75% and 0/1/1/0 -- no
+regression (and no claim of an improvement: that is the same noise floor),
+with the boss dead in all three and the fastest round-2 kill recorded here,
+24 s. Those fights only exercise the *unthreatened* path, though: round 2 is
+1v1, and the only enemy on screen is the body already in the actor's hands,
+which is excluded from its own clock.
+
+**The threatened branch is measured separately, with the waves left alive**
+(`tools/hold_threat_diag.py`, no `DebugScenario` sweep -- the point is a hold
+taken in a crowd). Two runs, Axel 150 s and Blaze 220 s, 877 hold ticks and
+66 decision ticks between them:
+
+| | Axel | Blaze |
+| --- | --- | --- |
+| decisions with a threat on the clock | 5 | 3 |
+| of those, `ThrowHeldEnemy` | **5** | **3** |
+| of those, a knee started | **0** | **0** |
+| grace observed, in frames | 5, 7, 7, 8, 12 | 7, 9, 11 |
+| decisions with nothing coming | 27 (21 knees, 3 flips, 1 suplex, 2 rear-throws) | 31 (24 knees, 5 flips, 1 suplex, 1 rear-throw) |
+
+Two things in that table are the actual confirmation. Every observed grace is
+**5-12 frames**, all of them under the knee's 17-18 -- which is the horizon
+argument above, seen in real play rather than derived. And the throw is not
+merely *offered*: the action byte goes `$60` -> `$62` (Axel) / `$64` (Blaze)
+and stays there ~24 ticks, which at ~2 frames a tick is the 41-46 frames the
+lockstep harness measured for that same move.
+
+The samples are small (8 threatened decisions) because a hold taken *while
+something else is already committed* is not a common tick -- but the rule is
+an invariant rather than a rate, and the invariant held on every one of them. The
 threatened path is covered by `tests/ai/test_decide.py` and the sequence
 tests only.
 

@@ -455,6 +455,11 @@ def could_hold_actions(context: Context) -> Context:
     still safe but the suplex chain is not, so the finisher on offer becomes
     the throw. From a back hold the suplex is the only finisher there is, and
     is offered regardless.
+
+    Confirmed live with the waves alive (``tools/hold_threat_diag.py``): over
+    two runs, every one of the eight hold decisions taken with something on
+    the clock chose the throw, no knee was ever started under one, and the
+    grace observed ran 5-12 frames -- all of it under a knee's 17-18.
     """
 
     verbs: set[Token] = set()

@@ -735,7 +735,10 @@ actor has before anything *else* on screen can hit it, and:
   from `$66`.
 
 The clock is built out of the same predicates `reach.is_incoming_melee` uses,
-so "is it coming" and "when" cannot disagree.
+so "is it coming" and "when" cannot disagree. Measured live with the street
+waves left alive (`tools/hold_threat_diag.py`): eight threatened hold
+decisions, eight throws, no knee ever started under a clock, and every
+observed grace between 5 and 12 frames.
 
 `reach.grab_would_connect` answers the other half — whether walking in
 would actually reach — from the same shared geometry definition every
