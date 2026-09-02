@@ -372,6 +372,85 @@ strength of the reasoning:
   before and after. It is kept because it is free and correct, not because
   it was shown to pay.
 
+**The dodge was measured with the wrong number, in both directions** (user:
+"a IA esta a parar num sitio seguro, depois o Souther ataca e atinge a
+personagem. Tem de arriscar e ir de encontro com o boss"). An 8-fight batch
+with per-hit attribution (`tools/boss_fight.py` records each hit's context
+now) said where the damage is, and it is not ambiguous:
+
+| | |
+| --- | --- |
+| boss state at the hit | **`$02`, 100% of 49 hits** |
+| 64-104px away (his own best range) | 69% |
+| **inside the pocket (<24px)** | **0%** |
+| within 4s of giving a hold up | 49% |
+| before the first hold | 16% |
+
+and nearly every hit carried the same signature in the ticks before it:
+`WalkToNearEnemy x16 | DodgeSoutherSlash x14`. Fifteen ticks closing,
+fifteen dodging, hit, repeat -- a limit cycle parked at his best range,
+because `DodgeSoutherSlash` outranks the walk (46 against ~14) and **froze
+X**, so half of every cycle made no progress toward the only ground that is
+safe. That is the "waits for the right moment and is then far away" the user
+described, in numbers.
+
+The dodge's clearance was `SOUTHER_DASH_RESOLVE_LANE + slack` -- 32px, both
+sides. The claw's own box says otherwise. `$16C2E (souther_create_claw)`
+names the claw's animation set in its own body (`move.l #$0002e44a, d2`),
+and all three shapes it selects (`$6D`, `$6F`, `$71`) carry lane
+**-10..+24**; `$16C6E (souther_position_claw)` then places the claw **four
+px down his lane** (`addq.w #$4, d0`). A hit is box-against-*body*
+(`$450C`), so what has to leave the rectangle is the actor's body, not its
+centre -- half a body in lane, the exact counterpart of `BODY_OVERLAP_X` on
+the punch's inner edge. The real clearances are therefore **14px above him
+and 36px below**, and the single symmetric 32 was *more than twice* what the
+shallow side needs **and four pixels short of what the deep side does**: a
+dodge could step down, report itself clear, and still be inside the claw.
+
+So `SOUTHER_CLAW_CLEARANCE_ABOVE`/`_BELOW` replace it, the shallow side is
+taken whenever the actor is not already committed to the deep one (crossing
+would walk the claw's whole width), and the dodge **stops freezing X once it
+is out of the band** -- inside it the lane is the only axis that helps, and
+closing X there walks *along* the box, the same reason `_movement_mask`'s
+pit dodge clears Y before X.
+
+Two further defects fell out of the unit tests while making that work, both
+real:
+
+- the router counted **Souther himself** as danger while planning the dodge,
+  so the moment the destination became the pocket at his feet the goal was
+  unreachable by construction and the dodge stood still. He is exempt from
+  this one plan now, exactly as the approach exempts the enemy it is already
+  alongside;
+- `PointGoal.is_reached` tests the actor's **body rect**. With the shorter
+  shallow clearance the escape point landed inside the actor's own body, so
+  the dodge reported arrival without having left the claw at all. The
+  body-aware clearance above is what fixes it; the symmetric form was too
+  coarse to expose it.
+
+Measured, same harness and configuration, 8 fights each (two of the second
+batch were lost to a hung host and are excluded rather than counted as
+anything):
+
+| | damage | median | mean | lives lost | hits/fight | fastest kill |
+| --- | --- | --- | --- | --- | --- | --- |
+| before | 0, 25, 75, 200, 200, 300, 300, 400 | 200% | 187% | 9 | 6.1 | 25.1 s |
+| after (n=6) | 0, 25, 75, 200, 200, 200 | 137% | 117% | **3** | **3.8** | **15.6 s** |
+
+What is claimed: **the tail is gone** (nothing above 200%, against three
+fights at 300-400%), lives lost fell by two thirds, and hits at 64-104px
+dropped 69% -> 52% while mid-fight hits collapsed 35% -> 17%. What is *not*
+claimed: any movement in the sub-50% rate, which stayed at 2 fights in both
+batches, or in the mean -- six runs against eight on a spread this wide
+cannot establish either.
+
+**What the same data says to do next.** Hits *before the first hold* went
+16% -> 43%, and time-to-first-hold now separates the batch cleanly: 1.69,
+1.77, 1.80, 3.36 s in the cheap fights against 14.3 and 16.9 s in the two
+200% ones. The fight is decided by how fast the first hold happens, and the
+approach is what is slow -- which is the corridor, and the next thing to
+change.
+
 **Where the remaining damage comes from, and why no lane trick fixes it**
 (user: "ainda apanha muito do boss, especialmente tentando se aproximar").
 Over the shipped configuration's five fights, 20 hits: **every one of them

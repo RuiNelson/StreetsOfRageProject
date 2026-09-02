@@ -30,13 +30,14 @@ import argparse
 import json
 import sys
 import time
-from collections import Counter
+from collections import Counter, deque
 
 from megadrive_remote import MegaDriveClient
 
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.loop import AgentLoop
 from sor_autoplay.debug_scenario import DebugScenario
+from sor_autoplay.memory_map import ACTION_HOLDING
 from sor_autoplay.phases import player_phase
 from sor_autoplay.reach_gameplay import reach_gameplay
 from sor_autoplay.rom_data import RomData
@@ -44,6 +45,46 @@ from sor_autoplay.state import read_snapshot
 from sor_autoplay.world_map import MapEntity
 
 PLAYER_MAX_HEALTH = 80
+
+# How many ticks of verb history to carry with each hit taken. About a
+# second at the turbo cadence (~2 frames a tick), which is long enough to
+# show what the AI was doing on the way into the hit rather than only at the
+# instant of it -- the whole point of attributing a hit at all.
+HIT_HISTORY_TICKS = 30
+
+# Souther's own inner abort ($15EDA: `+$50 < $18`), the ground his claw
+# cannot be started from. Recorded per hit so "was the actor in the pocket"
+# is a fact in the log rather than a reconstruction.
+POCKET_DX = 0x18
+
+# A hit landing within this many seconds of the actor giving a hold up is
+# counted against the *re-approach*: the finish throws the boss clear, and
+# the actor has to cross the commit band again to get back. This is the
+# whole of hypothesis (b) -- see autoplay/CLAUDE.md.
+REAPPROACH_WINDOW_S = 4.0
+
+# ...and a hit this early in the fight is the *entrance*: both bodies start
+# 70-85px apart and converge, and the crossing happens before any hold
+# window can have opened. Hypothesis (a).
+ENTRANCE_WINDOW_S = 4.0
+
+
+def compress(names: list[str | None]) -> list[str]:
+    """Run-length the verb history so a hit's context is readable.
+
+    Thirty raw names of mostly one repeated verb tells nobody anything; the
+    same thirty as ``WalkToNearEnemy x22 -> Punch x3`` is the shape of what
+    the AI was doing.
+    """
+
+    runs: list[list] = []
+    for name in names:
+        label = name or "None"
+        if runs and runs[-1][0] == label:
+            runs[-1][1] += 1
+        else:
+            runs.append([label, 1])
+    return [f"{label} x{count}" for label, count in runs]
 
 
 def find_boss(snapshot, type_id: int) -> MapEntity | None:
@@ -148,6 +189,21 @@ def main() -> int:
         fight_started = None
         no_verb_buckets: Counter[str] = Counter()
         verb_counts: Counter[str] = Counter()
+        # Per-hit attribution: the question the totals cannot answer is
+        # *where* a 200% fight spends its health, and the two candidate
+        # answers (the entrance crossing, and the re-approach every finish
+        # pays for) want opposite fixes. See autoplay/CLAUDE.md.
+        hits: list[dict] = []
+        recent_verbs: deque = deque(maxlen=HIT_HISTORY_TICKS)
+        last_hp = None
+        # This harness's *own* previous-lives value. `last_lives` above is
+        # already overwritten with the current one by the time the hit block
+        # runs, so reusing it would make every death invisible here.
+        prev_lives = None
+        first_hold_t = None
+        last_hold_end_t = None
+        holds_completed = 0
+        was_holding = False
         end_state = "timeout"
 
         deadline = time.monotonic() + args.seconds
@@ -190,6 +246,24 @@ def main() -> int:
                     if boss_seen:
                         end_state = "level_reset"
                         break
+                    # Say so. This branch used to `continue` in silence, which
+                    # made a run that ends here indistinguishable from a
+                    # hung host: two batch runs timed out after their last
+                    # heartbeat at ~27s and there was no way to tell, from
+                    # 580 seconds of nothing, whether the actor had been
+                    # wiped back to the title, walked into another level, or
+                    # the emulator had simply stopped answering. A harness
+                    # whose quietest moment is its most interesting one
+                    # cannot be used to attribute anything.
+                    if started - last_report > 10.0:
+                        last_report = started
+                        print(
+                            f"off-target: level={snap.level_index} "
+                            f"(want {level_index}) playable={playable} "
+                            f"lives={snap.players[0].lives} "
+                            f"state={snap.game_mode!r} timer_valid={snap.timer_valid}",
+                            flush=True,
+                        )
                     time.sleep(max(0.0, poll_s - (time.monotonic() - started)))
                     continue
                 scenario.sweep_other_families(client)
@@ -238,6 +312,73 @@ def main() -> int:
                 verb_counts[verb_name or "None"] += 1
                 if verb is None and p1_entity is not None:
                     no_verb_buckets[player_bucket(p1_entity.action_state, p1_entity.held_type)] += 1
+
+                elapsed = started - fight_started
+
+                # The hold's own edges, which is what makes a hit
+                # attributable to a re-approach rather than to the walk in.
+                holding_now = (
+                    p1_entity is not None
+                    and (p1_entity.action_state & 0xFE) in ACTION_HOLDING
+                )
+                if holding_now and not was_holding and first_hold_t is None:
+                    first_hold_t = elapsed
+                if was_holding and not holding_now:
+                    last_hold_end_t = elapsed
+                    holds_completed += 1
+                was_holding = holding_now
+
+                # A hit is health lost, or a life lost -- the second does not
+                # show as a decrease, since respawning refills the bar.
+                lost_a_life = (
+                    p1.lives is not None
+                    and prev_lives is not None
+                    and p1.lives < prev_lives
+                )
+                took_damage = (
+                    p1.health is not None
+                    and last_hp is not None
+                    and p1.health < last_hp
+                )
+                if took_damage or lost_a_life:
+                    dx = (
+                        boss.world_x - p1_entity.world_x
+                        if boss is not None and p1_entity is not None
+                        else None
+                    )
+                    dy = (
+                        boss.world_y - p1_entity.world_y
+                        if boss is not None and p1_entity is not None
+                        else None
+                    )
+                    hits.append(
+                        {
+                            "t": round(elapsed, 2),
+                            "damage": (last_hp - p1.health) if took_damage else last_hp,
+                            "life_lost": bool(lost_a_life),
+                            "boss_state": boss.action_state if boss else None,
+                            "boss_tactical": getattr(boss, "tactical", None) if boss else None,
+                            "boss_phase": (
+                                boss.combat_phase.name if boss and boss.combat_phase else None
+                            ),
+                            "dx": dx,
+                            "dy": dy,
+                            "in_pocket": (dx is not None and abs(dx) < POCKET_DX),
+                            "verb": verb_name,
+                            "recent_verbs": compress(list(recent_verbs)),
+                            "before_first_hold": first_hold_t is None,
+                            "since_hold_end": (
+                                round(elapsed - last_hold_end_t, 2)
+                                if last_hold_end_t is not None
+                                else None
+                            ),
+                        }
+                    )
+                recent_verbs.append(verb_name)
+                if p1.health is not None:
+                    last_hp = p1.health
+                if p1.lives is not None:
+                    prev_lives = p1.lives
 
                 sink.write(
                     json.dumps(
@@ -296,6 +437,21 @@ def main() -> int:
             "fight_seconds": (
                 round(time.monotonic() - fight_started, 1) if fight_started else None
             ),
+            "hits": hits,
+            "hits_total": len(hits),
+            "hits_before_first_hold": sum(1 for h in hits if h["before_first_hold"]),
+            "hits_in_first_seconds": sum(1 for h in hits if h["t"] <= ENTRANCE_WINDOW_S),
+            "hits_after_a_finish": sum(
+                1
+                for h in hits
+                if h["since_hold_end"] is not None
+                and h["since_hold_end"] <= REAPPROACH_WINDOW_S
+            ),
+            "damage_before_first_hold": sum(
+                h["damage"] or 0 for h in hits if h["before_first_hold"]
+            ),
+            "first_hold_at": round(first_hold_t, 2) if first_hold_t is not None else None,
+            "holds_completed": holds_completed,
             "verb_counts": dict(verb_counts),
             "no_verb_ticks": sum(no_verb_buckets.values()),
             "no_verb_buckets": dict(no_verb_buckets),

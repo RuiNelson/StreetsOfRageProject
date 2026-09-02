@@ -1578,23 +1578,57 @@ PROJECTILE_SIDESTEP_DISTANCE = 40
 
 # How far clear of *Souther's own lane* the dodge aims -- an absolute
 # clearance, not a step length, because the side pick is derived from his lane
-# rather than from the actor's (see _souther_slash_sidestep_target). The claw
-# dash resolves only with the target within $18 (24px) of its lane
-# ($161C6 souther_state2_claw_dash) and the state-1 commit gate at
-# $15EDA needs $1C (28px) -- but $15EDA is not what this dodge answers. By
-# the time the step is taken the claw is already committed, and the only
-# question left is whether the dash resolves, so the number to clear is the
-# dash's own $18 and not the commit gate's $1C. Clearing 28 as well used to
-# look free; it is not, because the measured failure of this dodge is that it
-# arrives too late (autoplay/CLAUDE.md: "fired the same tick as the commit and
-# had no time left to matter"), and four pixels is about two ticks of walking.
-# The user's rule for this fight is the same one: evade exactly enough not to
-# be hit, and spend everything else on the chase.
+# rather than from the actor's (see _souther_slash_sidestep_target).
 #
-# Plus more than MOVE_DEADBAND_Y, or the Y bits go quiet while X is still
-# frozen and the actor stalls a few px short of actually escaping, the same
-# deadlock PIT_DODGE_OVERSHOOT exists to prevent.
-SOUTHER_SLASH_LANE_CLEARANCE = SOUTHER_DASH_RESOLVE_LANE + MOVE_DEADBAND_Y + 5
+# Read off the claw's **own hitbox**, not off a gate number standing in for it.
+# `$16C2E (souther_create_claw)` names the claw's animation set in its own
+# body (`move.l #$0002e44a, d2`), and every one of the three shapes that set
+# selects -- `$6D`, `$6F`, `$71` -- carries the identical lane extent
+# **-10..+24**. `$16C6E (souther_position_claw)` then places the claw object
+# four pixels down his lane:
+#
+#     $016CB2  move.w $14(a1), d0    ; his lane
+#     $016CB6  addq.w #$4, d0        ; +4
+#     $016CB8  move.w d0, $14(a0)    ; the claw's
+#
+# So measured from *his* lane the claw covers **-6 .. +28**, and it is
+# asymmetric: stepping to the shallow side clears it in a quarter of the
+# distance the deep side needs. The old symmetric clearance
+# (SOUTHER_DASH_RESOLVE_LANE + slack, ~33 both ways) spent about 26px of
+# wasted travel every time the shallow side was the one being used -- roughly
+# ten ticks of a dodge that is already the half of the cycle the approach
+# cannot afford.
+#
+# Measured, and this is why the box and not the gate: over an 8-fight batch,
+# **every one of 49 hits taken landed with the boss in primary `$02`**, and
+# none of them inside the pocket. The thing that hits the actor is this box,
+# not the `$18` dash-resolve test the clearance used to be derived from --
+# that one is about his state machine, not about damage.
+SOUTHER_CLAW_LANE_ABOVE = 6
+SOUTHER_CLAW_LANE_BELOW = 28
+# ...and a hit is box-against-**body**: `$450C` tests the attacker's attack
+# box against the victim's body box, so escaping is the actor's own body
+# leaving the claw's rectangle, not its centre point leaving it. Half a body
+# in lane, the exact counterpart of ``BODY_OVERLAP_X`` on the punch's inner
+# edge, which makes the real centre-to-centre clearances 14 above and 36
+# below.
+#
+# The old symmetric number was ``$18 + slack`` = 32 for both sides, which is
+# the arithmetic this correction matters for: 32 is more than twice what the
+# shallow side needs **and four pixels short of what the deep side does**.
+# A dodge that stepped down and reported itself clear could still be inside
+# the claw, which is a real way to be hit mid-dodge and one the symmetric
+# form could never have shown.
+PLAYER_BODY_HALF_Y = nav.NOMINAL_BODY_H // 2
+# Plus more than MOVE_DEADBAND_Y, or the Y bits go quiet while the actor is
+# still a few px short of actually escaping, the same deadlock
+# PIT_DODGE_OVERSHOOT exists to prevent.
+SOUTHER_CLAW_CLEARANCE_ABOVE = (
+    SOUTHER_CLAW_LANE_ABOVE + PLAYER_BODY_HALF_Y + MOVE_DEADBAND_Y + 5
+)
+SOUTHER_CLAW_CLEARANCE_BELOW = (
+    SOUTHER_CLAW_LANE_BELOW + PLAYER_BODY_HALF_Y + MOVE_DEADBAND_Y + 5
+)
 
 
 def _projectile_sidestep_target(
@@ -1618,6 +1652,24 @@ def _projectile_sidestep_target(
     if actor.world_y < (lo + hi) / 2:
         return actor.world_x, actor.world_y + PROJECTILE_SIDESTEP_DISTANCE
     return actor.world_x, actor.world_y - PROJECTILE_SIDESTEP_DISTANCE
+
+
+def _souther_pocket_aim_x(actor: Myself | Partner, souther: Souther) -> int:
+    """The X the dodge keeps walking toward: Souther's own inner abort.
+
+    The same pocket ``_souther_pocket_stop_dx`` aims the approach at, on the
+    side the actor already stands, so a dodge and an approach never pull in
+    opposite directions on X. Inside ``$18`` ``$15EDA`` cannot begin a claw
+    and ``$161C6`` cannot resolve one, which is why it is worth walking
+    toward even while a claw is already out.
+    """
+
+    inside = SOUTHER_SLASH_DIST_MIN - REACH_SAFETY_MARGIN
+    floor = punch_usable_inner_x(actor.character_id) + WALK_TO_ENEMY_STOP_BUFFER
+    stop = max(floor, inside)
+    if actor.world_x <= souther.world_x:
+        return int(souther.world_x - stop)
+    return int(souther.world_x + stop)
 
 
 def _souther_slash_sidestep_target(
@@ -1653,28 +1705,60 @@ def _souther_slash_sidestep_target(
     """
 
     lo, hi = _lane_bounds(context)
-    above = souther.world_y - SOUTHER_SLASH_LANE_CLEARANCE
-    below = souther.world_y + SOUTHER_SLASH_LANE_CLEARANCE
+    above = souther.world_y - SOUTHER_CLAW_CLEARANCE_ABOVE
+    below = souther.world_y + SOUTHER_CLAW_CLEARANCE_BELOW
     can_go_up = above >= lo
     can_go_down = below <= hi
 
+    # X is frozen only while it still has to be. The claw's box is lane-gated
+    # (see SOUTHER_CLAW_LANE_ABOVE), so:
+    #
+    # - **inside** the band it covers, the lane is the only axis that helps,
+    #   and closing X there walks *along* the box rather than out of it --
+    #   the same reason `_movement_mask`'s pit dodge clears Y before X ("a
+    #   pit is a rectangle, not a line");
+    # - **outside** it, the actor is already safe from this claw whatever it
+    #   does on X, and $161C6 steers only on X so it cannot follow a lane
+    #   change it has already lost. Those ticks are free, and the pocket is
+    #   what they are worth spending on.
+    #
+    # Spending them on nothing is what made this dodge the expensive half of
+    # a limit cycle. Measured over an 8-fight batch: nearly every hit taken
+    # carried the signature `WalkToNearEnemy x16 | DodgeSoutherSlash x14` in
+    # the ticks before it, at 64-104px -- his own best range -- with 0 of 49
+    # hits taken inside the pocket. Half of every cycle made no progress
+    # toward the one piece of ground that is safe, so the actor never
+    # arrived and the cycle repeated until something landed (user: "esta a
+    # parar num sitio seguro, depois o Souther ataca e atinge a personagem.
+    # Tem de arriscar e ir de encontro com o boss").
+    clear_of_the_claw = not (
+        souther.world_y - SOUTHER_CLAW_LANE_ABOVE - PLAYER_BODY_HALF_Y
+        <= actor.world_y
+        <= souther.world_y + SOUTHER_CLAW_LANE_BELOW + PLAYER_BODY_HALF_Y
+    )
+    toward = (
+        _souther_pocket_aim_x(actor, souther) if clear_of_the_claw else actor.world_x
+    )
+
     dy = actor.world_y - souther.world_y
+    # Which side, and never the cheap one when the actor is on the other:
+    # crossing his lane to reach it would walk the whole width of the claw.
     if dy < 0 and can_go_up:
-        return actor.world_x, int(above)
+        return toward, int(above)
     if dy > 0 and can_go_down:
-        return actor.world_x, int(below)
+        return toward, int(below)
     if can_go_up and can_go_down:
-        # Exactly on his lane: no sign to read, so fall back to whichever side
-        # has more room. One tick of movement gives the test above a sign, and
-        # from then on it reinforces itself.
-        roomier_is_up = (souther.world_y - lo) >= (hi - souther.world_y)
-        return actor.world_x, int(above if roomier_is_up else below)
+        # On his lane, so there is no side to preserve -- take the shallow
+        # one, which is four times nearer. Fixed rather than read off the
+        # actor's position, so it cannot oscillate (test_stability's
+        # alternating-commitment fixture is exactly that failure).
+        return toward, int(above)
     if can_go_up:
-        return actor.world_x, int(above)
+        return toward, int(above)
     if can_go_down:
-        return actor.world_x, int(below)
+        return toward, int(below)
     roomier_is_up = (souther.world_y - lo) >= (hi - souther.world_y)
-    return actor.world_x, int(lo if roomier_is_up else hi)
+    return toward, int(lo if roomier_is_up else hi)
 
 
 def state_machine_projectile_sidestep(
@@ -1838,7 +1922,20 @@ def state_machine_dodge_souther_slash(
     target_x, target_y = _souther_slash_sidestep_target(actor, target, context)
     goal = nav.PointGoal(nav.Point(target_x, target_y), tolerance=MOVE_DEADBAND_X)
     body, origin = nav.actor_footprint(actor)
-    solids, dangers = nav.obstacle_sets(context, body=body, origin=origin)
+    # Souther himself is exempt from the danger set this one dodge plans
+    # against, the same way ``state_machine_walk_to_near_enemy`` exempts the
+    # enemy it is already alongside: the destination is the pocket at his own
+    # feet, so his body rect *contains* the ground being aimed at, and leaving
+    # him in makes the goal unreachable by construction -- the router then
+    # returns nothing and the dodge stands still, which is the failure this
+    # whole change exists to remove. Every *other* live enemy still counts; a
+    # dodge is never trying to stand in somebody else's reach.
+    solids, dangers = nav.obstacle_sets(
+        context,
+        body=body,
+        origin=origin,
+        ignore_enemy_slots=frozenset({target.slot}),
+    )
 
     def straight_line() -> int:
         return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)

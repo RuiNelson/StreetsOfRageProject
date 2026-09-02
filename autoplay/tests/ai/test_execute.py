@@ -53,6 +53,7 @@ from sor_autoplay.ai.execute import (
     execute_tick,
     execute_verb,
     press_no_button,
+    _souther_slash_sidestep_target,
 )
 from sor_autoplay.ai.decide import (
     BREAKABLE_PUNCH_X,
@@ -3199,32 +3200,100 @@ class DodgeSoutherSlashExecuteTests(unittest.TestCase):
     def test_side_is_picked_from_southers_own_lane(self) -> None:
         # Self-reinforcing, like _pit_dodge_target_y: the flip point is his
         # lane and the chosen direction always moves further from it, so the
-        # pick cannot undo itself while X is frozen. Reading it off the lane
-        # midpoint instead reversed 18 times in 40 ticks on the tick harness.
-        above = self._run(_myself(world_x=120, world_y=50), souther_y=60)
+        # pick cannot undo itself. Reading it off the lane midpoint instead
+        # reversed 18 times in 40 ticks on the tick harness.
+        #
+        # Both actors here start *inside* the claw's own band (-6..+28 from
+        # his lane), which is what makes a lane step the thing to check. An
+        # actor already outside it is a different question -- see
+        # test_an_actor_already_clear_of_the_claw_just_closes.
+        above = self._run(_myself(world_x=120, world_y=58), souther_y=60)
         self.assertTrue(above.hold_buttons.call_args.kwargs["player1"] & UP)
         below = self._run(_myself(world_x=120, world_y=70), souther_y=60)
         self.assertTrue(below.hold_buttons.call_args.kwargs["player1"] & DOWN)
 
-    def test_clears_the_lane_gate_the_rom_actually_reads(self) -> None:
-        # By the time this dodge runs the claw is committed, so the gate it
-        # has to beat is $161C6's own resolve lane ($18, 24px) and not
-        # $15EDA's commit lane ($1C) -- clearing 24 by more than the
-        # executor's Y deadband is exactly "enough not to be hit", which is
-        # what the user asked this fight's evasion to be and no more.
+    def test_an_actor_already_clear_of_the_claw_closes_instead(self) -> None:
+        # Outside the claw's own band -- body included -- there is nothing
+        # left to dodge, and $161C6 steers only on X so it cannot follow a
+        # lane change it has already lost. Those ticks go to the pocket
+        # instead of to more sidestep, which is the half of the limit cycle
+        # that used to make no progress at all.
+        client = MagicMock()
+        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+        actor = _myself(world_x=120, world_y=40)
+        _settle(
+            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
+            {actor, self._souther(world_y=60)},
+            gamepad,
+        )
+        held = client.hold_buttons.call_args.kwargs["player1"]
+        self.assertTrue(held & RIGHT, f"expected the pocket, got {held:#06x}")
+        self.assertFalse(held & DOWN)
+
+    def test_clears_the_claw_box_the_rom_actually_carries(self) -> None:
+        # Not a gate number standing in for the box: $16C2E names the claw's
+        # own animation set ($2E44A), whose three shapes all carry lane
+        # -10..+24, and $16C6E places the claw four px down his lane. So the
+        # claw covers -6..+28 measured from *him*, and the two clearances
+        # have to clear their own side of that -- by more than the executor's
+        # Y deadband, or the step stalls just short.
         from sor_autoplay.ai.execute import (
             MOVE_DEADBAND_Y,
-            SOUTHER_SLASH_LANE_CLEARANCE,
+            SOUTHER_CLAW_CLEARANCE_ABOVE,
+            SOUTHER_CLAW_CLEARANCE_BELOW,
+            SOUTHER_CLAW_LANE_ABOVE,
+            SOUTHER_CLAW_LANE_BELOW,
         )
-        from sor_autoplay.ai.reach import SOUTHER_DASH_RESOLVE_LANE
 
         self.assertGreater(
-            SOUTHER_SLASH_LANE_CLEARANCE, SOUTHER_DASH_RESOLVE_LANE + MOVE_DEADBAND_Y
+            SOUTHER_CLAW_CLEARANCE_ABOVE, SOUTHER_CLAW_LANE_ABOVE + MOVE_DEADBAND_Y
         )
-        # ...and no further than it has to: a step that overshoots is a step
-        # that takes longer to arrive, and arriving late is this dodge's
-        # measured failure mode.
-        self.assertLess(SOUTHER_SLASH_LANE_CLEARANCE, 0x1C + MOVE_DEADBAND_Y + 5)
+        self.assertGreater(
+            SOUTHER_CLAW_CLEARANCE_BELOW, SOUTHER_CLAW_LANE_BELOW + MOVE_DEADBAND_Y
+        )
+        # The whole point of reading the box: the shallow side is far nearer,
+        # and a symmetric clearance threw that away.
+        self.assertLess(SOUTHER_CLAW_CLEARANCE_ABOVE, SOUTHER_CLAW_CLEARANCE_BELOW)
+
+    def test_the_dodge_keeps_closing_x(self) -> None:
+        # The claw's box is lane-gated and $161C6 steers only on X, so once
+        # the lane is left the actor's X is irrelevant to it -- and freezing X
+        # is what made this dodge the expensive half of a limit cycle at his
+        # own best range. Diagonal costs no lane speed: holding two directions
+        # moves both axes at their own rate.
+        actor = _myself(world_x=40, world_y=40)
+        souther = self._souther(world_x=200, world_y=60)
+
+        target_x, _ = _souther_slash_sidestep_target(actor, souther, set())
+
+        self.assertGreater(target_x, actor.world_x, "the dodge must still close X")
+        self.assertLess(
+            abs(target_x - souther.world_x),
+            SOUTHER_SLASH_DIST_MIN,
+            "and it must aim at the pocket, where neither gate can fire",
+        )
+
+    def test_the_shallow_side_is_taken_from_his_own_lane(self) -> None:
+        # On his lane there is no side to preserve, so take the near one.
+        from sor_autoplay.ai.execute import SOUTHER_CLAW_CLEARANCE_ABOVE
+
+        actor = _myself(world_x=120, world_y=60)
+        souther = self._souther(world_x=200, world_y=60)
+
+        _, target_y = _souther_slash_sidestep_target(actor, souther, set())
+
+        self.assertEqual(target_y, souther.world_y - SOUTHER_CLAW_CLEARANCE_ABOVE)
+
+    def test_the_deep_side_is_kept_when_the_actor_is_already_on_it(self) -> None:
+        # Crossing to the shallow side would walk the entire width of the claw.
+        from sor_autoplay.ai.execute import SOUTHER_CLAW_CLEARANCE_BELOW
+
+        actor = _myself(world_x=120, world_y=80)
+        souther = self._souther(world_x=200, world_y=60)
+
+        _, target_y = _souther_slash_sidestep_target(actor, souther, set())
+
+        self.assertEqual(target_y, souther.world_y + SOUTHER_CLAW_CLEARANCE_BELOW)
 
     def test_a_side_with_no_lane_room_is_not_chosen(self) -> None:
         # An aim point the lane clamp would drag back inside the band is worse
