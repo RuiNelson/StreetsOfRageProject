@@ -256,18 +256,24 @@ ANTONIO_APPROACH_LANE_Y = WALK_TO_ENEMY_LANE_SAFETY_Y + PUNCH_RANGE_Y
 # and the hold is then taken from inside the pocket
 # (`GrabReason.SOUTHER_WALK_IN`).
 SOUTHER_APPROACH_LANE_Y = SOUTHER_SLASH_LANE + PUNCH_RANGE_Y + REACH_SAFETY_MARGIN
-# ai-analysis/enemy-ai.md's primary-1 tactical table names `+$67 == 1` as
-# `$160D0 (souther_state1_close_lane)` -- the one substate that should home
-# his lane onto the actor's. Five clean-host traces say that labelling does
-# not match what moves: tactical 1 appeared on 2 of 696 primary-1 ticks,
-# while tactical **2** carried essentially all of the visible lane bursts
-# (30 of 153 ticks nonzero, mean |delta| 3.9px). Either the labels are
-# swapped or `$160D0` is a one-tick transition that reads back as 2 before
-# any snapshot lands on it; either way this is keyed off what moves, not off
-# which name is right, and covers both. While he is the one closing, the
-# offset needs more than REACH_SAFETY_MARGIN's ~2 ticks of cushion.
-SOUTHER_LANE_CLOSING_TACTICALS = frozenset({0x01, 0x02})
-SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING = SOUTHER_APPROACH_LANE_Y + 24
+# `SOUTHER_LANE_CLOSING_TACTICALS` and `SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING`
+# used to live here: the approach widened its offset from 40 to 64px whenever
+# his tactical read 1 or 2, the substates measured to actually move his lane.
+# The reasoning was that his own closing speed erodes a fixed cushion, so the
+# cushion should grow while he closes.
+#
+# It is the wrong conclusion from a true premise. He closes lane at 4px per
+# 60Hz frame (`$15F98 (souther_state1_standoff)`) against the 2-3px an agent
+# tick of walking buys, so a widening offset is a race that cannot be won --
+# it spends ticks moving *away* in lane, gains nothing, and does it at
+# exactly the moment the X gap most needs closing. What actually denies
+# `$15EDA` is the pocket (`+$50 < $18`), and the pocket is reached on X.
+#
+# Measured over the batch that followed the claw-box dodge: the two fights
+# that reached 200% took 14.3s and 16.9s to land a first hold against
+# 1.69-3.36s in the four cheap ones, and hits taken *before* the first hold
+# went from 16% to 43% of all damage. Time-to-first-hold is what separates
+# this fight, and widening the corridor is what spends it.
 # A Breakable is itself a solid obstacle -- walking straight to its exact
 # (world_x, world_y) means walking into it from whatever angle happens to be
 # a straight line, which can mean approaching from directly above/below and
@@ -906,8 +912,17 @@ def _lane_offset_while_closing(actor: Myself | Partner, target: Enemy) -> int | 
             return None
         if abs(target.world_x - actor.world_x) >= SOUTHER_SLASH_DIST_CLOSING:
             return None
-        if target.tactical in SOUTHER_LANE_CLOSING_TACTICALS:
-            return SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING
+        # The offset does **not** widen while he closes lane, though the
+        # arithmetic for it is tempting and was shipped once. `$15F98
+        # (souther_state1_standoff)` closes at 4px per 60Hz frame against the
+        # 2-3px an agent tick of walking buys, so widening is a race the
+        # actor loses by construction -- it spends ticks moving away in lane,
+        # gains nothing, and does it exactly when the X gap most needs
+        # closing. Measured over the batch that followed the claw-box dodge:
+        # the two fights that reached 200% took **14.3s and 16.9s** to land a
+        # first hold, against 1.69-3.36s in the four cheap ones, and 43% of
+        # all hits taken now arrive *before* that first hold. The pocket, not
+        # the lane, is what denies `$15EDA` -- and the pocket is reached on X.
         return SOUTHER_APPROACH_LANE_Y
     return None
 

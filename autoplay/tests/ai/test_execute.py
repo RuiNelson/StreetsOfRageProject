@@ -42,8 +42,6 @@ from sor_autoplay.ai.execute import (
     PICKUP_RANGE_Y,
     ANTONIO_APPROACH_LANE_Y,
     SOUTHER_APPROACH_LANE_Y,
-    SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING,
-    SOUTHER_LANE_CLOSING_TACTICALS,
     WALK_TO_ENEMY_LANE_SAFETY_Y,
     _enemy_stop_dx,
     _find_safe_spot,
@@ -3373,22 +3371,21 @@ class SoutherLaneOffsetIsDroppedWhenTheGateCannotFireTests(unittest.TestCase):
 
         self.assertEqual(target_y, 40 + WALK_TO_ENEMY_LANE_SAFETY_Y)
 
-    def test_actively_closing_lane_gets_the_wider_offset(self) -> None:
-        # Both tactical values measured live to actually move his lane (see
-        # SOUTHER_LANE_CLOSING_TACTICALS's own comment on why it is {1, 2}
-        # rather than just the manuscript's named $160D0/1) get the wider
-        # margin. Standoff (0) does not, which is why SoutherStabilityTests'
-        # alternating-commitment fixture (fixed at tactical 0) never sees
-        # this branch.
+    def test_closing_lane_does_not_widen_the_offset(self) -> None:
+        # The premise is true -- tacticals 1 and 2 are the substates measured
+        # to actually move his lane -- and the conclusion was wrong. He
+        # closes at 4px per 60Hz frame against the 2-3px a tick of walking
+        # buys, so widening is a race lost by construction, spending the
+        # ticks the X gap needs. Measured: the fights that widened took
+        # 14-17s to land a first hold against 1.7-3.4s in the cheap ones.
         actor = _myself(world_x=100, world_y=150)
-        for tactical in SOUTHER_LANE_CLOSING_TACTICALS:
+        for tactical in (0x00, 0x01, 0x02):
             with self.subTest(tactical=tactical):
                 souther = self._souther(tactical=tactical)
 
                 _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
 
-                self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING)
-        self.assertGreater(SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING, SOUTHER_APPROACH_LANE_Y)
+                self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
 
     def test_a_punishable_souther_is_walked_straight_at(self) -> None:
         for primary, phase in (
