@@ -171,6 +171,47 @@ DEFAULT_HOLD_THROW_FRAMES = 46
 # is made against these same frame counts rather than against this one.
 HOLD_KNEE_BUDGET_KNEES = 3
 
+# What each hold move takes off the body in hand, from the live capture in
+# `ai-analysis/enemy-ai.md`'s "Being held by a player": the knee is 2 and the
+# suplex 5. Used to answer "is ending this hold worth what ending it costs",
+# which against Souther is not a rhetorical question -- see
+# `hold_finish_is_worth_the_ground` below.
+HOLD_KNEE_DAMAGE = 2
+HOLD_SUPLEX_DAMAGE = 5
+
+# **A knee is not one action, and HOLD_KNEE_FRAMES prices only the first.**
+# Live trace of four consecutive holds on Souther (tools/boss_fight.py rows,
+# player +$30 per tick): the chain escalates `$6A` -> `$6C` -> `$6E` and only
+# then returns to the front hold, and the three stages are nothing like each
+# other in cost. Over three fights:
+#
+#     $6A: 14, 15, 15 ticks    $6C: 12, 15, 17    $6E: 166, 160, 166
+#
+# So the third stage is an order of magnitude longer than the first two -- on
+# the order of 80 frames against 17 -- and it is where essentially all of a
+# hold's time goes. Damage per stage, read off the boss's health word across
+# the same runs, is 2, 2, 3.
+#
+# Two consequences, neither of them currently a live bug but both worth
+# knowing before touching this:
+#
+# - `hold_knee_budget_frames` under-prices three knees badly (52 frames
+#   against a real ~115), which only ever makes the budget *shorter* than
+#   intended, i.e. it finishes earlier rather than over-committing;
+# - `decide.could_hold_actions` prices the knee it is about to start at
+#   `hold_knee_frames` when deciding against an incoming clock. That is right
+#   for stage one and wrong by ~4x for stage three, and nothing in the
+#   observation tells the two apart at a `$60` decision tick. It is masked
+#   today: every grace ever measured live was 5-12 frames, all under even
+#   stage one's 17, so the throw wins every threatened decision anyway. Widen
+#   `CLOSING_ENEMY_THREAT_FRAMES` and it stops being masked.
+#
+# Measuring `$6C`/`$6E` properly needs `tools/hold_timing_diag.py` extended to
+# issue a *chain* of knees under lockstep rather than one; the numbers above
+# are tick-derived and this file does not accept tick-derived frame counts as
+# constants (see its own docstring), which is exactly why they are a comment
+# and not a table.
+
 
 def hold_knee_frames(character_id: int | None) -> int:
     if character_id is None:

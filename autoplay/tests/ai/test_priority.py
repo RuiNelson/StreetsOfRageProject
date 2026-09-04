@@ -2428,9 +2428,6 @@ class AntonioVerbEmergencyTests(unittest.TestCase):
         self.assertIsInstance(winner, JumpAttack)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 def _souther(slot: str, combat_phase: CombatPhase, **overrides) -> Souther:
     fields = dict(

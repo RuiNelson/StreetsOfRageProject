@@ -451,6 +451,35 @@ cannot establish either.
 approach is what is slow -- which is the corridor, and the next thing to
 change.
 
+**Holding him until the suplex would kill: tried, measured worse, reverted.**
+The attribution after the corridor fix is unambiguous about where the damage
+now is -- entrance hits **0%**, and **74% of every hit taken within four
+seconds of giving a hold up** -- so the finish is what costs, because it
+throws him clear and the walk back in crosses the band his claw commits from.
+The rule that follows is clean and the arithmetic supports it: a knee is 2
+damage in 17-18 frames (0.114/frame) against the flip-into-suplex's 5 in ~115
+(0.043), a held boss cannot act at all, and no hit has ever been recorded
+inside the pocket -- so keep kneeing until `finish_would_kill`.
+
+It measured **195%, 195%, 200%** against the previous configuration's 0, 50,
+75, 75, 200, 200 (median 75%). Three fights was enough because the mechanism
+came out of the same trace:
+
+**a "knee" is three ROM actions, not one.** The chain runs `$6A` -> `$6C` ->
+`$6E` before returning to the front hold, and the stages are nothing alike --
+across three fights, `$6A` took 14/15/15 ticks, `$6C` 12/15/17, and `$6E`
+**166/160/166**. The third stage is where a hold's whole time goes, and
+holding until lethal forces the actor through it four times per fight instead
+of finishing after two cheap knees. Damage per stage is 2, 2, 3.
+
+`kinematics.HOLD_KNEE_FRAMES` (17-18, from `tools/hold_timing_diag.py`)
+therefore prices **stage one only**. That under-pricing is latent rather than
+live -- `hold_knee_budget_frames` only ends up shorter than intended, and
+`could_hold_actions`' threatened comparison is masked because every grace ever
+measured (5-12 frames) is under even stage one -- but it is written down in
+`kinematics.py` next to the constants, with what it would take to measure the
+other two stages properly.
+
 **Where the remaining damage comes from, and why no lane trick fixes it**
 (user: "ainda apanha muito do boss, especialmente tentando se aproximar").
 Over the shipped configuration's five fights, 20 hits: **every one of them
