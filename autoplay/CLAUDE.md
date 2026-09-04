@@ -451,6 +451,56 @@ cannot establish either.
 approach is what is slow -- which is the corridor, and the next thing to
 change.
 
+**The round-2 baseline, at last measured properly (n=20).** Every number in
+this file before it came from three to six fights, which
+[[boss-fights-are-hard-to-measure]] already said was too few and which this
+batch confirms was too few in *both* directions. Twenty fights on the shipped
+configuration, `--no-food`, Blaze, turbo 4, a fresh host each, and **zero runs
+lost** (the round-2 console reset is fixed -- see
+`StreetsOfRageRecompilation/CLAUDE.md`):
+
+    0, 0, 0, 0, 25, 25, 25, 25, 50, 50, 50, 75, 75,
+    190, 195, 195, 200, 290, 295, 395
+
+**median 50%, mean 108%, 11 of 20 at or under 50%, 7 of 20 lost a life.**
+
+The shape matters more than the median: the distribution is **bimodal with a
+hole in it**. Thirteen fights land between 0% and 75%; seven land at 190% and
+up; nothing sits in between. That is arithmetic, not coincidence --
+`damage_pct` is `(health lost) + 80 * (lives lost)` over 80, so one death is
+worth +100 points by itself. The question this fight poses is therefore not
+"why is the damage higher" but **"what kills the actor in one fight out of
+three"**, which is a single discrete event per bad fight rather than a diffuse
+difference.
+
+Comparing the seven that died against the thirteen that did not:
+
+| | died (7) | clean (13) |
+| --- | --- | --- |
+| fight length | 34.9 s (22-51) | **23.4 s (16.8-26.7)** |
+| hits taken | 7.1 | **1.2** |
+| first hold at | 2.1 s (1.24-6.84) | **1.3 s (1.29-1.35)** |
+| holds completed | 3.9 | 4.5 |
+| `WalkToNearEnemy` share | 44.0% | 37.1% |
+| `DodgeSoutherSlash` share | 8.0% | **11.9%** |
+
+Two things in that table are worth more than the rest.
+
+**Every clean fight takes its first hold between 1.29 s and 1.35 s** -- a
+60-millisecond window across thirteen runs. The deaths spread from 1.24 s to
+6.84 s. So the opening either connects or it does not, and a fight that misses
+it is a different fight. (One death fight *did* open at 1.24 s, so the opening
+is necessary and not sufficient -- which is also why the earlier n=6 reading
+that "time-to-first-hold is falsified" was itself too small a sample to say.)
+
+**And all eleven killing blows land with `pocket=False`**, at dx 29-93, with
+the boss in primary `$02` tactical `$00` -- the claw wind-up -- and the same
+`WalkToNearEnemy` / `DodgeSoutherSlash` alternation in the ticks before. Not
+one death happened inside the pocket, in this batch or any earlier one. The
+bad fights are the ones that get knocked out of the pocket and cannot get back
+in, and they dodge *less* than the clean ones (8.0% against 11.9%) while
+walking *more* (44% against 37%) -- caught mid-approach, repeatedly.
+
 **Holding him until the suplex would kill: tried, measured worse, reverted.**
 The attribution after the corridor fix is unambiguous about where the damage
 now is -- entrance hits **0%**, and **74% of every hit taken within four
