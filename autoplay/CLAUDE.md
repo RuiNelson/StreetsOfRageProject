@@ -501,6 +501,64 @@ bad fights are the ones that get knocked out of the pocket and cannot get back
 in, and they dodge *less* than the clean ones (8.0% against 11.9%) while
 walking *more* (44% against 37%) -- caught mid-approach, repeatedly.
 
+**Count hits, not damage percent** (user: "a morte acontece por via de dano").
+`damage_pct_of_one_bar` is `(health lost) + 80 * (lives lost)` over 80, so the
+fourth hit jumps a fight from 75% to 190%. That quantisation is what made the
+baseline look bimodal and sent two sessions looking for a discrete "what kills
+it" event. In hits the same twenty fights are perfectly continuous --
+`0,0,0,0,1,1,1,1,2,2,2,3,3,4,5,6,6,8,9,12` -- and the target restates cleanly:
+one life is four hits, so "under half a bar" is **median <= 2 hits**.
+
+**The arrival was landing on the gate rather than inside it.** `nav.strike_
+goal` insets its region by half the body on each axis, so a `stop_dx` of 16 is
+satisfied by a body whose near *edge* is 16 out -- an origin 24 out. `$15EDA`
+reads `+$50`, which is origin to origin, and its inner abort is `+$50 < $18`:
+so the approach was stopping exactly **on** the gate it was aiming to get
+inside, where he can still commit. `PLAYER_BODY_HALF_X` subtracts the half
+body that `strike_goal` adds back, and `test_the_arrival_lands_inside_the_gate_
+not_on_it` pins `stop_dx + half body < $18` so it cannot drift back.
+
+It was found by the tick harness rather than by reading: with a strike refused
+from outside the pocket (below), the actor parked at dx=24 with an empty mask
+and `WalkToNearEnemy` winning every tick -- the same "arrived somewhere nothing
+can act" this file records from the corridor.
+
+Measured, three configurations of twenty fights each, same host recipe:
+
+| | base | strike refused outside the pocket | arrival fixed |
+| --- | --- | --- | --- |
+| hits, median | 2.0 | 3.0 | 2.0 |
+| hits, mean | 3.3 | 3.6 | **2.15** |
+| worst fight | 12 | 9 | **7** |
+| **lives lost** | 7 | 7 | **2** |
+| damage <= 50% | 11/20 | 7/20 | 13/20 |
+
+Read the third column carefully, because the obvious reading is too strong:
+the **median is unchanged**, and the rank-sum probability that a base fight
+takes more hits than a fixed one is **0.56**, barely off a coin. The effect is
+entirely in the tail -- base has seven fights at four hits or more
+(4,5,6,6,8,9,12), the fixed one has two (6,7) -- and since four hits *is* a
+life, those seven and two are exactly the seven and two deaths. Seven against
+two in twenty is suggestive (Fisher p ~ 0.13), not established. What is
+claimed: **the tail is shorter, and the tail is where the deaths are**. What
+is not: that the typical fight takes less damage.
+
+**Refusing the strike from outside the pocket: tried again, measured worse,
+reverted.** Every one of the baseline's 66 hits arrives with the actor outside
+the pocket at dx 29-93, and `Punch` outranks the approach (20 against ~14), so
+the first tick the punch's outer edge comes into range is the last tick of the
+walk. Refusing it -- with `reach.enemy_actionable` agreeing, so the approach
+keeps closing rather than opening the vacuum the 2019 attempt hit -- bought
+real consistency: the first-hold window collapsed from a 1.24-6.84 s spread to
+1.29-1.47 s, the worst fight went 12 hits to 9, and fights ran 21% shorter
+(19.4 s against 24.6 s median). It also lost all four zero-hit fights and put
+the median up from 2 to 3, at identical deaths.
+
+Shorter fights with more hits means a higher damage rate, which is the wrong
+trade. The likely reason is worth keeping: **that strike is what puts him in
+hitstun, and the hitstun is the window the grab lives in** -- refusing it makes
+the fight more predictable and more expensive at the same time.
+
 **Holding him until the suplex would kill: tried, measured worse, reverted.**
 The attribution after the corridor fix is unambiguous about where the damage
 now is -- entrance hits **0%**, and **74% of every hit taken within four

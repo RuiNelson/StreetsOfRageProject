@@ -211,6 +211,18 @@ PIT_DODGE_OVERSHOOT = MOVE_DEADBAND_Y + 5
 
 # Stop just inside punch_outer_x — never walk onto the enemy.
 WALK_TO_ENEMY_STOP_BUFFER = 4
+
+# The same correction on X, and it is load-bearing for the pocket rather than
+# a nicety. `nav.strike_goal` insets its region by half the body on each axis,
+# so a `stop_dx` of 16 is satisfied by a body whose *near edge* is 16 out --
+# an origin 24 out. The ROM's `+$50` is measured origin to origin, and
+# `$15EDA`'s inner abort is `+$50 < $18`, so arriving "at the pocket" that way
+# lands exactly **on** the gate rather than inside it: he can still commit.
+# Caught on the tick harness the moment a strike thrown from outside the
+# pocket was refused -- the actor parked at dx=24 with an empty mask and
+# `WalkToNearEnemy` winning every tick, which is the same "arrived somewhere
+# nothing can act" this file records from the fifth attempt.
+PLAYER_BODY_HALF_X = nav.NOMINAL_BODY_W // 2
 # While still approaching a dangerous (ATTACKING/CHARGE) enemy and already
 # near its exact lane, sidestep by this much instead of closing distance
 # straight down its line of attack.
@@ -811,7 +823,7 @@ def _souther_pocket_stop_dx(actor: Myself | Partner, target: Enemy, stop_dx: int
 
     if not isinstance(target, Souther) or target.strike_is_committed():
         return stop_dx
-    inside = SOUTHER_SLASH_DIST_MIN - REACH_SAFETY_MARGIN
+    inside = SOUTHER_SLASH_DIST_MIN - REACH_SAFETY_MARGIN - PLAYER_BODY_HALF_X
     floor = punch_usable_inner_x(actor.character_id) + WALK_TO_ENEMY_STOP_BUFFER
     return max(floor, min(stop_dx, inside))
 
@@ -1679,7 +1691,7 @@ def _souther_pocket_aim_x(actor: Myself | Partner, souther: Souther) -> int:
     toward even while a claw is already out.
     """
 
-    inside = SOUTHER_SLASH_DIST_MIN - REACH_SAFETY_MARGIN
+    inside = SOUTHER_SLASH_DIST_MIN - REACH_SAFETY_MARGIN - PLAYER_BODY_HALF_X
     floor = punch_usable_inner_x(actor.character_id) + WALK_TO_ENEMY_STOP_BUFFER
     stop = max(floor, inside)
     if actor.world_x <= souther.world_x:

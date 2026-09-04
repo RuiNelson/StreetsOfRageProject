@@ -52,6 +52,7 @@ from sor_autoplay.ai.execute import (
     execute_verb,
     press_no_button,
     _souther_slash_sidestep_target,
+    PLAYER_BODY_HALF_X,
 )
 from sor_autoplay.ai.decide import (
     BREAKABLE_PUNCH_X,
@@ -598,16 +599,24 @@ class SoutherPocketApproachTests(unittest.TestCase):
         self.assertGreater(y_below, souther.world_y)
         self.assertLess(y_above, souther.world_y)
 
-    def test_the_corridor_has_no_gap_between_its_two_halves(self) -> None:
-        # The whole point: the lane gate is unsatisfied for the approach and
-        # the $18 inner abort is unsatisfied at the arrival, and the two
-        # overlap rather than leaving a band where both are satisfied. The
-        # approach only gives the lane up once "alongside", which is inside
-        # stop_dx -- so stop_dx must itself be inside the inner abort.
+    def test_the_arrival_lands_inside_the_gate_not_on_it(self) -> None:
+        # The $18 inner abort has to be unsatisfied where the actor actually
+        # ends up, and *that* is the stop point plus half a body:
+        # nav.strike_goal insets its region by half the body on each axis, so
+        # a stop_dx of 16 is met by an origin 24 out -- exactly on the gate,
+        # which the ROM measures origin to origin ($15EDA reads +$50).
+        #
+        # Caught on the tick harness the moment the strike was refused from
+        # outside the pocket: the actor parked at dx=24 with an empty mask and
+        # WalkToNearEnemy winning every tick, the same "arrived somewhere
+        # nothing can act" this module's own notes record from the corridor.
         actor = _myself(world_x=100, world_y=100)
         souther = self._souther(world_x=200, world_y=100)
 
-        self.assertLess(_enemy_stop_dx(actor, souther), SOUTHER_SLASH_DIST_MIN)
+        self.assertLess(
+            _enemy_stop_dx(actor, souther) + PLAYER_BODY_HALF_X,
+            SOUTHER_SLASH_DIST_MIN,
+        )
 
     def test_every_character_stays_above_their_own_punch_floor(self) -> None:
         for cid in (0, 1, 2):
