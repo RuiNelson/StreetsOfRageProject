@@ -3022,3 +3022,41 @@ class WeaponDetourRefusedNearSoutherTests(unittest.TestCase):
         self.assertTrue(
             could_walk_to_weapon({myself, dead, self._weapon(), camera})
         )
+
+
+class NeverRetreatFromSoutherTests(unittest.TestCase):
+    """Minimum caution against him (user: "reduzir as protecoes de seguranca
+    ao minimo com o boss do nivel 2").
+
+    Backing off is not neutral in this fight: `$15EDA` picks its commit
+    distance from the target's own `+$1C`, so walking away still leaves the
+    actor inside a commit band and only gives up the X the pocket is reached
+    on. The one ground he cannot commit from is forward.
+    """
+
+    def _hurt_actor(self):
+        return make_myself(
+            world_x=100, world_y=100, facing_left=False, health_percent=20.0
+        )
+
+    def test_no_retreat_is_offered_against_a_committed_souther(self) -> None:
+        actor = self._hurt_actor()
+        souther = _souther(
+            world_x=170,
+            world_y=100,
+            combat_phase=CombatPhase.ATTACKING,
+            primary_state=2,
+            tactical=2,
+        )
+        context = {actor, CameraRange(left=0, right=640, top=0, bottom=224), souther}
+        self.assertEqual(could_retreat_from_danger(context), set())
+
+    def test_an_ordinary_enemy_at_the_same_distance_still_gets_one(self) -> None:
+        # Scoped to him: the concession is still right everywhere else, and
+        # the same geometry proves it is the type and not the distance.
+        actor = self._hurt_actor()
+        grunt = make_enemy(
+            slot="obj01", world_x=170, world_y=100, combat_phase=CombatPhase.ATTACKING
+        )
+        context = {actor, CameraRange(left=0, right=640, top=0, bottom=224), grunt}
+        self.assertTrue(could_retreat_from_danger(context))

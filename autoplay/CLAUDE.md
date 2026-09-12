@@ -23,16 +23,19 @@ cannot reach from, not the plan; never a grounded B — standing still is
 `$16EAE`'s kick trigger; dodge only a kick/dash that is already locked in;
 and see **Holding a boss** below, without which the walk-in succeeded and
 the AI then stood in the hold until the round clock killed it.
-Souther is **corridor in → grab → knee, knee, ... → suplex**: hold a lane
-offset wider than his `$1C` slash gate while closing X, hand the lane over at
-his own `$18` inner abort, and take the hold from inside that pocket -- where
-`$15EDA` cannot commit and `$161C6` cannot resolve -- then knee and suplex.
-The hop is **removed** entirely (he counters jump attacks outright) and
-evasion is cut back to the one thing that has to be evaded: an already
-committed claw, answered by a lane step just wide enough that `$161C6`
-cannot resolve. Walking straight down his lane instead was tried and
-measured much worse (see **The fifth attempt**), where the four bugs that
-made the corridor *look* like a stalemate are also recorded. The police
+Souther is **chase → grab → knee, knee, ... → suplex, with every safety
+protection cut to the minimum** (user: "tem muita precaução, simplesmente tem
+de ir atrás do boss e tentar agarrá-lo! Reduzir as proteções de segurança ao
+mínimo com o boss do nível 2"): no lane offset at any distance, the router no
+longer plans around his own reach on the way in, and the AI never retreats
+from him. Only the committed-claw dodge is left, sized off the claw's own box.
+The approach **holds whatever lane it already has** rather than converging on
+his -- converging made it fight `DodgeSoutherSlash` over the lane axis (9
+reversals in 40 ticks on the stability harness), which is oscillation, not
+aggression. The pure chase measured much worse once, before the claw-box
+dodge, the X-freeze fix and the arrival fix; see **The fifth attempt** for
+that run and the four bugs that made the old corridor *look* like a
+stalemate. The police
 special is **not** spent on him below "about to die" -- the call freezes the
 caller for the length of his own longest helpless window, which is worth
 more as a grab-and-suplex than as the flat 10 damage the special buys alone.

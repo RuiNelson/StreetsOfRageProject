@@ -795,6 +795,15 @@ def could_retreat_from_danger(context: Context) -> Context:
                 continue
             if target_slot in actionable:
                 continue  # already hittable -- attack instead of retreating
+            if isinstance(enemy, Souther):
+                # Never back off from him (user: "reduzir as protecoes de
+                # seguranca ao minimo com o boss do nivel 2"). Retreating is
+                # not neutral here: `$15EDA` picks its commit distance from
+                # the target's own `+$1C`, so walking away still leaves the
+                # actor inside a commit band -- it only gives up the X the
+                # pocket is reached on. The one ground he cannot commit from
+                # is forward.
+                continue
             verbs.add(RetreatFromDanger(actor_slot=actor.slot, target_slot=target_slot))
     return verbs
 
