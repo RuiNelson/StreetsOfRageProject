@@ -23,20 +23,16 @@ cannot reach from, not the plan; never a grounded B — standing still is
 `$16EAE`'s kick trigger; dodge only a kick/dash that is already locked in;
 and see **Holding a boss** below, without which the walk-in succeeded and
 the AI then stood in the hold until the round clock killed it.
-Souther is **line up on his lane → close X → grab → knee, knee, ... →
-suplex** (user, watching a fight: "primeiro assegura-te que está alinhado com
-o Souther, está abaixo e pode ir mais para cima, corrige isso!"): the
-approach aims at his own lane from the first tick, at every distance and
-wherever he stands in the band, and takes the hold from inside his `$18`
-inner abort -- where `$15EDA` cannot commit and `$161C6` cannot resolve. The
-router still treats him as danger until alongside and the retreat is left
-alone; only the lane changed. The hop is **removed** entirely (he counters
-jump attacks outright) and evasion is the committed-claw dodge alone, sized
-off the claw's own ROM box. The corridor, the shallow-side corridor and the
-full chase that preceded this are recorded, with their measurements, under
-**Chasing him with every protection cut** and **The shallow-side corridor**;
-the four bugs that once made the corridor *look* like a stalemate are under
-**The fifth attempt**. The police
+Souther is **corridor in → grab → knee, knee, ... → suplex**: hold a lane
+offset wider than his `$1C` slash gate while closing X, hand the lane over at
+his own `$18` inner abort, and take the hold from inside that pocket -- where
+`$15EDA` cannot commit and `$161C6` cannot resolve -- then knee and suplex.
+The hop is **removed** entirely (he counters jump attacks outright) and
+evasion is cut back to the one thing that has to be evaded: an already
+committed claw, answered by a lane step just wide enough that `$161C6`
+cannot resolve. Walking straight down his lane instead was tried and
+measured much worse (see **The fifth attempt**), where the four bugs that
+made the corridor *look* like a stalemate are also recorded. The police
 special is **not** spent on him below "about to die" -- the call freezes the
 caller for the length of his own longest helpless window, which is worth
 more as a grab-and-suplex than as the flat 10 damage the special buys alone.
@@ -596,58 +592,38 @@ cadence", and this session's traces measure committed runs at a median of 71
 ticks (p25 38, shortest real one 21) and free runs at 157. The fixture now
 cycles at 21/21, the fastest tempo actually observed.
 
-**The shallow-side corridor** (the next attempt after the two chase
-variants above, and aimed at what they measured). The approach now aims
-`SOUTHER_CLAW_CLEARANCE_ABOVE` (22px) *above* him whenever the band has room,
-instead of `SOUTHER_APPROACH_LANE_Y` (48px) on whichever side the actor is
-already on. Three things make that the right number rather than another
-margin guess:
+**Three more lane aims after the chase, all measured, all reverted.** The
+approach's lane is the one knob every attempt in this section keeps turning,
+so the numbers are worth keeping together (20-fight reference: corridor +
+arrival fix, 2.15 hits a fight, 2 lives):
 
-- the claw is asymmetric -- it reaches 14px above his lane with half a body
-  and 36px below -- and the old side rule picks the side the actor is on, so
-  half the time the deep one; in the two chase variants 55 of 80 and 26 of 31
-  hits landed with the actor below him;
-- 22px above him is exactly the lane `DodgeSoutherSlash` escapes to, so the
-  approach and the dodge want the **same** lane and have no Y axis to fight
-  over: on the stability harness that is one lane reversal at every measured
-  claw tempo (21/21, 38/76, 71/157 ticks), against three with full
-  convergence;
-- it is 10px short of grab range instead of 36, which is the "line up on Y"
-  the user asked for, without standing on his lane inside the commit band.
+| lane aim | fights | hits | lives |
+| --- | --- | --- | --- |
+| shallow side, on the clearance (22px above him) | 20 | mean 3.15 | 4 |
+| shallow side, band edge on the clearance (34px above) | 5 (stopped) | 0, 3, 3, 4, 6 | 2 |
+| **his own lane, nothing else changed** | 5 (stopped) | **15, 15, 15, 16, 17** | **all, every fight** |
 
-He still commits from there (22 < `$1C`); the claw simply cannot reach.
-With no room above him -- he spends a lot of the fight in the band's top
-rows -- the ordinary corridor applies unchanged. `boss_fight.py` now logs
-absolute `p1_x`/`p1_y`/`boss_x`/`boss_y` per tick so a batch can say how
-often that fallback is what actually runs.
+- **The shallow aim on the clearance** lost to a goal-band edge: the routed
+  goal is aim +/- `PUNCH_RANGE_Y` and the actor settles on its nearest
+  edge, so -22 + 12 left it 10px above his lane, inside the claw's shallow
+  reach -- 34 of 63 hits landed at dy -9..-11. Worth remembering for any
+  future lane aim: **the aim is not where the actor stops**. Moving the aim
+  one slack further out fixed that edge, but the other 20 hits came from
+  the fallback: in 39% of fight ticks he stands above lane 30 with no room
+  over him, and the ordinary corridor ran there.
+- **His own lane** was asked for by the user from watching exactly that
+  fallback ("primeiro assegura-te que está alinhado com o Souther, está
+  abaixo e pode ir mais para cima") and run *isolated* -- router and retreat
+  untouched, unlike the earlier chase -- so it settles the question: it loses
+  the whole game in every fight, the same as the chase did. Of 78 hits, 57
+  land at 64-104px and 76 in the claw's wind-up; 48 land with the actor
+  below him; and the commonest thing the AI was doing right before a hit
+  was `DodgeSoutherSlash x20` -- a full twenty ticks of dodge that still did
+  not clear the deep side's 44px. **On his lane inside 24-104px is inside
+  his commit gate, and the only escape there is the long one.**
 
-Measured first with the aim *on* the clearance, and it came out worse than
-the reference -- mean 3.15 hits over twenty fights against 2.15, 4 lives
-against 2 -- for a reason the new absolute positions show exactly. **34 of
-the 63 hits landed with the actor above him at dy -9, -10 or -11**: the
-routed goal is a band, aim +/- `PUNCH_RANGE_Y`, the actor settles on its
-nearest edge, and -22 + 12 is -10 -- where its body reaches into the claw's
-shallow edge. The aim now sits one lane-slack further out, so the band's
-near edge is the clearance itself, and
-`test_the_approach_band_stays_clear_of_the_claw` pins it. It is the same
-class of bug as `PLAYER_BODY_HALF_X`: a region measured one way, a ROM gate
-measured another. The old 48px corridor never showed it only because its
-near edge (36) still happened to fall outside the claw.
-
-The other 20 hits are the fallback: in **39% of fight ticks there was no
-room above him** (he stands above lane 30), the ordinary corridor ran, and
-those hits all landed on the deep side. That is a separate, still open
-problem.
-
-The band-edge version ran five fights -- 0, 3, 3, 4, 6 hits, two lives --
-before the user stopped it from watching one: the actor was sitting *below*
-him with room to climb, which is the fallback above, in the fight's most
-common position. The approach now simply lines up on his lane (see the note
-at the top of this file). Unlike the chase variant that did the same and
-lost every life, it changes the lane and nothing else. On the stability
-harness: 3 lane reversals at the fastest measured claw tempo (21/21, budget
-4) and 1 at the typical ones, none on X, and `GrabEnemy` winning 13-15 ticks
-a run against 9 for the shallow-side aim.
+`boss_fight.py` keeps the absolute `p1_x`/`p1_y`/`boss_x`/`boss_y` it logs
+per tick; everything above about *where* the hits land came from it.
 
 **Holding him until the suplex would kill: tried, measured worse, reverted.**
 The attribution after the corridor fix is unambiguous about where the damage

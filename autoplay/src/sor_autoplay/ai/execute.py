@@ -996,22 +996,6 @@ def _approach_lane_y(
 
     if alongside or grab_reasons(context, actor, target, []) & _ON_PUNISH_GRAB_REASONS:
         return target.world_y
-    if isinstance(target, Souther) and not target.is_defeated:
-        # **Aligned with him first**, at every distance and wherever he is in
-        # the band (user, watching a fight: "primeiro assegura-te que esta
-        # alinhado com o Souther, esta abaixo e pode ir mais para cima,
-        # corrige isso!"). A hold only connects within GRAB_RANGE_Y of his
-        # lane, and every lane the approach held instead left the actor
-        # somewhere it could see him and not reach him: 48px below him
-        # whenever he stood in the band's top rows (39% of a fight), where
-        # the shallow-side aim had no room.
-        #
-        # Measured once already as part of a larger change -- the chase that
-        # also stopped routing around him and never retreated, which lost
-        # every life in five fights of five. This isolates the alignment:
-        # the router still treats him as danger until alongside and the
-        # retreat is untouched.
-        return target.world_y
     dy = abs(target.world_y - actor.world_y)
     gated = _lane_offset_while_closing(actor, target)
     hold_offset = gated if gated is not None else WALK_TO_ENEMY_LANE_SAFETY_Y
