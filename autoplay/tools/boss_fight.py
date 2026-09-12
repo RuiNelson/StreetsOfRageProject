@@ -399,6 +399,17 @@ def main() -> int:
                             "boss_state": boss.action_state if boss else None,
                             "boss_tactical": getattr(boss, "tactical", None) if boss else None,
                             "verb": verb_name,
+                            # Absolute positions, so a batch can answer
+                            # questions about *where* the fight happens --
+                            # not only how far apart the two bodies are.
+                            # Souther spends much of a fight in the top rows
+                            # of the lane band, and whether there is room
+                            # above him for the actor is a lane question the
+                            # relative dx/dy alone cannot settle.
+                            "p1_x": p1_entity.world_x if p1_entity else None,
+                            "p1_y": p1_entity.world_y if p1_entity else None,
+                            "boss_x": boss.world_x if boss else None,
+                            "boss_y": boss.world_y if boss else None,
                         }
                     )
                     + "\n"

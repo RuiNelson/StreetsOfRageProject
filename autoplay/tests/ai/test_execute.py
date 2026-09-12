@@ -547,57 +547,33 @@ class SoutherPocketApproachTests(unittest.TestCase):
         self.assertLess(stop_dx, SOUTHER_SLASH_DIST_MIN)
         self.assertGreaterEqual(stop_dx, punch_usable_inner_x(0))
 
-    def test_the_approach_holds_a_lane_offset_wider_than_his_slash_gate(self) -> None:
-        # $15EDA's slash needs +$52 < $1C (28px). The routed goal carries
-        # PUNCH_RANGE_Y of lane slack, so the aim has to be 28 + 12 for the
-        # *nearest acceptable arrival* to be 28 rather than 16 -- 16 being
-        # inside the gate, satisfied. world_x=120 keeps dx=80 for every actor
-        # below, comfortably inside SOUTHER_SLASH_DIST_CLOSING (104) so this
-        # test exercises the lane math, not the separate outer-bound
-        # relaxation (see test_a_far_souther_gets_no_offset_at_all).
+    def test_the_approach_aims_just_clear_of_the_claw_above_him(self) -> None:
+        # The shallow-side corridor. The claw reaches 6px above his lane (14
+        # with half a body) and 28 below (36): SOUTHER_CLAW_CLEARANCE_ABOVE
+        # clears the shallow side, and it is the lane DodgeSoutherSlash
+        # escapes to as well, so the approach and the dodge never want two
+        # different lanes. From *either* side of him: the old rule kept the
+        # side the actor was already on, which half the time is the deep one
+        # -- where 55 of 80 hits landed in the chase that lined up on him.
+        from sor_autoplay.ai.execute import SOUTHER_CLAW_CLEARANCE_ABOVE
+
         souther = self._souther(world_x=120, world_y=40)
+        for actor_y in (100, 80, 70, 10):
+            with self.subTest(actor_y=actor_y):
+                actor = _myself(world_x=40, world_y=actor_y)
+                _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
+                self.assertEqual(target_y, souther.world_y - SOUTHER_CLAW_CLEARANCE_ABOVE)
 
-        # Wide of the offset: close the lane down to it, no further.
-        far = _myself(world_x=40, world_y=100)
-        _, target_y = _walk_to_near_enemy_target(far, souther, {far, souther})
-        self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
+    def test_with_no_room_above_him_the_corridor_still_applies(self) -> None:
+        # He fights from the top rows of the band, where there is no lane
+        # above him to stand in; then the ordinary corridor is the answer,
+        # and it must never aim outside the band.
+        souther = self._souther(world_x=200, world_y=10)
+        actor = _myself(world_x=100, world_y=90)
 
-        # Already inside the offset but still clear of the gate *with a real
-        # margin*: hold, since a nudge either way is jitter and the gate is
-        # unsatisfied anyway.
-        near = _myself(world_x=40, world_y=80)
-        _, held_y = _walk_to_near_enemy_target(near, souther, {near, souther})
-        self.assertEqual(held_y, near.world_y)
-        self.assertGreaterEqual(abs(held_y - souther.world_y), SOUTHER_SLASH_LANE)
+        _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
 
-        # The margin has to be a real cushion against his own closing speed
-        # (4px/tick, ai-analysis/enemy-ai.md), not merely non-negative: at
-        # dy=30 (2px of raw clearance over his 28px gate) the old formula
-        # held here too, and a live trace caught him closing that in two
-        # ticks and committing at dy=21 while DodgeSoutherSlash, firing on
-        # the same tick as the commit, had no time left to matter. The
-        # approach must still be *actively widening* at dy=30, not holding.
-        thin_margin = _myself(world_x=40, world_y=70)
-        _, widened_y = _walk_to_near_enemy_target(thin_margin, souther, {thin_margin, souther})
-        self.assertNotEqual(widened_y, thin_margin.world_y)
-        self.assertGreaterEqual(abs(widened_y - souther.world_y), SOUTHER_APPROACH_LANE_Y)
-
-        self.assertGreater(
-            SOUTHER_APPROACH_LANE_Y - PUNCH_RANGE_Y, SOUTHER_SLASH_LANE
-        )
-
-    def test_the_offset_is_on_the_side_the_actor_already_stands(self) -> None:
-        # Crossing his lane to reach the aim point would walk straight through
-        # the gate the offset exists to keep unsatisfied.
-        below = _myself(world_x=40, world_y=90)
-        above = _myself(world_x=40, world_y=10)
-        souther = self._souther(world_x=200, world_y=50)
-
-        _, y_below = _walk_to_near_enemy_target(below, souther, {below, souther})
-        _, y_above = _walk_to_near_enemy_target(above, souther, {above, souther})
-
-        self.assertGreater(y_below, souther.world_y)
-        self.assertLess(y_above, souther.world_y)
+        self.assertEqual(target_y, souther.world_y + SOUTHER_APPROACH_LANE_Y)
 
     def test_the_arrival_lands_inside_the_gate_not_on_it(self) -> None:
         # The $18 inner abort has to be unsatisfied where the actor actually
@@ -3355,46 +3331,33 @@ class SoutherLaneOffsetIsDroppedWhenTheGateCannotFireTests(unittest.TestCase):
         fields.update(overrides)
         return Souther(**fields)
 
-    def test_a_ready_souther_still_gets_the_offset(self) -> None:
-        # Comfortably inside SOUTHER_SLASH_DIST_CLOSING (104px): far enough
-        # that the offset test below (dx=160) is the one exercising the
-        # separate outer-bound relaxation, not this one.
+    def test_a_ready_souther_is_approached_just_clear_of_the_claw(self) -> None:
+        from sor_autoplay.ai.execute import SOUTHER_CLAW_CLEARANCE_ABOVE
+
         actor = _myself(world_x=100, world_y=100)
         souther = self._souther()
 
         _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
 
-        self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
+        self.assertEqual(target_y, 40 - SOUTHER_CLAW_CLEARANCE_ABOVE)
 
-    def test_a_far_souther_gets_no_offset_at_all(self) -> None:
-        # Past SOUTHER_SLASH_DIST_CLOSING (104px, the widest of the three
-        # velocity-selected windows -- always assume the widest, since a
-        # live approach always reads as "walking into him"), $15EDA cannot
-        # commit at any lane, so denying one is pure overhead. Only matters
-        # for a re-approach after a knockback -- a fresh engagement starts
-        # inside 104px on tick one and never sees this branch.
-        actor = _myself(world_x=40, world_y=100)
-        souther = self._souther()  # world_x=200, dx=160
+    def test_the_shallow_aim_holds_at_any_distance_and_tactical(self) -> None:
+        # No switch at his $68 boundary and no widening while he closes lane:
+        # a change of aim is itself a lane move, and the claw box -- the
+        # thing this clears -- does not depend on either.
+        from sor_autoplay.ai.execute import SOUTHER_CLAW_CLEARANCE_ABOVE
 
-        _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
+        for dx in (40, 90, 160):
+            for tactical in (0x00, 0x01, 0x02):
+                with self.subTest(dx=dx, tactical=tactical):
+                    souther = self._souther(tactical=tactical)
+                    actor = _myself(world_x=souther.world_x - dx, world_y=100)
 
-        self.assertEqual(target_y, 40 + WALK_TO_ENEMY_LANE_SAFETY_Y)
+                    _, target_y = _walk_to_near_enemy_target(
+                        actor, souther, {actor, souther}
+                    )
 
-    def test_closing_lane_does_not_widen_the_offset(self) -> None:
-        # The premise is true -- tacticals 1 and 2 are the substates measured
-        # to actually move his lane -- and the conclusion was wrong. He
-        # closes at 4px per 60Hz frame against the 2-3px a tick of walking
-        # buys, so widening is a race lost by construction, spending the
-        # ticks the X gap needs. Measured: the fights that widened took
-        # 14-17s to land a first hold against 1.7-3.4s in the cheap ones.
-        actor = _myself(world_x=100, world_y=150)
-        for tactical in (0x00, 0x01, 0x02):
-            with self.subTest(tactical=tactical):
-                souther = self._souther(tactical=tactical)
-
-                _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
-
-                self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
+                    self.assertEqual(target_y, 40 - SOUTHER_CLAW_CLEARANCE_ABOVE)
 
     def test_a_punishable_souther_is_walked_straight_at(self) -> None:
         for primary, phase in (

@@ -592,6 +592,31 @@ cadence", and this session's traces measure committed runs at a median of 71
 ticks (p25 38, shortest real one 21) and free runs at 157. The fixture now
 cycles at 21/21, the fastest tempo actually observed.
 
+**The shallow-side corridor** (the next attempt after the two chase
+variants above, and aimed at what they measured). The approach now aims
+`SOUTHER_CLAW_CLEARANCE_ABOVE` (22px) *above* him whenever the band has room,
+instead of `SOUTHER_APPROACH_LANE_Y` (48px) on whichever side the actor is
+already on. Three things make that the right number rather than another
+margin guess:
+
+- the claw is asymmetric -- it reaches 14px above his lane with half a body
+  and 36px below -- and the old side rule picks the side the actor is on, so
+  half the time the deep one; in the two chase variants 55 of 80 and 26 of 31
+  hits landed with the actor below him;
+- 22px above him is exactly the lane `DodgeSoutherSlash` escapes to, so the
+  approach and the dodge want the **same** lane and have no Y axis to fight
+  over: on the stability harness that is one lane reversal at every measured
+  claw tempo (21/21, 38/76, 71/157 ticks), against three with full
+  convergence;
+- it is 10px short of grab range instead of 36, which is the "line up on Y"
+  the user asked for, without standing on his lane inside the commit band.
+
+He still commits from there (22 < `$1C`); the claw simply cannot reach.
+With no room above him -- he spends a lot of the fight in the band's top
+rows -- the ordinary corridor applies unchanged. `boss_fight.py` now logs
+absolute `p1_x`/`p1_y`/`boss_x`/`boss_y` per tick so a batch can say how
+often that fallback is what actually runs.
+
 **Holding him until the suplex would kill: tried, measured worse, reverted.**
 The attribution after the corridor fix is unambiguous about where the damage
 now is -- entrance hits **0%**, and **74% of every hit taken within four

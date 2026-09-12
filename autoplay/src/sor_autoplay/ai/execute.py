@@ -996,6 +996,38 @@ def _approach_lane_y(
 
     if alongside or grab_reasons(context, actor, target, []) & _ON_PUNISH_GRAB_REASONS:
         return target.world_y
+    if isinstance(target, Souther) and not target.is_defeated:
+        # **The shallow-side corridor.** Aim just clear of the claw, *above*
+        # him, instead of `SOUTHER_APPROACH_LANE_Y` (48px) on whichever side
+        # the actor happens to be on.
+        #
+        # His claw is asymmetric (`SOUTHER_CLAW_LANE_ABOVE`/`_BELOW`: -6..+28
+        # from his lane, 14 above and 36 below with half a body), and the
+        # side rule below picks the side the actor is *already* on -- so half
+        # the time the deep one. Measured over two chase variants, that is
+        # where the hits are: 55 of 80 and 26 of 31 landed with the actor
+        # below him, often straight after a dodge that could not finish its
+        # 44px deep-side step inside the wind-up.
+        #
+        # `SOUTHER_CLAW_CLEARANCE_ABOVE` (22) is also the lane
+        # `DodgeSoutherSlash` escapes to, so the approach and the dodge now
+        # want the **same** lane: when he commits the dodge has nothing left
+        # to move on Y and spends the tick closing X instead, and there is no
+        # lane axis for the two verbs to fight over. And 22px is 10 short of
+        # grab range rather than 36, which is the "line up on Y" the user
+        # asked for (user: "o problema comeca logo quando ela nao se coloca
+        # em linha com o boss no eixo Y") without standing on his lane
+        # inside the commit band -- the configuration that lost every life
+        # in five fights out of five.
+        #
+        # He will still commit from here (22 < `$1C`); the claw simply cannot
+        # reach, and a whiffed commit is a ~71-tick cycle he spends while the
+        # actor keeps closing. With no room above him -- he fights from the
+        # top rows of the band -- the ordinary corridor below still applies.
+        lo, _hi = _lane_bounds(context)
+        above = target.world_y - SOUTHER_CLAW_CLEARANCE_ABOVE
+        if above >= lo:
+            return int(above)
     dy = abs(target.world_y - actor.world_y)
     gated = _lane_offset_while_closing(actor, target)
     hold_offset = gated if gated is not None else WALK_TO_ENEMY_LANE_SAFETY_Y
