@@ -547,56 +547,28 @@ class SoutherPocketApproachTests(unittest.TestCase):
         self.assertLess(stop_dx, SOUTHER_SLASH_DIST_MIN)
         self.assertGreaterEqual(stop_dx, punch_usable_inner_x(0))
 
-    def test_the_approach_aims_just_clear_of_the_claw_above_him(self) -> None:
-        # The shallow-side corridor, from *either* side of him: the old rule
-        # kept the side the actor was already on, half the time the deep one.
-        # The aim is one lane-slack beyond the clearance, because the routed
-        # goal is a band (aim +/- PUNCH_RANGE_Y) and the actor settles on
-        # its nearest edge -- see test_the_approach_band_stays_clear_of_the_claw.
-        from sor_autoplay.ai.execute import SOUTHER_CLAW_CLEARANCE_ABOVE
-
+    def test_the_approach_lines_up_on_his_lane(self) -> None:
+        # User, watching: "primeiro assegura-te que esta alinhado com o
+        # Souther, esta abaixo e pode ir mais para cima". From either side
+        # of him, the aim is his own lane -- a hold connects only within
+        # GRAB_RANGE_Y of it.
         souther = self._souther(world_x=120, world_y=80)
         for actor_y in (100, 90, 70, 20):
             with self.subTest(actor_y=actor_y):
                 actor = _myself(world_x=40, world_y=actor_y)
                 _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
-                self.assertEqual(
-                    target_y,
-                    souther.world_y - SOUTHER_CLAW_CLEARANCE_ABOVE - PUNCH_RANGE_Y,
-                )
+                self.assertEqual(target_y, souther.world_y)
 
-    def test_the_approach_band_stays_clear_of_the_claw(self) -> None:
-        # The live bug this pins: aimed at the clearance itself, the band's
-        # near edge sat 10px above his lane, inside the claw's shallow reach
-        # (SOUTHER_CLAW_LANE_ABOVE plus half a body), and 34 of 63 hits in
-        # twenty fights landed there at dy -9..-11.
-        from sor_autoplay.ai.execute import (
-            PLAYER_BODY_HALF_Y,
-            SOUTHER_CLAW_LANE_ABOVE,
-        )
-
-        for souther_y in (40, 60, 80, 100):
-            with self.subTest(souther_y=souther_y):
-                souther = self._souther(world_x=120, world_y=souther_y)
-                actor = _myself(world_x=40, world_y=souther_y)
-                _, aim = _walk_to_near_enemy_target(actor, souther, {actor, souther})
-                near_edge = aim + PUNCH_RANGE_Y
-                self.assertLessEqual(
-                    near_edge,
-                    souther.world_y - SOUTHER_CLAW_LANE_ABOVE - PLAYER_BODY_HALF_Y,
-                    "the band the actor settles in must not reach into the claw",
-                )
-
-    def test_with_no_room_above_him_the_corridor_still_applies(self) -> None:
-        # He fights from the top rows of the band, where there is no lane
-        # above him to stand in; then the ordinary corridor is the answer,
-        # and it must never aim outside the band.
+    def test_even_in_the_top_rows_of_the_band(self) -> None:
+        # The case the user saw: he stands near the top of the band, the old
+        # fallback held the actor 48px below him with room to climb. The aim
+        # is still his lane.
         souther = self._souther(world_x=200, world_y=10)
         actor = _myself(world_x=100, world_y=90)
 
         _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
 
-        self.assertEqual(target_y, souther.world_y + SOUTHER_APPROACH_LANE_Y)
+        self.assertEqual(target_y, souther.world_y)
 
     def test_the_arrival_lands_inside_the_gate_not_on_it(self) -> None:
         # The $18 inner abort has to be unsatisfied where the actor actually
@@ -3354,22 +3326,15 @@ class SoutherLaneOffsetIsDroppedWhenTheGateCannotFireTests(unittest.TestCase):
         fields.update(overrides)
         return Souther(**fields)
 
-    def test_a_ready_souther_is_approached_just_clear_of_the_claw(self) -> None:
-        from sor_autoplay.ai.execute import SOUTHER_CLAW_CLEARANCE_ABOVE
-
+    def test_a_ready_souther_is_lined_up_on(self) -> None:
         actor = _myself(world_x=100, world_y=100)
         souther = self._souther(world_y=80)
 
         _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
 
-        self.assertEqual(target_y, 80 - SOUTHER_CLAW_CLEARANCE_ABOVE - PUNCH_RANGE_Y)
+        self.assertEqual(target_y, 80)
 
-    def test_the_shallow_aim_holds_at_any_distance_and_tactical(self) -> None:
-        # No switch at his $68 boundary and no widening while he closes lane:
-        # a change of aim is itself a lane move, and the claw box -- the
-        # thing this clears -- does not depend on either.
-        from sor_autoplay.ai.execute import SOUTHER_CLAW_CLEARANCE_ABOVE
-
+    def test_his_lane_at_any_distance_and_tactical(self) -> None:
         for dx in (40, 90, 160):
             for tactical in (0x00, 0x01, 0x02):
                 with self.subTest(dx=dx, tactical=tactical):
@@ -3380,9 +3345,7 @@ class SoutherLaneOffsetIsDroppedWhenTheGateCannotFireTests(unittest.TestCase):
                         actor, souther, {actor, souther}
                     )
 
-                    self.assertEqual(
-                        target_y, 80 - SOUTHER_CLAW_CLEARANCE_ABOVE - PUNCH_RANGE_Y
-                    )
+                    self.assertEqual(target_y, 80)
 
     def test_a_punishable_souther_is_walked_straight_at(self) -> None:
         for primary, phase in (

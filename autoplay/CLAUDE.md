@@ -23,16 +23,20 @@ cannot reach from, not the plan; never a grounded B — standing still is
 `$16EAE`'s kick trigger; dodge only a kick/dash that is already locked in;
 and see **Holding a boss** below, without which the walk-in succeeded and
 the AI then stood in the hold until the round clock killed it.
-Souther is **corridor in → grab → knee, knee, ... → suplex**: hold a lane
-offset wider than his `$1C` slash gate while closing X, hand the lane over at
-his own `$18` inner abort, and take the hold from inside that pocket -- where
-`$15EDA` cannot commit and `$161C6` cannot resolve -- then knee and suplex.
-The hop is **removed** entirely (he counters jump attacks outright) and
-evasion is cut back to the one thing that has to be evaded: an already
-committed claw, answered by a lane step just wide enough that `$161C6`
-cannot resolve. Walking straight down his lane instead was tried and
-measured much worse (see **The fifth attempt**), where the four bugs that
-made the corridor *look* like a stalemate are also recorded. The police
+Souther is **line up on his lane → close X → grab → knee, knee, ... →
+suplex** (user, watching a fight: "primeiro assegura-te que está alinhado com
+o Souther, está abaixo e pode ir mais para cima, corrige isso!"): the
+approach aims at his own lane from the first tick, at every distance and
+wherever he stands in the band, and takes the hold from inside his `$18`
+inner abort -- where `$15EDA` cannot commit and `$161C6` cannot resolve. The
+router still treats him as danger until alongside and the retreat is left
+alone; only the lane changed. The hop is **removed** entirely (he counters
+jump attacks outright) and evasion is the committed-claw dodge alone, sized
+off the claw's own ROM box. The corridor, the shallow-side corridor and the
+full chase that preceded this are recorded, with their measurements, under
+**Chasing him with every protection cut** and **The shallow-side corridor**;
+the four bugs that once made the corridor *look* like a stalemate are under
+**The fifth attempt**. The police
 special is **not** spent on him below "about to die" -- the call freezes the
 caller for the length of his own longest helpless window, which is worth
 more as a grab-and-suplex than as the flat 10 damage the special buys alone.
@@ -634,6 +638,16 @@ The other 20 hits are the fallback: in **39% of fight ticks there was no
 room above him** (he stands above lane 30), the ordinary corridor ran, and
 those hits all landed on the deep side. That is a separate, still open
 problem.
+
+The band-edge version ran five fights -- 0, 3, 3, 4, 6 hits, two lives --
+before the user stopped it from watching one: the actor was sitting *below*
+him with room to climb, which is the fallback above, in the fight's most
+common position. The approach now simply lines up on his lane (see the note
+at the top of this file). Unlike the chase variant that did the same and
+lost every life, it changes the lane and nothing else. On the stability
+harness: 3 lane reversals at the fastest measured claw tempo (21/21, budget
+4) and 1 at the typical ones, none on X, and `GrabEnemy` winning 13-15 ticks
+a run against 9 for the shallow-side aim.
 
 **Holding him until the suplex would kill: tried, measured worse, reverted.**
 The attribution after the corridor fix is unambiguous about where the damage
