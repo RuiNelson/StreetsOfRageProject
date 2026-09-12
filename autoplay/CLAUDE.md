@@ -23,16 +23,13 @@ cannot reach from, not the plan; never a grounded B — standing still is
 `$16EAE`'s kick trigger; dodge only a kick/dash that is already locked in;
 and see **Holding a boss** below, without which the walk-in succeeded and
 the AI then stood in the hold until the round clock killed it.
-Souther is **corridor in → grab → knee, knee, ... → suplex**: hold a lane
-offset wider than his `$1C` slash gate while closing X, hand the lane over at
-his own `$18` inner abort, and take the hold from inside that pocket -- where
-`$15EDA` cannot commit and `$161C6` cannot resolve -- then knee and suplex.
-The hop is **removed** entirely (he counters jump attacks outright) and
-evasion is cut back to the one thing that has to be evaded: an already
-committed claw, answered by a lane step just wide enough that `$161C6`
-cannot resolve. Walking straight down his lane instead was tried and
-measured much worse (see **The fifth attempt**), where the four bugs that
-made the corridor *look* like a stalemate are also recorded. The police
+Souther is **aligned on his lane → grab → knee, knee, ... → suplex**: the
+approach lines up on his lane from the start (user: "eu quero que o Y do
+inimigo e do jogador se alinhem"), and the claw is answered by leaving it by
+its *nearest* edge -- or, with no room above him, by charging into the pocket
+inside his `$18` inner abort. The hop is **removed** entirely (he counters
+jump attacks outright). See **Aligned, with a dodge that can finish** below
+for why the dodge had to change before the alignment could survive. The police
 special is **not** spent on him below "about to die" -- the call freezes the
 caller for the length of his own longest helpless window, which is worth
 more as a grab-and-suplex than as the flat 10 damage the special buys alone.
@@ -624,6 +621,34 @@ arrival fix, 2.15 hits a fight, 2 lives):
 
 `boss_fight.py` keeps the absolute `p1_x`/`p1_y`/`boss_x`/`boss_y` it logs
 per tick; everything above about *where* the hits land came from it.
+
+**Aligned, with a dodge that can finish** (user: "eu quero que o Y do
+inimigo e do jogador se alinhem"). The aligned approach lost every life in
+five fights of five when it was run alone, and the per-hit record says the
+cause was the dodge rather than the aim: `_souther_slash_sidestep_target`
+picked its side from the bare sign of `dy`, so an actor aligned on him and a
+couple of px below his lane escaped through the claw's **deep** side -- 44px
+against the shallow side's ~24 -- and was hit mid-step. 48 of 78 hits landed
+with the actor below him, most straight after twenty ticks of dodging.
+
+From inside the claw's lane band the dodge now leaves by its **nearest edge**
+(up costs `dy + 22`, down `44 - dy`), which is self-reinforcing the way
+`_pit_dodge_target_y` is -- moving toward the chosen edge only makes it
+cheaper. The "never cross to the cheap side" rule still applies from
+*outside* the band, where crossing does walk the claw's whole width. And when
+the only exit left is the long one -- he stands in the band's top rows, 39% of
+a fight by the absolute positions `boss_fight.py` logs -- the dodge charges
+**forward into the pocket** instead, where no hit has been recorded in any
+batch.
+
+The stability harness at the real claw tempos (21/21, 38/76, 71/157 ticks):
+mid-band 3/1/1 lane reversals (budget 4), none on X, grab reached every free
+phase; in the top rows no DOWN ticks at all and the dodge carries the actor
+into the hold on its own. One fixture note: with the actor *exactly* on the
+band floor (lane 8) the planner's first vector is a 4px step down, because its
+16px body pokes out of the plannable world -- a `nav.plan_route` edge property,
+not the dodge's. Measurement pending: twenty fights against the 2.15-hit
+reference.
 
 **Holding him until the suplex would kill: tried, measured worse, reverted.**
 The attribution after the corridor fix is unambiguous about where the damage

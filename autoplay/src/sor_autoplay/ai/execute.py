@@ -996,6 +996,19 @@ def _approach_lane_y(
 
     if alongside or grab_reasons(context, actor, target, []) & _ON_PUNISH_GRAB_REASONS:
         return target.world_y
+    if isinstance(target, Souther) and not target.is_defeated:
+        # **Aligned with him on Y**, at every distance and wherever he stands
+        # in the band (user: "eu quero que o Y do inimigo e do jogador se
+        # alinhem"). A hold only connects within GRAB_RANGE_Y of his lane.
+        #
+        # Measured alone this lost every life in five fights of five, and
+        # the reason was the *dodge*, not the aim: its side pick read the bare
+        # sign of dy, so an aligned actor a couple of px below him escaped by
+        # the claw's deep side (44px) and was hit mid-step -- 48 of 78 hits,
+        # most after twenty ticks of dodging. `_souther_slash_sidestep_target`
+        # now leaves the claw by its nearest edge from inside it, which is
+        # what makes this aim survivable; see there.
+        return target.world_y
     dy = abs(target.world_y - actor.world_y)
     gated = _lane_offset_while_closing(actor, target)
     hold_offset = gated if gated is not None else WALK_TO_ENEMY_LANE_SAFETY_Y
@@ -1766,6 +1779,35 @@ def _souther_slash_sidestep_target(
     toward = (
         _souther_pocket_aim_x(actor, souther) if clear_of_the_claw else actor.world_x
     )
+
+    if not clear_of_the_claw:
+        # **Inside the claw, leave by its nearest edge** -- not by the sign of
+        # dy. With the approach aligned on his lane (user: "eu quero que o Y
+        # do inimigo e do jogador se alinhem") the actor is inside this band
+        # whenever he commits, and a bare sign test sent an actor two px
+        # below him out through the claw's *deep* side: 44px against the
+        # shallow side's 24. Measured, that is how the aligned approach lost
+        # every life: 48 of 78 hits with the actor below him, most straight
+        # after twenty ticks of dodging that never finished the step.
+        #
+        # The "never cross to the cheap side" rule below exists because
+        # crossing his lane from *outside* the band walks its whole width;
+        # from inside it there is no width left to walk, only the distance to
+        # each edge. Self-reinforcing like `_pit_dodge_target_y`: moving
+        # toward the chosen edge only makes it cheaper, so the pick cannot
+        # flip back.
+        up_cost = actor.world_y - above
+        down_cost = below - actor.world_y
+        if can_go_up and up_cost <= down_cost:
+            return actor.world_x, int(above)
+        if can_go_down and down_cost < up_cost:
+            return actor.world_x, int(below)
+        # Only the long way out is left: he stands in the band's top rows, so
+        # there is no shallow exit, and the deep one is the claw's full width.
+        # Go forward instead, into the pocket -- inside `$18` he cannot begin
+        # a claw, `$161C6` cannot resolve one, and across every batch this
+        # project has recorded not one hit has landed there.
+        return _souther_pocket_aim_x(actor, souther), actor.world_y
 
     dy = actor.world_y - souther.world_y
     # Which side, and never the cheap one when the actor is on the other:
