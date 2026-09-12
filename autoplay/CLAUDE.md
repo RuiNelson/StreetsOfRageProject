@@ -23,26 +23,16 @@ cannot reach from, not the plan; never a grounded B — standing still is
 `$16EAE`'s kick trigger; dodge only a kick/dash that is already locked in;
 and see **Holding a boss** below, without which the walk-in succeeded and
 the AI then stood in the hold until the round clock killed it.
-Souther is **chase → grab → knee, knee, ... → suplex, with every safety
-protection cut to the minimum** (user: "tem muita precaução, simplesmente tem
-de ir atrás do boss e tentar agarrá-lo! Reduzir as proteções de segurança ao
-mínimo com o boss do nível 2"): no lane offset at any distance, the router no
-longer plans around his own reach on the way in, and the AI never retreats
-from him. Only the committed-claw dodge is left, sized off the claw's own box.
-The approach **lines up on his lane from the start** (user, watching:
-"o problema começa logo quando ela não se coloca em linha com o boss no eixo
-Y") -- a hold only connects within `GRAB_RANGE_Y` of his lane, and a variant
-that kept its own lane instead measured a mean of 3.1 hits over ten fights,
-one of them 16, with the first hold slipping to 3-6 s in half of them. That
-variant existed because the stability harness showed convergence fighting
-`DodgeSoutherSlash` over the lane axis; the harness was right about the
-mechanism and wrong about the tempo -- it cycled the claw 4 ticks on / 4 off,
-while this session's own traces measure committed runs at a median of 71 ticks
-(shortest real one 21) and free runs at 157. At the real tempo convergence is
-one dodge-and-return per claw, and the fixture now uses it. The pure chase measured much worse once, before the claw-box
-dodge, the X-freeze fix and the arrival fix; see **The fifth attempt** for
-that run and the four bugs that made the old corridor *look* like a
-stalemate. The police
+Souther is **corridor in → grab → knee, knee, ... → suplex**: hold a lane
+offset wider than his `$1C` slash gate while closing X, hand the lane over at
+his own `$18` inner abort, and take the hold from inside that pocket -- where
+`$15EDA` cannot commit and `$161C6` cannot resolve -- then knee and suplex.
+The hop is **removed** entirely (he counters jump attacks outright) and
+evasion is cut back to the one thing that has to be evaded: an already
+committed claw, answered by a lane step just wide enough that `$161C6`
+cannot resolve. Walking straight down his lane instead was tried and
+measured much worse (see **The fifth attempt**), where the four bugs that
+made the corridor *look* like a stalemate are also recorded. The police
 special is **not** spent on him below "about to die" -- the call freezes the
 caller for the length of his own longest helpless window, which is worth
 more as a grab-and-suplex than as the flat 10 damage the special buys alone.
@@ -568,6 +558,39 @@ Shorter fights with more hits means a higher damage rate, which is the wrong
 trade. The likely reason is worth keeping: **that strike is what puts him in
 hitstun, and the hitstun is the window the grab lives in** -- refusing it makes
 the fight more predictable and more expensive at the same time.
+
+**Chasing him with every protection cut: two variants, both measured and
+reverted** (user: "tem muita precaução, simplesmente tem de ir atrás do boss e
+tentar agarrá-lo! Reduzir as proteções de segurança ao mínimo"; then, watching
+the first variant: "o problema começa logo quando ela não se coloca em linha
+com o boss no eixo Y"). Both variants dropped the corridor at every distance,
+stopped the router planning around his reach on the way in, and refused
+`RetreatFromDanger` against him; only the committed-claw dodge stayed.
+
+| variant | fights | hits | lives lost |
+| --- | --- | --- | --- |
+| reference (corridor + arrival fix) | 20 | mean 2.15, worst 7 | 2 |
+| keep own lane, converge only at `$18` | 10 (stopped) | 0,2,0,1,4,0,3,1,**16**,4 -- mean 3.1 | 5 |
+| **line up on his lane from the start** | 5 (stopped) | **15,16,16,16,17** | **19 -- game over in all five** |
+
+The first variant is what the user saw and was right about: holding its own
+lane, the actor could not take a hold (which needs `GRAB_RANGE_Y`) until the
+very end, and the first hold slipped to 3-6 s in half the fights. The second
+is what that points at, and it is the worst configuration ever measured here.
+Of its 80 hits, 79 land in the claw's wind-up (`$02`/tactical 0) and 72 at
+64-104px -- inside `$15EDA`'s commit band -- and 51 land 25-32px *below* his
+lane, frequently right after thirty ticks of `DodgeSoutherSlash`: the dodge
+takes the deep side whenever the actor is already below him, and the deep side
+of the claw reaches +28 (+36 with half a body), a 44px step the wind-up does
+not leave time for. **Being on his lane anywhere between 24 and 104px is
+standing in his commit gate**, and he uses it every cycle. That is the job the
+corridor does, whatever else was wrong with it.
+
+One thing from these runs is kept: `test_alternating_commitment_does_not_
+chatter_the_lane` cycled the claw 4 ticks on / 4 off as "roughly the real
+cadence", and this session's traces measure committed runs at a median of 71
+ticks (p25 38, shortest real one 21) and free runs at 157. The fixture now
+cycles at 21/21, the fastest tempo actually observed.
 
 **Holding him until the suplex would kill: tried, measured worse, reverted.**
 The attribution after the corridor fix is unambiguous about where the damage

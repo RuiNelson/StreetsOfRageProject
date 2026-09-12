@@ -913,19 +913,29 @@ def _lane_offset_while_closing(actor: Myself | Partner, target: Enemy) -> int | 
         return None
     if isinstance(target, Antonio):
         return ANTONIO_APPROACH_LANE_Y
-    # **Souther holds no offset at all** (user: "tem muita precaucao,
-    # simplesmente tem de ir atras do boss e tentar agarra-lo! Reduzir as
-    # protecoes de seguranca ao minimo com o boss do nivel 2"). What denies
-    # `$15EDA` is the pocket (`+$50 < $18`), and the pocket is reached on X.
-    # `$15F98 (souther_state1_standoff)` closes lane at 4px per 60Hz frame
-    # against the 2-3px an agent tick of walking buys, so an offset is
-    # something the approach can arrive at and never something it can hold.
-    #
-    # The pure chase measured much worse once (400%/500%, 3-4 lives) and is
-    # re-run rather than re-argued, because the three things that made it
-    # fail have since been fixed: the dodge was sized off the wrong gate and
-    # froze X, and the approach stopped *on* `$15EDA`'s inner abort rather
-    # than inside it. See autoplay/CLAUDE.md.
+    if isinstance(target, Souther):
+        if is_punishable(target.combat_phase) or target.strike_is_committed():
+            # `$15EDA` is not on the call path of the hit reaction `$03`, the
+            # lethal gate `$05`, the police reaction `$0A`, or the committed
+            # claw. These are 47% of his ticks and the only ground a hold can
+            # be taken from; holding the offset through them parked the actor
+            # at dx=76, dl=26 for 1136 ticks of a 3669-tick trace while
+            # `grab_would_connect` was true on 11.
+            return None
+        if abs(target.world_x - actor.world_x) >= SOUTHER_SLASH_DIST_CLOSING:
+            return None
+        # The offset does **not** widen while he closes lane, though the
+        # arithmetic for it is tempting and was shipped once. `$15F98
+        # (souther_state1_standoff)` closes at 4px per 60Hz frame against the
+        # 2-3px an agent tick of walking buys, so widening is a race the
+        # actor loses by construction -- it spends ticks moving away in lane,
+        # gains nothing, and does it exactly when the X gap most needs
+        # closing. Measured over the batch that followed the claw-box dodge:
+        # the two fights that reached 200% took **14.3s and 16.9s** to land a
+        # first hold, against 1.69-3.36s in the four cheap ones, and 43% of
+        # all hits taken now arrive *before* that first hold. The pocket, not
+        # the lane, is what denies `$15EDA` -- and the pocket is reached on X.
+        return SOUTHER_APPROACH_LANE_Y
     return None
 
 
@@ -985,13 +995,6 @@ def _approach_lane_y(
     """
 
     if alongside or grab_reasons(context, actor, target, []) & _ON_PUNISH_GRAB_REASONS:
-        return target.world_y
-    if isinstance(target, Souther) and not target.is_defeated:
-        # The chase lines up on his lane **from the start** (user, watching
-        # a fight: "o problema comeca logo quando ela nao se coloca em linha
-        # com o boss no eixo Y"). A hold only connects within GRAB_RANGE_Y of
-        # his lane, so every tick spent off it is a tick the grab cannot
-        # happen -- see the chase notes in autoplay/CLAUDE.md.
         return target.world_y
     dy = abs(target.world_y - actor.world_y)
     gated = _lane_offset_while_closing(actor, target)
@@ -1336,17 +1339,7 @@ def state_machine_walk_to_near_enemy(
         context,
         body=body,
         origin=origin,
-        # A live Souther is exempt for the **whole** approach, not only once
-        # alongside. His own reach box is the ground the chase walks into on
-        # purpose, and leaving him in the danger set makes the router plan
-        # around the very place the hold is taken from (user: "reduzir as
-        # protecoes de seguranca ao minimo com o boss do nivel 2"). Every
-        # *other* live enemy still counts.
-        ignore_enemy_slots=(
-            frozenset({target.slot})
-            if alongside or (isinstance(target, Souther) and not target.is_defeated)
-            else frozenset()
-        ),
+        ignore_enemy_slots=frozenset({target.slot}) if alongside else frozenset(),
     )
 
     def straight_line() -> int:

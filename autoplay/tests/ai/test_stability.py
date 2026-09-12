@@ -701,17 +701,9 @@ class SoutherStabilityTests(unittest.TestCase):
         # committed, 21 free. Measured over ten live round-2 traces, $16118
         # (souther_state2_claw_commit) runs have a median of 71 ticks (p25 38)
         # and the free runs between them 157; no real committed run is
-        # shorter than 21 apart from a single 2-tick outlier.
-        #
-        # This fixture used to cycle 4 on / 4 off -- "roughly the real
-        # cadence", which the traces put at about eighteen times too fast.
-        # At that tempo the approach and the dodge could never finish a
-        # single lane move between them, so any approach that lines up on
-        # his lane read as chatter and the fixture forbade it, which is how
-        # an approach that would not align on Y shipped (user: "o problema
-        # comeca logo quando ela nao se coloca em linha com o boss no eixo
-        # Y"). At the real tempo lining up costs one dodge-and-return per
-        # claw: 3 lane reversals over these two cycles, none on X.
+        # shorter than 21 apart from a single 2-tick outlier. This fixture
+        # used to cycle 4 on / 4 off -- "roughly the real cadence", which the
+        # traces put at about eighteen times too fast.
         masks, _ = _run_souther(
             ticks=84,
             actor_x=100,
