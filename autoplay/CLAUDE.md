@@ -617,6 +617,24 @@ rows -- the ordinary corridor applies unchanged. `boss_fight.py` now logs
 absolute `p1_x`/`p1_y`/`boss_x`/`boss_y` per tick so a batch can say how
 often that fallback is what actually runs.
 
+Measured first with the aim *on* the clearance, and it came out worse than
+the reference -- mean 3.15 hits over twenty fights against 2.15, 4 lives
+against 2 -- for a reason the new absolute positions show exactly. **34 of
+the 63 hits landed with the actor above him at dy -9, -10 or -11**: the
+routed goal is a band, aim +/- `PUNCH_RANGE_Y`, the actor settles on its
+nearest edge, and -22 + 12 is -10 -- where its body reaches into the claw's
+shallow edge. The aim now sits one lane-slack further out, so the band's
+near edge is the clearance itself, and
+`test_the_approach_band_stays_clear_of_the_claw` pins it. It is the same
+class of bug as `PLAYER_BODY_HALF_X`: a region measured one way, a ROM gate
+measured another. The old 48px corridor never showed it only because its
+near edge (36) still happened to fall outside the claw.
+
+The other 20 hits are the fallback: in **39% of fight ticks there was no
+room above him** (he stands above lane 30), the ordinary corridor ran, and
+those hits all landed on the deep side. That is a separate, still open
+problem.
+
 **Holding him until the suplex would kill: tried, measured worse, reverted.**
 The attribution after the corridor fix is unambiguous about where the damage
 now is -- entrance hits **0%**, and **74% of every hit taken within four

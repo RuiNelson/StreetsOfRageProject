@@ -1024,10 +1024,21 @@ def _approach_lane_y(
         # reach, and a whiffed commit is a ~71-tick cycle he spends while the
         # actor keeps closing. With no room above him -- he fights from the
         # top rows of the band -- the ordinary corridor below still applies.
+        #
+        # **The aim is one lane-slack further out than the clearance**, and
+        # that is not a margin: the routed goal is a band, aim +/-
+        # PUNCH_RANGE_Y, and the actor settles at the band's *nearest* edge.
+        # Aimed at the clearance itself, that edge sat 12px inside it -- 10px
+        # above his lane, where the actor's body reaches into the claw's
+        # shallow edge (6px, 14 with half a body). Measured over twenty
+        # fights of exactly that: **34 of 63 hits landed with the actor
+        # above him at dy -9, -10 or -11**, the band's near edge to the
+        # pixel. The same class of bug as `PLAYER_BODY_HALF_X` on the other
+        # axis: the region is measured one way and the ROM another.
         lo, _hi = _lane_bounds(context)
-        above = target.world_y - SOUTHER_CLAW_CLEARANCE_ABOVE
-        if above >= lo:
-            return int(above)
+        near_edge = target.world_y - SOUTHER_CLAW_CLEARANCE_ABOVE
+        if near_edge >= lo:
+            return int(near_edge - PUNCH_RANGE_Y)
     dy = abs(target.world_y - actor.world_y)
     gated = _lane_offset_while_closing(actor, target)
     hold_offset = gated if gated is not None else WALK_TO_ENEMY_LANE_SAFETY_Y
