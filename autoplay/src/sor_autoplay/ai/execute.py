@@ -987,25 +987,12 @@ def _approach_lane_y(
     if alongside or grab_reasons(context, actor, target, []) & _ON_PUNISH_GRAB_REASONS:
         return target.world_y
     if isinstance(target, Souther) and not target.is_defeated:
-        # The chase: **no offset, and no convergence either** -- hold whatever
-        # lane the actor already has and spend every tick on X.
-        #
-        # Aiming at his own lane is the obvious reading of "go straight at
-        # him" and it does not work, for a reason the tick harness shows in
-        # one run: `DodgeSoutherSlash` steps *off* his lane and this would
-        # step back *onto* it, so with him committing and un-committing every
-        # few ticks the two verbs fight over the lane axis and the actor
-        # oscillates in place -- 9 direction reversals in 40 ticks against a
-        # budget of 4 (`test_alternating_commitment_does_not_chatter_the_
-        # lane`). That is what the first chase attempt's 549 dodge ticks a
-        # fight were, and it neither closes nor evades.
-        #
-        # Holding the current lane agrees with the dodge instead of fighting
-        # it: after a lane step the actor keeps the ground it just bought and
-        # converts it into X. The lane itself is taken at the end, by
-        # `_lane_release_dx` at his own `$18` inner abort, which is where the
-        # hold is taken from anyway.
-        return actor.world_y
+        # The chase lines up on his lane **from the start** (user, watching
+        # a fight: "o problema comeca logo quando ela nao se coloca em linha
+        # com o boss no eixo Y"). A hold only connects within GRAB_RANGE_Y of
+        # his lane, so every tick spent off it is a tick the grab cannot
+        # happen -- see the chase notes in autoplay/CLAUDE.md.
+        return target.world_y
     dy = abs(target.world_y - actor.world_y)
     gated = _lane_offset_while_closing(actor, target)
     hold_offset = gated if gated is not None else WALK_TO_ENEMY_LANE_SAFETY_Y

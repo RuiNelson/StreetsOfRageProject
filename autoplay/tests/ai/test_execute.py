@@ -547,21 +547,20 @@ class SoutherPocketApproachTests(unittest.TestCase):
         self.assertLess(stop_dx, SOUTHER_SLASH_DIST_MIN)
         self.assertGreaterEqual(stop_dx, punch_usable_inner_x(0))
 
-    def test_the_approach_holds_no_offset_and_keeps_its_own_lane(self) -> None:
-        # The chase (user: "simplesmente tem de ir atras do boss e tentar
-        # agarra-lo! Reduzir as protecoes de seguranca ao minimo"). No
-        # deliberate offset is held on the way in -- and no convergence
-        # either, which is the half that is not obvious: aiming at his lane
-        # makes the approach fight DodgeSoutherSlash over the lane axis every
-        # time he commits, and the actor oscillates in place. Holding the
-        # current lane agrees with the dodge and spends the tick on X.
+    def test_the_approach_lines_up_on_his_lane_from_the_start(self) -> None:
+        # User, watching a fight: "o problema comeca logo quando ela nao se
+        # coloca em linha com o boss no eixo Y". A hold only connects within
+        # GRAB_RANGE_Y of his lane, so an approach that keeps its own lane
+        # cannot take the hold until the very end -- measured, holding the
+        # lane put the first hold at 3-6 s in half the fights and produced a
+        # 16-hit fight. No offset and no lane-hold: his lane is the aim.
         souther = self._souther(world_x=120, world_y=40)
 
         for actor_y in (100, 80, 70, 10):
             with self.subTest(actor_y=actor_y):
                 actor = _myself(world_x=40, world_y=actor_y)
                 _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
-                self.assertEqual(target_y, actor.world_y)
+                self.assertEqual(target_y, souther.world_y)
 
     def test_the_arrival_lands_inside_the_gate_not_on_it(self) -> None:
         # The $18 inner abort has to be unsatisfied where the actor actually
@@ -3290,7 +3289,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class SoutherApproachHoldsNoOffsetTests(unittest.TestCase):
+class SoutherApproachLinesUpOnHisLaneTests(unittest.TestCase):
     """The corridor is gone entirely (user: "reduzir as protecoes de seguranca
     ao minimo com o boss do nivel 2").
 
@@ -3316,7 +3315,7 @@ class SoutherApproachHoldsNoOffsetTests(unittest.TestCase):
         fields.update(overrides)
         return Souther(**fields)
 
-    def test_no_offset_at_any_distance_or_tactical(self) -> None:
+    def test_his_lane_at_any_distance_or_tactical(self) -> None:
         for dx in (40, 90, 160):
             for tactical in (0x00, 0x01, 0x02):
                 with self.subTest(dx=dx, tactical=tactical):
@@ -3327,7 +3326,7 @@ class SoutherApproachHoldsNoOffsetTests(unittest.TestCase):
                         actor, souther, {actor, souther}
                     )
 
-                    self.assertEqual(target_y, actor.world_y)
+                    self.assertEqual(target_y, souther.world_y)
 
     def test_a_punishable_souther_is_walked_straight_at(self) -> None:
         for primary, phase in (

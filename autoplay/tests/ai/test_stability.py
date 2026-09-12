@@ -697,15 +697,28 @@ class SoutherStabilityTests(unittest.TestCase):
     """
 
     def test_alternating_commitment_does_not_chatter_the_lane(self) -> None:
-        # Four ticks committed, four not -- roughly the real cadence of
-        # $16118 (souther_state2_claw_commit) resolving and re-arming.
+        # The claw at the fastest tempo the game actually produces: 21 ticks
+        # committed, 21 free. Measured over ten live round-2 traces, $16118
+        # (souther_state2_claw_commit) runs have a median of 71 ticks (p25 38)
+        # and the free runs between them 157; no real committed run is
+        # shorter than 21 apart from a single 2-tick outlier.
+        #
+        # This fixture used to cycle 4 on / 4 off -- "roughly the real
+        # cadence", which the traces put at about eighteen times too fast.
+        # At that tempo the approach and the dodge could never finish a
+        # single lane move between them, so any approach that lines up on
+        # his lane read as chatter and the fixture forbade it, which is how
+        # an approach that would not align on Y shipped (user: "o problema
+        # comeca logo quando ela nao se coloca em linha com o boss no eixo
+        # Y"). At the real tempo lining up costs one dodge-and-return per
+        # claw: 3 lane reversals over these two cycles, none on X.
         masks, _ = _run_souther(
-            ticks=40,
+            ticks=84,
             actor_x=100,
             actor_y=60,
             souther_x=180,
             souther_y=60,
-            states=[(2, 2)] * 4 + [(1, 0)] * 4,
+            states=[(2, 2)] * 21 + [(1, 0)] * 21,
         )
         self.assertLessEqual(
             _reversals(masks, DOWN, UP),

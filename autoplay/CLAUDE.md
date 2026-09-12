@@ -29,10 +29,17 @@ de ir atrás do boss e tentar agarrá-lo! Reduzir as proteções de segurança a
 mínimo com o boss do nível 2"): no lane offset at any distance, the router no
 longer plans around his own reach on the way in, and the AI never retreats
 from him. Only the committed-claw dodge is left, sized off the claw's own box.
-The approach **holds whatever lane it already has** rather than converging on
-his -- converging made it fight `DodgeSoutherSlash` over the lane axis (9
-reversals in 40 ticks on the stability harness), which is oscillation, not
-aggression. The pure chase measured much worse once, before the claw-box
+The approach **lines up on his lane from the start** (user, watching:
+"o problema começa logo quando ela não se coloca em linha com o boss no eixo
+Y") -- a hold only connects within `GRAB_RANGE_Y` of his lane, and a variant
+that kept its own lane instead measured a mean of 3.1 hits over ten fights,
+one of them 16, with the first hold slipping to 3-6 s in half of them. That
+variant existed because the stability harness showed convergence fighting
+`DodgeSoutherSlash` over the lane axis; the harness was right about the
+mechanism and wrong about the tempo -- it cycled the claw 4 ticks on / 4 off,
+while this session's own traces measure committed runs at a median of 71 ticks
+(shortest real one 21) and free runs at 157. At the real tempo convergence is
+one dodge-and-return per claw, and the fixture now uses it. The pure chase measured much worse once, before the claw-box
 dodge, the X-freeze fix and the arrival fix; see **The fifth attempt** for
 that run and the four bugs that made the old corridor *look* like a
 stalemate. The police
