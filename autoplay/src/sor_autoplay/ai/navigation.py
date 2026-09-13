@@ -173,23 +173,43 @@ def lane_bounds(context: Context) -> tuple[float, float]:
     return float(LANE_Y_MIN), float(lane_max)
 
 
-def world_rect(context: Context) -> Rect:
+def world_rect(
+    context: Context,
+    *,
+    body: Rect | None = None,
+    origin: tuple[float, float] | None = None,
+) -> Rect:
     """The rectangle a route may be planned inside.
 
     Vertically the level's own lane band. Horizontally the camera, which is
     what the actor can actually reach right now -- ``world_map`` tracks
     entities up to two screens past each edge, and planning across all of
     that would route around things that are not on screen.
+
+    The lane band bounds an *origin* (``$43AA`` clamps the player's position,
+    not its box), while the search moves a *body* and keeps all of it inside
+    the world. Given the actor's ``body`` and ``origin``, the band is
+    restated for that body -- the same conversion ``partner_obstacles`` and
+    ``strike_goal`` make. Drawn round the origin instead, the world left the
+    body of an actor standing on either edge of the band half outside it, the
+    search could not take one step, and ``WalkToAdvanceStage`` held nothing:
+    measured live at round 1's third wave gate (camera ``$0AC0``), the actor
+    at y=2 (``LANE_Y_MIN``) after following a type-``$26`` in from y=0, the
+    camera already scrolling on, frozen on 5 traced walks out of 6 until a
+    human touched the pad or the round clock took a life.
     """
 
-    lo, hi = lane_bounds(context)
+    top, bottom = lane_bounds(context)
+    if body is not None and origin is not None:
+        top += body.top - origin[1]
+        bottom += body.bottom - origin[1]
     camera = find(context, CameraRange)
     if camera is None:
         # No camera token: plan in the lane band alone, wide enough that the
         # bounds never clip a goal. Better an unbounded X than a guessed one.
-        return Rect(-1e6, lo, 2e6, hi - lo)
+        return Rect(-1e6, top, 2e6, bottom - top)
     left = camera.left - WORLD_MARGIN_X
-    return Rect(left, lo, (camera.right + WORLD_MARGIN_X) - left, hi - lo)
+    return Rect(left, top, (camera.right + WORLD_MARGIN_X) - left, bottom - top)
 
 
 class _OriginRule:
@@ -625,8 +645,8 @@ def plan_route(
     best effort without it.
     """
 
-    world = world_rect(context)
     body = body_rect(actor)
+    world = world_rect(context, body=body, origin=(float(actor.world_x), float(actor.world_y)))
     options = dict(
         start=body,
         goal=goal,

@@ -20,7 +20,7 @@ from sor_autoplay.ai.tokens import (
 from sor_autoplay.ai.reach import PIT_AVOID_MARGIN
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.hitboxes import Hitbox
-from sor_autoplay.world_map import LANE_Y_MIN
+from sor_autoplay.world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN
 from sor_autoplay import prop_solids
 
 
@@ -114,6 +114,69 @@ class WorldRectTests(unittest.TestCase):
         lookahead_x = actor_x + 40  # WalkToAdvanceStage's fixed lookahead
 
         self.assertLessEqual(lookahead_x, world.right)
+
+    def test_bounds_the_origin_and_holds_the_body(self) -> None:
+        # $43AA clamps the player's position to the lane band; the search
+        # moves the body, whose box reaches 8px either side of it (Blaze's
+        # live box at the round-1 gate).
+        actor = _myself(
+            world_x=3036,
+            world_y=LANE_Y_MIN,
+            hitbox=Hitbox(x0=3038, x1=3048, y0=LANE_Y_MIN - 8, y1=LANE_Y_MIN + 8, z0=112, z1=160),
+        )
+        body, origin = nav.actor_footprint(actor)
+        world = nav.world_rect({Stage(level_index=0, direction="right")}, body=body, origin=origin)
+
+        self.assertEqual(world.top, LANE_Y_MIN - 8)
+        self.assertEqual(world.bottom, LANE_Y_MAX_DEFAULT + 8)
+
+
+class LaneBandEdgeTests(unittest.TestCase):
+    """A route out from either edge of the lane band.
+
+    Recorded live at round 1's third wave gate (camera ``$0AC0``): the actor
+    had followed a type-``$26`` in from y=0 up to ``LANE_Y_MIN``, the sweep
+    killed it and the camera scrolled on, and ``plan_route`` came back with no
+    steps and ``reached=False`` on every tick -- the body stuck out of a world
+    drawn round the origin's band. ``WalkToAdvanceStage`` held nothing until a
+    human touched the pad.
+    """
+
+    def _route(self, world_y: int):
+        actor = _myself(
+            world_x=3036,
+            world_y=world_y,
+            hitbox=Hitbox(x0=3038, x1=3048, y0=world_y - 8, y1=world_y + 8, z0=112, z1=160),
+        )
+        context = {
+            actor,
+            Stage(level_index=0, direction="right"),
+            CameraRange(left=2892, right=3148, top=0, bottom=112),
+        }
+        body, origin = nav.actor_footprint(actor)
+        solids = nav.solid_obstacles(context, body=body, origin=origin)
+        goal = nav.advance_goal(context, actor.world_x + 40)
+        return nav.plan_route(context, actor, goal, solids=solids)
+
+    def test_walks_on_from_the_top_edge(self) -> None:
+        path = self._route(LANE_Y_MIN)
+
+        self.assertTrue(path.reached)
+        self.assertIs(path.steps[0].direction, nav.Direction.RIGHT)
+
+    def test_walks_on_from_the_bottom_edge(self) -> None:
+        path = self._route(LANE_Y_MAX_DEFAULT)
+
+        self.assertTrue(path.reached)
+        self.assertIs(path.steps[0].direction, nav.Direction.RIGHT)
+
+    def test_never_plans_the_origin_off_the_band(self) -> None:
+        # Holding the body is not licence to walk the origin past the clamp.
+        path = self._route(LANE_Y_MIN)
+        origin_offset = path.start.top - LANE_Y_MIN
+
+        for rect in path.positions():
+            self.assertGreaterEqual(rect.top - origin_offset, LANE_Y_MIN)
 
 
 class ObstacleTests(unittest.TestCase):

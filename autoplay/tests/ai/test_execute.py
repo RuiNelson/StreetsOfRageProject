@@ -87,6 +87,7 @@ from sor_autoplay.ai.tokens import (
     WalkToWeapon,
 )
 from sor_autoplay.phases import CombatPhase
+from sor_autoplay.world_map import LANE_Y_MIN
 
 UP = 0x0001
 DOWN = 0x0002
@@ -507,7 +508,12 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         # and converges onto the enemy's lane -- the only branch that aims at
         # the enemy's own Y. Further out it holds its own lane instead, so
         # that the lane aim cannot depend on the enemy's combat phase (see
-        # _walk_to_near_enemy_target).
+        # _walk_to_near_enemy_target). The route reaches that lane first and
+        # only then turns along X (find_path's Y-then-X finish), so the first
+        # vector is UP. It read LEFT|UP while the planner's world was drawn
+        # round the origin's band: an enemy at y=0 needs the body above
+        # LANE_Y_MIN, the search spent its whole node budget without
+        # arriving, and a best-effort diagonal came back.
         actor = _myself(world_x=44, world_y=50)
         target = _enemy(world_x=0, world_y=0)
         context = {actor, target}
@@ -516,7 +522,7 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
 
         _settle(verb, context, gamepad)
 
-        client.hold_buttons.assert_called_with(player1=LEFT | UP, player2=0)
+        client.hold_buttons.assert_called_with(player1=UP, player2=0)
 
     def test_lane_aim_does_not_depend_on_the_enemys_phase(self) -> None:
         # Regression: the lane aim must not depend on the enemy's combat
@@ -1232,6 +1238,23 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
         gamepad, client = _gamepad()
 
         _settle(verb, {actor}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+    def test_walks_on_from_the_top_edge_of_the_lane_band(self) -> None:
+        # Live, round 1's third wave gate: the actor at y == LANE_Y_MIN with
+        # the camera already scrolling on held nothing on every tick, since
+        # its body stuck out of the planner's world (navigation.world_rect).
+        actor = _myself(world_x=3036, world_y=LANE_Y_MIN)
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        gamepad, client = _gamepad()
+        context = {
+            actor,
+            Stage(level_index=0, direction="right"),
+            CameraRange(left=2892, right=3148, top=0, bottom=112),
+        }
+
+        _settle(verb, context, gamepad)
 
         client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
 
@@ -2829,6 +2852,10 @@ def _swinging_enemy_ahead(world_x: int, world_y: int) -> Enemy:
 
 class ExecuteWalkToWeaponTests(unittest.TestCase):
     def test_holds_movement_when_far_from_weapon(self) -> None:
+        # A real route, lane first and then X (find_path's Y-then-X finish).
+        # It read RIGHT|DOWN while the planner's world was drawn round the
+        # origin's band: a body at y=0 started outside it, the search came
+        # back empty, and the straight-line fallback supplied the diagonal.
         actor = _myself(world_x=0, world_y=0)
         weapon = Weapon(slot="obj05", world_x=100, world_y=100, weapon_type=0x08)
         verb = WalkToWeapon(actor_slot="P1", target_slot="obj05")
@@ -2836,7 +2863,7 @@ class ExecuteWalkToWeaponTests(unittest.TestCase):
 
         _settle(verb, {actor, weapon}, gamepad)
 
-        client.hold_buttons.assert_called_with(player1=RIGHT | DOWN, player2=0)
+        client.hold_buttons.assert_called_with(player1=DOWN, player2=0)
 
     def test_presses_punch_when_adjacent(self) -> None:
         actor = _myself(world_x=0, world_y=0)

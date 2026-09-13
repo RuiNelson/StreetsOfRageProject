@@ -518,6 +518,26 @@ camera walk clamp. `in_smash_range` must use the punch box's own ±8 lane
 extent -- 16 fired B from a corner the box cannot reach, so the booth
 never broke.
 
+**Frozen on the edge of the lane band (user):** "in round 1 the AI stops
+in the middle of the level, no enemies, and will not walk on until I touch
+the pad". Traced at round 1's third wave gate (camera `$0AC0`, the player
+clamped at x=3036): the actor follows a type-`$26` that enters at y=0 up to
+`LANE_Y_MIN`, the sweep kills it, the camera scrolls on -- and
+`WalkToAdvanceStage` held `0x0` on every tick. 5 traced walks of 6 froze
+there for the 25 s the trace allowed; scored runs lost a life to the round
+clock. The lane band bounds the *origin* (`$43AA`), but `pathfind` keeps
+the whole *body* inside `world_rect`, so a body reaching 8 px past an
+origin on either edge of the band started outside the world and the search
+could not take one step (`steps=()`, `reached=False`).
+`world_rect(body=, origin=)` now restates the band for the body, the
+conversion `partner_obstacles` and `strike_goal` already make. After it,
+the 3 traced walks of 6 that reached y=2-3 (115-205 ticks there) never got
+an empty route and all walked on. Two executor tests that expected a
+diagonal had encoded the bug: their goal, at y=0, lay outside the old world.
+The wait *before* that gate opens is the ROM, not the AI: the player is
+held at `camera_x+$120` until the wave's six spawns -- swept, so never on
+screen -- are dead, about 5-7 s at turbo 4.
+
 **Target ranking (user):** `WalkToAdvanceStage` always has the lowest
 emergency of any verb that still scores. Among enemy targets, a `Boss`
 outranks an armed ordinary enemy, and an armed ordinary enemy (pickup
