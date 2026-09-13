@@ -11,6 +11,7 @@ Police special = physical A (0x0010), Jump = physical C (0x0040).
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from contextvars import ContextVar
 
 from .pathfind import Path, Point, PointGoal
@@ -58,7 +59,7 @@ from .tokens import (
     InContinueMenu,
     InMrXDialog,
 )
-from .tokens import Context, Verb, find, find_all
+from .tokens import Context, Dialog, Verb, find, find_all
 from .tokens import (
     DodgeAntonioKick,
     ProjectileSidestep,
@@ -81,6 +82,7 @@ from .decide import (
 from .reach import (
     ANTONIO_KICK_LANE_BREAK,
     PIT_AVOID_MARGIN,
+    PLAYER_CONTACT_LANE_Y,
     REACH_SAFETY_MARGIN,
     enemy_behind_actor,
     enemy_lane_covers,
@@ -90,6 +92,7 @@ from .reach import (
     incoming_melee_targets,
     live_enemies,
     pit_endangers,
+    walking_box_would_grab,
 )
 from .. import prop_solids
 from ..phases import is_dangerous, is_punishable
@@ -1728,9 +1731,19 @@ def state_machine_walk_to_advance_stage(
     # and matches exactly what the pre-routing ad-hoc dodge already avoided
     # for this verb, so nothing about its danger handling regresses; only
     # the breakable/pit detour quality improves.
+    #
+    # The one danger it does take is the partner's grab zone
+    # (nav.partner_obstacles). The failure above needs a danger big enough
+    # to contain the strip, and the strip spans every lane while the zone is
+    # about two bodies tall, so a way round it exists wherever the lane band
+    # has room. Without it a partner standing on the actor's lane ahead was a
+    # wall execute_tick's partner guard stopped the actor at, not something
+    # the route went round.
     body, origin = nav.actor_footprint(actor)
     solids = nav.solid_obstacles(context, body=body, origin=origin)
-    path = nav.plan_route(context, actor, goal, solids=solids, dangers=())
+    path = nav.plan_route(
+        context, actor, goal, solids=solids, dangers=nav.partner_obstacles(context)
+    )
     sink = _ROUTE_TRACE.get()
     if sink is not None:
         sink[actor.slot] = path
@@ -2626,6 +2639,157 @@ def _pit_escape_mask(context: Context, actor: Myself) -> int | None:
     return None
 
 
+_DIRECTION_MASKS = UP_MASK | DOWN_MASK | LEFT_MASK | RIGHT_MASK
+
+
+def _walk_steps(mask: int) -> tuple[int, int]:
+    """The walk ``mask`` asks for, read the way the ROM reads it: ``$2D00``
+    sends a pad with both X bits to Right and both lane bits to Up."""
+
+    step_x = 1 if mask & RIGHT_MASK else -1 if mask & LEFT_MASK else 0
+    step_y = -1 if mask & UP_MASK else 1 if mask & DOWN_MASK else 0
+    return step_x, step_y
+
+
+def _walk_grabs(actor: Myself, partner: Partner, mask: int) -> bool:
+    step_x, step_y = _walk_steps(mask)
+    return walking_box_would_grab(actor, partner, step_x=step_x, step_y=step_y)
+
+
+def _partner_lane_escape(context: Context, actor: Myself, partner: Partner) -> int:
+    """A lane step out of ``partner``'s contact band that takes no hold, or 0.
+
+    Away from their lane first -- the side the actor is already on, or with
+    the two level, the side with more room -- then the other way, each only if
+    the lane has room for a step (``nav.NAV_STEP``, about one tick of walking),
+    the step does not end in a pit's danger zone, and it does not itself reach
+    them: a lane walk keeps the box facing the way the actor faces. Outside
+    the band there is no lane to clear, and 0 -- standing still -- is safe.
+    """
+
+    dy = actor.world_y - partner.world_y
+    if abs(dy) > PLAYER_CONTACT_LANE_Y:
+        return 0
+    lo, hi = _lane_bounds(context)
+    if dy:
+        up_first = dy < 0
+    else:
+        up_first = actor.world_y - lo >= hi - actor.world_y
+    sides = ((UP_MASK, -1), (DOWN_MASK, 1))
+    for mask, sign in sides if up_first else reversed(sides):
+        target_y = actor.world_y + sign * nav.NAV_STEP
+        if not lo <= target_y <= hi:
+            continue
+        if _inside_pit(context, actor.world_x, target_y):
+            continue
+        if _walk_grabs(actor, partner, mask):
+            continue
+        return mask
+    return 0
+
+
+def _keep_off_partner(context: Context, actor: Myself, partner: Partner, mask: int) -> int:
+    """``mask``, minus any walk that would take hold of ``partner``.
+
+    The rule the executor puts on every mask while a partner is on screen
+    (``_PartnerSafeGamepad``): the walking box must not reach their body
+    (``reach.walking_box_would_grab`` -- a walk into the other player is a
+    hold on them, ``$4478``). Only a pure D-pad mask is judged. Anything with
+    A, B or C in it is a strike, a jump or a hold move rather than a walk,
+    and whether *that* lands on the partner is ``partner.do_not_harm_partner``'s
+    question.
+
+    What survives, in order: the walk without its X step toward them -- the
+    press that turns the box onto them, which is the case right after
+    ``ReleasePartner``, since the ROM's release leaves the actor facing away;
+    then without its lane step toward their lane as well, since a lane walk
+    keeps the box facing the way it already faces; then, while the actor
+    still stands inside their contact band, a lane step out of it -- the pit
+    dodge's "freeze X, clear the lane first", so a partner planted on the
+    actor's lane is gone round rather than waited behind; and failing all of
+    that, nothing, the one input ``$4478`` can never turn into a hold.
+    """
+
+    if not mask & _DIRECTION_MASKS or mask & ~_DIRECTION_MASKS:
+        return mask
+    if not _walk_grabs(actor, partner, mask):
+        return mask
+    if partner.world_x > actor.world_x:
+        toward_x = RIGHT_MASK
+    elif partner.world_x < actor.world_x:
+        toward_x = LEFT_MASK
+    else:
+        toward_x = LEFT_MASK | RIGHT_MASK
+    if partner.world_y > actor.world_y:
+        toward_y = DOWN_MASK
+    elif partner.world_y < actor.world_y:
+        toward_y = UP_MASK
+    else:
+        toward_y = 0
+    for candidate in (mask & ~toward_x, mask & ~(toward_x | toward_y)):
+        if candidate and not _walk_grabs(actor, partner, candidate):
+            return candidate
+    return _partner_lane_escape(context, actor, partner)
+
+
+class _PartnerSafeGamepad:
+    """The pad a verb handler drives while a partner is on screen.
+
+    Every mask goes through ``_keep_off_partner`` *before* it reaches the link.
+    Stripping it after the handler would be too late: the handler's own
+    ``hold_buttons`` has already gone out by then, and a vblank between the two
+    calls is a walking frame with the box on the partner.
+    """
+
+    def __init__(self, gamepad: VirtualGamepad, keep: Callable[[int], int]) -> None:
+        self._gamepad = gamepad
+        self._keep = keep
+
+    @property
+    def player_index(self) -> int:
+        return self._gamepad.player_index
+
+    @property
+    def held(self) -> int:
+        return self._gamepad.held
+
+    def hold(self, mask: int) -> None:
+        self._gamepad.hold(self._keep(int(mask)))
+
+    def press(self, mask: int, *, frames: int = 1) -> None:
+        self._gamepad.press(self._keep(int(mask)), frames=frames)
+
+    def steer_x(self, direction: int) -> int:
+        return self._gamepad.steer_x(direction)
+
+    def release(self) -> None:
+        self._gamepad.release()
+
+
+def _partner_safe_gamepad(
+    verb: Verb, context: Context, actor: Myself | None, gamepad: VirtualGamepad
+):
+    """``gamepad``, wrapped so no walk this tick takes hold of the partner --
+    or ``gamepad`` itself when there is nothing to keep off.
+
+    Not while airborne: a jump reads 2 at ``$45D4``, so it can hit but never
+    grab, and its launch direction is committed. Not while the actor holds a
+    body: in a hold the pad's directions are the release and throw inputs,
+    and ``ReleasePartner``'s back press is exactly one of them (the walk that
+    follows a release is judged on the next tick). Not for a ``Dialog`` verb,
+    whose Up/Down move a menu cursor rather than a body.
+    """
+
+    partner = find(context, Partner)
+    if actor is None or partner is None:
+        return gamepad
+    if actor.is_airborne or actor.is_holding_enemy or isinstance(verb, Dialog):
+        return gamepad
+    return _PartnerSafeGamepad(
+        gamepad, lambda mask: _keep_off_partner(context, actor, partner, mask)
+    )
+
+
 def execute_tick(
     verb: Verb | None,
     context: Context,
@@ -2647,6 +2811,15 @@ def execute_tick(
     apply regardless of which verb -- if any -- won this tick, including
     a plain melee strike or no verb at all, neither of which any Pit token
     reaches otherwise.
+
+    The partner is the second such constraint (``_partner_safe_gamepad``).
+    With another player on screen the winning verb's handler drives a wrapped
+    pad, and every mask it holds or presses loses any walk that would put the
+    walking box on the partner's body before it reaches the link: ``$4478``
+    makes that contact a hold on them, and a hold pins the human however
+    briefly it lasts. The pit escape is not filtered -- a fall costs a life, a
+    grab costs the partner a moment, and the escape refuses categorically to
+    hand back nothing.
 
     ``route_trace``, keyed by actor slot, is filled with the planner's most
     recent :class:`~sor_autoplay.ai.pathfind.Path` whenever a routed handler
@@ -2671,7 +2844,7 @@ def execute_tick(
         if verb is None:
             press_no_button(gamepad)
             return
-        execute_verb(verb, context, gamepad)
+        execute_verb(verb, context, _partner_safe_gamepad(verb, context, actor, gamepad))
     finally:
         if token is not None:
             _ROUTE_TRACE.reset(token)

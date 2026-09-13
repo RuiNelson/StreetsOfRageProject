@@ -948,8 +948,11 @@ the way `priority.py` and `execute.py` already dispatch:
 
 Three families are deliberately *not* filtered. `GrabEnemy` presses nothing
 — that is what makes it a hold rather than a hit (see [Grabbing an
-enemy](#grabbing-an-enemy)) — so its `+$34` is zero and `$4478` has nothing
-to convert. `CallPolice` cannot be
+enemy](#grabbing-an-enemy)) — so its `+$34` is zero and `$4478` has no hit
+to convert. What a walk *can* do to the partner is take hold of them, and
+that is a rule about how the actor moves rather than which verb it runs:
+[`execute_tick`](#execute_tick) keeps every walk's box off the partner,
+whichever verb is walking. `CallPolice` cannot be
 friendly fire at all: `$4478` returns immediately while a police special is
 active. Neither are the two attack-thrown
 weapons (`$21E6 (player_release_thrown_weapon)` issues its throw command for
@@ -1097,6 +1100,38 @@ closes: falling in a pit costs a full life
 (player-health-lives-and-combat.md's `$01C0` fall-boundary check), so this
 is a constraint on how the actor is allowed to move right now — the
 executor's own responsibility — not a competing intent.
+
+It applies a second constraint of the same kind, for the other player.
+With a `Partner` on screen the winning verb's handler drives a wrapped
+gamepad, and every D-pad mask it holds or presses is checked before it
+reaches the link. Walking into the other player is a hold on them (`$4478`;
+see [Knowing that a hold exists at all](#knowing-that-a-hold-exists-at-all)),
+so a walk whose walking box would reach their body within the tick —
+`reach.walking_box_would_grab`, swept over the tick at the character's ROM
+walk speed and the partner's own `+$1C` — loses its X step toward them,
+then its lane step toward their lane, and when neither leaves a walk that
+keeps off them it becomes a lane step out of their contact band (the pit
+escape's "freeze X, clear the lane first") or, outside that band, nothing:
+the one input that can never grab. The check sits in front of the link
+rather than after the handler, because by then the handler's own
+`hold_buttons` has gone out, and a vblank between the two calls is a walking
+frame. `navigation.partner_obstacles` is the planning half: the same zone
+is danger to the router, so a partner standing on the actor's lane is gone
+round rather than waited behind. Left alone: the pit escape (a fall costs a
+life, a grab costs the partner a moment), anything carrying A, B or C
+(strikes, jumps and hold moves — friendly fire is
+[`do_not_harm_partner`](#do_not_harm_partner)'s question), a hold's own
+directions (`ReleasePartner`'s back press *is* the release), airborne
+ticks, and `Dialog` verbs, whose Up and Down move a cursor.
+
+A lane walk counts, which is the easy thing to miss. The ROM's D-pad table
+at `$2D00` sends Up or Down alone to the walk actions `$0A`/`$0E` through
+`$2EE8`, which keeps the facing bit, and those play the same walk animation
+as a step sideways — every frame of it carrying the walking box (Axel 0..16,
+Adam 0..20, Blaze 0..19 ahead of the origin). So an Up/Down step into the
+partner's lane while facing them within reach takes the hold as surely as a
+step toward them. Standing still never does: idle `$02` plays animation 0,
+which carries no attack box at all.
 
 Because the `MegaDriveEnvironment` remote access interface supports
 pressing and holding buttons but not reading which buttons are currently

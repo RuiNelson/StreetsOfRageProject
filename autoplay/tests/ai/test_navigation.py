@@ -13,6 +13,7 @@ from sor_autoplay.ai.tokens import (
     CameraRange,
     Enemy,
     Myself,
+    Partner,
     Pit,
     Stage,
 )
@@ -536,6 +537,76 @@ class JumpLandingTests(unittest.TestCase):
         pit = Pit(world_x=140, lane_y=0, width=96, height=120)
         actor = _myself(world_x=100, world_y=60)
         self.assertIsNone(nav.hop_landing_x(self._world(actor, pit), actor, "right"))
+
+
+class PartnerGrabZoneTests(unittest.TestCase):
+    """A walk into the other player is a hold on them, so routes go round.
+
+    Axel's walking box reaches 16, Blaze's body 12 either side of her origin,
+    and lanes 16 apart still touch (``$450C`` compares inclusively): origins
+    from 102 to 158 on X and 44 to 76 on the lane touch a Blaze at (130, 60).
+    """
+
+    def _context(self, *tokens):
+        return {
+            Stage(level_index=0, direction="right"),
+            CameraRange(left=0, right=320, top=0, bottom=112),
+            *tokens,
+        }
+
+    def _partner(self, *, world_x, world_y) -> Partner:
+        return Partner(
+            slot="P2",
+            player_index=2,
+            character_id=2,
+            character_name="Blaze",
+            world_x=world_x,
+            world_y=world_y,
+            health=80,
+            health_percent=100.0,
+            lives=3,
+            specials=1,
+            held_weapon_type=0,
+            action_state=0x02,
+            is_airborne=False,
+            facing_left=True,
+            combat_phase=CombatPhase.NORMAL,
+        )
+
+    def test_no_partner_no_zone(self) -> None:
+        context = self._context(_myself(world_x=20, world_y=60))
+        self.assertEqual(nav.partner_obstacles(context), [])
+
+    def test_the_zone_is_where_the_walking_box_reaches_her(self) -> None:
+        actor = _myself(world_x=20, world_y=60)
+        context = self._context(actor, self._partner(world_x=130, world_y=60))
+
+        (zone,) = nav.partner_obstacles(context)
+
+        # The contact zone one pixel wider each way, less the nominal 16x16
+        # body's 8 on each side: touching it is standing just out of contact.
+        self.assertEqual((zone.left, zone.right, zone.top, zone.bottom), (109, 151, 51, 69))
+        self.assertIn(zone, nav.danger_obstacles(context))
+
+    def test_a_route_goes_round_her_rather_than_into_her(self) -> None:
+        actor = _myself(world_x=20, world_y=60)
+        context = self._context(actor, self._partner(world_x=130, world_y=60))
+
+        route = nav.plan_route(
+            context,
+            actor,
+            PointGoal(nav.Point(240, 60)),
+            solids=[],
+            dangers=nav.danger_obstacles(context),
+        )
+
+        self.assertTrue(route.reached)
+        for rect in route.positions():
+            origin = rect.center
+            self.assertFalse(
+                abs(origin.y - 60) <= 16 and 102 <= origin.x <= 158,
+                f"routed into her grab contact at {origin}",
+            )
 
 
 if __name__ == "__main__":

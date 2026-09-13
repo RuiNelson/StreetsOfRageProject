@@ -14,6 +14,9 @@ is a wall or a fall. Enemies and the bands they swing through are *danger*,
 which is different: a screen full of enemies would make every destination
 unreachable if their reach were treated as concrete. So a route is planned
 twice, danger first, solids alone as the fallback (see :func:`plan_route`).
+The ground right in front of the other player is danger too
+(:func:`partner_obstacles`): walking into them is a hold on them, which
+``execute_tick`` refuses outright, so the route worth having goes round them.
 
 **Where "arrived" is.** Every reach predicate downstream (``reach.in_punch_
 band``, ``decide.in_smash_range``) compares *origin distances*, not edges, so
@@ -53,9 +56,12 @@ from .pathfind import (
 )
 from .reach import (
     PIT_AVOID_MARGIN,
+    PLAYER_CONTACT_LANE_Y,
     any_pit_endangers,
     jump_attack_max_dx,
     live_enemies,
+    player_body_span_x,
+    walk_box_reach_x,
 )
 from .tokens import (
     Breakable,
@@ -392,18 +398,58 @@ def enemy_rects(enemy: Enemy) -> list[Rect]:
     return rects
 
 
+def partner_obstacles(context: Context) -> list[Rect]:
+    """The ground where ``Myself``'s walking box would take hold of the partner.
+
+    Walking into the other player is a hold on them
+    (``reach.walking_box_would_grab``), and ``execute_tick`` refuses every
+    walk that would make that contact. This is the planning half of the same
+    rule: a route that goes round the partner is one that rule never has to
+    stop, where a straight one parks the actor behind them.
+
+    The zone is every actor origin from which the walking box, facing them,
+    touches their body -- their body span grown by the box's reach on both
+    sides (an actor faces the way it walks, so it faces them from whichever
+    side it comes), over the ``PLAYER_CONTACT_LANE_Y`` band -- expressed for
+    the actor's own body rectangle, so that "the body overlaps it" means "the
+    origin is in it", the conversion :func:`strike_goal` makes too.
+    """
+
+    actor = find(context, Myself)
+    partner = find(context, Partner)
+    if actor is None or partner is None:
+        return []
+    body = body_rect(actor)
+    reach_x = walk_box_reach_x(actor.character_id)
+    lo, hi = player_body_span_x(partner)
+    # One pixel past the zone's edge on every side: ``$450C``'s contact is
+    # inclusive, and the planner's rectangles may touch without overlapping,
+    # so a body touching this has to be an origin just *outside* contact.
+    edge_x = reach_x + 1
+    edge_y = PLAYER_CONTACT_LANE_Y + 1
+    left = lo - edge_x + (body.right - actor.world_x)
+    right = hi + edge_x + (body.left - actor.world_x)
+    top = partner.world_y - edge_y + (body.bottom - actor.world_y)
+    bottom = partner.world_y + edge_y + (body.top - actor.world_y)
+    if right <= left or bottom <= top:
+        return []
+    return [Rect(left, top, right - left, bottom - top)]
+
+
 def danger_obstacles(
     context: Context,
     *,
     ignore_slots: frozenset[str] = frozenset(),
 ) -> list[Rect]:
-    """Every live enemy's body and reach -- the ground worth not crossing."""
+    """Every live enemy's body and reach, and the partner's grab zone -- the
+    ground worth not crossing."""
 
     rects: list[Rect] = []
     for enemy in live_enemies(context):
         if enemy.slot in ignore_slots:
             continue
         rects.extend(enemy_rects(enemy))
+    rects.extend(partner_obstacles(context))
     return rects
 
 

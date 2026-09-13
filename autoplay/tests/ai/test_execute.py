@@ -27,7 +27,7 @@ from sor_autoplay.ai.tokens import (
     ThrowPepper,
 )
 from sor_autoplay.ai.tokens import PUNCH_RANGE_Y
-from sor_autoplay.ai.tokens import Myself
+from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay.ai.tokens import (
     AttackRange,
     Enemy,
@@ -46,6 +46,8 @@ from sor_autoplay.ai.execute import (
     WALK_TO_ENEMY_LANE_SAFETY_Y,
     _enemy_stop_dx,
     _find_safe_spot,
+    _keep_off_partner,
+    _partner_safe_gamepad,
     _safe_spot_candidates,
     _walk_to_breakable_target,
     _walk_to_near_enemy_target,
@@ -62,6 +64,7 @@ from sor_autoplay.ai.pathfind import Rect
 from sor_autoplay.ai.reach import (
     PIT_AVOID_MARGIN,
     pit_endangers,
+    walking_box_would_grab,
 )
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.tokens import Breakable, Pit, Projectile
@@ -3153,6 +3156,223 @@ class ReleasePartnerExecuteTests(unittest.TestCase):
                         self.assertFalse(call.kwargs["player1"] & (B | C))
                     for call in client.hold_buttons.call_args_list:
                         self.assertFalse(call.kwargs["player1"] & (B | C))
+
+
+def _partner_token(**overrides) -> Partner:
+    fields = dict(
+        slot="P2",
+        player_index=2,
+        character_id=2,
+        character_name="Blaze",
+        world_x=120,
+        world_y=60,
+        health=80,
+        health_percent=100.0,
+        lives=3,
+        specials=1,
+        held_weapon_type=0,
+        facing_left=True,
+        combat_phase=CombatPhase.NORMAL,
+        action_state=0x02,
+        is_airborne=False,
+    )
+    fields.update(overrides)
+    return Partner(**fields)
+
+
+def _walk_grabs(actor, partner, mask: int) -> bool:
+    step_x = 1 if mask & RIGHT else -1 if mask & LEFT else 0
+    step_y = -1 if mask & UP else 1 if mask & DOWN else 0
+    return walking_box_would_grab(actor, partner, step_x=step_x, step_y=step_y)
+
+
+def _box_touches(actor, partner, mask: int) -> bool:
+    """This frame's contact, measured apart from the executor's own sweep.
+
+    Axel's walking box (0..16 ahead, out only while a direction is held)
+    against Blaze's body (12 either side), ``$450C``-inclusive on both axes.
+    """
+
+    if not mask & (UP | DOWN | LEFT | RIGHT):
+        return False
+    if abs(partner.world_y - actor.world_y) > 16:
+        return False
+    if actor.facing_left:
+        box = (actor.world_x - 16, actor.world_x)
+    else:
+        box = (actor.world_x, actor.world_x + 16)
+    return box[0] <= partner.world_x + 12 and box[1] >= partner.world_x - 12
+
+
+class KeepOffPartnerTests(unittest.TestCase):
+    """``_keep_off_partner`` on single masks: Axel walking, Blaze standing."""
+
+    def _keep(self, actor, partner, mask: int) -> int:
+        context = {actor, partner, CameraRange(left=0, right=320, top=0, bottom=112)}
+        return _keep_off_partner(context, actor, partner, mask)
+
+    def test_the_x_step_toward_her_is_what_goes(self) -> None:
+        # Facing away from her (a release's aftermath): Right would turn the
+        # box onto her, Up alone keeps it pointing away.
+        actor = _myself(world_x=100, world_y=60, facing_left=True)
+        partner = _partner_token(world_x=125, world_y=60)
+        self.assertEqual(self._keep(actor, partner, UP | RIGHT), UP)
+
+    def test_a_walk_straight_into_her_clears_her_lane_instead(self) -> None:
+        # Nothing of the walk survives and the actor stands in her lane band:
+        # freeze X, clear the lane first -- away from her lane.
+        actor = _myself(world_x=100, world_y=60, facing_left=True)
+        above = _partner_token(world_x=125, world_y=52)
+        self.assertEqual(self._keep(actor, above, RIGHT), DOWN)
+        level = _partner_token(world_x=125, world_y=60)
+        self.assertIn(self._keep(actor, level, RIGHT), (UP, DOWN))
+
+    def test_out_of_her_band_a_step_into_her_lane_facing_her_is_refused(self) -> None:
+        # Facing her, in reach on X, 20 px off her lane: stepping into her
+        # lane is the grab, and there is no lane of hers to clear.
+        actor = _myself(world_x=100, world_y=60, facing_left=False)
+        partner = _partner_token(world_x=120, world_y=80)
+        self.assertEqual(self._keep(actor, partner, DOWN | RIGHT), 0)
+
+    def test_walking_away_from_her_is_kept(self) -> None:
+        actor = _myself(world_x=100, world_y=60)
+        partner = _partner_token(world_x=120, world_y=60)
+        self.assertEqual(self._keep(actor, partner, LEFT), LEFT)
+
+    def test_a_press_with_a_button_is_not_a_walk(self) -> None:
+        # B or C with a direction is a strike, a jump or a hold move -- +$34
+        # set or a jump action, never a walking frame: do_not_harm_partner's.
+        actor = _myself(world_x=100, world_y=60)
+        partner = _partner_token(world_x=112, world_y=60)
+        self.assertEqual(self._keep(actor, partner, B | RIGHT), B | RIGHT)
+        self.assertEqual(self._keep(actor, partner, C | RIGHT), C | RIGHT)
+
+    def test_a_partner_out_of_reach_changes_nothing(self) -> None:
+        actor = _myself(world_x=100, world_y=60)
+        partner = _partner_token(world_x=200, world_y=60)
+        self.assertEqual(self._keep(actor, partner, RIGHT), RIGHT)
+
+
+class ExecuteTickKeepsOffThePartnerTests(unittest.TestCase):
+    """``execute_tick`` never walks the actor's walking box onto the partner.
+
+    ``$4478`` turns that contact into a hold on them. The reported risk was
+    the moment after ``ReleasePartner``: the ROM leaves the actor facing away,
+    and the next verb's walk toward an enemy beyond her turned the box
+    straight back onto her.
+    """
+
+    ARENA = (
+        Stage(level_index=0, direction="right"),
+        CameraRange(left=0, right=320, top=0, bottom=112),
+    )
+
+    def _sent(self, client) -> list[int]:
+        """Every mask the link was handed, held or pressed -- not only the
+        last: a mask stripped after it went out was still a frame of it."""
+
+        held = [call.kwargs["player1"] for call in client.hold_buttons.call_args_list]
+        pressed = [call.kwargs["player1"] for call in client.press_buttons.call_args_list]
+        return held + pressed
+
+    def test_after_a_release_it_never_turns_back_into_her(self) -> None:
+        actor = _myself(world_x=100, world_y=60, facing_left=True)
+        partner = _partner_token(world_x=125, world_y=60)
+        enemy = _enemy(world_x=220, world_y=60)
+        context = {actor, partner, enemy, *self.ARENA}
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        for _ in range(AXIS_RAMP_TICKS + 2):
+            execute_tick(verb, context, gamepad)
+
+        sent = self._sent(client)
+        self.assertTrue(sent)
+        for mask in sent:
+            self.assertFalse(_walk_grabs(actor, partner, mask), hex(mask))
+        # Not parked behind her either: it is leaving her lane to go round.
+        self.assertTrue(gamepad.held & (UP | DOWN), hex(gamepad.held))
+
+    def test_walks_round_a_partner_planted_on_its_lane(self) -> None:
+        actor = _myself(world_x=40, world_y=60)
+        partner = _partner_token(world_x=100, world_y=60)
+        verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
+        gamepad, _client = _gamepad()
+
+        for _ in range(100):
+            execute_tick(verb, {actor, partner, *self.ARENA}, gamepad)
+            mask = gamepad.held
+            dx = (WALK_PX_PER_TICK if mask & RIGHT else 0) - (
+                WALK_PX_PER_TICK if mask & LEFT else 0
+            )
+            dy = (WALK_PX_PER_TICK if mask & DOWN else 0) - (
+                WALK_PX_PER_TICK if mask & UP else 0
+            )
+            actor = replace(actor, world_x=actor.world_x + dx, world_y=actor.world_y + dy)
+            if dx:
+                actor = replace(actor, facing_left=dx < 0)
+            self.assertFalse(
+                _box_touches(actor, partner, mask),
+                f"walked into her at ({actor.world_x}, {actor.world_y})",
+            )
+
+        self.assertGreater(actor.world_x, partner.world_x + 40)
+
+    def test_the_release_press_is_never_filtered(self) -> None:
+        # In a hold, back is loc_235A's release input, not a walk -- and it has
+        # to reach the ROM, or the AI holds her for good. Her body sits close
+        # in front, near enough that a *walk* back would read as contact.
+        actor = replace(
+            _myself(world_x=100, world_y=60, action_state=0x60, facing_left=False),
+            hold_release_countdown=3,
+            held_enemy_slot="P2",
+        )
+        partner = _partner_token(
+            world_x=106, world_y=60, action_state=0x7A, combat_phase=CombatPhase.HELD_BY_ENEMY
+        )
+        gamepad, client = _gamepad()
+
+        execute_tick(ReleasePartner(actor_slot="P1", target_slot="P2"), {actor, partner}, gamepad)
+
+        self.assertEqual(client.press_buttons.call_args.kwargs["player1"], LEFT)
+
+    def test_a_strike_keeps_its_facing_press(self) -> None:
+        actor = _myself(world_x=100, world_y=60, facing_left=True)
+        target = _enemy(world_x=140, world_y=60)
+        partner = _partner_token(world_x=125, world_y=60)
+        gamepad, client = _gamepad()
+
+        execute_tick(Punch(actor_slot="P1", target_slot="obj01"), {actor, target, partner}, gamepad)
+
+        self.assertEqual(client.press_buttons.call_args.kwargs["player1"], B | RIGHT)
+
+    def test_a_partner_out_of_reach_changes_nothing(self) -> None:
+        actor = _myself(world_x=0, world_y=90)
+        target = _enemy(world_x=100, world_y=90)
+        context = {actor, target, _partner_token(world_x=300, world_y=20)}
+        gamepad, client = _gamepad()
+
+        for _ in range(AXIS_RAMP_TICKS):
+            execute_tick(WalkToNearEnemy(actor_slot="P1", target_slot="obj01"), context, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+    def test_only_a_grounded_actor_with_a_partner_is_filtered(self) -> None:
+        actor = _myself(world_x=100, world_y=60)
+        partner = _partner_token(world_x=110, world_y=60)
+        walk = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, _client = _gamepad()
+
+        self.assertIsNot(_partner_safe_gamepad(walk, {actor, partner}, actor, gamepad), gamepad)
+        # A menu cursor is not a body; a jump reads 2 at $45D4; and with no
+        # partner there is nothing to keep off.
+        menu = HandleMrXDialog(actor_slot="P1")
+        self.assertIs(_partner_safe_gamepad(menu, {actor, partner}, actor, gamepad), gamepad)
+        airborne = replace(actor, is_airborne=True)
+        self.assertIs(
+            _partner_safe_gamepad(walk, {airborne, partner}, airborne, gamepad), gamepad
+        )
+        self.assertIs(_partner_safe_gamepad(walk, {actor}, actor, gamepad), gamepad)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ from sor_autoplay.ai.tokens import (
     JumpAttack,
     Myself,
     Nora,
+    Partner,
     Projectile,
     Punch,
     RearAttack,
@@ -32,6 +33,7 @@ from sor_autoplay.ai.tokens import (
     Surrounded,
     Weapon,
 )
+from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay.phases import CombatPhase
 
 # Nora's whip and Garcia's straight punch, exactly as attack_ranges.py pulls
@@ -1628,6 +1630,98 @@ class JackStillJugglingTests(unittest.TestCase):
         )
 
         self.assertFalse(reach.jack_still_juggling(knife, {jack}))
+
+
+def _partner(**overrides) -> Partner:
+    fields = dict(
+        slot="P2",
+        player_index=2,
+        character_id=2,
+        character_name="Blaze",
+        world_x=130,
+        world_y=100,
+        health=80,
+        health_percent=100.0,
+        lives=3,
+        specials=1,
+        held_weapon_type=0,
+        facing_left=True,
+        combat_phase=CombatPhase.NORMAL,
+        action_state=0x02,
+        is_airborne=False,
+    )
+    fields.update(overrides)
+    return Partner(**fields)
+
+
+class WalkingBoxGrabTests(unittest.TestCase):
+    """A walk into the other player is a hold on them -- ``$4478``.
+
+    The actor is Axel (walking box 0..16, 3.0 px/frame on X and 2.375 on the
+    lane), the partner Blaze (body within 12 of her origin). One tick sweeps
+    ``reach.WALK_SWEEP_FRAMES`` (4) frames of walk: 12 px on X, 9.5 on the lane.
+    """
+
+    def _grabs(self, actor, partner, *, step_x=0, step_y=0) -> bool:
+        return reach.walking_box_would_grab(actor, partner, step_x=step_x, step_y=step_y)
+
+    def test_the_walk_boxes_are_the_roms_own(self) -> None:
+        # Shapes $4D / $CF / $8F, the walk animation's box in each set.
+        self.assertEqual([reach.walk_box_reach_x(c) for c in (0, 1, 2)], [16, 20, 19])
+        # Unknown: the longest, since this reach keeps the actor out.
+        self.assertEqual(reach.walk_box_reach_x(None), 20)
+
+    def test_walking_toward_the_partner_takes_the_hold(self) -> None:
+        actor = _myself(world_x=100)
+        # Her body 128..152; the box 100..116, swept 12 px on, just touches.
+        self.assertTrue(self._grabs(actor, _partner(world_x=140), step_x=1))
+        self.assertFalse(self._grabs(actor, _partner(world_x=141), step_x=1))
+
+    def test_walking_away_takes_no_hold(self) -> None:
+        actor = _myself(world_x=100)
+        self.assertFalse(self._grabs(actor, _partner(world_x=120), step_x=-1))
+
+    def test_turning_toward_a_partner_behind_takes_the_hold(self) -> None:
+        # ReleasePartner's aftermath: the ROM leaves the actor facing away,
+        # and the X press toward her is what turns the box onto her.
+        actor = _myself(world_x=100, facing_left=True)
+        partner = _partner(world_x=125)
+        self.assertTrue(self._grabs(actor, partner, step_x=1))
+        self.assertFalse(self._grabs(actor, partner, step_y=-1))
+        self.assertFalse(self._grabs(actor, partner, step_x=-1))
+
+    def test_a_lane_walk_keeps_the_box_facing_the_way_it_faces(self) -> None:
+        # $2D00: Up alone is $0A, Down alone $0E, both through $2EE8, which
+        # keeps the facing bit -- the same walk animation, the same box.
+        actor = _myself(world_x=100, world_y=100)
+        partner = _partner(world_x=120, world_y=120)
+        self.assertTrue(self._grabs(actor, partner, step_y=1))  # into her lane
+        self.assertFalse(self._grabs(actor, partner, step_y=-1))  # out of it
+        facing_away = replace(actor, facing_left=True)
+        self.assertFalse(self._grabs(facing_away, partner, step_y=1))
+
+    def test_lanes_sixteen_apart_still_touch(self) -> None:
+        # $450C compares with bgt/blt/bge: touching boxes are contact.
+        actor = _myself(world_x=100, world_y=100)
+        self.assertTrue(self._grabs(actor, _partner(world_x=120, world_y=116), step_x=1))
+        self.assertFalse(self._grabs(actor, _partner(world_x=120, world_y=117), step_x=1))
+
+    def test_standing_still_puts_out_no_box(self) -> None:
+        # Idle $02 plays animation 0, which names no attack box.
+        self.assertFalse(self._grabs(_myself(world_x=100), _partner(world_x=110)))
+
+    def test_a_partner_walking_in_closes_the_gap_too(self) -> None:
+        # +$1C: her own walk is swept over the same frames.
+        actor = _myself(world_x=100)
+        standing = _partner(world_x=150)
+        self.assertFalse(self._grabs(actor, standing, step_x=1))
+        self.assertTrue(self._grabs(actor, replace(standing, vel_x=-3.25), step_x=1))
+
+    def test_the_live_body_box_widens_the_span(self) -> None:
+        box = Hitbox(x0=120, x1=160, y0=92, y1=108, z0=-50, z1=0)
+        self.assertEqual(
+            reach.player_body_span_x(_partner(world_x=150, hitbox=box)), (120, 162)
+        )
 
 
 if __name__ == "__main__":

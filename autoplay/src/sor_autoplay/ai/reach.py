@@ -41,7 +41,14 @@ from ..world_map import (
     LANE_Y_MIN_ENEMY,
     lane_y_max_for_level,
 )
-from .kinematics import enemy_projected, enemy_projected_without_crossing
+from .kinematics import (
+    AI_LATENCY_FRAMES,
+    FRAMES_PER_TICK,
+    WALK_SPEED_LANE,
+    WALK_SPEED_X,
+    enemy_projected,
+    enemy_projected_without_crossing,
+)
 from .tokens import (
     Antonio,
     BODY_OVERLAP_X,
@@ -527,6 +534,134 @@ def grab_would_connect(actor: PlayableCharacter, enemy: Enemy) -> bool:
     if dx > punch_outer_x(actor.character_id):
         return False
     return enemy_in_front(actor, enemy) or dx <= GRAB_BEHIND_TOLERANCE_X
+
+
+# --- Walking into the other player ($4478) ---------------------------------
+#
+# A walk into the other player is a hold on them, exactly as a walk into an
+# enemy is. ``$4478 (resolve_player_vs_player_collision)`` tests each player's
+# attack box (``+$64``) against the other's body box (``+$70``), inclusively
+# on every axis, and when the walker's outgoing damage ``+$34`` is zero and
+# both players' actions read 1 in the table at ``$45D4`` (idle ``$02``, every
+# walk ``$06``-``$0F``, the armed ground family ``$30``-``$3B``; a jump reads
+# 2, which hits but never grabs), it writes grab contact (``+$7C`` = 3) and
+# ``$3266`` takes the front ``$60`` / back ``$66`` hold on them.
+#
+# The box a walk puts out is decoded straight from the ROM: ``$1F20`` holds
+# each character's animation set, ``$2F2C`` plays animations 4/5 for every
+# walk action (24/25 armed, the same boxes), and every frame of them names one
+# attack shape starting at the origin -- ``$4D`` (Axel, 0..16), ``$CF`` (Adam,
+# 0..20), ``$8F`` (Blaze, 0..19), mirrored by the next id in ``$1ABA8``.
+# Blaze's 19 is also what ``tools/souther_hold_lab.py`` measured live.
+# Standing still puts out none: a released pad drops the walk to idle ``$02``
+# (``$2E6C``), animation 0, whose frame names no attack box, and ``$4140``
+# then parks ``+$64`` at world X 0 (P1) or ``$10`` (P2), where no body in play
+# can be.
+#
+# **A lane walk counts too.** The D-pad table at ``$2D00`` sends Up alone to
+# ``$0A`` and Down alone to ``$0E``, both through ``$2EE8``, which keeps the
+# facing bit: the same animations 4/5, the box facing the way the actor
+# already faces. Only an X press turns it (Right is ``$06``, Left ``$07``).
+WALK_BOX_REACH_X: dict[int, int] = {0: 16, 1: 20, 2: 19}  # Axel, Adam, Blaze
+# The longest of the three. This reach keeps the actor *out* of contact, so an
+# unknown character must never be assumed to reach less than it can.
+# (``souther.WALK_BOX_REACH_X`` keeps its own, deliberately narrower fallback:
+# there the reach decides whether a walk-in is attempted at all.)
+DEFAULT_WALK_BOX_REACH_X = 20
+# How far a standing or walking player's body box reaches from its own origin,
+# either facing: the idle frames lean furthest (Axel 0..13, Blaze 2..12, Adam
+# -5..+7), and a partner turns or starts to walk without notice.
+PLAYER_BODY_REACH_X: dict[int, int] = {0: 13, 1: 7, 2: 12}
+DEFAULT_PLAYER_BODY_REACH_X = 13
+# Every player shape uses lane extent 0 (-8..+8), and ``$450C`` compares with
+# ``bgt``/``blt``/``bge``: two lanes exactly 16 apart still touch. (``$AB88``,
+# the enemy-contact test behind ``souther.GRAB_LANE``, compares strictly.)
+PLAYER_CONTACT_LANE_Y = 16
+# How long one tick's mask walks before the next tick can change it: the hold
+# itself, plus the age of the snapshot it was decided from.
+WALK_SWEEP_FRAMES = FRAMES_PER_TICK + AI_LATENCY_FRAMES
+
+
+def walk_box_reach_x(character_id: int | None) -> int:
+    """How far ``character_id``'s walking box reaches ahead of its origin."""
+
+    if character_id is None:
+        return DEFAULT_WALK_BOX_REACH_X
+    return WALK_BOX_REACH_X.get(character_id, DEFAULT_WALK_BOX_REACH_X)
+
+
+def player_body_span_x(player: PlayableCharacter) -> tuple[int, int]:
+    """Where ``player``'s body box can be on X over the next few frames.
+
+    The widest ground body the character has about its origin, widened by the
+    box ``+$70`` actually holds this frame wherever that reaches further (a
+    hurt frame, say).
+    """
+
+    if player.character_id is None:
+        body = DEFAULT_PLAYER_BODY_REACH_X
+    else:
+        body = PLAYER_BODY_REACH_X.get(player.character_id, DEFAULT_PLAYER_BODY_REACH_X)
+    lo, hi = player.world_x - body, player.world_x + body
+    box = player.hitbox
+    if box is not None and not box.is_degenerate:
+        lo, hi = min(lo, box.x0), max(hi, box.x1)
+    return lo, hi
+
+
+def _walk_speed(table: dict[int, float], character_id: int | None) -> float:
+    """``table``'s speed for this character, the fastest when it is unknown:
+    a sweep that comes up short is contact it failed to see."""
+
+    fastest = max(table.values())
+    if character_id is None:
+        return fastest
+    return table.get(character_id, fastest)
+
+
+def walking_box_would_grab(
+    actor: PlayableCharacter,
+    other: PlayableCharacter,
+    *,
+    step_x: int,
+    step_y: int,
+) -> bool:
+    """Would one tick of walking put ``actor``'s walking box on ``other``?
+
+    ``step_x``/``step_y`` are the walk's directions, each -1, 0 or +1 (right
+    and down positive); both 0 is standing still, which puts out no box. The
+    box faces ``step_x`` when there is one and the actor's current facing
+    otherwise -- see ``WALK_BOX_REACH_X`` for why a lane walk keeps it.
+
+    The walk is swept over ``WALK_SWEEP_FRAMES`` at the character's ROM walk
+    speed (``kinematics.WALK_SPEED_X``/``WALK_SPEED_LANE``), and so is
+    ``other``'s own X velocity (``+$1C``): a partner walking in closes the gap
+    as surely as the actor does. Their lane velocity is not observed, so it is
+    not swept.
+    """
+
+    if not step_x and not step_y:
+        return False
+    frames = WALK_SWEEP_FRAMES
+    travel_x = step_x * _walk_speed(WALK_SPEED_X, actor.character_id) * frames
+    travel_y = step_y * _walk_speed(WALK_SPEED_LANE, actor.character_id) * frames
+
+    dy = other.world_y - actor.world_y
+    if dy - max(0.0, travel_y) > PLAYER_CONTACT_LANE_Y:
+        return False
+    if dy - min(0.0, travel_y) < -PLAYER_CONTACT_LANE_Y:
+        return False
+
+    # The body's span relative to the actor's origin, swept by how the two
+    # close on each other over the tick.
+    closing = other.vel_x * frames - travel_x
+    lo, hi = player_body_span_x(other)
+    lo = lo - actor.world_x + min(0.0, closing)
+    hi = hi - actor.world_x + max(0.0, closing)
+    facing_left = step_x < 0 if step_x else actor.facing_left
+    reach_x = walk_box_reach_x(actor.character_id)
+    box_lo, box_hi = (-reach_x, 0) if facing_left else (0, reach_x)
+    return lo <= box_hi and hi >= box_lo
 
 
 def in_rear_band(actor: PlayableCharacter, enemy: Character) -> bool:

@@ -24,7 +24,10 @@ Four consequences of that same ROM routine bound what is filtered here:
 
 - ``+$34`` must be nonzero, so ``GrabEnemy`` — a walk-in that deliberately
   presses nothing (see ``AI.md``'s "Grabbing an enemy") — cannot hurt the
-  partner and is left alone;
+  partner and is left alone. What any walk *can* do to them is take hold of
+  them (the next point), and that is a rule about how the actor moves rather
+  than which verb it runs: ``execute.execute_tick`` keeps every walk's box
+  off the partner, whatever verb is walking;
 - the routine returns immediately while a police special is active, so
   ``CallPolice`` is not friendly fire and is never withdrawn;
 - with no damage out, the same contact is a **grab** between the players,
