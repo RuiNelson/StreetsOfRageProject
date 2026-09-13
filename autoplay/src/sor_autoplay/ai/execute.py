@@ -71,6 +71,7 @@ from .tokens import (
 )
 from .gamepad import VirtualGamepad
 from . import kinematics
+from . import jump_kick
 from . import souther as souther_plan
 from . import navigation as nav
 from .decide import (
@@ -81,6 +82,8 @@ from .decide import (
 )
 from .reach import (
     ANTONIO_KICK_LANE_BREAK,
+    B_PRESS_PICKUP_X,
+    B_PRESS_PICKUP_Y,
     PIT_AVOID_MARGIN,
     PLAYER_CONTACT_LANE_Y,
     REACH_SAFETY_MARGIN,
@@ -90,10 +93,12 @@ from .reach import (
     in_camera,
     in_playable_lane,
     incoming_melee_targets,
+    item_a_b_press_takes,
     live_enemies,
     pit_endangers,
     walking_box_would_grab,
 )
+from .partner import item_is_the_partners
 from .. import prop_solids
 from ..phases import is_dangerous, is_punishable
 from ..world_map import LANE_Y_MIN
@@ -2732,6 +2737,38 @@ def _keep_off_partner(context: Context, actor: Myself, partner: Partner, mask: i
     return _partner_lane_escape(context, actor, partner)
 
 
+def _step_off_item(context: Context, actor: Myself, item: Pickup | Weapon) -> int:
+    """The shortest walk that takes ``item`` out of ``$3136``'s box, or 0.
+
+    Away from the item on whichever axis clears the box sooner at the
+    character's own ROM walk speed, then the other axis; a lane step only onto
+    ground the actor may stand on (the lane band, no pit's danger zone). The
+    partner pad's ``_keep_off_partner`` still judges the result, so stepping
+    off an item never walks into the partner either.
+    """
+
+    dx = actor.world_x - item.world_x
+    dy = actor.world_y - item.world_y
+    if dx > 0:
+        x_mask = RIGHT_MASK
+    elif dx < 0:
+        x_mask = LEFT_MASK
+    else:
+        x_mask = _back_direction_mask(actor)
+    lo, hi = _lane_bounds(context)
+    if dy > 0 or (dy == 0 and hi - actor.world_y >= actor.world_y - lo):
+        y_mask, y_sign = DOWN_MASK, 1
+    else:
+        y_mask, y_sign = UP_MASK, -1
+    target_y = actor.world_y + y_sign * nav.NAV_STEP
+    lane_ok = lo <= target_y <= hi and not _inside_pit(context, actor.world_x, target_y)
+    clear_x = (B_PRESS_PICKUP_X + 1 - abs(dx)) / kinematics.walk_speed_x(actor.character_id)
+    clear_y = (B_PRESS_PICKUP_Y + 1 - abs(dy)) / kinematics.walk_speed_lane(actor.character_id)
+    if lane_ok and clear_y <= clear_x:
+        return y_mask
+    return x_mask
+
+
 class _PartnerSafeGamepad:
     """The pad a verb handler drives while a partner is on screen.
 
@@ -2739,11 +2776,22 @@ class _PartnerSafeGamepad:
     Stripping it after the handler would be too late: the handler's own
     ``hold_buttons`` has already gone out by then, and a vblank between the two
     calls is a walking frame with the box on the partner.
+
+    A press is judged once more first (``redirect``): a grounded B with an
+    item that is the partner's inside ``$3136``'s box would pick it up rather
+    than strike, so it becomes the step that clears the box instead, and the
+    strike goes out on a later tick from clear ground.
     """
 
-    def __init__(self, gamepad: VirtualGamepad, keep: Callable[[int], int]) -> None:
+    def __init__(
+        self,
+        gamepad: VirtualGamepad,
+        keep: Callable[[int], int],
+        redirect: Callable[[int], int | None] = lambda mask: None,
+    ) -> None:
         self._gamepad = gamepad
         self._keep = keep
+        self._redirect = redirect
 
     @property
     def player_index(self) -> int:
@@ -2757,6 +2805,10 @@ class _PartnerSafeGamepad:
         self._gamepad.hold(self._keep(int(mask)))
 
     def press(self, mask: int, *, frames: int = 1) -> None:
+        step = self._redirect(int(mask))
+        if step is not None:
+            self.hold(step)
+            return
         self._gamepad.press(self._keep(int(mask)), frames=frames)
 
     def steer_x(self, direction: int) -> int:
@@ -2783,11 +2835,67 @@ def _partner_safe_gamepad(
     partner = find(context, Partner)
     if actor is None or partner is None:
         return gamepad
-    if actor.is_airborne or actor.is_holding_enemy or isinstance(verb, Dialog):
+    if actor.is_airborne:
+        # One judgment still applies in the air: the kick edge. A flight is
+        # committed, but whether its box comes out is still a choice, and a
+        # kick that would land on the partner is held back
+        # (jump_kick.airborne_hits_player) -- the direction stays held. Only
+        # for JumpAttack: a WalkToAdvanceStage hop kicks for the hang time
+        # that clears a pit, and falling short costs a life.
+        if isinstance(verb, JumpAttack) and actor.action_base in JUMP_FREE_FLIGHT_ACTIONS:
+            return _PartnerSafeGamepad(
+                gamepad,
+                lambda mask: mask,
+                lambda mask: _hold_back_kick(actor, partner, mask),
+            )
+        return gamepad
+    if actor.is_holding_enemy or isinstance(verb, Dialog):
         return gamepad
     return _PartnerSafeGamepad(
-        gamepad, lambda mask: _keep_off_partner(context, actor, partner, mask)
+        gamepad,
+        lambda mask: _keep_off_partner(context, actor, partner, mask),
+        lambda mask: _redirect_b_press(context, actor, partner, mask),
     )
+
+
+def _redirect_b_press(context: Context, actor: Myself, partner: Partner, mask: int) -> int | None:
+    """The step to take instead of a B press that would pick up the partner's
+    item, or ``None`` to let the press through.
+
+    ``$3136 (find_close_interaction_target)`` runs on every grounded B that
+    is not the B+C chord (``$322A`` reads the chord first, ahead of ``$3028``),
+    and a match picks the item up instead of striking
+    (``reach.item_a_b_press_takes``). When that item is the partner's
+    (``partner.item_is_the_partners``) the press becomes the walk that clears
+    the box -- the strike waits a tick or two, the food stays on the floor.
+    Not the verb's business, which is why it is not a withdrawal: the punch is
+    still the right thing to do, only not from where the actor stands.
+    """
+
+    if not mask & PUNCH_MASK or mask & JUMP_MASK:
+        return None
+    item = item_a_b_press_takes(context, actor)
+    if item is None or not item_is_the_partners(actor, partner, item):
+        return None
+    return _step_off_item(context, actor, item)
+
+
+def _hold_back_kick(actor: Myself, partner: Partner, mask: int) -> int | None:
+    """The press without its B while the kick would land on the partner, or
+    ``None`` to let it through.
+
+    In free flight B is the kick edge (``$3914``), and the kick then stays out
+    to the landing. Whether that box would touch the partner on any update
+    left is ``jump_kick.airborne_hits_player``'s question; while it would,
+    the edge is not sent and the flight keeps its direction. The next tick
+    asks again, so a kick the flight carries past the partner still comes out.
+    """
+
+    if not mask & PUNCH_MASK:
+        return None
+    if not jump_kick.airborne_hits_player(actor, partner):
+        return None
+    return mask & ~PUNCH_MASK
 
 
 def execute_tick(

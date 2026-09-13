@@ -1805,10 +1805,10 @@ class CouldJumpAttackTests(unittest.TestCase):
         self.assertEqual(could_jump_attack(context), set())
 
     def test_axel_does_not_fire_beyond_his_shorter_kick_range(self) -> None:
-        # controls-and-input.md "Closed-form trajectory summary": Axel's
-        # early-kick range is 60px, well short of the old flat 72px cap.
+        # jump_kick.landing_distance: Axel's kicked flight lands 67.125 px on
+        # (lockstep lab), well short of Blaze's 84.
         myself = make_myself(world_x=100, world_y=100, is_airborne=False, facing_left=False)
-        enemy = make_enemy(world_x=165, world_y=100)  # dx=65 > Axel's 60
+        enemy = make_enemy(world_x=170, world_y=100)  # dx=70 > Axel's 67
         camera = CameraRange(left=0, right=400, top=0, bottom=200)
         context: set[Token] = {myself, enemy, camera}
 
@@ -1819,7 +1819,7 @@ class CouldJumpAttackTests(unittest.TestCase):
             character_id=2, character_name="Blaze", world_x=100, world_y=100,
             is_airborne=False, facing_left=False,
         )
-        enemy = make_enemy(world_x=165, world_y=100)  # dx=65, within Blaze's 75
+        enemy = make_enemy(world_x=175, world_y=100)  # dx=75, within Blaze's 84
 
         result = could_jump_attack({myself, enemy})
 

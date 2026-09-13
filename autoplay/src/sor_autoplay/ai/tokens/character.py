@@ -197,10 +197,19 @@ class PlayableCharacter(Character, ABC):
     action_flags: int = 0
     tech_armed: int = 0  # player +$45; bounce-cancel tech may still be latched
     hitbox: Hitbox | None = None
-    # Player X velocity at +$1C (signed 16.16, px per 60 Hz frame). Antonio's
-    # kick gate at $16EAE reads this exact word: a value of 0 is the
-    # standing-still path that fires the power kick during a ground combo.
+    # Player X velocity at +$1C (signed 16.16, px per object update -- two
+    # 60 Hz frames, see ai/jump_kick.py). Antonio's kick gate at $16EAE reads
+    # this exact word: a value of 0 is the standing-still path that fires the
+    # power kick during a ground combo.
     vel_x: float = 0.0
+    # Height at +$18 (down is positive) and its velocity at +$24, per update:
+    # what ai/jump_kick.py needs to carry a flight already in the air on.
+    world_z: int = 0
+    vel_z: float = 0.0
+    # The floor under this player: its own height the last tick it stood on
+    # the ground (observe.GroundTracker). A flight lands back on it, and a
+    # jump gives no other way to know where that is. None until observed.
+    ground_z: int | None = None
     # Ticks since this actor took its current hold (front $60 or back $66),
     # cross-tick memory from observe.HoldTracker -- there is no ROM-decoded
     # escape/struggle timer on the held enemy to read instead. 0 while not

@@ -41,6 +41,7 @@ from ..world_map import (
     LANE_Y_MIN_ENEMY,
     lane_y_max_for_level,
 )
+from . import jump_kick
 from .kinematics import (
     AI_LATENCY_FRAMES,
     FRAMES_PER_TICK,
@@ -60,6 +61,7 @@ from .tokens import (
     Grunt,
     Jack,
     PlayableCharacter,
+    Pickup,
     Pit,
     Projectile,
     PUNCH_RANGE_Y,
@@ -701,37 +703,52 @@ def in_rear_band(actor: PlayableCharacter, enemy: Character) -> bool:
 
 
 def in_jump_attack_band(actor: PlayableCharacter, enemy: Character) -> bool:
-    """True when a jump kick is the move that covers this gap: in front, in
-    lane, inside the kick's own free-flight range.
+    """True when a jump kick is the move that covers this gap -- and the
+    kick would really land on ``enemy``'s body.
 
-    The min-dx gate (beyond the actor's own punch outer edge -- no point
-    hopping somewhere a punch already reaches) only applies while still
-    grounded: that is the launch decision. Once already airborne the actor
-    is committed to a fixed trajectory (controls-and-input.md "Free
-    flight": no mid-air lane control, only limited air steer) and closing
-    distance is no longer optional, so the min-dx gate must not also
-    disqualify the follow-through B edge (``$3914``) once the flight has
-    naturally carried the actor closer than that edge -- see execute.py's
-    ``state_machine_jump_attack`` airborne branch, which this band gates.
+    Two questions. The first is policy, and unchanged in spirit: in front;
+    grounded, past the actor's own punch outer edge (no point hopping where a
+    punch already reaches) and no further than the kicked flight itself
+    carries the actor (``jump_kick.landing_distance`` -- 67/77/84 px, the lab's
+    own landings; a kick launched from further away connects only if the
+    target keeps still for the whole flight). Antonio is the one exception to
+    the near edge: a standing B is his ``$16EAE`` kick trigger, so the hop is
+    the opener inside punch range too, straight up (``jump_kick.launch_
+    direction``).
 
-    Antonio is the one grounded exception to that min-dx: a standing B is
-    his ``$16EAE`` kick trigger, so the hop is the opener inside punch
-    range too. Lane and facing still have to hold -- a jump kick is
-    horizontal, and hopping at an Antonio off the lane kicks empty air.
+    The second used to be a distance band -- dx within 50/48/60..60/69/75 and
+    14 px of lane -- and is now the ROM's own physics (``ai/jump_kick.py``):
+    the flight launched now, with the kick edge on either free-flight update
+    the executor can land it on, puts its box on the body. That is what the
+    band never could say: the box rides high enough near the top of the arc
+    to pass clean over a standing body (Blaze's does not even come out for 6
+    updates), and low enough on the way up and down to reach far past 60 px
+    -- as far as ~110 px for Axel -- which is what let a kick aimed at an
+    enemy land on the partner behind it.
+
+    Once airborne the question is only whether B pressed now still connects
+    (``jump_kick.airborne_hits``), with no min-dx: the flight has already
+    carried the actor where it carries it. When the floor under that flight
+    is unknown, the old distance band answers instead.
     """
 
+    if not enemy_in_front(actor, enemy):
+        return False
     dx = abs(enemy.world_x - actor.world_x)
-    dy = abs(enemy.world_y - actor.world_y)
-    if dy > JUMP_ATTACK_RANGE_Y:
+    if actor.is_airborne:
+        hit = jump_kick.airborne_hits(actor, enemy)
+        if hit is not None:
+            return hit
+        return (
+            abs(enemy.world_y - actor.world_y) <= JUMP_ATTACK_RANGE_Y
+            and dx <= jump_attack_max_dx(actor.character_id)
+        )
+    min_dx = 0 if isinstance(enemy, Antonio) else max(
+        JUMP_ATTACK_MIN_DX, punch_outer_x(actor.character_id)
+    )
+    if dx < min_dx or dx > jump_kick.landing_distance(actor.character_id):
         return False
-    min_dx = 0 if actor.is_airborne else max(JUMP_ATTACK_MIN_DX, punch_outer_x(actor.character_id))
-    if isinstance(enemy, Antonio):
-        min_dx = 0
-    if dx < min_dx:
-        return False
-    if dx > jump_attack_max_dx(actor.character_id):
-        return False
-    return enemy_in_front(actor, enemy)
+    return jump_kick.launch_hits(actor, enemy)
 
 
 def rear_threats(actor: PlayableCharacter, enemies: list[Enemy]) -> list[Enemy]:
@@ -1295,6 +1312,110 @@ def weapon_upgrade_rank(
     if rank <= weapon_rank(actor.held_weapon_type):
         return None
     return rank
+
+
+# ``$3136 (find_close_interaction_target)``'s search box, read straight off the
+# routine (``addi.w #$ffec`` / ``#$0028`` on X, ``#$fff0`` / ``#$0020`` on the
+# lane, ``#$fff8`` / ``+8`` on height). Every grounded B press calls it before
+# committing to a strike -- ``$3028 (player_normal_attack_input)``'s first
+# press and combo continuation alike, and the held-weapon swing path -- and a
+# match turns the press into a pickup instead. The compares are inclusive
+# (``bgt``/``blt``) and there is no nearest-first ranking: the first eligible
+# object in object-table slot order wins.
+B_PRESS_PICKUP_X = 0x14  # 20
+B_PRESS_PICKUP_Y = 0x10  # 16
+
+
+def _object_slot_order(slot: str) -> int:
+    """Object-table index of an ``objNN`` slot -- the order ``$3136`` scans in."""
+
+    if slot.startswith("obj"):
+        try:
+            return int(slot[3:])
+        except ValueError:
+            pass
+    return 1 << 16
+
+
+def item_a_b_press_takes(context: Context, actor: PlayableCharacter) -> Pickup | Weapon | None:
+    """The floor item a grounded B press would pick up right now, or ``None``.
+
+    ``$3136`` accepts a free weapon (``+$51`` clear, wear ``< 3``) -- even with
+    a weapon already in hand, which it lets go of -- and the six consumable
+    types. ``Weapon``/``Pickup`` tokens exist only for free ground items, so
+    the wear is the one test left to make here. The height test (``±8``) is
+    always met by a grounded actor and an item on its floor, and an airborne B
+    is the jump kick (``$3914``), which never reaches ``$3136``.
+
+    So a punch thrown with food at the actor's feet is not a punch: it eats
+    the food. That is how the AI used to take food the partner needed more
+    while fighting beside it (user: "a IA a usar um item de recuperação de
+    vida quando o partner precisa mais dele").
+    """
+
+    if actor.is_airborne:
+        return None
+    candidates = [
+        item
+        for item in (*find_all(context, Weapon), *find_all(context, Pickup))
+        if abs(item.world_x - actor.world_x) <= B_PRESS_PICKUP_X
+        and abs(item.world_y - actor.world_y) <= B_PRESS_PICKUP_Y
+        and not (isinstance(item, Weapon) and item.wear >= 3)
+    ]
+    return min(candidates, key=lambda item: _object_slot_order(item.slot), default=None)
+
+
+# --- Whose fight it is -------------------------------------------------------
+#
+# User: "a IA a tentar atacar o mesmo inimigo que o partner já está a atacar ou
+# perto de atacar, estuda bem o assunto e evita isso!". A human's intent is not
+# observable, but what their character can hit is, and it is the same geometry
+# the AI's own attacks are judged by.
+#
+# "Perto de atacar" is a few steps short of strike reach, facing it, on its
+# lane band. A walk covers 3.0 px per 30 Hz update, so 24 px is about a quarter
+# of a second: the partner arriving at the enemy, not merely passing by it.
+PARTNER_ENGAGE_APPROACH_X = 24
+PARTNER_ENGAGE_LANE_SLACK_Y = 8
+
+
+def partner_is_engaging(partner: PlayableCharacter, enemy: Enemy) -> bool:
+    """Is the other player attacking ``enemy`` right now, or about to?
+
+    - holding it (their ``+$4C`` names it);
+    - in the air, with a kick whose flight lands on it
+      (``jump_kick.airborne_arc`` -- B assumed if it is not out yet);
+    - on the ground, with a forward strike of theirs reaching it now
+      (``punch_would_connect``, armed or not), or with it in front of them, on
+      their lane band, within ``PARTNER_ENGAGE_APPROACH_X`` of that reach.
+
+    Never while the partner is the one held: an enemy holding the partner is
+    the one fight the AI is welcome in, and friendly fire keeps its strikes
+    off the partner's own body.
+    """
+
+    if partner.held_enemy_slot == enemy.slot:
+        return True
+    if partner.combat_phase is CombatPhase.HELD_BY_ENEMY:
+        return False
+    if partner.is_airborne:
+        steps = jump_kick.airborne_arc(partner)
+        if not steps:
+            return False
+        ground = partner.ground_z if partner.ground_z is not None else partner.world_z
+        body = jump_kick.enemy_body(enemy, ground_z=float(ground))
+        return jump_kick.first_hit_frame(steps, lambda frame: body, inclusive=False) is not None
+    if punch_would_connect(partner, enemy):
+        return True
+    if not enemy_in_front(partner, enemy):
+        return False
+    dx = abs(enemy.world_x - partner.world_x)
+    dy = abs(enemy.world_y - partner.world_y)
+    reach_x = punch_outer_x(partner.character_id, partner.held_weapon_type)
+    return (
+        dx <= reach_x + PARTNER_ENGAGE_APPROACH_X
+        and dy <= PUNCH_RANGE_Y + PARTNER_ENGAGE_LANE_SLACK_Y
+    )
 
 
 def connects(band, actor: PlayableCharacter, enemy: Enemy, frames) -> bool:

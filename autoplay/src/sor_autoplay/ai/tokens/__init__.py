@@ -65,6 +65,7 @@ from .enemy import (
     NORA_TICKS_SINCE_ATTACK_UNKNOWN,
     Nora,
     Onihime,
+    PartnerFight,
     Signal,
     Souther,
     Surrounded,

@@ -62,6 +62,20 @@ for the partner if the partner needs it more than ``Myself`` does"). It is
 expressed the same way, as a withdrawal, because a verb the actor should not
 take is exactly a verb that should never reach the ranking.
 
+The item rule itself is ``item_is_the_partners`` (the user's: the actor
+takes food only while it is strictly the hurter, a weapon unless the partner
+is strictly the worse armed -- a tie is the actor's -- and a 1UP to the one
+with fewer lives). ``execute``'s partner pad asks it too, because any
+grounded B beside an item picks the item up (``$3136``).
+
+The third half is **leaving the partner's fight to them** (user: "a IA a
+tentar atacar o mesmo inimigo que o partner já está a atacar ou perto de
+atacar, estuda bem o assunto e evita isso!"): ``PartnerFightTracker`` marks
+the enemies the partner is fighting or about to (``reach.
+partner_is_engaging``, remembered ``PARTNER_FIGHT_MEMORY_FRAMES``), and the
+actor's attacks on them, and walks to them, are withdrawn -- bar
+self-defence and a kick already in the air.
+
 Everything here is a no-op without a ``Partner`` token, which is the
 ordinary single-player case: ``observe.py`` only builds one while the other
 player is actually playable.
@@ -71,14 +85,17 @@ from __future__ import annotations
 
 from typing import Callable
 
-from . import reach
+from . import jump_kick, kinematics, reach
 from .decide import in_smash_range
 from .tokens import (
     AttackHeldEnemy,
     Breakable,
     Context,
     CounterGrab,
+    EngageSouther,
+    Enemy,
     FlipHold,
+    GrabEnemy,
     HealthPickup,
     HitAntonioBoomerang,
     JumpAttack,
@@ -87,16 +104,21 @@ from .tokens import (
     Myself,
     OpenBreakable,
     Partner,
+    PartnerFight,
     Pickup,
     Punch,
     RearAttack,
     ReleaseToRegrab,
     Supplex,
     ThrowHeldEnemy,
+    ThrowKnife,
+    ThrowPepper,
     Token,
     Verb,
+    WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
+    Weapon,
     find,
     find_all,
     weapon_rank,
@@ -140,18 +162,33 @@ def _open_breakable_hits_partner(
 def _jump_attack_hits_partner(
     context: Context, actor: Myself, partner: Partner, verb: Verb
 ) -> bool:
-    """The kick's own band — but only while the launch is still a decision.
+    """The kick's own flight -- but only while the launch is still a decision.
+
+    Not a distance band: the flight launched now toward the verb's target,
+    update by update, with its kick box on every update it is out
+    (``jump_kick.launch_hits_player``). The band this replaced stopped at
+    60/69/75 px, and a kick really lands on a standing body as far as ~110
+    px away (Axel) -- so a partner standing a little beyond the enemy was
+    kicked by a launch this filter had passed (user: "a IA não tem bem ideia
+    do ataque de pontapé no ar").
 
     Once airborne the actor is committed (``AI.md``, "Committing to a
     jump"): the trajectory is fixed, and withdrawing the verb mid-flight
     hands the tick to ``press_no_button``, which releases the controller and
-    costs the kick *and* the launch direction. Not kicking does not un-fly
-    the jump, so an airborne ``JumpAttack`` is never withdrawn here.
+    costs the launch direction. So an airborne ``JumpAttack`` is never
+    withdrawn here; the executor instead holds back the B edge itself while
+    the kick would still land on the partner
+    (``execute.state_machine_jump_attack``).
     """
 
     if actor.is_airborne:
         return False
-    return reach.in_jump_attack_band(actor, partner)
+    target = find(context, Enemy, slot=verb.target_slot)
+    if target is not None:
+        direction = jump_kick.launch_direction(actor, target)
+    else:
+        direction = -1 if actor.facing_left else 1
+    return jump_kick.launch_hits_player(actor, partner, direction=direction)
 
 
 def _rear_attack_hits_partner(
@@ -162,39 +199,60 @@ def _rear_attack_hits_partner(
     return reach.in_rear_band(actor, partner)
 
 
+def item_is_the_partners(actor: Myself, partner: Partner, item: Pickup | Weapon) -> bool:
+    """Whether ``item`` is the partner's to take rather than ``actor``'s.
+
+    The user's rule: "A IA só deve usar items de recuperação se estiver sem
+    partner, ou se tiver partner, a personagem dela precisar mais do item que
+    o partner. O mesmo para armas, só apanhar uma arma se tiver na mão nenhuma
+    ou uma pior, e se o partner não tiver uma melhor (no caso de empate,
+    tentar pegar)". Read as a question of who needs it more:
+
+    - **food** is the actor's only while the actor is strictly the hurter of
+      the two -- equally hurt leaves it for the partner;
+    - a **weapon** is the partner's only while the partner is strictly the
+      worse armed (``weapon_rank``: knife 5 > bat/pipe 4 > bottle 3 >
+      pepper 2, unarmed 0), so a tie -- both unarmed included -- is the
+      actor's to try. Whether it is an upgrade for the actor at all is
+      ``reach.weapon_upgrade_rank``'s question, asked before this one;
+    - a **1UP** goes to the one with fewer lives, a tie being the actor's.
+
+    ``SpecialPickup`` and ``ScorePickup`` are claimed by neither. Shared by
+    the walk-to-item withdrawals below and by ``execute``'s partner pad, which
+    must not let a B press pick one up either (``$3136`` turns any grounded B
+    near an item into a pickup -- ``reach.item_a_b_press_takes``).
+    """
+
+    if isinstance(item, HealthPickup):
+        return not actor.health_percent < partner.health_percent
+    if isinstance(item, LifePickup):
+        return partner.lives < actor.lives
+    if isinstance(item, Weapon):
+        return weapon_rank(partner.held_weapon_type) < weapon_rank(actor.held_weapon_type)
+    return False
+
+
 def _weapon_belongs_to_partner(
     context: Context, actor: Myself, partner: Partner, verb: Verb
 ) -> bool:
-    """Leave a ground weapon alone while the partner is the worse armed.
+    """``WalkToWeapon`` toward a weapon that is the partner's.
 
     ``could_walk_to_weapon`` only ever produces a genuine upgrade for
     ``Myself`` (``reach.weapon_upgrade_rank``), so the question left here is
-    purely who needs it more: an unarmed partner, or one holding a weapon
-    ranked below the actor's own (``weapon_rank``: knife 5 > bat/pipe 4 >
-    bottle 3 > pepper 2), needs it more than an actor who is already the
-    better armed of the two.
+    purely who needs it more -- ``item_is_the_partners``.
     """
 
-    theirs = weapon_rank(partner.held_weapon_type)
-    return theirs == 0 or theirs < weapon_rank(actor.held_weapon_type)
+    weapon = find(context, Weapon, slot=verb.target_slot)
+    return weapon is not None and item_is_the_partners(actor, partner, weapon)
 
 
 def _pickup_belongs_to_partner(
     context: Context, actor: Myself, partner: Partner, verb: Verb
 ) -> bool:
-    """Leave food to the hurter of the two, and a 1UP to the poorer of them.
-
-    Only the two consumables whose value is exactly the resource being
-    compared: a ``SpecialPickup`` and a ``ScorePickup`` are not claimed by
-    either half of this rule and stay collectable.
-    """
+    """``WalkToPickup`` toward a consumable that is the partner's."""
 
     pickup = find(context, Pickup, slot=verb.target_slot)
-    if isinstance(pickup, HealthPickup):
-        return partner.health_percent < actor.health_percent
-    if isinstance(pickup, LifePickup):
-        return partner.lives < actor.lives
-    return False
+    return pickup is not None and item_is_the_partners(actor, partner, pickup)
 
 
 def _hold_move_lands_on_partner(
@@ -224,6 +282,36 @@ def _counter_throws_partner(
     return partner.held_enemy_slot == actor.slot
 
 
+def _targets_the_partners_fight(
+    context: Context, actor: Myself, partner: Partner, verb: Verb
+) -> bool:
+    """An attack, or the walk to one, aimed at an enemy that is the
+    partner's fight (``PartnerFight``).
+
+    User: "a IA a tentar atacar o mesmo inimigo que o partner já está a
+    atacar ou perto de atacar, estuda bem o assunto e evita isso!". Two
+    bodies on one enemy is two players in each other's way -- the kick or
+    punch aimed at it passes through the partner's space, the grab takes
+    the body from under their combo -- so the actor picks another enemy, and
+    with none left it waits rather than joins.
+
+    Two exceptions. **Self-defence**: an enemy whose committed attack is
+    about to land on the actor (``reach.is_incoming_melee``) is answered
+    whoever else is fighting it. **A kick already in the air**: the flight is
+    committed, and withdrawing it would release the pad mid-flight.
+    """
+
+    slot = getattr(verb, "target_slot", None)
+    if slot is None or not any(
+        claim.enemy_slot == slot for claim in find_all(context, PartnerFight)
+    ):
+        return False
+    if isinstance(verb, JumpAttack) and actor.is_airborne:
+        return False
+    enemy = find(context, Enemy, slot=slot)
+    return enemy is None or not reach.is_incoming_melee(actor, enemy)
+
+
 # Verbs whose own attack box can land on the partner ($4478).
 _HARM_TESTS: dict[type[Verb], WithdrawTest] = {
     Punch: _forward_strike_hits_partner,
@@ -232,6 +320,23 @@ _HARM_TESTS: dict[type[Verb], WithdrawTest] = {
     OpenBreakable: _open_breakable_hits_partner,
     JumpAttack: _jump_attack_hits_partner,
     RearAttack: _rear_attack_hits_partner,
+}
+
+# Verbs that attack an enemy, or walk to attack one -- left alone while the
+# enemy is the partner's fight.
+_FIGHT_TESTS: dict[type[Verb], WithdrawTest] = {
+    verb_cls: _targets_the_partners_fight
+    for verb_cls in (
+        WalkToNearEnemy,
+        Punch,
+        MeleeWeaponAttack,
+        JumpAttack,
+        GrabEnemy,
+        RearAttack,
+        ThrowKnife,
+        ThrowPepper,
+        EngageSouther,
+    )
 }
 
 # Verbs that act on the body in the actor's hands, or on whoever holds the
@@ -251,11 +356,18 @@ _CLAIM_TESTS: dict[type[Verb], WithdrawTest] = {
     WalkToPickup: _pickup_belongs_to_partner,
 }
 
-_WITHDRAW_TESTS: dict[type[Verb], WithdrawTest] = {
-    **_HARM_TESTS,
-    **_HOLD_TESTS,
-    **_CLAIM_TESTS,
-}
+def _merged(*tables: dict[type[Verb], WithdrawTest]) -> dict[type[Verb], tuple[WithdrawTest, ...]]:
+    """Every table's test for each class, in table order: a ``Punch`` has to
+    miss the partner *and* leave the partner's enemy alone."""
+
+    merged: dict[type[Verb], tuple[WithdrawTest, ...]] = {}
+    for table in tables:
+        for verb_cls, test in table.items():
+            merged[verb_cls] = merged.get(verb_cls, ()) + (test,)
+    return merged
+
+
+_WITHDRAW_TESTS = _merged(_HARM_TESTS, _HOLD_TESTS, _FIGHT_TESTS, _CLAIM_TESTS)
 
 
 def withdrawn_verbs(context: Context) -> set[Verb]:
@@ -268,16 +380,62 @@ def withdrawn_verbs(context: Context) -> set[Verb]:
 
     withdrawn: set[Verb] = set()
     for verb in find_all(context, Verb):
-        test = _WITHDRAW_TESTS.get(type(verb))
-        if test is None:
+        tests = _WITHDRAW_TESTS.get(type(verb), ())
+        if not tests:
             continue
         # Only this agent's own verbs: decide._actors yields Myself alone,
         # so a verb parametrized on anyone else is not ours to withdraw.
         if getattr(verb, "actor_slot", None) != actor.slot:
             continue
-        if test(context, actor, partner, verb):
+        if any(test(context, actor, partner, verb) for test in tests):
             withdrawn.add(verb)
     return withdrawn
+
+
+# How long an enemy stays the partner's after the last tick they were seen
+# fighting it. A combo knocks the body back out of reach between hits and the
+# partner steps in again; a claim that lapsed in that gap sent the AI in for
+# it, and back out the moment the partner stepped back in. Three quarters of
+# a second, in 60 Hz frames.
+PARTNER_FIGHT_MEMORY_FRAMES = 45
+
+
+class PartnerFightTracker:
+    """Which enemies are the partner's fight, remembered across ticks.
+
+    Each tick asks ``reach.partner_is_engaging`` of every live enemy and
+    answers one ``PartnerFight`` token per enemy engaged now or within the
+    last ``PARTNER_FIGHT_MEMORY_FRAMES``. The same kind of cross-tick fact as
+    ``observe``'s trackers (a single snapshot is not a transition), owned per
+    ``AgentLoop`` for the same reason, and fed the *observed* context rather
+    than the snapshot because the judgment is made of tokens: the partner's
+    reach, their kick in flight, the enemy's body.
+
+    A slot that stops being a live enemy is forgotten at once, so a slot the
+    game reuses for a fresh enemy starts unclaimed. Without a ``Partner`` in
+    the context there is nobody to leave anything to, and every claim goes.
+    """
+
+    def __init__(self) -> None:
+        self._ticks_since: dict[str, int] = {}
+
+    def update(self, context: Context) -> set[Token]:
+        partner = find(context, Partner)
+        if partner is None:
+            self._ticks_since = {}
+            return set()
+        ticks_since: dict[str, int] = {}
+        for enemy in reach.live_enemies(context):
+            if reach.partner_is_engaging(partner, enemy):
+                ticks_since[enemy.slot] = 0
+            elif enemy.slot in self._ticks_since:
+                ticks_since[enemy.slot] = self._ticks_since[enemy.slot] + 1
+        self._ticks_since = ticks_since
+        return {
+            PartnerFight(enemy_slot=slot)
+            for slot, ticks in ticks_since.items()
+            if kinematics.frames_for_ticks(ticks) <= PARTNER_FIGHT_MEMORY_FRAMES
+        }
 
 
 def do_not_harm_partner(context: Context) -> Context:

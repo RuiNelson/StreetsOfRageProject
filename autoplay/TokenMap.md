@@ -54,6 +54,7 @@ classDiagram
     Boss <|-- Onihime
 
     Inferred <|-- Surrounded
+    Inferred <|-- PartnerFight
 
     Verb <|-- Walk
     Walk <|-- WalkToNearEnemy

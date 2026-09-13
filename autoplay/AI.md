@@ -567,6 +567,41 @@ edge* of B in free flight. Neither survives being routed through the
 smoothing that serves ordinary walking, and a B pressed during the crouch is
 simply still held when free flight begins, so no edge ever arrives.
 
+**What the flight is, update by update** (`ai/jump_kick.py`; user: "a IA não
+tem bem ideia do ataque de pontapé no ar, estudar bem esse ataque para ser
+previsível para a IA"). The kick used to be a distance band -- 50..60 px for
+Axel, 14 px of lane -- and it is now the ROM's own physics, transcribed from
+`$1FC0`/`$1FDC`/`$2000` and checked bit for bit against a lockstep lab
+(`tools/jump_kick_lab.py`: every position, velocity and kick box of every
+variant, for all three characters). Two things the band could not say. The
+box rides high on the body: near the top of the arc it passes clean over a
+standing body, and Blaze's does not even come out until 6 updates after the
+edge. And it reaches far: low on the way up and down it lands on a standing
+body as far as ~110 px from Axel's takeoff -- which is how a kick aimed at an
+enemy 60 px away landed on a partner standing further along.
+
+**Objects move at 30 Hz.** The object pass (`$AD8E`) waits a VBlank of its
+own between the two players and the 66 object slots, so every object moves
+on every *other* 60 Hz frame, and every ROM rate -- the jump's, a walk's, an
+enemy's `+$1C` -- is per update. The crouch is 5 updates, 10 frames; Axel's
+kicked flight is 19 updates, 38 frames. `jump_kick` counts in updates and
+reports frames; `kinematics`'s lead times still multiply the ROM's per-update
+velocities by frame counts, which the jump lead happens to get right (see
+`JUMP_CROUCH_FRAMES`) and the rest of the time axis does not -- measured and
+written down, not changed here, since every horizon built on it was tuned
+live.
+
+What uses the model: `reach.in_jump_attack_band` (the launch is offered when
+the flight lands on the target, and no further out than the kicked flight
+carries the actor, 67/77/84 px); `do_not_harm_partner` (a launch whose flight
+touches the partner on any update is withdrawn); the partner pad in
+`execute_tick` (in free flight the B edge is held back while the kick would
+still land on the partner -- the flight is committed, its box is not); the
+router (a kick the *partner* is flying is ground not to walk into); the
+partner's fight (`reach.partner_is_engaging` counts the enemies their kick
+will land on); and the ranking (a launch whose flight also lands on other
+enemies scores a little more, `priority._jump_attack_extra_hits_bonus`).
+
 ### Stunned enemies
 
 `Grunt` carries the ROM's own stun counter (`+$50`) and reads as
@@ -929,10 +964,14 @@ the way `priority.py` and `execute.py` already dispatch:
   range`). Withdrawing the approach as well would park the actor in front of
   a prop for as long as the partner stood nearby, and the next tick re-asks
   the question anyway;
-- `JumpAttack` on the grounded launch only. Once airborne the actor is
-  committed (see [Committing to a jump](#committing-to-a-jump)): a tick with
-  no verb releases the controller, losing the kick *and* the launch
-  direction, and not kicking does not un-fly the jump;
+- `JumpAttack` on the grounded launch only, judged on the flight itself --
+  launched toward the verb's target, every update of it, on either kick edge
+  the executor can land -- rather than on a reach band, which stopped at 60
+  px while the kick lands as far as ~110 (see [Committing to a
+  jump](#committing-to-a-jump)). Once airborne the actor is committed: a tick
+  with no verb releases the controller and loses the launch direction, so
+  the verb stays, and the partner pad holds back the B edge instead while the
+  kick would still land on the partner;
 - `RearAttack` while the partner is inside the `$322A` chord's real band on
   the side it stands;
 - the hold moves — `AttackHeldEnemy`, `Supplex`, `ThrowHeldEnemy`,
@@ -966,14 +1005,50 @@ partner needs more** — the coordination the [Process](#process) section
 above asks for, expressed as a withdrawal for the same reason: a verb the
 actor should not take is a verb that should never reach the ranking.
 
-- `WalkToWeapon` is withdrawn while the partner is unarmed, or holds a
-  weapon ranked below the actor's own (knife 5 > bat/pipe 4 > bottle 3 >
-  pepper 2). `could_walk_to_weapon` only ever offers a genuine upgrade for
-  `Myself`, so what is left to decide is which of the two needs it more;
-- `WalkToPickup` is withdrawn for a `HealthPickup` while the partner's
-  health is the lower of the two, and for a `LifePickup` while the partner
-  has fewer lives left. A `SpecialPickup` and a `ScorePickup` are claimed by
-  neither rule and stay collectable.
+The rule is the user's ("A IA só deve usar items de recuperação se estiver
+sem partner, ou se tiver partner, a personagem dela precisar mais do item que
+o partner. O mesmo para armas [...] (no caso de empate, tentar pegar)"), and
+one function states it for every caller, `partner.item_is_the_partners`:
+
+- food is the actor's only while the actor is strictly the hurter of the
+  two -- equally hurt leaves it on the floor for the partner;
+- a weapon is the partner's only while the partner is strictly the worse
+  armed (knife 5 > bat/pipe 4 > bottle 3 > pepper 2, unarmed 0), so a tie,
+  both unarmed included, is the actor's to try. `could_walk_to_weapon` only
+  ever offers a genuine upgrade for `Myself`, so this is only ever asked
+  about one;
+- a 1UP goes to the one with fewer lives, a tie being the actor's. A
+  `SpecialPickup` and a `ScorePickup` are claimed by neither.
+
+`WalkToWeapon` and `WalkToPickup` are withdrawn toward an item that is the
+partner's. **That alone was not enough, because a pickup is not only a walk.**
+`$3136 (find_close_interaction_target)` runs on every grounded B press --
+`$3028`'s punch and combo continuation, and the armed swing -- before the
+strike commits, and an item whose origin lies within ±20 px on X and ±16 on
+the lane is picked up *instead* (first in object-table slot order, not
+nearest; `reach.item_a_b_press_takes`). A punch thrown at an enemy standing
+over the partner's food ate it. That is not a verb to withdraw -- the punch is
+still the right thing to do, only not from there -- so it is the executor's:
+[`execute_tick`](#execute_tick)'s partner pad turns such a press into the
+walk that clears the box (`execute._step_off_item`), and the strike goes out
+a tick or two later from clear ground.
+
+The third half is **leaving the partner's fight to them** (user: "a IA a
+tentar atacar o mesmo inimigo que o partner já está a atacar ou perto de
+atacar, estuda bem o assunto e evita isso!"). Whether the partner is fighting
+an enemy is read off the partner, with the same geometry the actor's own
+attacks are judged by (`reach.partner_is_engaging`): holding it, a kick in
+flight that lands on it (`jump_kick.airborne_arc`), a strike of theirs that
+reaches it, or facing it on their lane within 24 px of that reach. Being
+fought is a transition, not a snapshot -- a combo knocks the body out of
+reach between two hits -- so `partner.PartnerFightTracker`, owned by the
+loop, keeps each claim for 45 frames past the last tick it held, as
+`PartnerFight` tokens. Every verb that attacks an enemy or walks to one
+(`WalkToNearEnemy`, `Punch`, `MeleeWeaponAttack`, `JumpAttack`, `GrabEnemy`,
+`RearAttack`, `ThrowKnife`, `ThrowPepper`, `EngageSouther`) is withdrawn
+against a claimed enemy, with two exceptions: self-defence (its committed
+attack is about to land on the actor, `reach.is_incoming_melee`) and a kick
+already in the air. The actor takes another enemy; with none left, it waits.
 
 ### `determine_priority_verb`
 

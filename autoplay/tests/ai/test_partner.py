@@ -202,6 +202,19 @@ class JumpAttackTests(unittest.TestCase):
         context = {make_myself(), make_partner(world_x=155), make_enemy(world_x=155), hop}
         self.assertEqual(verbs(do_not_harm_partner(context)), set())
 
+    def test_launch_withdrawn_with_the_partner_well_past_the_old_band(self):
+        # The reported kind of kick: aimed at an enemy 60 px out, with the
+        # partner standing 100 px out on the same lane. The old 60 px band
+        # passed it; the flight's box, low on the way down, lands on them.
+        hop = JumpAttack(actor_slot="P1", target_slot="obj01")
+        context = {make_myself(), make_partner(world_x=200), make_enemy(world_x=160), hop}
+        self.assertEqual(verbs(do_not_harm_partner(context)), set())
+
+    def test_launch_kept_with_the_partner_past_the_flight(self):
+        hop = JumpAttack(actor_slot="P1", target_slot="obj01")
+        context = {make_myself(), make_partner(world_x=250), make_enemy(world_x=160), hop}
+        self.assertEqual(verbs(do_not_harm_partner(context)), {hop})
+
     def test_airborne_jump_is_never_withdrawn(self):
         """Committed: withdrawing here loses the kick *and* the hold."""
 
@@ -245,8 +258,14 @@ class WeaponClaimTests(unittest.TestCase):
             WalkToWeapon(actor_slot="P1", target_slot="obj04"),
         }
 
+    def test_taken_when_both_are_unarmed(self):
+        # A tie is the actor's to try (user: "no caso de empate, tentar pegar").
+        kept = do_not_harm_partner(self._context(mine=0, theirs=0))
+        self.assertEqual({type(v) for v in verbs(kept)}, {WalkToWeapon})
+
     def test_left_for_an_unarmed_partner(self):
-        self.assertEqual(verbs(do_not_harm_partner(self._context(mine=0, theirs=0))), set())
+        # Pepper (2) in hand against an unarmed partner (0).
+        self.assertEqual(verbs(do_not_harm_partner(self._context(mine=0x0C, theirs=0))), set())
 
     def test_left_for_a_worse_armed_partner(self):
         # Pepper (2) against the actor's bat (4).
@@ -277,6 +296,14 @@ class PickupClaimTests(unittest.TestCase):
 
     def test_food_left_for_the_hurt_partner(self):
         context = self._context(self._food(), health=20, health_percent=25.0)
+        self.assertEqual(verbs(do_not_harm_partner(context)), set())
+
+    def test_food_left_when_both_are_as_hurt(self):
+        # The actor eats only while it is strictly the hurter of the two (user:
+        # "a personagem dela precisar mais do item que o partner").
+        context = self._context(self._food(), health=40, health_percent=50.0)
+        actor = next(t for t in context if isinstance(t, Myself))
+        context = (context - {actor}) | {make_myself(health=40, health_percent=50.0)}
         self.assertEqual(verbs(do_not_harm_partner(context)), set())
 
     def test_food_taken_when_the_partner_is_healthier(self):

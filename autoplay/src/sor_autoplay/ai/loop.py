@@ -25,11 +25,12 @@ from .execute import execute_tick
 from .gamepad import VirtualGamepad
 from .inference import generate_inference_tokens
 from .observe import (
+    GroundTracker,
     HoldTracker,
     NoraAttackTracker,
     generate_direct_observation_tokens,
 )
-from .partner import do_not_harm_partner
+from .partner import PartnerFightTracker, do_not_harm_partner
 from .pathfind import Path
 from .priority import determine_priority_verb
 from .tokens import Context, DebugNoFood, Myself, Verb, find, find_all
@@ -73,6 +74,12 @@ class AgentLoop:
         # Cross-tick memory for PlayableCharacter.hold_ticks -- see
         # observe.HoldTracker. Same per-AgentLoop granularity as above.
         self._hold_tracker = HoldTracker()
+        # Cross-tick memory for PlayableCharacter.ground_z -- the floor a
+        # flight lands back on (observe.GroundTracker, ai/jump_kick.py).
+        self._ground_tracker = GroundTracker()
+        # Cross-tick memory of which enemies are the partner's fight -- see
+        # partner.PartnerFightTracker. Same per-AgentLoop granularity.
+        self._partner_fight_tracker = PartnerFightTracker()
 
     def inform_hud(
         self,
@@ -135,8 +142,12 @@ class AgentLoop:
             player_index=player_index,
             nora_tracker=self._nora_tracker,
             hold_tracker=self._hold_tracker,
+            ground_tracker=self._ground_tracker,
         )
         context |= generate_inference_tokens(context)
+        # Which enemies are the partner's fight (PartnerFight): read here,
+        # from the observed tokens, and remembered across ticks by the loop.
+        context |= self._partner_fight_tracker.update(context)
         if self._no_food:
             context = context | {DebugNoFood()}
         context |= generate_verb_tokens(context)

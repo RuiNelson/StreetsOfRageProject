@@ -54,6 +54,7 @@ from .pathfind import (
     RegionGoal,
     find_path,
 )
+from . import jump_kick
 from .reach import (
     PIT_AVOID_MARGIN,
     PLAYER_CONTACT_LANE_Y,
@@ -431,9 +432,19 @@ def partner_obstacles(context: Context) -> list[Rect]:
     right = hi + edge_x + (body.left - actor.world_x)
     top = partner.world_y - edge_y + (body.bottom - actor.world_y)
     bottom = partner.world_y + edge_y + (body.top - actor.world_y)
-    if right <= left or bottom <= top:
-        return []
-    return [Rect(left, top, right - left, bottom - top)]
+    rects: list[Rect] = []
+    if right > left and bottom > top:
+        rects.append(Rect(left, top, right - left, bottom - top))
+    # A kick the partner is already flying lands on the AI as surely as the
+    # AI's lands on them ($4478 tests both ways): the ground its box will
+    # sweep before they come down (jump_kick.airborne_arc, B assumed now if
+    # it is not out yet) is somewhere the body is not walked into. The box is
+    # already a body-overlap test, so it goes in as it is.
+    if partner.is_airborne:
+        swept = jump_kick.swept_area(jump_kick.airborne_arc(partner))
+        if swept is not None:
+            rects.append(Rect(swept.x0, swept.y0, swept.x1 - swept.x0, swept.y1 - swept.y0))
+    return rects
 
 
 def danger_obstacles(

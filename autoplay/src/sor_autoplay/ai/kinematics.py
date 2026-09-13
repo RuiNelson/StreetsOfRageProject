@@ -282,6 +282,14 @@ BODY_CONTACT_GAP_X = 13
 # a direction is held. Free flight carries that velocity unchanged unless
 # air steer is applied, so the horizontal part of a kick is a constant-speed
 # approach and the gap closes at exactly this rate.
+#
+# Units, measured in lockstep (tools/jump_kick_lab.py): those are 5 object
+# *updates* and 3.0 px per update -- the object pass runs at 30 Hz
+# (ai/jump_kick.py), so the crouch really lasts 10 frames. The lead below
+# still counts 5 on purpose: enemy_projected multiplies an enemy's ROM
+# velocity, itself per update, by the number it is given, so 5 is exactly the
+# 5 updates the enemy really moves during the crouch. The flight itself is
+# ai/jump_kick.py's.
 JUMP_CROUCH_FRAMES = 5
 JUMP_LAUNCH_SPEED_X = 3.0
 
@@ -336,6 +344,16 @@ def walk_speed_x(character_id: int | None) -> float:
     return WALK_SPEED_X.get(character_id, DEFAULT_WALK_SPEED_X)
 
 
+# Adam's again, the slowest lane walk, for the same reason as above.
+DEFAULT_WALK_SPEED_LANE = 1.5
+
+
+def walk_speed_lane(character_id: int | None) -> float:
+    if character_id is None:
+        return DEFAULT_WALK_SPEED_LANE
+    return WALK_SPEED_LANE.get(character_id, DEFAULT_WALK_SPEED_LANE)
+
+
 def thrown_weapon_speed_x(weapon_type: int) -> float:
     return THROWN_WEAPON_SPEED_X.get(weapon_type, DEFAULT_THROWN_WEAPON_SPEED_X)
 
@@ -351,7 +369,13 @@ def enemy_projected(enemy: Enemy, frames: int) -> Enemy:
     """
 
     world_x, world_y = enemy.predict_position_after_n_frames(frames)
-    return replace(enemy, world_x=world_x, world_y=world_y)
+    # The body goes where the enemy goes: a projected token that kept the
+    # observed box would be hit (or missed) where the enemy no longer is.
+    box = enemy.hitbox
+    if box is not None:
+        dx, dy = world_x - enemy.world_x, world_y - enemy.world_y
+        box = replace(box, x0=box.x0 + dx, x1=box.x1 + dx, y0=box.y0 + dy, y1=box.y1 + dy)
+    return replace(enemy, world_x=world_x, world_y=world_y, hitbox=box)
 
 
 def intercept_frames(

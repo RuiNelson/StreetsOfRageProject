@@ -111,6 +111,32 @@ class HoldTracker:
         return ticks
 
 
+class GroundTracker:
+    """Cross-tick memory of the floor each player last stood on.
+
+    The third exception to this module's statelessness, and the same kind of
+    fact as the other two: a flight in the air says nothing about where its
+    floor is (``$3E78`` probes the map at landing time), but the player stood
+    on it the tick before it jumped. ``ai/jump_kick.py`` needs it to know
+    when a flight already in the air comes down -- the partner's kick
+    included, which is what makes that kick predictable at all.
+
+    Keyed by player slot, like ``HoldTracker``, and for the same reason needs
+    no ``forget_missing``.
+    """
+
+    def __init__(self) -> None:
+        self._ground: dict[str, int] = {}
+
+    def update(self, slot: str, *, airborne: bool, world_z: int) -> int | None:
+        """Remember ``world_z`` while grounded; return the floor either way,
+        ``None`` for a player first seen in the air."""
+
+        if not airborne:
+            self._ground[slot] = world_z
+        return self._ground.get(slot)
+
+
 # The whole hold family ($60-$6F) plus the C crossover ($76/$80), not only the
 # two stable holds $60/$66 --
 # see PlayableCharacter's own docstring. Counting the animation locks in
@@ -144,7 +170,15 @@ def _build_playable_character(
     player_snapshot: PlayerSnapshot,
     entity: MapEntity,
     hold_ticks: int = 0,
+    ground_tracker: GroundTracker | None = None,
 ) -> Myself | Partner:
+    slot = f"P{player_snapshot.index}"
+    if ground_tracker is not None:
+        ground_z = ground_tracker.update(
+            slot, airborne=entity.is_airborne, world_z=entity.world_z
+        )
+    else:
+        ground_z = None if entity.is_airborne else entity.world_z
     # The ROM's own hold link, but only while the action byte says a hold is
     # what +$4C describes -- outside the grab/hold families it is a general
     # contact pointer (world_map.MapEntity.contact_slot).
@@ -175,6 +209,9 @@ def _build_playable_character(
         tech_armed=entity.tech_armed,
         hitbox=entity.hitbox,
         vel_x=entity.player_vel_x,
+        world_z=entity.world_z,
+        vel_z=entity.player_vel_z,
+        ground_z=ground_z,
         hold_ticks=hold_ticks,
         held_enemy_slot=held_enemy_slot,
         knee_chain_last=entity.knee_chain_last,
@@ -212,6 +249,7 @@ def generate_direct_observation_tokens(
     player_index: int,
     nora_tracker: NoraAttackTracker | None = None,
     hold_tracker: HoldTracker | None = None,
+    ground_tracker: GroundTracker | None = None,
 ) -> Context:
     context: Context = set()
     live_nora_slots: set[str] = set()
@@ -251,6 +289,7 @@ def generate_direct_observation_tokens(
                 player_snapshot=myself_snapshot,
                 entity=myself_entity,
                 hold_ticks=myself_hold_ticks,
+                ground_tracker=ground_tracker,
             )
         )
         animation = _maybe_animation_in_progress(myself_entity)
@@ -277,6 +316,7 @@ def generate_direct_observation_tokens(
                     player_snapshot=partner_snapshot,
                     entity=partner_entity,
                     hold_ticks=partner_hold_ticks,
+                    ground_tracker=ground_tracker,
                 )
             )
             animation = _maybe_animation_in_progress(partner_entity)

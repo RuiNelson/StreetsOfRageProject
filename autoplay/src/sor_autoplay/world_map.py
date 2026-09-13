@@ -201,6 +201,8 @@ class MapEntity:
     # Player X velocity at +$1C (same offset as ordinary-enemy X). Antonio's
     # kick gate reads this word on the targeted player.
     player_vel_x: float = 0.0
+    # Player height velocity at +$24: a jump's v_z (ai/jump_kick.py).
+    player_vel_z: float = 0.0
     combat_phase: CombatPhase = CombatPhase.UNKNOWN
     # The object's real body AABB. A player reads its own cached box straight
     # out of the object (+$70, written every frame by $4140) and needs no ROM
@@ -640,9 +642,11 @@ def _entity_from_object(
     enemy_vel_x = 0.0
     enemy_vel_y = 0.0
     player_vel_x = 0.0
+    player_vel_z = 0.0
     phase = CombatPhase.UNKNOWN
 
     if style.kind == "player":
+        player_vel_z = fixed1616_signed(slot, mm.OBJ_VEL_Z)
         held_type = _u8(slot, mm.OBJ_HELD_TYPE)
         held_ptr = _u16(slot, mm.OBJ_HELD_PTR)
         contact_ptr = _u16(slot, mm.OBJ_CONTACT_PTR)
@@ -772,6 +776,7 @@ def _entity_from_object(
         enemy_vel_x=enemy_vel_x,
         enemy_vel_y=enemy_vel_y,
         player_vel_x=player_vel_x,
+        player_vel_z=player_vel_z,
         boss_dist_lane=boss_dist_lane,
         combat_phase=phase,
     )

@@ -490,3 +490,20 @@ class Surrounded(Inferred):
     behind: int
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PartnerFight(Inferred):
+    """The other player is fighting this enemy, or about to -- it is theirs.
+
+    Produced by ``partner.PartnerFightTracker`` from ``reach.
+    partner_is_engaging`` (holding it, a kick in flight that lands on it, a
+    strike that reaches it, or a few steps short of one and facing it), and
+    kept for ``partner.PARTNER_FIGHT_MEMORY_FRAMES`` after the last tick that
+    held, so a body knocked out of reach between two hits of the partner's
+    combo stays theirs. ``partner.do_not_harm_partner`` withdraws the actor's
+    own attacks on it (user: "a IA a tentar atacar o mesmo inimigo que o
+    partner já está a atacar ou perto de atacar [...] evita isso!").
+    """
+
+    enemy_slot: str
+
+

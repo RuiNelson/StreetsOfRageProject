@@ -32,6 +32,7 @@ from .decide import (
     _advance_blocking_breakables,
     _advance_blocking_enemies,
 )
+from . import jump_kick
 from .tokens import (
     Attack,
     CounterGrab,
@@ -557,6 +558,23 @@ def _emergency_melee_strike(verb: Verb, context: Context) -> int:
     return _with_target_class(_EMERGENCY_PUNCH_DEFAULT, target)
 
 
+# A jump kick stays out from its edge to the landing and hits every body its
+# box crosses (jump_kick.enemies_hit): a launch whose flight also lands on
+# other enemies is worth this much more per extra body, counted up to two.
+# Small on purpose -- it sorts kicks against each other and a one-body kick
+# against a routine approach, and stays far below every punishable strike.
+_EMERGENCY_JUMP_ATTACK_EXTRA_HIT = 2
+_JUMP_ATTACK_EXTRA_HITS_COUNTED = 2
+
+
+def _jump_attack_extra_hits_bonus(actor, target: Enemy, context: Context) -> int:
+    if actor is None or actor.is_airborne:
+        return 0
+    hit = jump_kick.enemies_hit(actor, target, reach.on_screen_enemies(context))
+    extra = sum(1 for enemy in hit if enemy.slot != target.slot)
+    return _EMERGENCY_JUMP_ATTACK_EXTRA_HIT * min(extra, _JUMP_ATTACK_EXTRA_HITS_COUNTED)
+
+
 def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
     target = find(context, Enemy, slot=verb.target_slot)
     actor = _find_actor(context, verb.actor_slot)
@@ -571,15 +589,16 @@ def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
             return _with_target_class(_EMERGENCY_JUMP_OVER_ANTONIO_KICK, target)
         if not is_punishable(target.combat_phase):
             return _with_target_class(_EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER, target)
+    extra_hits = _jump_attack_extra_hits_bonus(actor, target, context)
     if is_punishable(target.combat_phase):
-        return _with_target_class(_EMERGENCY_JUMP_ATTACK_PUNISHABLE, target)
+        return _with_target_class(_EMERGENCY_JUMP_ATTACK_PUNISHABLE, target) + extra_hits
     if (
         isinstance(target, Nora)
         and not is_dangerous(target.combat_phase)
         and target.ticks_since_last_attack <= NORA_RECOVERY_PUNISH_TICKS
     ):
-        return _with_target_class(_EMERGENCY_JUMP_ATTACK_NORA_RECOVERY, target)
-    return _with_target_class(_EMERGENCY_JUMP_ATTACK_DEFAULT, target)
+        return _with_target_class(_EMERGENCY_JUMP_ATTACK_NORA_RECOVERY, target) + extra_hits
+    return _with_target_class(_EMERGENCY_JUMP_ATTACK_DEFAULT, target) + extra_hits
 
 
 # Stepping out of a kick gate that has not fired yet. Must clear the hop it
