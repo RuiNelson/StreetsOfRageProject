@@ -16,6 +16,7 @@ from sor_autoplay.ai.tokens import (
     OpenBreakable,
     Punch,
     RearAttack,
+    ReleasePartner,
     ReleaseToRegrab,
     Supplex,
     TechRecover,
@@ -1602,6 +1603,70 @@ class CouldHoldActionsTests(unittest.TestCase):
         myself = make_myself(held_weapon_type=0x01, action_state=0x60)
         result = could_hold_actions({myself})
         self.assertTrue(any(isinstance(t, AttackHeldEnemy) for t in result))
+
+    def _partner(self, **overrides) -> Partner:
+        fields = dict(
+            slot="P2",
+            player_index=2,
+            character_id=2,
+            character_name="Blaze",
+            world_x=120,
+            world_y=100,
+            health=80,
+            health_percent=100.0,
+            lives=3,
+            specials=1,
+            held_weapon_type=0,
+            facing_left=False,
+            combat_phase=CombatPhase.HELD_BY_ENEMY,
+            action_state=0x7A,
+            is_airborne=False,
+        )
+        fields.update(overrides)
+        return Partner(**fields)
+
+    def test_a_hold_on_the_partner_offers_only_the_release(self) -> None:
+        # User: "The AI grabbed me and supplexed me". Walking into the other
+        # player takes this same hold, with +$4C naming them, and a GRABBED
+        # bystander used to be named instead -- knee, flip, suplex, all
+        # delivered by the ROM to the partner.
+        myself = make_myself(
+            world_x=100, world_y=100, action_state=0x60, held_enemy_slot="P2"
+        )
+        bystander = make_enemy(
+            slot="obj01", world_x=80, world_y=100, combat_phase=CombatPhase.GRABBED
+        )
+        context: set[Token] = {myself, self._partner(), bystander}
+
+        self.assertEqual(
+            could_hold_actions(context),
+            {ReleasePartner(actor_slot="P1", target_slot="P2")},
+        )
+
+    def test_a_back_hold_on_the_partner_is_never_suplexed(self) -> None:
+        # The reported shape: from $66 B is the suplex, offered regardless of
+        # threat for an enemy.
+        myself = make_myself(
+            world_x=100, world_y=100, action_state=0x66, held_enemy_slot="P2"
+        )
+        context: set[Token] = {myself, self._partner(), make_enemy(world_x=160)}
+
+        self.assertEqual(
+            could_hold_actions(context),
+            {ReleasePartner(actor_slot="P1", target_slot="P2")},
+        )
+
+    def test_a_partner_hold_is_released_without_a_partner_token(self) -> None:
+        # A player slot in +$4C is never an enemy, whether or not the partner
+        # is currently observable as playable.
+        myself = make_myself(
+            world_x=100, world_y=100, action_state=0x60, held_enemy_slot="P2"
+        )
+
+        self.assertEqual(
+            could_hold_actions({myself, make_enemy(world_x=110)}),
+            {ReleasePartner(actor_slot="P1", target_slot="P2")},
+        )
 
 
 class CouldJumpAttackTests(unittest.TestCase):

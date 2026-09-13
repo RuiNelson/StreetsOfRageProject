@@ -20,18 +20,28 @@ this module asks *them* about the ``Partner`` rather than measuring a second
 time — the rule this codebase replaced its inference cache with: whenever
 two stages need the same judgment, both call the same function.
 
-Three consequences of that same ROM routine bound what is filtered here:
+Four consequences of that same ROM routine bound what is filtered here:
 
 - ``+$34`` must be nonzero, so ``GrabEnemy`` — a walk-in that deliberately
   presses nothing (see ``AI.md``'s "Grabbing an enemy") — cannot hurt the
   partner and is left alone;
 - the routine returns immediately while a police special is active, so
   ``CallPolice`` is not friendly fire and is never withdrawn;
-- the hold moves (``AttackHeldEnemy``/``Supplex``/``ThrowHeldEnemy``/
-  ``FlipHold``) apply their damage to the body already in the actor's hands.
-  A thrown body is its own object with its own collisions and no decoded
-  player path, so nothing here withdraws them; if that turns out to hurt a
-  partner standing behind the throw, this is the place to add it.
+- with no damage out, the same contact is a **grab** between the players,
+  and ``$3266`` takes the same front/back hold on the partner it takes on an
+  enemy, linking ``+$4C`` to the partner's object. The hold moves
+  (``AttackHeldEnemy``/``Supplex``/``ThrowHeldEnemy``/``FlipHold``/
+  ``ReleaseToRegrab``) act on that body whatever enemy they name, so they
+  are withdrawn exactly while the link names the partner (user: "The AI
+  grabbed me and supplexed me, it shouldn't, because it should never hurt
+  it's partner!"); ``decide.could_hold_actions`` offers ``ReleasePartner``
+  in their place. A thrown *enemy* is its own object with no decoded player
+  path, so throwing one is left alone;
+- the grab runs the other way too: ``$34EA``/``$34E6`` put the player held
+  by the other player into ``$78``/``$7A``, the family an enemy grab uses,
+  so it reads ``HELD_BY_ENEMY`` -- and ``CounterGrab``'s C then B would
+  throw the partner. It is withdrawn while the partner's own ``+$4C`` names
+  the actor, and nothing replaces it: the hold is the partner's to end.
 
 The two attack-thrown weapons (``$21E6 (player_release_thrown_weapon)``
 issues its throw command for the knife ``$08`` and the pepper ``$0C``, and
@@ -61,8 +71,11 @@ from typing import Callable
 from . import reach
 from .decide import in_smash_range
 from .tokens import (
+    AttackHeldEnemy,
     Breakable,
     Context,
+    CounterGrab,
+    FlipHold,
     HealthPickup,
     HitAntonioBoomerang,
     JumpAttack,
@@ -74,6 +87,9 @@ from .tokens import (
     Pickup,
     Punch,
     RearAttack,
+    ReleaseToRegrab,
+    Supplex,
+    ThrowHeldEnemy,
     Token,
     Verb,
     WalkToPickup,
@@ -178,6 +194,33 @@ def _pickup_belongs_to_partner(
     return False
 
 
+def _hold_move_lands_on_partner(
+    context: Context, actor: Myself, partner: Partner, verb: Verb
+) -> bool:
+    """A hold move acts on the body in hand, and ``+$4C`` says whose it is.
+
+    Whatever enemy the verb names, the ROM delivers the knee, the throw, the
+    crossover and the suplex to the object ``+$4C`` links -- the partner,
+    once the actor has walked into them (``PlayableCharacter.
+    is_holding_player``).
+    """
+
+    return actor.held_enemy_slot == partner.slot
+
+
+def _counter_throws_partner(
+    context: Context, actor: Myself, partner: Partner, verb: Verb
+) -> bool:
+    """C then B throws whoever holds the actor -- here, the partner.
+
+    The partner's own hold link is the witness: ``$3266`` writes ``+$4C`` on
+    the holder, and ``observe.py`` fills ``held_enemy_slot`` from it only
+    while the action byte is a hold.
+    """
+
+    return partner.held_enemy_slot == actor.slot
+
+
 # Verbs whose own attack box can land on the partner ($4478).
 _HARM_TESTS: dict[type[Verb], WithdrawTest] = {
     Punch: _forward_strike_hits_partner,
@@ -188,13 +231,28 @@ _HARM_TESTS: dict[type[Verb], WithdrawTest] = {
     RearAttack: _rear_attack_hits_partner,
 }
 
+# Verbs that act on the body in the actor's hands, or on whoever holds the
+# actor -- the partner, once the two players have grabbed each other.
+_HOLD_TESTS: dict[type[Verb], WithdrawTest] = {
+    AttackHeldEnemy: _hold_move_lands_on_partner,
+    Supplex: _hold_move_lands_on_partner,
+    ThrowHeldEnemy: _hold_move_lands_on_partner,
+    FlipHold: _hold_move_lands_on_partner,
+    ReleaseToRegrab: _hold_move_lands_on_partner,
+    CounterGrab: _counter_throws_partner,
+}
+
 # Verbs that would take a floor item the partner needs more.
 _CLAIM_TESTS: dict[type[Verb], WithdrawTest] = {
     WalkToWeapon: _weapon_belongs_to_partner,
     WalkToPickup: _pickup_belongs_to_partner,
 }
 
-_WITHDRAW_TESTS: dict[type[Verb], WithdrawTest] = {**_HARM_TESTS, **_CLAIM_TESTS}
+_WITHDRAW_TESTS: dict[type[Verb], WithdrawTest] = {
+    **_HARM_TESTS,
+    **_HOLD_TESTS,
+    **_CLAIM_TESTS,
+}
 
 
 def withdrawn_verbs(context: Context) -> set[Verb]:

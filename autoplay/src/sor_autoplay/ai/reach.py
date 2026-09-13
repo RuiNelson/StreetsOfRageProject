@@ -423,9 +423,16 @@ def held_enemy(actor: PlayableCharacter, enemies: list[Enemy]) -> Enemy | None:
     the weapon the actor is still carrying. Without this the whole hold
     family scored ``_EMERGENCY_DEFAULT`` and the AI stood in a live front
     hold on him for an entire round-1 fight.
+
+    ``None`` too while (1) names the other player
+    (``PlayableCharacter.is_holding_player``): no enemy is in hand then, and
+    (2) and (3) would name a bystander for the hold family to knee and
+    suplex *through* the partner.
     """
 
     if not actor.is_holding_enemy:
+        return None
+    if actor.is_holding_player:
         return None
     if actor.held_enemy_slot is not None:
         for enemy in enemies:

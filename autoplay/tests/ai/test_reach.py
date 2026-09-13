@@ -911,6 +911,25 @@ class HeldEnemyTests(unittest.TestCase):
 
         self.assertIsNone(reach.held_enemy(myself, [near]))
 
+    def test_no_enemy_is_in_hand_while_the_link_names_the_partner(self) -> None:
+        # $3266 wrote the other player's object into +$4C. The fallbacks
+        # would otherwise name these bystanders -- one GRABBED, one in
+        # contact -- for the hold family to knee and suplex through the
+        # partner.
+        myself = _myself(
+            world_x=100, world_y=100, action_state=0x66, held_enemy_slot="P2"
+        )
+        grabbed = _garcia(
+            slot="obj01",
+            world_x=90,
+            world_y=100,
+            attack_ranges=(),
+            combat_phase=CombatPhase.GRABBED,
+        )
+        contact = _garcia(slot="obj02", world_x=120, world_y=100, attack_ranges=())
+
+        self.assertIsNone(reach.held_enemy(myself, [grabbed, contact]))
+
     def test_no_grab_reason_survives_while_already_holding(self) -> None:
         # $AAA0 refuses a fresh grab while the actor's own +$4C is set.
         myself = _myself(

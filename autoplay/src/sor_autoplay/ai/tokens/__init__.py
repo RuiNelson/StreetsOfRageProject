@@ -26,6 +26,7 @@ from .attack_verbs import (
     Punch,
     RearAttack,
     ReleaseGrab,
+    ReleasePartner,
     ReleaseToRegrab,
     Supplex,
     ThrowHeldEnemy,

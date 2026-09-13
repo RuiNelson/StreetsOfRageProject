@@ -30,6 +30,7 @@ from .tokens import (
     Punch,
     RearAttack,
     ReleaseGrab,
+    ReleasePartner,
     ReleaseToRegrab,
     OpenBreakable,
     Supplex,
@@ -494,6 +495,18 @@ def could_hold_actions(context: Context) -> Context:
         if base in (0x28, 0x2A, 0x2C, 0x2E, 0x62, 0x64, 0x68, 0x6A, 0x6C, 0x6E):
             continue
         if base in ACTION_HOLD_CROSSOVER:
+            continue
+
+        if actor.is_holding_player:
+            # The body in hand is the partner: walking into the other player
+            # takes this same hold ($4478's grab contact, then $3266), and
+            # every move below would land on them. The reported case was
+            # FlipHold then Supplex, aimed by the nearest-enemy fallback at a
+            # bystander and delivered by the ROM to the partner. Letting go
+            # is the only move, and it presses nothing but back.
+            verbs.add(
+                ReleasePartner(actor_slot=actor.slot, target_slot=actor.held_enemy_slot)
+            )
             continue
 
         # A held Souther runs his own loop: knee, knee, release, walk back in

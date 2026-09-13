@@ -19,6 +19,7 @@ from sor_autoplay.ai.tokens import (
     Punch,
     RearAttack,
     ReleaseGrab,
+    ReleasePartner,
     ReleaseToRegrab,
     Supplex,
     TechRecover,
@@ -3116,6 +3117,42 @@ class ReleaseToRegrabExecuteTests(unittest.TestCase):
 
     def test_a_spent_countdown_presses_only_what_is_left(self) -> None:
         self.assertEqual(self._run(1).press_buttons.call_args.kwargs["frames"], 4)
+
+
+class ReleasePartnerExecuteTests(unittest.TestCase):
+    def _run(self, *, facing_left: bool, countdown: int = 3, action_state: int = 0x60):
+        actor = replace(
+            _myself(world_x=100, world_y=50, action_state=action_state, facing_left=facing_left),
+            hold_release_countdown=countdown,
+            held_enemy_slot="P2",
+        )
+        client = MagicMock()
+        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+        execute_verb(ReleasePartner(actor_slot="P1", target_slot="P2"), {actor}, gamepad)
+        return client
+
+    def test_presses_back_for_the_countdown_and_nothing_else(self) -> None:
+        client = self._run(facing_left=False)
+        client.press_buttons.assert_called_once()
+        pressed = client.press_buttons.call_args.kwargs
+        self.assertEqual(pressed["player1"], LEFT)  # facing right: back is left
+        self.assertEqual(pressed["frames"], 8)
+        # No walk back in: re-entering contact would take the partner again.
+        self.assertEqual(client.hold_buttons.call_args.kwargs["player1"], 0)
+
+    def test_back_follows_facing_in_a_back_hold(self) -> None:
+        pressed = self._run(facing_left=True, action_state=0x67).press_buttons
+        self.assertEqual(pressed.call_args.kwargs["player1"], RIGHT)
+
+    def test_never_presses_b_or_c(self) -> None:
+        for facing_left in (False, True):
+            for countdown in (0, 1, 2, 3, 0xFF):
+                with self.subTest(facing_left=facing_left, countdown=countdown):
+                    client = self._run(facing_left=facing_left, countdown=countdown)
+                    for call in client.press_buttons.call_args_list:
+                        self.assertFalse(call.kwargs["player1"] & (B | C))
+                    for call in client.hold_buttons.call_args_list:
+                        self.assertFalse(call.kwargs["player1"] & (B | C))
 
 
 if __name__ == "__main__":

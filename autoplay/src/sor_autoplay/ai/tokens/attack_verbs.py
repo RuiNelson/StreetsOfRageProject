@@ -316,6 +316,27 @@ class ReleaseGrab(GrabMechanics):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ReleasePartner(GrabMechanics):
+    """Let go of the other player -- the only move a partner hold offers.
+
+    Walking into the partner takes a hold on them just as walking into an
+    enemy does (``PlayableCharacter.is_holding_player``), and every other
+    hold move then lands on the partner: B knees or throws them, and C
+    crosses over into the back hold whose B is the suplex (user: "The AI
+    grabbed me and supplexed me, it shouldn't, because it should never hurt
+    it's partner!"). Produced by ``could_hold_actions`` instead of all of
+    them; the executor holds back and presses nothing else, so ``loc_235A``
+    drops the hold and hands the partner its own release (``+$7D`` = 5).
+
+    Raises emergency: (the partner in the actor's hands)×72.
+    """
+
+    priority: int = 18
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class JumpAttack(MeleeAttacks):
     """Jump-kick — a directed hop, except an in-place hop on Antonio
     already inside punch range.

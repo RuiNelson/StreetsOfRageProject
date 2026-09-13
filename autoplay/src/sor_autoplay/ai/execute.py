@@ -28,6 +28,7 @@ from .tokens import (
     RearAttack,
     OpenBreakable,
     ReleaseGrab,
+    ReleasePartner,
     ReleaseToRegrab,
     Supplex,
     TechRecover,
@@ -2121,6 +2122,26 @@ def state_machine_flip_hold(verb: FlipHold, context: Context, gamepad: VirtualGa
     _press(gamepad, JUMP_MASK, frames=HOLD_FRAMES)
 
 
+def state_machine_release_partner(
+    verb: ReleasePartner, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Hold back, and press nothing else, until ``loc_235A`` lets the partner go.
+
+    The same timed back press as ``ReleaseToRegrab``, sized from the ROM's own
+    ``+$63`` countdown -- a property of the hold, not of who is in it -- but
+    without the walk back in, which would take the partner again. B and C are
+    never pressed: in a hold they are the knee, the throw and the crossover
+    into the suplex.
+    """
+
+    actor = _find_actor(context, verb.actor_slot)
+    if actor is None:
+        gamepad.release()
+        return
+    frames = souther_plan.release_press_frames(actor.hold_release_countdown)
+    _press(gamepad, _back_direction_mask(actor), frames=frames)
+
+
 def state_machine_release_grab(verb: ReleaseGrab, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, verb.actor_slot)
     target = find(context, Enemy, slot=verb.target_slot)
@@ -2531,6 +2552,7 @@ _HANDLERS = {
     ThrowHeldEnemy: state_machine_throw_held_enemy,
     FlipHold: state_machine_flip_hold,
     ReleaseGrab: state_machine_release_grab,
+    ReleasePartner: state_machine_release_partner,
     ThrowKnife: state_machine_throw_knife,
     ThrowPepper: state_machine_throw_pepper,
     WalkToWeapon: state_machine_walk_to_weapon,

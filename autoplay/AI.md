@@ -748,6 +748,24 @@ succeeded. Measured live: the AI took a front hold on Antonio and then
 issued no verb for 70 seconds, until the round clock killed it. See
 `autoplay/CLAUDE.md`'s **Holding a boss**.
 
+**The body in hand can be the other player.** With no damage out, `$4478
+(resolve_player_vs_player_collision)` turns a walking box on the other
+player's body into grab contact, and `$3266` takes the same front `$60` /
+back `$66` hold it takes on an enemy, writing the partner's object into
+`+$4C` (decoded `P1`/`P2`: `PlayableCharacter.is_holding_player`). From
+there the knee, the throw, and the C crossover into the suplex all land on
+the partner. So `could_hold_actions` offers `ReleasePartner` alone — hold
+back and press nothing else until `loc_235A` drops the hold — and
+`reach.held_enemy` answers `None` rather than letting its contact fallbacks
+name a bystander. That fallback was the reported bug (user: "The AI grabbed
+me and supplexed me, it shouldn't, because it should never hurt it's
+partner!"): the hold family aimed `FlipHold` then `Supplex` at the nearest
+enemy, and the ROM delivered both to the partner. The grab also runs the
+other way — a player held by the other player enters `$78`/`$7A` through
+`$34EA`/`$34E6`, the family an enemy grab uses, and reads `HELD_BY_ENEMY` —
+which is why [`do_not_harm_partner`](#do_not_harm_partner) withdraws
+`CounterGrab` there.
+
 This list is meant to grow. Any further situation where a hold beats a
 strike belongs here as another `GrabReason` member with its own tier and
 its own branch in `grab_reasons`, not as a bespoke new token.
@@ -916,17 +934,24 @@ the way `priority.py` and `execute.py` already dispatch:
   no verb releases the controller, losing the kick *and* the launch
   direction, and not kicking does not un-fly the jump;
 - `RearAttack` while the partner is inside the `$322A` chord's real band on
-  the side it stands.
+  the side it stands;
+- the hold moves — `AttackHeldEnemy`, `Supplex`, `ThrowHeldEnemy`,
+  `FlipHold`, `ReleaseToRegrab` — while the body in the actor's hands *is*
+  the partner (`+$4C` names it; see [Knowing that a hold exists at
+  all](#knowing-that-a-hold-exists-at-all)). They act on that body whatever
+  enemy they name. `could_hold_actions` already offers only
+  `ReleasePartner` there, so this is the guarantee rather than the plan;
+- `CounterGrab` while the partner is the one holding the actor (the
+  partner's own `+$4C` names `Myself`). A player held by the other player
+  reads `HELD_BY_ENEMY`, and the counter's C then B would throw the partner.
+  Nothing replaces it: the hold is the partner's to end.
 
-Four families are deliberately *not* filtered. `GrabEnemy` presses nothing
+Three families are deliberately *not* filtered. `GrabEnemy` presses nothing
 — that is what makes it a hold rather than a hit (see [Grabbing an
 enemy](#grabbing-an-enemy)) — so its `+$34` is zero and `$4478` has nothing
 to convert. `CallPolice` cannot be
 friendly fire at all: `$4478` returns immediately while a police special is
-active. The hold moves (`AttackHeldEnemy`, `Supplex`, `ThrowHeldEnemy`,
-`FlipHold`) deal their damage to the body already in the actor's hands; a
-thrown body is its own object with its own collisions and no decoded player
-path, so nothing withdraws them today. Neither are the two attack-thrown
+active. Neither are the two attack-thrown
 weapons (`$21E6 (player_release_thrown_weapon)` issues its throw command for
 the knife `$08` and the pepper `$0C`, and for nothing else): an earlier
 version of this filter withdrew a throw whose flight lane the partner shared,

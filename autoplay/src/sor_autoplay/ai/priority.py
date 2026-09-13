@@ -47,6 +47,7 @@ from .tokens import (
     RearAttack,
     OpenBreakable,
     ReleaseGrab,
+    ReleasePartner,
     ReleaseToRegrab,
     Supplex,
     TechRecover,
@@ -251,6 +252,11 @@ _EMERGENCY_HOLD_RELEASE = 50
 # Souther's hand-back (ReleaseToRegrab): the one input souther.hold_step chose,
 # at the top of the hold family so nothing else can take the tick from it.
 _EMERGENCY_HOLD_REGRAB = 69
+# Letting go of the partner (ReleasePartner). decide.could_hold_actions offers
+# it alone for a hold on the other player, so it never actually meets a hold
+# move; it still tops the whole hold family, so nothing that lands on the
+# partner could outrank it if one ever leaked through.
+_EMERGENCY_RELEASE_PARTNER = 72
 # The knee budget moved to frames and to kinematics.py -- see
 # ``kinematics.hold_knee_budget_frames``. It was six *ticks*, which is not a
 # unit the game has: at ~2 frames a tick that is 12 frames against a knee's
@@ -909,6 +915,16 @@ def _held_enemy_emergency(weight: int) -> Callable[[Verb, Context], int]:
     return _emergency
 
 
+def _emergency_release_partner(verb: ReleasePartner, context: Context) -> int:
+    """``_EMERGENCY_RELEASE_PARTNER`` while the actor really holds the partner
+    (``PlayableCharacter.is_holding_player``), else nothing."""
+
+    actor = _find_actor(context, verb.actor_slot)
+    if actor is None or not actor.is_holding_player:
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_RELEASE_PARTNER
+
+
 _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     HandleContinueMenu: _emergency_handle_continue_menu,
     HandleMrXDialog: _emergency_handle_mr_x_dialog,
@@ -926,6 +942,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     AttackHeldEnemy: _emergency_attack_held_enemy,
     ReleaseGrab: _held_enemy_emergency(_EMERGENCY_HOLD_RELEASE),
     ReleaseToRegrab: _held_enemy_emergency(_EMERGENCY_HOLD_REGRAB),
+    ReleasePartner: _emergency_release_partner,
     JumpAttack: _emergency_jump_attack,
     ThrowKnife: _emergency_throw_knife,
     ThrowPepper: _emergency_throw_pepper,

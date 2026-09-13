@@ -16,6 +16,7 @@ from sor_autoplay.ai.tokens import (
     MeleeWeaponAttack,
     Punch,
     RearAttack,
+    ReleasePartner,
     ReleaseToRegrab,
     ScorePickup,
     SpecialPickup,
@@ -2574,3 +2575,31 @@ class ParkedTargetUnderBossThreatTests(unittest.TestCase):
         winner = self._fight((1, 0), CombatPhase.KNOCKDOWN, engage=False)
         self.assertIsInstance(winner, Punch)
         self.assertEqual(winner.target_slot, "obj01")
+
+
+class ReleasePartnerPriorityTests(unittest.TestCase):
+    """Letting go of the partner tops every hold move that would land on them."""
+
+    def test_tops_the_hold_family_while_the_partner_is_in_hand(self) -> None:
+        # Even a GRABBED bystander, which scores the hold family at full
+        # tier, cannot outrank it if a hold move ever leaked through.
+        context = {
+            _myself(action_state=0x66, held_enemy_slot="P2"),
+            _enemy("obj01", CombatPhase.GRABBED, world_x=110),
+            ReleasePartner(actor_slot="P1", target_slot="P2"),
+            Supplex(actor_slot="P1", target_slot="obj01"),
+            AttackHeldEnemy(actor_slot="P1", target_slot="obj01"),
+            FlipHold(actor_slot="P1", target_slot="obj01"),
+        }
+        winner = find_all(determine_priority_verb(context), Verb)[0]
+        self.assertIsInstance(winner, ReleasePartner)
+
+    def test_scores_nothing_while_the_body_in_hand_is_an_enemy(self) -> None:
+        context = {
+            _myself(action_state=0x60, held_enemy_slot="obj01"),
+            _enemy("obj01", CombatPhase.GRABBED, world_x=110),
+            ReleasePartner(actor_slot="P1", target_slot="P2"),
+            AttackHeldEnemy(actor_slot="P1", target_slot="obj01"),
+        }
+        winner = find_all(determine_priority_verb(context), Verb)[0]
+        self.assertIsInstance(winner, AttackHeldEnemy)

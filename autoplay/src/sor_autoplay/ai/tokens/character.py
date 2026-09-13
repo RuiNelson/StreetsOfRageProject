@@ -211,9 +211,10 @@ class PlayableCharacter(Character, ABC):
     hold_ticks: int = 0
     # Slot of the body this actor currently has in its hands, from the ROM's
     # own hold link (+$4C, world_map.MapEntity.contact_slot) -- None when not
-    # holding, or when the pointer does not resolve to a live object. This is
-    # the *identity* half of is_holding_enemy below, which only answers
-    # whether a hold exists at all.
+    # holding, or when the pointer does not resolve to a live object; P1/P2
+    # when the body is the other player (is_holding_player). This is the
+    # *identity* half of is_holding_enemy below, which only answers whether a
+    # hold exists at all.
     held_enemy_slot: str | None = None
     # player +$61: the last knee of the current front-hold chain ($6A, then
     # $6C) -- see knees_in_chain.
@@ -254,6 +255,23 @@ class PlayableCharacter(Character, ABC):
         """Action family with facing bit cleared."""
 
         return self.action_state & 0xFE
+
+    @property
+    def is_holding_player(self) -> bool:
+        """True while the body in this actor's hands is the *other player*.
+
+        Walking into the partner takes a hold on them exactly as walking into
+        an enemy does. ``$4478 (resolve_player_vs_player_collision)`` turns a
+        walking box on the other player's body, with no damage out, into grab
+        contact (``+$7C`` = 3) and a reciprocal ``+$7E`` link; ``$3266`` then
+        takes the same front ``$60`` / back ``$66`` hold it takes on an enemy
+        and writes the partner's object into ``+$4C``, which ``world_map``
+        decodes as ``P1``/``P2``. Every hold move from there -- the knee, the
+        throw, the C crossover and the suplex after it -- lands on the
+        partner.
+        """
+
+        return self.held_enemy_slot in ("P1", "P2")
 
     @property
     def is_holding_enemy(self) -> bool:

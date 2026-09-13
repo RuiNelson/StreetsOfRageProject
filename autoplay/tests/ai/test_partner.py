@@ -8,11 +8,17 @@ would only make the assertions depend on unrelated production gates.
 
 import unittest
 
+from sor_autoplay.ai.decide import generate_verb_tokens
+from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.partner import do_not_harm_partner
+from sor_autoplay.ai.priority import determine_priority_verb
 from sor_autoplay.ai.tokens import (
+    AttackHeldEnemy,
     Breakable,
     CallPolice,
+    CounterGrab,
     Enemy,
+    FlipHold,
     Garcia,
     GrabEnemy,
     HealthPickup,
@@ -24,8 +30,12 @@ from sor_autoplay.ai.tokens import (
     Partner,
     Punch,
     RearAttack,
+    ReleasePartner,
+    ReleaseToRegrab,
     ScorePickup,
     SpecialPickup,
+    Supplex,
+    ThrowHeldEnemy,
     ThrowKnife,
     Verb,
     WalkToPickup,
@@ -302,6 +312,122 @@ class OtherActorTests(unittest.TestCase):
         punch = Punch(actor_slot="P2", target_slot="obj01")
         context = {make_myself(), make_partner(world_x=130), make_enemy(world_x=130), punch}
         self.assertEqual(verbs(do_not_harm_partner(context)), {punch})
+
+
+class HoldOnPartnerTests(unittest.TestCase):
+    """The body in hand is the partner: ``$3266`` linked ``+$4C`` to them."""
+
+    HOLD_MOVES = (AttackHeldEnemy, Supplex, FlipHold, ThrowHeldEnemy, ReleaseToRegrab)
+
+    def _context(self, verb, *, held):
+        return {
+            make_myself(action_state=0x66, held_enemy_slot=held),
+            make_partner(
+                world_x=120, action_state=0x7A, combat_phase=CombatPhase.HELD_BY_ENEMY
+            ),
+            make_enemy(slot="obj01", world_x=70, combat_phase=CombatPhase.GRABBED),
+            verb,
+        }
+
+    def test_every_hold_move_is_withdrawn(self):
+        for cls in self.HOLD_MOVES:
+            with self.subTest(verb=cls.__name__):
+                verb = cls(actor_slot="P1", target_slot="obj01")
+                self.assertEqual(
+                    verbs(do_not_harm_partner(self._context(verb, held="P2"))), set()
+                )
+
+    def test_hold_moves_on_an_enemy_are_left_alone(self):
+        for cls in self.HOLD_MOVES:
+            with self.subTest(verb=cls.__name__):
+                verb = cls(actor_slot="P1", target_slot="obj01")
+                kept = do_not_harm_partner(self._context(verb, held="obj01"))
+                self.assertEqual(verbs(kept), {verb})
+
+    def test_the_release_is_never_withdrawn(self):
+        release = ReleasePartner(actor_slot="P1", target_slot="P2")
+        kept = do_not_harm_partner(self._context(release, held="P2"))
+        self.assertEqual(verbs(kept), {release})
+
+
+class HeldByPartnerTests(unittest.TestCase):
+    """The partner holds the actor: ``$34EA``/``$34E6`` put it in ``$78``/``$7A``."""
+
+    def _held_actor(self):
+        return make_myself(action_state=0x7A, combat_phase=CombatPhase.HELD_BY_ENEMY)
+
+    def test_the_counter_is_withdrawn(self):
+        counter = CounterGrab(actor_slot="P1")
+        context = {
+            self._held_actor(),
+            make_partner(world_x=120, action_state=0x60, held_enemy_slot="P1"),
+            counter,
+        }
+        self.assertEqual(verbs(do_not_harm_partner(context)), set())
+
+    def test_the_counter_on_an_enemy_hold_is_kept(self):
+        counter = CounterGrab(actor_slot="P1")
+        context = {
+            self._held_actor(),
+            make_partner(world_x=300),
+            make_enemy(world_x=120, combat_phase=CombatPhase.ATTACKING),
+            counter,
+        }
+        self.assertEqual(verbs(do_not_harm_partner(context)), {counter})
+
+
+class ReportedGrabPipelineTests(unittest.TestCase):
+    """The whole loop as reported: the user on P1, the AI on P2.
+
+    User: "The AI grabbed me and supplexed me, it shouldn't, because it should
+    never hurt it's partner!"
+    """
+
+    def _run(self, context):
+        context = set(context)
+        context |= generate_inference_tokens(context)
+        context |= generate_verb_tokens(context)
+        context = do_not_harm_partner(context)
+        return find_all(determine_priority_verb(context), Verb)
+
+    def _ai(self, **overrides):
+        return make_myself(
+            slot="P2", player_index=2, character_id=2, character_name="Blaze", **overrides
+        )
+
+    def _user(self, **overrides):
+        return make_partner(
+            slot="P1", player_index=1, character_id=0, character_name="Axel", **overrides
+        )
+
+    def test_a_hold_on_the_user_ends_in_a_release(self):
+        # From $66 the hold family used to offer Supplex outright, and from
+        # $60 the knee and the flip into it -- aimed at the nearest enemy,
+        # landed by the ROM on the user.
+        for action_state in (0x60, 0x66):
+            with self.subTest(action_state=hex(action_state)):
+                context = {
+                    self._ai(world_x=100, action_state=action_state, held_enemy_slot="P1"),
+                    self._user(
+                        world_x=118,
+                        action_state=0x7A,
+                        combat_phase=CombatPhase.HELD_BY_ENEMY,
+                    ),
+                    make_enemy(slot="obj01", world_x=160),
+                }
+                self.assertEqual(
+                    self._run(context), [ReleasePartner(actor_slot="P2", target_slot="P1")]
+                )
+
+    def test_held_by_the_user_the_ai_does_not_counter(self):
+        context = {
+            self._ai(world_x=100, action_state=0x7A, combat_phase=CombatPhase.HELD_BY_ENEMY),
+            self._user(
+                world_x=118, action_state=0x60, facing_left=True, held_enemy_slot="P2"
+            ),
+            make_enemy(slot="obj01", world_x=200),
+        }
+        self.assertEqual(self._run(context), [])
 
 
 if __name__ == "__main__":
