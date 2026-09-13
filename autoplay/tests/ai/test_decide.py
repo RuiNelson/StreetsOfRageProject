@@ -2053,6 +2053,39 @@ class InSmashRangeTests(unittest.TestCase):
         actor = make_myself(world_x=100 - (wall + 1), world_y=100)
         self.assertTrue(in_smash_range(actor, prop))
 
+    def _booth(self, dx: int):
+        from sor_autoplay.hitboxes import Hitbox
+
+        x = 100 + dx
+        return Breakable(
+            slot="prop",
+            world_x=x,
+            world_y=100,
+            type_id=0x11,
+            hitbox=Hitbox(x0=x - 16, x1=x + 16, y0=90, y1=110, z0=80, z1=160),
+        )
+
+    def test_a_swing_passes_over_a_booth_it_stands_too_close_to(self) -> None:
+        # Live, round 1: Blaze with the bat swung 93 times from 17px at a
+        # type-$11 booth (box ±16) and never broke it; from 19px it broke.
+        # Her swing peaks 53px out, so the punch's inner edge said "in range"
+        # at a spot the weapon only passes over.
+        blaze = replace(make_myself(world_x=100, world_y=100), character_id=2, held_weapon_type=0x0A)
+
+        self.assertFalse(in_smash_range(blaze, self._booth(dx=17)))
+        self.assertTrue(in_smash_range(blaze, self._booth(dx=19)))
+        self.assertTrue(in_smash_range(blaze, self._booth(dx=34)))
+        self.assertFalse(in_smash_range(blaze, self._booth(dx=-17)))
+        self.assertTrue(in_smash_range(blaze, self._booth(dx=-19)))
+
+    def test_the_swing_band_is_only_for_a_held_bat_or_pipe(self) -> None:
+        blaze = replace(make_myself(world_x=100, world_y=100), character_id=2)
+        # Axel's swing peaks at 36px: what is under it is under his punch too.
+        axel_with_pipe = replace(make_myself(world_x=100, world_y=100), held_weapon_type=0x0B)
+
+        self.assertTrue(in_smash_range(blaze, self._booth(dx=17)))
+        self.assertTrue(in_smash_range(axel_with_pipe, self._booth(dx=12)))
+
 
 class CouldWalkToWeaponTests(unittest.TestCase):
     def test_fires_for_in_camera_upgrade_weapon(self) -> None:

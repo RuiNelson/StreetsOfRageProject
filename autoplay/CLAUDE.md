@@ -538,6 +538,25 @@ The wait *before* that gate opens is the ROM, not the AI: the player is
 held at `camera_x+$120` until the wave's six spawns -- swept, so never on
 screen -- are dead, about 5-7 s at turbo 4.
 
+**Swinging a bat over a booth from too close (user, same report):** the
+other cause of "stops in the middle of round 1". Blaze's `OpenBreakable` B
+landed on the bat at her feet (`$3136` picks an item up instead of
+striking), swapping out her pipe, and she then swung 93 times in 25 s from
+x=2903 at the type-`$11` booth at 2920 without touching it; a scored run
+stalled on the same spot and lost a life to the round clock. The swing
+(`$48`) only connects near its peak: the held weapon's origin runs from
+w_x-p_x = 6 out to 53 for Blaze (36 for Axel, weapons-range-and-damage.md
+§5), and its box reaches about 18 px back from there. The booth (box ±16)
+broke from 19 px, and from 27-36 px in every other walk, but never from
+17 px -- yet `in_smash_range` used the punch's inner edge (12 px for Blaze).
+`decide.breakable_strike_inner_x` is now the swing's inner edge (peak - 18
+- the prop's box past its origin; the punch's own with no bat or pipe),
+shared by `in_smash_range`, the approach's `inner_dx` and the facing
+nudge's headroom. After it, 6 traced walks of 6 broke every booth with
+swings from 22-35 px, the bat included. Not measured: the same peak puts a
+±6 px enemy under Blaze's swing closer than ~29 px, and `MeleeWeaponAttack`
+still uses the punch's inner edge.
+
 **Target ranking (user):** `WalkToAdvanceStage` always has the lowest
 emergency of any verb that still scores. Among enemy targets, a `Boss`
 outranks an armed ordinary enemy, and an armed ordinary enemy (pickup

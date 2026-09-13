@@ -124,6 +124,19 @@ SMASH_WALL_CLEARANCE_X = 8
 # OpenBreakable and handed the tick to WalkToAdvanceStage, which walked
 # straight back into the crate -- the two verbs flipping every few ticks.
 BREAKABLE_AHEAD_SLACK = 8
+# A held bat/pipe swing ($48) connects near its peak, not in the hand. The
+# weapon is its own object, and its origin runs from the hand (w_x-p_x = 6)
+# out to the peak: 36px for Axel (weapons-range-and-damage.md §5), 53px for
+# Blaze (measured on round 1's booths with both weapons; Adam unmeasured, so
+# the longer one). Its box reaches about 18px back from there: Blaze broke a
+# type-$11 booth from 19px, and swung 93 times from 17px without touching
+# it (booth box ±16) -- the actor stood still until the round clock took a
+# life. So a prop nearer than the peak, less that back reach, less the prop's
+# own extent past its origin, is *under* the swing. See
+# ``breakable_strike_inner_x``.
+MELEE_WEAPON_SWING_PEAK_X: dict[int, int] = {0: 36, 2: 53}
+DEFAULT_MELEE_WEAPON_SWING_PEAK_X = 53
+MELEE_WEAPON_SWING_BACK_X = 18
 
 
 def _is_holding_enemy(actor: PlayableCharacter) -> bool:
@@ -1659,6 +1672,30 @@ def breakable_smash_outer_x(prop: Breakable) -> int:
     )
 
 
+def breakable_strike_inner_x(actor: PlayableCharacter, prop: Breakable) -> int:
+    """The nearest the actor may stand to ``prop`` and still hit it with B.
+
+    Unarmed, the punch box's own inner edge (``punch_usable_inner_x``). With a
+    bat or pipe, the swing's: its box only exists near the peak
+    (``MELEE_WEAPON_SWING_PEAK_X``) and reaches ``MELEE_WEAPON_SWING_BACK_X``
+    back from there, so the prop must reach out to meet it -- with its box on
+    the far side of its origin, or its wall when the box is unknown. Shared
+    by ``in_smash_range`` and by the executor's approach and facing nudge, so
+    where the actor stops and whether it swings can never disagree.
+    """
+
+    inner = punch_usable_inner_x(actor.character_id)
+    if actor.held_weapon_type not in MELEE_WEAPON_TYPES:
+        return inner
+    peak = MELEE_WEAPON_SWING_PEAK_X.get(actor.character_id, DEFAULT_MELEE_WEAPON_SWING_PEAK_X)
+    box = prop.hitbox
+    if box is not None and not box.is_degenerate:
+        far = box.x1 - prop.world_x if prop.world_x >= actor.world_x else prop.world_x - box.x0
+    else:
+        far = prop_solids.solid_half_width(prop.type_id)
+    return max(inner, peak - MELEE_WEAPON_SWING_BACK_X - far)
+
+
 def in_smash_range(actor: PlayableCharacter, prop: Breakable) -> bool:
     """Close enough that B hits the prop without moving first.
 
@@ -1673,12 +1710,13 @@ def in_smash_range(actor: PlayableCharacter, prop: Breakable) -> bool:
     released the controller and reset the steering axis, so the actor never
     walked away either. Recorded live: **94 seconds** of a 7-minute run spent
     punching one type-$11 prop from 1px away, ~430 presses, ending in a lost
-    life -- and 22 shorter stalls in the same run.
+    life -- and 22 shorter stalls in the same run. With a bat or pipe in hand
+    the inner edge is the swing's, further out (``breakable_strike_inner_x``).
     """
 
     dx = abs(prop.world_x - actor.world_x)
     if not (
-        punch_usable_inner_x(actor.character_id) <= dx <= breakable_smash_outer_x(prop)
+        breakable_strike_inner_x(actor, prop) <= dx <= breakable_smash_outer_x(prop)
     ):
         return False
     # Prefer the ROM's own test: attack-box lane vs the prop's body lane.

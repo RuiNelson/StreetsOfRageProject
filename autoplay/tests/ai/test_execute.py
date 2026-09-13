@@ -191,6 +191,50 @@ class BreakableFacingNudgeAtTheCameraClampTests(unittest.TestCase):
         self.assertTrue(mask & LEFT)
 
 
+class BreakableWeaponSwingBandTests(unittest.TestCase):
+    """A bat/pipe swing needs the prop out near its peak.
+
+    Recorded live on round 1 (``trace_walk``): Blaze, holding the bat,
+    stood at x=2903 beside the type-``$11`` booth at 2920 and swung 93
+    times in 25 s without touching it -- the punch's inner edge called 17px
+    "in range", and her swing peaks 53px out. The same booth broke from 19px
+    and from 27-36px in every other walk.
+    """
+
+    def _context(self, actor_x: int):
+        actor = replace(
+            _myself(world_x=actor_x, world_y=36), character_id=2, held_weapon_type=0x0A
+        )
+        booth = Breakable(
+            slot="obj06",
+            world_x=2920,
+            world_y=32,
+            type_id=0x11,
+            hitbox=Hitbox(x0=2904, x1=2936, y0=22, y1=42, z0=80, z1=160),
+        )
+        return {
+            actor,
+            booth,
+            CameraRange(left=2759, right=3015, top=0, bottom=112),
+            Stage(level_index=0, direction="right"),
+        }
+
+    def test_steps_back_out_from_under_the_swing(self) -> None:
+        gamepad, client = _gamepad()
+
+        _settle(OpenBreakable(actor_slot="P1", target_slot="obj06"), self._context(2903), gamepad)
+
+        client.press_buttons.assert_not_called()
+        self.assertTrue(gamepad.held & LEFT, f"did not back off (mask {hex(gamepad.held)})")
+
+    def test_swings_from_inside_the_band(self) -> None:
+        gamepad, client = _gamepad()
+
+        _settle(OpenBreakable(actor_slot="P1", target_slot="obj06"), self._context(2893), gamepad)
+
+        self.assertTrue(client.press_buttons.called)
+
+
 class AntonioLaneBreakTests(unittest.TestCase):
     """The uncommitted half of ``DodgeAntonioKick``: walk out of his gate.
 

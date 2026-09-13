@@ -78,6 +78,7 @@ from .decide import (
     BREAKABLE_PUNCH_X,
     BREAKABLE_APPROACH_Y,
     breakable_smash_outer_x,
+    breakable_strike_inner_x,
     in_smash_range,
 )
 from .reach import (
@@ -2429,8 +2430,8 @@ def state_machine_open_breakable(
             # already -- wrongly -- facing) buys room for a real toward-
             # target step next tick that lands *at* the inner edge rather
             # than past it.
-            headroom = abs(target.world_x - actor.world_x) - punch_usable_inner_x(
-                actor.character_id
+            headroom = abs(target.world_x - actor.world_x) - breakable_strike_inner_x(
+                actor, target
             )
             nudge_x = toward_target if headroom >= BREAKABLE_FACE_NUDGE_X else -toward_target
             # ...but never into the camera's walk clamp. `$43AA` simply undoes
@@ -2515,7 +2516,7 @@ def state_machine_open_breakable(
         target.world_y,
         stop_dx=breakable_smash_outer_x(target),
         lane_slack=BREAKABLE_APPROACH_Y,
-        inner_dx=punch_usable_inner_x(actor.character_id),
+        inner_dx=breakable_strike_inner_x(actor, target),
         side=side,
     )
     body, origin = nav.actor_footprint(actor)
