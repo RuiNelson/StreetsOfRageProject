@@ -132,10 +132,31 @@ partner is flying is danger), `reach.partner_is_engaging`, and a small
 multi-hit bonus (+2 per extra body, up to +4). New token fields: `world_z`,
 `vel_z` (`+$24`), `ground_z` (`observe.GroundTracker`, the floor a flight
 lands on); `kinematics.enemy_projected` now carries the hitbox with the body.
-**Open, measured, not changed:** `kinematics` treats the ROM's per-update
-velocities (walk tables, enemy `+$1C`/`+$20`) as per 60 Hz frame, so every
-projection and intercept runs 2x fast; the horizons built on them were tuned
-live, so fixing the unit needs its own measured pass.
+**The 30 Hz time axis: fixed, measured, not kept.** `kinematics` treats
+the ROM's per-update velocities (walk tables, enemy `+$1C`/`+$20`, thrown
+weapons, Souther's dash, Antonio's boomerang) as per 60 Hz frame, so every
+projection and intercept runs 2x fast, and `JUMP_CROUCH_FRAMES = 5` is
+really 10 frames (`ai/jump_kick.py` already simulates it correctly). A root
+fix -- one `OBJECT_UPDATE_FRAMES = 2` dividing every ROM rate, each horizon
+keeping its meaning in frames -- was scored with `tools/boss_fight.py`
+(Blaze, turbo 4, 8 fights a side, a fresh host per fight):
+
+| Batch | Antonio hits/fight, mean (median) | lives lost | Souther hits, `--no-food` |
+| --- | --- | --- | --- |
+| HEAD, then the fix | 2.50 (2) vs 4.25 (4.5) | 2 vs 6 | 1 in 8 vs 0 |
+| paired, lane-edge fix in both | 3.38 (3.5) vs 3.88 (3.5) | 4 vs 3 | 0 vs 0 |
+
+Pooled over 16 Antonio fights, the fix took 65 hits to HEAD's 47 and never
+came out ahead. For Antonio the only projection it changes is his
+boomerang's (a `Boss` has no `grunt_vel`), and the extra hits come neither
+from the entrance (20 vs 23 in the first 4 s) nor from the boomerang (11 vs
+9 with `HitAntonioBoomerang` in the last 30 verbs). They sit in three long
+fights (73-82 s), two confirmed with Antonio in tactical 9 on lane 0 --
+HEAD's longest was 29 s. The first batch was also skewed by the lane-edge
+freeze below (walk stalls in 3 candidate runs of 8, 1 of 8 for HEAD).
+Under "keep it only if it is not worse" it was reverted. For a retry: the
+horizons are tuned to the 2x-fast projection, so the unit fix has to be
+retuned as a whole against these numbers, not dropped in.
 
 **Leave the partner's fight to them** (user: "a IA a tentar atacar o mesmo
 inimigo que o partner já está a atacar ou perto de atacar, estuda bem o
