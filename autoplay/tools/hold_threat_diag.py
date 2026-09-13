@@ -48,7 +48,7 @@ from megadrive_remote import MegaDriveClient
 from sor_autoplay.ai import reach
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.loop import AgentLoop
-from sor_autoplay.ai.observe import GrabStallTracker, HoldTracker, NoraAttackTracker
+from sor_autoplay.ai.observe import HoldTracker, NoraAttackTracker
 from sor_autoplay.ai.observe import generate_direct_observation_tokens
 from sor_autoplay.ai.tokens import Myself, find
 from sor_autoplay.reach_gameplay import reach_gameplay
@@ -84,7 +84,6 @@ def main() -> int:
         # so it keeps its own and never feeds them back.
         nora = NoraAttackTracker()
         holds = HoldTracker()
-        stalls = GrabStallTracker()
 
         hold_ticks = 0
         decisions = 0
@@ -107,7 +106,6 @@ def main() -> int:
                     player_index=1,
                     nora_tracker=nora,
                     hold_tracker=holds,
-                    grab_stall_tracker=stalls,
                 )
                 actor = find(context, Myself)
                 if actor is None or not actor.is_holding_enemy:

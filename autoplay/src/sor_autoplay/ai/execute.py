@@ -17,7 +17,7 @@ from .pathfind import Path, Point, PointGoal
 from .tokens import (
     CounterGrab,
     DodgeAntonioKick,
-    DodgeSoutherSlash,
+    EngageSouther,
     FlipHold,
     GrabEnemy,
     HitAntonioBoomerang,
@@ -28,6 +28,7 @@ from .tokens import (
     RearAttack,
     OpenBreakable,
     ReleaseGrab,
+    ReleaseToRegrab,
     Supplex,
     TechRecover,
     ThrowHeldEnemy,
@@ -59,7 +60,6 @@ from .tokens import (
 from .tokens import Context, Verb, find, find_all
 from .tokens import (
     DodgeAntonioKick,
-    DodgeSoutherSlash,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -69,6 +69,7 @@ from .tokens import (
 )
 from .gamepad import VirtualGamepad
 from . import kinematics
+from . import souther as souther_plan
 from . import navigation as nav
 from .decide import (
     BREAKABLE_PUNCH_X,
@@ -80,10 +81,6 @@ from .reach import (
     ANTONIO_KICK_LANE_BREAK,
     PIT_AVOID_MARGIN,
     REACH_SAFETY_MARGIN,
-    SOUTHER_DASH_RESOLVE_LANE,
-    SOUTHER_SLASH_DIST_CLOSING,
-    SOUTHER_SLASH_DIST_MIN,
-    SOUTHER_SLASH_LANE,
     enemy_behind_actor,
     enemy_lane_covers,
     grab_reasons,
@@ -212,17 +209,6 @@ PIT_DODGE_OVERSHOOT = MOVE_DEADBAND_Y + 5
 # Stop just inside punch_outer_x — never walk onto the enemy.
 WALK_TO_ENEMY_STOP_BUFFER = 4
 
-# The same correction on X, and it is load-bearing for the pocket rather than
-# a nicety. `nav.strike_goal` insets its region by half the body on each axis,
-# so a `stop_dx` of 16 is satisfied by a body whose *near edge* is 16 out --
-# an origin 24 out. The ROM's `+$50` is measured origin to origin, and
-# `$15EDA`'s inner abort is `+$50 < $18`, so arriving "at the pocket" that way
-# lands exactly **on** the gate rather than inside it: he can still commit.
-# Caught on the tick harness the moment a strike thrown from outside the
-# pocket was refused -- the actor parked at dx=24 with an empty mask and
-# `WalkToNearEnemy` winning every tick, which is the same "arrived somewhere
-# nothing can act" this file records from the fifth attempt.
-PLAYER_BODY_HALF_X = nav.NOMINAL_BODY_W // 2
 # While still approaching a dangerous (ATTACKING/CHARGE) enemy and already
 # near its exact lane, sidestep by this much instead of closing distance
 # straight down its line of attack.
@@ -239,53 +225,6 @@ LANE_SIDE_DEADBAND_Y = 6
 # and `$14` dash windows with margin. Simulated over the real executor: 13px
 # of arrival offset before, 28 after.
 ANTONIO_APPROACH_LANE_Y = WALK_TO_ENEMY_LANE_SAFETY_Y + PUNCH_RANGE_Y
-# The same construction for Souther, off his own gate rather than Antonio's.
-# `$15EDA (souther_state1_active_combat)` refuses the slash whenever
-# `+$52 >= $1C` (28px of lane), so 28 is the number the *arrival* has to
-# clear, plus the routed goal's own PUNCH_RANGE_Y of lane slack and a
-# REACH_SAFETY_MARGIN cushion against his own closing speed.
-#
-# Paired with `_souther_pocket_stop_dx` (16px, inside the `$18` inner abort)
-# this is ai-analysis/enemy-ai.md's "uncommittable corridor": the lane gate
-# is unsatisfied for the whole approach, the inner abort is unsatisfied from
-# the moment the lane is given up, and the two overlap, so there is no
-# instant at which `$15EDA` can commit.
-#
-# **This was deleted for one session and put back on the measurement.**
-# Running the approach straight down his lane instead -- the literal reading
-# of "chase him" -- put the actor inside the commit gate for the whole walk
-# in, and he used it: `DodgeSoutherSlash` went from 99 ticks a fight to 549,
-# the actor spent 1387 ticks in hurt states against 613, and both scored
-# fights lost 3 lives at 400% damage against the corridor's 1 life at 200%.
-# The corridor's own worth had been recorded as "no measured gain" before,
-# but that was measured against *damage* while other bugs dominated it; what
-# it plainly does is deny commits, and denying them is the cheapest evasion
-# in the fight -- it costs a lane offset, not a single tick of approach.
-#
-# The chase is what happens *after* it, and it is not blocked by any of
-# this: the offset is dropped the moment he is punishable or committed
-# (below), `_lane_release_dx` hands the lane over at his own `$18` boundary,
-# and the hold is then taken from inside the pocket
-# (`GrabReason.SOUTHER_WALK_IN`).
-SOUTHER_APPROACH_LANE_Y = SOUTHER_SLASH_LANE + PUNCH_RANGE_Y + REACH_SAFETY_MARGIN
-# `SOUTHER_LANE_CLOSING_TACTICALS` and `SOUTHER_APPROACH_LANE_Y_WHILE_CLOSING`
-# used to live here: the approach widened its offset from 40 to 64px whenever
-# his tactical read 1 or 2, the substates measured to actually move his lane.
-# The reasoning was that his own closing speed erodes a fixed cushion, so the
-# cushion should grow while he closes.
-#
-# It is the wrong conclusion from a true premise. He closes lane at 4px per
-# 60Hz frame (`$15F98 (souther_state1_standoff)`) against the 2-3px an agent
-# tick of walking buys, so a widening offset is a race that cannot be won --
-# it spends ticks moving *away* in lane, gains nothing, and does it at
-# exactly the moment the X gap most needs closing. What actually denies
-# `$15EDA` is the pocket (`+$50 < $18`), and the pocket is reached on X.
-#
-# Measured over the batch that followed the claw-box dodge: the two fights
-# that reached 200% took 14.3s and 16.9s to land a first hold against
-# 1.69-3.36s in the four cheap ones, and hits taken *before* the first hold
-# went from 16% to 43% of all damage. Time-to-first-hold is what separates
-# this fight, and widening the corridor is what spends it.
 # A Breakable is itself a solid obstacle -- walking straight to its exact
 # (world_x, world_y) means walking into it from whatever angle happens to be
 # a straight line, which can mean approaching from directly above/below and
@@ -800,34 +739,6 @@ def _dead_zone_stop_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> 
     return max(floor, min(stop_dx, inside))
 
 
-def _souther_pocket_stop_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> int:
-    """Stand inside Souther's own state-1 inner abort, not at punch's outer edge.
-
-    ``reach.SOUTHER_SLASH_DIST_MIN`` (24px) is where ``$15EDA
-    (souther_state1_active_combat)`` cannot *begin* the slash at all -- see
-    that constant's own docstring for the ROM evidence. Stopping at the
-    punch's outer edge instead (46px for Axel) sits squarely inside his
-    state-1 commit window (the velocity-selected ``$50``/``$58``/``$68``
-    bands), which is exactly where the claw comes from: measured live, 220 of
-    240 health lost across a full fight went in during the wind-up that
-    follows that commit. Aiming for the pocket denies the commit outright
-    instead of merely giving the actor a worse angle to be hit from.
-
-    Only while he is **not** already ``strike_is_committed()``. Once the claw
-    is out, this same distance is where ``$161C6
-    (souther_state2_claw_dash)`` *resolves* -- reach.SOUTHER_SLASH_DIST_MIN's
-    own docstring says so -- so it has stopped being a pocket and become the
-    thing being dodged; ``DodgeSoutherSlash`` owns that window, not this stop
-    point.
-    """
-
-    if not isinstance(target, Souther) or target.strike_is_committed():
-        return stop_dx
-    inside = SOUTHER_SLASH_DIST_MIN - REACH_SAFETY_MARGIN - PLAYER_BODY_HALF_X
-    floor = punch_usable_inner_x(actor.character_id) + WALK_TO_ENEMY_STOP_BUFFER
-    return max(floor, min(stop_dx, inside))
-
-
 def _crossing_would_walk_into_the_swing(actor: Myself | Partner, target: Enemy) -> bool:
     """True while starting the walk into a dead-zone enemy would cross a
     live swing.
@@ -879,63 +790,19 @@ def _lane_offset_while_closing(actor: Myself | Partner, target: Enemy) -> int | 
     the X distance closes; "hold the actor's current lane", which is what the
     generic branch does, is a coin flip on exactly that question.
 
-    Two bosses qualify, from two separately derived numbers:
-
-    - **Antonio**, whose ``$16EAE`` power kick needs the target within
-      ``$10`` (16px) of his lane and whose ``$16E74`` dash/boomerang commit
-      needs ``$14`` (20px). ``ANTONIO_APPROACH_LANE_Y`` clears both;
-    - **Souther**, whose ``$15EDA (souther_state1_active_combat)`` slash
-      commit needs ``+$52 < $1C`` (28px). ``SOUTHER_APPROACH_LANE_Y`` is that
-      gate plus the routed goal's own lane slack and a margin.
-
-    Souther is the case where the offset is not merely safer but *closes the
-    gate for the entire approach*: his commit also needs ``+$50`` inside a
-    velocity-selected window (``reach.SOUTHER_SLASH_DIST_AWAY``/``_STATIONARY``/
-    ``_CLOSING`` -- 80/88/104px, widest while the target is walking into him,
-    which a live approach always is) **and** outside the ``$18`` inner abort,
-    and the pocket ``_souther_pocket_stop_dx`` stops in is inside that lower
-    bound -- so the lane offset covers the walk in and the inner abort covers
-    the arrival, with an overlap rather than a gap between them. Past 104px
-    he cannot commit at any lane, so the offset is skipped there too.
-
-    It is dropped for the states ``$15EDA`` is off the call path of -- the
-    hit reaction, the lethal gate, the police reaction, the committed claw --
-    because those are the only ground a hold can be taken from and holding an
-    offset through them was, measured, what lost the fight. That carve-out,
-    ``_lane_release_dx``'s early hand-over at his own ``$18`` boundary, and
-    ``GrabReason.SOUTHER_WALK_IN`` are together the chase: the corridor is
-    how the actor *reaches* the pocket, not a reason to stay out of it.
-    Deleting it entirely was tried and measured much worse -- see this
-    module's note by ``SOUTHER_APPROACH_LANE_Y`` and ``autoplay/CLAUDE.md``.
+    Antonio is the one boss this applies to: his ``$16EAE`` power kick needs
+    the target within ``$10`` (16px) of his lane and his ``$16E74``
+    dash/boomerang commit needs ``$14`` (20px); ``ANTONIO_APPROACH_LANE_Y``
+    clears both. Souther is not approached through here at all -- his whole
+    approach is ``EngageSouther`` (``souther.plan_engage``), whose corridor
+    also has to know which *side* of his lane the actor is on, since his gate
+    is ``$0A`` above him and ``$1C`` below.
     """
 
     if target.is_defeated:
         return None
     if isinstance(target, Antonio):
         return ANTONIO_APPROACH_LANE_Y
-    if isinstance(target, Souther):
-        if is_punishable(target.combat_phase) or target.strike_is_committed():
-            # `$15EDA` is not on the call path of the hit reaction `$03`, the
-            # lethal gate `$05`, the police reaction `$0A`, or the committed
-            # claw. These are 47% of his ticks and the only ground a hold can
-            # be taken from; holding the offset through them parked the actor
-            # at dx=76, dl=26 for 1136 ticks of a 3669-tick trace while
-            # `grab_would_connect` was true on 11.
-            return None
-        if abs(target.world_x - actor.world_x) >= SOUTHER_SLASH_DIST_CLOSING:
-            return None
-        # The offset does **not** widen while he closes lane, though the
-        # arithmetic for it is tempting and was shipped once. `$15F98
-        # (souther_state1_standoff)` closes at 4px per 60Hz frame against the
-        # 2-3px an agent tick of walking buys, so widening is a race the
-        # actor loses by construction -- it spends ticks moving away in lane,
-        # gains nothing, and does it exactly when the X gap most needs
-        # closing. Measured over the batch that followed the claw-box dodge:
-        # the two fights that reached 200% took **14.3s and 16.9s** to land a
-        # first hold, against 1.69-3.36s in the four cheap ones, and 43% of
-        # all hits taken now arrive *before* that first hold. The pocket, not
-        # the lane, is what denies `$15EDA` -- and the pocket is reached on X.
-        return SOUTHER_APPROACH_LANE_Y
     return None
 
 
@@ -947,7 +814,7 @@ def _holds_lane_offset_while_closing(actor: Myself | Partner, target: Enemy) -> 
 
 # The subset of GrabReason that means "already helpless, nothing left to
 # deny" rather than "grabbable in general" -- see _approach_lane_y.
-_ON_PUNISH_GRAB_REASONS = frozenset({GrabReason.ANTONIO_ON_PUNISH, GrabReason.SOUTHER_ON_PUNISH})
+_ON_PUNISH_GRAB_REASONS = frozenset({GrabReason.ANTONIO_ON_PUNISH})
 
 
 def _approach_lane_y(
@@ -961,37 +828,22 @@ def _approach_lane_y(
     enemy's own lane -- the approach is over and the strike or the hold needs
     the alignment.
 
-    A boss already in one of its own *punishable* primaries is the other
-    case that forces exact convergence, ahead of the generic bands below.
-    Those bands are sized for a *punch* -- ``WALK_TO_ENEMY_LANE_SAFETY_Y`` is
-    ``PUNCH_RANGE_Y`` plus slack -- and Souther's ``$03``/``$05``/``$0A`` or a
-    punishable Antonio need the much tighter ``reach.GRAB_RANGE_Y`` instead.
-    Measured live against Souther's police-reaction window (``$0A``, the
-    longest helpless state in the fight): the approach reached dy=26 while
-    closing, landed inside the punch band's own "close enough" branch below,
-    and parked there for the rest of the window -- ``grab_reasons`` stayed
-    ``SOUTHER_ON_PUNISH`` for hundreds of ticks and ``grab_would_connect``
-    never once went true, because 26px is comfortably inside the 28px punch
-    band and just as comfortably outside the 10px grab range.
+    A punishable Antonio is the other case that forces exact convergence,
+    ahead of the generic bands below. Those bands are sized for a *punch* --
+    ``WALK_TO_ENEMY_LANE_SAFETY_Y`` is ``PUNCH_RANGE_Y`` plus slack -- and a
+    hold needs the much tighter ``reach.GRAB_RANGE_Y`` instead: an approach
+    parked inside the punch band's own "close enough" branch never once came
+    within grab range of a helpless boss.
 
     Deliberately narrower than "``grab_reasons`` is nonempty": Antonio's
     ``ANTONIO_WALK_IN`` fires for any live, ready, ungrabbed Antonio, at any
     range -- that is the reason the lane-offset approach below exists at all,
     and converging early on its strength alone reopens his kick gate (broke
     three ``test_an_antonio_approach_*`` fixtures, all at his own
-    ``CombatPhase.NORMAL``, when tried). Only the two *on-punish* reasons --
-    the boss already helpless, nothing left to deny -- earn the bypass.
-    ``enemies=[]`` is safe here: both boss branches of ``grab_reasons``
-    return before ever touching that argument.
-
-    A live Souther is *not* converged on for ``GrabReason.SOUTHER_WALK_IN``
-    alone, deliberately, even though the walk-in wants the lane: that reason
-    holds for any ready Souther at contact range, and converging on it walks
-    the approach down his commit lane for the whole way in. Measured, that is
-    the single most expensive thing the AI can do against him (549 dodge
-    ticks a fight against 99, 3 lives against 1). The lane is handed over by
-    ``_lane_release_dx`` instead, at his own ``$18`` inner abort, which is
-    where the hold is taken from anyway.
+    ``CombatPhase.NORMAL``, when tried). Only the *on-punish* reason -- the
+    boss already helpless, nothing left to deny -- earns the bypass.
+    ``enemies=[]`` is safe here: the Antonio branch of ``grab_reasons``
+    returns before ever touching that argument.
     """
 
     if alongside or grab_reasons(context, actor, target, []) & _ON_PUNISH_GRAB_REASONS:
@@ -1090,39 +942,11 @@ def _approach_lane_y(
 def _lane_release_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> int:
     """The X gap at which the approach may finally converge onto the lane.
 
-    ``stop_dx`` -- where the strike lands from -- for everything ordinary.
-    For a boss the offset is *denying a gate* rather than dodging a swing,
-    though, and then the honest boundary is the gate's own, not the
-    approach's: giving the lane up any later leaves the actor holding an
-    offset it no longer needs, inside a range where the enemy cannot commit
-    anyway, waiting on an X gap the enemy is actively opening.
-
-    Souther is that case and the reason this exists. ``$15EDA
-    (souther_state1_active_combat)`` aborts the slash outright below ``$18``
-    (24px) -- ``reach.SOUTHER_SLASH_DIST_MIN`` -- while ``_souther_pocket_
-    stop_dx`` stops at 16, so the eight pixels between them were a band where
-    the actor was already safe and still refusing to line the punch up.
-    Measured live: 3 punches thrown in a whole fight, with the approach
-    holding a 40px lane offset the entire time. Handing the lane over at the
-    ROM's own boundary closes that band.
-
-    Only while he is not already committed -- once the claw is out, 24px is
-    where ``$161C6`` *resolves* rather than a pocket, which is
-    ``_souther_pocket_stop_dx``'s own rule and ``DodgeSoutherSlash``'s window.
-
-    The boundary is ``$18`` itself and **not one pixel inside it**, and the
-    pixel matters: ``PointGoal`` is a *covering* test, so an approach that
-    aims at the pocket (16px) reports arrival anywhere its body covers that
-    point -- origin ``dx`` between 16 and 24. Landing on 24 with the release
-    at 23 meant the lane never converged, and with the lane never converged
-    nothing was ever in punch or grab range: the actor stood 24px out and
-    36px off his lane holding no button, with ``WalkToNearEnemy`` winning
-    every tick. That is the round-2 stalemate reproduced on the tick harness,
-    and the arithmetic that produced it was this comparison being strict.
+    ``stop_dx`` -- where the strike lands from. Souther used to hand his lane
+    over early here, at his own ``$18`` inner abort; his approach is
+    ``EngageSouther`` now, whose converge point is ``souther.CONVERGE_DX``.
     """
 
-    if isinstance(target, Souther) and not target.strike_is_committed():
-        return max(stop_dx, SOUTHER_SLASH_DIST_MIN)
     return stop_dx
 
 
@@ -1248,18 +1072,14 @@ def _enemy_stop_dx(actor: Myself | Partner, target: Enemy) -> int:
 
     Split out of ``_walk_to_near_enemy_target`` so the routed approach and
     the straight-line fallback cannot disagree about it. Everything tactical
-    lives here -- the punch's own outer edge, the dead-zone pocket some
-    enemies have (``_dead_zone_stop_dx``), and Souther's own inner-abort
-    pocket (``_souther_pocket_stop_dx``) -- while the route itself is
-    geometry the path finder owns. The two pockets never both apply (a
-    ``Souther`` has no extracted ``attack_ranges``, so ``_dead_zone_stop_dx``
-    is a no-op on one and passes its input straight through).
+    lives here -- the punch's own outer edge and the dead-zone pocket some
+    enemies have (``_dead_zone_stop_dx``) -- while the route itself is
+    geometry the path finder owns.
     """
 
     outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
     inner = punch_inner_x(actor.character_id)
-    stop_dx = _dead_zone_stop_dx(actor, target, max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER))
-    return _souther_pocket_stop_dx(actor, target, stop_dx)
+    return _dead_zone_stop_dx(actor, target, max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER))
 
 
 def state_machine_walk_to_near_enemy(
@@ -1603,61 +1423,6 @@ def state_machine_retreat_from_danger(
 # than landing just inside it.
 PROJECTILE_SIDESTEP_DISTANCE = 40
 
-# How far clear of *Souther's own lane* the dodge aims -- an absolute
-# clearance, not a step length, because the side pick is derived from his lane
-# rather than from the actor's (see _souther_slash_sidestep_target).
-#
-# Read off the claw's **own hitbox**, not off a gate number standing in for it.
-# `$16C2E (souther_create_claw)` names the claw's animation set in its own
-# body (`move.l #$0002e44a, d2`), and every one of the three shapes that set
-# selects -- `$6D`, `$6F`, `$71` -- carries the identical lane extent
-# **-10..+24**. `$16C6E (souther_position_claw)` then places the claw object
-# four pixels down his lane:
-#
-#     $016CB2  move.w $14(a1), d0    ; his lane
-#     $016CB6  addq.w #$4, d0        ; +4
-#     $016CB8  move.w d0, $14(a0)    ; the claw's
-#
-# So measured from *his* lane the claw covers **-6 .. +28**, and it is
-# asymmetric: stepping to the shallow side clears it in a quarter of the
-# distance the deep side needs. The old symmetric clearance
-# (SOUTHER_DASH_RESOLVE_LANE + slack, ~33 both ways) spent about 26px of
-# wasted travel every time the shallow side was the one being used -- roughly
-# ten ticks of a dodge that is already the half of the cycle the approach
-# cannot afford.
-#
-# Measured, and this is why the box and not the gate: over an 8-fight batch,
-# **every one of 49 hits taken landed with the boss in primary `$02`**, and
-# none of them inside the pocket. The thing that hits the actor is this box,
-# not the `$18` dash-resolve test the clearance used to be derived from --
-# that one is about his state machine, not about damage.
-SOUTHER_CLAW_LANE_ABOVE = 6
-SOUTHER_CLAW_LANE_BELOW = 28
-# ...and a hit is box-against-**body**: `$450C` tests the attacker's attack
-# box against the victim's body box, so escaping is the actor's own body
-# leaving the claw's rectangle, not its centre point leaving it. Half a body
-# in lane, the exact counterpart of ``BODY_OVERLAP_X`` on the punch's inner
-# edge, which makes the real centre-to-centre clearances 14 above and 36
-# below.
-#
-# The old symmetric number was ``$18 + slack`` = 32 for both sides, which is
-# the arithmetic this correction matters for: 32 is more than twice what the
-# shallow side needs **and four pixels short of what the deep side does**.
-# A dodge that stepped down and reported itself clear could still be inside
-# the claw, which is a real way to be hit mid-dodge and one the symmetric
-# form could never have shown.
-PLAYER_BODY_HALF_Y = nav.NOMINAL_BODY_H // 2
-# Plus more than MOVE_DEADBAND_Y, or the Y bits go quiet while the actor is
-# still a few px short of actually escaping, the same deadlock
-# PIT_DODGE_OVERSHOOT exists to prevent.
-SOUTHER_CLAW_CLEARANCE_ABOVE = (
-    SOUTHER_CLAW_LANE_ABOVE + PLAYER_BODY_HALF_Y + MOVE_DEADBAND_Y + 5
-)
-SOUTHER_CLAW_CLEARANCE_BELOW = (
-    SOUTHER_CLAW_LANE_BELOW + PLAYER_BODY_HALF_Y + MOVE_DEADBAND_Y + 5
-)
-
-
 def _projectile_sidestep_target(
     actor: Myself | Partner, projectile: Projectile, context: Context
 ) -> tuple[int, int]:
@@ -1679,113 +1444,6 @@ def _projectile_sidestep_target(
     if actor.world_y < (lo + hi) / 2:
         return actor.world_x, actor.world_y + PROJECTILE_SIDESTEP_DISTANCE
     return actor.world_x, actor.world_y - PROJECTILE_SIDESTEP_DISTANCE
-
-
-def _souther_pocket_aim_x(actor: Myself | Partner, souther: Souther) -> int:
-    """The X the dodge keeps walking toward: Souther's own inner abort.
-
-    The same pocket ``_souther_pocket_stop_dx`` aims the approach at, on the
-    side the actor already stands, so a dodge and an approach never pull in
-    opposite directions on X. Inside ``$18`` ``$15EDA`` cannot begin a claw
-    and ``$161C6`` cannot resolve one, which is why it is worth walking
-    toward even while a claw is already out.
-    """
-
-    inside = SOUTHER_SLASH_DIST_MIN - REACH_SAFETY_MARGIN - PLAYER_BODY_HALF_X
-    floor = punch_usable_inner_x(actor.character_id) + WALK_TO_ENEMY_STOP_BUFFER
-    stop = max(floor, inside)
-    if actor.world_x <= souther.world_x:
-        return int(souther.world_x - stop)
-    return int(souther.world_x + stop)
-
-
-def _souther_slash_sidestep_target(
-    actor: Myself | Partner, souther: Souther, context: Context
-) -> tuple[int, int]:
-    """Where to step to make Souther's committed claw dash overshoot.
-
-    X holds, as it does for a thrown weapon:
-    ``$161C6 (souther_state2_claw_dash)`` closes the X gap itself at 8px/frame,
-    far faster than any character walks, so contesting X is pointless. What it
-    never does is write ``+$20`` -- the dash cannot correct lane once committed
-    -- and it only resolves with the target inside ``$18`` of its lane, so the
-    lane is the whole fight.
-
-    **Which** side is picked from **Souther's own lane**, never from the lane
-    midpoint, the same way ``_pit_dodge_target_y`` picks from the pit's danger
-    edges and for exactly the same reason. The midpoint rule
-    ``_projectile_sidestep_target`` above uses steers the actor *toward* the
-    middle of the lane and across it (upper half aims down, lower half aims
-    up), so the pick undoes itself the moment the actor crosses -- harmless for
-    a throw, which is over in a tick or two, and a permanent oscillation here,
-    because this dodge freezes X and the claw lasts many ticks. Caught on the
-    tick harness (``tests/ai/test_stability.py``): with the actor at lane 60 in
-    a 0..112 lane, the commanded lane direction reversed 18 times in 40 ticks,
-    alternating UP/DOWN across the midpoint at 56.
-
-    Souther's own lane is stable because it is self-reinforcing: the flip point
-    is his lane, and the chosen direction always moves the actor further from
-    it. A side only counts if its aim point survives the lane clamp still clear
-    of the band; when neither does, the roomier side is the best answer
-    available and is still picked from his lane and the lane bounds alone, so
-    it cannot oscillate either.
-    """
-
-    lo, hi = _lane_bounds(context)
-    above = souther.world_y - SOUTHER_CLAW_CLEARANCE_ABOVE
-    below = souther.world_y + SOUTHER_CLAW_CLEARANCE_BELOW
-    can_go_up = above >= lo
-    can_go_down = below <= hi
-
-    # X is frozen only while it still has to be. The claw's box is lane-gated
-    # (see SOUTHER_CLAW_LANE_ABOVE), so:
-    #
-    # - **inside** the band it covers, the lane is the only axis that helps,
-    #   and closing X there walks *along* the box rather than out of it --
-    #   the same reason `_movement_mask`'s pit dodge clears Y before X ("a
-    #   pit is a rectangle, not a line");
-    # - **outside** it, the actor is already safe from this claw whatever it
-    #   does on X, and $161C6 steers only on X so it cannot follow a lane
-    #   change it has already lost. Those ticks are free, and the pocket is
-    #   what they are worth spending on.
-    #
-    # Spending them on nothing is what made this dodge the expensive half of
-    # a limit cycle. Measured over an 8-fight batch: nearly every hit taken
-    # carried the signature `WalkToNearEnemy x16 | DodgeSoutherSlash x14` in
-    # the ticks before it, at 64-104px -- his own best range -- with 0 of 49
-    # hits taken inside the pocket. Half of every cycle made no progress
-    # toward the one piece of ground that is safe, so the actor never
-    # arrived and the cycle repeated until something landed (user: "esta a
-    # parar num sitio seguro, depois o Souther ataca e atinge a personagem.
-    # Tem de arriscar e ir de encontro com o boss").
-    clear_of_the_claw = not (
-        souther.world_y - SOUTHER_CLAW_LANE_ABOVE - PLAYER_BODY_HALF_Y
-        <= actor.world_y
-        <= souther.world_y + SOUTHER_CLAW_LANE_BELOW + PLAYER_BODY_HALF_Y
-    )
-    toward = (
-        _souther_pocket_aim_x(actor, souther) if clear_of_the_claw else actor.world_x
-    )
-
-    dy = actor.world_y - souther.world_y
-    # Which side, and never the cheap one when the actor is on the other:
-    # crossing his lane to reach it would walk the whole width of the claw.
-    if dy < 0 and can_go_up:
-        return toward, int(above)
-    if dy > 0 and can_go_down:
-        return toward, int(below)
-    if can_go_up and can_go_down:
-        # On his lane, so there is no side to preserve -- take the shallow
-        # one, which is four times nearer. Fixed rather than read off the
-        # actor's position, so it cannot oscillate (test_stability's
-        # alternating-commitment fixture is exactly that failure).
-        return toward, int(above)
-    if can_go_up:
-        return toward, int(above)
-    if can_go_down:
-        return toward, int(below)
-    roomier_is_up = (souther.world_y - lo) >= (hi - souther.world_y)
-    return toward, int(lo if roomier_is_up else hi)
 
 
 def state_machine_projectile_sidestep(
@@ -1852,7 +1510,7 @@ def _antonio_lane_break_target(
     moving, so contesting it means retreating most of the arena, while the
     lane half is 16px and can be left in about three ticks. Side is picked
     from **his** lane, never the lane midpoint, the same self-reinforcing
-    rule ``_souther_slash_sidestep_target`` and ``_pit_dodge_target_y`` use.
+    rule ``_pit_dodge_target_y`` uses.
     """
 
     lo, hi = _lane_bounds(context)
@@ -1923,21 +1581,21 @@ def state_machine_dodge_antonio_kick(
     )
 
 
-def state_machine_dodge_souther_slash(
-    verb: DodgeSoutherSlash, context: Context, gamepad: VirtualGamepad
+def state_machine_engage_souther(
+    verb: EngageSouther, context: Context, gamepad: VirtualGamepad
 ) -> None:
-    """Step off the lane the claw dash resolves on -- and never jump.
+    """Walk the plan ``souther.plan_engage`` names this tick.
 
-    Deliberately *not* delegating to ``state_machine_jump_attack`` the way
-    ``state_machine_dodge_antonio_kick`` does. Against Antonio the hop is the
-    answer because his dash tracks lane; against Souther the hop is the one
-    input ``$16234 (souther_counter_jump_attack)`` watches for, and it answers a
-    jump-attack action state inside 120px x 18px by promoting him straight to
-    the committed claw with every distance gate bypassed. So this reuses the
-    routed lateral step instead, planned exactly like
-    ``state_machine_projectile_sidestep``: every live enemy counts as danger
-    (a dodge is never trying to stand in anyone's reach) and only the
-    destination differs.
+    Held directly rather than through ``_hold_steered``'s axis ramp. The ramp
+    stops an X request that flips from tick to tick from ever reaching the
+    D-pad, and this plan cannot flip: it only ever presses *toward* him (its
+    side is read with a deadband), and nothing else. The three ticks the ramp
+    costs are exactly the ticks a walk-in needs its walking box out, since
+    the grab is that box's contact with his body and a still actor has none.
+
+    Never away from him, either: a target facing away from him is what sends
+    ``$15F98``'s standoff into its 4 px-per-update rush, with lane homing to
+    the band just above the actor.
     """
 
     actor = _find_actor(context, verb.actor_slot)
@@ -1945,39 +1603,44 @@ def state_machine_dodge_souther_slash(
     if actor is None or target is None:
         gamepad.release()
         return
+    lo, hi = _lane_bounds(context)
+    plan = souther_plan.plan_engage(actor, target, lane_lo=lo, lane_hi=hi)
+    mask = _movement_mask(context, actor.world_x, actor.world_y, plan.target_x, plan.target_y)
+    toward_mask = RIGHT_MASK if plan.toward > 0 else LEFT_MASK
+    away_mask = LEFT_MASK if plan.toward > 0 else RIGHT_MASK
+    mask &= ~away_mask
+    if plan.press_toward:
+        mask |= toward_mask
+    gamepad.hold(_clamp_mask(context, actor.world_x, actor.world_y, mask))
 
-    target_x, target_y = _souther_slash_sidestep_target(actor, target, context)
-    goal = nav.PointGoal(nav.Point(target_x, target_y), tolerance=MOVE_DEADBAND_X)
-    body, origin = nav.actor_footprint(actor)
-    # Souther himself is exempt from the danger set this one dodge plans
-    # against, the same way ``state_machine_walk_to_near_enemy`` exempts the
-    # enemy it is already alongside: the destination is the pocket at his own
-    # feet, so his body rect *contains* the ground being aimed at, and leaving
-    # him in makes the goal unreachable by construction -- the router then
-    # returns nothing and the dodge stands still, which is the failure this
-    # whole change exists to remove. Every *other* live enemy still counts; a
-    # dodge is never trying to stand in somebody else's reach.
-    solids, dangers = nav.obstacle_sets(
-        context,
-        body=body,
-        origin=origin,
-        ignore_enemy_slots=frozenset({target.slot}),
-    )
 
-    def straight_line() -> int:
-        return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)
+def state_machine_release_to_regrab(
+    verb: ReleaseToRegrab, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Hold back until ``loc_235A`` drops the hold, then turn straight back in.
 
-    _hold_steered(
-        gamepad,
-        _routed_mask(
-            context,
-            actor,
-            goal,
-            solids=solids,
-            dangers=dangers,
-            fallback=straight_line,
-        ),
-    )
+    The back press is one timed press sized from the ROM's own countdown
+    (``+$63``, ``souther.release_press_frames``), so it ends on the frame the
+    hold drops rather than walking the actor away for however long the next
+    poll takes; the walk back in is latched in the same tick, and the next
+    tick's ``EngageSouther`` walk-in carries it on. Measured in lockstep: the
+    re-grab survives three frames of added latency -- he commits four frames
+    after the release, and his leaning body still walks into the actor's box.
+
+    If the press ends a frame short, the countdown keeps what it spent (nothing
+    resets it mid-hold) and the next tick's press finishes the job.
+    """
+
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Souther, slot=verb.target_slot)
+    if actor is None or target is None:
+        gamepad.release()
+        return
+    back = _back_direction_mask(actor)
+    toward = LEFT_MASK if target.world_x < actor.world_x else RIGHT_MASK
+    frames = souther_plan.release_press_frames(actor.hold_release_countdown)
+    _press(gamepad, back, frames=frames)
+    gamepad.hold(toward)
 
 
 def state_machine_hit_antonio_boomerang(
@@ -2849,7 +2512,8 @@ _HANDLERS = {
     RetreatFromDanger: state_machine_retreat_from_danger,
     ProjectileSidestep: state_machine_projectile_sidestep,
     DodgeAntonioKick: state_machine_dodge_antonio_kick,
-    DodgeSoutherSlash: state_machine_dodge_souther_slash,
+    EngageSouther: state_machine_engage_souther,
+    ReleaseToRegrab: state_machine_release_to_regrab,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,
     Punch: state_machine_melee_strike,

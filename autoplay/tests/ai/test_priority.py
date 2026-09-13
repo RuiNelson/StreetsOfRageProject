@@ -6,7 +6,7 @@ from sor_autoplay.ai.tokens import (
     Breakable,
     CounterGrab,
     DodgeAntonioKick,
-    DodgeSoutherSlash,
+    EngageSouther,
     FlipHold,
     GrabEnemy,
     HealthPickup,
@@ -16,6 +16,7 @@ from sor_autoplay.ai.tokens import (
     MeleeWeaponAttack,
     Punch,
     RearAttack,
+    ReleaseToRegrab,
     ScorePickup,
     SpecialPickup,
     OpenBreakable,
@@ -53,7 +54,6 @@ from sor_autoplay.ai.kinematics import (
 from sor_autoplay.ai.tokens import Verb, find_all
 from sor_autoplay.ai.tokens import (
     DodgeAntonioKick,
-    DodgeSoutherSlash,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -2471,76 +2471,81 @@ def _souther_actor(**overrides) -> Myself:
 
 
 class SoutherVerbEmergencyTests(unittest.TestCase):
-    def test_the_punish_grab_outranks_punching_him_again(self) -> None:
-        myself = _souther_actor()
-        souther = _souther("obj11", CombatPhase.RECOVERY, primary_state=3)
+    def test_the_engage_outranks_every_strike_on_anything_else(self) -> None:
+        # Measured: a $322A chord at a grunt the sweep had not reached yet
+        # locked the actor 12 ticks under his lane -- the one hit taken.
+        myself = _souther_actor(world_x=100, world_y=60)
+        souther = _souther("obj11", CombatPhase.NORMAL, world_x=80, world_y=40)
+        grunt = Garcia(slot="obj01", type_id=0x20, world_x=130, world_y=60, health=10,
+                       combat_phase=CombatPhase.ATTACKING, targets_player=1,
+                       facing_left=True, held_weapon_type=0x0B)
         context = {
             myself,
+            souther,
+            grunt,
             CameraRange(left=0, right=640, top=0, bottom=224),
-            souther,
-            Punch(actor_slot="P1", target_slot="obj11"),
-            GrabEnemy(actor_slot="P1", target_slot="obj11"),
+            RearAttack(actor_slot="P1", target_slot="obj01"),
+            Punch(actor_slot="P1", target_slot="obj01"),
+            GrabEnemy(actor_slot="P1", target_slot="obj01"),
+            EngageSouther(actor_slot="P1", target_slot="obj11"),
         }
         winner = find_all(determine_priority_verb(context), Verb)[0]
-        self.assertIsInstance(winner, GrabEnemy)
+        self.assertIsInstance(winner, EngageSouther)
 
-    def test_the_dodge_outranks_approaching_him(self) -> None:
+    def test_the_engage_scores_nothing_once_he_is_dead(self) -> None:
         myself = _souther_actor()
-        souther = _souther(
-            "obj11", CombatPhase.ATTACKING, primary_state=2, tactical=2
-        )
         context = {
             myself,
-            souther,
-            WalkToNearEnemy(actor_slot="P1", target_slot="obj11"),
-            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
+            _souther("obj11", CombatPhase.NORMAL, health=0xFFFF),
+            EngageSouther(actor_slot="P1", target_slot="obj11"),
+            WalkToAdvanceStage(actor_slot="P1", direction="right"),
         }
         winner = find_all(determine_priority_verb(context), Verb)[0]
-        self.assertIsInstance(winner, DodgeSoutherSlash)
+        self.assertIsInstance(winner, WalkToAdvanceStage)
 
-    def test_the_dodge_outranks_a_competing_projectile_sidestep(self) -> None:
-        myself = _souther_actor()
-        souther = _souther(
-            "obj11", CombatPhase.ATTACKING, primary_state=2, tactical=2
-        )
-        thrown = Projectile(
-            slot="obj20", world_x=100, world_y=100, vel_x=6.0, vel_z=0.0, type_id=0x28
-        )
-        context = {
-            myself,
-            souther,
-            thrown,
-            ProjectileSidestep(actor_slot="P1", target_slot="obj20"),
-            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
-        }
-        winner = find_all(determine_priority_verb(context), Verb)[0]
-        self.assertIsInstance(winner, DodgeSoutherSlash)
+    def _holding(self, **overrides):
+        fields = dict(action_state=0x60, held_enemy_slot="obj11")
+        fields.update(overrides)
+        return _souther_actor(**fields)
 
-    def test_the_dodge_scores_nothing_without_its_own_inference(self) -> None:
-        # An injected or stale verb must not win on its class alone.
-        myself = _souther_actor()
-        souther = _souther("obj11", CombatPhase.RECOVERY)
+    def test_the_hand_back_tops_the_hold_family(self) -> None:
+        held = _souther("obj11", CombatPhase.RECOVERY, world_x=152, primary_state=4)
         context = {
-            myself,
-            souther,
-            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
-            WalkToNearEnemy(actor_slot="P1", target_slot="obj11"),
+            self._holding(),
+            held,
+            ReleaseToRegrab(actor_slot="P1", target_slot="obj11"),
+            AttackHeldEnemy(actor_slot="P1", target_slot="obj11"),
+            FlipHold(actor_slot="P1", target_slot="obj11"),
         }
         winner = find_all(determine_priority_verb(context), Verb)[0]
-        self.assertIsInstance(winner, WalkToNearEnemy)
+        self.assertIsInstance(winner, ReleaseToRegrab)
+
+    def test_a_souther_knee_is_not_rationed_by_the_knee_budget(self) -> None:
+        # souther.hold_step reads the ROM's own chain count; the tick budget
+        # is for bodies without one.
+        held = _souther("obj11", CombatPhase.RECOVERY, world_x=152, primary_state=4)
+        context = {
+            self._holding(hold_ticks=500),
+            held,
+            AttackHeldEnemy(actor_slot="P1", target_slot="obj11"),
+            FlipHold(actor_slot="P1", target_slot="obj11"),
+        }
+        winner = find_all(determine_priority_verb(context), Verb)[0]
+        self.assertIsInstance(winner, AttackHeldEnemy)
 
 
 class ParkedTargetUnderBossThreatTests(unittest.TestCase):
     """A body on the floor must not outrank a boss that is about to land.
 
     Live-reported against Souther: with the claw committed two steps away,
-    punching a knocked-down grunt scored 60 against the dodge's 46 and won.
+    punching a knocked-down grunt scored 60 against the old dodge's 46 and won.
+    The engage that replaced the dodge outranks it outright (76).
     A knockdown keeps its full tier while nothing is incoming -- that window
     really does end in a wake-up -- but under an incoming attack it is capped
     like a stun, and for a sharper version of the same reason.
     """
 
-    def _fight(self, boss_state, grunt_phase):
+    def _fight(self, boss_state, grunt_phase, *, engage: bool = True):
         myself = _souther_actor(world_x=100, world_y=60)
         boss = _souther("obj11", CombatPhase.ATTACKING, world_x=140, world_y=60,
                         primary_state=boss_state[0], tactical=boss_state[1],
@@ -2556,15 +2561,16 @@ class ParkedTargetUnderBossThreatTests(unittest.TestCase):
             grunt,
             CameraRange(left=-200, right=700, top=0, bottom=224),
             Punch(actor_slot="P1", target_slot="obj01"),
-            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
         }
+        if engage:
+            context.add(EngageSouther(actor_slot="P1", target_slot="obj11"))
         return find_all(determine_priority_verb(context), Verb)[0]
 
-    def test_knockdown_loses_to_the_dodge_while_the_claw_is_committed(self) -> None:
+    def test_knockdown_loses_to_the_engage_while_the_claw_is_committed(self) -> None:
         self.assertIsInstance(self._fight((2, 2), CombatPhase.KNOCKDOWN),
-                              DodgeSoutherSlash)
+                              EngageSouther)
 
     def test_knockdown_keeps_its_tier_while_the_boss_is_idle(self) -> None:
-        winner = self._fight((1, 0), CombatPhase.KNOCKDOWN)
+        winner = self._fight((1, 0), CombatPhase.KNOCKDOWN, engage=False)
         self.assertIsInstance(winner, Punch)
         self.assertEqual(winner.target_slot, "obj01")

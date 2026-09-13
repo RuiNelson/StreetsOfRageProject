@@ -68,6 +68,10 @@ REAPPROACH_WINDOW_S = 4.0
 # window can have opened. Hypothesis (a).
 ENTRANCE_WINDOW_S = 4.0
 
+# The shared later-boss family: $17C36 (boss_apply_pending_damage) is theirs,
+# and it treats a health word of exactly 0 as lethal (see boss_is_dead).
+LATER_BOSS_TYPES = frozenset({0x55, 0x56, 0x57, 0x58})
+
 
 def compress(names: list[str | None]) -> list[str]:
     """Run-length the verb history so a hit's context is readable.
@@ -123,13 +127,20 @@ def boss_is_dead(entity: MapEntity) -> bool:
     reset looks like too, and it produced a false "boss defeated" report
     once before any of this existed.
 
-    Both ``phases.boss_phase``'s and ``MapEntity.is_defeated``'s DEATH
-    misclassification are real latent bugs worth fixing at the source (needs
-    disassembling ``$164FC`` itself to name its real states), but that is
-    out of scope here -- this function only has to not be fooled by them.
+    **Zero is dead too, for the ``$55``-``$58`` family.** ``$17C36
+    (boss_apply_pending_damage)`` subtracts and branches ``bgt`` to the
+    living path, so a hit that leaves exactly 0 takes the lethal one
+    (``$166D4``). Souther's hold loop ends on a 2-damage knee from 2 HP more
+    often than not, and without this the kill was reported as the stage's own
+    level change seconds later ("level_reset"), with those seconds counted
+    as fight.
     """
 
-    return entity.health is not None and entity.health >= 0x8000
+    if entity.health is None:
+        return False
+    if entity.health >= 0x8000:
+        return True
+    return entity.type_id in LATER_BOSS_TYPES and entity.health == 0
 
 
 def verb_name_for(verb) -> str | None:

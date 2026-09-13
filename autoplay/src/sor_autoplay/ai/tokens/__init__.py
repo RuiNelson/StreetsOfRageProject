@@ -26,6 +26,7 @@ from .attack_verbs import (
     Punch,
     RearAttack,
     ReleaseGrab,
+    ReleaseToRegrab,
     Supplex,
     ThrowHeldEnemy,
     ThrowKnife,
@@ -125,7 +126,7 @@ from .tokens import (
 )
 from .walk_verbs import (
     DodgeAntonioKick,
-    DodgeSoutherSlash,
+    EngageSouther,
     ProjectileSidestep,
     RetreatFromDanger,
     Walk,

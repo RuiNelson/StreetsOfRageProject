@@ -36,7 +36,7 @@ from .tokens import (
     Attack,
     CounterGrab,
     DodgeAntonioKick,
-    DodgeSoutherSlash,
+    EngageSouther,
     FlipHold,
     GrabEnemy,
     HitAntonioBoomerang,
@@ -47,6 +47,7 @@ from .tokens import (
     RearAttack,
     OpenBreakable,
     ReleaseGrab,
+    ReleaseToRegrab,
     Supplex,
     TechRecover,
     ThrowHeldEnemy,
@@ -222,11 +223,6 @@ _EMERGENCY_GRAB_WHILE_SURROUNDED = 61
 # existing grab (64..70) do not coexist -- could_grab skips while
 # holding.
 _EMERGENCY_GRAB_ANTONIO_ON_PUNISH = 61
-# Souther in hitstun: identical reasoning and identical tier. He has more
-# health than Antonio ($20 vs $18 from $17EDC boss_init_combat_stats), so the
-# suplex chain is worth more here, and the same "must clear punch-on-punish
-# once the boss raise is applied to both" arithmetic applies.
-_EMERGENCY_GRAB_SOUTHER_ON_PUNISH = 61
 # Taking the hold on a *ready* Antonio, from contact range. Has to clear the
 # hop it replaces -- _EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER (22), which is
 # raised by the same _EMERGENCY_BOSS_TARGET as this is, so comparing the raw
@@ -235,17 +231,6 @@ _EMERGENCY_GRAB_SOUTHER_ON_PUNISH = 61
 # a boss who can. Above _EMERGENCY_GRAB_DEAD_ZONE (30) because this is the
 # whole plan against him rather than an improvement on an exchange.
 _EMERGENCY_GRAB_ANTONIO_WALK_IN = 35
-# Taking the hold on a *ready* Souther, from contact range -- the chase. Same
-# tier as Antonio's walk-in and for the same reason: it is the plan against
-# him rather than an improvement on an exchange, so it has to clear the
-# strike it replaces (_EMERGENCY_PUNCH_DEFAULT, 20, with the same boss raise
-# applied to both) while staying well below the punish grab (61), since a
-# hold on a boss who cannot act is still strictly better than one on a boss
-# who can. Unlike Antonio's, the thing it displaces is a punch rather than a
-# hop -- against Souther the hop is refused outright ($16234 counters it) --
-# and the punch is not lost: reach.SOUTHER_WALK_IN_STALL_TICKS hands the tick
-# straight back to it if the walk-in is not converting.
-_EMERGENCY_GRAB_SOUTHER_WALK_IN = 35
 _EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
 _EMERGENCY_HOLD_SUPPLEX = 68
 _EMERGENCY_HOLD_FLIP = 66
@@ -263,6 +248,9 @@ _EMERGENCY_HOLD_FLIP = 66
 # finish (decide.could_hold_actions, on kinematics' measured frame counts).
 _EMERGENCY_HOLD_KNEE_FRESH = 67
 _EMERGENCY_HOLD_RELEASE = 50
+# Souther's hand-back (ReleaseToRegrab): the one input souther.hold_step chose,
+# at the top of the hold family so nothing else can take the tick from it.
+_EMERGENCY_HOLD_REGRAB = 69
 # The knee budget moved to frames and to kinematics.py -- see
 # ``kinematics.hold_knee_budget_frames``. It was six *ticks*, which is not a
 # unit the game has: at ~2 frames a tick that is 12 frames against a knee's
@@ -363,16 +351,17 @@ _EMERGENCY_DODGE_ANTONIO_KICK = 58
 # under the grounded dodge so a hop that has already started is not
 # abandoned, well above a routine jump (18).
 _EMERGENCY_JUMP_OVER_ANTONIO_KICK = 56
-# Step off the lane of Souther's committed claw dash. Deliberately *not* at the
-# Antonio dodge's 58: that tier had to beat the strike-on-a-live-boss because
-# standing still is what arms Antonio's kick, whereas Souther's own commit gate
-# narrows when the actor stands still ($58) and widens when it walks in ($68),
-# so there is nothing here to out-rank a punch for. What this does have to beat
-# is every approach/retreat tier and ProjectileSidestep's ceiling (45), so the
-# claw is answered before an unrelated throw. Below the real escapes
-# (RearAttack 55/60, the punish grab 61) and below
-# CounterGrab/TechRecover/CallPolice.
-_EMERGENCY_DODGE_SOUTHER_SLASH = 46
+# The whole engage against Souther (EngageSouther). With the boss raise it is
+# 76: above every strike and every grab tier on anything else (a warranted
+# RearAttack on an armed grunt peaks at 67, a grab at 68), so no detour,
+# pickup or stray grunt can lock the actor in an animation mid-engage. Measured
+# why: in two of the first three fights on this plan the one hit taken came
+# from exactly that -- a $322A chord at a grunt the sweep had not reached yet,
+# 12 ticks locked in action $21 at 22 px under his lane while he backed off to
+# his own gate edge and committed. The hold family (64-70) never coexists with
+# it (the engage is not produced while holding), and CounterGrab/TechRecover
+# and the dialogs stay above it as the only answers to their own states.
+_EMERGENCY_ENGAGE_SOUTHER = 62
 # Lowest of any verb that still scores. Must sit under every other live
 # candidate -- including ScorePickup (9), SpecialPickup (11), LifePickup
 # (12), and WalkToNearEnemy's floor (8) -- so stage advance is only chosen
@@ -606,12 +595,12 @@ def _emergency_dodge_antonio_kick(verb: DodgeAntonioKick, context: Context) -> i
     return _EMERGENCY_DEFAULT
 
 
-def _emergency_dodge_souther_slash(verb: DodgeSoutherSlash, context: Context) -> int:
+def _emergency_engage_souther(verb: EngageSouther, context: Context) -> int:
     target = find(context, Souther, slot=verb.target_slot)
     actor = _find_actor(context, verb.actor_slot)
-    if target is not None and actor is not None and reach.souther_will_slash(target, actor):
-        return _EMERGENCY_DODGE_SOUTHER_SLASH
-    return _EMERGENCY_DEFAULT
+    if target is None or actor is None or target.is_defeated:
+        return _EMERGENCY_DEFAULT
+    return _with_target_class(_EMERGENCY_ENGAGE_SOUTHER, target)
 
 
 def _emergency_hit_antonio_boomerang(verb: HitAntonioBoomerang, context: Context) -> int:
@@ -629,8 +618,6 @@ _GRAB_REASON_SCORE: dict[GrabReason, int] = {
     GrabReason.DEAD_ZONE: _EMERGENCY_GRAB_DEAD_ZONE,
     GrabReason.ANTONIO_ON_PUNISH: _EMERGENCY_GRAB_ANTONIO_ON_PUNISH,
     GrabReason.ANTONIO_WALK_IN: _EMERGENCY_GRAB_ANTONIO_WALK_IN,
-    GrabReason.SOUTHER_ON_PUNISH: _EMERGENCY_GRAB_SOUTHER_ON_PUNISH,
-    GrabReason.SOUTHER_WALK_IN: _EMERGENCY_GRAB_SOUTHER_WALK_IN,
     GrabReason.WHILE_SURROUNDED: _EMERGENCY_GRAB_WHILE_SURROUNDED,
     GrabReason.DODGE_CHARGE: _EMERGENCY_GRAB_TO_DODGE_CHARGE,
 }
@@ -874,6 +861,10 @@ def _emergency_attack_held_enemy(verb: AttackHeldEnemy, context: Context) -> int
 
     if not _target_is_in_hand(verb, context):
         return _EMERGENCY_DEFAULT
+    if isinstance(find(context, Enemy, slot=verb.target_slot), Souther):
+        # souther.hold_step already chose this knee from the ROM's own chain
+        # count (+$58 bit 6, +$61); the budget below is for bodies without one.
+        return _EMERGENCY_HOLD_KNEE_FRESH
     actor = _find_actor(context, verb.actor_slot)
     if actor is not None and kinematics.frames_for_ticks(
         actor.hold_ticks
@@ -934,6 +925,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     FlipHold: _held_enemy_emergency(_EMERGENCY_HOLD_FLIP),
     AttackHeldEnemy: _emergency_attack_held_enemy,
     ReleaseGrab: _held_enemy_emergency(_EMERGENCY_HOLD_RELEASE),
+    ReleaseToRegrab: _held_enemy_emergency(_EMERGENCY_HOLD_REGRAB),
     JumpAttack: _emergency_jump_attack,
     ThrowKnife: _emergency_throw_knife,
     ThrowPepper: _emergency_throw_pepper,
@@ -943,7 +935,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     RetreatFromDanger: _emergency_retreat_from_danger,
     ProjectileSidestep: _emergency_projectile_sidestep,
     DodgeAntonioKick: _emergency_dodge_antonio_kick,
-    DodgeSoutherSlash: _emergency_dodge_souther_slash,
+    EngageSouther: _emergency_engage_souther,
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
 }

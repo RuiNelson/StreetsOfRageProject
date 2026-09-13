@@ -217,24 +217,22 @@ class DodgeAntonioKick(Walk):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class DodgeSoutherSlash(Walk):
-    """Step off the lane Souther's committed claw dash resolves on.
+class EngageSouther(Walk):
+    """Close on Souther to take a hold, never where his claw can start or land.
 
-    Produced by ``could_dodge_souther_slash`` once per ``Souther`` whose
-    ``strike_is_committed()`` holds (primary ``$02``). A lane step is the whole
-    answer here, and specifically **not** a hop: the dash at
-    ``$161C6 (souther_state2_claw_dash)`` writes only ``+$1C``, so it cannot
-    follow a lane change once committed, and it only resolves with the target
-    within ``$18`` (24px) of its lane -- while a jump is the one input
-    ``$16234 (souther_counter_jump_attack)`` punishes outright. The exact
-    mirror of ``DodgeAntonioKick``, whose dash *does* track lane and therefore
-    has to be hopped instead.
+    Produced by ``could_engage_souther`` once per live, on-screen ``Souther``
+    while the actor is free to move and not already holding a body -- armed
+    or not, since ``$AAA0``'s grab never looks at the carried weapon.
+    It is the whole approach against him -- the generic walk-in, strike,
+    grab and dodge verbs all stand down for him -- and the hold it ends in is
+    a contact result of walking into him, not an input
+    (``souther.plan_engage`` owns where to stand and when to walk in).
 
-    Raises emergency: a committed Souther claw gate×46 -- above every
-    approach/retreat tier and above ProjectileSidestep's own ceiling (45), so
-    the claw is answered first when both are live. Below the real escapes
-    (RearAttack 55/60, the punish grab 61) and below
-    CounterGrab/TechRecover/CallPolice.
+    Raises emergency: a live Souther×62, plus the boss raise (14) -- 76,
+    above every strike and grab tier on anything else (a stray grunt's chord
+    once locked the actor mid-engage, and that was the one hit taken), below
+    CounterGrab/TechRecover and the dialogs; the hold family (64-70) never
+    coexists with it.
     """
 
     priority: int = 24

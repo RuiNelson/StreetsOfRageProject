@@ -608,70 +608,6 @@ class AntonioWillKickTests(unittest.TestCase):
         self.assertTrue(reach.antonio_will_kick(antonio, myself))
 
 
-class SoutherWillSlashTests(unittest.TestCase):
-    def test_fires_when_already_committed(self) -> None:
-        myself = _myself(world_x=160, world_y=100)
-        souther = _souther(
-            combat_phase=CombatPhase.ATTACKING, primary_state=2, boss_dist_lane=60
-        )
-        # Primary $02 is the whole committed claw; unlike Antonio's kick there
-        # is no lane gate left to satisfy -- $161C6 closes the lane itself.
-        self.assertTrue(reach.souther_will_slash(souther, myself))
-
-    def test_stationary_actor_uses_the_middle_window(self) -> None:
-        myself = _myself(world_x=160, world_y=100, vel_x=0.0)
-        inside = _souther(boss_dist_x=reach.SOUTHER_SLASH_DIST_STATIONARY - 1)
-        self.assertTrue(reach.souther_will_slash(inside, myself))
-        outside = _souther(boss_dist_x=reach.SOUTHER_SLASH_DIST_STATIONARY)
-        self.assertFalse(reach.souther_will_slash(outside, myself))
-
-    def test_closing_actor_gets_the_widest_window(self) -> None:
-        # Souther faces left, so a positive vel_x is the actor walking into
-        # him: the ROM's `neg`-then-`bmi` path, threshold $68.
-        myself = _myself(world_x=160, world_y=100, vel_x=3.0)
-        souther = _souther(
-            facing_left=True, boss_dist_x=reach.SOUTHER_SLASH_DIST_CLOSING - 1
-        )
-        self.assertTrue(reach.souther_will_slash(souther, myself))
-        # The same distance while backing away is outside the tighter window.
-        fleeing = _myself(world_x=160, world_y=100, vel_x=-3.0)
-        self.assertGreater(
-            reach.SOUTHER_SLASH_DIST_CLOSING - 1, reach.SOUTHER_SLASH_DIST_AWAY
-        )
-        self.assertFalse(reach.souther_will_slash(souther, fleeing))
-
-    def test_retreating_actor_uses_the_tightest_window(self) -> None:
-        myself = _myself(world_x=160, world_y=100, vel_x=-3.0)
-        inside = _souther(
-            facing_left=True, boss_dist_x=reach.SOUTHER_SLASH_DIST_AWAY - 1
-        )
-        self.assertTrue(reach.souther_will_slash(inside, myself))
-
-    def test_inner_abort_denies_the_start(self) -> None:
-        # `cmpi.w #$0018,d2 / bcs` -- he cannot begin the slash from inside
-        # 24px, so this is not a threat even though every other gate holds.
-        myself = _myself(world_x=160, world_y=100, vel_x=0.0)
-        souther = _souther(boss_dist_x=reach.SOUTHER_SLASH_DIST_MIN - 1)
-        self.assertFalse(reach.souther_will_slash(souther, myself))
-        at_edge = _souther(boss_dist_x=reach.SOUTHER_SLASH_DIST_MIN)
-        self.assertTrue(reach.souther_will_slash(at_edge, myself))
-
-    def test_off_lane_denies_the_start(self) -> None:
-        myself = _myself(world_x=160, world_y=100, vel_x=0.0)
-        souther = _souther(boss_dist_lane=reach.SOUTHER_SLASH_LANE)
-        self.assertFalse(reach.souther_will_slash(souther, myself))
-
-    def test_unavailable_target_never_fires(self) -> None:
-        myself = _myself(world_x=160, world_y=100, vel_x=0.0)
-        souther = _souther(target_unavailable=1)
-        self.assertFalse(reach.souther_will_slash(souther, myself))
-
-    def test_recovering_souther_is_not_a_threat(self) -> None:
-        myself = _myself(world_x=160, world_y=100, vel_x=0.0)
-        souther = _souther(combat_phase=CombatPhase.RECOVERY)
-        self.assertFalse(reach.souther_will_slash(souther, myself))
-
-
 class SoutherWouldPunishJumpTests(unittest.TestCase):
     def test_armed_in_state_1(self) -> None:
         myself = _myself(world_x=160, world_y=100)
@@ -1191,78 +1127,23 @@ class GrabReasonsTests(unittest.TestCase):
             _GRAB_REASON_SCORE[GrabReason.ANTONIO_ON_PUNISH],
         )
 
-    def test_the_brief_souther_hit_reaction_offers_the_hold(self) -> None:
+    def test_souther_is_never_a_grab_reason_case(self) -> None:
+        # His hold is the engage's own walk-in (EngageSouther), from the lane
+        # and at the moment souther.plan_engage picks -- not a reason
+        # could_grab_enemy weighs against a strike.
         myself = _myself(world_x=160, world_y=100)
-        souther = _souther(
-            world_x=180, world_y=100, combat_phase=CombatPhase.RECOVERY, primary_state=3
-        )
-
-        self.assertEqual(
-            reach.grab_reasons(set(), myself, souther, [souther]),
-            frozenset({GrabReason.SOUTHER_ON_PUNISH}),
-        )
-
-    def test_the_long_souther_recovery_state_is_only_the_walk_in(self) -> None:
-        # Measured live: primary $04 held 70% of one 120s fight against
-        # $03's 4%, and both decode as RECOVERY. Keyed on the phase alone,
-        # the grab scored 75 -- top of the table -- for most of the fight
-        # and never converted: 2318 ticks of GrabEnemy while Souther lost 11
-        # health and the actor lost a life. $04 is where he sits, not a
-        # window, so it still does not earn the punish tier -- it gets the
-        # chase's own, which is both lower and timed out.
-        myself = _myself(world_x=160, world_y=100)
-        souther = _souther(
-            world_x=180, world_y=100, combat_phase=CombatPhase.RECOVERY, primary_state=4
-        )
-
-        self.assertEqual(
-            reach.grab_reasons(set(), myself, souther, [souther]),
-            frozenset({GrabReason.SOUTHER_WALK_IN}),
-        )
-
-    def test_a_souther_that_can_still_act_is_chased_for_the_hold(self) -> None:
-        myself = _myself(world_x=160, world_y=100)
-        souther = _souther(world_x=180, world_y=100)
-
-        self.assertEqual(
-            reach.grab_reasons(set(), myself, souther, [souther]),
-            frozenset({GrabReason.SOUTHER_WALK_IN}),
-        )
-
-    def test_the_souther_walk_in_ranks_under_the_punish_one(self) -> None:
-        from sor_autoplay.ai.priority import _GRAB_REASON_SCORE
-
-        self.assertLess(
-            _GRAB_REASON_SCORE[GrabReason.SOUTHER_WALK_IN],
-            _GRAB_REASON_SCORE[GrabReason.SOUTHER_ON_PUNISH],
-        )
-
-    def test_a_stalled_walk_in_hands_the_tick_back_to_the_strike(self) -> None:
-        # The guard on the chase: a walk-in that has not become a hold in
-        # SOUTHER_WALK_IN_STALL_TICKS stops outranking every strike, so the
-        # AI hits him instead -- and the hitstun that follows is what
-        # SOUTHER_ON_PUNISH grabs from.
-        souther = _souther(world_x=180, world_y=100)
-        stalled = _myself(world_x=160, world_y=100)
-        stalled = replace(
-            stalled, grab_stall_ticks=reach.SOUTHER_WALK_IN_STALL_TICKS + 1
-        )
-
-        self.assertEqual(reach.grab_reasons(set(), stalled, souther, [souther]), frozenset())
-
-    def test_the_hitstun_grab_survives_a_stalled_walk_in(self) -> None:
-        souther = _souther(
-            world_x=180, world_y=100, combat_phase=CombatPhase.RECOVERY, primary_state=3
-        )
-        stalled = replace(
-            _myself(world_x=160, world_y=100),
-            grab_stall_ticks=reach.SOUTHER_WALK_IN_STALL_TICKS + 1,
-        )
-
-        self.assertEqual(
-            reach.grab_reasons(set(), stalled, souther, [souther]),
-            frozenset({GrabReason.SOUTHER_ON_PUNISH}),
-        )
+        for primary, phase in (
+            (1, CombatPhase.NORMAL),
+            (3, CombatPhase.RECOVERY),
+            (4, CombatPhase.RECOVERY),
+        ):
+            with self.subTest(primary=primary):
+                souther = _souther(
+                    world_x=180, world_y=100, combat_phase=phase, primary_state=primary
+                )
+                self.assertEqual(
+                    reach.grab_reasons(set(), myself, souther, [souther]), frozenset()
+                )
 
 
 def _connects(band, actor, enemy, verb_cls) -> bool:

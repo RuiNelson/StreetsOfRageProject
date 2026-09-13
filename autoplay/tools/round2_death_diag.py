@@ -43,7 +43,6 @@ from megadrive_remote import MegaDriveClient
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.loop import AgentLoop
 from sor_autoplay.ai.observe import (
-    GrabStallTracker,
     HoldTracker,
     NoraAttackTracker,
     generate_direct_observation_tokens,
@@ -95,7 +94,7 @@ def main() -> int:
         rom = RomData.read(client)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         loop = AgentLoop(gamepad)
-        nora, holds, stalls = NoraAttackTracker(), HoldTracker(), GrabStallTracker()
+        nora, holds = NoraAttackTracker(), HoldTracker()
 
         trace = open(args.trace, "w", encoding="utf-8") if args.trace else None
         history: deque = deque(maxlen=HISTORY_TICKS)
@@ -153,7 +152,6 @@ def main() -> int:
                 player_index=1,
                 nora_tracker=nora,
                 hold_tracker=holds,
-                grab_stall_tracker=stalls,
             )
             actor = find(context, Myself)
             pits = [

@@ -16,6 +16,7 @@ from sor_autoplay.ai.tokens import (
     OpenBreakable,
     Punch,
     RearAttack,
+    ReleaseToRegrab,
     Supplex,
     TechRecover,
     ThrowKnife,
@@ -34,7 +35,7 @@ from sor_autoplay.ai.decide import (
     could_handle_continue_menu,
     could_handle_mr_x_dialog,
     could_dodge_antonio_kick,
-    could_dodge_souther_slash,
+    could_engage_souther,
     could_grab_enemy,
     could_hit_antonio_boomerang,
     could_hold_actions,
@@ -57,7 +58,7 @@ from sor_autoplay.ai.tokens import (
     Antonio,
     AttackRange,
     DodgeAntonioKick,
-    DodgeSoutherSlash,
+    EngageSouther,
     Enemy,
     Garcia,
     HitAntonioBoomerang,
@@ -111,7 +112,7 @@ could_counter_grab = _with_inference(could_counter_grab)
 could_handle_continue_menu = _with_inference(could_handle_continue_menu)
 could_handle_mr_x_dialog = _with_inference(could_handle_mr_x_dialog)
 could_dodge_antonio_kick = _with_inference(could_dodge_antonio_kick)
-could_dodge_souther_slash = _with_inference(could_dodge_souther_slash)
+could_engage_souther = _with_inference(could_engage_souther)
 could_grab_enemy = _with_inference(could_grab_enemy)
 could_hit_antonio_boomerang = _with_inference(could_hit_antonio_boomerang)
 could_hold_actions = _with_inference(could_hold_actions)
@@ -1217,18 +1218,14 @@ class CouldCallPoliceTests(unittest.TestCase):
 
         self.assertEqual(could_call_police(context), {CallPolice(actor_slot="P1")})
 
-    def test_does_not_fire_against_a_live_souther_below_the_boss_threshold(self) -> None:
-        # Carved out (user: "a maioria do dano deve-se a ataques de polícia,
-        # não usar ataques de polícia"): the call locks the caller in action
-        # $3 for the ~300-frame $16AEC delay, which is also the longest
-        # SOUTHER_ON_PUNISH window in the fight -- see _police_is_worth_it.
-        # The near-death thresholds are untouched; only this early, healthy
-        # boss-bonus trigger is scoped away from him.
-        myself = make_myself(specials=1, health_percent=50.0)
-        souther = _souther()
-        context: set[Token] = {myself, souther}
-
-        self.assertEqual(could_call_police(context), set())
+    def test_never_fires_against_a_live_souther_at_any_health(self) -> None:
+        # User: "do not use police attacks or life-gaining items". Not even at
+        # the near-death thresholds -- the call freezes the caller for the
+        # whole $16AEC delay, and the hold loop never lets him act at all.
+        for health_percent, lives in ((50.0, 3), (10.0, 3), (20.0, 1)):
+            with self.subTest(health_percent=health_percent, lives=lives):
+                myself = make_myself(specials=1, health_percent=health_percent, lives=lives)
+                self.assertEqual(could_call_police({myself, _souther()}), set())
 
     def test_does_not_fire_against_a_live_boss_while_comfortably_healthy(self) -> None:
         myself = make_myself(specials=1, health_percent=90.0)
@@ -2852,116 +2849,173 @@ class JumpRefusedNearSoutherTests(unittest.TestCase):
         self.assertNotEqual(could_jump_attack({myself, souther}), set())
 
 
-class CouldDodgeSoutherSlashTests(unittest.TestCase):
-    def test_fires_once_the_claw_is_committed(self) -> None:
-        myself = make_myself(world_x=120, world_y=100)
-        souther = _souther(
-            world_x=160,
-            world_y=100,
-            combat_phase=CombatPhase.ATTACKING,
-            primary_state=2,
-            tactical=2,
-        )
-        result = could_dodge_souther_slash({myself, souther})
+class CouldEngageSoutherTests(unittest.TestCase):
+    """EngageSouther is the whole approach to him -- see souther.plan_engage."""
+
+    def test_offered_for_a_live_souther_on_screen(self) -> None:
+        myself = make_myself(world_x=100, world_y=100)
         self.assertEqual(
-            result, {DodgeSoutherSlash(actor_slot="P1", target_slot="obj11")}
+            could_engage_souther({myself, _souther(world_x=200)}),
+            {EngageSouther(actor_slot="P1", target_slot="obj11")},
         )
 
-    def test_the_uncommitted_gate_is_not_enough(self) -> None:
-        # Leaving the lane while he is still choosing is the dodge loop that
-        # never gets close enough to hit him -- same rule as the Antonio dodge.
-        myself = make_myself(world_x=120, world_y=100, vel_x=0.0)
-        souther = _souther(world_x=160, world_y=100, primary_state=1)
-        self.assertEqual(could_dodge_souther_slash({myself, souther}), set())
-
-    def test_predicted_gate_alone_does_not_fire_even_outside_punch_range(self) -> None:
-        # A stricter version of the case above: a pre-emptive branch shipped
-        # once (dodge on the predicted $15EDA gate whenever the target was
-        # not also in punch range) and was reverted -- measured live over a
-        # full fight it fired on only 28 of 1794 ticks, no measurable
-        # benefit, and it is redundant with execute._souther_pocket_stop_dx
-        # now keeping the approach inside the $18 inner abort in the first
-        # place. dx=70 here is comfortably outside Axel's punch reach (~50),
-        # so the old branch would have fired; only the commit
-        # (strike_is_committed()) may produce this verb now.
-        myself = make_myself(world_x=100, world_y=100, vel_x=0.0)
-        souther = _souther(
-            world_x=170, world_y=100, primary_state=1, boss_dist_x=70, boss_dist_lane=0
-        )
-        self.assertEqual(could_dodge_souther_slash({myself, souther}), set())
-
-    def test_suppressed_while_airborne(self) -> None:
-        myself = make_myself(
-            world_x=120, world_y=100, is_airborne=True, action_state=0x12
-        )
-        souther = _souther(
-            world_x=160,
-            world_y=100,
-            combat_phase=CombatPhase.ATTACKING,
-            primary_state=2,
-            tactical=2,
-        )
-        self.assertEqual(could_dodge_souther_slash({myself, souther}), set())
-
-    def test_does_not_fire_when_animation_in_progress(self) -> None:
-        myself = make_myself(world_x=120, world_y=100)
-        souther = _souther(
-            world_x=160,
-            world_y=100,
-            combat_phase=CombatPhase.ATTACKING,
-            primary_state=2,
-            tactical=2,
-        )
+    def test_offered_armed_too(self) -> None:
+        # $AAA0's grab code never reads the carried weapon; an armed actor
+        # handed to the generic approach walked his lane inside the commit
+        # band and took the claw (the one hit of the validation batch).
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0B)
         self.assertEqual(
-            could_dodge_souther_slash({myself, souther, AnimationInProgress(slot="P1")}),
+            could_engage_souther({myself, _souther(world_x=200)}),
+            {EngageSouther(actor_slot="P1", target_slot="obj11")},
+        )
+
+    def test_armed_nothing_else_is_aimed_at_him(self) -> None:
+        # A swing sets +$34 and turns the grab contact into a hit, exactly as
+        # a punch does.
+        myself = make_myself(world_x=160, world_y=100, held_weapon_type=0x0A)
+        souther = _souther(world_x=190, world_y=100)
+        camera = CameraRange(left=0, right=640, top=0, bottom=224)
+        context = {myself, souther, camera}
+        aimed_at_him = {
+            type(token).__name__
+            for token in generate_verb_tokens(context)
+            if isinstance(token, Verb) and getattr(token, "target_slot", None) == "obj11"
+        }
+        self.assertEqual(aimed_at_him, {"EngageSouther"})
+
+    def test_not_while_holding_airborne_or_mid_animation(self) -> None:
+        souther = _souther(world_x=200)
+        cases = {
+            "holding": make_myself(action_state=0x60, held_enemy_slot="obj11"),
+            "airborne": make_myself(is_airborne=True, action_state=0x12),
+        }
+        for label, myself in cases.items():
+            with self.subTest(label):
+                self.assertEqual(could_engage_souther({myself, souther}), set())
+        self.assertEqual(
+            could_engage_souther({make_myself(), souther, AnimationInProgress(slot="P1")}),
             set(),
         )
 
+    def test_not_for_a_dead_souther(self) -> None:
+        self.assertEqual(could_engage_souther({make_myself(), _souther(health=0xFFFF)}), set())
 
-class CouldGrabSoutherOnPunishTests(unittest.TestCase):
-    def test_grab_offered_during_the_brief_hit_reaction(self) -> None:
-        myself = make_myself(world_x=140, world_y=100)
+    def test_the_generic_verbs_stand_down_for_him(self) -> None:
+        # On his lane, inside punch and grab range: a punch would turn the
+        # grab contact into a hit, and GrabEnemy/WalkToNearEnemy/RearAttack
+        # would each own a tick of the engage. Nothing but EngageSouther.
+        myself = make_myself(world_x=160, world_y=100)
+        souther = _souther(world_x=190, world_y=100)
         camera = CameraRange(left=0, right=640, top=0, bottom=224)
-        souther = _souther(
-            world_x=160,
+        context = {myself, souther, camera}
+        self.assertEqual(could_punch(context), set())
+        self.assertEqual(could_grab_enemy(context), set())
+        self.assertEqual(could_rear_attack(context), set())
+        self.assertNotIn(
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj11"),
+            could_walk_to_near_enemy(context),
+        )
+        aimed_at_him = {
+            type(token).__name__
+            for token in generate_verb_tokens(context)
+            if isinstance(token, Verb) and getattr(token, "target_slot", None) == "obj11"
+        }
+        self.assertEqual(aimed_at_him, {"EngageSouther"})
+
+
+class SoutherHoldLoopTests(unittest.TestCase):
+    """Knee, knee, release, walk back in -- souther.hold_step, wired."""
+
+    def _holding(self, action_state: int, *, knees: int = 0, crossover_spent: bool = False):
+        return make_myself(
+            world_x=100,
             world_y=100,
-            combat_phase=CombatPhase.RECOVERY,
-            primary_state=3,
+            action_state=action_state,
+            held_enemy_slot="obj11",
+            action_flags=0x40 if knees else 0,
+            knee_chain_last={0: 0, 1: 0x6A, 2: 0x6C}[knees],
+            crossover_spent=crossover_spent,
         )
-        result = could_grab_enemy({myself, camera, souther})
-        self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="obj11")})
 
-    def test_grab_offered_during_the_long_recovery_he_sits_in(self) -> None:
-        # Offered, but on the chase's own lower tier (GrabReason.SOUTHER_
-        # WALK_IN) rather than the punish one -- see test_reach.
-        myself = make_myself(world_x=140, world_y=100)
-        camera = CameraRange(left=0, right=640, top=0, bottom=224)
-        souther = _souther(
-            world_x=160,
-            world_y=100,
-            combat_phase=CombatPhase.RECOVERY,
-            primary_state=4,
+    def _held(self, **overrides):
+        fields = dict(
+            world_x=132, world_y=100, primary_state=4, combat_phase=CombatPhase.RECOVERY
         )
-        result = could_grab_enemy({myself, camera, souther})
-        self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="obj11")})
+        fields.update(overrides)
+        return _souther(**fields)
 
-    def test_grab_offered_while_he_can_still_act(self) -> None:
-        # The chase itself: a ready Souther at contact range is walked into,
-        # not traded punches with.
-        myself = make_myself(world_x=140, world_y=100)
-        camera = CameraRange(left=0, right=640, top=0, bottom=224)
-        souther = _souther(world_x=160, world_y=100)
-        result = could_grab_enemy({myself, camera, souther})
-        self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="obj11")})
+    def test_knees_until_the_chain_holds_two(self) -> None:
+        for knees in (0, 1):
+            with self.subTest(knees=knees):
+                self.assertEqual(
+                    could_hold_actions({self._holding(0x60, knees=knees), self._held()}),
+                    {AttackHeldEnemy(actor_slot="P1", target_slot="obj11")},
+                )
 
-    def test_no_grab_once_the_walk_in_has_stalled(self) -> None:
-        myself = replace(
-            make_myself(world_x=140, world_y=100),
-            grab_stall_ticks=reach.SOUTHER_WALK_IN_STALL_TICKS + 1,
+    def test_two_knees_hand_him_back_for_the_regrab(self) -> None:
+        self.assertEqual(
+            could_hold_actions({self._holding(0x60, knees=2), self._held()}),
+            {ReleaseToRegrab(actor_slot="P1", target_slot="obj11")},
         )
+
+    def test_the_third_knee_only_when_it_kills(self) -> None:
+        self.assertEqual(
+            could_hold_actions({self._holding(0x60, knees=2), self._held(health=3)}),
+            {AttackHeldEnemy(actor_slot="P1", target_slot="obj11")},
+        )
+
+    def test_never_a_throw_flip_or_suplex_from_the_front(self) -> None:
+        # Each of them leaves him 100-165 px down the actor's lane.
+        for knees in (0, 1, 2):
+            with self.subTest(knees=knees):
+                verbs = could_hold_actions({self._holding(0x60, knees=knees), self._held()})
+                self.assertFalse(
+                    any(isinstance(v, (ThrowHeldEnemy, FlipHold, Supplex)) for v in verbs)
+                )
+
+    def test_a_back_hold_crosses_once(self) -> None:
+        self.assertEqual(
+            could_hold_actions({self._holding(0x66), self._held()}),
+            {FlipHold(actor_slot="P1", target_slot="obj11")},
+        )
+        self.assertEqual(
+            could_hold_actions({self._holding(0x66, crossover_spent=True), self._held()}),
+            {ReleaseToRegrab(actor_slot="P1", target_slot="obj11")},
+        )
+
+    def test_a_back_hold_suplexes_only_to_kill(self) -> None:
+        self.assertEqual(
+            could_hold_actions({self._holding(0x66), self._held(health=5)}),
+            {Supplex(actor_slot="P1", target_slot="obj11")},
+        )
+
+
+class LifeItemsRefusedNearSoutherTests(unittest.TestCase):
+    """User: "do not use police attacks or life-gaining items"."""
+
+    def _items(self):
+        food = HealthPickup(
+            slot="obj20", world_x=140, world_y=100, pickup_type=0x49, health_delta=20
+        )
+        life = LifePickup(slot="obj21", world_x=160, world_y=100, pickup_type=0x4C)
+        return food, life
+
+    def test_neither_is_walked_to_while_he_lives(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, health=20, health_percent=25.0)
         camera = CameraRange(left=0, right=640, top=0, bottom=224)
-        souther = _souther(world_x=160, world_y=100)
-        self.assertEqual(could_grab_enemy({myself, camera, souther}), set())
+        food, life = self._items()
+        self.assertEqual(
+            could_walk_to_pickup({myself, camera, food, life, _souther(world_x=300)}), set()
+        )
+
+    def test_both_come_back_once_he_is_dead(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, health=20, health_percent=25.0)
+        camera = CameraRange(left=0, right=640, top=0, bottom=224)
+        food, life = self._items()
+        walks = could_walk_to_pickup(
+            {myself, camera, food, life, _souther(world_x=300, health=0xFFFF)}
+        )
+        self.assertEqual({w.target_slot for w in walks}, {"obj20", "obj21"})
 
 
 class BossNotIgnoredForASideshowTests(unittest.TestCase):
@@ -2977,10 +3031,11 @@ class BossNotIgnoredForASideshowTests(unittest.TestCase):
         myself = make_myself(world_x=100, world_y=60)
         grunt = make_enemy(slot="obj01", world_x=140, world_y=60)
         boss = _souther(world_x=190, world_y=60, boss_dist_x=90)
-        walks = could_walk_to_near_enemy({myself, grunt, boss})
+        # His approach is EngageSouther now, offered whatever else is in range
+        # -- the ranking settles the contest, and it has to be shown it.
         self.assertIn(
-            WalkToNearEnemy(actor_slot="P1", target_slot="obj11"),
-            walks,
+            EngageSouther(actor_slot="P1", target_slot="obj11"),
+            could_engage_souther({myself, grunt, boss}),
             "the boss must still be offered as a target",
         )
 

@@ -266,14 +266,8 @@ REACH_SAFETY_MARGIN = 8
 # Souther's state 1 -> state 2 commit gate at $15EDA
 # (souther_state1_active_combat) has an inner abort (`cmpi.w #$0018,d2 / bcs`):
 # he cannot *begin* the slash from inside 24px and has to walk back out first.
-# Shared with execute.py (the approach's own stop point, ``_souther_pocket_
-# stop_dx``) and inference.py (the fuller commit-gate geometry, ``check_for_
-# souther_slash``) -- lives here rather than in either, per this module's own
-# charter as the one shared definition, the same reason ``REACH_SAFETY_MARGIN``
-# above does. Not a safe pocket once he is *already* committed: $161C6
-# (souther_state2_claw_dash) resolves an already-in-progress dash at
-# +$50 in [$18,$40), the same band -- this constant only denies the state-1
-# start, so a caller must gate on ``Souther.strike_is_committed()`` too.
+# Used here for the dash-arrival clock (``frames_until_melee_lands``); the
+# engage's own copy, with the rest of his commit gate, is ``souther.POCKET_DX``.
 SOUTHER_SLASH_DIST_MIN = 0x18  # 24px
 
 # How far ahead a Grunt's own committed velocity (grunt_vel_x/grunt_vel_y) is
@@ -847,7 +841,7 @@ def souther_dash_arrives_soon(actor: PlayableCharacter, enemy: Enemy) -> bool:
     Lane is part of the test rather than slack around it: the dash writes
     only ``+$1C`` and resolves only with the target inside ``$18`` of its
     lane, so an actor already off that lane is genuinely not about to be hit
-    -- which is exactly what ``DodgeSoutherSlash`` is spending the tick
+    -- which is what ``EngageSouther``'s claw escape spends the tick
     achieving.
     """
 
@@ -989,20 +983,9 @@ ANTONIO_STATIONARY_VEL = 0.5
 # Primary $02 is the committed kick ($171CC).
 ANTONIO_KICK_PRIMARY_STATE = 0x02
 
-# Souther's state 1 -> state 2 commit gate at $15EDA
-# (souther_state1_active_combat). Same shape as Antonio's $16EAE kick gate: the
-# X window is picked by the sign of the *target's* +$1C velocity after the ROM
-# signs it into Souther's own facing frame (`neg` when +$60 is nonzero), so
-# `bmi` -- walking into him -- gets the widest window.
-SOUTHER_SLASH_DIST_CLOSING = 0x68  # 104px; target walking into him
-SOUTHER_SLASH_DIST_STATIONARY = 0x58  # 88px
-SOUTHER_SLASH_DIST_AWAY = 0x50  # 80px; target walking off
-# Lane gate: $0A when +$61 is set, else $1C. We take the wider $1C for the same
-# reason the Antonio constants above take their wider pair -- never miss a
-# strike by under-stating the box.
-SOUTHER_SLASH_LANE = 0x1C  # 28px
-# Primary $02 is the whole committed claw ($16118 souther_state2_claw_commit).
-SOUTHER_SLASH_PRIMARY_STATE = 0x02
+# Souther's claw commit (``$15EDA``) and the geometry around it live in
+# ``souther.py``, with the lane gate the ROM actually applies: ``$0A`` for a
+# target above his lane (``+$61``), ``$1C`` level or below.
 
 # The X reach of "do not jump near Souther". $16234
 # (souther_counter_jump_attack) is where the number comes from: $162A4
@@ -1108,60 +1091,6 @@ def can_break_antonio_kick_lane(actor: PlayableCharacter, antonio: Antonio) -> b
     return abs(antonio.world_y - actor.world_y) < ANTONIO_KICK_LANE_BREAK
 
 
-def _souther_slash_distance_threshold(souther: Souther, actor: PlayableCharacter) -> int:
-    """The ROM's X window for the 1->2 claw commit, given the actor's motion.
-
-    ``$15EDA (souther_state1_active_combat)`` reads the target's ``+$1C``, and
-    ``beq`` on it is the standing-still path (``$58``). Non-zero is negated when
-    ``+$60`` is nonzero -- signed into Souther's own frame -- so the ``bmi``
-    path is "walking into him" and takes the widest window (``$68``), while
-    ``bpl`` (backing away) takes the tightest (``$50``).
-
-    The same reading as Antonio's ``_antonio_kick_distance_threshold``, and the
-    same practical consequence: closing the distance is what lets him start
-    from furthest out.
-    """
-
-    vel = actor.vel_x
-    if abs(vel) < ANTONIO_STATIONARY_VEL:
-        return SOUTHER_SLASH_DIST_STATIONARY
-    relative = -vel if souther.facing_left else vel
-    if relative < 0:
-        return SOUTHER_SLASH_DIST_CLOSING
-    return SOUTHER_SLASH_DIST_AWAY
-
-
-def souther_will_slash(souther: Souther, actor: PlayableCharacter) -> bool:
-    """True when Souther's commit gate is satisfied, or the claw is already on.
-
-    Already-committed (primary ``$02``) is always a slash. The predictive half
-    mirrors ``$15EDA``: target available, ``+$66`` hard-hold clear, inside the
-    lane window, and inside the velocity-selected X window but **outside** the
-    ``$18`` inner abort -- that abort is a real part of the gate, not a
-    conservatism, so leaving it out would report a slash from a range the ROM
-    refuses to start one at.
-    """
-
-    if souther.target_unavailable:
-        return False
-    if souther.combat_phase in (
-        CombatPhase.DEATH,
-        CombatPhase.GRABBED,
-        CombatPhase.RECOVERY,
-    ):
-        return False
-
-    dist_x = souther.boss_dist_x or abs(souther.world_x - actor.world_x)
-    dist_lane = souther.boss_dist_lane or abs(souther.world_y - actor.world_y)
-    if souther.primary_state == SOUTHER_SLASH_PRIMARY_STATE:
-        return True
-    if dist_lane >= SOUTHER_SLASH_LANE:
-        return False
-    if dist_x < SOUTHER_SLASH_DIST_MIN:
-        return False
-    return dist_x < _souther_slash_distance_threshold(souther, actor)
-
-
 def souther_would_punish_jump(actor: PlayableCharacter, context: Context) -> bool:
     """True when a jump attack launched now would be countered by a live Souther.
 
@@ -1186,7 +1115,7 @@ def souther_would_punish_jump(actor: PlayableCharacter, context: Context) -> boo
     So the counter arms itself the instant he leaves recovery, with the actor
     still in the air. Measured: with this exemption in place the AI spent 298
     of 3541 fight ticks airborne against him. A punishable Souther is a walk-in
-    and a grab (``GrabReason.SOUTHER_ON_PUNISH``), never a hop.
+    and a hold (``EngageSouther``), never a hop.
 
     The X half-width is widened by the character's own free-flight reach
     (``jump_attack_max_dx``), because ``+$79`` stays set for as long as
@@ -1271,8 +1200,9 @@ ANTONIO_BOOMERANG_ATTACH_RADIUS = 40
 # animation-synchronized attack objects that live and die with the claw
 # sequence, never thrown -- so unlike Antonio's $96 they are withheld from
 # an incoming-projectile threat *unconditionally* rather than only while
-# attached. The claw is answered by DodgeSoutherSlash, which reads Souther's
-# own state; a ProjectileSidestep competing with it would just split the tick.
+# attached. They carry no attack box of their own either -- the claw's box
+# is Souther's *own* animation (souther.py) -- and EngageSouther reads his
+# state; a ProjectileSidestep competing with it would just split the tick.
 SOUTHER_CLAW_TYPE_IDS = frozenset({0x98, 0x99})
 
 
@@ -1345,7 +1275,7 @@ def is_souther_claw(projectile: Projectile) -> bool:
     (souther_state2_claw_dash)`` re-creates the afterimage every dash tick
     from Souther's own position. They have no independent flight to
     intercept, so the only honest answer is Souther's own state, which
-    ``DodgeSoutherSlash`` reads.
+    ``EngageSouther`` reads.
     """
 
     return projectile.type_id in SOUTHER_CLAW_TYPE_IDS
@@ -1391,62 +1321,6 @@ GRABBABLE_PHASES = frozenset(
     }
 )
 
-# The two primary states a Souther can be taken out of, and the reason the
-# grab is keyed on the state byte rather than on ``is_punishable``.
-#
-# `$03` is the shared later-boss hit reaction (`$163D0`). It is *not* the
-# blink the old note here called it: measured over two 90 s traces, its
-# episodes run about 55 agent ticks -- over half a second -- which is ample
-# time to take a hold. What actually kept the grab at zero was where the
-# actor was standing when they opened, not how long they lasted: across 221
-# in-`$03` ticks, `grab_would_connect` was true on 14 of them, and the actor
-# was carrying a weapon (which forbids the hold outright) on 107.
-#
-# `$0A` is the police-special reaction (`$16A60 (later_boss_police_special_
-# reaction)`), 5.6% of a measured fight and the longest window in it: he is
-# helpless for all of it, and there is nothing else worth doing with those
-# ticks.
-#
-# `$04` is deliberately *not* here even though `phases.py` decodes it as
-# RECOVERY too. An earlier note recorded it as 70% of a fight, which does not
-# reproduce -- two later traces put it at 4 ticks in 10 220 -- but the
-# conclusion stands on its own: `$04` is a state he *sits* in rather than a
-# window, and keying on `is_punishable` handed the top of the emergency table
-# to a walk-in that never converted.
-SOUTHER_HIT_REACTION_PRIMARY = 0x03
-SOUTHER_POLICE_REACTION_PRIMARY = 0x0A
-# `$05` is the shared lethal gate `$164FC`, which `phases.boss_phase` used to
-# decode as DEATH and no longer does -- he is in hitstun there, being tested,
-# and it is another window rather than a corpse. See that decode.
-SOUTHER_LETHAL_GATE_PRIMARY = 0x05
-SOUTHER_GRABBABLE_PRIMARIES = frozenset(
-    {
-        SOUTHER_HIT_REACTION_PRIMARY,
-        SOUTHER_LETHAL_GATE_PRIMARY,
-        SOUTHER_POLICE_REACTION_PRIMARY,
-    }
-)
-
-# How many consecutive ticks of an unconverted walk-in are worth spending on
-# a *ready* Souther before the tick goes back to a strike -- the guard on
-# `GrabReason.SOUTHER_WALK_IN`, counted by `observe.GrabStallTracker` and
-# read off `PlayableCharacter.grab_stall_ticks`.
-#
-# Long enough that a genuine grab is never cut short: the contact code needs
-# a walking frame's attack box (`execute.state_machine_grab_enemy`'s own
-# docstring), so a hold can take a handful of ticks of walking into him even
-# when it is going to work. Short enough that the failure mode is a blip
-# rather than a fight: at the project's turbo cadence of about two 60Hz
-# frames per tick this is roughly 0.8s, against the 2318-tick stalemate the
-# unguarded version of this reason produced the last time it was tried.
-#
-# There is no cooldown on the other side of it. The counter resets the moment
-# contact breaks, which is what the strike that replaces the walk-in causes,
-# so the cycle is "chase, try the hold, hit him if he will not be held, chase
-# the hitstun" rather than a duty cycle of standing still.
-SOUTHER_WALK_IN_STALL_TICKS = 24
-
-
 def actor_is_surrounded(context: Context, actor_slot: str) -> bool:
     """True when ``actor_slot`` carries a live ``Surrounded`` judgment."""
 
@@ -1467,13 +1341,13 @@ def grab_reasons(
     Whether the grab is *reachable* is a separate question, answered by
     ``grab_would_connect``; ``decide.could_grab_enemy`` requires both.
 
-    Most reasons are ``Grunt``-only. Antonio and Souther are the exceptions:
-    after a landed hit both sit in the shared later-boss ``RECOVERY`` states
-    (primary ``$03``/``$04``), and a hold-then-suplex beats following up with
-    another strike -- for Antonio because a grounded punch is his own kick trigger,
-    for Souther because ``$15EDA (souther_state1_active_combat)`` cannot
-    re-arm the claw from recovery, so the walk-in is free. Bongo, the twins,
-    Abadede and Mr. X stay out of scope.
+    Most reasons are ``Grunt``-only. Antonio is the exception: after a
+    landed hit he sits in the shared later-boss ``RECOVERY`` states (primary
+    ``$03``/``$04``), and a hold-then-suplex beats following up with another
+    strike, because a grounded punch is his own kick trigger. Souther is not a
+    case here at all -- his hold is the engage's own walk-in
+    (``EngageSouther``, ``souther.plan_engage``). Bongo, the twins, Abadede and
+    Mr. X stay out of scope.
 
     ``enemies`` should be every on-screen enemy for this actor (the same set
     ``target`` was drawn from) -- ``DODGE_CHARGE`` and ``CLEAR_REAR`` both
@@ -1499,31 +1373,6 @@ def grab_reasons(
         # which decide.could_grab_enemy requires anyway, so this reason never
         # starts a walk across his kick window.
         return frozenset({GrabReason.ANTONIO_WALK_IN})
-    if isinstance(target, Souther):
-        # The hit reaction, primary $03, and the police-special reaction,
-        # primary $0A -- deliberately not the whole of is_punishable the way
-        # Antonio's is.
-        #
-        # Measured live over a full 120s Souther fight: he sits in primary
-        # $04 for 70% of it (2304 of 3304 ticks) against 4% in $03, and both
-        # decode as RECOVERY. Keyed on is_punishable, the grab therefore
-        # scored 61+14 = 75 -- the top of the table -- for most of the
-        # fight, and the walk-in never converted: 2318 ticks of GrabEnemy,
-        # and Souther lost 11 health in two minutes while the actor lost a
-        # whole life. $04 is where he *sits*, not a window.
-        if target.primary_state in SOUTHER_GRABBABLE_PRIMARIES:
-            return frozenset({GrabReason.SOUTHER_ON_PUNISH})
-        # Ready, and already at contact range: hold him anyway. This is the
-        # chase (GrabReason.SOUTHER_WALK_IN) -- the pocket a hold is taken
-        # from is ground his own $15EDA cannot commit from and his own
-        # standoff leaves at 1px/frame, so waiting for hitstun to arrive
-        # before reaching for the hold spends the fight's safest ticks
-        # trading punches instead. Timed out by grab_stall_ticks so a
-        # walk-in that is not converting hands the tick back to the strike
-        # rather than repeating the stalemate this reason caused once.
-        if actor.grab_stall_ticks <= SOUTHER_WALK_IN_STALL_TICKS:
-            return frozenset({GrabReason.SOUTHER_WALK_IN})
-        return frozenset()
     if not isinstance(target, Grunt):
         return frozenset()
 

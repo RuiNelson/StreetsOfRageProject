@@ -18,7 +18,7 @@ from typing import Callable
 from .. import prop_solids
 from ..memory_map import ACTION_HOLD_CROSSOVER
 from ..phases import CombatPhase, is_dangerous, is_punishable
-from . import kinematics, navigation as nav, reach
+from . import kinematics, navigation as nav, reach, souther as souther_plan
 from .tokens import (
     CounterGrab,
     FlipHold,
@@ -30,6 +30,7 @@ from .tokens import (
     Punch,
     RearAttack,
     ReleaseGrab,
+    ReleaseToRegrab,
     OpenBreakable,
     Supplex,
     TechRecover,
@@ -66,7 +67,7 @@ from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDi
 from .tokens import Context, Token, find, find_all
 from .tokens import (
     DodgeAntonioKick,
-    DodgeSoutherSlash,
+    EngageSouther,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -257,6 +258,14 @@ def _could_melee_strike(
             # kick/dash that is already locked in.
             if isinstance(target, Antonio):
                 continue
+            # Souther is taken in a hold, never struck -- bare-handed or with
+            # a weapon. A strike makes the actor's own +$34 non-zero, so the
+            # very contact that would have been the grab ($AAA0's code 3) is
+            # a hit instead -- and the hitstun it buys ($163D0) is a state
+            # his collision is not even processed in, so it cannot be
+            # grabbed from. EngageSouther owns him (souther.py).
+            if isinstance(target, Souther):
+                continue
             verbs.add(make_verb(actor.slot, target_slot, actor.held_weapon_type))
     return verbs
 
@@ -317,6 +326,10 @@ def could_rear_attack(context: Context) -> Context:
         }
         for target_slot in _targets_in_reach(context, actor, reach.in_rear_band, RearAttack):
             if target_slot in on_jacks_back:
+                continue
+            if isinstance(find(context, Enemy, slot=target_slot), Souther):
+                # The chord is a strike like any other: it turns the grab
+                # contact into a hit. EngageSouther owns him.
                 continue
             verbs.add(RearAttack(actor_slot=actor.slot, target_slot=target_slot))
     return verbs
@@ -417,6 +430,10 @@ def could_grab_enemy(context: Context) -> Context:
         for enemy in on_screen:
             if enemy.slot not in in_reach:
                 continue
+            if isinstance(enemy, Souther):
+                # The engage walks into him itself, from the lane and at the
+                # moment souther.plan_engage picks (EngageSouther).
+                continue
             if enemy.slot in threatening:
                 # Walking into a committed attack is how the actor takes the
                 # hit rather than the hold -- same reasoning that keeps
@@ -477,6 +494,22 @@ def could_hold_actions(context: Context) -> Context:
         if base in (0x28, 0x2A, 0x2C, 0x2E, 0x62, 0x64, 0x68, 0x6A, 0x6C, 0x6E):
             continue
         if base in ACTION_HOLD_CROSSOVER:
+            continue
+
+        # A held Souther runs his own loop: knee, knee, release, walk back in
+        # -- souther.hold_step reads the ROM's knee chain and crossover flag
+        # and returns the one input that keeps him in the actor's hands.
+        held = reach.held_enemy(actor, enemies)
+        if isinstance(held, Souther):
+            step = souther_plan.hold_step(actor, held)
+            if step is souther_plan.HoldStep.KNEE:
+                verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
+            elif step is souther_plan.HoldStep.RELEASE:
+                verbs.add(ReleaseToRegrab(actor_slot=actor.slot, target_slot=held.slot))
+            elif step is souther_plan.HoldStep.CROSS:
+                verbs.add(FlipHold(actor_slot=actor.slot, target_slot=held.slot))
+            elif step is souther_plan.HoldStep.SUPLEX:
+                verbs.add(Supplex(actor_slot=actor.slot, target_slot=held.slot))
             continue
 
         # Target the enemy actually in the grab, not merely the closest one:
@@ -686,6 +719,9 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 # Never walk toward a target that is itself standing in a
                 # pit's danger zone -- reaching it means standing there too.
                 continue
+            if isinstance(enemy, Souther):
+                # EngageSouther owns the whole approach to him, armed or not.
+                continue
             if standing_off and enemy.slot in threatening:
                 # could_retreat_from_danger covers this one instead -- don't
                 # propose closing the last stretch of distance into a
@@ -792,6 +828,9 @@ def could_retreat_from_danger(context: Context) -> Context:
         for target_slot in reach.incoming_melee_targets(context, actor):
             enemy = find(context, Enemy, slot=target_slot)
             if enemy is None:
+                continue
+            if isinstance(enemy, Souther):
+                # His claw is answered by the engage's own lane escape.
                 continue
             if target_slot in actionable:
                 continue  # already hittable -- attack instead of retreating
@@ -993,29 +1032,22 @@ def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
     well before the "about to die" thresholds, at a health gate just lax
     enough that it is never spent while comfortably healthy either.
 
-    Souther is carved out of the boss bonus (user: "a maioria do dano
-    deve-se a ataques de polícia, não usar ataques de polícia"). The call
-    does buy the flat 10 damage, but it also puts the *caller* into action
-    ``$3`` for the shared ``$16AEC`` delay -- 300 P1 / 390 P2 frames, about
-    5-6.5s, entirely unresponsive to input (measured live: 798 of 798 ticks
-    sampled in that action were at an unchanged position, the longest run
-    644 ticks starting on the exact tick ``CallPolice`` fired). That is also
-    the single longest window ``SOUTHER_ON_PUNISH`` ever gets -- Souther is
-    forced into the shared ``$0A`` reaction for the same span -- so the call
-    spends the fight's best grab-and-suplex opportunity on a frozen actor
-    and buys only the scripted 10, where a landed hold-into-suplex chain is
-    worth far more. The re-approach that follows from scratch is where
-    ``autoplay/CLAUDE.md``'s "every hit is primary $02, with WalkToNearEnemy
-    holding the tick through the second before" damage actually comes from,
-    which is the indirect sense in which the special *causes* it. The
-    near-death thresholds above stay: at 18%/35% health nothing is lost by
-    freezing, since Souther freezes with the actor, and a life lost there
-    (+``PLAYER_MAX_HEALTH`` on the scored damage total) is far worse than a
-    spent special. Scoped to Souther, not the shared mechanism, because
-    Antonio's numbers are separately measured and this has not been.
+    Never against a live Souther, at any health (user: "a maioria do dano
+    deve-se a ataques de polícia, não usar ataques de polícia", then "do not
+    use police attacks or life-gaining items"). The call puts the *caller*
+    into action ``$3`` for the shared ``$16AEC`` delay -- 300 P1 / 390 P2
+    frames, input dead the whole time -- and buys a flat 10, while the hold
+    loop (``souther.hold_step``) takes 4 every 55 frames without ever letting
+    him act. The Antonio/other-boss bonus stays: their numbers are separately
+    measured and this has not been.
     """
 
     if not _has_live_enemy(context):
+        return False
+    if _souther_is_alive(context):
+        # Not against Souther, at any health (user: "do not use police
+        # attacks or life-gaining items"). The call freezes the caller for
+        # the whole $16AEC delay, and the hold loop never lets him act.
         return False
     threshold = (
         POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE
@@ -1262,22 +1294,21 @@ def could_dodge_antonio_kick(context: Context) -> Context:
     return verbs
 
 
-def could_dodge_souther_slash(context: Context) -> Context:
-    """Step off the lane of a claw dash Souther has already committed to.
+def could_engage_souther(context: Context) -> Context:
+    """Close on Souther for the hold -- the whole approach to him, one verb.
 
-    One candidate per live Souther whose claw gate (``reach.souther_will_
-    slash``) is live and who is in primary ``$02``
-    (``Souther.strike_is_committed``). The uncommitted state-1 gate is
-    deliberately not enough, for the same reason ``could_dodge_antonio_kick``
-    refuses it: leaving the lane while he is still choosing is the dodge loop
-    that never gets close enough to hit him.
+    One candidate per live, on-screen ``Souther`` while the actor is free to
+    move (not mid-animation, not held, not holding a body, not airborne).
+    ``souther.plan_engage`` decides where the actor stands and when it walks
+    in; the hold is the contact result of that walk, and the loop that follows
+    is ``could_hold_actions``'.
 
-    A lane step is the *whole* answer, and specifically not a hop --
-    ``$161C6 (souther_state2_claw_dash)`` writes only ``+$1C`` and so cannot
-    follow the lane change, while ``$16234
-    (souther_counter_jump_attack)`` punishes exactly the jump that answers
-    Antonio. Suppressed while airborne, like the Antonio dodge, since
-    ``could_jump_attack`` owns a flight already underway.
+    Armed or not: ``$AAA0``'s grab code never looks at the carried weapon (it
+    wants a walking attack box, ``+$34`` clear, ``+$4C`` clear and 8 px of
+    elevation), and ``loc_235A`` releases an armed holder into the armed walk
+    ``$30``, so the whole loop runs with a weapon in hand. Handing an armed
+    actor to the generic approach instead walked it down his lane inside the
+    commit band -- the one hit in the validation batch.
     """
 
     verbs: set[Token] = set()
@@ -1290,29 +1321,9 @@ def could_dodge_souther_slash(context: Context) -> Context:
             continue
         if actor.is_airborne:
             continue
-        for souther in find_all(context, Souther):
-            if souther.is_defeated:
-                continue
-            if not reach.souther_will_slash(souther, actor):
-                continue
-            if not souther.strike_is_committed():
-                # Predicted window only: walking in and punching is the
-                # opener, same as could_dodge_antonio_kick. A pre-emptive
-                # version of this branch shipped once (the predicted
-                # $15EDA gate alone was enough to dodge) and was reverted:
-                # measured live over a full fight it fired on only 28 of
-                # 1794 ticks, no measurable benefit, and it is redundant
-                # with execute._souther_pocket_stop_dx now denying the
-                # commit outright by keeping the approach inside the $18
-                # inner abort in the first place -- from there
-                # reach.souther_will_slash's own predictive gate cannot even
-                # fire (dist_x < SOUTHER_SLASH_DIST_MIN refuses it), so a
-                # pre-emptive dodge branch would mostly be dead weight,
-                # not more coverage.
-                continue
-            verbs.add(
-                DodgeSoutherSlash(actor_slot=actor.slot, target_slot=souther.slot)
-            )
+        for enemy in reach.on_screen_enemies(context):
+            if isinstance(enemy, Souther):
+                verbs.add(EngageSouther(actor_slot=actor.slot, target_slot=enemy.slot))
     return verbs
 
 
@@ -1463,22 +1474,16 @@ def could_throw_pepper(context: Context) -> Context:
 def _a_weapon_would_disarm_the_plan(context: Context) -> bool:
     """Whether picking a weapon up would cost more than it could ever pay.
 
-    True while a live Souther is on screen, and measured rather than
-    reasoned. Armed, the AI has **no move on him at all**: ``could_grab_
-    enemy`` excludes an armed actor outright, ``could_punch`` is unarmed-only,
-    and ``could_jump_attack`` is refused near him for his own counter. What
-    is supposed to replace them is ``MeleeWeaponAttack`` -- and across ten
-    scored fights it fired **zero** times, while ``WalkToWeapon`` took 137 to
-    223 ticks of five of them. The detour is pure loss: it spends the
-    approach and hands back nothing.
+    True while a live Souther is on screen. The plan against him is the hold
+    loop (``souther.py``), which never swings a weapon -- a swing sets
+    ``+$34`` and turns the grab contact into a hit -- so a weapon buys nothing
+    in this fight, and walking to one is time spent inside his commit band
+    rather than in the corridor. Before the hold loop existed the detour was
+    measured as pure loss too: ``WalkToWeapon`` took 137 to 223 ticks of five
+    of ten scored fights while ``MeleeWeaponAttack`` fired zero times.
 
-    That matters more against him than against anyone else because the hold
-    is the plan (user: "e essencial agarrar o boss"), and being armed is the
-    one condition that forbids the hold outright. The ROM's own contact grab
-    does not care what the actor carries -- a live front hold on Antonio was
-    recorded with a pipe in ``+$60`` -- but lifting that exclusion was tried
-    for Antonio and measured worse, so the answer here is the other one: do
-    not pick the weapon up while the fight that needs bare hands is on.
+    A weapon the actor walks into the arena with is kept: the ROM's grab
+    ignores it, and the engage and the hold run the same armed or not.
 
     Scoped to Souther deliberately. The same refusal was tried twice for
     Antonio and measured no better both times (see autoplay/CLAUDE.md); his
@@ -1540,6 +1545,21 @@ def _food_is_spoken_for(context: Context) -> bool:
     return any(not antonio.is_defeated for antonio in find_all(context, Antonio))
 
 
+def _souther_is_alive(context: Context) -> bool:
+    return any(not souther.is_defeated for souther in find_all(context, Souther))
+
+
+def _life_items_refused(context: Context) -> bool:
+    """Whether health and extra lives are off the table this tick.
+
+    True while a live Souther is on screen (user: "do not use police attacks
+    or life-gaining items"): the fight is scored on the health the round left
+    the actor, and a plan that only survives by eating is not a plan.
+    """
+
+    return _souther_is_alive(context)
+
+
 def _pickup_is_useful(actor: PlayableCharacter, pickup: Pickup) -> bool:
     if isinstance(pickup, HealthPickup):
         missing = PLAYER_MAX_HEALTH - actor.health
@@ -1577,11 +1597,13 @@ def could_walk_to_pickup(context: Context) -> Context:
         if _is_holding_enemy(actor):
             continue
         leave_the_food = _food_is_spoken_for(context)
+        refuse_life = _life_items_refused(context)
         useful = [
             p
             for p in pickups
             if _pickup_is_useful(actor, p)
             and not (leave_the_food and isinstance(p, HealthPickup))
+            and not (refuse_life and isinstance(p, (HealthPickup, LifePickup)))
         ]
         # One candidate per useful pickup -- priority.py's per-target
         # _emergency_walk_to_pickup already ranks by type/urgency, so no
@@ -1718,7 +1740,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_retreat_from_danger(context)
         | could_projectile_sidestep(context)
         | could_dodge_antonio_kick(context)
-        | could_dodge_souther_slash(context)
+        | could_engage_souther(context)
         | could_hit_antonio_boomerang(context)
         | could_walk_to_advance_stage(context)
         | could_punch(context)

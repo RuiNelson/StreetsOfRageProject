@@ -281,6 +281,26 @@ class FlipHold(GrabMechanics):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ReleaseToRegrab(GrabMechanics):
+    """Let a held Souther go on purpose -- and walk straight back into him.
+
+    Produced by ``could_hold_actions`` for a held ``Souther`` once the front
+    hold's knee chain holds two knees (the third, ``$6E``, knocks him 90 px
+    down the actor's lane) or a back hold has spent its one crossover
+    (``souther.hold_step``). Holding back drops the hold on ``loc_235A``'s
+    countdown and leaves him in primary 1, 32 px in front, on the actor's
+    lane; the executor turns straight back into him, and walking in from
+    there takes the hold again before his claw can land.
+
+    Raises emergency: (Souther in the actor's hands)×69.
+    """
+
+    priority: int = 17
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ReleaseGrab(GrabMechanics):
     """Walk away opposite the held enemy to drop the grab.
 

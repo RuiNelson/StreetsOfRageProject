@@ -24,7 +24,8 @@ from megadrive_remote import MegaDriveClient
 
 from sor_autoplay.ai import reach
 from sor_autoplay.ai.decide import _blocked, _is_holding_enemy, generate_verb_tokens
-from sor_autoplay.ai.execute import _lane_offset_while_closing, _souther_pocket_stop_dx, execute_tick
+from sor_autoplay.ai import souther as souther_plan
+from sor_autoplay.ai.execute import _lane_bounds, execute_tick
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.observe import (
@@ -36,7 +37,7 @@ from sor_autoplay.ai.observe import (
 # Private on purpose: the per-verb score is exactly what this tool exists to
 # show, and re-deriving it here would risk disagreeing with the pipeline.
 from sor_autoplay.ai.priority import _emergency, determine_priority_verb
-from sor_autoplay.ai.tokens import Boss, DebugNoFood, Enemy, Myself, Verb, find, find_all
+from sor_autoplay.ai.tokens import Boss, DebugNoFood, Enemy, Myself, Souther, Verb, find, find_all
 from sor_autoplay.debug_scenario import DebugScenario
 from sor_autoplay.reach_gameplay import reach_gameplay
 from sor_autoplay.rom_data import RomData
@@ -188,22 +189,28 @@ def main() -> int:
                     "boss_hp": boss.health,
                     "boss_primary": boss.primary_state,
                     "boss_tactical": boss.tactical,
-                    "boss_grabbable": boss.primary_state in reach.SOUTHER_GRABBABLE_PRIMARIES,
+                    "boss_untouchable": boss.primary_state in souther_plan.UNTOUCHABLE_PRIMARIES,
                     "boss_committed": boss.strike_is_committed() if hasattr(boss, "strike_is_committed") else None,
                     "boss_phase": boss.combat_phase.name if boss.combat_phase else None,
                     "dx": dx,
                     "dy": dy,
-                    "lane_offset_gate": (
-                        _lane_offset_while_closing(me, boss) if me is not None else None
-                    ),
-                    "pocket_stop_dx": (
-                        _souther_pocket_stop_dx(me, boss, 999) if me is not None else None
-                    ),
-                    "grab_reasons": (
-                        sorted(r.name for r in reach.grab_reasons(context, me, boss, enemies))
-                        if me is not None
+                    # The plan's own view of this tick (souther.py): which
+                    # engage mode it is in, whether $15EDA could commit on
+                    # the actor from here, and the hold loop's ROM counters.
+                    "engage_mode": (
+                        souther_plan.plan_engage(
+                            me, boss, lane_lo=_lane_bounds(context)[0], lane_hi=_lane_bounds(context)[1]
+                        ).mode.name
+                        if me is not None and isinstance(boss, Souther)
                         else None
                     ),
+                    "can_commit_on": (
+                        souther_plan.can_commit_on(me, boss)
+                        if me is not None and isinstance(boss, Souther)
+                        else None
+                    ),
+                    "knees_in_chain": me.knees_in_chain if me is not None else None,
+                    "release_countdown": me.hold_release_countdown if me is not None else None,
                     "grab_would_connect": (
                         reach.grab_would_connect(me, boss) if me is not None else None
                     ),

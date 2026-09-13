@@ -8,10 +8,9 @@ observer's existing single-poll-per-tick discipline.
 ``Verb`` (and every candidate that preceded it) into a thread-safe
 ``VerbState`` that the observer's Tk thread reads for the HUD.
 
-``_nora_tracker``, ``_hold_tracker`` and ``_grab_stall_tracker`` are the
-pieces of state that survive across ticks besides the virtual gamepad's own
-sticky hold -- see ``observe.NoraAttackTracker``, ``observe.HoldTracker`` and
-``observe.GrabStallTracker``.
+``_nora_tracker`` and ``_hold_tracker`` are the pieces of state that
+survive across ticks besides the virtual gamepad's own sticky hold -- see
+``observe.NoraAttackTracker`` and ``observe.HoldTracker``.
 """
 
 from __future__ import annotations
@@ -26,7 +25,6 @@ from .execute import execute_tick
 from .gamepad import VirtualGamepad
 from .inference import generate_inference_tokens
 from .observe import (
-    GrabStallTracker,
     HoldTracker,
     NoraAttackTracker,
     generate_direct_observation_tokens,
@@ -75,9 +73,6 @@ class AgentLoop:
         # Cross-tick memory for PlayableCharacter.hold_ticks -- see
         # observe.HoldTracker. Same per-AgentLoop granularity as above.
         self._hold_tracker = HoldTracker()
-        # Cross-tick memory for PlayableCharacter.grab_stall_ticks -- see
-        # observe.GrabStallTracker. Same per-AgentLoop granularity again.
-        self._grab_stall_tracker = GrabStallTracker()
 
     def inform_hud(
         self,
@@ -140,7 +135,6 @@ class AgentLoop:
             player_index=player_index,
             nora_tracker=self._nora_tracker,
             hold_tracker=self._hold_tracker,
-            grab_stall_tracker=self._grab_stall_tracker,
         )
         context |= generate_inference_tokens(context)
         if self._no_food:

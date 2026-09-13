@@ -174,6 +174,23 @@ OBJ_CONTINUE_CHOICE = 0x63
 OBJ_MR_X_CHOICE_NO_BIT = 0x08  # bit 3 set → NO; clear → YES
 OBJ_MR_X_CHOICE_ACTIVE_BIT = 0x10  # bit 4 set → this player's choice UI is live
 OBJ_ACTION_FLAGS = 0x58  # player combo/action flags; bit5 queues next normal hit
+# Front-hold knee chain ($2BA8): bit 6 of +$58 is set by a hold's first knee
+# and survives only actions $60/$6A/$6C (the $394E mask table), while +$61 is
+# the chain's last knee action -- $6A, then $6C. A B edge with +$61 at $6C is
+# the third knee, $6E: 3 damage plus the heavy flag, which knocks the body
+# away and ends the hold.
+PLAYER_KNEE_CHAIN_BIT = 0x40
+OBJ_KNEE_CHAIN_LAST = 0x61
+# loc_235A's front-hold release countdown: $3266 seeds it with 3 when a hold
+# is taken, each frame the stick is held *back* decrements it, and the hold is
+# dropped on the frame it goes negative. Nothing resets it mid-hold.
+OBJ_HOLD_RELEASE_COUNTDOWN = 0x63
+# Player +$4B bit 7: set on a C crossover's sixth animation frame ($26E2) and
+# cleared only by a fresh grab ($3266). A crossover that finds it already set
+# takes $278A's failure path -- the actor lands out of the hold, next to a
+# boss that is free again -- so it is "this hold's one crossover is spent".
+OBJ_PLAYER_HOLD_FLAGS = 0x4B
+PLAYER_CROSSOVER_SPENT_BIT = 0x80
 # Throw-landing tech flags (controls-and-input.md "C+Up landing tech"):
 # +$45 armed by special throw releases ($284A/$28A2/$2AA4); C-edge+Up latches +$46
 # so $3F24 skips bounce and lands as jump $14.

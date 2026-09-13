@@ -10,7 +10,7 @@ from sor_autoplay.ai.tokens import (
     Antonio,
     CounterGrab,
     DodgeAntonioKick,
-    DodgeSoutherSlash,
+    EngageSouther,
     GrabEnemy,
     HitAntonioBoomerang,
     JumpAttack,
@@ -19,6 +19,7 @@ from sor_autoplay.ai.tokens import (
     Punch,
     RearAttack,
     ReleaseGrab,
+    ReleaseToRegrab,
     Supplex,
     TechRecover,
     ThrowKnife,
@@ -41,7 +42,6 @@ from sor_autoplay.ai.execute import (
     PICKUP_RANGE_X,
     PICKUP_RANGE_Y,
     ANTONIO_APPROACH_LANE_Y,
-    SOUTHER_APPROACH_LANE_Y,
     WALK_TO_ENEMY_LANE_SAFETY_Y,
     _enemy_stop_dx,
     _find_safe_spot,
@@ -51,8 +51,6 @@ from sor_autoplay.ai.execute import (
     execute_tick,
     execute_verb,
     press_no_button,
-    _souther_slash_sidestep_target,
-    PLAYER_BODY_HALF_X,
 )
 from sor_autoplay.ai.decide import (
     BREAKABLE_PUNCH_X,
@@ -62,8 +60,6 @@ from sor_autoplay.ai.decide import (
 from sor_autoplay.ai.pathfind import Rect
 from sor_autoplay.ai.reach import (
     PIT_AVOID_MARGIN,
-    SOUTHER_SLASH_DIST_MIN,
-    SOUTHER_SLASH_LANE,
     pit_endangers,
 )
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
@@ -484,150 +480,6 @@ class DeadZoneApproachTests(unittest.TestCase):
         stop_dx = target_x - nora.world_x
         self.assertLess(stop_dx, nora.min_reach)
         self.assertGreaterEqual(stop_dx, punch_usable_inner_x(0))
-
-
-class SoutherPocketApproachTests(unittest.TestCase):
-    """reach.SOUTHER_SLASH_DIST_MIN (24px) is where $15EDA cannot begin the
-    slash at all. Measured live: 220 of 240 health lost across a full fight
-    went in during the wind-up that follows his state-1 commit, which the
-    punch's own outer edge (46px for Axel) sits squarely inside."""
-
-    def _souther(self, **overrides) -> Souther:
-        fields = dict(
-            slot="obj11",
-            type_id=0x55,
-            world_x=200,
-            world_y=100,
-            health=32,
-            combat_phase=CombatPhase.NORMAL,
-            targets_player=1,
-            facing_left=True,
-            primary_state=1,
-            tactical=0,
-        )
-        fields.update(overrides)
-        return Souther(**fields)
-
-    def test_stops_inside_the_inner_abort(self) -> None:
-        actor = _myself(world_x=100, world_y=100)
-        souther = self._souther(world_x=200, world_y=100)
-
-        target_x, _ = _walk_to_near_enemy_target(actor, souther, set())
-
-        stop_dx = souther.world_x - target_x
-        self.assertLess(stop_dx, SOUTHER_SLASH_DIST_MIN, "still outside the commit gate")
-        self.assertGreaterEqual(
-            stop_dx, punch_usable_inner_x(0), "too close for Axel's own punch"
-        )
-
-    def test_committed_souther_is_not_pocketed(self) -> None:
-        # Once the claw is out, 24px is where $161C6 resolves the dash, not a
-        # pocket -- DodgeSoutherSlash owns that window, not the approach.
-        actor = _myself(world_x=100, world_y=100)
-        committed = self._souther(
-            world_x=200,
-            world_y=100,
-            combat_phase=CombatPhase.ATTACKING,
-            primary_state=2,
-            tactical=2,
-        )
-
-        target_x, _ = _walk_to_near_enemy_target(actor, committed, set())
-
-        stop_dx = committed.world_x - target_x
-        self.assertGreaterEqual(stop_dx, SOUTHER_SLASH_DIST_MIN)
-
-    def test_pocket_is_reached_from_the_other_side(self) -> None:
-        actor = _myself(world_x=300, world_y=100, facing_left=True)
-        souther = self._souther(world_x=200, world_y=100, facing_left=False)
-
-        target_x, _ = _walk_to_near_enemy_target(actor, souther, set())
-
-        stop_dx = target_x - souther.world_x
-        self.assertLess(stop_dx, SOUTHER_SLASH_DIST_MIN)
-        self.assertGreaterEqual(stop_dx, punch_usable_inner_x(0))
-
-    def test_the_approach_holds_a_lane_offset_wider_than_his_slash_gate(self) -> None:
-        # $15EDA's slash needs +$52 < $1C (28px). The routed goal carries
-        # PUNCH_RANGE_Y of lane slack, so the aim has to be 28 + 12 for the
-        # *nearest acceptable arrival* to be 28 rather than 16 -- 16 being
-        # inside the gate, satisfied. world_x=120 keeps dx=80 for every actor
-        # below, comfortably inside SOUTHER_SLASH_DIST_CLOSING (104) so this
-        # test exercises the lane math, not the separate outer-bound
-        # relaxation (see test_a_far_souther_gets_no_offset_at_all).
-        souther = self._souther(world_x=120, world_y=40)
-
-        # Wide of the offset: close the lane down to it, no further.
-        far = _myself(world_x=40, world_y=100)
-        _, target_y = _walk_to_near_enemy_target(far, souther, {far, souther})
-        self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
-
-        # Already inside the offset but still clear of the gate *with a real
-        # margin*: hold, since a nudge either way is jitter and the gate is
-        # unsatisfied anyway.
-        near = _myself(world_x=40, world_y=80)
-        _, held_y = _walk_to_near_enemy_target(near, souther, {near, souther})
-        self.assertEqual(held_y, near.world_y)
-        self.assertGreaterEqual(abs(held_y - souther.world_y), SOUTHER_SLASH_LANE)
-
-        # The margin has to be a real cushion against his own closing speed
-        # (4px/tick, ai-analysis/enemy-ai.md), not merely non-negative: at
-        # dy=30 (2px of raw clearance over his 28px gate) the old formula
-        # held here too, and a live trace caught him closing that in two
-        # ticks and committing at dy=21 while DodgeSoutherSlash, firing on
-        # the same tick as the commit, had no time left to matter. The
-        # approach must still be *actively widening* at dy=30, not holding.
-        thin_margin = _myself(world_x=40, world_y=70)
-        _, widened_y = _walk_to_near_enemy_target(thin_margin, souther, {thin_margin, souther})
-        self.assertNotEqual(widened_y, thin_margin.world_y)
-        self.assertGreaterEqual(abs(widened_y - souther.world_y), SOUTHER_APPROACH_LANE_Y)
-
-        self.assertGreater(
-            SOUTHER_APPROACH_LANE_Y - PUNCH_RANGE_Y, SOUTHER_SLASH_LANE
-        )
-
-    def test_the_offset_is_on_the_side_the_actor_already_stands(self) -> None:
-        # Crossing his lane to reach the aim point would walk straight through
-        # the gate the offset exists to keep unsatisfied.
-        below = _myself(world_x=40, world_y=90)
-        above = _myself(world_x=40, world_y=10)
-        souther = self._souther(world_x=200, world_y=50)
-
-        _, y_below = _walk_to_near_enemy_target(below, souther, {below, souther})
-        _, y_above = _walk_to_near_enemy_target(above, souther, {above, souther})
-
-        self.assertGreater(y_below, souther.world_y)
-        self.assertLess(y_above, souther.world_y)
-
-    def test_the_arrival_lands_inside_the_gate_not_on_it(self) -> None:
-        # The $18 inner abort has to be unsatisfied where the actor actually
-        # ends up, and *that* is the stop point plus half a body:
-        # nav.strike_goal insets its region by half the body on each axis, so
-        # a stop_dx of 16 is met by an origin 24 out -- exactly on the gate,
-        # which the ROM measures origin to origin ($15EDA reads +$50).
-        #
-        # Caught on the tick harness the moment the strike was refused from
-        # outside the pocket: the actor parked at dx=24 with an empty mask and
-        # WalkToNearEnemy winning every tick, the same "arrived somewhere
-        # nothing can act" this module's own notes record from the corridor.
-        actor = _myself(world_x=100, world_y=100)
-        souther = self._souther(world_x=200, world_y=100)
-
-        self.assertLess(
-            _enemy_stop_dx(actor, souther) + PLAYER_BODY_HALF_X,
-            SOUTHER_SLASH_DIST_MIN,
-        )
-
-    def test_every_character_stays_above_their_own_punch_floor(self) -> None:
-        for cid in (0, 1, 2):
-            actor = replace(_myself(world_x=100, world_y=100), character_id=cid)
-            souther = self._souther(world_x=200, world_y=100)
-
-            target_x, _ = _walk_to_near_enemy_target(actor, souther, set())
-
-            stop_dx = souther.world_x - target_x
-            self.assertGreaterEqual(stop_dx, punch_usable_inner_x(cid), f"character {cid}")
-            self.assertLess(stop_dx, SOUTHER_SLASH_DIST_MIN, f"character {cid}")
 
 
 class ExecuteWalkToNearEnemyTests(unittest.TestCase):
@@ -3165,274 +3017,106 @@ class DodgeAntonioKickExecuteTests(unittest.TestCase):
         self.assertFalse(pressed & (LEFT | RIGHT))
 
 
-class DodgeSoutherSlashExecuteTests(unittest.TestCase):
-    def _souther(self, **overrides) -> Souther:
-        fields = dict(
-            slot="obj11",
-            type_id=0x55,
-            world_x=160,
-            world_y=100,
-            health=32,
-            combat_phase=CombatPhase.ATTACKING,
-            targets_player=1,
-            facing_left=True,
-            primary_state=2,
-            tactical=2,
-        )
-        fields.update(overrides)
-        return Souther(**fields)
+def _souther_token(**overrides) -> Souther:
+    fields = dict(
+        slot="obj11",
+        type_id=0x55,
+        world_x=200,
+        world_y=50,
+        health=32,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=1,
+        facing_left=True,
+        primary_state=1,
+        tactical=0,
+    )
+    fields.update(overrides)
+    return Souther(**fields)
 
-    def _run(self, actor, souther_y=None):
+
+class EngageSoutherExecuteTests(unittest.TestCase):
+    CAMERA = CameraRange(left=-100, right=600, top=0, bottom=112)
+
+    def _run(self, actor, souther):
         client = MagicMock()
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
-        lane = actor.world_y if souther_y is None else souther_y
         execute_verb(
-            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
-            {actor, self._souther(world_y=lane)},
+            EngageSouther(actor_slot="P1", target_slot="obj11"),
+            {actor, souther, self.CAMERA},
             gamepad,
         )
         return client
 
-    def test_steps_off_the_lane_and_never_jumps(self) -> None:
-        # $16234 (souther_counter_jump_attack) punishes the jump-attack action
-        # states, so this dodge must never press C -- the exact opposite of
-        # DodgeAntonioKick, which delegates to the jump state machine.
-        client = self._run(_myself(world_x=120, world_y=40))
+    def _held(self, client) -> int:
+        return client.hold_buttons.call_args.kwargs["player1"]
+
+    def test_the_walk_in_presses_toward_him_on_the_first_tick(self) -> None:
+        # No axis ramp: the walking box is what turns the contact into a
+        # grab, and a tick spent ramping is a tick without it.
+        held = self._held(self._run(_myself(world_x=170, world_y=50), _souther_token()))
+        self.assertTrue(held & RIGHT)
+        self.assertFalse(held & (LEFT | B | C))
+
+    def test_never_presses_away_from_him(self) -> None:
+        # Inside his stand point the X target lies behind the actor; the
+        # engage drops X rather than turn its back on him.
+        client = self._run(_myself(world_x=195, world_y=100), _souther_token(world_y=50))
+        self.assertFalse(self._held(client) & LEFT)
+
+    def test_the_corridor_below_steps_off_his_lane_and_closes(self) -> None:
+        held = self._held(self._run(_myself(world_x=60, world_y=60), _souther_token(world_y=40)))
+        self.assertTrue(held & DOWN)
+        self.assertTrue(held & RIGHT)
+
+    def test_a_live_claw_is_left_by_lane_and_never_by_a_jump(self) -> None:
+        client = self._run(
+            _myself(world_x=140, world_y=70),
+            _souther_token(primary_state=2, combat_phase=CombatPhase.ATTACKING),
+        )
         client.press_buttons.assert_not_called()
-        held = client.hold_buttons.call_args.kwargs["player1"]
-        self.assertTrue(held & (UP | DOWN), f"expected a lane step, got {held:#06x}")
-        self.assertFalse(held & C)
-        self.assertFalse(held & B)
+        held = self._held(client)
+        self.assertTrue(held & DOWN)
+        self.assertFalse(held & (B | C | LEFT | RIGHT))
 
-    def test_side_is_picked_from_southers_own_lane(self) -> None:
-        # Self-reinforcing, like _pit_dodge_target_y: the flip point is his
-        # lane and the chosen direction always moves further from it, so the
-        # pick cannot undo itself. Reading it off the lane midpoint instead
-        # reversed 18 times in 40 ticks on the tick harness.
-        #
-        # Both actors here start *inside* the claw's own band (-6..+28 from
-        # his lane), which is what makes a lane step the thing to check. An
-        # actor already outside it is a different question -- see
-        # test_an_actor_already_clear_of_the_claw_just_closes.
-        above = self._run(_myself(world_x=120, world_y=58), souther_y=60)
-        self.assertTrue(above.hold_buttons.call_args.kwargs["player1"] & UP)
-        below = self._run(_myself(world_x=120, world_y=70), souther_y=60)
-        self.assertTrue(below.hold_buttons.call_args.kwargs["player1"] & DOWN)
-
-    def test_an_actor_already_clear_of_the_claw_closes_instead(self) -> None:
-        # Outside the claw's own band -- body included -- there is nothing
-        # left to dodge, and $161C6 steers only on X so it cannot follow a
-        # lane change it has already lost. Those ticks go to the pocket
-        # instead of to more sidestep, which is the half of the limit cycle
-        # that used to make no progress at all.
+    def test_releases_when_he_is_gone(self) -> None:
         client = MagicMock()
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
-        actor = _myself(world_x=120, world_y=40)
-        _settle(
-            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
-            {actor, self._souther(world_y=60)},
+        gamepad.hold(RIGHT)
+        execute_verb(
+            EngageSouther(actor_slot="P1", target_slot="obj11"),
+            {_myself(world_x=100, world_y=50)},
             gamepad,
         )
-        held = client.hold_buttons.call_args.kwargs["player1"]
-        self.assertTrue(held & RIGHT, f"expected the pocket, got {held:#06x}")
-        self.assertFalse(held & DOWN)
+        client.press_buttons.assert_not_called()
+        self.assertEqual(self._held(client), 0)
 
-    def test_clears_the_claw_box_the_rom_actually_carries(self) -> None:
-        # Not a gate number standing in for the box: $16C2E names the claw's
-        # own animation set ($2E44A), whose three shapes all carry lane
-        # -10..+24, and $16C6E places the claw four px down his lane. So the
-        # claw covers -6..+28 measured from *him*, and the two clearances
-        # have to clear their own side of that -- by more than the executor's
-        # Y deadband, or the step stalls just short.
-        from sor_autoplay.ai.execute import (
-            MOVE_DEADBAND_Y,
-            SOUTHER_CLAW_CLEARANCE_ABOVE,
-            SOUTHER_CLAW_CLEARANCE_BELOW,
-            SOUTHER_CLAW_LANE_ABOVE,
-            SOUTHER_CLAW_LANE_BELOW,
+
+class ReleaseToRegrabExecuteTests(unittest.TestCase):
+    def _run(self, countdown: int):
+        actor = replace(
+            _myself(world_x=100, world_y=50, action_state=0x60, facing_left=False),
+            hold_release_countdown=countdown,
+            held_enemy_slot="obj11",
         )
-
-        self.assertGreater(
-            SOUTHER_CLAW_CLEARANCE_ABOVE, SOUTHER_CLAW_LANE_ABOVE + MOVE_DEADBAND_Y
-        )
-        self.assertGreater(
-            SOUTHER_CLAW_CLEARANCE_BELOW, SOUTHER_CLAW_LANE_BELOW + MOVE_DEADBAND_Y
-        )
-        # The whole point of reading the box: the shallow side is far nearer,
-        # and a symmetric clearance threw that away.
-        self.assertLess(SOUTHER_CLAW_CLEARANCE_ABOVE, SOUTHER_CLAW_CLEARANCE_BELOW)
-
-    def test_the_dodge_keeps_closing_x(self) -> None:
-        # The claw's box is lane-gated and $161C6 steers only on X, so once
-        # the lane is left the actor's X is irrelevant to it -- and freezing X
-        # is what made this dodge the expensive half of a limit cycle at his
-        # own best range. Diagonal costs no lane speed: holding two directions
-        # moves both axes at their own rate.
-        actor = _myself(world_x=40, world_y=40)
-        souther = self._souther(world_x=200, world_y=60)
-
-        target_x, _ = _souther_slash_sidestep_target(actor, souther, set())
-
-        self.assertGreater(target_x, actor.world_x, "the dodge must still close X")
-        self.assertLess(
-            abs(target_x - souther.world_x),
-            SOUTHER_SLASH_DIST_MIN,
-            "and it must aim at the pocket, where neither gate can fire",
-        )
-
-    def test_the_shallow_side_is_taken_from_his_own_lane(self) -> None:
-        # On his lane there is no side to preserve, so take the near one.
-        from sor_autoplay.ai.execute import SOUTHER_CLAW_CLEARANCE_ABOVE
-
-        actor = _myself(world_x=120, world_y=60)
-        souther = self._souther(world_x=200, world_y=60)
-
-        _, target_y = _souther_slash_sidestep_target(actor, souther, set())
-
-        self.assertEqual(target_y, souther.world_y - SOUTHER_CLAW_CLEARANCE_ABOVE)
-
-    def test_the_deep_side_is_kept_when_the_actor_is_already_on_it(self) -> None:
-        # Crossing to the shallow side would walk the entire width of the claw.
-        from sor_autoplay.ai.execute import SOUTHER_CLAW_CLEARANCE_BELOW
-
-        actor = _myself(world_x=120, world_y=80)
-        souther = self._souther(world_x=200, world_y=60)
-
-        _, target_y = _souther_slash_sidestep_target(actor, souther, set())
-
-        self.assertEqual(target_y, souther.world_y + SOUTHER_CLAW_CLEARANCE_BELOW)
-
-    def test_a_side_with_no_lane_room_is_not_chosen(self) -> None:
-        # An aim point the lane clamp would drag back inside the band is worse
-        # than useless: the Y bits go quiet while X stays frozen.
-        actor = _myself(world_x=120, world_y=4)
-        client = self._run(actor, souther_y=8)
-        held = client.hold_buttons.call_args.kwargs["player1"]
-        self.assertTrue(held & DOWN, f"expected the roomier side, got {held:#06x}")
-
-    def test_releases_when_the_souther_is_gone(self) -> None:
-        actor = _myself(world_x=120, world_y=40)
+        held = _souther_token(world_x=132, primary_state=4, combat_phase=CombatPhase.RECOVERY)
         client = MagicMock()
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         execute_verb(
-            DodgeSoutherSlash(actor_slot="P1", target_slot="obj11"),
-            {actor},
-            gamepad,
+            ReleaseToRegrab(actor_slot="P1", target_slot="obj11"), {actor, held}, gamepad
         )
-        client.press_buttons.assert_not_called()
+        return client
+
+    def test_the_back_press_spans_the_countdown_then_walks_back_in(self) -> None:
+        client = self._run(3)
+        client.press_buttons.assert_called_once()
+        pressed = client.press_buttons.call_args.kwargs
+        self.assertEqual(pressed["player1"], LEFT)  # facing right: back is left
+        self.assertEqual(pressed["frames"], 8)
+        self.assertEqual(client.hold_buttons.call_args.kwargs["player1"], RIGHT)
+
+    def test_a_spent_countdown_presses_only_what_is_left(self) -> None:
+        self.assertEqual(self._run(1).press_buttons.call_args.kwargs["frames"], 4)
 
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class SoutherLaneOffsetIsDroppedWhenTheGateCannotFireTests(unittest.TestCase):
-    """The offset denies $15EDA, and $15EDA is off the call path of the hit
-    reaction, the lethal gate, the police reaction and the committed claw.
-    Those are 47% of his ticks and the only ground a hold can be taken from;
-    holding the offset through them parked the actor at dx=76, dl=26 for 1136
-    ticks of a 3669-tick trace while grab_would_connect was true on 11.
-
-    Dropping it for *every* state as well -- walking the approach straight
-    down his lane -- was tried and measured much worse (549 dodge ticks a
-    fight against 99, 3-4 lives against 1-2). See
-    execute._lane_offset_while_closing and autoplay/CLAUDE.md.
-    """
-
-    def _souther(self, **overrides) -> Souther:
-        fields = dict(
-            slot="obj11",
-            type_id=0x55,
-            world_x=200,
-            world_y=40,
-            health=32,
-            combat_phase=CombatPhase.NORMAL,
-            targets_player=1,
-            facing_left=True,
-            primary_state=1,
-            tactical=0,
-        )
-        fields.update(overrides)
-        return Souther(**fields)
-
-    def test_a_ready_souther_still_gets_the_offset(self) -> None:
-        # Comfortably inside SOUTHER_SLASH_DIST_CLOSING (104px): far enough
-        # that the offset test below (dx=160) is the one exercising the
-        # separate outer-bound relaxation, not this one.
-        actor = _myself(world_x=100, world_y=100)
-        souther = self._souther()
-
-        _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
-
-        self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
-
-    def test_a_far_souther_gets_no_offset_at_all(self) -> None:
-        # Past SOUTHER_SLASH_DIST_CLOSING (104px, the widest of the three
-        # velocity-selected windows -- always assume the widest, since a
-        # live approach always reads as "walking into him"), $15EDA cannot
-        # commit at any lane, so denying one is pure overhead. Only matters
-        # for a re-approach after a knockback -- a fresh engagement starts
-        # inside 104px on tick one and never sees this branch.
-        actor = _myself(world_x=40, world_y=100)
-        souther = self._souther()  # world_x=200, dx=160
-
-        _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
-
-        self.assertEqual(target_y, 40 + WALK_TO_ENEMY_LANE_SAFETY_Y)
-
-    def test_closing_lane_does_not_widen_the_offset(self) -> None:
-        # The premise is true -- tacticals 1 and 2 are the substates measured
-        # to actually move his lane -- and the conclusion was wrong. He
-        # closes at 4px per 60Hz frame against the 2-3px a tick of walking
-        # buys, so widening is a race lost by construction, spending the
-        # ticks the X gap needs. Measured: the fights that widened took
-        # 14-17s to land a first hold against 1.7-3.4s in the cheap ones.
-        actor = _myself(world_x=100, world_y=150)
-        for tactical in (0x00, 0x01, 0x02):
-            with self.subTest(tactical=tactical):
-                souther = self._souther(tactical=tactical)
-
-                _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
-
-                self.assertEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
-
-    def test_a_punishable_souther_is_walked_straight_at(self) -> None:
-        for primary, phase in (
-            (3, CombatPhase.RECOVERY),   # $163D0 hit reaction
-            (5, CombatPhase.RECOVERY),   # $164FC lethal gate
-            (10, CombatPhase.RECOVERY),  # $16A60 police reaction
-        ):
-            with self.subTest(primary=primary):
-                actor = _myself(world_x=40, world_y=100)
-                souther = self._souther(primary_state=primary, combat_phase=phase)
-
-                _, target_y = _walk_to_near_enemy_target(
-                    actor, souther, {actor, souther}
-                )
-
-                self.assertNotEqual(target_y, 40 + SOUTHER_APPROACH_LANE_Y)
-                # Exact convergence, not merely "closer than the offset": a
-                # residual within SOUTHER_APPROACH_LANE_Y still passed here
-                # while it was actually a fixed WALK_TO_ENEMY_LANE_SAFETY_Y
-                # (28px) -- comfortably outside reach.GRAB_RANGE_Y (10px) and
-                # a grab that never connects. See the dy=26 case below for
-                # the live trace this weaker bound let through.
-                self.assertEqual(target_y, souther.world_y)
-
-    def test_a_punishable_souther_inside_the_punch_band_still_converges(self) -> None:
-        # The live bug this guards: a punishable Souther with a residual dy
-        # already inside WALK_TO_ENEMY_LANE_SAFETY_Y (28px) but outside
-        # reach.GRAB_RANGE_Y (10px) landed in _approach_lane_y's "close
-        # enough, hold the current lane" branch -- built for a punch's own
-        # wide lane slack, not a grab's tight one. Measured live against
-        # Souther's police-reaction window: the approach parked at dy=26 for
-        # hundreds of ticks, grab_reasons stayed SOUTHER_ON_PUNISH the whole
-        # time, and grab_would_connect never once went true.
-        actor = _myself(world_x=40, world_y=66)
-        souther = self._souther(primary_state=0x0A, combat_phase=CombatPhase.RECOVERY)
-        self.assertEqual(souther.world_y, 40)
-        self.assertEqual(abs(actor.world_y - souther.world_y), 26)
-
-        _, target_y = _walk_to_near_enemy_target(actor, souther, {actor, souther})
-
-        self.assertEqual(target_y, souther.world_y)

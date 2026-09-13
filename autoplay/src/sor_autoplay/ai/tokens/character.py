@@ -13,7 +13,11 @@ from abc import ABC
 from dataclasses import dataclass
 
 from sor_autoplay.hitboxes import Hitbox
-from sor_autoplay.memory_map import ACTION_HOLD_BASES, ACTION_THROW_AIR_TECHABLE
+from sor_autoplay.memory_map import (
+    ACTION_HOLD_BASES,
+    ACTION_THROW_AIR_TECHABLE,
+    PLAYER_KNEE_CHAIN_BIT,
+)
 from sor_autoplay.phases import CombatPhase
 
 from .pickup_tokens import is_weapon_type
@@ -211,14 +215,39 @@ class PlayableCharacter(Character, ABC):
     # the *identity* half of is_holding_enemy below, which only answers
     # whether a hold exists at all.
     held_enemy_slot: str | None = None
-    # Consecutive ticks this actor has stood in grab contact with a live
-    # enemy, free to act, unarmed and *not* holding anything -- cross-tick
-    # memory from observe.GrabStallTracker, reset the moment a hold is taken
-    # or contact is lost. It is the AI's only evidence that a walk-in is not
-    # converting, which no single tick can show: reach.grab_reasons uses it
-    # to time out Souther's SOUTHER_WALK_IN and let a strike take the tick
-    # instead. 0 whenever there is nothing to time out.
-    grab_stall_ticks: int = 0
+    # player +$61: the last knee of the current front-hold chain ($6A, then
+    # $6C) -- see knees_in_chain.
+    knee_chain_last: int = 0
+    # player +$63: loc_235A's front-hold release countdown (memory_map.
+    # OBJ_HOLD_RELEASE_COUNTDOWN). Seeded with 3 by the grab; each frame held
+    # back decrements it, and the hold drops on the frame it goes negative.
+    hold_release_countdown: int = 0
+    # player +$4B bit 7 (memory_map.PLAYER_CROSSOVER_SPENT_BIT): this hold's
+    # one C crossover has been used. A second one takes $26E2's failure path
+    # and lands the actor out of the hold beside a free body.
+    crossover_spent: bool = False
+
+    @property
+    def knees_in_chain(self) -> int:
+        """Knees already landed in this front hold's chain: 0, 1 or 2.
+
+        ``$2BA8`` keeps the count in the player's own object. The first B of a
+        chain sets ``+$58`` bit 6 and writes ``$6A`` to ``+$61``; each later B
+        steps ``+$61`` by 2 while it is still inside ``[$6A, $6E)``. So the
+        next knee after two is ``$6E`` -- 3 damage and the heavy flag, which
+        knocks the held body away and ends the hold. Bit 6 survives only
+        ``$60``/``$6A``/``$6C`` (``$394E``'s mask table), which is why the
+        walk before a grab, a crossover and any other action all restart the
+        chain at one.
+        """
+
+        if not self.action_flags & PLAYER_KNEE_CHAIN_BIT:
+            return 0
+        if self.knee_chain_last == 0x6A:
+            return 1
+        if self.knee_chain_last == 0x6C:
+            return 2
+        return 0
 
     @property
     def action_base(self) -> int:

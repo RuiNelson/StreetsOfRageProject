@@ -23,23 +23,13 @@ cannot reach from, not the plan; never a grounded B — standing still is
 `$16EAE`'s kick trigger; dodge only a kick/dash that is already locked in;
 and see **Holding a boss** below, without which the walk-in succeeded and
 the AI then stood in the hold until the round clock killed it.
-Souther is **corridor in → grab → knee, knee, ... → suplex**: hold a lane
-offset wider than his `$1C` slash gate while closing X, hand the lane over at
-his own `$18` inner abort, and take the hold from inside that pocket -- where
-`$15EDA` cannot commit and `$161C6` cannot resolve -- then knee and suplex.
-The hop is **removed** entirely (he counters jump attacks outright) and
-evasion is cut back to the one thing that has to be evaded: an already
-committed claw, answered by a lane step just wide enough that `$161C6`
-cannot resolve. Walking straight down his lane instead was tried and
-measured much worse (see **The fifth attempt**), where the four bugs that
-made the corridor *look* like a stalemate are also recorded. The police
-special is **not** spent on him below "about to die" -- the call freezes the
-caller for the length of his own longest helpless window, which is worth
-more as a grab-and-suplex than as the flat 10 damage the special buys alone.
-He also fights from the top two rows of the lane band, which is why the two
-targeting bands and the approach's lane convergence all had to be right
-before any of that tactic could run -- see **Souther was a stalemate**,
-**The grab still wasn't landing** and **The fifth attempt**).
+Souther is **engage once, then knee, knee, release, re-grab until he dies**:
+close X in a corridor his side-dependent commit gate cannot use (15px above
+him, or 38px below), walk into him from the grab's lane -- contact is the
+hold, and `$AAA0` tests the grab before his claw -- then two knees, a release
+by holding back, and straight back into him. Armed or not; the police special
+and life-gaining items are never used while he lives (user). See **Souther:
+the ROM model and the plan**).
 
 **Holding a boss (user: "a IA não consegue lidar bem com o boss de
 primeiro nível"; "os jogadores profissionais são bem fãs de agarrar e fazer
@@ -243,504 +233,120 @@ The honest reading is that "wait in the middle" needs a *timer or a trigger*
 and that the lane-0 window needs a verb that does something useful in it.
 Neither is written yet.
 
-**Souther was a stalemate, and none of the three reasons were tactical**
-(user: "contra o boss do nível 2 fica empatada, não consegue atingir o boss,
-mas faz com que o boss não a consiga atingir"). The description was exact,
-and a per-tick trace of a 90 s fight (10 220 ticks, the real pipeline) says
-why: **the actor stood at lane 59-88 against a boss at lane 0-27 for the
-whole fight**, held no button at all on 4600 of its 6513 approach ticks, and
-landed one punch. Nothing could hit anything. Three independent bugs, all in
-"where is the enemy and how do I get to it", none of them about how to fight
-him:
+**Souther: the ROM model and the plan** (user: "We need to substantially
+improve the AI's performance against the Level 2 boss, Souther ... It is
+already understood that grabbing Souther and repeatedly dealing damage to him
+is an effective strategy"; "do not use police attacks or life-gaining items";
+prefer deterministic behaviour; do not preserve old behaviour for its own
+sake). Every attempt before this one tuned lane margins against a model of him
+that was wrong in three places. The rewrite started from the disassembly and a
+lockstep lab, and the whole plan now lives in one module, `ai/souther.py`.
 
-- **the boss was not a target at all for 2228 of the 10 220 ticks.** The ROM
-  clamps the two kinds of body with two different routines -- players to
-  `$02..$70` (`$44 0A`, inside `$43AA
-  (clamp_players_to_gameplay_bounds)`), enemies to `$00..$70` (`$17AB8`,
-  `ai-analysis/enemy-ai.md`) -- and Souther fights from those top two rows,
-  which is 24% of his ticks. `reach.live_enemies` judged him by the
-  *player's* floor (`in_playable_lane`), so he dropped out of the target
-  list entirely. A lane the actor cannot stand in is not a lane it cannot
-  hit: from `$02` an enemy at `$00` is 2px away against a 12px
-  `PUNCH_RANGE_Y`. `reach.in_targetable_lane` is the enemy-side band and is
-  what `live_enemies` asks now; `in_playable_lane` stays the player's, for
-  the actor's own stand points;
-- **and not on screen for another 1462.** `CameraRange` is the player's walk
-  clamp (`camera_x + $20 .. + $120`, 256px), not the CRT (320px), so the
-  32px strip down each side is plainly visible and fought in while sitting
-  outside `reach.in_camera` -- `world_map.py`'s own note already says
-  combat uses the full 0..320 band. Souther backs into the left strip
-  constantly. `reach.in_visible_screen` is that band, and
-  `on_screen_enemies` asks it; `in_camera` keeps its own question, "may the
-  actor stand here". `decide._advance_blocking_enemies` follows it, since
-  its off-screen carve-out exists precisely because the approach would not
-  chase such a body -- and now it does;
-- **with no target, the AI walked away.** `WalkToAdvanceStage` took 2333 to
-  5121 ticks per fight *while the boss was alive on screen*. It is gone
-  entirely from the fights after the fix (0 ticks, every run).
+What the ROM says (full decode in `ai-analysis/enemy-ai.md`, "The claw box,
+the side-dependent gate, and holding him", and `ai-analysis/controls-and-
+input.md`, "The knee chain, the release, and the one crossover"):
 
-The third bug is the one that made it a *stalemate* rather than a loss.
-`execute._approach_lane_y` returned `actor.world_y` whenever
-`dy >= WALK_TO_ENEMY_LANE_SAFETY_Y`, which holds **whatever** offset the
-actor happens to have, however wide. `nav.strike_goal` builds its region
-around the lane that function names, so an approach 68px off-lane walks to
-the right X on its own lane, reports arrival, and stops: nothing is in
-range, so nothing attacks; the goal is met, so nothing moves. `alongside`
-was supposed to converge the lane, but it only turns true inside `stop_dx`
-on X, and against a boss who keeps re-opening the X gap the two conditions
-never coincide. The fix closes the lane down to the offset the approach
-actually wants (`hold_offset`), **on the side the actor is already on** --
-which is what makes it safe for every enemy and not just Antonio: `dy` is
-greater than the offset in that branch, so the aim point lies strictly
-between the two bodies and can never route the walk across the target's own
-lane. That is the risk the midpoint rule carries, and why *that* rule stays
-scoped to Antonio.
+- **The commit lane gate is side-dependent**: `+$52 < $0A` when the target is
+  above him and `< $1C` otherwise (`+$61`, from `$17B2C`). Every earlier
+  attempt used 28px for both sides. 11-15px above him is outside the gate and
+  inside grab range at once.
+- **The claw is his own attack box** (set `$2E44A`, animation 4): 0..86px
+  forward over lane -10..+24, with his body leaning 36-42px forward while it
+  swings. The type-`$98` object has no box, and the old dodge's clearances
+  were computed from it. An ordinary claw swings in place; the lane-blind
+  8px/frame dash only follows the jump counter.
+- **Grab beats hit**: `$AAA0` tests the player's attack box against his body
+  before his attack box against the player, and never reads the carried
+  weapon. Walking into him with the walking box out is a hold, even through a
+  swinging claw, whenever that box reaches his leaning body first. A strike
+  (`+$34` set) is a hit instead, and his hitstun `$03` cannot be grabbed.
+- **He never escapes a hold, and a release is the best move in it.** Holding
+  back counts `+$63` down from 3 and drops the hold on the ~8th frame; he goes
+  straight to primary 1, 32px in front of the actor on its lane -- in reach of
+  an immediate re-grab. The third knee (`$6E`), the throw and the suplex all
+  put him 90-165px away, which is the re-approach every earlier plan paid for.
+  One crossover per hold (`+$4B` bit 7); a second one drops him free next to
+  the actor, measured as a claw three frames later.
+- He updates at 30Hz, so every per-frame rate in the old notes is per update.
 
-Measured with `tools/boss_fight.py --level 2 --boss-type 0x55`, Blaze, turbo
-4, against a pristine copy of the previous code on the same host:
+The plan (`souther.plan_engage`, `souther.hold_step`):
 
-| | killed | lives lost | damage taken | fight length | `WalkToAdvanceStage` ticks |
+1. **Engage** (`EngageSouther`, emergency 62 plus the boss 14): close X in a
+   corridor 15px above him (inside the grab lane, outside the 10px gate) or
+   38px below (past the 28px gate and the claw's 32px deep side), on the side
+   the actor is already on; converge from below only inside `$18`; leave a
+   live claw's band by lane only; and once in the grab lane within 48px, walk
+   into him with the toward bit held every frame.
+2. **Hold loop**: knee, knee (4 damage), then `ReleaseToRegrab` presses back
+   for exactly the countdown's frames and holds toward him, and the engage
+   walks straight back in. A back hold crosses over once, then releases. A
+   finisher is used only when it kills (third knee at 3 health or less, suplex
+   at 5).
+3. **Nothing else aims at him**: `Punch`/`MeleeWeaponAttack`, `GrabEnemy`,
+   `RearAttack`, `WalkToNearEnemy`, `RetreatFromDanger` and the jump all stand
+   down for him; `CallPolice` is refused while he lives, and so are
+   `HealthPickup`/`LifePickup`.
+
+Measured with `tools/souther_hold_lab.py` in lockstep (Blaze): the re-grab
+lands 4-6 frames after each release, six cycles running, no damage; with two
+frames of injected input delay he commits 3 frames after the release and the
+lean-contact grab still takes him at frame 6. Then `tools/boss_fight.py
+--level 2 --boss-type 0x55 --no-food`, turbo 4, a fresh host per fight:
+
+| | fights | killed | lives lost | hits taken | fight length |
 | --- | --- | --- | --- | --- | --- |
-| before | 3/3 | 1, 2, 2 | 160, 240, 240 | 82, 211, 157 s | 2333, 5121, 3877 |
-| after | 2/2 | 0, 1 | 60, 160 | 33, 46 s | 0, 0 |
+| previous plan (the n=20 baseline in the lessons below) | 20 | 20 | 2 | median 2, mean 2.15, worst 7 | clean fights 16.8-26.7 s |
+| engage + hold loop, Blaze | 16 | 16 | 0 | 0 in every fight | 2.1-4.1 s |
+| engage + hold loop, Axel / Adam | 2 / 2 | 4 | 0 | 0, 0 / 0, 1 | 2.4-6.7 s |
+| + the engage armed too, Axel / Adam | 3 / 3 | 6 | 0 | 0 in every fight | 4.2-4.5 s, 7 holds each |
 
-**Then the hold (user: "e essencial agarrar o boss"), which took four
-things, none of which worked alone.** The hold chain fired essentially never
--- `GrabEnemy` at 0 ticks in most scored fights -- and the reasons were not
-the one the old note here guessed at:
+The one hit in that table: Adam walked into the arena armed,
+`could_engage_souther` still excluded an armed actor, and the generic armed
+approach walked his lane 31px below him inside `[$18, $68)` -- exactly the
+ground the corridor avoids. The engage now runs armed too. None of the six
+fights after that change happened to start armed, so the armed path rests on
+the ROM read (`$AAA0` never consults the weapon) and the unit tests, not yet
+on a live fight.
 
-- **the boss vanished on every hit.** `phases.boss_phase` decoded primary
-  `$05` as DEATH. `$164FC` is the shared *lethal gate*: visited transiently
-  on **every** hit to test whether it was fatal, not a death. So
-  `should_ignore_as_target` dropped him from `reach.live_enemies` for the
-  length of each of his own hitstuns -- caught by tracing the weapon detours
-  that survived the refusal below, all of them at primary `$05` with the boss
-  reading 22, 15 and 8 health. The same byte had already been caught lying
-  from the other side twice (a false "boss defeated" at 25 and 29 of 32,
-  which `tools/boss_fight.py` works around by reading the raw health word,
-  saying in its own docstring that the fix belonged in `phases`). It now
-  decodes RECOVERY, which also makes it a *punish window* rather than a blind
-  spot, and death is left to the signed health word, which cannot flicker;
-- **armed, the AI has no move on him at all.** `could_grab_enemy` excludes an
-  armed actor, `could_punch` is unarmed-only, `could_jump_attack` is refused
-  near him. `MeleeWeaponAttack` is what should replace them and fired **zero**
-  times across ten scored fights, while `WalkToWeapon` took 137-223 ticks of
-  five of them. `decide._a_weapon_would_disarm_the_plan` refuses the detour
-  while a live Souther is on screen -- scoped to him, since the same refusal
-  was measured no better for Antonio twice;
-- **the window was described wrongly.** `$03` is not the blink the old note
-  called it: its episodes run about 55 agent ticks, over half a second. What
-  kept the grab at zero was *where the actor stood* when they opened -- over
-  221 in-`$03` ticks, `grab_would_connect` was true on 14 and the actor was
-  armed on 107. `SOUTHER_GRABBABLE_PRIMARIES` now also carries `$05` (the
-  lethal gate above) and `$0A` (the police reaction, `$16A60`), which is the
-  longest helpless window in the fight. `$04` stays out: an earlier note put
-  it at 70% of a fight, which does not reproduce (4 ticks in 10 220), but it
-  is a state he *sits* in rather than a window;
-- **and then the corridor itself was the thing blocking the hold.** The lane
-  offset exists to deny `$15EDA`, and `$15EDA` is off the call path of `$03`,
-  `$05`, `$0A` and the committed claw -- 47% of his ticks, and the only
-  ground a hold can be taken from. Holding it there parked the actor at
-  dx=76, dl=26 (this offset, to the pixel) for 1136 ticks of a 3669-tick
-  trace while `grab_would_connect` was true on **11**.
-  `_lane_offset_while_closing` returns `None` for a punishable or committed
-  Souther, so the approach converges straight onto his lane and walks in.
+Not measured yet: Axel's and Adam's walking-box reach (`souther.
+WALK_BOX_REACH_X` has Blaze's 19 only; the 14 default can only narrow the
+walk-in), the round-6 Souther pair, and two players.
 
-Measured with `--no-food` throughout (`scripts/go_to_boss_2` passes it; see
-`tokens.DebugNoFood`), five fights a configuration:
+**What the earlier attempts taught**, kept because each one was paid for in
+runs:
 
-| | lives lost | damage | length | grab ticks |
-| --- | --- | --- | --- | --- |
-| corridor only | 1, 1, 1, 1, 1 | 160 x5 | 25-32 s | 0, 0, 0, 0, 13 |
-| + lethal gate + weapon | 1, 0, 2, 1, 1 | 40-240 | 30-50 s | 0, 0, 13, 15, 0 |
-| + offset dropped (shipped) | 1, 0, 0, 0, 1 | 40-160 | 20-34 s | 0, 168, 0, 37, 13 |
+- **Measure in hits, over many fights.** Identical code spread 0-12 hits a
+  fight, so nothing here was decided on fewer than five runs a side, and the
+  baseline took twenty. `damage_pct` counts a death as +100 points, which made
+  the baseline look bimodal; one life is four hits.
+- **Aligned on his lane anywhere in 24-104px lost the whole game in every
+  fight**, three variants of it (the chase with every protection cut, the
+  lane alone, the lane plus a nearest-edge dodge; 15-17 hits a fight). That
+  range is his commit band. The user asked for the alignment repeatedly ("eu
+  quero que o Y do inimigo e do jogador se alinhem"); the plan aligns inside
+  the grab band, which is outside his gate on the upper side.
+- **Measured worse and reverted**: refusing the strike from outside the
+  pocket (and demoting it), holding the lane offset while a claw is out, three
+  more lane aims, and holding him until the suplex would kill -- the `$6E`
+  stage alone took ~160 ticks, which is what the release now avoids.
+- **Four arrival bugs** made the old corridor look like a stalemate, and
+  their fixes are still in place: the enemy-side lane band
+  (`reach.in_targetable_lane` -- he fights from lanes 0-1, below the player's
+  floor), the visible-screen band (`reach.in_visible_screen`), and
+  `phases.boss_phase` reading `$05` (the lethal gate, visited on every hit) as
+  death and a walking primary `$01` as attacking.
+- **The police special freezes the caller** for the shared `$16AEC` delay
+  (~5 s) and was most of the damage in one batch (user: "a maioria do dano
+  deve-se a ataques de polícia, não usar ataques de polícia").
+- The user's other asks over those sessions -- "e essencial agarrar o boss",
+  "tem muita precaução, simplesmente tem de ir atrás do boss e tentar
+  agarrá-lo", "deve evitar o seu ataque, mas só apenas o suficiente para não
+  apanhar dano" -- are what the plan above does in the form the ROM allows:
+  the hold is the plan, the approach is direct, and the only evasion is
+  staying out of the claw's own box.
 
-Two things measured **worse** and were reverted rather than kept on the
-strength of the reasoning:
-
-- refusing the punch from outside the pocket (`$18`), together with a hard
-  mask rule denying X movement inside his commit band. The reasoning is
-  sound -- B from the punch band's *outer* edge is 48px for Blaze, squarely
-  inside `[$18, $68)`, and since `Punch` outranks the walk the first tick
-  that edge came into range was the last tick of the approach -- but it
-  measured 1, 1, 2, 2, 2 lives against 1, 1, 1, 1, 1, with fights stretching
-  to 113 s. Note also that gating the *strike* alone opens a vacuum: at 30
-  and 40px no candidate verb was produced at all, because `enemy_actionable`
-  still called him hittable. Any retry has to move both together;
-- `navigation.commit_gate_rects` (his commit box as ground the router plans
-  around) is **kept** but did not on its own change deaths: 1, 1, 1, 1, 1
-  before and after. It is kept because it is free and correct, not because
-  it was shown to pay.
-
-**The dodge was measured with the wrong number, in both directions** (user:
-"a IA esta a parar num sitio seguro, depois o Souther ataca e atinge a
-personagem. Tem de arriscar e ir de encontro com o boss"). An 8-fight batch
-with per-hit attribution (`tools/boss_fight.py` records each hit's context
-now) said where the damage is, and it is not ambiguous:
-
-| | |
-| --- | --- |
-| boss state at the hit | **`$02`, 100% of 49 hits** |
-| 64-104px away (his own best range) | 69% |
-| **inside the pocket (<24px)** | **0%** |
-| within 4s of giving a hold up | 49% |
-| before the first hold | 16% |
-
-and nearly every hit carried the same signature in the ticks before it:
-`WalkToNearEnemy x16 | DodgeSoutherSlash x14`. Fifteen ticks closing,
-fifteen dodging, hit, repeat -- a limit cycle parked at his best range,
-because `DodgeSoutherSlash` outranks the walk (46 against ~14) and **froze
-X**, so half of every cycle made no progress toward the only ground that is
-safe. That is the "waits for the right moment and is then far away" the user
-described, in numbers.
-
-The dodge's clearance was `SOUTHER_DASH_RESOLVE_LANE + slack` -- 32px, both
-sides. The claw's own box says otherwise. `$16C2E (souther_create_claw)`
-names the claw's animation set in its own body (`move.l #$0002e44a, d2`),
-and all three shapes it selects (`$6D`, `$6F`, `$71`) carry lane
-**-10..+24**; `$16C6E (souther_position_claw)` then places the claw **four
-px down his lane** (`addq.w #$4, d0`). A hit is box-against-*body*
-(`$450C`), so what has to leave the rectangle is the actor's body, not its
-centre -- half a body in lane, the exact counterpart of `BODY_OVERLAP_X` on
-the punch's inner edge. The real clearances are therefore **14px above him
-and 36px below**, and the single symmetric 32 was *more than twice* what the
-shallow side needs **and four pixels short of what the deep side does**: a
-dodge could step down, report itself clear, and still be inside the claw.
-
-So `SOUTHER_CLAW_CLEARANCE_ABOVE`/`_BELOW` replace it, the shallow side is
-taken whenever the actor is not already committed to the deep one (crossing
-would walk the claw's whole width), and the dodge **stops freezing X once it
-is out of the band** -- inside it the lane is the only axis that helps, and
-closing X there walks *along* the box, the same reason `_movement_mask`'s
-pit dodge clears Y before X.
-
-Two further defects fell out of the unit tests while making that work, both
-real:
-
-- the router counted **Souther himself** as danger while planning the dodge,
-  so the moment the destination became the pocket at his feet the goal was
-  unreachable by construction and the dodge stood still. He is exempt from
-  this one plan now, exactly as the approach exempts the enemy it is already
-  alongside;
-- `PointGoal.is_reached` tests the actor's **body rect**. With the shorter
-  shallow clearance the escape point landed inside the actor's own body, so
-  the dodge reported arrival without having left the claw at all. The
-  body-aware clearance above is what fixes it; the symmetric form was too
-  coarse to expose it.
-
-Measured, same harness and configuration, 8 fights each (two of the second
-batch were lost to a hung host and are excluded rather than counted as
-anything):
-
-| | damage | median | mean | lives lost | hits/fight | fastest kill |
-| --- | --- | --- | --- | --- | --- | --- |
-| before | 0, 25, 75, 200, 200, 300, 300, 400 | 200% | 187% | 9 | 6.1 | 25.1 s |
-| after (n=6) | 0, 25, 75, 200, 200, 200 | 137% | 117% | **3** | **3.8** | **15.6 s** |
-
-What is claimed: **the tail is gone** (nothing above 200%, against three
-fights at 300-400%), lives lost fell by two thirds, and hits at 64-104px
-dropped 69% -> 52% while mid-fight hits collapsed 35% -> 17%. What is *not*
-claimed: any movement in the sub-50% rate, which stayed at 2 fights in both
-batches, or in the mean -- six runs against eight on a spread this wide
-cannot establish either.
-
-**What the same data says to do next.** Hits *before the first hold* went
-16% -> 43%, and time-to-first-hold now separates the batch cleanly: 1.69,
-1.77, 1.80, 3.36 s in the cheap fights against 14.3 and 16.9 s in the two
-200% ones. The fight is decided by how fast the first hold happens, and the
-approach is what is slow -- which is the corridor, and the next thing to
-change.
-
-**The round-2 baseline, at last measured properly (n=20).** Every number in
-this file before it came from three to six fights, which
-[[boss-fights-are-hard-to-measure]] already said was too few and which this
-batch confirms was too few in *both* directions. Twenty fights on the shipped
-configuration, `--no-food`, Blaze, turbo 4, a fresh host each, and **zero runs
-lost** (the round-2 console reset is fixed -- see
-`StreetsOfRageRecompilation/CLAUDE.md`):
-
-    0, 0, 0, 0, 25, 25, 25, 25, 50, 50, 50, 75, 75,
-    190, 195, 195, 200, 290, 295, 395
-
-**median 50%, mean 108%, 11 of 20 at or under 50%, 7 of 20 lost a life.**
-
-The shape matters more than the median: the distribution is **bimodal with a
-hole in it**. Thirteen fights land between 0% and 75%; seven land at 190% and
-up; nothing sits in between. That is arithmetic, not coincidence --
-`damage_pct` is `(health lost) + 80 * (lives lost)` over 80, so one death is
-worth +100 points by itself. The question this fight poses is therefore not
-"why is the damage higher" but **"what kills the actor in one fight out of
-three"**, which is a single discrete event per bad fight rather than a diffuse
-difference.
-
-Comparing the seven that died against the thirteen that did not:
-
-| | died (7) | clean (13) |
-| --- | --- | --- |
-| fight length | 34.9 s (22-51) | **23.4 s (16.8-26.7)** |
-| hits taken | 7.1 | **1.2** |
-| first hold at | 2.1 s (1.24-6.84) | **1.3 s (1.29-1.35)** |
-| holds completed | 3.9 | 4.5 |
-| `WalkToNearEnemy` share | 44.0% | 37.1% |
-| `DodgeSoutherSlash` share | 8.0% | **11.9%** |
-
-Two things in that table are worth more than the rest.
-
-**Every clean fight takes its first hold between 1.29 s and 1.35 s** -- a
-60-millisecond window across thirteen runs. The deaths spread from 1.24 s to
-6.84 s. So the opening either connects or it does not, and a fight that misses
-it is a different fight. (One death fight *did* open at 1.24 s, so the opening
-is necessary and not sufficient -- which is also why the earlier n=6 reading
-that "time-to-first-hold is falsified" was itself too small a sample to say.)
-
-**And all eleven killing blows land with `pocket=False`**, at dx 29-93, with
-the boss in primary `$02` tactical `$00` -- the claw wind-up -- and the same
-`WalkToNearEnemy` / `DodgeSoutherSlash` alternation in the ticks before. Not
-one death happened inside the pocket, in this batch or any earlier one. The
-bad fights are the ones that get knocked out of the pocket and cannot get back
-in, and they dodge *less* than the clean ones (8.0% against 11.9%) while
-walking *more* (44% against 37%) -- caught mid-approach, repeatedly.
-
-**Count hits, not damage percent** (user: "a morte acontece por via de dano").
-`damage_pct_of_one_bar` is `(health lost) + 80 * (lives lost)` over 80, so the
-fourth hit jumps a fight from 75% to 190%. That quantisation is what made the
-baseline look bimodal and sent two sessions looking for a discrete "what kills
-it" event. In hits the same twenty fights are perfectly continuous --
-`0,0,0,0,1,1,1,1,2,2,2,3,3,4,5,6,6,8,9,12` -- and the target restates cleanly:
-one life is four hits, so "under half a bar" is **median <= 2 hits**.
-
-**The arrival was landing on the gate rather than inside it.** `nav.strike_
-goal` insets its region by half the body on each axis, so a `stop_dx` of 16 is
-satisfied by a body whose near *edge* is 16 out -- an origin 24 out. `$15EDA`
-reads `+$50`, which is origin to origin, and its inner abort is `+$50 < $18`:
-so the approach was stopping exactly **on** the gate it was aiming to get
-inside, where he can still commit. `PLAYER_BODY_HALF_X` subtracts the half
-body that `strike_goal` adds back, and `test_the_arrival_lands_inside_the_gate_
-not_on_it` pins `stop_dx + half body < $18` so it cannot drift back.
-
-It was found by the tick harness rather than by reading: with a strike refused
-from outside the pocket (below), the actor parked at dx=24 with an empty mask
-and `WalkToNearEnemy` winning every tick -- the same "arrived somewhere nothing
-can act" this file records from the corridor.
-
-Measured, three configurations of twenty fights each, same host recipe:
-
-| | base | strike refused outside the pocket | arrival fixed |
-| --- | --- | --- | --- |
-| hits, median | 2.0 | 3.0 | 2.0 |
-| hits, mean | 3.3 | 3.6 | **2.15** |
-| worst fight | 12 | 9 | **7** |
-| **lives lost** | 7 | 7 | **2** |
-| damage <= 50% | 11/20 | 7/20 | 13/20 |
-
-Read the third column carefully, because the obvious reading is too strong:
-the **median is unchanged**, and the rank-sum probability that a base fight
-takes more hits than a fixed one is **0.56**, barely off a coin. The effect is
-entirely in the tail -- base has seven fights at four hits or more
-(4,5,6,6,8,9,12), the fixed one has two (6,7) -- and since four hits *is* a
-life, those seven and two are exactly the seven and two deaths. Seven against
-two in twenty is suggestive (Fisher p ~ 0.13), not established. What is
-claimed: **the tail is shorter, and the tail is where the deaths are**. What
-is not: that the typical fight takes less damage.
-
-**Refusing the strike from outside the pocket: tried again, measured worse,
-reverted.** Every one of the baseline's 66 hits arrives with the actor outside
-the pocket at dx 29-93, and `Punch` outranks the approach (20 against ~14), so
-the first tick the punch's outer edge comes into range is the last tick of the
-walk. Refusing it -- with `reach.enemy_actionable` agreeing, so the approach
-keeps closing rather than opening the vacuum the 2019 attempt hit -- bought
-real consistency: the first-hold window collapsed from a 1.24-6.84 s spread to
-1.29-1.47 s, the worst fight went 12 hits to 9, and fights ran 21% shorter
-(19.4 s against 24.6 s median). It also lost all four zero-hit fights and put
-the median up from 2 to 3, at identical deaths.
-
-Shorter fights with more hits means a higher damage rate, which is the wrong
-trade. The likely reason is worth keeping: **that strike is what puts him in
-hitstun, and the hitstun is the window the grab lives in** -- refusing it makes
-the fight more predictable and more expensive at the same time.
-
-**Chasing him with every protection cut: two variants, both measured and
-reverted** (user: "tem muita precaução, simplesmente tem de ir atrás do boss e
-tentar agarrá-lo! Reduzir as proteções de segurança ao mínimo"; then, watching
-the first variant: "o problema começa logo quando ela não se coloca em linha
-com o boss no eixo Y"). Both variants dropped the corridor at every distance,
-stopped the router planning around his reach on the way in, and refused
-`RetreatFromDanger` against him; only the committed-claw dodge stayed.
-
-| variant | fights | hits | lives lost |
-| --- | --- | --- | --- |
-| reference (corridor + arrival fix) | 20 | mean 2.15, worst 7 | 2 |
-| keep own lane, converge only at `$18` | 10 (stopped) | 0,2,0,1,4,0,3,1,**16**,4 -- mean 3.1 | 5 |
-| **line up on his lane from the start** | 5 (stopped) | **15,16,16,16,17** | **19 -- game over in all five** |
-
-The first variant is what the user saw and was right about: holding its own
-lane, the actor could not take a hold (which needs `GRAB_RANGE_Y`) until the
-very end, and the first hold slipped to 3-6 s in half the fights. The second
-is what that points at, and it is the worst configuration ever measured here.
-Of its 80 hits, 79 land in the claw's wind-up (`$02`/tactical 0) and 72 at
-64-104px -- inside `$15EDA`'s commit band -- and 51 land 25-32px *below* his
-lane, frequently right after thirty ticks of `DodgeSoutherSlash`: the dodge
-takes the deep side whenever the actor is already below him, and the deep side
-of the claw reaches +28 (+36 with half a body), a 44px step the wind-up does
-not leave time for. **Being on his lane anywhere between 24 and 104px is
-standing in his commit gate**, and he uses it every cycle. That is the job the
-corridor does, whatever else was wrong with it.
-
-One thing from these runs is kept: `test_alternating_commitment_does_not_
-chatter_the_lane` cycled the claw 4 ticks on / 4 off as "roughly the real
-cadence", and this session's traces measure committed runs at a median of 71
-ticks (p25 38, shortest real one 21) and free runs at 157. The fixture now
-cycles at 21/21, the fastest tempo actually observed.
-
-**Three more lane aims after the chase, all measured, all reverted.** The
-approach's lane is the one knob every attempt in this section keeps turning,
-so the numbers are worth keeping together (20-fight reference: corridor +
-arrival fix, 2.15 hits a fight, 2 lives):
-
-| lane aim | fights | hits | lives |
-| --- | --- | --- | --- |
-| shallow side, on the clearance (22px above him) | 20 | mean 3.15 | 4 |
-| shallow side, band edge on the clearance (34px above) | 5 (stopped) | 0, 3, 3, 4, 6 | 2 |
-| **his own lane, nothing else changed** | 5 (stopped) | **15, 15, 15, 16, 17** | **all, every fight** |
-
-- **The shallow aim on the clearance** lost to a goal-band edge: the routed
-  goal is aim +/- `PUNCH_RANGE_Y` and the actor settles on its nearest
-  edge, so -22 + 12 left it 10px above his lane, inside the claw's shallow
-  reach -- 34 of 63 hits landed at dy -9..-11. Worth remembering for any
-  future lane aim: **the aim is not where the actor stops**. Moving the aim
-  one slack further out fixed that edge, but the other 20 hits came from
-  the fallback: in 39% of fight ticks he stands above lane 30 with no room
-  over him, and the ordinary corridor ran there.
-- **His own lane** was asked for by the user from watching exactly that
-  fallback ("primeiro assegura-te que está alinhado com o Souther, está
-  abaixo e pode ir mais para cima") and run *isolated* -- router and retreat
-  untouched, unlike the earlier chase -- so it settles the question: it loses
-  the whole game in every fight, the same as the chase did. Of 78 hits, 57
-  land at 64-104px and 76 in the claw's wind-up; 48 land with the actor
-  below him; and the commonest thing the AI was doing right before a hit
-  was `DodgeSoutherSlash x20` -- a full twenty ticks of dodge that still did
-  not clear the deep side's 44px. **On his lane inside 24-104px is inside
-  his commit gate, and the only escape there is the long one.**
-
-`boss_fight.py` keeps the absolute `p1_x`/`p1_y`/`boss_x`/`boss_y` it logs
-per tick; everything above about *where* the hits land came from it.
-
-**Aligned on his lane: three attempts, three whole games lost.** The user
-has asked for Y alignment repeatedly while watching ("eu quero que o Y do
-inimigo e do jogador se alinhem"), so the three runs belong together:
-
-| aligned approach, plus | fights | hits | lives |
-| --- | --- | --- | --- |
-| every other protection cut (the chase) | 5 | 15, 16, 16, 16, 17 | all |
-| nothing else | 5 | 15, 15, 15, 16, 17 | all |
-| a dodge that leaves the claw by its nearest edge, and charges the pocket when he is in the top rows | 5 | 7, 12, 13, 14, 15 | all |
-
-The third settles the question the second left open. Its dodge fixed the
-measured failure -- a bare-sign side pick that sent an aligned actor a couple
-of px below him out through the claw's 44px deep side -- and the hits simply
-moved: of 61, 26 below him, 18 on his lane, 17 above, dy spread from -10 to
-+25, **all 61 in the claw's wind-up** and 48 at 64-104px. Aligned, the actor is
-inside the claw's lane band by definition every time he commits, and no dodge
-leaves that band inside the wind-up. The pocket charge fared no better (37 of
-the 61 hits came with him in the top rows): 40-80px forward is 40-80px through
-the claw's own forward reach, which runs to 86.
-
-Why the corridor's 48px is not caution but the floor. With him in the band's
-top rows there is no lane above him, and below him the claw reaches 28px, 36
-with half a body; the routed goal is a band, aim +/- `PUNCH_RANGE_Y`, and the
-actor settles on its nearest edge. So the closest lane below him the claw
-cannot touch is aimed at 36 + 12 = **48** -- which is `SOUTHER_APPROACH_LANE_Y`.
-"It could go further up" from there is "it could go into the claw". The
-alignment the grab needs is taken at `_lane_release_dx`, inside his `$18`
-inner abort, where he cannot begin a claw at all.
-
-**Holding him until the suplex would kill: tried, measured worse, reverted.**
-The attribution after the corridor fix is unambiguous about where the damage
-now is -- entrance hits **0%**, and **74% of every hit taken within four
-seconds of giving a hold up** -- so the finish is what costs, because it
-throws him clear and the walk back in crosses the band his claw commits from.
-The rule that follows is clean and the arithmetic supports it: a knee is 2
-damage in 17-18 frames (0.114/frame) against the flip-into-suplex's 5 in ~115
-(0.043), a held boss cannot act at all, and no hit has ever been recorded
-inside the pocket -- so keep kneeing until `finish_would_kill`.
-
-It measured **195%, 195%, 200%** against the previous configuration's 0, 50,
-75, 75, 200, 200 (median 75%). Three fights was enough because the mechanism
-came out of the same trace:
-
-**a "knee" is three ROM actions, not one.** The chain runs `$6A` -> `$6C` ->
-`$6E` before returning to the front hold, and the stages are nothing alike --
-across three fights, `$6A` took 14/15/15 ticks, `$6C` 12/15/17, and `$6E`
-**166/160/166**. The third stage is where a hold's whole time goes, and
-holding until lethal forces the actor through it four times per fight instead
-of finishing after two cheap knees. Damage per stage is 2, 2, 3.
-
-`kinematics.HOLD_KNEE_FRAMES` (17-18, from `tools/hold_timing_diag.py`)
-therefore prices **stage one only**. That under-pricing is latent rather than
-live -- `hold_knee_budget_frames` only ends up shorter than intended, and
-`could_hold_actions`' threatened comparison is masked because every grace ever
-measured (5-12 frames) is under even stage one -- but it is written down in
-`kinematics.py` next to the constants, with what it would take to measure the
-other two stages properly.
-
-**Where the remaining damage comes from, and why no lane trick fixes it**
-(user: "ainda apanha muito do boss, especialmente tentando se aproximar").
-Over the shipped configuration's five fights, 20 hits: **every one of them
-primary `$02`**, the committed claw, and 18 of the 20 with `WalkToNearEnemy`
-holding the tick through the second before. Half arrive in the first 4 s, at
-t~1.3 and t~3.1, in every fight.
-
-The measurement that explains it, taken from consecutive ticks of a live
-trace rather than from the tables:
-
-| | lane movement per agent tick |
-| --- | --- |
-| Blaze | +/-2 px (3 at most) |
-| Souther | +/-4 px |
-
-**He closes lane twice as fast as the actor opens it.** A lane offset is
-therefore something an approach can *arrive* at and never something it can
-*hold* -- which is why the corridor changed the shape of the fight and not
-the death count (1,1,1,1,1 each side). It also means the pocket is not
-merely the safest ground but the only *stable* ground in the fight: inside
-`$19` he takes `$1606A`, backing off at 1px/frame and **mirroring** lane
-rather than chasing it; outside it he chases at 4px/frame and wins.
-
-Two further attempts on this, both **measured worse and reverted**, so that
-nobody spends the runs again:
-
-- **keeping the lane offset while the claw is already out.** Mechanically
-  exact -- `$161C6` writes only `+$1C`, cannot follow a lane change once
-  committed, and resolves only with `+$52 < $18`, so an offset wider than
-  that ought to be the dodge. Measured 2 clean fights in 6 and 137 mean
-  damage against 3 in 5 and 96, with a second batch confirming it was not
-  small-sample noise;
-- **demoting the strike thrown from outside the pocket** below the walk
-  (13 vs 14+), with `reach.enemy_actionable` agreeing so the approach keeps
-  closing the last 32px. This is the *ranking* form of the refusal that
-  failed earlier, and it does avoid that version's vacuum -- the strike stays
-  on the table -- but it measured 0/1/1/2 lives across its four valid runs.
-
-**On jumping (user: "talvez saltar?").** The premise is right and is worth
-recording even though it is unused: `$162A4 (souther_flag_target_jump_
-attack)` arms `+$79` only for player action `$16`/`$17`/`$42`/`$43`, the
-jump-*attack* pairs. Free flight is `$12`/`$13` and `$3914` is what promotes
-it to `$16` when B is pressed, so **a hop with no kick is invisible to
-`$16234`** and the blanket refusal in `reach.souther_would_punish_jump` is
-stricter than the ROM requires. What it does not buy is a dodge: his claw
-boxes, extracted from his own animation set `$2E44A` (shapes `$6D`, `$71`,
-`$6F`), sit at z `-50..-26`, and Blaze's apex is about -50 -- the clearance
-window is real but narrow, and the flight passes through the band on the way
-up and down. A jump also freezes lane at takeoff, which is the axis he
-already wins. So it is a way to *cross*, not a way to *evade*.
-
-The near-side lane rule made the old fight visibly worse while it applied to
-him (2 lives / 177 s / 9 hits against 1 / 89 s / 6 after scoping it back to
-Antonio), which is what the scoping was for; the change above is the
-*magnitude* of the generic offset, not its side rule at small `dy`.
-
-**The trade is real and it went the other way on hops**, and the reason is
-worth keeping. Antonio closes lane himself, so an approach that holds its
+**Antonio: the lane-offset trade is real, and it went the other way on
+hops**, and the reason is worth keeping. Antonio closes lane himself, so an approach that holds its
 offset meets him already aligned at 60-75px -- past contact range, inside
 the kick's free flight -- and out there the hop is the better answer,
 because it closes the gap *and* attacks where walking that band only stands
@@ -763,284 +369,6 @@ reverted rather than kept on the strength of the reasoning:
   him was recorded with a pipe in `+$60`): 40 / 160 / 40 with a death, and
   the hop it was meant to displace stayed;
 - see also the armed-jump note under **Holding a boss**.
-
-**The grab still wasn't landing, and the police special was most of the
-damage (user: "ela não chega a agarrar"; "a maioria do dano deve-se a
-ataques de polícia, não usar ataques de polícia"; "corrigir até que o boss
-leve menos de meia vida").** Three separate bugs, none of them the grab
-window itself -- `SOUTHER_ON_PUNISH` was already firing on every one of his
-punishable primaries, as designed above.
-
-- **`_approach_lane_y` stopped widening the lane at the punch's own comfort
-  band, not the grab's.** `WalkToNearEnemy`'s "close enough, a further nudge
-  is only jitter" branch holds once `dy >= hold_offset - PUNCH_RANGE_Y`, which
-  is `reach.GRAB_RANGE_Y` (10px at the time) only by accident for a punch -- for a boss
-  already in a live grab window it left dy parked around 26-28px, comfortably
-  inside the punch band and just as comfortably outside grab range. Measured
-  live against the police-reaction window (`$0A`, the longest helpless state
-  in the fight): `grab_reasons` held `SOUTHER_ON_PUNISH` for hundreds of
-  ticks in a row and `grab_would_connect` never once went true. Fixed by
-  converging exactly onto his lane whenever `grab_reasons` returns
-  `SOUTHER_ON_PUNISH`/`ANTONIO_ON_PUNISH` -- deliberately narrower than "any
-  grab reason", since Antonio's `ANTONIO_WALK_IN` fires for any live, ready,
-  ungrabbed Antonio at any range and converging on that alone reopens his
-  kick gate (see `_approach_lane_y`'s own docstring and the
-  `test_an_antonio_approach_*` fixtures this broke on the first attempt);
-- **the police special was worth spending well before "about to die" --
-  except that spending it locks the caller in action `$3` for the shared
-  `$16AEC` delay (300 P1 / 390 P2 frames, ~5-6.5s), input dead the whole
-  time.** Measured live: 798 of 798 sampled ticks in that action were at an
-  unchanged position, the longest run 644 ticks starting on the exact tick
-  `CallPolice` fired. That is also the single longest `SOUTHER_ON_PUNISH`
-  window in the fight -- Souther is forced into the shared `$0A` reaction for
-  the same span -- so the old 60%-health boss bonus was spending the fight's
-  best grab-and-suplex opportunity on a frozen actor for a flat 10 damage,
-  where a landed hold-into-suplex chain is worth far more. `_police_is_worth_
-  it` no longer counts a live Souther toward that bonus (`Boss` still does,
-  for Antonio and the rest of the family -- unmeasured for them, and their
-  numbers are separately tuned, so left alone). The near-death thresholds
-  (18%/35%) stay: at those health levels nothing is lost by freezing, since
-  Souther freezes with the actor, and a life lost there is far worse on the
-  scored total than a spent special;
-- **and `SOUTHER_APPROACH_LANE_Y` itself sat exactly on his commit gate with
-  no margin against his own closing speed.** `ANTONIO_APPROACH_LANE_Y` and
-  `SOUTHER_APPROACH_LANE_Y` both happen to equal 40 (noted above), but from
-  different arithmetic: Antonio's is `WALK_TO_ENEMY_LANE_SAFETY_Y +
-  PUNCH_RANGE_Y`, so subtracting `PUNCH_RANGE_Y` back out in `_approach_lane_
-  y`'s "close enough" check lands on `WALK_TO_ENEMY_LANE_SAFETY_Y` (28) -- a
-  generic buffer that happens to sit 8-12px clear of his real 16/20px gates.
-  Souther's was `SOUTHER_SLASH_LANE + PUNCH_RANGE_Y`, so the identical
-  subtraction landed on `SOUTHER_SLASH_LANE` (28) *exactly* -- his own real
-  gate, zero clearance. Measured live: the approach stopped widening the
-  instant dy reached 28, and Souther, closing lane at 4px/tick while the
-  actor held still, was in his committed claw two ticks later at dy=21 --
-  `DodgeSoutherSlash` fired the same tick as the commit and had no time left
-  to matter. Fixed by adding `reach.REACH_SAFETY_MARGIN` (8px), the same
-  cushion `_souther_pocket_stop_dx` already uses to deny his other gate
-  rather than sit on it.
-
-Measured with `tools/boss_fight.py --level 2 --boss-type 0x55 --no-food`,
-Blaze, turbo 4:
-
-| | n | killed | damage | mean |
-| --- | --- | --- | --- | --- |
-| grab convergence + police carve-out only | 3 | 3/3 | 300%, 200%, 400% | 300% |
-| + flat lane margin | 3 | 3/3 | 75%, 195%, 195% | 155% |
-| + tactical-scoped wider margin (shipped) | 5 | 5/5 | 200%, 200%, 400%, 75%, 300% | 235% |
-
-**The margin work does not answer the brief, and the user asked for a
-fourth attempt anyway** (user: "Tenta chegar aos menos de 50%... tens de
-equacionar o comportamento do boss e programar a IA de acordo"), which
-found real bugs but not enough of an effect to claim over the noise floor:
-the eight fights across both margin rows range 75%-400% on identical code,
-so a three-run batch at 155% and a five-run batch at 235% are not evidence
-the second is worse -- they are evidence three runs is too few to tell, a
-point [[boss-fights-are-hard-to-measure]] already makes generally and this
-number reconfirms specifically for this fight.
-
-What the fourth attempt found, precisely (asked-for "equação"):
-`ai-analysis/enemy-ai.md`'s own gate table names the commit condition
-exactly -- `$15EDA`'s slash fires when `+$52 < $1C` (lane, 28px) **and**
-`+$50` sits in a velocity-selected window, `reach.SOUTHER_SLASH_DIST_AWAY`/
-`_STATIONARY`/`_CLOSING` (80/88/104px -- widest while the target is walking
-into him, which an approach always is). `_lane_offset_while_closing` had
-never encoded the *upper* bound at all; it now returns `None` past 104px,
-free correctness for a re-approach after a knockback (a fresh engagement
-starts inside 104px on tick one and never sees it).
-
-The lane number itself needed a real cushion against his own closing speed,
-not the single `REACH_SAFETY_MARGIN` (8px) it had: that handler's own
-comment puts his rate at **4px per 60Hz frame**, not per agent tick -- a
-units slip this same file had already made once (the "twice as fast" table
-above is titled "per agent tick" while citing the identical `$1606A` path in
-frame terms two lines later). At ~2 frames/tick under turbo that is 4px/tick
-or more, against an actor that measures 2-3, and confirmed against nothing
-more speculative than that: flatly widening `SOUTHER_APPROACH_LANE_Y` broke
-`test_alternating_commitment_does_not_chatter_the_lane`, an existing
-regression test for the live "changes direction very often, very quickly"
-bug this same corridor work has already caused once. That test's Souther
-never leaves tactical `$00`, so the fix is scoped to the tactical substates
-that actually move him -- and here the manuscript's own labels turned out to
-be unreliable: it names `+$67 == 1` (`$160D0`) as the one substate that
-homes lane onto the target, but five clean-host traces measured tactical 1
-on 2 of 696 primary-1 ticks -- too rare to be "the" closing state -- while
-tactical **2** (labelled `$16106 (souther_state1_dash_timer)`) carried
-essentially every visible lane burst (mean 3.9px on its nonzero ticks,
-against tactical 0's 1.4px on its own rarer ones). Either the two labels
-are swapped or `$160D0` is a one-tick transition that reads back as 2 before
-any snapshot lands on it; either way, `SOUTHER_LANE_CLOSING_TACTICALS` keys
-off what moves, not off which name is right, and is `{1, 2}` rather than
-re-guessing. A live trace confirmed the scoped margin actually engages in
-real play (72px on 88 of ~700 ticks in one fight) without touching the
-chatter test's fixture.
-
-None of that moved the mean, and the honest reading is *why not*, not
-*that it therefore failed*: every fight above still takes its first claw
-within about a second of the boss appearing, before any grab window has
-opened and before fixes one through three are even relevant. A clean trace
-shows the mechanism -- at the start both bodies converge from a large
-separation (dy around 70-85px), Souther closing lane whenever tactical
-reads 1 or 2 while the actor closes X, and the two tracks meet in the
-middle regardless of how wide the *target* offset is, because reaching
-strike range at all necessarily means crossing the same band his gate
-lives in. A margin changes *where* that crossing is risky, not *whether*
-crossing it is. This is the same shape as Antonio's still-open entrance hit
-below, and the project's own history with that one (three attempts, all
-measured worse, reverted) is reason enough not to guess at a fifth margin
-number rather than change what kind of fix this is.
-
-**What a fifth attempt would need to be, if someone picks this back up:**
-not a wider margin, but *less time spent in the danger band in the first
-place*. `$15EDA`'s own inner abort (`+$50 < $18`, 24px) denies the commit
-unconditionally, independent of lane -- reaching it fast matters more than
-defending lane on the way there, since Souther's closing speed erodes any
-fixed cushion give enough ticks regardless of its width. Two concrete,
-unimplemented candidates from this investigation: (1) the approach's own
-side-selection (`approach_from_right` in `_walk_to_near_enemy_target` /
-`_enemy_stop_dx`'s `side`) reads a live position compare that can flip when
-a *fast, still-approaching* boss crosses a comparatively stationary actor
-mid-approach -- unlike the lane-side pick, which was already hardened
-against exactly this for Antonio -- and a flip there lengthens the crossing
-well past the direct distance; (2) prioritizing X-closure over lane
-defense specifically while `+$50` is still large would need either
-persistent per-approach state or a pathfinding-level change to express
-safely, both bigger and riskier than this session's other fixes and neither
-attempted here.
-
-**The fifth attempt: the stalemate was four bugs on the way to the hold, not
-a tactic** (user: "a IA nao funciona muito bem para o Souther. Deve evitar o
-seu ataque, mas so apenas o suficiente para nao apanhar dano. A melhor
-estrategia e correr atras dele para o agarrar. Depois ataca-lo e terminar
-com supplex"). The literal reading of that -- delete the corridor, walk
-straight at him -- was implemented first and **measured much worse**, so it
-is recorded here as a rejected variant before the four fixes that shipped:
-
-| | lives | damage | dodge ticks | GrabEnemy ticks |
-| --- | --- | --- | --- | --- |
-| corridor (previous code) | 1, 2 | 200%, 300% | 99, 103 | 0, 0 |
-| no corridor, chase his lane | 3, 4 | 400%, 500% | 549, 386 | 12, 7 |
-
-Walking down his lane put the actor inside `$15EDA`'s commit gate for the
-whole approach and he used it -- four to five times the committed claws, and
-1387 ticks in hurt states against 613 -- which is the clearest evidence yet
-that the corridor does the one job it was built for, whatever the earlier
-damage numbers said. (Do **not** read `boss_fight.py`'s `no_verb_buckets`
-NORMAL count as a stalemate metric, incidentally: around 780 of those ticks
-in a typical round-2 run are simply ticks with no boss object on screen at
-all, in every configuration.)
-
-The corridor's real fault is not visible in any of those columns, and the
-tick harness is where it shows: with `_run_souther` driving the real pipeline
-against a stationary Souther, the corridor approach walks off-lane, closes X,
-and then **parks at dx=24, dy=24 with an empty mask for every remaining
-tick**, `WalkToNearEnemy` winning each one. Not a tactic, not a hesitation --
-an approach that reports arrival somewhere nothing can act. Four separate
-causes, each of which alone is enough to produce it:
-
-- **`navigation.strike_goal` collapsed to a tolerant point at the boss.**
-  With `stop_dx` at the pocket (16) and the punch's own dead zone at 10, the
-  band is `(16 - 10) - 16px of body` -- negative, so every region is dropped
-  and the fallback was `PointGoal(target, tolerance=max(stop_dx, lane_slack))`.
-  That reads as "be within 16px per axis of the boss", which the actor
-  satisfies standing 24px out and 24px off-lane. It now aims at the **stand
-  point** the caller asked for -- `stop_dx` out on the side the approach
-  comes from -- as a one-pixel-wide *region* keeping the lane band, so
-  `enough_contact` still applies (a `PointGoal`'s contact is `inf`, which
-  silently disables it);
-- **`_lane_release_dx` was one pixel too strict.** `PointGoal` is a covering
-  test, so an approach aimed at 16px arrives anywhere in 16..24px; landing on
-  24 with the release at 23 meant `alongside` never went true, so the lane
-  never converged, so nothing was ever in range. It releases at `$18` itself
-  now -- the ROM's own inner-abort boundary, which is what the docstring
-  always claimed;
-- **`reach.GRAB_RANGE_Y` was two pixels tighter than the punch band.**
-  `decide._actionable_targets` stops the approach the moment
-  `punch_would_connect` holds -- exactly `PUNCH_RANGE_Y` (12) -- so the
-  approach settles at 12px of lane and a 10px grab band is unreachable *from
-  the position the AI itself chose to stop at*. `$AAA0` reads the punch's own
-  forward attack box and the bodies are 16px tall, so 12px is both inside the
-  box and a real overlap; the two bands are one number now;
-- **and `phases.boss_phase` called a walking Souther dangerous.** Primary
-  `$01` fell through to the generic `t != 0` tail, so tactical `$01`/`$02` --
-  about a fifth of his primary-1 ticks -- decoded as `ATTACKING`, which is
-  outside `reach.GRABBABLE_PHASES`: no hold could be taken on any of those
-  ticks, `is_incoming_melee` could call a walking boss an incoming attack,
-  and the approach treated his empty hands as a live swing. None of his
-  primary-1 handlers strike (`$15F98` walks the standoff bands, `$160D0`
-  writes an approach velocity, `$16106` counts `+$5C` down); the one
-  committed move is primary `$02`, already decoded. This is the type-`$58`
-  mistake the same function already records for Onihime/Yasha's chase state.
-
-On top of those, the two pieces of the user's tactic that were genuinely
-missing rather than broken:
-
-- **`GrabReason.SOUTHER_WALK_IN`** -- the hold is now the plan against a
-  *ready* Souther at contact range, at Antonio's walk-in tier (35, over the
-  punch's 20, under the punish grab's 61), not only the reward for a landed
-  hit. The ground it is taken from is the pocket the approach already aims
-  at: `$15EDA` cannot commit from inside `$18`, `$161C6` cannot resolve there
-  either, and `$15F98` drifts out of it at 1px/frame against the 2px/frame it
-  is followed at;
-- **with a guard, because this exact reason has failed before.**
-  `observe.GrabStallTracker` counts consecutive ticks in contact without a
-  hold (`PlayableCharacter.grab_stall_ticks`), and past
-  `reach.SOUTHER_WALK_IN_STALL_TICKS` (24, ~0.8s at turbo cadence) the reason
-  stops being produced so a strike takes the tick. The counter resets when
-  contact breaks -- which is what the strike causes -- so the cycle is chase
-  -> try the hold -> hit him if he will not be held -> chase the hitstun,
-  where `SOUTHER_ON_PUNISH` still owns the grab. Without it this is the
-  2318-tick walk-in that lost a life while the boss lost 11 health.
-
-Measured with `tools/boss_fight.py --level 2 --boss-type 0x55 --no-food`,
-Blaze, turbo 4, `--poll-ms 8`, a fresh host per fight (see
-[[boss-fights-are-hard-to-measure]] -- a long-lived host stalls silently):
-
-| | lives lost | damage | GrabEnemy ticks | hold moves |
-| --- | --- | --- | --- | --- |
-| previous code | 1, 2 | 200%, 300% | 0, 0 | 3, 4 |
-| chase, no corridor (rejected) | 3, 4 | 400%, 500% | 12, 7 | 3, 1 |
-| the four fixes + the walk-in (shipped) | 0, 1, 1, 0 | 50%, 200%, 200%, 75% | 39, 2, 183, 19 | 6, 4, 6, 4 |
-
-Read that table with this file's own noise warning in mind: n=4 against n=2
-on a fight whose spread is 75%-400% on identical code is **not** proof the
-damage mean moved, and it is not claimed here. Two things in it are not
-noise, though:
-
-- **the grab column.** Zero ticks in every scored fight before this, a hold
-  taken in every one after -- which is the whole of "correr atras dele para o
-  agarrar", and exactly what the four arrival bugs were suppressing;
-- **two of the four fights cost no life at all**, which had not happened in
-  any previous scored round-2 fight in this file's history.
-
-The rejected chase row, by contrast, *is* separated from both others on every
-column at once, which is why two runs were enough to stop it.
-
-Evasion was also cut back to what the user asked for and no more:
-`SOUTHER_SLASH_LANE_CLEARANCE` is sized off `$161C6`'s `$18` resolve lane
-rather than `$15EDA`'s `$1C` commit lane, since by the time the dodge runs
-the claw is already committed and four pixels is about two ticks of walking
--- and arriving late is this dodge's own measured failure mode.
-
-The corridor itself is **kept**, and the rejected variant above is why: it
-costs a lane offset rather than a tick of approach, which is the cheapest
-evasion in the fight.
-
-**Two things seen in these traces and deliberately left alone**, so the next
-session does not re-derive them:
-
-- every `Punch` in a shipped round-2 fight was issued while the actor's own
-  action byte was in the hold family (`$60`, and the locks `$6A`/`$6C`/`$6E`).
-  `decide._could_melee_strike` has no "not while holding" gate, and
-  `could_hold_actions` deliberately produces nothing during a lock, so the
-  punch wins those ticks by default. It is harmless as it stands -- the ROM
-  ignores fresh attack edges during a lock, and the B that survives to the
-  end of one is a knee, which is what the hold wanted anyway -- but it is
-  luck rather than design, and the same B with a *back* direction would be a
-  throw rather than the knee;
-- around 780 ticks of a typical round-2 fight have **no boss object on
-  screen at all** (`boss_hp` null in `boss_fight.py`'s rows), in every
-  configuration measured. That is most of what the `no_verb_buckets` NORMAL
-  count reports, so it is not an idle-AI metric.
 
 Still open (Antonio): the actor takes a 20-damage hit in the first
 half-second of the fight in most runs, before it has done anything at all —
@@ -1201,11 +529,12 @@ do not commit `.jsonl` runs.
 
 | Tool | Role |
 | --- | --- |
-| `boss_fight.py` | **Scores** one boss fight: plays the level for real, then reports killed/died, damage taken, fight length and the verb histogram. `--level`/`--boss-type` select the fight (`--level 1 --boss-type 0x56` is Antonio, `--level 2 --boss-type 0x55` Souther, the default). Boss death is the raw signed health word only -- both `phases.boss_phase`'s `DEATH` decode and `MapEntity.is_defeated` false-positive on the transient `$164FC` lethality test, twice confirmed live |
+| `boss_fight.py` | **Scores** one boss fight: plays the level for real, then reports killed/died, damage taken, fight length and the verb histogram. `--level`/`--boss-type` select the fight (`--level 1 --boss-type 0x56` is Antonio, `--level 2 --boss-type 0x55` Souther, the default). Boss death is the raw signed health word only (zero counts for the later bosses `$55`-`$58`, whose `$17C36` lethal test is `<= 0`) -- both `phases.boss_phase`'s `DEATH` decode and `MapEntity.is_defeated` false-positive on the transient `$164FC` lethality test, twice confirmed live |
 | `antonio_diag.py` | **Explains** a round-1 fight tick by tick: every candidate `Verb` with its own emergency, the actor's hold state (`+$4C` link and the action byte behind it), Antonio's primary/tactical bytes, and `antonio_will_kick`/`grab_reasons`/`grab_would_connect`. Written for, and found, the front-hold stall in **Holding a boss** above |
 | `hold_timing_diag.py` | **Measures** how long each hold move commits the actor for, in 60 Hz frames: the AI plays until it holds a body, then the host enters **lockstep** and the move is issued on frame 0 with the player's `+$30` sampled every frame until it settles. One fresh hold per session -- a throw and a suplex both end the hold, and re-entering lockstep on one that is already ending measures the ending. Feeds `kinematics.HOLD_*_FRAMES`; a lockstep step is one game frame regardless of `--turbo` |
 | `hold_threat_diag.py` | **Checks** the other half live: plays an ordinary level with the waves left **alive** (no sweep, deliberately) and logs every tick the actor is holding a body -- action base, the winning verb, live enemy count, and `reach.frames_until_any_melee_lands` with the held body excluded. Summarises the decision ticks only ($60/$66; the animation locks in between ignore fresh edges, so counting them would dilute the question), and reports `knees_while_threatened`, which must be 0 |
-| `souther_diag.py` | The round-2 equivalent, plus `dx`/`dy`, `_lane_offset_while_closing`, and `_souther_pocket_stop_dx` per tick. Stops on the boss's own death (raw signed health, like `boss_fight.py`) or a level reset after the boss was seen, with a `--fight-seconds` backstop -- do not run it, or any tool that drives a live host, without a real stop condition. Found the grab-convergence and lane-margin bugs in **The grab still wasn't landing** above |
+| `souther_diag.py` | The round-2 equivalent: `dx`/`dy`, `souther.plan_engage`'s mode, `souther.can_commit_on`, the holder's knee chain and release countdown, and whether he is untouchable, per tick. Stops on the boss's own death (raw signed health, like `boss_fight.py`) or a level reset after the boss was seen, with a `--fight-seconds` backstop -- do not run it, or any tool that drives a live host, without a real stop condition. |
+| `souther_hold_lab.py` | **Lockstep lab** for the Souther hold loop: the AI plays to its first hold, then the host steps one frame at a time through scripted experiments (`--experiments`, comma-separated, one fresh hold each: `release_regrab`, `release_loop`, `second_crossover`, `throw`, `suplex`), logging both bodies' bytes every frame; `--regrab-delay` injects input latency into the walk back in. Sweeps the street families itself every 30 frames, since lockstep stops the ordinary sweep. It measured the release countdown, the one-crossover rule and the re-grab timing `souther.py` is built on |
 | `round2_death_diag.py` | **Traces** a whole round-2 run tick by tick (`--trace`) and stops the moment the game leaves the level for the title, which is what four lost measurement runs actually were: not the AI dying but the **console resetting**, caused by the debug sweep writing a death into an object slot that was still spawning (fixed host-side -- see `StreetsOfRageRecompilation/CLAUDE.md`). Records every `Pit` with `reach.pit_endangers` per tick, which is how the pit theory was ruled out: round 2 has none |
 | `breakable_diag.py` | Round-1 breakable stall, with **real** enemies (the sweep did not reproduce it) |
 | `armed_combat_diag.py` | Held-weapon reach and swing timing |
@@ -1217,7 +546,7 @@ do not commit `.jsonl` runs.
 | `app.py` | CLI (`--host`, `--port`, `--poll-ms`, `--hud-ms`, `--once`, `--agent-p1`, `--agent-p2`), poll loop, AI dispatch |
 | `state.py` | Work-RAM / remote reads → `GameSnapshot`. `snapshot_from_memory_blocks` skips both `hazards.holes_for_level` and `hazards.barriers_for_level` on the elevator stage (`level_index == 6`, stage 7): its moving platform is not represented by the class-0/2 collision map the same way ordinary terrain is, so both reads would be class-map noise rather than real hazards. Barrier solids were skipped first ("class map noise cannot invent walls on the lift"); holes got the identical carve-out once a phantom `Pit` reached the AI pipeline (`ai/observe.py` builds one per `snapshot.floor_holes` entry, unconditionally) and the HUD drew a hole that was never there. `snapshot.floor_holes`/`floor_barriers` are therefore always `()` on stage 7, which is the one place both the HUD and the token pipeline need to change to make pits disappear there — everything downstream already just reads the snapshot |
 | `world_map.py` | Camera + actors → map entities (incl. hunt targets); `MapEntity.stun_timer` is the ordinary-enemy `+$50` stun countdown, read only in the `kind=="enemy"` branch (the same offset is weapon wear / boss distance / player character id for other kinds) and only meaningful while `combat_phase` is `STUNNED`; `MapEntity.held_type` on an ordinary enemy is the pickup weapon `$08-$0C` it is carrying, resolved from a held weapon object's `+$52` holder pointer (`interaction==1`) -- enemies do not store the type at `+$60` (that word is their scripted approach X); `parse_world_map` takes `police_special_active` purely to disambiguate enemy state `$0400`; `MapEntity.hitbox` is the object's real body AABB -- for a player, `_object_geometry` reads it straight from the cached box at `+$70` and needs no `RomData` at all; for everything else it is rebuilt per tick from the ROM shape tables and `None` without `RomData` (*unknown*, never *no body*) -- and `MapEntity.attack_ranges` is every reach its type has (empty for a player, whose reach lives in `tokens/character.py` instead, and for bosses, whose animation sets are not labelled); `MapEntity.character_id` (0/1/2 = Axel/Adam/Blaze, `None` for non-players) is threaded through from `parse_world_map`'s own resolved `char_id` purely so a display-side consumer (today, `hud.py`'s `_display_attack_ranges`) can look up a player's per-character punch reach -- it is not read anywhere in `world_map.py` itself; `_is_dormant_combatant` drops a combatant whose **primary state is still `$0000`** whether or not the SAT-hidden bit is set: a wave's object slots are populated before `$937A` runs, so for one frame they hold a complete, *visible*, uninitialised entity -- recorded live, five of them appearing for a single tick at state `$00` with zero health and zero velocity, spread across the level ahead, and the AI punched at the nearest of them (48px away, at nothing) before they vanished. The hidden bit is a symptom `$937A` sets while testing eligibility, not the definition of dormancy. `MapEntity.enemy_vel_x`/`enemy_vel_y` carry ordinary-enemy velocity (+$1C/+$20), read only in the `kind=="enemy"` branch -- distinct fields/offsets from the boss-only `vel_x`/`vel_z` (+$20/+$24) already on the same dataclass, left untouched. `MapEntity.contact_slot` resolves the player's `+$4C` hold link to a slot name -- the ROM's own "which body am I holding", and the only field that answers it for a later boss (see **Holding a boss**); meaningful only while the action byte is in a grab/hold family, which is why `observe.py` and `is_grabbing` both gate on that |
-| `object_catalog.py` | Type → symbol / color / family. Antonio's boomerang (`$96`) and Souther's claw/afterimage (`$98`/`$99`) are catalogued so the linked boss attack objects become map entities at all; the claw pair is then withheld **unconditionally** from being a projectile threat (`reach.is_souther_claw`), unlike the boomerang, which is only withheld while attached (`reach.antonio_still_holding_boomerang`) -- they are animation-synchronized and re-created from Souther's own position every dash tick, with no flight to intercept |
+| `object_catalog.py` | Type → symbol / color / family. Antonio's boomerang (`$96`) and Souther's claw/afterimage (`$98`/`$99`) are catalogued so the linked boss attack objects become map entities at all; the claw pair is then withheld **unconditionally** from being a projectile threat (`reach.is_souther_claw`), unlike the boomerang, which is only withheld while attached (`reach.antonio_still_holding_boomerang`) -- they are animation-synchronized visuals re-created from Souther's own position every tick, with no flight to intercept and no box of their own (the claw's hit is his own attack box; `ai-analysis/enemy-ai.md`) |
 | `memory_map.py` | Known addresses; `OBJ_VEL_X_ORDINARY`/`OBJ_VEL_LANE_ORDINARY` (+$1C/+$20) are ordinary-enemy velocity per enemy-ai.md's object-layout table, corroborated live (a moving Garcia's +$1C tracked its actual displacement direction while +$20 stayed 0) -- distinct from the pre-existing boss-only `OBJ_VEL_X = 0x20`, which enemy-ai.md's own table implies is mislabeled (probably lane velocity) but is left untouched since boss AI is out of scope |
 | `hitboxes.py` | Real collision AABBs, as the formal `Hitbox` value object. **Players cache theirs** at `+$64` (attack) / `+$70` (body) -- six absolute words `[x0,x1,y0,y1,z0,z1]`, written by `$4140`, whose only call site (`$1CC6` in `sub_001bdc`) is player code. **Enemies cache nothing**: `$AAA0` passes the enemy's per-frame box id (`+$2` attack / `+$3` body) to `$AB24`, which rebuilds the AABB from ROM tables on every test and discards it -- so an enemy hitbox must be *reconstructed*, not read (this is also why `enemy-ai.md` can list `+$64`/`+$70` as pointers for enemies without contradicting the player layout). Tables: `$1A68E` object shapes (5-byte records), `$1AB8E` lane extents (2-byte), `$1ABA8` player shapes; type `$58` is the one non-player that uses the player table. Both record bytes are sign-extended (`ext.w` in `$AB88`), box id 0 means no box, and mirroring is *not* applied here -- the shape table carries separate forward/backward records and the animation data picks one, so a rebuilt box is already oriented |
 | `prop_solids.py` | The rectangle a **solid prop** stands behind, which is not the box `hitboxes.py` rebuilds. `sub_00003B8A` walks the object table per moving object (skipping any slot without bit 0 of `+$3A`, the solid flag -- set on every intact breakable sampled live) and `sub_00003BAE` tests the mover's **own position** -- a point, never its body box -- against `prop.x + rec[0] .. + rec[1]` on x and `prop.lane + rec[2] .. + rec[3]` on lane, strictly on all four edges (two `bcc` exits per axis), undoing that frame's whole displacement (`+$1C`/`+$20`) on a hit. `rec` is one of five records at `$3C6A`, picked by the type compare chain at `$3BC4`-`$3C00`, which ends in `nop` rather than a branch -- so every type it does not name (the round-4 props among them) uses the last record. Every record ends 4px *past* the prop's lane origin: a prop is solid behind its feet and walkable in front of them. The distinction is not academic -- a round-5 prop (`$1F`) at lane 96 draws its body box at lane 86..106, in front of its origin, while the wall that stops a player runs 76..100, twenty px behind it, so routing off the sprite plans straight through solid ground. Verified live on stage 5's 2x2 fence: from the corridor between the rows, UP stops at lane 60 (`56 + 4`, exact) and DOWN at 75, one walk step short of the predicted 76 |
@@ -1310,24 +639,24 @@ entry points in this tree.
 
 | Piece | Role |
 | --- | --- |
-| `tokens/` | All token classes (including ABCs), split by kind; the package `__init__` re-exports everything. `tokens/tokens.py` (`Token`/`Information`/`Verb` base classes, `Context`, `find`/`find_all`; `Information` splits into `Observed` (directly read from RAM) and `Inferred` (derived from observed tokens)); `tokens/character.py` (`Character` common actor base (`slot`, position, health, facing, combat phase); `Myself`/`Partner` (`player_index`, `action_state`, `action_flags`, `is_airborne`, punch inner/outer helpers, `vel_x` from player `+$1C` -- the word Antonio's kick gate reads -- and their own `hitbox` -- read straight from the object's own cached box at `+$70`, never reconstructed, and carrying no `attack_ranges`: a player's reach is this module's punch/rear/jump-kick geometry, not a per-frame extraction)); `tokens/enemy.py` (`Enemy` (a `Character`; adds `type_id`, `targets_player`, the formal `hitbox`/`attack_ranges` value objects plus the `max_reach`/`min_reach` helpers derived from them, `is_defeated` (the ROM's lethal check is **signed**, so a health word of `$8000`-`$FFFF` is already a corpse while the object sits in its slot with a stale action family -- judging "still a target" from `combat_phase` alone kept the AI walking to, ranking and punching bodies, which is what "attacking enemies that are not there" looks like from the sofa; zero health is *not* defeated and still owes a finishing hit) -- value objects rather than tokens, since a token may never embed a token by value, `held_weapon_type` (pickup `$08-$0C` while this enemy is holding one, else 0 -- ordinary enemies do not store this at `+$60`; observe copies `MapEntity.held_type`, which `world_map` resolves from the held weapon's `+$52` holder pointer), `grunt_vel_x`/`grunt_vel_y` -- ordinary-enemy-only velocity, defaulted to 0 and unused by `Boss`, which keeps its own separately offset `vel_x`/`vel_z` -- and `predict_position_after_n_frames(n)`, the enemy's own constant-velocity extrapolation in **60 Hz game frames** (the unit `$17AB8` integrates `+$1C`/`+$20` in, *not* AI poll ticks, which are ~2 frames each at the 33ms default), which every lead time in `ai/kinematics.py` is built on and which a `Boss` answers with its current position since it never populates those fields) + subclasses: `Grunt` (ordinary types `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`; carries the ROM's own `stun_timer` at `+$50` plus `is_stunned`, an ordinary-enemy-only field since both stun handlers are ordinary state-table entries; `Nora` additionally carries `ticks_since_last_attack`, cross-tick memory maintained by `observe.NoraAttackTracker` -- not a RAM field, defaulted to `NORA_TICKS_SINCE_ATTACK_UNKNOWN` for any `Nora` built without going through the tracker), `Boss` → direct subclasses `Abadede`/`MrX`/`Souther`/`Antonio`/`Bongo`/`Onihime` (`Boss` also carries `primary_state`, the `+$30` byte Antonio's kick is); `enemy_class_for_type`; `Surrounded`, the one `Inferred` judgment left about enemies (three or more live enemies inside the close box around the actor, or a pincer with one on each side; produced by `inference.check_for_surrounded`, the only function `inference.py` still has); `GrabReason` -- `CLEAR_REAR`/`DEAD_ZONE`/`JACK_FROM_BEHIND`/`ANTONIO_ON_PUNISH`/`ANTONIO_WALK_IN`/`SOUTHER_ON_PUNISH`/`SOUTHER_WALK_IN`/`WHILE_SURROUNDED`/`DODGE_CHARGE` -- an `Enum`, not a token field: it is the return type of `reach.grab_reasons(context, actor, target, enemies) -> frozenset[GrabReason]`, why a hold beats a strike; most reasons are `Grunt`-only; the later bosses have two each, one after a landed hit (`ANTONIO_ON_PUNISH`/`SOUTHER_ON_PUNISH`) and one for a boss who is merely ready at contact range (`ANTONIO_WALK_IN`/`SOUTHER_WALK_IN`, the tier that makes the hold the *plan* rather than the reward for a hit). They stay four separate reasons because the reason differs: Antonio's grounded punch is his own kick trigger, Souther simply cannot re-arm the claw from recovery, and the walk-in on each is worth less than the punish. `SOUTHER_WALK_IN` alone is timed out, by `PlayableCharacter.grab_stall_ticks`/`reach.SOUTHER_WALK_IN_STALL_TICKS` -- a walk-in that outranks every strike and never converts is the worst case on record against him. `WHILE_SURROUNDED` is the only reason keyed on the actor's own situation (`reach.actor_is_surrounded`) rather than on the candidate enemy -- see `AI.md`'s "Judging without a cache" for why this, and every other judgment formerly produced by `inference.py`'s `check_for_*` functions (`ClosingEnemy`, `TargetInReach`/`ReachKind`, `IncomingMelee`, `PunishWindow`, `IncomingProjectile`, `WeaponUpgrade`, `AntonioIsGoingToKick`, `SoutherIsGoingToSlash`, `SoutherPunishesJump`, `SafeSpot`), is now a direct `reach.py` (or, for `SafeSpot`, `execute.py`) function call at each site that needs the answer instead of a token written into the context once per tick; `tokens/essential.py` (`Essential` (scene-wide observations `Stage`/`CameraRange`/`AnimationInProgress`/`InContinueMenu`/`InMrXDialog`)); `tokens/dialog_verbs.py` (`Dialog` groups UI-prompt verbs `HandleContinueMenu`/`HandleMrXDialog` -- always Yes + initials `AI `, always No to Mr. X); `tokens/hazard_tokens.py` (`Projectile`, `StageObjects` (`Breakable` -- carries its real `hitbox`, `Pit`)); `tokens/pickup_tokens.py` (`Weapon` (with its real `hitbox`) + consumable `Pickup` hierarchy + `weapon_rank`); `tokens/walk_verbs.py` (`WalkToNearEnemy`, `RetreatFromDanger` (give up ground to a dangerous enemy not yet actionable -- only while hurt or `Surrounded`, per `decide._retreat_is_worth_it`; danger alone is not enough), `ProjectileSidestep` (step off a projectile's own lane rather than block its path, once `reach.projectile_threatens` judges it a threat -- built for Jack's thrown axe/torch (type `$28`), but reacts to any projectile judged a threat), `DodgeAntonioKick` (leave Antonio's kick lane, or hop if the kick is already committed -- the reaction to `reach.antonio_will_kick`), `DodgeSoutherSlash` (a pure lane step off Souther's committed claw dash, and deliberately **never** a hop -- `$161C6` only steers on X and only resolves within `$18` of its lane, while `$16234` punishes the hop outright), `WalkToAdvanceStage`, `WalkToWeapon`, `WalkToPickup`); `tokens/attack_verbs.py` (`Punch` (unarmed only), `HitAntonioBoomerang` (timed B-punch that knocks his type-`$96` boomerang away the moment it would hit), `MeleeWeaponAttack` (armed melee -- same B input as `Punch`, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat (`Punch`/`JumpAttack`/`RearAttack`); `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`, the only two the ROM attack-throws)); `tokens/police_verb.py` (`CallPolice` — an `Attack` descendant, health-critical only and only with at least one live enemy); `tokens/recovery_verbs.py` (`Recovery` groups actions that escape/shorten a bad state rather than act on an enemy/prop/held body; `TechRecover` — the C+Up bounce-cancel landing tech, armed only by specific special/boss hold-throw choreography (`PlayableCharacter.throw_tech_ready`), not an ordinary street-enemy throw) |
-| `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM); free-to-act phases include `HOLDING` and `HELD_BY_ENEMY`. Fills `PlayableCharacter.held_enemy_slot` from `MapEntity.contact_slot` while the action byte is in the hold family (`$60-$6F` or the `$76`/`$80` crossover), and `HoldTracker` counts `hold_ticks` over that same family so a knee or a flip passing through an animation lock does not restart the knee budget. Also emits `InContinueMenu` from a type-`$0F` player object and `InMrXDialog` when `$FFDE00` is set and this player's `+$59` bit 4 is live. `NoraAttackTracker` is the one deliberate exception to `generate_direct_observation_tokens` otherwise being a pure function of its snapshot argument: cross-tick memory (keyed by enemy slot, one instance per `AgentLoop`) of ticks since each on-screen Nora last held a dangerous phase, reset to 0 while dangerous and incremented otherwise, feeding `Nora.ticks_since_last_attack`; `forget_missing` drops a slot the moment it stops being observed as a live Nora so a slot the game later reuses for a different enemy never inherits a stale count. `GrabStallTracker` is the third such exception and the guard on Souther's chase: keyed by the *actor's* slot, it counts consecutive ticks spent in `reach.grab_would_connect` contact with a live enemy while unarmed and not holding -- "a walk-in that is not converting" -- and resets on either end of that (a hold taken, or contact lost). `PlayableCharacter.grab_stall_ticks` carries it, and `reach.grab_reasons` withdraws `GrabReason.SOUTHER_WALK_IN` past `reach.SOUTHER_WALK_IN_STALL_TICKS` so the tick goes back to a strike |
+| `tokens/` | All token classes (including ABCs), split by kind; the package `__init__` re-exports everything. `tokens/tokens.py` (`Token`/`Information`/`Verb` base classes, `Context`, `find`/`find_all`; `Information` splits into `Observed` (directly read from RAM) and `Inferred` (derived from observed tokens)); `tokens/character.py` (`Character` common actor base (`slot`, position, health, facing, combat phase); `Myself`/`Partner` (`player_index`, `action_state`, `action_flags`, `is_airborne`, punch inner/outer helpers, `vel_x` from player `+$1C` -- the word Antonio's kick gate reads -- and their own `hitbox` -- read straight from the object's own cached box at `+$70`, never reconstructed, and carrying no `attack_ranges`: a player's reach is this module's punch/rear/jump-kick geometry, not a per-frame extraction)); `tokens/enemy.py` (`Enemy` (a `Character`; adds `type_id`, `targets_player`, the formal `hitbox`/`attack_ranges` value objects plus the `max_reach`/`min_reach` helpers derived from them, `is_defeated` (the ROM's lethal check is **signed**, so a health word of `$8000`-`$FFFF` is already a corpse while the object sits in its slot with a stale action family -- judging "still a target" from `combat_phase` alone kept the AI walking to, ranking and punching bodies, which is what "attacking enemies that are not there" looks like from the sofa; zero health is *not* defeated and still owes a finishing hit) -- value objects rather than tokens, since a token may never embed a token by value, `held_weapon_type` (pickup `$08-$0C` while this enemy is holding one, else 0 -- ordinary enemies do not store this at `+$60`; observe copies `MapEntity.held_type`, which `world_map` resolves from the held weapon's `+$52` holder pointer), `grunt_vel_x`/`grunt_vel_y` -- ordinary-enemy-only velocity, defaulted to 0 and unused by `Boss`, which keeps its own separately offset `vel_x`/`vel_z` -- and `predict_position_after_n_frames(n)`, the enemy's own constant-velocity extrapolation in **60 Hz game frames** (the unit `$17AB8` integrates `+$1C`/`+$20` in, *not* AI poll ticks, which are ~2 frames each at the 33ms default), which every lead time in `ai/kinematics.py` is built on and which a `Boss` answers with its current position since it never populates those fields) + subclasses: `Grunt` (ordinary types `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`; carries the ROM's own `stun_timer` at `+$50` plus `is_stunned`, an ordinary-enemy-only field since both stun handlers are ordinary state-table entries; `Nora` additionally carries `ticks_since_last_attack`, cross-tick memory maintained by `observe.NoraAttackTracker` -- not a RAM field, defaulted to `NORA_TICKS_SINCE_ATTACK_UNKNOWN` for any `Nora` built without going through the tracker), `Boss` → direct subclasses `Abadede`/`MrX`/`Souther`/`Antonio`/`Bongo`/`Onihime` (`Boss` also carries `primary_state`, the `+$30` byte Antonio's kick is); `enemy_class_for_type`; `Surrounded`, the one `Inferred` judgment left about enemies (three or more live enemies inside the close box around the actor, or a pincer with one on each side; produced by `inference.check_for_surrounded`, the only function `inference.py` still has); `GrabReason` -- `CLEAR_REAR`/`DEAD_ZONE`/`JACK_FROM_BEHIND`/`ANTONIO_ON_PUNISH`/`ANTONIO_WALK_IN`/`WHILE_SURROUNDED`/`DODGE_CHARGE` -- an `Enum`, not a token field: it is the return type of `reach.grab_reasons(context, actor, target, enemies) -> frozenset[GrabReason]`, why a hold beats a strike; most reasons are `Grunt`-only; Antonio has two, one after a landed hit (`ANTONIO_ON_PUNISH`) and one for a boss who is merely ready at contact range (`ANTONIO_WALK_IN`, the tier that makes the hold the *plan* rather than the reward for a hit). Souther has none: `EngageSouther` walks into him itself, so no `GrabEnemy` is ever produced for him. `WHILE_SURROUNDED` is the only reason keyed on the actor's own situation (`reach.actor_is_surrounded`) rather than on the candidate enemy -- see `AI.md`'s "Judging without a cache" for why this, and every other judgment formerly produced by `inference.py`'s `check_for_*` functions (`ClosingEnemy`, `TargetInReach`/`ReachKind`, `IncomingMelee`, `PunishWindow`, `IncomingProjectile`, `WeaponUpgrade`, `AntonioIsGoingToKick`, `SoutherIsGoingToSlash`, `SoutherPunishesJump`, `SafeSpot`), is now a direct `reach.py` (or, for `SafeSpot`, `execute.py`) function call at each site that needs the answer instead of a token written into the context once per tick; `tokens/essential.py` (`Essential` (scene-wide observations `Stage`/`CameraRange`/`AnimationInProgress`/`InContinueMenu`/`InMrXDialog`)); `tokens/dialog_verbs.py` (`Dialog` groups UI-prompt verbs `HandleContinueMenu`/`HandleMrXDialog` -- always Yes + initials `AI `, always No to Mr. X); `tokens/hazard_tokens.py` (`Projectile`, `StageObjects` (`Breakable` -- carries its real `hitbox`, `Pit`)); `tokens/pickup_tokens.py` (`Weapon` (with its real `hitbox`) + consumable `Pickup` hierarchy + `weapon_rank`); `tokens/walk_verbs.py` (`WalkToNearEnemy`, `RetreatFromDanger` (give up ground to a dangerous enemy not yet actionable -- only while hurt or `Surrounded`, per `decide._retreat_is_worth_it`; danger alone is not enough), `ProjectileSidestep` (step off a projectile's own lane rather than block its path, once `reach.projectile_threatens` judges it a threat -- built for Jack's thrown axe/torch (type `$28`), but reacts to any projectile judged a threat), `DodgeAntonioKick` (leave Antonio's kick lane, or hop if the kick is already committed -- the reaction to `reach.antonio_will_kick`), `EngageSouther` (the whole approach to Souther -- corridor, lane escape, walk-in -- planned by `souther.plan_engage`; the hold is the contact result of the walk, armed or not), `WalkToAdvanceStage`, `WalkToWeapon`, `WalkToPickup`); `tokens/attack_verbs.py` (`Punch` (unarmed only), `HitAntonioBoomerang` (timed B-punch that knocks his type-`$96` boomerang away the moment it would hit), `MeleeWeaponAttack` (armed melee -- same B input as `Punch`, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`/`ReleaseToRegrab`), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat (`Punch`/`JumpAttack`/`RearAttack`); `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`, the only two the ROM attack-throws)); `tokens/police_verb.py` (`CallPolice` — an `Attack` descendant, health-critical only and only with at least one live enemy); `tokens/recovery_verbs.py` (`Recovery` groups actions that escape/shorten a bad state rather than act on an enemy/prop/held body; `TechRecover` — the C+Up bounce-cancel landing tech, armed only by specific special/boss hold-throw choreography (`PlayableCharacter.throw_tech_ready`), not an ordinary street-enemy throw) |
+| `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM); free-to-act phases include `HOLDING` and `HELD_BY_ENEMY`. Fills `PlayableCharacter.held_enemy_slot` from `MapEntity.contact_slot` while the action byte is in the hold family (`$60-$6F` or the `$76`/`$80` crossover), and `HoldTracker` counts `hold_ticks` over that same family so a knee or a flip passing through an animation lock does not restart the knee budget. Also emits `InContinueMenu` from a type-`$0F` player object and `InMrXDialog` when `$FFDE00` is set and this player's `+$59` bit 4 is live. `NoraAttackTracker` is the one deliberate exception to `generate_direct_observation_tokens` otherwise being a pure function of its snapshot argument: cross-tick memory (keyed by enemy slot, one instance per `AgentLoop`) of ticks since each on-screen Nora last held a dangerous phase, reset to 0 while dangerous and incremented otherwise, feeding `Nora.ticks_since_last_attack`; `forget_missing` drops a slot the moment it stops being observed as a live Nora so a slot the game later reuses for a different enemy never inherits a stale count. `GrabStallTracker` (the old Souther walk-in timeout) is gone with the grab reason it guarded; the hold loop reads the holder's own bytes instead (`PlayableCharacter.knees_in_chain`/`hold_release_countdown`/`crossover_spent`, from `+$58`/`+$61`, `+$63` and `+$4B`) |
 | `inference.py` | `check_for_surrounded` (3+ enemies in the close box, or a pincer -- reusing `rear_attack_is_warranted`'s own box so the two judgments cannot disagree) and `generate_inference_tokens` (in practice, just `context | check_for_surrounded(context)`), the only two functions left here. Every other judgment this file used to compute once per tick and write into the context -- threat-filtered incoming projectiles, closing enemies, per-move reach bands, incoming melee, punish windows, grab opportunities, weapon upgrades, Antonio's kick gate, Souther's slash gate and jump counter, safe spots -- was removed and folded into a `reach.py` (or, for the safe-spot search, `execute.py`) function called directly by whichever `could_*`/`_emergency_*`/state machine needs the answer, several times a tick rather than once; see that row below and `AI.md`'s "Judging without a cache" for the reasoning and the full list of removed tokens |
-| `walk_verbs.py` | `WalkToNearEnemy`, `RetreatFromDanger`, `ProjectileSidestep`, `DodgeAntonioKick`, `DodgeSoutherSlash`, `WalkToAdvanceStage`, `WalkToWeapon`, `WalkToPickup` |
-| `attack_verbs.py` | `Punch` (unarmed), `HitAntonioBoomerang` (timed punch of Antonio's type-`$96` boomerang), `MeleeWeaponAttack` (armed melee, same B input, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat; `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`) |
+| `walk_verbs.py` | `WalkToNearEnemy`, `RetreatFromDanger`, `ProjectileSidestep`, `DodgeAntonioKick`, `EngageSouther`, `WalkToAdvanceStage`, `WalkToWeapon`, `WalkToPickup` |
+| `attack_verbs.py` | `Punch` (unarmed), `HitAntonioBoomerang` (timed punch of Antonio's type-`$96` boomerang), `MeleeWeaponAttack` (armed melee, same B input, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`/`ReleaseToRegrab`), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat; `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`) |
 | `police_verb.py` | `CallPolice` — an `Attack` descendant (health-critical only; below `POLICE_HEALTH_PERCENT_THRESHOLD`; also requires at least one live enemy) |
 | `dialog_verbs.py` | `HandleContinueMenu` / `HandleMrXDialog` — UI-prompt verbs (always Yes + initials `AI `; always No to Mr. X). Name-entry confirm is C (or A): `$57D2` accepts `+$55` bits 5+6 and treats bit 4 (B) as backspace, a no-op on the first slot -- pressing B to "type A" left the AI stuck on the first initial |
 | `recovery_verbs.py` | `TechRecover` — fires while `PlayableCharacter.throw_tech_ready` (armed `+$45` on a techable action `$5C`/`$72`/`$88`); `could_tech_recover` bypasses the generic `_blocked` gate like `could_counter_grab`, since the actor is airborne/hurt for the whole window |
 | `kinematics.py` | The AI's **time** axis, next to `reach.py`'s geometry: where a target will be when a move actually *arrives*, so no attack is aimed at a position its own startup has already invalidated. Built on `Enemy.predict_position_after_n_frames` plus measured ROM timings -- punch startup 3/3/5 and `$322A` chord startup 3/21/7 frames (controls-and-input.md's two "Measured" tables), the jump's fixed 5-frame crouch and 3.0 px/frame launch velocity, thrown knife 16 px/frame and pepper 6 px/frame (weapons-range-and-damage.md section 4), and ground walk speeds **read from the ROM's own tables** at `$3670`/`$3706`/`$379C` (3.0/2.5/3.25 px/frame on X, 2.375/1.5/1.625 on lane): `$3614` indexes them by the character id at `+$50` and the action with its facing bit cleared, one signed byte per axis scaled by /16, entry `$06` being the straight horizontal walk -- not currently in any manuscript, extracted here. `intercept_frames` is the shared one-dimensional pursuit solve (gap over approach speed *minus* the target's own velocity along it), reporting `MAX_LEAD_FRAMES` for a target that would never be caught so the projection simply fails the band check instead of returning infinity. **A prediction may only ever add an attack, never remove one**, which is why `connect_frames` always includes frame 0 -- the observed position, the answer the pipeline gave before any of this existed -- and why a stationary move leads only by its own startup, not by its damaging span. Both rules are scar tissue, measured by sweeping the pipeline against the previous commit: judging the punch at a single future instant projected an enemy walking into Axel from 20px straight into the punch's *inner dead zone*, deleting the `Punch`, handing the tick to `WalkToNearEnemy` and having the actor walk into enemies it should have hit -- while promoting the point-blank `RearAttack` chord, since a target inside the dead zone is exactly what makes that chord "warranted"; and sweeping the whole 10-frame damaging span instead had Axel punching at a target 74px away because it would arrive by the last frame, flailing in place rather than closing. `enemy_projected_without_crossing` is the third: straight-line extrapolation walks an approaching body through the actor and out the other side, which no enemy does (`$AAA0` resolves the contact first), so an approach is clamped at `BODY_CONTACT_GAP_X` -- clamping to the actor's exact X was not enough, since dx=0 sits inside the degenerate zero-width front band Axel and Blaze have and produced the same phantom chord a different way. Everything is in **60 Hz frames**, never poll ticks (`FRAMES_PER_TICK` is the one conversion point), and `AI_LATENCY_FRAMES` is the pipeline's own one-poll delay on top of every startup. `ATTACK_CONNECT_FRAMES` maps every concrete `Attack` to the frames its band should be tested at (`inference` takes the union) and `tests/ai/test_kinematics.py` fails if one is missing -- several are legitimately just `(0,)` and say why (`held_target_lead_frames`: a held body travels with the actor, so the relative velocity is zero; `static_target_lead_frames`: a `Breakable` does not move; `no_aim_point_lead_frames`: `CallPolice` sweeps the whole screen and `CounterGrab` is resolved by input timing, not geometry). A jump kick leads by its 5-frame crouch and **not** by its flight: how far the flight reaches is already what `reach.in_jump_attack_band` measures, and solving the full interception there launched kicks from over 100px on the assumption the target kept closing for all 25 frames. It also owns the **hold move** durations -- `HOLD_KNEE_FRAMES`/`HOLD_CROSSOVER_FRAMES`/`HOLD_SUPLEX_FRAMES`/`HOLD_THROW_FRAMES` (17-18 / 37-39 / 77-78 / 41-46 per character), measured by `tools/hold_timing_diag.py` under lockstep rather than derived from the animation records, whose `frames x delay` product is not an action's length -- plus `hold_finisher_frames` (a suplex costs the crossover too from a front hold, ~115 against a throw's 41-46) and `hold_knee_budget_frames` (three knees, the unthreatened budget that replaced a six-*tick* one). Imports only `tokens`, so `reach.py`/`inference.py`/`decide.py`/`priority.py`/`execute.py` can all share it |
-| `reach.py` | The one definition of every band and target filter, shared by `inference.py`, `decide.py`, `priority.py` and `execute.py`: `live_enemies` (three independent ways to stop being a target, all needed: the phase says so, `Enemy.is_defeated` says so -- the health word, which the phase can lag far behind -- or the lane is unreachable)/`on_screen_enemies`/`in_playable_lane`/`in_camera`, `enemy_behind_actor`, `in_punch_band` vs `punch_would_connect` (the raw box ignores facing; a forward strike cannot hit backwards). The band predicates and the two facing helpers take a `Character` rather than an `Enemy` (their parameter keeps the name `enemy` for every caller that has one), because `$4478 (resolve_player_vs_player_collision)` runs the identical box-against-body test against the *other player* -- so `partner.py` asks these about the `Partner` instead of restating the geometry. Both now judge **box against body**, the way `$450C` does: `punch_usable_inner_x` is the measured inner edge less `tokens.character.BODY_OVERLAP_X`, because a ~13px-wide body centred just inside the box still overlaps it. Treating that as a dead zone was a measured disaster -- the AI refused to punch a foe 10px in front of Axel, `could_walk_to_near_enemy` took the tick and aimed 46px away to re-establish "proper" range, walking away turned the actor around, the enemy then read as *behind* it, the turn-around branch aimed back, and the actor shuffled between two points forever in punching range of an enemy it never hit. The same false dead zone is `rear_attack_is_warranted`'s first clause, so it also promoted the point-blank B+C chord as the "escape" from a situation a plain punch answers. `punch_behind_tolerance_x` is likewise **derived** rather than chosen (and evaluates to 0 for all three characters): the box starts 8-18px in front, so no body centred behind can reach it -- the old flat 4px of slack had Adam, who lands 4px past an enemy after a jump kick, standing there punching forward into empty air indefinitely. The grab keeps its own `GRAB_BEHIND_TOLERANCE_X`, since its contact test reads a walking frame's box, which starts at the actor's own origin, `in_rear_band` (side-specific, never the union; `rear_attack_behind_min_x` is the chord's *inner* edge -- Axel's box is X -40..**-8**, Blaze's -53..**-5** -- body-corrected like the punch, and a zero-width **front** band now refuses to match at all: `<=` against Axel's and Blaze's 0px forward reach still matched `dx == 0`, which is exactly where a jump kick landing on its target leaves the actor, so the AI answered "nothing can hit this" with a backfist aimed the other way), `in_jump_attack_band` (its min-dx launch gate -- no point hopping somewhere a punch already reaches -- applies only while grounded; once the actor is already airborne and committed to its free-flight trajectory, that gate is dropped so the follow-through B edge still lands even after the flight has carried the actor closer than that edge), `grab_would_connect` (forward-only like the punch test, since the ROM's contact test reads the actor's own forward-pointing attack box; ranged by the actor's unarmed punch outer edge, and by the punch band's own `GRAB_RANGE_Y == PUNCH_RANGE_Y` lane tolerance -- `$AAA0` reads that same box, and the two pixels the grab band used to give up sat exactly where `_actionable_targets` stops the approach, so the hold was unreachable from the position the AI itself chose to stop at), `rear_threats`, `rear_attack_is_warranted`, `enemy_actionable` (answered about the observed position only, unlike `connects`, which sweeps a move's own timeline -- see `kinematics.connect_frames`), `enemy_forward_dx`/`enemy_can_reach`/`in_enemy_dead_zone` (the enemy's *own* reach, answered exactly from its extracted `AttackRange`s -- `enemy_can_reach` returns `None` for "unknown", which callers must not read as "harmless"), `too_close_to_keep_approaching` (now the enemy's real reach when known, falling back to the old `punch_outer_x + RETREAT_CAUTION_MARGIN` caution box only when it is not -- that box was always an approximation built from the *actor's* punch range, which has nothing to do with how far the enemy can hit; its optional `extra_margin` widens whichever of the two the caller lands on, and exists solely for the hysteresis band below), `APPROACH_RELEASE_MARGIN` (the approach half of the retreat/approach decision suppresses itself until this far *beyond* the caution zone, instead of resuming the instant the retreat trigger clears -- approach and retreat used to switch on one shared boundary, which is a textbook limit cycle and reproduced as a one-tick direction reversal when the pipeline was driven over synthetic ticks; between the two thresholds the actor holds its ground, and the whole suppression lifts by itself once the enemy leaves its dangerous phase), `CLOSING_ENEMY_THREAT_FRAMES` (the shared "how far ahead is a committed velocity trusted" horizon -- in 60 Hz frames; it was a *tick* count multiplied straight into a per-frame velocity, i.e. half the ~200ms its own comment described), `enemy_projected` (re-exported from `kinematics.py`, which owns it now: an `Enemy` rebuilt at `predict_position_after_n_frames` via `dataclasses.replace`; a stationary enemy, and every `Boss`, projects to itself), `enemy_will_close_soon` (re-tests `too_close_to_keep_approaching` at that projected position -- the predictive half of `is_incoming_melee`, built specifically for a committed attack with no static reach to test at all: Signal's slide, per enemy-ai.md's "Signal's slide is velocity, not a hitbox") and `souther_dash_arrives_soon` (the third path into `is_incoming_melee`, for the one enemy invisible to the other two: a `Boss` populates neither `attack_ranges` nor `grunt_vel_*`, so his committed claw dash, `$161C6` at 8px/frame, would otherwise go undetected), `is_incoming_melee` (the union of all three, plus the dangerous-phase gate, shared by `grab_reasons`' own `DODGE_CHARGE` charging check, `decide.py`'s approach/retreat/grab gates, and `priority._other_enemy_is_incoming`/`_emergency_retreat_from_danger`) and `incoming_melee_targets` (the per-actor convenience: slots of on-screen enemies `is_incoming_melee` judges a threat, replacing the old `IncomingMelee` token's presence/absence lookup), `pit_endangers` (the one definition of "standing in a `Pit`'s danger zone", shared by `execute._find_safe_spot`'s candidate filter and `execute._pit_escape_mask`'s own standalone override), `any_pit_endangers` (the same check against every `Pit` in context at once, used by `decide.py`'s `could_walk_to_near_enemy`/`could_walk_to_weapon`/`could_walk_to_pickup`/`could_open_breakable` to refuse a target sitting in one), `projectile_threatens`/`projectile_ticks_to_impact` (an observed `Projectile` heading toward the actor, in lane, within the impact window -- the latter shared by `decide.could_projectile_sidestep`'s gate and `priority._emergency_projectile_sidestep`'s score so neither recomputes the other's number), `antonio_still_holding_boomerang`/`is_souther_claw`/`jack_still_juggling` (withhold an attached/unthrowable object from `projectile_threatens`'s callers), `antonio_will_kick`/`souther_will_slash`/`souther_would_punish_jump` (the boss-specific gates `decide.py`/`execute.py` react to directly), `weapon_upgrade_rank` (a ground `Weapon`'s rank if it is a genuine upgrade for `actor` right now, else `None` -- the rank itself, not a bare bool, since `priority._emergency_walk_to_weapon` scores by how much of an upgrade it is), `actor_is_surrounded` (a live `Surrounded` judgment for one actor slot) and `grab_reasons` (`context, actor, target, enemies) -> frozenset[GrabReason]`, every reason a hold on `target` beats a strike right now -- `CLEAR_REAR`/`DEAD_ZONE`/`JACK_FROM_BEHIND`/`ANTONIO_ON_PUNISH`/`ANTONIO_WALK_IN`/`SOUTHER_ON_PUNISH`/`SOUTHER_WALK_IN`/`WHILE_SURROUNDED`/`DODGE_CHARGE`, shared by `decide.could_grab_enemy`/`could_rear_attack`'s `on_jacks_back` check and `priority._emergency_grab_enemy`'s `max` over the returned reasons). These were private helpers in `decide.py`, imported across modules and duplicated in `inference.py`; nothing here reads RAM or produces tokens. `held_enemy`/`in_held_contact` name the body already in the actor's hands -- the ROM's `+$4C` link first, then a `GRABBED` phase, then contact -- and `grab_reasons` returns nothing at all while the actor is holding, which is `$AAA0`'s own rule (it refuses a grab code unless `+$4C` is clear) |
+| `reach.py` | The one definition of every band and target filter, shared by `inference.py`, `decide.py`, `priority.py` and `execute.py`: `live_enemies` (three independent ways to stop being a target, all needed: the phase says so, `Enemy.is_defeated` says so -- the health word, which the phase can lag far behind -- or the lane is unreachable)/`on_screen_enemies`/`in_playable_lane`/`in_camera`, `enemy_behind_actor`, `in_punch_band` vs `punch_would_connect` (the raw box ignores facing; a forward strike cannot hit backwards). The band predicates and the two facing helpers take a `Character` rather than an `Enemy` (their parameter keeps the name `enemy` for every caller that has one), because `$4478 (resolve_player_vs_player_collision)` runs the identical box-against-body test against the *other player* -- so `partner.py` asks these about the `Partner` instead of restating the geometry. Both now judge **box against body**, the way `$450C` does: `punch_usable_inner_x` is the measured inner edge less `tokens.character.BODY_OVERLAP_X`, because a ~13px-wide body centred just inside the box still overlaps it. Treating that as a dead zone was a measured disaster -- the AI refused to punch a foe 10px in front of Axel, `could_walk_to_near_enemy` took the tick and aimed 46px away to re-establish "proper" range, walking away turned the actor around, the enemy then read as *behind* it, the turn-around branch aimed back, and the actor shuffled between two points forever in punching range of an enemy it never hit. The same false dead zone is `rear_attack_is_warranted`'s first clause, so it also promoted the point-blank B+C chord as the "escape" from a situation a plain punch answers. `punch_behind_tolerance_x` is likewise **derived** rather than chosen (and evaluates to 0 for all three characters): the box starts 8-18px in front, so no body centred behind can reach it -- the old flat 4px of slack had Adam, who lands 4px past an enemy after a jump kick, standing there punching forward into empty air indefinitely. The grab keeps its own `GRAB_BEHIND_TOLERANCE_X`, since its contact test reads a walking frame's box, which starts at the actor's own origin, `in_rear_band` (side-specific, never the union; `rear_attack_behind_min_x` is the chord's *inner* edge -- Axel's box is X -40..**-8**, Blaze's -53..**-5** -- body-corrected like the punch, and a zero-width **front** band now refuses to match at all: `<=` against Axel's and Blaze's 0px forward reach still matched `dx == 0`, which is exactly where a jump kick landing on its target leaves the actor, so the AI answered "nothing can hit this" with a backfist aimed the other way), `in_jump_attack_band` (its min-dx launch gate -- no point hopping somewhere a punch already reaches -- applies only while grounded; once the actor is already airborne and committed to its free-flight trajectory, that gate is dropped so the follow-through B edge still lands even after the flight has carried the actor closer than that edge), `grab_would_connect` (forward-only like the punch test, since the ROM's contact test reads the actor's own forward-pointing attack box; ranged by the actor's unarmed punch outer edge, and by the punch band's own `GRAB_RANGE_Y == PUNCH_RANGE_Y` lane tolerance -- `$AAA0` reads that same box, and the two pixels the grab band used to give up sat exactly where `_actionable_targets` stops the approach, so the hold was unreachable from the position the AI itself chose to stop at), `rear_threats`, `rear_attack_is_warranted`, `enemy_actionable` (answered about the observed position only, unlike `connects`, which sweeps a move's own timeline -- see `kinematics.connect_frames`), `enemy_forward_dx`/`enemy_can_reach`/`in_enemy_dead_zone` (the enemy's *own* reach, answered exactly from its extracted `AttackRange`s -- `enemy_can_reach` returns `None` for "unknown", which callers must not read as "harmless"), `too_close_to_keep_approaching` (now the enemy's real reach when known, falling back to the old `punch_outer_x + RETREAT_CAUTION_MARGIN` caution box only when it is not -- that box was always an approximation built from the *actor's* punch range, which has nothing to do with how far the enemy can hit; its optional `extra_margin` widens whichever of the two the caller lands on, and exists solely for the hysteresis band below), `APPROACH_RELEASE_MARGIN` (the approach half of the retreat/approach decision suppresses itself until this far *beyond* the caution zone, instead of resuming the instant the retreat trigger clears -- approach and retreat used to switch on one shared boundary, which is a textbook limit cycle and reproduced as a one-tick direction reversal when the pipeline was driven over synthetic ticks; between the two thresholds the actor holds its ground, and the whole suppression lifts by itself once the enemy leaves its dangerous phase), `CLOSING_ENEMY_THREAT_FRAMES` (the shared "how far ahead is a committed velocity trusted" horizon -- in 60 Hz frames; it was a *tick* count multiplied straight into a per-frame velocity, i.e. half the ~200ms its own comment described), `enemy_projected` (re-exported from `kinematics.py`, which owns it now: an `Enemy` rebuilt at `predict_position_after_n_frames` via `dataclasses.replace`; a stationary enemy, and every `Boss`, projects to itself), `enemy_will_close_soon` (re-tests `too_close_to_keep_approaching` at that projected position -- the predictive half of `is_incoming_melee`, built specifically for a committed attack with no static reach to test at all: Signal's slide, per enemy-ai.md's "Signal's slide is velocity, not a hitbox") and `souther_dash_arrives_soon` (the third path into `is_incoming_melee`, for the one enemy invisible to the other two: a `Boss` populates neither `attack_ranges` nor `grunt_vel_*`, so his committed claw dash, `$161C6` at 8px/frame, would otherwise go undetected), `is_incoming_melee` (the union of all three, plus the dangerous-phase gate, shared by `grab_reasons`' own `DODGE_CHARGE` charging check, `decide.py`'s approach/retreat/grab gates, and `priority._other_enemy_is_incoming`/`_emergency_retreat_from_danger`) and `incoming_melee_targets` (the per-actor convenience: slots of on-screen enemies `is_incoming_melee` judges a threat, replacing the old `IncomingMelee` token's presence/absence lookup), `pit_endangers` (the one definition of "standing in a `Pit`'s danger zone", shared by `execute._find_safe_spot`'s candidate filter and `execute._pit_escape_mask`'s own standalone override), `any_pit_endangers` (the same check against every `Pit` in context at once, used by `decide.py`'s `could_walk_to_near_enemy`/`could_walk_to_weapon`/`could_walk_to_pickup`/`could_open_breakable` to refuse a target sitting in one), `projectile_threatens`/`projectile_ticks_to_impact` (an observed `Projectile` heading toward the actor, in lane, within the impact window -- the latter shared by `decide.could_projectile_sidestep`'s gate and `priority._emergency_projectile_sidestep`'s score so neither recomputes the other's number), `antonio_still_holding_boomerang`/`is_souther_claw`/`jack_still_juggling` (withhold an attached/unthrowable object from `projectile_threatens`'s callers), `antonio_will_kick`/`souther_would_punish_jump` (the boss-specific gates `decide.py`/`execute.py` react to directly), `weapon_upgrade_rank` (a ground `Weapon`'s rank if it is a genuine upgrade for `actor` right now, else `None` -- the rank itself, not a bare bool, since `priority._emergency_walk_to_weapon` scores by how much of an upgrade it is), `actor_is_surrounded` (a live `Surrounded` judgment for one actor slot) and `grab_reasons` (`context, actor, target, enemies) -> frozenset[GrabReason]`, every reason a hold on `target` beats a strike right now -- `CLEAR_REAR`/`DEAD_ZONE`/`JACK_FROM_BEHIND`/`ANTONIO_ON_PUNISH`/`ANTONIO_WALK_IN`/`WHILE_SURROUNDED`/`DODGE_CHARGE`, shared by `decide.could_grab_enemy`/`could_rear_attack`'s `on_jacks_back` check and `priority._emergency_grab_enemy`'s `max` over the returned reasons). These were private helpers in `decide.py`, imported across modules and duplicated in `inference.py`; nothing here reads RAM or produces tokens. `held_enemy`/`in_held_contact` name the body already in the actor's hands -- the ROM's `+$4C` link first, then a `GRABBED` phase, then contact -- and `grab_reasons` returns nothing at all while the actor is holding, which is `$AAA0`'s own rule (it refuses a grab code unless `+$4C` is clear) |
 
 | `navigation.py` | **Jumps use this planner too**: `pit_obstacles` (holes only, no crates), `plan_lane_route` (Y-locked corridor -- a jump has no mid-air lane control), `jump_landing_is_safe` (clear lane / walk around / hop over), `hop_landing_x` (far side of the nearest blocking pit if it is in kick range). The **only** place that turns this game into `pathfind/`'s vocabulary: tokens in, rectangles out, a route back. Reads no RAM, touches no gamepad, emits no tokens. Decides three things. **What is solid**: breakables and pits are geometry, enemies and their reaches are *danger*, and the two are planned in separate passes (`plan_route` tries solids+danger first and falls back to solids alone, because a busy screen can have no danger-free route and an AI that stops moving when the room is busy is worse than one that accepts risk). Both a crate and a pit are **origin** rules -- the ROM tests the moving object's own position against them, never its box (`prop_solids`, `reach.pit_endangers`) -- so both are restated through `_OriginRule` into the rectangle a *body* may not overlap, and a crate's rectangle comes from `prop_solids`, not from `Breakable.hitbox`. The restatement is exact and uses the body's real offsets from the origin, not half its width: a cached player box is not centred on the actor (Axel's spans -7..+3 facing left), and assuming it was left a 2px sliver of wall the route stepped into and the ROM refused -- recorded live as 42 seconds held against a round-5 prop, the same symptom this model was written to remove. A rule shallower than the body is deep (the phone booth's is 14px) cannot be restated exactly at all and gets a one-px floor, which over-states it slightly rather than letting the lattice drop it as no wall at all. The pit rect also grows by one px because that predicate is inclusive and collision is not. Measured on the sweep: without the inset an actor standing safely beside a pit read as inside it, left the lane to escape a hole it was never in, and lost every attack in the run. An idle enemy's *reach* is **not** an obstacle (`is_dangerous` gates it): every enemy could swing, and routing around that potential turned a 20-tick approach into a 60-tick detour. **Where arrived is**: `strike_goal` builds a `RegionGoal` inset by half the body on each axis, so "the body overlaps it" means "my origin is within `stop_dx`/`lane_slack` of the target's" -- the same sentence `in_punch_band`/`in_smash_range` already say -- and its lane-overlap *contact* is the alignment the blow depends on, which is what makes `enough_contact` read as "px of lane margin to spare" and `maximize_contact` as "line up square". With an `inner_dx` the ground is an annulus (two bands, a hole between), so standing on top of a target is correctly not "in range"; `side` narrows it to one band when a caller must insist. When the band is thinner than the body is wide -- `stop_dx` inside the strike's own dead zone plus a body, which is exactly the Souther pocket -- there is no region left, and the fallback aims at the **stand point** (`stop_dx` out, on the side the approach comes from) as a one-px-wide region that keeps the lane band. It used to be a `PointGoal` at the *target's own position* with `tolerance=max(stop_dx, lane_slack)`, which is "be within 16px per axis of the boss" -- satisfied standing 24px out and 24px off-lane, holding no button, which is most of what round 2's stalemate was. A `PointGoal`'s `contact` is also `inf`, so that fallback silently disabled `enough_contact` and let the approach settle on the loose edge of its own band. `NAV_STEP` is 4px, finer than the executor's deadbands on purpose: the pockets to land in are ~10px deep and a coarser lattice reports them unreachable rather than steering badly. **`world_rect`'s `WORLD_MARGIN_X` must exceed every goal offset a routed verb can place beyond the actor's own position** -- `WalkToAdvanceStage`'s fixed 40px lookahead, a strike goal's `stop_dx` up to ~56px -- or the goal itself can fall outside the plannable world with no lattice position ever able to satisfy it, so `plan_route` reports `reached=False` forever rather than merely a worse route. Live-diagnosed at 32px: an actor at the camera's own trailing edge got a lookahead point 8px past `world_rect`'s right bound and stalled dead there -- not badly routed, unable to progress at all, since advancing is exactly what would have scrolled the camera and made the goal reachable again. Now 96px, comfortably past every such offset and still well inside what `world_map` already tracks past each camera edge (two screens). **Nothing tactical** -- which side, how far to stop short, whether to wait out a swing all stay in `execute.py` |
 | `pathfind/` | **Standalone** rectangle path finding on a bounded cartesian plane — imports nothing from the rest of `sor_autoplay` (no tokens, no snapshot, no RAM) so it can be tested exhaustively without a running `sor`, and so the caller that turns a route into d-pad input stays the only code that knows about the game. `geometry.py` (`Rect`/`Segment`/`Point`/`Edge`/`Direction`, y grows **downwards** like the lane axis, so `UP` is towards smaller y; **touching is not overlapping**, so a body may stop flush against a crate), `goals.py` (`RegionGoal`, an *area* rather than a boundary — reached by overlapping it, contact measured on a named axis, and several regions may be alternatives so an annulus "close enough to reach, far enough not to be standing on it" is expressible. It exists because the other three are measure-zero targets: on a lattice of whole steps an exact touch is essentially never achievable, so anything meaning "close enough to act" aimed at one got best-effort routes forever. `PointGoal`, reached by *covering* the point, with an optional `tolerance` — a body cannot land its centre on an arbitrary point when every move is a multiple of the step; `SegmentGoal`, reached only by the **named** edges of the body, since touching a threshold with your right edge and having walked through it until your left edge touches are opposite outcomes of the same line; `RectGoal`, a whole rectangle as destination, defined by `(own_edge, target_edge)` **pairs** rather than by distance — `RectGoal.horizontal(crate)` is "arrive stacked above or below it" (my bottom on its top, or my top on its bottom), `RectGoal.vertical` the side-by-side pairing, a single-pair `RectGoal` forces one approach side, and `RectGoal.of` builds the full cross product, which deliberately *also* includes the aligned pairings two same-height boxes satisfy just by standing side by side. A rect goal says nothing about not overlapping the target: pass the same rectangle in `obstacles` too and the body stops flush, which is exactly where the edges meet), `grid.py` (the lattice of body positions, **anchored at the start rect** so every move is a whole multiple of the step with no ragged first hop; whole-body collision, swept moves so a step cannot tunnel through an obstacle thinner than itself, no diagonal corner cutting, and obstacles the body *already* stands in dropped for the whole search so a body inside a crate is not planned as permanently stuck), How *well* the edges meet is a separate, opt-in question, because by default any contact counts — including corner to corner, which satisfies a goal and is useless in practice (a body clipping the top corner of a crate cannot act on it). Two parameters, deliberately different tools: `enough_contact` is a **requirement** that raises the bar for arrival itself (at least N px of shared edge, else the position does not count and an unmeetable bar returns the usual best effort with `reached=False`), while `maximize_contact` is a **preference** that leaves arrival alone and makes the search prefer the flushest arrival, scoring each one `cost + alignment_weight * misalignment` and stopping only when no unexplored node can beat it (`f` is a lower bound on any route through a node, and every arrival has `h == 0`, so arrivals are popped in cost order and the test is exact). `alignment_weight` must exceed 1 to do anything at all — a px of extra overlap costs at least a px of walking, so at exactly 1 they cancel — hence the default of 2. Contact is measured **along the shared edge**: for a side-by-side pairing it is the boxes' *heights* that cap it, not their widths. `Path.contact`/`Path.misalignment` report the achieved values whether or not the search was told to care; both are `inf`/0 for goals with nothing to measure (a point, an oblique segment), so a contact requirement can never silently make those unreachable. `search.py` (ordinary A*, but **mid-search a Y-then-X finish**: after a node is expanded, if the goal is reachable from there by one axis-aligned run or by walking the lane (Y) and then the street (X), the route is the A* prefix plus those legs and the search stops; this is how a beat-em-up body actually closes, and a free-space diagonal is rejected even though it is shorter. A start boxed in still walks around with A* and only straightens once a node can see the goal that way. `maximize_contact` still requires the two legs to arrive flush, otherwise a corner clip would hide the around-the-crate walk the rest of A* is there to find. The search itself is A* with the octile heuristic — exactly the free-space optimum for these move costs, so admissible *and* consistent; consecutive cells in one direction merge into a single vector, because a d-pad wants "hold right for 88px", not eleven 8px hops; a failed search returns the **best-effort** route to the closest position reached with `reached=False`, since an AI that must act every tick is better served by walking part-way and re-planning; open-list ties are broken by insertion order, not at random, so the same world always plans the same route — and since neighbours are pushed in `geometry.ALL_DIRECTIONS`' order, that order is also which move wins an equal-`f` tie. `ALL_DIRECTIONS` is `CARDINALS + DIAGONALS`, so a straight step wins a tie over a diagonal one, keeping routes on the lattice's own axes and reserving diagonals for a move that genuinely needs one — a `DIAGONALS + CARDINALS` ordering was tried and reverted the same session: on a viewer example routing past a stacked pair of obstacles with a gap between them, diagonal-first took a longer up-and-over route (`RIGHT 48, UP_RIGHT 16, RIGHT 88, DOWN_RIGHT 24`) instead of threading the gap and using one diagonal only to line up with the target's own row at the end). `viewer.py` is a **standalone Tk window** for looking at the result — draw a body, draw obstacles, pick a destination and see the vectors, with the lattice, the merged step lengths, the arriving body edges and the best-effort route all drawable. It is not connected to anything: no remote, no RAM, no import of `hud.py` or any other `sor_autoplay` module, so the package stays dependency-free. Needs Tk, hence `python3.11`; launch it with the meta-repo wrapper `./scripts/pathfind_viewer` (which finds a Tk-capable Python the same way `./scripts/autoplay` does and sets `SOR_PATHFIND_PROG` so `--help` names the script), or directly with `cd autoplay && PYTHONPATH=src python3.11 -m sor_autoplay.ai.pathfind.viewer`; optional `--width/--height/--step/--body`; no test imports it, so the suite still runs on any Python. Not wired into `decide.py`/`execute.py` — the AI still steers as it did |
 | `decide.py` | Grounded `could_jump_attack` also requires `navigation.jump_landing_is_safe` (pathfinder: do not launch through a pit the 2D walk can go around; hop over only when the landing is solid and no walk reaches); airborne follow-through skips that gate. Every reach question is answered directly against `reach.py`'s band predicates -- `punch_would_connect` for the four melee-strike siblings, `in_rear_band` for the chord, `in_jump_attack_band` for the kick, `enemy_actionable` for "already hittable, stop walking" -- and the same goes for `reach.is_incoming_melee` (retreat / don't-approach / don't-hop-into-it), `reach.weapon_upgrade_rank` (`could_walk_to_weapon`) and `Surrounded` (`could_call_police`'s second gate, below `POLICE_HEALTH_PERCENT_THRESHOLD_SURROUNDED`, since the special is the one move that clears every side at once -- and both gates also require at least one live enemy); `could_handle_continue_menu` / `could_handle_mr_x_dialog` fire from their Observed tokens without needing `Myself`; `_actors` yields **only `Myself`**, never `Partner` -- one `AgentLoop` runs per AI-controlled player and executes the surviving verb on *that* player's own `VirtualGamepad`, so a `Partner`-parametrized verb would be carried out on the wrong pad (and out-rank `Myself`'s own candidates while doing it); `Partner` stays in the context as `Information` only; `could_*` generators never pre-select a single "best" candidate (per AI.md: that ranking is `determine_priority_verb`'s job alone) -- `could_walk_to_near_enemy`/`could_throw_knife`/`could_throw_pepper`/`could_walk_to_weapon`/`could_walk_to_pickup`/`could_open_breakable` each produce one Verb per valid possibility, not just the nearest/best; `could_walk_to_near_enemy`/`could_walk_to_weapon`/`could_walk_to_pickup`/`could_open_breakable` all skip a target whose own position is inside a `Pit`'s danger zone (`reach.any_pit_endangers`) -- live-diagnosed: without this, a target sitting in a pit produced a walk verb aimed squarely at it every tick, which `execute._pit_escape_mask` fought right back out of the moment the actor arrived, reading as the actor turning left then right forever at the pit's own edge; the fix is refusing to generate that verb at all rather than patching the tug-of-war after the fact; `_live_enemies` excludes any enemy outside the level's playable Y lane (`lane_y_max_for_level`) -- e.g. stage 1's scripted "behind a door" placeholder, a real tracked Enemy the player can never reach -- so it can't be targeted or block stage advance; `could_walk_to_near_enemy` prefers an on-screen chase but falls back to every live enemy ahead in the stage's own scroll direction when nothing is on-screen (never one behind, per `_ahead_in_stage_direction`) -- otherwise a live off-screen enemy holds back stage advance while nothing ever moves the camera toward it; stage advance gated on *every* live enemy (on-screen or not), not just on-screen ones -- except an off-screen enemy already at exactly 0 health (`_advance_blocking_enemies`), which nothing here will ever chase down to finish off -- and on an on-camera `Breakable` sitting on the stage path (`_advance_blocking_breakables`, same ahead/camera/pit filters as `could_open_breakable`): producing `WalkToAdvanceStage` next to `OpenBreakable` was a limit cycle, the HUD flipping between them (the old name WalkToBreakable still shows up in reports) because the approach score (14 down to 8) used to cross the advance's then-flat 12 around 30-45px, and the around-path walking off a same-X crate made that hypot grow until advance won, walked back in, and handed it over again -- advance is now 1 (and 0 while a blocking crate exists), so the cycle cannot return from ranking alone; `could_open_breakable` no longer falls back to behind-only crates (walking back to one, then advancing past it, is the same cycle); `could_rear_attack` deliberately does *not* fire early on an enemy merely closing toward the rear band, only on one already inside it (a live-diagnosed regression: `$322A` only hits by current position, so an early commit while the enemy is still outside `in_rear_band` is a guaranteed whiff that locks the actor in recovery frames exactly when the enemy arrives and lands its own hit for free); `could_rear_attack` still produces on rear-band membership alone (a `could_*` answers "possible?", not "best?") -- the de-preferring lives in `priority._emergency_rear_attack` via `_rear_attack_is_warranted`; `could_walk_to_near_enemy` offers the turn-around for a behind enemy (`execute._walk_to_near_enemy_target` aims past it so the D-pad flips facing); both its threat skips and `could_retreat_from_danger` are deliberately **side-agnostic**, so a dangerous close enemy is owned by exactly one of them no matter which way the actor faces. An earlier version paired a front-only skip here with a behind-skip in the retreat ("fleeing something at your back means running blind"), and that pairing is a *facing-feedback limit cycle*: retreating holds the D-pad away from the threat, holding a direction sets facing, `reach.enemy_behind_actor` reads facing, so the same enemy re-classified as "behind" every other tick and was handed back and forth between the retreat and the turn-around -- the commanded direction reversed on **every single tick** (19 reversals in 20, measured) for as long as one enemy stayed committed nearby, with the walk verb's lane sidestep riding on top so it read as darting up/down too. Covered end-to-end by `tests/ai/test_stability.py`; `could_walk_to_near_enemy`'s "already in range, don't walk closer" skip is **per-enemy**, not global. It used to be `if any(enemy is actionable): continue`, which suppressed the approach for *every* enemy the moment one was in range -- live-reported as "ataca o outro inimigo": with a grunt in punch range and Souther two steps behind it, **no verb was produced for Souther at all**, so the grunt's punch won by default and the AI hit the sideshow while the boss walked in. Ranking is what should settle that contest (the walk-in carries `_EMERGENCY_BOSS_TARGET`), and it cannot settle one it is never shown. The skip's *predicate* uses `_enemy_actionable` (real rear band, or punch band *and* actually in front) rather than raw `_in_punch_band`/`_in_rear_band` -- live-diagnosed fix: `_in_punch_band` ignores facing, so an enemy sitting behind the actor but still inside the punch box by raw distance (beyond both the real rear band and `could_punch`'s 4px behind tolerance) used to make this skip producing any verb at all, leaving the actor standing still and undefended; `could_retreat_from_danger` is gated on `_retreat_is_worth_it` -- **hurt** (below `RETREAT_HEALTH_PERCENT_THRESHOLD`, i.e. `HEALTH_CRITICAL_PERCENT`) or **`Surrounded`** -- because backing off is a concession, not a reflex: no enemy can be defeated without standing in the range it hits back from, so treating "a committed enemy is within caution distance" as a reason to flee refuses the only exchange that ever wins the fight (the AI backs off, the enemy follows, the round goes nowhere) *and* supplied both limit cycles above with the verb they oscillated against. Healthy and one-on-one, `could_walk_to_near_enemy` owns that same enemy and walks in; the attack tiers (jump 18, punch 20) outrank the walk (14) so it strikes the moment it is in range. That one predicate is also the **single owner test**: when it holds, retreat claims the enemy and the walk stands off; when it does not, the walk claims it and retreat produces nothing -- exactly one of the two ever holds a given enemy, which is structurally what stops them handing it back and forth. Otherwise it produces `RetreatFromDanger` for a dangerous (ATTACKING/CHARGE), not-yet-`_enemy_actionable` on-screen enemy once it's inside `_too_close_to_keep_approaching`'s caution zone -- a **box** (`punch_outer_x` + `RETREAT_CAUTION_MARGIN` on X, `RETREAT_CAUTION_MARGIN_Y` on the lane axis), not an X-only band: an X-only zone made the AI back away from a committed enemy several lanes away that could never connect, and since `could_walk_to_near_enemy` skips proposing a candidate for that same enemy, it neither approached nor retreated; the Y margin stays below `execute.WALK_TO_ENEMY_LANE_SAFETY_Y` so that verb's own sidestep actually leaves the zone; `could_grab_enemy` needs both halves -- `reach.grab_would_connect` (possible) *and* a non-empty `reach.grab_reasons` (worth it) for the same pair -- plus `reach.is_incoming_melee` not holding for it, since walking into a committed attack is how the actor takes the hit instead of the hold; it declines while armed (every held weapon's own melee move beats a bare hold, and closing to contact spends that advantage) and while airborne (`$AAA0` needs both bodies within 8px of elevation); `could_hold_actions` targets the enemy actually in `CombatPhase.GRABBED` (falling back to the nearest) rather than whichever live enemy is nearest, since every hold move's emergency is gated on its target being GRABBED; hold always acts; `could_jump_attack` splits the grounded and airborne questions: from the ground it needs `reach.in_jump_attack_band` (and the "never launch into a committed attack" `reach.is_incoming_melee` gate), but **once airborne it is committed** and keeps producing a `JumpAttack` for the nearest *live* enemy -- on screen or not -- even when no band target remains. Depending on the band mid-flight was a measured failure: the target walks out of it, drifts a lane, or the flight carries the actor past it, and a tick with no verb reaches `press_no_button`, which *releases the directional hold* -- so the jump both lands without ever pressing B and (when it happens during the 5-frame crouch) goes straight up, since `$384E` reads no direction at launch. On the flight harness that was **211 of 587 launched jumps producing no kick at all**, now 0. `_could_melee_strike` refuses to fire while airborne for the mirror-image reason: mid-air B *is* the kick (`$3914`), so a `Punch` there outranked `JumpAttack` (20 vs 18) and pressed B straight through its state machine, firing the kick by accident of timing rather than by design. `could_jump_attack` also declines **while holding a weapon**, like every other `MeleeAttacks` sibling: an armed jump runs the ROM's *parallel* `$3C-$43` family, a different move with a different reach, whose kick edge nothing here models -- the band is the unarmed free-flight range and `execute`'s state machine names the unarmed states. Recorded live with a bat in hand: 246 of 4859 ticks sat in `$42`, the armed jump attack, while the pipeline believed it was performing an ordinary jump kick. Armed, the answer is the weapon's own swing, reached by walking in. The two thrown weapons are the one attack family whose reach question `decide` still answers itself, and it answers it at the **interception point** as well as the current one: `thrown_weapon_impact_point`/`thrown_weapon_would_connect` (shared with `priority._emergency_thrown_weapon`, so the verb that gets produced and the score it is ranked by cannot be measured about different instants) solve the flight at the weapon's own speed -- pepper's 6 px/frame lets a target walk a real distance mid-flight where a knife's 16 px/frame does not -- and take the union with the observed position, the same additive rule the bands follow; `_could_melee_strike` (the shared body behind `could_punch`/`could_swing_bat_or_pipe`/`could_stab_with_knife_or_bottle`/`could_spray_pepper`) additionally refuses a `Jack` currently juggling his axe/torch (`Jack.has_projectile`) as a target for all four -- closing in on him mid-juggle trades hits with the spinning weapon instead of landing cleanly, so only `could_jump_attack`'s kick (arrives from above) and `could_rear_attack`'s from-behind chord (he isn't juggling toward his own back) stay live answers on him until he lets the weapon go; `could_projectile_sidestep` produces one `ProjectileSidestep` per observed `Projectile` `reach.projectile_threatens` judges a threat (gated like `could_retreat_from_danger`: not mid-animation, not held by an enemy, not itself holding one) -- once Jack actually throws the axe/torch it is a fast in-lane `Projectile` with no melee answer at all, only getting out of its lane; a threat judgment is itself withheld for Jack's axe/torch specifically while he is still juggling it -- live-diagnosed regression: the weapon's own object exists (and is judged as a `Projectile`) for the whole juggle, not only once thrown, so its spin's instantaneous velocity can momentarily point straight at the actor and satisfy the same in-lane/heading/impact-window test a genuine throw would, making the AI sidestep an axe that never left Jack's hand. `reach.jack_still_juggling` (`Projectile.type_id == $28`, matched to a live `Jack` with `has_projectile` true within `JACK_JUGGLE_ATTACH_RADIUS`) filters those out, so only a released throw ever produces a sidestep |
 | `partner.py` | `do_not_harm_partner` -- the only stage of the loop that **removes** verbs, between `generate_verb_tokens` and `determine_priority_verb` (so a withdrawn verb is never ranked, never executed, and never listed as a pending candidate on the HUD). A no-op without a `Partner` token, which is every one-player session. Two halves. **Friendly fire**: `$4478 (resolve_player_vs_player_collision)` tests the attacker's attack box `+$64` against the *other player's* body box `+$70` exactly as `$450C` does for an enemy, whenever the attacker's `+$34` is nonzero (player-health-lives-and-combat.md), so the same `reach.punch_would_connect`/`in_rear_band`/`in_jump_attack_band` the rest of the pipeline uses are asked about the `Partner` rather than the geometry being measured a second time -- withdrawing `Punch`/`MeleeWeaponAttack`/`HitAntonioBoomerang` in the punch box, `RearAttack` in the chord's band, `OpenBreakable` **only** on the ticks `decide.in_smash_range` says it actually strikes (withdrawing the approach too would park the actor in front of a prop for as long as the partner stood near it), and `JumpAttack` **only** on the grounded launch (airborne is committed -- a tick with no verb releases the pad and loses the kick *and* the launch direction). `GrabEnemy` (presses nothing, so `+$34` stays zero), `CallPolice` (`$4478` returns outright while a police special is active), the hold moves (damage goes to the body in hand) and the two attack-thrown weapons are deliberately never withdrawn -- the throw filter existed briefly (partner sharing the flight lane in front, nearer than the target) and was **removed on the user's call**: "it's almost impossible to hit the partner", so the lane test only cost real throws. **Item courtesy** (AI.md's Process section: leave what the partner needs more): `WalkToWeapon` while the partner is unarmed or worse-armed than the actor (`weapon_rank`), `WalkToPickup` on a `HealthPickup` while the partner's health is the lower of the two and on a `LifePickup` while the partner has fewer lives -- `SpecialPickup`/`ScorePickup` are claimed by neither |
-| `priority.py` | Emergency is computed per concrete `Verb` class from the `Information` tokens present in `Context` (never from the verb's type alone), including judgments answered directly against `reach.py`: `phases.is_punishable` decides the punishable tier for melee strikes and jump kicks, `reach.is_incoming_melee` gates `RetreatFromDanger` (its threat is over → 0), `reach.weapon_upgrade_rank` carries the rank `WalkToWeapon` scores with, `Surrounded` raises `CallPolice` to 80 above the health thresholds, and a live `Boss` raises it to the *same* top tier as the "about to die" case (88, not a lesser one) once health drops under its own laxer gate (`decide.POLICE_HEALTH_PERCENT_THRESHOLD_BOSS`, 60% -- `$16A60 later_boss_police_special_reaction`'s flat -10 HP is roughly a third of a later-boss's whole 32-max health bar in one press, worth outranking a combo in progress rather than hoarded for the panic thresholds and never spent), and any `Attack` on a **stunned** `Grunt` is capped by how much stun is left (`_stunned_target_ceiling`, applied branch-wide in `_emergency` as a ceiling that can only lower a score, reading the stunned `Grunt`'s own `stun_timer`): hitstun (<= `phases.HITSTUN_FRAMES`) caps at 21, just above a plain strike, so the ROM's 3-hit chain -- whose third hit is the knockdown -- is not abandoned for an equally punchable fresh enemy; anything longer is the `$A0` pepper stun and caps at 19, *below* a plain strike, since that body is parked for nearly three seconds. Both stay far below the `RearAttack` escape (55/60), which they beat at the punishable tier (60) before this, and above every `Walk` tier so the actor never walks off mid-stun. A `KNOCKDOWN` keeps 60 **while nothing is incoming**, since that window ends in a wake-up with invulnerability and really does have to be used now -- but while `reach.is_incoming_melee` holds for another enemy it is capped by `_EMERGENCY_ATTACK_PARKED_UNDER_THREAT` like a stun, and for a sharper version of the same reason: a body on the floor that is about to become invulnerable anyway is the worst thing on screen to trade a hit for. Live-reported against Souther -- with the claw committed two steps away, punching a knocked-down grunt scored 60 against the dodge's 46 and won the tick. A third ceiling, `_EMERGENCY_ATTACK_PARKED_UNDER_THREAT` (10), applies to a stunned target while `reach.is_incoming_melee` holds for **another** enemy against the same actor (`_other_enemy_is_incoming`): the two above are both over `WalkToNearEnemy`'s realistic 11..14, so nothing ever interrupted a combo on a parked body and the AI took punches in the back -- user-reported, and exactly the situation the whole ceiling exists for ("a stunned enemy cannot act, cannot retaliate, and will still be standing there in a moment"). Sitting just under the walk's own base hands the tick to the turn-and-face while the threat is genuinely close (inside ~60px) and leaves the punish winning over a distant one. Measured over six 90s recordings against a running host: hits taken fell from 5.2 to 3.1 per minute at an unchanged attack rate (157 attacks started on each side) — one `_emergency_*` function per class (or a shared function for the four melee-strike siblings, or a `_held_enemy_emergency` factory for the five hold moves), dispatched by a `type(verb) → function` table; module constants are named contributions, not static outcomes. Scores: counter-grab 100 (Myself held by enemy), tech-recover 90 (Myself throw_tech_ready), call-police 88 (Myself health below a lives-aware threshold: POLICE_HEALTH_PERCENT_THRESHOLD, raised to POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE on the last life -- or, the same 88, a live Boss and health below POLICE_HEALTH_PERCENT_THRESHOLD_BOSS), rear 60/55 (target dangerous / not) only while `decide._rear_attack_is_warranted` -- boxed in between two enemies, or target inside the punch dead zone -- and 11/9 otherwise, since `$322A` costs up to 21 frames of startup and hits only by current position, so the `WalkToNearEnemy` turn-around (12..14 in the rear band) reaches the same enemy faster and outranks it; the chord stays produced on band membership alone and still wins when nothing better is on the table, grab-enemy 58 (reason `CLEAR_REAR` for the pair -- above every strike on an enemy that can still act and above the warranted chord against a *calm* rear enemy, below the 60 chord against one already committed) / 30 (`DEAD_ZONE`, an improvement on an ordinary fight rather than an escape from a bad one), 0 with no opportunity left, supplex 68 / throw-held 70 / flip 66 / release 50 (target `Enemy` actually `GRABBED`) / knee -- `_emergency_attack_held_enemy`, not the generic `_held_enemy_emergency` factory the other four hold moves share -- 67 while `actor.hold_ticks <= HOLD_KNEE_TICKS` (6, `observe.HoldTracker`'s cross-tick count of ticks since this actor's current hold began; no ROM escape counter is decoded, so this is a heuristic in the same category NoraAttackTracker already is) and `_EMERGENCY_DEFAULT` once past it, so a fresh hold mils a few knees (67 clears FlipHold's fixed 66) before FlipHold's own constant tier finishes it -- live-reported as the AI grabbing and flipping straight to Supplex with zero knees landed, since the old fixed 64 never cleared 66. Pinned as a sequence, not a single tick, by `tests/ai/test_stability.py`'s `HoldSequenceStabilityTests` (a lone-tick test cannot distinguish "grab then finish" from "grab, knee, knee, finish"), verified to reproduce the exact reported symptom (`['FlipHold', 'Supplex']`) against the old scoring, knife/pepper 25 down to a floor of 21 (target beyond melee, within throw range, 1 point per 15px closer), jump 28/24/18 (target punishable / a `Nora` not currently dangerous within `NORA_RECOVERY_PUNISH_TICKS` (10) of her own `ticks_since_last_attack` -- see `observe.NoraAttackTracker` -- / neither) and melee-strike (punch/swing/stab/spray, shared formula) 60/20 (target punishable / not), open-breakable 16 in smash range, else 14 down to a floor of 8 (1 point per 15px closer) -- the two tiers the former SmashBreakable/WalkToBreakable pair carried, so the merge changed no ranking, weapon 12+rank (14..17, every rank clearing walk-to-near-enemy's own floor of 8 outright rather than merely tying it, floor `Weapon` outranks the held one, better upgrade scoring higher), walk-to-near-enemy 14 down to a floor of 8 (1 point per 15px closer), retreat-from-danger 17 down to a floor of 15 (1 point per 25px closer -- above walk-to-near-enemy's base 14 so backing off an imminent threat outranks still approaching a different target, and below the *lowest* real attack tier, jump-attack's 18, so attacking always wins once actually possible; the earlier 30/20 band broke that invariant by beating punch 20, jump 18/28 and knife-throw 21..25. This ranking only ever comes up when `decide._retreat_is_worth_it` already let the verb be produced -- hurt or surrounded -- so it means "while conceding, backing off beats approaching", not "danger outranks engaging"), projectile-sidestep 45 down to a floor of 30 (1 point per 2 ticks-to-impact closer, `_emergency_projectile_sidestep` reusing `_distance_emergency` with a tick count standing in for its usual pixel distance -- above every ordinary approach/retreat tier so a confirmed incoming throw is answered before it lands, below a guaranteed punishable strike (60) and the rear/grab-clear-rear escapes (55/58/60), which stay right even with a projectile also in flight), dodge-souther-slash 46 flat (deliberately not the Antonio dodge's 58: that tier had to beat a strike on a live Antonio because standing still is what arms his kick, whereas Souther's own gate *narrows* when the actor stands still ($58) and widens when it walks in ($68), so there is nothing here to out-rank a punch for -- it only has to beat every approach/retreat tier and projectile-sidestep's own ceiling of 45, so the claw is answered before an unrelated throw), grab-souther-on-punish 61 (the same tier and the same arithmetic as grab-antonio-on-punish: it must clear punch-on-punish once the boss raise applies to both, or a stale Punch wins the tick and the hold never starts), grab-souther-walk-in 35 (the chase: the same tier as grab-antonio-walk-in, over the punch it replaces and under the punish grab, since a hold on a boss who cannot act still beats one on a boss who can), stage-advance 1 (lowest of any verb that still scores -- must lose to every other live candidate, including a ScorePickup at 9; no *blocking* `Enemy` anywhere -- `_advance_blocking_enemies` excludes an off-screen straggler stuck at 0 health -- and no on-camera ahead `Breakable`, `_advance_blocking_breakables`; either gate scores the verb 0 so an injected candidate cannot outrank `OpenBreakable`), engagement verbs (walk-in / strike / grab / throw) add `_EMERGENCY_ARMED_TARGET` (7) when the target is an ordinary enemy holding a pickup weapon `$08-$0C` or a Jack still juggling his axe, and `_EMERGENCY_BOSS_TARGET` (14) when the target is a `Boss` -- sized to dominate WalkToNearEnemy's 6-point distance span so a far armed foe still beats a close unarmed one and a far boss still beats a close armed one; bosses are excepted from the armed raise, pickup tiers 50/15/12/11/9 (health-critical/health/life/special/score -- special and score both raised from their original 9/3 to clear walk-to-near-enemy's floor of 8, which they could not otherwise ever beat while any enemy existed anywhere on screen) — the max wins, with the `priority` field breaking ties; hold throws outrank knees. `could_*` generators never pre-select a single "best" candidate themselves (per AI.md's own principle) -- `_distance_emergency` is what lets several same-type candidates (near-enemy, thrown-weapon, breakable) rank against each other here instead; a first coarse-bucketed version was discarded after a live run showed clustered enemies tying every tick and the AI flip-flopping targets, so this scores near-continuously instead. **Remaining exact ties are broken deterministically and stably (`min(tied, key=repr)`), never at random.** `random.choice` was defensible per tick -- equally scored candidates really are equally good -- and disastrous over a run of them: the whole decision is remade every poll, so re-rolling turned "either target is fine" into swapping between them ~15 times a second, and since tied candidates are overwhelmingly the *same verb class aimed at different targets* (one per enemy, by the no-pre-selection rule above) whose targets lie in different directions, each swap re-aimed the D-pad. Near-continuous scoring made ties rarer but they stay routine at any distance-band floor and at every flat tier, so rarer was never enough on its own; `repr` gives a total order over frozen dataclasses that depends only on field values, so the same candidate set yields the same winner every tick. Covered by `tests/ai/test_stability.py`. `_emergency_thrown_weapon` scores the knife/pepper candidates by their **flight** distance through `decide.thrown_weapon_impact_point`, not by the current gap, so a target running away ranks below one standing still at the same instantaneous distance -- and never scores 0 for being outside a range `decide` never measured it against `_target_is_in_hand` is the gate every hold move scores through -- `CombatPhase.GRABBED`, or `reach.held_enemy` naming this target, which is the only thing that works for a boss; `_boss_attack_gate_is_live` drops a non-health item detour to 0 while Antonio's kick gate covers the actor |
+| `priority.py` | Emergency is computed per concrete `Verb` class from the `Information` tokens present in `Context` (never from the verb's type alone), including judgments answered directly against `reach.py`: `phases.is_punishable` decides the punishable tier for melee strikes and jump kicks, `reach.is_incoming_melee` gates `RetreatFromDanger` (its threat is over → 0), `reach.weapon_upgrade_rank` carries the rank `WalkToWeapon` scores with, `Surrounded` raises `CallPolice` to 80 above the health thresholds, and a live `Boss` raises it to the *same* top tier as the "about to die" case (88, not a lesser one) once health drops under its own laxer gate (`decide.POLICE_HEALTH_PERCENT_THRESHOLD_BOSS`, 60% -- `$16A60 later_boss_police_special_reaction`'s flat -10 HP is roughly a third of a later-boss's whole 32-max health bar in one press, worth outranking a combo in progress rather than hoarded for the panic thresholds and never spent), and any `Attack` on a **stunned** `Grunt` is capped by how much stun is left (`_stunned_target_ceiling`, applied branch-wide in `_emergency` as a ceiling that can only lower a score, reading the stunned `Grunt`'s own `stun_timer`): hitstun (<= `phases.HITSTUN_FRAMES`) caps at 21, just above a plain strike, so the ROM's 3-hit chain -- whose third hit is the knockdown -- is not abandoned for an equally punchable fresh enemy; anything longer is the `$A0` pepper stun and caps at 19, *below* a plain strike, since that body is parked for nearly three seconds. Both stay far below the `RearAttack` escape (55/60), which they beat at the punishable tier (60) before this, and above every `Walk` tier so the actor never walks off mid-stun. A `KNOCKDOWN` keeps 60 **while nothing is incoming**, since that window ends in a wake-up with invulnerability and really does have to be used now -- but while `reach.is_incoming_melee` holds for another enemy it is capped by `_EMERGENCY_ATTACK_PARKED_UNDER_THREAT` like a stun, and for a sharper version of the same reason: a body on the floor that is about to become invulnerable anyway is the worst thing on screen to trade a hit for. Live-reported against Souther -- with the claw committed two steps away, punching a knocked-down grunt scored 60 against the (since retired) claw dodge's 46 and won the tick. A third ceiling, `_EMERGENCY_ATTACK_PARKED_UNDER_THREAT` (10), applies to a stunned target while `reach.is_incoming_melee` holds for **another** enemy against the same actor (`_other_enemy_is_incoming`): the two above are both over `WalkToNearEnemy`'s realistic 11..14, so nothing ever interrupted a combo on a parked body and the AI took punches in the back -- user-reported, and exactly the situation the whole ceiling exists for ("a stunned enemy cannot act, cannot retaliate, and will still be standing there in a moment"). Sitting just under the walk's own base hands the tick to the turn-and-face while the threat is genuinely close (inside ~60px) and leaves the punish winning over a distant one. Measured over six 90s recordings against a running host: hits taken fell from 5.2 to 3.1 per minute at an unchanged attack rate (157 attacks started on each side) — one `_emergency_*` function per class (or a shared function for the four melee-strike siblings, or a `_held_enemy_emergency` factory for the five hold moves), dispatched by a `type(verb) → function` table; module constants are named contributions, not static outcomes. Scores: counter-grab 100 (Myself held by enemy), tech-recover 90 (Myself throw_tech_ready), call-police 88 (Myself health below a lives-aware threshold: POLICE_HEALTH_PERCENT_THRESHOLD, raised to POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE on the last life -- or, the same 88, a live Boss and health below POLICE_HEALTH_PERCENT_THRESHOLD_BOSS), rear 60/55 (target dangerous / not) only while `decide._rear_attack_is_warranted` -- boxed in between two enemies, or target inside the punch dead zone -- and 11/9 otherwise, since `$322A` costs up to 21 frames of startup and hits only by current position, so the `WalkToNearEnemy` turn-around (12..14 in the rear band) reaches the same enemy faster and outranks it; the chord stays produced on band membership alone and still wins when nothing better is on the table, grab-enemy 58 (reason `CLEAR_REAR` for the pair -- above every strike on an enemy that can still act and above the warranted chord against a *calm* rear enemy, below the 60 chord against one already committed) / 30 (`DEAD_ZONE`, an improvement on an ordinary fight rather than an escape from a bad one), 0 with no opportunity left, supplex 68 / throw-held 70 / flip 66 / release 50 (target `Enemy` actually `GRABBED`) / knee -- `_emergency_attack_held_enemy`, not the generic `_held_enemy_emergency` factory the other four hold moves share -- 67 while `actor.hold_ticks <= HOLD_KNEE_TICKS` (6, `observe.HoldTracker`'s cross-tick count of ticks since this actor's current hold began; no ROM escape counter is decoded, so this is a heuristic in the same category NoraAttackTracker already is) and `_EMERGENCY_DEFAULT` once past it, so a fresh hold mils a few knees (67 clears FlipHold's fixed 66) before FlipHold's own constant tier finishes it -- live-reported as the AI grabbing and flipping straight to Supplex with zero knees landed, since the old fixed 64 never cleared 66. Pinned as a sequence, not a single tick, by `tests/ai/test_stability.py`'s `HoldSequenceStabilityTests` (a lone-tick test cannot distinguish "grab then finish" from "grab, knee, knee, finish"), verified to reproduce the exact reported symptom (`['FlipHold', 'Supplex']`) against the old scoring, knife/pepper 25 down to a floor of 21 (target beyond melee, within throw range, 1 point per 15px closer), jump 28/24/18 (target punishable / a `Nora` not currently dangerous within `NORA_RECOVERY_PUNISH_TICKS` (10) of her own `ticks_since_last_attack` -- see `observe.NoraAttackTracker` -- / neither) and melee-strike (punch/swing/stab/spray, shared formula) 60/20 (target punishable / not), open-breakable 16 in smash range, else 14 down to a floor of 8 (1 point per 15px closer) -- the two tiers the former SmashBreakable/WalkToBreakable pair carried, so the merge changed no ranking, weapon 12+rank (14..17, every rank clearing walk-to-near-enemy's own floor of 8 outright rather than merely tying it, floor `Weapon` outranks the held one, better upgrade scoring higher), walk-to-near-enemy 14 down to a floor of 8 (1 point per 15px closer), retreat-from-danger 17 down to a floor of 15 (1 point per 25px closer -- above walk-to-near-enemy's base 14 so backing off an imminent threat outranks still approaching a different target, and below the *lowest* real attack tier, jump-attack's 18, so attacking always wins once actually possible; the earlier 30/20 band broke that invariant by beating punch 20, jump 18/28 and knife-throw 21..25. This ranking only ever comes up when `decide._retreat_is_worth_it` already let the verb be produced -- hurt or surrounded -- so it means "while conceding, backing off beats approaching", not "danger outranks engaging"), projectile-sidestep 45 down to a floor of 30 (1 point per 2 ticks-to-impact closer, `_emergency_projectile_sidestep` reusing `_distance_emergency` with a tick count standing in for its usual pixel distance -- above every ordinary approach/retreat tier so a confirmed incoming throw is answered before it lands, below a guaranteed punishable strike (60) and the rear/grab-clear-rear escapes (55/58/60), which stay right even with a projectile also in flight), engage-souther 62 (plus the boss raise, 76: above every strike and grab tier on anything else -- a stray grunt's `RearAttack` chord once locked the actor mid-engage -- and below `CounterGrab`/`TechRecover`; the hold family never coexists with it), release-to-regrab 69 (the Souther hold loop's hand-back; his knees are exempt from the knee budget, since `souther.hold_step` counts them itself), stage-advance 1 (lowest of any verb that still scores -- must lose to every other live candidate, including a ScorePickup at 9; no *blocking* `Enemy` anywhere -- `_advance_blocking_enemies` excludes an off-screen straggler stuck at 0 health -- and no on-camera ahead `Breakable`, `_advance_blocking_breakables`; either gate scores the verb 0 so an injected candidate cannot outrank `OpenBreakable`), engagement verbs (walk-in / strike / grab / throw) add `_EMERGENCY_ARMED_TARGET` (7) when the target is an ordinary enemy holding a pickup weapon `$08-$0C` or a Jack still juggling his axe, and `_EMERGENCY_BOSS_TARGET` (14) when the target is a `Boss` -- sized to dominate WalkToNearEnemy's 6-point distance span so a far armed foe still beats a close unarmed one and a far boss still beats a close armed one; bosses are excepted from the armed raise, pickup tiers 50/15/12/11/9 (health-critical/health/life/special/score -- special and score both raised from their original 9/3 to clear walk-to-near-enemy's floor of 8, which they could not otherwise ever beat while any enemy existed anywhere on screen) — the max wins, with the `priority` field breaking ties; hold throws outrank knees. `could_*` generators never pre-select a single "best" candidate themselves (per AI.md's own principle) -- `_distance_emergency` is what lets several same-type candidates (near-enemy, thrown-weapon, breakable) rank against each other here instead; a first coarse-bucketed version was discarded after a live run showed clustered enemies tying every tick and the AI flip-flopping targets, so this scores near-continuously instead. **Remaining exact ties are broken deterministically and stably (`min(tied, key=repr)`), never at random.** `random.choice` was defensible per tick -- equally scored candidates really are equally good -- and disastrous over a run of them: the whole decision is remade every poll, so re-rolling turned "either target is fine" into swapping between them ~15 times a second, and since tied candidates are overwhelmingly the *same verb class aimed at different targets* (one per enemy, by the no-pre-selection rule above) whose targets lie in different directions, each swap re-aimed the D-pad. Near-continuous scoring made ties rarer but they stay routine at any distance-band floor and at every flat tier, so rarer was never enough on its own; `repr` gives a total order over frozen dataclasses that depends only on field values, so the same candidate set yields the same winner every tick. Covered by `tests/ai/test_stability.py`. `_emergency_thrown_weapon` scores the knife/pepper candidates by their **flight** distance through `decide.thrown_weapon_impact_point`, not by the current gap, so a target running away ranks below one standing still at the same instantaneous distance -- and never scores 0 for being outside a range `decide` never measured it against `_target_is_in_hand` is the gate every hold move scores through -- `CombatPhase.GRABBED`, or `reach.held_enemy` naming this target, which is the only thing that works for a boss; `_boss_attack_gate_is_live` drops a non-health item detour to 0 while Antonio's kick gate covers the actor |
 | `gamepad.py` | `VirtualGamepad`/`SharedGamepadState` — the only code allowed to call `hold_buttons`/`press_buttons`/`release_buttons`; never `write_memory`/`write_value`. `VirtualGamepad` also owns the virtual left/right **axis** (`steer_x`, `AXIS_RAMP_TICKS`): callers no longer assert a D-pad direction directly for walking -- they request "more left"/"more right"/"center" every tick, and the axis only reports an edge (which `execute._hold_steered` then turns into an actual `LEFT_MASK`/`RIGHT_MASK` press) once that request has held for `AXIS_RAMP_TICKS` (3) consecutive ticks. Reversing all the way from one edge to the other therefore takes `2 * AXIS_RAMP_TICKS` ticks (it has to cross center), while a single contrary or neutral tick only steps the axis one place back rather than resetting it. This exists because immediately translating each tick's raw direction decision into a press is itself an oscillation source once `decide.py`'s target/side picks flip even occasionally (a target swap, a facing re-read, ordinary jitter): the axis is a deliberate low-pass filter in front of the D-pad, on top of (not a replacement for) `execute.py`'s existing deadbands/hysteresis, which still decide *what* direction is wanted each tick. `release()` resets the axis to 0 immediately, rather than letting it ramp down. Per-tick state, so it depends on one `VirtualGamepad` persisting across ticks the way `AgentLoop`/`app.py` already do; `tests/ai/test_stability.py`'s multi-tick harness has to build its `VirtualGamepad` once per run for the same reason (a fresh one every tick can never reach an edge) |
-| `execute.py` | **`WalkToAdvanceStage` hops when `plan_route` cannot walk the lookahead** (`hop_landing_x` + `_jump_toward`); if the gap is wider than the kick it stalls at the wall and never injects raw RIGHT/LEFT into the hole. `execute_tick`'s pit override does **not** run while airborne (lane-plane `pit_endangers` would freeze a hop mid-gap). **`WalkToNearEnemy` and `OpenBreakable` steer by planned route** (`_routed_mask` -> `navigation`): the whole path is rebuilt every tick and only its **first vector** used, because the world moves under a plan (enemies walk, crates break, phases flip) while a search of this playfield costs well under a millisecond against a 33 ms tick. An empty mask means either "arrived, stand still" or "boxed in", and only the second falls back to `_movement_mask`'s straight line. The enemy approach uses `enough_contact` (a floor -- a moving target is not worth perfecting an alignment for) and closes on X in the actor's *own* lane, converging only once `alongside`, because the enemy being approached is exempt from its own danger set; the crate approach uses `maximize_contact` (it does not move, so lining up square with its face is free) and keeps the crate in its own obstacle set, since dropping it routes the actor straight down through it. Facing a crate to hit it is `_face_prop_mask`, a raw sign test with the stage direction as the dead-centre tie-break, *not* `_face_toward_mask`: the hysteresis there exists because two bodies in melee sit on top of each other and jitter flips the sign every tick, which a target that cannot move does not do -- and answering 0 inside the band is a stall, measured live as 2,300 punches thrown into empty air over 76 seconds from exactly `DIRECTION_HYSTERESIS_X` away, facing the wrong way, on a prop the same run had already broken from 11px while facing it. Ties on which side to stand are still broken by the measured anchors (facing within `DIRECTION_HYSTERESIS_X`, the stage direction for a crate) -- a cost tie picked arbitrarily put the actor *past* a crate, where `could_open_breakable` stops calling it "ahead" and hands the tick to WalkToAdvanceStage, back into the crate. **`RetreatFromDanger`, `ProjectileSidestep`, `WalkToWeapon`/`WalkToPickup` and `WalkToAdvanceStage` route too**, each reusing `_routed_mask` with the destination logic in `_retreat_from_danger_target`/`_projectile_sidestep_target`/etc. left untouched -- only *how* the actor gets there changed, never *where* or *which side*. Three things differ per verb and are worth knowing before touching any of them: `RetreatFromDanger` and `ProjectileSidestep` treat **every** live enemy as danger (no target exemption -- fleeing is never trying to stand in anyone's reach, unlike an approach); `WalkToWeapon`/`WalkToPickup` use `nav.strike_goal(..., inner_dx=0)` rather than a `PointGoal` with a scalar tolerance, because a tolerance wide enough to satisfy `PICKUP_RANGE_X` let the goal read "reached" up to 4px short on the narrower `PICKUP_RANGE_Y`, freezing the actor there forever (`_routed_mask` never falls back once `goal.is_reached` is true) -- `strike_goal`'s region is built from the same asymmetric `abs(dx) <= stop_dx and abs(dy) <= lane_slack` sentence the arrival check already states, so the two cannot disagree; `WalkToAdvanceStage` routes **solids only, never danger** -- its goal is a vertical strip 40px ahead spanning the lane (Y is free -- a point on the actor's own Y that landed in or behind a pit made every covering cell sit in the hole, so best-effort walked straight in on a lane that had room above or below) that slides forward with the actor every tick rather than a real destination, and once a nearby dangerous enemy's own reach box is wide enough to contain that strip, `nav.plan_route`'s danger-aware pass can never "reach" it (arriving there means standing inside the thing being avoided) and silently falls through to the danger-blind solids-only pass, walking the actor straight at the enemy -- confirmed on a synthetic sweep before reverting to solids-only, which is exactly the obstacle set the pre-routing ad-hoc dodge already covered here. `WalkToAdvanceStage` also keeps its `routed_mask or mask` short-circuit (not a bitwise merge): the router's own vector wins whenever it produces one -- including a pure Y-only pit dodge with no lateral bit, which `PitDodgeSideStabilityTests` explicitly requires -- and `mask` (the raw `RIGHT_MASK`/`LEFT_MASK`) only substitutes on total router failure, preserving the one guarantee this verb cannot give up: the D-pad always carries `verb.direction`'s bit unless the router legitimately needed the tick for a pure dodge. `_find_safe_spot` (this file) gates its own candidates the same way -- see that function's own docstring above. Everything else still steers straight-line; that is future work. `execute_tick(verb, context, gamepad)` is the actual per-tick entry point `loop.py` calls -- it runs the pit-escape override (below) before choosing between `press_no_button` and `execute_verb`, so `execute_verb`'s own dispatch to controller input is reached only once that override declines. Every press-only handler goes through `_press`, which drops the sticky directional hold first -- `hold_buttons` latches until changed and `SharedGamepadState.press` re-arms it, so a walk tick followed by an attack tick used to leave the actor walking through its own strike (past the enemy and out of its punch band, or over the pickup it had just pressed B to collect); a walk handler whose actor/target vanished from the context releases instead of coasting on the stale hold; `_movement_mask` steers every walk verb around on-screen `Breakable`s and `Pit`s (falling in a pit costs a full life — player-health-lives-and-combat.md), but only *incidentally*, while some other walk verb's path happens to cross one. The `Breakable` dodge nudges `to_y` around the prop while still closing `to_x` in the same tick (a fixed point margin is enough to clear with a diagonal step); the `Pit` dodge cannot do that — a pit is a rectangle wide/tall enough that a diagonal command can still cut through the footprint before Y finishes moving, live-diagnosed — so instead it freezes `to_x` at the actor's own current X (no L/R bit at all) for as long as `from_y` still sits inside the pit's own band (`reach.PIT_AVOID_MARGIN` past its `lane_y`/height), and only lets X resume once `from_y` has actually cleared it, not merely been asked to; recomputed fresh every tick from the live position, so a drift back in self-corrects. The Y dodge target itself overshoots that same boundary by `PIT_DODGE_OVERSHOOT` rather than landing exactly on it -- live-diagnosed: aiming precisely at the boundary meant that once `from_y` drifted to within `MOVE_DEADBAND_Y` of it (well before actually crossing it, since both the deadband check and the "not cleared" check share that one point), the Y mask bits went quiet on a `from_y` the danger check still called "not cleared" while X stayed frozen -- a 0 mask, the actor frozen a few pixels short of escaping while `pit_endangers` still read true. **Which** side that Y target aims for is `_pit_dodge_target_y`, and it comes from the pit's own danger edges -- the nearer one that still clears inside the lane -- never from the lane midpoint. The dodge freezes X, so nothing else is moving to break a tie and an unstable side pick here is *permanent*, unlike the Breakable dodge above which keeps closing X and walks past the prop regardless. The old rule read `from_y < (lo + hi) / 2`, a midpoint that has nothing to do with the pit, routinely falls **inside** its danger band, and which the rule then steered the actor *toward* (upper half aimed below, lower half above) -- so the actor crossed it, the pick flipped, and it crossed back forever. Reproduced on the tick harness with a 96x40 pit at lane 40..80 (danger 32..88, midpoint 57, inside it): the actor stopped dead at the pit's edge alternating UP/DOWN between y=56 and y=60, X frozen at 394, never advancing the stage -- 120 of 288 swept pit/lane/direction configurations failed that way, now 0. The nearer danger edge is stable because it is *self-reinforcing*: its flip point is the band's own centre and the chosen direction always moves the actor **away** from it, so a pick cannot undo itself; it is also the shortest way out. A side only counts when its aim point survives the lane clamp still clear of the band, since otherwise `_clamp_target_y` drags it back inside and the mask collapses to 0 -- which for `state_machine_walk_to_advance_stage` is worse than a stall, its `or mask` fallback then commanding the raw lateral direction straight into the pit. The dodge's own "already clear on Y" test is **strict** (`<`/`>`) so it means exactly what `reach.pit_endangers`' inclusive band means: with `<=`/`>=` the two disagreed about the single boundary pixel, the escape stopped there, and `_pit_escape_mask` -- still reading `pit_endangers` as true -- shoved the actor laterally back off the pit's centre. `_pit_escape_mask`'s own last-resort fallback now derives its direction from that same `_pit_dodge_target_y` (it previously pushed *toward* the pit's centre, the exact opposite of its documented job). `execute_tick`'s own pit override (`_pit_escape_mask`, `reach.pit_endangers`) is the standalone reaction to the actor's own current position already sitting inside a pit's danger zone with no walk verb underway to steer it -- knocked there, or having simply drifted in — and takes over the controller before either `press_no_button` or `execute_verb` runs, regardless of which `Verb` (if any) won the tick; it hands `_movement_mask` a point on the far side of the pit along X purely to make that same dodge logic recognise and take over — the actual escape (freeze X, clear Y toward whichever half of the lane is nearer) is entirely `_movement_mask`'s own, so both paths agree by construction — and never returns 0 while `pit_endangers` holds regardless: on the rare chance `_movement_mask` still resolves to an empty mask, it falls back to a direct, deadband-free push away from the pit's own center on Y, since this is the one place in the pipeline "the actor believes it is in a pit" is known for certain, and refusing to hand back "do nothing" for that belief is a categorical guarantee, not just a consequence of the current margin/deadband numbers; `state_machine_dodge_souther_slash` is a pure lane step and, unlike `state_machine_dodge_antonio_kick`, does **not** delegate to the jump state machine -- the hop is what `$16234` punishes. Its side pick (`_souther_slash_sidestep_target`) comes from *Souther's own lane*, not the lane midpoint `_projectile_sidestep_target` uses: the midpoint rule steers the actor toward the middle and across it, so the pick undoes itself, which is harmless for a throw that is over in a tick and a permanent oscillation for a claw that lasts many ticks with X frozen -- 18 lane reversals in 40 ticks on the tick harness before the fix, the same self-reinforcing correction `_pit_dodge_target_y` already documents. `_walk_to_near_enemy_target` stops *inside* an enemy's own dead zone when it has one (`_dead_zone_stop_dx`, from the extracted `Enemy.min_reach`): some enemies cannot hit what is pressed against them, and today the ROM picks out exactly one -- Nora, whose whip (shape `$22`) covers 32..80px. Stopping at the actor's own punch edge instead, 46px for Axel, parks it squarely inside that band; measured against a real Nora in her attacking phase, the AI settled at 51px, spent 108 of 120 ticks inside her reach and threw **zero** attacks, which is what "the AI cannot deal with Noras" looks like in play. Aiming for `min_reach - REACH_SAFETY_MARGIN` instead (floored at the punch's own usable inner edge, since closer than that is the grab's business) takes it to the pocket she has no answer to: 9px, 22 of 120 ticks in the band, and it attacks throughout. Enemies with no dead zone -- every other type -- are unaffected. `_crossing_would_walk_into_the_swing` is the other half: with the approach aiming for the pocket, a live recording had Nora land **9 of her 10 hits at ~80px**, the far edge of her reach, catching the actor as it set off across the band. So the crossing waits out a live swing -- but only from outside her whole reach, only for an enemy that *has* a dead zone, and only while the actor is in the lane her attacks actually sweep (`reach.enemy_lane_covers`). Each of those three conditions was paid for: holding ground against an ordinary enemy is passivity (measured: -20% damage dealt, more taken), and gating on the X gap alone made the AI sit out swings it was never in the line of, costing half its stage progress (1487px against 2579-3674). `_walk_to_near_enemy_target`'s **lane aim never depends on the enemy's combat phase**, which is what stopped the approach darting up and down. It has three branches: arrived on X (`dx <= stop_dx`) converges onto the enemy's lane, the one place that aims at it, since the punch needs `dy` inside `PUNCH_RANGE_Y`; still approaching *and* standing inside a committed enemy's line (`dy < WALK_TO_ENEMY_LANE_SAFETY_Y`) aims at a **fixed** offset lane, so repeated ticks converge on one point instead of stepping away forever; otherwise it holds the actor's current lane. The old version converged onto the enemy's lane from any distance and sidestepped off it while the enemy was committed, so every crossing of `is_dangerous` -- every few ticks in a real fight -- flipped the lane aim by a full `2 * WALK_TO_ENEMY_LANE_SAFETY_Y` (56px) and the whole walk-in alternated UP/DOWN. Holding the lane serves the original "never walk down its line of attack" intent more directly than the sidestep did, by not converging onto that line in the first place; `_retreat_from_danger_target` steers to `_find_safe_spot`'s result when it finds one (computed lazily, right here, rather than for every actor every tick: it weighs the sidesteps against the straight retreat by clearance, lane/camera bounds and pits) and otherwise steps straight away from the target on X, holding the actor's current lane; `_projectile_sidestep_target` is a pure lateral step -- holds X at the actor's current position (the danger is entirely about sharing the projectile's Y column, not its X) and steps `PROJECTILE_SIDESTEP_DISTANCE` (40, comfortably past `inference.PROJECTILE_LANE_SLACK`'s 24) off whichever lane edge is nearer, the same "away from the nearer edge" pick `_movement_mask`'s own prop/pit dodges use -- deliberately not "away from the projectile's Y", since the actor already shares that Y (that's what made it a threat) and stepping away from it is not a stable direction, it would flip on ordinary walk jitter; `decide.in_smash_range` has an **inner** edge as well as an outer one (`punch_usable_inner_x`): a punch box starts 16px in front of Axel, so a prop the actor is standing on top of cannot be hit at all. Its outer edge is `breakable_smash_outer_x`, not `BREAKABLE_PUNCH_X` flat: that constant is an origin-to-origin distance, meaningful only while the prop is narrower than the punch reaches, and a round-6 prop's wall already reaches exactly 36px from its own origin -- so a flat 36 would call every position the ROM allows out of range and the verb would approach a prop it could never report arriving at, the same stall from the other side. The reach therefore grows with the wall and only with the wall (`SMASH_WALL_CLEARANCE_X` past it, clearing both `NAV_STEP` and `MOVE_DEADBAND_X` so a lattice or deadband stop just outside still counts as arrived); every prop whose wall is already inside `BREAKABLE_PUNCH_X` keeps exactly the reach it always had. Without it the executor pressed B instead of repositioning, and the attack animation then blocked every verb on the next tick -- which reaches `press_no_button`, releasing the controller and resetting the steering axis, so the actor never walked away either. Recorded live: **94 seconds** of a 7-minute run spent punching one type-$11 prop from 1px away, ~430 presses, ending in a lost life, plus 22 shorter stalls in the same run; afterwards the longest stall in a comparable run was 10.8s. `_walk_to_breakable_target` picks which side of a prop to stop on from the **stage's own progress direction** when the actor is standing essentially on it, not from `actor.facing_left`: a prop, unlike an enemy, never moves to break the symmetry, so reading the side off facing is a feedback loop -- press left, facing goes left, the stop point jumps to the far side, press right, and back. Measured live: 107 seconds of a 200s run at one prop with LEFT held on 244 ticks and RIGHT on 240, the virtual steering axis cancelling almost all of it (2242 ticks with nothing on the pad) while the actor never moved a pixel on X. The stage direction is fixed for the whole level, so it cannot oscillate, and it leaves the actor already lined up to carry on. Stage 7 (`AI.md`: no lateral progress required) reports `Stage.direction == "none"`, which used to fall through to that same `actor.facing_left` read and reproduce the identical 107s oscillation for every stage-7 breakable approached near dead-center on X; fixed by giving `"none"` the same fixed, non-input-derived side as `"right"` rather than a live facing compare -- stable matters more than which side, and either one reaches smash range equally well from directly on top of the prop. Smash range is only a *side* pocket (`decide.in_smash_range`: same lane, X offset); a straight line from above or below the crate to that pocket cuts through the solid, so while the actor still shares the prop's blocking X column (`_breakable_block_x`, read from `prop_solids` -- origin-space, which is exactly what the caller compares `actor.world_x` against) the Y target is held at the actor's own lane and only X walks out to the smash pocket. The next tick, now beside it, converges on Y. Without that around-path the actor pinned itself against the body and never arrived at a point that could punch -- reported from play as not knowing how to handle a breakable sitting on a different lane. `at_smash_x` is the escape for a stop point that still lands inside the column plus its slack: once X has arrived, Y must be allowed to move or the actor freezes off-lane. The stop point itself is clamped outside the prop's own wall (`BREAKABLE_WALL_GAP_X`), because `breakable_smash_outer_x` minus the deadband buffer alone lands *inside* it for every prop whose wall is wider than that, leaving the actor to arrive by bumping into it. The incidental prop dodge in `_movement_mask` aims at the wall's real edges too (`BREAKABLE_AVOID_Y` is now a clearance measured from them, not a margin around the origin): the ROM's boxes reach up to 28px behind an origin and only 4px in front, and stage 5 stacks two rows of props with a 16px corridor between them, so a symmetric margin aimed one prop's dodge straight into the next one down. `state_machine_open_breakable` also passes the target's slot as `_movement_mask(..., ignore_slots=...)` so the incidental prop dodge -- which treats any breakable on the walk's X span as an obstacle on the way to something else -- does not push Y off the smash lane while the walk-in closes X. `WalkToNearEnemy`/`RetreatFromDanger`/`ProjectileSidestep` share one `_walk_toward_target` lookup/guard/steer shell (actor+target lookup, release on either missing, then `_hold_steered`/`_movement_mask` on a `compute_target` callback) instead of repeating it three times; `WalkToWeapon`/`WalkToPickup` likewise share `_walk_to_item` (identical PICKUP_RANGE arrival test, differing only in the target token type) and `ThrowKnife`/`ThrowPepper` share `_throw_ranged_weapon` (differing only in the frame count). `state_machine_open_breakable` switches on that same `decide.in_smash_range` its emergency scores with, so the tier it won on and the action it takes can never describe different situations -- out of range it walks to `_walk_to_breakable_target`, which stops just inside smash range on whichever side the actor already occupies, since a Breakable is itself a solid obstacle and its exact center is unreachable; `state_machine_grab_enemy` is the one walk handler that aims at the target's *exact* position with no stop buffer (overlapping is the point) and never presses a button -- a strike would make `+$34` nonzero and turn the grab contact code into a plain hit -- and falls back to the facing direction when the movement deadband would otherwise release, because `$AAA0` first requires a non-empty attack box, i.e. a *walking* frame; `_hold_steered` is the one place every walk handler's final `gamepad.hold(mask)` goes through -- it reads the mask's L/R bits as this tick's axis request, replaces them with whatever `gamepad.steer_x` reports, and holds the result, so the deadband/hysteresis logic above is unchanged and only the very last step is smoothed. Deliberately **not** applied anywhere in `state_machine_jump_attack`, which holds directions through `gamepad.hold` directly: that handler is now a four-state machine over the ROM's own jump family (`JUMP_CROUCH_ACTIONS` / `JUMP_ATTACK_ACTIONS`) because the four states take four different inputs. **Grounded** presses C plus the travel direction; **crouch (`$10`)** holds the direction and *presses nothing*; **free flight (`$12`)** presses B alone and re-holds the direction; **already kicking (`$16`)** and **landing (`$14`)** press nothing, since the kick stays active until touchdown and a B read on the landing frame comes out as an ordinary punch aimed where the kick was heading -- a swing at empty air 100px from anything, recorded live. Each state is matched by its own action id rather than by `is_airborne`, which spans all of them. Two ROM facts force that shape, and both were measured as failures first: `$384E` reads the held direction once, at the end of the 5-frame crouch, and the virtual X axis needs `AXIS_RAMP_TICKS` (3 ticks ≈ 6 frames) to reach an edge while `_press` clears the hold before every press -- so anything routed through `_hold_steered` arrives too late and the *first* jump of an encounter goes straight up and kicks the air where it stood; and `$3914` needs a **rising edge** of B in free flight, which a B pressed during the crouch cannot give, since `_press` holds each button 4 frames while the AI re-decides every 2, leaving it still held when free flight begins -- nor to any `_press`-based facing bit (`_face_toward_mask` inside an attack press), which is a one-shot instant press, not a continuous walking hold. The grab walk-in and the two throws aim through `_aim_point` (`kinematics.target_at_impact` for that verb's own class) rather than at the raw token -- a walk-in is a pursuit and a thrown weapon has a real flight time, so both lead their target. The melee strike and the jump kick deliberately do **not**: facing is set by holding a direction, and turning toward where a body *will* be is how the actor swings past one standing next to it; their movement is already covered by the damaging span that keeps frame 0 in `kinematics.connect_frames`. A stationary target aims at itself either way |
+| `execute.py` | **`WalkToAdvanceStage` hops when `plan_route` cannot walk the lookahead** (`hop_landing_x` + `_jump_toward`); if the gap is wider than the kick it stalls at the wall and never injects raw RIGHT/LEFT into the hole. `execute_tick`'s pit override does **not** run while airborne (lane-plane `pit_endangers` would freeze a hop mid-gap). **`WalkToNearEnemy` and `OpenBreakable` steer by planned route** (`_routed_mask` -> `navigation`): the whole path is rebuilt every tick and only its **first vector** used, because the world moves under a plan (enemies walk, crates break, phases flip) while a search of this playfield costs well under a millisecond against a 33 ms tick. An empty mask means either "arrived, stand still" or "boxed in", and only the second falls back to `_movement_mask`'s straight line. The enemy approach uses `enough_contact` (a floor -- a moving target is not worth perfecting an alignment for) and closes on X in the actor's *own* lane, converging only once `alongside`, because the enemy being approached is exempt from its own danger set; the crate approach uses `maximize_contact` (it does not move, so lining up square with its face is free) and keeps the crate in its own obstacle set, since dropping it routes the actor straight down through it. Facing a crate to hit it is `_face_prop_mask`, a raw sign test with the stage direction as the dead-centre tie-break, *not* `_face_toward_mask`: the hysteresis there exists because two bodies in melee sit on top of each other and jitter flips the sign every tick, which a target that cannot move does not do -- and answering 0 inside the band is a stall, measured live as 2,300 punches thrown into empty air over 76 seconds from exactly `DIRECTION_HYSTERESIS_X` away, facing the wrong way, on a prop the same run had already broken from 11px while facing it. Ties on which side to stand are still broken by the measured anchors (facing within `DIRECTION_HYSTERESIS_X`, the stage direction for a crate) -- a cost tie picked arbitrarily put the actor *past* a crate, where `could_open_breakable` stops calling it "ahead" and hands the tick to WalkToAdvanceStage, back into the crate. **`RetreatFromDanger`, `ProjectileSidestep`, `WalkToWeapon`/`WalkToPickup` and `WalkToAdvanceStage` route too**, each reusing `_routed_mask` with the destination logic in `_retreat_from_danger_target`/`_projectile_sidestep_target`/etc. left untouched -- only *how* the actor gets there changed, never *where* or *which side*. Three things differ per verb and are worth knowing before touching any of them: `RetreatFromDanger` and `ProjectileSidestep` treat **every** live enemy as danger (no target exemption -- fleeing is never trying to stand in anyone's reach, unlike an approach); `WalkToWeapon`/`WalkToPickup` use `nav.strike_goal(..., inner_dx=0)` rather than a `PointGoal` with a scalar tolerance, because a tolerance wide enough to satisfy `PICKUP_RANGE_X` let the goal read "reached" up to 4px short on the narrower `PICKUP_RANGE_Y`, freezing the actor there forever (`_routed_mask` never falls back once `goal.is_reached` is true) -- `strike_goal`'s region is built from the same asymmetric `abs(dx) <= stop_dx and abs(dy) <= lane_slack` sentence the arrival check already states, so the two cannot disagree; `WalkToAdvanceStage` routes **solids only, never danger** -- its goal is a vertical strip 40px ahead spanning the lane (Y is free -- a point on the actor's own Y that landed in or behind a pit made every covering cell sit in the hole, so best-effort walked straight in on a lane that had room above or below) that slides forward with the actor every tick rather than a real destination, and once a nearby dangerous enemy's own reach box is wide enough to contain that strip, `nav.plan_route`'s danger-aware pass can never "reach" it (arriving there means standing inside the thing being avoided) and silently falls through to the danger-blind solids-only pass, walking the actor straight at the enemy -- confirmed on a synthetic sweep before reverting to solids-only, which is exactly the obstacle set the pre-routing ad-hoc dodge already covered here. `WalkToAdvanceStage` also keeps its `routed_mask or mask` short-circuit (not a bitwise merge): the router's own vector wins whenever it produces one -- including a pure Y-only pit dodge with no lateral bit, which `PitDodgeSideStabilityTests` explicitly requires -- and `mask` (the raw `RIGHT_MASK`/`LEFT_MASK`) only substitutes on total router failure, preserving the one guarantee this verb cannot give up: the D-pad always carries `verb.direction`'s bit unless the router legitimately needed the tick for a pure dodge. `_find_safe_spot` (this file) gates its own candidates the same way -- see that function's own docstring above. Everything else still steers straight-line; that is future work. `execute_tick(verb, context, gamepad)` is the actual per-tick entry point `loop.py` calls -- it runs the pit-escape override (below) before choosing between `press_no_button` and `execute_verb`, so `execute_verb`'s own dispatch to controller input is reached only once that override declines. Every press-only handler goes through `_press`, which drops the sticky directional hold first -- `hold_buttons` latches until changed and `SharedGamepadState.press` re-arms it, so a walk tick followed by an attack tick used to leave the actor walking through its own strike (past the enemy and out of its punch band, or over the pickup it had just pressed B to collect); a walk handler whose actor/target vanished from the context releases instead of coasting on the stale hold; `_movement_mask` steers every walk verb around on-screen `Breakable`s and `Pit`s (falling in a pit costs a full life — player-health-lives-and-combat.md), but only *incidentally*, while some other walk verb's path happens to cross one. The `Breakable` dodge nudges `to_y` around the prop while still closing `to_x` in the same tick (a fixed point margin is enough to clear with a diagonal step); the `Pit` dodge cannot do that — a pit is a rectangle wide/tall enough that a diagonal command can still cut through the footprint before Y finishes moving, live-diagnosed — so instead it freezes `to_x` at the actor's own current X (no L/R bit at all) for as long as `from_y` still sits inside the pit's own band (`reach.PIT_AVOID_MARGIN` past its `lane_y`/height), and only lets X resume once `from_y` has actually cleared it, not merely been asked to; recomputed fresh every tick from the live position, so a drift back in self-corrects. The Y dodge target itself overshoots that same boundary by `PIT_DODGE_OVERSHOOT` rather than landing exactly on it -- live-diagnosed: aiming precisely at the boundary meant that once `from_y` drifted to within `MOVE_DEADBAND_Y` of it (well before actually crossing it, since both the deadband check and the "not cleared" check share that one point), the Y mask bits went quiet on a `from_y` the danger check still called "not cleared" while X stayed frozen -- a 0 mask, the actor frozen a few pixels short of escaping while `pit_endangers` still read true. **Which** side that Y target aims for is `_pit_dodge_target_y`, and it comes from the pit's own danger edges -- the nearer one that still clears inside the lane -- never from the lane midpoint. The dodge freezes X, so nothing else is moving to break a tie and an unstable side pick here is *permanent*, unlike the Breakable dodge above which keeps closing X and walks past the prop regardless. The old rule read `from_y < (lo + hi) / 2`, a midpoint that has nothing to do with the pit, routinely falls **inside** its danger band, and which the rule then steered the actor *toward* (upper half aimed below, lower half above) -- so the actor crossed it, the pick flipped, and it crossed back forever. Reproduced on the tick harness with a 96x40 pit at lane 40..80 (danger 32..88, midpoint 57, inside it): the actor stopped dead at the pit's edge alternating UP/DOWN between y=56 and y=60, X frozen at 394, never advancing the stage -- 120 of 288 swept pit/lane/direction configurations failed that way, now 0. The nearer danger edge is stable because it is *self-reinforcing*: its flip point is the band's own centre and the chosen direction always moves the actor **away** from it, so a pick cannot undo itself; it is also the shortest way out. A side only counts when its aim point survives the lane clamp still clear of the band, since otherwise `_clamp_target_y` drags it back inside and the mask collapses to 0 -- which for `state_machine_walk_to_advance_stage` is worse than a stall, its `or mask` fallback then commanding the raw lateral direction straight into the pit. The dodge's own "already clear on Y" test is **strict** (`<`/`>`) so it means exactly what `reach.pit_endangers`' inclusive band means: with `<=`/`>=` the two disagreed about the single boundary pixel, the escape stopped there, and `_pit_escape_mask` -- still reading `pit_endangers` as true -- shoved the actor laterally back off the pit's centre. `_pit_escape_mask`'s own last-resort fallback now derives its direction from that same `_pit_dodge_target_y` (it previously pushed *toward* the pit's centre, the exact opposite of its documented job). `execute_tick`'s own pit override (`_pit_escape_mask`, `reach.pit_endangers`) is the standalone reaction to the actor's own current position already sitting inside a pit's danger zone with no walk verb underway to steer it -- knocked there, or having simply drifted in — and takes over the controller before either `press_no_button` or `execute_verb` runs, regardless of which `Verb` (if any) won the tick; it hands `_movement_mask` a point on the far side of the pit along X purely to make that same dodge logic recognise and take over — the actual escape (freeze X, clear Y toward whichever half of the lane is nearer) is entirely `_movement_mask`'s own, so both paths agree by construction — and never returns 0 while `pit_endangers` holds regardless: on the rare chance `_movement_mask` still resolves to an empty mask, it falls back to a direct, deadband-free push away from the pit's own center on Y, since this is the one place in the pipeline "the actor believes it is in a pit" is known for certain, and refusing to hand back "do nothing" for that belief is a categorical guarantee, not just a consequence of the current margin/deadband numbers; `state_machine_engage_souther` holds `souther.plan_engage`'s mask directly (no axis ramp: the walk-in needs the walking box out every frame, and the plan never presses away from him); `state_machine_release_to_regrab` presses *back* for `souther.release_press_frames(countdown)` frames and then holds toward him, so the re-grab walk starts on the release frame. `_walk_to_near_enemy_target` stops *inside* an enemy's own dead zone when it has one (`_dead_zone_stop_dx`, from the extracted `Enemy.min_reach`): some enemies cannot hit what is pressed against them, and today the ROM picks out exactly one -- Nora, whose whip (shape `$22`) covers 32..80px. Stopping at the actor's own punch edge instead, 46px for Axel, parks it squarely inside that band; measured against a real Nora in her attacking phase, the AI settled at 51px, spent 108 of 120 ticks inside her reach and threw **zero** attacks, which is what "the AI cannot deal with Noras" looks like in play. Aiming for `min_reach - REACH_SAFETY_MARGIN` instead (floored at the punch's own usable inner edge, since closer than that is the grab's business) takes it to the pocket she has no answer to: 9px, 22 of 120 ticks in the band, and it attacks throughout. Enemies with no dead zone -- every other type -- are unaffected. `_crossing_would_walk_into_the_swing` is the other half: with the approach aiming for the pocket, a live recording had Nora land **9 of her 10 hits at ~80px**, the far edge of her reach, catching the actor as it set off across the band. So the crossing waits out a live swing -- but only from outside her whole reach, only for an enemy that *has* a dead zone, and only while the actor is in the lane her attacks actually sweep (`reach.enemy_lane_covers`). Each of those three conditions was paid for: holding ground against an ordinary enemy is passivity (measured: -20% damage dealt, more taken), and gating on the X gap alone made the AI sit out swings it was never in the line of, costing half its stage progress (1487px against 2579-3674). `_walk_to_near_enemy_target`'s **lane aim never depends on the enemy's combat phase**, which is what stopped the approach darting up and down. It has three branches: arrived on X (`dx <= stop_dx`) converges onto the enemy's lane, the one place that aims at it, since the punch needs `dy` inside `PUNCH_RANGE_Y`; still approaching *and* standing inside a committed enemy's line (`dy < WALK_TO_ENEMY_LANE_SAFETY_Y`) aims at a **fixed** offset lane, so repeated ticks converge on one point instead of stepping away forever; otherwise it holds the actor's current lane. The old version converged onto the enemy's lane from any distance and sidestepped off it while the enemy was committed, so every crossing of `is_dangerous` -- every few ticks in a real fight -- flipped the lane aim by a full `2 * WALK_TO_ENEMY_LANE_SAFETY_Y` (56px) and the whole walk-in alternated UP/DOWN. Holding the lane serves the original "never walk down its line of attack" intent more directly than the sidestep did, by not converging onto that line in the first place; `_retreat_from_danger_target` steers to `_find_safe_spot`'s result when it finds one (computed lazily, right here, rather than for every actor every tick: it weighs the sidesteps against the straight retreat by clearance, lane/camera bounds and pits) and otherwise steps straight away from the target on X, holding the actor's current lane; `_projectile_sidestep_target` is a pure lateral step -- holds X at the actor's current position (the danger is entirely about sharing the projectile's Y column, not its X) and steps `PROJECTILE_SIDESTEP_DISTANCE` (40, comfortably past `inference.PROJECTILE_LANE_SLACK`'s 24) off whichever lane edge is nearer, the same "away from the nearer edge" pick `_movement_mask`'s own prop/pit dodges use -- deliberately not "away from the projectile's Y", since the actor already shares that Y (that's what made it a threat) and stepping away from it is not a stable direction, it would flip on ordinary walk jitter; `decide.in_smash_range` has an **inner** edge as well as an outer one (`punch_usable_inner_x`): a punch box starts 16px in front of Axel, so a prop the actor is standing on top of cannot be hit at all. Its outer edge is `breakable_smash_outer_x`, not `BREAKABLE_PUNCH_X` flat: that constant is an origin-to-origin distance, meaningful only while the prop is narrower than the punch reaches, and a round-6 prop's wall already reaches exactly 36px from its own origin -- so a flat 36 would call every position the ROM allows out of range and the verb would approach a prop it could never report arriving at, the same stall from the other side. The reach therefore grows with the wall and only with the wall (`SMASH_WALL_CLEARANCE_X` past it, clearing both `NAV_STEP` and `MOVE_DEADBAND_X` so a lattice or deadband stop just outside still counts as arrived); every prop whose wall is already inside `BREAKABLE_PUNCH_X` keeps exactly the reach it always had. Without it the executor pressed B instead of repositioning, and the attack animation then blocked every verb on the next tick -- which reaches `press_no_button`, releasing the controller and resetting the steering axis, so the actor never walked away either. Recorded live: **94 seconds** of a 7-minute run spent punching one type-$11 prop from 1px away, ~430 presses, ending in a lost life, plus 22 shorter stalls in the same run; afterwards the longest stall in a comparable run was 10.8s. `_walk_to_breakable_target` picks which side of a prop to stop on from the **stage's own progress direction** when the actor is standing essentially on it, not from `actor.facing_left`: a prop, unlike an enemy, never moves to break the symmetry, so reading the side off facing is a feedback loop -- press left, facing goes left, the stop point jumps to the far side, press right, and back. Measured live: 107 seconds of a 200s run at one prop with LEFT held on 244 ticks and RIGHT on 240, the virtual steering axis cancelling almost all of it (2242 ticks with nothing on the pad) while the actor never moved a pixel on X. The stage direction is fixed for the whole level, so it cannot oscillate, and it leaves the actor already lined up to carry on. Stage 7 (`AI.md`: no lateral progress required) reports `Stage.direction == "none"`, which used to fall through to that same `actor.facing_left` read and reproduce the identical 107s oscillation for every stage-7 breakable approached near dead-center on X; fixed by giving `"none"` the same fixed, non-input-derived side as `"right"` rather than a live facing compare -- stable matters more than which side, and either one reaches smash range equally well from directly on top of the prop. Smash range is only a *side* pocket (`decide.in_smash_range`: same lane, X offset); a straight line from above or below the crate to that pocket cuts through the solid, so while the actor still shares the prop's blocking X column (`_breakable_block_x`, read from `prop_solids` -- origin-space, which is exactly what the caller compares `actor.world_x` against) the Y target is held at the actor's own lane and only X walks out to the smash pocket. The next tick, now beside it, converges on Y. Without that around-path the actor pinned itself against the body and never arrived at a point that could punch -- reported from play as not knowing how to handle a breakable sitting on a different lane. `at_smash_x` is the escape for a stop point that still lands inside the column plus its slack: once X has arrived, Y must be allowed to move or the actor freezes off-lane. The stop point itself is clamped outside the prop's own wall (`BREAKABLE_WALL_GAP_X`), because `breakable_smash_outer_x` minus the deadband buffer alone lands *inside* it for every prop whose wall is wider than that, leaving the actor to arrive by bumping into it. The incidental prop dodge in `_movement_mask` aims at the wall's real edges too (`BREAKABLE_AVOID_Y` is now a clearance measured from them, not a margin around the origin): the ROM's boxes reach up to 28px behind an origin and only 4px in front, and stage 5 stacks two rows of props with a 16px corridor between them, so a symmetric margin aimed one prop's dodge straight into the next one down. `state_machine_open_breakable` also passes the target's slot as `_movement_mask(..., ignore_slots=...)` so the incidental prop dodge -- which treats any breakable on the walk's X span as an obstacle on the way to something else -- does not push Y off the smash lane while the walk-in closes X. `WalkToNearEnemy`/`RetreatFromDanger`/`ProjectileSidestep` share one `_walk_toward_target` lookup/guard/steer shell (actor+target lookup, release on either missing, then `_hold_steered`/`_movement_mask` on a `compute_target` callback) instead of repeating it three times; `WalkToWeapon`/`WalkToPickup` likewise share `_walk_to_item` (identical PICKUP_RANGE arrival test, differing only in the target token type) and `ThrowKnife`/`ThrowPepper` share `_throw_ranged_weapon` (differing only in the frame count). `state_machine_open_breakable` switches on that same `decide.in_smash_range` its emergency scores with, so the tier it won on and the action it takes can never describe different situations -- out of range it walks to `_walk_to_breakable_target`, which stops just inside smash range on whichever side the actor already occupies, since a Breakable is itself a solid obstacle and its exact center is unreachable; `state_machine_grab_enemy` is the one walk handler that aims at the target's *exact* position with no stop buffer (overlapping is the point) and never presses a button -- a strike would make `+$34` nonzero and turn the grab contact code into a plain hit -- and falls back to the facing direction when the movement deadband would otherwise release, because `$AAA0` first requires a non-empty attack box, i.e. a *walking* frame; `_hold_steered` is the one place every walk handler's final `gamepad.hold(mask)` goes through -- it reads the mask's L/R bits as this tick's axis request, replaces them with whatever `gamepad.steer_x` reports, and holds the result, so the deadband/hysteresis logic above is unchanged and only the very last step is smoothed. Deliberately **not** applied anywhere in `state_machine_jump_attack`, which holds directions through `gamepad.hold` directly: that handler is now a four-state machine over the ROM's own jump family (`JUMP_CROUCH_ACTIONS` / `JUMP_ATTACK_ACTIONS`) because the four states take four different inputs. **Grounded** presses C plus the travel direction; **crouch (`$10`)** holds the direction and *presses nothing*; **free flight (`$12`)** presses B alone and re-holds the direction; **already kicking (`$16`)** and **landing (`$14`)** press nothing, since the kick stays active until touchdown and a B read on the landing frame comes out as an ordinary punch aimed where the kick was heading -- a swing at empty air 100px from anything, recorded live. Each state is matched by its own action id rather than by `is_airborne`, which spans all of them. Two ROM facts force that shape, and both were measured as failures first: `$384E` reads the held direction once, at the end of the 5-frame crouch, and the virtual X axis needs `AXIS_RAMP_TICKS` (3 ticks ≈ 6 frames) to reach an edge while `_press` clears the hold before every press -- so anything routed through `_hold_steered` arrives too late and the *first* jump of an encounter goes straight up and kicks the air where it stood; and `$3914` needs a **rising edge** of B in free flight, which a B pressed during the crouch cannot give, since `_press` holds each button 4 frames while the AI re-decides every 2, leaving it still held when free flight begins -- nor to any `_press`-based facing bit (`_face_toward_mask` inside an attack press), which is a one-shot instant press, not a continuous walking hold. The grab walk-in and the two throws aim through `_aim_point` (`kinematics.target_at_impact` for that verb's own class) rather than at the raw token -- a walk-in is a pursuit and a thrown weapon has a real flight time, so both lead their target. The melee strike and the jump kick deliberately do **not**: facing is set by holding a direction, and turning toward where a body *will* be is how the actor swings past one standing next to it; their movement is already covered by the damaging span that keeps frame 0 in `kinematics.connect_frames`. A stationary target aims at itself either way |
 | `loop.py` | `AgentLoop.tick` — gates on pause/non-gameplay/not-playable first, then runs the full pipeline (`do_not_harm_partner` between the verb generators and the ranking, so the HUD's pending list never shows a withdrawn verb either); the not-playable gate **does not** fire while the player's object is the type-`$0F` continue UI (`InContinueMenu` / `HandleContinueMenu` still have to answer Yes and type the initials). Fills a thread-safe `VerbState` (winning + every pending candidate) via `inform_hud` every tick and clears it on gate; hands the winning `Verb` (or `None`) to `execute.execute_tick` rather than choosing between `press_no_button`/`execute_verb` itself, and returns it for informational use only -- the actual controller output may differ if `execute_tick`'s pit override took over. Owns one `observe.NoraAttackTracker` per instance, passed into `generate_direct_observation_tokens` every tick -- the same per-player granularity as its own `VirtualGamepad` |
 
 Verified button mapping for the original (non-altControls) scheme (see
@@ -1366,12 +695,31 @@ landed facing away, and a live fight recorded 374 `JumpAttack` with
 the grab window is visible; `DodgeAntonioKick` and the jump-over
 tier fire only on a locked-in kick (primary `$02`) or dash (tactical `$08`).
 
-**Souther (`$55`, round 2)** is the second, and is worth reading as
-Antonio's mirror image rather than as more of the same
-(`reach.souther_will_slash` / `reach.souther_would_punish_jump` / `DodgeSoutherSlash` /
-`grab_reasons`' `SOUTHER_ON_PUNISH`; the ROM decode is in `enemy-ai.md`'s Souther
-section). Three facts drive all of it:
+**Souther (`$55`, round 2)** is the second, and everything the AI does against
+him is `ai/souther.py`: pure functions of the context that `decide`,
+`priority` and `execute` all call, so the three cannot disagree (the ROM model
+and the measurements are in **Souther: the ROM model and the plan** above).
 
+- `could_engage_souther` produces one `EngageSouther` per live, on-screen
+  Souther while the actor is free (not held, not holding, not airborne, not
+  mid-animation), armed or not. Every generic verb stands down for him --
+  `Punch`/`MeleeWeaponAttack` (a strike turns the grab contact into a hit),
+  `GrabEnemy`, `RearAttack`, `WalkToNearEnemy`, `RetreatFromDanger` -- so the
+  engage is the only verb aimed at him. `state_machine_engage_souther` holds
+  `souther.plan_engage`'s mask directly, without the axis ramp: the walk-in
+  needs the walking box out every frame, and the plan never presses away from
+  him.
+- `could_hold_actions` asks `souther.hold_step` in a hold on him:
+  `AttackHeldEnemy` for the first two knees of a chain (`PlayableCharacter.
+  knees_in_chain`, from the player's `+$58` bit 6 and `+$61`),
+  `ReleaseToRegrab` after them, `FlipHold` from a back hold while the one
+  crossover is unspent (`crossover_spent`, `+$4B` bit 7), and a finisher only
+  when it kills. `state_machine_release_to_regrab` presses back for
+  `souther.release_press_frames(hold_release_countdown)` frames (`+$63`) and
+  then holds toward him.
+- `_police_is_worth_it` is False and `HealthPickup`/`LifePickup` are refused
+  while he lives, and the weapon detour stays refused
+  (`_a_weapon_would_disarm_the_plan`).
 - **He counters jump attacks.** `$162A4 (souther_flag_target_jump_attack)`
   arms `+$79` from the *player's* own action state — `$16`/`$17`/`$42`/`$43`,
   the unarmed and armed jump attacks — and `$16234
@@ -1391,84 +739,22 @@ section). Three facts drive all of it:
   tactical `$00`) and on the `$12` lane window, and both let the jump through:
 
     - `$1619E`/`$161C6` skip `$16234` *because he is already attacking*, with
-      the type-`$98` claw live and carrying hitbox/damage descriptor `$225C`.
-      Not being countered is not the same as not being hit — that window is the
-      most dangerous one, not the safe one. The only genuinely safe Souther is
-      one who cannot act (`is_punishable`), and there `grab_reasons`'
-      `SOUTHER_ON_PUNISH` outranks the hop anyway.
+      the claw swing live (his own attack box; the `$98` object is only its
+      visual). Not being countered is not the same as not being hit — that
+      window is the most dangerous one, not the safe one. The only genuinely
+      safe Souther is one who cannot act (`is_punishable`), and there the
+      engage owns him anyway.
     - The lane window is real for the *flight* (a `JumpAttack` is horizontal, so
-      it cannot leave its lane) but not for **him**: `$15F98`/`$160D0` close
-      lane at 4px/frame, erasing 18px in about five of the flight's ~25 frames.
+      it cannot leave its lane) but not for **him**: he closes lane at up to
+      4px per update, erasing 18px in about nine of the flight's ~25 frames.
       Off-lane launches were countered on arrival.
 
   Reproduced before fixing by sweeping `generate_inference_tokens` →
   `generate_verb_tokens` → `determine_priority_verb` over every
   (primary, tactical) × distance × lane combination: airborne, `JumpAttack` won
-  in **every** Souther state, because `could_dodge_souther_slash` is suppressed
-  in flight. Keep that sweep in mind when touching this — the ground cases all
+  in **every** Souther state, because the (since retired) `could_dodge_souther_slash` was
+  suppressed in flight. Keep that sweep in mind when touching this — the ground cases all
   looked correct.
-- **His commit gate widens when the actor walks in.** `$15EDA
-  (souther_state1_active_combat)` picks `$68`/`$58`/`$50` from the sign of the
-  player's own `+$1C`, needs lane `+$52 < $1C`, and **aborts inside `$18`**
-  (24px, `reach.SOUTHER_SLASH_DIST_MIN`). There is deliberately no
-  grounded-B refusal as Antonio has: standing still narrows his window
-  rather than opening it. **The 24px pocket *is* used as
-  `_walk_to_near_enemy_target`'s stop point** (`execute._souther_pocket_
-  stop_dx`), unlike the note this used to carry here: the punch's own outer
-  edge (46px for Axel) sits squarely inside his state-1 commit bands, and a
-  full fight recorded live spent 220 of 240 lost health in the wind-up that
-  follows that commit. Denying the commit outright by parking the approach
-  inside the abort — 16px, `reach.REACH_SAFETY_MARGIN` inside the edge, floored
-  at the actor's own `punch_usable_inner_x` — beats merely getting hit from a
-  worse angle. Only while he is *not* already `strike_is_committed()`: once
-  the claw is out, this same 24px is where `$161C6` *resolves* the dash (see
-  below), so it has stopped being a pocket.
-
-  A pre-emptive version of `could_dodge_souther_slash` shipped alongside that
-  same 220/240 measurement — dodging on the *predicted* `$15EDA` gate, not
-  only the committed strike — and was reverted once the pocket fix above
-  existed: measured live it fired on only 28 of 1794 ticks, no measurable
-  benefit, and it is redundant with the pocket denying the commit before the
-  predicted gate can even become true (`reach.souther_will_slash` itself
-  refuses below `SOUTHER_SLASH_DIST_MIN`). `could_dodge_souther_slash` now only ever
-  fires on `strike_is_committed()`, the same shape as `could_dodge_antonio_
-  kick`.
-- **The committed dash cannot steer on lane.** `$161C6
-  (souther_state2_claw_dash)` writes only `+$1C` (8px/frame) and resolves only
-  with the target within `$18` of its lane, so `DodgeSoutherSlash` is a pure
-  lane step and `state_machine_dodge_souther_slash` must never press C.
-  **Which** side it steps to comes from *Souther's own lane*, never the lane
-  midpoint: the midpoint rule `_projectile_sidestep_target` uses steers the
-  actor toward the middle and across it, so the pick undoes itself — harmless
-  for a throw that is over in a tick, a permanent oscillation here because this
-  dodge freezes X. Caught on `tests/ai/test_stability.py` before shipping: 18
-  lane reversals in 40 ticks. Same self-reinforcing rule, and same reasoning, as
-  `_pit_dodge_target_y`.
-- **Only the brief hit reaction is the punish window, not the whole shared
-  recovery.** `phases.py` decodes both primary `$03` and `$04` as `RECOVERY`,
-  but they are not the same situation: measured live over a full fight, `$03`
-  held 4% of ticks against `$04`'s 70%. Keyed on the phase alone,
-  the `SOUTHER_ON_PUNISH` grab reason scored the top of the emergency table for most of the
-  fight and the walk-in never converted — 2318 ticks of `GrabEnemy`, 11 health
-  lost off him in two minutes. `check_for_grab_opportunities` now gates the
-  Souther branch on `enemy.primary_state == SOUTHER_HIT_REACTION_PRIMARY`
-  (`$03`) specifically. Re-measured after: `GrabEnemy` 70% → 2% of ticks.
-- **The knee has to be milked before the hold finishes.** `could_hold_actions`
-  always offered `AttackHeldEnemy` (knee) and `FlipHold` together on a front
-  hold, and the fixed tiers (`FlipHold` 66 over `AttackHeldEnemy`'s old flat
-  64) meant the flip always won immediately — live-reported as the AI grabbing
-  and flipping straight to `Supplex` with zero knees landed. `observe.
-  HoldTracker` (cross-tick, the same category `NoraAttackTracker` already is —
-  no ROM escape/struggle counter is decoded to read instead) counts ticks
-  since the actor's current hold began (`PlayableCharacter.hold_ticks`, through
-  a flip's front-to-back transition without resetting); `priority.
-  _emergency_attack_held_enemy` scores the knee at 67 — just over `FlipHold`'s
-  fixed 66 — while `hold_ticks <= HOLD_KNEE_TICKS` (6), then drops to
-  `_EMERGENCY_DEFAULT` so `FlipHold`'s own constant tier finishes it. Pinned as
-  a sequence, not a single tick, by `tests/ai/test_stability.py`'s
-  `HoldSequenceStabilityTests` (a lone-tick test cannot distinguish "grab then
-  finish" from "grab, knee, knee, finish"); reproduces the exact reported
-  symptom (`['FlipHold', 'Supplex']`) against the pre-fix scoring.
 
 **The hold ends when something is about to land, and the decision is made in
 frames** (user: "a IA deve fazer supplex ou atirar o inimigo se ele estiver

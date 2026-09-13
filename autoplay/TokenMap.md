@@ -63,7 +63,7 @@ classDiagram
     Walk <|-- RetreatFromDanger
     Walk <|-- ProjectileSidestep
     Walk <|-- DodgeAntonioKick
-    Walk <|-- DodgeSoutherSlash
+    Walk <|-- EngageSouther
 
     Verb <|-- Attack
     Attack <|-- MeleeAttacks
@@ -80,6 +80,7 @@ classDiagram
     GrabMechanics <|-- ThrowHeldEnemy
     GrabMechanics <|-- FlipHold
     GrabMechanics <|-- ReleaseGrab
+    GrabMechanics <|-- ReleaseToRegrab
     MeleeAttacks <|-- JumpAttack
     Attack <|-- OpenBreakable
     MeleeAttacks <|-- RearAttack

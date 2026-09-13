@@ -227,30 +227,28 @@ predicted window is not a reason to leave hop range. Overlapping him on
 X hops in place rather than punching. `HitAntonioBoomerang` punches the
 thrown boomerang at punch-connect time when it would hit the actor.
 
-Souther's commit gate at `$15EDA (souther_state1_active_combat)` — the
-velocity-selected `$50`/`$58`/`$68` X windows, the `$1C` lane window, and the
-`$18` inner abort that means he cannot *begin* the slash from inside 24px at
-all — is answered by `reach.souther_will_slash(souther, actor)`. Only once
-he is actually committed (primary `$02`) does `DodgeSoutherSlash` fire, and
-it is a pure lane step — `$161C6 (souther_state2_claw_dash)` writes only
-`+$1C`, so it cannot follow a lane change, and it resolves only with the
-target within `$18` of its lane. The step is sized to that `$18` and nothing
-wider: by the time it runs the claw is committed, so the commit gate's `$1C`
-is no longer the number to clear, and every extra pixel is another tick
-before the actor is out of the way.
+Souther is fought by one plan, `ai/souther.py`, and two verbs: **take one
+hold, and never give him back a turn.** `EngageSouther` is the whole approach
+(`souther.plan_engage`) and the hold it ends in is the contact result of
+walking into him; `souther.hold_step` then runs knee, knee, `ReleaseToRegrab`
+(hold back until `loc_235A`'s `+$63` countdown drops the hold, walk straight
+back in) until he is dead. Every generic verb against him — punch, chord,
+grab reason, walk-in, retreat — stands down.
 
-The approach answers the same gate from the other side, and it is a
-*corridor* rather than a dodge: `execute._lane_offset_while_closing` holds a
-lane offset wider than `$1C` for the whole walk in, `_lane_release_dx` hands
-the lane over at his own `$18` inner abort, and `_souther_pocket_stop_dx`
-stops inside it — so the lane gate is unsatisfied while the X gap closes and
-the inner abort is unsatisfied once it has, with an overlap rather than a gap
-between them (ai-analysis/enemy-ai.md, "The uncommittable corridor").
-Deleting it and walking straight down his lane instead was tried and measured
-much worse: four to five times as many committed claws, and 3-4 lives a fight
-against 1-2. What *had* made the corridor look like a stalemate was four
-separate arrival bugs between it and the hold — see `autoplay/CLAUDE.md`,
-"The fifth attempt".
+The model it rests on is the ROM's, and three parts of it were wrong in every
+earlier plan (`autoplay/CLAUDE.md`, "Souther: the ROM model and the plan"):
+
+- `$15EDA (souther_state1_active_combat)`'s lane gate is `$0A` when the actor
+  is *above* his lane (`+$61`) and `$1C` otherwise, so 11-15 px above him is
+  both gate-proof and inside the grab's own lane — the corridor's first
+  choice. Below him it holds 38 px, past the gate and past the claw;
+- the claw is his *own* attack box (lane -10..+24 about his lane, reaching up
+  to 86 px ahead), and his body leans forward during it, so an actor walking
+  into him inside 48 px is in grab contact before the box can land — `$AAA0`
+  tests the player's box against his body first, and an overlap is a grab;
+- a released front hold leaves him 32 px in front on the actor's lane in
+  primary 1, which the walk-in re-takes in 4-7 frames — measured in lockstep
+  with up to 3 frames of injected input latency and no damage.
 
 `reach.souther_would_punish_jump(actor, context)` is the one predicate
 keyed on the actor alone rather than on an actor/target pair, and the
@@ -279,14 +277,8 @@ reason — they describe *him*, not the flight.
   horizontal) but not Souther, who closes lane at 4px/frame and erases 18px in
   about five of the flight's ~25 frames.
 
-The only Souther worth hopping at is one who cannot act at all, and there a
-grab reason of `SOUTHER_ON_PUNISH` outranks the hop anyway — as does
-`SOUTHER_WALK_IN`, its everyday counterpart: a live Souther at contact range
-is walked into for the hold rather than traded punches with, which is the
-whole plan against him. The walk-in is timed out by
-`PlayableCharacter.grab_stall_ticks` (`observe.GrabStallTracker`) so a hold
-that is not happening hands the tick back to the strike, and the strike's own
-hitstun is what `SOUTHER_ON_PUNISH` then grabs from.
+There is no Souther worth hopping at: the hold is taken by walking in
+(`EngageSouther`), which a jump can never be.
 
 **`InContinueMenu`** is observed when this player's object is the type-`$0F`
 continue / high-score name-entry UI (the slot is no longer playable).
@@ -676,23 +668,9 @@ the window every hit he lands arrives in — while the hold denies him
 everything he owns. The approach that reaches that range keeps a lane offset
 wider than his `$10` kick and `$14` dash windows (`execute._approach_lane_y`)
 and converges only once alongside on X, so this is never a walk across his
-kick range. A fifth, `SOUTHER_ON_PUNISH`, is its Souther counterpart on the same shared
-later-boss `RECOVERY` states, and it is a separate reason rather than
-sharing Antonio's because the *reason* differs: Antonio's is that a second
-punch is his own kick trigger, Souther's is simply that `$15EDA (souther_
-state1_active_combat)` cannot re-arm the claw from recovery, so the
-walk-in is free — and with base health `$20` against Antonio's `$18`, the
-suplex chain matters more, not less. A sixth, `SOUTHER_WALK_IN`, is the
-Souther counterpart of `ANTONIO_WALK_IN`, and the plan against him rather
-than a fallback: the ground a hold is taken from is the `$18` pocket, which
-`$15EDA` cannot commit from, `$161C6` cannot resolve into, and `$15F98`
-leaves at 1px/frame against the 2px/frame it is followed at. Unlike every
-other reason it can be *withdrawn over time* — `PlayableCharacter.grab_stall_
-ticks` (`observe.GrabStallTracker`) counts ticks spent in contact without a
-hold, and past `reach.SOUTHER_WALK_IN_STALL_TICKS` the reason stops being
-produced so a strike takes the tick. A walk-in that outranks every strike
-and never converts is this project's worst recorded outcome against him, and
-the guard is what makes offering the reason at all defensible. A seventh,
+kick range. Souther has no reason here at all: his hold is the engage's own
+walk-in (`EngageSouther`), and what follows it — knee, knee, release, walk
+back in — is `souther.hold_step`, not a grab decision. A fifth,
 `WHILE_SURROUNDED`, fires
 for any grabbable `Grunt` while the actor is `Surrounded`: being boxed in
 is answered by a hold whichever side the crowd is on. It is the one
@@ -712,7 +690,7 @@ being surrounded is the only one that outranks the `$322A` escape chord (a
 pincer's hold becomes a throw *into* the enemy the chord was aimed at),
 clearing the rear beats every strike on an enemy that can still act,
 catching Jack from behind is just under that, grabbing a stunned Antonio
-or Souther sits above punching them again (the hold is the punish) and
+sits above punching him again (the hold is the punish) and
 above every strike on them, and the whip case is an improvement on an
 ordinary exchange and ranks just above a jump kick.
 

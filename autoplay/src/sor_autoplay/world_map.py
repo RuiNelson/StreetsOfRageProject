@@ -162,6 +162,9 @@ class MapEntity:
     tech_armed: int = 0  # player +$45; bounce-cancel tech arm
     tech_latched: int = 0  # player +$46; C+Up latched before land
     combo_state: int = 0  # player +$5D
+    knee_chain_last: int = 0  # player +$61; last knee of the front-hold chain
+    hold_release_countdown: int = 0  # player +$63; loc_235A release countdown
+    crossover_spent: bool = False  # player +$4B bit 7; this hold's crossover is used
     tactical: int = 0  # boss +$67
     pair_role: int = 0  # later-boss +$5D (1/2) when kind==boss
     target_ptr: int = 0  # ordinary +$42 / boss target low word
@@ -612,6 +615,9 @@ def _entity_from_object(
     held_ptr = 0
     contact_ptr = 0
     combo = 0
+    knee_chain_last = 0
+    hold_release_countdown = 0
+    crossover_spent = False
     action_flags = 0
     tech_armed = 0
     tech_latched = 0
@@ -644,6 +650,9 @@ def _entity_from_object(
         tech_armed = _u8(slot, mm.OBJ_TECH_ARM)
         tech_latched = _u8(slot, mm.OBJ_TECH_LATCH)
         combo = _u8(slot, mm.OBJ_COMBO_STATE)
+        knee_chain_last = _u8(slot, mm.OBJ_KNEE_CHAIN_LAST)
+        hold_release_countdown = _u8(slot, mm.OBJ_HOLD_RELEASE_COUNTDOWN)
+        crossover_spent = bool(_u8(slot, mm.OBJ_PLAYER_HOLD_FLAGS) & mm.PLAYER_CROSSOVER_SPENT_BIT)
         facing_left = bool(action_state & 0x01)
         phase = player_phase(action_byte=action_state, held_type=held_type)
         # Same +$1C X-velocity word Antonio's kick gate ($16EAE) reads.
@@ -739,6 +748,9 @@ def _entity_from_object(
         tech_armed=tech_armed,
         tech_latched=tech_latched,
         combo_state=combo,
+        knee_chain_last=knee_chain_last,
+        hold_release_countdown=hold_release_countdown,
+        crossover_spent=crossover_spent,
         tactical=tactical,
         pair_role=pair_role,
         target_ptr=target_ptr,
