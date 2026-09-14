@@ -20,7 +20,7 @@ import math
 from collections.abc import Callable
 
 from ..phases import HITSTUN_FRAMES, CombatPhase, is_dangerous, is_punishable
-from . import antonio as antonio_plan, bongo as bongo_plan, kinematics, reach
+from . import abadede as abadede_plan, antonio as antonio_plan, bongo as bongo_plan, kinematics, reach
 from .decide import (
     HEALTH_CRITICAL_PERCENT,
     in_smash_range,
@@ -35,6 +35,7 @@ from . import jump_kick
 from .tokens import (
     Attack,
     CounterGrab,
+    EngageAbadede,
     EngageAntonio,
     EngageBongo,
     EngageSouther,
@@ -57,7 +58,7 @@ from .tokens import (
     ThrowPepper,
 )
 from .tokens import Myself, Partner
-from .tokens import Antonio, Bongo, Boss, Breakable, Enemy, Grunt, Jack, Nora, Souther
+from .tokens import Abadede, Antonio, Bongo, Boss, Breakable, Enemy, Grunt, Jack, Nora, Souther
 from .tokens import (
     GrabReason,
     Surrounded,
@@ -350,6 +351,13 @@ _EMERGENCY_ENGAGE_ANTONIO = 62
 # mas prevenir ataques iminentes").
 _EMERGENCY_ENGAGE_BONGO = 62
 _EMERGENCY_ENGAGE_BONGO_UNDER_GRUNT = 5
+# Abadede's (EngageAbadede), the same tier and the same drop: his round keeps a
+# grunt coming behind the actor too (user: "existe sempre um Grunt atrás da
+# personagem controlada ... a AI deve-se proteger desse inimigo, sem se desviar
+# o objetivo principal, o boss"), so while its strike is about to land and his
+# run is not pressing (abadede.charge_is_pressing) the punch on it wins.
+_EMERGENCY_ENGAGE_ABADEDE = 62
+_EMERGENCY_ENGAGE_ABADEDE_UNDER_GRUNT = 5
 # Lowest of any verb that still scores. Must sit under every other live
 # candidate -- including ScorePickup (9), SpecialPickup (11), LifePickup
 # (12), and WalkToNearEnemy's floor (8) -- so stage advance is only chosen
@@ -591,6 +599,20 @@ def _emergency_engage_bongo(verb: EngageBongo, context: Context) -> int:
     if grunt_incoming and not bongo_plan.charge_is_pressing(target):
         return _with_target_class(_EMERGENCY_ENGAGE_BONGO_UNDER_GRUNT, target)
     return _with_target_class(_EMERGENCY_ENGAGE_BONGO, target)
+
+
+def _emergency_engage_abadede(verb: EngageAbadede, context: Context) -> int:
+    target = find(context, Abadede, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
+    if target is None or actor is None or target.is_defeated:
+        return _EMERGENCY_DEFAULT
+    grunt_incoming = any(
+        isinstance(enemy, Grunt) and reach.is_incoming_melee(actor, enemy)
+        for enemy in reach.on_screen_enemies(context)
+    )
+    if grunt_incoming and not abadede_plan.charge_is_pressing(target):
+        return _with_target_class(_EMERGENCY_ENGAGE_ABADEDE_UNDER_GRUNT, target)
+    return _with_target_class(_EMERGENCY_ENGAGE_ABADEDE, target)
 
 
 def _emergency_hit_antonio_boomerang(verb: HitAntonioBoomerang, context: Context) -> int:
@@ -849,9 +871,12 @@ def _emergency_attack_held_enemy(verb: AttackHeldEnemy, context: Context) -> int
 
     if not _target_is_in_hand(verb, context):
         return _EMERGENCY_DEFAULT
-    if isinstance(find(context, Enemy, slot=verb.target_slot), (Souther, Antonio, Bongo)):
-        # souther.hold_step already chose this knee from the ROM's own chain
-        # count (+$58 bit 6, +$61); the budget below is for bodies without one.
+    if isinstance(
+        find(context, Enemy, slot=verb.target_slot), (Souther, Antonio, Bongo, Abadede)
+    ):
+        # souther.hold_step (abadede.hold_step for him) already chose this
+        # knee from the ROM's own chain count (+$58 bit 6, +$61); the budget
+        # below is for bodies without one.
         return _EMERGENCY_HOLD_KNEE_FRESH
     actor = _find_actor(context, verb.actor_slot)
     if actor is not None and kinematics.frames_for_ticks(
@@ -936,6 +961,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     EngageSouther: _emergency_engage_souther,
     EngageAntonio: _emergency_engage_antonio,
     EngageBongo: _emergency_engage_bongo,
+    EngageAbadede: _emergency_engage_abadede,
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
 }

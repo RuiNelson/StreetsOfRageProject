@@ -6,5 +6,10 @@ set -euo pipefail
 # Opens the host in turbo and drives autoplay through the menus, the jump to
 # round 3, and a continuous sweep of every non-boss enemy family. See
 # ./scripts/go_to_boss for the shared flags and why the sweep is required.
+#
+# --no-food here too (user, for Abadede: "Nos testes, não te esqueças de não
+# usar o ataque especial (chamar a polícia), e de não consumir items de
+# recuperação de vida, para não dar uma falsa representação das capacidades
+# da IA"). Put before "$@" so a caller can still argue with it.
 
-exec "${0:A:h}/go_to_boss" 3 "$@"
+exec "${0:A:h}/go_to_boss" 3 --no-food "$@"

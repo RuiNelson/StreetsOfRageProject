@@ -378,6 +378,9 @@ def generate_direct_observation_tokens(
                     fine_x=entity.fine_x,
                     fine_y=entity.fine_y,
                     child_slot=entity.child_slot,
+                    substate=entity.boss_substate,
+                    timer_54=entity.boss_timer_54,
+                    script_param=entity.script_param,
                 )
             context.add(
                 cls(

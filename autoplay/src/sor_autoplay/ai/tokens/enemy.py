@@ -252,6 +252,12 @@ class Boss(Enemy, ABC):
     # +$6E resolved to a slot: the linked child -- Antonio's boomerang, the
     # one $17206 spawned last (world_map.MapEntity.child_slot).
     child_slot: str | None = None
+    # Abadede's substate +$5B and his +$54 timer word (ai/abadede.py).
+    substate: int = 0
+    timer_54: int = 0
+    # +$40, the ELC spawn parameter: a non-zero low nibble is Abadede's
+    # round-8 variant, whose pause decides differently ($146C4).
+    script_param: int = 0
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

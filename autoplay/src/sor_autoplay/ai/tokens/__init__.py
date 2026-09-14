@@ -128,6 +128,7 @@ from .tokens import (
     find_all,
 )
 from .walk_verbs import (
+    EngageAbadede,
     EngageAntonio,
     EngageBongo,
     EngageSouther,

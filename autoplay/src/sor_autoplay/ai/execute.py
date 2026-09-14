@@ -17,6 +17,7 @@ from contextvars import ContextVar
 from .pathfind import Path, Point, PointGoal
 from .tokens import (
     CounterGrab,
+    EngageAbadede,
     EngageAntonio,
     EngageBongo,
     EngageSouther,
@@ -46,7 +47,7 @@ from .tokens import (
     punch_outer_x,
     punch_usable_inner_x,
 )
-from .tokens import Antonio, Bongo, Enemy, Souther
+from .tokens import Abadede, Antonio, Bongo, Enemy, Souther
 from .tokens import CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile
 from .tokens import Pickup, Weapon
@@ -72,6 +73,7 @@ from .tokens import (
 from .gamepad import VirtualGamepad
 from . import kinematics
 from . import jump_kick
+from . import abadede as abadede_plan
 from . import antonio as antonio_plan
 from . import bongo as bongo_plan
 from . import souther as souther_plan
@@ -1559,6 +1561,67 @@ def state_machine_engage_bongo(
     gamepad.hold(mask)
 
 
+def abadede_can_punch(actor: Myself | Partner, context: Context) -> bool:
+    """Is a B press a punch for this actor now? Armed it swings the weapon, a
+    move the plan does not time; with an item underfoot it is a pickup
+    (``$3136``) -- food eaten in a fight that is scored without any."""
+
+    return actor.held_weapon_type == 0 and item_a_b_press_takes(context, actor) is None
+
+
+def engage_abadede_plan(
+    verb: EngageAbadede, context: Context
+) -> abadede_plan.EngagePlan | None:
+    """``abadede.plan_engage`` for this verb, from the context -- shared by the
+    handler and the diagnostics, so both see the one plan."""
+
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Abadede, slot=verb.target_slot)
+    if actor is None or target is None:
+        return None
+    return abadede_plan.plan_engage(
+        actor,
+        target,
+        camera=find(context, CameraRange),
+        partner=find(context, Partner) if isinstance(actor, Myself) else find(context, Myself),
+        can_punch=abadede_can_punch(actor, context),
+    )
+
+
+def state_machine_engage_abadede(
+    verb: EngageAbadede, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Hold the stick ``abadede.plan_engage`` chose this tick, or throw the
+    punch it timed into his run.
+
+    Held directly and unclamped, as ``EngageBongo``'s: the plan holds the lane
+    to the pixel -- 17-18 off his run, where his box misses and the walking
+    box still reaches his body -- and needs that box out at the moment of
+    contact; it models the camera clamp itself. The punch turns to him with
+    the same press.
+    """
+
+    plan = engage_abadede_plan(verb, context)
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Abadede, slot=verb.target_slot)
+    if plan is None or actor is None or target is None:
+        gamepad.release()
+        return
+    if plan.punch:
+        _press(gamepad, PUNCH_MASK | _face_toward_mask(actor, target.world_x), frames=PUNCH_FRAMES)
+        return
+    mask = 0
+    if plan.dir_x > 0:
+        mask |= RIGHT_MASK
+    elif plan.dir_x < 0:
+        mask |= LEFT_MASK
+    if plan.dir_y > 0:
+        mask |= DOWN_MASK
+    elif plan.dir_y < 0:
+        mask |= UP_MASK
+    gamepad.hold(mask)
+
+
 def state_machine_release_to_regrab(
     verb: ReleaseToRegrab, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -2479,6 +2542,7 @@ _HANDLERS = {
     EngageSouther: state_machine_engage_souther,
     EngageAntonio: state_machine_engage_antonio,
     EngageBongo: state_machine_engage_bongo,
+    EngageAbadede: state_machine_engage_abadede,
     ReleaseToRegrab: state_machine_release_to_regrab,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,

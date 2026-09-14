@@ -240,6 +240,26 @@ def ordinary_enemy_phase(
     return CombatPhase.UNKNOWN
 
 
+# Abadede's primaries, the table at $14466 (ai/abadede.py replays 1, 2, 3 and
+# 7). Only state 7's run can hurt a player; 1-3 are the approach, the pause
+# and the retreat. $0C is the death -- $0E, which an earlier decode took for
+# it, is the flight a throw sends him on.
+_ABADEDE_PHASES: dict[int, CombatPhase] = {
+    0x04: CombatPhase.RECOVERY,  # struck: the shake's set-up
+    0x05: CombatPhase.RECOVERY,  # the shake, no contact test
+    0x06: CombatPhase.KNOCKDOWN,  # a heavy hit, the police, a lethal blow
+    0x07: CombatPhase.CHARGE,  # the run, and the punch that ends it
+    0x08: CombatPhase.ATTACKING,  # he holds and throws the player
+    0x09: CombatPhase.GRABBED,  # suplexed
+    0x0A: CombatPhase.RECOVERY,  # getting up
+    0x0B: CombatPhase.GRABBED,  # held (front, or a back hold taken fresh)
+    0x0C: CombatPhase.DEATH,
+    0x0D: CombatPhase.GRABBED,  # held from behind
+    0x0E: CombatPhase.KNOCKDOWN,  # thrown
+    0x0F: CombatPhase.RECOVERY,  # hit by a type-$0C object ($155BE); undecoded
+}
+
+
 def boss_phase(
     *,
     type_id: int,
@@ -250,23 +270,18 @@ def boss_phase(
 
     Exact move tables differ per family; nonzero tactical usually means a
     committed substate (approach fine-tuning, attack, or police latch).
-    Abadede forces primary ``$06`` on hit/police; ``$0E`` is lethal.
+    Abadede's table is his own (``_ABADEDE_PHASES``).
     """
 
     p = primary_byte & 0xFF
     t = tactical & 0xFF
 
-    # Shared death / hit patterns across later bosses and Abadede.
     if type_id == 0x30:  # Abadede
-        if p in (0x0E,):
-            return CombatPhase.DEATH
-        if p in (0x06,):  # forced hit / police reaction path
-            return CombatPhase.RECOVERY
-        if p in (0x08, 0x0B):
-            return CombatPhase.ATTACKING
         if t != 0:
-            return CombatPhase.CHARGE
-        return CombatPhase.NORMAL
+            # +$67 is his police latch: set for one update, then the police's
+            # 10 points and the knockdown ($143D0).
+            return CombatPhase.SCRIPTED
+        return _ABADEDE_PHASES.get(p, CombatPhase.NORMAL)
 
     if type_id == 0x35:  # Mr. X
         if p >= 0x0C:

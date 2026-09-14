@@ -92,6 +92,7 @@ from .tokens import (
     Breakable,
     Context,
     CounterGrab,
+    EngageAbadede,
     EngageAntonio,
     EngageBongo,
     EngageSouther,
@@ -340,6 +341,7 @@ _FIGHT_TESTS: dict[type[Verb], WithdrawTest] = {
         EngageSouther,
         EngageAntonio,
         EngageBongo,
+        EngageAbadede,
     )
 }
 

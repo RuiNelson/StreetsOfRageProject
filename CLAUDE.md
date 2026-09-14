@@ -252,15 +252,17 @@ in `scripts/go_to_boss`, so eight copies cannot drift apart. Sweeping is not
 optional for boss work — see `autoplay/CLAUDE.md`. Neither is `--no-police`
 (user: "The police is allowed for Souther/Antonio, just don't test with the
 police on"): the AI may call it in play, as its last resort, but never in a
-test; `autoplay/tools/boss_fight.py` and the labs keep it off too. Rounds 2
-and 4 also pass `--no-food` (user, for Bongo: "Nos testes, não te esqueças de
-não usar o ataque especial (chamar a polícia), e de não consumir items de
-recuperação de vida"): a heal hides every hit landed after it, so a boss test
-is fought on the health the round left -- score with `boss_fight.py
---no-food` too. Round 4 keeps a Garcia-family grunt coming through the Bongo
-fight even with the sweep on (one is killed, the next arrives): the AI must
-not chase it, only stop its strikes (user: "não se focar nesse inimigo, mas
-prevenir ataques iminentes"). Quitting
+test; `autoplay/tools/boss_fight.py` and the labs keep it off too. Rounds 2,
+3 and 4 also pass `--no-food` (user, for Bongo and again for Abadede: "Nos
+testes, não te esqueças de não usar o ataque especial (chamar a polícia), e
+de não consumir items de recuperação de vida"): a heal hides every hit landed
+after it, so a boss test is fought on the health the round left -- score
+with `boss_fight.py --no-food` too. Rounds 3 and 4 keep a Garcia-family grunt
+coming through the boss fight even with the sweep on (one is killed, the next
+arrives; in round 3 it comes from behind the actor): the AI must not chase
+it, only stop its strikes (user: "não se focar nesse inimigo, mas prevenir
+ataques iminentes"; for Abadede: "a AI deve-se proteger desse inimigo, sem se
+desviar o objetivo principal, o boss"). Quitting
 the HUD (Esc/Q) also shuts the host down, so the port is free for the next
 run.
 

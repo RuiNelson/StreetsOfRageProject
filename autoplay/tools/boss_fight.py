@@ -71,6 +71,9 @@ ENTRANCE_WINDOW_S = 4.0
 # The shared later-boss family: $17C36 (boss_apply_pending_damage) is theirs,
 # and it treats a health word of exactly 0 as lethal (see boss_is_dead).
 LATER_BOSS_TYPES = frozenset({0x55, 0x56, 0x57, 0x58})
+# Abadede's own damage paths ($15632, $15094, $14A56) subtract and branch
+# `bgt` to the living path the same way, so 0 is lethal for him too.
+ZERO_IS_LETHAL = LATER_BOSS_TYPES | {0x30}
 
 
 def compress(names: list[str | None]) -> list[str]:
@@ -140,7 +143,7 @@ def boss_is_dead(entity: MapEntity) -> bool:
         return False
     if entity.health >= 0x8000:
         return True
-    return entity.type_id in LATER_BOSS_TYPES and entity.health == 0
+    return entity.type_id in ZERO_IS_LETHAL and entity.health == 0
 
 
 def verb_name_for(verb) -> str | None:
@@ -287,11 +290,10 @@ def main() -> int:
                     # ...and past it, until he is out of a charge: handed the
                     # pad with a flame already on it, no plan has a move left
                     # (measured: a 32-point hit 0.04 s after one such handover).
-                    charging = (
-                        up is not None
-                        and args.boss_type == 0x57
-                        and up.action_state == 2
-                        and up.tactical >= 3
+                    charging = up is not None and (
+                        (args.boss_type == 0x57 and up.action_state == 2 and up.tactical >= 3)
+                        # Abadede's run (state 7, set-up or running).
+                        or (args.boss_type == 0x30 and up.action_state == 7 and up.boss_substate <= 1)
                     )
                     if started < idle_until or charging:
                         # Hands off: no tick, the pad released, nothing scored yet.
@@ -416,6 +418,7 @@ def main() -> int:
                             "life_lost": bool(lost_a_life),
                             "boss_state": boss.action_state if boss else None,
                             "boss_tactical": getattr(boss, "tactical", None) if boss else None,
+                            "boss_sub": boss.boss_substate if boss else None,
                             "boss_phase": (
                                 boss.combat_phase.name if boss and boss.combat_phase else None
                             ),
@@ -456,6 +459,9 @@ def main() -> int:
                             ),
                             "boss_state": boss.action_state if boss else None,
                             "boss_tactical": getattr(boss, "tactical", None) if boss else None,
+                            # Abadede's substate +$5B and +$54 timer.
+                            "boss_sub": boss.boss_substate if boss else None,
+                            "boss_t54": boss.boss_timer_54 if boss else None,
                             "verb": verb_name,
                             # Absolute positions, so a batch can answer
                             # questions about *where* the fight happens --

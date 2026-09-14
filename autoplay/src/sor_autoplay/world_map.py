@@ -231,6 +231,10 @@ class MapEntity:
     boss_hold_flags: int = 0  # +$66 bit 0 = held
     fine_x: float = 0.0  # +$10 as 16.16
     fine_y: float = 0.0  # +$14 as 16.16
+    # Abadede ($30) only: the substate +$5B his handlers dispatch on and the
+    # +$54 word his timers count (memory_map.OBJ_BESPOKE_*).
+    boss_substate: int = 0
+    boss_timer_54: int = 0
     # Antonio's boomerang (type $96) only. It runs the later-boss layout, so
     # its velocities, animation, latched box, screen X, fine position, +$6B
     # countdown and +$52 lane target fill the boss fields above; these are
@@ -714,6 +718,8 @@ def _entity_from_object(
     boss_hold_flags = 0
     fine_x = 0.0
     fine_y = 0.0
+    boss_substate = 0
+    boss_timer_54 = 0
     boomerang_state = 0
     lane_sign = 0
     boomerang_turn_lane = 0
@@ -791,6 +797,8 @@ def _entity_from_object(
         # Target pointer location differs by boss generation.
         if type_id in (0x30, 0x35):
             target_ptr = _u16(slot, mm.OBJ_BESPOKE_TARGET)
+            boss_substate = _u8(slot, mm.OBJ_BESPOKE_SUBSTATE)
+            boss_timer_54 = _u16(slot, mm.OBJ_BESPOKE_TIMER)
         else:
             target_ptr = _u16(slot, mm.OBJ_LATER_BOSS_TARGET)
         phase = boss_phase(
@@ -922,6 +930,8 @@ def _entity_from_object(
         boss_hold_flags=boss_hold_flags,
         fine_x=fine_x,
         fine_y=fine_y,
+        boss_substate=boss_substate,
+        boss_timer_54=boss_timer_54,
         boomerang_state=boomerang_state,
         lane_sign=lane_sign,
         boomerang_turn_lane=boomerang_turn_lane,

@@ -131,10 +131,31 @@ class PhaseDecodeTests(unittest.TestCase):
         # stun timer +$50 down and write $0100 back at zero.
         self.assertEqual(ordinary_enemy_phase(0x0203), CombatPhase.STUNNED)
 
-    def test_abadede_police_recovery(self) -> None:
+    def test_abadede_primaries(self) -> None:
+        # $14466: the police (and any heavy hit) knock him down in $06, a
+        # throw's flight is $0E, and the death is $0C -- not $0E, which an
+        # earlier decode called lethal on every throw.
+        for primary, phase in (
+            (0x01, CombatPhase.NORMAL),
+            (0x02, CombatPhase.NORMAL),
+            (0x03, CombatPhase.NORMAL),
+            (0x05, CombatPhase.RECOVERY),
+            (0x06, CombatPhase.KNOCKDOWN),
+            (0x07, CombatPhase.CHARGE),
+            (0x0B, CombatPhase.GRABBED),
+            (0x0C, CombatPhase.DEATH),
+            (0x0E, CombatPhase.KNOCKDOWN),
+        ):
+            with self.subTest(primary=primary):
+                self.assertEqual(
+                    boss_phase(type_id=0x30, primary_byte=primary, tactical=0), phase
+                )
+
+    def test_abadede_police_latch_is_scripted(self) -> None:
+        # +$67 is set for the one update before the police's 10 points land.
         self.assertEqual(
-            boss_phase(type_id=0x30, primary_byte=0x06, tactical=0),
-            CombatPhase.RECOVERY,
+            boss_phase(type_id=0x30, primary_byte=0x01, tactical=1),
+            CombatPhase.SCRIPTED,
         )
 
     def test_later_boss_tactical_charge(self) -> None:

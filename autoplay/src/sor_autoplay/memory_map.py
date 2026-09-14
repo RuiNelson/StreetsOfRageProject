@@ -226,6 +226,11 @@ OBJ_BOSS_MODE_FLAGS = 0x7B
 OBJ_ATTACKER_PTR = 0x3E
 # Abadede / Mr. X selected player pointer.
 OBJ_BESPOKE_TARGET = 0x5C
+# Abadede ($30): the second dispatch level ($12B4C reads +$5B under the
+# primary +$30) and the word every one of his states counts down -- the
+# pause, the retreat, the punch, the shake, the hold (ai/abadede.py).
+OBJ_BESPOKE_SUBSTATE = 0x5B
+OBJ_BESPOKE_TIMER = 0x54
 # Later-boss selected player pointer word.
 OBJ_LATER_BOSS_TARGET = 0x72
 # Later bosses: the rest of what one update of their AI reads and writes, so

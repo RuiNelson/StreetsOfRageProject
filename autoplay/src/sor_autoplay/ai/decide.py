@@ -18,7 +18,14 @@ from typing import Callable
 from .. import prop_solids
 from ..memory_map import ACTION_HOLD_CROSSOVER
 from ..phases import CombatPhase, is_dangerous
-from . import bongo as bongo_plan, kinematics, navigation as nav, reach, souther as souther_plan
+from . import (
+    abadede as abadede_plan,
+    bongo as bongo_plan,
+    kinematics,
+    navigation as nav,
+    reach,
+    souther as souther_plan,
+)
 from .tokens import (
     CounterGrab,
     FlipHold,
@@ -45,7 +52,7 @@ from .tokens import (
     PlayableCharacter,
     punch_usable_inner_x,
 )
-from .tokens import Antonio, Bongo, Boss, Enemy, Jack, Souther
+from .tokens import Abadede, Antonio, Bongo, Boss, Enemy, Jack, Souther
 from .tokens import (
     GrabReason,
     Surrounded,
@@ -67,6 +74,7 @@ from .tokens import CallPolice
 from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDialog
 from .tokens import Context, Token, find, find_all
 from .tokens import (
+    EngageAbadede,
     EngageAntonio,
     EngageBongo,
     EngageSouther,
@@ -276,6 +284,12 @@ def _could_melee_strike(
             # he gets up from straight into a wind-up. EngageBongo owns him.
             if isinstance(target, Bongo):
                 continue
+            # Abadede neither (abadede.py): a strike on him is 1 point and a
+            # shake he backs off from, and a strike's +$34 turns the walk-in's
+            # grab contact into that. The one punch worth throwing -- into his
+            # run, when nothing else escapes it -- is EngageAbadede's.
+            if isinstance(target, Abadede):
+                continue
             verbs.add(make_verb(actor.slot, target_slot, actor.held_weapon_type))
     return verbs
 
@@ -337,7 +351,9 @@ def could_rear_attack(context: Context) -> Context:
         for target_slot in _targets_in_reach(context, actor, reach.in_rear_band, RearAttack):
             if target_slot in on_jacks_back:
                 continue
-            if isinstance(find(context, Enemy, slot=target_slot), (Souther, Antonio, Bongo)):
+            if isinstance(
+                find(context, Enemy, slot=target_slot), (Souther, Antonio, Bongo, Abadede)
+            ):
                 # The chord is a strike like any other: it turns the grab
                 # contact into a hit. Each boss's engage owns him.
                 continue
@@ -411,9 +427,10 @@ def could_grab_enemy(context: Context) -> Context:
         for enemy in on_screen:
             if enemy.slot not in in_reach:
                 continue
-            if isinstance(enemy, (Souther, Antonio, Bongo)):
+            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede)):
                 # Each engage walks into him itself, at the moment its plan
-                # picks (EngageSouther, EngageAntonio, EngageBongo).
+                # picks (EngageSouther, EngageAntonio, EngageBongo,
+                # EngageAbadede).
                 continue
             if enemy.slot in threatening:
                 # Walking into a committed attack is how the actor takes the
@@ -516,8 +533,13 @@ def could_hold_actions(context: Context) -> Context:
             ):
                 verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
                 continue
-        if isinstance(held, (Souther, Antonio, Bongo)):
-            step = souther_plan.hold_step(actor, held)
+        if isinstance(held, (Souther, Antonio, Bongo, Abadede)):
+            # Abadede's loop is the same three moves, each pressed on an
+            # update his hold reads the holder's +$7D (abadede.hold_step).
+            if isinstance(held, Abadede):
+                step = abadede_plan.hold_step(actor, held)
+            else:
+                step = souther_plan.hold_step(actor, held)
             if step is souther_plan.HoldStep.KNEE:
                 verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
             elif step is souther_plan.HoldStep.RELEASE:
@@ -735,9 +757,9 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 # Never walk toward a target that is itself standing in a
                 # pit's danger zone -- reaching it means standing there too.
                 continue
-            if isinstance(enemy, (Souther, Antonio, Bongo)):
-                # EngageSouther / EngageAntonio / EngageBongo own the whole
-                # approach to them, armed or not.
+            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede)):
+                # EngageSouther / EngageAntonio / EngageBongo / EngageAbadede
+                # own the whole approach to them, armed or not.
                 continue
             if standing_off and enemy.slot in threatening:
                 # could_retreat_from_danger covers this one instead -- don't
@@ -818,10 +840,11 @@ def could_retreat_from_danger(context: Context) -> Context:
             enemy = find(context, Enemy, slot=target_slot)
             if enemy is None:
                 continue
-            if isinstance(enemy, (Souther, Antonio, Bongo)):
+            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede)):
                 # Their attacks are their engage's business: Souther's claw
-                # by souther.plan_engage's lane escape, Antonio's kick and
-                # Bongo's flame by their plan_engage's lookahead.
+                # by souther.plan_engage's lane escape, Antonio's kick,
+                # Bongo's flame and Abadede's run by their plan_engage's
+                # lookahead.
                 continue
             if target_slot in actionable:
                 continue  # already hittable -- attack instead of retreating
@@ -1161,6 +1184,10 @@ def could_jump_attack(context: Context) -> Context:
             # strike that turns his grab contact into a hit. EngageBongo.
             for bongo in find_all(context, Bongo):
                 target_slots.discard(bongo.slot)
+            # Abadede neither: a kick knocks him down for 2 points and puts a
+            # whole charge between the actor and the next hold. EngageAbadede.
+            for abadede in find_all(context, Abadede):
+                target_slots.discard(abadede.slot)
         if actor.is_airborne and not target_slots:
             nearest = min(
                 live,
@@ -1292,6 +1319,43 @@ def could_engage_bongo(context: Context) -> Context:
             if bongo.is_defeated:
                 continue
             verbs.add(EngageBongo(actor_slot=actor.slot, target_slot=bongo.slot))
+    return verbs
+
+
+def could_engage_abadede(context: Context) -> Context:
+    """Take a hold on Abadede -- the whole fight against him, one verb.
+
+    One candidate per live ``Abadede`` while the actor is free to move (not
+    mid-animation, not held, not holding a body, not airborne), armed or not:
+    ``$AAA0``'s grab never reads the carried weapon (armed, the plan only
+    loses its punch). ``abadede.plan_engage`` picks the stick every tick from
+    a lookahead over his AI; the hold is the contact result of that walk, and
+    the loop that follows is ``could_hold_actions``'.
+
+    Not limited to the visible screen: his run carries him to its edges, and
+    the next one is decided by where the actor stands while he backs off.
+    """
+
+    verbs: set[Token] = set()
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.is_airborne:
+            continue
+        for abadede in find_all(context, Abadede):
+            # His lethal tests branch `bgt`: 0 is dead too, and he is on his
+            # way to $0C (the death) from there.
+            if (
+                abadede.is_defeated
+                or abadede_plan.signed_health(abadede) <= 0
+                or abadede.primary_state == abadede_plan.PRIMARY_DYING
+            ):
+                continue
+            verbs.add(EngageAbadede(actor_slot=actor.slot, target_slot=abadede.slot))
     return verbs
 
 
@@ -1468,7 +1532,12 @@ def _a_weapon_would_disarm_the_plan(context: Context) -> bool:
     none.
     """
 
-    return _souther_is_alive(context) or _antonio_is_alive(context) or _bongo_is_alive(context)
+    return (
+        _souther_is_alive(context)
+        or _antonio_is_alive(context)
+        or _bongo_is_alive(context)
+        or _abadede_is_alive(context)
+    )
 
 
 def could_walk_to_weapon(context: Context) -> Context:
@@ -1532,6 +1601,10 @@ def _antonio_is_alive(context: Context) -> bool:
 
 def _bongo_is_alive(context: Context) -> bool:
     return any(not bongo.is_defeated for bongo in find_all(context, Bongo))
+
+
+def _abadede_is_alive(context: Context) -> bool:
+    return any(not abadede.is_defeated for abadede in find_all(context, Abadede))
 
 
 def _life_items_refused(context: Context) -> bool:
@@ -1752,6 +1825,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_engage_souther(context)
         | could_engage_antonio(context)
         | could_engage_bongo(context)
+        | could_engage_abadede(context)
         | could_hit_antonio_boomerang(context)
         | could_walk_to_advance_stage(context)
         | could_punch(context)

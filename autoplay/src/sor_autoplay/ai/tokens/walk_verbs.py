@@ -254,3 +254,29 @@ class EngageBongo(Walk):
     priority: int = 24
     actor_slot: str
     target_slot: str  # Bongo.slot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EngageAbadede(Walk):
+    """Take a hold on Abadede without ever standing where his run lands.
+
+    Produced by ``could_engage_abadede`` once per live ``Abadede`` while the
+    actor is free to move and not already holding a body -- armed or not. It
+    is the whole fight against him: the strike, grab, hop, walk-in and
+    retreat verbs all stand down for him, and the stick each tick is
+    ``abadede.plan_engage``'s -- a lookahead over his own AI that keeps the
+    move which takes the hold soonest (17-18 lanes off his run, or walking
+    into him while he pauses) without his run's box ever meeting the actor's
+    body, and punches into the run only when nothing else escapes it.
+
+    Raises emergency: a live Abadede×62, plus the boss raise (14) -- 76, the
+    tier of ``EngageBongo``; ×5 instead (19, just under a punch) while a
+    grunt's committed strike is about to land (``reach.is_incoming_melee``)
+    and his run is not pressing (``abadede.charge_is_pressing``); below
+    CounterGrab/TechRecover and the dialogs; the hold family never coexists
+    with it.
+    """
+
+    priority: int = 24
+    actor_slot: str
+    target_slot: str  # Abadede.slot

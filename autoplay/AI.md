@@ -253,6 +253,26 @@ rides him (`$178D0`), with no flight of its own. The round's grunt, which the
 street replaces as often as it dies, lowers the engage just under a punch on
 it while its strike is about to land and his charge is not pressing.
 
+Abadede is fought by one plan, `ai/abadede.py`, of the same shape: **take one
+hold, and never give him back a turn.** `EngageAbadede` is the whole fight up
+to the hold -- punch, chord, grab reason, hop, walk-in, retreat and the
+weapon detour all stand down -- and its stick comes from a lookahead over his
+AI (`abadede.boss_update`: the approach, the four-update pause and its
+decision, the retreat, the charge's set-up, run, brake and punch, the shake,
+getting up and a released hold, read from his primary `+$30`, substate `+$5B`
+and `+$54` timer), the nine sticks held for 2, 6, 14 or all 40 updates and
+then a phase-aware tail, plus a punch timed into his run, under both update
+orders. Only his run hurts: the punch that ends it is erased by `$14CDC` in
+the same update, and his box is dropped while he backs off. His body is two
+lanes wider than the run's box on either side, so 17-18 lanes off the lane
+his run keeps a walking box takes him and nothing of his reaches the actor --
+the sweet area against his run, as a hold; on his lane only a punch meets the
+run first, and that punch is the fallback. The hold loop is Souther's, each
+knee and the release pressed on the one substate of his hold that reads the
+holder's `+$7D`; released, he backs off from where he stands, and that
+state's first contact test is the re-grab. The round's grunt lowers the
+engage just under a punch on it, as in Bongo's round.
+
 Souther is fought by one plan, `ai/souther.py`, and two verbs: **take one
 hold, and never give him back a turn.** `EngageSouther` is the whole approach
 (`souther.plan_engage`) and the hold it ends in is the contact result of
