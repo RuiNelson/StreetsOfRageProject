@@ -20,12 +20,11 @@ import math
 from collections.abc import Callable
 
 from ..phases import HITSTUN_FRAMES, CombatPhase, is_dangerous, is_punishable
-from . import kinematics, reach
+from . import antonio as antonio_plan, kinematics, reach
 from .decide import (
     HEALTH_CRITICAL_PERCENT,
     in_smash_range,
     POLICE_HEALTH_PERCENT_THRESHOLD,
-    POLICE_HEALTH_PERCENT_THRESHOLD_BOSS,
     POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE,
     thrown_weapon_impact_point,
     thrown_weapon_would_connect,
@@ -36,7 +35,7 @@ from . import jump_kick
 from .tokens import (
     Attack,
     CounterGrab,
-    DodgeAntonioKick,
+    EngageAntonio,
     EngageSouther,
     FlipHold,
     GrabEnemy,
@@ -95,11 +94,7 @@ _EMERGENCY_COUNTER_GRAB = 100  # already held — only useful action
 _EMERGENCY_HANDLE_CONTINUE = 99
 _EMERGENCY_HANDLE_MR_X = 99
 _EMERGENCY_TECH_RECOVER = 90  # narrow window, free to act at nothing else
-_EMERGENCY_CALL_POLICE = 88
-# Boxed in but not yet at the health thresholds above: still the only move
-# that clears every side at once, so it outranks every strike, but it sits
-# below the "about to die" call so the two are never confused.
-_EMERGENCY_CALL_POLICE_SURROUNDED = 80
+_EMERGENCY_CALL_POLICE = 88  # about to die: the special's one reason left
 _EMERGENCY_REAR_ATTACK = 55  # escape when boxed in / punch dead-zone
 _EMERGENCY_REAR_ATTACK_DANGEROUS = 60  # escape a commit from behind
 # The same chord when turning around *is* available (decide.
@@ -209,30 +204,10 @@ _EMERGENCY_GRAB_TO_DODGE_CHARGE = 61
 # rear threat (ThrowHeldEnemy, B+back), which is the "especially if the thrown
 # enemy hits other enemies" case.
 #
-# So: above the chord (60) and above punch-on-punish (60), below
-# HitAntonioBoomerang(62) -- an incoming projectile still has to be answered
-# first -- and below every hold move (64..70), which cannot coexist anyway
-# since could_grab_enemy skips while already holding. Shares 61 with
-# ANTONIO_ON_PUNISH, which is coherent rather than a collision: both say
-# "the hold is the answer here", and _emergency_grab_enemy takes the max over
-# whichever opportunities hold.
+# So: above the chord (60) and above punch-on-punish (60), and below every
+# hold move (64..70), which cannot coexist anyway since could_grab_enemy
+# skips while already holding.
 _EMERGENCY_GRAB_WHILE_SURROUNDED = 61
-# Antonio in hitstun: grab-then-suplex instead of standing still to
-# combo him. The boss raise (+14) is applied on top, so this must
-# clear punch-on-punish (60+14 = 74): otherwise an injected or stale
-# Punch still wins the tick and the hold never starts. Below
-# CounterGrab/TechRecover/CallPolice (100/90/88). Hold moves on an
-# existing grab (64..70) do not coexist -- could_grab skips while
-# holding.
-_EMERGENCY_GRAB_ANTONIO_ON_PUNISH = 61
-# Taking the hold on a *ready* Antonio, from contact range. Has to clear the
-# hop it replaces -- _EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER (22), which is
-# raised by the same _EMERGENCY_BOSS_TARGET as this is, so comparing the raw
-# tiers is the right comparison -- while staying well below the punish grab
-# (61): a hold on a boss who cannot act is still strictly better than one on
-# a boss who can. Above _EMERGENCY_GRAB_DEAD_ZONE (30) because this is the
-# whole plan against him rather than an improvement on an exchange.
-_EMERGENCY_GRAB_ANTONIO_WALK_IN = 35
 _EMERGENCY_HOLD_THROW = 70  # throw held body into rear threat
 _EMERGENCY_HOLD_SUPPLEX = 68
 _EMERGENCY_HOLD_FLIP = 66
@@ -269,11 +244,6 @@ _EMERGENCY_RELEASE_PARTNER = 72
 # later-boss grabbee states $06-$09 name no such counter) -- so how *many*
 # knees stays a judgment. How long a knee takes no longer is.
 _EMERGENCY_JUMP_ATTACK_PUNISHABLE = 28  # below punch; never prefer hop over strike
-# Hop on a live Antonio. Must clear _EMERGENCY_PUNCH_DEFAULT (20) so the
-# opener is the jump-kick even if a Punch is still in context: standing
-# still to throw that punch is $16EAE's zero-velocity kick trigger.
-# Below the committed jump-over (56) and the grounded dodge (58).
-_EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER = 22
 # Nora specifically, freshly out of her own whip engage-and-swing or lunge
 # (Nora.ticks_since_last_attack -- observe.NoraAttackTracker) but not (yet)
 # re-armed and not in any ROM-confirmed is_punishable phase, so this sits
@@ -344,20 +314,13 @@ _EMERGENCY_RETREAT_FROM_DANGER = 17  # closer scoring higher, floor 15
 # that might still be avoided on its own trades a certain gain for an
 # uncertain one.
 _EMERGENCY_PROJECTILE_SIDESTEP = 45  # sooner-to-impact scoring higher, floor 30
-# Punching Antonio's incoming boomerang (type $96) back. Above the kick
-# dodge: jumping into a boomerang that is already in the punch box is
-# how the opening hit of the fight lands. The kick's own startup is
-# longer than a punch, so the boomerang is answered first.
-_EMERGENCY_HIT_ANTONIO_BOOMERANG = 62
-# Sidestep / hop out of Antonio's kick window. Above HitAntonioBoomerang
-# and every strike on an Antonio that can still act: standing still to
-# punch is exactly what arms the kick ($16EAE zero-velocity path).
-_EMERGENCY_DODGE_ANTONIO_KICK = 58
-# Jump-kick over a kick that is already coming -- used only while the
-# actor is airborne/crouching (DodgeAntonioKick is suppressed then). Just
-# under the grounded dodge so a hop that has already started is not
-# abandoned, well above a routine jump (18).
-_EMERGENCY_JUMP_OVER_ANTONIO_KICK = 56
+# Punching Antonio's incoming boomerang (type $96) back. Above his engage
+# (EngageAntonio, 62 + the boss raise = 76): the boomerang is only thrown at
+# an actor 120+ px out -- tactical 7 first hands a near target back to
+# tactical 0 -- where no gate of his can fire, and once it is in the punch box
+# a punch is the only thing that stops it. The engage's lookahead replays his
+# AI, not the boomerang's flight.
+_EMERGENCY_HIT_ANTONIO_BOOMERANG = 78
 # The whole engage against Souther (EngageSouther). With the boss raise it is
 # 76: above every strike and every grab tier on anything else (a warranted
 # RearAttack on an armed grunt peaks at 67, a grab at 68), so no detour,
@@ -369,6 +332,12 @@ _EMERGENCY_JUMP_OVER_ANTONIO_KICK = 56
 # it (the engage is not produced while holding), and CounterGrab/TechRecover
 # and the dialogs stay above it as the only answers to their own states.
 _EMERGENCY_ENGAGE_SOUTHER = 62
+# The whole engage against Antonio (EngageAntonio), at Souther's tier for
+# Souther's reasons: 76 with the boss raise -- above every strike, grab and
+# item detour on anything else, below the only-answer states (CounterGrab,
+# TechRecover, the dialogs) and the incoming boomerang. The hold family never
+# coexists with it: the engage is not produced while the actor holds a body.
+_EMERGENCY_ENGAGE_ANTONIO = 62
 # Lowest of any verb that still scores. Must sit under every other live
 # candidate -- including ScorePickup (9), SpecialPickup (11), LifePickup
 # (12), and WalkToNearEnemy's floor (8) -- so stage advance is only chosen
@@ -488,15 +457,12 @@ def _emergency_handle_mr_x_dialog(verb: HandleMrXDialog, context: Context) -> in
 
 
 def _emergency_call_police(verb: CallPolice, context: Context) -> int:
-    """Mirrors ``decide._police_is_worth_it``'s three reasons, same tiers.
+    """Mirrors ``decide._police_is_worth_it``: the panic threshold only.
 
-    A live ``Boss`` scores the *same* top tier as "about to die"
-    (``_EMERGENCY_CALL_POLICE``, 88), not a lesser one: ``$16A60``'s flat
-    -10 HP is worth roughly a third of a later-boss's whole health bar in
-    one press, which is an order of magnitude better than the special's
-    ordinary value against a street enemy and easily worth outranking a
-    combo in progress once it applies at all (``decide._police_is_worth_it``
-    already keeps it from firing outside the boss's own laxer health gate).
+    The top tier (88) when it applies -- about to die is the one situation
+    the special is for -- and nothing otherwise. The laxer Surrounded and
+    live-boss tiers are gone with the reasons that produced them (user: "A
+    AI está a depender muito da chamada da polícia!").
     """
 
     actor = _find_actor(context, verb.actor_slot)
@@ -508,13 +474,6 @@ def _emergency_call_police(verb: CallPolice, context: Context) -> int:
         else POLICE_HEALTH_PERCENT_THRESHOLD
     )
     if actor.health_percent < threshold:
-        return _EMERGENCY_CALL_POLICE
-    if any(token.actor_slot == actor.slot for token in find_all(context, Surrounded)):
-        return _EMERGENCY_CALL_POLICE_SURROUNDED
-    if (
-        any(not boss.is_defeated for boss in find_all(context, Boss))
-        and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD_BOSS
-    ):
         return _EMERGENCY_CALL_POLICE
     return _EMERGENCY_DEFAULT
 
@@ -580,15 +539,6 @@ def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
     actor = _find_actor(context, verb.actor_slot)
     if target is None:
         return _EMERGENCY_DEFAULT
-    if isinstance(target, Antonio):
-        if (
-            target.strike_is_committed()
-            and actor is not None
-            and reach.antonio_will_kick(target, actor)
-        ):
-            return _with_target_class(_EMERGENCY_JUMP_OVER_ANTONIO_KICK, target)
-        if not is_punishable(target.combat_phase):
-            return _with_target_class(_EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER, target)
     extra_hits = _jump_attack_extra_hits_bonus(actor, target, context)
     if is_punishable(target.combat_phase):
         return _with_target_class(_EMERGENCY_JUMP_ATTACK_PUNISHABLE, target) + extra_hits
@@ -601,31 +551,20 @@ def _emergency_jump_attack(verb: JumpAttack, context: Context) -> int:
     return _with_target_class(_EMERGENCY_JUMP_ATTACK_DEFAULT, target) + extra_hits
 
 
-# Stepping out of a kick gate that has not fired yet. Must clear the hop it
-# replaces (_EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER 22 plus the boss raise's 14
-# = 36) and stay under the walk-in hold (_EMERGENCY_GRAB_ANTONIO_WALK_IN 35 +
-# 14 = 49): with the hold available the hold is the better answer, since a
-# held Antonio cannot kick at all, and only out of its range is leaving the
-# lane the best thing on the table.
-_EMERGENCY_BREAK_ANTONIO_KICK_LANE = 42
-
-
-def _emergency_dodge_antonio_kick(verb: DodgeAntonioKick, context: Context) -> int:
-    target = find(context, Antonio, slot=verb.target_slot)
-    actor = _find_actor(context, verb.actor_slot)
-    if target is not None and actor is not None and reach.antonio_will_kick(target, actor):
-        if not verb.committed:
-            return _EMERGENCY_BREAK_ANTONIO_KICK_LANE
-        return _EMERGENCY_DODGE_ANTONIO_KICK
-    return _EMERGENCY_DEFAULT
-
-
 def _emergency_engage_souther(verb: EngageSouther, context: Context) -> int:
     target = find(context, Souther, slot=verb.target_slot)
     actor = _find_actor(context, verb.actor_slot)
     if target is None or actor is None or target.is_defeated:
         return _EMERGENCY_DEFAULT
     return _with_target_class(_EMERGENCY_ENGAGE_SOUTHER, target)
+
+
+def _emergency_engage_antonio(verb: EngageAntonio, context: Context) -> int:
+    target = find(context, Antonio, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
+    if target is None or actor is None or target.is_defeated:
+        return _EMERGENCY_DEFAULT
+    return _with_target_class(_EMERGENCY_ENGAGE_ANTONIO, target)
 
 
 def _emergency_hit_antonio_boomerang(verb: HitAntonioBoomerang, context: Context) -> int:
@@ -641,8 +580,6 @@ _GRAB_REASON_SCORE: dict[GrabReason, int] = {
     GrabReason.CLEAR_REAR: _EMERGENCY_GRAB_CLEAR_REAR,
     GrabReason.JACK_FROM_BEHIND: _EMERGENCY_GRAB_JACK_FROM_BEHIND,
     GrabReason.DEAD_ZONE: _EMERGENCY_GRAB_DEAD_ZONE,
-    GrabReason.ANTONIO_ON_PUNISH: _EMERGENCY_GRAB_ANTONIO_ON_PUNISH,
-    GrabReason.ANTONIO_WALK_IN: _EMERGENCY_GRAB_ANTONIO_WALK_IN,
     GrabReason.WHILE_SURROUNDED: _EMERGENCY_GRAB_WHILE_SURROUNDED,
     GrabReason.DODGE_CHARGE: _EMERGENCY_GRAB_TO_DODGE_CHARGE,
 }
@@ -810,9 +747,10 @@ def _boss_attack_gate_is_live(context: Context, actor_slot: str | None) -> bool:
 
     An item detour is a walk that ignores the boss, and ``$16EAE`` punishes
     exactly that: the X window it kicks from is picked by the *target's* own
-    velocity (up to 120px while closing, 104px standing still) with a 16px
-    lane window, and the hit is 20 damage -- a quarter of the health bar, for
-    an apple. Measured over three round-1 fights, four of the eight hits
+    velocity and side (up to 120px while closing, 104px standing on his
+    right) with an 8px lane window above him and 16px below, and the hit is
+    20 damage -- a quarter of the health bar, for an apple. The gate itself
+    is ``antonio.kick_gate_open``. Measured over three round-1 fights, four of the eight hits
     Antonio landed came while the winning verb was ``WalkToPickup`` or
     ``WalkToWeapon``; a pipe is worth even less than the apple, since
     ``decide._could_melee_strike`` refuses every grounded B on him, so an
@@ -826,8 +764,7 @@ def _boss_attack_gate_is_live(context: Context, actor_slot: str | None) -> bool:
     if actor is None:
         return False
     return any(
-        not antonio.is_defeated and reach.antonio_will_kick(antonio, actor)
-        for antonio in find_all(context, Antonio)
+        antonio_plan.kick_gate_open(antonio, actor) for antonio in find_all(context, Antonio)
     )
 
 
@@ -886,7 +823,7 @@ def _emergency_attack_held_enemy(verb: AttackHeldEnemy, context: Context) -> int
 
     if not _target_is_in_hand(verb, context):
         return _EMERGENCY_DEFAULT
-    if isinstance(find(context, Enemy, slot=verb.target_slot), Souther):
+    if isinstance(find(context, Enemy, slot=verb.target_slot), (Souther, Antonio)):
         # souther.hold_step already chose this knee from the ROM's own chain
         # count (+$58 bit 6, +$61); the budget below is for bodies without one.
         return _EMERGENCY_HOLD_KNEE_FRESH
@@ -970,8 +907,8 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     WalkToNearEnemy: _emergency_walk_to_near_enemy,
     RetreatFromDanger: _emergency_retreat_from_danger,
     ProjectileSidestep: _emergency_projectile_sidestep,
-    DodgeAntonioKick: _emergency_dodge_antonio_kick,
     EngageSouther: _emergency_engage_souther,
+    EngageAntonio: _emergency_engage_antonio,
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
 }

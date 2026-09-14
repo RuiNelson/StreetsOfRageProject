@@ -9,11 +9,13 @@ walks the level to Antonio on its own.
 
 Unlike ``boss_fight.py``, which only scores the outcome, this records *why*
 each tick chose what it chose: every candidate ``Verb`` with its own
-emergency, the actor's hold state (`+$60` grabbed-object type and the
-action byte behind it), Antonio's primary/tactical bytes, and the three
-judgments the fight turns on (``reach.antonio_will_kick``,
-``reach.grab_reasons``, ``phases``' combat phase). The first live run of
-this answered a stall that no summary could: the actor sat in back hold
+emergency, the actor's hold state (the ``+$4C`` link and the action byte
+behind it), every byte of Antonio's own AI state that ``ai/antonio.py``
+replays (primary, tactical, ``+$78``, screen X, animation frame and the
+latched box ids, velocities), ``antonio.kick_gate_open`` on the observed
+positions, and what ``antonio.plan_engage`` chose -- the stick, the mode, and
+the outcome its lookahead predicted. The first live run of an earlier
+version answered a stall no summary could: the actor sat in back hold
 ``$67`` for 7746 consecutive ticks with the winning verb ``None``.
 
 Run (host already up with ``--debugUtils``, e.g.
@@ -33,9 +35,9 @@ import time
 
 from megadrive_remote import MegaDriveClient
 
-from sor_autoplay.ai import reach
+from sor_autoplay.ai import antonio as antonio_plan
 from sor_autoplay.ai.decide import _blocked, _is_holding_enemy, generate_verb_tokens
-from sor_autoplay.ai.execute import execute_tick
+from sor_autoplay.ai.execute import engage_antonio_plan, execute_tick
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.observe import (
@@ -47,7 +49,17 @@ from sor_autoplay.ai.observe import (
 # Private on purpose: the per-verb score is exactly what this tool exists to
 # show, and re-deriving it here would risk disagreeing with the pipeline.
 from sor_autoplay.ai.priority import _emergency, determine_priority_verb
-from sor_autoplay.ai.tokens import Boss, Enemy, Myself, Verb, find, find_all
+from sor_autoplay.ai.tokens import (
+    Antonio,
+    Boss,
+    DebugNoPolice,
+    EngageAntonio,
+    Enemy,
+    Myself,
+    Verb,
+    find,
+    find_all,
+)
 from sor_autoplay.debug_scenario import DebugScenario
 from sor_autoplay.reach_gameplay import reach_gameplay
 from sor_autoplay.rom_data import RomData
@@ -117,6 +129,9 @@ def main() -> int:
                     snap, player_index=1, nora_tracker=nora_tracker, hold_tracker=hold_tracker
                 )
                 context |= generate_inference_tokens(context)
+                # A diagnostic of a test run: the police stays off (user:
+                # "just don't test with the police on").
+                context |= {DebugNoPolice()}
                 context |= generate_verb_tokens(context)
                 pending = tuple(find_all(context, Verb))
                 scored = sorted(
@@ -140,7 +155,11 @@ def main() -> int:
                     print("boss up", flush=True)
 
                 me = find(context, Myself)
-                enemies = reach.live_enemies(context)
+                engage = None
+                if me is not None and isinstance(boss, Antonio):
+                    engage = engage_antonio_plan(
+                        EngageAntonio(actor_slot=me.slot, target_slot=boss.slot), context
+                    )
                 row = {
                     "t": round(started - (boss_deadline - args.fight_seconds), 3),
                     "hp": player.health,
@@ -167,18 +186,31 @@ def main() -> int:
                     "boss_dist_lane": boss.boss_dist_lane,
                     "boss_facing_left": boss.facing_left,
                     "boss_target_unavailable": boss.target_unavailable,
-                    "will_kick": (
-                        reach.antonio_will_kick(boss, me)
-                        if me is not None and boss.type_id == ANTONIO_TYPE
+                    "boss_t78": boss.phase_timer,
+                    "boss_t5c": boss.timer_5c,
+                    "boss_screen_x": boss.screen_x,
+                    "boss_anim": boss.anim,
+                    "boss_frame": boss.anim_frame,
+                    "boss_countdown": boss.anim_countdown,
+                    "boss_boxes": [boss.attack_box_id, boss.body_box_id],
+                    "boss_vel": [round(boss.boss_vel_x, 3), round(boss.boss_vel_lane, 3)],
+                    "boss_fine": [round(boss.fine_x, 3), round(boss.fine_y, 3)],
+                    "p1_flags_31": me.flags_31 if me else None,
+                    "kick_gate_open": (
+                        antonio_plan.kick_gate_open(boss, me)
+                        if me is not None and isinstance(boss, Antonio)
                         else None
                     ),
-                    "grab_reasons": (
-                        sorted(r.name for r in reach.grab_reasons(context, me, boss, enemies))
-                        if me is not None
+                    "plan": (
+                        {
+                            "dir": [engage.dir_x, engage.dir_y],
+                            "mode": engage.mode.name,
+                            "outcome": engage.outcome,
+                            "at": engage.at_update,
+                            "score": round(engage.score, 1),
+                        }
+                        if engage is not None
                         else None
-                    ),
-                    "grab_would_connect": (
-                        reach.grab_would_connect(me, boss) if me is not None else None
                     ),
                     "verb": type(verb).__name__ if verb else None,
                     "pending": [[s, p, n] for s, p, n in scored],

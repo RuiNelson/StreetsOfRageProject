@@ -79,8 +79,16 @@ ADDR_CHAR_SELECT_SUBSTATE = 0xFFF904  # W
 ADDR_SOUND_MUSIC_VOICE_BANK = 0xFFF014  # L
 ADDR_PLAY_SE = 0xFFF00A  # B, sound command queue slot 0
 
-# Object field used by Mr. X choice UI (bit3 = side, bit4 = choice active).
+# Player +$59: bits 3/4 are the Mr. X choice UI (side, choice active). Bit 1
+# is set by every hit reaction ($333E resolve_player_hit_or_ko, $33EC, $3468,
+# $34CA) and cleared by the floor landing ($3F24): while it is set $AA34
+# skips the player outright, and a later boss's $179F8 counts it as "target
+# unavailable" (+$77).
 OBJ_PLAYER_FLAGS_59 = 0x59
+PLAYER_HIT_REACTION_BIT = 0x02
+# Player +$7C: the contact code $AA22 hands a player (1 hit, 3 grab). While
+# bit 0 is latched -- a code not yet consumed -- $AA34 tests no contact.
+OBJ_PLAYER_CONTACT_CODE = 0x7C
 
 # Offsets within a player / generic object
 OBJ_TYPE = 0x00
@@ -220,6 +228,35 @@ OBJ_ATTACKER_PTR = 0x3E
 OBJ_BESPOKE_TARGET = 0x5C
 # Later-boss selected player pointer word.
 OBJ_LATER_BOSS_TARGET = 0x72
+# Later bosses: the rest of what one update of their AI reads and writes, so
+# ai/antonio.py can replay $16DA0 update by update from the observed object.
+OBJ_BOSS_VEL_X = 0x1C  # signed 16.16 X velocity (per update, $17AB8)
+OBJ_BOSS_VEL_LANE = 0x20  # signed 16.16 lane velocity
+OBJ_SCREEN_X = 0x28  # biased screen X, $80 = left edge, written by $AF46
+OBJ_ANIM = 0x08  # word: animation offset into the set, bit 1 = mirrored member
+OBJ_ANIM_FRAME = 0x0A  # the frame the renderer will show next
+OBJ_ANIM_COUNTDOWN = 0x0D  # updates left on it ($B0C8 reloads it from +$0C)
+OBJ_ATTACK_BOX = 0x02  # the box ids the renderer latched last: what collides
+OBJ_BODY_BOX = 0x03
+OBJ_BOSS_REENTRY_TIMER = 0x5C  # Antonio tactical 9 / 1 countdown
+OBJ_BOSS_REACTION_TIMER = 0x62  # hit reaction / throw / knockdown timer
+OBJ_BOSS_HOLD_FLAGS = 0x66  # bit 0 = held by a player ($17B52 grab code)
+OBJ_BOSS_WOBBLE = 0x6B  # $17A6E's lane wobble counter
+# Antonio's boomerang (type $96) runs the later-boss layout above -- +$1C/+$20
+# its velocities, +$52 the lane its return homes on, +$61 that lane's side,
+# +$6B its outbound countdown -- and two fields of its own: +$7B, the timer
+# once knocked away ($1727A), and the +$78 word its turn copies into +$52.
+# $172F6's `lea $64(a0),a1` makes that the boomerang's own +$78 rather than
+# its target's lane, which is why the return homes on the top of the street.
+OBJ_BOOMERANG_TURN_LANE = 0x78
+OBJ_BOOMERANG_KNOCK_TIMER = 0x7B
+# Later bosses: +$6E links the child object ($17238 writes it both ways) --
+# Antonio's boomerang, the one $17206 spawned last. An older one still in
+# flight keeps its own link to him but is no longer his.
+OBJ_LATER_BOSS_CHILD = 0x6E
+# Player +$31: $16EAE's standing-still kick window tests bit 1 of it on the
+# target. No player code ever sets bit 1 (only bit 0, in $7250).
+OBJ_PLAYER_FLAGS_31 = 0x31
 
 # Ordinary-enemy primary state words (high byte = family index).
 ENEMY_ST_NORMAL = 0x0100

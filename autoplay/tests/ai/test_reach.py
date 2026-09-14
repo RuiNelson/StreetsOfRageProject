@@ -513,103 +513,6 @@ def _souther(**overrides) -> Souther:
     return Souther(**fields)
 
 
-class AntonioWillKickTests(unittest.TestCase):
-    def test_fires_when_already_in_state_2(self) -> None:
-        myself = _myself(world_x=160, world_y=100)
-        antonio = _antonio(
-            combat_phase=CombatPhase.ATTACKING,
-            primary_state=2,
-            boss_dist_x=40,
-            boss_dist_lane=4,
-        )
-        self.assertTrue(reach.antonio_will_kick(antonio, myself))
-
-    def test_committed_kick_off_lane_is_not_a_threat(self) -> None:
-        myself = _myself(world_x=160, world_y=100)
-        antonio = _antonio(
-            combat_phase=CombatPhase.ATTACKING,
-            primary_state=2,
-            boss_dist_x=40,
-            boss_dist_lane=24,
-        )
-        self.assertFalse(reach.antonio_will_kick(antonio, myself))
-
-    def test_fires_when_standing_still_inside_the_stationary_window(self) -> None:
-        myself = _myself(world_x=160, world_y=100, vel_x=0.0)
-        antonio = _antonio(
-            world_x=200,
-            facing_left=True,
-            boss_dist_x=40,
-            boss_dist_lane=4,
-            primary_state=1,
-        )
-        self.assertTrue(reach.antonio_will_kick(antonio, myself))
-
-    def test_fires_once_the_dash_is_committed(self) -> None:
-        myself = _myself(world_x=3808, world_y=33)
-        antonio = _antonio(
-            world_x=3848,
-            world_y=16,
-            boss_dist_x=40,
-            boss_dist_lane=17,
-            primary_state=1,
-            tactical=0x08,
-        )
-        self.assertTrue(reach.antonio_will_kick(antonio, myself))
-
-    def test_uncommitted_dash_window_is_not_enough(self) -> None:
-        # The dash *window* is the whole fight range; firing here made
-        # DodgeAntonioKick win every tick and never attack.
-        myself = _myself(world_x=3808, world_y=33, vel_x=3.0)
-        antonio = _antonio(
-            world_x=3848,
-            world_y=16,
-            boss_dist_x=40,
-            boss_dist_lane=17,
-            primary_state=1,
-            tactical=0,
-        )
-        self.assertFalse(reach.antonio_will_kick(antonio, myself))
-
-    def test_does_not_fire_when_off_lane(self) -> None:
-        myself = _myself(world_x=160, world_y=100, vel_x=0.0)
-        antonio = _antonio(
-            world_x=200,
-            boss_dist_x=40,
-            boss_dist_lane=24,
-            primary_state=1,
-        )
-        self.assertFalse(reach.antonio_will_kick(antonio, myself))
-
-    def test_does_not_fire_when_far_on_x(self) -> None:
-        myself = _myself(world_x=40, world_y=100, vel_x=0.0)
-        antonio = _antonio(
-            world_x=200,
-            boss_dist_x=0x80,  # 128, outside the dash window too
-            boss_dist_lane=4,
-            primary_state=1,
-        )
-        self.assertFalse(reach.antonio_will_kick(antonio, myself))
-
-    def test_does_not_fire_when_target_unavailable(self) -> None:
-        myself = _myself(world_x=160, world_y=100)
-        antonio = _antonio(target_unavailable=1, combat_phase=CombatPhase.ATTACKING)
-        self.assertFalse(reach.antonio_will_kick(antonio, myself))
-
-    def test_closing_uses_the_wider_window(self) -> None:
-        # Antonio faces left (looking at a player on his left). Player
-        # walking right (vel > 0) is walking toward him -> $78 window.
-        myself = _myself(world_x=100, world_y=100, vel_x=3.0)
-        antonio = _antonio(
-            world_x=200,
-            facing_left=True,
-            boss_dist_x=0x70,  # 112, inside $78, outside $50/$68
-            boss_dist_lane=4,
-            primary_state=1,
-        )
-        self.assertTrue(reach.antonio_will_kick(antonio, myself))
-
-
 class SoutherWouldPunishJumpTests(unittest.TestCase):
     def test_armed_in_state_1(self) -> None:
         myself = _myself(world_x=160, world_y=100)
@@ -1112,42 +1015,6 @@ class GrabReasonsTests(unittest.TestCase):
         # is not a reason to grab it.
         self.assertEqual(reach.grab_reasons(set(), myself, boss, [boss, behind]), frozenset())
 
-    def test_promotes_antonio_once_he_is_in_hitstun(self) -> None:
-        myself = _myself(world_x=100, world_y=100, facing_left=False)
-        antonio = _antonio(
-            slot="obj09", world_x=130, world_y=100, combat_phase=CombatPhase.RECOVERY,
-            primary_state=3,
-        )
-
-        self.assertEqual(
-            reach.grab_reasons(set(), myself, antonio, [antonio]),
-            frozenset({GrabReason.ANTONIO_ON_PUNISH}),
-        )
-
-    def test_a_ready_antonio_is_still_worth_the_hold(self) -> None:
-        # The only alternative from contact range is the hop, and the hop is
-        # 45 committed airborne frames for ~2 damage -- the window every hit
-        # he still lands arrives in. reach.grab_would_connect keeps this
-        # from ever becoming a walk across the arena.
-        myself = _myself(world_x=100, world_y=100, facing_left=False)
-        antonio = _antonio(
-            slot="obj09", world_x=130, world_y=100, combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-        )
-
-        self.assertEqual(
-            reach.grab_reasons(set(), myself, antonio, [antonio]),
-            frozenset({GrabReason.ANTONIO_WALK_IN}),
-        )
-
-    def test_the_walk_in_reason_ranks_under_the_punish_one(self) -> None:
-        from sor_autoplay.ai.priority import _GRAB_REASON_SCORE
-
-        self.assertLess(
-            _GRAB_REASON_SCORE[GrabReason.ANTONIO_WALK_IN],
-            _GRAB_REASON_SCORE[GrabReason.ANTONIO_ON_PUNISH],
-        )
-
     def test_souther_is_never_a_grab_reason_case(self) -> None:
         # His hold is the engage's own walk-in (EngageSouther), from the lane
         # and at the moment souther.plan_engage picks -- not a reason
@@ -1263,18 +1130,6 @@ class ConnectsBandTimelineTests(unittest.TestCase):
 
         self.assertTrue(_connects(reach.in_jump_attack_band, myself, enemy, JumpAttack))
         self.assertFalse(_connects(reach.punch_would_connect, myself, enemy, Punch))
-
-    def test_antonio_opener_includes_punch_range_on_his_lane(self) -> None:
-        myself = _myself(world_x=120, world_y=100, facing_left=False)
-        antonio = _antonio(world_x=160, world_y=100, boss_dist_x=40, boss_dist_lane=0)
-
-        self.assertTrue(_connects(reach.in_jump_attack_band, myself, antonio, JumpAttack))
-
-    def test_antonio_opener_does_not_cover_another_lane(self) -> None:
-        myself = _myself(world_x=120, world_y=80, facing_left=False)
-        antonio = _antonio(world_x=160, world_y=100, boss_dist_x=40, boss_dist_lane=20)
-
-        self.assertFalse(_connects(reach.in_jump_attack_band, myself, antonio, JumpAttack))
 
     def test_ignores_enemies_outside_the_playable_lane(self) -> None:
         myself = _myself(world_x=100, world_y=100)

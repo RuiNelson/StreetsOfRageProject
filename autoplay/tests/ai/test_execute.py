@@ -9,7 +9,7 @@ from sor_autoplay.ai import priority as priority_module
 from sor_autoplay.ai.tokens import (
     Antonio,
     CounterGrab,
-    DodgeAntonioKick,
+    EngageAntonio,
     EngageSouther,
     GrabEnemy,
     HitAntonioBoomerang,
@@ -42,7 +42,6 @@ from sor_autoplay.ai.execute import (
     MOVE_DEADBAND_X,
     PICKUP_RANGE_X,
     PICKUP_RANGE_Y,
-    ANTONIO_APPROACH_LANE_Y,
     WALK_TO_ENEMY_LANE_SAFETY_Y,
     _enemy_stop_dx,
     _find_safe_spot,
@@ -233,44 +232,6 @@ class BreakableWeaponSwingBandTests(unittest.TestCase):
         _settle(OpenBreakable(actor_slot="P1", target_slot="obj06"), self._context(2893), gamepad)
 
         self.assertTrue(client.press_buttons.called)
-
-
-class AntonioLaneBreakTests(unittest.TestCase):
-    """The uncommitted half of ``DodgeAntonioKick``: walk out of his gate.
-
-    Also the regression test for the class of bug that only showed live --
-    the executor's uncommitted branch had never been driven by a unit test,
-    so a missing import in it reached a real fight before anything caught it.
-    """
-
-    def test_steps_away_from_his_lane(self) -> None:
-        actor = _myself(world_x=100, world_y=60)
-        antonio = _live_antonio(world_x=140, world_y=54)
-        verb = DodgeAntonioKick(
-            actor_slot="P1", target_slot="obj00", committed=False
-        )
-        gamepad, _client = _gamepad()
-
-        context = {actor, antonio, CameraRange(left=0, right=320, top=0, bottom=112)}
-        _settle(verb, context, gamepad)
-
-        # Actor is below him, so it steps further down, and never jumps.
-        self.assertTrue(gamepad.held & DOWN)
-        self.assertFalse(gamepad.held & C)
-
-    def test_a_committed_kick_still_jumps(self) -> None:
-        actor = _myself(world_x=100, world_y=60)
-        antonio = _live_antonio(world_x=140, world_y=54)
-        verb = DodgeAntonioKick(actor_slot="P1", target_slot="obj00", committed=True)
-        gamepad, client = _gamepad()
-
-        execute_verb(
-            verb,
-            {actor, antonio, CameraRange(left=0, right=320, top=0, bottom=112)},
-            gamepad,
-        )
-
-        self.assertTrue(client.press_buttons.called or client.hold_buttons.called)
 
 
 def _live_antonio(*, world_x: int, world_y: int) -> Antonio:
@@ -728,49 +689,6 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         target_x, target_y = _walk_to_near_enemy_target(actor, target, context)
 
         self.assertEqual(target_y, 50 - WALK_TO_ENEMY_LANE_SAFETY_Y)
-
-    def test_an_antonio_approach_never_crosses_his_lane(self) -> None:
-        # Actor at 60 against an Antonio at 50 steps further down, not up
-        # through his own lane. Measured over the real executor with the
-        # midpoint rule: an approach starting 20px clear crossed to 5px and
-        # then 2px of his kick lane while still 130px away on X.
-        actor = _myself(world_x=0, world_y=60)
-        antonio = _live_antonio(world_x=200, world_y=50)
-
-        _, target_y = _walk_to_near_enemy_target(actor, antonio, {actor, antonio})
-
-        self.assertEqual(target_y, 50 + ANTONIO_APPROACH_LANE_Y)
-
-    def test_an_antonio_approach_picks_the_side_with_room_when_on_his_lane(self) -> None:
-        # Practically on his lane: the raw compare is walk jitter, so the
-        # room in the band decides instead (lo=8, hi=106, midpoint 57; a
-        # target at 20 has the room below it).
-        actor = _myself(world_x=0, world_y=22)
-        antonio = _live_antonio(world_x=200, world_y=20)
-
-        _, target_y = _walk_to_near_enemy_target(actor, antonio, {actor, antonio})
-
-        self.assertEqual(target_y, 20 + ANTONIO_APPROACH_LANE_Y)
-
-    def test_an_antonio_approach_crosses_only_with_no_room_on_its_own_side(self) -> None:
-        # Actor above an Antonio near the top of the band: stepping further
-        # up leaves the playable lanes entirely, so crossing is forced rather
-        # than chosen.
-        actor = _myself(world_x=0, world_y=12)
-        antonio = _live_antonio(world_x=200, world_y=30)
-
-        _, target_y = _walk_to_near_enemy_target(actor, antonio, {actor, antonio})
-
-        self.assertEqual(target_y, 30 + ANTONIO_APPROACH_LANE_Y)
-
-    def test_an_antonio_approach_aims_wider_than_his_kick_gate(self) -> None:
-        # The routed goal carries PUNCH_RANGE_Y of lane slack, so an aim of
-        # WALK_TO_ENEMY_LANE_SAFETY_Y is satisfied by arriving 16px out --
-        # his $10 kick gate, satisfied. ANTONIO_APPROACH_LANE_Y adds the
-        # slack back so the nearest acceptable arrival is 28px clear.
-        self.assertGreaterEqual(
-            ANTONIO_APPROACH_LANE_Y - PUNCH_RANGE_Y, WALK_TO_ENEMY_LANE_SAFETY_Y
-        )
 
     def test_does_not_keep_sidestepping_once_clear_of_the_line_of_attack(self) -> None:
         # The sidestep aims at a *fixed* lane, so once the actor is already
@@ -1797,50 +1715,6 @@ class ExecuteJumpAttackTests(unittest.TestCase):
         gamepad, client = _gamepad()
 
         execute_verb(verb, {actor, enemy}, gamepad)
-
-        client.press_buttons.assert_called_once_with(player1=C | RIGHT, player2=0, frames=3)
-
-    def test_hops_in_place_on_antonio_inside_punch_range(self) -> None:
-        # A directed hop from dx=40 (Axel punch outer 50) carries ~3 px/frame
-        # past him; the actor lands facing away and grab_would_connect fails.
-        # Measured live: 374 JumpAttack, 0 GrabEnemy. C with no direction
-        # is the hop that lands in grab range.
-        actor = _myself(world_x=120, world_y=100)
-        antonio = Antonio(
-            slot="obj09",
-            type_id=0x56,
-            world_x=160,
-            world_y=100,
-            health=40,
-            combat_phase=CombatPhase.NORMAL,
-            targets_player=1,
-            facing_left=True,
-            primary_state=1,
-        )
-        verb = JumpAttack(actor_slot="P1", target_slot="obj09")
-        gamepad, client = _gamepad()
-
-        execute_verb(verb, {actor, antonio}, gamepad)
-
-        client.press_buttons.assert_called_once_with(player1=C, player2=0, frames=3)
-
-    def test_still_hops_toward_antonio_outside_punch_range(self) -> None:
-        actor = _myself(world_x=100, world_y=100)
-        antonio = Antonio(
-            slot="obj09",
-            type_id=0x56,
-            world_x=155,
-            world_y=100,
-            health=40,
-            combat_phase=CombatPhase.NORMAL,
-            targets_player=1,
-            facing_left=True,
-            primary_state=1,
-        )
-        verb = JumpAttack(actor_slot="P1", target_slot="obj09")
-        gamepad, client = _gamepad()
-
-        execute_verb(verb, {actor, antonio}, gamepad)
 
         client.press_buttons.assert_called_once_with(player1=C | RIGHT, player2=0, frames=3)
 
@@ -3029,67 +2903,6 @@ class HitAntonioBoomerangExecuteTests(unittest.TestCase):
         client.press_buttons.assert_called_once_with(
             player1=B | RIGHT, player2=0, frames=4
         )
-
-
-class DodgeAntonioKickExecuteTests(unittest.TestCase):
-    def test_jumps_over_the_kick(self) -> None:
-        actor = _myself(world_x=120, world_y=100)
-        antonio = Antonio(
-            slot="obj09",
-            type_id=0x56,
-            world_x=160,
-            world_y=100,
-            health=40,
-            combat_phase=CombatPhase.ATTACKING,
-            targets_player=1,
-            facing_left=True,
-            primary_state=2,
-        )
-        client = MagicMock()
-        gamepad = VirtualGamepad(
-            SharedGamepadState(client), player_index=1
-        )
-        execute_verb(
-            DodgeAntonioKick(actor_slot="P1", target_slot="obj09"),
-            {actor, antonio},
-            gamepad,
-        )
-        client.press_buttons.assert_called_once()
-        pressed = client.press_buttons.call_args.kwargs["player1"]
-        self.assertTrue(pressed & C)
-        self.assertFalse(pressed & (LEFT | RIGHT))
-
-    def test_hops_even_when_overlapping_on_x(self) -> None:
-        # JumpAttack's generic fallback punches when overlapping on X.
-        # Against Antonio that is the $16EAE kick trigger, and this dodge
-        # reuses that handler, so the fallback would turn a dodge into a
-        # standing punch. Hop in place instead.
-        actor = _myself(world_x=160, world_y=100)
-        antonio = Antonio(
-            slot="obj09",
-            type_id=0x56,
-            world_x=160,
-            world_y=100,
-            health=40,
-            combat_phase=CombatPhase.ATTACKING,
-            targets_player=1,
-            facing_left=True,
-            primary_state=2,
-        )
-        client = MagicMock()
-        gamepad = VirtualGamepad(
-            SharedGamepadState(client), player_index=1
-        )
-        execute_verb(
-            DodgeAntonioKick(actor_slot="P1", target_slot="obj09"),
-            {actor, antonio},
-            gamepad,
-        )
-        client.press_buttons.assert_called_once()
-        pressed = client.press_buttons.call_args.kwargs["player1"]
-        self.assertTrue(pressed & C)
-        self.assertFalse(pressed & B)
-        self.assertFalse(pressed & (LEFT | RIGHT))
 
 
 def _souther_token(**overrides) -> Souther:

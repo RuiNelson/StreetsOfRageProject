@@ -153,9 +153,11 @@ parametrized intent that precedes any concrete action.
   Taking a hold, on the other hand, is its own verb and its own
   *absence* of an input — see [Grabbing an enemy](#grabbing-an-enemy).
   `CallPolice`, which activates the police special attack, is an `Attack`
-  descendant. It only fires when health is running out (or the actor is
-  surrounded below the laxer health gate), a special remains, **and** at
-  least one live enemy is in context.
+  descendant. It only fires when health is running out, a special remains,
+  **and** at least one live enemy is in context -- never for a crowd or a
+  boss on its own (user: "A AI está a depender muito da chamada da
+  polícia!"), and never in a test, where the harness's `DebugNoPolice`
+  removes it.
 
 A third `Verb` branch, `Dialog`, answers game UI prompts rather than
 acting in combat: `HandleContinueMenu` (always Yes, initials `AI `) and
@@ -203,29 +205,34 @@ they are animation-synchronized attack objects re-created from his own
 position every dash tick, with no flight to intercept, so his own state is
 the only honest thing to read.
 
-Antonio's ROM kick gate at `$16EAE` (already satisfied, or committed to
-primary state 2, the close-range power kick) is answered by `reach.
-antonio_will_kick(antonio, actor)`. Standing still in front of him is one
-of the trigger paths — the player's own signature while throwing a ground
-combo, and equally the signature of a standing punch. The human answer is
-a jump kick to put him in later-boss hitstun (primary `$03`/`$04`,
-decoded as `RECOVERY`), then a grab and a suplex. A grounded B is
-refused entirely: the first punch stood in the same window as a combo
-and lost the ranking contest to the hop (20+boss vs 18+boss), which is
-why the fight looked weak. Jump-kicking him is offered inside punch range as well as the usual
-"past punch outer" band (~10px on Axel, too thin to fire) -- but only
-when the kick would connect (same lane, in front, within free-flight
-range). An X-only opener hopped from any lane and kicked empty air.
-Off-lane, walking onto his lane is the approach. The hop also wins
-the ranking (`priority._EMERGENCY_JUMP_ATTACK_ANTONIO_OPENER` 22).
-From inside punch range the hop is in place, so the actor lands where
-the grab can connect -- a directed hop from there lands on his far
-side, facing away, and the hold never starts.
-`DodgeAntonioKick` and the jump-over tier fire only
-once the kick or the tactical-`$08` dash is actually locked in. A
-predicted window is not a reason to leave hop range. Overlapping him on
-X hops in place rather than punching. `HitAntonioBoomerang` punches the
-thrown boomerang at punch-connect time when it would hit the actor.
+Antonio is fought by one plan too, `ai/antonio.py`, and the same shape:
+**take one hold, and never give him back a turn.** `EngageAntonio` is the
+whole fight up to the hold -- every generic verb against him (punch, chord,
+grab reason, hop, walk-in, retreat) stands down -- and its stick is chosen
+by a lookahead over his own AI: one update of `$16DA0
+(antonio_state1_active_combat)` replayed by `antonio.boss_update` (the
+screen test, the dash and kick gates, every tactical handler, `$17AB8`'s
+integration, and the renderer's latched boxes that decide what collides),
+played out for each of the nine stick positions under both update orders.
+The hold is then `souther.hold_step`'s loop -- the release, the knee chain
+and the crossover are the holding player's own bytes -- with
+`ReleaseToRegrab` handing him back 40 px out and the engage walking straight
+back into him.
+
+The model says there is one geometry that is kick-proof and grab-ready by
+construction -- 8-16 px above his lane, where `$16EAE` needs `< $08` and the
+grab touches at `<= $10` -- and that `$AAA0` tests the walking box against
+his body before his kick box against the player, so a walk that meets his
+leaning body takes the hold through a kick already on its frames. The
+planner hard-codes neither: it finds both because everything else inside his
+X window ends in a simulated kick. His boomerang is part of the model too
+(`BoomerangSim`): the launch from his throw animation, the dive out, the
+return homing on the top of the street (the ROM's turn aims it through a
+`lea` that reads the boomerang's own field, not the target's lane), his
+catch, and the fresh one he takes while an older one is still out -- so the
+lookahead steps off its path rather than meeting it. `HitAntonioBoomerang`
+still punches it away at punch-connect time, unarmed only: armed, B is a
+swing nothing here times.
 
 Souther is fought by one plan, `ai/souther.py`, and two verbs: **take one
 hold, and never give him back a turn.** `EngageSouther` is the whole approach
@@ -259,8 +266,8 @@ jump attacks) and nothing about who the jump was aimed at, so `$16234
 exactly as it answers one aimed at him: straight to primary `$02` with the
 claw spawned, every distance band and gate bypassed. So the whole of
 `could_jump_attack` is refused for that actor whenever a live,
-non-punishable Souther is within `$78`-plus-free-flight on X — the exact
-opposite of Antonio, whose fight *needs* the hop. Only the launch is
+non-punishable Souther is within `$78`-plus-free-flight on X (Antonio is
+never hopped at either: his kick box sits at head height). Only the launch is
 refused; an actor already airborne is committed and still gets a verb.
 
 The predicate is named *punish* rather than *counter* because the counter is
@@ -342,8 +349,9 @@ copied into a second token.
 
 **`Surrounded`** flags an actor boxed in by a crowd rather than facing a
 queue: three or more live enemies inside the close box around it, or a
-pincer with at least one on each side. It is what makes the police special
-worth spending on something other than imminent death. This is the one
+pincer with at least one on each side. It is what makes a hold the answer
+to a crowd (`reach.grab_reasons`' `WHILE_SURROUNDED`); the police special is
+for imminent death alone. This is the one
 judgment still computed once per tick and written into the context — see
 [Judging without a cache](#judging-without-a-cache) for why it, alone,
 earns that.
@@ -399,10 +407,11 @@ the same thing, both call the same function** — never each recomputing its
 own abbreviated version. That is what continues to prevent divergence; the
 cache never was.
 
-`Surrounded` is the one exception, and deliberately so: it is read by three
-or more call sites in a single tick (`priority._emergency_call_police`,
-`decide.py`'s police threshold, `reach.grab_reasons`'s `WHILE_SURROUNDED`
-case) and its own computation — a full enemy-count scan per actor — is
+`Surrounded` is the one exception, and deliberately so: it is read on every
+call of `reach.grab_reasons` (its `WHILE_SURROUNDED` case), which
+`decide.could_grab_enemy`, `could_rear_attack`'s Jack check and
+`priority._emergency_grab_enemy` make once per candidate, several times a
+tick, and its own computation — a full enemy-count scan per actor — is
 heavier than a two-enemy geometry check, so it genuinely benefits from
 being computed once and shared, the way the whole `Inferred` stage used to
 justify itself.
@@ -691,22 +700,11 @@ enemies) -> frozenset[GrabReason]` can return — `CLEAR_REAR` and
 than from the enemy's class, so a corrected extraction changes the AI's
 behaviour without changing any code. A third, `JACK_FROM_BEHIND`, fires
 when the actor is already on Jack's back (he is facing away): take the
-hold before the axe or the lunge turns around. A fourth, `ANTONIO_ON_
-PUNISH`, fires when Antonio is in later-boss hitstun (`RECOVERY`, primary
-`$03`/`$04` after `$17C36 boss_apply_pending_damage`): walk in without
-attacking, then flip-hold into a suplex. Standing still to punch him is the
-`$16EAE` zero-velocity kick trigger, so every grounded B is refused and the
-hold is the punish. Its counterpart on a *ready* Antonio is `ANTONIO_WALK_
-IN`, produced from contact range only: the alternative there is not a punch
-but a hop, and a hop is 45 committed airborne frames for about 2 damage —
-the window every hit he lands arrives in — while the hold denies him
-everything he owns. The approach that reaches that range keeps a lane offset
-wider than his `$10` kick and `$14` dash windows (`execute._approach_lane_y`)
-and converges only once alongside on X, so this is never a walk across his
-kick range. Souther has no reason here at all: his hold is the engage's own
-walk-in (`EngageSouther`), and what follows it — knee, knee, release, walk
-back in — is `souther.hold_step`, not a grab decision. A fifth,
-`WHILE_SURROUNDED`, fires
+hold before the axe or the lunge turns around. Antonio and Souther have no
+reason here at all: each one's hold is his engage's own walk-in
+(`EngageAntonio`, `EngageSouther`), and what follows it — knee, knee,
+release, walk back in — is `souther.hold_step`, not a grab decision. A
+fourth, `WHILE_SURROUNDED`, fires
 for any grabbable `Grunt` while the actor is `Surrounded`: being boxed in
 is answered by a hold whichever side the crowd is on. It is the one
 reason keyed on the actor's whole situation rather than on the candidate
@@ -724,10 +722,8 @@ present" — over whatever the set contains. The tiers rank differently:
 being surrounded is the only one that outranks the `$322A` escape chord (a
 pincer's hold becomes a throw *into* the enemy the chord was aimed at),
 clearing the rear beats every strike on an enemy that can still act,
-catching Jack from behind is just under that, grabbing a stunned Antonio
-sits above punching him again (the hold is the punish) and
-above every strike on them, and the whip case is an improvement on an
-ordinary exchange and ranks just above a jump kick.
+catching Jack from behind is just under that, and the whip case is an
+improvement on an ordinary exchange and ranks just above a jump kick.
 
 **How a hold ends is a timing decision, not a taste.** Every hold move is an
 animation lock that ignores fresh edges for its whole length, so issuing one

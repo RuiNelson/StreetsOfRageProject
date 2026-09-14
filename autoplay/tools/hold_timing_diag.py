@@ -98,7 +98,7 @@ def reach_a_hold(client: MegaDriveClient, *, character: str, seconds: float) -> 
 
     rom = RomData.read(client)
     gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
-    loop = AgentLoop(gamepad, no_food=True)
+    loop = AgentLoop(gamepad, no_food=True, no_police=True)
     deadline = time.monotonic() + seconds
     last_report = 0.0
     while time.monotonic() < deadline:

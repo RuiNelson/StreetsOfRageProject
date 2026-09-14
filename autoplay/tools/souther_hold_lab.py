@@ -491,7 +491,7 @@ def main() -> int:
     ) as sink:
         rom = RomData.read(client)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
-        loop = AgentLoop(gamepad, no_food=True)
+        loop = AgentLoop(gamepad, no_food=True, no_police=True)
         for name in [e.strip() for e in args.experiments.split(",") if e.strip()]:
             if not reach_souther_hold(client, loop, rom, scenario, seconds=args.grab_seconds):
                 print(f"{name}: never reached a Souther hold", flush=True)

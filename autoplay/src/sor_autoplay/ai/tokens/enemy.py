@@ -226,8 +226,29 @@ class Boss(Enemy, ABC):
     vel_x: float = 0.0  # +$20 signed 16.16, ROM units per tick
     vel_z: float = 0.0  # +$24 signed 16.16, ROM units per tick
     # Boss primary byte at +$30 (MapEntity.action_state). Antonio's kick is
-    # primary $02; the 1→2 transition is what reach.antonio_will_kick predicts.
+    # primary $02; ai/antonio.py replays the 1->2 transition.
     primary_state: int = 0
+    # The rest of one later-boss update's own state, for ai/antonio.py's
+    # replay of his AI (world_map.MapEntity documents each offset). ``vel_x``
+    # above is +$20, the *lane* velocity for this family; ``boss_vel_x`` is
+    # the real X one at +$1C.
+    boss_vel_x: float = 0.0
+    boss_vel_lane: float = 0.0
+    screen_x: int = 0
+    anim: int = 0
+    anim_frame: int = 0
+    anim_countdown: int = 0
+    attack_box_id: int = 0
+    body_box_id: int = 0
+    timer_5c: int = 0
+    timer_6b: int = 0
+    reaction_timer: int = 0
+    hold_flags: int = 0
+    fine_x: float = 0.0
+    fine_y: float = 0.0
+    # +$6E resolved to a slot: the linked child -- Antonio's boomerang, the
+    # one $17206 spawned last (world_map.MapEntity.child_slot).
+    child_slot: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -269,23 +290,20 @@ class Souther(Boss):
 class Antonio(Boss):
     """Antonio boss (type $56).
 
-    Primary state 1 (``$16DA0``) is active combat: facing, boomerang
-    maintain/throw (tactical ``$08``), and the proximity/velocity/facing
-    gate that advances him to state 2. Primary state 2 (``$171CC``) is the
-    committed close-range power kick. ``reach.antonio_will_kick`` names that
-    transition before -- and while -- it lands. A grounded punch on a live
-    Antonio is the ``$16EAE`` zero-velocity kick trigger, so the opener is
-    the hop, not a standing B.
+    Primary 1 (``$16DA0``) is his whole decision code: the dash and kick
+    gates run first on every update, then the tactical ``+$67`` -- back-off
+    and lane keeping (0), the pose, walk and lane approach (1, 2, 5), the
+    boomerang wind-up and throw (6, 7), the dash (8) and the walk back on
+    screen (9). Primary 2 (``$171CC``) is the committed kick. ``antonio.py``
+    replays all of it; ``EngageAntonio`` and the hold loop are the plan.
     """
 
     def strike_is_committed(self) -> bool:
-        """True when the kick or the dash/throw is already locked in.
+        """True when the kick or the dash is already locked in.
 
-        Primary ``$02`` is the close-range kick (``$171CC``). Tactical
-        ``$08`` is the boomerang dash/throw commit (``$16E88``). Turning
-        (tactical ``$09``) and merely standing inside the ``$16EAE``
-        prediction window are not commits -- those are when a punch can
-        still land and open the grab.
+        Primary ``$02`` is the kick (``$171CC``); tactical ``$08`` is the
+        dash (``$16E88``), which ends in the kick whenever its lane homing
+        brings the target inside the gate. The boomerang is tactical 6/7.
         """
 
         return self.primary_state == 0x02 or self.tactical == 0x08
@@ -342,10 +360,8 @@ class GrabReason(Enum):
     pure function's return value now, not a stored judgment: every situation
     is scored by the identical ``priority._emergency_grab_enemy`` -- "best
     tier among reasons present for this pair" -- with only the tier constant
-    differing per reason. Most reasons are ``Grunt``-only; ``ANTONIO_ON_
-    PUNISH`` is the exception, because Antonio's punish window is the
-    opening of the hop-grab-suplex that beats standing still to punch him
-    (a grounded B is his own kick trigger).
+    differing per reason. Every reason is ``Grunt``-only: the bosses with a
+    hold plan (Antonio, Souther) take it through their own engage verb.
     """
 
     CLEAR_REAR = auto()
@@ -438,40 +454,6 @@ class GrabReason(Enum):
     proposes walking across a crowd to reach someone.
     """
 
-    ANTONIO_ON_PUNISH = auto()
-    """Antonio is in hitstun -- walk in and hold him, then suplex.
-
-    Produced when a live ``Antonio`` is in a punishable phase (``RECOVERY``
-    after ``$17C36 boss_apply_pending_damage`` writes shared later-boss
-    states ``$03``/``$04``). A grounded punch here is standing still in
-    front of him, which is the ``$16EAE`` zero-velocity kick path; the
-    hold is how a human actually beats him.
-
-    Its counterpart on a *ready* Antonio is ``ANTONIO_WALK_IN`` below, which
-    only fires from contact range -- the walk across his kick window is
-    still not something to start.
-    """
-
-    ANTONIO_WALK_IN = auto()
-    """Already at contact range on a ready Antonio -- take the hold.
-
-    The alternative from here is not a punch (every grounded B on him is
-    refused: standing still in front of him *is* ``$16EAE``'s kick trigger)
-    but a **hop**, and the hop is the worse half of that trade. It commits
-    the actor to roughly 45 frames of fixed trajectory for about 2 damage,
-    and a kick that comes out during it hits a body that cannot answer --
-    measured, that airborne window is where every hit Antonio still lands
-    arrives. The hold instead denies him everything he owns, and converts
-    into knee + suplex for 7 and a knockdown.
-
-    Deliberately gated on ``grab_would_connect``'s contact range like every
-    other reason, so this is never "walk in from across the arena": the
-    approach that gets here keeps a lane offset wider than the ``$10`` kick
-    and ``$14`` dash windows (``execute._approach_lane_y``) and only
-    converges once alongside on X. It is also not produced against a
-    committed strike -- ``could_grab_enemy`` drops any target in
-    ``incoming_melee_targets`` first, and ``DodgeAntonioKick`` owns that.
-    """
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

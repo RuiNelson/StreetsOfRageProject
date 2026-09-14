@@ -13,6 +13,10 @@ set -euo pipefail
 # how the AI fights the boss, and how much health the level left it -- and
 # neither answer comes out of the run.
 #
+# --no-police likewise (user: "The police is allowed for Souther/Antonio,
+# just don't test with the police on"): the AI may call it in play, but a
+# boss test measures the plan, not the special.
+#
 # Usage:
 #   ./scripts/go_to_boss <1-8> [extra autoplay args...]
 #   ./scripts/go_to_boss_1                  # same thing, per round
@@ -87,4 +91,5 @@ done
     --reach-gameplay "$CHARACTER" \
     --start-level "$LEVEL" \
     --kill-street-enemies \
+    --no-police \
     "$@"

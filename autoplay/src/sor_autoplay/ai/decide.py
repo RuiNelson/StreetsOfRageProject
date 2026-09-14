@@ -17,7 +17,7 @@ from typing import Callable
 
 from .. import prop_solids
 from ..memory_map import ACTION_HOLD_CROSSOVER
-from ..phases import CombatPhase, is_dangerous, is_punishable
+from ..phases import CombatPhase, is_dangerous
 from . import kinematics, navigation as nav, reach, souther as souther_plan
 from .tokens import (
     CounterGrab,
@@ -50,7 +50,7 @@ from .tokens import (
     GrabReason,
     Surrounded,
 )
-from .tokens import AnimationInProgress, CameraRange, DebugNoFood, Stage
+from .tokens import AnimationInProgress, CameraRange, DebugNoFood, DebugNoPolice, Stage
 from .tokens import Breakable, Projectile
 from .tokens import PUNCH_RANGE_Y, punch_outer_x
 from .tokens import (
@@ -67,7 +67,7 @@ from .tokens import CallPolice
 from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDialog
 from .tokens import Context, Token, find, find_all
 from .tokens import (
-    DodgeAntonioKick,
+    EngageAntonio,
     EngageSouther,
     ProjectileSidestep,
     RetreatFromDanger,
@@ -83,19 +83,14 @@ POLICE_HEALTH_PERCENT_THRESHOLD = 18.0
 # respawn at full health (player-health-lives-and-combat.md) -- call police
 # sooner rather than risk it.
 POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE = 35.0
-# Being surrounded is the other reason the special exists — it is the only
-# move that clears every side at once. Still gated on health, just far less
-# strictly than the "about to die" thresholds above: spending it while
-# healthy wastes the one panic button of the life.
-POLICE_HEALTH_PERCENT_THRESHOLD_SURROUNDED = 60.0
-# A live Boss is a third reason, at the same laxer gate as Surrounded: $16A60
-# (later_boss_police_special_reaction) does a flat -10 HP against the
-# $55-$58 family's shared 32-max health pool ($17EDC boss_init_combat_stats),
-# so one press is roughly a third of a later-boss's whole bar -- an order of
-# magnitude better than the special's ordinary value against a street enemy.
-# Hoarding it for the panic thresholds above and dying with it unspent is
-# worse than spending it well before that against a boss.
-POLICE_HEALTH_PERCENT_THRESHOLD_BOSS = 60.0
+# There used to be two laxer reasons as well -- boxed in (Surrounded) and "a
+# live boss", both below 60% health -- and they are gone (user: "A AI está a
+# depender muito da chamada da polícia!"). The boss one fired in *every*
+# scored round-1 fight: 8 of 8 on the baseline batch, after the second hit,
+# since two of Antonio's 20-damage kicks leave exactly 50%. The special is
+# the life's one panic button, and the two fights it was being spent on have
+# plans that never need it (souther.py, antonio.py): a crowd is answered with
+# a hold, and a boss with the hold loop.
 
 KNIFE_RANGE_X = 90
 KNIFE_RANGE_Y = 16
@@ -261,15 +256,10 @@ def _could_melee_strike(
                 and target.has_projectile
             ):
                 continue
-            # Antonio: a grounded B is standing still in front of him, and
-            # $16EAE's zero-velocity path is the kick trigger. That is the
-            # first punch as much as a follow-up combo -- the previous
-            # "one punch opens the grab" exception stood in the window
-            # that arms the kick and lost the ranking contest to the hop
-            # that should have been the opener (punch 20+boss vs jump 18+
-            # boss). The hop is the opener (could_jump_attack); the grab
-            # is the punish (ANTONIO_ON_PUNISH); DodgeAntonioKick owns a
-            # kick/dash that is already locked in.
+            # Antonio is taken in a hold, never struck: a strike sets the
+            # actor's +$34 and turns the grab contact into a hit, and standing
+            # still to throw it is his own $16EAE kick window. EngageAntonio
+            # owns him (antonio.py).
             if isinstance(target, Antonio):
                 continue
             # Souther is taken in a hold, never struck -- bare-handed or with
@@ -341,9 +331,9 @@ def could_rear_attack(context: Context) -> Context:
         for target_slot in _targets_in_reach(context, actor, reach.in_rear_band, RearAttack):
             if target_slot in on_jacks_back:
                 continue
-            if isinstance(find(context, Enemy, slot=target_slot), Souther):
+            if isinstance(find(context, Enemy, slot=target_slot), (Souther, Antonio)):
                 # The chord is a strike like any other: it turns the grab
-                # contact into a hit. EngageSouther owns him.
+                # contact into a hit. EngageSouther / EngageAntonio own them.
                 continue
             verbs.add(RearAttack(actor_slot=actor.slot, target_slot=target_slot))
     return verbs
@@ -375,32 +365,6 @@ def could_tech_recover(context: Context) -> Context:
     return verbs
 
 
-def _walk_in_beats_the_hop(actor: PlayableCharacter, antonio: Antonio) -> bool:
-    """True when this actor should take a hold on ``antonio`` rather than hop.
-
-    Unarmed (a held weapon has no grab and no unarmed kick -- ``could_jump_
-    attack`` refuses the launch armed anyway) and already inside the X range
-    the hold is taken from, whatever the lane offset still is. The lane half
-    is deliberately *not* tested: the ticks while the approach converges the
-    last of its offset are exactly when the hop used to win.
-
-    The range is the **hold's**, not the hop's, and that boundary is
-    measured rather than reasoned. Widening it to the hop's own band (75px
-    on Blaze) does what it says -- hop episodes fell to 10-133 ticks a fight
-    -- and cost health: 40 / 60 / 60 damage taken against 60 / 20 / 20 / 20 /
-    20 for this version. Out at 60-75px on his lane the hop is the better
-    answer, because it closes the gap *and* attacks, where walking that band
-    just stands in the kick window for longer. The hop is not the enemy; the
-    hop **as the only plan** was.
-    """
-
-    if actor.held_weapon_type != 0 or actor.is_airborne:
-        return False
-    if antonio.is_defeated:
-        return False
-    return abs(antonio.world_x - actor.world_x) <= punch_outer_x(actor.character_id)
-
-
 def could_grab_enemy(context: Context) -> Context:
     """Walk into an enemy, unarmed and unattacking, to take a hold of it.
 
@@ -416,12 +380,9 @@ def could_grab_enemy(context: Context) -> Context:
     would spend that advantage, so for the AI holding a weapon is a reason
     not to grab, exactly as it is a reason not to ``Punch``.
 
-    Lifting this for Antonio alone -- where the weapon really does buy
-    nothing, since every grounded B on him is refused armed or not -- was
-    tried and **measured worse**: three fights gave 40 / 160 / 40 damage
-    taken with a death, against 40 / 40 / 20 / 60 / 60 and none without it,
-    and the hop it was meant to displace did not go away. See
-    ``autoplay/CLAUDE.md``.
+    Antonio and Souther are not grabbed through here at all: each is taken by
+    his engage's own walk-in (``EngageAntonio``, ``EngageSouther``), armed or
+    not, since ``$AAA0`` never reads the weapon.
     """
 
     verbs: set[Token] = set()
@@ -444,9 +405,9 @@ def could_grab_enemy(context: Context) -> Context:
         for enemy in on_screen:
             if enemy.slot not in in_reach:
                 continue
-            if isinstance(enemy, Souther):
-                # The engage walks into him itself, from the lane and at the
-                # moment souther.plan_engage picks (EngageSouther).
+            if isinstance(enemy, (Souther, Antonio)):
+                # Each engage walks into him itself, at the moment its plan
+                # picks (EngageSouther, EngageAntonio).
                 continue
             if enemy.slot in threatening:
                 # Walking into a committed attack is how the actor takes the
@@ -522,11 +483,13 @@ def could_hold_actions(context: Context) -> Context:
             )
             continue
 
-        # A held Souther runs his own loop: knee, knee, release, walk back in
-        # -- souther.hold_step reads the ROM's knee chain and crossover flag
-        # and returns the one input that keeps him in the actor's hands.
+        # A held Souther or Antonio runs the same loop: knee, knee, release,
+        # walk back in. souther.hold_step reads the ROM's knee chain and
+        # crossover flag -- the holding player's own bytes, which is why it
+        # is antonio.hold_step as well -- and returns the one input that
+        # keeps him in the actor's hands.
         held = reach.held_enemy(actor, enemies)
-        if isinstance(held, Souther):
+        if isinstance(held, (Souther, Antonio)):
             step = souther_plan.hold_step(actor, held)
             if step is souther_plan.HoldStep.KNEE:
                 verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
@@ -745,41 +708,14 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 # Never walk toward a target that is itself standing in a
                 # pit's danger zone -- reaching it means standing there too.
                 continue
-            if isinstance(enemy, Souther):
-                # EngageSouther owns the whole approach to him, armed or not.
+            if isinstance(enemy, (Souther, Antonio)):
+                # EngageSouther / EngageAntonio own the whole approach to
+                # them, armed or not.
                 continue
             if standing_off and enemy.slot in threatening:
                 # could_retreat_from_danger covers this one instead -- don't
                 # propose closing the last stretch of distance into a
                 # committed attack that isn't hittable yet.
-                continue
-            if (
-                isinstance(enemy, Antonio)
-                and enemy.strike_is_committed()
-                and reach.antonio_will_kick(enemy, actor)
-            ):
-                # could_dodge_antonio_kick owns a locked-in kick/dash.
-                continue
-            if (
-                isinstance(enemy, Antonio)
-                and not is_punishable(enemy.combat_phase)
-                and not _walk_in_beats_the_hop(actor, enemy)
-                and reach.connects(
-                    reach.in_jump_attack_band,
-                    actor,
-                    enemy,
-                    kinematics.connect_frames(JumpAttack, actor, enemy),
-                )
-            ):
-                # Jump-kick owns the last stretch only when the kick would
-                # actually connect (same lane, in front, in range) *and*
-                # there is no hold to take instead -- armed, in other words,
-                # since that is the one case with no grab (and no unarmed
-                # kick either). An X-only skip hopped at him from any lane
-                # and kicked air. A punishable Antonio is a grab walk-in,
-                # and so, now, is a ready one already at contact X range:
-                # the walk has to keep the tick or nothing converges the
-                # lane offset the approach is holding.
                 continue
             if (
                 standing_off
@@ -855,8 +791,10 @@ def could_retreat_from_danger(context: Context) -> Context:
             enemy = find(context, Enemy, slot=target_slot)
             if enemy is None:
                 continue
-            if isinstance(enemy, Souther):
-                # His claw is answered by the engage's own lane escape.
+            if isinstance(enemy, (Souther, Antonio)):
+                # Their attacks are their engage's business: Souther's claw
+                # by souther.plan_engage's lane escape, Antonio's kick by
+                # antonio.plan_engage's lookahead.
                 continue
             if target_slot in actionable:
                 continue  # already hittable -- attack instead of retreating
@@ -1023,6 +961,9 @@ def could_walk_to_advance_stage(context: Context) -> Context:
 
 def could_call_police(context: Context) -> Context:
     verbs: set[Token] = set()
+    if find(context, DebugNoPolice) is not None:
+        # The harness's --no-police (user: "just don't test with the police on").
+        return verbs
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -1045,53 +986,33 @@ def _has_live_enemy(context: Context) -> bool:
 
 
 def _police_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
-    """The three situations the special is for: about to die, boxed in, or a
-    live boss.
+    """Only when about to die: the special is the last resort, not a plan.
 
-    All three still need at least one live enemy -- calling the police into
-    an empty street spends the special for nothing (the boss case implies
-    this already, but the shared early return keeps the rule in one place).
-    ``Surrounded`` and a live ``Boss`` are both laxer-gate reasons: the
-    special is the one move that clears every side at once, and against
-    ``$16A60``'s flat -10 HP it is worth roughly a third of a later-boss's
-    whole health bar in one press -- both good enough reasons to spend it
-    well before the "about to die" thresholds, at a health gate just lax
-    enough that it is never spent while comfortably healthy either.
+    User: "A AI está a depender muito da chamada da polícia!". The two laxer
+    reasons this used to add -- boxed in, and any live boss, both under 60%
+    health -- made it a routine move: the boss one fired in every one of the
+    eight baseline round-1 fights, as soon as the second kick left the actor
+    at 50%. What is left is the panic threshold (``POLICE_HEALTH_PERCENT_
+    THRESHOLD``, or the wider ``_LAST_LIFE`` one when a KO means a continue
+    screen), still with at least one live enemy to sweep.
 
-    Never against a live Souther, at any health (user: "a maioria do dano
-    deve-se a ataques de polícia, não usar ataques de polícia", then "do not
-    use police attacks or life-gaining items"). The call puts the *caller*
-    into action ``$3`` for the shared ``$16AEC`` delay -- 300 P1 / 390 P2
-    frames, input dead the whole time -- and buys a flat 10, while the hold
-    loop (``souther.hold_step``) takes 4 every 55 frames without ever letting
-    him act. The Antonio/other-boss bonus stays: their numbers are separately
-    measured and this has not been.
+    Against Souther and Antonio exactly as anywhere else (user: "The police
+    is allowed for Souther/Antonio, just don't test with the police on"): a
+    fight is *scored* with the harness's ``DebugNoPolice``, which removes the
+    verb outright in ``could_call_police``, so a measured fight never leans on
+    it. Their hold loops never need it -- 4 damage every ~55 frames against a
+    call that puts the caller in action ``$3`` for the whole ``$16AEC`` delay
+    -- which is why it is only ever the panic button there.
     """
 
     if not _has_live_enemy(context):
-        return False
-    if _souther_is_alive(context):
-        # Not against Souther, at any health (user: "do not use police
-        # attacks or life-gaining items"). The call freezes the caller for
-        # the whole $16AEC delay, and the hold loop never lets him act.
         return False
     threshold = (
         POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE
         if actor.lives <= 1
         else POLICE_HEALTH_PERCENT_THRESHOLD
     )
-    if actor.health_percent < threshold:
-        return True
-    surrounded = any(
-        token.actor_slot == actor.slot for token in find_all(context, Surrounded)
-    )
-    if surrounded and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD_SURROUNDED:
-        return True
-    boss_alive = any(
-        not boss.is_defeated and not isinstance(boss, Souther)
-        for boss in find_all(context, Boss)
-    )
-    return boss_alive and actor.health_percent < POLICE_HEALTH_PERCENT_THRESHOLD_BOSS
+    return actor.health_percent < threshold
 
 
 def could_handle_continue_menu(context: Context) -> Context:
@@ -1123,10 +1044,9 @@ def could_jump_attack(context: Context) -> Context:
 
     - *grounded*: should this jump happen at all? Answered by
       ``_targets_in_reach`` with ``reach.in_jump_attack_band`` (in front,
-      in lane, inside the kick's free-flight range; past punch outer
-      except for Antonio, whose opener includes punch range because a
-      grounded B is his kick trigger), the "never launch into a committed
-      attack" gate, and
+      in lane, inside the kick's free-flight range, past punch outer),
+      never at Antonio (``EngageAntonio`` owns him), the "never launch into
+      a committed attack" gate, and
       ``navigation.jump_landing_is_safe`` -- the pathfinder refuses a
       launch whose current-lane flight would skip a walk-around and land
       in a pit.
@@ -1196,34 +1116,15 @@ def could_jump_attack(context: Context) -> Context:
             # held direction $384E samples.
             continue
         target_slots = _targets_in_reach(context, actor, reach.in_jump_attack_band, JumpAttack)
-        # Jump-kicking Antonio is the opener inside punch range too
-        # (in_jump_attack_band drops its min-dx for him), but only when
-        # the kick would connect: same lane, in front, within free-flight
-        # range. An earlier X-only add hopped at him from any lane. A
-        # punishable Antonio is a grab, not another hop -- unless already
-        # airborne, when the flight has to finish.
-        kick_slots = {
-            antonio.slot
-            for antonio in find_all(context, Antonio)
-            if not antonio.is_defeated and reach.antonio_will_kick(antonio, actor)
-        }
         if not actor.is_airborne:
+            # Antonio is taken in a hold, never hopped at. His kick box sits
+            # at head height on its long frames (z -50..-32, 12..84 px out),
+            # so a flight meets it rather than clearing it -- every hit the
+            # hop-based plan took landed with the actor in the air -- and his
+            # gate reads a jump's own +$1C as walking in. EngageAntonio owns
+            # him; a flight already in the air still finishes below.
             for antonio in find_all(context, Antonio):
-                if is_punishable(antonio.combat_phase):
-                    target_slots.discard(antonio.slot)
-                elif _walk_in_beats_the_hop(actor, antonio):
-                    # Ready, and the approach has already brought the actor
-                    # to the X range a hold is taken from. The hop from here
-                    # is 45 committed airborne frames for ~2 damage; the
-                    # walk-in is a few frames and ends with him unable to
-                    # act at all (GrabReason.ANTONIO_WALK_IN). Withdrawing
-                    # the hop here is what stops it winning the couple of
-                    # ticks while the approach converges the last of the
-                    # lane offset, which is the only reason it still had the
-                    # tick: at that moment the grab is not yet offered
-                    # (grab_would_connect wants GRAB_RANGE_Y) and nothing
-                    # else outranks a jump.
-                    target_slots.discard(antonio.slot)
+                target_slots.discard(antonio.slot)
         if actor.is_airborne and not target_slots:
             nearest = min(
                 live,
@@ -1240,12 +1141,7 @@ def could_jump_attack(context: Context) -> Context:
         # changing course either way, so this gate only applies pre-launch.
         threatening = reach.incoming_melee_targets(context, actor)
         for target_slot in target_slots:
-            if (
-                not actor.is_airborne
-                and target_slot in threatening
-                and target_slot not in kick_slots
-                and not isinstance(find(context, Enemy, slot=target_slot), Antonio)
-            ):
+            if not actor.is_airborne and target_slot in threatening:
                 continue
             if not actor.is_airborne:
                 target = find(context, Enemy, slot=target_slot)
@@ -1258,65 +1154,6 @@ def could_jump_attack(context: Context) -> Context:
                 if not nav.jump_landing_is_safe(context, actor, target.world_x):
                     continue
             verbs.add(JumpAttack(actor_slot=actor.slot, target_slot=target_slot))
-    return verbs
-
-
-def could_dodge_antonio_kick(context: Context) -> Context:
-    """Answer his kick -- by hopping the one already locked in, or by
-    stepping out of the gate that has not fired yet.
-
-    One candidate per live Antonio whose kick gate (``reach.antonio_will_
-    kick``) is live. ``committed`` splits the two cases and they take
-    opposite inputs: primary ``$02`` or tactical ``$08`` is a strike already
-    coming and gets the hop, while a merely *satisfiable* gate gets a pure
-    lane step that denies it -- ``$16EAE`` needs the target within ``$10``
-    (16px) of his lane, so 16px of lane is the whole difference between a
-    kick and no kick.
-
-    The uncommitted half used to be refused outright ("a predicted window is
-    the opener, not a dodge"), on the reasoning that stepping out while he is
-    still choosing is a dodge loop that never reaches grab range. What that
-    missed is how much warning the gate actually gives: measured over nine
-    onsets in one fight, ``antonio_will_kick`` was true for **9-12 ticks**
-    before seven of them, with the actor sitting at 7px of lane and hopping
-    straight into it. `reach.can_break_antonio_kick_lane` is what keeps the
-    loop from returning -- it produces nothing once the actor is already
-    clear, so the step ends by itself.
-
-    Suppressed once the actor is already airborne -- ``could_jump_attack``
-    owns the hop-over then, and producing a sidestep mid-crouch would
-    release the jump direction ``$384E`` samples.
-    """
-
-    verbs: set[Token] = set()
-    for actor in _actors(context):
-        if _blocked(context, actor):
-            continue
-        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
-            continue
-        if _is_holding_enemy(actor):
-            continue
-        if actor.is_airborne:
-            continue
-        for antonio in find_all(context, Antonio):
-            if antonio.is_defeated:
-                continue
-            if not reach.antonio_will_kick(antonio, actor):
-                continue
-            committed = antonio.strike_is_committed()
-            if not committed and not reach.can_break_antonio_kick_lane(actor, antonio):
-                # Nothing a pre-emptive step could achieve: already clear of
-                # his lane, or with no room to get clear. Leaving the tick to
-                # the approach here is what keeps this from becoming the
-                # dodge loop that never reaches grab range.
-                continue
-            verbs.add(
-                DodgeAntonioKick(
-                    actor_slot=actor.slot,
-                    target_slot=antonio.slot,
-                    committed=committed,
-                )
-            )
     return verbs
 
 
@@ -1350,6 +1187,42 @@ def could_engage_souther(context: Context) -> Context:
         for enemy in reach.on_screen_enemies(context):
             if isinstance(enemy, Souther):
                 verbs.add(EngageSouther(actor_slot=actor.slot, target_slot=enemy.slot))
+    return verbs
+
+
+def could_engage_antonio(context: Context) -> Context:
+    """Close on Antonio for the hold -- the whole fight against him, one verb.
+
+    One candidate per live ``Antonio`` while the actor is free to move (not
+    mid-animation, not held, not holding a body, not airborne), armed or not
+    for the same reason as ``could_engage_souther``: ``$AAA0``'s grab never
+    reads the carried weapon, and ``loc_235A`` releases an armed holder into
+    the armed walk. ``antonio.plan_engage`` picks the stick every tick from a
+    lookahead over his own AI; the hold is the contact result of that walk,
+    and the loop that follows is ``could_hold_actions``'.
+
+    Not limited to the visible screen or the actor's own lane band, unlike
+    ``live_enemies``' users: he fights from lanes the actor cannot stand in
+    (``$17AB8`` clamps him to ``$00``, the player to ``$02``) and walks back
+    on from off-camera (tactical 9), and both are exactly when the actor
+    should already be taking its position rather than walking off down the
+    street -- which is what the old approach did for 21% of a fight.
+    """
+
+    verbs: set[Token] = set()
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.is_airborne:
+            continue
+        for antonio in find_all(context, Antonio):
+            if antonio.is_defeated:
+                continue
+            verbs.add(EngageAntonio(actor_slot=actor.slot, target_slot=antonio.slot))
     return verbs
 
 
@@ -1389,6 +1262,14 @@ def could_hit_antonio_boomerang(context: Context) -> Context:
         if _is_holding_enemy(actor):
             continue
         if actor.is_airborne:
+            continue
+        if actor.held_weapon_type:
+            # Armed, B is the weapon's swing, not a punch: it commits the
+            # actor for ~26 frames and connects only near its peak, and
+            # nothing here times it (kinematics gives it the punch's 3-5
+            # frame startup). Measured live (Adam, armed): the swing went out
+            # early, whiffed, and the boomerang landed while it recovered.
+            # The engage keeps off his throw lane instead (antonio._end_danger).
             continue
 
         for projectile in find_all(context, Projectile):
@@ -1511,13 +1392,14 @@ def _a_weapon_would_disarm_the_plan(context: Context) -> bool:
     A weapon the actor walks into the arena with is kept: the ROM's grab
     ignores it, and the engage and the hold run the same armed or not.
 
-    Scoped to Souther deliberately. The same refusal was tried twice for
-    Antonio and measured no better both times (see autoplay/CLAUDE.md); his
-    fight has a hop in it that an armed actor can still throw, and this one
-    does not.
+    Antonio too, now that his fight has the same shape: the engage runs armed
+    or not, nothing in it swings, and the detour is a walk that ignores him.
+    The same refusal measured no better for him twice before, but that fight
+    still had a hop in it, which an armed actor cannot throw; this one has
+    none.
     """
 
-    return any(not souther.is_defeated for souther in find_all(context, Souther))
+    return _souther_is_alive(context) or _antonio_is_alive(context)
 
 
 def could_walk_to_weapon(context: Context) -> Context:
@@ -1568,11 +1450,15 @@ def _food_is_spoken_for(context: Context) -> bool:
 
     if find(context, DebugNoFood) is not None:
         return True
-    return any(not antonio.is_defeated for antonio in find_all(context, Antonio))
+    return _antonio_is_alive(context)
 
 
 def _souther_is_alive(context: Context) -> bool:
     return any(not souther.is_defeated for souther in find_all(context, Souther))
+
+
+def _antonio_is_alive(context: Context) -> bool:
+    return any(not antonio.is_defeated for antonio in find_all(context, Antonio))
 
 
 def _life_items_refused(context: Context) -> bool:
@@ -1790,8 +1676,8 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_walk_to_near_enemy(context)
         | could_retreat_from_danger(context)
         | could_projectile_sidestep(context)
-        | could_dodge_antonio_kick(context)
         | could_engage_souther(context)
+        | could_engage_antonio(context)
         | could_hit_antonio_boomerang(context)
         | could_walk_to_advance_stage(context)
         | could_punch(context)

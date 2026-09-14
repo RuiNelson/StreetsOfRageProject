@@ -33,7 +33,7 @@ from .observe import (
 from .partner import PartnerFightTracker, do_not_harm_partner
 from .pathfind import Path
 from .priority import determine_priority_verb
-from .tokens import Context, DebugNoFood, Myself, Verb, find, find_all
+from .tokens import Context, DebugNoFood, DebugNoPolice, Myself, Verb, find, find_all
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -58,12 +58,15 @@ class VerbState:
 
 
 class AgentLoop:
-    def __init__(self, gamepad: VirtualGamepad, *, no_food: bool = False) -> None:
+    def __init__(
+        self, gamepad: VirtualGamepad, *, no_food: bool = False, no_police: bool = False
+    ) -> None:
         self._gamepad = gamepad
-        # Harness switch, off by default and never read from the game -- see
-        # tokens.DebugNoFood. Held here rather than passed to tick() so a
-        # caller cannot set it for some ticks and not others.
+        # Harness switches, off by default and never read from the game -- see
+        # tokens.DebugNoFood / DebugNoPolice. Held here rather than passed to
+        # tick() so a caller cannot set them for some ticks and not others.
         self._no_food = no_food
+        self._no_police = no_police
         self._verb_state = VerbState(winning=None, pending=())
         self._state_lock = threading.Lock()
         # Cross-tick memory for Nora.ticks_since_last_attack -- see
@@ -150,6 +153,8 @@ class AgentLoop:
         context |= self._partner_fight_tracker.update(context)
         if self._no_food:
             context = context | {DebugNoFood()}
+        if self._no_police:
+            context = context | {DebugNoPolice()}
         context |= generate_verb_tokens(context)
         # AI.md's loop: the co-op courtesy filter runs between the could_*
         # generators and the ranking, so a verb that would land on the

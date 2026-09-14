@@ -3,9 +3,10 @@ import unittest
 from sor_autoplay.ai.tokens import (
     Antonio,
     AttackHeldEnemy,
+    Bongo,
     Breakable,
     CounterGrab,
-    DodgeAntonioKick,
+    EngageAntonio,
     EngageSouther,
     FlipHold,
     GrabEnemy,
@@ -54,7 +55,6 @@ from sor_autoplay.ai.kinematics import (
 )
 from sor_autoplay.ai.tokens import Verb, find_all
 from sor_autoplay.ai.tokens import (
-    DodgeAntonioKick,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -233,26 +233,6 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         self.assertEqual(len(verbs), 1)
         self.assertIsInstance(verbs[0], Punch)
 
-    def test_call_police_beats_a_combo_on_a_live_boss_below_boss_threshold(self) -> None:
-        # $16A60's flat -10 HP is roughly a third of a later-boss's whole
-        # health bar -- worth outranking an in-progress combo (the punishable
-        # tier, 60) once the boss health gate applies, the same top tier as
-        # the "about to die" case.
-        souther = _souther("obj11", CombatPhase.KNOCKDOWN, health=32)
-        myself = _myself(health_percent=50.0)
-        context = {
-            souther,
-            myself,
-            CallPolice(actor_slot="P1"),
-            Punch(actor_slot="P1", target_slot="obj11"),
-        }
-
-        result = determine_priority_verb(context)
-
-        verbs = find_all(result, Verb)
-        self.assertEqual(len(verbs), 1)
-        self.assertIsInstance(verbs[0], CallPolice)
-
     def test_call_police_vs_boss_loses_above_the_boss_threshold(self) -> None:
         souther = _souther("obj11", CombatPhase.KNOCKDOWN, health=32)
         myself = _myself(health_percent=90.0)
@@ -429,18 +409,20 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         self.assertIsInstance(verbs[0], AttackHeldEnemy)
 
     def test_held_boss_flips_once_the_knees_are_spent(self) -> None:
+        # A later boss with no hold plan of his own: Antonio and Souther take
+        # their knees from souther.hold_step, which never spends a budget.
         myself = _myself(
             action_state=0x60,
             held_enemy_slot="obj00",
             world_x=100,
             hold_ticks=_spent_knee_ticks(),
         )
-        antonio = Antonio(
+        bongo = Bongo(
             slot="obj00",
-            type_id=0x56,
+            type_id=0x57,
             world_x=140,
             world_y=64,
-            health=24,
+            health=30,
             combat_phase=CombatPhase.RECOVERY,
             targets_player=1,
             facing_left=True,
@@ -448,7 +430,7 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         )
         context = {
             myself,
-            antonio,
+            bongo,
             AttackHeldEnemy(actor_slot="P1", target_slot="obj00"),
             FlipHold(actor_slot="P1", target_slot="obj00"),
         }
@@ -848,19 +830,20 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
 
     def test_item_detours_stand_down_inside_antonios_kick_window(self) -> None:
         # Measured over three round-1 fights: four of the eight hits Antonio
-        # landed came while WalkToPickup or WalkToWeapon held the tick.
+        # landed came while WalkToPickup or WalkToWeapon held the tick. 70 px
+        # on his left, standing: inside $16EAE's 80 px window for that side.
         actor = _myself(world_x=100, world_y=64, health_percent=100.0)
         antonio = Antonio(
             slot="obj00",
             type_id=0x56,
-            world_x=180,
+            world_x=170,
             world_y=64,
             health=24,
             combat_phase=CombatPhase.NORMAL,
             targets_player=1,
             facing_left=True,
             primary_state=0x01,
-            boss_dist_x=80,
+            boss_dist_x=70,
             boss_dist_lane=0,
         )
         knife = Weapon(slot="obj01", world_x=0, world_y=64, weapon_type=0x08)
@@ -889,14 +872,14 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         antonio = Antonio(
             slot="obj00",
             type_id=0x56,
-            world_x=180,
+            world_x=170,
             world_y=64,
             health=24,
             combat_phase=CombatPhase.NORMAL,
             targets_player=1,
             facing_left=True,
             primary_state=0x01,
-            boss_dist_x=80,
+            boss_dist_x=70,
             boss_dist_lane=0,
         )
         apple = HealthPickup(
@@ -2190,243 +2173,6 @@ class DeterminePriorityTieTests(unittest.TestCase):
         self.assertEqual(
             len(winners), 1, f"tie-break is not deterministic: {winners}"
         )
-
-
-class AntonioVerbEmergencyTests(unittest.TestCase):
-    def test_dodge_outranks_punching_antonio(self) -> None:
-        myself = Myself(
-            slot="P1",
-            player_index=1,
-            character_id=0,
-            character_name="Axel",
-            world_x=120,
-            world_y=100,
-            health=80,
-            health_percent=100.0,
-            lives=3,
-            specials=1,
-            held_weapon_type=0,
-            facing_left=False,
-            combat_phase=CombatPhase.NORMAL,
-            action_state=0,
-            is_airborne=False,
-        )
-        antonio = Antonio(
-            slot="obj09",
-            type_id=0x56,
-            world_x=160,
-            world_y=100,
-            health=40,
-            combat_phase=CombatPhase.ATTACKING,
-            targets_player=1,
-            facing_left=True,
-            primary_state=2,
-            boss_dist_x=40,
-            boss_dist_lane=4,
-        )
-        context = {
-            myself,
-            antonio,
-            Punch(actor_slot="P1", target_slot="obj09"),
-            DodgeAntonioKick(actor_slot="P1", target_slot="obj09"),
-        }
-        winner = find_all(determine_priority_verb(context), Verb)[0]
-        self.assertIsInstance(winner, DodgeAntonioKick)
-
-    def test_hitting_the_boomerang_outranks_sidestepping_it(self) -> None:
-        myself = Myself(
-            slot="P1",
-            player_index=1,
-            character_id=0,
-            character_name="Axel",
-            world_x=100,
-            world_y=100,
-            health=80,
-            health_percent=100.0,
-            lives=3,
-            specials=1,
-            held_weapon_type=0,
-            facing_left=False,
-            combat_phase=CombatPhase.NORMAL,
-            action_state=0,
-            is_airborne=False,
-        )
-        boomerang = Projectile(
-            slot="obj10", world_x=130, world_y=100, vel_x=-8.0, vel_z=0.0, type_id=0x96
-        )
-        context = {
-            myself,
-            boomerang,
-            HitAntonioBoomerang(actor_slot="P1", target_slot="obj10"),
-            ProjectileSidestep(actor_slot="P1", target_slot="obj10"),
-        }
-        winner = find_all(determine_priority_verb(context), Verb)[0]
-        self.assertIsInstance(winner, HitAntonioBoomerang)
-
-    def test_punching_the_boomerang_beats_jumping_the_kick(self) -> None:
-        myself = Myself(
-            slot="P1",
-            player_index=1,
-            character_id=0,
-            character_name="Axel",
-            world_x=100,
-            world_y=100,
-            health=80,
-            health_percent=100.0,
-            lives=3,
-            specials=1,
-            held_weapon_type=0,
-            facing_left=False,
-            combat_phase=CombatPhase.NORMAL,
-            action_state=0,
-            is_airborne=False,
-        )
-        antonio = Antonio(
-            slot="obj09",
-            type_id=0x56,
-            world_x=160,
-            world_y=100,
-            health=40,
-            combat_phase=CombatPhase.ATTACKING,
-            targets_player=1,
-            facing_left=True,
-            primary_state=2,
-            boss_dist_x=40,
-            boss_dist_lane=4,
-        )
-        boomerang = Projectile(
-            slot="obj10", world_x=130, world_y=100, vel_x=-8.0, vel_z=0.0, type_id=0x96
-        )
-        context = {
-            myself,
-            antonio,
-            boomerang,
-            HitAntonioBoomerang(actor_slot="P1", target_slot="obj10"),
-            DodgeAntonioKick(actor_slot="P1", target_slot="obj09"),
-        }
-        winner = find_all(determine_priority_verb(context), Verb)[0]
-        self.assertIsInstance(winner, HitAntonioBoomerang)
-
-    def test_grabbing_a_stunned_antonio_outranks_punching_him(self) -> None:
-        myself = Myself(
-            slot="P1",
-            player_index=1,
-            character_id=0,
-            character_name="Axel",
-            world_x=120,
-            world_y=100,
-            health=80,
-            health_percent=100.0,
-            lives=3,
-            specials=1,
-            held_weapon_type=0,
-            facing_left=False,
-            combat_phase=CombatPhase.NORMAL,
-            action_state=0,
-            is_airborne=False,
-        )
-        antonio = Antonio(
-            slot="obj09",
-            type_id=0x56,
-            world_x=150,
-            world_y=100,
-            health=40,
-            combat_phase=CombatPhase.RECOVERY,
-            targets_player=1,
-            facing_left=True,
-            primary_state=3,
-            boss_dist_x=30,
-            boss_dist_lane=0,
-        )
-        context = {
-            myself,
-            antonio,
-            Punch(actor_slot="P1", target_slot="obj09"),
-            JumpAttack(actor_slot="P1", target_slot="obj09"),
-            GrabEnemy(actor_slot="P1", target_slot="obj09"),
-        }
-        winner = find_all(determine_priority_verb(context), Verb)[0]
-        self.assertIsInstance(winner, GrabEnemy)
-
-    def test_opener_hop_outranks_punching_a_live_antonio(self) -> None:
-        myself = Myself(
-            slot="P1",
-            player_index=1,
-            character_id=0,
-            character_name="Axel",
-            world_x=120,
-            world_y=100,
-            health=80,
-            health_percent=100.0,
-            lives=3,
-            specials=1,
-            held_weapon_type=0,
-            facing_left=False,
-            combat_phase=CombatPhase.NORMAL,
-            action_state=0,
-            is_airborne=False,
-        )
-        antonio = Antonio(
-            slot="obj09",
-            type_id=0x56,
-            world_x=160,
-            world_y=100,
-            health=40,
-            combat_phase=CombatPhase.NORMAL,
-            targets_player=1,
-            facing_left=True,
-            primary_state=1,
-            boss_dist_x=40,
-            boss_dist_lane=4,
-        )
-        context = {
-            myself,
-            antonio,
-            Punch(actor_slot="P1", target_slot="obj09"),
-            JumpAttack(actor_slot="P1", target_slot="obj09"),
-        }
-        winner = find_all(determine_priority_verb(context), Verb)[0]
-        self.assertIsInstance(winner, JumpAttack)
-
-    def test_jump_kick_outranks_walking_into_a_live_antonio(self) -> None:
-        myself = Myself(
-            slot="P1",
-            player_index=1,
-            character_id=0,
-            character_name="Axel",
-            world_x=100,
-            world_y=100,
-            health=80,
-            health_percent=100.0,
-            lives=3,
-            specials=1,
-            held_weapon_type=0,
-            facing_left=False,
-            combat_phase=CombatPhase.NORMAL,
-            action_state=0,
-            is_airborne=False,
-        )
-        antonio = Antonio(
-            slot="obj09",
-            type_id=0x56,
-            world_x=155,
-            world_y=100,
-            health=40,
-            combat_phase=CombatPhase.NORMAL,
-            targets_player=1,
-            facing_left=True,
-            primary_state=1,
-            boss_dist_x=55,
-            boss_dist_lane=4,
-        )
-        context = {
-            myself,
-            antonio,
-            JumpAttack(actor_slot="P1", target_slot="obj09"),
-            WalkToNearEnemy(actor_slot="P1", target_slot="obj09"),
-        }
-        winner = find_all(determine_priority_verb(context), Verb)[0]
-        self.assertIsInstance(winner, JumpAttack)
 
 
 

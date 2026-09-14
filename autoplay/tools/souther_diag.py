@@ -37,7 +37,17 @@ from sor_autoplay.ai.observe import (
 # Private on purpose: the per-verb score is exactly what this tool exists to
 # show, and re-deriving it here would risk disagreeing with the pipeline.
 from sor_autoplay.ai.priority import _emergency, determine_priority_verb
-from sor_autoplay.ai.tokens import Boss, DebugNoFood, Enemy, Myself, Souther, Verb, find, find_all
+from sor_autoplay.ai.tokens import (
+    Boss,
+    DebugNoFood,
+    DebugNoPolice,
+    Enemy,
+    Myself,
+    Souther,
+    Verb,
+    find,
+    find_all,
+)
 from sor_autoplay.debug_scenario import DebugScenario
 from sor_autoplay.reach_gameplay import reach_gameplay
 from sor_autoplay.rom_data import RomData
@@ -143,6 +153,9 @@ def main() -> int:
                 )
                 if args.no_food:
                     context = context | {DebugNoFood()}
+                # A diagnostic of a test run: the police stays off (user:
+                # "just don't test with the police on").
+                context = context | {DebugNoPolice()}
                 context |= generate_inference_tokens(context)
                 context |= generate_verb_tokens(context)
                 pending = tuple(find_all(context, Verb))

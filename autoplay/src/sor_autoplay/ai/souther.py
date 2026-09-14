@@ -64,7 +64,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from .tokens import PlayableCharacter, Souther
+from .tokens import Boss, PlayableCharacter, Souther
 
 # --- The commit gate ($15EDA) -------------------------------------------------
 
@@ -142,8 +142,8 @@ UNTOUCHABLE_PRIMARIES = frozenset({0x03, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A})
 CLAW_PRIMARY = 0x02
 
 
-def signed_health(souther: Souther) -> int:
-    health = souther.health or 0
+def signed_health(boss: Boss) -> int:
+    health = boss.health or 0
     return health - 0x10000 if health >= 0x8000 else health
 
 
@@ -331,7 +331,7 @@ class HoldStep(Enum):
     WAIT = auto()
 
 
-def hold_step(actor: PlayableCharacter, souther: Souther) -> HoldStep:
+def hold_step(actor: PlayableCharacter, boss: Boss) -> HoldStep:
     """Knee, knee, release -- and only ever finish when finishing kills.
 
     Front hold: two knees, then hand him back to the walk-in (the release),
@@ -343,9 +343,14 @@ def hold_step(actor: PlayableCharacter, souther: Souther) -> HoldStep:
     since otherwise it leaves him 100 px away; else the one crossover this
     hold allows, back to the front and its knees -- or, with that crossover
     already spent, the release.
+
+    Nothing here is Souther's: the knee chain, the release countdown and the
+    crossover flag are the holding *player's* bytes, the damage is the
+    player's move, and every later boss (``$55``-``$58``) reads the release
+    through the same ``$17CF2``. ``antonio.hold_step`` is this function.
     """
 
-    hp = signed_health(souther)
+    hp = signed_health(boss)
     base = actor.action_base
     if base == 0x66:
         if hp <= HOLD_SUPLEX_DAMAGE:

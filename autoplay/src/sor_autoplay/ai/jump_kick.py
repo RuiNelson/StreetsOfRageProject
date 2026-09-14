@@ -68,7 +68,7 @@ from typing import Callable
 
 from ..hitboxes import Hitbox
 from .kinematics import AI_LATENCY_FRAMES
-from .tokens import Antonio, Character, Enemy, PlayableCharacter, punch_outer_x
+from .tokens import Character, Enemy, PlayableCharacter
 
 # One object update, in 60 Hz frames -- see the module docstring.
 UPDATE_FRAMES = 2
@@ -411,13 +411,9 @@ def moving_body(
 
 def launch_direction(actor: PlayableCharacter, target: Character) -> int:
     """The way the executor launches a jump kick at ``target``: toward it,
-    except an Antonio inside the actor's punch outer edge, which it hops at
-    in place so the grab is still there on landing
-    (``execute._hop_without_x_carry``)."""
+    or the way the actor faces when the two share an X."""
 
     dx = target.world_x - actor.world_x
-    if isinstance(target, Antonio) and abs(dx) <= punch_outer_x(actor.character_id):
-        return 0
     if dx:
         return 1 if dx > 0 else -1
     return -1 if actor.facing_left else 1

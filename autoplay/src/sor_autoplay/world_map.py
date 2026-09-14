@@ -203,6 +203,41 @@ class MapEntity:
     player_vel_x: float = 0.0
     # Player height velocity at +$24: a jump's v_z (ai/jump_kick.py).
     player_vel_z: float = 0.0
+    # Player lane velocity at +$20, per update: a walk into the lane clamp
+    # caches its boxes a step past it (ai/antonio.py, ActorSim).
+    player_vel_lane: float = 0.0
+    # Player +$31, whose bit 1 $16EAE reads on its target (memory_map).
+    player_flags_31: int = 0
+    # Player +$59, the whole +$4B and +$7C: $179F8 (a later boss's "target
+    # unavailable") and $AA34 (no contact at all) read bits of them.
+    player_flags_59: int = 0
+    player_flags_4b: int = 0
+    player_contact_code: int = 0
+    # Later bosses (kind=="boss" only): the rest of what one update of their
+    # AI reads and writes, so ai/antonio.py can replay $16DA0 from here.
+    boss_vel_x: float = 0.0  # +$1C signed 16.16, px per update
+    boss_vel_lane: float = 0.0  # +$20 signed 16.16
+    screen_x: int = 0  # +$28 biased screen X ($80 = left edge)
+    anim: int = 0  # +$08 animation offset (bit 1 = the mirrored member)
+    anim_frame: int = 0  # +$0A the frame shown next
+    anim_countdown: int = 0  # +$0D updates left on it
+    attack_box_id: int = 0  # +$02 latched by the renderer: what collides next
+    body_box_id: int = 0  # +$03
+    boss_timer_5c: int = 0  # +$5C re-entry / pose countdown
+    boss_timer_6b: int = 0  # +$6B lane wobble counter
+    boss_reaction_timer: int = 0  # +$62 hit reaction / knockdown timer
+    boss_hold_flags: int = 0  # +$66 bit 0 = held
+    fine_x: float = 0.0  # +$10 as 16.16
+    fine_y: float = 0.0  # +$14 as 16.16
+    # Antonio's boomerang (type $96) only. It runs the later-boss layout, so
+    # its velocities, animation, latched box, screen X, fine position, +$6B
+    # countdown and +$52 lane target fill the boss fields above; these are
+    # the rest of what its own update reads (ai/antonio.py, BoomerangSim).
+    boomerang_state: int = 0  # +$30: 0 on his hand, 1 out, 2 back, 3 knocked away
+    lane_sign: int = 0  # +$61: nonzero when +$52 lies above it
+    boomerang_turn_lane: int = 0  # +$78 word: what its turn copies into +$52
+    boomerang_knock_timer: int = 0  # +$7B: updates left once knocked away
+    child_ptr: int = 0  # later boss +$6E: its linked child (Antonio's boomerang)
     combat_phase: CombatPhase = CombatPhase.UNKNOWN
     # The object's real body AABB. A player reads its own cached box straight
     # out of the object (+$70, written every frame by $4140) and needs no ROM
@@ -265,6 +300,13 @@ class MapEntity:
 
         base = self.action_base
         return 0x10 <= base <= 0x17 or 0x3C <= base <= 0x42
+
+    @property
+    def child_slot(self) -> str | None:
+        """Slot name a later boss's ``+$6E`` links to -- Antonio's boomerang,
+        the one ``$17206`` spawned last -- or ``None``."""
+
+        return _slot_name_from_object_ptr(self.child_ptr) if self.child_ptr else None
 
     @property
     def contact_slot(self) -> str | None:
@@ -489,6 +531,12 @@ def fixed16_lane_y(data: bytes, offset: int) -> int:
     return _u16(data, offset)
 
 
+def fixed1616_unsigned(data: bytes, offset: int) -> float:
+    """Unsigned 16.16 fixed-point long (a position: +$10 X, +$14 lane)."""
+
+    return int.from_bytes(data[offset : offset + 4], "big") / 65536.0
+
+
 def fixed1616_signed(data: bytes, offset: int) -> float:
     """Signed 16.16 fixed-point long (ROM velocity fields +$20 / +$24)."""
 
@@ -643,6 +691,30 @@ def _entity_from_object(
     enemy_vel_y = 0.0
     player_vel_x = 0.0
     player_vel_z = 0.0
+    player_vel_lane = 0.0
+    player_flags_31 = 0
+    player_flags_59 = 0
+    player_flags_4b = 0
+    player_contact_code = 0
+    boss_vel_x = 0.0
+    boss_vel_lane = 0.0
+    screen_x = 0
+    anim = 0
+    anim_frame = 0
+    anim_countdown = 0
+    attack_box_id = 0
+    body_box_id = 0
+    boss_timer_5c = 0
+    boss_timer_6b = 0
+    boss_reaction_timer = 0
+    boss_hold_flags = 0
+    fine_x = 0.0
+    fine_y = 0.0
+    boomerang_state = 0
+    lane_sign = 0
+    boomerang_turn_lane = 0
+    boomerang_knock_timer = 0
+    child_ptr = 0
     phase = CombatPhase.UNKNOWN
 
     if style.kind == "player":
@@ -661,6 +733,11 @@ def _entity_from_object(
         phase = player_phase(action_byte=action_state, held_type=held_type)
         # Same +$1C X-velocity word Antonio's kick gate ($16EAE) reads.
         player_vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X_ORDINARY)
+        player_vel_lane = fixed1616_signed(slot, mm.OBJ_VEL_LANE_ORDINARY)
+        player_flags_31 = _u8(slot, mm.OBJ_PLAYER_FLAGS_31)
+        player_flags_59 = _u8(slot, mm.OBJ_PLAYER_FLAGS_59)
+        player_flags_4b = _u8(slot, mm.OBJ_PLAYER_HOLD_FLAGS)
+        player_contact_code = _u8(slot, mm.OBJ_PLAYER_CONTACT_CODE)
     elif style.kind == "enemy":
         # Resolved from the weapon object's +$52 holder pointer, not from
         # this slot: ordinary-enemy +$60 is the scripted approach X.
@@ -688,6 +765,23 @@ def _entity_from_object(
         ground_z = fixed16_lane_y(slot, mm.OBJ_BOSS_GROUND_Z)
         vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X)
         vel_z = fixed1616_signed(slot, mm.OBJ_VEL_Z)
+        boss_vel_x = fixed1616_signed(slot, mm.OBJ_BOSS_VEL_X)
+        boss_vel_lane = fixed1616_signed(slot, mm.OBJ_BOSS_VEL_LANE)
+        screen_x = _u16(slot, mm.OBJ_SCREEN_X)
+        if screen_x >= 0x8000:
+            screen_x -= 0x10000
+        anim = _u16(slot, mm.OBJ_ANIM)
+        anim_frame = _u8(slot, mm.OBJ_ANIM_FRAME)
+        anim_countdown = _u8(slot, mm.OBJ_ANIM_COUNTDOWN)
+        attack_box_id = _u8(slot, mm.OBJ_ATTACK_BOX)
+        body_box_id = _u8(slot, mm.OBJ_BODY_BOX)
+        boss_timer_5c = _u8(slot, mm.OBJ_BOSS_REENTRY_TIMER)
+        boss_timer_6b = _u8(slot, mm.OBJ_BOSS_WOBBLE)
+        boss_reaction_timer = _u8(slot, mm.OBJ_BOSS_REACTION_TIMER)
+        boss_hold_flags = _u8(slot, mm.OBJ_BOSS_HOLD_FLAGS)
+        child_ptr = _u16(slot, mm.OBJ_LATER_BOSS_CHILD)
+        fine_x = fixed1616_unsigned(slot, mm.OBJ_POS_X)
+        fine_y = fixed1616_unsigned(slot, mm.OBJ_POS_Y)
         # Target pointer location differs by boss generation.
         if type_id in (0x30, 0x35):
             target_ptr = _u16(slot, mm.OBJ_BESPOKE_TARGET)
@@ -707,6 +801,27 @@ def _entity_from_object(
     elif style.kind == "projectile":
         vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X)
         vel_z = fixed1616_signed(slot, mm.OBJ_VEL_Z)
+        if type_id == 0x96:
+            # Antonio's boomerang runs the later-boss layout: +$1C is its X
+            # velocity and +$20 (OBJ_VEL_X) its lane velocity ($17AB8), so
+            # vel_x is +$1C here -- the lane would project it sideways.
+            boss_vel_x = fixed1616_signed(slot, mm.OBJ_BOSS_VEL_X)
+            boss_vel_lane = fixed1616_signed(slot, mm.OBJ_BOSS_VEL_LANE)
+            vel_x = boss_vel_x
+            screen_x = _u16(slot, mm.OBJ_SCREEN_X)
+            if screen_x >= 0x8000:
+                screen_x -= 0x10000
+            anim = _u16(slot, mm.OBJ_ANIM)
+            anim_frame = _u8(slot, mm.OBJ_ANIM_FRAME)
+            attack_box_id = _u8(slot, mm.OBJ_ATTACK_BOX)
+            boss_timer_6b = _u8(slot, mm.OBJ_BOSS_WOBBLE)
+            boss_dist_lane = _u16(slot, mm.OBJ_BOSS_DIST_LANE)
+            fine_x = fixed1616_unsigned(slot, mm.OBJ_POS_X)
+            fine_y = fixed1616_unsigned(slot, mm.OBJ_POS_Y)
+            boomerang_state = action_state
+            lane_sign = _u8(slot, mm.OBJ_BOSS_LANE_SIGN)
+            boomerang_turn_lane = _u16(slot, mm.OBJ_BOOMERANG_TURN_LANE)
+            boomerang_knock_timer = _u8(slot, mm.OBJ_BOOMERANG_KNOCK_TIMER)
         phase = CombatPhase.ATTACKING
     elif style.kind == "breakable" and outgoing:
         # Round-8 type-$45 moving props set outgoing damage while in flight.
@@ -777,6 +892,30 @@ def _entity_from_object(
         enemy_vel_y=enemy_vel_y,
         player_vel_x=player_vel_x,
         player_vel_z=player_vel_z,
+        player_vel_lane=player_vel_lane,
+        player_flags_31=player_flags_31,
+        player_flags_59=player_flags_59,
+        player_flags_4b=player_flags_4b,
+        player_contact_code=player_contact_code,
+        boss_vel_x=boss_vel_x,
+        boss_vel_lane=boss_vel_lane,
+        screen_x=screen_x,
+        anim=anim,
+        anim_frame=anim_frame,
+        anim_countdown=anim_countdown,
+        attack_box_id=attack_box_id,
+        body_box_id=body_box_id,
+        boss_timer_5c=boss_timer_5c,
+        boss_timer_6b=boss_timer_6b,
+        boss_reaction_timer=boss_reaction_timer,
+        boss_hold_flags=boss_hold_flags,
+        fine_x=fine_x,
+        fine_y=fine_y,
+        boomerang_state=boomerang_state,
+        lane_sign=lane_sign,
+        boomerang_turn_lane=boomerang_turn_lane,
+        boomerang_knock_timer=boomerang_knock_timer,
+        child_ptr=child_ptr,
         boss_dist_lane=boss_dist_lane,
         combat_phase=phase,
     )

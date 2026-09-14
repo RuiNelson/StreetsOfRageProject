@@ -20,6 +20,8 @@ classDiagram
     Essential <|-- AnimationInProgress
     Essential <|-- InContinueMenu
     Essential <|-- InMrXDialog
+    Essential <|-- DebugNoFood
+    Essential <|-- DebugNoPolice
 
     Observed <|-- Projectile
     Observed <|-- StageObjects
@@ -63,8 +65,8 @@ classDiagram
     Walk <|-- WalkToPickup
     Walk <|-- RetreatFromDanger
     Walk <|-- ProjectileSidestep
-    Walk <|-- DodgeAntonioKick
     Walk <|-- EngageSouther
+    Walk <|-- EngageAntonio
 
     Verb <|-- Attack
     Attack <|-- MeleeAttacks

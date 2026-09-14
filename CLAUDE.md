@@ -225,9 +225,10 @@ match.
 
 `scripts/go_to_boss_1` … `scripts/go_to_boss_8` put the AI in front of one
 round's boss with nothing else on screen: same turbo host and poll cadence as
-`both_turbo`, plus `--start-level N` and `--kill-street-enemies`, so autoplay
-navigates the menus, jumps to the round, and keeps every ordinary family
-swept for the rest of the session.
+`both_turbo`, plus `--start-level N`, `--kill-street-enemies` and
+`--no-police`, so autoplay navigates the menus, jumps to the round, keeps
+every ordinary family swept for the rest of the session, and never calls the
+police.
 
 ```bash
 ./scripts/go_to_boss_1            # round 1, Antonio
@@ -248,8 +249,12 @@ swept for the rest of the session.
 
 The numbered scripts are one line each; the turbo/poll/port flags live only
 in `scripts/go_to_boss`, so eight copies cannot drift apart. Sweeping is not
-optional for boss work — see `autoplay/CLAUDE.md`. Quitting the HUD (Esc/Q)
-also shuts the host down, so the port is free for the next run.
+optional for boss work — see `autoplay/CLAUDE.md`. Neither is `--no-police`
+(user: "The police is allowed for Souther/Antonio, just don't test with the
+police on"): the AI may call it in play, as its last resort, but never in a
+test; `autoplay/tools/boss_fight.py` and the labs keep it off too. Quitting
+the HUD (Esc/Q) also shuts the host down, so the port is free for the next
+run.
 
 ## Validation and handoff
 

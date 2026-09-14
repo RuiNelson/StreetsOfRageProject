@@ -354,6 +354,30 @@ def walk_speed_lane(character_id: int | None) -> float:
     return WALK_SPEED_LANE.get(character_id, DEFAULT_WALK_SPEED_LANE)
 
 
+# The diagonal rows of the same tables ($08/$0C, and the armed $34/$38): X
+# and lane per update while both are pressed. Blaze keeps her full 3.25 on X
+# and walks the lane at her vertical speed; Axel and Adam trade both down
+# (2.25/2.0 and 1.75/1.25). A lookahead that walks the lane and X together
+# (ai/antonio.py) needs these rather than the straight figures above.
+WALK_DIAGONAL_SPEED: dict[int, tuple[float, float]] = {
+    0: (2.25, 2.0),
+    1: (1.75, 1.25),
+    2: (3.25, 1.625),
+}
+DEFAULT_WALK_DIAGONAL_SPEED = (1.75, 1.25)
+
+
+def walk_speeds(character_id: int | None) -> tuple[float, float, float, float]:
+    """``(straight X, diagonal X, diagonal lane, straight lane)`` per update."""
+
+    diagonal = (
+        DEFAULT_WALK_DIAGONAL_SPEED
+        if character_id is None
+        else WALK_DIAGONAL_SPEED.get(character_id, DEFAULT_WALK_DIAGONAL_SPEED)
+    )
+    return walk_speed_x(character_id), diagonal[0], diagonal[1], walk_speed_lane(character_id)
+
+
 def thrown_weapon_speed_x(weapon_type: int) -> float:
     return THROWN_WEAPON_SPEED_X.get(weapon_type, DEFAULT_THROWN_WEAPON_SPEED_X)
 

@@ -85,6 +85,7 @@ from .essential import (
     AnimationInProgress,
     CameraRange,
     DebugNoFood,
+    DebugNoPolice,
     Essential,
     InContinueMenu,
     InMrXDialog,
@@ -127,7 +128,7 @@ from .tokens import (
     find_all,
 )
 from .walk_verbs import (
-    DodgeAntonioKick,
+    EngageAntonio,
     EngageSouther,
     ProjectileSidestep,
     RetreatFromDanger,

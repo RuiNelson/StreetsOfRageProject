@@ -211,12 +211,17 @@ def _build_playable_character(
         vel_x=entity.player_vel_x,
         world_z=entity.world_z,
         vel_z=entity.player_vel_z,
+        vel_lane=entity.player_vel_lane,
         ground_z=ground_z,
         hold_ticks=hold_ticks,
         held_enemy_slot=held_enemy_slot,
         knee_chain_last=entity.knee_chain_last,
         hold_release_countdown=entity.hold_release_countdown,
         crossover_spent=entity.crossover_spent,
+        flags_31=entity.player_flags_31,
+        flags_59=entity.player_flags_59,
+        flags_4b=entity.player_flags_4b,
+        contact_code=entity.player_contact_code,
     )
 
 
@@ -356,6 +361,21 @@ def generate_direct_observation_tokens(
                     vel_x=entity.vel_x,
                     vel_z=entity.vel_z,
                     primary_state=entity.action_state,
+                    boss_vel_x=entity.boss_vel_x,
+                    boss_vel_lane=entity.boss_vel_lane,
+                    screen_x=entity.screen_x,
+                    anim=entity.anim,
+                    anim_frame=entity.anim_frame,
+                    anim_countdown=entity.anim_countdown,
+                    attack_box_id=entity.attack_box_id,
+                    body_box_id=entity.body_box_id,
+                    timer_5c=entity.boss_timer_5c,
+                    timer_6b=entity.boss_timer_6b,
+                    reaction_timer=entity.boss_reaction_timer,
+                    hold_flags=entity.boss_hold_flags,
+                    fine_x=entity.fine_x,
+                    fine_y=entity.fine_y,
+                    child_slot=entity.child_slot,
                 )
             context.add(
                 cls(
@@ -384,6 +404,19 @@ def generate_direct_observation_tokens(
                     vel_x=entity.vel_x,
                     vel_z=entity.vel_z,
                     type_id=entity.type_id,
+                    state=entity.boomerang_state,
+                    vel_lane=entity.boss_vel_lane,
+                    fine_x=entity.fine_x,
+                    fine_y=entity.fine_y,
+                    anim=entity.anim,
+                    anim_frame=entity.anim_frame,
+                    attack_box_id=entity.attack_box_id,
+                    screen_x=entity.screen_x,
+                    countdown=entity.boss_timer_6b,
+                    lane_target=entity.boss_dist_lane,
+                    lane_target_above=bool(entity.lane_sign),
+                    turn_lane=entity.boomerang_turn_lane,
+                    knock_timer=entity.boomerang_knock_timer,
                 )
             )
         elif entity.kind == "weapon" and entity.is_free_ground_item:

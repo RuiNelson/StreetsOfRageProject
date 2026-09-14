@@ -711,10 +711,7 @@ def in_jump_attack_band(actor: PlayableCharacter, enemy: Character) -> bool:
     punch already reaches) and no further than the kicked flight itself
     carries the actor (``jump_kick.landing_distance`` -- 67/77/84 px, the lab's
     own landings; a kick launched from further away connects only if the
-    target keeps still for the whole flight). Antonio is the one exception to
-    the near edge: a standing B is his ``$16EAE`` kick trigger, so the hop is
-    the opener inside punch range too, straight up (``jump_kick.launch_
-    direction``).
+    target keeps still for the whole flight).
 
     The second used to be a distance band -- dx within 50/48/60..60/69/75 and
     14 px of lane -- and is now the ROM's own physics (``ai/jump_kick.py``):
@@ -743,9 +740,7 @@ def in_jump_attack_band(actor: PlayableCharacter, enemy: Character) -> bool:
             abs(enemy.world_y - actor.world_y) <= JUMP_ATTACK_RANGE_Y
             and dx <= jump_attack_max_dx(actor.character_id)
         )
-    min_dx = 0 if isinstance(enemy, Antonio) else max(
-        JUMP_ATTACK_MIN_DX, punch_outer_x(actor.character_id)
-    )
+    min_dx = max(JUMP_ATTACK_MIN_DX, punch_outer_x(actor.character_id))
     if dx < min_dx or dx > jump_kick.landing_distance(actor.character_id):
         return False
     return jump_kick.launch_hits(actor, enemy)
@@ -1115,32 +1110,9 @@ def incoming_melee_targets(context: Context, actor: PlayableCharacter) -> set[st
     return {enemy.slot for enemy in on_screen_enemies(context) if is_incoming_melee(actor, enemy)}
 
 
-# Kick gate at $16EAE (enemy-ai.md "Body state machine"): X thresholds
-# selected by the target's +$1C velocity relative to Antonio's facing, and
-# a lane window of $10 (or $08 when +$61 is set -- we use the looser $10
-# so we never miss a kick). Distances are the ROM's own +$50/+ $52 words.
-#
-# After the ROM signs velocity into Antonio's facing frame (`neg` if he
-# faces left), `bmi` (moving *against* his facing, i.e. toward him) uses
-# $78; the non-negative / backing-away path uses $50. Standing still is
-# its own path at $50 or $68 -- we take the wider $68 so a kick is never
-# missed.
-ANTONIO_KICK_DIST_STATIONARY = 0x68  # 104px
-ANTONIO_KICK_DIST_CLOSING = 0x78  # 120px; target walking into him
-ANTONIO_KICK_DIST_AWAY = 0x50  # 80px; target walking off
-ANTONIO_KICK_LANE = 0x10  # 16px
-# Dash/throw commit at $16E74: X in [$28, $78) and lane < $14. This is
-# the opening hit of the fight -- he dashes as soon as the actor walks
-# into that window. The token covers it too: a sidestep cannot leave a
-# lane he tracks, so the same hop is the answer.
-ANTONIO_DASH_DIST_MIN = 0x28  # 40px
-ANTONIO_DASH_DIST_MAX = 0x78  # 120px
-ANTONIO_DASH_LANE = 0x14  # 20px
-# High-word of a 16.16 velocity is "zero" for the ROM's `tst.w $1C`. A
-# couple of tenths of a pixel of walk jitter must not flip the path.
-ANTONIO_STATIONARY_VEL = 0.5
-# Primary $02 is the committed kick ($171CC).
-ANTONIO_KICK_PRIMARY_STATE = 0x02
+# Antonio's kick and dash gates -- and every other part of his AI -- live in
+# ``antonio.py``, with the side-dependent lane gate the ROM actually applies
+# (``$08`` above his lane, ``$10`` level or below).
 
 # Souther's claw commit (``$15EDA``) and the geometry around it live in
 # ``souther.py``, with the lane gate the ROM actually applies: ``$0A`` for a
@@ -1171,83 +1143,6 @@ SOUTHER_JUMP_COUNTER_DIST_X = 0x78  # 120px
 #
 # What is genuinely safe is a Souther who cannot act at all, which
 # is_punishable already names -- and there the grab outranks the hop anyway.
-
-
-def _antonio_kick_distance_threshold(antonio: Antonio, actor: PlayableCharacter) -> int:
-    """The ROM's X window for the 1->2 kick, given how the actor is moving.
-
-    ``$16EAE`` reads the target's ``+$1C`` high word. Zero is the
-    standing-still path (thresholds ``$50``/``$68`` selected by facing and
-    ``+$31`` bit 1 -- we take the wider ``$68`` so a kick is never
-    missed). Non-zero is signed relative to Antonio's facing ``+$60``:
-    negative (moving *against* his facing, i.e. approaching him -- the
-    ROM's ``bmi`` path) uses ``$78``, non-negative (backing away) uses
-    ``$50``. Same reading as ``ANTONIO_KICK_DIST_CLOSING``/``_AWAY``'s own
-    comments above, which is what this function returns.
-    """
-
-    vel = actor.vel_x
-    if abs(vel) < ANTONIO_STATIONARY_VEL:
-        return ANTONIO_KICK_DIST_STATIONARY
-    # Sign into Antonio's facing frame the way $16EB4 does: negate if he
-    # faces left, then `bmi` is "moving against his facing" = toward him.
-    relative = -vel if antonio.facing_left else vel
-    if relative < 0:
-        return ANTONIO_KICK_DIST_CLOSING
-    return ANTONIO_KICK_DIST_AWAY
-
-
-def antonio_will_kick(antonio: Antonio, actor: PlayableCharacter) -> bool:
-    """True when Antonio's kick gate is already satisfied, or the kick is on.
-
-    Already-committed (primary ``$02`` / ``CombatPhase.ATTACKING``) is
-    always a kick. The predictive half mirrors ``$16E54``-``$16F0E``:
-    target available, in the velocity-selected X window, and inside the
-    ``$10`` lane window. ``boss_dist_*`` are the ROM's own ``+$50``/``+$52``
-    words; we fall back to a computed gap if they were not populated.
-    """
-
-    if antonio.target_unavailable:
-        return False
-    if antonio.combat_phase in (
-        CombatPhase.DEATH,
-        CombatPhase.GRABBED,
-        CombatPhase.RECOVERY,
-    ):
-        return False
-
-    dist_x = antonio.boss_dist_x or abs(antonio.world_x - actor.world_x)
-    dist_lane = antonio.boss_dist_lane or abs(antonio.world_y - actor.world_y)
-    if antonio.primary_state == ANTONIO_KICK_PRIMARY_STATE:
-        return dist_lane < ANTONIO_KICK_LANE
-    # Already in the dash/throw commit (tactical $08): a locked-in ground
-    # strike. Do *not* also fire on the uncommitted dash *window* -- that
-    # window is the whole fight range, and treating it as a kick made
-    # DodgeAntonioKick win every tick and never attack.
-    if antonio.tactical == 0x08:
-        return dist_lane < ANTONIO_DASH_LANE and dist_x < ANTONIO_DASH_DIST_MAX
-    if dist_lane >= ANTONIO_KICK_LANE:
-        return False
-    return dist_x < _antonio_kick_distance_threshold(antonio, actor)
-
-
-# Lane the pre-emptive break aims to put between the actor and Antonio. His
-# kick gate is `+$52 < $10` (16px) and the dash/boomerang commit `< $14`
-# (20px), so clearing 20 disarms both; the margin past it is what stops the
-# step ending exactly on the boundary, where a px of walk jitter re-arms it.
-ANTONIO_KICK_LANE_BREAK = ANTONIO_DASH_LANE + 8
-
-
-def can_break_antonio_kick_lane(actor: PlayableCharacter, antonio: Antonio) -> bool:
-    """Whether stepping off his lane would actually disarm the gate.
-
-    False once the actor is already clear of ``ANTONIO_KICK_LANE_BREAK``:
-    the gate is then denied on lane alone and the step has nothing left to
-    do, which is what keeps the pre-emptive dodge from holding every tick
-    and becoming a stand-off.
-    """
-
-    return abs(antonio.world_y - actor.world_y) < ANTONIO_KICK_LANE_BREAK
 
 
 def souther_would_punish_jump(actor: PlayableCharacter, context: Context) -> bool:
@@ -1516,6 +1411,9 @@ def antonio_still_holding_boomerang(projectile: Projectile, context: Context) ->
 
     if projectile.type_id != ANTONIO_BOOMERANG_TYPE_ID:
         return False
+    if projectile.state in (1, 2, 3):
+        # Out, back or knocked away ($17272's states 1-3): off his hand.
+        return False
     for antonio in find_all(context, Antonio):
         if (
             abs(projectile.world_x - antonio.world_x) <= ANTONIO_BOOMERANG_ATTACH_RADIUS
@@ -1604,13 +1502,10 @@ def grab_reasons(
     Whether the grab is *reachable* is a separate question, answered by
     ``grab_would_connect``; ``decide.could_grab_enemy`` requires both.
 
-    Most reasons are ``Grunt``-only. Antonio is the exception: after a
-    landed hit he sits in the shared later-boss ``RECOVERY`` states (primary
-    ``$03``/``$04``), and a hold-then-suplex beats following up with another
-    strike, because a grounded punch is his own kick trigger. Souther is not a
-    case here at all -- his hold is the engage's own walk-in
-    (``EngageSouther``, ``souther.plan_engage``). Bongo, the twins, Abadede and
-    Mr. X stay out of scope.
+    Every reason is ``Grunt``-only. Antonio and Souther are not cases here
+    at all -- each one's hold is his engage's own walk-in (``EngageAntonio``/
+    ``antonio.plan_engage``, ``EngageSouther``/``souther.plan_engage``).
+    Bongo, the twins, Abadede and Mr. X stay out of scope.
 
     ``enemies`` should be every on-screen enemy for this actor (the same set
     ``target`` was drawn from) -- ``DODGE_CHARGE`` and ``CLEAR_REAR`` both
@@ -1627,15 +1522,6 @@ def grab_reasons(
     if target.combat_phase not in GRABBABLE_PHASES:
         return frozenset()
 
-    if isinstance(target, Antonio):
-        if is_punishable(target.combat_phase):
-            return frozenset({GrabReason.ANTONIO_ON_PUNISH})
-        # Ready, and already at contact range: the hold still beats the hop,
-        # which is the only other thing available against him. See
-        # GrabReason.ANTONIO_WALK_IN -- the range gate is grab_would_connect,
-        # which decide.could_grab_enemy requires anyway, so this reason never
-        # starts a walk across his kick window.
-        return frozenset({GrabReason.ANTONIO_WALK_IN})
     if not isinstance(target, Grunt):
         return frozenset()
 

@@ -175,6 +175,15 @@ def main() -> int:
             "scored fight should normally set this."
         ),
     )
+    ap.add_argument(
+        "--police",
+        action="store_true",
+        help=(
+            "Allow the police special. Off by default here (user: \"The police "
+            "is allowed for Souther/Antonio, just don't test with the police "
+            "on\"): a scored fight measures the plan, not the special."
+        ),
+    )
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     poll_s = args.poll_ms / 1000.0
@@ -188,7 +197,7 @@ def main() -> int:
     with MegaDriveClient(host=args.host, port=args.port) as client:
         rom = RomData.read(client)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
-        loop = AgentLoop(gamepad, no_food=args.no_food)
+        loop = AgentLoop(gamepad, no_food=args.no_food, no_police=not args.police)
 
         boss_seen = False
         start_hp = start_lives = None

@@ -95,7 +95,7 @@ class GrabEnemy(GrabMechanics):
 
     Raises emergency: (reach.grab_reasons includes CLEAR_REAR)×58,
     (reach.grab_reasons includes JACK_FROM_BEHIND)×56,
-    (reach.grab_reasons includes ANTONIO_ON_PUNISH)×61,
+    (reach.grab_reasons includes WHILE_SURROUNDED or DODGE_CHARGE)×61,
     (reach.grab_reasons includes DEAD_ZONE)×30.
 
     The rear tier sits above every strike on an enemy that can still act
@@ -453,12 +453,16 @@ class HitAntonioBoomerang(MeleeAttacks):
     ``Projectile`` is heading at the actor, in lane, and inside the punch
     box at punch-connect time (startup + pipeline latency). Not produced
     while the boomerang is still attached to Antonio -- punching his hand
-    is just standing still in front of him, which is how his kick starts.
+    is just standing still in front of him, which is how his kick starts --
+    nor while the actor is armed: B is then the weapon's swing, whose timing
+    nothing models (measured: an early swing whiffed and the boomerang
+    landed during its recovery). The engage keeps an armed actor off his
+    throw lane instead (``antonio._end_danger``).
 
-    Raises emergency: (reach.projectile_threatens for this boomerang)×62 --
-    above DodgeAntonioKick (58), because jumping into a boomerang that is
-    already in the punch box is a free hit, and a punch is faster than the
-    kick's own startup.
+    Raises emergency: (reach.projectile_threatens for this boomerang)×78 --
+    above EngageAntonio (76): the boomerang is only thrown at an actor 120+
+    px out, where no gate of his can fire, and once it is in the punch box a
+    punch is the only thing that stops it.
     """
 
     priority: int = 25

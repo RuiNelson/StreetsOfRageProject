@@ -17,7 +17,7 @@ from contextvars import ContextVar
 from .pathfind import Path, Point, PointGoal
 from .tokens import (
     CounterGrab,
-    DodgeAntonioKick,
+    EngageAntonio,
     EngageSouther,
     FlipHold,
     GrabEnemy,
@@ -45,7 +45,7 @@ from .tokens import (
     punch_outer_x,
     punch_usable_inner_x,
 )
-from .tokens import Antonio, Enemy, GrabReason, Souther
+from .tokens import Antonio, Enemy, Souther
 from .tokens import CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile
 from .tokens import Pickup, Weapon
@@ -61,7 +61,6 @@ from .tokens import (
 )
 from .tokens import Context, Dialog, Verb, find, find_all
 from .tokens import (
-    DodgeAntonioKick,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -72,6 +71,7 @@ from .tokens import (
 from .gamepad import VirtualGamepad
 from . import kinematics
 from . import jump_kick
+from . import antonio as antonio_plan
 from . import souther as souther_plan
 from . import navigation as nav
 from .decide import (
@@ -82,7 +82,6 @@ from .decide import (
     in_smash_range,
 )
 from .reach import (
-    ANTONIO_KICK_LANE_BREAK,
     B_PRESS_PICKUP_X,
     B_PRESS_PICKUP_Y,
     PIT_AVOID_MARGIN,
@@ -90,7 +89,6 @@ from .reach import (
     REACH_SAFETY_MARGIN,
     enemy_behind_actor,
     enemy_lane_covers,
-    grab_reasons,
     in_camera,
     in_playable_lane,
     incoming_melee_targets,
@@ -227,14 +225,6 @@ WALK_TO_ENEMY_LANE_SAFETY_Y = PUNCH_RANGE_Y + 16
 # enemy to be on -- the raw compare is walk jitter -- so _approach_lane_y
 # stops reading it and picks the side with room instead.
 LANE_SIDE_DEADBAND_Y = 6
-# The offset an Antonio approach aims for, rather than the generic sidestep
-# above. The routed goal is a *region* with PUNCH_RANGE_Y of lane slack, so
-# an aim of WALK_TO_ENEMY_LANE_SAFETY_Y is satisfied by arriving 16px out --
-# which is exactly his `$16EAE` kick gate, satisfied. Adding the slack back
-# puts the nearest acceptable arrival at 28px, clear of both his `$10` kick
-# and `$14` dash windows with margin. Simulated over the real executor: 13px
-# of arrival offset before, 28 after.
-ANTONIO_APPROACH_LANE_Y = WALK_TO_ENEMY_LANE_SAFETY_Y + PUNCH_RANGE_Y
 # A Breakable is itself a solid obstacle -- walking straight to its exact
 # (world_x, world_y) means walking into it from whatever angle happens to be
 # a straight line, which can mean approaching from directly above/below and
@@ -790,43 +780,6 @@ def _crossing_would_walk_into_the_swing(actor: Myself | Partner, target: Enemy) 
     return gap > target.max_reach + REACH_SAFETY_MARGIN
 
 
-def _lane_offset_while_closing(actor: Myself | Partner, target: Enemy) -> int | None:
-    """The lane offset this enemy's own ROM gate makes mandatory, or ``None``.
-
-    Not-``None`` for a live boss whose committed move is *lane-gated*,
-    regardless of what he is doing this instant -- which is the difference
-    from the generic ``is_dangerous`` test below. For those, an approach that
-    keeps more lane than the gate allows cannot arm the move at all, however
-    the X distance closes; "hold the actor's current lane", which is what the
-    generic branch does, is a coin flip on exactly that question.
-
-    Antonio is the one boss this applies to: his ``$16EAE`` power kick needs
-    the target within ``$10`` (16px) of his lane and his ``$16E74``
-    dash/boomerang commit needs ``$14`` (20px); ``ANTONIO_APPROACH_LANE_Y``
-    clears both. Souther is not approached through here at all -- his whole
-    approach is ``EngageSouther`` (``souther.plan_engage``), whose corridor
-    also has to know which *side* of his lane the actor is on, since his gate
-    is ``$0A`` above him and ``$1C`` below.
-    """
-
-    if target.is_defeated:
-        return None
-    if isinstance(target, Antonio):
-        return ANTONIO_APPROACH_LANE_Y
-    return None
-
-
-def _holds_lane_offset_while_closing(actor: Myself | Partner, target: Enemy) -> bool:
-    """Whether the approach must stay off this enemy's lane the whole way in."""
-
-    return _lane_offset_while_closing(actor, target) is not None
-
-
-# The subset of GrabReason that means "already helpless, nothing left to
-# deny" rather than "grabbable in general" -- see _approach_lane_y.
-_ON_PUNISH_GRAB_REASONS = frozenset({GrabReason.ANTONIO_ON_PUNISH})
-
-
 def _approach_lane_y(
     actor: Myself | Partner, target: Enemy, context: Context, *, alongside: bool
 ) -> int:
@@ -838,32 +791,17 @@ def _approach_lane_y(
     enemy's own lane -- the approach is over and the strike or the hold needs
     the alignment.
 
-    A punishable Antonio is the other case that forces exact convergence,
-    ahead of the generic bands below. Those bands are sized for a *punch* --
-    ``WALK_TO_ENEMY_LANE_SAFETY_Y`` is ``PUNCH_RANGE_Y`` plus slack -- and a
-    hold needs the much tighter ``reach.GRAB_RANGE_Y`` instead: an approach
-    parked inside the punch band's own "close enough" branch never once came
-    within grab range of a helpless boss.
-
-    Deliberately narrower than "``grab_reasons`` is nonempty": Antonio's
-    ``ANTONIO_WALK_IN`` fires for any live, ready, ungrabbed Antonio, at any
-    range -- that is the reason the lane-offset approach below exists at all,
-    and converging early on its strength alone reopens his kick gate (broke
-    three ``test_an_antonio_approach_*`` fixtures, all at his own
-    ``CombatPhase.NORMAL``, when tried). Only the *on-punish* reason -- the
-    boss already helpless, nothing left to deny -- earns the bypass.
-    ``enemies=[]`` is safe here: the Antonio branch of ``grab_reasons``
-    returns before ever touching that argument.
+    No boss comes through here: Antonio and Souther each have their own
+    engage (``antonio.plan_engage``, ``souther.plan_engage``), because the
+    safe side of each one's lane is part of his own ROM gate -- ``$08`` above
+    Antonio and ``$10`` below, ``$0A`` above Souther and ``$1C`` below -- and
+    no generic band can know that.
     """
 
-    if alongside or grab_reasons(context, actor, target, []) & _ON_PUNISH_GRAB_REASONS:
+    if alongside:
         return target.world_y
     dy = abs(target.world_y - actor.world_y)
-    gated = _lane_offset_while_closing(actor, target)
-    hold_offset = gated if gated is not None else WALK_TO_ENEMY_LANE_SAFETY_Y
-    clear_of_the_line = (
-        hold_offset - PUNCH_RANGE_Y if gated is not None else WALK_TO_ENEMY_LANE_SAFETY_Y
-    )
+    hold_offset = WALK_TO_ENEMY_LANE_SAFETY_Y
     if dy > hold_offset:
         # Clear of the line -- but "clear" must not also mean "and never any
         # closer". Returning ``actor.world_y`` here holds *whatever* offset
@@ -881,72 +819,33 @@ def _approach_lane_y(
         #
         # So close the lane down to the offset the approach actually wants,
         # on the side the actor is **already** on. That side is what makes
-        # this safe to do for every enemy rather than Antonio alone: the aim
-        # point lies strictly between the two bodies (dy is greater than the
-        # offset), so it can never route the walk across the target's own
-        # lane, which is the risk the midpoint rule below carries and the
-        # reason that rule stays scoped.
+        # this safe to do for every enemy: the aim point lies strictly
+        # between the two bodies (dy is greater than the offset), so it can
+        # never route the walk across the target's own lane, which is the
+        # risk the midpoint rule below carries.
         side = 1 if actor.world_y > target.world_y else -1
         return int(target.world_y + side * hold_offset)
-    if dy >= clear_of_the_line:
+    if dy >= hold_offset:
         # Inside the band the approach wants; holding the current lane is
         # enough, and a further nudge would only be jitter.
         return actor.world_y
-    if not (
-        _holds_lane_offset_while_closing(actor, target) or is_dangerous(target.combat_phase)
-    ):
+    if not is_dangerous(target.combat_phase):
         return actor.world_y
     # Leave the line, aiming at a *fixed* lane rather than a displacement
     # from the actor's own, so repeated ticks converge on one point instead
-    # of stepping away forever.
+    # of stepping away forever. Side from the lane band's own midpoint, which
+    # does not move tick to tick -- ``actor.world_y`` vs ``target.world_y``
+    # crosses zero on a couple of px of walk jitter while both bodies
+    # converge, and the live symptom of reading it was the actor darting up
+    # and down by a full 2 * WALK_TO_ENEMY_LANE_SAFETY_Y against one
+    # barely-moving enemy.
     lo, hi = _lane_bounds(context)
-    if not _holds_lane_offset_while_closing(actor, target):
-        # Side from the lane band's own midpoint, which does not move tick to
-        # tick -- ``actor.world_y`` vs ``target.world_y`` crosses zero on a
-        # couple of px of walk jitter while both bodies converge, and the
-        # live symptom of reading it was the actor darting up and down by a
-        # full 2 * WALK_TO_ENEMY_LANE_SAFETY_Y against one barely-moving
-        # enemy.
-        #
-        # The Antonio branch below reads the side instead, and measurably
-        # should, but that is **scoped to him on purpose**: it is measured on
-        # his fight and nowhere else. Souther crosses lanes constantly and
-        # grunts arrive in crowds, so a side that can flip is a real risk
-        # there and an unmeasured one -- see autoplay/CLAUDE.md.
-        offset = (
-            WALK_TO_ENEMY_LANE_SAFETY_Y
-            if target.world_y >= (lo + hi) / 2
-            else -WALK_TO_ENEMY_LANE_SAFETY_Y
-        )
-        return int(target.world_y + offset)
-
-    # A lane-gated boss: the side is the one the actor is **already on**, so
-    # the walk never crosses the lane it is leaving. The midpoint rule above
-    # puts the aim point on the far side whenever he sits between the actor
-    # and the middle of the band, and the actor then walks straight through
-    # his own gate -- simulated over the real executor against Antonio, an
-    # approach starting 20px clear crossed to 5px and then 2px while still
-    # 130px away on X. Crossing is exactly what the offset exists to prevent,
-    # so the side rule is part of the gate denial and not a separate taste.
-    #
-    # The jitter the midpoint rule exists for is answered by a deadband: an
-    # actor within LANE_SIDE_DEADBAND_Y of his lane has no side worth
-    # reading, and only then does the room in the band decide.
-    dy_signed = actor.world_y - target.world_y
-    if abs(dy_signed) >= LANE_SIDE_DEADBAND_Y:
-        offset = hold_offset if dy_signed > 0 else -hold_offset
-    else:
-        offset = (
-            hold_offset
-            if target.world_y < (lo + hi) / 2
-            else -hold_offset
-        )
-    aim = target.world_y + offset
-    if not lo <= aim <= hi:
-        # No room that side of him; the band's other side is all there is,
-        # and crossing is then unavoidable rather than chosen.
-        aim = target.world_y - offset
-    return int(aim)
+    offset = (
+        WALK_TO_ENEMY_LANE_SAFETY_Y
+        if target.world_y >= (lo + hi) / 2
+        else -WALK_TO_ENEMY_LANE_SAFETY_Y
+    )
+    return int(target.world_y + offset)
 
 
 def _lane_release_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> int:
@@ -1510,87 +1409,6 @@ def state_machine_projectile_sidestep(
     )
 
 
-def _antonio_lane_break_target(
-    actor: Myself | Partner, antonio: Antonio, context: Context
-) -> tuple[int, int]:
-    """Where to step to put ``reach.ANTONIO_KICK_LANE_BREAK`` of lane between
-    the actor and Antonio.
-
-    X holds: the gate's X half is 80-120px wide depending on how the actor is
-    moving, so contesting it means retreating most of the arena, while the
-    lane half is 16px and can be left in about three ticks. Side is picked
-    from **his** lane, never the lane midpoint, the same self-reinforcing
-    rule ``_pit_dodge_target_y`` uses.
-    """
-
-    lo, hi = _lane_bounds(context)
-    clearance = ANTONIO_KICK_LANE_BREAK + MOVE_DEADBAND_Y
-    above = antonio.world_y - clearance
-    below = antonio.world_y + clearance
-    can_go_up = above >= lo
-    can_go_down = below <= hi
-
-    dy = actor.world_y - antonio.world_y
-    if dy < 0 and can_go_up:
-        return actor.world_x, int(above)
-    if dy > 0 and can_go_down:
-        return actor.world_x, int(below)
-    if can_go_up and can_go_down:
-        roomier_is_up = (antonio.world_y - lo) >= (hi - antonio.world_y)
-        return actor.world_x, int(above if roomier_is_up else below)
-    if can_go_up:
-        return actor.world_x, int(above)
-    if can_go_down:
-        return actor.world_x, int(below)
-    return actor.world_x, actor.world_y
-
-
-def state_machine_dodge_antonio_kick(
-    verb: DodgeAntonioKick, context: Context, gamepad: VirtualGamepad
-) -> None:
-    """Hop the kick that is already coming; step out of the one that is not.
-
-    **Committed** (`verb.committed`, primary `$02` or tactical `$08`) is the
-    original behaviour: a ground sidestep does not leave the ROM's
-    X-velocity gate in time once the strike is locked in (measured: minutes
-    of sidestep, 0 damage dealt), so this reuses the jump-kick state machine
-    and the airborne B edge punishes. Inside punch range that hop is in
-    place -- a directed hop from there lands past him, facing away, and the
-    grab on landing never happens.
-
-    **Uncommitted** is the opposite input for the opposite situation: the
-    gate is merely satisfiable, there are ~10 ticks before it fires, and
-    `$16EAE` cannot start at all with the target more than `$10` (16px) off
-    his lane. So this walks that 16px rather than jumping into it. Hopping
-    here is what the trace caught the AI doing -- five of nine kick onsets
-    had `JumpAttack` holding the tick through the whole warning.
-    """
-
-    if verb.committed:
-        state_machine_jump_attack(verb, context, gamepad)
-        return
-
-    actor = _find_actor(context, verb.actor_slot)
-    target = find(context, Antonio, slot=verb.target_slot)
-    if actor is None or target is None:
-        gamepad.release()
-        return
-    target_x, target_y = _antonio_lane_break_target(actor, target, context)
-    goal = nav.PointGoal(nav.Point(target_x, target_y), tolerance=MOVE_DEADBAND_X)
-    body, origin = nav.actor_footprint(actor)
-    solids, dangers = nav.obstacle_sets(context, body=body, origin=origin)
-
-    def straight_line() -> int:
-        return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)
-
-    _hold_steered(
-        gamepad,
-        _routed_mask(
-            context, actor, goal, solids=solids, dangers=dangers, fallback=straight_line
-        ),
-    )
-
-
 def state_machine_engage_souther(
     verb: EngageSouther, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -1624,6 +1442,73 @@ def state_machine_engage_souther(
     gamepad.hold(_clamp_mask(context, actor.world_x, actor.world_y, mask))
 
 
+def engage_antonio_plan(
+    verb: EngageAntonio, context: Context
+) -> antonio_plan.EngagePlan | None:
+    """``antonio.plan_engage`` for this verb, from the context -- shared by
+    the handler and the diagnostics, so both see the one plan."""
+
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Antonio, slot=verb.target_slot)
+    if actor is None or target is None:
+        return None
+    others = [
+        other
+        for other in find_all(context, Antonio)
+        if other.slot != target.slot and not other.is_defeated
+    ]
+    return antonio_plan.plan_engage(
+        actor,
+        target,
+        camera=find(context, CameraRange),
+        others=others,
+        partner=find(context, Partner) if isinstance(actor, Myself) else find(context, Myself),
+        # His boomerang, for the lookahead to fly (none on screen is an
+        # answer too: tactical 7 then has nothing to wait on).
+        projectiles=list(find_all(context, Projectile)),
+    )
+
+
+def state_machine_engage_antonio(
+    verb: EngageAntonio, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Hold the stick ``antonio.plan_engage`` chose this tick.
+
+    Held directly, like ``EngageSouther``'s mask: the lookahead has already
+    decided the X direction update by update, and the axis ramp would hold
+    back exactly the presses a walk-in needs -- the grab is the walking box's
+    contact with his body, and a still actor has none.
+
+    And held *unclamped*, including into the camera's walk clamp, which every
+    other walk here strips (``_clamp_mask_to_camera``). The round-1 arena
+    puts the fight against that edge: the actor arrives at the right of the
+    locked camera, he spawns just past it, and after every release he is
+    back past it walking in on tactical 9. Stripping the press there left the
+    actor standing still -- facing away, after a release -- with no walking
+    box, and both hits of the first scored batch on this plan landed exactly
+    so, the entrance and a re-grab. Pressed, ``$43AA`` holds the player at the
+    edge in a walk, the box is out, and he walks into it. The plan models the
+    clamp itself (``ActorSim``'s ``x_lo``/``x_hi``), and the lane edges it
+    works to are the ROM's own ``$02..$70``.
+    """
+
+    plan = engage_antonio_plan(verb, context)
+    actor = _find_actor(context, verb.actor_slot)
+    if plan is None or actor is None:
+        gamepad.release()
+        return
+    mask = 0
+    if plan.dir_x > 0:
+        mask |= RIGHT_MASK
+    elif plan.dir_x < 0:
+        mask |= LEFT_MASK
+    if plan.dir_y > 0:
+        mask |= DOWN_MASK
+    elif plan.dir_y < 0:
+        mask |= UP_MASK
+    gamepad.hold(mask)
+
+
 def state_machine_release_to_regrab(
     verb: ReleaseToRegrab, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -1639,10 +1524,15 @@ def state_machine_release_to_regrab(
 
     If the press ends a frame short, the countdown keeps what it spent (nothing
     resets it mid-hold) and the next tick's press finishes the job.
+
+    Any held later boss: the countdown and the release are the player's own
+    code, and Antonio reads the release through the same ``$17CF2`` Souther
+    does. Antonio lands 40 px out rather than 32, and ``EngageAntonio``'s
+    lookahead carries the walk back in from the next tick.
     """
 
     actor = _find_actor(context, verb.actor_slot)
-    target = find(context, Souther, slot=verb.target_slot)
+    target = find(context, Enemy, slot=verb.target_slot)
     if actor is None or target is None:
         gamepad.release()
         return
@@ -1939,22 +1829,6 @@ JUMP_ATTACK_ACTIONS = frozenset({0x16, 0x42})
 JUMP_LAND_ACTIONS = frozenset({0x14, 0x40})
 
 
-def _hop_without_x_carry(actor: Myself | Partner, target: Enemy) -> bool:
-    """True when a directed hop at this distance would fly past ``target``.
-
-    Antonio's punish is the grab on landing. A directed hop from inside
-    punch range carries ~3 px/frame for the whole flight and lands on his
-    far side, facing away -- ``grab_would_connect`` then fails (he is
-    behind) and the next live tick hops again. Measured live: a full
-    Antonio fight under the directed opener was 374 ``JumpAttack`` and
-    0 ``GrabEnemy``.
-    """
-
-    if not isinstance(target, Antonio):
-        return False
-    return abs(target.world_x - actor.world_x) <= punch_outer_x(actor.character_id)
-
-
 def _jump_toward(
     actor: Myself | Partner,
     target_x: int,
@@ -1970,8 +1844,7 @@ def _jump_toward(
 
     ``horizontal=False`` is an in-place hop: ``$384E`` reads the held
     direction at the end of the crouch, so any leftover LEFT/RIGHT from
-    the walk-in becomes carry. Against Antonio inside punch range that
-    carry is how the actor lands past him and never grabs.
+    the walk-in becomes carry.
     """
 
     face = 0
@@ -2054,21 +1927,11 @@ def state_machine_jump_attack(verb: JumpAttack, context: Context, gamepad: Virtu
         and actor.action_base not in (
             JUMP_CROUCH_ACTIONS | JUMP_FREE_FLIGHT_ACTIONS | JUMP_ATTACK_ACTIONS | JUMP_LAND_ACTIONS
         )
-        and not isinstance(target, Antonio)
     ):
-        # Already overlapping on X — punch, don't jump. Antonio is the
-        # exception: overlapping him on X is exactly when the hop has to
-        # go straight up over the kick/dash. A grounded B here is the
-        # $16EAE zero-velocity trigger, and DodgeAntonioKick reuses this
-        # handler, so the fallback would turn a dodge into a punch.
+        # Already overlapping on X — punch, don't jump.
         _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
         return
-    _jump_toward(
-        actor,
-        target.world_x,
-        gamepad,
-        horizontal=not _hop_without_x_carry(actor, target),
-    )
+    _jump_toward(actor, target.world_x, gamepad)
 
 
 def state_machine_grab_enemy(verb: GrabEnemy, context: Context, gamepad: VirtualGamepad) -> None:
@@ -2551,8 +2414,8 @@ _HANDLERS = {
     WalkToNearEnemy: state_machine_walk_to_near_enemy,
     RetreatFromDanger: state_machine_retreat_from_danger,
     ProjectileSidestep: state_machine_projectile_sidestep,
-    DodgeAntonioKick: state_machine_dodge_antonio_kick,
     EngageSouther: state_machine_engage_souther,
+    EngageAntonio: state_machine_engage_antonio,
     ReleaseToRegrab: state_machine_release_to_regrab,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,

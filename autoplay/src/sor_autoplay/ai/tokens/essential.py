@@ -91,3 +91,17 @@ class DebugNoFood(Essential):
     ever remove an option (``decide._food_is_spoken_for``), never add one, so
     a session without it behaves exactly as before.
     """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DebugNoPolice(Essential):
+    """Harness switch: never call the police special.
+
+    **Not an observation**, exactly like ``DebugNoFood``: added by the runner
+    (``--no-police``) so a fight is *scored* on what the plan itself does
+    (user: "The police is allowed for Souther/Antonio, just don't test with
+    the police on"). The special is ``$16A60``'s flat 10 off a later boss and
+    a screen sweep otherwise; a measured fight it helped win measures the
+    special, not the plan. It only ever removes ``CallPolice``
+    (``decide.could_call_police``), never adds anything.
+    """

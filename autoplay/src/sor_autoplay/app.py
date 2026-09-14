@@ -258,6 +258,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-police",
+        action="store_true",
+        help=(
+            "Debug: never call the police special, for the whole session. "
+            "Use when *testing* (user: \"The police is allowed for "
+            "Souther/Antonio, just don't test with the police on\"): a fight "
+            "the special helped win measures the special, not the plan. "
+            "scripts/go_to_boss passes it."
+        ),
+    )
+    parser.add_argument(
         "--kill-street-enemies",
         action="store_true",
         help=(
@@ -348,6 +359,7 @@ class ObserverApp:
         agent_p2: bool = False,
         scenario: DebugScenario | None = None,
         no_food: bool = False,
+        no_police: bool = False,
     ) -> None:
         self.host = host
         self.port = port
@@ -377,8 +389,8 @@ class ObserverApp:
             2: VirtualGamepad(self._gamepad_state, player_index=2),
         }
         self._agent_loops = {
-            1: AgentLoop(self._gamepads[1], no_food=no_food),
-            2: AgentLoop(self._gamepads[2], no_food=no_food),
+            1: AgentLoop(self._gamepads[1], no_food=no_food, no_police=no_police),
+            2: AgentLoop(self._gamepads[2], no_food=no_food, no_police=no_police),
         }
 
     def set_agent_enabled(self, player_index: int, enabled: bool) -> None:
@@ -648,6 +660,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         agent_p1=args.agent_p1,
         agent_p2=args.agent_p2,
         no_food=args.no_food,
+        no_police=args.no_police,
         scenario=DebugScenario(
             start_level=args.start_level,
             only_enemy=args.only_enemy,

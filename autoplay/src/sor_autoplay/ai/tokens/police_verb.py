@@ -16,17 +16,15 @@ class CallPolice(Attack):
     """The A-button police special — a screen-clearing attack.
 
     Produced by ``could_call_police`` when the actor has a special, at
-    least one live enemy is in context, and either health_percent is below
-    POLICE_HEALTH_PERCENT_THRESHOLD (or the higher
+    least one live enemy is in context, no Souther or Antonio is alive, and
+    health_percent is below POLICE_HEALTH_PERCENT_THRESHOLD (or the higher
     POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE while on the last life, where
-    a KO risks a continue/game-over instead of a free respawn), or a
-    ``Surrounded`` names the actor while it is below the laxer
-    POLICE_HEALTH_PERCENT_THRESHOLD_SURROUNDED -- being boxed in is the
-    other situation only this move answers, since it is the one attack that
-    clears every side at once. A special with nobody to sweep is a waste.
+    a KO risks a continue/game-over instead of a free respawn). The last
+    resort and nothing more (user: "A AI está a depender muito da chamada da
+    polícia!"): being surrounded or facing a boss is no longer a reason.
 
     Raises emergency: (Myself when health_percent is below that same
-    lives-aware threshold)×88, Surrounded×80.
+    lives-aware threshold)×88.
     """
 
     priority: int = 0

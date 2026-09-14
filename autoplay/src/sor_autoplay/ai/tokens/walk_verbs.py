@@ -128,7 +128,8 @@ class RetreatFromDanger(Walk):
     dangerous phase, close enough that continuing to approach risks
     arriving right as its hit lands) that is not yet actionable -- not
     really hittable yet -- and **only while ``decide._retreat_is_worth_it``**:
-    the actor is hurt, or ``Surrounded``. Danger alone is deliberately not
+    the actor is hurt (a crowd is answered with a hold, not by backing away
+    -- ``reach.grab_reasons``' ``WHILE_SURROUNDED``). Danger alone is deliberately not
     enough, since no enemy can be defeated without standing in the range it
     hits back from. Never just the nearest; determine_priority_verb picks
     among the candidates.
@@ -184,39 +185,6 @@ class ProjectileSidestep(Walk):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class DodgeAntonioKick(Walk):
-    """Leave Antonio's kick lane -- or hop over the kick -- before it lands.
-
-    Produced by ``could_dodge_antonio_kick`` once per live Antonio whose kick
-    gate (``reach.antonio_will_kick``) is live and who has already locked in
-    the kick (primary ``$02``) or the dash/throw (tactical ``$08``). A
-    predicted ``$16EAE`` window is not enough: sidestepping that made the AI
-    leave hop range forever and never take the hold. The executor hops
-    over the committed strike. The opener hop on a live Antonio is
-    ``JumpAttack``, not this.
-
-    Raises emergency: a committed Antonio kick gate×58 -- above every
-    strike on an Antonio that can still act (20). A punish grab on
-    hitstun (61+boss) outranks this, but the two do not coexist: a
-    recovering Antonio does not satisfy the kick gate. Below
-    CounterGrab/TechRecover/CallPolice, which stay the only answers to
-    those situations.
-    """
-
-    priority: int = 24
-    actor_slot: str
-    target_slot: str  # Antonio.slot
-    # False while his gate is merely *satisfiable* -- the ~10 ticks of warning
-    # `reach.antonio_will_kick` gives before he actually commits, measured
-    # over nine onsets in one fight (9-12 ticks on seven of them, 0 on the two
-    # at his entrance). Committed is the old behaviour: hop the strike that is
-    # already coming. Uncommitted is a pure lane step that *denies the gate*,
-    # since `$16EAE` needs the target within `$10` (16px) of his lane and
-    # nothing at all happens outside it.
-    committed: bool = True
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
 class EngageSouther(Walk):
     """Close on Souther to take a hold, never where his claw can start or land.
 
@@ -238,3 +206,26 @@ class EngageSouther(Walk):
     priority: int = 24
     actor_slot: str
     target_slot: str  # Souther.slot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EngageAntonio(Walk):
+    """Take a hold on Antonio without ever standing where his kick lands.
+
+    Produced by ``could_engage_antonio`` once per live ``Antonio`` while the
+    actor is free to move and not already holding a body -- armed or not, on
+    screen or walking back on. It is the whole fight against him: the strike,
+    grab, hop, walk-in and retreat verbs all stand down for him, and the stick
+    each tick is ``antonio.plan_engage``'s -- a lookahead over his own AI that
+    keeps the move which takes the hold soonest without his kick box ever
+    meeting the actor's body.
+
+    Raises emergency: a live Antonio×62, plus the boss raise (14) -- 76, the
+    same tier as ``EngageSouther`` and for the same reasons; below the
+    incoming-boomerang punch (78), CounterGrab/TechRecover and the dialogs;
+    the hold family never coexists with it.
+    """
+
+    priority: int = 24
+    actor_slot: str
+    target_slot: str  # Antonio.slot

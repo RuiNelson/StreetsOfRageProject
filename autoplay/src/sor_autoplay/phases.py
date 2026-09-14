@@ -311,6 +311,17 @@ def boss_phase(
     if type_id == 0x56 and p == 0x02:
         return CombatPhase.ATTACKING
 
+    # ...and his primary $01 is never an attack either, the same correction
+    # Souther's got just above. $16DA0's tactical byte is his whole decision
+    # state -- back-off (0), pose (1), walks (2-4), lane approach (5), the
+    # boomerang wind-up and throw (6, 7), the dash (8), the walk back on
+    # screen (9) -- and none of them carries an attack box: the boomerang is
+    # its own object, and the dash is idle animation 0 carrying him at 4 px an
+    # update into the kick gate, which is what CHARGE means. The generic tail
+    # below called every one of them ATTACKING or CHARGE (see ai/antonio.py).
+    if type_id == 0x56 and p == 0x01:
+        return CombatPhase.CHARGE if t == 0x08 else CombatPhase.NORMAL
+
     # Shared later-boss framework states $03+ (enemy-ai.md Onihime table
     # $158D8; Antonio/Souther/Bongo use the same handlers). Previously
     # only the twins decoded $03/$04 as RECOVERY, so a punched Antonio

@@ -206,6 +206,9 @@ class PlayableCharacter(Character, ABC):
     # what ai/jump_kick.py needs to carry a flight already in the air on.
     world_z: int = 0
     vel_z: float = 0.0
+    # Lane velocity at +$20, per update: ai/antonio.py puts the boxes of a
+    # walk held into the lane clamp a step past it, where $4140 cached them.
+    vel_lane: float = 0.0
     # The floor under this player: its own height the last tick it stood on
     # the ground (observe.GroundTracker). A flight lands back on it, and a
     # jump gives no other way to know where that is. None until observed.
@@ -236,6 +239,18 @@ class PlayableCharacter(Character, ABC):
     # one C crossover has been used. A second one takes $26E2's failure path
     # and lands the actor out of the hold beside a free body.
     crossover_spent: bool = False
+    # player +$31: Antonio's standing-still kick window ($16EAE) reads bit 1
+    # of it on his target. Nothing in the player code sets that bit, so it
+    # reads 0 -- carried anyway so ai/antonio.py applies the ROM's own test.
+    flags_31: int = 0
+    # player +$59, +$4B and +$7C, raw. A later boss's $179F8 marks its target
+    # unavailable (+$77) while +$59 bit 1 (a hit reaction, until the floor
+    # landing) or +$4B bit 1 is set, or the action is $5A-$5F; $AA34 tests no
+    # contact on a player with +$59 bit 1 or +$7C bit 0 (a contact code not
+    # yet consumed). ai/antonio.py applies both.
+    flags_59: int = 0
+    flags_4b: int = 0
+    contact_code: int = 0
 
     @property
     def knees_in_chain(self) -> int:

@@ -26,7 +26,6 @@ from sor_autoplay.ai.tokens import (
 from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay import prop_solids
 from sor_autoplay.ai.decide import (
-    _walk_in_beats_the_hop,
     BREAKABLE_PUNCH_X,
     breakable_smash_outer_x,
     in_smash_range,
@@ -35,7 +34,7 @@ from sor_autoplay.ai.decide import (
     could_counter_grab,
     could_handle_continue_menu,
     could_handle_mr_x_dialog,
-    could_dodge_antonio_kick,
+    could_engage_antonio,
     could_engage_souther,
     could_grab_enemy,
     could_hit_antonio_boomerang,
@@ -58,7 +57,7 @@ from sor_autoplay.ai.decide import (
 from sor_autoplay.ai.tokens import (
     Antonio,
     AttackRange,
-    DodgeAntonioKick,
+    EngageAntonio,
     EngageSouther,
     Enemy,
     Garcia,
@@ -112,7 +111,7 @@ could_call_police = _with_inference(could_call_police)
 could_counter_grab = _with_inference(could_counter_grab)
 could_handle_continue_menu = _with_inference(could_handle_continue_menu)
 could_handle_mr_x_dialog = _with_inference(could_handle_mr_x_dialog)
-could_dodge_antonio_kick = _with_inference(could_dodge_antonio_kick)
+could_engage_antonio = _with_inference(could_engage_antonio)
 could_engage_souther = _with_inference(could_engage_souther)
 could_grab_enemy = _with_inference(could_grab_enemy)
 could_hit_antonio_boomerang = _with_inference(could_hit_antonio_boomerang)
@@ -1165,17 +1164,6 @@ class CouldCallPoliceTests(unittest.TestCase):
 
         self.assertEqual(could_call_police(context), set())
 
-    def test_fires_when_pincered_below_the_surrounded_threshold(self) -> None:
-        # The other reason the special exists: it is the only move that
-        # clears every side at once, so a crowd counts even above the
-        # "about to die" thresholds -- just not while comfortably healthy.
-        myself = make_myself(specials=1, health_percent=50.0, world_x=100, world_y=100)
-        front = make_enemy(slot="obj01", world_x=130, world_y=100)
-        back = make_enemy(slot="obj02", world_x=70, world_y=100)
-        context: set[Token] = {myself, front, back}
-
-        self.assertEqual(could_call_police(context), {CallPolice(actor_slot="P1")})
-
     def test_does_not_fire_when_pincered_while_healthy(self) -> None:
         myself = make_myself(specials=1, health_percent=90.0, world_x=100, world_y=100)
         front = make_enemy(slot="obj01", world_x=130, world_y=100)
@@ -1207,26 +1195,15 @@ class CouldCallPoliceTests(unittest.TestCase):
 
         self.assertEqual(could_call_police(context), set())
 
-    def test_fires_against_a_live_boss_below_the_boss_threshold(self) -> None:
-        # $16A60's flat -10 HP is roughly a third of a later-boss's whole
-        # health bar (32 max) -- worth spending well before the "about to
-        # die" thresholds, not hoarded until near-death against a street
-        # enemy that never comes. Antonio, not Souther: see the carve-out
-        # below.
-        myself = make_myself(specials=1, health_percent=50.0)
-        antonio = _antonio()
-        context: set[Token] = {myself, antonio}
-
-        self.assertEqual(could_call_police(context), {CallPolice(actor_slot="P1")})
-
-    def test_never_fires_against_a_live_souther_at_any_health(self) -> None:
-        # User: "do not use police attacks or life-gaining items". Not even at
-        # the near-death thresholds -- the call freezes the caller for the
-        # whole $16AEC delay, and the hold loop never lets him act at all.
-        for health_percent, lives in ((50.0, 3), (10.0, 3), (20.0, 1)):
+    def test_against_a_live_souther_only_at_the_panic_threshold(self) -> None:
+        # User: "The police is allowed for Souther/Antonio, just don't test
+        # with the police on". The last resort, as anywhere else: not at half
+        # health, yes near death (and on the last life's wider threshold).
+        for health_percent, lives, fires in ((50.0, 3, False), (10.0, 3, True), (20.0, 1, True)):
             with self.subTest(health_percent=health_percent, lives=lives):
                 myself = make_myself(specials=1, health_percent=health_percent, lives=lives)
-                self.assertEqual(could_call_police({myself, _souther()}), set())
+                expected = {CallPolice(actor_slot="P1")} if fires else set()
+                self.assertEqual(could_call_police({myself, _souther()}), expected)
 
     def test_does_not_fire_against_a_live_boss_while_comfortably_healthy(self) -> None:
         myself = make_myself(specials=1, health_percent=90.0)
@@ -2457,80 +2434,6 @@ def _antonio(**overrides) -> Antonio:
     return Antonio(**fields)
 
 
-class CouldDodgeAntonioKickTests(unittest.TestCase):
-    def test_fires_when_the_kick_is_committed(self) -> None:
-        myself = make_myself(world_x=120, world_y=100)
-        antonio = _antonio(world_x=160, combat_phase=CombatPhase.ATTACKING, primary_state=2)
-        result = could_dodge_antonio_kick({myself, antonio})
-        self.assertTrue(
-            any(isinstance(v, DodgeAntonioKick) and v.target_slot == "obj09" for v in result)
-        )
-
-    def test_breaks_the_lane_on_a_predicted_window(self) -> None:
-        # The gate gives 9-12 ticks of warning before it fires (measured over
-        # nine onsets), and `$16EAE` cannot start at all past `$10` of lane.
-        # So a merely satisfiable gate is answered by walking those 16px --
-        # `committed=False`, a lane step, not the hop.
-        myself = make_myself(world_x=120, world_y=100, vel_x=0.0)
-        antonio = _antonio(
-            world_x=160,
-            world_y=96,
-            combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-            boss_dist_x=40,
-            boss_dist_lane=4,
-        )
-
-        result = could_dodge_antonio_kick({myself, antonio})
-
-        self.assertEqual(
-            result,
-            {
-                DodgeAntonioKick(
-                    actor_slot="P1", target_slot="obj09", committed=False
-                )
-            },
-        )
-
-    def test_no_lane_break_once_already_clear_of_his_lane(self) -> None:
-        # Nothing left for the step to achieve, and producing it anyway is
-        # what would turn this into the stand-off the old refusal feared.
-        myself = make_myself(world_x=120, world_y=100, vel_x=0.0)
-        antonio = _antonio(
-            world_x=160,
-            world_y=60,
-            combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-            boss_dist_x=40,
-            boss_dist_lane=4,
-        )
-        self.assertFalse(
-            any(isinstance(v, DodgeAntonioKick) for v in could_dodge_antonio_kick({myself, antonio}))
-        )
-
-    def test_a_committed_kick_is_still_the_hop(self) -> None:
-        myself = make_myself(world_x=120, world_y=100, vel_x=0.0)
-        antonio = _antonio(
-            world_x=160,
-            world_y=96,
-            combat_phase=CombatPhase.ATTACKING,
-            primary_state=2,
-            boss_dist_x=40,
-            boss_dist_lane=4,
-        )
-
-        result = could_dodge_antonio_kick({myself, antonio})
-
-        self.assertTrue(all(v.committed for v in result))
-
-    def test_does_not_fire_while_airborne(self) -> None:
-        myself = make_myself(world_x=120, world_y=100, is_airborne=True, action_state=0x12)
-        antonio = _antonio(world_x=160, combat_phase=CombatPhase.ATTACKING, primary_state=2)
-        self.assertFalse(
-            any(isinstance(v, DodgeAntonioKick) for v in could_dodge_antonio_kick({myself, antonio}))
-        )
-
-
 class CouldHitAntonioBoomerangTests(unittest.TestCase):
     def test_fires_when_the_thrown_boomerang_is_in_punch_range(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
@@ -2543,6 +2446,21 @@ class CouldHitAntonioBoomerangTests(unittest.TestCase):
             any(
                 isinstance(v, HitAntonioBoomerang) and v.target_slot == "obj10"
                 for v in result
+            )
+        )
+
+    def test_does_not_swing_a_weapon_at_it(self) -> None:
+        # Armed, B is the swing, not the punch this verb is timed for
+        # (measured: an early swing whiffed and the boomerang landed).
+        myself = make_myself(world_x=100, world_y=100, facing_left=False, held_weapon_type=0x0A)
+        antonio = _antonio(world_x=300, world_y=100, boss_dist_x=200, boss_dist_lane=0)
+        boomerang = Projectile(
+            slot="obj10", world_x=130, world_y=100, vel_x=-8.0, vel_z=0.0, type_id=0x96
+        )
+        self.assertFalse(
+            any(
+                isinstance(v, HitAntonioBoomerang)
+                for v in could_hit_antonio_boomerang({myself, antonio, boomerang})
             )
         )
 
@@ -2608,230 +2526,6 @@ class PunchSkippedDuringAntonioKickTests(unittest.TestCase):
             v for v in could_punch({myself, antonio}) if isinstance(v, Punch)
         ]
         self.assertEqual(punches, [])
-
-
-class CouldGrabAntonioOnPunishTests(unittest.TestCase):
-    def test_grabs_antonio_in_hitstun(self) -> None:
-        myself = make_myself(world_x=120, world_y=100, facing_left=False)
-        antonio = _antonio(
-            world_x=150,
-            world_y=100,
-            combat_phase=CombatPhase.RECOVERY,
-            primary_state=3,
-            boss_dist_x=30,
-            boss_dist_lane=0,
-        )
-        result = could_grab_enemy({myself, antonio})
-        self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="obj09")})
-
-    def test_grabs_a_ready_antonio_from_contact_range(self) -> None:
-        # Changed deliberately: the hold beats the hop even on a ready
-        # Antonio (GrabReason.ANTONIO_WALK_IN). What still keeps this honest
-        # is the range gate -- see the next test.
-        myself = make_myself(world_x=120, world_y=100, facing_left=False)
-        antonio = _antonio(
-            world_x=150,
-            world_y=100,
-            combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-            boss_dist_x=30,
-            boss_dist_lane=0,
-        )
-        self.assertEqual(
-            could_grab_enemy({myself, antonio}),
-            {GrabEnemy(actor_slot="P1", target_slot="obj09")},
-        )
-
-    def test_does_not_walk_in_on_a_ready_antonio_from_across_the_arena(self) -> None:
-        myself = make_myself(world_x=20, world_y=100, facing_left=False)
-        antonio = _antonio(
-            world_x=200,
-            world_y=100,
-            combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-            boss_dist_x=180,
-            boss_dist_lane=0,
-        )
-        self.assertEqual(could_grab_enemy({myself, antonio}), set())
-
-    def test_does_not_walk_in_on_a_ready_antonio_off_his_lane(self) -> None:
-        # The approach holds a lane offset wider than his $10 kick window;
-        # the hold is only taken once it has converged.
-        myself = make_myself(world_x=120, world_y=72, facing_left=False)
-        antonio = _antonio(
-            world_x=150,
-            world_y=100,
-            combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-            boss_dist_x=30,
-            boss_dist_lane=28,
-        )
-        self.assertEqual(could_grab_enemy({myself, antonio}), set())
-
-
-class JumpKickAntonioTests(unittest.TestCase):
-    def test_the_hold_replaces_the_hop_at_contact_range(self) -> None:
-        # dx=40 is inside Axel's punch (50) *and* kick (60), same lane --
-        # the range the Antonio min-dx exception exists for. It is also the
-        # range a hold is taken from, and the hold wins: the hop is 45
-        # committed airborne frames for ~2 damage, and every hit he still
-        # lands arrives in that window (GrabReason.ANTONIO_WALK_IN).
-        myself = make_myself(world_x=120, world_y=100, facing_left=False)
-        antonio = _antonio(
-            world_x=160,
-            world_y=100,
-            combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-            boss_dist_x=40,
-            boss_dist_lane=4,
-        )
-        self.assertEqual(could_jump_attack({myself, antonio}), set())
-
-    def test_still_hops_from_past_the_range_a_hold_reaches(self) -> None:
-        # dx=55: outside Axel's punch outer (50), inside the kick's own free
-        # flight (60). No hold reaches from here and the hop still owns it --
-        # measured, not assumed: withdrawing the hop out here too cost 40 /
-        # 60 / 60 damage taken against 60 / 20 / 20 / 20 / 20 with it kept.
-        myself = make_myself(world_x=105, world_y=100, facing_left=False)
-        antonio = _antonio(
-            world_x=160,
-            world_y=100,
-            combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-            boss_dist_x=55,
-            boss_dist_lane=4,
-        )
-        result = could_jump_attack({myself, antonio})
-        self.assertIn(JumpAttack(actor_slot="P1", target_slot="obj09"), result)
-
-    def test_still_hops_at_contact_range_while_armed(self) -> None:
-        # Armed there is no hold to take instead... and no unarmed kick
-        # either, so could_jump_attack refuses the launch on its own. The
-        # point of the assertion is that _walk_in_beats_the_hop is what does
-        # *not* fire here -- the weapon gate does.
-        myself = make_myself(
-            world_x=120, world_y=100, facing_left=False, held_weapon_type=0x0B
-        )
-        antonio = _antonio(
-            world_x=160,
-            world_y=100,
-            combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-            boss_dist_x=40,
-            boss_dist_lane=4,
-        )
-        self.assertFalse(_walk_in_beats_the_hop(myself, antonio))
-
-    def test_does_not_hop_at_an_antonio_behind(self) -> None:
-        myself = make_myself(world_x=160, world_y=100, facing_left=False)
-        antonio = _antonio(
-            world_x=120,
-            world_y=100,
-            combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-            boss_dist_x=40,
-            boss_dist_lane=0,
-        )
-        self.assertFalse(
-            any(isinstance(v, JumpAttack) for v in could_jump_attack({myself, antonio}))
-        )
-
-    def test_does_not_hop_at_an_antonio_off_the_lane(self) -> None:
-        # Jump kick is horizontal. An X-only opener hopped at him from any
-        # lane and kicked empty air -- the live "sempre aos saltos" report.
-        myself = make_myself(world_x=120, world_y=80, facing_left=False)
-        antonio = _antonio(
-            world_x=160,
-            world_y=100,
-            combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-            boss_dist_x=40,
-            boss_dist_lane=20,
-        )
-        self.assertFalse(
-            any(isinstance(v, JumpAttack) for v in could_jump_attack({myself, antonio}))
-        )
-
-    def test_walks_onto_an_off_lane_antonio_instead_of_hopping(self) -> None:
-        myself = make_myself(world_x=120, world_y=80, facing_left=False)
-        antonio = _antonio(
-            world_x=160,
-            world_y=100,
-            combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-            boss_dist_x=40,
-            boss_dist_lane=20,
-        )
-        self.assertIn(
-            WalkToNearEnemy(actor_slot="P1", target_slot="obj09"),
-            could_walk_to_near_enemy({myself, antonio}),
-        )
-
-    def test_does_not_hop_a_stunned_antonio_from_the_ground(self) -> None:
-        # Hitstun is the grab, not another hop.
-        myself = make_myself(world_x=120, world_y=100, facing_left=False)
-        antonio = _antonio(
-            world_x=150,
-            world_y=100,
-            combat_phase=CombatPhase.RECOVERY,
-            primary_state=3,
-            boss_dist_x=30,
-            boss_dist_lane=0,
-        )
-        self.assertFalse(
-            any(isinstance(v, JumpAttack) for v in could_jump_attack({myself, antonio}))
-        )
-
-    def test_does_not_walk_through_jump_range_on_a_live_antonio(self) -> None:
-        # dx=55 is past punch outer and inside kick max, same lane: the hop
-        # owns it, and measurably should (see the JumpKickAntonioTests case
-        # of the same name).
-        myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        antonio = _antonio(
-            world_x=155,
-            world_y=100,
-            combat_phase=CombatPhase.NORMAL,
-            primary_state=1,
-            boss_dist_x=55,
-            boss_dist_lane=4,
-        )
-        self.assertFalse(
-            any(
-                isinstance(v, WalkToNearEnemy) and v.target_slot == "obj09"
-                for v in could_walk_to_near_enemy({myself, antonio})
-            )
-        )
-
-    def test_stunned_antonio_in_punch_range_is_a_grab_not_another_hop(self) -> None:
-        myself = make_myself(world_x=120, world_y=100, facing_left=False)
-        antonio = _antonio(
-            world_x=150,
-            world_y=100,
-            combat_phase=CombatPhase.RECOVERY,
-            primary_state=3,
-            boss_dist_x=30,
-            boss_dist_lane=0,
-        )
-        result = generate_verb_tokens({myself, antonio})
-        self.assertIn(GrabEnemy(actor_slot="P1", target_slot="obj09"), result)
-        self.assertFalse(any(isinstance(v, JumpAttack) for v in result))
-
-    def test_still_walks_in_to_grab_a_stunned_antonio(self) -> None:
-        # Past grab reach (Axel punch outer 50) so the hold is not live
-        # yet -- walking in is how we get there.
-        myself = make_myself(world_x=100, world_y=100, facing_left=False)
-        antonio = _antonio(
-            world_x=160,
-            world_y=100,
-            combat_phase=CombatPhase.RECOVERY,
-            primary_state=3,
-            boss_dist_x=60,
-            boss_dist_lane=0,
-        )
-        self.assertIn(
-            WalkToNearEnemy(actor_slot="P1", target_slot="obj09"),
-            could_walk_to_near_enemy({myself, antonio}),
-        )
 
 
 if __name__ == "__main__":
