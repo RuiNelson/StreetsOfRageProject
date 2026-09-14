@@ -129,6 +129,7 @@ from .tokens import (
 )
 from .walk_verbs import (
     EngageAntonio,
+    EngageBongo,
     EngageSouther,
     ProjectileSidestep,
     RetreatFromDanger,

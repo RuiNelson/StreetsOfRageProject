@@ -2,6 +2,7 @@ import unittest
 
 from sor_autoplay.ai.tokens import (
     Antonio,
+    Onihime,
     AttackHeldEnemy,
     Bongo,
     Breakable,
@@ -409,8 +410,42 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         self.assertIsInstance(verbs[0], AttackHeldEnemy)
 
     def test_held_boss_flips_once_the_knees_are_spent(self) -> None:
-        # A later boss with no hold plan of his own: Antonio and Souther take
-        # their knees from souther.hold_step, which never spends a budget.
+        # A later boss with no hold plan of his own: Antonio, Souther and
+        # Bongo take their knees from souther.hold_step (bongo.hold_step),
+        # which never spends a budget. The twins still do.
+        myself = _myself(
+            action_state=0x60,
+            held_enemy_slot="obj00",
+            world_x=100,
+            hold_ticks=_spent_knee_ticks(),
+        )
+        twin = Onihime(
+            slot="obj00",
+            type_id=0x58,
+            world_x=140,
+            world_y=64,
+            health=30,
+            combat_phase=CombatPhase.RECOVERY,
+            targets_player=1,
+            facing_left=True,
+            primary_state=0x04,
+        )
+        context = {
+            myself,
+            twin,
+            AttackHeldEnemy(actor_slot="P1", target_slot="obj00"),
+            FlipHold(actor_slot="P1", target_slot="obj00"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], FlipHold)
+
+    def test_held_bongo_keeps_the_knee_past_the_budget(self) -> None:
+        # Bongo runs Souther's loop (bongo.hold_step): the knee it chose from
+        # the ROM's own chain count wins however long the hold has lasted.
         myself = _myself(
             action_state=0x60,
             held_enemy_slot="obj00",
@@ -420,7 +455,7 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         bongo = Bongo(
             slot="obj00",
             type_id=0x57,
-            world_x=140,
+            world_x=132,
             world_y=64,
             health=30,
             combat_phase=CombatPhase.RECOVERY,
@@ -439,7 +474,7 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
 
         verbs = find_all(result, Verb)
         self.assertEqual(len(verbs), 1)
-        self.assertIsInstance(verbs[0], FlipHold)
+        self.assertIsInstance(verbs[0], AttackHeldEnemy)
 
     def test_knee_outranks_flip_while_the_hold_is_fresh(self) -> None:
         # Live-reported: the AI grabbed and flipped straight to Supplex,

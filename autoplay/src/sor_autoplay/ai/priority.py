@@ -20,7 +20,7 @@ import math
 from collections.abc import Callable
 
 from ..phases import HITSTUN_FRAMES, CombatPhase, is_dangerous, is_punishable
-from . import antonio as antonio_plan, kinematics, reach
+from . import antonio as antonio_plan, bongo as bongo_plan, kinematics, reach
 from .decide import (
     HEALTH_CRITICAL_PERCENT,
     in_smash_range,
@@ -36,6 +36,7 @@ from .tokens import (
     Attack,
     CounterGrab,
     EngageAntonio,
+    EngageBongo,
     EngageSouther,
     FlipHold,
     GrabEnemy,
@@ -56,7 +57,7 @@ from .tokens import (
     ThrowPepper,
 )
 from .tokens import Myself, Partner
-from .tokens import Antonio, Boss, Breakable, Enemy, Grunt, Jack, Nora, Souther
+from .tokens import Antonio, Bongo, Boss, Breakable, Enemy, Grunt, Jack, Nora, Souther
 from .tokens import (
     GrabReason,
     Surrounded,
@@ -338,6 +339,17 @@ _EMERGENCY_ENGAGE_SOUTHER = 62
 # TechRecover, the dialogs) and the incoming boomerang. The hold family never
 # coexists with it: the engage is not produced while the actor holds a body.
 _EMERGENCY_ENGAGE_ANTONIO = 62
+# The whole engage against Bongo (EngageBongo), at the same tier for the same
+# reasons -- with one exception the round forces: its street keeps a grunt
+# alive through the whole fight (killed, it is replaced), and the engage's 76
+# would let that grunt's committed strike land every time. So while one is
+# about to land (reach.is_incoming_melee) and his charge is not pressing
+# (bongo.charge_is_pressing), the engage drops to 5 + the boss raise = 19:
+# just under a punch on the grunt (20), still above walking to it (8-14) --
+# prevent the blow, never chase the grunt (user: "não se focar nesse inimigo,
+# mas prevenir ataques iminentes").
+_EMERGENCY_ENGAGE_BONGO = 62
+_EMERGENCY_ENGAGE_BONGO_UNDER_GRUNT = 5
 # Lowest of any verb that still scores. Must sit under every other live
 # candidate -- including ScorePickup (9), SpecialPickup (11), LifePickup
 # (12), and WalkToNearEnemy's floor (8) -- so stage advance is only chosen
@@ -565,6 +577,20 @@ def _emergency_engage_antonio(verb: EngageAntonio, context: Context) -> int:
     if target is None or actor is None or target.is_defeated:
         return _EMERGENCY_DEFAULT
     return _with_target_class(_EMERGENCY_ENGAGE_ANTONIO, target)
+
+
+def _emergency_engage_bongo(verb: EngageBongo, context: Context) -> int:
+    target = find(context, Bongo, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
+    if target is None or actor is None or target.is_defeated:
+        return _EMERGENCY_DEFAULT
+    grunt_incoming = any(
+        isinstance(enemy, Grunt) and reach.is_incoming_melee(actor, enemy)
+        for enemy in reach.on_screen_enemies(context)
+    )
+    if grunt_incoming and not bongo_plan.charge_is_pressing(target):
+        return _with_target_class(_EMERGENCY_ENGAGE_BONGO_UNDER_GRUNT, target)
+    return _with_target_class(_EMERGENCY_ENGAGE_BONGO, target)
 
 
 def _emergency_hit_antonio_boomerang(verb: HitAntonioBoomerang, context: Context) -> int:
@@ -823,7 +849,7 @@ def _emergency_attack_held_enemy(verb: AttackHeldEnemy, context: Context) -> int
 
     if not _target_is_in_hand(verb, context):
         return _EMERGENCY_DEFAULT
-    if isinstance(find(context, Enemy, slot=verb.target_slot), (Souther, Antonio)):
+    if isinstance(find(context, Enemy, slot=verb.target_slot), (Souther, Antonio, Bongo)):
         # souther.hold_step already chose this knee from the ROM's own chain
         # count (+$58 bit 6, +$61); the budget below is for bodies without one.
         return _EMERGENCY_HOLD_KNEE_FRESH
@@ -909,6 +935,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     ProjectileSidestep: _emergency_projectile_sidestep,
     EngageSouther: _emergency_engage_souther,
     EngageAntonio: _emergency_engage_antonio,
+    EngageBongo: _emergency_engage_bongo,
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
 }

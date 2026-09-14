@@ -184,6 +184,17 @@ def main() -> int:
             "on\"): a scored fight measures the plan, not the special."
         ),
     )
+    ap.add_argument(
+        "--idle-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "Hands off for this long once the boss is up: the pad is released "
+            "and nothing is scored, so the fight is taken up from wherever he "
+            "has got to -- a start other than the entrance. Harness only; the AI "
+            "is untouched."
+        ),
+    )
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     poll_s = args.poll_ms / 1000.0
@@ -225,6 +236,7 @@ def main() -> int:
         holds_completed = 0
         was_holding = False
         end_state = "timeout"
+        idle_until: float | None = None
 
         deadline = time.monotonic() + args.seconds
         # Heartbeat while walking the level: "boss_seen": false with nothing
@@ -261,6 +273,32 @@ def main() -> int:
                 # idle and produced zero rows before its timeout. Only a
                 # confirmed level change while the boss was already alive is
                 # treated as a real reset below, after the tick.
+                if (
+                    not boss_seen
+                    and args.idle_seconds > 0
+                    and playable
+                    and snap.level_index == level_index
+                    and find_boss(snap, args.boss_type) is not None
+                ):
+                    if idle_until is None:
+                        idle_until = started + args.idle_seconds
+                        print(f"boss up: hands off for {args.idle_seconds:.1f} s", flush=True)
+                    up = find_boss(snap, args.boss_type)
+                    # ...and past it, until he is out of a charge: handed the
+                    # pad with a flame already on it, no plan has a move left
+                    # (measured: a 32-point hit 0.04 s after one such handover).
+                    charging = (
+                        up is not None
+                        and args.boss_type == 0x57
+                        and up.action_state == 2
+                        and up.tactical >= 3
+                    )
+                    if started < idle_until or charging:
+                        # Hands off: no tick, the pad released, nothing scored yet.
+                        client.hold_buttons(player1=0, player2=0)
+                        scenario.sweep_other_families(client)
+                        time.sleep(max(0.0, poll_s - (time.monotonic() - started)))
+                        continue
                 verb = loop.tick(snap, player_index=1)
                 if not playable or snap.level_index != level_index:
                     if boss_seen:
@@ -430,6 +468,22 @@ def main() -> int:
                             "p1_y": p1_entity.world_y if p1_entity else None,
                             "boss_x": boss.world_x if boss else None,
                             "boss_y": boss.world_y if boss else None,
+                            # The nearest ordinary enemy alive -- round 4's
+                            # grunt, which the street keeps sending.
+                            "grunt": next(
+                                (
+                                    [e.type_id, e.world_x, e.world_y, e.action_state]
+                                    for e in sorted(
+                                        (
+                                            e
+                                            for e in entities
+                                            if e.kind == "enemy" and not e.is_defeated
+                                        ),
+                                        key=lambda e: abs(e.world_x - (p1_entity.world_x if p1_entity else 0)),
+                                    )
+                                ),
+                                None,
+                            ),
                         }
                     )
                     + "\n"

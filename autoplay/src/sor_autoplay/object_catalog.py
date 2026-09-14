@@ -79,8 +79,15 @@ _BOSS_STYLES: dict[int, EntityStyle] = {
 # `inference.check_for_incoming_projectiles` withholds them unconditionally,
 # unlike Antonio's `$96`, which is only withheld while still attached. Their
 # value here is the HUD and the danger geometry, never a `ProjectileSidestep`.
+#
+# Bongo's `$97` (`$1781E`) is his flame, and the only thing of his that ever
+# hurts: born the update his charge launches, placed 20 px ahead of him every
+# update (`$178D0`), gone once he leaves primary 2. It has an attack box and
+# no body, and `ai/bongo.py` models it; like the claw, it is never a thrown
+# weapon to sidestep on its own velocity (it has none -- it rides him).
 _BOSS_PROJECTILE_STYLES: dict[int, EntityStyle] = {
     0x96: EntityStyle("projectile", "Antonio", "~", "#af52de", "Antonio boomerang"),
+    0x97: EntityStyle("projectile", "Bongo", "^", "#30d158", "Bongo flame"),
     0x98: EntityStyle("projectile", "Souther", "%", "#ff9500", "Souther claw"),
     0x99: EntityStyle("projectile", "Souther", "'", "#ffb340", "Souther afterimage"),
 }

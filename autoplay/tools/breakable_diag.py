@@ -33,7 +33,8 @@ from sor_autoplay.ai.decide import generate_verb_tokens
 from sor_autoplay.ai.execute import execute_tick
 from sor_autoplay.ai.observe import HoldTracker, NoraAttackTracker, generate_direct_observation_tokens
 from sor_autoplay.ai.priority import determine_priority_verb
-from sor_autoplay.ai.tokens import Breakable, Myself, Verb, find, find_all
+from sor_autoplay.ai.tokens import Boss, Breakable, Myself, Verb, find, find_all
+from sor_autoplay.debug_scenario import DebugScenario
 from sor_autoplay.reach_gameplay import reach_gameplay
 from sor_autoplay.rom_data import RomData
 from sor_autoplay.state import read_snapshot
@@ -54,9 +55,38 @@ def main() -> int:
         "once at least one has been seen (default 40, wide enough to cross a "
         "wave gap between prop clusters without cutting the run short)",
     )
+    ap.add_argument(
+        "--level",
+        type=int,
+        default=None,
+        help="Jump to this round first (the host's level cheat) -- real enemies stay alive",
+    )
+    ap.add_argument(
+        "--heartbeat-s",
+        type=float,
+        default=0.0,
+        help="Also log a position row this often with no Breakable in context, so a "
+        "stall away from one is visible too (0 = off, the original behaviour)",
+    )
+    ap.add_argument(
+        "--until-boss",
+        action="store_true",
+        help="Stop as soon as a boss is in context -- the walk is over",
+    )
+    ap.add_argument(
+        "--sweep",
+        action="store_true",
+        help="Keep every ordinary family swept, as scripts/go_to_boss and the boss "
+        "harnesses do -- the walk the user watches before a boss fight",
+    )
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     poll_s = args.poll_ms / 1000.0
+    scenario = (
+        DebugScenario(start_level=args.level, kill_street_enemies=args.sweep)
+        if args.level or args.sweep
+        else None
+    )
 
     with MegaDriveClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
@@ -77,6 +107,13 @@ def main() -> int:
                 started = time.monotonic()
                 snap = read_snapshot(client, rom=rom)
                 player = snap.players[0]
+                if scenario is not None and scenario.level_jump_pending:
+                    if player.is_playable:
+                        scenario.apply_start_level(client)
+                    time.sleep(poll_s)
+                    continue
+                if scenario is not None and player.is_playable:
+                    scenario.sweep_other_families(client)
                 in_continue_ui = player.is_continue_ui
                 if snap.paused or (
                     not in_continue_ui and (not snap.timer_valid or not player.is_playable)
@@ -103,8 +140,27 @@ def main() -> int:
                 elif seen_breakable:
                     gap_ticks += 1
 
+                myself = find(context, Myself)
+                if args.until_boss and find_all(context, Boss):
+                    print(f"boss reached at x={myself.world_x if myself else None}", flush=True)
+                    break
+                beat = (
+                    args.heartbeat_s > 0
+                    and not breakables
+                    and started - getattr(main, "_last_beat", 0.0) >= args.heartbeat_s
+                )
+                if beat:
+                    main._last_beat = started
+                    sink.write(json.dumps({
+                        "t": round(started - deadline + args.seconds, 3),
+                        "p1_x": myself.world_x if myself else None,
+                        "p1_y": myself.world_y if myself else None,
+                        "level": snap.level_index,
+                        "verb": type(verb).__name__ if verb else None,
+                        "hp": player.health,
+                        "lives": player.lives,
+                    }) + "\n")
                 if breakables:
-                    myself = find(context, Myself)
                     row = {
                         "t": round(started - deadline + args.seconds, 3),
                         "p1_x": myself.world_x if myself else None,

@@ -93,6 +93,7 @@ from .tokens import (
     Context,
     CounterGrab,
     EngageAntonio,
+    EngageBongo,
     EngageSouther,
     Enemy,
     FlipHold,
@@ -338,6 +339,7 @@ _FIGHT_TESTS: dict[type[Verb], WithdrawTest] = {
         ThrowPepper,
         EngageSouther,
         EngageAntonio,
+        EngageBongo,
     )
 }
 

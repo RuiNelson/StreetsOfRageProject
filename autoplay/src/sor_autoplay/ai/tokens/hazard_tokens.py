@@ -37,6 +37,7 @@ class Projectile(Observed):
     fine_y: float = 0.0  # +$14 as 16.16
     anim: int = 0  # +$08: $40 thrown right, $42 left
     anim_frame: int = 0  # +$0A, the frame shown next
+    anim_countdown: int = 0  # +$0D: updates left on it (Bongo's flame hands over on it)
     attack_box_id: int = 0  # +$02, latched by the renderer
     screen_x: int = 0  # +$28, biased ($80 = the left edge)
     countdown: int = 0  # +$6B: updates of the outbound leg left

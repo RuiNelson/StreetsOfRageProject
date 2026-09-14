@@ -242,6 +242,9 @@ class Boss(Enemy, ABC):
     body_box_id: int = 0
     timer_5c: int = 0
     timer_6b: int = 0
+    # Bongo's +$68 (turn / wind-up countdown) and +$79 (charge run-out).
+    timer_68: int = 0
+    timer_79: int = 0
     reaction_timer: int = 0
     hold_flags: int = 0
     fine_x: float = 0.0

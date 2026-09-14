@@ -242,6 +242,11 @@ OBJ_BOSS_REENTRY_TIMER = 0x5C  # Antonio tactical 9 / 1 countdown
 OBJ_BOSS_REACTION_TIMER = 0x62  # hit reaction / throw / knockdown timer
 OBJ_BOSS_HOLD_FLAGS = 0x66  # bit 0 = held by a player ($17B52 grab code)
 OBJ_BOSS_WOBBLE = 0x6B  # $17A6E's lane wobble counter
+# Bongo ($57): +$68 counts his turn (state 1) and each wind-up tactical down
+# (state 2, $176B4-$176E6); +$79 is the charge's run-out after passing the
+# target ($177E2). ai/bongo.py replays both.
+OBJ_BOSS_TIMER_68 = 0x68
+OBJ_BOSS_TIMER_79 = 0x79
 # Antonio's boomerang (type $96) runs the later-boss layout above -- +$1C/+$20
 # its velocities, +$52 the lane its return homes on, +$61 that lane's side,
 # +$6B its outbound countdown -- and two fields of its own: +$7B, the timer

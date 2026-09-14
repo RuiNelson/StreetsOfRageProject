@@ -225,6 +225,8 @@ class MapEntity:
     body_box_id: int = 0  # +$03
     boss_timer_5c: int = 0  # +$5C re-entry / pose countdown
     boss_timer_6b: int = 0  # +$6B lane wobble counter
+    boss_timer_68: int = 0  # +$68 Bongo's turn / wind-up countdown
+    boss_timer_79: int = 0  # +$79 Bongo's charge run-out
     boss_reaction_timer: int = 0  # +$62 hit reaction / knockdown timer
     boss_hold_flags: int = 0  # +$66 bit 0 = held
     fine_x: float = 0.0  # +$10 as 16.16
@@ -706,6 +708,8 @@ def _entity_from_object(
     body_box_id = 0
     boss_timer_5c = 0
     boss_timer_6b = 0
+    boss_timer_68 = 0
+    boss_timer_79 = 0
     boss_reaction_timer = 0
     boss_hold_flags = 0
     fine_x = 0.0
@@ -777,6 +781,8 @@ def _entity_from_object(
         body_box_id = _u8(slot, mm.OBJ_BODY_BOX)
         boss_timer_5c = _u8(slot, mm.OBJ_BOSS_REENTRY_TIMER)
         boss_timer_6b = _u8(slot, mm.OBJ_BOSS_WOBBLE)
+        boss_timer_68 = _u8(slot, mm.OBJ_BOSS_TIMER_68)
+        boss_timer_79 = _u8(slot, mm.OBJ_BOSS_TIMER_79)
         boss_reaction_timer = _u8(slot, mm.OBJ_BOSS_REACTION_TIMER)
         boss_hold_flags = _u8(slot, mm.OBJ_BOSS_HOLD_FLAGS)
         child_ptr = _u16(slot, mm.OBJ_LATER_BOSS_CHILD)
@@ -801,10 +807,11 @@ def _entity_from_object(
     elif style.kind == "projectile":
         vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X)
         vel_z = fixed1616_signed(slot, mm.OBJ_VEL_Z)
-        if type_id == 0x96:
-            # Antonio's boomerang runs the later-boss layout: +$1C is its X
-            # velocity and +$20 (OBJ_VEL_X) its lane velocity ($17AB8), so
-            # vel_x is +$1C here -- the lane would project it sideways.
+        if type_id in (0x96, 0x97):
+            # Antonio's boomerang and Bongo's flame run the later-boss layout:
+            # +$1C is the X velocity and +$20 (OBJ_VEL_X) the lane velocity
+            # ($17AB8), so vel_x is +$1C here -- the lane would project it
+            # sideways. (The flame has none: $178D0 places it on Bongo.)
             boss_vel_x = fixed1616_signed(slot, mm.OBJ_BOSS_VEL_X)
             boss_vel_lane = fixed1616_signed(slot, mm.OBJ_BOSS_VEL_LANE)
             vel_x = boss_vel_x
@@ -813,7 +820,9 @@ def _entity_from_object(
                 screen_x -= 0x10000
             anim = _u16(slot, mm.OBJ_ANIM)
             anim_frame = _u8(slot, mm.OBJ_ANIM_FRAME)
+            anim_countdown = _u8(slot, mm.OBJ_ANIM_COUNTDOWN)
             attack_box_id = _u8(slot, mm.OBJ_ATTACK_BOX)
+            child_ptr = _u16(slot, mm.OBJ_LATER_BOSS_CHILD)
             boss_timer_6b = _u8(slot, mm.OBJ_BOSS_WOBBLE)
             boss_dist_lane = _u16(slot, mm.OBJ_BOSS_DIST_LANE)
             fine_x = fixed1616_unsigned(slot, mm.OBJ_POS_X)
@@ -907,6 +916,8 @@ def _entity_from_object(
         body_box_id=body_box_id,
         boss_timer_5c=boss_timer_5c,
         boss_timer_6b=boss_timer_6b,
+        boss_timer_68=boss_timer_68,
+        boss_timer_79=boss_timer_79,
         boss_reaction_timer=boss_reaction_timer,
         boss_hold_flags=boss_hold_flags,
         fine_x=fine_x,

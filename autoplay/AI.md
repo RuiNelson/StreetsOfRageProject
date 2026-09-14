@@ -234,6 +234,25 @@ lookahead steps off its path rather than meeting it. `HitAntonioBoomerang`
 still punches it away at punch-connect time, unarmed only: armed, B is a
 swing nothing here times.
 
+Bongo is fought by one plan, `ai/bongo.py`, of Antonio's shape: **take one
+hold, and never give him back a turn.** `EngageBongo` is the whole fight up
+to the hold -- punch, chord, grab reason, hop, walk-in, retreat, the weapon
+detour and the flame's own sidestep all stand down -- and its stick comes
+from a lookahead over his AI and his flame (`bongo.boss_update`: `$175BA`'s
+approach and turn, `$17682`'s wind-up, launch and charge, the type-`$97`
+flame's `$17858`, the renderer's latched boxes), the nine sticks held for
+2, 8, 16 or all 44 updates and then a phase-aware tail, under both update
+orders. He never touches anyone with his own body; the flame does, and it
+has no body box, so `$AAA0` never shields a holder from it -- which makes a
+front grab while it is still igniting the flame's hit, and the planner
+scores it as one (`_grab_is_burnt`). The safe places are 15-16 lanes above
+his charge and behind it; the hold loop is `souther.hold_step`'s, and a
+released Bongo goes straight into a 21-update wind-up in front of the actor.
+`Projectile` type `$97` is withheld from `ProjectileSidestep` outright: it
+rides him (`$178D0`), with no flight of its own. The round's grunt, which the
+street replaces as often as it dies, lowers the engage just under a punch on
+it while its strike is about to land and his charge is not pressing.
+
 Souther is fought by one plan, `ai/souther.py`, and two verbs: **take one
 hold, and never give him back a turn.** `EngageSouther` is the whole approach
 (`souther.plan_engage`) and the hold it ends in is the contact result of

@@ -15,7 +15,7 @@ flags), plus an opt-in **symbolic AI** (`ai/` — Phase A of the design in
 module docstrings and [`AI.md`](AI.md) for the Token/Information/Verb
 pipeline and manuscript-grounded combat facts already wired in. Still future
 work: two-player coordination, six-button `--altControls`, and per-boss
-tactics beyond Antonio and Souther. Antonio is **a lookahead over his own
+tactics beyond Antonio, Souther and Bongo. Antonio is **a lookahead over his own
 AI, then knee, knee, release, re-grab until he dies**: `ai/antonio.py`
 replays his state-1 code update by update -- gates, tacticals, the kick's
 frame-by-frame boxes -- and `EngageAntonio` holds the stick that takes the
@@ -550,6 +550,145 @@ runs:
   the hold is the plan, the approach is direct, and the only evasion is
   staying out of the claw's own box.
 
+**Bongo: the ROM model and the plan** (user: "Neste momento a IA lida muito mal
+com o inimigo Bongo, o boss do stage 4 ... Deves primeiro pensar bem para chegar
+a uma estratégia para o derrotar de forma eficiente em termos de tempo decorrido
+e vida perdida"; "Nos testes, não te esqueças de não usar o ataque especial
+(chamar a polícia), e de não consumir items de recuperação de vida"). Everything
+the AI does against him is `ai/bongo.py`, and the plan is Antonio's shape:
+**take one hold, and never give him back a turn.** Before it, a scored fight
+(Blaze, `--no-food`, police off) lost two lives in 19 s and took him from 30 to
+23: the generic walk-in ate seven 32-point flames, every one of them in his
+charge.
+
+What the ROM says (full decode in `ai-analysis/enemy-ai.md`, "Bongo"):
+
+- **He never touches anyone himself.** No animation he fights in (set
+  `$2EF62`) has an attack box, and `$174E0` clears his `+$34` every update.
+  His one weapon is the **flame**, type `$97` (`$1781E`): born the update his
+  charge launches, placed 20 px ahead of him on his lane + 4 at head height
+  (`$178D0`), carrying his `+$4A` -- **32 on Normal: three kill from full
+  health**. Its box grows through the ignition (`$9D`/`$9F`/`$A1`, four updates
+  each) to `$A3`: x +4..+76 ahead of him, lane -6..+28 of his -- against a +-8
+  body, **every lane from 14 above him to 36 below**. No body box.
+- **State 1** (`$175BA`): a target on his back side costs a 10-update turn
+  standing still; otherwise he walks at it 0.5 px an update and keeps the lane
+  gap in `[$50, $60)`, stepping away when closer (a level target counts as below
+  him: he steps up). Inside `$B0` (176 px) on X he winds up.
+- **State 2** (`$17682`): the wind-up is tacticals 0-2 (5, 5, 10 updates on
+  `+$68`), drifting at state 1's last velocities -- 21 updates from the gate to
+  the launch. The launch: X 2 px an update on his facing, lane `+$52 / (+$50 /
+  2)` toward the target's lane (he would reach it as he reaches the target),
+  capped at 6. Tactical 3 adds 0.125 to both every update (to 6), the lane only
+  while `+$52 >= 8`, and **never re-aims**. Past the target by `$50`, tactical 4
+  runs 20 more updates or until his screen X leaves `[$50, $1F0)`, then state 1
+  facing away: a turn. So every charge ends at a screen edge on a lane clamp.
+- **Grab first, flame after** (`$AAA0`): his update tests the walking box
+  against his body before the flame -- in a later slot -- tests its box on the
+  player's body. But the flame has **no body box**, so `$AAA0` never enters the
+  grab path that shields a holder from Antonio's kick: **a holding player is
+  not spared.** An igniting flame stays placed on him whatever he does
+  (`$17858` retires it only from anim `$3C`), and a front hold stands him 32 px
+  out facing the holder -- so a front grab in the first 12 updates after a
+  launch is the flame's hit. A back hold (`$17E22`) stands him facing away.
+
+Out of that, two safe places during a charge: **15-16 lanes above him** (the
+flame's top edge is 14, the grab reaches 16 -- exact, so the flame is simulated
+with no lane margin: a margin of one leaves only 16, which Blaze's 1.625 px lane
+step does not always land on) and **behind him** once his origin has run 9 px
+past the actor. And one set-up before a charge: with him on the bottom clamp,
+level with him at the launch (lane velocity 0), so the charge runs along the
+clamp and the pocket above it holds still.
+
+The plan (`bongo.plan_engage`, `EngageBongo`,
+`execute.state_machine_engage_bongo`):
+
+1. **A lookahead over his AI and the flame** (`boss_update`, 2.4 us an update):
+   the nine sticks, each held for 2, 8, 16 updates or the whole 44-update
+   horizon and then a phase-aware tail (`_Tail`), each under both update orders
+   and scored by the worse -- a hold by how soon, a hit below everything, and a
+   burnt grab (`_grab_is_burnt`: the hold's first passes played out) as the hit
+   it is. About 5-7 ms a tick.
+2. **The tail's phases** (`engage_mode`): WALK_IN whenever contact comes before
+   his launch -- the entrance (he spawns 40 px off, facing away: turn plus
+   wind-up is 31 updates) and every release; STALK while he walks in (a few
+   lanes above him, beyond his gate, his X taken where the edge nudge `$17744`
+   will put him); LEVEL/DIVE through a wind-up; POCKET/BEHIND through a charge,
+   with the dodge lane worked out once from his predicted path -- above him
+   first when it is reachable before the flame, else below.
+3. **The hold loop is Souther's** (`souther.hold_step`): knee, knee,
+   `ReleaseToRegrab` -- he lands 32 px out facing the actor and goes straight
+   into a wind-up, 21 updates in which the walking box, already touching his
+   body, takes him again. Nothing about the flame belongs in the hold: the
+   answer to a burnt grab is not to take it.
+4. **The round's grunt** (user: "no stage 4, existe sempre um inimigo Grunt que
+   pode atacar a IA pelas costas, se esse inimigo for derrotado, o jogo instancia
+   um novo inimigo idêntico. Portanto, não se focar nesse inimigo, mas prevenir
+   ataques iminentes"): Garcia-family types `$20`-`$22` keep arriving through the
+   fight (`bongo_lab.py`'s rows; the harness sweep kills each and the next
+   comes). `EngageBongo` drops from 76 to 19 -- just under a punch on it (20),
+   above walking to it (8-14) -- while its committed strike is about to land
+   (`reach.is_incoming_melee`) and his charge is not pressing
+   (`bongo.charge_is_pressing`: running, or its launch 6 updates away or less).
+   Nothing ever walks to it. In a hold, a strike landing from **behind**
+   sooner than a knee finishes (`reach.frames_until_any_melee_lands` against
+   `kinematics.hold_knee_frames`, with `reach.rear_threats`) gets Bongo thrown
+   back into it (`ThrowHeldEnemy`) -- Bongo only; Souther's and Antonio's
+   rounds are swept clean and their loops were measured without it. What the
+   live runs actually met was the other side: a type-`$22` Garcia walking in
+   from the camera's right edge (its approach `$09`, `$E124`) and punching
+   (`$0A`, `$E190`: two stages, forward 0..+40 then +16..+51) from 57-62 px
+   *in front* of the holder, over the held Bongo, for 8. Nothing a hold has
+   answers that one: the throw goes backward and locks the actor 41-46 frames
+   against a punch that lands in 5-12, and letting go gives up the 21-update
+   wind-up that makes the re-grab safe for a flame worth 32. So it is taken;
+   the entrance fights end before any grunt arrives.
+5. The rest stands down for him: `Punch`/`MeleeWeaponAttack`, `RearAttack`,
+   `GrabEnemy`, `WalkToNearEnemy`, `RetreatFromDanger`, the grounded
+   `JumpAttack`, the weapon detour, and `ProjectileSidestep` on the flame.
+
+The model was checked in lockstep before anything was built on it
+(`tools/bongo_lab.py --actor wander`, two seeds): 2253 of his updates, ten
+charges, every field of states 1 and 2 and of the flame matching the ROM, bar
+two updates where the player's respawn knocked him back. On contact it missed
+no hit; it over-predicts on a player lying down (a low body box) or at the
++-12 edge of the body -- the safe side. With the real pipeline playing
+(`--actor engage`) he died in 389 frames: no hit, seven holds, not one charge
+launched, and the 29 of his updates spent outside a hold all matched.
+
+**What the live runs taught.** The first scored fight on the plan killed him in
+9.4 s with nine holds and took three hits, all with him *held* -- each a front
+grab 2-8 updates after a launch, the flame still igniting on him. That is how
+"a holder is not spared" was found; `_grab_is_burnt` came out of it, and
+offline (40 randomized sim-vs-sim fights: entrance, far, turn, wind-up and
+mid-charge starts, all three characters) the planner went from 19 hits to 2
+with the longer stick holds and the predicted dodge, then to none with the
+burnt grab.
+
+Scored with `tools/boss_fight.py --level 4 --boss-type 0x57 --no-food`, turbo
+4, police off, a fresh host per fight (a hit is 32 damage; three kill):
+
+| | fights | killed | hits taken | lives lost | first hold | fight length |
+| --- | --- | --- | --- | --- | --- | --- |
+| before (generic approach), Blaze | 1 | 0 (two lives lost) | 7 | 2 | 0.47 s | 19.1 s |
+| plan, grab not yet checked for the flame, Blaze | 1 | 1 | 3 | 1 | 0.63 s | 9.4 s |
+| plan, Blaze | 4 | 4 | **0 in every fight** | 0 | 0.44-0.46 s | 3.3 s |
+| plan, Axel | 4 | 4 | **0 in every fight** | 0 | 0.47-0.48 s | 3.3 s |
+| plan, Adam | 4 | 4 | **0 in every fight** | 0 | 0.53-0.83 s | 3.3-4.0 s |
+| plan, hands off for the first 3 s (`--idle-seconds 3`), Blaze | 4 | 4 | no flame; one 8-point grunt punch in 3 fights | 0 | 0.99-1.01 s | 3.9-4.4 s |
+| plan, hands off for the first 3 s, Axel | 4 | 4 | no flame; one 8-point grunt punch in each | 0 | 1.00-1.01 s | 4.3-4.4 s |
+| plan, hands off for the first 3 s, Adam | 4 | 4 | **none** | 0 | 0.92-0.94 s | 3.7-3.8 s |
+
+Every scored fight on the plan is decided at the entrance: the hold comes
+before his first launch and the loop never lets him go. The idle rows are the
+same fight joined after the AI stood still through his first charge -- the
+start that exercises the pocket, the dodge and the burnt-grab refusal live --
+and every one of their holds was taken from his charge without a flame: all
+seven hits in them are the round's grunt, the type-`$22` punch from in front
+of the holder over the held Bongo (4 above), 8 points each, at 1.5-2.0 s. An
+earlier idle batch handed the pad over mid-charge and took two unavoidable
+flames within 0.04 s, which is why `--idle-seconds` now waits him out of it.
+
 **First-level breakables (user):** Round-1 phone booths (`$11`) and the
 type-`$19` family share the shallowest ROM solid (14px on lane vs a 16px
 body, walkable in front of the feet). The 1px conversion of that rule
@@ -649,6 +788,23 @@ if the landing is solid and no walk reaches); `WalkToAdvanceStage` hops
 via `hop_landing_x` when `plan_route` fails and the far side is in kick
 range, otherwise stalls at the wall; the pit override does not run
 while airborne.
+
+**Stage-4 breakable (user: "Vi a IA a ficar presa num breakable desse stage e
+a não conseguir progredir!"):** reproduced in both swept walks of round 4
+(`tools/breakable_diag.py --level 4 --sweep`, Blaze and Axel): 61 s at x=1617
+beside a type-`$1B` prop at (1656, 96), facing away, `OpenBreakable` winning
+7000 ticks, until the round clock took a life. Round-4 props take `$3C6A`'s
+default record, so the wall runs x 1620..1692 over lanes 76..100 -- 28 px
+nearer than the sprite box -- and the facing nudge's 16 px toward-step sat
+inside it. Routed around that wall the nudge went UP (lane 80 -> 78, out of
+the punch's lane), the approach came back DOWN, and so on. The nudge's route
+now leaves the target prop out of its own obstacle set: a step into the
+prop's wall is exactly what turns the actor (`$3BAE` undoes the displacement
+and keeps the facing), and the next tick punches. After it the same swept
+walk reached Bongo in 55 s with no life lost (115 s and one or two lives
+before). `tests/ai/test_execute.py`'s `_walk` now undoes a step into a prop's
+wall the way `$3BAE` does -- the facing kept -- which is what a trail
+through that nudge has to look like.
 
 **Jack (user):** If the actor is already on Jack's back (Jack facing away),
 grab immediately (`reach.grab_reasons`' `JACK_FROM_BEHIND`). A jump kick that overshoots leaves
@@ -755,15 +911,16 @@ do not commit `.jsonl` runs.
 
 | Tool | Role |
 | --- | --- |
-| `boss_fight.py` | **Scores** one boss fight: plays the level for real, then reports killed/died, damage taken, fight length and the verb histogram. `--level`/`--boss-type` select the fight (`--level 1 --boss-type 0x56` is Antonio, `--level 2 --boss-type 0x55` Souther, the default). Boss death is the raw signed health word only (zero counts for the later bosses `$55`-`$58`, whose `$17C36` lethal test is `<= 0`) -- both `phases.boss_phase`'s `DEATH` decode and `MapEntity.is_defeated` false-positive on the transient `$164FC` lethality test, twice confirmed live |
+| `boss_fight.py` | **Scores** one boss fight: plays the level for real, then reports killed/died, damage taken, fight length and the verb histogram. `--level`/`--boss-type` select the fight (`--level 1 --boss-type 0x56` is Antonio, `--level 2 --boss-type 0x55` Souther, the default; `--level 4 --boss-type 0x57` Bongo). `--idle-seconds N` keeps the pad released -- no tick, nothing scored -- for N s after the boss appears, and past that until a Bongo is out of his charge (handed the pad with a flame already on the actor, no plan has a move left): a start other than the entrance. Each row also carries the nearest ordinary enemy (`grunt`: type, x, lane, state), which is how round 4's grunt was caught punching over a held Bongo. Boss death is the raw signed health word only (zero counts for the later bosses `$55`-`$58`, whose `$17C36` lethal test is `<= 0`) -- both `phases.boss_phase`'s `DEATH` decode and `MapEntity.is_defeated` false-positive on the transient `$164FC` lethality test, twice confirmed live |
 | `antonio_diag.py` | **Explains** a round-1 fight tick by tick: every candidate `Verb` with its own emergency, the actor's hold state (`+$4C` link and the action byte behind it), every byte of Antonio's AI state that `ai/antonio.py` replays (primary, tactical, `+$78`, `+$5C`, screen X, animation frame, countdown and latched box ids, velocities, 16.16 position), `antonio.kick_gate_open`, and `antonio.plan_engage`'s stick, mode and predicted outcome. First written for, and found, the front-hold stall in **Holding a boss** above |
 | `antonio_lab.py` | **Lockstep lab** for round 1: plays to Antonio in real time, then steps the host one frame at a time with the real `AgentLoop` ticking every two frames (its pad recorded and replayed through `step_input`), and on every frame his object updates replays `antonio.boss_update` from the previous frame's work RAM and compares every field -- position, lane, primary, tactical, both timers, both velocities, animation, countdown, latched boxes, screen X -- the same for every boomerang of his while it flies (his linked one by his `+$6E`, older ones by slot), plus the contact outcome against the player's own `+$7C`. `--actor wander` swaps the pipeline for a seeded walk that never attacks, to run the model through all of his states; `--input-delay` adds latency. Scores the fight too (hits, holds, kicks started) |
+| `bongo_lab.py` | **Lockstep lab** for round 4, `antonio_lab.py`'s shape: the real pipeline plays to Bongo, then every frame his object updates is checked against `bongo.boss_update` field by field -- position, lane, primary, tactical, `+$68`, `+$79`, both velocities, the animation, its countdown, the latched boxes, screen X -- and his flame (`$97`) the same while it exists, plus the contact outcome against the player's `+$7C` (3 grab, 1 flame hit). `--actor wander` walks a seeded path that never attacks, to run the model through every state; rows also carry the other enemies alive (how the round's grunt was identified) |
 | `hold_timing_diag.py` | **Measures** how long each hold move commits the actor for, in 60 Hz frames: the AI plays until it holds a body, then the host enters **lockstep** and the move is issued on frame 0 with the player's `+$30` sampled every frame until it settles. One fresh hold per session -- a throw and a suplex both end the hold, and re-entering lockstep on one that is already ending measures the ending. Feeds `kinematics.HOLD_*_FRAMES`; a lockstep step is one game frame regardless of `--turbo` |
 | `hold_threat_diag.py` | **Checks** the other half live: plays an ordinary level with the waves left **alive** (no sweep, deliberately) and logs every tick the actor is holding a body -- action base, the winning verb, live enemy count, and `reach.frames_until_any_melee_lands` with the held body excluded. Summarises the decision ticks only ($60/$66; the animation locks in between ignore fresh edges, so counting them would dilute the question), and reports `knees_while_threatened`, which must be 0 |
 | `souther_diag.py` | The round-2 equivalent: `dx`/`dy`, `souther.plan_engage`'s mode, `souther.can_commit_on`, the holder's knee chain and release countdown, and whether he is untouchable, per tick. Stops on the boss's own death (raw signed health, like `boss_fight.py`) or a level reset after the boss was seen, with a `--fight-seconds` backstop -- do not run it, or any tool that drives a live host, without a real stop condition. |
 | `souther_hold_lab.py` | **Lockstep lab** for the Souther hold loop: the AI plays to its first hold, then the host steps one frame at a time through scripted experiments (`--experiments`, comma-separated, one fresh hold each: `release_regrab`, `release_loop`, `second_crossover`, `throw`, `suplex`), logging both bodies' bytes every frame; `--regrab-delay` injects input latency into the walk back in. Sweeps the street families itself every 30 frames, since lockstep stops the ordinary sweep. It measured the release countdown, the one-crossover rule and the re-grab timing `souther.py` is built on |
 | `round2_death_diag.py` | **Traces** a whole round-2 run tick by tick (`--trace`) and stops the moment the game leaves the level for the title, which is what four lost measurement runs actually were: not the AI dying but the **console resetting**, caused by the debug sweep writing a death into an object slot that was still spawning (fixed host-side -- see `StreetsOfRageRecompilation/CLAUDE.md`). Records every `Pit` with `reach.pit_endangers` per tick, which is how the pit theory was ruled out: round 2 has none |
-| `breakable_diag.py` | Round-1 breakable stall, with **real** enemies (the sweep did not reproduce it) |
+| `breakable_diag.py` | Breakable stalls, per tick while a `Breakable` is in context. Round 1 by default, with **real** enemies (the sweep did not reproduce that stall); `--level N` jumps to a round first, `--sweep` keeps the ordinary families swept (the walk `scripts/go_to_boss` and the boss harnesses make -- how the round-4 stall was reproduced), `--heartbeat-s` logs a position row that often with no breakable around (so a stall anywhere shows), `--until-boss` stops at the boss |
 | `armed_combat_diag.py` | Held-weapon reach and swing timing |
 
 ## Observer surface
@@ -773,7 +930,7 @@ do not commit `.jsonl` runs.
 | `app.py` | CLI (`--host`, `--port`, `--poll-ms`, `--hud-ms`, `--once`, `--agent-p1`, `--agent-p2`), poll loop, AI dispatch |
 | `state.py` | Work-RAM / remote reads → `GameSnapshot`. `snapshot_from_memory_blocks` skips both `hazards.holes_for_level` and `hazards.barriers_for_level` on the elevator stage (`level_index == 6`, stage 7): its moving platform is not represented by the class-0/2 collision map the same way ordinary terrain is, so both reads would be class-map noise rather than real hazards. Barrier solids were skipped first ("class map noise cannot invent walls on the lift"); holes got the identical carve-out once a phantom `Pit` reached the AI pipeline (`ai/observe.py` builds one per `snapshot.floor_holes` entry, unconditionally) and the HUD drew a hole that was never there. `snapshot.floor_holes`/`floor_barriers` are therefore always `()` on stage 7, which is the one place both the HUD and the token pipeline need to change to make pits disappear there — everything downstream already just reads the snapshot |
 | `world_map.py` | Camera + actors → map entities (incl. hunt targets); `MapEntity.stun_timer` is the ordinary-enemy `+$50` stun countdown, read only in the `kind=="enemy"` branch (the same offset is weapon wear / boss distance / player character id for other kinds) and only meaningful while `combat_phase` is `STUNNED`; `MapEntity.held_type` on an ordinary enemy is the pickup weapon `$08-$0C` it is carrying, resolved from a held weapon object's `+$52` holder pointer (`interaction==1`) -- enemies do not store the type at `+$60` (that word is their scripted approach X); `parse_world_map` takes `police_special_active` purely to disambiguate enemy state `$0400`; `MapEntity.hitbox` is the object's real body AABB -- for a player, `_object_geometry` reads it straight from the cached box at `+$70` and needs no `RomData` at all; for everything else it is rebuilt per tick from the ROM shape tables and `None` without `RomData` (*unknown*, never *no body*) -- and `MapEntity.attack_ranges` is every reach its type has (empty for a player, whose reach lives in `tokens/character.py` instead, and for bosses, whose animation sets are not labelled); `MapEntity.character_id` (0/1/2 = Axel/Adam/Blaze, `None` for non-players) is threaded through from `parse_world_map`'s own resolved `char_id` purely so a display-side consumer (today, `hud.py`'s `_display_attack_ranges`) can look up a player's per-character punch reach -- it is not read anywhere in `world_map.py` itself; `_is_dormant_combatant` drops a combatant whose **primary state is still `$0000`** whether or not the SAT-hidden bit is set: a wave's object slots are populated before `$937A` runs, so for one frame they hold a complete, *visible*, uninitialised entity -- recorded live, five of them appearing for a single tick at state `$00` with zero health and zero velocity, spread across the level ahead, and the AI punched at the nearest of them (48px away, at nothing) before they vanished. The hidden bit is a symptom `$937A` sets while testing eligibility, not the definition of dormancy. `MapEntity.enemy_vel_x`/`enemy_vel_y` carry ordinary-enemy velocity (+$1C/+$20), read only in the `kind=="enemy"` branch -- distinct fields/offsets from the boss-only `vel_x`/`vel_z` (+$20/+$24) already on the same dataclass, left untouched. `MapEntity.contact_slot` resolves the player's `+$4C` hold link to a slot name -- the ROM's own "which body am I holding", and the only field that answers it for a later boss (see **Holding a boss**); meaningful only while the action byte is in a grab/hold family, which is why `observe.py` and `is_grabbing` both gate on that |
-| `object_catalog.py` | Type → symbol / color / family. Antonio's boomerang (`$96`) and Souther's claw/afterimage (`$98`/`$99`) are catalogued so the linked boss attack objects become map entities at all; the claw pair is then withheld **unconditionally** from being a projectile threat (`reach.is_souther_claw`), unlike the boomerang, which is only withheld while attached (`reach.antonio_still_holding_boomerang`) -- they are animation-synchronized visuals re-created from Souther's own position every tick, with no flight to intercept and no box of their own (the claw's hit is his own attack box; `ai-analysis/enemy-ai.md`) |
+| `object_catalog.py` | Type → symbol / color / family. Antonio's boomerang (`$96`), Bongo's flame (`$97`) and Souther's claw/afterimage (`$98`/`$99`) are catalogued so the linked boss attack objects become map entities at all (the flame reads the later-boss layout like the boomerang: animation, countdown, latched box, `+$6E`); the claw pair is then withheld **unconditionally** from being a projectile threat (`reach.is_souther_claw`), unlike the boomerang, which is only withheld while attached (`reach.antonio_still_holding_boomerang`) -- they are animation-synchronized visuals re-created from Souther's own position every tick, with no flight to intercept and no box of their own (the claw's hit is his own attack box; `ai-analysis/enemy-ai.md`) |
 | `memory_map.py` | Known addresses; `OBJ_VEL_X_ORDINARY`/`OBJ_VEL_LANE_ORDINARY` (+$1C/+$20) are ordinary-enemy velocity per enemy-ai.md's object-layout table, corroborated live (a moving Garcia's +$1C tracked its actual displacement direction while +$20 stayed 0) -- distinct from the pre-existing boss-only `OBJ_VEL_X = 0x20`, which is in fact the lane velocity for the later-boss object family (`$17AB8` adds `+$1C` to X and `+$20` to the lane) -- still what `vel_x` reads for a boss and for most projectiles, while Antonio's `$96` boomerang reads its X velocity from `+$1C` (`OBJ_BOSS_VEL_X`) |
 | `hitboxes.py` | Real collision AABBs, as the formal `Hitbox` value object. **Players cache theirs** at `+$64` (attack) / `+$70` (body) -- six absolute words `[x0,x1,y0,y1,z0,z1]`, written by `$4140`, whose only call site (`$1CC6` in `sub_001bdc`) is player code. **Enemies cache nothing**: `$AAA0` passes the enemy's per-frame box id (`+$2` attack / `+$3` body) to `$AB24`, which rebuilds the AABB from ROM tables on every test and discards it -- so an enemy hitbox must be *reconstructed*, not read (this is also why `enemy-ai.md` can list `+$64`/`+$70` as pointers for enemies without contradicting the player layout). Tables: `$1A68E` object shapes (5-byte records), `$1AB8E` lane extents (2-byte), `$1ABA8` player shapes; type `$58` is the one non-player that uses the player table. Both record bytes are sign-extended (`ext.w` in `$AB88`), box id 0 means no box, and mirroring is *not* applied here -- the shape table carries separate forward/backward records and the animation data picks one, so a rebuilt box is already oriented |
 | `prop_solids.py` | The rectangle a **solid prop** stands behind, which is not the box `hitboxes.py` rebuilds. `sub_00003B8A` walks the object table per moving object (skipping any slot without bit 0 of `+$3A`, the solid flag -- set on every intact breakable sampled live) and `sub_00003BAE` tests the mover's **own position** -- a point, never its body box -- against `prop.x + rec[0] .. + rec[1]` on x and `prop.lane + rec[2] .. + rec[3]` on lane, strictly on all four edges (two `bcc` exits per axis), undoing that frame's whole displacement (`+$1C`/`+$20`) on a hit. `rec` is one of five records at `$3C6A`, picked by the type compare chain at `$3BC4`-`$3C00`, which ends in `nop` rather than a branch -- so every type it does not name (the round-4 props among them) uses the last record. Every record ends 4px *past* the prop's lane origin: a prop is solid behind its feet and walkable in front of them. The distinction is not academic -- a round-5 prop (`$1F`) at lane 96 draws its body box at lane 86..106, in front of its origin, while the wall that stops a player runs 76..100, twenty px behind it, so routing off the sprite plans straight through solid ground. Verified live on stage 5's 2x2 fence: from the corridor between the rows, UP stops at lane 60 (`56 + 4`, exact) and DOWN at 75, one walk step short of the predicted 76 |
@@ -1086,8 +1243,9 @@ an invariant rather than a rate, and the invariant held on every one of them. Th
 threatened path is covered by `tests/ai/test_decide.py` and the sequence
 tests only.
 
-Bongo (`$57`), Onihime/Yasha (`$58`), Abadede (`$30`) and Mr. X (`$35`) still
-only have the subclass hierarchy populated.
+Onihime/Yasha (`$58`), Abadede (`$30`) and Mr. X (`$35`) still only have the
+subclass hierarchy populated; Bongo (`$57`) has his plan (**Bongo: the ROM
+model and the plan**).
 
 ## TokenMap (keep updated)
 

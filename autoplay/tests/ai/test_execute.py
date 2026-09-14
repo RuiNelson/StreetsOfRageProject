@@ -190,6 +190,48 @@ class BreakableFacingNudgeAtTheCameraClampTests(unittest.TestCase):
         self.assertTrue(mask & LEFT)
 
 
+class BreakableFacingNudgeAgainstThePropsOwnWallTests(unittest.TestCase):
+    """In smash range, facing away, standing against the prop's own wall.
+
+    Recorded live on round 4 (``tools/breakable_diag.py --level 4 --sweep``,
+    Blaze and Axel alike): the actor at x=1617, lane 80, beside a type-``$1B``
+    prop at (1656, 96). Round-4 props take ``$3C6A``'s default record, so the
+    wall runs x 1620..1692 over lanes 76..100, and the facing nudge's
+    toward-step (16 px) sat inside it. Routed around that wall, the nudge went
+    UP -- lane 78, out of the punch's lane -- the approach brought it back
+    DOWN, and the actor rocked between the two lanes, facing away, for 61 s
+    until the round clock took a life. A step into the prop's own wall is
+    exactly what turns the actor, so the nudge must not route around it.
+    """
+
+    def _prop(self):
+        return Breakable(
+            slot="obj02",
+            world_x=1656,
+            world_y=96,
+            type_id=0x1B,
+            hitbox=Hitbox(x0=1648, x1=1664, y0=86, y1=106, z0=0, z1=40),
+        )
+
+    def _context(self, actor):
+        return {
+            actor,
+            self._prop(),
+            CameraRange(left=1560, right=1816, top=0, bottom=112),
+            Stage(level_index=3, direction="right"),
+        }
+
+    def test_the_nudge_turns_toward_the_prop_on_its_own_lane(self) -> None:
+        actor = replace(_myself(world_x=1617, world_y=80, facing_left=True), character_id=2)
+        self.assertTrue(in_smash_range(actor, self._prop()))
+        gamepad, _client = _gamepad()
+        _settle(OpenBreakable(actor_slot="P1", target_slot="obj02"), self._context(actor), gamepad)
+
+        mask = gamepad.held
+        self.assertTrue(mask & RIGHT, f"the prop is to the right; got {mask:#x}")
+        self.assertFalse(mask & (UP | DOWN), f"left the smash lane; got {mask:#x}")
+
+
 class BreakableWeaponSwingBandTests(unittest.TestCase):
     """A bat/pipe swing needs the prop out near its peak.
 
@@ -282,12 +324,24 @@ def _walk(verb, actor, others, *, ticks: int = 80):
 
     gamepad, _client = _gamepad()
     trail = [actor]
+    # $3BAE, as the ROM runs it: a step that would leave the mover's own
+    # position inside a solid prop's push-back box is undone whole, and the
+    # facing the held direction set is kept -- which is how pressing into a
+    # prop's own wall turns the actor toward it.
+    walls = [
+        prop_solids.solid_box(p.type_id, p.world_x, p.world_y)
+        for p in others
+        if isinstance(p, Breakable)
+    ]
     for _ in range(ticks):
         execute_verb(verb, {actor, *others}, gamepad)
         mask = gamepad.held
         dx = (WALK_PX_PER_TICK if mask & RIGHT else 0) - (WALK_PX_PER_TICK if mask & LEFT else 0)
         dy = (WALK_PX_PER_TICK if mask & DOWN else 0) - (WALK_PX_PER_TICK if mask & UP else 0)
-        actor = replace(actor, world_x=actor.world_x + dx, world_y=actor.world_y + dy)
+        x, y = actor.world_x + dx, actor.world_y + dy
+        if any(w.blocks(x, y) for w in walls):
+            x, y = actor.world_x, actor.world_y
+        actor = replace(actor, world_x=x, world_y=y)
         if dx:
             actor = replace(actor, facing_left=dx < 0)
         trail.append(actor)

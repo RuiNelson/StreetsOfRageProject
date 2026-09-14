@@ -7,7 +7,7 @@ set -euo pipefail
 # round 2, and a continuous sweep of every non-boss enemy family. See
 # ./scripts/go_to_boss for the shared flags and why the sweep is required.
 #
-# --no-food is passed here and nowhere else (user): the round-2 arena's food
+# --no-food is passed here and in go_to_boss_4 (user): the round-2 arena's food
 # is what made the fight *look* survivable. A heal hides every hit landed
 # after it -- boss_fight.py scores damage as a running minimum -- so the AI
 # was being credited for a plan the food was carrying. Souther has to be

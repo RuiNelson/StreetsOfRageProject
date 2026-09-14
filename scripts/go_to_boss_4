@@ -7,4 +7,15 @@ set -euo pipefail
 # round 4, and a continuous sweep of every non-boss enemy family. See
 # ./scripts/go_to_boss for the shared flags and why the sweep is required.
 
-exec "${0:A:h}/go_to_boss" 4 "$@"
+#
+# --no-food, as round 2 does (user: "Nos testes, não te esqueças de não usar o
+# ataque especial (chamar a polícia), e de não consumir items de recuperação
+# de vida"): a heal hides every flame landed after it, and Bongo has to be
+# beaten with the health the round left. Before "$@", so a caller can still
+# argue with it.
+#
+# The round keeps a Garcia-family grunt coming through the whole fight (the
+# sweep kills one, the street sends the next); see autoplay/CLAUDE.md,
+# "Bongo: the ROM model and the plan".
+
+exec "${0:A:h}/go_to_boss" 4 --no-food "$@"

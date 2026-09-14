@@ -18,7 +18,7 @@ from typing import Callable
 from .. import prop_solids
 from ..memory_map import ACTION_HOLD_CROSSOVER
 from ..phases import CombatPhase, is_dangerous
-from . import kinematics, navigation as nav, reach, souther as souther_plan
+from . import bongo as bongo_plan, kinematics, navigation as nav, reach, souther as souther_plan
 from .tokens import (
     CounterGrab,
     FlipHold,
@@ -45,7 +45,7 @@ from .tokens import (
     PlayableCharacter,
     punch_usable_inner_x,
 )
-from .tokens import Antonio, Boss, Enemy, Jack, Souther
+from .tokens import Antonio, Bongo, Boss, Enemy, Jack, Souther
 from .tokens import (
     GrabReason,
     Surrounded,
@@ -68,6 +68,7 @@ from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDi
 from .tokens import Context, Token, find, find_all
 from .tokens import (
     EngageAntonio,
+    EngageBongo,
     EngageSouther,
     ProjectileSidestep,
     RetreatFromDanger,
@@ -270,6 +271,11 @@ def _could_melee_strike(
             # grabbed from. EngageSouther owns him (souther.py).
             if isinstance(target, Souther):
                 continue
+            # Bongo too: the hold is the plan against him (bongo.py), and a
+            # strike turns the walk-in's grab contact into a hit whose hitstun
+            # he gets up from straight into a wind-up. EngageBongo owns him.
+            if isinstance(target, Bongo):
+                continue
             verbs.add(make_verb(actor.slot, target_slot, actor.held_weapon_type))
     return verbs
 
@@ -331,9 +337,9 @@ def could_rear_attack(context: Context) -> Context:
         for target_slot in _targets_in_reach(context, actor, reach.in_rear_band, RearAttack):
             if target_slot in on_jacks_back:
                 continue
-            if isinstance(find(context, Enemy, slot=target_slot), (Souther, Antonio)):
+            if isinstance(find(context, Enemy, slot=target_slot), (Souther, Antonio, Bongo)):
                 # The chord is a strike like any other: it turns the grab
-                # contact into a hit. EngageSouther / EngageAntonio own them.
+                # contact into a hit. Each boss's engage owns him.
                 continue
             verbs.add(RearAttack(actor_slot=actor.slot, target_slot=target_slot))
     return verbs
@@ -405,9 +411,9 @@ def could_grab_enemy(context: Context) -> Context:
         for enemy in on_screen:
             if enemy.slot not in in_reach:
                 continue
-            if isinstance(enemy, (Souther, Antonio)):
+            if isinstance(enemy, (Souther, Antonio, Bongo)):
                 # Each engage walks into him itself, at the moment its plan
-                # picks (EngageSouther, EngageAntonio).
+                # picks (EngageSouther, EngageAntonio, EngageBongo).
                 continue
             if enemy.slot in threatening:
                 # Walking into a committed attack is how the actor takes the
@@ -489,7 +495,28 @@ def could_hold_actions(context: Context) -> Context:
         # is antonio.hold_step as well -- and returns the one input that
         # keeps him in the actor's hands.
         held = reach.held_enemy(actor, enemies)
-        if isinstance(held, (Souther, Antonio)):
+        if isinstance(held, Bongo) and base == 0x60:
+            # Round 4 keeps a grunt coming through the whole fight (user: "não
+            # se focar nesse inimigo, mas prevenir ataques iminentes"). A
+            # strike from behind that lands before a knee could finish is
+            # answered the way any hold answers it here: throw the body in hand
+            # back into it (B+back). The one measured live came the other way
+            # -- a type-$22 punch from in front, over the held Bongo, 8 points
+            # mid-knee -- which no hold move answers (the throw goes backward
+            # and locks the actor 41-46 frames), so it is left alone. Bongo
+            # only -- Souther's and Antonio's rounds are swept clean and their
+            # loops were measured without it.
+            grace = reach.frames_until_any_melee_lands(
+                actor, enemies, ignore_slots=frozenset({held.slot})
+            )
+            if (
+                grace is not None
+                and grace < kinematics.hold_knee_frames(actor.character_id)
+                and reach.rear_threats(actor, enemies)
+            ):
+                verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
+                continue
+        if isinstance(held, (Souther, Antonio, Bongo)):
             step = souther_plan.hold_step(actor, held)
             if step is souther_plan.HoldStep.KNEE:
                 verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
@@ -708,9 +735,9 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 # Never walk toward a target that is itself standing in a
                 # pit's danger zone -- reaching it means standing there too.
                 continue
-            if isinstance(enemy, (Souther, Antonio)):
-                # EngageSouther / EngageAntonio own the whole approach to
-                # them, armed or not.
+            if isinstance(enemy, (Souther, Antonio, Bongo)):
+                # EngageSouther / EngageAntonio / EngageBongo own the whole
+                # approach to them, armed or not.
                 continue
             if standing_off and enemy.slot in threatening:
                 # could_retreat_from_danger covers this one instead -- don't
@@ -791,10 +818,10 @@ def could_retreat_from_danger(context: Context) -> Context:
             enemy = find(context, Enemy, slot=target_slot)
             if enemy is None:
                 continue
-            if isinstance(enemy, (Souther, Antonio)):
+            if isinstance(enemy, (Souther, Antonio, Bongo)):
                 # Their attacks are their engage's business: Souther's claw
-                # by souther.plan_engage's lane escape, Antonio's kick by
-                # antonio.plan_engage's lookahead.
+                # by souther.plan_engage's lane escape, Antonio's kick and
+                # Bongo's flame by their plan_engage's lookahead.
                 continue
             if target_slot in actionable:
                 continue  # already hittable -- attack instead of retreating
@@ -830,6 +857,10 @@ def could_projectile_sidestep(context: Context) -> Context:
             if reach.antonio_still_holding_boomerang(projectile, context):
                 continue
             if reach.is_souther_claw(projectile):
+                continue
+            if projectile.type_id == bongo_plan.FLAME_TYPE:
+                # It rides him ($178D0): no flight of its own to step off, and
+                # bongo.plan_engage already plays it forward with him.
                 continue
             if not reach.projectile_threatens(projectile, actor):
                 continue
@@ -1125,6 +1156,11 @@ def could_jump_attack(context: Context) -> Context:
             # him; a flight already in the air still finishes below.
             for antonio in find_all(context, Antonio):
                 target_slots.discard(antonio.slot)
+            # Bongo neither: the flame rides at head height (z -78..-32)
+            # ahead of him, which is where a flight meets it, and a kick is a
+            # strike that turns his grab contact into a hit. EngageBongo.
+            for bongo in find_all(context, Bongo):
+                target_slots.discard(bongo.slot)
         if actor.is_airborne and not target_slots:
             nearest = min(
                 live,
@@ -1223,6 +1259,39 @@ def could_engage_antonio(context: Context) -> Context:
             if antonio.is_defeated:
                 continue
             verbs.add(EngageAntonio(actor_slot=actor.slot, target_slot=antonio.slot))
+    return verbs
+
+
+def could_engage_bongo(context: Context) -> Context:
+    """Take a hold on Bongo -- the whole fight against him, one verb.
+
+    One candidate per live ``Bongo`` while the actor is free to move (not
+    mid-animation, not held, not holding a body, not airborne), armed or not
+    for ``could_engage_souther``'s reason: ``$AAA0``'s grab never reads the
+    carried weapon. ``bongo.plan_engage`` picks the stick every tick from a
+    lookahead over his AI and his flame; the hold is the contact result of
+    that walk, and the loop that follows is ``could_hold_actions``'.
+
+    Not limited to the visible screen or the lane band either: his charge
+    runs him 48 px past the camera's edge ($17744 lets him stand there), and
+    the next one is decided by where the actor stands while he turns and
+    walks back in.
+    """
+
+    verbs: set[Token] = set()
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.is_airborne:
+            continue
+        for bongo in find_all(context, Bongo):
+            if bongo.is_defeated:
+                continue
+            verbs.add(EngageBongo(actor_slot=actor.slot, target_slot=bongo.slot))
     return verbs
 
 
@@ -1399,7 +1468,7 @@ def _a_weapon_would_disarm_the_plan(context: Context) -> bool:
     none.
     """
 
-    return _souther_is_alive(context) or _antonio_is_alive(context)
+    return _souther_is_alive(context) or _antonio_is_alive(context) or _bongo_is_alive(context)
 
 
 def could_walk_to_weapon(context: Context) -> Context:
@@ -1459,6 +1528,10 @@ def _souther_is_alive(context: Context) -> bool:
 
 def _antonio_is_alive(context: Context) -> bool:
     return any(not antonio.is_defeated for antonio in find_all(context, Antonio))
+
+
+def _bongo_is_alive(context: Context) -> bool:
+    return any(not bongo.is_defeated for bongo in find_all(context, Bongo))
 
 
 def _life_items_refused(context: Context) -> bool:
@@ -1678,6 +1751,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_projectile_sidestep(context)
         | could_engage_souther(context)
         | could_engage_antonio(context)
+        | could_engage_bongo(context)
         | could_hit_antonio_boomerang(context)
         | could_walk_to_advance_stage(context)
         | could_punch(context)

@@ -18,6 +18,7 @@ from .pathfind import Path, Point, PointGoal
 from .tokens import (
     CounterGrab,
     EngageAntonio,
+    EngageBongo,
     EngageSouther,
     FlipHold,
     GrabEnemy,
@@ -45,7 +46,7 @@ from .tokens import (
     punch_outer_x,
     punch_usable_inner_x,
 )
-from .tokens import Antonio, Enemy, Souther
+from .tokens import Antonio, Bongo, Enemy, Souther
 from .tokens import CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile
 from .tokens import Pickup, Weapon
@@ -72,6 +73,7 @@ from .gamepad import VirtualGamepad
 from . import kinematics
 from . import jump_kick
 from . import antonio as antonio_plan
+from . import bongo as bongo_plan
 from . import souther as souther_plan
 from . import navigation as nav
 from .decide import (
@@ -1509,6 +1511,54 @@ def state_machine_engage_antonio(
     gamepad.hold(mask)
 
 
+def engage_bongo_plan(verb: EngageBongo, context: Context) -> bongo_plan.EngagePlan | None:
+    """``bongo.plan_engage`` for this verb, from the context -- shared by the
+    handler and the diagnostics, so both see the one plan."""
+
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Bongo, slot=verb.target_slot)
+    if actor is None or target is None:
+        return None
+    return bongo_plan.plan_engage(
+        actor,
+        target,
+        camera=find(context, CameraRange),
+        partner=find(context, Partner) if isinstance(actor, Myself) else find(context, Myself),
+        # His flame, for the lookahead to carry on (none on screen is an
+        # answer too: no charge is running).
+        projectiles=list(find_all(context, Projectile)),
+    )
+
+
+def state_machine_engage_bongo(
+    verb: EngageBongo, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Hold the stick ``bongo.plan_engage`` chose this tick.
+
+    Held directly and unclamped, as ``EngageAntonio``'s: the lookahead has
+    already decided the stick update by update -- the lane it must hold to
+    the pixel against his flame, and the walking box a grab needs at the
+    moment of contact -- and it models the camera clamp itself. His charge
+    runs him past the camera's edge and a re-grab can meet him there.
+    """
+
+    plan = engage_bongo_plan(verb, context)
+    actor = _find_actor(context, verb.actor_slot)
+    if plan is None or actor is None:
+        gamepad.release()
+        return
+    mask = 0
+    if plan.dir_x > 0:
+        mask |= RIGHT_MASK
+    elif plan.dir_x < 0:
+        mask |= LEFT_MASK
+    if plan.dir_y > 0:
+        mask |= DOWN_MASK
+    elif plan.dir_y < 0:
+        mask |= UP_MASK
+    gamepad.hold(mask)
+
+
 def state_machine_release_to_regrab(
     verb: ReleaseToRegrab, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -2316,7 +2366,19 @@ def state_machine_open_breakable(
             nudge_x_target = actor.world_x + nudge_x
             nudge_goal = PointGoal(Point(nudge_x_target, actor.world_y), tolerance=MOVE_DEADBAND_X)
             body, origin = nav.actor_footprint(actor)
-            solids, dangers = nav.obstacle_sets(context, body=body, origin=origin)
+            # The prop itself is no obstacle to *this* walk: it only has to
+            # turn the actor, and a step into the prop's own wall does that --
+            # $3BAE undoes the displacement, the facing stays. Routed around
+            # that wall instead, the nudge left the smash lane. Recorded live
+            # on round 4 (both swept walks, Blaze and Axel): at x=1617 against
+            # a type-$1B prop at (1656, 96) -- default $3C6A record, wall
+            # x 1620..1692, lanes 76..100 -- the toward-step sat inside the
+            # wall, the route went UP (lane 80 -> 78, out of range), the
+            # approach came back DOWN, and the actor rocked between the two
+            # lanes for 61 s, facing away, until the round clock took a life.
+            solids, dangers = nav.obstacle_sets(
+                context, body=body, origin=origin, ignore_slots=frozenset({target.slot})
+            )
 
             def face_nudge_straight_line() -> int:
                 return _movement_mask(
@@ -2416,6 +2478,7 @@ _HANDLERS = {
     ProjectileSidestep: state_machine_projectile_sidestep,
     EngageSouther: state_machine_engage_souther,
     EngageAntonio: state_machine_engage_antonio,
+    EngageBongo: state_machine_engage_bongo,
     ReleaseToRegrab: state_machine_release_to_regrab,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,

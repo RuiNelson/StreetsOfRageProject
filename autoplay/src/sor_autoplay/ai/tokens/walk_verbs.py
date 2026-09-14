@@ -229,3 +229,28 @@ class EngageAntonio(Walk):
     priority: int = 24
     actor_slot: str
     target_slot: str  # Antonio.slot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EngageBongo(Walk):
+    """Take a hold on Bongo without ever standing where his flame lands.
+
+    Produced by ``could_engage_bongo`` once per live ``Bongo`` while the actor
+    is free to move and not already holding a body -- armed or not, on screen
+    or past its edge. It is the whole fight against him: the strike, grab,
+    hop, walk-in, retreat and sidestep verbs all stand down for him and his
+    flame, and the stick each tick is ``bongo.plan_engage``'s -- a lookahead
+    over his own AI and his flame's that keeps the move which takes the hold
+    soonest without the flame's box ever meeting the actor's body.
+
+    Raises emergency: a live Bongo×62, plus the boss raise (14) -- 76, the tier
+    of ``EngageSouther``/``EngageAntonio``; ×5 instead (19, just under a
+    punch) while a grunt's committed strike is about to land
+    (``reach.is_incoming_melee``) and his charge is not pressing
+    (``bongo.charge_is_pressing``); below CounterGrab/TechRecover and the
+    dialogs; the hold family never coexists with it.
+    """
+
+    priority: int = 24
+    actor_slot: str
+    target_slot: str  # Bongo.slot
