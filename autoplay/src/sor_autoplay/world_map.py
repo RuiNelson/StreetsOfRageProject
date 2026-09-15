@@ -113,6 +113,7 @@ _MAP_KINDS = frozenset(
         "breakable",
         "pickup",
         "projectile",
+        "hazard",
     }
 )
 
@@ -912,6 +913,10 @@ def _entity_from_object(
             fine_y = fixed1616_unsigned(slot, mm.OBJ_POS_Y)
             fine_z = fixed1616_signed(slot, mm.OBJ_POS_Z)
         phase = CombatPhase.ATTACKING
+    elif style.kind == "hazard":
+        # Round 6's press (ai/press.py): committed while it shakes (2) and
+        # falls (3) -- the fall is its one attack -- and harmless otherwise.
+        phase = CombatPhase.ATTACKING if action_state in (2, 3) else CombatPhase.NORMAL
     elif style.kind == "breakable" and outgoing:
         # Round-8 type-$45 moving props set outgoing damage while in flight.
         # Retain their smashable kind, but expose the active danger phase to

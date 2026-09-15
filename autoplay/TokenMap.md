@@ -27,6 +27,8 @@ classDiagram
     Observed <|-- StageObjects
     StageObjects <|-- Breakable
     StageObjects <|-- Pit
+    StageObjects <|-- Wall
+    StageObjects <|-- Press
 
     Observed <|-- Weapon
     Observed <|-- Pickup

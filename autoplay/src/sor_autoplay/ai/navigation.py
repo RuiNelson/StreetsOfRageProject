@@ -73,9 +73,11 @@ from .tokens import (
     Partner,
     Pit,
     Stage,
+    Wall,
     find,
     find_all,
 )
+from . import press as press_model
 from .. import prop_solids
 from ..hitboxes import Hitbox
 from ..phases import is_dangerous
@@ -291,10 +293,13 @@ def solid_obstacles(
     origin: tuple[float, float] | None = None,
     ignore_slots: frozenset[str] = frozenset(),
 ) -> list[Rect]:
-    """Geometry that is physically impassable: intact props and floor holes.
+    """Geometry that is physically impassable: intact props, floor holes and
+    walls -- and a committed press's drop zone (:func:`press_obstacles`),
+    which a body can enter but not stand in for 20 damage and a knockdown.
 
-    Both are **point rules**, and both are therefore restated through
-    :class:`_OriginRule` rather than collided against directly.
+    Props, holes and walls are **point rules**, and are therefore restated
+    through :class:`_OriginRule` rather than collided against directly (see
+    :func:`wall_obstacles`); the press's zone is a body test already.
 
     A **prop** is a wall, but not the wall its sprite draws: ``prop_solids``
     carries the ROM's own per-type push-back rectangle, which for some types
@@ -325,7 +330,67 @@ def solid_obstacles(
             rule.rect(Rect(solid.x0, solid.y0, solid.width, solid.height))
         )
     rects.extend(pit_obstacles(context, body=body, origin=origin))
+    rects.extend(wall_obstacles(context, body=body, origin=origin))
+    rects.extend(press_obstacles(context))
     return rects
+
+
+# $3C92, the wall probe: 8 px ahead of the mover's own position along its X
+# velocity (to the right when it has none), on its own lane, 8 px above its
+# feet (hazards.WALL_PROBE_Z).
+WALL_PROBE_X = 8
+
+
+def wall_obstacles(
+    context: Context,
+    *,
+    body: Rect | None = None,
+    origin: tuple[float, float] | None = None,
+) -> list[Rect]:
+    """Walls (``Wall``), as ground the body must keep off.
+
+    A point rule, like a prop's: ``$3C92`` tests the point ``WALL_PROBE_X``
+    ahead of the mover's own position on its lane, and undoes the whole step
+    when that point is in a wall cell. So an origin keeps ``WALL_PROBE_X``
+    clear of a wall on whichever side it walks from, and the wall's own rows
+    on the lane: the cells grown by the probe on X alone (and a pixel, as for
+    pits: the cells are half-open, :class:`_OriginRule` strict), restated for
+    the body.
+
+    Measured live on round 6: the housing at x 2512..2680 over lanes 0-63
+    (its left edge 8 px further right per row) stopped a walk on lanes 56-63
+    at x 2557 for 70 s, one row above free floor, while the router -- which
+    had no idea it was there -- planned straight RIGHT every tick, until the
+    round clock ran out.
+    """
+
+    rule = _OriginRule(body, origin)
+    reach = WALL_PROBE_X + 1
+    return [
+        rule.rect(Rect(w.world_x - reach, w.lane_y - 1, w.width + 2 * reach, w.height + 1))
+        for w in find_all(context, Wall)
+    ]
+
+
+def wall_probe_blocks(context: Context, world_x: float, lane_y: float, vel_x: float) -> bool:
+    """Would ``$3C92`` undo a step that leaves the mover's origin here?"""
+
+    probe_x = world_x + (WALL_PROBE_X if vel_x >= 0 else -WALL_PROBE_X)
+    return any(
+        w.world_x <= probe_x < w.world_x + w.width and w.lane_y <= lane_y < w.lane_y + w.height
+        for w in find_all(context, Wall)
+    )
+
+
+def press_obstacles(context: Context) -> list[Rect]:
+    """The drop zones of every committed press (``ai/press.py``), as they are.
+
+    Already a body test -- the fall's box against the player's own box -- so
+    there is nothing to restate. Only while the press is committed: armed with
+    nobody in its window it must stay walkable, or nothing would set it off.
+    """
+
+    return press_model.committed_zones(context)
 
 
 def pit_obstacles(
@@ -785,9 +850,14 @@ def jump_landing_is_safe(
     - No walk reaches (the pit spans the playable Y): yes only if the
       landing origin is not itself in a pit, i.e. this is a jump *over* to
       solid ground, not a jump *into* the hole.
+
+    Never onto a live press's drop zone (``press.lands_in_reach``): the
+    landing sets it off and the recovery holds the actor under it.
     """
 
     if any_pit_endangers(context, target_x, actor.world_y):
+        return False
+    if press_model.lands_in_reach(context, body_rect(actor).moved_by(target_x - actor.world_x, 0)):
         return False
     if plan_lane_route(context, actor, target_x).reached:
         return True

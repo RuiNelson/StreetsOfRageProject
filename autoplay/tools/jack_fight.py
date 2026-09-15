@@ -14,6 +14,14 @@ front of him or thrown. So a hit is attributed through the player's own
 with that Jack's primary state and spawn personality (``+$40`` low
 nibble).
 
+A loss with no attacker is the round clock when a time-over sequence
+(``$FFFA49``) ran in the seconds before it (``time_over_s_ago``). The clock
+alone cannot say so: the sequence ends by writing 55 to it and taking the
+player's health on the same frame, and a respawn (``$1E0E``) puts the player
+at the camera's left edge -- so the tick the loss shows up on reads neither
+00 nor where the actor died. ``clock_before``/``p1_before`` are the tick
+before it.
+
 Rounds with Jack (the ELC census in ``autoplay/CLAUDE.md``): 2 and 4
 (personality 0), 5 (2 and 3), 6 and 8 (0 and 1). The run ends when a boss
 appears, the level changes, or ``--seconds`` runs out.
@@ -52,6 +60,9 @@ ROUND_BOSS_TYPES = frozenset({0x30, 0x35, 0x55, 0x56, 0x57, 0x58})
 PLAYER_MAX_HEALTH = 80
 SLOT_COUNT = 66
 HIT_HISTORY_TICKS = 30
+# The time-over freezes 255 frames, then the KO and the respawn play out: a
+# loss this soon after the sequence was up is the clock's.
+TIME_OVER_WINDOW_S = 15.0
 
 
 def _u8(b: bytes, o: int) -> int:
@@ -174,6 +185,9 @@ def main() -> int:
         started_at = None
         end_state = "timeout"
         last_hp = prev_lives = None
+        # The tick before, and the last tick a time-over sequence was up: the
+        # tick a clock death shows up on already reads the sequence's 55.
+        prev_clock = prev_pos = last_time_over_t = None
         hits: list[dict] = []
         recent_verbs: deque = deque(maxlen=HIT_HISTORY_TICKS)
         verbs_with_jack: Counter[str] = Counter()
@@ -222,6 +236,10 @@ def main() -> int:
                 clock_raw = client.read_memory(mm.ADDR_GAME_TIMER, 4)
                 clock_bcd = clock_raw[1]
                 clock = (clock_bcd >> 4) * 10 + (clock_bcd & 0x0F)
+                # Up for the time-over's 255 frozen frames; the playable test
+                # above does not stop at it (the player object stays type 1).
+                if client.read_memory(mm.ADDR_TIME_OVER_SEQUENCE, 1)[0]:
+                    last_time_over_t = t0
                 slots = {
                     f"obj{i:02d}": table[i * 0x80 : (i + 1) * 0x80] for i in range(SLOT_COUNT)
                 }
@@ -264,6 +282,8 @@ def main() -> int:
                         rec["dead_t"] = round(elapsed, 2)
 
                 p1 = snap.players[0]
+                p1e = next((e for e in snap.world_map.entities if e.slot == "P1"), None) if snap.world_map else None
+                p1_pos = [p1e.world_x, p1e.world_y] if p1e else None
                 attacker = slot_for_ptr(_u16(p1raw, 0x7E))
                 lost_life = p1.lives is not None and prev_lives is not None and p1.lives < prev_lives
                 took = p1.health is not None and last_hp is not None and p1.health < last_hp
@@ -289,6 +309,9 @@ def main() -> int:
                             owner_state = src[0x30]
                         else:
                             source = f"type_{src[0]:02X}"
+                    time_over_s_ago = round(t0 - last_time_over_t, 2) if last_time_over_t is not None else None
+                    if time_over_s_ago is not None and time_over_s_ago <= TIME_OVER_WINDOW_S:
+                        source = "round_clock"
                     if owner_slot in jacks:
                         jacks[owner_slot]["hits"] += 1
                         jacks[owner_slot]["damage"] += (last_hp - p1.health) if took else last_hp
@@ -297,25 +320,29 @@ def main() -> int:
                         "damage": (last_hp - p1.health) if took else last_hp,
                         "life_lost": bool(lost_life),
                         "clock": clock,
+                        "clock_before": prev_clock,
+                        "time_over_s_ago": time_over_s_ago,
                         "source": source,
                         "attacker": attacker,
                         "owner": owner_slot,
                         "owner_state": owner_state,
                         "verb": verb_name,
                         "recent_verbs": compress(list(recent_verbs)),
-                        "p1": [snap.world_map and next((e.world_x for e in snap.world_map.entities if e.slot == "P1"), None),
-                               next((e.world_y for e in snap.world_map.entities if e.slot == "P1"), None) if snap.world_map else None],
+                        "p1": p1_pos,
+                        "p1_before": prev_pos,
                         "jacks": live_jacks,
                         "axes": axe_rows,
                     }
                     hits.append(hit)
                     print(
                         f"HIT t={hit['t']} dmg={hit['damage']} src={source} owner={owner_slot} "
-                        f"owner_state={owner_state} verb={verb_name}",
+                        f"owner_state={owner_state} verb={verb_name} clock={clock}<-{prev_clock} "
+                        f"time_over_s_ago={time_over_s_ago}",
                         flush=True,
                     )
                 recent_verbs.append(verb_name)
                 prev_slots = slots
+                prev_clock, prev_pos = clock, p1_pos
                 if p1.health is not None:
                     last_hp = p1.health
                 if p1.lives is not None:
@@ -325,7 +352,6 @@ def main() -> int:
                     jack_ticks += 1
                     verbs_with_jack[verb_name or "None"] += 1
                 if live_jacks or axe_rows:
-                    p1e = next((e for e in snap.world_map.entities if e.slot == "P1"), None) if snap.world_map else None
                     sink.write(
                         json.dumps(
                             {
@@ -368,7 +394,6 @@ def main() -> int:
                     break
                 if t0 - last_report > 10.0:
                     last_report = t0
-                    p1e = next((e for e in snap.world_map.entities if e.slot == "P1"), None) if snap.world_map else None
                     print(
                         f"t={elapsed:.1f} x={p1e.world_x if p1e else None} hp={p1.health} "
                         f"lives={p1.lives} jacks={len(live_jacks)} axes={len(axe_rows)} verb={verb_name}",
@@ -389,6 +414,7 @@ def main() -> int:
         "hits_total": len(hits),
         "damage_total": sum(h["damage"] or 0 for h in hits),
         "lives_lost": sum(1 for h in hits if h["life_lost"]),
+        "lives_lost_to_the_clock": sum(1 for h in hits if h["life_lost"] and h["source"] == "round_clock"),
         "hits_by_source": dict(Counter(h["source"] for h in hits)),
         "hits_by_owner_state": dict(Counter(str(h["owner_state"]) for h in hits)),
         "jacks": list(jacks.values()),

@@ -86,9 +86,11 @@ class ObjectCatalogTests(unittest.TestCase):
         )
 
     def test_round6_moving_hazard_is_not_a_breakable(self) -> None:
+        # Nor a projectile: a zero-velocity "threat" within 24 lanes of it,
+        # while its drop boxes reach 48 lanes above it (ai/press.py).
         style = style_for_type(0x42)
         self.assertIsNotNone(style)
-        self.assertEqual(style.kind, "projectile")
+        self.assertEqual(style.kind, "hazard")
 
     def test_antonio_boomerang_is_a_tracked_projectile(self) -> None:
         """Type $96 is Antonio's linked boomerang/attack object (see
@@ -252,8 +254,23 @@ class WorldMapParseTests(unittest.TestCase):
         )
         hazard = next(entity for entity in world.entities if entity.type_id == 0x42)
 
-        self.assertEqual(hazard.kind, "projectile")
+        self.assertEqual(hazard.kind, "hazard")
         self.assertEqual(hazard.combat_phase, CombatPhase.ATTACKING)
+
+    def test_round6_armed_press_is_not_attacking(self) -> None:
+        # Armed (1) it waits for a player's X; only the shake and the fall
+        # are its attack (ai/press.py).
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+        self._put_object(actors, type_id=0x42, state=1, damage=0x14)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+        hazard = next(entity for entity in world.entities if entity.type_id == 0x42)
+
+        self.assertEqual(hazard.combat_phase, CombatPhase.NORMAL)
 
     def test_projectile_velocity_is_decoded(self) -> None:
         """Projectile-kind objects share the generic +$20/+$24 velocity fields

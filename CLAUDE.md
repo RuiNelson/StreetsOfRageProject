@@ -277,9 +277,13 @@ turbo host up (`./scripts/run --turbo 4 --lang en --debugUtils --port 7777
 --silent`), it plays the round with every other ordinary family swept
 (`DebugScenario(only_enemy="jack")`), police and food off, attributes each
 hit to the axe that landed it, its state and its owner's, and logs the round
-clock (`$FFFB01`, two BCD digits) every tick: a life lost to a full-health
-"hit" with no attacker is the clock only if it reads 00 (a pit looks the
-same otherwise), and a Jack stalemate is what runs it out. Round 2 has three
+clock (`$FFFB01`, two BCD digits) every tick. A loss with no attacker is the
+clock's when it comes within 15 s of a time-over (`$FFFA49`; the hit reads
+`source: round_clock`): the time-over ends by writing 55 to the clock and
+taking the player's health on the same frame, so the clock never reads 00
+there. A Jack stalemate runs it out, and so does a walk stuck on terrain --
+round 6 has no pits, but it has machine housings and drop presses (see
+`autoplay/CLAUDE.md`, **Round 6: the factory floor**). Round 2 has three
 personality-0 Jacks; round 4 one; round 5 four jumpers at once, then a
 juggle-walker at the level's right X bound (`$1510`); round 6 a personality 1
 (retreat and ranged throw).

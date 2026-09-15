@@ -114,7 +114,8 @@ class GameSnapshot:
     police_special_active: bool = False
     police_special_caller: int | None = None  # 0=P1, 1=P2 while special active
     floor_holes: tuple[FloorHole, ...] = ()
-    # Collision-class ≥ 2 walls / machine housings (always used for nav).
+    # Walls by the round's own floor table (hazards.find_collision_barriers):
+    # round 6's machine housings. The AI routes round them as ``Wall`` tokens.
     floor_barriers: tuple[FloorHole, ...] = ()
     players: tuple[PlayerSnapshot, PlayerSnapshot] = ()
     world_map: WorldMap = field(default_factory=empty_world_map)

@@ -22,7 +22,8 @@ from sor_autoplay.world_map import MapEntity
 from .tokens import Myself, Partner
 from .tokens import Boss, Enemy, Grunt, Jack, Nora, enemy_class_for_type
 from .tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, Stage
-from .tokens import Breakable, Pit, Projectile
+from .tokens import Breakable, Pit, Press, Projectile, Wall
+from .press import PRESS_TYPE
 from .tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
 from .tokens import Weapon, build_pickup_token
 from .tokens import Context
@@ -490,6 +491,16 @@ def generate_direct_observation_tokens(
                         hitbox=entity.hitbox,
                     )
                 )
+        elif entity.kind == "hazard" and entity.type_id == PRESS_TYPE:
+            context.add(
+                Press(
+                    slot=entity.slot,
+                    world_x=entity.world_x,
+                    world_y=entity.world_y,
+                    world_z=entity.world_z,
+                    state=entity.action_state,
+                )
+            )
 
     if nora_tracker is not None:
         nora_tracker.forget_missing(frozenset(live_nora_slots))
@@ -501,6 +512,16 @@ def generate_direct_observation_tokens(
                 lane_y=hole.lane_y,
                 width=hole.width,
                 height=hole.height,
+            )
+        )
+
+    for wall in snapshot.floor_barriers:
+        context.add(
+            Wall(
+                world_x=wall.world_x,
+                lane_y=wall.lane_y,
+                width=wall.width,
+                height=wall.height,
             )
         )
 

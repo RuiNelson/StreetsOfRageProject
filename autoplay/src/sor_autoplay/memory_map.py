@@ -53,6 +53,11 @@ ADDR_PRIMARY_BLOCKMAP_STRIDE = 0xFFE02E
 
 # Level collision (packed two 4-bit classes per byte). Class 0 ≈ open/hole.
 ADDR_LEVEL_COLLISION_CLASS_MAP = 0xFFA000
+# The time-over sequence ($10976): 3 on the frame the round clock reaches 00,
+# then 1 while $FA4A counts 255 frames down with every object frozen; it ends
+# by writing 55 to the clock and taking 80 from the player ($109DE) -- so the
+# tick a clock death shows up on reads 55, never 00.
+ADDR_TIME_OVER_SEQUENCE = 0xFFFA49
 
 # Pause / police special (see addresses.csv + ai-analysis).
 ADDR_POLICE_SPECIAL_ACTIVE = 0xFFFA1A

@@ -8,7 +8,7 @@ from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay.ai.tokens import Abadede, Enemy, Garcia, Jack, Nora, Souther
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, Stage
 from sor_autoplay.ai.tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
-from sor_autoplay.ai.tokens import Pit, Projectile
+from sor_autoplay.ai.tokens import Pit, Press, Projectile, Wall
 from sor_autoplay.ai.observe import (
     HoldTracker,
     NoraAttackTracker,
@@ -648,6 +648,56 @@ class PitObservationTests(unittest.TestCase):
         context = generate_direct_observation_tokens(snapshot, player_index=1)
 
         self.assertEqual(find_all(context, Pit), [])
+
+
+class WallAndPressObservationTests(unittest.TestCase):
+    def test_floor_barriers_become_wall_tokens(self) -> None:
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        walls = (FloorHole(world_x=2568, lane_y=56, width=112, height=8),)
+        snapshot = replace(
+            _snapshot(players=(p1, p2), entities=(_player_entity(slot="P1"),), level_index=5),
+            floor_barriers=walls,
+        )
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        self.assertEqual(
+            find_all(context, Wall), [Wall(world_x=2568, lane_y=56, width=112, height=8)]
+        )
+
+    def test_the_press_is_a_press_not_a_projectile(self) -> None:
+        # Type $42 used to be catalogued as a projectile: a zero-velocity
+        # threat within 24 lanes, while its box reaches 48 lanes above it.
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        press = MapEntity(
+            kind="hazard",
+            family="Stage hazard",
+            symbol="!",
+            color="#ef4444",
+            label="Press",
+            type_id=0x42,
+            world_x=900,
+            world_y=112,
+            world_z=64,
+            map_x=float(900 - 768),
+            map_y=112.0,
+            health=0,
+            slot="obj06",
+            action_state=2,
+        )
+        snapshot = _snapshot(
+            players=(p1, p2), entities=(_player_entity(slot="P1"), press), level_index=5
+        )
+
+        context = generate_direct_observation_tokens(snapshot, player_index=1)
+
+        self.assertEqual(
+            find_all(context, Press),
+            [Press(slot="obj06", world_x=900, world_y=112, world_z=64, state=2)],
+        )
+        self.assertEqual(find_all(context, Projectile), [])
 
 
 class AnimationInProgressTests(unittest.TestCase):

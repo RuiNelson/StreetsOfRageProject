@@ -15,6 +15,7 @@ from __future__ import annotations
 import math
 from typing import Callable
 
+from . import press as press_model
 from .. import prop_solids
 from ..memory_map import ACTION_HOLD_CROSSOVER
 from ..phases import CombatPhase, is_dangerous
@@ -520,6 +521,17 @@ def could_hold_actions(context: Context) -> Context:
             ):
                 verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
                 continue
+
+        def crossover_lands_under_a_press(body_in_hand: Enemy) -> bool:
+            # The crossover carries the actor over the body in hand to the
+            # mirror of where it stands, and the hold keeps it there: a live
+            # press over that ground sets itself off and comes down on the
+            # actor still locked in the hold (press.lands_in_reach). Where it
+            # would, the hold keeps to B -- a knee, or in a back hold the
+            # suplex -- and the actor stays where it is.
+            landing = nav.body_rect(actor).moved_by(2 * (body_in_hand.world_x - actor.world_x), 0)
+            return press_model.lands_in_reach(context, landing)
+
         if isinstance(held, Jack):
             # Jack's loop (jack.hold_step): in a back hold, wait out his axes
             # still in the air -- they point away from a holder behind him and
@@ -529,6 +541,8 @@ def could_hold_actions(context: Context) -> Context:
             step = jack_plan.hold_step(
                 actor, held, find_all(context, Projectile), camera=find(context, CameraRange)
             )
+            if step is souther_plan.HoldStep.CROSS and crossover_lands_under_a_press(held):
+                step = souther_plan.HoldStep.KNEE
             if step is souther_plan.HoldStep.KNEE:
                 grace = reach.frames_until_any_melee_lands(
                     actor, enemies, ignore_slots=frozenset({held.slot})
@@ -555,6 +569,8 @@ def could_hold_actions(context: Context) -> Context:
                 step = abadede_plan.hold_step(actor, held)
             else:
                 step = souther_plan.hold_step(actor, held)
+            if step is souther_plan.HoldStep.CROSS and crossover_lands_under_a_press(held):
+                step = souther_plan.HoldStep.KNEE
             if step is souther_plan.HoldStep.KNEE:
                 verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
             elif step is souther_plan.HoldStep.RELEASE:
@@ -633,7 +649,9 @@ def could_hold_actions(context: Context) -> Context:
             else:
                 # Standard: knee damage, or flip for a suplex finish.
                 verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
-            if has_time_to_suplex:
+            if has_time_to_suplex and not (
+                nearest is not None and crossover_lands_under_a_press(nearest)
+            ):
                 verbs.add(FlipHold(actor_slot=actor.slot, target_slot=target_slot))
             elif not rear:
                 # There is time for another knee but not for the suplex chain,

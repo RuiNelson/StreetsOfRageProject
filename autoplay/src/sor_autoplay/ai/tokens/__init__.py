@@ -94,8 +94,10 @@ from .essential import (
 from .hazard_tokens import (
     Breakable,
     Pit,
+    Press,
     Projectile,
     StageObjects,
+    Wall,
 )
 from .pickup_tokens import (
     HEALTH_DELTA,

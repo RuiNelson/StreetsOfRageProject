@@ -96,3 +96,35 @@ class Breakable(StageObjects):
     # and which needs only ``type_id``. Kept for display and for anything
     # that wants the sprite's own extent.
     hitbox: Hitbox | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Wall(StageObjects):
+    """Terrain a walk cannot enter: floor standing 8+ px above the street's.
+
+    Observed from ``GameSnapshot.floor_barriers`` (``hazards.find_collision_
+    barriers``, by the round's own floor table): round 6's machine housings,
+    160 px tall. ``$3C92`` probes 8 px ahead of the mover's own position on
+    its lane, so it is a point rule like a prop's (``navigation.wall_obstacles``).
+    """
+
+    world_x: int
+    lane_y: int
+    width: int
+    height: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Press(StageObjects):
+    """Round 6's drop press (type ``$42``), with the state its fall is timed by.
+
+    Observed from map entities of kind ``"hazard"``; ``ai/press.py`` is the
+    ROM model (``state`` is its ``+$30``: 1 armed, 2 shaking, 3 falling, 4-8
+    down and back up).
+    """
+
+    slot: str
+    world_x: int
+    world_y: int
+    world_z: int
+    state: int

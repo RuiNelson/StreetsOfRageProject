@@ -80,6 +80,7 @@ from . import bongo as bongo_plan
 from . import jack as jack_plan
 from . import souther as souther_plan
 from . import navigation as nav
+from . import press as press_model
 from .decide import (
     BREAKABLE_PUNCH_X,
     BREAKABLE_APPROACH_Y,
@@ -2695,6 +2696,54 @@ def _pit_escape_mask(context: Context, actor: Myself) -> int | None:
     return None
 
 
+def _press_escape_mask(context: Context, actor: Myself) -> int | None:
+    """The walk out of a committed press's drop zone (``ai/press.py``), or
+    ``None`` while the actor's body is clear of every one.
+
+    The router keeps a walk out of a committed press's zone
+    (``navigation.press_obstacles``), but a press can commit with the actor
+    already inside -- the walk that sets one off crosses its trigger where
+    ``$EA`` starts, and nothing stops a strike or a hold being taken under
+    one -- and a body buried in an obstacle is exactly what the path finder
+    drops the obstacle for. From the trigger, the box first reaches a
+    standing body after 11 updates of shaking and ~10 of falling. Every
+    direction is played forward at the character's own walk
+    (``press.escape_step``) with the ROM's refusals -- the lane band and the
+    camera clamp hold the origin, a wall (``$3C92``) or a pit's danger undoes
+    the step -- and the one out soonest is held.
+    """
+
+    zones = press_model.committed_zones(context)
+    if not zones:
+        return None
+    body = nav.body_rect(actor)
+    if not any(body.overlaps(zone) for zone in zones):
+        return None
+    lane_lo, lane_hi = _lane_bounds(context)
+    camera = find(context, CameraRange)
+    pits = find_all(context, Pit)
+
+    def constrain(x: float, y: float, vel_x: float) -> tuple[float, float] | None:
+        y = min(max(y, lane_lo), lane_hi)
+        if camera is not None:
+            x = min(max(x, camera.left), camera.right)
+        if nav.wall_probe_blocks(context, x, y, vel_x):
+            return None
+        if any(pit_endangers(pit, round(x), round(y)) for pit in pits):
+            return None
+        return x, y
+
+    step_x, step_y = press_model.escape_step(
+        body,
+        (float(actor.world_x), float(actor.world_y)),
+        zones,
+        speeds=kinematics.walk_speeds(actor.character_id),
+        constrain=constrain,
+    )
+    mask = RIGHT_MASK if step_x > 0 else LEFT_MASK if step_x < 0 else 0
+    return mask | (DOWN_MASK if step_y > 0 else UP_MASK if step_y < 0 else 0)
+
+
 _DIRECTION_MASKS = UP_MASK | DOWN_MASK | LEFT_MASK | RIGHT_MASK
 
 
@@ -2997,6 +3046,10 @@ def execute_tick(
         # only: once airborne the trajectory is committed.
         if actor is not None and not actor.is_airborne:
             mask = _pit_escape_mask(context, actor)
+            if mask is None:
+                # The same kind of constraint, after the pit: a fall costs a
+                # life, a press 20 and a knockdown.
+                mask = _press_escape_mask(context, actor)
             if mask is not None:
                 _hold_steered(gamepad, mask)
                 return

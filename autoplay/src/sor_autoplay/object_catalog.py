@@ -13,7 +13,7 @@ from dataclasses import dataclass
 class EntityStyle:
     """How one live object should appear on the 2D map."""
 
-    kind: str  # player | enemy | boss | weapon | breakable | pickup | projectile | other
+    kind: str  # player | enemy | boss | weapon | breakable | pickup | projectile | hazard | other
     family: str
     symbol: str
     color: str  # Tk color string
@@ -120,12 +120,14 @@ _BREAKABLE_STYLES: dict[int, EntityStyle] = {
     0x45: EntityStyle("breakable", "Breakable", "◆", "#d97706", "Moving prop"),
 }
 
-# Type $42 is a Round-6 hydraulic press.  Its initializer writes outgoing
-# damage $14 and its state machine repeatedly moves it on Z ($40 ↔ $A0);
-# unlike the prop families above, it has no player-hit destruction path.
-# Treat as an avoid-only solid obstacle (cannot walk through; do not stand under).
+# Type $42 is round 6's drop press (ai/press.py). It stands 96 px over the
+# bottom lane ($7A8E: z $40, damage $14), drops when a player's X comes into
+# (x - $30, x + $60], and while it falls two attack boxes reaching up to 56 px
+# either side of it hurt for 20. It has no body box and no push-back rectangle
+# (a walk goes under it) and no player-hit destruction path: its own kind,
+# never a projectile to sidestep nor a prop to smash.
 _HAZARD_STYLES: dict[int, EntityStyle] = {
-    0x42: EntityStyle("projectile", "Stage hazard", "!", "#ef4444", "Press"),
+    0x42: EntityStyle("hazard", "Stage hazard", "!", "#ef4444", "Press"),
 }
 
 # Consumable pickups (types with shared effect index at +$50).

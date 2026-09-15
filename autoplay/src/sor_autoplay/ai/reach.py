@@ -1367,8 +1367,9 @@ def projectile_ticks_to_impact(projectile: Projectile, actor: PlayableCharacter)
 def projectile_threatens(projectile: Projectile, actor: PlayableCharacter) -> bool:
     """True when the projectile is heading toward the actor in-lane soon.
 
-    Stage-hazard projectiles with zero X velocity (e.g. a vertical press) are
-    treated as threats when already overlapping the actor's X column.
+    A projectile with zero X velocity is a threat when already on or near the
+    actor's X column. (Round 6's press used to come through here too; it is a
+    ``Press`` now, and its drop zone is not its lane -- see ``ai/press.py``.)
     """
 
     if abs(projectile.world_y - actor.world_y) > PROJECTILE_LANE_SLACK:
