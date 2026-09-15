@@ -131,6 +131,7 @@ from .walk_verbs import (
     EngageAbadede,
     EngageAntonio,
     EngageBongo,
+    EngageJack,
     EngageSouther,
     ProjectileSidestep,
     RetreatFromDanger,

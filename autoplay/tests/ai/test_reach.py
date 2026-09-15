@@ -147,7 +147,9 @@ class EnemyForwardDxTests(unittest.TestCase):
 
 
 class RearAttackWarrantedTests(unittest.TestCase):
-    def test_jack_facing_the_actor_from_behind_is_warranted(self) -> None:
+    def test_jack_is_judged_like_any_lone_grunt(self) -> None:
+        # No chord is ever produced at Jack (EngageJack owns him), and the
+        # predicate keeps no special case for him either.
         actor = _myself(world_x=100, world_y=100)
         jack = Jack(
             slot="obj01",
@@ -158,22 +160,6 @@ class RearAttackWarrantedTests(unittest.TestCase):
             combat_phase=CombatPhase.NORMAL,
             targets_player=1,
             facing_left=False,
-            has_projectile=False,
-        )
-        self.assertTrue(reach.rear_attack_is_warranted(actor, jack, [jack]))
-
-    def test_on_jacks_back_the_chord_is_not_warranted(self) -> None:
-        # Actor overshot to x=150 facing right; Jack at 130 facing left.
-        actor = _myself(world_x=150, world_y=100, facing_left=False)
-        jack = Jack(
-            slot="obj01",
-            type_id=0x27,
-            world_x=130,
-            world_y=100,
-            health=10,
-            combat_phase=CombatPhase.NORMAL,
-            targets_player=1,
-            facing_left=True,
             has_projectile=False,
         )
         self.assertFalse(reach.rear_attack_is_warranted(actor, jack, [jack]))
@@ -949,16 +935,13 @@ class GrabReasonsTests(unittest.TestCase):
 
         self.assertEqual(reach.grab_reasons(set(), myself, front, [front]), frozenset())
 
-    def test_promotes_jack_when_the_actor_is_on_his_back(self) -> None:
-        # Jack faces left at x=130; the actor at x=150 is behind him and
-        # facing him -- the hold that lands before the axe turns around.
+    def test_jack_earns_no_reason_of_his_own(self) -> None:
+        # On his back, facing him: EngageJack takes that hold (jack.py), so
+        # GrabEnemy needs no reason for it.
         myself = _myself(world_x=150, world_y=100, facing_left=True)
         jack = _jack(slot="obj01", world_x=130, world_y=100, facing_left=True)
 
-        self.assertEqual(
-            reach.grab_reasons(set(), myself, jack, [jack]),
-            frozenset({GrabReason.JACK_FROM_BEHIND}),
-        )
+        self.assertEqual(reach.grab_reasons(set(), myself, jack, [jack]), frozenset())
 
     def test_does_not_promote_jack_when_he_is_facing_the_actor(self) -> None:
         myself = _myself(world_x=100, world_y=100, facing_left=False)
@@ -1462,21 +1445,28 @@ class IsSoutherClawTests(unittest.TestCase):
 
 
 class JackStillJugglingTests(unittest.TestCase):
-    def test_ignored_while_still_juggling(self) -> None:
+    """The axe's own +$30/+$31 say whether it has a flight (ai/jack.py)."""
+
+    def _axe(self, state: int, flags: int) -> Projectile:
+        return Projectile(
+            slot="obj10", world_x=150, world_y=100, vel_x=-10.0, vel_z=0.0, type_id=0x28,
+            state=state, flags_31=flags,
+        )
+
+    def test_ignored_while_juggled_tossed_or_dropped(self) -> None:
         jack = _jack(slot="obj20", world_x=140, world_y=100, has_projectile=True)
-        axe = Projectile(
-            slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0, type_id=0x28
-        )
+        for state in (1, 2, 3):
+            self.assertTrue(reach.jack_still_juggling(self._axe(state, 0x01), {jack}))
 
-        self.assertTrue(reach.jack_still_juggling(axe, {jack}))
+    def test_a_throw_waiting_for_his_release_frame_is_not_out_yet(self) -> None:
+        # 64 px over his head until his frame 1: nothing to step off.
+        self.assertTrue(reach.jack_still_juggling(self._axe(4, 0x01), set()))
 
-    def test_no_longer_juggling_once_thrown(self) -> None:
-        jack = _jack(slot="obj20", world_x=300, world_y=100, has_projectile=False)
-        axe = Projectile(
-            slot="obj10", world_x=150, world_y=100, vel_x=-5.0, vel_z=0.0, type_id=0x28
-        )
-
-        self.assertFalse(reach.jack_still_juggling(axe, {jack}))
+    def test_a_released_throw_is_out_even_point_blank(self) -> None:
+        # The old distance guess called this one "still juggling" within 40 px
+        # of him -- exactly where his aligned throw is released.
+        jack = _jack(slot="obj20", world_x=140, world_y=100, has_projectile=True)
+        self.assertFalse(reach.jack_still_juggling(self._axe(4, 0x03), {jack}))
 
     def test_other_projectile_types_are_never_his_axe(self) -> None:
         jack = _jack(slot="obj20", world_x=140, world_y=100, has_projectile=True)

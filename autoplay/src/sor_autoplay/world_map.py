@@ -231,6 +231,7 @@ class MapEntity:
     boss_hold_flags: int = 0  # +$66 bit 0 = held
     fine_x: float = 0.0  # +$10 as 16.16
     fine_y: float = 0.0  # +$14 as 16.16
+    fine_z: float = 0.0  # +$18 as 16.16 (Jack and his axes: the juggle arc is fractional)
     # Abadede ($30) only: the substate +$5B his handlers dispatch on and the
     # +$54 word his timers count (memory_map.OBJ_BESPOKE_*).
     boss_substate: int = 0
@@ -244,6 +245,19 @@ class MapEntity:
     boomerang_turn_lane: int = 0  # +$78 word: what its turn copies into +$52
     boomerang_knock_timer: int = 0  # +$7B: updates left once knocked away
     child_ptr: int = 0  # later boss +$6E: its linked child (Antonio's boomerang)
+    # Jack ($27) and his axes ($28) only: the rest of what one update of theirs
+    # reads, so ai/jack.py can replay it. The animation, latched boxes, screen
+    # X and fine position fill the boss fields above.
+    ordinary_flags: int = 0  # +$31, the state-local flag byte
+    animating: bool = False  # +$01 bit 2: the renderer steps +$0A only while set
+    anim_reload: int = 0  # +$0C: what +$0D reloads from on a frame step
+    approach_x: int = 0  # Jack +$60: the point $9604 walks him to ...
+    approach_y: int = 0  # ... +$62 ...
+    approach_speed: int = 0  # ... at +$64 (8.8 px an update)
+    timer_51: int = 0  # Jack +$51
+    timer_54: int = 0  # Jack +$54
+    axe_offset: float = 0.0  # axe +$54: its X offset from Jack (16.16)
+    owner_ptr: int = 0  # axe +$42: Jack's object (low word)
     combat_phase: CombatPhase = CombatPhase.UNKNOWN
     # The object's real body AABB. A player reads its own cached box straight
     # out of the object (+$70, written every frame by $4140) and needs no ROM
@@ -270,6 +284,12 @@ class MapEntity:
             # Already-linked consumables set +$51 before delete.
             return self.interaction == 0
         return False
+
+    @property
+    def owner_slot(self) -> str | None:
+        """The Jack a type-``$28`` axe belongs to (its ``+$42``), as a slot name."""
+
+        return _slot_name_from_object_ptr(self.owner_ptr) if self.owner_ptr else None
 
     # Back-compat aliases used by HUD/app during the rename.
     @property
@@ -718,6 +738,7 @@ def _entity_from_object(
     boss_hold_flags = 0
     fine_x = 0.0
     fine_y = 0.0
+    fine_z = 0.0
     boss_substate = 0
     boss_timer_54 = 0
     boomerang_state = 0
@@ -725,6 +746,13 @@ def _entity_from_object(
     boomerang_turn_lane = 0
     boomerang_knock_timer = 0
     child_ptr = 0
+    ordinary_flags = 0
+    animating = False
+    anim_reload = 0
+    approach_x = approach_y = approach_speed = 0
+    timer_51 = timer_54 = 0
+    axe_offset = 0.0
+    owner_ptr = 0
     phase = CombatPhase.UNKNOWN
 
     if style.kind == "player":
@@ -758,6 +786,30 @@ def _entity_from_object(
         enemy_vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X_ORDINARY)
         enemy_vel_y = fixed1616_signed(slot, mm.OBJ_VEL_LANE_ORDINARY)
         stun_timer = _u8(slot, mm.OBJ_ORDINARY_STUN_TIMER)
+        if type_id == 0x27:
+            # Jack: what ai/jack.py replays of him -- his state flags, the
+            # approach point and speed $9604 walks him by, his animation (his
+            # throws release on its frames) and his height (his jump).
+            vel_z = fixed1616_signed(slot, mm.OBJ_VEL_Z)
+            ordinary_flags = _u8(slot, mm.OBJ_ORDINARY_FLAGS)
+            animating = bool(_u8(slot, mm.OBJ_FLAGS) & mm.OBJ_ANIMATE_BIT)
+            anim = _u16(slot, mm.OBJ_ANIM)
+            anim_frame = _u8(slot, mm.OBJ_ANIM_FRAME)
+            anim_countdown = _u8(slot, mm.OBJ_ANIM_COUNTDOWN)
+            anim_reload = _u8(slot, mm.OBJ_ANIM_RELOAD)
+            attack_box_id = _u8(slot, mm.OBJ_ATTACK_BOX)
+            body_box_id = _u8(slot, mm.OBJ_BODY_BOX)
+            approach_x = _u16(slot, mm.OBJ_APPROACH_X)
+            approach_y = _u16(slot, mm.OBJ_APPROACH_Y)
+            approach_speed = _u16(slot, mm.OBJ_APPROACH_SPEED)
+            timer_51 = _u8(slot, mm.OBJ_ORDINARY_TIMER_51)
+            timer_54 = _u8(slot, mm.OBJ_ORDINARY_TIMER_54)
+            screen_x = _u16(slot, mm.OBJ_SCREEN_X)
+            if screen_x >= 0x8000:
+                screen_x -= 0x10000
+            fine_x = fixed1616_unsigned(slot, mm.OBJ_POS_X)
+            fine_y = fixed1616_unsigned(slot, mm.OBJ_POS_Y)
+            fine_z = fixed1616_signed(slot, mm.OBJ_POS_Z)
         phase = ordinary_enemy_phase(
             primary_state,
             type_id=type_id,
@@ -839,6 +891,26 @@ def _entity_from_object(
             lane_sign = _u8(slot, mm.OBJ_BOSS_LANE_SIGN)
             boomerang_turn_lane = _u16(slot, mm.OBJ_BOOMERANG_TURN_LANE)
             boomerang_knock_timer = _u8(slot, mm.OBJ_BOOMERANG_KNOCK_TIMER)
+        elif type_id == 0x28:
+            # Jack's axe runs the ordinary-object layout: +$1C is its X
+            # velocity and +$20 its lane velocity (the +$20 read above would
+            # project a thrown axe as standing still). +$30 is its own state
+            # (1 juggled, 2 tossed, 3 dropped, 4 thrown), +$54 its offset from
+            # Jack while juggled and +$42 Jack himself (ai/jack.py, AxeSim).
+            vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X_ORDINARY)
+            boss_vel_lane = fixed1616_signed(slot, mm.OBJ_VEL_LANE_ORDINARY)
+            boomerang_state = action_state
+            ordinary_flags = _u8(slot, mm.OBJ_ORDINARY_FLAGS)
+            axe_offset = fixed1616_signed(slot, mm.OBJ_JACK_AXE_OFFSET)
+            owner_ptr = _u16(slot, mm.OBJ_TARGET_PTR)
+            stun_timer = _u8(slot, mm.OBJ_ORDINARY_STUN_TIMER)
+            anim = _u16(slot, mm.OBJ_ANIM)
+            anim_frame = _u8(slot, mm.OBJ_ANIM_FRAME)
+            attack_box_id = _u8(slot, mm.OBJ_ATTACK_BOX)
+            body_box_id = _u8(slot, mm.OBJ_BODY_BOX)
+            fine_x = fixed1616_unsigned(slot, mm.OBJ_POS_X)
+            fine_y = fixed1616_unsigned(slot, mm.OBJ_POS_Y)
+            fine_z = fixed1616_signed(slot, mm.OBJ_POS_Z)
         phase = CombatPhase.ATTACKING
     elif style.kind == "breakable" and outgoing:
         # Round-8 type-$45 moving props set outgoing damage while in flight.
@@ -903,6 +975,17 @@ def _entity_from_object(
         target_unavailable=target_unavailable,
         phase_timer=phase_timer,
         ground_z=ground_z,
+        ordinary_flags=ordinary_flags,
+        animating=animating,
+        anim_reload=anim_reload,
+        approach_x=approach_x,
+        approach_y=approach_y,
+        approach_speed=approach_speed,
+        timer_51=timer_51,
+        timer_54=timer_54,
+        axe_offset=axe_offset,
+        owner_ptr=owner_ptr,
+        fine_z=fine_z,
         vel_x=vel_x,
         vel_z=vel_z,
         enemy_vel_x=enemy_vel_x,

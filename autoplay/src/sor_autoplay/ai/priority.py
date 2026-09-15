@@ -21,6 +21,7 @@ from collections.abc import Callable
 
 from ..phases import HITSTUN_FRAMES, CombatPhase, is_dangerous, is_punishable
 from . import abadede as abadede_plan, antonio as antonio_plan, bongo as bongo_plan, kinematics, reach
+from . import jack as jack_plan
 from .decide import (
     HEALTH_CRITICAL_PERCENT,
     in_smash_range,
@@ -38,6 +39,7 @@ from .tokens import (
     EngageAbadede,
     EngageAntonio,
     EngageBongo,
+    EngageJack,
     EngageSouther,
     FlipHold,
     GrabEnemy,
@@ -160,12 +162,6 @@ _EMERGENCY_ATTACK_PARKED_UNDER_THREAT = 10
 # committed behind (_EMERGENCY_REAR_ATTACK_DANGEROUS, 60): there is no time to
 # walk into anything then.
 _EMERGENCY_GRAB_CLEAR_REAR = 58
-# Caught Jack from behind: take the hold before he turns. Above every
-# strike on an enemy that can still act (20) and above the jump-kick
-# punish (28), just under clearing a pincer (58) -- a rear threat still
-# outranks finishing Jack -- and under the chord against a *committed*
-# Jack at the actor's own back (60), which has no time to walk in.
-_EMERGENCY_GRAB_JACK_FROM_BEHIND = 56
 # An enemy whose every attack starts further out than contact (Nora, per the
 # extracted ranges) has nothing to answer a body pressed against it, so
 # holding it beats trading strikes -- but it is an improvement on an ordinary
@@ -358,6 +354,20 @@ _EMERGENCY_ENGAGE_BONGO_UNDER_GRUNT = 5
 # run is not pressing (abadede.charge_is_pressing) the punch on it wins.
 _EMERGENCY_ENGAGE_ABADEDE = 62
 _EMERGENCY_ENGAGE_ABADEDE_UNDER_GRUNT = 5
+# The whole engage against Jack (EngageJack). His body never strikes -- every
+# hit he lands is a type-$28 axe (jack.py) -- so this is an ordinary enemy's
+# approach, not a boss tier: just above a strike on a plain grunt (20), with
+# the armed raise his juggle earns (+7), a point less per 40 px so two Jacks
+# rank by distance rather than flip on the random tie-break. While an axe of
+# his is out at the actor it takes the tick outright (72): the plan dodges it,
+# and nothing else knows where it flies. While another enemy's committed
+# strike is about to land it drops under the punch on that enemy (5), as the
+# boss engages do for their rounds' grunts.
+_EMERGENCY_ENGAGE_JACK = 30
+_EMERGENCY_ENGAGE_JACK_FLOOR = 22
+_EMERGENCY_ENGAGE_JACK_PER_PX = 40
+_EMERGENCY_ENGAGE_JACK_AXE_OUT = 72
+_EMERGENCY_ENGAGE_JACK_UNDER_GRUNT = 5
 # Lowest of any verb that still scores. Must sit under every other live
 # candidate -- including ScorePickup (9), SpecialPickup (11), LifePickup
 # (12), and WalkToNearEnemy's floor (8) -- so stage advance is only chosen
@@ -615,6 +625,27 @@ def _emergency_engage_abadede(verb: EngageAbadede, context: Context) -> int:
     return _with_target_class(_EMERGENCY_ENGAGE_ABADEDE, target)
 
 
+def _emergency_engage_jack(verb: EngageJack, context: Context) -> int:
+    target = find(context, Jack, slot=verb.target_slot)
+    actor = _find_actor(context, verb.actor_slot)
+    if target is None or actor is None or target.is_defeated:
+        return _EMERGENCY_DEFAULT
+    if jack_plan.axe_threatens(actor, target, find_all(context, Projectile)):
+        return _EMERGENCY_ENGAGE_JACK_AXE_OUT
+    grunt_incoming = any(
+        isinstance(enemy, Grunt) and reach.is_incoming_melee(actor, enemy)
+        for enemy in reach.on_screen_enemies(context)
+    )
+    if grunt_incoming:
+        return _with_target_class(_EMERGENCY_ENGAGE_JACK_UNDER_GRUNT, target)
+    distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
+    score = max(
+        _EMERGENCY_ENGAGE_JACK_FLOOR,
+        _EMERGENCY_ENGAGE_JACK - int(distance // _EMERGENCY_ENGAGE_JACK_PER_PX),
+    )
+    return _with_target_class(score, target)
+
+
 def _emergency_hit_antonio_boomerang(verb: HitAntonioBoomerang, context: Context) -> int:
     projectile = find(context, Projectile, slot=verb.target_slot)
     if projectile is None:
@@ -626,7 +657,6 @@ def _emergency_hit_antonio_boomerang(verb: HitAntonioBoomerang, context: Context
 # _EMERGENCY_GRAB_* constants above for why each tier is where it is.
 _GRAB_REASON_SCORE: dict[GrabReason, int] = {
     GrabReason.CLEAR_REAR: _EMERGENCY_GRAB_CLEAR_REAR,
-    GrabReason.JACK_FROM_BEHIND: _EMERGENCY_GRAB_JACK_FROM_BEHIND,
     GrabReason.DEAD_ZONE: _EMERGENCY_GRAB_DEAD_ZONE,
     GrabReason.WHILE_SURROUNDED: _EMERGENCY_GRAB_WHILE_SURROUNDED,
     GrabReason.DODGE_CHARGE: _EMERGENCY_GRAB_TO_DODGE_CHARGE,
@@ -962,6 +992,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     EngageAntonio: _emergency_engage_antonio,
     EngageBongo: _emergency_engage_bongo,
     EngageAbadede: _emergency_engage_abadede,
+    EngageJack: _emergency_engage_jack,
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
 }

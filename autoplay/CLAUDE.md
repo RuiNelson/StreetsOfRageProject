@@ -15,7 +15,8 @@ flags), plus an opt-in **symbolic AI** (`ai/` — Phase A of the design in
 module docstrings and [`AI.md`](AI.md) for the Token/Information/Verb
 pipeline and manuscript-grounded combat facts already wired in. Still future
 work: two-player coordination, six-button `--altControls`, and per-boss
-tactics beyond Antonio, Souther, Abadede and Bongo. Antonio is **a lookahead over his own
+tactics beyond Antonio, Souther, Abadede and Bongo. One ordinary enemy has a
+plan of its own, Jack (`ai/jack.py`, **Jack: the ROM model and the plan**). Antonio is **a lookahead over his own
 AI, then knee, knee, release, re-grab until he dies**: `ai/antonio.py`
 replays his state-1 code update by update -- gates, tacticals, the kick's
 frame-by-frame boxes -- and `EngageAntonio` holds the stick that takes the
@@ -947,14 +948,202 @@ before). `tests/ai/test_execute.py`'s `_walk` now undoes a step into a prop's
 wall the way `$3BAE` does -- the facing kept -- which is what a trail
 through that nudge has to look like.
 
-**Jack (user):** If the actor is already on Jack's back (Jack facing away),
-grab immediately (`reach.grab_reasons`' `JACK_FROM_BEHIND`). A jump kick that overshoots leaves
-the actor on his back but facing the wrong way -- that is a turn-and-grab,
-not `RearAttack` (the chord would fire away from him). Prefer `RearAttack`
-when Jack is at the actor's back *and facing them*. His axe juggle and
-lunge punish a turn-and-punch in that geometry. If the actor is holding a
-weapon, use it on Jack -- including while he juggles. Only the unarmed
-punch is refused against the spin.
+**Jack: the ROM model and the plan** (user: "A AI tem sérias dificuldades em
+lidar com o inimigo do tipo Jack ... É essencial construir uma estratégia para
+lidar com este inimigo ... O objetivo é lidar com este inimigo de forma
+eficiente, no menor tempo possível, com o menor dano sofrido. A IA deve lidar
+com todos os ataques, estados, etc. que este inimigo pode ter"; "o inimigo não
+aparece no Stage 1"). Everything the AI does against him is `ai/jack.py`, and
+the plan is the bosses' shape: **take the hold from where no axe of his
+reaches, keep it until his axes are gone, then spend it.** The earlier rules
+(grab him from behind through `GrabReason.JACK_FROM_BEHIND`, the rear chord
+when he faces the actor, the armed swing and the jump kick at him, no unarmed
+punch while he juggled) are gone: they were written without the ROM model,
+and they took 13 of his hits in the baseline below.
+
+What the ROM says (full decode in `ai-analysis/enemy-ai.md`, "Jack"):
+
+- **His body never strikes.** No animation of his carries a strike box and no
+  state tests one: every hit is a type-`$28` axe. His extracted "reach" was a
+  thrown-body box (`attack_ranges.CONFIRMED_TYPE_SHAPES[0x27]` is now empty)
+  and his `$08`-`$0A` were read as a lunge; `phases.py` reads all his states
+  NORMAL but the knockdown.
+- **The juggle**: two axes, 8 updates apart, riding 8 lanes below him and
+  8-24 px in front, each arc pinned to absolute z 128 (apex 96, 15 updates,
+  then 4 px an update back to his hand; ~20 a cycle). On a floor at 160 (round
+  2) the box meets a standing body only near the bottom of the arc and on the
+  way back. An arc that *ends* with his pose off the juggle stance drops the
+  axe; the walk back to his hand never looks, and restarts a whole arc.
+- **The throws**: waiting 64 px over his head, then 10 px an update from 32 px
+  in front of him along his lane - 1, at head height. `$0E` throws three, 12
+  updates apart (the actor within 64 px on X aborts it into `$07`); `$0B`
+  throws both juggled axes after `$0A`'s diagonal back-off onto the actor's
+  lane.
+- **Personalities**: `+$40`'s low nibble picks the state every reset lands in
+  (`$F2DE`): 0 juggle approach + aligned throw (rounds 2, 4, 6, 8), 1 retreat +
+  ranged throw (6, 8), 2 jumps (5), 3 juggle walk (5).
+- **`$07` faces the target every update** (`$9E4C`): there is no "behind him"
+  there -- walk past him and he turns, and the next arcs start on the actor's
+  side. `$DBCC` takes him to lane `$58`/`$18` away from the target's half
+  (round 4 always up, round 6 always down), then walks legs of 2.5-5 px an
+  update toward and past the target and resets only 80 px beyond it -- and a
+  reset off screen fails `$0C`'s entry test and lands straight back in `$07`.
+  The level's X bound (`$9F96`: below `$1510`) refuses the step and does
+  nothing else, so a Jack walking into it waits there until the target is 80
+  px behind him.
+- **The hold**: he is placed 32 px in front of the holder (28 from behind) and
+  his flying axes follow him, so a *front* hold on a juggling Jack is itself a
+  hit, and a back hold keeps them on the far side. The grab only writes his
+  state -- `$A04A` places and poses him on his next update -- so an arc ending
+  on the grab's own pass walks back through a front holder. No escape from a
+  hold; knees 2, 2, 3, suplex 5, throw 4; **only a negative health word
+  kills** (0 is alive). The third knee and the crossover's suplex land him the
+  way the front holder faced, the B+back throw behind it.
+- **A dropped axe still hurts**: `$FED6` (an arc cut short when his pose
+  leaves the juggle stance, a toss he does not catch) only moves it and drops
+  it at 1.125 an update to the floor, but its box stays in the player's hit
+  test and keeps its damage; only a strike's knocked-off copy carries none.
+
+The plan (`jack.plan_engage`, `EngageJack`, `execute.state_machine_engage_jack`,
+`jack.hold_step`):
+
+1. **A lookahead over him and every axe on screen** (`world_update`: his
+   states `$01`-`$12` with their approach points, gates and re-facings, the
+   juggle, the toss, the throws and their release frames), the nine sticks
+   held 2 updates then a tail policy, or held all 16, each under both update
+   orders and scored by the worse: a hold by how soon -- unless
+   `hold_is_burnt` (the axes still up, played over the hold's first 22
+   updates with the one-update pose lag) says an axe meets the holder, which
+   scores as the hit it is; a hit below everything else; the rest by the time
+   to `engage_aim`'s point and whether the end sits in a live juggle's band or
+   a throw's lane. 2.4 ms a tick with one Jack, 9 with eight. **The punch**
+   (when `abadede_can_punch`): thirteen more candidates stand, or walk toward
+   him -- the walk is the turn: B with a turn on one press is sampled
+   pre-turn, a committed miss -- and punch on update 0-6; a strike (`$9B88`: 1 damage, 24 updates of stun, his
+   juggle off so its axes drop, a 2 px push) scores under a hold and over the
+   rest, and the rollout plays on from it -- an axe on the locked actor still
+   counts; at 0 health it kills. No second punch while the stun has more than
+   8 updates to run (`REPUNCH_T50`). The round (`Stage.level_index`) goes in
+   as `level`: his `$07` lane direction and X bound depend on it.
+2. **The aim** (`engage_aim`): out of a throw's lane band first; out of the
+   juggle's band by the nearer lane (9+ above his lane, 25+ below); past him on
+   that side; back to his lane only 16+ px behind his origin, and into his
+   back. In `$07`: mid-screen (`EVADE_CENTRE`, so his reset lands on screen),
+   `POCKET_DY` (13) lanes above him -- out of the juggle, in the punch's reach;
+   only from above his band, from below the actor waits below it -- with no
+   tie-break drift toward him; out of reach and pinned at the level's bound,
+   88 px behind his walk, where `$DBCC` resets him at once; out of reach and
+   walking on, stand -- his walk makes the 80 px, and going after him keeps it
+   short (`_evade_exit`). With no axe of his out, straight in from
+   the front. Down, looking about or held: stand off behind him.
+3. **The hold** (`jack.hold_step`): a back hold waits while a juggled axe is
+   still up (they drop at the end of their arcs); a front hold crosses over
+   out of one about to land (lets go when the crossover is spent). Then knee,
+   knee, cross over, suplex -- 9, which leaves a round-2 Jack (9) alive at 0,
+   so the punch before it makes one hold a kill; from a back hold the suplex
+   when it kills, else the crossover and the knees. Near a camera bound,
+   whichever finisher leaves him less far out of the actor's reach: the
+   crossover's suplex lands him 136 px on the way the actor faced (58 of
+   flight, 78 of slide), the B+back throw 270-278 px behind it. Another
+   enemy's blow landing sooner than a knee finishes gets the throw, as for
+   any grunt.
+4. **Ownership**: `could_engage_jack` for every live Jack in the camera,
+   armed or not, at 0 health too. `Punch`/`MeleeWeaponAttack`, `GrabEnemy`,
+   `RearAttack`, `WalkToNearEnemy` and the grounded `JumpAttack` stand down for
+   him, and `ProjectileSidestep` for a live Jack's axes (`reach.jack_still_juggling`
+   now reads the axe's own `+$30`/`+$31`: the old distance guess called a throw
+   released point-blank "still juggling"). `EngageJack` ranks 30 less a point
+   per 40 px plus the armed raise, 72 while an axe of his is out at the actor
+   (`jack.axe_threatens`), 5 under another enemy's committed strike;
+   `partner.do_not_harm_partner` withdraws it on the partner's Jack.
+5. **Observation**: `world_map` reads Jack's `+$31`, animation, approach point
+   and speed, timers and fine position, and the axe's own state, flags, `+$54`
+   offset, owner (`+$42` -> `owner_slot`), fine z and its real X velocity
+   (`+$1C` -- `vel_x` used to read `+$20`, the lane, so a thrown axe looked
+   motionless).
+
+The model was checked against the ROM before anything was built on it: the
+baseline's per-tick trace replayed offline, axe by axe, update by update --
+3,939 of 3,950 single-update steps exact (the arc, the drift, the walk back,
+the restart, the thrown flight); the 11 misses are 1-3 px while he walks, the
+object pass reading his position before or after his own update.
+
+Scored with `tools/jack_fight.py --level 2` (Blaze, turbo 4, no food, no
+police, every other ordinary family swept; round 2 has three personality-0
+Jacks):
+
+| | Jack hits (damage) | lives lost | round | notes |
+| --- | --- | --- | --- | --- |
+| before (generic verbs) | 13 (156) | 1 | 105 s | 11 juggled-axe hits; `JumpAttack` 1839 ticks at him |
+| plan, first run | 28 (320) | 4, game over | -- | a Jack at 0 health was dropped as dead: no verb for 90 s |
+| + 0 health is alive | 2 (24) | 0 | 81 s | both in `$07`: he turned as the actor walked past |
+| + `$07` faces every update | 2 (24) | 0 | 85 s | one aim through the juggle's band, one front hold burnt by the pose lag |
+| + band exit, hold pose lag, wait for axes in flight | 1 (12) | 2, both the round clock | 210 s | a `$07` stalemate: the actor walked along with him and he reset off screen |
+| + `$07` waits mid-screen | 0 (0) | 0 | 112 s | kills took 34, 31 and 21 s |
+| + the punch | 0 (0) | 1, the round clock | 162 s | in `$07` the actor kept to lane 2 while he walked lane 91 for 50 s |
+| + `$07` pocket, exit and X bound | 3 (36) | 0 | 81 s | kills 10, 17, 30 s; a punch thrown facing away, one from below his band, one unexplained |
+| + punch turns by walking, pocket from above | 1 (12) | 0 | 92 s | kills 12, 31, 20 s; a dropped axe on a front holder |
+| + dropped axes fall, camera-bound throw | 1 (12) | 0 | 87 s | kills 14, 26, 15 s; the hit came from an axe 47 px off, which the `$2B` box cannot reach |
+| + stand while he walks on out of reach | 0 (0) | 0 | 97 s | kills 16, 33, 26 s |
+
+The harness logs the round clock from the "punch turns by walking" runs on.
+Before that, "the round clock" in these tables is read off a full-health,
+no-attacker loss at the end of a long stalemate; a pit looks the same.
+
+Round 5 (`--level 5`: four personality-2 Jacks at once, one with 14 health,
+then a personality-3 one near the level's right X bound):
+
+| | Jack hits (damage) | lives lost | to the boss | notes |
+| --- | --- | --- | --- | --- |
+| the punch | 1 (12) | 1, the round clock | 161 s | the p3 Jack stood 65 s at X 5390 in `$07`, pinned by `$1510` |
+| + `$07` pocket, exit and X bound | 0 (0) | 0 | 93 s | p2 Jacks 10-19 s each, the p3 Jack 6 s |
+| + punch turns by walking, pocket from above | 0 (0) | 0 | 132 s | a p2 Jack suplexed past the camera's right bound took 45 s |
+| + dropped axes fall, camera-bound throw | 0 (0) | 0 | 94 s | p2 Jacks 8-15 s each, the p3 Jack 12 s; three camera-bound throws |
+
+Round 4 (`--level 4`: one personality-0 Jack, whose `$07` always goes up),
+with everything above: no hit, no life lost, Bongo reached in 65 s, the Jack
+dead 8 s after he appeared.
+
+Round 6 (`--level 6`: one personality-1 Jack, the retreat and ranged throw,
+whose `$07` always goes down): no hit from him, dead 10 s after he appeared
+-- each time his retreat aborted into `$07` with the actor inside 64 px, and
+the hold followed. The round's losses were not his: four hits from a
+type-`$42` object, and a life lost with no attacker at X 2474 while the clock
+read 55 (so not the clock; a pit, most likely) after the stage walk had stood
+70 s at X 2557.
+
+**What the live runs taught**, each found in a trace (`jack_fight.py` logs
+every Jack and axe byte per tick, and a hit names the axe from the player's
+`+$7E`):
+
+- a Jack at 0 health is alive and still throwing (`$A13A`'s `bmi`): the first
+  run dropped him and stood still for 90 s;
+- in `$07` he turns every update: two "back" grabs became front holds;
+- the held pose lags the grab by one update: an axe whose arc ends then walks
+  back to his hand -- through a front holder -- and restarts a whole arc;
+- the pocket above his lane is not the way out from below it: 17 lanes below
+  him the aim climbed through the juggle while 8 lanes down cleared it;
+- his `$07` must be waited out mid-screen: an actor that walked along with him
+  let him reset off screen, straight back into `$07`, until the round clock
+  ran out;
+- keeping out of his band is not enough either: an actor that did only that
+  sat at lane 2 while he walked lane 91 to and fro for 50 s. The pocket above
+  him is where the punch ends it;
+- the level's X bound holds his walk and nothing else: pinned at X 5390 with
+  the actor held by the camera at 5344, a round-5 Jack stood 65 s; 88 px
+  behind his walk resets him;
+- a punch pressed with a turn is thrown the old way: facing away in the
+  pocket, five punches whiffed while he walked into the actor, and his walk
+  through it took a front hold with both axes up;
+- the pocket is only reachable from above: from below, a punch on the way,
+  15 lanes under him, landed, and an axe finishing its arc hit the locked
+  actor;
+- a dropped axe still hurts: the arc a front hold cut short fell 128, 137,
+  147, 158 onto the holder 22 px away -- the model had deleted it, so
+  `hold_is_burnt` called that hold clean;
+- at a camera bound the finisher's landing side matters: cross over and
+  suplex threw a round-5 Jack past the right bound, and his jumps kept him
+  out of reach for 30 s.
 
 ## Ownership
 
@@ -1053,6 +1242,7 @@ do not commit `.jsonl` runs.
 | Tool | Role |
 | --- | --- |
 | `boss_fight.py` | **Scores** one boss fight: plays the level for real, then reports killed/died, damage taken, fight length and the verb histogram. `--level`/`--boss-type` select the fight (`--level 1 --boss-type 0x56` is Antonio, `--level 2 --boss-type 0x55` Souther, the default; `--level 3 --boss-type 0x30` Abadede, `--level 4 --boss-type 0x57` Bongo). `--idle-seconds N` keeps the pad released -- no tick, nothing scored -- for N s after the boss appears, and past that until a Bongo is out of his charge (handed the pad with a flame already on the actor, no plan has a move left) or an Abadede out of his run's set-up and run: a start other than the entrance. Each row also carries the nearest ordinary enemy (`grunt`: type, x, lane, state), which is how round 4's grunt was caught punching over a held Bongo. Boss death is the raw signed health word only (zero counts for the later bosses `$55`-`$58`, whose `$17C36` lethal test is `<= 0`, and for Abadede, whose own damage paths branch the same way) -- both `phases.boss_phase`'s `DEATH` decode and `MapEntity.is_defeated` false-positive on the transient `$164FC` lethality test, twice confirmed live |
+| `jack_fight.py` | **Scores** the Jacks of one round (`--level`, 2 by default): jumps to it, keeps every other ordinary family swept (`DebugScenario(only_enemy="jack")`), food and police off, and plays it through with the real pipeline until a boss appears, the level changes or the game is over. Every tick with a Jack or an axe on screen logs both objects' bytes (state, flags, position and fine height, velocities, `+$54` offset, owner, approach point, timers); a hit is attributed through the player's `+$7E` to the axe that landed it -- read from the previous tick when the axe has already removed itself -- with its state and its owner's. The summary gives hits by source and by Jack state, each Jack's life span and personality, and the verb mix while a Jack lived |
 | `antonio_diag.py` | **Explains** a round-1 fight tick by tick: every candidate `Verb` with its own emergency, the actor's hold state (`+$4C` link and the action byte behind it), every byte of Antonio's AI state that `ai/antonio.py` replays (primary, tactical, `+$78`, `+$5C`, screen X, animation frame, countdown and latched box ids, velocities, 16.16 position), `antonio.kick_gate_open`, and `antonio.plan_engage`'s stick, mode and predicted outcome. First written for, and found, the front-hold stall in **Holding a boss** above |
 | `antonio_lab.py` | **Lockstep lab** for round 1: plays to Antonio in real time, then steps the host one frame at a time with the real `AgentLoop` ticking every two frames (its pad recorded and replayed through `step_input`), and on every frame his object updates replays `antonio.boss_update` from the previous frame's work RAM and compares every field -- position, lane, primary, tactical, both timers, both velocities, animation, countdown, latched boxes, screen X -- the same for every boomerang of his while it flies (his linked one by his `+$6E`, older ones by slot), plus the contact outcome against the player's own `+$7C`. `--actor wander` swaps the pipeline for a seeded walk that never attacks, to run the model through all of his states; `--input-delay` adds latency. Scores the fight too (hits, holds, kicks started) |
 | `bongo_lab.py` | **Lockstep lab** for round 4, `antonio_lab.py`'s shape: the real pipeline plays to Bongo, then every frame his object updates is checked against `bongo.boss_update` field by field -- position, lane, primary, tactical, `+$68`, `+$79`, both velocities, the animation, its countdown, the latched boxes, screen X -- and his flame (`$97`) the same while it exists, plus the contact outcome against the player's `+$7C` (3 grab, 1 flame hit). `--actor wander` walks a seeded path that never attacks, to run the model through every state; rows also carry the other enemies alive (how the round's grunt was identified) |
@@ -1165,10 +1355,10 @@ entry points in this tree.
 
 | Piece | Role |
 | --- | --- |
-| `tokens/` | All token classes (including ABCs), split by kind; the package `__init__` re-exports everything. `tokens/tokens.py` (`Token`/`Information`/`Verb` base classes, `Context`, `find`/`find_all`; `Information` splits into `Observed` (directly read from RAM) and `Inferred` (derived from observed tokens)); `tokens/character.py` (`Character` common actor base (`slot`, position, health, facing, combat phase); `Myself`/`Partner` (`player_index`, `action_state`, `action_flags`, `is_airborne`, punch inner/outer helpers, `vel_x` from player `+$1C` -- the word Antonio's kick gate reads -- and their own `hitbox` -- read straight from the object's own cached box at `+$70`, never reconstructed, and carrying no `attack_ranges`: a player's reach is this module's punch/rear/jump-kick geometry, not a per-frame extraction)); `tokens/enemy.py` (`Enemy` (a `Character`; adds `type_id`, `targets_player`, the formal `hitbox`/`attack_ranges` value objects plus the `max_reach`/`min_reach` helpers derived from them, `is_defeated` (the ROM's lethal check is **signed**, so a health word of `$8000`-`$FFFF` is already a corpse while the object sits in its slot with a stale action family -- judging "still a target" from `combat_phase` alone kept the AI walking to, ranking and punching bodies, which is what "attacking enemies that are not there" looks like from the sofa; zero health is *not* defeated and still owes a finishing hit) -- value objects rather than tokens, since a token may never embed a token by value, `held_weapon_type` (pickup `$08-$0C` while this enemy is holding one, else 0 -- ordinary enemies do not store this at `+$60`; observe copies `MapEntity.held_type`, which `world_map` resolves from the held weapon's `+$52` holder pointer), `grunt_vel_x`/`grunt_vel_y` -- ordinary-enemy-only velocity, defaulted to 0 and unused by `Boss`, which keeps its own separately offset `vel_x`/`vel_z` -- and `predict_position_after_n_frames(n)`, the enemy's own constant-velocity extrapolation in **60 Hz game frames** (the unit `$17AB8` integrates `+$1C`/`+$20` in, *not* AI poll ticks, which are ~2 frames each at the 33ms default), which every lead time in `ai/kinematics.py` is built on and which a `Boss` answers with its current position since it never populates those fields) + subclasses: `Grunt` (ordinary types `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`; carries the ROM's own `stun_timer` at `+$50` plus `is_stunned`, an ordinary-enemy-only field since both stun handlers are ordinary state-table entries; `Nora` additionally carries `ticks_since_last_attack`, cross-tick memory maintained by `observe.NoraAttackTracker` -- not a RAM field, defaulted to `NORA_TICKS_SINCE_ATTACK_UNKNOWN` for any `Nora` built without going through the tracker), `Boss` → direct subclasses `Abadede`/`MrX`/`Souther`/`Antonio`/`Bongo`/`Onihime` (`Boss` also carries `primary_state`, the `+$30` byte Antonio's kick is); `enemy_class_for_type`; `Surrounded`, the one `Inferred` judgment left about enemies (three or more live enemies inside the close box around the actor, or a pincer with one on each side; produced by `inference.check_for_surrounded`, the only function `inference.py` still has); `GrabReason` -- `CLEAR_REAR`/`DEAD_ZONE`/`JACK_FROM_BEHIND`/`WHILE_SURROUNDED`/`DODGE_CHARGE` -- an `Enum`, not a token field: it is the return type of `reach.grab_reasons(context, actor, target, enemies) -> frozenset[GrabReason]`, why a hold beats a strike; most reasons are `Grunt`-only, and neither boss with a plan has one: `EngageAntonio` and `EngageSouther` walk into them themselves, so no `GrabEnemy` is ever produced for either. `WHILE_SURROUNDED` is the only reason keyed on the actor's own situation (`reach.actor_is_surrounded`) rather than on the candidate enemy -- see `AI.md`'s "Judging without a cache" for why this, and every other judgment formerly produced by `inference.py`'s `check_for_*` functions (`ClosingEnemy`, `TargetInReach`/`ReachKind`, `IncomingMelee`, `PunishWindow`, `IncomingProjectile`, `WeaponUpgrade`, `AntonioIsGoingToKick`, `SoutherIsGoingToSlash`, `SoutherPunishesJump`, `SafeSpot`), is now a direct `reach.py` (or, for `SafeSpot`, `execute.py`) function call at each site that needs the answer instead of a token written into the context once per tick; `tokens/essential.py` (`Essential` (scene-wide observations `Stage`/`CameraRange`/`AnimationInProgress`/`InContinueMenu`/`InMrXDialog`)); `tokens/dialog_verbs.py` (`Dialog` groups UI-prompt verbs `HandleContinueMenu`/`HandleMrXDialog` -- always Yes + initials `AI `, always No to Mr. X); `tokens/hazard_tokens.py` (`Projectile` -- Antonio's `$96` boomerang also carries the rest of its later-boss object, `vel_x` being its `+$1C`, for `antonio.BoomerangSim` --, `StageObjects` (`Breakable` -- carries its real `hitbox`, `Pit`)); `tokens/pickup_tokens.py` (`Weapon` (with its real `hitbox`) + consumable `Pickup` hierarchy + `weapon_rank`); `tokens/walk_verbs.py` (`WalkToNearEnemy`, `RetreatFromDanger` (give up ground to a dangerous enemy not yet actionable -- only while hurt or `Surrounded`, per `decide._retreat_is_worth_it`; danger alone is not enough), `ProjectileSidestep` (step off a projectile's own lane rather than block its path, once `reach.projectile_threatens` judges it a threat -- built for Jack's thrown axe/torch (type `$28`), but reacts to any projectile judged a threat), `EngageAntonio` (the whole approach to Antonio, planned by `antonio.plan_engage`'s lookahead over his own AI; the hold is the contact result of the walk, armed or not), `EngageSouther` (the whole approach to Souther -- corridor, lane escape, walk-in -- planned by `souther.plan_engage`; the hold is the contact result of the walk, armed or not), `WalkToAdvanceStage`, `WalkToWeapon`, `WalkToPickup`); `tokens/attack_verbs.py` (`Punch` (unarmed only), `HitAntonioBoomerang` (timed B-punch that knocks his type-`$96` boomerang away the moment it would hit), `MeleeWeaponAttack` (armed melee -- same B input as `Punch`, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`/`ReleaseToRegrab`, and `ReleasePartner` -- the only one offered while the body in hand is the other player), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat (`Punch`/`JumpAttack`/`RearAttack`); `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`, the only two the ROM attack-throws)); `tokens/police_verb.py` (`CallPolice` — an `Attack` descendant, health-critical only and only with at least one live enemy); `tokens/recovery_verbs.py` (`Recovery` groups actions that escape/shorten a bad state rather than act on an enemy/prop/held body; `TechRecover` — the C+Up bounce-cancel landing tech, armed only by specific special/boss hold-throw choreography (`PlayableCharacter.throw_tech_ready`), not an ordinary street-enemy throw) |
+| `tokens/` | All token classes (including ABCs), split by kind; the package `__init__` re-exports everything. `tokens/tokens.py` (`Token`/`Information`/`Verb` base classes, `Context`, `find`/`find_all`; `Information` splits into `Observed` (directly read from RAM) and `Inferred` (derived from observed tokens)); `tokens/character.py` (`Character` common actor base (`slot`, position, health, facing, combat phase); `Myself`/`Partner` (`player_index`, `action_state`, `action_flags`, `is_airborne`, punch inner/outer helpers, `vel_x` from player `+$1C` -- the word Antonio's kick gate reads -- and their own `hitbox` -- read straight from the object's own cached box at `+$70`, never reconstructed, and carrying no `attack_ranges`: a player's reach is this module's punch/rear/jump-kick geometry, not a per-frame extraction)); `tokens/enemy.py` (`Enemy` (a `Character`; adds `type_id`, `targets_player`, the formal `hitbox`/`attack_ranges` value objects plus the `max_reach`/`min_reach` helpers derived from them, `is_defeated` (the ROM's lethal check is **signed**, so a health word of `$8000`-`$FFFF` is already a corpse while the object sits in its slot with a stale action family -- judging "still a target" from `combat_phase` alone kept the AI walking to, ranking and punching bodies, which is what "attacking enemies that are not there" looks like from the sofa; zero health is *not* defeated and still owes a finishing hit) -- value objects rather than tokens, since a token may never embed a token by value, `held_weapon_type` (pickup `$08-$0C` while this enemy is holding one, else 0 -- ordinary enemies do not store this at `+$60`; observe copies `MapEntity.held_type`, which `world_map` resolves from the held weapon's `+$52` holder pointer), `grunt_vel_x`/`grunt_vel_y` -- ordinary-enemy-only velocity, defaulted to 0 and unused by `Boss`, which keeps its own separately offset `vel_x`/`vel_z` -- and `predict_position_after_n_frames(n)`, the enemy's own constant-velocity extrapolation in **60 Hz game frames** (the unit `$17AB8` integrates `+$1C`/`+$20` in, *not* AI poll ticks, which are ~2 frames each at the 33ms default), which every lead time in `ai/kinematics.py` is built on and which a `Boss` answers with its current position since it never populates those fields) + subclasses: `Grunt` (ordinary types `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`; carries the ROM's own `stun_timer` at `+$50` plus `is_stunned`, an ordinary-enemy-only field since both stun handlers are ordinary state-table entries; `Nora` additionally carries `ticks_since_last_attack`, cross-tick memory maintained by `observe.NoraAttackTracker` -- not a RAM field, defaulted to `NORA_TICKS_SINCE_ATTACK_UNKNOWN` for any `Nora` built without going through the tracker), `Boss` → direct subclasses `Abadede`/`MrX`/`Souther`/`Antonio`/`Bongo`/`Onihime` (`Boss` also carries `primary_state`, the `+$30` byte Antonio's kick is); `enemy_class_for_type`; `Surrounded`, the one `Inferred` judgment left about enemies (three or more live enemies inside the close box around the actor, or a pincer with one on each side; produced by `inference.check_for_surrounded`, the only function `inference.py` still has); `GrabReason` -- `CLEAR_REAR`/`DEAD_ZONE`/`WHILE_SURROUNDED`/`DODGE_CHARGE` -- an `Enum`, not a token field: it is the return type of `reach.grab_reasons(context, actor, target, enemies) -> frozenset[GrabReason]`, why a hold beats a strike; most reasons are `Grunt`-only, and neither boss with a plan has one: `EngageAntonio` and `EngageSouther` walk into them themselves, so no `GrabEnemy` is ever produced for either. `WHILE_SURROUNDED` is the only reason keyed on the actor's own situation (`reach.actor_is_surrounded`) rather than on the candidate enemy -- see `AI.md`'s "Judging without a cache" for why this, and every other judgment formerly produced by `inference.py`'s `check_for_*` functions (`ClosingEnemy`, `TargetInReach`/`ReachKind`, `IncomingMelee`, `PunishWindow`, `IncomingProjectile`, `WeaponUpgrade`, `AntonioIsGoingToKick`, `SoutherIsGoingToSlash`, `SoutherPunishesJump`, `SafeSpot`), is now a direct `reach.py` (or, for `SafeSpot`, `execute.py`) function call at each site that needs the answer instead of a token written into the context once per tick; `tokens/essential.py` (`Essential` (scene-wide observations `Stage`/`CameraRange`/`AnimationInProgress`/`InContinueMenu`/`InMrXDialog`)); `tokens/dialog_verbs.py` (`Dialog` groups UI-prompt verbs `HandleContinueMenu`/`HandleMrXDialog` -- always Yes + initials `AI `, always No to Mr. X); `tokens/hazard_tokens.py` (`Projectile` -- Antonio's `$96` boomerang also carries the rest of its later-boss object, `vel_x` being its `+$1C`, for `antonio.BoomerangSim` --, `StageObjects` (`Breakable` -- carries its real `hitbox`, `Pit`)); `tokens/pickup_tokens.py` (`Weapon` (with its real `hitbox`) + consumable `Pickup` hierarchy + `weapon_rank`); `tokens/walk_verbs.py` (`WalkToNearEnemy`, `RetreatFromDanger` (give up ground to a dangerous enemy not yet actionable -- only while hurt or `Surrounded`, per `decide._retreat_is_worth_it`; danger alone is not enough), `ProjectileSidestep` (step off a projectile's own lane rather than block its path, once `reach.projectile_threatens` judges it a threat -- built for Jack's thrown axe/torch (type `$28`), but reacts to any projectile judged a threat), `EngageAntonio` (the whole approach to Antonio, planned by `antonio.plan_engage`'s lookahead over his own AI; the hold is the contact result of the walk, armed or not), `EngageSouther` (the whole approach to Souther -- corridor, lane escape, walk-in -- planned by `souther.plan_engage`; the hold is the contact result of the walk, armed or not), `WalkToAdvanceStage`, `WalkToWeapon`, `WalkToPickup`); `tokens/attack_verbs.py` (`Punch` (unarmed only), `HitAntonioBoomerang` (timed B-punch that knocks his type-`$96` boomerang away the moment it would hit), `MeleeWeaponAttack` (armed melee -- same B input as `Punch`, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`/`ReleaseToRegrab`, and `ReleasePartner` -- the only one offered while the body in hand is the other player), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat (`Punch`/`JumpAttack`/`RearAttack`); `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`, the only two the ROM attack-throws)); `tokens/police_verb.py` (`CallPolice` — an `Attack` descendant, health-critical only and only with at least one live enemy); `tokens/recovery_verbs.py` (`Recovery` groups actions that escape/shorten a bad state rather than act on an enemy/prop/held body; `TechRecover` — the C+Up bounce-cancel landing tech, armed only by specific special/boss hold-throw choreography (`PlayableCharacter.throw_tech_ready`), not an ordinary street-enemy throw) |
 | `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM); free-to-act phases include `HOLDING` and `HELD_BY_ENEMY`. Fills `PlayableCharacter.held_enemy_slot` from `MapEntity.contact_slot` while the action byte is in the hold family (`$60-$6F` or the `$76`/`$80` crossover), and `HoldTracker` counts `hold_ticks` over that same family so a knee or a flip passing through an animation lock does not restart the knee budget. Also emits `InContinueMenu` from a type-`$0F` player object and `InMrXDialog` when `$FFDE00` is set and this player's `+$59` bit 4 is live. `NoraAttackTracker` is the one deliberate exception to `generate_direct_observation_tokens` otherwise being a pure function of its snapshot argument: cross-tick memory (keyed by enemy slot, one instance per `AgentLoop`) of ticks since each on-screen Nora last held a dangerous phase, reset to 0 while dangerous and incremented otherwise, feeding `Nora.ticks_since_last_attack`; `forget_missing` drops a slot the moment it stops being observed as a live Nora so a slot the game later reuses for a different enemy never inherits a stale count. `GrabStallTracker` (the old Souther walk-in timeout) is gone with the grab reason it guarded; the hold loop reads the holder's own bytes instead (`PlayableCharacter.knees_in_chain`/`hold_release_countdown`/`crossover_spent`, from `+$58`/`+$61`, `+$63` and `+$4B`) |
 | `inference.py` | `check_for_surrounded` (3+ enemies in the close box, or a pincer -- reusing `rear_attack_is_warranted`'s own box so the two judgments cannot disagree) and `generate_inference_tokens` (in practice, just `context | check_for_surrounded(context)`), the only two functions left here. Every other judgment this file used to compute once per tick and write into the context -- threat-filtered incoming projectiles, closing enemies, per-move reach bands, incoming melee, punish windows, grab opportunities, weapon upgrades, Antonio's kick gate, Souther's slash gate and jump counter, safe spots -- was removed and folded into a `reach.py` (or, for the safe-spot search, `execute.py`) function called directly by whichever `could_*`/`_emergency_*`/state machine needs the answer, several times a tick rather than once; see that row below and `AI.md`'s "Judging without a cache" for the reasoning and the full list of removed tokens |
-| `walk_verbs.py` | `WalkToNearEnemy`, `RetreatFromDanger`, `ProjectileSidestep`, `EngageAntonio`, `EngageSouther`, `EngageBongo`, `EngageAbadede`, `WalkToAdvanceStage`, `WalkToWeapon`, `WalkToPickup` |
+| `walk_verbs.py` | `WalkToNearEnemy`, `RetreatFromDanger`, `ProjectileSidestep`, `EngageAntonio`, `EngageSouther`, `EngageBongo`, `EngageAbadede`, `EngageJack`, `WalkToAdvanceStage`, `WalkToWeapon`, `WalkToPickup` |
 | `attack_verbs.py` | `Punch` (unarmed), `HitAntonioBoomerang` (timed punch of Antonio's type-`$96` boomerang), `MeleeWeaponAttack` (armed melee, same B input, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`/`ReleaseToRegrab`, and `ReleasePartner` -- the only one offered while the body in hand is the other player), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat; `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`) |
 | `police_verb.py` | `CallPolice` — an `Attack` descendant (health-critical only; below `POLICE_HEALTH_PERCENT_THRESHOLD`; also requires at least one live enemy) |
 | `dialog_verbs.py` | `HandleContinueMenu` / `HandleMrXDialog` — UI-prompt verbs (always Yes + initials `AI `; always No to Mr. X). Name-entry confirm is C (or A): `$57D2` accepts `+$55` bits 5+6 and treats bit 4 (B) as backspace, a no-op on the first slot -- pressing B to "type A" left the AI stuck on the first initial |

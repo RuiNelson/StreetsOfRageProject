@@ -69,6 +69,7 @@ classDiagram
     Walk <|-- EngageAntonio
     Walk <|-- EngageBongo
     Walk <|-- EngageAbadede
+    Walk <|-- EngageJack
 
     Verb <|-- Attack
     Attack <|-- MeleeAttacks

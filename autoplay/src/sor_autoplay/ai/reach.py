@@ -777,20 +777,9 @@ def rear_attack_is_warranted(
        so it stays unhittable by a normal strike even after the turn.
     2. **Boxed in** -- another live enemy is close on the actor's opposite
        side, so spending the turn hands that one a free hit.
-    3. **Jack, when he is facing the actor** -- his axe juggle and shared
-       lunge punish a turn-and-punch: the extra frames spent flipping
-       facing are the ones he uses to throw or slide. The chord hits him
-       where he is, now. The opposite geometry -- the actor already on
-       *his* back, just facing the wrong way (a jump kick that overshot)
-       -- is a grab, not a chord: ``enemy_forward_dx < 0`` means turn
-       around and take the hold (``grab_reasons`` includes
-       ``JACK_FROM_BEHIND``).
-    """
 
-    if isinstance(enemy, Jack):
-        # On his back: the chord would fire the wrong way. Walk around
-        # to face him and grab.
-        return enemy_forward_dx(enemy, actor) >= 0
+    (Jack is never a chord target: ``EngageJack`` owns him.)
+    """
 
     if abs(enemy.world_x - actor.world_x) < punch_usable_inner_x(actor.character_id):
         return True
@@ -1336,16 +1325,13 @@ PROJECTILE_LANE_SLACK = 24
 CAUTION_RANGE_X = 40
 
 # object_catalog.py's Jack axe/torch helper. Unlike every other projectile
-# family, this object exists while still tethered to Jack's own juggle
-# animation, not only once thrown -- so its momentary spin velocity can
-# point straight at the actor and satisfy projectile_threatens without a
-# real throw ever happening.
+# family, this object exists while still tethered to Jack's own juggle, not
+# only once thrown -- its own +$30 says which (ai/jack.py: 1 juggled, 2 tossed
+# high, 3 dropped, 4 thrown, and a thrown one flies only once +$31 bit 1 is
+# set, on his release frame).
 JACK_PROJECTILE_TYPE_ID = 0x28
-
-# The juggled axe/torch stays within this radius of Jack himself; once
-# thrown it opens that gap on the very next tick. Generous enough to cover
-# the juggle's own spin without needing exact ROM offsets.
-JACK_JUGGLE_ATTACH_RADIUS = 40
+JACK_AXE_THROWN = 4
+JACK_AXE_RELEASED_BIT = 0x02
 
 # Antonio's linked boomerang (object_catalog.py type $96). Same attach
 # problem as Jack's axe: the object exists while still in his hand, and
@@ -1443,27 +1429,22 @@ def is_souther_claw(projectile: Projectile) -> bool:
 
 
 def jack_still_juggling(projectile: Projectile, context: Context) -> bool:
-    """True when this is Jack's axe/torch and he has not released it yet.
+    """True when this is one of Jack's axes and not a released throw.
 
-    The weapon spins tethered to him for the whole juggle, so its
-    instantaneous velocity can momentarily point straight at the actor and
-    read exactly like an incoming throw. Matched to whichever live,
-    still-juggling (``has_projectile``) Jack sits within
-    ``JACK_JUGGLE_ATTACH_RADIUS`` of it, since the object carries no
-    explicit owner slot.
+    Only a thrown axe (its own ``+$30`` = 4) past its release (``+$31`` bit
+    1, set on his animation's frame 1) has a flight to step off: a juggled
+    one rides his hand (``$FCB6``), a tossed one hangs high over him, a
+    dropped one tests no contact, and a thrown one still waiting sits 64 px
+    over his head (``ai/jack.py``). The object's own state says which --
+    the old guess by distance from him called a throw released point-blank
+    "still juggling" and let it land.
     """
 
     if projectile.type_id != JACK_PROJECTILE_TYPE_ID:
         return False
-    for jack in find_all(context, Jack):
-        if not jack.has_projectile:
-            continue
-        if (
-            abs(projectile.world_x - jack.world_x) <= JACK_JUGGLE_ATTACH_RADIUS
-            and abs(projectile.world_y - jack.world_y) <= JACK_JUGGLE_ATTACH_RADIUS
-        ):
-            return True
-    return False
+    return not (
+        projectile.state == JACK_AXE_THROWN and projectile.flags_31 & JACK_AXE_RELEASED_BIT
+    )
 
 
 # Enemy phases a hold can actually be taken on. Deliberately not
@@ -1551,11 +1532,6 @@ def grab_reasons(
     # it anyway.
     if any(other.slot != target.slot for other in rear_threats(actor, enemies)):
         reasons.add(GrabReason.CLEAR_REAR)
-    if isinstance(target, Jack) and enemy_forward_dx(target, actor) < 0:
-        # Facing away: the hold lands before the axe or the lunge can turn
-        # around. The opposite geometry -- Jack at the actor's back -- is
-        # RearAttack, not a backwards walk-in.
-        reasons.add(GrabReason.JACK_FROM_BEHIND)
     if target.min_reach > 0:
         # Every attack it owns starts further out than contact -- read from
         # the ROM shape its animations select, not from the enemy's type.

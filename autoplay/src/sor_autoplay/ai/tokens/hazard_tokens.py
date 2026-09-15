@@ -45,6 +45,16 @@ class Projectile(Observed):
     lane_target_above: bool = False  # +$61
     turn_lane: int = 0  # +$78 word: what the turn copies into +$52
     knock_timer: int = 0  # +$7B: updates left once knocked away
+    # Jack's axe (type $28) only, for ai/jack.py's AxeSim: ``state`` is its own
+    # +$30 (1 juggled, 2 tossed, 3 dropped, 4 thrown), ``vel_x``/``vel_lane``
+    # its +$1C/+$20.
+    world_z: int = 0  # +$18
+    fine_z: float = 0.0  # +$18 as 16.16: the juggle arc is fractional
+    owner_slot: str | None = None  # +$42: the Jack it belongs to
+    flags_31: int = 0  # +$31: bit 1 = on its way back to his hand / released
+    offset: float = 0.0  # +$54: its X offset from him while juggled
+    timer_50: int = 0  # +$50: the tossed axe's hang countdown
+    body_box_id: int = 0  # +$03
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

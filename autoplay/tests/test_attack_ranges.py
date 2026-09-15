@@ -255,7 +255,9 @@ class ConfirmedTypeShapesTests(unittest.TestCase):
         )
 
     def test_confirmed_shapes_cover_exactly_the_traced_types(self) -> None:
-        self.assertEqual(set(CONFIRMED_TYPE_SHAPES), {0x20, 0x21, 0x22})
+        self.assertEqual(set(CONFIRMED_TYPE_SHAPES), {0x20, 0x21, 0x22, 0x27})
+        # Jack strikes with nothing of his own: his hits are his axes.
+        self.assertEqual(CONFIRMED_TYPE_SHAPES[0x27], frozenset())
         self.assertEqual(CONFIRMED_TYPE_SHAPES[0x20], frozenset({0x14}))
         self.assertEqual(CONFIRMED_TYPE_SHAPES[0x21], frozenset({0x12, 0x3E}))
         self.assertEqual(CONFIRMED_TYPE_SHAPES[0x22], frozenset({0x12, 0x3E}))

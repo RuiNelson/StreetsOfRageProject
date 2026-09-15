@@ -21,6 +21,7 @@ from ..phases import CombatPhase, is_dangerous
 from . import (
     abadede as abadede_plan,
     bongo as bongo_plan,
+    jack as jack_plan,
     kinematics,
     navigation as nav,
     reach,
@@ -77,6 +78,7 @@ from .tokens import (
     EngageAbadede,
     EngageAntonio,
     EngageBongo,
+    EngageJack,
     EngageSouther,
     ProjectileSidestep,
     RetreatFromDanger,
@@ -227,13 +229,10 @@ def _could_melee_strike(
     concrete ``Verb`` -- ``Punch`` ignores the weapon type it is passed,
     ``MeleeWeaponAttack`` carries it as its own ``weapon_type`` field.
 
-    Refuses an *unarmed* punch on a Jack currently juggling his axe/torch
-    (``Jack.has_projectile``): closing in with bare fists trades hits with
-    the spin. A held weapon reaches past that spin -- bat, pipe, knife,
-    bottle, pepper -- and must be used; ``could_jump_attack`` is already
-    refused while armed, so skipping the swing left the AI walking around
-    him doing nothing. The kick and the from-behind chord stay available
-    unarmed.
+    Never at Jack, armed or not: ``EngageJack`` takes him in a hold from
+    where none of his axes reaches (``jack.py``). A strike on him is a trade
+    with the juggle in front of him -- the baseline lost 11 hits of 13 to it --
+    and its ``+$34`` turns the walk-in's grab contact into a hit.
     """
 
     verbs: set[Token] = set()
@@ -259,11 +258,9 @@ def _could_melee_strike(
         # and inside the band" judgment this used to recompute inline.
         for target_slot in _targets_in_reach(context, actor, reach.punch_would_connect, Punch):
             target = find(context, Enemy, slot=target_slot)
-            if (
-                held_types is None
-                and isinstance(target, Jack)
-                and target.has_projectile
-            ):
+            # Jack is taken in a hold from his back or out of his axes' way
+            # (jack.py); EngageJack owns him.
+            if isinstance(target, Jack):
                 continue
             # Antonio is taken in a hold, never struck: a strike sets the
             # actor's +$34 and turns the grab contact into a hit, and standing
@@ -339,23 +336,13 @@ def could_rear_attack(context: Context) -> Context:
         # rather than turning around and punching -- is a ranking question,
         # and lives in priority._emergency_rear_attack via
         # reach.rear_attack_is_warranted.
-        # On Jack's back (a jump that overshot, still facing the wrong
-        # way): the chord would fire away from him. Walk around and grab.
-        on_screen = reach.on_screen_enemies(context)
-        on_jacks_back = {
-            jack.slot
-            for jack in on_screen
-            if isinstance(jack, Jack)
-            and GrabReason.JACK_FROM_BEHIND in reach.grab_reasons(context, actor, jack, on_screen)
-        }
         for target_slot in _targets_in_reach(context, actor, reach.in_rear_band, RearAttack):
-            if target_slot in on_jacks_back:
-                continue
             if isinstance(
-                find(context, Enemy, slot=target_slot), (Souther, Antonio, Bongo, Abadede)
+                find(context, Enemy, slot=target_slot), (Souther, Antonio, Bongo, Abadede, Jack)
             ):
                 # The chord is a strike like any other: it turns the grab
-                # contact into a hit. Each boss's engage owns him.
+                # contact into a hit. Each boss's engage owns him, and
+                # EngageJack owns Jack.
                 continue
             verbs.add(RearAttack(actor_slot=actor.slot, target_slot=target_slot))
     return verbs
@@ -427,10 +414,10 @@ def could_grab_enemy(context: Context) -> Context:
         for enemy in on_screen:
             if enemy.slot not in in_reach:
                 continue
-            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede)):
+            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Jack)):
                 # Each engage walks into him itself, at the moment its plan
                 # picks (EngageSouther, EngageAntonio, EngageBongo,
-                # EngageAbadede).
+                # EngageAbadede, EngageJack).
                 continue
             if enemy.slot in threatening:
                 # Walking into a committed attack is how the actor takes the
@@ -533,6 +520,34 @@ def could_hold_actions(context: Context) -> Context:
             ):
                 verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
                 continue
+        if isinstance(held, Jack):
+            # Jack's loop (jack.hold_step): in a back hold, wait out his axes
+            # still in the air -- they point away from a holder behind him and
+            # drop at the end of their arcs; out of a front hold's way of them,
+            # cross over. Then knee, knee, cross over, suplex -- or, facing a
+            # camera bound, the B+back throw that lands him behind the actor.
+            step = jack_plan.hold_step(
+                actor, held, find_all(context, Projectile), camera=find(context, CameraRange)
+            )
+            if step is souther_plan.HoldStep.KNEE:
+                grace = reach.frames_until_any_melee_lands(
+                    actor, enemies, ignore_slots=frozenset({held.slot})
+                )
+                if grace is not None and grace < kinematics.hold_knee_frames(actor.character_id):
+                    # Another enemy's blow lands before a knee could finish:
+                    # the throw, as for any held grunt below.
+                    verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
+                else:
+                    verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
+            elif step is souther_plan.HoldStep.RELEASE:
+                verbs.add(ReleaseGrab(actor_slot=actor.slot, target_slot=held.slot))
+            elif step is souther_plan.HoldStep.CROSS:
+                verbs.add(FlipHold(actor_slot=actor.slot, target_slot=held.slot))
+            elif step is souther_plan.HoldStep.SUPLEX:
+                verbs.add(Supplex(actor_slot=actor.slot, target_slot=held.slot))
+            elif step is souther_plan.HoldStep.THROW:
+                verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
+            continue
         if isinstance(held, (Souther, Antonio, Bongo, Abadede)):
             # Abadede's loop is the same three moves, each pressed on an
             # update his hold reads the holder's +$7D (abadede.hold_step).
@@ -757,9 +772,9 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 # Never walk toward a target that is itself standing in a
                 # pit's danger zone -- reaching it means standing there too.
                 continue
-            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede)):
-                # EngageSouther / EngageAntonio / EngageBongo / EngageAbadede
-                # own the whole approach to them, armed or not.
+            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Jack)):
+                # EngageSouther / EngageAntonio / EngageBongo / EngageAbadede /
+                # EngageJack own the whole approach to them, armed or not.
                 continue
             if standing_off and enemy.slot in threatening:
                 # could_retreat_from_danger covers this one instead -- don't
@@ -874,8 +889,14 @@ def could_projectile_sidestep(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
+        live_jacks = {jack.slot for jack in find_all(context, Jack)}
         for projectile in find_all(context, Projectile):
             if reach.jack_still_juggling(projectile, context):
+                continue
+            if projectile.type_id == jack_plan.AXE_TYPE and projectile.owner_slot in live_jacks:
+                # A live Jack's axes are EngageJack's: jack.plan_engage plays
+                # every one of them forward, thrown ones included, and ranks
+                # itself up while one is out at the actor.
                 continue
             if reach.antonio_still_holding_boomerang(projectile, context):
                 continue
@@ -1188,6 +1209,11 @@ def could_jump_attack(context: Context) -> Context:
             # whole charge between the actor and the next hold. EngageAbadede.
             for abadede in find_all(context, Abadede):
                 target_slots.discard(abadede.slot)
+            # Jack neither: his juggle rides in front of him, where a flight
+            # comes down, and most of the baseline's hits on him landed in
+            # the air. EngageJack.
+            for jack in find_all(context, Jack):
+                target_slots.discard(jack.slot)
         if actor.is_airborne and not target_slots:
             nearest = min(
                 live,
@@ -1356,6 +1382,46 @@ def could_engage_abadede(context: Context) -> Context:
             ):
                 continue
             verbs.add(EngageAbadede(actor_slot=actor.slot, target_slot=abadede.slot))
+    return verbs
+
+
+def could_engage_jack(context: Context) -> Context:
+    """Take a hold on Jack from where no axe of his reaches -- one verb per Jack.
+
+    One candidate per live ``Jack`` in the camera while the actor is free to
+    move (not mid-animation, not held, not holding a body, not airborne),
+    armed or not: ``$AAA0``'s grab never reads the carried weapon.
+    ``jack.plan_engage`` picks the stick every tick from a lookahead over him
+    and every axe on screen; the hold is the contact result of that walk, and
+    the loop that follows is ``could_hold_actions``' (``jack.hold_step``).
+
+    Knocked down or looking about he is still produced for: the plan's WAIT
+    stands off behind him, where his next state's axes do not point.
+    """
+
+    verbs: set[Token] = set()
+    camera = find(context, CameraRange)
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.is_airborne:
+            continue
+        for jack in find_all(context, Jack):
+            # Only a negative health word is lethal for an ordinary enemy
+            # ($A13A's `bmi`): a Jack at 0 is alive, still throwing, and one
+            # knee from dead. Dropping him there left the first live run with
+            # no verb at all for 90 s while he killed the actor.
+            if jack.is_defeated or jack.state == jack_plan.ST_DYING:
+                continue
+            if camera is not None and not (
+                camera.left - 0x40 <= jack.world_x <= camera.right + 0x40
+            ):
+                continue
+            verbs.add(EngageJack(actor_slot=actor.slot, target_slot=jack.slot))
     return verbs
 
 
@@ -1826,6 +1892,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_engage_antonio(context)
         | could_engage_bongo(context)
         | could_engage_abadede(context)
+        | could_engage_jack(context)
         | could_hit_antonio_boomerang(context)
         | could_walk_to_advance_stage(context)
         | could_punch(context)

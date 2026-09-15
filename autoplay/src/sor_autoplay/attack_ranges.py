@@ -94,6 +94,11 @@ CONFIRMED_TYPE_SHAPES: Mapping[int, frozenset[int]] = {
     # which tests box $12/$13 then $3E/$3F -- two stages of one attack.
     0x21: frozenset({0x12, 0x3E}),
     0x22: frozenset({0x12, 0x3E}),
+    # Jack strikes with nothing of his own: no state of his tests a box
+    # against a player, and the two attack boxes his set does carry belong to
+    # the thrown-body flight (animation 2, $25/$1D, no body box) and to his
+    # axes' animations (the $28 helper). His hits are the axes (ai/jack.py).
+    0x27: frozenset(),
 }
 
 # How much of a set to read. Sets are a few KB at most; over-reading is

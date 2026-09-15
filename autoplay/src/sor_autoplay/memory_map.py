@@ -27,6 +27,8 @@ ADDR_P2_OUT_FLAG = 0xFFFF25
 # --- Round clock ---
 # game_timer is the live countdown (BCD-like word: $40/$50/$60 at wave start).
 # round_timer_bcd is the two-digit HUD digit source updated once per game second.
+# Read live (tools/jack_fight.py, rounds 2 and 5): the digits counted down in
+# game_timer's low byte ($FFFB01) while $FFFB02-$FFFB03 stayed 0.
 ADDR_GAME_TIMER = 0xFFFB00
 ADDR_ROUND_TIMER_BCD = 0xFFFB02
 ADDR_MILLI_SECOND = 0xFFFB58
@@ -157,8 +159,10 @@ OBJ_ORDINARY_STUN_TIMER = 0x50
 OBJ_INTERACTION = 0x51
 OBJ_BOSS_DIST_LANE = 0x52
 # Ordinary family-private byte at the same offset. Jack ($27) uses bit 0 as
-# the weapon-attached latch: set while an axe/torch is in his hands and clear
-# when state $0E launches it. Keep this distinct from the boss distance alias.
+# his juggle latch: $F55E / $F286 set it when they spawn the two type-$28
+# axes ($F544), and every contact on him ($F7C0), his knockdown ($F2AC), his
+# ranged throw ($0E) and the end of his aligned throw ($0B) clear it. Keep
+# this distinct from the boss distance alias.
 OBJ_FAMILY_STATE = 0x52
 OBJ_JACK_WEAPON_ATTACHED = 0x52
 # Weapon +$52: holder object pointer (low 16 of the 68000 address). Same
@@ -166,6 +170,24 @@ OBJ_JACK_WEAPON_ATTACHED = 0x52
 # meaningful for kind=="weapon" while interaction==1 (held). Enemies do not
 # store the weapon type at +$60 (that word is their scripted approach X).
 OBJ_WEAPON_HOLDER = 0x52
+# +$01 bit 2: the renderer ($B0C8) steps +$0A only while it is set, reloading
+# the +$0D countdown from +$0C on every step.
+OBJ_ANIMATE_BIT = 0x04
+OBJ_ANIM_RELOAD = 0x0C
+# Ordinary enemies: the state-local flag byte after the +$30 state byte (bit 0
+# = the state's entry has run; the rest are per-state).
+OBJ_ORDINARY_FLAGS = 0x31
+# Ordinary enemies: the point $9604 (ordinary_enemy_approach_point) walks to
+# and the 8.8 speed it walks at.
+OBJ_APPROACH_X = 0x60
+OBJ_APPROACH_Y = 0x62
+OBJ_APPROACH_SPEED = 0x64
+# Ordinary enemies: two more per-state timer bytes next to the +$50 one.
+OBJ_ORDINARY_TIMER_51 = 0x51
+OBJ_ORDINARY_TIMER_54 = 0x54
+# Jack's juggled axe (type $28, state 1, $FCB6): its X offset from him, 16.16,
+# drifting at +$1C each update (-1 in the air, +4 on the way back to his hand).
+OBJ_JACK_AXE_OFFSET = 0x54
 # Type-$0F continue / high-score name-entry object (see player-health-lives-and-combat.md).
 # Bit7 set → high_score_name_entry_dispatcher; clear → continue Yes/No table at $5236.
 OBJ_CONTINUE_UI_FLAGS = 0x4B

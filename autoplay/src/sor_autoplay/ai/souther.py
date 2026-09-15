@@ -329,6 +329,7 @@ class HoldStep(Enum):
     CROSS = auto()
     SUPLEX = auto()
     WAIT = auto()
+    THROW = auto()  # B+back from a front hold; only Jack's loop (``jack.hold_step``) asks for it
 
 
 def hold_step(actor: PlayableCharacter, boss: Boss) -> HoldStep:

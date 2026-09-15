@@ -20,6 +20,7 @@ from .tokens import (
     EngageAbadede,
     EngageAntonio,
     EngageBongo,
+    EngageJack,
     EngageSouther,
     FlipHold,
     GrabEnemy,
@@ -47,7 +48,7 @@ from .tokens import (
     punch_outer_x,
     punch_usable_inner_x,
 )
-from .tokens import Abadede, Antonio, Bongo, Enemy, Souther
+from .tokens import Abadede, Antonio, Bongo, Enemy, Jack, Souther
 from .tokens import CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile
 from .tokens import Pickup, Weapon
@@ -76,6 +77,7 @@ from . import jump_kick
 from . import abadede as abadede_plan
 from . import antonio as antonio_plan
 from . import bongo as bongo_plan
+from . import jack as jack_plan
 from . import souther as souther_plan
 from . import navigation as nav
 from .decide import (
@@ -1622,6 +1624,60 @@ def state_machine_engage_abadede(
     gamepad.hold(mask)
 
 
+def engage_jack_plan(verb: EngageJack, context: Context) -> jack_plan.EngagePlan | None:
+    """``jack.plan_engage`` for this verb, from the context -- shared by the
+    handler and the diagnostics, so both see the one plan."""
+
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Jack, slot=verb.target_slot)
+    if actor is None or target is None:
+        return None
+    stage = find(context, Stage)
+    return jack_plan.plan_engage(
+        actor,
+        target,
+        others=[jack for jack in find_all(context, Jack) if jack.slot != target.slot],
+        projectiles=find_all(context, Projectile),
+        camera=find(context, CameraRange),
+        can_punch=abadede_can_punch(actor, context),
+        level=stage.level_index if stage is not None else None,
+    )
+
+
+def state_machine_engage_jack(verb: EngageJack, context: Context, gamepad: VirtualGamepad) -> None:
+    """Hold the stick ``jack.plan_engage`` chose this tick.
+
+    Held directly and unclamped, as the boss engages': the plan walks the
+    actor's box into his back to the pixel, keeps it out of every axe's box
+    to the pixel, and models the camera clamp itself.
+    """
+
+    plan = engage_jack_plan(verb, context)
+    actor = _find_actor(context, verb.actor_slot)
+    target = find(context, Jack, slot=verb.target_slot)
+    if plan is None or actor is None or target is None:
+        gamepad.release()
+        return
+    if plan.punch:
+        # From the lane pocket over his juggle, or into a throw coming along
+        # the actor's lane: the plan timed it in the facing the actor already
+        # has. B with a turn on the same press is sampled pre-turn -- a
+        # committed miss (``_facing_prop``; traced live against Jack, five
+        # punches whiffed facing away) -- so the plan turns by walking.
+        _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
+        return
+    mask = 0
+    if plan.dir_x > 0:
+        mask |= RIGHT_MASK
+    elif plan.dir_x < 0:
+        mask |= LEFT_MASK
+    if plan.dir_y > 0:
+        mask |= DOWN_MASK
+    elif plan.dir_y < 0:
+        mask |= UP_MASK
+    gamepad.hold(mask)
+
+
 def state_machine_release_to_regrab(
     verb: ReleaseToRegrab, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -2543,6 +2599,7 @@ _HANDLERS = {
     EngageAntonio: state_machine_engage_antonio,
     EngageBongo: state_machine_engage_bongo,
     EngageAbadede: state_machine_engage_abadede,
+    EngageJack: state_machine_engage_jack,
     ReleaseToRegrab: state_machine_release_to_regrab,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,

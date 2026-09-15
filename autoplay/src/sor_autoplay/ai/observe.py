@@ -338,7 +338,29 @@ def generate_direct_observation_tokens(
                 # family here. Boss keeps its own +$50 (distance to target).
                 extra["stun_timer"] = entity.stun_timer
             if cls is Jack:
-                extra["has_projectile"] = bool(entity.family_state & 0x01)
+                extra.update(
+                    has_projectile=bool(entity.family_state & 0x01),
+                    state=entity.action_state,
+                    flags_31=entity.ordinary_flags,
+                    personality=entity.script_param & 0x0F,
+                    script_param=entity.script_param,
+                    world_z=entity.world_z,
+                    vel_z=entity.vel_z,
+                    animating=entity.animating,
+                    anim=entity.anim,
+                    anim_frame=entity.anim_frame,
+                    anim_countdown=entity.anim_countdown,
+                    anim_reload=entity.anim_reload,
+                    approach_x=entity.approach_x,
+                    approach_y=entity.approach_y,
+                    approach_speed=entity.approach_speed,
+                    timer_51=entity.timer_51,
+                    timer_54=entity.timer_54,
+                    screen_x=entity.screen_x,
+                    fine_x=entity.fine_x,
+                    fine_y=entity.fine_y,
+                    fine_z=entity.fine_z,
+                )
             elif cls is Nora:
                 live_nora_slots.add(entity.slot)
                 extra["ticks_since_last_attack"] = (
@@ -423,6 +445,13 @@ def generate_direct_observation_tokens(
                     lane_target_above=bool(entity.lane_sign),
                     turn_lane=entity.boomerang_turn_lane,
                     knock_timer=entity.boomerang_knock_timer,
+                    world_z=entity.world_z,
+                    owner_slot=entity.owner_slot,
+                    flags_31=entity.ordinary_flags,
+                    offset=entity.axe_offset,
+                    timer_50=entity.stun_timer,
+                    body_box_id=entity.body_box_id,
+                    fine_z=entity.fine_z,
                 )
             )
         elif entity.kind == "weapon" and entity.is_free_ground_item:

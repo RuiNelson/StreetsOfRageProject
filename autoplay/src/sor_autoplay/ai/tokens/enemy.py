@@ -206,9 +206,40 @@ class Nora(Grunt):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Jack(Grunt):
-    """Jack ordinary enemy (type $27); may carry a weapon."""
+    """Jack ordinary enemy (type $27): harmless himself, his type-$28 axes are not.
 
-    has_projectile: bool  # family_state bit 0 -- "weapon attached"
+    No animation of his carries a strike box and no state of his tests one
+    against a player (``ai-analysis/enemy-ai.md``, "Jack"); every hit he lands
+    is an axe -- two juggled in front of him, or thrown along his lane. The
+    fields past ``has_projectile`` are what ``ai/jack.py`` replays of his
+    update: ``state`` is his ``+$30`` byte (the ``$1037C`` table),
+    ``personality`` the ``+$40`` low nibble ``$F2DE`` turns into the state he
+    goes back to after every reset (0 approach and aligned throw, 1 retreat
+    and ranged throw, 2 jumps, 3 juggle walk), ``approach_*`` the point and
+    8.8 speed ``$9604`` walks him by.
+    """
+
+    has_projectile: bool  # +$52 bit 0: his juggle is spawned and unbroken
+    state: int = 0
+    flags_31: int = 0
+    personality: int = 0
+    script_param: int = 0  # the whole +$40 (bit 4 picks the torch set for his axes)
+    world_z: int = 0
+    vel_z: float = 0.0  # +$24
+    animating: bool = False  # +$01 bit 2
+    anim: int = 0
+    anim_frame: int = 0
+    anim_countdown: int = 0
+    anim_reload: int = 0
+    approach_x: int = 0
+    approach_y: int = 0
+    approach_speed: int = 0
+    timer_51: int = 0
+    timer_54: int = 0
+    screen_x: int = 0
+    fine_x: float = 0.0
+    fine_y: float = 0.0
+    fine_z: float = 0.0
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -398,17 +429,6 @@ class GrabReason(Enum):
     because of its extracted geometry, so a corrected extraction or a
     newly-covered type changes the AI's behaviour without changing anything
     here.
-    """
-
-    JACK_FROM_BEHIND = auto()
-    """The actor is already on Jack's back -- take the hold before he turns.
-
-    Produced when the actor stands behind a live ``Jack``
-    (``reach.enemy_forward_dx`` negative: Jack is facing away). His axe
-    juggle and lunge punish a front exchange; a back grab skips both. The
-    walk-in still has to face him (``reach.grab_would_connect``), so this
-    is "caught him from behind", not "he is behind us" -- that side is
-    ``RearAttack``.
     """
 
     DODGE_CHARGE = auto()

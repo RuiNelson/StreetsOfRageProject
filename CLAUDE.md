@@ -266,6 +266,34 @@ desviar o objetivo principal, o boss"). Quitting
 the HUD (Esc/Q) also shuts the host down, so the port is free for the next
 run.
 
+### Testing against Jack
+
+Jack (type `$27`) never appears in round 1 (user: "o inimigo não aparece no
+Stage 1"). The ELC streams place him in rounds 2 and 4 (his personality 0:
+juggle approach and aligned throw), 5 (personality 2, the jumpers -- eight
+records in one batch -- and 3, the juggle walk), 6 and 8 (0 and 1, the
+retreat and ranged throw). `autoplay/tools/jack_fight.py` scores him: with the
+turbo host up (`./scripts/run --turbo 4 --lang en --debugUtils --port 7777
+--silent`), it plays the round with every other ordinary family swept
+(`DebugScenario(only_enemy="jack")`), police and food off, attributes each
+hit to the axe that landed it, its state and its owner's, and logs the round
+clock (`$FFFB01`, two BCD digits) every tick: a life lost to a full-health
+"hit" with no attacker is the clock only if it reads 00 (a pit looks the
+same otherwise), and a Jack stalemate is what runs it out. Round 2 has three
+personality-0 Jacks; round 4 one; round 5 four jumpers at once, then a
+juggle-walker at the level's right X bound (`$1510`); round 6 a personality 1
+(retreat and ranged throw).
+
+```bash
+cd autoplay
+PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \
+    tools/jack_fight.py --level 2 --out /tmp/jack.jsonl
+PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \
+    tools/jack_fight.py --level 5 --seconds 420 --out /tmp/jack5.jsonl
+```
+
+See `autoplay/CLAUDE.md`, **Jack: the ROM model and the plan**.
+
 ## Validation and handoff
 
 - Documentation-only changes: check Markdown structure, links, paths, command

@@ -125,58 +125,40 @@ _TYPE_SPECIFIC_MOVE_PHASES: dict[int, dict[int, CombatPhase]] = {
     # counting it down exactly like the generic hitstun handler does. Both
     # are a real, timed, cannot-act window -- STUNNED, so Grunt.stun_timer
     # reads the ROM's own countdown correctly instead of silently reporting
-    # nothing. $0F is the same $9B36 handler
-    # reached a second way (from state $17, below) and gets the same phase.
-    # $10 ($F2AC) unconditionally clears her approach counter, sets the
-    # state to $11, and jumps straight into ordinary_enemy_begin_knockdown
-    # -- the same routine state $03 itself dispatches to.
-    # $12 ($F2BC) delegates every tick to $DBCC, the identical shared
-    # handler state $07 (BLOCKED) already uses for every type.
-    # $13 ($F5F2) and $14 ($F64A) are the lead-up to her special: picking a
-    # lane offset and gating on distance to the target before the lunge is
-    # allowed to fire. Committed, not yet the hit itself -- CHARGE.
-    # $15 ($F6BC) is the special itself: on entry it writes +$1C/+$20 (this
-    # codebase's grunt_vel_x/grunt_vel_y) directly to roughly 2.75/2.125 px
-    # per tick toward the target -- a scripted lunge with no attack shape of
-    # its own, the same pattern already confirmed for Signal's slide
-    # (enemy-ai.md "Signal's slide is velocity, not a hitbox") but faster on
-    # both axes. This state, not a wider whip box, is what closes the gap a
-    # human sees as "she takes a quick step in and hits" -- ATTACKING, which
-    # is what lets check_for_incoming_melee's velocity projection
-    # (reach.enemy_will_close_soon) see it coming from her real grunt_vel_x/
-    # grunt_vel_y instead of the AI discovering it only once already hit.
+    # nothing.
+    # Her table is thirteen words ($00-$0C): the word at $1037C, right after
+    # it, is Jack's state $00, and no code of hers writes a state above $0C
+    # (her handlers only ever store $01, $03, $07, $08, $0B and $0C). The
+    # states $0D-$17 an earlier reading gave her -- a "lunge shared with
+    # Jack" among them -- are Jack's own table read past her end.
     0x26: {
         0x08: CombatPhase.ATTACKING,
         0x0A: CombatPhase.ATTACKING,
         0x0B: CombatPhase.STUNNED,
         0x0C: CombatPhase.STUNNED,
-        0x0F: CombatPhase.STUNNED,
-        0x10: CombatPhase.KNOCKDOWN,
-        0x12: CombatPhase.BLOCKED,
-        0x13: CombatPhase.CHARGE,
-        0x14: CombatPhase.CHARGE,
-        0x15: CombatPhase.ATTACKING,
     },
-    # Jack $27: enemy-ai.md's "A second scripted lunge, shared with Jack"
-    # dumped his own primary-state table at $1037C and found the *identical*
-    # three lunge addresses ($F5F2/$F64A/$F6BC) Nora's table uses at her
-    # states $13/$14/$15, but at Jack's own states $08/$09/$0A instead -- his
-    # own numbering, same shared toolkit routine. Before this entry, Jack's
-    # lunge fell through to UNKNOWN exactly the way every one of Nora's own
-    # states did before she got a table at all: invisible to is_dangerous,
-    # so check_for_incoming_melee/enemy_will_close_soon never saw him coming
-    # and the AI took his lunge as a free hit. $F5F2/$F64A pick a lane offset
-    # and gate on distance before the lunge fires -- committed, not yet the
-    # hit -- CHARGE; $F6BC is the lunge itself, writing +$1C/+$20 directly
-    # toward the target with no attack shape of its own -- ATTACKING, same
-    # as Nora's $15. His own states $01/$03/$07 use the shared
-    # reselect-target/knockdown-trigger/blocked-delegate routines too (per
-    # the same manuscript section), but those land on the generic
-    # $0100/$0300/$0700 hi-byte cases above and need no entry here.
+    # Jack $27, his own table at $1037C ($00-$12). None of his states is an
+    # attack of his body: no animation in his set carries a strike box and no
+    # handler of his tests one against a player -- every hit he lands is a
+    # type-$28 axe, which ai/jack.py models and EngageJack plans against.
+    # So everything he does reads NORMAL here (the axes are not his melee),
+    # bar the knockdown $F2AC hands over to ($11, $991A): a body on the floor
+    # that nothing grabs or hits. $08-$0A ($F5F2/$F64A/$F6BC) are a lane
+    # set-up, a distance gate and a diagonal *back-off* onto the target's
+    # lane before his aligned throw -- not a lunge: $F6BC's X velocity points
+    # away from the target (enemy-ai.md, "Jack").
     0x27: {
-        0x08: CombatPhase.CHARGE,
-        0x09: CombatPhase.CHARGE,
-        0x0A: CombatPhase.ATTACKING,
+        0x08: CombatPhase.NORMAL,
+        0x09: CombatPhase.NORMAL,
+        0x0A: CombatPhase.NORMAL,
+        0x0B: CombatPhase.NORMAL,
+        0x0C: CombatPhase.NORMAL,
+        0x0D: CombatPhase.NORMAL,
+        0x0E: CombatPhase.NORMAL,
+        0x0F: CombatPhase.NORMAL,
+        0x10: CombatPhase.NORMAL,
+        0x11: CombatPhase.KNOCKDOWN,
+        0x12: CombatPhase.NORMAL,
     },
 }
 

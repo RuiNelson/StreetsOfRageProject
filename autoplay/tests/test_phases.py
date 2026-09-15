@@ -77,43 +77,38 @@ class PhaseDecodeTests(unittest.TestCase):
     def test_nora_whip_engage_and_special_are_attacking(self) -> None:
         # $08 (whip engage/swing, $F1B0) and $0A (shared "damaging special"
         # entry $DDE6, the same address already ATTACKING for Garcia $22's
-        # own state $13) and $15 (the scripted lunge $F6BC).
+        # own state $13).
         self.assertEqual(ordinary_enemy_phase(0x0801, type_id=0x26), CombatPhase.ATTACKING)
         self.assertEqual(ordinary_enemy_phase(0x0A01, type_id=0x26), CombatPhase.ATTACKING)
-        self.assertEqual(ordinary_enemy_phase(0x1501, type_id=0x26), CombatPhase.ATTACKING)
-
-    def test_nora_lunge_windup_is_charge(self) -> None:
-        self.assertEqual(ordinary_enemy_phase(0x1301, type_id=0x26), CombatPhase.CHARGE)
-        self.assertEqual(ordinary_enemy_phase(0x1401, type_id=0x26), CombatPhase.CHARGE)
 
     def test_nora_post_hit_recovery_is_stunned(self) -> None:
-        # $0B/$0C/$0F all route through her own +$50 countdown ($9B36/$F078),
+        # $0B/$0C route through her own +$50 countdown ($9B36/$F078),
         # distinct from the generic $0200 hitstun state, which every ordinary
         # type (Nora included) already reads STUNNED via the hi-byte check.
         self.assertEqual(ordinary_enemy_phase(0x0B01, type_id=0x26), CombatPhase.STUNNED)
         self.assertEqual(ordinary_enemy_phase(0x0C01, type_id=0x26), CombatPhase.STUNNED)
-        self.assertEqual(ordinary_enemy_phase(0x0F01, type_id=0x26), CombatPhase.STUNNED)
 
-    def test_nora_state_ten_knockdown_and_twelve_blocked(self) -> None:
-        # $10 ($F2AC) jumps straight into ordinary_enemy_begin_knockdown;
-        # $12 ($F2BC) delegates every tick to the same $DBCC handler state
-        # $07 (BLOCKED) already shares across every type.
-        self.assertEqual(ordinary_enemy_phase(0x1001, type_id=0x26), CombatPhase.KNOCKDOWN)
-        self.assertEqual(ordinary_enemy_phase(0x1201, type_id=0x26), CombatPhase.BLOCKED)
+    def test_nora_table_ends_at_c(self) -> None:
+        # Her table at $10362 is thirteen words: $1037C, where an earlier
+        # reading took her states $0D-$17 from, is Jack's state $00, and no
+        # code of hers writes a state past $0C. Those states stay unmapped.
+        for state in (0x0F, 0x10, 0x12, 0x13, 0x14, 0x15):
+            self.assertEqual(
+                ordinary_enemy_phase(state << 8 | 1, type_id=0x26), CombatPhase.NORMAL
+            )
 
     def test_nora_normal_states_still_default_normal(self) -> None:
         # $09 (chase/approach, $F0FC) has no Nora-specific override and must
         # keep falling back to NORMAL rather than picking up a stray mapping.
         self.assertEqual(ordinary_enemy_phase(0x0901, type_id=0x26), CombatPhase.NORMAL)
 
-    def test_jack_lunge_shares_noras_toolkit_at_his_own_state_numbers(self) -> None:
-        # enemy-ai.md's "A second scripted lunge, shared with Jack": his own
-        # table at $1037C reuses the identical $F5F2/$F64A/$F6BC addresses
-        # Nora's table uses at $13/$14/$15, but at Jack's own states
-        # $08/$09/$0A instead.
-        self.assertEqual(ordinary_enemy_phase(0x0801, type_id=0x27), CombatPhase.CHARGE)
-        self.assertEqual(ordinary_enemy_phase(0x0901, type_id=0x27), CombatPhase.CHARGE)
-        self.assertEqual(ordinary_enemy_phase(0x0A01, type_id=0x27), CombatPhase.ATTACKING)
+    def test_jack_never_attacks_with_his_body(self) -> None:
+        # Every hit Jack lands is a type-$28 axe (ai/jack.py): his own states,
+        # the $08-$0A lane set-up / gate / back-off included, read NORMAL --
+        # bar the knockdown $F2AC hands over to.
+        for state in range(0x08, 0x13):
+            expected = CombatPhase.KNOCKDOWN if state == 0x11 else CombatPhase.NORMAL
+            self.assertEqual(ordinary_enemy_phase(state << 8 | 1, type_id=0x27), expected)
 
     def test_signal_attack_family_states(self) -> None:
         self.assertEqual(

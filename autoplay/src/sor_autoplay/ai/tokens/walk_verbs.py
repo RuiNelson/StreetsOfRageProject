@@ -280,3 +280,35 @@ class EngageAbadede(Walk):
     priority: int = 24
     actor_slot: str
     target_slot: str  # Abadede.slot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EngageJack(Walk):
+    """Take a hold on Jack from where none of his axes reaches.
+
+    Produced by ``could_engage_jack`` once per live ``Jack`` in the camera
+    while the actor is free to move and not already holding a body -- armed
+    or not. It is the whole fight against him: the strike, grab, hop, walk-in
+    and rear-chord verbs all stand down for him, and the stick each tick is
+    ``jack.plan_engage``'s -- a lookahead over his state machine and every axe
+    of his (juggled, tossed, thrown) that keeps the move which takes a hold
+    soonest -- one no axe still in the air can reach -- without any axe box
+    ever meeting the actor's body, or, where the actor can punch, the punch
+    that stuns him and drops his juggle (thrown in the facing the actor has:
+    the plan turns it by walking). In his dodge (``$07``) it waits mid-screen
+    in the pocket above his juggle, or steps 88 px behind his walk when he is
+    out of reach and cannot come back. His body never strikes; the axes are
+    the whole threat.
+
+    Raises emergency: a live Jack×30 less 1 per 40 px, plus the armed raise
+    while he juggles; ×72 while an axe of his is out at the actor (a released
+    throw coming its way, or one about to be released along its lane); ×5
+    instead (just under a punch) while another enemy's committed strike is
+    about to land (``reach.is_incoming_melee``) and no axe of his is out;
+    below CounterGrab/TechRecover and the dialogs; the hold family never
+    coexists with it.
+    """
+
+    priority: int = 24
+    actor_slot: str
+    target_slot: str  # Jack.slot

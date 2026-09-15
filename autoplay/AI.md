@@ -737,13 +737,14 @@ Those are two of the reasons `reach.grab_reasons(context, actor, target,
 enemies) -> frozenset[GrabReason]` can return — `CLEAR_REAR` and
 `DEAD_ZONE`. The second is derived from the extracted `AttackRange`s rather
 than from the enemy's class, so a corrected extraction changes the AI's
-behaviour without changing any code. A third, `JACK_FROM_BEHIND`, fires
-when the actor is already on Jack's back (he is facing away): take the
-hold before the axe or the lunge turns around. Antonio and Souther have no
-reason here at all: each one's hold is his engage's own walk-in
-(`EngageAntonio`, `EngageSouther`), and what follows it — knee, knee,
-release, walk back in — is `souther.hold_step`, not a grab decision. A
-fourth, `WHILE_SURROUNDED`, fires
+behaviour without changing any code. Antonio, Souther, Bongo, Abadede and
+Jack have no reason here at all: each one's hold is his engage's own
+walk-in (`EngageAntonio`, `EngageSouther`, `EngageBongo`, `EngageAbadede`,
+`EngageJack`), and what follows it is that plan's hold step, not a grab
+decision. (Jack had one, `JACK_FROM_BEHIND`; it went with his plan --
+`ai/jack.py` takes his hold only where no axe of his still in the air can
+reach the holder, which "he is facing away" alone did not guarantee.) A
+third, `WHILE_SURROUNDED`, fires
 for any grabbable `Grunt` while the actor is `Surrounded`: being boxed in
 is answered by a hold whichever side the crowd is on. It is the one
 reason keyed on the actor's whole situation rather than on the candidate
@@ -760,9 +761,9 @@ at the actor's back both hold), so `priority._emergency_grab_enemy` takes
 present" — over whatever the set contains. The tiers rank differently:
 being surrounded is the only one that outranks the `$322A` escape chord (a
 pincer's hold becomes a throw *into* the enemy the chord was aimed at),
-clearing the rear beats every strike on an enemy that can still act,
-catching Jack from behind is just under that, and the whip case is an
-improvement on an ordinary exchange and ranks just above a jump kick.
+clearing the rear beats every strike on an enemy that can still act, and
+the whip case is an improvement on an ordinary exchange and ranks just
+above a jump kick.
 
 **How a hold ends is a timing decision, not a taste.** Every hold move is an
 animation lock that ignores fresh edges for its whole length, so issuing one

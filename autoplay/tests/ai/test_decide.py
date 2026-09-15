@@ -545,18 +545,15 @@ class CouldRearAttackTests(unittest.TestCase):
 
         self.assertEqual(result, set())
 
-    def test_does_not_fire_when_already_on_jacks_back(self) -> None:
-        # Jump kick overshoots: actor at 150 facing right, Jack at 130
-        # facing left. On his back, but facing the wrong way. The chord
-        # would fire away from him -- walk around and grab instead.
-        myself = make_myself(world_x=150, world_y=100, facing_left=False)
-        jack = make_jack(world_x=130, world_y=100, facing_left=True)
+    def test_never_fires_on_jack(self) -> None:
+        # EngageJack owns him: neither the chord nor the generic walk-in is
+        # produced for him, on his back or in front of him.
+        for facing_left in (True, False):
+            myself = make_myself(world_x=150, world_y=100, facing_left=facing_left)
+            jack = make_jack(world_x=130, world_y=100, facing_left=True)
 
-        self.assertEqual(could_rear_attack({myself, jack}), set())
-        self.assertEqual(
-            could_walk_to_near_enemy({myself, jack}),
-            {WalkToNearEnemy(actor_slot="P1", target_slot="obj01")},
-        )
+            self.assertEqual(could_rear_attack({myself, jack}), set())
+            self.assertEqual(could_walk_to_near_enemy({myself, jack}), set())
 
 
 class CouldCounterGrabTests(unittest.TestCase):
@@ -1261,13 +1258,12 @@ class CouldGrabEnemyTests(unittest.TestCase):
 
         self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="front")})
 
-    def test_fires_on_jack_when_already_on_his_back(self) -> None:
+    def test_never_fires_on_jack(self) -> None:
+        # On his back is exactly where EngageJack's own walk-in takes him.
         myself = make_myself(world_x=150, world_y=100, facing_left=True)
         jack = make_jack(slot="jack", world_x=130, world_y=100, facing_left=True)
 
-        result = could_grab_enemy({myself, jack})
-
-        self.assertEqual(result, {GrabEnemy(actor_slot="P1", target_slot="jack")})
+        self.assertEqual(could_grab_enemy({myself, jack}), set())
 
     def test_fires_on_nora_without_any_rear_threat(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
@@ -2283,80 +2279,46 @@ class CouldOpenBreakableTests(unittest.TestCase):
         self.assertEqual(could_open_breakable(context), set())
 
 
-class JackJugglingMeleeTests(unittest.TestCase):
-    """While Jack juggles his axe/torch (has_projectile), an unarmed punch
-    is refused -- closing in with fists trades hits with the spin. A held
-    weapon reaches past it and must be used."""
+class JackIsEngageJacksTests(unittest.TestCase):
+    """EngageJack owns Jack (jack.py): every strike, the chord and the hop
+    stand down for him, juggling or not, armed or not -- his body never
+    strikes, his axes are the threat, and a strike's +$34 turns the walk-in's
+    grab contact into a hit. Other enemies around him are untouched."""
 
-    def test_could_punch_refuses_a_juggling_jack(self) -> None:
+    def test_no_punch_whether_he_juggles_or_not(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
-        jack = make_jack(world_x=130, world_y=105, has_projectile=True)
-        context: set[Token] = {myself, jack}
+        for juggling in (True, False):
+            jack = make_jack(world_x=130, world_y=105, has_projectile=juggling)
+            self.assertEqual(could_punch({myself, jack}), set())
 
-        self.assertEqual(could_punch(context), set())
+    def test_no_weapon_swing_either(self) -> None:
+        for weapon in (0x0A, 0x08):  # bat, knife
+            myself = make_myself(world_x=100, world_y=100, held_weapon_type=weapon)
+            jack = make_jack(world_x=130, world_y=105, has_projectile=True)
+            self.assertEqual(could_melee_weapon_attack({myself, jack}), set())
 
-    def test_could_punch_fires_once_the_weapon_is_gone(self) -> None:
+    def test_a_grunt_beside_him_is_still_punched(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
-        jack = make_jack(world_x=130, world_y=105, has_projectile=False)
-        context: set[Token] = {myself, jack}
-
-        result = could_punch(context)
-
-        self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj01")})
-
-    def test_could_melee_weapon_attack_still_fires_on_a_juggling_jack_with_a_bat(self) -> None:
-        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A)  # baseball bat
-        jack = make_jack(world_x=130, world_y=105, has_projectile=True)
-        context: set[Token] = {myself, jack}
+        jack = make_jack(slot="obj01", world_x=130, world_y=105, has_projectile=True)
+        grunt = make_enemy(slot="obj02", world_x=135, world_y=100)
 
         self.assertEqual(
-            could_melee_weapon_attack(context),
-            {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x0A)},
+            could_punch({myself, jack, grunt}), {Punch(actor_slot="P1", target_slot="obj02")}
         )
 
-    def test_could_melee_weapon_attack_still_fires_on_a_juggling_jack_with_a_knife(self) -> None:
-        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)  # knife
-        jack = make_jack(world_x=130, world_y=105, has_projectile=True)
-        context: set[Token] = {myself, jack}
-
-        self.assertEqual(
-            could_melee_weapon_attack(context),
-            {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x08)},
-        )
-
-    def test_a_non_juggling_jack_does_not_affect_a_different_juggling_jack(self) -> None:
-        # The refusal is per-target, read from each Jack's own has_projectile
-        # -- not a blanket "no melee on any Jack this tick".
-        myself = make_myself(world_x=100, world_y=100)
-        juggling = make_jack(slot="obj01", world_x=130, world_y=105, has_projectile=True)
-        idle = make_jack(slot="obj02", world_x=135, world_y=100, has_projectile=False)
-        context: set[Token] = {myself, juggling, idle}
-
-        result = could_punch(context)
-
-        self.assertEqual(result, {Punch(actor_slot="P1", target_slot="obj02")})
-
-    def test_could_rear_attack_is_unaffected(self) -> None:
-        # Jack at the actor's back *facing them* (chasing): the chord still
-        # answers him, juggling or not. The melee-strike refusal does not
-        # apply. He must face the actor -- otherwise this is "on his back"
-        # and the grab owns it (see CouldRearAttackTests).
+    def test_no_chord_at_him(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
         jack = make_jack(world_x=80, world_y=100, facing_left=False, has_projectile=True)
 
-        result = could_rear_attack({myself, jack})
+        self.assertEqual(could_rear_attack({myself, jack}), set())
 
-        self.assertEqual(result, {RearAttack(actor_slot="P1", target_slot="obj01")})
-
-    def test_could_jump_attack_is_unaffected(self) -> None:
-        # The kick arrives from above, not through the juggling itself.
+    def test_no_hop_at_him(self) -> None:
+        # The juggle rides in front of him where a flight comes down.
         myself = make_myself(world_x=100, world_y=100, is_airborne=False, facing_left=False)
         jack = make_jack(world_x=160, world_y=105, has_projectile=True)
         camera = CameraRange(left=0, right=400, top=0, bottom=200)
 
-        result = could_jump_attack({myself, jack, camera})
-
-        self.assertEqual(result, {JumpAttack(actor_slot="P1", target_slot="obj01")})
+        self.assertEqual(could_jump_attack({myself, jack, camera}), set())
 
 
 class CouldProjectileSidestepTests(unittest.TestCase):
