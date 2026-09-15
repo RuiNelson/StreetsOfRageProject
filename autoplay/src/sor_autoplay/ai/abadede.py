@@ -62,9 +62,11 @@ The hold
 
 Out of that, the plan (``plan_engage``): a lookahead over his AI -- the nine
 sticks, each held a while and then handed to a tail policy that follows his
-phases (``engage_mode``), plus a punch pressed on a chosen update -- scored
-by the worse of two update orders: a hold by how soon, a punch that lands on
-his run next, a hit below everything. The tail stands 17-18 lanes off a
+phases (``engage_mode``), plus a punch pressed on a chosen update, standing
+or after walking toward him (the ROM samples the facing a punch starts with:
+B and a turn on one press is thrown the old way, so the walk is the turn) --
+scored by the worse of two update orders: a hold by how soon, a punch that
+lands on his run next, a hit below everything. The tail stands 17-18 lanes off a
 charge's lane with the walking box toward him, walks into him from 11-15
 lanes while he walks in or pauses, and waits in front of him, box out, while
 he cannot collide.
@@ -992,10 +994,12 @@ def _rollout(
     punch_at: int | None = None,
 ) -> tuple[Outcome, int | None, AbadedeSim, ActorSim]:
     """Play one candidate out: ``first`` for ``hold`` updates (None: all of
-    them), then the tail policy -- or, with ``punch_at``, standing until that
-    actor update, the punch on it, and its lock. ``actor_first`` picks which
-    body the next update reaches first: a snapshot can land on either side
-    of ``$AD8E``'s VBlank wait, and the plan has to survive both."""
+    them), then the tail policy -- or, with ``punch_at``, ``first`` (standing,
+    or walking toward him, which turns the actor) until that actor update,
+    the punch on it in the facing the actor has then, and its lock.
+    ``actor_first`` picks which body the next update reaches first: a
+    snapshot can land on either side of ``$AD8E``'s VBlank wait, and the plan
+    has to survive both."""
 
     moves = 0
     punched_on: int | None = None
@@ -1006,8 +1010,10 @@ def _rollout(
             punched_on is None or moves - punched_on < punch.lock
         ):
             if punched_on is None:
+                # In the facing it has: the ROM samples the facing a punch
+                # starts with, and a turn on the same press is a committed
+                # miss (``execute._facing_prop``) -- the actor turns by walking.
                 punched_on = moves
-                a.facing_left = b.x < a.x
             a.walking = False
             a.vx = 0.0
             a.box_x, a.box_y = a.x, a.y
@@ -1141,11 +1147,11 @@ def plan_from_sims(
             if first[1] == 0:
                 score += _KEEP_LANE_BONUS
         if best is None or score > best.score:
-            now_punch = punch_at == 0
+            now = (0, 0) if punch_at == 0 else first
             best = EngagePlan(
-                dir_x=0 if punch_at is not None else first[0],
-                dir_y=0 if punch_at is not None else first[1],
-                punch=now_punch,
+                dir_x=now[0],
+                dir_y=now[1],
+                punch=punch_at == 0,
                 mode=mode_now,
                 outcome=None if outcome is Outcome.NONE else outcome.name.lower(),
                 at_update=at,
@@ -1160,6 +1166,9 @@ def plan_from_sims(
     if punch is not None and _punch_worth_trying(b0):
         for wait in PUNCH_WAITS:
             consider((0, 0), None, wait)
+            if wait:
+                # Walking toward him first is how the actor turns to him.
+                consider((toward_x, 0), None, wait)
     assert best is not None
     return best
 

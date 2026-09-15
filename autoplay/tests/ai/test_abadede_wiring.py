@@ -216,7 +216,9 @@ class ExecuteTests(unittest.TestCase):
         )
         self.assertEqual(gamepad.held, expected)
 
-    def test_a_close_run_on_the_lane_is_punched_toward_him(self) -> None:
+    def test_a_close_run_on_the_lane_is_punched_in_the_facing_the_actor_has(self) -> None:
+        # B alone: a turn on the same press is sampled pre-turn, a committed
+        # miss (``_facing_prop``).
         me = _myself(100, 60)
         boss = _run(200, 60)
         gamepad, client = _gamepad()
@@ -224,7 +226,18 @@ class ExecuteTests(unittest.TestCase):
         pressed = [
             call.kwargs.get("player1", 0) for call in client.press_buttons.call_args_list
         ]
-        self.assertTrue(any(mask & B and mask & RIGHT for mask in pressed), pressed)
+        self.assertIn(B, pressed)
+        self.assertFalse(any(mask & (LEFT | RIGHT) for mask in pressed), pressed)
+
+    def test_facing_away_it_turns_by_walking_before_any_punch(self) -> None:
+        me = _myself(100, 60, facing_left=True)
+        boss = _run(200, 60)
+        gamepad, client = _gamepad()
+        execute_verb(EngageAbadede(actor_slot="P1", target_slot="obj00"), {me, boss, CAMERA}, gamepad)
+        pressed = [
+            call.kwargs.get("player1", 0) for call in client.press_buttons.call_args_list
+        ]
+        self.assertFalse(any(mask & B for mask in pressed), pressed)
 
     def test_armed_it_never_presses_b_at_him(self) -> None:
         me = _myself(100, 60, held_weapon_type=0x0B)

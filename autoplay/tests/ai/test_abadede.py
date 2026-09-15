@@ -345,10 +345,37 @@ class PlanTests(unittest.TestCase):
         p = plan.plan_from_sims(b, _actor(110, 63), punch=plan.punch_spec(BLAZE))
         self.assertEqual(p.outcome, "grab")
 
+    def test_a_punch_facing_away_is_no_strike_at_update_zero(self) -> None:
+        # The ROM samples the facing a punch starts with: B and a turn on one
+        # press is thrown the old way (``execute._facing_prop``; five punches
+        # whiffed that way against Jack). So a punch on update 0 lands only
+        # facing him.
+        spec = plan.punch_spec(BLAZE)
+        for left, expected in ((False, STRUCK), (True, None)):
+            for actor_first in (False, True):
+                with self.subTest(facing_away=left, actor_first=actor_first):
+                    outcome, _, _, a = plan._rollout(
+                        _run(200, 60), _actor(100, 60, left=left), None, (0, 0), None,
+                        plan._Tail(), actor_first=actor_first, horizon=plan.HORIZON_UPDATES,
+                        punch=spec, punch_at=0,
+                    )
+                    self.assertIs(a.facing_left, left)
+                    if expected is None:
+                        self.assertIsNot(outcome, STRUCK)
+                    else:
+                        self.assertIs(outcome, expected)
+
+    def test_facing_away_it_walks_toward_him_to_turn_before_it_punches(self) -> None:
+        p = plan.plan_from_sims(_run(200, 60), _actor(100, 60, left=True), punch=plan.punch_spec(BLAZE))
+        self.assertFalse(p.punch)
+        self.assertNotEqual(p.outcome, "hit")
+        if p.outcome == "struck":
+            self.assertEqual((p.dir_x, p.dir_y), (1, 0))
+
 
 def _fight(b: plan.AbadedeSim, a: ActorSim, *, char: int, updates: int = 120):
     """The planner playing the actor against his model, update by update, to
-    the first contact."""
+    the first contact. A punch is thrown in the facing the actor has."""
 
     spec = plan.punch_spec(char)
     punched_on = None
@@ -361,7 +388,6 @@ def _fight(b: plan.AbadedeSim, a: ActorSim, *, char: int, updates: int = 120):
             p = plan.plan_from_sims(b, a, punch=spec)
             if p.punch:
                 punched_on = moves
-                a.facing_left = b.x < a.x
                 a.walking = False
                 a.box_x, a.box_y = a.x, a.y
             else:
@@ -390,9 +416,10 @@ class ClosedLoopTests(unittest.TestCase):
     def test_every_start_ends_in_his_hands_and_never_in_his_run(self) -> None:
         for char in (BLAZE, AXEL, ADAM):
             for name, make in self.STARTS:
-                with self.subTest(name, char=char):
-                    outcome, _ = _fight(make(), _actor(100, 60, char=char), char=char)
-                    self.assertIn(outcome, (GRAB, STRUCK))
+                for left in (False, True):
+                    with self.subTest(name, char=char, facing_away=left):
+                        outcome, _ = _fight(make(), _actor(100, 60, char=char, left=left), char=char)
+                        self.assertIn(outcome, (GRAB, STRUCK))
 
 
 class HoldStepTests(unittest.TestCase):

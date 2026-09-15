@@ -1599,8 +1599,7 @@ def state_machine_engage_abadede(
     Held directly and unclamped, as ``EngageBongo``'s: the plan holds the lane
     to the pixel -- 17-18 off his run, where his box misses and the walking
     box still reaches his body -- and needs that box out at the moment of
-    contact; it models the camera clamp itself. The punch turns to him with
-    the same press.
+    contact; it models the camera clamp itself.
     """
 
     plan = engage_abadede_plan(verb, context)
@@ -1610,7 +1609,11 @@ def state_machine_engage_abadede(
         gamepad.release()
         return
     if plan.punch:
-        _press(gamepad, PUNCH_MASK | _face_toward_mask(actor, target.world_x), frames=PUNCH_FRAMES)
+        # The plan timed it in the facing the actor already has. B with a
+        # turn on the same press is sampled pre-turn -- a committed miss
+        # (``_facing_prop``; traced live against Jack, five punches whiffed
+        # facing away) -- so the plan turns by walking.
+        _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
         return
     mask = 0
     if plan.dir_x > 0:

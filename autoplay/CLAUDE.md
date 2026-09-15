@@ -730,9 +730,9 @@ The plan (`abadede.plan_engage`, `EngageAbadede`,
    `+$54` as well as his usual bytes): the nine sticks, each held for 2, 6
    or 14 updates or the whole 40-update horizon and then a phase-aware tail
    (`engage_mode`), plus a punch pressed on one of the next seven updates,
-   each under both update orders and scored by the worse -- a hold by how
-   soon, a punch landing on his run next, a hit below everything. 2-5 ms a
-   tick.
+   standing or after walking toward him (below, 3), each under both update
+   orders and scored by the worse -- a hold by how soon, a punch landing on
+   his run next, a hit below everything. 2-5 ms a tick.
 2. **The tail's phases**: SWEET while his run is coming (17-18 lanes off its
    lane by whichever step lands in the band, straight or diagonal, and the
    walking box at him); WALK_IN while he walks in or pauses (into him from
@@ -745,7 +745,16 @@ The plan (`abadede.plan_engage`, `EngageAbadede`,
    rollout reaches a hold and one reaches his run with it -- caught on his
    lane with the run too close to leave. `can_punch` is off armed (B swings)
    and with an item underfoot (B picks it up -- food, in a fight scored
-   without it).
+   without it). **It is thrown in the facing the actor already has**: the
+   ROM samples the facing a punch starts with, so B and a turn on one press
+   is thrown the old way -- a committed miss facing away (`execute.
+   _facing_prop`; traced live against Jack, five punches whiffed). The first
+   plan turned the rollout's actor to him on the punch and `execute` pressed
+   B with the turn; now the rollout keeps the facing, six more candidates
+   walk toward him (`antonio.actor_update` turns the actor on a walk) before
+   a punch on updates 1-6 -- the plan's stick is that walk until then -- and
+   `execute` presses B alone. Found in the code, by Jack's trace; no Abadede
+   fight has been scored since.
 4. **The hold loop** (`abadede.hold_step`) is Souther's -- knee, knee,
    release, walk straight back in -- with one ROM rule of his own: he reads
    the holder's `+$7D` only in state `$B` substate 1, and a knee's damage is
