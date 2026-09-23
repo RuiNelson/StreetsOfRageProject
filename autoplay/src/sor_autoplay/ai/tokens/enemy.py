@@ -289,6 +289,19 @@ class Boss(Enemy, ABC):
     # +$40, the ELC spawn parameter: a non-zero low nibble is Abadede's
     # round-8 variant, whose pause decides differently ($146C4).
     script_param: int = 0
+    # The rest of a twin's update (ai/twins.py, TwinSim): height as 16.16,
+    # the floor (+$4C) as 16.16, the frame-timer reload (+$0C), the grab
+    # path's toggle (+$7A), +$4B, the knockdown's bounces (+$63), damage
+    # waiting for its next update (+$6C), +$37 and +$6D.
+    fine_z: float = 0.0
+    ground_fine: float = 0.0
+    anim_reload: int = 0
+    toggle_7a: int = 0
+    flags_4b: int = 0
+    bounce_63: int = 0
+    pending_damage: int = 0
+    flags_37: int = 0
+    flags_6d: int = 0
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

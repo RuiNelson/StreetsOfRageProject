@@ -233,6 +233,18 @@ class MapEntity:
     fine_x: float = 0.0  # +$10 as 16.16
     fine_y: float = 0.0  # +$14 as 16.16
     fine_z: float = 0.0  # +$18 as 16.16 (Jack and his axes: the juggle arc is fractional)
+    # Onihime/Yasha ($58) read these too (ai/twins.py replays their update):
+    # +$0C the frame-timer reload, +$7A the grab path's toggle, +$4B (bit 0:
+    # got up), +$63 the knockdown's bounce counter, +$6C damage waiting for
+    # its next update, +$37 (bit 0: that hit knocks down), +$6D, and +$4C as
+    # 16.16. The player's are the rear attack's frame and countdown.
+    boss_toggle_7a: int = 0
+    boss_flags_4b: int = 0
+    boss_bounce_63: int = 0
+    boss_pending_damage: int = 0
+    boss_flags_37: int = 0
+    boss_flags_6d: int = 0
+    boss_ground_fine: float = 0.0
     # Abadede ($30) only: the substate +$5B his handlers dispatch on and the
     # +$54 word his timers count (memory_map.OBJ_BESPOKE_*).
     boss_substate: int = 0
@@ -740,6 +752,9 @@ def _entity_from_object(
     fine_x = 0.0
     fine_y = 0.0
     fine_z = 0.0
+    boss_toggle_7a = boss_flags_4b = boss_bounce_63 = 0
+    boss_pending_damage = boss_flags_37 = boss_flags_6d = 0
+    boss_ground_fine = 0.0
     boss_substate = 0
     boss_timer_54 = 0
     boomerang_state = 0
@@ -777,6 +792,11 @@ def _entity_from_object(
         player_flags_59 = _u8(slot, mm.OBJ_PLAYER_FLAGS_59)
         player_flags_4b = _u8(slot, mm.OBJ_PLAYER_HOLD_FLAGS)
         player_contact_code = _u8(slot, mm.OBJ_PLAYER_CONTACT_CODE)
+        anim = _u16(slot, mm.OBJ_ANIM)
+        anim_frame = _u8(slot, mm.OBJ_ANIM_FRAME)
+        anim_countdown = _u8(slot, mm.OBJ_ANIM_COUNTDOWN)
+        fine_x = fixed1616_unsigned(slot, mm.OBJ_POS_X)
+        fine_y = fixed1616_unsigned(slot, mm.OBJ_POS_Y)
     elif style.kind == "enemy":
         # Resolved from the weapon object's +$52 holder pointer, not from
         # this slot: ordinary-enemy +$60 is the scripted approach X.
@@ -847,6 +867,15 @@ def _entity_from_object(
         child_ptr = _u16(slot, mm.OBJ_LATER_BOSS_CHILD)
         fine_x = fixed1616_unsigned(slot, mm.OBJ_POS_X)
         fine_y = fixed1616_unsigned(slot, mm.OBJ_POS_Y)
+        fine_z = fixed1616_unsigned(slot, mm.OBJ_POS_Z)
+        anim_reload = _u8(slot, mm.OBJ_ANIM_RELOAD)
+        boss_toggle_7a = _u8(slot, mm.OBJ_BOSS_TOGGLE_7A)
+        boss_flags_4b = _u8(slot, mm.OBJ_BOSS_FLAGS_4B)
+        boss_bounce_63 = _u8(slot, mm.OBJ_BOSS_BOUNCE_63)
+        boss_pending_damage = _u8(slot, mm.OBJ_BOSS_PENDING_DAMAGE)
+        boss_flags_37 = _u8(slot, mm.OBJ_BOSS_FLAGS_37)
+        boss_flags_6d = _u8(slot, mm.OBJ_BOSS_FLAGS_6D)
+        boss_ground_fine = fixed1616_unsigned(slot, mm.OBJ_BOSS_GROUND_Z)
         # Target pointer location differs by boss generation.
         if type_id in (0x30, 0x35):
             target_ptr = _u16(slot, mm.OBJ_BESPOKE_TARGET)
@@ -991,6 +1020,13 @@ def _entity_from_object(
         axe_offset=axe_offset,
         owner_ptr=owner_ptr,
         fine_z=fine_z,
+        boss_toggle_7a=boss_toggle_7a,
+        boss_flags_4b=boss_flags_4b,
+        boss_bounce_63=boss_bounce_63,
+        boss_pending_damage=boss_pending_damage,
+        boss_flags_37=boss_flags_37,
+        boss_flags_6d=boss_flags_6d,
+        boss_ground_fine=boss_ground_fine,
         vel_x=vel_x,
         vel_z=vel_z,
         enemy_vel_x=enemy_vel_x,

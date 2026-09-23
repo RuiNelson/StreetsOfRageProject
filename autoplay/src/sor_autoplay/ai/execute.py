@@ -18,6 +18,7 @@ from .pathfind import Path, Point, PointGoal
 from .tokens import (
     CounterGrab,
     EngageAbadede,
+    EngageTwins,
     EngageAntonio,
     EngageBongo,
     EngageJack,
@@ -48,7 +49,7 @@ from .tokens import (
     punch_outer_x,
     punch_usable_inner_x,
 )
-from .tokens import Abadede, Antonio, Bongo, Enemy, Jack, Souther
+from .tokens import Abadede, Antonio, Bongo, Enemy, Jack, Onihime, Souther
 from .tokens import CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile
 from .tokens import Pickup, Weapon
@@ -78,6 +79,8 @@ from . import abadede as abadede_plan
 from . import antonio as antonio_plan
 from . import bongo as bongo_plan
 from . import jack as jack_plan
+from . import twins as twins_model
+from . import twins_plan
 from . import souther as souther_plan
 from . import navigation as nav
 from . import press as press_model
@@ -1628,6 +1631,70 @@ def state_machine_engage_abadede(
     gamepad.hold(mask)
 
 
+# One plan memory per actor slot (twins_plan.PlanMemory): the program the last
+# tick chose, kept unless something is really better.
+_TWINS_MEMORY: dict[str, twins_plan.PlanMemory] = {}
+
+
+def engage_twins_plan(
+    verb: EngageTwins, context: Context, held: int = 0
+) -> twins_plan.TwinsPlan | None:
+    """``twins_plan.plan`` for this verb, from the context -- shared by the
+    handler and the diagnostics, so both see the one plan. ``held`` is the
+    mask the pad latches now: it plays the updates before this tick's stick
+    lands (``twins_plan.SCENARIOS``)."""
+
+    actor = _find_actor(context, verb.actor_slot)
+    camera = find(context, CameraRange)
+    if actor is None or camera is None:
+        return None
+    from .decide import live_twins  # decide imports this module's neighbours
+
+    cam_x = int(camera.left) - twins_model.PLAYER_X_MIN_OFFSET
+    twins = [twins_model.twin_from_token(twin, cam_x=cam_x) for twin in find_all(context, Onihime)]
+    twins = [t for t in twins if not t.gone]
+    if not live_twins(context) or not twins:
+        return None
+    twins.sort(key=lambda t: t.slot)
+    sim = twins_model.actor_from_token(actor, cam_x=cam_x)
+    committed = (
+        1 if held & RIGHT_MASK else (-1 if held & LEFT_MASK else 0),
+        1 if held & DOWN_MASK else (-1 if held & UP_MASK else 0),
+    )
+    memory = _TWINS_MEMORY.setdefault(verb.actor_slot, twins_plan.PlanMemory())
+    return twins_plan.plan(sim, twins, committed=committed, memory=memory)
+
+
+def state_machine_engage_twins(verb: EngageTwins, context: Context, gamepad: VirtualGamepad) -> None:
+    """Hold the stick ``twins_plan.plan`` chose this tick, or throw the rear
+    attack on the update it lands.
+
+    Held directly and unclamped, as the other boss engages': the plan keeps
+    the lane to the pixel off a flying kick's path and models the camera
+    clamp itself. The chord is B+C with no direction: ``$322A`` runs before
+    the walk in the ground control, so it starts in the facing the actor
+    already has -- its back to the twins.
+    """
+
+    plan = engage_twins_plan(verb, context, getattr(gamepad, "held", 0))
+    if plan is None:
+        gamepad.release()
+        return
+    if plan.chord:
+        _press(gamepad, PUNCH_MASK | JUMP_MASK, frames=REAR_ATTACK_FRAMES)
+        return
+    mask = 0
+    if plan.dir_x > 0:
+        mask |= RIGHT_MASK
+    elif plan.dir_x < 0:
+        mask |= LEFT_MASK
+    if plan.dir_y > 0:
+        mask |= DOWN_MASK
+    elif plan.dir_y < 0:
+        mask |= UP_MASK
+    gamepad.hold(mask)
+
+
 def engage_jack_plan(verb: EngageJack, context: Context) -> jack_plan.EngagePlan | None:
     """``jack.plan_engage`` for this verb, from the context -- shared by the
     handler and the diagnostics, so both see the one plan."""
@@ -2604,6 +2671,7 @@ _HANDLERS = {
     EngageBongo: state_machine_engage_bongo,
     EngageAbadede: state_machine_engage_abadede,
     EngageJack: state_machine_engage_jack,
+    EngageTwins: state_machine_engage_twins,
     ReleaseToRegrab: state_machine_release_to_regrab,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,

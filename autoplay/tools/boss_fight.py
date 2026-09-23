@@ -74,6 +74,12 @@ LATER_BOSS_TYPES = frozenset({0x55, 0x56, 0x57, 0x58})
 # Abadede's own damage paths ($15632, $15094, $14A56) subtract and branch
 # `bgt` to the living path the same way, so 0 is lethal for him too.
 ZERO_IS_LETHAL = LATER_BOSS_TYPES | {0x30}
+# Bosses that come as a pair of one type: the fight is over when every one
+# seen is dead (round 5's twins).
+PAIR_TYPES = frozenset({0x58})
+# The rear attack's actions ($322A): bare and armed, and Adam's crouch that
+# starts his hop.
+CHORD_ACTIONS = frozenset({0x20, 0x22, 0x4A, 0x4C})
 
 
 def compress(names: list[str | None]) -> list[str]:
@@ -99,8 +105,17 @@ def find_boss(snapshot, type_id: int) -> MapEntity | None:
         return None
     for entity in snapshot.world_map.entities:
         if entity.type_id == type_id and entity.kind == "boss":
+            # A pair (Onihime and Yasha, $58): the one still standing.
+            if type_id in PAIR_TYPES and boss_is_dead(entity):
+                continue
             return entity
     return None
+
+
+def find_bosses(snapshot, type_id: int) -> list[MapEntity]:
+    if not snapshot.world_map:
+        return []
+    return [e for e in snapshot.world_map.entities if e.type_id == type_id and e.kind == "boss"]
 
 
 def boss_is_dead(entity: MapEntity) -> bool:
@@ -219,6 +234,13 @@ def main() -> int:
         lives_lost = 0
         last_lives = None
         boss_hp_start = boss_hp_min = None
+        pair_seen: dict[str, int] = {}
+        pair_dead: set[str] = set()
+        # Rear attacks: each start of the chord action, and whether a boss
+        # lost health before the next one (a whiff otherwise).
+        chord_starts: list[bool] = []
+        was_chording = False
+        boss_hp_seen: dict[str, int] = {}
         fight_ticks = 0
         fight_started = None
         no_verb_buckets: Counter[str] = Counter()
@@ -495,7 +517,27 @@ def main() -> int:
                     + "\n"
                 )
 
-                if boss is not None and boss_is_dead(boss):
+                chording = p1_entity is not None and (
+                    (p1_entity.action_state & 0xFE) in CHORD_ACTIONS
+                )
+                if chording and not was_chording:
+                    chord_starts.append(False)
+                was_chording = chording
+                for each in find_bosses(snap, args.boss_type):
+                    if each.health is not None:
+                        before = boss_hp_seen.get(each.slot)
+                        if before is not None and each.health < before and chord_starts:
+                            chord_starts[-1] = True
+                        boss_hp_seen[each.slot] = each.health
+                if args.boss_type in PAIR_TYPES:
+                    for twin in find_bosses(snap, args.boss_type):
+                        pair_seen.setdefault(twin.slot, twin.health or 0)
+                        if boss_is_dead(twin):
+                            pair_dead.add(twin.slot)
+                    if len(pair_seen) >= 2 and pair_dead >= set(pair_seen):
+                        end_state = "killed"
+                        break
+                elif boss is not None and boss_is_dead(boss):
                     end_state = "killed"
                     break
 
@@ -524,6 +566,10 @@ def main() -> int:
                 round(100.0 * damage / PLAYER_MAX_HEALTH, 1) if damage is not None else None
             ),
             "boss_hp": [boss_hp_start, boss_hp_min],
+            "chords": len(chord_starts),
+            "chord_whiffs": sum(1 for struck in chord_starts if not struck),
+            "pair_seen": pair_seen,
+            "pair_dead": sorted(pair_dead),
             "fight_ticks": fight_ticks,
             "fight_seconds": (
                 round(time.monotonic() - fight_started, 1) if fight_started else None

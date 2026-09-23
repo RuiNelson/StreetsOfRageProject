@@ -273,6 +273,13 @@ OBJ_BODY_BOX = 0x03
 OBJ_BOSS_REENTRY_TIMER = 0x5C  # Antonio tactical 9 / 1 countdown
 OBJ_BOSS_REACTION_TIMER = 0x62  # hit reaction / throw / knockdown timer
 OBJ_BOSS_HOLD_FLAGS = 0x66  # bit 0 = held by a player ($17B52 grab code)
+# Onihime/Yasha ($58, ai/twins.py): the rest of what their update reads.
+OBJ_BOSS_TOGGLE_7A = 0x7A  # grab path tactical 0's bchg toggle
+OBJ_BOSS_FLAGS_4B = 0x4B  # bit 0 set by state 5 (got up), consumed by state 1
+OBJ_BOSS_BOUNCE_63 = 0x63  # knockdown bounces left (2 at the hit)
+OBJ_BOSS_PENDING_DAMAGE = 0x6C  # $17B52 code 2: applied on its next update
+OBJ_BOSS_FLAGS_37 = 0x37  # bit 0: the pending hit knocks down (player +$42)
+OBJ_BOSS_FLAGS_6D = 0x6D  # nonzero: pending damage is dropped
 OBJ_BOSS_WOBBLE = 0x6B  # $17A6E's lane wobble counter
 # Bongo ($57): +$68 counts his turn (state 1) and each wind-up tactical down
 # (state 2, $176B4-$176E6); +$79 is the charge's run-out after passing the

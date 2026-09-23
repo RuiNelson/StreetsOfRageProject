@@ -6,5 +6,11 @@ set -euo pipefail
 # Opens the host in turbo and drives autoplay through the menus, the jump to
 # round 5, and a continuous sweep of every non-boss enemy family. See
 # ./scripts/go_to_boss for the shared flags and why the sweep is required.
+#
+# --no-food (user, for this fight: "Do not use recovery items ... These
+# mechanics must not be used as fallback strategies"): the twins are fought
+# with rear attacks from an edge on the health the round left. Before "$@",
+# so a caller can still argue with it. See autoplay/CLAUDE.md, "Onihime and
+# Yasha: the ROM model and the plan".
 
-exec "${0:A:h}/go_to_boss" 5 "$@"
+exec "${0:A:h}/go_to_boss" 5 --no-food "$@"

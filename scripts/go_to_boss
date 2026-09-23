@@ -33,11 +33,13 @@ SCRIPT_DIR="${0:A:h}"
 META_ROOT="${SCRIPT_DIR:h}"
 
 # Kept identical to scripts/both_turbo, which autoplay/CLAUDE.md names as the
-# source of truth: --turbo 4 runs the VDP at 60x4 Hz and --poll-ms 8 is ~2
-# game frames at that rate. Leaving the default 33 ms under turbo would make
+# source of truth: --turbo 2 runs the VDP at 60x2 Hz and --poll-ms 16 is ~2
+# game frames at that rate. 2x is the ceiling on the development machine
+# (user: "use turbo 2x at max, this PC can't handle turbo 4x at full speed";
+# measured, --turbo 4 ran at 120 fps there, the same as --turbo 2). Leaving the default 33 ms under turbo would make
 # the AI see every eighth frame and miss holds, jumps and incoming attacks.
-TURBO=4
-POLL_MS=8
+TURBO=2
+POLL_MS=16
 PORT=7777
 CHARACTER=blaze
 

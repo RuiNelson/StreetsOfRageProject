@@ -283,6 +283,31 @@ class EngageAbadede(Walk):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class EngageTwins(Walk):
+    """Fight Onihime and Yasha from an edge with rear attacks.
+
+    Produced by ``could_engage_twins`` once while any live twin (type ``$58``)
+    is on the level and the actor is free to move (not mid-animation, not
+    held, not holding a body, not airborne) -- armed or not: the armed chord
+    (``$4A``) plays the same animation, box and damage. It is the whole
+    fight against them: the strike, grab, hop, walk-in, retreat and rear-chord
+    verbs all stand down for the twins, and every tick's stick and B+C press
+    are ``twins_plan.plan``'s -- a lookahead over both twins' own AI
+    (``twins.py``) that keeps the actor at the edge with its back to them,
+    holds or leaves the approach twin's lane, steps off its flying kick, and
+    throws the rear attack on the update that lands it.
+
+    Raises emergency: a live twin×62, plus the boss raise (14) -- 76, the tier
+    of the other boss engages; below CounterGrab/TechRecover and the dialogs;
+    the hold family never coexists with it.
+    """
+
+    priority: int = 24
+    actor_slot: str
+    target_slot: str  # the nearest live twin's Onihime.slot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class EngageJack(Walk):
     """Take a hold on Jack from where none of his axes reaches.
 

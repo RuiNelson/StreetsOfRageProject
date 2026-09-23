@@ -251,6 +251,14 @@ class PlayableCharacter(Character, ABC):
     flags_59: int = 0
     flags_4b: int = 0
     contact_code: int = 0
+    # The animation (+$08), its frame (+$0A) and that frame's countdown
+    # (+$0D) -- the rear attack's timeline (ai/twins.py) -- and the position
+    # as 16.16 ($43AA clamps only the integer word, so the fraction matters).
+    anim: int = 0
+    anim_frame: int = 0
+    anim_countdown: int = 0
+    fine_x: float = 0.0
+    fine_y: float = 0.0
 
     @property
     def knees_in_chain(self) -> int:

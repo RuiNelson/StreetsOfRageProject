@@ -203,16 +203,24 @@ still samples about two game frames per tick. Prefer the wrapper:
 That is equivalent to:
 
 ```bash
-./scripts/run --turbo 4 --lang en --debugUtils --port 7777 --silent &
-./scripts/autoplay --poll-ms 8 --port 7777 --agent-p1 --reach-gameplay blaze
+./scripts/run --turbo 2 --lang en --debugUtils --port 7777 --silent &
+./scripts/autoplay --poll-ms 16 --port 7777 --agent-p1 --reach-gameplay blaze
 ```
 
-- `--turbo 4` (with the default `--vsync 0`) runs the internal VDP at
-  `60 × 4` Hz.
-- `--poll-ms 8` replaces the default 33 ms wall-clock poll (~2 frames
-  at 60 Hz) with ~2 frames at 240 Hz. Do not leave `--poll-ms` at 33
-  under turbo: the AI would see every eighth frame and miss holds,
-  jumps, and incoming attacks.
+- `--turbo 2` (with the default `--vsync 0`) runs the internal VDP at
+  `60 × 2` Hz. Never more on the development machine (user: "use turbo 2x
+  at max, this PC can't handle turbo 4x at full speed"): measured, `--turbo
+  4` ran at 120 fps there as well, so anything paced by the wall clock was
+  off by two.
+- `--poll-ms 16` replaces the default 33 ms wall-clock poll (~2 frames
+  at 60 Hz) with ~2 frames at 120 Hz. Do not leave `--poll-ms` at 33
+  under turbo: the AI would see every fourth frame and miss holds,
+  jumps, and incoming attacks. Mind the pacing when timing moves (user:
+  "take care with the game running speed, the AI pooling speed, and the
+  'emulated' game frame pacing!"): a tick is about one player update at 2x,
+  and a stick written after planning lands on the next player update or the
+  one after -- plans that time a move must survive both (see
+  `autoplay/CLAUDE.md`, **Onihime and Yasha: the ROM model and the plan**).
 - `--silent` is required whenever the game is launched for debug.
 - Only start a live `sor` session when necessary; prefer `autoplay`
   unit tests for logic changes.
@@ -242,7 +250,7 @@ police.
 | `go_to_boss_2` | 2 | Souther (`$55`) |
 | `go_to_boss_3` | 3 | Abadede (`$30`) |
 | `go_to_boss_4` | 4 | Bongo (`$57`) |
-| `go_to_boss_5` | 5 | Onihime & Yasha (`$58` pair) |
+| `go_to_boss_5` | 5 | Onihime & Yasha (`$58` pair), `--no-food` |
 | `go_to_boss_6` | 6 | Bongo (`$57`), then a Souther pair (`$55`) |
 | `go_to_boss_7` | 7 | none — the ELC stream has no terminal boss section |
 | `go_to_boss_8` | 8 | boss rush, `$56` → `$55` → `$30` → `$57` → `$58` → Mr. X (`$35`) |
@@ -266,6 +274,20 @@ desviar o objetivo principal, o boss"). Quitting
 the HUD (Esc/Q) also shuts the host down, so the port is free for the next
 run.
 
+### Testing against the twins
+
+Round 5's Onihime and Yasha are fought with rear attacks from an edge
+(`autoplay/CLAUDE.md`, **Onihime and Yasha: the ROM model and the plan**).
+Score a fight with `boss_fight.py --level 5 --boss-type 0x58 --no-food
+--poll-ms 16` (a pair: killed when both are dead) on a `--turbo 2` host;
+check the model in lockstep with `tools/twins_lab.py` (`--actor engage`,
+then `--check` on the recording), and tune the plan offline with
+`tools/twins_sim.py`. A rear attack that lands on nothing is a defect, not a
+cost (user: "Vi que a IA dá vários `BackAttack` em falso, não quero que dê
+ataques em falso"): the plan presses B+C only when its lookahead has the
+press striking a twin under every timing, and `boss_fight.py` reports
+`chords` and `chord_whiffs` so a live run shows it.
+
 ### Testing against Jack
 
 Jack (type `$27`) never appears in round 1 (user: "o inimigo não aparece no
@@ -273,7 +295,7 @@ Stage 1"). The ELC streams place him in rounds 2 and 4 (his personality 0:
 juggle approach and aligned throw), 5 (personality 2, the jumpers -- eight
 records in one batch -- and 3, the juggle walk), 6 and 8 (0 and 1, the
 retreat and ranged throw). `autoplay/tools/jack_fight.py` scores him: with the
-turbo host up (`./scripts/run --turbo 4 --lang en --debugUtils --port 7777
+turbo host up (`./scripts/run --turbo 2 --lang en --debugUtils --port 7777
 --silent`), it plays the round with every other ordinary family swept
 (`DebugScenario(only_enemy="jack")`), police and food off, attributes each
 hit to the axe that landed it, its state and its owner's, and logs the round

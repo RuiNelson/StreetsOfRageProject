@@ -223,6 +223,11 @@ def _build_playable_character(
         flags_59=entity.player_flags_59,
         flags_4b=entity.player_flags_4b,
         contact_code=entity.player_contact_code,
+        anim=entity.anim,
+        anim_frame=entity.anim_frame,
+        anim_countdown=entity.anim_countdown,
+        fine_x=entity.fine_x,
+        fine_y=entity.fine_y,
     )
 
 
@@ -404,6 +409,15 @@ def generate_direct_observation_tokens(
                     substate=entity.boss_substate,
                     timer_54=entity.boss_timer_54,
                     script_param=entity.script_param,
+                    fine_z=entity.fine_z,
+                    ground_fine=entity.boss_ground_fine,
+                    anim_reload=entity.anim_reload,
+                    toggle_7a=entity.boss_toggle_7a,
+                    flags_4b=entity.boss_flags_4b,
+                    bounce_63=entity.boss_bounce_63,
+                    pending_damage=entity.boss_pending_damage,
+                    flags_37=entity.boss_flags_37,
+                    flags_6d=entity.boss_flags_6d,
                 )
             context.add(
                 cls(

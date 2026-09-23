@@ -54,7 +54,7 @@ from .tokens import (
     PlayableCharacter,
     punch_usable_inner_x,
 )
-from .tokens import Abadede, Antonio, Bongo, Boss, Enemy, Jack, Souther
+from .tokens import Abadede, Antonio, Bongo, Boss, Enemy, Jack, Onihime, Souther
 from .tokens import (
     GrabReason,
     Surrounded,
@@ -77,6 +77,7 @@ from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDi
 from .tokens import Context, Token, find, find_all
 from .tokens import (
     EngageAbadede,
+    EngageTwins,
     EngageAntonio,
     EngageBongo,
     EngageJack,
@@ -288,6 +289,12 @@ def _could_melee_strike(
             # run, when nothing else escapes it -- is EngageAbadede's.
             if isinstance(target, Abadede):
                 continue
+            # The twins are fought with the rear attack alone, from the edge
+            # with the actor's back to them (twins_plan.py); a punch thrown at
+            # one turns the actor to face it -- the grab twin's jump-in
+            # ($15C72). EngageTwins owns them.
+            if isinstance(target, Onihime):
+                continue
             verbs.add(make_verb(actor.slot, target_slot, actor.held_weapon_type))
     return verbs
 
@@ -339,7 +346,7 @@ def could_rear_attack(context: Context) -> Context:
         # reach.rear_attack_is_warranted.
         for target_slot in _targets_in_reach(context, actor, reach.in_rear_band, RearAttack):
             if isinstance(
-                find(context, Enemy, slot=target_slot), (Souther, Antonio, Bongo, Abadede, Jack)
+                find(context, Enemy, slot=target_slot), (Souther, Antonio, Bongo, Abadede, Jack, Onihime)
             ):
                 # The chord is a strike like any other: it turns the grab
                 # contact into a hit. Each boss's engage owns him, and
@@ -415,10 +422,10 @@ def could_grab_enemy(context: Context) -> Context:
         for enemy in on_screen:
             if enemy.slot not in in_reach:
                 continue
-            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Jack)):
+            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Jack, Onihime)):
                 # Each engage walks into him itself, at the moment its plan
                 # picks (EngageSouther, EngageAntonio, EngageBongo,
-                # EngageAbadede, EngageJack).
+                # EngageAbadede, EngageJack); EngageTwins never takes a hold.
                 continue
             if enemy.slot in threatening:
                 # Walking into a committed attack is how the actor takes the
@@ -790,9 +797,10 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 # Never walk toward a target that is itself standing in a
                 # pit's danger zone -- reaching it means standing there too.
                 continue
-            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Jack)):
+            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Jack, Onihime)):
                 # EngageSouther / EngageAntonio / EngageBongo / EngageAbadede /
-                # EngageJack own the whole approach to them, armed or not.
+                # EngageJack / EngageTwins own the whole approach to them,
+                # armed or not.
                 continue
             if standing_off and enemy.slot in threatening:
                 # could_retreat_from_danger covers this one instead -- don't
@@ -873,7 +881,7 @@ def could_retreat_from_danger(context: Context) -> Context:
             enemy = find(context, Enemy, slot=target_slot)
             if enemy is None:
                 continue
-            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede)):
+            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Onihime)):
                 # Their attacks are their engage's business: Souther's claw
                 # by souther.plan_engage's lane escape, Antonio's kick,
                 # Bongo's flame and Abadede's run by their plan_engage's
@@ -1057,6 +1065,10 @@ def could_call_police(context: Context) -> Context:
     if find(context, DebugNoPolice) is not None:
         # The harness's --no-police (user: "just don't test with the police on").
         return verbs
+    if live_twins(context):
+        # Never against the twins, not even as the panic button (user: "Do
+        # not call the police ... must not be used as fallback strategies").
+        return verbs
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -1187,6 +1199,13 @@ def could_jump_attack(context: Context) -> Context:
             # swing -- could_melee_weapon_attack -- reached by walking in,
             # which could_walk_to_near_enemy already does.
             continue
+        if 0x20 <= (actor.action_state & 0xFE) <= 0x24 or (actor.action_state & 0xFE) in (0x4A, 0x4C, 0x4E):
+            # The rear attack ($322A), not a jump: Adam's is a hop ($22 ->
+            # $24; armed $4C -> $4E), airborne for 14 updates, and a B pressed
+            # in it is no kick
+            # -- measured live against the twins, the airborne follow-through
+            # below pressed at them through 135 ticks of his chords.
+            continue
         if not actor.is_airborne and reach.souther_would_punish_jump(actor, context):
             # The exact opposite of the Antonio exception below. Souther's
             # $16234 (souther_counter_jump_attack) reads the *player's* action
@@ -1232,9 +1251,14 @@ def could_jump_attack(context: Context) -> Context:
             # the air. EngageJack.
             for jack in find_all(context, Jack):
                 target_slots.discard(jack.slot)
+            # The twins neither: a kick turns the actor at them and leaves it
+            # in the air where the grab twin's jump-in lands. EngageTwins.
+            for twin in find_all(context, Onihime):
+                target_slots.discard(twin.slot)
         if actor.is_airborne and not target_slots:
+            twins = {twin.slot for twin in find_all(context, Onihime)}
             nearest = min(
-                live,
+                (enemy for enemy in live if enemy.slot not in twins),
                 key=lambda e: math.hypot(
                     e.world_x - actor.world_x, e.world_y - actor.world_y
                 ),
@@ -1401,6 +1425,45 @@ def could_engage_abadede(context: Context) -> Context:
                 continue
             verbs.add(EngageAbadede(actor_slot=actor.slot, target_slot=abadede.slot))
     return verbs
+
+
+def could_engage_twins(context: Context) -> Context:
+    """Fight Onihime and Yasha -- the whole fight against both, one verb.
+
+    One candidate while any live twin exists and the actor is free to move
+    (not mid-animation -- the rear attack's own frames included --, not held,
+    not holding a body, not airborne), armed or not: the armed chord
+    (``$4A``) plays the same animation, box and damage as the bare one.
+    ``twins_plan.plan`` picks the stick and the B+C press every tick.
+    """
+
+    verbs: set[Token] = set()
+    twins = live_twins(context)
+    if not twins:
+        return verbs
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.is_airborne:
+            continue
+        nearest = min(twins, key=lambda t: abs(t.world_x - actor.world_x))
+        verbs.add(EngageTwins(actor_slot=actor.slot, target_slot=nearest.slot))
+    return verbs
+
+
+def live_twins(context: Context) -> list[Onihime]:
+    """Every twin still fighting: not dead (``$17C36``'s lethal test is
+    ``<= 0``, so 0 health is the death blow) and not yet removed."""
+
+    return [
+        twin
+        for twin in find_all(context, Onihime)
+        if not twin.is_defeated and (twin.health or 0) > 0 and twin.primary_state != 0
+    ]
 
 
 def could_engage_jack(context: Context) -> Context:
@@ -1621,6 +1684,7 @@ def _a_weapon_would_disarm_the_plan(context: Context) -> bool:
         or _antonio_is_alive(context)
         or _bongo_is_alive(context)
         or _abadede_is_alive(context)
+        or bool(live_twins(context))
     )
 
 
@@ -1672,7 +1736,9 @@ def _food_is_spoken_for(context: Context) -> bool:
 
     if find(context, DebugNoFood) is not None:
         return True
-    return _antonio_is_alive(context)
+    # The twins too (user: "Do not use recovery items" -- not even as a
+    # fallback: a fight that survives by eating is not the plan).
+    return _antonio_is_alive(context) or bool(live_twins(context))
 
 
 def _souther_is_alive(context: Context) -> bool:
@@ -1699,7 +1765,7 @@ def _life_items_refused(context: Context) -> bool:
     the actor, and a plan that only survives by eating is not a plan.
     """
 
-    return _souther_is_alive(context)
+    return _souther_is_alive(context) or bool(live_twins(context))
 
 
 def _pickup_is_useful(actor: PlayableCharacter, pickup: Pickup) -> bool:
@@ -1911,6 +1977,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_engage_bongo(context)
         | could_engage_abadede(context)
         | could_engage_jack(context)
+        | could_engage_twins(context)
         | could_hit_antonio_boomerang(context)
         | could_walk_to_advance_stage(context)
         | could_punch(context)

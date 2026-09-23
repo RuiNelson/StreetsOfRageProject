@@ -41,6 +41,7 @@ from .tokens import (
     EngageBongo,
     EngageJack,
     EngageSouther,
+    EngageTwins,
     FlipHold,
     GrabEnemy,
     HitAntonioBoomerang,
@@ -354,6 +355,10 @@ _EMERGENCY_ENGAGE_BONGO_UNDER_GRUNT = 5
 # run is not pressing (abadede.charge_is_pressing) the punch on it wins.
 _EMERGENCY_ENGAGE_ABADEDE = 62
 _EMERGENCY_ENGAGE_ABADEDE_UNDER_GRUNT = 5
+# The whole fight against Onihime and Yasha (EngageTwins): the boss tier, and
+# no grunt drop -- round 5's arena is swept, and its plan never turns the
+# actor to anything else.
+_EMERGENCY_ENGAGE_TWINS = 62
 # The whole engage against Jack (EngageJack). His body never strikes -- every
 # hit he lands is a type-$28 axe (jack.py) -- so this is an ordinary enemy's
 # approach, not a boss tier: just above a strike on a plain grunt (20), with
@@ -623,6 +628,13 @@ def _emergency_engage_abadede(verb: EngageAbadede, context: Context) -> int:
     if grunt_incoming and not abadede_plan.charge_is_pressing(target):
         return _with_target_class(_EMERGENCY_ENGAGE_ABADEDE_UNDER_GRUNT, target)
     return _with_target_class(_EMERGENCY_ENGAGE_ABADEDE, target)
+
+
+def _emergency_engage_twins(verb: EngageTwins, context: Context) -> int:
+    target = find(context, Enemy, slot=verb.target_slot)
+    if target is None or target.is_defeated:
+        return _EMERGENCY_DEFAULT
+    return _with_target_class(_EMERGENCY_ENGAGE_TWINS, target)
 
 
 def _emergency_engage_jack(verb: EngageJack, context: Context) -> int:
@@ -992,6 +1004,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     EngageAntonio: _emergency_engage_antonio,
     EngageBongo: _emergency_engage_bongo,
     EngageAbadede: _emergency_engage_abadede,
+    EngageTwins: _emergency_engage_twins,
     EngageJack: _emergency_engage_jack,
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
