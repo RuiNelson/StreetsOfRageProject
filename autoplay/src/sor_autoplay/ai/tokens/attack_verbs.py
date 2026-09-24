@@ -469,3 +469,32 @@ class HitAntonioBoomerang(MeleeAttacks):
     actor_slot: str
     target_slot: str  # Projectile.slot of the boomerang
 
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class HitTable(MeleeAttacks):
+    """Timed B-punch that knocks round 8's thrown table (type ``$45``) away
+    the moment it would hit the actor.
+
+    Produced by ``could_hit_table`` when an in-flight type-``$45``
+    ``Projectile`` (object_catalog.py's ``TABLE_TYPE_ID``) is heading at the
+    actor, in lane, and inside the punch box at punch-connect time (startup
+    + pipeline latency) -- ``reach.table_in_punch_band``, the same shape as
+    ``HitAntonioBoomerang``'s ``_boomerang_in_punch_band``. Unlike the
+    boomerang, the object has no "still on its thrower's desk" phase to
+    filter out: by the time it is classified a ``Projectile`` at all (its
+    own +$30 state leaves 0), it is already armed with a real flight
+    velocity (live-captured, autoplay/CLAUDE.md), so nothing here needs an
+    ``antonio_still_holding_boomerang``-style attach check. Not produced
+    while the actor is armed: B is then the weapon's swing, whose timing
+    nothing here models -- the same reasoning ``could_hit_antonio_boomerang``
+    gives for its own armed exception.
+
+    Raises emergency above ``_EMERGENCY_PROJECTILE_SIDESTEP`` (45): once the
+    table is close enough to be in the punch box, there is no longer time
+    left to clear its lane, and punching is the only answer.
+    """
+
+    priority: int = 25
+    actor_slot: str
+    target_slot: str  # Projectile.slot of the table
+

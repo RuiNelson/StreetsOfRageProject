@@ -13,6 +13,7 @@ from sor_autoplay.ai.tokens import (
     EngageSouther,
     GrabEnemy,
     HitAntonioBoomerang,
+    HitTable,
     JumpAttack,
     MeleeWeaponAttack,
     OpenBreakable,
@@ -3019,6 +3020,26 @@ class HitAntonioBoomerangExecuteTests(unittest.TestCase):
         execute_verb(
             HitAntonioBoomerang(actor_slot="P1", target_slot="obj10"),
             {actor, boomerang},
+            gamepad,
+        )
+        client.press_buttons.assert_called_once_with(
+            player1=B | RIGHT, player2=0, frames=4
+        )
+
+
+class HitTableExecuteTests(unittest.TestCase):
+    def test_presses_b_toward_the_table(self) -> None:
+        actor = _myself(world_x=100, world_y=100, facing_left=False)
+        table = Projectile(
+            slot="obj10", world_x=130, world_y=100, vel_x=-8.0, vel_z=0.0, type_id=0x45
+        )
+        client = MagicMock()
+        gamepad = VirtualGamepad(
+            SharedGamepadState(client), player_index=1
+        )
+        execute_verb(
+            HitTable(actor_slot="P1", target_slot="obj10"),
+            {actor, table},
             gamepad,
         )
         client.press_buttons.assert_called_once_with(

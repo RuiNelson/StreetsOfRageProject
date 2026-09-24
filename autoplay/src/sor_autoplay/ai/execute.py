@@ -27,6 +27,7 @@ from .tokens import (
     FlipHold,
     GrabEnemy,
     HitAntonioBoomerang,
+    HitTable,
     JumpAttack,
     AttackHeldEnemy,
     MeleeWeaponAttack,
@@ -1891,6 +1892,19 @@ def state_machine_hit_antonio_boomerang(
     _press(gamepad, PUNCH_MASK | face, frames=PUNCH_FRAMES)
 
 
+def state_machine_hit_table(
+    verb: HitTable, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Face round 8's thrown table and press B -- the same input as a punch."""
+
+    actor = _find_actor(context, verb.actor_slot)
+    projectile = find(context, Projectile, slot=verb.target_slot)
+    face = 0
+    if actor is not None and projectile is not None:
+        face = _face_toward_mask(actor, projectile.world_x)
+    _press(gamepad, PUNCH_MASK | face, frames=PUNCH_FRAMES)
+
+
 def state_machine_walk_to_advance_stage(
     verb: WalkToAdvanceStage, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -2823,6 +2837,7 @@ _HANDLERS = {
     EngageMrX: state_machine_engage_mr_x,
     ReleaseToRegrab: state_machine_release_to_regrab,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
+    HitTable: state_machine_hit_table,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,
     WalkToScreenCenter: state_machine_walk_to_screen_center,
     Punch: state_machine_melee_strike,

@@ -69,6 +69,7 @@ from .tokens import (
     FlipHold,
     GrabEnemy,
     HitAntonioBoomerang,
+    HitTable,
     JumpAttack,
     MeleeWeaponAttack,
     OpenBreakable,
@@ -702,6 +703,7 @@ def no_aim_point_lead_frames(actor: PlayableCharacter, target: object = None) ->
 ATTACK_CONNECT_FRAMES: dict[type[Attack], Callable[..., tuple[int, ...]]] = {
     Punch: melee_strike_connect_frames,
     HitAntonioBoomerang: melee_strike_connect_frames,
+    HitTable: melee_strike_connect_frames,
     MeleeWeaponAttack: melee_strike_connect_frames,
     RearAttack: rear_attack_connect_frames,
     JumpAttack: travelling_connect_frames(jump_attack_lead_frames),

@@ -13,6 +13,7 @@ from sor_autoplay.ai.tokens import (
     GrabEnemy,
     HealthPickup,
     HitAntonioBoomerang,
+    HitTable,
     JumpAttack,
     LifePickup,
     MeleeWeaponAttack,
@@ -1903,6 +1904,45 @@ class DetermineEmergencyProjectileSidestepTests(unittest.TestCase):
             myself,
             present,
             ProjectileSidestep(actor_slot="P1", target_slot="obj10"),  # obj10 missing
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
+
+
+class DetermineEmergencyHitTableTests(unittest.TestCase):
+    """Round 8's thrown table: once it is close enough to be a HitTable
+    candidate too, punching it wins over ProjectileSidestep -- there is no
+    longer time left to clear its lane (see priority.py's
+    _EMERGENCY_HIT_TABLE comment)."""
+
+    def test_outranks_sidestepping_the_same_table(self) -> None:
+        myself = _myself(world_x=100, world_y=64)
+        table = Projectile(slot="obj10", world_x=112, world_y=64, vel_x=-5.0, vel_z=0.0, type_id=0x45)
+        context = {
+            myself,
+            table,
+            ProjectileSidestep(actor_slot="P1", target_slot="obj10"),
+            HitTable(actor_slot="P1", target_slot="obj10"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], HitTable)
+
+    def test_scores_zero_when_table_missing(self) -> None:
+        myself = _myself(world_x=0, world_y=64)
+        present = _enemy("obj02", CombatPhase.NORMAL, world_x=10, world_y=64)
+        context = {
+            myself,
+            present,
+            HitTable(actor_slot="P1", target_slot="obj10"),  # obj10 missing
             WalkToNearEnemy(actor_slot="P1", target_slot="obj02"),
         }
 

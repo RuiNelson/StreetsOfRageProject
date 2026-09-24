@@ -47,6 +47,7 @@ from .tokens import (
     FlipHold,
     GrabEnemy,
     HitAntonioBoomerang,
+    HitTable,
     JumpAttack,
     AttackHeldEnemy,
     MeleeWeaponAttack,
@@ -347,6 +348,14 @@ _EMERGENCY_PROJECTILE_SIDESTEP = 45  # sooner-to-impact scoring higher, floor 30
 # a punch is the only thing that stops it. The engage's lookahead replays his
 # AI, not the boomerang's flight.
 _EMERGENCY_HIT_ANTONIO_BOOMERANG = 78
+# Punching round 8's thrown table (type $45) back once it is in the punch
+# box. Flat, above _EMERGENCY_PROJECTILE_SIDESTEP (45): unlike the boomerang
+# there is no boss engage to out-rank here, just the sidestep this verb
+# competes with for the same object once distance no longer leaves room to
+# clear its lane -- see reach.table_in_punch_band/could_hit_table. Below the
+# RearAttack/CLEAR_REAR grab escapes (55-60), which stay the right answer
+# even with a table also in flight.
+_EMERGENCY_HIT_TABLE = 50
 # The whole engage against Souther (EngageSouther). With the boss raise it is
 # 76: above every strike and every grab tier on anything else (a warranted
 # RearAttack on an armed grunt peaks at 67, a grab at 68), so no detour,
@@ -711,6 +720,13 @@ def _emergency_hit_antonio_boomerang(verb: HitAntonioBoomerang, context: Context
     return _EMERGENCY_HIT_ANTONIO_BOOMERANG
 
 
+def _emergency_hit_table(verb: HitTable, context: Context) -> int:
+    projectile = find(context, Projectile, slot=verb.target_slot)
+    if projectile is None:
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_HIT_TABLE
+
+
 # Score per GrabReason, looked up by _emergency_grab_enemy. See the
 # _EMERGENCY_GRAB_* constants above for why each tier is where it is.
 _GRAB_REASON_SCORE: dict[GrabReason, int] = {
@@ -1070,6 +1086,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     EngageMrX: _emergency_engage_mr_x,
     EngageJack: _emergency_engage_jack,
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
+    HitTable: _emergency_hit_table,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
     WalkToScreenCenter: _emergency_walk_to_screen_center,
 }

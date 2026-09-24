@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from . import memory_map as mm
-from .object_catalog import EntityStyle, player_style, style_for_object
+from .object_catalog import TABLE_TYPE_ID, EntityStyle, player_style, style_for_object
 from .attack_ranges import AttackRange, attack_ranges_for_object
 from .hitboxes import OBJ_CACHED_BODY_BOX, Hitbox, cached_box, object_boxes
 from .rom_data import RomData
@@ -934,6 +934,18 @@ def _entity_from_object(
             fine_x = fixed1616_unsigned(slot, mm.OBJ_POS_X)
             fine_y = fixed1616_unsigned(slot, mm.OBJ_POS_Y)
             fine_z = fixed1616_signed(slot, mm.OBJ_POS_Z)
+        elif type_id == TABLE_TYPE_ID:
+            # Round 8's thrown table ($7534's dispatcher) runs the same
+            # ordinary-object layout as Jack's axe below: +$1C is its real X
+            # velocity and +$20 its lane velocity (the +$20 read above is 0
+            # for a straight-line throw, which would project it as standing
+            # still). +$30 is its own state (0 hidden/unarmed -- filtered out
+            # before this by object_catalog.style_for_object -- otherwise
+            # armed and flying); object_catalog.py/reach.py, "Round 8's
+            # thrown office table".
+            vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X_ORDINARY)
+            boss_vel_lane = fixed1616_signed(slot, mm.OBJ_VEL_LANE_ORDINARY)
+            boomerang_state = action_state
         elif type_id == 0x28:
             # Jack's axe runs the ordinary-object layout: +$1C is its X
             # velocity and +$20 its lane velocity (the +$20 read above would
@@ -959,12 +971,6 @@ def _entity_from_object(
         # Round 6's press (ai/press.py): committed while it shakes (2) and
         # falls (3) -- the fall is its one attack -- and harmless otherwise.
         phase = CombatPhase.ATTACKING if action_state in (2, 3) else CombatPhase.NORMAL
-    elif style.kind == "breakable" and outgoing:
-        # Round-8 type-$45 moving props set outgoing damage while in flight.
-        # Retain their smashable kind, but expose the active danger phase to
-        # symbolic/fuzzy consumers instead of treating them as inert scenery.
-        phase = CombatPhase.ATTACKING
-
     hitbox, ranges = _object_geometry(
         slot,
         rom,

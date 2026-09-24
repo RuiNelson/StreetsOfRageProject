@@ -19,6 +19,7 @@ from .attack_verbs import (
     GrabEnemy,
     GrabMechanics,
     HitAntonioBoomerang,
+    HitTable,
     JumpAttack,
     MeleeAttacks,
     MeleeWeaponAttack,

@@ -78,12 +78,18 @@ class ObjectCatalogTests(unittest.TestCase):
             0x1D,  # Round 4
             0x1F,  # Round 5
             0x41,  # Round 6
-            0x45,  # Round 8 moving prop
         }
         self.assertEqual(
             {type_id for type_id in expected if style_for_type(type_id).kind == "breakable"},
             expected,
         )
+
+    def test_round8_table_is_not_a_plain_breakable_type(self) -> None:
+        # $45 needs its own +$30 to tell a hidden, not-yet-armed instance
+        # from a real in-flight one (see TABLE_TYPE_ID/_TABLE_STYLE) -- a
+        # type-only lookup cannot answer that, so it returns None rather
+        # than the wrong static answer either way.
+        self.assertIsNone(style_for_type(0x45))
 
     def test_round6_moving_hazard_is_not_a_breakable(self) -> None:
         # Nor a projectile: a zero-velocity "threat" within 24 lanes of it,
@@ -126,6 +132,19 @@ class ObjectCatalogTests(unittest.TestCase):
         self.assertIsNone(
             style_for_object(0x11, action_state=2, variant=3)
         )
+
+    def test_round8_table_is_hidden_until_armed_then_a_projectile(self) -> None:
+        # +$30 == 0: hidden at its spawn point, not yet armed (live-captured,
+        # autoplay/CLAUDE.md) -- no map entity at all, same as before this
+        # type was decoded. Any other state: really in flight, a projectile
+        # (never a punchable "breakable" prop -- that used to hide it from
+        # reach.projectile_threatens/ProjectileSidestep for its whole flight).
+        self.assertIsNone(style_for_object(0x45, action_state=0))
+        for state in (1, 2):
+            style = style_for_object(0x45, action_state=state)
+            self.assertIsNotNone(style)
+            assert style is not None
+            self.assertEqual(style.kind, "projectile")
 
 
 class ProjectionTests(unittest.TestCase):
@@ -201,7 +220,10 @@ class WorldMapParseTests(unittest.TestCase):
         actors = bytearray(ACTORS_BYTES)
         camera = bytearray(CAMERA_BYTES)
         _put_u16(camera, 0x02, 768)
-        late_types = (0x18, 0x1B, 0x1C, 0x1D, 0x1F, 0x41, 0x45)
+        # $45 is deliberately excluded: at this same default state (1) it is
+        # armed and flying, so it is observed as a "projectile", not a
+        # "breakable" -- see test_round8_moving_prop_exposes_active_damage_phase.
+        late_types = (0x18, 0x1B, 0x1C, 0x1D, 0x1F, 0x41)
         for index, type_id in enumerate(late_types):
             self._put_object(actors, type_id=type_id, slot_index=index)
 
@@ -227,7 +249,12 @@ class WorldMapParseTests(unittest.TestCase):
 
         self.assertFalse(any(entity.kind == "breakable" for entity in world.entities))
 
-    def test_round8_moving_prop_exposes_active_damage_phase(self) -> None:
+    def test_round8_armed_table_is_a_tracked_projectile(self) -> None:
+        # Default state (1) is already armed/flying (style_for_object gates
+        # on +$30 != 0) -- a real Projectile, not a punchable "breakable"
+        # prop. combat_phase == ATTACKING falls out of the generic
+        # "projectile" branch every such entity gets, same as Antonio's
+        # boomerang or Jack's axe.
         actors = bytearray(ACTORS_BYTES)
         camera = bytearray(CAMERA_BYTES)
         _put_u16(camera, 0x02, 768)
@@ -238,10 +265,25 @@ class WorldMapParseTests(unittest.TestCase):
         )
         prop = next(entity for entity in world.entities if entity.type_id == 0x45)
 
-        self.assertEqual(prop.kind, "breakable")
+        self.assertEqual(prop.kind, "projectile")
         self.assertEqual(prop.outgoing_damage, 3)
         self.assertEqual(prop.script_param, 2)
         self.assertEqual(prop.combat_phase, CombatPhase.ATTACKING)
+
+    def test_round8_table_hidden_at_spawn_is_not_observed(self) -> None:
+        # State 0: hidden at its spawn point, not yet armed -- invisible to
+        # the map/agent pipeline, exactly like before this type was decoded
+        # (it was never a threat at this state either).
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+        self._put_object(actors, type_id=0x45, state=0)
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+
+        self.assertFalse(any(entity.type_id == 0x45 for entity in world.entities))
 
     def test_round6_moving_hazard_is_observed_as_dangerous(self) -> None:
         actors = bytearray(ACTORS_BYTES)
@@ -299,6 +341,37 @@ class WorldMapParseTests(unittest.TestCase):
         self.assertEqual(debris.kind, "projectile")
         self.assertAlmostEqual(debris.vel_x, -1.5)
         self.assertAlmostEqual(debris.vel_z, 2.25)
+
+    def test_round8_table_velocity_reads_the_ordinary_x_field(self) -> None:
+        """Round 8's thrown table runs the ordinary-object layout (+$1C X
+        velocity), not the generic projectile default (+$20, lane velocity)
+        -- the same correction Jack's axe needs. Before this, its real
+        +$1C speed was invisible and reach.projectile_threatens always read
+        it as standing still (+$20 is 0 for a straight-line throw)."""
+
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+
+        base = 0x100
+        _put_u8(actors, base + OBJ_TYPE, 0x45)
+        _put_u8(actors, base + OBJ_FLAGS, 0x00)
+        _put_u8(actors, base + OBJ_PRIMARY_STATE, 2)  # armed/flying
+        _put_fixed16(actors, base + OBJ_POS_X, 800)
+        _put_fixed16(actors, base + OBJ_POS_Y, 0x40)
+        _put_fixed16(actors, base + OBJ_POS_Z, 0xA0)
+        _put_fixed1616_signed(actors, base + OBJ_VEL_X_ORDINARY, 5.0)  # +$1C
+        _put_fixed1616_signed(actors, base + OBJ_VEL_X, 0.0)  # +$20, unused here
+        _put_fixed1616_signed(actors, base + OBJ_VEL_Z, 1.25)  # +$24
+
+        world = parse_world_map(
+            actors_block=bytes(actors), camera_block=bytes(camera)
+        )
+        table = next(entity for entity in world.entities if entity.type_id == 0x45)
+
+        self.assertEqual(table.kind, "projectile")
+        self.assertAlmostEqual(table.vel_x, 5.0)
+        self.assertAlmostEqual(table.vel_z, 1.25)
 
     def test_ordinary_enemy_velocity_is_decoded(self) -> None:
         """Ordinary enemies (kind=="enemy") must expose their own +$1C/+$20

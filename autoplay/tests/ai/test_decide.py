@@ -12,6 +12,7 @@ from sor_autoplay.ai.tokens import (
     AttackHeldEnemy,
     ThrowHeldEnemy,
     HitAntonioBoomerang,
+    HitTable,
     MeleeWeaponAttack,
     OpenBreakable,
     Punch,
@@ -39,6 +40,7 @@ from sor_autoplay.ai.decide import (
     could_engage_souther,
     could_grab_enemy,
     could_hit_antonio_boomerang,
+    could_hit_table,
     could_hold_actions,
     could_jump_attack,
     could_melee_weapon_attack,
@@ -118,6 +120,7 @@ could_engage_antonio = _with_inference(could_engage_antonio)
 could_engage_souther = _with_inference(could_engage_souther)
 could_grab_enemy = _with_inference(could_grab_enemy)
 could_hit_antonio_boomerang = _with_inference(could_hit_antonio_boomerang)
+could_hit_table = _with_inference(could_hit_table)
 could_hold_actions = _with_inference(could_hold_actions)
 could_jump_attack = _with_inference(could_jump_attack)
 could_melee_weapon_attack = _with_inference(could_melee_weapon_attack)
@@ -2579,6 +2582,61 @@ class CouldHitAntonioBoomerangTests(unittest.TestCase):
                 isinstance(v, HitAntonioBoomerang)
                 for v in could_hit_antonio_boomerang({myself, antonio, boomerang})
             )
+        )
+
+
+class CouldHitTableTests(unittest.TestCase):
+    """Round 8's thrown table (type ``$45``) -- same shape as
+    ``CouldHitAntonioBoomerangTests``, minus the attach exception: the table
+    is never observed as a ``Projectile`` at all until it is already armed
+    and flying (object_catalog.style_for_object), so ``could_hit_table``
+    needs no ``antonio_still_holding_boomerang``-style filter."""
+
+    def test_fires_when_the_thrown_table_is_in_punch_range(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        table = Projectile(
+            slot="obj10", world_x=130, world_y=100, vel_x=-8.0, vel_z=0.0, type_id=0x45
+        )
+        result = could_hit_table({myself, table})
+        self.assertTrue(
+            any(isinstance(v, HitTable) and v.target_slot == "obj10" for v in result)
+        )
+
+    def test_does_not_swing_a_weapon_at_it(self) -> None:
+        # Armed, B is the swing, not the punch this verb is timed for -- the
+        # same exception could_hit_antonio_boomerang makes.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False, held_weapon_type=0x0A)
+        table = Projectile(
+            slot="obj10", world_x=130, world_y=100, vel_x=-8.0, vel_z=0.0, type_id=0x45
+        )
+        self.assertFalse(
+            any(
+                isinstance(v, HitTable)
+                for v in could_hit_table({myself, table})
+            )
+        )
+
+    def test_does_not_fire_on_a_distant_table_still_in_flight(self) -> None:
+        # Still outside both the threat window and the punch box: this is
+        # ProjectileSidestep's case (room to flee), not HitTable's.
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        table = Projectile(
+            slot="obj10", world_x=400, world_y=100, vel_x=-8.0, vel_z=0.0, type_id=0x45
+        )
+        self.assertFalse(
+            any(
+                isinstance(v, HitTable)
+                for v in could_hit_table({myself, table})
+            )
+        )
+
+    def test_other_projectile_types_are_never_the_table(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, facing_left=False)
+        knife = Projectile(
+            slot="obj10", world_x=130, world_y=100, vel_x=-8.0, vel_z=0.0, type_id=0x1E
+        )
+        self.assertFalse(
+            any(isinstance(v, HitTable) for v in could_hit_table({myself, knife}))
         )
 
 

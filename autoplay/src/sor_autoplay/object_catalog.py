@@ -120,8 +120,29 @@ _BREAKABLE_STYLES: dict[int, EntityStyle] = {
     0x1D: EntityStyle("breakable", "Breakable", "□", "#9b8269", "Round 4 prop"),
     0x1F: EntityStyle("breakable", "Breakable", "□", "#867768", "Round 5 prop"),
     0x41: EntityStyle("breakable", "Breakable", "□", "#7c7368", "Round 6 prop"),
-    0x45: EntityStyle("breakable", "Breakable", "◆", "#d97706", "Moving prop"),
+    # $45 (round 8's thrown office table) is deliberately NOT listed here --
+    # see TABLE_TYPE_ID/_TABLE_STYLE below. Unlike every other prop in this
+    # dict, the same type id covers both an inert, hidden, not-yet-armed
+    # instance and a real in-flight object once armed, and only the state
+    # byte at +$30 tells them apart -- a plain type->style lookup cannot.
 }
+
+# Round 8's thrown office table (ai-analysis/enemy-ai.md "Round 8's thrown
+# office table"; user: "as mesas do nivel 8 tambem sao um 'breakable'" --
+# true only of its *idle* state). `sor.asm`'s object-type-$45 dispatcher
+# ($7534, state table $7540) sits in primary state 0 hidden at its spawn
+# point until the actor closes in, then arms: its lane (+$14) snaps to the
+# actor's own lane and its +$1C X velocity is set from a per-instance table
+# (live-captured, autoplay/CLAUDE.md: 5-6 px/tick) -- a real thrown object,
+# not scenery. `style_for_object` below returns this style only once armed
+# (state != 0); while still 0 it returns None, same as before this was
+# decoded. Before this, every armed instance stayed tagged "breakable" (or,
+# briefly at state 1, was mis-tagged an *intact* one), invisible to
+# `reach.projectile_threatens`/`ProjectileSidestep` for its whole flight --
+# a live run with no answer for it took a real hit (measured: p1 health
+# 80 -> 77).
+TABLE_TYPE_ID = 0x45
+_TABLE_STYLE = EntityStyle("projectile", "Round 8 table", "◆", "#d97706", "Thrown table")
 
 # Type $42 is round 6's drop press (ai/press.py). It stands 96 px over the
 # bottom lane ($7A8E: z $40, damage $14), drops when a player's X comes into
@@ -232,6 +253,12 @@ def style_for_object(
     """
 
     type_id &= 0xFF
+    if type_id == TABLE_TYPE_ID:
+        # Round 8's thrown table: state-gated on its own +$30, not the
+        # generic intact/debris rule below (see _TABLE_STYLE above -- the
+        # same type id is hidden scenery at state 0 and a real projectile
+        # at any other state, never a punchable "breakable" prop).
+        return _TABLE_STYLE if (action_state & 0xFF) != 0 else None
     style = style_for_type(type_id)
     if style is None or style.kind != "breakable":
         return style

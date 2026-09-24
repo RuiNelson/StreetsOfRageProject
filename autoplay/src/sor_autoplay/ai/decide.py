@@ -36,6 +36,7 @@ from .tokens import (
     FlipHold,
     GrabEnemy,
     HitAntonioBoomerang,
+    HitTable,
     JumpAttack,
     AttackHeldEnemy,
     MeleeWeaponAttack,
@@ -1871,6 +1872,54 @@ def could_hit_antonio_boomerang(context: Context) -> Context:
     return verbs
 
 
+def could_hit_table(context: Context) -> Context:
+    """Punch round 8's thrown table (type ``$45``) at the moment it would
+    hit the actor.
+
+    Same shape as ``could_hit_antonio_boomerang``, minus the attach filter:
+    the table has no "still on its thrower's desk" phase -- object_catalog.
+    style_for_object only classifies it a ``Projectile`` once its own +$30
+    leaves 0, and by then it is already in real flight
+    (reach.TABLE_TYPE_ID). One candidate per in-flight table ``Projectile``
+    that is heading at the actor (or already inside the punch box) and whose
+    projected position at punch-connect time still sits in that box.
+    """
+
+    verbs: set[Token] = set()
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.is_airborne:
+            continue
+        if actor.held_weapon_type:
+            # Armed, B is the weapon's swing, not a punch -- see the
+            # identical exception in could_hit_antonio_boomerang.
+            continue
+        for projectile in find_all(context, Projectile):
+            if projectile.type_id != reach.TABLE_TYPE_ID:
+                continue
+            if not reach.projectile_threatens(projectile, actor) and not reach.table_in_punch_band(
+                actor, projectile.world_x, projectile.world_y
+            ):
+                continue
+            frames = kinematics.connect_frames(HitTable, actor, projectile)
+            if not any(
+                reach.table_in_punch_band(
+                    actor,
+                    round(projectile.world_x + projectile.vel_x * frame),
+                    projectile.world_y,
+                )
+                for frame in frames
+            ):
+                continue
+            verbs.add(HitTable(actor_slot=actor.slot, target_slot=projectile.slot))
+    return verbs
+
+
 def thrown_weapon_impact_point(actor: PlayableCharacter, enemy: Enemy, verb_cls) -> Enemy:
     """``enemy`` where the thrown weapon would actually meet it.
 
@@ -2280,6 +2329,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_engage_twins(context)
         | could_engage_mr_x(context)
         | could_hit_antonio_boomerang(context)
+        | could_hit_table(context)
         | could_walk_to_advance_stage(context)
         | could_walk_to_screen_center(context)
         | could_punch(context)

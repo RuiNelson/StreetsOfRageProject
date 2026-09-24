@@ -1502,6 +1502,34 @@ def jack_still_juggling(projectile: Projectile, context: Context) -> bool:
     )
 
 
+# Round 8's thrown office table (object_catalog.py's TABLE_TYPE_ID, same
+# value). Unlike Antonio's boomerang or Jack's axe, it has no "still
+# attached to its owner" phase to filter here: object_catalog.style_for_
+# object only classifies it as a Projectile once its own +$30 leaves 0, and
+# by then it already carries a real, live-measured flight velocity (5-6
+# px/tick; autoplay/CLAUDE.md, "Round 8's thrown tables"), aimed at
+# whichever actor's lane it copied the instant it armed.
+TABLE_TYPE_ID = 0x45
+
+
+def table_in_punch_band(actor: PlayableCharacter, world_x: int, world_y: int) -> bool:
+    """Would a forward B connect with a point at ``(world_x, world_y)``.
+
+    Mirrors ``decide._boomerang_in_punch_band`` exactly (same lane slack,
+    same outer-X slack for a fast-moving target caught a tick early rather
+    than a tick late): the table is heavy enough that letting it connect is
+    worse than an early punch, and this is the "already too close to flee"
+    half of the table's answer -- ``could_hit_table`` calls it where
+    ``could_projectile_sidestep`` would otherwise be the only reaction and
+    the distance no longer leaves room to clear the lane in time.
+    """
+
+    if abs(world_y - actor.world_y) > PUNCH_RANGE_Y + 6:
+        return False
+    dx = abs(world_x - actor.world_x)
+    return dx <= punch_outer_x(actor.character_id, actor.held_weapon_type) + 12
+
+
 # Enemy phases a hold can actually be taken on. Deliberately not
 # ``is_punishable``: that set includes KNOCKDOWN (a body on the floor, which
 # the contact test cannot hold) and GRABBED (already held). ATTACKING/CHARGE

@@ -1547,6 +1547,26 @@ class JackStillJugglingTests(unittest.TestCase):
         self.assertFalse(reach.jack_still_juggling(knife, {jack}))
 
 
+class TableInPunchBandTests(unittest.TestCase):
+    """Round 8's thrown table (``reach.TABLE_TYPE_ID``) -- same shape as
+    ``decide._boomerang_in_punch_band``, mirrored here for ``could_hit_table``."""
+
+    def test_in_lane_and_in_range_connects(self) -> None:
+        myself = _myself(world_x=100, world_y=100)
+
+        self.assertTrue(reach.table_in_punch_band(myself, 112, 100))
+
+    def test_out_of_lane_does_not_connect(self) -> None:
+        myself = _myself(world_x=100, world_y=100)
+
+        self.assertFalse(reach.table_in_punch_band(myself, 112, 130))
+
+    def test_too_far_on_x_does_not_connect(self) -> None:
+        myself = _myself(world_x=100, world_y=100)
+
+        self.assertFalse(reach.table_in_punch_band(myself, 300, 100))
+
+
 def _partner(**overrides) -> Partner:
     fields = dict(
         slot="P2",

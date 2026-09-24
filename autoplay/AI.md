@@ -1004,8 +1004,8 @@ parameter is still named `enemy`, but it is typed `Character`.
 One test per concrete `Verb` class, dispatched by `type(verb) → function`
 the way `priority.py` and `execute.py` already dispatch:
 
-- the forward strikes — `Punch`, `MeleeWeaponAttack`, `HitAntonioBoomerang`
-  — are withdrawn while `punch_would_connect` holds for the partner;
+- the forward strikes — `Punch`, `MeleeWeaponAttack`, `HitAntonioBoomerang`,
+  `HitTable` — are withdrawn while `punch_would_connect` holds for the partner;
 - `OpenBreakable` only on the ticks it actually strikes (`decide.in_smash_
   range`). Withdrawing the approach as well would park the actor in front of
   a prop for as long as the partner stood nearby, and the next tick re-asks

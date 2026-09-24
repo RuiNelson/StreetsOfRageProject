@@ -1320,23 +1320,56 @@ dead Garcia's replacement is not modelled; a whole-fight offline simulator
 (hold loop, hit reactions, respawns) was started from `$1353A`'s decode and
 not finished; Axel and Adam have not been run live against him.
 
-**Round 8's thrown tables (not yet modelled; user: "as mesas do nível 8
-também são um 'breakable'").** The office occasionally throws a table
-(furniture) at the player; the AI should detect one in its lane and either
-flee it, if there is room, or punch it away (`HitAntonioBoomerang`'s
-pattern) when it is too close to flee. `object_catalog.py`'s `0x45` entry
-is tagged `kind="breakable"`, `"Moving prop"`, with no `labels.csv` backing
-and no decoded spawn trigger, velocity, or hitbox — the user's note confirms
-it is a `Breakable`-typed object even while in flight, not a distinct
-projectile type, which matches that tag. Undecoded still: whether `0x45`
-*is* the thrown table (as opposed to an ordinary round-8 prop), its throw
-trigger, flight velocity, and hitbox. `Projectile` tokens are built from an
-explicit per-type whitelist (`observe.py`, `object_catalog.py`'s
-`_ENEMY_STYLES`/`_BOSS_PROJECTILE_STYLES`/`_WEAPON_STYLES`); a `Breakable`
-in flight is invisible to `reach.projectile_threatens` and
-`ProjectileSidestep` as things stand, so this needs a live level-8 capture
-before any `could_flee_table`/`PunchAwayTable` verb can be built on real
-data rather than a guess.
+**Round 8's thrown tables** (user: "No nível 8, de vez em quando o jogo
+atira umas mesas contra o jogador, a IA deve detetar se estão em linha com
+ela, e se for o caso, fugir delas, ou se for estiver demasiado perto,
+dar-lhes um murro para que elas não atinjam a IA"; confirmed right at the
+level's start: "as mesas são atiradas logo de início"; and, on the ROM
+family: "as mesas do nível 8 também são um 'breakable'" -- true of its
+*idle* state only, below). Full decode in `ai-analysis/enemy-ai.md`, "Round
+8's thrown office table (`$45`)".
+
+`object_type_update_jt` (`$B236`) confirms type `$45` is one real object,
+dispatched at `$7534 (round8_table_dispatcher)` through a 3-entry
+per-`+$30`-state table: **state 0** (`$7546
+(round8_table_state0_wait_and_arm)`) sits hidden at its spawn point until a
+camera-relative proximity threshold trips, then arms -- an X velocity from a
+per-variant (`+$40`) table at `$75DC` (variants 1-4 measured `+5`, `+6`,
+`-5`, `-6` px/tick; variant 0 never arms and never flies, so not every `$45`
+is a real throw) and a lane (`+$14`) copied from whichever player is the
+current target *at that instant* (a straight shot down that lane, not a
+homer). **State 1** (`$75E6 (round8_table_state1_flight)`) integrates
+velocity and runs a hit-check shared with other props (`sub_00007392`) that
+explicitly special-cases type `$45` for a stronger vertical recoil when
+punched -- the ROM's own "punch it away" mechanic, found in the
+disassembly independent of any live run. **State 2** (`$75EE
+(round8_table_state2_bounce)`) is the gravity arc, rise then fall, on its
+own after launch or after a punch. Live-captured (`autoplay/tools/table_
+throw_diag.py`, new, `hakuro_emerge_diag.py`'s shape, `DebugScenario(start_
+level=8)`, no sweep needed -- the very first live sample already had an
+armed table): ~5-6 world px/tick, lane-locked to the player at arm time, a
+168->117->166 `z` arc. Reproduced the report exactly: `p1_hp` 80 -> 77 with
+no answer for it, because `object_catalog.py` tagged every `$45` a
+`Breakable` regardless of state -- invisible to `reach.projectile_
+threatens`/`ProjectileSidestep` for its whole flight, and for the one tick
+its state read 1, misread as an *intact* one (`_INTACT_BREAKABLE_STATE`'s
+same numeric value, unrelated reason).
+
+Fixed: `object_catalog.TABLE_TYPE_ID`/`style_for_object` now classify `$45`
+by its own `+$30` -- `None` at state 0 (unchanged), a `"projectile"`-kind
+`EntityStyle` at any other state -- and `world_map.py` gives it the same
+`+$1C`/`+$20` ordinary-layout velocity correction Jack's axe already needed
+(the projectile-kind default `+$20`/`+$24` reads a straight throw's real
+speed as 0). `reach.table_in_punch_band` mirrors `decide._boomerang_in_
+punch_band`; `HitTable` (`ai/tokens/attack_verbs.py`, wired through
+`decide.py`/`priority.py`/`execute.py`/`kinematics.py`/`ai/partner.py`) is
+`HitAntonioBoomerang`'s exact shape with no attach-phase filter -- the
+table has none, it is already in real flight by the time it is observed at
+all. `ProjectileSidestep` needed no changes: once `$45` is a real
+`Projectile` with a real `vel_x`, its existing `reach.projectile_threatens`
+gate already covers the flee half. A second live run against the fixed AI
+produced 36 `ProjectileSidestep`s and 13 `HitTable`s with no hit
+attributable to an armed, in-lane table.
 
 **Jack: the ROM model and the plan** (user: "A AI tem sérias dificuldades em
 lidar com o inimigo do tipo Jack ... É essencial construir uma estratégia para

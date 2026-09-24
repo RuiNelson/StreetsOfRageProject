@@ -82,6 +82,7 @@ classDiagram
     Attack <|-- GrabMechanics
     MeleeAttacks <|-- Punch
     MeleeAttacks <|-- HitAntonioBoomerang
+    MeleeAttacks <|-- HitTable
     Attack <|-- MeleeWeaponAttack
     Attack <|-- WeaponAttacks
     WeaponAttacks <|-- ThrowKnife
