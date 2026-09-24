@@ -48,6 +48,16 @@ class Enemy(Character):
     # OBJ_VEL_X_ORDINARY/OBJ_VEL_LANE_ORDINARY.
     grunt_vel_x: float = 0.0  # +$1C signed 16.16, ordinary enemies only
     grunt_vel_y: float = 0.0  # +$20 signed 16.16 (lane), ordinary enemies only
+    # Elevation at +$18, threaded onto every Enemy/Boss now (world_map.py
+    # already read it for every kind; only Jack's flight and Boss's own
+    # ground_z/vel_z consumed it before). Ordinary enemies do not otherwise
+    # move on this axis, with one scripted exception: round 5's HakuRo rises
+    # from below the boat's deck before becoming reachable
+    # (ai-analysis/enemy-ai.md, "HakuRo: rising from below deck";
+    # reach.enemy_still_emerging reads this against hazards.base_floor_z to
+    # gate it out of targeting while still below floor). A Boss leaves this
+    # at its default; its own elevation is ``ground_z``/``vel_z`` below.
+    world_z: int = 0
     hitbox: Hitbox | None = None
     attack_ranges: tuple[AttackRange, ...] = ()
     # Pickup weapon type $08-$0C while this enemy is holding one, else 0.
@@ -224,8 +234,7 @@ class Jack(Grunt):
     flags_31: int = 0
     personality: int = 0
     script_param: int = 0  # the whole +$40 (bit 4 picks the torch set for his axes)
-    world_z: int = 0
-    vel_z: float = 0.0  # +$24
+    vel_z: float = 0.0  # +$24 -- world_z (+$18) is now on the base Enemy
     animating: bool = False  # +$01 bit 2
     anim: int = 0
     anim_frame: int = 0

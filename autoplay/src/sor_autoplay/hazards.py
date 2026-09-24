@@ -113,6 +113,24 @@ def floor_kind(level_index: int, klass: int) -> int | None:
     return kinds[klass]
 
 
+def base_floor_z(level_index: int) -> int:
+    """The street's own surface height (``BASE_FLOOR_CLASS``) for this round.
+
+    A standing body's ``world_z`` (+$18) *is* its floor's surface once it has
+    landed on it (``$3E78``, cited above); z grows downward, so a body
+    reading meaningfully *more* than this has not reached the floor yet.
+    Used by ``reach.enemy_still_emerging`` for an ordinary enemy scripted to
+    rise from below the ground before it becomes reachable (round 5's
+    HakuRo, ``ai-analysis/enemy-ai.md``'s "HakuRo: rising from below deck") --
+    the same reference ``is_wall_class`` already measures a class's own
+    surface against, just read for the plain street class instead of a
+    raised one.
+    """
+
+    _, surfaces = _floor_table(level_index)
+    return surfaces[BASE_FLOOR_CLASS]
+
+
 def is_hole_class(level_index: int, klass: int) -> bool:
     """No floor at all: a player standing here falls until it loses a life."""
 

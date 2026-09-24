@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import math
 
+from .. import hazards
 from ..phases import CombatPhase, is_dangerous, is_punishable, should_ignore_as_target
 from ..world_map import (
     CAMERA_X_MIN,
@@ -362,10 +363,49 @@ def in_targetable_lane(world_y: int, context: Context) -> bool:
     return LANE_Y_MIN_ENEMY <= world_y <= lane_max
 
 
+# How far below the round's own street surface (hazards.base_floor_z) an
+# ordinary enemy's world_z may sit and still count as "on the ground". Round
+# 5's HakuRo (ai-analysis/enemy-ai.md, "HakuRo: rising from below deck")
+# measured 52px ($34, the ROM's own one-shot +$18 offset at
+# haku_ro_type25_dispatcher's state $13 entry, $0000E952) below the surface
+# while stuck -- a live capture also showed it can sit there frozen
+# indefinitely (the same handler re-tests cam_x+$80/+$100 against its own
+# world_x every tick and does not touch +$18/+$24 at all until that clears,
+# so nothing here can assume "a few ticks and it settles"). A wide margin
+# keeps ordinary float/lane jitter of a body actually on the floor from ever
+# tripping this; 52px of slack is nowhere near it.
+EMERGING_FLOOR_MARGIN_Z = 24
+
+
+def enemy_still_emerging(enemy: Enemy, context: Context) -> bool:
+    """True while this enemy's body has not reached the round's floor yet.
+
+    Ordinary enemies do not otherwise move on the Z axis at all -- this is a
+    generic geometry check (any type, any round with a similar rise-from-
+    below mechanic), not a HakuRo- or round-5-specific one, because the ROM
+    fact it reads is generic: ``hazards.base_floor_z`` is the same per-round
+    street surface ``hazards.is_wall_class`` already measures a raised class
+    against, and ``Enemy.world_z`` (+$18) is read from the object table for
+    every ordinary enemy and boss uniformly by ``world_map.py``. A ``Boss``
+    never has this field populated (it tracks its own elevation as
+    ``ground_z``/``vel_z``), so it reads its default 0 and this is always
+    ``False`` for one.
+
+    Without a ``Stage`` token in context (should not happen once gameplay
+    has started) this reads conservatively as ``False`` -- never suppress a
+    target from a missing token rather than a real measurement.
+    """
+
+    stage = find(context, Stage)
+    if stage is None:
+        return False
+    return enemy.world_z > hazards.base_floor_z(stage.level_index) + EMERGING_FLOOR_MARGIN_Z
+
+
 def live_enemies(context: Context) -> list[Enemy]:
     """Every enemy still worth acting on.
 
-    Three independent ways to stop being one, and all three are needed:
+    Four independent ways to stop being one, and all four are needed:
 
     - ``should_ignore_as_target`` -- the phase says so (DEATH, or a SCRIPTED
       sequence like the police-special sweep);
@@ -377,7 +417,20 @@ def live_enemies(context: Context) -> list[Enemy]:
     - ``in_targetable_lane`` -- it is somewhere the actor can neither reach
       nor hit (stage 1's scripted "behind a door" placeholder is a real,
       tracked Enemy past the lane ceiling). Deliberately the *enemy* band and
-      not ``in_playable_lane``'s player band: see that function.
+      not ``in_playable_lane``'s player band: see that function;
+    - ``enemy_still_emerging`` -- it is visible and carries a real state/
+      health/hitbox, but is physically below the round's own floor and not
+      yet a body the actor can touch (round 5's HakuRo jumping up from below
+      the boat's deck; see that function and
+      ai-analysis/enemy-ai.md's "HakuRo: rising from below deck"). Left
+      unfiltered, this reads as a completely ordinary, on-screen, targetable
+      enemy -- HakuRo has no entry in ``phases.py``'s per-type table, so its
+      state ``$13`` decodes as ``UNKNOWN`` rather than something
+      ``should_ignore_as_target`` already excludes -- and the AI walked up
+      to it and punched it every tick for as long as it stayed frozen there,
+      which measured live is indefinitely (the ROM handler will not resume
+      integrating its height until the camera scrolls close enough, and nothing
+      advances the camera while the AI is busy fighting it).
     """
 
     return [
@@ -386,6 +439,7 @@ def live_enemies(context: Context) -> list[Enemy]:
         if not should_ignore_as_target(e.combat_phase)
         and not e.is_defeated
         and in_targetable_lane(e.world_y, context)
+        and not enemy_still_emerging(e, context)
     ]
 
 

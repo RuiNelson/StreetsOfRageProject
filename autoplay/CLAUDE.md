@@ -1638,6 +1638,73 @@ only Jack kept; one run each, so a direction, not a score):
 position, held mask, verb, route, camera bounds, class under the actor,
 time-over byte and object census, plus the class map whenever it changes.
 
+**HakuRo: rising from below deck (user, in Portuguese): "No nível 5 há um
+bug que a AI fica presa num inimigo que é detetado (e bem), mas está por
+debaixo do chão do estágio (o estágio é num barco e o inimigo sai a
+saltar), a IA fica presa a tentar dar murros no inimigo, mas este ainda não
+está disponível."** Reproduced at round 5, wave 3 (0-indexed, the 4th
+wave). The enemy is **HakuRo, type `$25`** -- an earlier attempt at this
+bug misidentified it as Nora (type `$26`, symbol `"N"`; HakuRo is `"H"`,
+`ai/tokens/enemy.py`'s `HakuRo(Grunt)`, types `$25`/`$2A`), the numerically
+adjacent slot in `object_catalog.py`. This capture confirmed HakuRo on
+every row (`type: "0x25"`).
+
+The ROM fact (full decode, `StreetsOfRageRecompilation/ai-analysis
+/enemy-ai.md`, "HakuRo: rising from below deck"): `haku_ro_type25
+_dispatcher`'s state `$13` handler (`$0000E952`) makes the object visible
+and adds a fixed `$34` (52px) to its elevation (`+$18`) the moment the wave
+activates it, then **does not touch elevation again on any subsequent
+update** until `cam_x+$80` (or `+$100`) reaches the object's own X -- a
+literal early return every tick until then. Nothing else in the ROM scrolls
+the camera except stage-forward player progress, so an AI that parks itself
+in front of the (fully visible, fully ordinary-looking) frozen HakuRo and
+keeps attacking it never advances the stage, the camera never scrolls, the
+gate never clears, and the enemy never actually rises: a genuine ROM-native
+deadlock, not merely a slow animation. Live capture
+(`tools/hakuro_emerge_diag.py`, round 5 jumped to directly with every other
+ordinary family swept, `--turbo 2`) measured three of five wave-3 HakuRo
+frozen at exactly `world_z=212` -- bit-exact, zero jitter -- for the entire
+33+ second capture window, while the real pipeline repeatedly issued
+`WalkToNearEnemy`/`MeleeWeaponAttack` at them; 212 is precisely 160 (the
+round's own base street surface) + 52, confirming the decode against the
+running game. `phases.py` has no per-type table entry for HakuRo at all, so
+state `$13` decodes as `CombatPhase.UNKNOWN` -- not one of
+`should_ignore_as_target`'s phases -- so nothing already in the pipeline
+excluded it from targeting.
+
+The fix does not touch `phases.py`: `Enemy.world_z` (`tokens/enemy.py`,
++$18, now threaded onto every ordinary enemy and boss the same way
+`observe.py` already threaded it for Jack alone) is read by a new
+`reach.enemy_still_emerging` predicate against `hazards.base_floor_z`
+(`hazards.py`, the same round's-own-street-surface reference
+`is_wall_class` already measures a raised class against) and wired into
+`reach.live_enemies` as a fourth exclusion alongside
+`should_ignore_as_target`/`is_defeated`/`in_targetable_lane`. Deliberately
+**generic**, not HakuRo- or round-5-specific: the ROM fact behind it (a
+body's `world_z` *is* its floor's surface once landed) holds for any
+ordinary enemy in any round, and a `Boss` never populates `world_z` (it
+tracks its own elevation as `ground_z`/`vel_z`), so the predicate is always
+false for one. Once excluded from `live_enemies`, the frozen HakuRo also
+stops blocking `could_walk_to_advance_stage` (`decide._advance_blocking
+_enemies` iterates the same list), so the AI naturally resumes walking the
+stage forward -- which is exactly what satisfies the camera gate and lets
+the ROM's own handler finish the rise. No extra plumbing was needed for
+that half: it falls out of the existing stage-advance gate reusing
+`live_enemies`.
+
+Verified live, before and after, on the same wave-3 scenario
+(`--turbo 2 --poll-ms 16`, `--kill-street-enemies`-equivalent
+`--only-enemy hakuro`, a hard wall-clock backstop and an instant
+`level_index` stop on every tick): before the fix, wave 3 never progressed
+in over 33s of capture (hakuro count held at 5 the whole time); after, the
+same wave completed cleanly in ~27.5s (hakuro count 5 -> 3 -> 0, wave
+advancing to 4), with `WalkToAdvanceStage` appearing prominently in the
+verb log and the previously-frozen slots' later `JumpAttack`/
+`MeleeWeaponAttack` verbs landing only once their own `world_z` read back
+at the floor -- confirming the gate does not over-suppress a HakuRo that
+has actually landed. Unit coverage:
+`tests/ai/test_reach.py`'s `EnemyStillEmergingTests`.
+
 ## Ownership
 
 - Project-owned directory in the StreetsOfRageProject workspace.
@@ -1780,6 +1847,7 @@ do not commit `.jsonl` runs.
 | `twins_sim.py` | **Plays whole twin fights offline**, `twins_plan.plan` against `twins.py`, from a recording's frame with the actor's start shifted around (`--starts N`, seeded): events alternate as `$AD8E` runs them, a tick about every player update (sometimes half an update or a whole one late), the stick landing 0-1 updates after the tick. Per start: strikes per twin, the first hit (the model plays no hit reaction), the time to kill both, ms a plan; `--trace U` prints every program's score per timing at update U |
 | `mr_x_lab.py` | **Records, and checks the model against,** Mr. X in lockstep: the real pipeline walks round 8 with `--kill-until-mr-x`, then one of four actors plays a frame at a time -- `engage` (the real pipeline), `hold` (a scripted knee/release loop), `wander` or `stand` -- and every frame's row carries the input, the camera, a census, and the raw bytes of the player, him, his bullets and every Garcia. `--check FILE` replays it through `mr_x.check_recording` (and the Garcias through `garcia.check_recording`) |
 | `mr_x_sim.py` | **Plays the approach to Mr. X offline**, `mr_x_plan.plan` against `mr_x.py` and `garcia.py`, from a lab recording's frame with the actor shifted around (`--starts N`, seeded), `twins_sim.py`'s timing; per start the first hold (marked `burnt` when a Garcia's blow reaches the holder before a knee is spent), the first hit, a Garcia held, punches and chords. `--replay FILE --at T` runs the plan on one row of a `boss_fight.py` recording (its raw slots) and prints every program's worst and mean -- why the live pipeline did what it did |
+| `hakuro_emerge_diag.py` | **Traces** round 5's wave-3 HakuRo group tick by tick while the real pipeline plays, with every other ordinary family swept (`--only-enemy hakuro`): every HakuRo's raw type/position/elevation/state/health/animation, the winning verb and its target, and the wave counter, all to JSONL; stops the instant `level_index` leaves round 5, on a wave past the target, on a wall-clock backstop past the target wave, or a hard overall backstop -- see **HakuRo: rising from below deck**. Found the camera-gated freeze (`world_z` pinned bit-exact for 30+s) that `reach.enemy_still_emerging` now excludes from targeting |
 | `stage_walk_diag.py` | **Traces** a round's stage walk tick by tick (`--level`, 6 by default; `--only-enemy FAMILY` or `--kill-street-enemies`), for stalls with nothing on screen: the actor's position, height, action and velocities, the mask the pad holds, the winning verb and whether its route arrived, the camera and its scroll bounds (`$FFE01A`/`$FFE01E`), the class under the actor, pits and walls, the round clock, the time-over byte and a census of every object slot; the class map (lane-band rows only -- more runs into `$FFB800`) is written as its own row whenever it changes. Runs past a mid-round boss unless `--stop-at-boss`. Found round 6's housings, belts and presses (**Round 6: the factory floor**) |
 | `antonio_diag.py` | **Explains** a round-1 fight tick by tick: every candidate `Verb` with its own emergency, the actor's hold state (`+$4C` link and the action byte behind it), every byte of Antonio's AI state that `ai/antonio.py` replays (primary, tactical, `+$78`, `+$5C`, screen X, animation frame, countdown and latched box ids, velocities, 16.16 position), `antonio.kick_gate_open`, and `antonio.plan_engage`'s stick, mode and predicted outcome. First written for, and found, the front-hold stall in **Holding a boss** above |
 | `antonio_lab.py` | **Lockstep lab** for round 1: plays to Antonio in real time, then steps the host one frame at a time with the real `AgentLoop` ticking every two frames (its pad recorded and replayed through `step_input`), and on every frame his object updates replays `antonio.boss_update` from the previous frame's work RAM and compares every field -- position, lane, primary, tactical, both timers, both velocities, animation, countdown, latched boxes, screen X -- the same for every boomerang of his while it flies (his linked one by his `+$6E`, older ones by slot), plus the contact outcome against the player's own `+$7C`. `--actor wander` swaps the pipeline for a seeded walk that never attacks, to run the model through all of his states; `--input-delay` adds latency. Scores the fight too (hits, holds, kicks started) |

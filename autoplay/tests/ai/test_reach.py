@@ -30,6 +30,7 @@ from sor_autoplay.ai.tokens import (
     RearAttack,
     Signal,
     Souther,
+    Stage,
     Surrounded,
     Weapon,
 )
@@ -460,6 +461,75 @@ class LiveEnemyTests(unittest.TestCase):
         self.assertEqual(
             reach.on_screen_enemies({camera, in_strip, off_screen}), [in_strip]
         )
+
+
+class EnemyStillEmergingTests(unittest.TestCase):
+    """Round 5's HakuRo, still below the boat's deck (``enemy.world_z``).
+
+    ai-analysis/enemy-ai.md, "HakuRo: rising from below deck": a live capture
+    of round 5, wave 3 measured the ROM parking a fully visible, otherwise
+    ordinary HakuRo at ``world_z=212`` -- 52px ($34) below the round's own
+    floor (``hazards.base_floor_z(4) == 160``) -- for over thirty seconds
+    with no progress at all, because ``haku_ro_type25_dispatcher``'s state
+    ``$13`` handler ($0000E952) does not touch +$18/+$24 again until the
+    camera scrolls close enough. ``phases.py`` has no per-type table entry
+    for HakuRo at all, so that state decodes as ``CombatPhase.UNKNOWN`` --
+    not one of ``should_ignore_as_target``'s phases -- which is why the
+    geometry check in ``reach.enemy_still_emerging`` is the fix rather than a
+    phase-table entry.
+    """
+
+    def test_an_enemy_below_the_rounds_floor_is_not_yet_a_target(self) -> None:
+        stage = Stage(level_index=4, direction="right")  # round 5
+        rising = _enemy(world_x=130, world_y=0, world_z=212)
+
+        self.assertTrue(reach.enemy_still_emerging(rising, {stage, rising}))
+        self.assertEqual(reach.live_enemies({stage, rising}), [])
+
+    def test_an_enemy_on_the_floor_is_a_target(self) -> None:
+        stage = Stage(level_index=4, direction="right")
+        landed = _enemy(world_x=130, world_y=0, world_z=160)
+
+        self.assertFalse(reach.enemy_still_emerging(landed, {stage, landed}))
+        self.assertEqual(reach.live_enemies({stage, landed}), [landed])
+
+    def test_small_jitter_above_the_floor_does_not_suppress_a_target(self) -> None:
+        # Right at the margin's own edge -- still not suppressed. The margin
+        # exists so a body genuinely on the floor is never dropped by noise;
+        # 52px of real emergence is nowhere near it.
+        stage = Stage(level_index=4, direction="right")
+        jittered = _enemy(
+            world_x=130, world_y=0, world_z=160 + reach.EMERGING_FLOOR_MARGIN_Z
+        )
+
+        self.assertFalse(reach.enemy_still_emerging(jittered, {stage, jittered}))
+
+    def test_becomes_a_target_again_the_moment_it_lands(self) -> None:
+        # Must not over-suppress: once the ROM's own landing snap runs
+        # (state $13 -> $0E, world_z back to the floor), the same enemy is
+        # targetable again with no extra machinery.
+        stage = Stage(level_index=4, direction="right")
+        still_rising = _enemy(slot="obj02", world_x=130, world_y=0, world_z=212)
+        landed = replace(still_rising, world_z=160)
+
+        self.assertEqual(reach.live_enemies({stage, still_rising}), [])
+        self.assertEqual(reach.live_enemies({stage, landed}), [landed])
+
+    def test_with_no_stage_token_nothing_is_suppressed(self) -> None:
+        # Conservative default: a missing token must never be read as a
+        # reason to drop a target -- only a real measurement is.
+        rising = _enemy(world_x=130, world_y=0, world_z=212)
+
+        self.assertFalse(reach.enemy_still_emerging(rising, {rising}))
+        self.assertEqual(reach.live_enemies({rising}), [rising])
+
+    def test_a_boss_never_populates_world_z_so_it_is_never_suppressed(self) -> None:
+        # Boss tracks its own elevation as ground_z/vel_z; world_z stays at
+        # its default 0, always well above any round's floor.
+        stage = Stage(level_index=4, direction="right")
+        boss = _souther(world_x=130, world_y=0, primary_state=1)
+
+        self.assertFalse(reach.enemy_still_emerging(boss, {stage, boss}))
 
 
 def _antonio(**overrides) -> Antonio:
