@@ -71,6 +71,7 @@ from .tokens import (
     WalkToAdvanceStage,
     WalkToNearEnemy,
     WalkToPickup,
+    WalkToScreenCenter,
     WalkToWeapon,
 )
 from .gamepad import VirtualGamepad
@@ -2013,6 +2014,59 @@ def state_machine_walk_to_advance_stage(
     _hold_steered(gamepad, _clamp_mask(context, actor.world_x, actor.world_y, held))
 
 
+def state_machine_walk_to_screen_center(
+    verb: WalkToScreenCenter, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Walk toward the visible screen's own horizontal centre.
+
+    See ``WalkToScreenCenter``'s own docstring and ``decide.could_walk_to_
+    screen_center`` for why this verb exists and how it is gated. The
+    centre X is ``CameraRange``'s own midpoint -- deliberately: ``reach.
+    in_visible_screen`` widens ``CameraRange`` by ``reach.SCREEN_STRIP_X``
+    symmetrically on both sides, so the walk clamp's midpoint and the
+    visible CRT's midpoint are the same point, and reading ``CameraRange``
+    for it here is not the "hold the arena centre" mistake
+    ``autoplay/CLAUDE.md``'s "The entrance" warns against (that verb read
+    the clamp as though its *edges* were the visible screen's own).
+
+    Routed exactly like ``WalkToAdvanceStage``'s own lookahead
+    (``nav.advance_goal``): a vertical strip spanning the whole lane band,
+    not a point pinned to the actor's current Y, so a pit sitting on the
+    actor's own lane cannot make the goal unreachable. Unlike that verb this
+    one has no obligation to keep moving once blocked -- it is the AI's
+    idle, human-like filler, not a guaranteed-progress fallback -- so it
+    uses the same simple routed-with-straight-line-fallback shape
+    ``state_machine_walk_to_near_enemy`` already uses, and holds still
+    (``goal.is_reached``) once the actor arrives.
+    """
+
+    actor = _find_actor(context, verb.actor_slot)
+    camera = find(context, CameraRange)
+    if actor is None or camera is None:
+        gamepad.release()
+        return
+
+    center_x = (camera.left + camera.right) / 2
+    goal = nav.advance_goal(context, center_x)
+    body, origin = nav.actor_footprint(actor)
+    solids, dangers = nav.obstacle_sets(context, body=body, origin=origin)
+
+    def straight_line() -> int:
+        return _movement_mask(context, actor.world_x, actor.world_y, center_x, actor.world_y)
+
+    _hold_steered(
+        gamepad,
+        _routed_mask(
+            context,
+            actor,
+            goal,
+            solids=solids,
+            dangers=dangers,
+            fallback=straight_line,
+        ),
+    )
+
+
 def state_machine_melee_strike(verb: Verb, context: Context, gamepad: VirtualGamepad) -> None:
     """Shared handler for ``Punch`` / ``MeleeWeaponAttack`` -- identical
     B-button press regardless of which (if any) weapon is held; only the
@@ -2770,6 +2824,7 @@ _HANDLERS = {
     ReleaseToRegrab: state_machine_release_to_regrab,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,
+    WalkToScreenCenter: state_machine_walk_to_screen_center,
     Punch: state_machine_melee_strike,
     MeleeWeaponAttack: state_machine_melee_strike,
     RearAttack: state_machine_rear_attack,

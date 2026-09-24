@@ -77,6 +77,55 @@ class WalkToAdvanceStage(Walk):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class WalkToScreenCenter(Walk):
+    """Walk toward the visible screen's own horizontal centre to draw an
+    off-screen enemy into view, rather than stand pinned against the camera
+    edge failing to reach it.
+
+    User (in Portuguese): "Por vezes a IA fica presa a um canto do ecrã a
+    tentar chegar a inimigos que estão fora do campo visível no ecrã, a IA
+    nesse caso deve-se andar para o centro do ecrã para os 'chamar' (ter um
+    comportamento mais humano) ... não dês muita prioridade, atacar o
+    inimigo em caso de perigo é mais imperativo."
+
+    Produced by ``could_walk_to_screen_center`` once per actor gated on
+    ``decide._actor_pinned_for_screen_center``: nothing in ``reach.
+    on_screen_enemies`` (the ordinary approach owns any real on-screen
+    fight untouched), a live enemy still waits ahead in the stage's own
+    scroll direction -- exactly ``could_walk_to_near_enemy``'s own
+    off-screen fallback target -- and the actor is already pinned against
+    ``CameraRange``'s own walk-clamp edge in that direction. That is the
+    point at which ``navigation.world_rect`` (bounded to the camera plus
+    ``navigation.WORLD_MARGIN_X``, deliberately: "planning across all of
+    that would route around things that are not on screen") and the
+    executor's own camera clamp (``execute._clamp_mask_to_camera``) agree
+    there is no further lattice position toward that target this tick --
+    the stuck-in-a-corner bug reported above.
+
+    The centre is read off ``CameraRange`` -- deliberately, and *not* the
+    mistake ``autoplay/CLAUDE.md``'s "The entrance" warns against, where an
+    earlier "hold the arena centre" verb misread the walk clamp as the
+    visible screen. Here the two midpoints coincide: ``reach.
+    in_visible_screen`` widens ``CameraRange`` by ``reach.SCREEN_STRIP_X``
+    symmetrically on both sides, so ``(camera.left + camera.right) / 2`` is
+    simultaneously the walk clamp's own centre and the visible CRT's, and
+    it is the second reading this verb means (``execute.state_machine_
+    walk_to_screen_center``).
+
+    Raises emergency: flat, one point above ``WalkToNearEnemy``'s off-screen
+    floor -- and that floor is itself capped whenever this verb's own
+    condition holds (``priority._EMERGENCY_WALK_TO_NEAR_ENEMY_PINNED_
+    CEILING``), so the two never tie and this always wins the exact tick it
+    exists for, never before or after. Stays under every pickup, weapon,
+    retreat and attack tier, per the user's own "não dês muita prioridade"
+    (``priority._EMERGENCY_WALK_TO_SCREEN_CENTER``).
+    """
+
+    priority: int = 4
+    actor_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class WalkToWeapon(Walk):
     """Walk to pick up a free ground weapon that outranks the held one.
 

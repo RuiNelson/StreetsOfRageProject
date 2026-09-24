@@ -29,6 +29,7 @@ from .decide import (
     POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE,
     thrown_weapon_impact_point,
     thrown_weapon_would_connect,
+    _actor_pinned_for_screen_center,
     _advance_blocking_breakables,
     _advance_blocking_enemies,
 )
@@ -87,6 +88,7 @@ from .tokens import (
     WalkToAdvanceStage,
     WalkToNearEnemy,
     WalkToPickup,
+    WalkToScreenCenter,
     WalkToWeapon,
 )
 
@@ -294,6 +296,30 @@ _EMERGENCY_WALK_TO_PICKUP_LIFE = 12
 _EMERGENCY_WALK_TO_PICKUP_SPECIAL = 11
 _EMERGENCY_WALK_TO_PICKUP_SCORE = 9
 _EMERGENCY_WALK_TO_NEAR_ENEMY = 14
+# The ceiling WalkToNearEnemy's off-screen fallback is held to once the
+# actor is pinned against CameraRange's own walk-clamp edge in the target's
+# direction (decide._actor_pinned_for_screen_center) -- the point at which
+# neither navigation.plan_route (bounded to the camera plus navigation.
+# WORLD_MARGIN_X) nor the straight-line fallback (zeroed by execute.
+# _clamp_mask_to_camera) can advance the actor another pixel toward it.
+# Equal to the verb's own natural distance floor, so a target that was
+# already going to floor changes nothing; a near one that would otherwise
+# score above it (any distance under 90px, via _distance_emergency's
+# step_px=15) is pulled down to the same floor instead of continuing to
+# outrank WalkToScreenCenter -- applied after the boss/armed raise too,
+# since pinned is pinned whoever the target is. See WalkToScreenCenter's own
+# docstring (user: "a IA fica presa a um canto do ecrã a tentar chegar a
+# inimigos que estão fora do campo visível no ecrã").
+_EMERGENCY_WALK_TO_NEAR_ENEMY_PINNED_CEILING = 8
+# One point above that ceiling, so WalkToScreenCenter always wins the exact
+# tick WalkToNearEnemy's fallback is stalled -- both read the identical
+# condition (decide._actor_pinned_for_screen_center), so the two can never
+# tie -- and never before or after. A tie with WalkToPickup's Score tier (9)
+# is broken by WalkToScreenCenter's own low `priority` field, so a genuine
+# pickup is still taken first: per the user's "não dês muita prioridade"
+# this must never contend with anything that represents real progress, only
+# with the one stalled candidate it exists to replace.
+_EMERGENCY_WALK_TO_SCREEN_CENTER = 9
 # Must sit in the gap between WalkToNearEnemy's base (14) and the *lowest*
 # real attack tier (_EMERGENCY_JUMP_ATTACK_DEFAULT, 18) -- backing off an
 # imminent threat outranks still walking toward one, but never outranks
@@ -764,10 +790,26 @@ def _emergency_walk_to_near_enemy(verb: WalkToNearEnemy, context: Context) -> in
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
     distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
-    return _with_target_class(
+    score = _with_target_class(
         _distance_emergency(distance, base=_EMERGENCY_WALK_TO_NEAR_ENEMY, floor=8, step_px=15),
         target,
     )
+    if _actor_pinned_for_screen_center(context, actor):
+        # See _EMERGENCY_WALK_TO_NEAR_ENEMY_PINNED_CEILING's own comment.
+        score = min(score, _EMERGENCY_WALK_TO_NEAR_ENEMY_PINNED_CEILING)
+    return score
+
+
+def _emergency_walk_to_screen_center(verb: WalkToScreenCenter, context: Context) -> int:
+    """Flat, while ``decide._actor_pinned_for_screen_center`` still holds for
+    this actor -- re-derived here rather than trusted from production, per
+    this module's own rule that a score comes from the ``Information``
+    tokens in context, never from the verb's type alone."""
+
+    actor = _find_actor(context, verb.actor_slot)
+    if actor is None or not _actor_pinned_for_screen_center(context, actor):
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_WALK_TO_SCREEN_CENTER
 
 
 def _emergency_retreat_from_danger(verb: RetreatFromDanger, context: Context) -> int:
@@ -1029,6 +1071,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     EngageJack: _emergency_engage_jack,
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
+    WalkToScreenCenter: _emergency_walk_to_screen_center,
 }
 
 

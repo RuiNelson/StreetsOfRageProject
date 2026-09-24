@@ -83,6 +83,7 @@ from sor_autoplay.ai.tokens import (
     WalkToAdvanceStage,
     WalkToNearEnemy,
     WalkToPickup,
+    WalkToScreenCenter,
     WalkToWeapon,
 )
 from sor_autoplay.phases import CombatPhase
@@ -1439,6 +1440,72 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
         _settle(verb, {actor, camera, Stage(level_index=0, direction="right")}, gamepad)
 
         client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+
+class ExecuteWalkToScreenCenterTests(unittest.TestCase):
+    """See ``WalkToScreenCenter`` and ``decide.could_walk_to_screen_center``
+    for why this verb exists (user, in Portuguese: "a IA nesse caso deve-se
+    andar para o centro do ecrã para os 'chamar'")."""
+
+    def test_walks_right_toward_the_centre_when_left_of_it(self) -> None:
+        actor = _myself(world_x=20, world_y=64)
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        verb = WalkToScreenCenter(actor_slot="P1")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, camera}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+    def test_walks_left_toward_the_centre_when_right_of_it(self) -> None:
+        actor = _myself(world_x=180, world_y=64)
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        verb = WalkToScreenCenter(actor_slot="P1")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, camera}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=LEFT, player2=0)
+
+    def test_centre_is_the_camera_midpoint_not_an_edge(self) -> None:
+        # A camera off-centre in world space -- the target must be its own
+        # midpoint, not e.g. world x=0.
+        actor = _myself(world_x=1050, world_y=64)
+        camera = CameraRange(left=1000, right=1200, top=0, bottom=112)
+        verb = WalkToScreenCenter(actor_slot="P1")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, camera}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+    def test_holds_nothing_once_already_at_the_centre(self) -> None:
+        actor = _myself(world_x=100, world_y=64)  # centre of (0, 200)
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        verb = WalkToScreenCenter(actor_slot="P1")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, camera}, gamepad)
+
+        client.hold_buttons.assert_not_called()
+
+    def test_missing_actor_does_nothing(self) -> None:
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        verb = WalkToScreenCenter(actor_slot="P1")
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {camera}, gamepad)
+
+        client.hold_buttons.assert_not_called()
+
+    def test_missing_camera_does_nothing(self) -> None:
+        actor = _myself(world_x=20, world_y=64)
+        verb = WalkToScreenCenter(actor_slot="P1")
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {actor}, gamepad)
+
+        client.hold_buttons.assert_not_called()
 
 
 class MovementDeadbandTests(unittest.TestCase):

@@ -144,7 +144,17 @@ parametrized intent that precedes any concrete action.
 
 - `Walk` — for example, `WalkToNearEnemy`,
   `WalkToAdvanceStage`, `WalkToWeapon`, and `WalkToPickup`; grabbing a
-  lay-down weapon or consumable is a `Walk` descendant.
+  lay-down weapon or consumable is a `Walk` descendant. `WalkToScreenCenter`
+  is the lowest-priority `Walk` of all: it walks toward the visible screen's
+  own centre to draw an off-screen enemy into view, human-like, when
+  `WalkToNearEnemy`'s off-screen fallback is pinned against the camera's
+  walk-clamp edge with nowhere left to route (user: "a IA fica presa a um
+  canto do ecrã a tentar chegar a inimigos que estão fora do campo visível
+  no ecrã, a IA nesse caso deve-se andar para o centro do ecrã para os
+  'chamar'"). See `decide.could_walk_to_screen_center`,
+  `decide._actor_pinned_for_screen_center`, and
+  `priority._EMERGENCY_WALK_TO_SCREEN_CENTER` for the gating and scoring,
+  and `autoplay/CLAUDE.md`'s dedicated entry for the full mechanism.
 - `Attack` — for example, `Punch`, `JumpAttack`, `GrabEnemy`, `Supplex`,
   `ThrowKnife`, `RearAttack` (simultaneous B+C rear/escape chord), and
   `CounterGrab` (enemy-held C then B sequence), each parametrized with the

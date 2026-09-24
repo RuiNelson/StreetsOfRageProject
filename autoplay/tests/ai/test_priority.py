@@ -61,6 +61,7 @@ from sor_autoplay.ai.tokens import (
     WalkToAdvanceStage,
     WalkToNearEnemy,
     WalkToPickup,
+    WalkToScreenCenter,
     WalkToWeapon,
 )
 from sor_autoplay.phases import HITSTUN_FRAMES, PEPPER_STUN_FRAMES, CombatPhase
@@ -1945,6 +1946,160 @@ class DetermineEmergencyAdvanceStageLowestTests(unittest.TestCase):
         verbs = find_all(result, Verb)
         self.assertEqual(len(verbs), 1)
         self.assertIsInstance(verbs[0], WalkToPickup)
+
+
+class DetermineEmergencyWalkToScreenCenterTests(unittest.TestCase):
+    """User (in Portuguese): "a IA fica presa a um canto do ecrã a tentar
+    chegar a inimigos que estão fora do campo visível no ecrã ... não dês
+    muita prioridade, atacar o inimigo em caso de perigo é mais
+    imperativo". WalkToScreenCenter must win the exact tick
+    could_walk_to_near_enemy's off-screen fallback is stuck against the
+    camera edge, and lose to everything else -- see decide.
+    _actor_pinned_for_screen_center and priority.
+    _EMERGENCY_WALK_TO_NEAR_ENEMY_PINNED_CEILING.
+    """
+
+    def test_beats_the_pinned_off_screen_fallback(self) -> None:
+        myself = _myself(world_x=196, world_y=64)
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        stage = Stage(level_index=0, direction="right")
+        far = _enemy("obj01", CombatPhase.NORMAL, world_x=500, world_y=64)
+        context = {
+            myself,
+            camera,
+            stage,
+            far,
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+            WalkToScreenCenter(actor_slot="P1"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToScreenCenter)
+
+    def test_beats_the_pinned_fallback_even_against_a_near_off_screen_target(
+        self,
+    ) -> None:
+        # Without the pinned ceiling, an off-screen target only just past
+        # the visible strip would still outscore WalkToScreenCenter (up to
+        # 12 via the ordinary distance formula) even though the actor
+        # cannot take a single further step toward it.
+        myself = _myself(world_x=196, world_y=64)
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        stage = Stage(level_index=0, direction="right")
+        near_off_screen = _enemy("obj01", CombatPhase.NORMAL, world_x=234, world_y=64)
+        context = {
+            myself,
+            camera,
+            stage,
+            near_off_screen,
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+            WalkToScreenCenter(actor_slot="P1"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToScreenCenter)
+
+    def test_loses_while_still_closing_in_not_yet_pinned(self) -> None:
+        myself = _myself(world_x=100, world_y=64)
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        stage = Stage(level_index=0, direction="right")
+        far = _enemy("obj01", CombatPhase.NORMAL, world_x=500, world_y=64)
+        context = {
+            myself,
+            camera,
+            stage,
+            far,
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+            WalkToScreenCenter(actor_slot="P1"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToNearEnemy)
+
+    def test_loses_to_real_combat_once_an_enemy_is_on_screen(self) -> None:
+        # Defensive: even if the token were present (it would not be, per
+        # could_walk_to_screen_center's own gate), the emergency function
+        # re-derives the condition and must never let it outrank real
+        # combat once an enemy is genuinely visible.
+        myself = _myself(world_x=196, world_y=64)
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        stage = Stage(level_index=0, direction="right")
+        onscreen = _enemy("obj01", CombatPhase.NORMAL, world_x=199, world_y=64)
+        context = {
+            myself,
+            camera,
+            stage,
+            onscreen,
+            Punch(actor_slot="P1", target_slot="obj01"),
+            WalkToScreenCenter(actor_slot="P1"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], Punch)
+
+    def test_score_pickup_wins_the_tie(self) -> None:
+        # Both score 9 (priority._EMERGENCY_WALK_TO_PICKUP_SCORE ==
+        # priority._EMERGENCY_WALK_TO_SCREEN_CENTER); WalkToScreenCenter's
+        # own low `priority` field must lose that tie, per the user's "não
+        # dês muita prioridade" -- a genuine pickup is still taken first.
+        myself = _myself(world_x=196, world_y=64)
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        stage = Stage(level_index=0, direction="right")
+        far = _enemy("obj01", CombatPhase.NORMAL, world_x=500, world_y=64)
+        coin = ScorePickup(slot="item01", world_x=190, world_y=64, pickup_type=0x3F, points=3000)
+        context = {
+            myself,
+            camera,
+            stage,
+            far,
+            coin,
+            WalkToNearEnemy(actor_slot="P1", target_slot="obj01"),
+            WalkToScreenCenter(actor_slot="P1"),
+            WalkToPickup(actor_slot="P1", target_slot="item01"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToPickup)
+
+    def test_beats_walk_to_advance_stage(self) -> None:
+        # The two "idle" verbs are mutually exclusive in practice (a live
+        # off-screen enemy that qualifies here also blocks
+        # WalkToAdvanceStage via decide._advance_blocking_enemies), but the
+        # ranking is still worth pinning down: calling an enemy into view is
+        # more useful than a stage advance that is gated off anyway.
+        myself = _myself(world_x=196, world_y=64)
+        camera = CameraRange(left=0, right=200, top=0, bottom=112)
+        stage = Stage(level_index=0, direction="right")
+        far = _enemy("obj01", CombatPhase.NORMAL, world_x=500, world_y=64)
+        context = {
+            myself,
+            camera,
+            stage,
+            far,
+            WalkToScreenCenter(actor_slot="P1"),
+            WalkToAdvanceStage(actor_slot="P1", direction="right"),
+        }
+
+        result = determine_priority_verb(context)
+
+        verbs = find_all(result, Verb)
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], WalkToScreenCenter)
 
 
 def _garcia(slot: str, combat_phase: CombatPhase, **overrides) -> Garcia:

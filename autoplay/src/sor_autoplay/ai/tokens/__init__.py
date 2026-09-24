@@ -144,5 +144,6 @@ from .walk_verbs import (
     WalkToAdvanceStage,
     WalkToNearEnemy,
     WalkToPickup,
+    WalkToScreenCenter,
     WalkToWeapon,
 )

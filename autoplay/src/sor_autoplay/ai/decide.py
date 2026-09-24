@@ -91,6 +91,7 @@ from .tokens import (
     WalkToAdvanceStage,
     WalkToNearEnemy,
     WalkToPickup,
+    WalkToScreenCenter,
     WalkToWeapon,
 )
 
@@ -1130,6 +1131,104 @@ def could_walk_to_advance_stage(context: Context) -> Context:
         if _is_holding_enemy(actor):
             continue
         verbs.add(WalkToAdvanceStage(actor_slot=actor.slot, direction=stage.direction))
+    return verbs
+
+
+# How close to CameraRange's own edge -- the ROM's $43AA walk clamp,
+# camera_x+$20..+$120, not the visible CRT reach.SCREEN_STRIP_X widens it to
+# for that separate question -- the actor must already be before
+# WalkToScreenCenter considers could_walk_to_near_enemy's off-screen
+# fallback genuinely stalled rather than merely still closing. Mirrors
+# execute.MOVE_DEADBAND_X, the deadband execute._clamp_mask_to_camera
+# releases the walk hold at: inside that margin the executor's own camera
+# clamp already refuses to advance the fallback's straight-line aim toward
+# an off-screen target, and navigation.world_rect (bounded to the camera
+# plus navigation.WORLD_MARGIN_X -- "planning across all of that would
+# route around things that are not on screen") gives the router no further
+# lattice position either. That is the concrete stuck-in-a-corner bug this
+# verb exists to answer (user, in Portuguese: "a IA fica presa a um canto
+# do ecrã a tentar chegar a inimigos que estão fora do campo visível no
+# ecrã").
+PINNED_AT_CAMERA_EDGE_MARGIN = 5
+
+
+def _pinned_at_camera_edge(camera: CameraRange, actor_world_x: int, direction: str) -> bool:
+    """Is the actor already at the walk clamp's own edge in ``direction``?
+
+    ``camera.left``/``camera.right`` are exactly the bound ``reach.
+    in_camera`` answers "may the actor stand there" with -- the correct use
+    of ``CameraRange`` here, unlike the *visible screen* question
+    ``could_walk_to_screen_center``'s own target asks instead (see that
+    function and ``WalkToScreenCenter``'s docstring for why the two do not
+    conflict). See ``PINNED_AT_CAMERA_EDGE_MARGIN`` for the threshold.
+    """
+
+    if direction == "right":
+        return actor_world_x >= camera.right - PINNED_AT_CAMERA_EDGE_MARGIN
+    if direction == "left":
+        return actor_world_x <= camera.left + PINNED_AT_CAMERA_EDGE_MARGIN
+    return False
+
+
+def _actor_pinned_for_screen_center(context: Context, actor: PlayableCharacter) -> bool:
+    """Single owner of WalkToScreenCenter's whole production condition, so
+    ``could_walk_to_screen_center`` (production) and ``priority.
+    _emergency_walk_to_near_enemy``'s pinned ceiling on the stalled fallback
+    (scoring) can never disagree about it -- the same pattern
+    ``_advance_blocking_enemies`` already established for WalkToAdvanceStage.
+
+    True only while every one of these holds: a ``Stage`` with a lateral
+    direction and a ``CameraRange`` both exist; nothing is in ``reach.
+    on_screen_enemies`` (the ordinary, on-screen approach is not what is
+    stuck, and every combat verb is untouched by this check); a live enemy
+    still waits ahead in the stage's own scroll direction -- exactly
+    ``could_walk_to_near_enemy``'s own off-screen fallback target; and the
+    actor already sits at that fallback's own dead end
+    (``_pinned_at_camera_edge``).
+    """
+
+    stage = find(context, Stage)
+    camera = find(context, CameraRange)
+    if stage is None or stage.direction not in ("left", "right") or camera is None:
+        return False
+    if reach.on_screen_enemies(context):
+        return False
+    if not any(
+        _ahead_in_stage_direction(actor.world_x, enemy.world_x, stage.direction)
+        for enemy in reach.live_enemies(context)
+    ):
+        return False
+    return _pinned_at_camera_edge(camera, actor.world_x, stage.direction)
+
+
+def could_walk_to_screen_center(context: Context) -> Context:
+    """Walk toward the visible screen's centre to call an off-screen enemy
+    into view, instead of standing pinned against the camera edge failing to
+    reach it (user, in Portuguese: "a IA nesse caso deve-se andar para o
+    centro do ecrã para os 'chamar', ter um comportamento mais humano").
+
+    See ``WalkToScreenCenter``'s own docstring for the stuck-in-a-corner
+    mechanism this answers. Gated entirely by
+    ``_actor_pinned_for_screen_center`` -- see that function for why each of
+    its conditions is necessary; in particular, never while any enemy is
+    genuinely on screen, so this can only ever compete with the *same*
+    stalled ``WalkToNearEnemy`` candidate for the tick, never with the
+    ordinary on-screen approach or any combat verb (per the user's own "não
+    dês muita prioridade, atacar o inimigo em caso de perigo é mais
+    imperativo").
+    """
+
+    verbs: set[Token] = set()
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if not _actor_pinned_for_screen_center(context, actor):
+            continue
+        verbs.add(WalkToScreenCenter(actor_slot=actor.slot))
     return verbs
 
 
@@ -2182,6 +2281,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_engage_mr_x(context)
         | could_hit_antonio_boomerang(context)
         | could_walk_to_advance_stage(context)
+        | could_walk_to_screen_center(context)
         | could_punch(context)
         | could_melee_weapon_attack(context)
         | could_rear_attack(context)

@@ -27,6 +27,7 @@ from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay import prop_solids
 from sor_autoplay.ai.decide import (
     BREAKABLE_PUNCH_X,
+    PINNED_AT_CAMERA_EDGE_MARGIN,
     breakable_smash_outer_x,
     in_smash_range,
     generate_verb_tokens,
@@ -52,6 +53,7 @@ from sor_autoplay.ai.decide import (
     could_open_breakable,
     could_walk_to_near_enemy,
     could_walk_to_pickup,
+    could_walk_to_screen_center,
     could_walk_to_weapon,
 )
 from sor_autoplay.ai.tokens import (
@@ -84,6 +86,7 @@ from sor_autoplay.ai.tokens import (
     WalkToAdvanceStage,
     WalkToNearEnemy,
     WalkToPickup,
+    WalkToScreenCenter,
     WalkToWeapon,
 )
 from sor_autoplay.ai.inference import generate_inference_tokens
@@ -129,6 +132,7 @@ could_walk_to_advance_stage = _with_inference(could_walk_to_advance_stage)
 could_open_breakable = _with_inference(could_open_breakable)
 could_walk_to_near_enemy = _with_inference(could_walk_to_near_enemy)
 could_walk_to_pickup = _with_inference(could_walk_to_pickup)
+could_walk_to_screen_center = _with_inference(could_walk_to_screen_center)
 could_walk_to_weapon = _with_inference(could_walk_to_weapon)
 generate_verb_tokens = _with_inference(generate_verb_tokens)
 
@@ -1122,6 +1126,144 @@ class CouldWalkToAdvanceStageTests(unittest.TestCase):
             could_walk_to_advance_stage(context),
             {WalkToAdvanceStage(actor_slot="P1", direction="right")},
         )
+
+
+class CouldWalkToScreenCenterTests(unittest.TestCase):
+    """Regression coverage for the "stuck in a corner" report (user, in
+    Portuguese): "a IA fica presa a um canto do ecrã a tentar chegar a
+    inimigos que estão fora do campo visível no ecrã, a IA nesse caso deve-se
+    andar para o centro do ecrã para os 'chamar'". See ``WalkToScreenCenter``
+    and ``decide._actor_pinned_for_screen_center`` for the mechanism.
+    """
+
+    def test_fires_when_pinned_at_the_camera_edge_with_an_off_screen_enemy_ahead(
+        self,
+    ) -> None:
+        myself = make_myself(world_x=196, world_y=100)  # camera.right(200) - 4
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        ahead = make_enemy(world_x=500, world_y=100)  # off-screen, ahead
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, ahead, stage}
+
+        self.assertEqual(
+            could_walk_to_screen_center(context),
+            {WalkToScreenCenter(actor_slot="P1")},
+        )
+
+    def test_fires_pinned_on_the_left_edge_too(self) -> None:
+        myself = make_myself(world_x=4, world_y=100)  # camera.left(0) + 4
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        ahead = make_enemy(world_x=-300, world_y=100)  # off-screen, ahead (left)
+        stage = Stage(level_index=0, direction="left")
+        context: set[Token] = {myself, camera, ahead, stage}
+
+        self.assertEqual(
+            could_walk_to_screen_center(context),
+            {WalkToScreenCenter(actor_slot="P1")},
+        )
+
+    def test_does_not_fire_before_reaching_the_camera_edge(self) -> None:
+        # Same off-screen target, but the actor still has room to close in
+        # -- the ordinary WalkToNearEnemy fallback is not stuck yet.
+        myself = make_myself(world_x=100, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        ahead = make_enemy(world_x=500, world_y=100)
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, ahead, stage}
+
+        self.assertEqual(could_walk_to_screen_center(context), set())
+
+    def test_margin_boundary_is_exact(self) -> None:
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        ahead = make_enemy(world_x=500, world_y=100)
+        stage = Stage(level_index=0, direction="right")
+        just_outside = make_myself(
+            world_x=200 - PINNED_AT_CAMERA_EDGE_MARGIN - 1, world_y=100
+        )
+        just_inside = make_myself(
+            world_x=200 - PINNED_AT_CAMERA_EDGE_MARGIN, world_y=100
+        )
+
+        self.assertEqual(
+            could_walk_to_screen_center({just_outside, camera, ahead, stage}), set()
+        )
+        self.assertEqual(
+            could_walk_to_screen_center({just_inside, camera, ahead, stage}),
+            {WalkToScreenCenter(actor_slot="P1")},
+        )
+
+    def test_does_not_fire_when_an_enemy_is_on_screen(self) -> None:
+        # The ordinary approach owns this tick untouched -- nothing is
+        # stuck, per could_walk_to_near_enemy's own on-screen branch.
+        myself = make_myself(world_x=196, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        onscreen = make_enemy(slot="near", world_x=190, world_y=100)
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, onscreen, stage}
+
+        self.assertEqual(could_walk_to_screen_center(context), set())
+
+    def test_does_not_fire_without_a_live_enemy_ahead(self) -> None:
+        # Pinned, but nothing is actually blocking WalkToAdvanceStage either
+        # -- no off-screen target to be stuck chasing.
+        myself = make_myself(world_x=196, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        behind = make_enemy(world_x=50, world_y=100)  # off-screen, but behind
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, behind, stage}
+
+        self.assertEqual(could_walk_to_screen_center(context), set())
+
+    def test_does_not_fire_without_a_stage_token(self) -> None:
+        myself = make_myself(world_x=196, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        ahead = make_enemy(world_x=500, world_y=100)
+        context: set[Token] = {myself, camera, ahead}
+
+        self.assertEqual(could_walk_to_screen_center(context), set())
+
+    def test_does_not_fire_without_a_camera_token(self) -> None:
+        myself = make_myself(world_x=196, world_y=100)
+        ahead = make_enemy(world_x=500, world_y=100)
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, ahead, stage}
+
+        self.assertEqual(could_walk_to_screen_center(context), set())
+
+    def test_does_not_fire_when_stage_direction_is_none(self) -> None:
+        myself = make_myself(world_x=196, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        ahead = make_enemy(world_x=500, world_y=100)
+        stage = Stage(level_index=6, direction="none")
+        context: set[Token] = {myself, camera, ahead, stage}
+
+        self.assertEqual(could_walk_to_screen_center(context), set())
+
+    def test_does_not_fire_when_animation_in_progress(self) -> None:
+        myself = make_myself(world_x=196, world_y=100)
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        ahead = make_enemy(world_x=500, world_y=100)
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {
+            myself,
+            camera,
+            ahead,
+            stage,
+            AnimationInProgress(slot="P1"),
+        }
+
+        self.assertEqual(could_walk_to_screen_center(context), set())
+
+    def test_does_not_fire_while_holding_an_enemy(self) -> None:
+        myself = make_myself(
+            world_x=196, world_y=100, action_state=0x76, held_enemy_slot="obj00"
+        )
+        camera = CameraRange(left=0, right=200, top=0, bottom=200)
+        ahead = make_enemy(slot="obj00", world_x=500, world_y=100)
+        stage = Stage(level_index=0, direction="right")
+        context: set[Token] = {myself, camera, ahead, stage}
+
+        self.assertEqual(could_walk_to_screen_center(context), set())
 
 
 class CouldCallPoliceTests(unittest.TestCase):

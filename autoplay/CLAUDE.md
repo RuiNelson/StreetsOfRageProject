@@ -177,6 +177,68 @@ rather than joins. Two AIs on one enemy would each yield to the other until
 the memory lapses -- the AI does not know whether its partner is a human, and
 the human is the case this is for.
 
+**Calling an off-screen enemy into view** (user, in Portuguese: "Por vezes a
+IA fica presa a um canto do ecrã a tentar chegar a inimigos que estão fora
+do campo visível no ecrã, a IA nesse caso deve-se andar para o centro do
+ecrã para os 'chamar' (ter um comportamento mais humano), cria um token
+para essa ação, mas não dês muita prioridade, atacar o inimigo em caso de
+perigo é mais imperativo."). `could_walk_to_near_enemy`'s off-screen
+fallback (`decide.py`, its own docstring: "the next wave, tracked on the
+world map but not yet in camera") aims a `WalkToNearEnemy` straight at a
+target's `world_x` past `navigation.world_rect`'s own bound -- deliberately
+just the camera plus `navigation.WORLD_MARGIN_X` (96px, `navigation.py:144`),
+since "planning across all of that would route around things that are not
+on screen". Once the actor's own position reaches `CameraRange`'s walk-clamp
+edge (the ROM's `$43AA`, `camera_x+$20..+$120`) there is no further lattice
+position toward an off-screen target for `plan_route` to find, and the
+straight-line fallback (`execute._walk_to_near_enemy_target`) is zeroed the
+same tick by `execute._clamp_mask_to_camera` (`execute.py:426-444`), which
+strips the blocked direction within `MOVE_DEADBAND_X` (5px) of the clamp.
+`determine_priority_verb` kept picking that stalled `WalkToNearEnemy`
+anyway -- nothing else in the pipeline ever proposed heading back toward the
+middle of the screen -- so the AI held position in the corner indefinitely:
+the reported bug.
+
+The fix is a new lowest-priority `Walk`, `WalkToScreenCenter`
+(`tokens/walk_verbs.py`), produced by `decide.could_walk_to_screen_center`
+only when `decide._actor_pinned_for_screen_center` holds: nothing in
+`reach.on_screen_enemies` (never while a real fight is on screen), a live
+enemy still waits ahead in the stage's own scroll direction (the exact
+off-screen fallback target), and the actor already sits within
+`decide.PINNED_AT_CAMERA_EDGE_MARGIN` (5px, mirroring
+`execute.MOVE_DEADBAND_X`) of `CameraRange`'s own edge in that direction.
+`execute.state_machine_walk_to_screen_center` routes it through the same
+`navigation.plan_route`/`nav.advance_goal` every other `Walk` uses, at a
+strip centred on `(camera.left + camera.right) / 2`.
+
+Scoring keeps the user's "não dês muita prioridade" literally:
+`WalkToScreenCenter` is flat at `priority._EMERGENCY_WALK_TO_SCREEN_CENTER`
+(9), and the stalled `WalkToNearEnemy` it replaces is capped to
+`priority._EMERGENCY_WALK_TO_NEAR_ENEMY_PINNED_CEILING` (8, its own natural
+distance floor) whenever the identical pinned condition holds -- both read
+`decide._actor_pinned_for_screen_center`, so the two can never tie and
+`WalkToScreenCenter` wins the exact tick it exists for, never before (while
+there is still room to close in, the ordinary fallback keeps its full
+distance score, up to 12 for a target just past the visible strip) and
+never after (nothing raises the capped score back up). It stays under every
+pickup, weapon, retreat and real attack tier -- a `ScorePickup` tie at 9 is
+broken by `WalkToScreenCenter`'s own low `priority` field (4) -- so danger
+response and any genuine progress always win, per the user's own "atacar o
+inimigo em caso de perigo é mais imperativo".
+
+**Avoiding the "hold the arena centre" mistake again:** see **The
+entrance**, in the Antonio section below -- an earlier "hold the arena
+centre" verb misread `CameraRange` (the walk clamp) as the visible CRT and
+measured worse for it. This verb reads `CameraRange` twice, for two different and
+correctly separated questions: `_pinned_at_camera_edge` asks `reach.
+in_camera`'s own question, "may the actor stand any further this way" (the
+walk clamp is exactly right there), while the walk's *target* is
+`(camera.left + camera.right) / 2` read as the visible screen's centre --
+correct only because `reach.in_visible_screen` widens `CameraRange` by
+`reach.SCREEN_STRIP_X` (32px) symmetrically on both sides, so the two
+midpoints coincide. `WalkToScreenCenter`'s own docstring and
+`tokens/walk_verbs.py` spell this out so the distinction is not lost again.
+
 **Holding a boss (user: "a IA não consegue lidar bem com o boss de
 primeiro nível"; "os jogadores profissionais são bem fãs de agarrar e fazer
 supplex, é muito importante evitar o ataque de pontapé" -- the grab-and-
