@@ -21,7 +21,7 @@ from sor_autoplay.world_map import MapEntity
 
 from .tokens import Myself, Partner
 from .tokens import Boss, Enemy, Grunt, Jack, Nora, enemy_class_for_type
-from .tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, Stage
+from .tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, MrXOffice, Stage
 from .tokens import Breakable, Pit, Press, Projectile, Wall
 from .press import PRESS_TYPE
 from .tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
@@ -228,6 +228,7 @@ def _build_playable_character(
         anim_countdown=entity.anim_countdown,
         fine_x=entity.fine_x,
         fine_y=entity.fine_y,
+        raw=entity.raw,
     )
 
 
@@ -276,6 +277,8 @@ def generate_direct_observation_tokens(
                 name_letter_index=myself_snapshot.name_letter_index,
             )
         )
+    if snapshot.mr_x_offer_flag and snapshot.level_index == 7:
+        context.add(MrXOffice())
     if snapshot.mr_x_offer_flag and myself_snapshot.mr_x_choice_active:
         context.add(
             InMrXDialog(
@@ -434,6 +437,7 @@ def generate_direct_observation_tokens(
                     hitbox=entity.hitbox,
                     attack_ranges=entity.attack_ranges,
                     held_weapon_type=entity.held_type,
+                    raw=entity.raw,
                     **extra,
                 )
             )
@@ -461,6 +465,7 @@ def generate_direct_observation_tokens(
                     turn_lane=entity.boomerang_turn_lane,
                     knock_timer=entity.boomerang_knock_timer,
                     world_z=entity.world_z,
+                    raw=entity.raw,
                     owner_slot=entity.owner_slot,
                     flags_31=entity.ordinary_flags,
                     offset=entity.axe_offset,

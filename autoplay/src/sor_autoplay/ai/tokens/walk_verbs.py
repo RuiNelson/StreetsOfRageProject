@@ -308,6 +308,33 @@ class EngageTwins(Walk):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class EngageMrX(Walk):
+    """Take a hold on Mr. X -- the gun is walked into, the lunge stepped off.
+
+    Produced by ``could_engage_mr_x`` once per live ``MrX`` (type ``$35``)
+    while the actor is free to move (not mid-animation, not held, not holding
+    a body, not airborne) -- armed or not: ``$AAA0``'s grab never reads the
+    weapon -- and once with no target (``target_slot`` "") while his office's
+    first waves are up (``MrXOffice``). It is the whole fight: the strike,
+    grab, hop, walk-in, retreat and rear-chord verbs stand down for him and
+    his Garcias, and every tick's stick and punch are ``mr_x_plan.plan``'s --
+    a lookahead over his own AI, every bullet (``mr_x.py``) and every Garcia
+    (``garcia.py``) that keeps the actor $80 or more away when he decides (so
+    he goes to the gun), walks into him while his gun has no box out, steps
+    off his lunge by the lane, punches a Garcia first when that lands, and
+    takes no hold a Garcia's blow reaches before a knee is spent. The hold
+    loop after the grab is ``mr_x_plan.hold_step``'s.
+
+    Raises emergency: a live Mr. X×62, plus the boss raise (14) -- 76, the
+    tier of the other boss engages; the same 76 in the office's first waves.
+    """
+
+    priority: int = 24
+    actor_slot: str
+    target_slot: str  # MrX.slot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class EngageJack(Walk):
     """Take a hold on Jack from where none of his axes reaches.
 

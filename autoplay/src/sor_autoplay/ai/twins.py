@@ -366,6 +366,13 @@ class ActorSim:
         "x", "y", "z", "facing_left", "character", "walking", "vx", "chord",
         "x_lo", "x_hi", "lane_lo", "lane_hi", "attack", "body", "damage",
         "knockdown", "unavailable", "untouchable", "holding", "latch", "invulnerable",
+        # +$2C, the renderer's screen Y: Mr. X's reposition reads it (ai/mr_x.py).
+        "screen_y",
+        # The punch's update since the press, or None (ai/mr_x.py, actor_step).
+        "punch",
+        # +$49 while +$4B bit 1 is set: the blink's updates still to run
+        # (ai/mr_x.py, actor_step; invulnerable while it runs).
+        "blink",
     )
 
     def __init__(self, **fields) -> None:

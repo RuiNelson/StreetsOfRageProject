@@ -90,6 +90,9 @@ _BOSS_PROJECTILE_STYLES: dict[int, EntityStyle] = {
     0x97: EntityStyle("projectile", "Bongo", "^", "#30d158", "Bongo flame"),
     0x98: EntityStyle("projectile", "Souther", "%", "#ff9500", "Souther claw"),
     0x99: EntityStyle("projectile", "Souther", "'", "#ffb340", "Souther afterimage"),
+    # Mr. X's machine-gun bullet ($140DC; ai/mr_x.py). Its shell casing ($37)
+    # touches nothing and is not drawn.
+    0x36: EntityStyle("projectile", "Mr. X", "*", "#ff6961", "Mr. X bullet"),
 }
 
 # Carried / ground weapons.

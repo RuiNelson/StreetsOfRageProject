@@ -253,7 +253,7 @@ police.
 | `go_to_boss_5` | 5 | Onihime & Yasha (`$58` pair), `--no-food` |
 | `go_to_boss_6` | 6 | Bongo (`$57`), then a Souther pair (`$55`) |
 | `go_to_boss_7` | 7 | none — the ELC stream has no terminal boss section |
-| `go_to_boss_8` | 8 | boss rush, `$56` → `$55` → `$30` → `$57` → `$58` → Mr. X (`$35`) |
+| `go_to_boss_8` | 8 | boss rush, `$56` → `$55` → `$30` → `$57` → `$58` → Mr. X (`$35`); `--kill-until-mr-x` instead of the street sweep, `--no-food` |
 
 The numbered scripts are one line each; the turbo/poll/port flags live only
 in `scripts/go_to_boss`, so eight copies cannot drift apart. Sweeping is not
@@ -287,6 +287,26 @@ cost (user: "Vi que a IA dá vários `BackAttack` em falso, não quero que dê
 ataques em falso"): the plan presses B+C only when its lookahead has the
 press striking a twin under every timing, and `boss_fight.py` reports
 `chords` and `chord_whiffs` so a live run shows it.
+
+### Testing against Mr. X
+
+Round 8 is long -- the street, then the whole boss rush -- so its sweep is its
+own flag (user: "é melhor haver uma flag para automaticamente eliminar todos os
+inimigos e bosses que aparecem até o Mr X estar no ar ... ter em atenção para
+essa flag não automaticamente matar esses ajudantes nem o Mr X"):
+`--kill-until-mr-x` (autoplay; the host's `Alt/Option+X`) kills every enemy and
+boss until his office scene is up, and nothing after -- his type-`$22` Garcias
+(the user's "Glasia") and he are the fight. `scripts/go_to_boss_8` passes it
+with `--no-food`; score with `autoplay/tools/boss_fight.py --level 8
+--boss-type 0x35 --no-food --poll-ms 16` on a `--turbo 2` host (the same
+optimisation goals as the twins: minimum time, minimum damage, reliability; no
+police, no recovery items; no attack that can miss). For Mr. X the harness
+also writes every tick's raw slots (the player, him, his bullets, the
+Garcias, and the office waves before him as `pre` rows), which
+`autoplay/tools/mr_x_sim.py --replay FILE --at T` feeds back through the plan.
+The user's verdict after the Garcia work: "a performance da luta é
+suficientemente boa por hoje". See `autoplay/CLAUDE.md`, **Mr. X: the ROM
+model and the plan**.
 
 ### Testing against Jack
 

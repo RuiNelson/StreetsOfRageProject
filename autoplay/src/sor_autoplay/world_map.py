@@ -285,6 +285,10 @@ class MapEntity:
     # in tokens/character.py, not this field), for anything that does not
     # attack, and for bosses, whose animation sets are not labelled.
     attack_ranges: tuple[AttackRange, ...] = ()
+    # The whole 128-byte slot, for the objects whose plan replays their update
+    # from the ROM model itself: the players, Mr. X ($35) and his bullets
+    # ($36) -- ai/mr_x.py builds its simulation from exactly these bytes.
+    raw: bytes = b""
 
     @property
     def is_free_ground_item(self) -> bool:
@@ -921,6 +925,15 @@ def _entity_from_object(
             lane_sign = _u8(slot, mm.OBJ_BOSS_LANE_SIGN)
             boomerang_turn_lane = _u16(slot, mm.OBJ_BOOMERANG_TURN_LANE)
             boomerang_knock_timer = _u8(slot, mm.OBJ_BOOMERANG_KNOCK_TIMER)
+        elif type_id == 0x36:
+            # Mr. X's bullet ($140DC) runs his older layout: +$1C is its X
+            # velocity and +$20 its lane velocity, 16.16 positions.
+            vel_x = fixed1616_signed(slot, mm.OBJ_VEL_X_ORDINARY)
+            boss_vel_lane = fixed1616_signed(slot, mm.OBJ_VEL_LANE_ORDINARY)
+            boomerang_state = action_state
+            fine_x = fixed1616_unsigned(slot, mm.OBJ_POS_X)
+            fine_y = fixed1616_unsigned(slot, mm.OBJ_POS_Y)
+            fine_z = fixed1616_signed(slot, mm.OBJ_POS_Z)
         elif type_id == 0x28:
             # Jack's axe runs the ordinary-object layout: +$1C is its X
             # velocity and +$20 its lane velocity (the +$20 read above would
@@ -1063,7 +1076,12 @@ def _entity_from_object(
         child_ptr=child_ptr,
         boss_dist_lane=boss_dist_lane,
         combat_phase=phase,
+        raw=bytes(slot) if style.kind == "player" or type_id in RAW_SLOT_TYPES else b"",
     )
+
+
+# Types whose MapEntity carries its raw slot (MapEntity.raw).
+RAW_SLOT_TYPES = frozenset({0x35, 0x36, 0x20, 0x21, 0x22, 0x23})
 
 
 def _is_hidden(slot: bytes) -> bool:

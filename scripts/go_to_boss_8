@@ -4,7 +4,12 @@ set -euo pipefail
 # Round 8: the boss rush -- $56 -> $55 -> $30 -> $57 -> $58 -> Mr. X ($35)
 #
 # Opens the host in turbo and drives autoplay through the menus, the jump to
-# round 8, and a continuous sweep of every non-boss enemy family. See
-# ./scripts/go_to_boss for the shared flags and why the sweep is required.
+# round 8, and --kill-until-mr-x: every enemy and every boss of the rush dies
+# until Mr. X's scene is up, and nothing after -- his Garcia helpers and he are
+# the fight. See ./scripts/go_to_boss for the shared flags.
+#
+# --no-food, as for the twins ("Do not use recovery items"): Mr. X is fought on
+# the health the walk left. See autoplay/CLAUDE.md, "Mr. X: the ROM model and
+# the plan".
 
-exec "${0:A:h}/go_to_boss" 8 "$@"
+exec "${0:A:h}/go_to_boss" 8 --no-food "$@"

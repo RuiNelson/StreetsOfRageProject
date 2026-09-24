@@ -41,6 +41,7 @@ class Projectile(Observed):
     attack_box_id: int = 0  # +$02, latched by the renderer
     screen_x: int = 0  # +$28, biased ($80 = the left edge)
     countdown: int = 0  # +$6B: updates of the outbound leg left
+    raw: bytes = b""  # Mr. X's bullets ($36): the slot, for ai/mr_x.py
     lane_target: int = 0  # +$52: the lane the return homes on
     lane_target_above: bool = False  # +$61
     turn_lane: int = 0  # +$78 word: what the turn copies into +$52

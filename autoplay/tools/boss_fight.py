@@ -73,7 +73,8 @@ ENTRANCE_WINDOW_S = 4.0
 LATER_BOSS_TYPES = frozenset({0x55, 0x56, 0x57, 0x58})
 # Abadede's own damage paths ($15632, $15094, $14A56) subtract and branch
 # `bgt` to the living path the same way, so 0 is lethal for him too.
-ZERO_IS_LETHAL = LATER_BOSS_TYPES | {0x30}
+# Mr. X ($35): $13F9A takes him to $E, his death, at 0 or below.
+ZERO_IS_LETHAL = LATER_BOSS_TYPES | {0x30, 0x35}
 # Bosses that come as a pair of one type: the fight is over when every one
 # seen is dead (round 5's twins).
 PAIR_TYPES = frozenset({0x58})
@@ -175,6 +176,29 @@ def player_bucket(action_state: int, held_type: int) -> str:
     return player_phase(action_byte=action_state, held_type=held_type).name
 
 
+def raw_bytes(snap) -> dict:
+    """Mr. X's fight, for ``tools/mr_x_sim.py --replay``: the camera and the
+    raw slots of the player, him, his bullets and every Garcia -- the bytes
+    ``mr_x_plan`` builds its lookahead from, as ``mr_x_lab.py`` records them."""
+
+    wm = snap.world_map
+    if wm is None:
+        return {}
+    by_kind: dict[str, list] = {"mx": [], "bu": [], "en": []}
+    p1 = ""
+    for e in wm.entities:
+        if not e.raw:
+            continue
+        if e.kind == "player":
+            if e.slot == "P1":
+                p1 = e.raw.hex()
+            continue
+        slot = int(e.slot[3:]) if e.slot.startswith("obj") and e.slot[3:].isdigit() else 0
+        key = "mx" if e.type_id == 0x35 else "bu" if e.type_id == 0x36 else "en"
+        by_kind[key].append([slot, e.raw.hex()])
+    return {"cam": wm.camera_x, "p1": p1, **by_kind}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
@@ -221,7 +245,13 @@ def main() -> int:
     with MegaDriveClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
-    scenario = DebugScenario(start_level=args.level, kill_street_enemies=True)
+    # Round 8's Mr. X: every enemy and every boss of the rush dies on the way,
+    # and nothing once his scene is up -- his Garcias are his fight
+    # (DebugScenario(kill_until_mr_x=True), the host's X).
+    if args.boss_type == 0x35:
+        scenario = DebugScenario(start_level=args.level, kill_until_mr_x=True)
+    else:
+        scenario = DebugScenario(start_level=args.level, kill_street_enemies=True)
 
     with MegaDriveClient(host=args.host, port=args.port) as client:
         rom = RomData.read(client)
@@ -348,6 +378,7 @@ def main() -> int:
                         )
                     time.sleep(max(0.0, poll_s - (time.monotonic() - started)))
                     continue
+                scenario.note_snapshot(snap)
                 scenario.sweep_other_families(client)
                 p1 = snap.players[0]
                 entities = snap.world_map.entities if snap.world_map else ()
@@ -366,6 +397,10 @@ def main() -> int:
                     print(f"boss up: hp={start_hp} lives={start_lives}", flush=True)
 
                 if not boss_seen:
+                    if args.boss_type == 0x35 and scenario.mr_x_reached:
+                        # His office's first waves: the Garcias before him.
+                        sink.write(json.dumps({"pre": True, "hp": p1.health, "verb": verb_name_for(verb),
+                                               **raw_bytes(snap)}) + "\n")
                     if started - last_report > 10.0:
                         last_report = started
                         print(
@@ -512,6 +547,7 @@ def main() -> int:
                                 ),
                                 None,
                             ),
+                            **(raw_bytes(snap) if args.boss_type == 0x35 else {}),
                         }
                     )
                     + "\n"

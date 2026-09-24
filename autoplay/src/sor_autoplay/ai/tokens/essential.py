@@ -77,6 +77,17 @@ class InMrXDialog(Essential):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class MrXOffice(Essential):
+    """Round 8's last room: Mr. X's offer has run.
+
+    Observed while ``$FFDE00 (mr_x_offer_flag)`` is set on level index 7 --
+    it stays set from the offer through his fight. The Garcias the room sends
+    (two, two more, then two with him, replaced as they die) are his helpers,
+    and ``EngageMrX`` owns them, before he appears as well as after.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class DebugNoFood(Essential):
     """Harness switch: leave every ``HealthPickup`` on the floor.
 

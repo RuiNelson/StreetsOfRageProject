@@ -89,6 +89,7 @@ from .essential import (
     Essential,
     InContinueMenu,
     InMrXDialog,
+    MrXOffice,
     Stage,
 )
 from .hazard_tokens import (
@@ -131,6 +132,7 @@ from .tokens import (
 )
 from .walk_verbs import (
     EngageAbadede,
+    EngageMrX,
     EngageTwins,
     EngageAntonio,
     EngageBongo,

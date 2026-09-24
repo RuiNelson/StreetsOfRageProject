@@ -41,6 +41,7 @@ from .tokens import (
     EngageBongo,
     EngageJack,
     EngageSouther,
+    EngageMrX,
     EngageTwins,
     FlipHold,
     GrabEnemy,
@@ -61,7 +62,7 @@ from .tokens import (
     ThrowPepper,
 )
 from .tokens import Myself, Partner
-from .tokens import Abadede, Antonio, Bongo, Boss, Breakable, Enemy, Grunt, Jack, Nora, Souther
+from .tokens import Abadede, Antonio, Bongo, Boss, Breakable, Enemy, Grunt, Jack, MrX, Nora, Souther
 from .tokens import (
     GrabReason,
     Surrounded,
@@ -359,6 +360,12 @@ _EMERGENCY_ENGAGE_ABADEDE_UNDER_GRUNT = 5
 # no grunt drop -- round 5's arena is swept, and its plan never turns the
 # actor to anything else.
 _EMERGENCY_ENGAGE_TWINS = 62
+# The whole fight against Mr. X and his Garcias (the user's "Glasia";
+# EngageMrX): the boss tier, and no hand-off -- mr_x_plan's lookahead plays
+# the Garcias too (garcia.py), punches them when that lands, and steps off
+# their jabs. A generic punch at one used to take the tick while his lunge
+# came (three of four lunge hits in a scored fight).
+_EMERGENCY_ENGAGE_MR_X = 62
 # The whole engage against Jack (EngageJack). His body never strikes -- every
 # hit he lands is a type-$28 axe (jack.py) -- so this is an ordinary enemy's
 # approach, not a boss tier: just above a strike on a plain grunt (20), with
@@ -635,6 +642,19 @@ def _emergency_engage_twins(verb: EngageTwins, context: Context) -> int:
     if target is None or target.is_defeated:
         return _EMERGENCY_DEFAULT
     return _with_target_class(_EMERGENCY_ENGAGE_TWINS, target)
+
+
+def _emergency_engage_mr_x(verb: EngageMrX, context: Context) -> int:
+    actor = _find_actor(context, verb.actor_slot)
+    if actor is None:
+        return _EMERGENCY_DEFAULT
+    if not verb.target_slot:
+        # The office's first waves: his helpers are the plan's too.
+        return _EMERGENCY_ENGAGE_MR_X + _EMERGENCY_BOSS_TARGET
+    target = find(context, MrX, slot=verb.target_slot)
+    if target is None or target.is_defeated or not target.raw:
+        return _EMERGENCY_DEFAULT
+    return _with_target_class(_EMERGENCY_ENGAGE_MR_X, target)
 
 
 def _emergency_engage_jack(verb: EngageJack, context: Context) -> int:
@@ -914,7 +934,7 @@ def _emergency_attack_held_enemy(verb: AttackHeldEnemy, context: Context) -> int
     if not _target_is_in_hand(verb, context):
         return _EMERGENCY_DEFAULT
     if isinstance(
-        find(context, Enemy, slot=verb.target_slot), (Souther, Antonio, Bongo, Abadede)
+        find(context, Enemy, slot=verb.target_slot), (Souther, Antonio, Bongo, Abadede, MrX)
     ):
         # souther.hold_step (abadede.hold_step for him) already chose this
         # knee from the ROM's own chain count (+$58 bit 6, +$61); the budget
@@ -1005,6 +1025,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     EngageBongo: _emergency_engage_bongo,
     EngageAbadede: _emergency_engage_abadede,
     EngageTwins: _emergency_engage_twins,
+    EngageMrX: _emergency_engage_mr_x,
     EngageJack: _emergency_engage_jack,
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,

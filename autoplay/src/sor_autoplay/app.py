@@ -278,6 +278,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--kill-until-mr-x",
+        action="store_true",
+        help=(
+            "Debug, for round 8: kill every enemy and every boss of the rush "
+            "repeatedly through the host's X hotkey (requires --debugUtils), "
+            "until Mr. X's scene is up -- then nothing, so his helpers and he "
+            "are the fight. Cannot be combined with another sweep."
+        ),
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -517,6 +527,7 @@ class ObserverApp:
         ):
             return False
 
+        scenario.note_snapshot(snapshot)
         scenario.sweep_other_families(self._client)
         return True
 
@@ -665,6 +676,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             start_level=args.start_level,
             only_enemy=args.only_enemy,
             kill_street_enemies=args.kill_street_enemies,
+            kill_until_mr_x=args.kill_until_mr_x,
         ),
     )
     if args.once:
@@ -696,6 +708,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario_bits.append(f"only {args.only_enemy}")
     if args.kill_street_enemies:
         scenario_bits.append("kill street enemies")
+    if args.kill_until_mr_x:
+        scenario_bits.append("kill everything until Mr. X")
     scenario_text = f"; debug scenario: {', '.join(scenario_bits)}" if scenario_bits else ""
     print(
         f"Starting SoR Autoplay GUI → {args.host}:{args.port} "

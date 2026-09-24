@@ -86,12 +86,23 @@ done
 # Esc/Q is how a run normally ends and the next run needs that port back.
 # Ctrl-C is covered by the shell itself: SIGINT reaches the whole foreground
 # process group, so host and agent go down together.
+# Round 8 sweeps with --kill-until-mr-x instead: the street sweep would go on
+# killing the Garcias sent into Mr. X's fight, which are his helpers, and it
+# leaves the boss rush alive. The new one kills every enemy and every boss up
+# to him, and nothing once his scene is up (user: "uma flag para
+# automaticamente eliminar todos os inimigos e bosses que aparecem até o Mr X
+# estar no ar ... não automaticamente matar esses ajudantes nem o Mr X").
+SWEEP=--kill-street-enemies
+if [[ "$LEVEL" == 8 ]]; then
+    SWEEP=--kill-until-mr-x
+fi
+
 "$META_ROOT/scripts/autoplay" \
     --poll-ms "$POLL_MS" \
     --port "$PORT" \
     --agent-p1 \
     --reach-gameplay "$CHARACTER" \
     --start-level "$LEVEL" \
-    --kill-street-enemies \
+    "$SWEEP" \
     --no-police \
     "$@"

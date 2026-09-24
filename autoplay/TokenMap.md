@@ -20,6 +20,7 @@ classDiagram
     Essential <|-- AnimationInProgress
     Essential <|-- InContinueMenu
     Essential <|-- InMrXDialog
+    Essential <|-- MrXOffice
     Essential <|-- DebugNoFood
     Essential <|-- DebugNoPolice
 
@@ -73,6 +74,7 @@ classDiagram
     Walk <|-- EngageAbadede
     Walk <|-- EngageJack
     Walk <|-- EngageTwins
+    Walk <|-- EngageMrX
 
     Verb <|-- Attack
     Attack <|-- MeleeAttacks

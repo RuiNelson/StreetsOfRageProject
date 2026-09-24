@@ -563,11 +563,13 @@ chords are not handled by these host-side cheats.
 | `Alt/Option+B` | Kill every instantiated **Signal** (type `$24`) |
 | `Alt/Option+J` | Kill every instantiated **Jack** (type `$27`) |
 | `Alt/Option+U` | Kill every instantiated **Nora** (type `$26`) |
+| `Alt/Option+X` | Round 8: kill every enemy and boss instantiated on the way to **Mr. X** -- does nothing once his office scene is up (types `$33`-`$35`), so his Garcias and he are left to fight |
 
 The per-family kills put each enemy through the same forced-death sweep as
 `Alt/Option+K`, so score, HUD, and cleanup run exactly as they do for a normal
 defeat. They cover ordinary enemies only: bosses have their own lethal paths
-and no family cheat names one. Each letter is the enemy's own initial where
+and no family cheat names one (`Alt/Option+X` is the one exception, for the
+rush before Mr. X). Each letter is the enemy's own initial where
 that was free — Signal takes `B` and Nora takes `U`, since `S` already adds a
 special attack and `N` is the ninja.
 

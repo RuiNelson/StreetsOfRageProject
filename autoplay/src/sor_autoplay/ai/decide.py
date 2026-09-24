@@ -21,6 +21,9 @@ from ..memory_map import ACTION_HOLD_CROSSOVER
 from ..phases import CombatPhase, is_dangerous
 from . import (
     abadede as abadede_plan,
+    garcia as garcia_model,
+    mr_x as mr_x_model,
+    mr_x_plan,
     bongo as bongo_plan,
     jack as jack_plan,
     kinematics,
@@ -54,7 +57,7 @@ from .tokens import (
     PlayableCharacter,
     punch_usable_inner_x,
 )
-from .tokens import Abadede, Antonio, Bongo, Boss, Enemy, Jack, Onihime, Souther
+from .tokens import Abadede, Antonio, Bongo, Boss, Enemy, Garcia, Jack, MrX, MrXOffice, Onihime, Souther
 from .tokens import (
     GrabReason,
     Surrounded,
@@ -77,6 +80,7 @@ from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDi
 from .tokens import Context, Token, find, find_all
 from .tokens import (
     EngageAbadede,
+    EngageMrX,
     EngageTwins,
     EngageAntonio,
     EngageBongo,
@@ -295,6 +299,11 @@ def _could_melee_strike(
             # ($15C72). EngageTwins owns them.
             if isinstance(target, Onihime):
                 continue
+            # Mr. X neither: the hold loop is the plan (mr_x_plan.py), and a
+            # strike turns the walk-in's grab contact into 1 point and a
+            # retreat. The punches worth throwing are EngageMrX's own.
+            if isinstance(target, MrX) or is_office_helper(context, target):
+                continue
             verbs.add(make_verb(actor.slot, target_slot, actor.held_weapon_type))
     return verbs
 
@@ -346,8 +355,8 @@ def could_rear_attack(context: Context) -> Context:
         # reach.rear_attack_is_warranted.
         for target_slot in _targets_in_reach(context, actor, reach.in_rear_band, RearAttack):
             if isinstance(
-                find(context, Enemy, slot=target_slot), (Souther, Antonio, Bongo, Abadede, Jack, Onihime)
-            ):
+                find(context, Enemy, slot=target_slot), (Souther, Antonio, Bongo, Abadede, Jack, Onihime, MrX)
+            ) or is_office_helper(context, find(context, Enemy, slot=target_slot)):
                 # The chord is a strike like any other: it turns the grab
                 # contact into a hit. Each boss's engage owns him, and
                 # EngageJack owns Jack.
@@ -422,7 +431,7 @@ def could_grab_enemy(context: Context) -> Context:
         for enemy in on_screen:
             if enemy.slot not in in_reach:
                 continue
-            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Jack, Onihime)):
+            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Jack, Onihime, MrX)) or is_office_helper(context, enemy):
                 # Each engage walks into him itself, at the moment its plan
                 # picks (EngageSouther, EngageAntonio, EngageBongo,
                 # EngageAbadede, EngageJack); EngageTwins never takes a hold.
@@ -569,6 +578,38 @@ def could_hold_actions(context: Context) -> Context:
             elif step is souther_plan.HoldStep.THROW:
                 verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
             continue
+        if isinstance(held, MrX):
+            # Mr. X's loop (mr_x_plan.hold_step): knee, knee, release, each on
+            # the one substate of his hold that reads the holder's +$7D, and
+            # the walk straight back in re-grabs him on the retreat's first
+            # update. A Garcia of his whose blow lands from behind before a
+            # knee finishes gets him thrown back into it (B+back), as for
+            # Bongo's grunt; one from in front, over him, no hold move answers.
+            threat = _office_threat(context, actor) if base == 0x60 else None
+            if threat is not None and threat[0] < mr_x_plan.HOLD_KNEE_SAFE_UPDATES:
+                # A Garcia's blow (garcia.py plays his approach and trigger)
+                # lands before a knee, the release after it and a step could
+                # all be spent: no knee -- let go now, and the engage has the
+                # actor free to punch the Garcia first or step off his jab.
+                # Not the throw, from either side: it locks the holder 41-46
+                # frames, and his flight hops 48 px at its apex ($13356), over
+                # a Garcia close behind.
+                verbs.add(ReleaseToRegrab(actor_slot=actor.slot, target_slot=held.slot))
+                continue
+            step = mr_x_plan.hold_step(
+                action_base=base,
+                knees_in_chain=actor.knees_in_chain,
+                primary=held.primary_state,
+                substate=held.substate,
+                health=held.health if held.health is not None else 0,
+            )
+            if step == "knee":
+                verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
+            elif step == "release":
+                verbs.add(ReleaseToRegrab(actor_slot=actor.slot, target_slot=held.slot))
+            elif step == "suplex":
+                verbs.add(Supplex(actor_slot=actor.slot, target_slot=held.slot))
+            continue
         if isinstance(held, (Souther, Antonio, Bongo, Abadede)):
             # Abadede's loop is the same three moves, each pressed on an
             # update his hold reads the holder's +$7D (abadede.hold_step).
@@ -587,6 +628,34 @@ def could_hold_actions(context: Context) -> Context:
             elif step is souther_plan.HoldStep.SUPLEX:
                 verbs.add(Supplex(actor_slot=actor.slot, target_slot=held.slot))
             continue
+
+        if base == 0x60 and is_office_helper(context, held) and live_mr_x(context):
+            # One of Mr. X's Garcias in hand while he lives
+            # (mr_x_plan.garcia_hold_step): the throw (B+back) when nothing
+            # -- his lunge, the other Garcia, a bullet -- lands on the holder
+            # through its lock: it lays this one down far off and knocks down
+            # whatever stands behind the actor, Mr. X included ($AA34 tests
+            # the thrown bodies at $FFFB24). Else a knee if one fits, else
+            # let go: measured, a throw started with him walking in was his
+            # lunge, 34, three times in one fight.
+            sims = office_sims(context, actor, exclude=held.slot)
+            step = mr_x_plan.garcia_hold_step(*sims) if sims is not None else "knee"
+            if step == "throw":
+                verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
+            elif step == "knee":
+                verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
+            else:
+                verbs.add(ReleaseGrab(actor_slot=actor.slot, target_slot=held.slot))
+            continue
+        if base == 0x60 and is_office_helper(context, held):
+            # The office's first waves: this hold is the kill -- knees while no
+            # other Garcia's blow lands sooner than one (garcia.py, not the
+            # generic velocity clock, which does not see his approach), else
+            # the throw.
+            threat = _office_threat(context, actor, exclude=held.slot)
+            if threat is not None and threat[0] <= mr_x_plan.KNEE_UPDATES + 2:
+                verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
+                continue
 
         # Target the enemy actually in the grab, not merely the closest one:
         # every hold move's emergency (priority._held_enemy_emergency) is
@@ -797,7 +866,7 @@ def could_walk_to_near_enemy(context: Context) -> Context:
                 # Never walk toward a target that is itself standing in a
                 # pit's danger zone -- reaching it means standing there too.
                 continue
-            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Jack, Onihime)):
+            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Jack, Onihime, MrX)) or is_office_helper(context, enemy):
                 # EngageSouther / EngageAntonio / EngageBongo / EngageAbadede /
                 # EngageJack / EngageTwins own the whole approach to them,
                 # armed or not.
@@ -881,7 +950,7 @@ def could_retreat_from_danger(context: Context) -> Context:
             enemy = find(context, Enemy, slot=target_slot)
             if enemy is None:
                 continue
-            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Onihime)):
+            if isinstance(enemy, (Souther, Antonio, Bongo, Abadede, Onihime, MrX)) or is_office_helper(context, enemy):
                 # Their attacks are their engage's business: Souther's claw
                 # by souther.plan_engage's lane escape, Antonio's kick,
                 # Bongo's flame and Abadede's run by their plan_engage's
@@ -931,6 +1000,10 @@ def could_projectile_sidestep(context: Context) -> Context:
             if projectile.type_id == bongo_plan.FLAME_TYPE:
                 # It rides him ($178D0): no flight of its own to step off, and
                 # bongo.plan_engage already plays it forward with him.
+                continue
+            if projectile.type_id == mr_x_model.BULLET_TYPE and live_mr_x(context):
+                # Mr. X's bullets are EngageMrX's: mr_x_plan.plan plays every
+                # one forward, and the ones he is about to fire.
                 continue
             if not reach.projectile_threatens(projectile, actor):
                 continue
@@ -1065,9 +1138,11 @@ def could_call_police(context: Context) -> Context:
     if find(context, DebugNoPolice) is not None:
         # The harness's --no-police (user: "just don't test with the police on").
         return verbs
-    if live_twins(context):
+    if live_twins(context) or live_mr_x(context):
         # Never against the twins, not even as the panic button (user: "Do
-        # not call the police ... must not be used as fallback strategies").
+        # not call the police ... must not be used as fallback strategies"),
+        # nor Mr. X, fought the same way ("fazer o mesmo tipo de
+        # optimização").
         return verbs
     for actor in _actors(context):
         if _blocked(context, actor):
@@ -1255,6 +1330,12 @@ def could_jump_attack(context: Context) -> Context:
             # in the air where the grab twin's jump-in lands. EngageTwins.
             for twin in find_all(context, Onihime):
                 target_slots.discard(twin.slot)
+            # Mr. X neither: a kick is 1-2 points and his retreat, and the
+            # landing is where his lunge or a bullet finds a locked actor.
+            for mr_x in find_all(context, MrX):
+                target_slots.discard(mr_x.slot)
+            for helper in office_helpers(context):
+                target_slots.discard(helper.slot)
         if actor.is_airborne and not target_slots:
             twins = {twin.slot for twin in find_all(context, Onihime)}
             nearest = min(
@@ -1463,6 +1544,120 @@ def live_twins(context: Context) -> list[Onihime]:
         twin
         for twin in find_all(context, Onihime)
         if not twin.is_defeated and (twin.health or 0) > 0 and twin.primary_state != 0
+    ]
+
+
+def could_engage_mr_x(context: Context) -> Context:
+    """Take a hold on Mr. X -- the whole fight against him, one verb.
+
+    One candidate per live ``MrX`` while the actor is free to move (not held,
+    not holding a body, not airborne, not mid-animation -- the punch's own
+    frames included), armed or not: ``$AAA0``'s grab never reads the weapon.
+    ``mr_x_plan.plan`` picks the stick and the punch every tick; the hold loop
+    is ``could_hold_actions``'s (``mr_x_plan.hold_step``).
+    """
+
+    verbs: set[Token] = set()
+    targets = live_mr_x(context)
+    if not targets and not office_helpers(context):
+        return verbs
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor):
+            continue
+        if actor.is_airborne:
+            continue
+        for mr_x in targets:
+            verbs.add(EngageMrX(actor_slot=actor.slot, target_slot=mr_x.slot))
+        if not targets:
+            # The office's first waves: he is not there yet, and the room hands
+            # off to him only once they are dead.
+            verbs.add(EngageMrX(actor_slot=actor.slot, target_slot=""))
+    return verbs
+
+
+def office_helpers(context: Context) -> list[Garcia]:
+    """Mr. X's helpers: the office's type-$22 Garcias, alive, their slot's
+    bytes observed (``MapEntity.raw``)."""
+
+    if find(context, MrXOffice) is None:
+        return []
+    return [
+        g for g in find_all(context, Garcia)
+        if g.type_id == garcia_model.OFFICE_TYPE and g.raw and not g.is_defeated
+    ]
+
+
+def is_office_helper(context: Context, enemy: Enemy | None) -> bool:
+    return (
+        isinstance(enemy, Garcia)
+        and enemy.type_id == garcia_model.OFFICE_TYPE
+        and find(context, MrXOffice) is not None
+    )
+
+
+def office_sims(context: Context, actor, *, exclude: str = ""):
+    """The office from the context's raw slots, as ``mr_x_plan`` plays it:
+    (the actor, Mr. X or None, his Garcias alive -- less ``exclude`` --, his
+    bullets in flight), or None without the actor's bytes or a camera."""
+
+    camera = find(context, CameraRange)
+    if camera is None or not getattr(actor, "raw", b""):
+        return None
+    cam_x = int(camera.left) - mr_x_model.PLAYER_X_MIN_OFFSET
+    him = next(iter(live_mr_x(context)), None)
+    m = mr_x_model.MrXSim.from_bytes(him.raw, slot=_slot_number(him.slot), cam_x=cam_x) if him else None
+    garcias = [
+        garcia_model.GarciaSim.from_bytes(g.raw, slot=_slot_number(g.slot), cam_x=cam_x)
+        for g in office_helpers(context)
+        if g.slot != exclude
+    ]
+    bullets = [
+        mr_x_model.BulletSim.from_bytes(p.raw, slot=_slot_number(p.slot), cam_x=cam_x)
+        for p in find_all(context, Projectile)
+        if p.type_id == mr_x_model.BULLET_TYPE and p.raw
+    ]
+    a = mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x)
+    a.punch = None
+    return a, m, [g for g in garcias if g.alive], [b for b in bullets if b.state == 1]
+
+
+def _office_threat(context: Context, actor, *, exclude: str = "") -> tuple[int, bool] | None:
+    """``mr_x_plan.garcia_threat`` for a holder: the first update a Garcia of
+    the office (``exclude`` the one in hand) lands on it where it stands."""
+
+    camera = find(context, CameraRange)
+    if camera is None or not getattr(actor, "raw", b""):
+        return None
+    cam_x = int(camera.left) - mr_x_model.PLAYER_X_MIN_OFFSET
+    sims = [
+        garcia_model.GarciaSim.from_bytes(g.raw, slot=_slot_number(g.slot), cam_x=cam_x)
+        for g in office_helpers(context)
+        if g.slot != exclude
+    ]
+    if not sims:
+        return None
+    return mr_x_plan.garcia_threat(mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x), sims)
+
+
+def _slot_number(slot: str) -> int:
+    return int(slot[3:]) if slot.startswith("obj") and slot[3:].isdigit() else 0
+
+
+def live_mr_x(context: Context) -> list[MrX]:
+    """Mr. X while he fights: out of his entrance's set-up, health above 0
+    (``$13F9A`` goes to ``$E``, his death, at 0 or less), not dying."""
+
+    return [
+        mr_x
+        for mr_x in find_all(context, MrX)
+        if not mr_x.is_defeated
+        and (mr_x.health or 0) > 0
+        and mr_x.primary_state != mr_x_model.PRIMARY_DYING
+        and bool(mr_x.raw)
     ]
 
 
@@ -1685,6 +1880,12 @@ def _a_weapon_would_disarm_the_plan(context: Context) -> bool:
         or _bongo_is_alive(context)
         or _abadede_is_alive(context)
         or bool(live_twins(context))
+        or bool(live_mr_x(context))
+        # His office, from the offer on: armed, B is a swing the plan does
+        # not time, so the punch that out-reaches a Garcia's jab is gone for
+        # the whole fight -- measured, a pipe picked up in the first waves
+        # left the actor trading jabs with both Garcias at the street's edge.
+        or find(context, MrXOffice) is not None
     )
 
 
@@ -1738,7 +1939,7 @@ def _food_is_spoken_for(context: Context) -> bool:
         return True
     # The twins too (user: "Do not use recovery items" -- not even as a
     # fallback: a fight that survives by eating is not the plan).
-    return _antonio_is_alive(context) or bool(live_twins(context))
+    return _antonio_is_alive(context) or bool(live_twins(context)) or bool(live_mr_x(context))
 
 
 def _souther_is_alive(context: Context) -> bool:
@@ -1765,7 +1966,7 @@ def _life_items_refused(context: Context) -> bool:
     the actor, and a plan that only survives by eating is not a plan.
     """
 
-    return _souther_is_alive(context) or bool(live_twins(context))
+    return _souther_is_alive(context) or bool(live_twins(context)) or bool(live_mr_x(context))
 
 
 def _pickup_is_useful(actor: PlayableCharacter, pickup: Pickup) -> bool:
@@ -1978,6 +2179,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_engage_abadede(context)
         | could_engage_jack(context)
         | could_engage_twins(context)
+        | could_engage_mr_x(context)
         | could_hit_antonio_boomerang(context)
         | could_walk_to_advance_stage(context)
         | could_punch(context)

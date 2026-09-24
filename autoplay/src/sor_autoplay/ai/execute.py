@@ -18,6 +18,7 @@ from .pathfind import Path, Point, PointGoal
 from .tokens import (
     CounterGrab,
     EngageAbadede,
+    EngageMrX,
     EngageTwins,
     EngageAntonio,
     EngageBongo,
@@ -49,7 +50,7 @@ from .tokens import (
     punch_outer_x,
     punch_usable_inner_x,
 )
-from .tokens import Abadede, Antonio, Bongo, Enemy, Jack, Onihime, Souther
+from .tokens import Abadede, Antonio, Bongo, Enemy, Jack, MrX, Onihime, Souther
 from .tokens import CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile
 from .tokens import Pickup, Weapon
@@ -76,6 +77,7 @@ from .gamepad import VirtualGamepad
 from . import kinematics
 from . import jump_kick
 from . import abadede as abadede_plan
+from . import garcia as garcia_model, mr_x as mr_x_model, mr_x_plan
 from . import antonio as antonio_plan
 from . import bongo as bongo_plan
 from . import jack as jack_plan
@@ -1695,6 +1697,98 @@ def state_machine_engage_twins(verb: EngageTwins, context: Context, gamepad: Vir
     gamepad.hold(mask)
 
 
+# One plan memory per actor slot (mr_x_plan.PlanMemory).
+_MR_X_MEMORY: dict[str, mr_x_plan.PlanMemory] = {}
+
+
+def _slot_index(slot: str) -> int:
+    return int(slot[3:]) if slot.startswith("obj") and slot[3:].isdigit() else 0
+
+
+def engage_mr_x_plan(verb: EngageMrX, context: Context, held: int = 0) -> mr_x_plan.MrXPlan | None:
+    """``mr_x_plan.plan`` for this verb, from the context's raw slots -- his,
+    his bullets' and the actor's (``MapEntity.raw``), so the simulation starts
+    from exactly what the ROM holds. ``held`` is the mask the pad latches now:
+    it plays the updates before this tick's stick lands."""
+
+    actor = _find_actor(context, verb.actor_slot)
+    camera = find(context, CameraRange)
+    target = find(context, MrX, slot=verb.target_slot) if verb.target_slot else None
+    if actor is None or camera is None or not actor.raw:
+        return None
+    if verb.target_slot and (target is None or not target.raw):
+        return None
+    from .decide import office_helpers  # decide imports this module's neighbours
+
+    cam_x = int(camera.left) - mr_x_model.PLAYER_X_MIN_OFFSET
+    m = (
+        mr_x_model.MrXSim.from_bytes(target.raw, slot=_slot_index(target.slot), cam_x=cam_x)
+        if target is not None
+        else None
+    )
+    garcias = [
+        garcia_model.GarciaSim.from_bytes(g.raw, slot=_slot_index(g.slot), cam_x=cam_x)
+        for g in office_helpers(context)
+    ]
+    garcias = [g for g in garcias if g.alive]
+    if m is None and not garcias:
+        return None
+    bullets = [
+        mr_x_model.BulletSim.from_bytes(p.raw, slot=_slot_index(p.slot), cam_x=cam_x)
+        for p in find_all(context, Projectile)
+        if p.type_id == mr_x_model.BULLET_TYPE and p.raw
+    ]
+    bullets = [b for b in bullets if b.state == 1]
+    a = mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x)
+    a.punch = None
+    committed = (
+        1 if held & RIGHT_MASK else (-1 if held & LEFT_MASK else 0),
+        1 if held & DOWN_MASK else (-1 if held & UP_MASK else 0),
+    )
+    memory = _MR_X_MEMORY.setdefault(verb.actor_slot, mr_x_plan.PlanMemory())
+    # Armed, B is the weapon's swing, which nothing here times; and a B over
+    # an item underfoot picks it up (abadede_can_punch has both rules).
+    return mr_x_plan.plan(
+        a, m, bullets, garcias=garcias, committed=committed, memory=memory,
+        can_punch=abadede_can_punch(actor, context),
+    )
+
+
+def state_machine_engage_mr_x(verb: EngageMrX, context: Context, gamepad: VirtualGamepad) -> None:
+    """Hold the stick ``mr_x_plan.plan`` chose this tick, or throw the punch
+    or the rear attack it timed.
+
+    Held directly and unclamped, as the other boss engages': the lane dodge
+    off his lunge and the step into his gun are a lane or two wide, and the
+    walking box must be out on the update of contact. The punch is B alone,
+    in the facing the actor already has (B with a turn is sampled pre-turn:
+    ``_facing_prop``); the plan turns by walking.
+    """
+
+    plan = engage_mr_x_plan(verb, context, getattr(gamepad, "held", 0))
+    if plan is None:
+        gamepad.release()
+        return
+    if plan.chord:
+        # B+C with no direction: $322A runs before the walk, so the rear
+        # attack goes out behind the facing the actor already has.
+        _press(gamepad, PUNCH_MASK | JUMP_MASK, frames=REAR_ATTACK_FRAMES)
+        return
+    if plan.punch:
+        _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
+        return
+    mask = 0
+    if plan.dir_x > 0:
+        mask |= RIGHT_MASK
+    elif plan.dir_x < 0:
+        mask |= LEFT_MASK
+    if plan.dir_y > 0:
+        mask |= DOWN_MASK
+    elif plan.dir_y < 0:
+        mask |= UP_MASK
+    gamepad.hold(mask)
+
+
 def engage_jack_plan(verb: EngageJack, context: Context) -> jack_plan.EngagePlan | None:
     """``jack.plan_engage`` for this verb, from the context -- shared by the
     handler and the diagnostics, so both see the one plan."""
@@ -2672,6 +2766,7 @@ _HANDLERS = {
     EngageAbadede: state_machine_engage_abadede,
     EngageJack: state_machine_engage_jack,
     EngageTwins: state_machine_engage_twins,
+    EngageMrX: state_machine_engage_mr_x,
     ReleaseToRegrab: state_machine_release_to_regrab,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,

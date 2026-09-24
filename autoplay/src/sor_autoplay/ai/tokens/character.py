@@ -155,6 +155,9 @@ class Character(Observed, ABC):
     health: int | None
     facing_left: bool
     combat_phase: CombatPhase
+    # The object's 128 bytes, for a plan that replays its update from the ROM
+    # model (world_map.MapEntity.raw): the players and Mr. X. Empty otherwise.
+    raw: bytes = b""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
