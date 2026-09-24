@@ -1258,6 +1258,24 @@ dead Garcia's replacement is not modelled; a whole-fight offline simulator
 (hold loop, hit reactions, respawns) was started from `$1353A`'s decode and
 not finished; Axel and Adam have not been run live against him.
 
+**Round 8's thrown tables (not yet modelled; user: "as mesas do nível 8
+também são um 'breakable'").** The office occasionally throws a table
+(furniture) at the player; the AI should detect one in its lane and either
+flee it, if there is room, or punch it away (`HitAntonioBoomerang`'s
+pattern) when it is too close to flee. `object_catalog.py`'s `0x45` entry
+is tagged `kind="breakable"`, `"Moving prop"`, with no `labels.csv` backing
+and no decoded spawn trigger, velocity, or hitbox — the user's note confirms
+it is a `Breakable`-typed object even while in flight, not a distinct
+projectile type, which matches that tag. Undecoded still: whether `0x45`
+*is* the thrown table (as opposed to an ordinary round-8 prop), its throw
+trigger, flight velocity, and hitbox. `Projectile` tokens are built from an
+explicit per-type whitelist (`observe.py`, `object_catalog.py`'s
+`_ENEMY_STYLES`/`_BOSS_PROJECTILE_STYLES`/`_WEAPON_STYLES`); a `Breakable`
+in flight is invisible to `reach.projectile_threatens` and
+`ProjectileSidestep` as things stand, so this needs a live level-8 capture
+before any `could_flee_table`/`PunchAwayTable` verb can be built on real
+data rather than a guess.
+
 **Jack: the ROM model and the plan** (user: "A AI tem sérias dificuldades em
 lidar com o inimigo do tipo Jack ... É essencial construir uma estratégia para
 lidar com este inimigo ... O objetivo é lidar com este inimigo de forma
@@ -1646,6 +1664,43 @@ questions (how the AI fights the boss, and how much health the level left
 it) and neither answer comes out of the run. Do not add a "real waves" mode
 to these tools; that was tried and rejected.
 
+**Poll timing is now measured, not just assumed (user: "sugestões para
+melhorar o timing do autoplay, mais preciso com as atualizações da host
+application sem tornar a host application lenta para jogadores reais?").**
+`ObserverApp._poll_loop` (`app.py`) already re-bases its sleep off elapsed
+work time each iteration, so one slow tick does not stack onto the next, but
+it had no visibility into how many emulated frames a poll actually covered
+-- only the wall-clock `--poll-ms` it asked for. `state.read_snapshot` now
+also calls the remote protocol's existing `get_game_uptime_frames()` (already
+used by every offline lockstep lab, just never by live play) and carries it
+in `GameSnapshot.raw["uptime_frames"]`; `ObserverApp._record_frame_timing`
+diffs it against the previous poll and logs a rolling `frames/tick
+min/mean/max` + `poll work min/mean/max` line at DEBUG every few seconds --
+purely diagnostic, read by nothing else. This does not touch the host's own
+`--turbo`/`--vsync` pacing (`VDP::renderLoop`'s `nextFrameDeadline`
+accumulator in `MegaDriveEnvironment`), which stays a real-time loop for
+human players regardless of `--poll-ms`.
+
+Deliberately **not** done yet: swapping `kinematics.FRAMES_PER_TICK`'s
+nominal 2 for this measured, per-tick value inside the prediction math
+itself. That module's own docstring calls `FRAMES_PER_TICK` "the nominal
+figures every measured constant below was taken at," and this codebase has
+already paid once to learn that lesson the hard way -- see **The 30 Hz time
+axis: fixed, measured, not kept** above (`OBJECT_UPDATE_FRAMES`): a
+dynamically-correct time axis was built, scored with `boss_fight.py`, and
+reverted because it came out worse, not better, against Antonio and Souther.
+Wiring live jitter into every boss lookahead's tuned lead time needs the same
+measure-first discipline before it touches combat, not a guess. The frame
+counter above is step one -- watch `poll timing:` lines under real load
+before deciding whether `--poll-ms 16` at `--turbo 2` is actually drifting
+enough to be worth it. A further, larger option surfaced by that
+investigation and also not started: the remote protocol's
+`SET_LOCKSTEP`/`STEP_INPUT` primitive (`MegaDriveEnvironment`, used by every
+`*_lab.py` tool) could drive live AI-controlled play frame-exactly (poll →
+decide → step N frames → poll) instead of wall-clock sleeping, with zero
+effect on the human-player `--vsync` path since it is a separate protocol
+call the AI alone would use.
+
 ## Diagnostic tools (`tools/`)
 
 Not part of the AI and never imported by it: each one drives the **real**
@@ -1680,7 +1735,7 @@ do not commit `.jsonl` runs.
 
 | Piece | Role |
 | --- | --- |
-| `app.py` | CLI (`--host`, `--port`, `--poll-ms`, `--hud-ms`, `--once`, `--agent-p1`, `--agent-p2`), poll loop, AI dispatch |
+| `app.py` | CLI (`--host`, `--port`, `--poll-ms`, `--hud-ms`, `--once`, `--agent-p1`, `--agent-p2`), poll loop, AI dispatch. `_record_frame_timing` logs measured frames/tick at DEBUG (**Poll timing is now measured, not just assumed**, above) -- diagnostic only, never read by the AI |
 | `state.py` | Work-RAM / remote reads → `GameSnapshot`. `snapshot_from_memory_blocks` skips both `hazards.holes_for_level` and `hazards.barriers_for_level` on the elevator stage (`level_index == 6`, stage 7): its moving platform is not represented by the class-0/2 collision map the same way ordinary terrain is, so both reads would be class-map noise rather than real hazards. Barrier solids were skipped first ("class map noise cannot invent walls on the lift"); holes got the identical carve-out once a phantom `Pit` reached the AI pipeline (`ai/observe.py` builds one per `snapshot.floor_holes` entry, unconditionally) and the HUD drew a hole that was never there. `snapshot.floor_holes`/`floor_barriers` are therefore always `()` on stage 7, which is the one place both the HUD and the token pipeline need to change to make pits disappear there — everything downstream already just reads the snapshot |
 | `world_map.py` | Camera + actors → map entities (incl. hunt targets); `MapEntity.stun_timer` is the ordinary-enemy `+$50` stun countdown, read only in the `kind=="enemy"` branch (the same offset is weapon wear / boss distance / player character id for other kinds) and only meaningful while `combat_phase` is `STUNNED`; `MapEntity.held_type` on an ordinary enemy is the pickup weapon `$08-$0C` it is carrying, resolved from a held weapon object's `+$52` holder pointer (`interaction==1`) -- enemies do not store the type at `+$60` (that word is their scripted approach X); `parse_world_map` takes `police_special_active` purely to disambiguate enemy state `$0400`; `MapEntity.hitbox` is the object's real body AABB -- for a player, `_object_geometry` reads it straight from the cached box at `+$70` and needs no `RomData` at all; for everything else it is rebuilt per tick from the ROM shape tables and `None` without `RomData` (*unknown*, never *no body*) -- and `MapEntity.attack_ranges` is every reach its type has (empty for a player, whose reach lives in `tokens/character.py` instead, and for bosses, whose animation sets are not labelled); `MapEntity.character_id` (0/1/2 = Axel/Adam/Blaze, `None` for non-players) is threaded through from `parse_world_map`'s own resolved `char_id` purely so a display-side consumer (today, `hud.py`'s `_display_attack_ranges`) can look up a player's per-character punch reach -- it is not read anywhere in `world_map.py` itself; `_is_dormant_combatant` drops a combatant whose **primary state is still `$0000`** whether or not the SAT-hidden bit is set: a wave's object slots are populated before `$937A` runs, so for one frame they hold a complete, *visible*, uninitialised entity -- recorded live, five of them appearing for a single tick at state `$00` with zero health and zero velocity, spread across the level ahead, and the AI punched at the nearest of them (48px away, at nothing) before they vanished. The hidden bit is a symptom `$937A` sets while testing eligibility, not the definition of dormancy. `MapEntity.enemy_vel_x`/`enemy_vel_y` carry ordinary-enemy velocity (+$1C/+$20), read only in the `kind=="enemy"` branch -- distinct fields/offsets from the boss-only `vel_x`/`vel_z` (+$20/+$24) already on the same dataclass, left untouched. `MapEntity.contact_slot` resolves the player's `+$4C` hold link to a slot name -- the ROM's own "which body am I holding", and the only field that answers it for a later boss (see **Holding a boss**); meaningful only while the action byte is in a grab/hold family, which is why `observe.py` and `is_grabbing` both gate on that |
 | `object_catalog.py` | Type → symbol / color / family. Antonio's boomerang (`$96`), Bongo's flame (`$97`) and Souther's claw/afterimage (`$98`/`$99`) are catalogued so the linked boss attack objects become map entities at all (the flame reads the later-boss layout like the boomerang: animation, countdown, latched box, `+$6E`); the claw pair is then withheld **unconditionally** from being a projectile threat (`reach.is_souther_claw`), unlike the boomerang, which is only withheld while attached (`reach.antonio_still_holding_boomerang`) -- they are animation-synchronized visuals re-created from Souther's own position every tick, with no flight to intercept and no box of their own (the claw's hit is his own attack box; `ai-analysis/enemy-ai.md`) |

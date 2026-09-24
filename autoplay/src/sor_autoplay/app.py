@@ -383,6 +383,15 @@ class ObserverApp:
         self._rom: RomData | None = None
         self._hud: ObserverHud | None = None
 
+        # Diagnostic only (not read by the AI): how many emulated frames
+        # actually landed between polls, vs. wall-clock time spent. Lets a
+        # user judge whether --poll-ms is really tracking the host's frame
+        # rate before trusting kinematics.FRAMES_PER_TICK's nominal 2 --
+        # see autoplay/CLAUDE.md's OBJECT_UPDATE_FRAMES story for why that
+        # nominal constant is not swapped for a live measurement outright.
+        self._frame_timing_samples: list[tuple[int, float]] = []
+        self._frame_timing_logged_at = 0.0
+
         # AI is opt-in and off by default; toggled via CLI flag or the HUD's
         # per-player click label. One SharedGamepadState is shared by both
         # VirtualGamepad views because a single remote HOLD_BUTTONS call
@@ -455,6 +464,7 @@ class ObserverApp:
 
                 assert self._client is not None
                 snapshot = read_snapshot(self._client, rom=self._rom)
+                self._record_frame_timing(snapshot, time.monotonic() - started)
 
                 with self._lock:
                     self._latest = snapshot
@@ -486,6 +496,48 @@ class ObserverApp:
                         pass
                 self._stop.wait(backoff_s)
                 backoff_s = min(2.0, backoff_s * 1.5)
+
+    def _record_frame_timing(self, snapshot: GameSnapshot, elapsed_s: float) -> None:
+        """Log how many emulated frames a poll actually covered.
+
+        Purely observational: never read by the AI or by ``kinematics.py``
+        (which never imports this module). ``uptime_frames`` resets on
+        ``restart_game``/reconnect, which reads as a negative delta here and
+        is simply dropped rather than logged as a stall.
+        """
+
+        previous = self._frame_timing_samples[-1][0] if self._frame_timing_samples else None
+        current = snapshot.raw.get("uptime_frames")
+        if current is None:
+            return
+        if previous is not None and current > previous:
+            self._frame_timing_samples.append((current, elapsed_s))
+        elif previous is None:
+            self._frame_timing_samples.append((current, elapsed_s))
+
+        now = time.monotonic()
+        if now - self._frame_timing_logged_at < 3.0 or len(self._frame_timing_samples) < 2:
+            return
+        deltas = [
+            b[0] - a[0]
+            for a, b in zip(self._frame_timing_samples, self._frame_timing_samples[1:])
+        ]
+        wall_ms = [b[1] * 1000.0 for b in self._frame_timing_samples[1:]]
+        if deltas:
+            logger.debug(
+                "poll timing: %d ticks, frames/tick min=%d mean=%.2f max=%d, "
+                "poll work min=%.1fms mean=%.1fms max=%.1fms (poll_ms=%d)",
+                len(deltas),
+                min(deltas),
+                sum(deltas) / len(deltas),
+                max(deltas),
+                min(wall_ms),
+                sum(wall_ms) / len(wall_ms),
+                max(wall_ms),
+                self.poll_ms,
+            )
+        self._frame_timing_samples = self._frame_timing_samples[-1:]
+        self._frame_timing_logged_at = now
 
     def _apply_scenario(self, snapshot: GameSnapshot) -> bool:
         """Run the debug scenario for this poll; True when the AI may tick.

@@ -22,6 +22,7 @@ class MemorySource(Protocol):
     """Minimal client surface used by the observer."""
 
     def read_memory(self, address: int, length: int) -> bytes: ...
+    def get_game_uptime_frames(self) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +274,7 @@ def snapshot_from_memory_blocks(
     blockmap_stride: int = 0,
     mr_x_offer_flag: int = 0,
     mr_x_offer_state: int = 0,
+    uptime_frames: int = 0,
     connected: bool = True,
     error: str | None = None,
     rom: RomData | None = None,
@@ -430,6 +432,7 @@ def snapshot_from_memory_blocks(
         mr_x_offer_flag=mr_x_offer_flag & 0xFF,
         mr_x_offer_state=mr_x_offer_state & 0xFFFF,
         raw={
+            "uptime_frames": uptime_frames,
             "game_state": game_state,
             "level": level_index,
             "wave": wave,
@@ -517,6 +520,7 @@ def read_snapshot(client: MemorySource, *, rom: RomData | None = None) -> GameSn
         if stride > 0
         else b""
     )
+    uptime_frames = client.get_game_uptime_frames()
     return snapshot_from_memory_blocks(
         globals_block=globals_block,
         timer_block=timer_block,
@@ -531,6 +535,7 @@ def read_snapshot(client: MemorySource, *, rom: RomData | None = None) -> GameSn
         blockmap_stride=stride,
         mr_x_offer_flag=mr_x_blob[0],
         mr_x_offer_state=int.from_bytes(mr_x_blob[4:6], "big"),
+        uptime_frames=uptime_frames,
         connected=True,
         rom=rom,
     )
