@@ -400,10 +400,22 @@ copied into a second token.
 queue: three or more live enemies inside the close box around it, or a
 pincer with at least one on each side. It is what makes a hold the answer
 to a crowd (`reach.grab_reasons`' `WHILE_SURROUNDED`); the police special is
-for imminent death alone. This is the one
-judgment still computed once per tick and written into the context — see
-[Judging without a cache](#judging-without-a-cache) for why it, alone,
-earns that.
+for imminent death alone. This is one of the two
+judgments still computed once per tick and written into the context — see
+[Judging without a cache](#judging-without-a-cache) for why these two, and
+no others, earn that.
+
+**`EnemyCluster`** flags a live, on-screen enemy that has at least one
+other live enemy inside the same close box `Surrounded` uses, centred on
+the enemy rather than the actor: a group close enough together that a wide
+attack landing on one plausibly lands on the others too. `priority.
+_hold_cluster_bonus` reads it to score `ThrowHeldEnemy`/`Supplex` higher
+when the held body is part of one (`$FFFB24` -- a thrown or slammed body
+knocks down whatever else it lands near, documented for Mr. X's Garcias
+and generic to any hold move). `JumpAttack` does not read it: its own
+bonus (`priority._jump_attack_extra_hits_bonus`) already comes from a real
+flight-box sweep (`jump_kick.enemies_hit`), which is strictly more
+accurate than this proximity estimate and stays the one used.
 
 Backing off to a safe spot, given a threat worth leaving, is `execute.
 _find_safe_spot(actor, context)`: the best of a few candidate steps around
@@ -456,14 +468,28 @@ the same thing, both call the same function** — never each recomputing its
 own abbreviated version. That is what continues to prevent divergence; the
 cache never was.
 
-`Surrounded` is the one exception, and deliberately so: it is read on every
-call of `reach.grab_reasons` (its `WHILE_SURROUNDED` case), which
+`Surrounded` is the first exception, and deliberately so: it is read on
+every call of `reach.grab_reasons` (its `WHILE_SURROUNDED` case), which
 `decide.could_grab_enemy`, `could_rear_attack`'s Jack check and
 `priority._emergency_grab_enemy` make once per candidate, several times a
 tick, and its own computation — a full enemy-count scan per actor — is
 heavier than a two-enemy geometry check, so it genuinely benefits from
 being computed once and shared, the way the whole `Inferred` stage used to
 justify itself.
+
+`EnemyCluster` is the second (user: "Eu queria um token Inferred", after an
+earlier pass at cluster-aware `Supplex`/`ThrowHeldEnemy` scoring had gone
+straight to a private `reach.py` helper the way every removed token above
+did). It is read by `priority._hold_cluster_bonus` for every `Supplex`/
+`ThrowHeldEnemy` candidate scored — several times a tick whenever a hold is
+live — and each token is a scan of every other on-screen enemy against the
+anchor, the same cost class as `Surrounded`'s own scan; sharing it once
+per tick rather than recomputing it per candidate is the same trade that
+keeps `Surrounded` a token. Nothing else demoted `EnemyCluster` back to a
+bare function: unlike the eleven removed tokens, which had exactly one real
+caller apiece once the dust settled, this one is built to be read by more
+than `_hold_cluster_bonus` as the AI grows into using it (the HUD, a future
+`could_*`) without every new reader re-deriving the same geometry.
 
 ### Hitbox and AttackRange
 

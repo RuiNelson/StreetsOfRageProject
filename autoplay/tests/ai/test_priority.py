@@ -360,16 +360,20 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
     ) -> None:
         # $FFFB24: a thrown body knocks down whatever else it lands near, so
         # a throw into a cluster should outrank an otherwise-identical throw
-        # into empty ground -- priority._hold_cluster_bonus, off
-        # reach.nearby_enemies (a proximity estimate, not a flight sweep).
+        # into empty ground -- priority._hold_cluster_bonus, off the
+        # EnemyCluster token (inference.check_for_clusters, a proximity
+        # estimate, not a flight sweep) -- so the context must go through
+        # generate_inference_tokens the way the real pipeline does.
         held = _enemy("obj01", CombatPhase.GRABBED, world_x=200, world_y=100)
         verb = ThrowHeldEnemy(actor_slot="P1", target_slot="obj01")
-        lone_context = {held}
-        clustered_context = {
-            held,
-            _enemy("obj02", CombatPhase.NORMAL, world_x=220, world_y=100),
-            _enemy("obj03", CombatPhase.NORMAL, world_x=180, world_y=108),
-        }
+        lone_context = generate_inference_tokens({held})
+        clustered_context = generate_inference_tokens(
+            {
+                held,
+                _enemy("obj02", CombatPhase.NORMAL, world_x=220, world_y=100),
+                _enemy("obj03", CombatPhase.NORMAL, world_x=180, world_y=108),
+            }
+        )
 
         self.assertGreater(
             priority._emergency(verb, clustered_context),
@@ -379,13 +383,15 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
     def test_supplex_cluster_bonus_is_capped(self) -> None:
         held = _enemy("obj01", CombatPhase.GRABBED, world_x=200, world_y=100)
         verb = Supplex(actor_slot="P1", target_slot="obj01")
-        many_nearby = {
-            held,
-            *(
-                _enemy(f"obj{n:02d}", CombatPhase.NORMAL, world_x=200 + n, world_y=100)
-                for n in range(2, 8)
-            ),
-        }
+        many_nearby = generate_inference_tokens(
+            {
+                held,
+                *(
+                    _enemy(f"obj{n:02d}", CombatPhase.NORMAL, world_x=200 + n, world_y=100)
+                    for n in range(2, 8)
+                ),
+            }
+        )
 
         self.assertEqual(
             priority._emergency(verb, many_nearby),
@@ -399,13 +405,28 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         # front-to-back crossover, not a throw or a slam.
         held = _enemy("obj01", CombatPhase.GRABBED, world_x=200, world_y=100)
         verb = FlipHold(actor_slot="P1", target_slot="obj01")
-        clustered_context = {
+        clustered_context = generate_inference_tokens(
+            {held, _enemy("obj02", CombatPhase.NORMAL, world_x=220, world_y=100)}
+        )
+
+        self.assertEqual(
+            priority._emergency(verb, clustered_context), priority._EMERGENCY_HOLD_FLIP
+        )
+
+    def test_no_bonus_without_running_inference_first(self) -> None:
+        # _hold_cluster_bonus reads the EnemyCluster token rather than
+        # rescanning enemies itself -- a context that skipped
+        # generate_inference_tokens (never happens in the real pipeline,
+        # loop.py always runs it before ranking) scores the bare tier.
+        held = _enemy("obj01", CombatPhase.GRABBED, world_x=200, world_y=100)
+        verb = ThrowHeldEnemy(actor_slot="P1", target_slot="obj01")
+        no_inference_context = {
             held,
             _enemy("obj02", CombatPhase.NORMAL, world_x=220, world_y=100),
         }
 
         self.assertEqual(
-            priority._emergency(verb, clustered_context), priority._EMERGENCY_HOLD_FLIP
+            priority._emergency(verb, no_inference_context), priority._EMERGENCY_HOLD_THROW
         )
 
     def test_suplex_outranks_the_walk_in_on_a_held_boss(self) -> None:

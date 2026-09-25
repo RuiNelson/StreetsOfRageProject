@@ -66,6 +66,7 @@ from .tokens import (
 from .tokens import Myself, Partner
 from .tokens import Abadede, Antonio, Bongo, Boss, Breakable, Enemy, Grunt, Jack, MrX, Nora, Souther
 from .tokens import (
+    EnemyCluster,
     GrabReason,
     Surrounded,
 )
@@ -230,21 +231,27 @@ _EMERGENCY_HOLD_KNEE_FRESH = 67
 # A thrown or slammed held body can knock down whatever else is standing
 # near it ($FFFB24 -- documented for Mr. X's Garcias: "Thrown bodies knock
 # Garcias and Mr. X down"). Scored the same shallow way as the jump kick's
-# extra hits below (reach.nearby_enemies, proximity only -- neither the
-# throw's nor the suplex's landing spot is ROM-measured the way jump_kick.py's
-# flight is), and only for the two hold moves that actually send the body
-# somewhere: FlipHold/AttackHeldEnemy/ReleaseGrab/ReleaseToRegrab never let
-# it go near anyone.
+# extra hits below, off the EnemyCluster token (inference.check_for_
+# clusters, a proximity estimate -- neither the throw's nor the suplex's
+# landing spot is ROM-measured the way jump_kick.py's flight is), and only
+# for the two hold moves that actually send the body somewhere: FlipHold/
+# AttackHeldEnemy/ReleaseGrab/ReleaseToRegrab never let it go near anyone.
 _EMERGENCY_HOLD_CLUSTER_EXTRA_HIT = 2
 _HOLD_CLUSTER_EXTRA_HITS_COUNTED = 2
 
 
 def _hold_cluster_bonus(verb: Verb, context: Context) -> int:
-    held = find(context, Enemy, slot=getattr(verb, "target_slot", None))
-    if held is None:
+    held_slot = getattr(verb, "target_slot", None)
+    if held_slot is None:
         return 0
-    nearby = reach.nearby_enemies(held, reach.on_screen_enemies(context))
-    return _EMERGENCY_HOLD_CLUSTER_EXTRA_HIT * min(len(nearby), _HOLD_CLUSTER_EXTRA_HITS_COUNTED)
+    cluster = find(context, EnemyCluster, slot=held_slot)
+    if cluster is None:
+        return 0
+    return _EMERGENCY_HOLD_CLUSTER_EXTRA_HIT * min(
+        len(cluster.member_slots), _HOLD_CLUSTER_EXTRA_HITS_COUNTED
+    )
+
+
 _EMERGENCY_HOLD_RELEASE = 50
 # Souther's hand-back (ReleaseToRegrab): the one input souther.hold_step chose,
 # at the top of the hold family so nothing else can take the tick from it.

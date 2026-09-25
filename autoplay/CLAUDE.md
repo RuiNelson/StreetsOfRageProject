@@ -1201,6 +1201,31 @@ everything else on the board. Covered by `tests/ai/test_reach.py`'s
 `NearbyEnemiesTests` and `tests/ai/test_priority.py`'s cluster-bonus cases
 under `DetermineEmergencyWinnerTests`.
 
+**...as an `Inferred` token (user: "Eu queria um token Inferred"):** the
+cluster judgment above shipped as a private `priority._hold_cluster_bonus`
+calling `reach.nearby_enemies` directly -- exactly the shape every other
+`reach.py` judgment in this project takes, per **Judging without a
+cache**'s own rule. The user wanted it as a token instead, so it is now
+`EnemyCluster` (`tokens/enemy.py`, next to `Surrounded`), produced by
+`inference.check_for_clusters` and unioned into the context by
+`generate_inference_tokens` the same way `Surrounded` is; `priority.
+_hold_cluster_bonus` reads `find(context, EnemyCluster, slot=held_slot)`
+rather than rescanning enemies itself. `reach.nearby_enemies` did not go
+away -- it is still the one shared geometry `check_for_clusters` calls
+once per on-screen enemy to build the token, the same relationship
+`check_for_surrounded` has with `reach.SURROUNDED_NEAR_X`/`_Y`. `AI.md`'s
+**Judging without a cache** section now documents `EnemyCluster` as the
+second (and only other) exception, with its own reasoning: several
+call sites a tick and a same-cost-class scan as `Surrounded`'s, per that
+section's own bar for keeping a token rather than a bare function. A test
+(`test_priority.py`'s `test_no_bonus_without_running_inference_first`)
+pins the one behaviour change this caused: a context that skips
+`generate_inference_tokens`
+before scoring now scores the bare tier, since the token, not a live
+recomputation, is what the bonus reads -- true of every other `Inferred`
+consumer already (`Surrounded`), never true of the ordinary `reach.py`
+functions this rule is otherwise an exception to.
+
 **Stage-4 pits (user):** The AI walked/jumped into a pit on the bridge
 (round 4). `JumpAttack` was blind to holes -- a kick toward an enemy
 across a gap flew in -- and `execute_tick`'s pit override then froze X
@@ -2289,11 +2314,12 @@ Every token class docstring follows the same normalized shape.
    under what conditions they are generated and which function generates
    them (e.g. "Built by ``inference.check_for_surrounded`` when at least
    ``SURROUNDED_MIN_ENEMIES`` live enemies are inside the close box around
-   the actor"). ``Surrounded`` is the only ``Inferred`` token left — see
-   [Judging without a cache](AI.md#judging-without-a-cache) in `AI.md` for
-   why every other judgment this convention used to describe as a token is
-   now a direct `reach.py`/`execute.py` function call instead, documented
-   per its own function docstring rather than a token docstring.
+   the actor"). ``Surrounded`` and ``EnemyCluster`` are the only ``Inferred``
+   tokens left — see [Judging without a cache](AI.md#judging-without-a-cache)
+   in `AI.md` for why every other judgment this convention used to describe
+   as a token is now a direct `reach.py`/`execute.py` function call instead,
+   documented per its own function docstring rather than a token docstring,
+   and for why these two earn the exception.
 3. **Verb descendants add a second line describing when they are
    produced** — the ``could_*`` generator that creates them and the
    conditions under which it fires (e.g. "Produced by ``could_punch`` when
@@ -2309,12 +2335,12 @@ Every token class docstring follows the same normalized shape.
    Raises emergency: Surrounded×80, (reach.is_incoming_melee for this target)×17, (Weapon when distance is less than 32)×150
    ```
 
-   ``Surrounded`` is the only `Information` token available to reference
-   this way; every other condition is named as the `reach.py`/`phases.py`
-   function (or `GrabReason` member returned by `reach.grab_reasons`) that
-   answers it, e.g. ``reach.is_incoming_melee``, ``reach.projectile_
-   threatens``, ``phases.is_punishable``, ``(reach.grab_reasons includes
-   DEAD_ZONE)``.
+   ``Surrounded`` and ``EnemyCluster`` are the only `Information` tokens
+   available to reference this way; every other condition is named as the
+   `reach.py`/`phases.py` function (or `GrabReason` member returned by
+   `reach.grab_reasons`) that answers it, e.g. ``reach.is_incoming_melee``,
+   ``reach.projectile_threatens``, ``phases.is_punishable``,
+   ``(reach.grab_reasons includes DEAD_ZONE)``.
 
 ## Snapshot cadence
 

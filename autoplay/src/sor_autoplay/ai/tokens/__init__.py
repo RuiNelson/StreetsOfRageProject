@@ -57,6 +57,7 @@ from .enemy import (
     Bongo,
     Boss,
     Enemy,
+    EnemyCluster,
     Garcia,
     GrabReason,
     Grunt,

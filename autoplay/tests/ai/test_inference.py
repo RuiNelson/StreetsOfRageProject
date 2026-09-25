@@ -2,11 +2,13 @@ import unittest
 
 from sor_autoplay.ai.tokens import Myself
 from sor_autoplay.ai.tokens import Enemy
-from sor_autoplay.ai.tokens import Surrounded
+from sor_autoplay.ai.tokens import EnemyCluster, Surrounded
 from sor_autoplay.ai.inference import (
+    check_for_clusters,
     check_for_surrounded,
     generate_inference_tokens,
 )
+from sor_autoplay.ai import reach
 from sor_autoplay.ai.tokens import Token
 from sor_autoplay.phases import CombatPhase
 
@@ -101,6 +103,51 @@ class CheckForSurroundedTests(unittest.TestCase):
                 )
 
 
+class CheckForClustersTests(unittest.TestCase):
+    """``EnemyCluster`` -- built off ``reach.nearby_enemies``, one token per
+    anchor enemy with at least one other live enemy inside ``Surrounded``'s
+    own box (SURROUNDED_NEAR_X/_Y), centred on the enemy rather than the
+    actor. Backs ``priority._hold_cluster_bonus`` for ``ThrowHeldEnemy``/
+    ``Supplex`` (user: "Eu queria um token Inferred")."""
+
+    def test_two_clustered_enemies_produce_a_token_for_each_anchor(self) -> None:
+        held = make_enemy(slot="obj01", world_x=200, world_y=100)
+        nearby = make_enemy(slot="obj02", world_x=220, world_y=100)
+
+        result = check_for_clusters({held, nearby})
+
+        self.assertEqual(
+            result,
+            {
+                EnemyCluster(slot="obj01", member_slots=frozenset({"obj02"})),
+                EnemyCluster(slot="obj02", member_slots=frozenset({"obj01"})),
+            },
+        )
+
+    def test_a_lone_enemy_produces_no_cluster(self) -> None:
+        lone = make_enemy(slot="obj01", world_x=200, world_y=100)
+
+        self.assertEqual(check_for_clusters({lone}), set())
+
+    def test_an_enemy_outside_the_box_is_not_clustered(self) -> None:
+        anchor = make_enemy(slot="obj01", world_x=200, world_y=100)
+        far = make_enemy(
+            slot="obj02", world_x=200 + reach.SURROUNDED_NEAR_X + 1, world_y=100
+        )
+
+        self.assertEqual(check_for_clusters({anchor, far}), set())
+
+    def test_names_every_clustered_member(self) -> None:
+        anchor = make_enemy(slot="obj01", world_x=200, world_y=100)
+        near_1 = make_enemy(slot="obj02", world_x=220, world_y=100)
+        near_2 = make_enemy(slot="obj03", world_x=180, world_y=108)
+
+        result = check_for_clusters({anchor, near_1, near_2})
+
+        anchor_token = next(t for t in result if t.slot == "obj01")
+        self.assertEqual(anchor_token.member_slots, frozenset({"obj02", "obj03"}))
+
+
 class GenerateInferenceTokensTests(unittest.TestCase):
     def test_unions_context_with_surrounded_check(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)
@@ -114,6 +161,15 @@ class GenerateInferenceTokensTests(unittest.TestCase):
         self.assertIn(front, result)
         self.assertIn(back, result)
         self.assertTrue(any(isinstance(t, Surrounded) for t in result))
+
+    def test_unions_context_with_cluster_check(self) -> None:
+        held = make_enemy(slot="obj01", world_x=200, world_y=100)
+        nearby = make_enemy(slot="obj02", world_x=220, world_y=100)
+        context: set[Token] = {held, nearby}
+
+        result = generate_inference_tokens(context)
+
+        self.assertTrue(any(isinstance(t, EnemyCluster) for t in result))
 
     def test_does_not_mutate_input_context(self) -> None:
         myself = make_myself()

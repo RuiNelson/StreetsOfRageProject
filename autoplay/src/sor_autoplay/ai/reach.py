@@ -563,6 +563,11 @@ def nearby_enemies(
     ``$FFFB24``, documented for Mr. X's Garcias ("Thrown bodies knock
     Garcias and Mr. X down"), which is not specific to him or to any one
     hold move.
+
+    The shared geometry ``inference.check_for_clusters`` turns into one
+    ``EnemyCluster`` token per anchor with a nonempty result -- call this
+    directly only when a caller genuinely cannot go through the token (the
+    token itself is built by calling this once per on-screen enemy).
     """
 
     return [

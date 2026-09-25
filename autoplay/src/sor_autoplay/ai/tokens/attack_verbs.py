@@ -227,10 +227,9 @@ class Supplex(GrabMechanics):
     Produced by ``could_hold_actions`` while the actor is in a confirmed
     back hold (base $66).
 
-    Raises emergency: (Enemy when in the GRABBED phase)×68, plus
-    priority._hold_cluster_bonus (up to +4) for other live enemies
-    clustered around the held body (reach.nearby_enemies) -- a slammed
-    body can take a bystander down with it too ($FFFB24).
+    Raises emergency: (Enemy when in the GRABBED phase)×68,
+    (EnemyCluster around the held body)×up to 4 -- a slammed body can take
+    a bystander down with it too ($FFFB24).
     """
 
     priority: int = 13
@@ -260,10 +259,9 @@ class ThrowHeldEnemy(GrabMechanics):
     Produced by ``could_hold_actions`` in front hold (base $60) when a
     rear threat is present.
 
-    Raises emergency: (Enemy when in the GRABBED phase)×70, plus
-    priority._hold_cluster_bonus (up to +4) for other live enemies
-    clustered around the held body (reach.nearby_enemies) -- the thrown
-    body knocks down whatever else it lands near ($FFFB24).
+    Raises emergency: (Enemy when in the GRABBED phase)×70,
+    (EnemyCluster around the held body)×up to 4 -- the thrown body knocks
+    down whatever else it lands near ($FFFB24).
     """
 
     priority: int = 16

@@ -524,6 +524,24 @@ class Surrounded(Inferred):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class EnemyCluster(Inferred):
+    """Other live enemies clustered close enough around ``slot`` that a wide
+    attack landing on it plausibly reaches them too -- a thrown or slammed
+    body knocks down whatever else it lands near ($FFFB24), and a jump
+    kick's own flight can cross more than one body on its way through.
+
+    Produced by ``inference.check_for_clusters`` for every live, on-screen
+    enemy with at least one other live enemy inside ``reach.
+    SURROUNDED_NEAR_X``/``_Y`` of it (``Surrounded``'s own "part of this
+    fight" box, centred on the enemy rather than the actor).
+    ``member_slots`` names the others.
+    """
+
+    slot: str
+    member_slots: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class PartnerFight(Inferred):
     """The other player is fighting this enemy, or about to -- it is theirs.
 
