@@ -227,6 +227,24 @@ _EMERGENCY_HOLD_FLIP = 66
 # threat to throw into, or when something is landing too soon for a knee to
 # finish (decide.could_hold_actions, on kinematics' measured frame counts).
 _EMERGENCY_HOLD_KNEE_FRESH = 67
+# A thrown or slammed held body can knock down whatever else is standing
+# near it ($FFFB24 -- documented for Mr. X's Garcias: "Thrown bodies knock
+# Garcias and Mr. X down"). Scored the same shallow way as the jump kick's
+# extra hits below (reach.nearby_enemies, proximity only -- neither the
+# throw's nor the suplex's landing spot is ROM-measured the way jump_kick.py's
+# flight is), and only for the two hold moves that actually send the body
+# somewhere: FlipHold/AttackHeldEnemy/ReleaseGrab/ReleaseToRegrab never let
+# it go near anyone.
+_EMERGENCY_HOLD_CLUSTER_EXTRA_HIT = 2
+_HOLD_CLUSTER_EXTRA_HITS_COUNTED = 2
+
+
+def _hold_cluster_bonus(verb: Verb, context: Context) -> int:
+    held = find(context, Enemy, slot=getattr(verb, "target_slot", None))
+    if held is None:
+        return 0
+    nearby = reach.nearby_enemies(held, reach.on_screen_enemies(context))
+    return _EMERGENCY_HOLD_CLUSTER_EXTRA_HIT * min(len(nearby), _HOLD_CLUSTER_EXTRA_HITS_COUNTED)
 _EMERGENCY_HOLD_RELEASE = 50
 # Souther's hand-back (ReleaseToRegrab): the one input souther.hold_step chose,
 # at the top of the hold family so nothing else can take the tick from it.
@@ -1031,13 +1049,22 @@ def _target_is_in_hand(verb: Verb, context: Context) -> bool:
     return in_hand is not None and in_hand.slot == target.slot
 
 
-def _held_enemy_emergency(weight: int) -> Callable[[Verb, Context], int]:
+def _held_enemy_emergency(
+    weight: int, *, cluster_bonus: bool = False
+) -> Callable[[Verb, Context], int]:
     """Build an ``_emergency_*`` for a hold move: ``weight`` only while its
     target ``Enemy`` really is the body in the actor's hands
-    (``_target_is_in_hand``)."""
+    (``_target_is_in_hand``). With ``cluster_bonus``, add
+    ``_hold_cluster_bonus`` on top -- for ``ThrowHeldEnemy``/``Supplex``,
+    the moves that actually send the held body flying near whatever else is
+    standing around it."""
 
     def _emergency(verb: Verb, context: Context) -> int:
-        return weight if _target_is_in_hand(verb, context) else _EMERGENCY_DEFAULT
+        if not _target_is_in_hand(verb, context):
+            return _EMERGENCY_DEFAULT
+        if cluster_bonus:
+            return weight + _hold_cluster_bonus(verb, context)
+        return weight
 
     return _emergency
 
@@ -1063,8 +1090,8 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     MeleeWeaponAttack: _emergency_melee_strike,
     OpenBreakable: _emergency_open_breakable,
     GrabEnemy: _emergency_grab_enemy,
-    ThrowHeldEnemy: _held_enemy_emergency(_EMERGENCY_HOLD_THROW),
-    Supplex: _held_enemy_emergency(_EMERGENCY_HOLD_SUPPLEX),
+    ThrowHeldEnemy: _held_enemy_emergency(_EMERGENCY_HOLD_THROW, cluster_bonus=True),
+    Supplex: _held_enemy_emergency(_EMERGENCY_HOLD_SUPPLEX, cluster_bonus=True),
     FlipHold: _held_enemy_emergency(_EMERGENCY_HOLD_FLIP),
     AttackHeldEnemy: _emergency_attack_held_enemy,
     ReleaseGrab: _held_enemy_emergency(_EMERGENCY_HOLD_RELEASE),

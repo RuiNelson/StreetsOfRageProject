@@ -1659,5 +1659,35 @@ class WalkingBoxGrabTests(unittest.TestCase):
         )
 
 
+class NearbyEnemiesTests(unittest.TestCase):
+    """``reach.nearby_enemies`` -- the cluster estimate ``Supplex``/
+    ``ThrowHeldEnemy`` score a bonus with (priority._hold_cluster_bonus),
+    same box as ``Surrounded``'s (SURROUNDED_NEAR_X/_Y), centred on a body
+    instead of the actor."""
+
+    def test_finds_bodies_inside_the_box_and_excludes_the_anchor(self) -> None:
+        anchor = _garcia(slot="held", world_x=200, world_y=100)
+        close = _garcia(slot="obj02", world_x=200 + reach.SURROUNDED_NEAR_X, world_y=100)
+        self.assertEqual(reach.nearby_enemies(anchor, [anchor, close]), [close])
+
+    def test_excludes_bodies_outside_the_box_on_either_axis(self) -> None:
+        anchor = _garcia(slot="held", world_x=200, world_y=100)
+        too_far_x = _garcia(
+            slot="obj02", world_x=200 + reach.SURROUNDED_NEAR_X + 1, world_y=100
+        )
+        too_far_y = _garcia(
+            slot="obj03", world_x=200, world_y=100 + reach.SURROUNDED_NEAR_Y + 1
+        )
+        self.assertEqual(reach.nearby_enemies(anchor, [anchor, too_far_x, too_far_y]), [])
+
+    def test_counts_more_than_one_clustered_body(self) -> None:
+        anchor = _garcia(slot="held", world_x=200, world_y=100)
+        near_1 = _garcia(slot="obj02", world_x=220, world_y=100)
+        near_2 = _garcia(slot="obj03", world_x=180, world_y=108)
+        self.assertCountEqual(
+            reach.nearby_enemies(anchor, [anchor, near_1, near_2]), [near_1, near_2]
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1164,6 +1164,43 @@ with a rear threat → `ThrowHeldEnemy` (70), without one → `FlipHold` (66) �
 back hold `$66` → `Supplex` (68) — the missing piece was only ever taking the
 hold in the first place.
 
+**Cluster inference for JumpAttack/Supplex/ThrowHeldEnemy (user: "quero que
+a IA saiba inferir clusters de inimigos que estão perto uns dos outros e
+podem ser atacados com ataques como JumpAttack, Supplex ... e
+ThrowHeldEnemy"):** the paragraph above already banked on "the throw is
+especially good when the thrown body hits other enemies" as a fixed
+constant (`_EMERGENCY_HOLD_THROW` 70, `_EMERGENCY_HOLD_SUPPLEX` 68) with
+nothing actually reading whether a cluster was there. `JumpAttack` was the
+one move with a real answer already: `jump_kick.enemies_hit` sweeps its
+*actual* flight box against every on-screen enemy (**The jump kick,
+measured**, above), and `priority._jump_attack_extra_hits_bonus` scores +2
+per extra body it lands on, up to +4 -- so `could_jump_attack`'s one verb
+per in-band target already ranks a kick into a cluster above an otherwise
+identical kick at a lone target. `Supplex` and `ThrowHeldEnemy` had no
+equivalent: neither move's landing spot is modelled the way the kick's
+flight is (that would need the same per-boss/per-character ROM decode and
+lab work the jump kick, Bongo's flame, etc. each took), so
+`reach.nearby_enemies` is a deliberately shallower proximity estimate
+instead -- other live enemies within `Surrounded`'s own "part of this
+fight" box (`SURROUNDED_NEAR_X`/`_Y`, 96 x 32), centred on the *held body*
+rather than the actor. `priority._hold_cluster_bonus` counts them (capped
+at 2, `_EMERGENCY_HOLD_CLUSTER_EXTRA_HIT` x2 = up to +4, the same shape as
+the kick's bonus) and `_held_enemy_emergency`'s new `cluster_bonus` flag
+adds it only for `ThrowHeldEnemy`/`Supplex` -- not `FlipHold`,
+`AttackHeldEnemy`, `ReleaseGrab` or `ReleaseToRegrab`, none of which send
+the body anywhere near anyone. The ROM fact behind counting it at all is
+`$FFFB24`, already decoded for Mr. X's Garcias ("Thrown bodies knock
+Garcias and Mr. X down") and generic to any thrown/slammed body, not just
+his office. Since decide.py's own branches never offer `Supplex` and
+`ThrowHeldEnemy` for the same held body on the same tick (back hold vs.
+front hold, or Bongo's/Mr. X's mutually exclusive `step` chains), the bonus
+can only ever raise the one move already chosen -- it does not change
+which finisher `souther.hold_step`/`abadede.hold_step`/`mr_x_plan.
+garcia_hold_step` pick, only how urgently the winning one outranks
+everything else on the board. Covered by `tests/ai/test_reach.py`'s
+`NearbyEnemiesTests` and `tests/ai/test_priority.py`'s cluster-bonus cases
+under `DetermineEmergencyWinnerTests`.
+
 **Stage-4 pits (user):** The AI walked/jumped into a pit on the bridge
 (round 4). `JumpAttack` was blind to holes -- a kick toward an enemy
 across a gap flew in -- and `execute_tick`'s pit override then froze X

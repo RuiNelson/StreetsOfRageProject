@@ -227,7 +227,10 @@ class Supplex(GrabMechanics):
     Produced by ``could_hold_actions`` while the actor is in a confirmed
     back hold (base $66).
 
-    Raises emergency: (Enemy when in the GRABBED phase)×68.
+    Raises emergency: (Enemy when in the GRABBED phase)×68, plus
+    priority._hold_cluster_bonus (up to +4) for other live enemies
+    clustered around the held body (reach.nearby_enemies) -- a slammed
+    body can take a bystander down with it too ($FFFB24).
     """
 
     priority: int = 13
@@ -257,7 +260,10 @@ class ThrowHeldEnemy(GrabMechanics):
     Produced by ``could_hold_actions`` in front hold (base $60) when a
     rear threat is present.
 
-    Raises emergency: (Enemy when in the GRABBED phase)×70.
+    Raises emergency: (Enemy when in the GRABBED phase)×70, plus
+    priority._hold_cluster_bonus (up to +4) for other live enemies
+    clustered around the held body (reach.nearby_enemies) -- the thrown
+    body knocks down whatever else it lands near ($FFFB24).
     """
 
     priority: int = 16
@@ -351,7 +357,10 @@ class JumpAttack(MeleeAttacks):
     Antonio opener×22 (clears a grounded punch: standing still is
     his kick trigger), (target is punishable)×28, (Nora, not currently
     dangerous, within priority.NORA_RECOVERY_PUNISH_TICKS of her own
-    last attack)×24, Enemy×18. Against a live Antonio the hop is also
+    last attack)×24, Enemy×18, plus priority._jump_attack_extra_hits_bonus
+    (up to +4) for other bodies the kick's own flight also lands on
+    (jump_kick.enemies_hit -- a real box sweep, not a proximity estimate).
+    Against a live Antonio the hop is also
     offered inside punch range (a grounded B is his kick trigger) but
     only when the kick would connect -- same lane, in front, within
     free-flight range. Off-lane, walking onto his lane is the

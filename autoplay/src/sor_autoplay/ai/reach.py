@@ -545,6 +545,35 @@ def on_screen_enemies(context: Context) -> list[Enemy]:
     return [e for e in enemies if in_visible_screen(camera, e.world_x, e.world_y)]
 
 
+def nearby_enemies(
+    anchor: Enemy,
+    enemies: list[Enemy],
+    *,
+    near_x: int = SURROUNDED_NEAR_X,
+    near_y: int = SURROUNDED_NEAR_Y,
+) -> list[Enemy]:
+    """Other live enemies clustered around ``anchor`` -- a body, not the
+    actor -- using ``Surrounded``'s own "part of this fight" box
+    (``SURROUNDED_NEAR_X``/``_Y``) by default.
+
+    A proximity estimate, not a hitbox sweep: unlike ``jump_kick.
+    enemies_hit``'s real flight box, no hold move's landing spot is
+    ROM-measured here, so this only answers "close enough that a thrown or
+    slammed body would plausibly reach it" -- the ROM fact behind it is
+    ``$FFFB24``, documented for Mr. X's Garcias ("Thrown bodies knock
+    Garcias and Mr. X down"), which is not specific to him or to any one
+    hold move.
+    """
+
+    return [
+        enemy
+        for enemy in enemies
+        if enemy.slot != anchor.slot
+        and abs(enemy.world_x - anchor.world_x) <= near_x
+        and abs(enemy.world_y - anchor.world_y) <= near_y
+    ]
+
+
 def in_punch_band(actor: PlayableCharacter, enemy: Character) -> bool:
     """Raw distance box only -- ignores facing. Callers that want "a strike
     would actually connect" want :func:`punch_would_connect` instead."""

@@ -26,6 +26,7 @@ from sor_autoplay.ai.tokens import (
     OpenBreakable,
     Supplex,
     TechRecover,
+    ThrowHeldEnemy,
     ThrowKnife,
     ThrowPepper,
     Weapon,
@@ -50,6 +51,7 @@ from sor_autoplay.ai.tokens import (
 from sor_autoplay.ai.tokens import CameraRange, Stage
 from sor_autoplay.ai.tokens import Projectile
 from sor_autoplay.ai.inference import generate_inference_tokens
+from sor_autoplay.ai import priority
 from sor_autoplay.ai.priority import determine_priority_verb as _rank_verbs
 from sor_autoplay.ai.kinematics import (
     frames_for_ticks,
@@ -353,6 +355,59 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         self.assertEqual(len(verbs), 1)
         self.assertIsInstance(verbs[0], Punch)
 
+    def test_throw_held_enemy_scores_higher_with_enemies_clustered_near_the_held_body(
+        self,
+    ) -> None:
+        # $FFFB24: a thrown body knocks down whatever else it lands near, so
+        # a throw into a cluster should outrank an otherwise-identical throw
+        # into empty ground -- priority._hold_cluster_bonus, off
+        # reach.nearby_enemies (a proximity estimate, not a flight sweep).
+        held = _enemy("obj01", CombatPhase.GRABBED, world_x=200, world_y=100)
+        verb = ThrowHeldEnemy(actor_slot="P1", target_slot="obj01")
+        lone_context = {held}
+        clustered_context = {
+            held,
+            _enemy("obj02", CombatPhase.NORMAL, world_x=220, world_y=100),
+            _enemy("obj03", CombatPhase.NORMAL, world_x=180, world_y=108),
+        }
+
+        self.assertGreater(
+            priority._emergency(verb, clustered_context),
+            priority._emergency(verb, lone_context),
+        )
+
+    def test_supplex_cluster_bonus_is_capped(self) -> None:
+        held = _enemy("obj01", CombatPhase.GRABBED, world_x=200, world_y=100)
+        verb = Supplex(actor_slot="P1", target_slot="obj01")
+        many_nearby = {
+            held,
+            *(
+                _enemy(f"obj{n:02d}", CombatPhase.NORMAL, world_x=200 + n, world_y=100)
+                for n in range(2, 8)
+            ),
+        }
+
+        self.assertEqual(
+            priority._emergency(verb, many_nearby),
+            priority._EMERGENCY_HOLD_SUPPLEX
+            + priority._EMERGENCY_HOLD_CLUSTER_EXTRA_HIT
+            * priority._HOLD_CLUSTER_EXTRA_HITS_COUNTED,
+        )
+
+    def test_cluster_bonus_does_not_apply_to_flip_hold(self) -> None:
+        # FlipHold never lets the body go anywhere near anyone -- it is the
+        # front-to-back crossover, not a throw or a slam.
+        held = _enemy("obj01", CombatPhase.GRABBED, world_x=200, world_y=100)
+        verb = FlipHold(actor_slot="P1", target_slot="obj01")
+        clustered_context = {
+            held,
+            _enemy("obj02", CombatPhase.NORMAL, world_x=220, world_y=100),
+        }
+
+        self.assertEqual(
+            priority._emergency(verb, clustered_context), priority._EMERGENCY_HOLD_FLIP
+        )
+
     def test_suplex_outranks_the_walk_in_on_a_held_boss(self) -> None:
         # The round-1 stall: a held Antonio reads primary $04 (RECOVERY), not
         # GRABBED, so every hold move used to score 0 and GrabEnemy's punish
@@ -519,8 +574,6 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         # threat, both mutually exclusive with the front-hold branch
         # AttackHeldEnemy lives in -- but score it directly anyway, since nothing
         # stops a stale/injected AttackHeldEnemy sharing a tick with them.
-        from sor_autoplay.ai.tokens import ThrowHeldEnemy
-
         myself = _myself(hold_ticks=0)
         held = _enemy("obj01", CombatPhase.GRABBED)
         context = {
