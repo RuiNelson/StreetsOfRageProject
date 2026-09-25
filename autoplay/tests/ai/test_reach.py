@@ -1091,6 +1091,10 @@ def _connects(band, actor, enemy, verb_cls) -> bool:
     return reach.connects(band, actor, enemy, kinematics.connect_frames(verb_cls, actor, enemy))
 
 
+def _lands(band, actor, enemy, verb_cls) -> bool:
+    return reach.strike_lands(band, actor, enemy, kinematics.connect_frames(verb_cls, actor, enemy))
+
+
 class FramesUntilMeleeLandsTests(unittest.TestCase):
     """The clock the hold decision runs on -- see reach.frames_until_melee_lands.
 
@@ -1234,16 +1238,17 @@ class ConnectsBandTimelineTests(unittest.TestCase):
         self.assertTrue(reach.enemy_actionable(myself, closing, [closing]))
 
     def test_a_walking_enemy_never_loses_a_band_it_currently_occupies(self) -> None:
-        # The additive guarantee, swept: whatever the observed position
-        # offers, every velocity must still offer.
+        # The additive guarantee of ``connects``, swept, for the bands that do
+        # not read velocity themselves: whatever the observed position offers,
+        # every velocity must still offer. (The jump kick's own band reads it
+        # -- ``jump_kick.launch_hits`` wants the kick to land whether the body
+        # stops or walks on -- and strikes are judged by ``strike_lands``.)
         def _bands(actor, enemy) -> set:
             found = set()
             if _connects(reach.punch_would_connect, actor, enemy, Punch):
                 found.add("PUNCH")
             if _connects(reach.in_rear_band, actor, enemy, RearAttack):
                 found.add("REAR")
-            if _connects(reach.in_jump_attack_band, actor, enemy, JumpAttack):
-                found.add("JUMP_ATTACK")
             if _connects(reach.grab_would_connect, actor, enemy, GrabEnemy):
                 found.add("GRAB")
             if reach.enemy_actionable(actor, enemy, [enemy]):
@@ -1258,6 +1263,67 @@ class ConnectsBandTimelineTests(unittest.TestCase):
                 moving = _enemy(world_x=100 + dx, world_y=100, grunt_vel_x=vel)
                 with self.subTest(dx=dx, vel=vel):
                     self.assertTrue(baseline <= _bands(myself, moving))
+
+    def test_a_strike_never_lands_where_the_observed_position_misses(self) -> None:
+        # The no-whiff rule (``strike_lands``), swept: a velocity may withdraw
+        # a strike, never add one the target has to walk into.
+        myself = _myself(world_x=100, world_y=100, facing_left=False)
+        for dx in range(8, 130, 2):
+            still = _enemy(world_x=100 + dx, world_y=100)
+            for band, verb in (
+                (reach.melee_strike_would_connect, Punch),
+                (reach.in_rear_band, RearAttack),
+                (reach.in_jump_attack_band, JumpAttack),
+            ):
+                offered = _lands(band, myself, still, verb)
+                for vel in (-3.0, -2.0, -1.0, 1.0, 2.0, 3.0):
+                    moving = _enemy(world_x=100 + dx, world_y=100, grunt_vel_x=vel)
+                    with self.subTest(dx=dx, vel=vel, verb=verb.__name__):
+                        if not offered:
+                            self.assertFalse(_lands(band, myself, moving, verb))
+
+    def test_a_body_walking_in_close_is_still_struck(self) -> None:
+        # The regression the additive rule was written against, under the
+        # no-whiff rule: an enemy 20 px in front of Axel walking in stops at
+        # contact, which is still inside his band -- the punch stays.
+        myself = _myself(world_x=100, world_y=100, facing_left=False)
+        for character_id in (0, 1, 2):
+            actor = replace(myself, character_id=character_id)
+            closing = _enemy(world_x=120, world_y=100, grunt_vel_x=-2.0)
+            with self.subTest(character_id=character_id):
+                self.assertTrue(_lands(reach.melee_strike_would_connect, actor, closing, Punch))
+
+    def test_a_punch_waits_for_a_body_still_walking_in(self) -> None:
+        # dx=58 is outside Axel's band: it may stop there, and a punch thrown
+        # at it lands on nothing. Next tick, once it is in, it goes.
+        myself = _myself(world_x=100, world_y=100, facing_left=False)
+        arriving = _enemy(world_x=158, world_y=100, grunt_vel_x=-2.0)
+        self.assertFalse(_lands(reach.melee_strike_would_connect, myself, arriving, Punch))
+        arrived = _enemy(world_x=140, world_y=100, grunt_vel_x=-2.0)
+        self.assertTrue(_lands(reach.melee_strike_would_connect, myself, arrived, Punch))
+
+    def test_a_punch_is_not_thrown_at_a_body_walking_out_of_reach(self) -> None:
+        # 48 px out, leaving at 3 px an update: by the time the hit arms it is
+        # past Axel's 50.
+        myself = _myself(world_x=100, world_y=100, facing_left=False)
+        leaving = _enemy(world_x=148, world_y=100, grunt_vel_x=3.0)
+        self.assertFalse(_lands(reach.melee_strike_would_connect, myself, leaving, Punch))
+        self.assertTrue(
+            _lands(reach.melee_strike_would_connect, myself, _enemy(world_x=148, world_y=100), Punch)
+        )
+
+    def test_nothing_lands_on_a_body_on_the_floor(self) -> None:
+        # The ordinary knockdown ($0300) runs no contact test.
+        myself = _myself(world_x=100, world_y=100, facing_left=False)
+        down = _enemy(world_x=130, world_y=100, combat_phase=CombatPhase.KNOCKDOWN)
+        for band, verb in (
+            (reach.melee_strike_would_connect, Punch),
+            (reach.in_rear_band, RearAttack),
+            (reach.in_jump_attack_band, JumpAttack),
+        ):
+            with self.subTest(verb=verb.__name__):
+                self.assertFalse(_lands(band, myself, down, verb))
+        self.assertFalse(reach.enemy_actionable(myself, down, [down]))
 
     def test_adams_slow_chord_reaches_a_target_walking_into_it(self) -> None:
         # Adam's chord damages from frame 21 to frame 38 -- more than half a

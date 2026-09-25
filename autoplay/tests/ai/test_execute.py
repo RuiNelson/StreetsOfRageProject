@@ -1432,6 +1432,31 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
         held = gamepad.held
         self.assertFalse(held & RIGHT, f"pushed into the camera clamp: {held:#x}")
 
+    def test_turns_to_an_enemy_behind_it_on_the_clamp(self) -> None:
+        # Pinned on the right clamp facing left, the enemy behind it past the
+        # edge: pressing RIGHT turns the actor ($43AA only undoes the step).
+        # Stripping it left the actor facing away for good.
+        actor = _myself(world_x=1504, world_y=64, facing_left=True)
+        enemy = _enemy(world_x=1530, world_y=64)
+        camera = CameraRange(left=1248, right=1504, top=0, bottom=112, reach_left=1248, reach_right=1504)
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, enemy, camera, Stage(level_index=0, direction="right")}, gamepad)
+
+        self.assertTrue(gamepad.held & RIGHT, f"never turned: {gamepad.held:#x}")
+
+    def test_once_turned_it_does_not_hold_into_the_clamp(self) -> None:
+        actor = _myself(world_x=1504, world_y=64, facing_left=False)
+        enemy = _enemy(world_x=1600, world_y=64)
+        camera = CameraRange(left=1248, right=1504, top=0, bottom=112, reach_left=1248, reach_right=1504)
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        _settle(verb, {actor, enemy, camera, Stage(level_index=0, direction="right")}, gamepad)
+
+        self.assertFalse(gamepad.held & RIGHT, f"pushed into the camera clamp: {gamepad.held:#x}")
+
     def test_still_advances_when_the_camera_has_room(self) -> None:
         actor = _myself(world_x=1400, world_y=64)
         camera = CameraRange(left=1216, right=1472, top=0, bottom=112)

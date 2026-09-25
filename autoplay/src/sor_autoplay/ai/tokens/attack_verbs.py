@@ -146,16 +146,16 @@ class MeleeWeaponAttack(Attack):
     because nothing here ever branched on which of the three fired — every
     could_*, emergency and execute handler was already the identical shared
     function, keyed by nothing but the class -- ``weapon_type`` carries the
-    one real distinction. For the two weapon groups whose own melee reach has
-    not been separately measured (knife/bottle, pepper), ``could_melee_
-    weapon_attack`` reuses the unarmed punch band as the closest available
-    evidence; bat/pipe uses its own measured 36px reach
-    (weapons-range-and-damage.md), shorter than any character's unarmed
-    punch_outer_x.
+    one real distinction, and ``reach.melee_strike_would_connect`` is where it
+    is read: a bat or pipe swing lands only near its peak (Axel 36, Blaze 53;
+    nearer is under the swing), the knife's B is a stab only while its target
+    is in the knife's cone (``$3084``; out of it B throws), knife and bottle
+    otherwise keep the punch's band (unmeasured), and pepper spray never
+    strikes -- its B throws the can (``ThrowPepper``).
 
     Produced by ``could_melee_weapon_attack`` once per actor holding one of
-    these weapon types, for an enemy ``reach.punch_would_connect`` names as
-    connecting.
+    these weapon types, for an enemy the strike lands on under every timing
+    (``reach.strike_lands``).
 
     Raises emergency: (Enemy when in a punishable phase)×60, Enemy×20.
     """
@@ -179,14 +179,18 @@ class WeaponAttacks(Attack, ABC):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ThrowKnife(WeaponAttacks):
-    """Throw the held knife at an out-of-melee-range enemy.
+    """Throw the held knife at an enemy B would not stab.
 
-    Produced by ``could_throw_knife`` once per on-screen enemy, when the
-    actor holds a knife (type $08) and that enemy is beyond melee but
-    within knife range -- never just the nearest; determine_priority_
-    verb picks among the candidates.
+    The knife's B is only a throw while nothing at all stands in its cone
+    (``$3084``: in front, under 144 px, on a lane in ``[y - 12, y + 12)`` --
+    ``PlayableCharacter.knife_cone_occupied``); with anything there it is the
+    stab. So this is produced by ``could_throw_knife`` once per on-screen
+    enemy in front, on the knife's lane band (``decide.KNIFE_THROW_LANE_Y``),
+    now and at the interception, while the cone is empty -- which puts every
+    target on the actor's own lane 144 px out or more. The old 40-90 px
+    envelope was a stab into the air every time.
 
-    Raises emergency: (Enemy when beyond melee and within knife range)×25,
+    Raises emergency: (Enemy when the throw meets it)×25,
     closer scoring higher (distance-scored; see
     priority._emergency_thrown_weapon).
     """
@@ -204,8 +208,8 @@ class ThrowPepper(WeaponAttacks):
     knife throw does (items-and-weapons.md), making it a crowd-control tool.
 
     Produced by ``could_throw_pepper`` once per on-screen enemy, when the
-    actor holds pepper spray (type $0C) and that enemy is beyond melee but
-    within throw range (reusing ``ThrowKnife``'s measured range constants —
+    actor holds pepper spray (type $0C) and that enemy is in front, beyond
+    melee but within throw range (the envelope the knife used to have --
     pepper's own effective throw range has not been separately measured) --
     never just the nearest; determine_priority_verb picks among the
     candidates.

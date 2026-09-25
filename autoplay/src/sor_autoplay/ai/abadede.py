@@ -248,11 +248,13 @@ def _hi(value: float) -> int:
 
 @dataclass(frozen=True, slots=True)
 class PunchSpec:
-    """The actor's punch: its box's X reach ahead, the live updates, the lock."""
+    """The actor's punch: its box's X reach ahead, the live updates, the lock
+    -- and what a hit takes off (``+$34``: the punch's 1, a weapon's own)."""
 
     box: tuple[int, int]
     live: tuple[int, int]
     lock: int = PUNCH_LOCK_UPDATES
+    damage: int = 1
 
 
 def punch_spec(character_id: int | None) -> PunchSpec:

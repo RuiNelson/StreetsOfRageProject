@@ -556,14 +556,20 @@ timings and, for the moves that are really approaches, the ROM's own
 walk-speed tables. Two rules keep it honest, and both were learned by
 sweeping the pipeline and comparing:
 
-- **A prediction may only ever add an attack, never take one away.** An
-  attack is not an instant — a punch damages for 10 frames, Adam's chord for
-  18 — so the band is tested at the observed position *as well as* at the
-  frame the hit arms, and the union decides. Judging only the future instant
+- **A strike must land whatever the target does** (user: "A IA dá muitos
+  ataques em falso, a IA só deve atacar quando esse ataque resultar"). The
+  band is tested at the observed position *and* at the frame the hit arms,
+  the target carried there by its own velocity at 30 Hz, and both must hold
+  (`reach.strike_lands`): it may stop where it stands, or keep walking. This
+  replaced the older rule for strikes, "a prediction may only ever add an
+  attack" (the union), which offered punches at bodies that then stopped
+  short of the band or walked out of it -- the whiffs. That older rule was
+  written against a real regression: judging only the future instant
   projected an enemy walking into Axel from 20px into the punch's own inner
-  dead zone: the strike vanished, the walk verb took the tick, and the actor
-  walked into enemies it should have been hitting, reaching for the slow
-  point-blank chord instead.
+  dead zone. It stays fixed, because an approach is never projected past
+  contact (13 px), which is inside every character's band. The grab walk-in
+  keeps the union (`reach.connects`): its arrival is contact, and an early
+  one is only more walking.
 - **A move leads by its dead time, not by its whole reach.** A jump kick
   leads by the 5-frame crouch it spends on the ground, because that is the
   part the launch decision cannot see; how far the flight itself carries is

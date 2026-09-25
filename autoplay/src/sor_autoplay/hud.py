@@ -18,7 +18,7 @@ from .ai.loop import VerbState
 from .ai.pathfind import Path as RoutePath
 from .ai.reach import CLOSING_ENEMY_THREAT_FRAMES
 from .ai.tokens import Verb
-from .ai.tokens.character import PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
+from .ai.tokens.character import PUNCH_RANGE_Y, punch_inner_x, punch_outer_x, punch_usable_inner_x
 from .attack_ranges import AttackRange
 from .hitboxes import Hitbox
 from .phases import CombatPhase, is_dangerous, phase_color
@@ -1229,7 +1229,10 @@ def _display_attack_ranges(entity: MapEntity) -> tuple[AttackRange, ...]:
     punch = AttackRange(
         shape_id=0,
         animation=-1,
-        forward_min=punch_inner_x(entity.character_id),
+        forward_min=max(
+            punch_inner_x(entity.character_id),
+            punch_usable_inner_x(entity.character_id, entity.held_type),
+        ),
         forward_max=punch_outer_x(entity.character_id, entity.held_type),
         lane_min=-PUNCH_RANGE_Y,
         lane_max=PUNCH_RANGE_Y,

@@ -66,6 +66,7 @@ from .tokens import (
 from .tokens import AnimationInProgress, CameraRange, DebugNoFood, DebugNoPolice, Stage
 from .tokens import Breakable, Projectile
 from .tokens import PUNCH_RANGE_Y, punch_outer_x
+from .tokens.character import knife_cone_contains
 from .tokens import (
     PLAYER_MAX_HEALTH,
     HealthPickup,
@@ -82,6 +83,7 @@ from .tokens import Context, Token, find, find_all
 from .tokens import (
     EngageAbadede,
     EngageMrX,
+    FightMrXOffice,
     EngageTwins,
     EngageAntonio,
     EngageBongo,
@@ -111,10 +113,20 @@ POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE = 35.0
 # plans that never need it (souther.py, antonio.py): a crowd is answered with
 # a hold, and a boss with the hold loop.
 
+# Pepper's throw envelope: beyond melee, inside the can's arc. Unmeasured;
+# the knife's old numbers, kept for the can alone (``could_throw_pepper``).
 KNIFE_RANGE_X = 90
 KNIFE_RANGE_Y = 16
 KNIFE_MELEE_X = 40
 PEPPER_SPRAY_TYPE = 0x0C
+# The knife's throw (``$3084``/``$21E6``): it happens only while nothing at all
+# stands in the knife's cone (``PlayableCharacter.knife_cone_occupied``), so
+# every target on a lane under 12 px off is 144 px out or more. It leaves the
+# hand 48 px out and flies level at 16 px an update until it meets a body, so
+# the reach is the screen; the lane it can meet a body on is kept to the
+# punch box's +-8 (the knife's own lane extent is unmeasured).
+KNIFE_THROW_LANE_Y = 8
+KNIFE_THROW_MIN_X = 48
 
 HEALTH_PICKUP_MISSING_MIN = 16
 HEALTH_CRITICAL_PERCENT = 40.0
@@ -190,21 +202,27 @@ def _blocked(context: Context, actor: PlayableCharacter) -> bool:
     return find(context, AnimationInProgress, slot=actor.slot) is not None
 
 
-def _targets_in_reach(context: Context, actor: PlayableCharacter, band, verb_cls) -> set[str]:
-    """Live enemies ``verb_cls`` would connect with from here, right now.
+def _targets_in_reach(
+    context: Context, actor: PlayableCharacter, band, verb_cls, *, strike: bool = True
+) -> set[str]:
+    """Live enemies ``verb_cls`` would land on from here, right now.
 
-    Tested across the move's own timeline (``reach.connects``,
-    ``kinematics.connect_frames(verb_cls, ...)``) rather than only at the
-    observed instant, so an enemy walking *into* range arms the move as it
-    arrives instead of after. Shared by every ``could_*`` that asks "can
-    this move reach that enemy" so the band is computed identically
-    wherever it is asked -- see ``reach.connects``.
+    A strike (``strike=True``: the punch, the weapon's move, the rear chord,
+    the jump kick) must land under every timing the target can take --
+    stopping where it stands, or keeping its velocity until the hit arms --
+    and never on a body that cannot be struck (``reach.strike_lands``: the
+    no-whiff rule). A walk-in (``GrabEnemy``, ``strike=False``) keeps the
+    older, additive test over the move's timeline (``reach.connects``): its
+    arrival is contact, and an early one is only more walking. Shared by every
+    ``could_*`` that asks "can this move reach that enemy" so the band is
+    computed identically wherever it is asked.
     """
 
+    test = reach.strike_lands if strike else reach.connects
     return {
         enemy.slot
         for enemy in reach.live_enemies(context)
-        if reach.connects(band, actor, enemy, kinematics.connect_frames(verb_cls, actor, enemy))
+        if test(band, actor, enemy, kinematics.connect_frames(verb_cls, actor, enemy))
     }
 
 
@@ -237,10 +255,16 @@ def _could_melee_strike(
     concrete ``Verb`` -- ``Punch`` ignores the weapon type it is passed,
     ``MeleeWeaponAttack`` carries it as its own ``weapon_type`` field.
 
-    Never at Jack, armed or not: ``EngageJack`` takes him in a hold from
-    where none of his axes reaches (``jack.py``). A strike on him is a trade
-    with the juggle in front of him -- the baseline lost 11 hits of 13 to it --
-    and its ``+$34`` turns the walk-in's grab contact into a hit.
+    Never at Jack, armed or not: ``EngageJack`` owns him (``jack.py``), and
+    its lookahead is where a strike on him is timed -- the punch, and armed
+    the weapon's own move, which lands through his juggle because a live
+    strike box meets an axe before the axe meets the actor. A strike thrown
+    blind is a trade with the juggle -- the baseline lost 11 hits of 13 to it
+    -- and its ``+$34`` turns the walk-in's grab contact into a hit.
+
+    Every strike here passes the no-whiff rule (``reach.strike_lands``): the
+    band holds where the target stands and where it walks to before the hit
+    arms, and the body can be struck at all (not down on the floor).
     """
 
     verbs: set[Token] = set()
@@ -264,7 +288,7 @@ def _could_melee_strike(
             continue
         # _targets_in_reach already carries the "in front (within tolerance)
         # and inside the band" judgment this used to recompute inline.
-        for target_slot in _targets_in_reach(context, actor, reach.punch_would_connect, Punch):
+        for target_slot in _targets_in_reach(context, actor, reach.melee_strike_would_connect, Punch):
             target = find(context, Enemy, slot=target_slot)
             # Jack is taken in a hold from his back or out of his axes' way
             # (jack.py); EngageJack owns him.
@@ -427,7 +451,7 @@ def could_grab_enemy(context: Context) -> Context:
             # $AAA0 aborts the grab code unless the two bodies are within 8px
             # of elevation, so an airborne actor cannot take a hold at all.
             continue
-        in_reach = _targets_in_reach(context, actor, reach.grab_would_connect, GrabEnemy)
+        in_reach = _targets_in_reach(context, actor, reach.grab_would_connect, GrabEnemy, strike=False)
         threatening = reach.incoming_melee_targets(context, actor)
         on_screen = reach.on_screen_enemies(context)
         for enemy in on_screen:
@@ -1655,11 +1679,16 @@ def could_engage_mr_x(context: Context) -> Context:
     frames included), armed or not: ``$AAA0``'s grab never reads the weapon.
     ``mr_x_plan.plan`` picks the stick and the punch every tick; the hold loop
     is ``could_hold_actions``'s (``mr_x_plan.hold_step``).
+
+    ``EngageMrX`` only ever names a live Mr. X. With none on the map and his
+    helpers up (the office's first waves) the one verb is ``FightMrXOffice``,
+    aimed at the nearest helper: the same plan, with nobody else in it.
     """
 
     verbs: set[Token] = set()
     targets = live_mr_x(context)
-    if not targets and not office_helpers(context):
+    helpers = office_helpers(context)
+    if not targets and not helpers:
         return verbs
     for actor in _actors(context):
         if _blocked(context, actor):
@@ -1675,7 +1704,11 @@ def could_engage_mr_x(context: Context) -> Context:
         if not targets:
             # The office's first waves: he is not there yet, and the room hands
             # off to him only once they are dead.
-            verbs.add(EngageMrX(actor_slot=actor.slot, target_slot=""))
+            nearest = min(
+                helpers,
+                key=lambda g: (abs(g.world_x - actor.world_x) + abs(g.world_y - actor.world_y), g.slot),
+            )
+            verbs.add(FightMrXOffice(actor_slot=actor.slot, target_slot=nearest.slot))
     return verbs
 
 
@@ -1938,29 +1971,72 @@ def thrown_weapon_impact_point(actor: PlayableCharacter, enemy: Enemy, verb_cls)
     return kinematics.target_at_impact(verb_cls, actor, enemy)
 
 
-def _in_throw_envelope(actor: PlayableCharacter, target: Enemy) -> bool:
-    """Beyond melee, inside throw range, at this exact position."""
+def _in_throw_envelope(actor: PlayableCharacter, target: Enemy, verb_cls=ThrowPepper) -> bool:
+    """In front, and where the thrown weapon meets a body, at this position.
 
+    B is read with the facing the actor already has (a turn on the same
+    press is sampled after ``$3084``), so a target behind is a throw the
+    other way. The knife flies level to the screen's edge on a lane band of
+    ``KNIFE_THROW_LANE_Y``; the pepper can's arc keeps the old envelope."""
+
+    if not reach.enemy_in_front(actor, target):
+        return False
     dx = abs(target.world_x - actor.world_x)
     dy = abs(target.world_y - actor.world_y)
+    if verb_cls is ThrowKnife:
+        return dy <= KNIFE_THROW_LANE_Y and dx >= KNIFE_THROW_MIN_X
     if dy > KNIFE_RANGE_Y:
         return False
     return KNIFE_MELEE_X < dx <= KNIFE_RANGE_X
 
 
-def thrown_weapon_would_connect(
-    actor: PlayableCharacter, enemy: Enemy, verb_cls
-) -> bool:
-    """True when the throw is worth making, judged now *or* at the impact.
+def knife_would_stab(actor: PlayableCharacter, context: Context | None = None) -> bool:
+    """Whether the knife's B, pressed now, is the stab rather than the throw.
 
-    The union, like every other band in this pipeline
-    (``inference.check_for_targets_in_reach``): the prediction may add a
-    throw at a target that will have walked into the envelope, and may never
-    withdraw one the observed position already offers.
+    The ROM's own answer is ``knife_cone_occupied``, read off the object
+    table. Every object the context knows of is tested as well -- enemies,
+    items, props, projectiles, which that scan counts all the same -- so a
+    context built without the table still sees the body the knife is aimed
+    at. Players are not in the scan (their slots sit before it).
     """
 
-    return _in_throw_envelope(actor, enemy) or _in_throw_envelope(
-        actor, thrown_weapon_impact_point(actor, enemy, verb_cls)
+    if actor.knife_cone_occupied:
+        return True
+    if context is None:
+        return False
+    for token in context:
+        if isinstance(token, PlayableCharacter) or not isinstance(
+            token, (Enemy, Pickup, Weapon, Breakable, Projectile)
+        ):
+            continue
+        if knife_cone_contains(
+            actor.world_x, actor.world_y, actor.facing_left, token.world_x, token.world_y
+        ):
+            return True
+    return False
+
+
+def thrown_weapon_would_connect(
+    actor: PlayableCharacter, enemy: Enemy, verb_cls, context: Context | None = None
+) -> bool:
+    """True when B really throws, and the throw meets ``enemy`` whatever it does.
+
+    The no-whiff rule, as for the strikes (``reach.strike_lands``): in the
+    envelope now *and* at the interception, and never at a body a throw
+    passes through (``reach.can_be_struck``). For the knife, B is a throw only
+    while its cone is empty (``knife_would_stab``): with anything in it --
+    the target itself 40-90 px out, the old envelope -- B is the stab, into
+    the air. The flight crosses the screen, and the candidates are the
+    on-screen enemies (``_could_throw_ranged_weapon``).
+    """
+
+    if not reach.can_be_struck(enemy):
+        return False
+    if verb_cls is ThrowKnife:
+        if knife_would_stab(actor, context):
+            return False
+    return _in_throw_envelope(actor, enemy, verb_cls) and _in_throw_envelope(
+        actor, thrown_weapon_impact_point(actor, enemy, verb_cls), verb_cls
     )
 
 
@@ -1982,7 +2058,7 @@ def _could_throw_ranged_weapon(context: Context, *, weapon_type: int, verb_cls) 
         if actor.held_weapon_type != weapon_type:
             continue
         for enemy in enemies:
-            if thrown_weapon_would_connect(actor, enemy, verb_cls):
+            if thrown_weapon_would_connect(actor, enemy, verb_cls, context):
                 verbs.add(verb_cls(actor_slot=actor.slot, target_slot=enemy.slot))
     return verbs
 
@@ -1992,11 +2068,11 @@ def could_throw_knife(context: Context) -> Context:
 
 
 def could_throw_pepper(context: Context) -> Context:
-    """Mirrors ``could_throw_knife``'s range gating: items-and-weapons.md
-    confirms pepper spray is also attack-thrown (``$21E6``, command 3), but
-    its own effective throw range has not been separately measured, so this
-    reuses ``KNIFE_MELEE_X``/``KNIFE_RANGE_X``/``KNIFE_RANGE_Y`` as the
-    closest available evidence."""
+    """Pepper spray is attack-thrown on every B (``$3084`` never stabs with
+    it; ``$21E6``, command 3), but its own effective throw range has not been
+    separately measured, so this keeps the envelope the knife once used
+    (``KNIFE_MELEE_X``/``KNIFE_RANGE_X``/``KNIFE_RANGE_Y``) as the closest
+    available evidence, in front of the actor only."""
 
     return _could_throw_ranged_weapon(context, weapon_type=PEPPER_SPRAY_TYPE, verb_cls=ThrowPepper)
 

@@ -363,8 +363,10 @@ class EngageMrX(Walk):
     Produced by ``could_engage_mr_x`` once per live ``MrX`` (type ``$35``)
     while the actor is free to move (not mid-animation, not held, not holding
     a body, not airborne) -- armed or not: ``$AAA0``'s grab never reads the
-    weapon -- and once with no target (``target_slot`` "") while his office's
-    first waves are up (``MrXOffice``). It is the whole fight: the strike,
+    weapon. Never without him (user: "A IA emite EngageMrX, mesmo quando o
+    Mr. X não está no contexto"): the office's waves before he appears are
+    ``FightMrXOffice``'s, which plays the same lookahead with no Mr. X in
+    it. It is the whole fight: the strike,
     grab, hop, walk-in, retreat and rear-chord verbs stand down for him and
     his Garcias, and every tick's stick and punch are ``mr_x_plan.plan``'s --
     a lookahead over his own AI, every bullet (``mr_x.py``) and every Garcia
@@ -375,12 +377,34 @@ class EngageMrX(Walk):
     loop after the grab is ``mr_x_plan.hold_step``'s.
 
     Raises emergency: a live Mr. X×62, plus the boss raise (14) -- 76, the
-    tier of the other boss engages; the same 76 in the office's first waves.
+    tier of the other boss engages.
     """
 
     priority: int = 24
     actor_slot: str
     target_slot: str  # MrX.slot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FightMrXOffice(Walk):
+    """Fight the office's Garcias before Mr. X is in the room.
+
+    Produced by ``could_engage_mr_x`` while ``MrXOffice`` is up, his helpers
+    (the office's type-``$22`` Garcias) are alive and no live ``MrX`` is on
+    the map -- the office's first waves, before the room hands off to him.
+    Every tick is ``mr_x_plan.plan``'s with no Mr. X in it: the same Garcia
+    lookahead (``garcia.py``), the punch and rear attack only when they land
+    under every timing, and the home on the right clamp, facing the wall,
+    that the fight with him starts from. It used to be an ``EngageMrX`` with
+    an empty target, which read as an engage on a boss who was not there.
+
+    Raises emergency: the Mr. X tier, 76 -- the generic verbs stand down for
+    his helpers, so nothing else would answer them.
+    """
+
+    priority: int = 24
+    actor_slot: str
+    target_slot: str  # the nearest office Garcia's slot
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

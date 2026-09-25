@@ -135,6 +135,7 @@ from .tokens import (
 from .walk_verbs import (
     EngageAbadede,
     EngageMrX,
+    FightMrXOffice,
     EngageTwins,
     EngageAntonio,
     EngageBongo,

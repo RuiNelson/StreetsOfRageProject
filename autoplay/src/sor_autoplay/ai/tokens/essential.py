@@ -29,12 +29,63 @@ class Stage(Essential):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CameraRange(Essential):
-    """The camera's visible world rectangle."""
+    """Where the actor can stand now, what the screen shows, and how far the
+    corridor lets it go (user: "A IA não tem bem noção dos limites
+    esquerda/direita de câmara (janela visível) e até onde pode se deslocar
+    no mundo do jogo").
+
+    ``left``/``right`` are ``$43AA``'s walk clamp, ``camera_x + $20 .. +
+    $120``: no player origin stands outside it this frame. The visible screen
+    is 32 px wider on each side (``visible_left``/``visible_right``,
+    ``reach.SCREEN_STRIP_X``). ``reach_left``/``reach_right`` are the same
+    clamp at the camera's own X bounds (``$FFE01E``/``$FFE01A`` + ``$20`` /
+    ``+ $120``): the camera follows the player only between them, so that is
+    as far as a walk can ever take the actor before the next wave gate opens.
+    ``None`` when the bounds were not read; then only the clamp is known.
+    """
 
     left: float
     right: float
     top: float
     bottom: float
+    reach_left: float | None = None
+    reach_right: float | None = None
+
+    @property
+    def visible_left(self) -> float:
+        return self.left - CAMERA_CLAMP_LEFT
+
+    @property
+    def visible_right(self) -> float:
+        return self.right + CAMERA_CLAMP_LEFT
+
+    @property
+    def world_left(self) -> float:
+        """The farthest left an origin can get in this corridor."""
+
+        return self.left if self.reach_left is None else min(self.left, self.reach_left)
+
+    @property
+    def world_right(self) -> float:
+        """The farthest right an origin can get in this corridor."""
+
+        return self.right if self.reach_right is None else max(self.right, self.reach_right)
+
+    @property
+    def scrolls_left(self) -> bool:
+        """Walking into the left clamp can still move the camera."""
+
+        return self.world_left < self.left
+
+    @property
+    def scrolls_right(self) -> bool:
+        return self.world_right > self.right
+
+
+# $43AA's clamp in screen X: the origin stays in $20..$120 of the 320 px
+# screen, so the visible screen reaches $20 past it on each side.
+CAMERA_CLAMP_LEFT = 0x20
+CAMERA_CLAMP_RIGHT = 0x120
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

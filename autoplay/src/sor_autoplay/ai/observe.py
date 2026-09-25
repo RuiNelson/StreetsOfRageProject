@@ -20,6 +20,7 @@ from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 from sor_autoplay.world_map import MapEntity
 
 from .tokens import Myself, Partner
+from .tokens.character import knife_cone_contains
 from .tokens import Boss, Enemy, Grunt, Jack, Nora, enemy_class_for_type
 from .tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, MrXOffice, Stage
 from .tokens import Breakable, Pit, Press, Projectile, Wall
@@ -165,6 +166,32 @@ def _find_player_entity(snapshot: GameSnapshot, player_index: int) -> MapEntity 
     return None
 
 
+def _corridor_reach(world_map) -> dict[str, float]:
+    """``CameraRange.reach_left``/``reach_right``: ``$43AA``'s clamp at the
+    camera's own X bounds (``$FFE01E``/``$FFE01A``), as far as walking can
+    scroll it before the next wave gate. Empty when the bounds were not read,
+    or read as nonsense (a max below the min)."""
+
+    lo = getattr(world_map, "scroll_min_x", None)
+    hi = getattr(world_map, "scroll_max_x", None)
+    if lo is None or hi is None or hi < lo:
+        return {}
+    return {
+        "reach_left": float(lo + world_map.camera_left),
+        "reach_right": float(hi + world_map.camera_right),
+    }
+
+
+def knife_cone_occupied(entity: MapEntity, front_scan) -> bool:
+    """``$3084``'s knife test for this player over the snapshot's own scan of
+    the object table (``WorldMap.front_scan``)."""
+
+    return any(
+        knife_cone_contains(entity.world_x, entity.world_y, entity.facing_left, x, y)
+        for _type, x, y in front_scan
+    )
+
+
 def _build_playable_character(
     cls: type[Myself] | type[Partner],
     *,
@@ -172,6 +199,7 @@ def _build_playable_character(
     entity: MapEntity,
     hold_ticks: int = 0,
     ground_tracker: GroundTracker | None = None,
+    front_scan=(),
 ) -> Myself | Partner:
     slot = f"P{player_snapshot.index}"
     if ground_tracker is not None:
@@ -226,6 +254,7 @@ def _build_playable_character(
         anim=entity.anim,
         anim_frame=entity.anim_frame,
         anim_countdown=entity.anim_countdown,
+        knife_cone_occupied=knife_cone_occupied(entity, front_scan),
         fine_x=entity.fine_x,
         fine_y=entity.fine_y,
         raw=entity.raw,
@@ -304,6 +333,7 @@ def generate_direct_observation_tokens(
                 entity=myself_entity,
                 hold_ticks=myself_hold_ticks,
                 ground_tracker=ground_tracker,
+                front_scan=getattr(snapshot.world_map, "front_scan", ()),
             )
         )
         animation = _maybe_animation_in_progress(myself_entity)
@@ -331,6 +361,7 @@ def generate_direct_observation_tokens(
                     entity=partner_entity,
                     hold_ticks=partner_hold_ticks,
                     ground_tracker=ground_tracker,
+                    front_scan=getattr(snapshot.world_map, "front_scan", ()),
                 )
             )
             animation = _maybe_animation_in_progress(partner_entity)
@@ -559,6 +590,7 @@ def generate_direct_observation_tokens(
             right=snapshot.world_map.camera_x + snapshot.world_map.camera_right,
             top=snapshot.world_map.camera_top,
             bottom=snapshot.world_map.camera_bottom,
+            **_corridor_reach(snapshot.world_map),
         )
     )
     context.add(

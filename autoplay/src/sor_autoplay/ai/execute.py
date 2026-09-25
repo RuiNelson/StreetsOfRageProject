@@ -19,6 +19,7 @@ from .tokens import (
     CounterGrab,
     EngageAbadede,
     EngageMrX,
+    FightMrXOffice,
     EngageTwins,
     EngageAntonio,
     EngageBongo,
@@ -52,6 +53,7 @@ from .tokens import (
     punch_usable_inner_x,
 )
 from .tokens import Abadede, Antonio, Bongo, Enemy, Jack, MrX, Onihime, Souther
+from .tokens.character import KNIFE_TYPE
 from .tokens import CameraRange, Stage
 from .tokens import Breakable, Pit, Projectile
 from .tokens import Pickup, Weapon
@@ -425,7 +427,9 @@ def _clamp_mask_to_lane(context: Context, from_y: int, mask: int) -> int:
     return mask
 
 
-def _clamp_mask_to_camera(context: Context, from_x: int, mask: int) -> int:
+def _clamp_mask_to_camera(
+    context: Context, from_x: int, mask: int, *, facing_left: bool | None = None
+) -> int:
     """Never hold into the camera's walk clamp.
 
     ``$43AA`` keeps the player in ``camera_x + $20 .. + $120``. WalkToAdvance
@@ -434,20 +438,30 @@ def _clamp_mask_to_camera(context: Context, from_x: int, mask: int) -> int:
     first-level wave gate at world x=1504, with a sidewalk trash can in
     frame that is not even an object. Holding the blocked direction does
     nothing and looks like the actor is stuck on that scenery.
+
+    Except while the actor faces *away* from that edge (``facing_left``
+    given): the press then turns it -- ``$2D00`` writes the walk and its
+    facing, ``$43AA`` only undoes the step -- and an enemy behind an actor
+    pinned on the clamp is otherwise never faced. Once turned, the press is
+    stripped again.
     """
 
     camera = find(context, CameraRange)
     if camera is None:
         return mask
-    if from_x >= camera.right - MOVE_DEADBAND_X:
+    if from_x >= camera.right - MOVE_DEADBAND_X and facing_left is not True:
         mask &= ~RIGHT_MASK
-    if from_x <= camera.left + MOVE_DEADBAND_X:
+    if from_x <= camera.left + MOVE_DEADBAND_X and facing_left is not False:
         mask &= ~LEFT_MASK
     return mask
 
 
-def _clamp_mask(context: Context, from_x: int, from_y: int, mask: int) -> int:
-    return _clamp_mask_to_camera(context, from_x, _clamp_mask_to_lane(context, from_y, mask))
+def _clamp_mask(
+    context: Context, from_x: int, from_y: int, mask: int, *, facing_left: bool | None = None
+) -> int:
+    return _clamp_mask_to_camera(
+        context, from_x, _clamp_mask_to_lane(context, from_y, mask), facing_left=facing_left
+    )
 
 
 # The HUD wants to draw the planner's actual output, but every routed
@@ -472,8 +486,13 @@ def _routed_mask(
     enough_contact: float = 0.0,
     maximize_contact: bool = False,
     fallback,
+    turn_at_clamp: bool = False,
 ) -> int:
     """First vector of a planned route, or ``fallback()`` when there is none.
+
+    ``turn_at_clamp`` keeps a press into the camera's walk clamp while the
+    actor faces away from it: the press turns it to a target behind it there
+    (``_clamp_mask_to_camera``).
 
     Only the **first** vector, and the whole route is thrown away and rebuilt
     next tick. That looks wasteful and is not: the world moves under a plan
@@ -502,7 +521,13 @@ def _routed_mask(
     mask = nav.first_vector_mask(path)
     if not mask and not goal.is_reached(nav.body_rect(actor)):
         mask = fallback()
-    return _clamp_mask(context, actor.world_x, actor.world_y, mask)
+    return _clamp_mask(
+        context,
+        actor.world_x,
+        actor.world_y,
+        mask,
+        facing_left=actor.facing_left if turn_at_clamp else None,
+    )
 
 
 def _movement_mask(
@@ -513,8 +538,13 @@ def _movement_mask(
     to_y: int,
     *,
     ignore_slots: frozenset[str] = frozenset(),
+    facing_left: bool | None = None,
 ) -> int:
-    """Build a D-pad mask, clamped to lane bounds and steered around props."""
+    """Build a D-pad mask, clamped to lane bounds and steered around props.
+
+    ``facing_left``, when given, lets a press into the camera clamp through
+    while the actor faces away from it -- the turn (``_clamp_mask_to_camera``).
+    """
 
     to_y = _clamp_target_y(context, to_y)
     camera = find(context, CameraRange)
@@ -627,7 +657,7 @@ def _movement_mask(
     elif from_y - to_y > MOVE_DEADBAND_Y:
         mask |= UP_MASK
 
-    return _clamp_mask(context, from_x, from_y, mask)
+    return _clamp_mask(context, from_x, from_y, mask, facing_left=facing_left)
 
 
 def _face_toward_mask(actor: Myself | Partner, target_x: int) -> int:
@@ -749,7 +779,7 @@ def _dead_zone_stop_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> 
     if dead_zone <= 0:
         return stop_dx
     inside = dead_zone - REACH_SAFETY_MARGIN
-    floor = punch_usable_inner_x(actor.character_id) + WALK_TO_ENEMY_STOP_BUFFER
+    floor = punch_usable_inner_x(actor.character_id, actor.held_weapon_type) + WALK_TO_ENEMY_STOP_BUFFER
     return max(floor, min(stop_dx, inside))
 
 
@@ -1001,7 +1031,12 @@ def _enemy_stop_dx(actor: Myself | Partner, target: Enemy) -> int:
     """
 
     outer = punch_outer_x(actor.character_id, actor.held_weapon_type)
-    inner = punch_inner_x(actor.character_id)
+    # A bat or pipe lands only near the swing's peak: its inner edge, not the
+    # fist's, is the nearest worth standing.
+    inner = max(
+        punch_inner_x(actor.character_id),
+        punch_usable_inner_x(actor.character_id, actor.held_weapon_type),
+    )
     return _dead_zone_stop_dx(actor, target, max(inner, outer - WALK_TO_ENEMY_STOP_BUFFER))
 
 
@@ -1069,7 +1104,7 @@ def state_machine_walk_to_near_enemy(
         _approach_lane_y(actor, target, context, alongside=alongside),
         stop_dx=stop_dx,
         lane_slack=PUNCH_RANGE_Y,
-        inner_dx=punch_usable_inner_x(actor.character_id),
+        inner_dx=punch_usable_inner_x(actor.character_id, actor.held_weapon_type),
         side=side,
     )
     # The target stops counting as a hazard only once the actor is alongside
@@ -1087,7 +1122,10 @@ def state_machine_walk_to_near_enemy(
 
     def straight_line() -> int:
         target_x, target_y = _walk_to_near_enemy_target(actor, target, context)
-        return _movement_mask(context, actor.world_x, actor.world_y, target_x, target_y)
+        return _movement_mask(
+            context, actor.world_x, actor.world_y, target_x, target_y,
+            facing_left=actor.facing_left,
+        )
 
     _hold_steered(
         gamepad,
@@ -1099,6 +1137,7 @@ def state_machine_walk_to_near_enemy(
             dangers=dangers,
             enough_contact=nav.MIN_STRIKE_CONTACT_Y,
             fallback=straight_line,
+            turn_at_clamp=True,
         ),
     )
 
@@ -1571,6 +1610,23 @@ def state_machine_engage_bongo(
     gamepad.hold(mask)
 
 
+def jack_strikes(actor: Myself | Partner, context: Context) -> tuple:
+    """Every timing this actor's B can have against Jack (``jack.strike_specs``):
+    the punch unarmed, the weapon's move armed -- a swing or a stab lands on
+    him through his juggle, since a live strike box meets an axe before the
+    axe meets the actor. None with an item underfoot (``$3136`` picks it up)."""
+
+    if item_a_b_press_takes(context, actor) is not None:
+        return ()
+    if actor.held_weapon_type == KNIFE_TYPE:
+        from .decide import knife_would_stab  # decide imports this module's neighbours
+
+        if not knife_would_stab(actor, context):
+            # Nothing in the knife's cone: B is the throw, ThrowKnife's.
+            return ()
+    return jack_plan.strike_specs(actor.character_id, actor.held_weapon_type)
+
+
 def abadede_can_punch(actor: Myself | Partner, context: Context) -> bool:
     """Is a B press a punch for this actor now? Armed it swings the weapon, a
     move the plan does not time; with an item underfoot it is a pickup
@@ -1707,18 +1763,21 @@ def _slot_index(slot: str) -> int:
     return int(slot[3:]) if slot.startswith("obj") and slot[3:].isdigit() else 0
 
 
-def engage_mr_x_plan(verb: EngageMrX, context: Context, held: int = 0) -> mr_x_plan.MrXPlan | None:
+def engage_mr_x_plan(
+    verb: EngageMrX | FightMrXOffice, context: Context, held: int = 0,
+) -> mr_x_plan.MrXPlan | None:
     """``mr_x_plan.plan`` for this verb, from the context's raw slots -- his,
     his bullets' and the actor's (``MapEntity.raw``), so the simulation starts
     from exactly what the ROM holds. ``held`` is the mask the pad latches now:
-    it plays the updates before this tick's stick lands."""
+    it plays the updates before this tick's stick lands. ``FightMrXOffice``
+    plays it with no Mr. X: the office's first waves."""
 
     actor = _find_actor(context, verb.actor_slot)
     camera = find(context, CameraRange)
-    target = find(context, MrX, slot=verb.target_slot) if verb.target_slot else None
+    target = find(context, MrX, slot=verb.target_slot) if isinstance(verb, EngageMrX) else None
     if actor is None or camera is None or not actor.raw:
         return None
-    if verb.target_slot and (target is None or not target.raw):
+    if isinstance(verb, EngageMrX) and (target is None or not target.raw):
         return None
     from .decide import office_helpers  # decide imports this module's neighbours
 
@@ -1756,7 +1815,7 @@ def engage_mr_x_plan(verb: EngageMrX, context: Context, held: int = 0) -> mr_x_p
     )
 
 
-def state_machine_engage_mr_x(verb: EngageMrX, context: Context, gamepad: VirtualGamepad) -> None:
+def state_machine_engage_mr_x(verb: EngageMrX | FightMrXOffice, context: Context, gamepad: VirtualGamepad) -> None:
     """Hold the stick ``mr_x_plan.plan`` chose this tick, or throw the punch
     or the rear attack it timed.
 
@@ -1806,7 +1865,7 @@ def engage_jack_plan(verb: EngageJack, context: Context) -> jack_plan.EngagePlan
         others=[jack for jack in find_all(context, Jack) if jack.slot != target.slot],
         projectiles=find_all(context, Projectile),
         camera=find(context, CameraRange),
-        can_punch=abadede_can_punch(actor, context),
+        strikes=jack_strikes(actor, context),
         level=stage.level_index if stage is not None else None,
     )
 
@@ -2835,6 +2894,7 @@ _HANDLERS = {
     EngageJack: state_machine_engage_jack,
     EngageTwins: state_machine_engage_twins,
     EngageMrX: state_machine_engage_mr_x,
+    FightMrXOffice: state_machine_engage_mr_x,
     ReleaseToRegrab: state_machine_release_to_regrab,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     HitTable: state_machine_hit_table,

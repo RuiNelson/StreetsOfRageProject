@@ -570,6 +570,44 @@ class PunchTests(unittest.TestCase):
         self.assertNotEqual(plan.outcome, "hit")
         self.assertFalse(plan.punch)
 
+    def test_armed_the_swing_lands_through_his_juggle(self) -> None:
+        # User: with a weapon the AI can strike Jack even while he juggles --
+        # the live weapon box meets an axe before the axe meets the actor
+        # (``_punch_meets_axe``). A pipe in Blaze's hand, 50 px in front of
+        # him on his lane, both axes up.
+        axes = _token_axes(_juggling_world(left=True))
+        plan = J.plan_engage(
+            _myself(2750, 60, left=False, held_weapon_type=0x0B), _jack(2800, 60, left=True),
+            projectiles=axes, camera=CAMERA, strikes=J.strike_specs(2, 0x0B),
+        )
+        self.assertEqual(plan.outcome, "struck")
+        self.assertTrue(plan.punch)
+
+    def test_armed_nothing_is_swung_from_where_an_axe_lands_first(self) -> None:
+        axes = _token_axes(_juggling_world(left=True))
+        plan = J.plan_engage(
+            _myself(2770, 60, left=False, held_weapon_type=0x0B), _jack(2800, 60, left=True),
+            projectiles=axes, camera=CAMERA, strikes=J.strike_specs(2, 0x0B),
+        )
+        self.assertFalse(plan.punch)
+
+    def test_a_weapon_strike_takes_its_own_damage(self) -> None:
+        jack = _jack_sim(2800, 60, left=True, hp=9)
+        world = _world(jack)
+        world.punch = (35, 53)
+        world.damage = 4
+        self.assertIs(J.jack_update(0, _actor(2750, 60, left=False), world), J.Outcome.STRUCK)
+        self.assertEqual(jack.hp, 5)
+
+    def test_strike_timings_per_hand(self) -> None:
+        self.assertEqual(len(J.strike_specs(2, 0)), 1)
+        self.assertEqual(J.strike_specs(2, 0x0C), ())  # pepper: B throws the can
+        swings = J.strike_specs(2, 0x0A)
+        self.assertEqual({s.box for s in swings}, {(35, 53)})
+        self.assertEqual({s.damage for s in swings}, {4})
+        self.assertGreater(len(swings), 1)  # the live window is unmeasured
+        self.assertEqual({s.damage for s in J.strike_specs(0, 0x08)}, {5})
+
     def test_no_second_punch_while_his_stun_runs(self) -> None:
         world = _world(_jack_sim(2800, 60, left=True, state=J.ST_HITSTUN, t50=20))
         self.assertFalse(J._punch_worth_trying(world, 0, _actor(2760, 48)))

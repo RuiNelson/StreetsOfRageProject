@@ -120,6 +120,9 @@ _MAP_KINDS = frozenset(
 OBJECT_SLOT_COUNT = mm.OBJECT_TABLE_SLOTS  # 66
 OBJECT_SLOT_SIZE = mm.OBJECT_SLOT_SIZE  # 0x80
 OBJECT_TABLE_BYTES = OBJECT_SLOT_COUNT * OBJECT_SLOT_SIZE
+# ``$3084``'s knife test walks the first 32 slots and skips these two types.
+KNIFE_SCAN_SLOTS = 32
+KNIFE_SCAN_SKIPPED_TYPES = frozenset({0x00, 0x16})
 
 ADDR_ACTORS_BASE = mm.ADDR_P1_OBJECT  # 0xFFB800
 ACTORS_BYTES = 0x100 + OBJECT_TABLE_BYTES
@@ -128,6 +131,11 @@ ADDR_CAMERA_BASE = 0xFFE000
 CAMERA_BYTES = 0x20
 CAM_X_OFF = 0x02
 CAM_Y_OFF = 0x0E
+# The primary camera's X bounds (game-engine-and-levels.md §6.1/§6.3): the
+# camera scrolls only between them, and a wave gate writes the next stop to
+# the max (rounds 1-7; round 8 the min) and the current X to the other.
+CAM_X_MAX_OFF = 0x1A
+CAM_X_MIN_OFF = 0x1E
 
 
 @dataclass(frozen=True, slots=True)
@@ -469,6 +477,17 @@ class WorldMap:
     view_top: float
     view_bottom: float
     entities: tuple[MapEntity, ...]
+    # Every occupied slot of the first ``KNIFE_SCAN_SLOTS`` of the object
+    # table, as (type, X word, lane word), whatever the type -- effects and
+    # controllers too, which ``entities`` leaves out. It is what the ROM's
+    # knife test scans (``$3084``: ``hasNearbyObjectInFront`` in
+    # ``SoRInteractions.cpp``, types ``$00`` and ``$16`` skipped): any of
+    # them in front of the player turns the knife's B into a stab.
+    front_scan: tuple[tuple[int, int, int], ...] = ()
+    # ``$FFE01E``/``$FFE01A``: the camera's own X bounds, ``None`` when the
+    # camera block was too short to hold them.
+    scroll_min_x: int | None = None
+    scroll_max_x: int | None = None
 
     @property
     def view_width(self) -> float:
@@ -1293,6 +1312,15 @@ def parse_world_map(
             entities.append(entity)
 
     cam_l, cam_r, cam_t, cam_b, v_l, v_r, v_t, v_b = _framed_view(lane_max, entities)
+    front_scan = []
+    for i in range(min(KNIFE_SCAN_SLOTS, OBJECT_SLOT_COUNT)):
+        off = i * OBJECT_SLOT_SIZE
+        type_id = table[off + mm.OBJ_TYPE]
+        if type_id in KNIFE_SCAN_SKIPPED_TYPES:
+            continue
+        front_scan.append(
+            (type_id, _u16(table, off + mm.OBJ_POS_X), _u16(table, off + mm.OBJ_POS_Y))
+        )
 
     return WorldMap(
         camera_x=camera_x,
@@ -1306,6 +1334,13 @@ def parse_world_map(
         view_top=v_t,
         view_bottom=v_b,
         entities=tuple(entities),
+        front_scan=tuple(front_scan),
+        scroll_min_x=(
+            _u16(camera_block, CAM_X_MIN_OFF) if len(camera_block) >= CAM_X_MIN_OFF + 2 else None
+        ),
+        scroll_max_x=(
+            _u16(camera_block, CAM_X_MAX_OFF) if len(camera_block) >= CAM_X_MAX_OFF + 2 else None
+        ),
     )
 
 

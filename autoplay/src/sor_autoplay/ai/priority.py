@@ -43,6 +43,7 @@ from .tokens import (
     EngageJack,
     EngageSouther,
     EngageMrX,
+    FightMrXOffice,
     EngageTwins,
     FlipHold,
     GrabEnemy,
@@ -346,6 +347,11 @@ _EMERGENCY_WALK_TO_NEAR_ENEMY_PINNED_CEILING = 8
 # this must never contend with anything that represents real progress, only
 # with the one stalled candidate it exists to replace.
 _EMERGENCY_WALK_TO_SCREEN_CENTER = 9
+# Walking to (and waiting in striking position beside) a body on the floor:
+# under the walk to any enemy that can be struck (8 at its farthest), so the
+# actor takes those first and only waits by the one getting up when nothing
+# else is there. Above WalkToAdvanceStage, which a live enemy blocks anyway.
+_EMERGENCY_WALK_TO_DOWNED_ENEMY = 7
 # Must sit in the gap between WalkToNearEnemy's base (14) and the *lowest*
 # real attack tier (_EMERGENCY_JUMP_ATTACK_DEFAULT, 18) -- backing off an
 # imminent threat outranks still walking toward one, but never outranks
@@ -440,6 +446,16 @@ _EMERGENCY_ENGAGE_JACK_FLOOR = 22
 _EMERGENCY_ENGAGE_JACK_PER_PX = 40
 _EMERGENCY_ENGAGE_JACK_AXE_OUT = 72
 _EMERGENCY_ENGAGE_JACK_UNDER_GRUNT = 5
+# A grunt nearer than him, able to act and inside the fight's box (or closing
+# in committed: reach.presses_sooner_than) is the more imminent fight (user:
+# "A IA dá muita prioridade ao EngageJack, mesmo quando tem muitos mais outros
+# inimigos mais iminentes que o Jack"). Flat, no armed raise: under the walk
+# to it (8..14), the strikes and the grab on it, so the actor deals with the
+# near ones first; still above WalkToAdvanceStage, and an axe of his out at
+# the actor still takes the tick (72). This overrides the older "a juggling
+# Jack outranks every other grunt" ranking only while something nearer
+# presses; with nothing nearer, the armed raise stands.
+_EMERGENCY_ENGAGE_JACK_BEHIND_NEARER = 6
 # Lowest of any verb that still scores. Must sit under every other live
 # candidate -- including ScorePickup (9), SpecialPickup (11), LifePickup
 # (12), and WalkToNearEnemy's floor (8) -- so stage advance is only chosen
@@ -708,13 +724,18 @@ def _emergency_engage_mr_x(verb: EngageMrX, context: Context) -> int:
     actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         return _EMERGENCY_DEFAULT
-    if not verb.target_slot:
-        # The office's first waves: his helpers are the plan's too.
-        return _EMERGENCY_ENGAGE_MR_X + _EMERGENCY_BOSS_TARGET
     target = find(context, MrX, slot=verb.target_slot)
     if target is None or target.is_defeated or not target.raw:
         return _EMERGENCY_DEFAULT
     return _with_target_class(_EMERGENCY_ENGAGE_MR_X, target)
+
+
+def _emergency_fight_mr_x_office(verb: FightMrXOffice, context: Context) -> int:
+    # The office's first waves: his helpers are the plan's, and the generic
+    # verbs stand down for them.
+    if _find_actor(context, verb.actor_slot) is None:
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_ENGAGE_MR_X + _EMERGENCY_BOSS_TARGET
 
 
 def _emergency_engage_jack(verb: EngageJack, context: Context) -> int:
@@ -730,6 +751,13 @@ def _emergency_engage_jack(verb: EngageJack, context: Context) -> int:
     )
     if grunt_incoming:
         return _with_target_class(_EMERGENCY_ENGAGE_JACK_UNDER_GRUNT, target)
+    if any(
+        reach.presses_sooner_than(actor, enemy, target)
+        for enemy in reach.on_screen_enemies(context)
+    ):
+        # A nearer grunt that can act is the fight now; Jack waits, with no
+        # armed raise, under every verb aimed at it.
+        return _EMERGENCY_ENGAGE_JACK_BEHIND_NEARER
     distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
     score = max(
         _EMERGENCY_ENGAGE_JACK_FLOOR,
@@ -838,6 +866,12 @@ def _emergency_walk_to_near_enemy(verb: WalkToNearEnemy, context: Context) -> in
     if _actor_pinned_for_screen_center(context, actor):
         # See _EMERGENCY_WALK_TO_NEAR_ENEMY_PINNED_CEILING's own comment.
         score = min(score, _EMERGENCY_WALK_TO_NEAR_ENEMY_PINNED_CEILING)
+    if not reach.can_be_struck(target):
+        # Down on the floor: nothing lands on it until it is up, so the walk
+        # is only a wait in striking position -- every enemy that can be hit
+        # comes first (user: "A IA não reage bem quando um inimigo não pode
+        # ser atacado (por exemplo quando está no chão)").
+        score = min(score, _EMERGENCY_WALK_TO_DOWNED_ENEMY)
     return score
 
 
@@ -915,7 +949,7 @@ def _emergency_thrown_weapon(verb: Verb, context: Context, weight: int) -> int:
     actor = _find_actor(context, getattr(verb, "actor_slot", None))
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
-    if not thrown_weapon_would_connect(actor, target, type(verb)):
+    if not thrown_weapon_would_connect(actor, target, type(verb), context):
         return _EMERGENCY_DEFAULT
     # Rank by how far the weapon actually has to fly, so a target running
     # away scores below one standing still at the same instantaneous gap.
@@ -1118,6 +1152,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     EngageAbadede: _emergency_engage_abadede,
     EngageTwins: _emergency_engage_twins,
     EngageMrX: _emergency_engage_mr_x,
+    FightMrXOffice: _emergency_fight_mr_x_office,
     EngageJack: _emergency_engage_jack,
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     HitTable: _emergency_hit_table,

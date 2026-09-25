@@ -77,6 +77,7 @@ classDiagram
     Walk <|-- EngageJack
     Walk <|-- EngageTwins
     Walk <|-- EngageMrX
+    Walk <|-- FightMrXOffice
 
     Verb <|-- Attack
     Attack <|-- MeleeAttacks

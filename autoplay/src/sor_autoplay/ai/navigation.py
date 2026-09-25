@@ -210,8 +210,24 @@ def world_rect(
         # No camera token: plan in the lane band alone, wide enough that the
         # bounds never clip a goal. Better an unbounded X than a guessed one.
         return Rect(-1e6, top, 2e6, bottom - top)
+    # X bounds an *origin* too: ``$43AA`` keeps it inside the walk clamp, and
+    # the clamp only moves as far as the camera may scroll in this corridor
+    # (``CameraRange.world_left``/``world_right``). Planning past that was a
+    # route through ground the ROM never lets the actor stand on (user: "A IA
+    # não tem bem noção dos limites esquerda/direita de câmara (janela
+    # visível) e até onde pode se deslocar no mundo do jogo"): the
+    # ``WORLD_MARGIN_X`` ahead is kept only where the camera can still scroll.
+    # Unknown bounds are not locked ones: without them the margin stands.
     left = camera.left - WORLD_MARGIN_X
-    return Rect(left, top, (camera.right + WORLD_MARGIN_X) - left, bottom - top)
+    right = camera.right + WORLD_MARGIN_X
+    if camera.reach_left is not None:
+        left = max(left, camera.world_left)
+    if camera.reach_right is not None:
+        right = min(right, camera.world_right)
+    if body is not None and origin is not None:
+        left += body.left - origin[0]
+        right += body.right - origin[0]
+    return Rect(left, top, right - left, bottom - top)
 
 
 class _OriginRule:

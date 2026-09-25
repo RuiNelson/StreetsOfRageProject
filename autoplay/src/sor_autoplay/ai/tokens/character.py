@@ -37,6 +37,41 @@ DEFAULT_PUNCH_OUTER_X = 48
 # -- a held bat/pipe must use this instead of the per-character punch table.
 MELEE_WEAPON_TYPES = frozenset({0x0A, 0x0B})  # baseball bat, steel pipe
 MELEE_WEAPON_PUNCH_OUTER_X = 36
+# The swing ($48) connects near its peak, not in the hand: the weapon is its
+# own object, its origin runs from the hand (w_x-p_x = 6) out to the peak --
+# 36 px for Axel (weapons-range-and-damage.md §5), 53 for Blaze (measured on
+# round 1's booths with both weapons) -- and its box reaches about 18 px back
+# from there (Blaze broke a +-16 booth from 19 px and swung 93 times from 17
+# without touching it). Adam is unmeasured; his punch (48) is Axel's (50),
+# not Blaze's (60), so he takes Axel's peak -- an estimate, not a reading.
+MELEE_WEAPON_SWING_PEAK_X: dict[int, int] = {0: 36, 1: 36, 2: 53}
+DEFAULT_MELEE_WEAPON_SWING_PEAK_X = 36
+MELEE_WEAPON_SWING_BACK_X = 18
+# When the swing's box is live is unmeasured: it commits the actor ~26 frames
+# (13 player updates) and is live only near its peak. The updates, counted
+# from the B edge, the box may be out on -- the plans play every window
+# inside this span (``jack.SWING_LIVE_WINDOWS``), and the no-whiff test arms
+# the swing at its end (``kinematics.melee_strike_connect_frames``).
+MELEE_WEAPON_SWING_LIVE_UPDATES = (3, 9)
+MELEE_WEAPON_SWING_LOCK_UPDATES = 13
+# Half an ordinary enemy's body on X (the idle bodies run about +-6): how far
+# a body reaches back toward the actor from its own origin, when its own box
+# is not at hand.
+ENEMY_BODY_HALF_X = 6
+KNIFE_TYPE = 0x08
+BOTTLE_TYPE = 0x09
+PEPPER_SPRAY_TYPE = 0x0C
+# The knife's B is two moves (``$3084 (player_held_object_attack_input)``,
+# reimplemented in ``SoRInteractions.cpp``'s ``hasNearbyObjectInFront``): a
+# stab (``$46``, the knife kept) when *any* object of the first 32 slots --
+# any type but ``$00``/``$16``: an enemy, an item, a prop, a projectile --
+# stands in front of the player less than ``$90`` (144) px away on X, on a
+# lane in ``[y - 12, y + 12)``; otherwise the throw (``$44``, released on
+# frame 1). So a knife "thrown" at an enemy 40-90 px away is a stab into the
+# air, and a stab needs its target inside the stab's own reach.
+KNIFE_CONE_X = 0x90
+KNIFE_CONE_LANE_BELOW = 12  # lane >= y - 12
+KNIFE_CONE_LANE_ABOVE = 12  # lane < y + 12
 
 
 # A hit is box-against-*body*, not box-against-point: `$450C` tests the
@@ -67,23 +102,74 @@ def punch_inner_x(character_id: int | None) -> int:
     return PUNCH_INNER_X.get(character_id, DEFAULT_PUNCH_INNER_X)
 
 
-def punch_usable_inner_x(character_id: int | None) -> int:
+def swing_peak_x(character_id: int | None) -> int:
+    """Where a bat or pipe swing's own origin peaks, px in front of the actor."""
+
+    if character_id is None:
+        return DEFAULT_MELEE_WEAPON_SWING_PEAK_X
+    return MELEE_WEAPON_SWING_PEAK_X.get(character_id, DEFAULT_MELEE_WEAPON_SWING_PEAK_X)
+
+
+def swing_inner_x(character_id: int | None, body_half_x: int = ENEMY_BODY_HALF_X) -> int:
+    """The nearest a body reaching ``body_half_x`` back toward the actor can
+    stand and still meet a bat/pipe swing: nearer, it is under the swing."""
+
+    return max(0, swing_peak_x(character_id) - MELEE_WEAPON_SWING_BACK_X - body_half_x)
+
+
+def punch_usable_inner_x(character_id: int | None, held_weapon_type: int = 0) -> int:
     """The nearest a *body* can be and still be hit -- see BODY_OVERLAP_X.
 
     This, not ``punch_inner_x``, is what "too close to punch" means. The raw
     edge stays available for anything that really is about the box (the walk
     verb's stop distance, which wants the box comfortably clear).
+
+    With a bat or pipe it is the swing's (``swing_inner_x``): the swing only
+    connects near its peak, and an enemy under it is a miss (user: "A IA não
+    sabe bem o alcance das armas").
     """
 
+    if held_weapon_type in MELEE_WEAPON_TYPES:
+        return swing_inner_x(character_id)
     return max(0, punch_inner_x(character_id) - BODY_OVERLAP_X)
 
 
 def punch_outer_x(character_id: int | None, held_weapon_type: int = 0) -> int:
+    """The farthest B lands from, for the weapon in hand.
+
+    Bat/pipe: the swing's peak, Axel's measured 36 and Blaze's 53 (a body
+    centred there still meets the box, which reaches back from the peak).
+    Knife and bottle: the punch's own box -- their stab (``$46``) and swing
+    (``$44`` without a release) are unmeasured, and the hand that carries them
+    is the punch's. Pepper's B is a throw, never a strike; its number is the
+    punch's only so the geometry that asks "how far does this actor reach"
+    has one."""
+
     if held_weapon_type in MELEE_WEAPON_TYPES:
-        return MELEE_WEAPON_PUNCH_OUTER_X
+        return swing_peak_x(character_id)
     if character_id is None:
         return DEFAULT_PUNCH_OUTER_X
     return PUNCH_OUTER_X.get(character_id, DEFAULT_PUNCH_OUTER_X)
+
+
+def knife_cone_contains(
+    actor_x: int, actor_y: int, facing_left: bool, object_x: int, object_y: int
+) -> bool:
+    """``hasNearbyObjectInFront``'s test for one object: in front on the
+    facing, under 144 px on X (unsigned, so 0 counts as in front facing
+    right), on a lane in ``[y - 12, y + 12)``."""
+
+    if object_x >= actor_x:
+        if facing_left:
+            return False
+        distance = object_x - actor_x
+    else:
+        if not facing_left:
+            return False
+        distance = actor_x - object_x
+    if distance >= KNIFE_CONE_X:
+        return False
+    return actor_y - KNIFE_CONE_LANE_BELOW <= object_y < actor_y + KNIFE_CONE_LANE_ABOVE
 
 
 # Rear-attack ($322A player_attack_jump_chord) own attack box +$64, measured
@@ -262,6 +348,11 @@ class PlayableCharacter(Character, ABC):
     anim_countdown: int = 0
     fine_x: float = 0.0
     fine_y: float = 0.0
+    # ``$3084``'s knife test, read off the object table this snapshot: some
+    # object (any type but $00/$16) stands in front under 144 px, on a lane in
+    # [y - 12, y + 12). With a knife in hand, B is then the stab, else the
+    # throw (``knife_cone_contains``).
+    knife_cone_occupied: bool = False
 
     @property
     def knees_in_chain(self) -> int:

@@ -236,6 +236,35 @@ class WorldMapParseTests(unittest.TestCase):
             set(late_types),
         )
 
+    def test_the_knife_scan_sees_every_type_but_two_in_the_first_32_slots(self) -> None:
+        # $3084's scan (``hasNearbyObjectInFront``): any type but $00/$16 --
+        # a GO prompt ($48) the map never draws counts too -- and only the
+        # first 32 slots of the table.
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+        self._put_object(actors, type_id=0x48, slot_index=0)
+        self._put_object(actors, type_id=0x16, slot_index=1)
+        self._put_object(actors, type_id=0x20, slot_index=31)
+        self._put_object(actors, type_id=0x20, slot_index=32)
+
+        world = parse_world_map(actors_block=bytes(actors), camera_block=bytes(camera))
+
+        self.assertEqual(
+            world.front_scan, ((0x48, 800, 0x40), (0x20, 800 + 31 * 16, 0x40))
+        )
+
+    def test_the_cameras_scroll_bounds_are_read(self) -> None:
+        actors = bytearray(ACTORS_BYTES)
+        camera = bytearray(CAMERA_BYTES)
+        _put_u16(camera, 0x02, 768)
+        _put_u16(camera, 0x1A, 0x07C0)
+        _put_u16(camera, 0x1E, 0x04C0)
+
+        world = parse_world_map(actors_block=bytes(actors), camera_block=bytes(camera))
+
+        self.assertEqual((world.scroll_min_x, world.scroll_max_x), (0x04C0, 0x07C0))
+
     def test_broken_original_and_same_type_debris_are_ignored(self) -> None:
         actors = bytearray(ACTORS_BYTES)
         camera = bytearray(CAMERA_BYTES)

@@ -90,6 +90,36 @@ class WorldRectTests(unittest.TestCase):
         self.assertEqual(world.left, 100 - nav.WORLD_MARGIN_X)
         self.assertEqual(world.right, 420 + nav.WORLD_MARGIN_X)
 
+    def test_a_locked_corridor_is_the_walk_clamp(self) -> None:
+        # A wave gate: the camera may not scroll ($FFE01A == $FFE01E), so
+        # $43AA's clamp is all the actor can reach -- no route through ground
+        # past it.
+        camera = CameraRange(left=100, right=388, top=0, bottom=112, reach_left=100, reach_right=388)
+        world = nav.world_rect({Stage(level_index=0, direction="right"), camera})
+
+        self.assertEqual(world.left, 100)
+        self.assertEqual(world.right, 388)
+
+    def test_an_open_corridor_keeps_the_margin_it_can_scroll_into(self) -> None:
+        camera = CameraRange(left=100, right=388, top=0, bottom=112, reach_left=100, reach_right=2000)
+        world = nav.world_rect({Stage(level_index=0, direction="right"), camera})
+
+        self.assertEqual(world.left, 100)
+        self.assertEqual(world.right, 388 + nav.WORLD_MARGIN_X)
+
+    def test_the_x_clamp_is_restated_for_the_body(self) -> None:
+        actor = _myself(
+            world_x=380,
+            world_y=60,
+            hitbox=Hitbox(x0=378, x1=392, y0=52, y1=68, z0=112, z1=160),
+        )
+        body, origin = nav.actor_footprint(actor)
+        camera = CameraRange(left=100, right=388, top=0, bottom=112, reach_left=100, reach_right=388)
+        world = nav.world_rect({Stage(level_index=0, direction="right"), camera}, body=body, origin=origin)
+
+        self.assertEqual(world.left, 100 - 2)
+        self.assertEqual(world.right, 388 + 12)
+
     def test_without_a_camera_only_the_lane_band_is_bounded(self) -> None:
         world = nav.world_rect({Stage(level_index=0, direction="right")})
 

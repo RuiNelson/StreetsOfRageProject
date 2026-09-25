@@ -82,6 +82,15 @@ from .antonio import ActorSim, actor_update
 from .jump_kick import DEFAULT_BODY, STANDING_BODY
 from .souther import HoldStep
 from .tokens import CameraRange, Jack, PlayableCharacter, Projectile
+from .tokens.character import (
+    BOTTLE_TYPE,
+    KNIFE_TYPE,
+    MELEE_WEAPON_SWING_BACK_X,
+    MELEE_WEAPON_SWING_LIVE_UPDATES,
+    MELEE_WEAPON_SWING_LOCK_UPDATES,
+    MELEE_WEAPON_TYPES,
+    swing_peak_x,
+)
 
 __all__ = [
     "AXE_TYPE",
@@ -524,7 +533,10 @@ class AxeSim:
 class World:
     """Every Jack and every axe on screen, and what the actor is standing on."""
 
-    __slots__ = ("jacks", "axes", "cam_x", "actor_z", "body", "spawned", "punch", "struck", "level")
+    __slots__ = (
+        "jacks", "axes", "cam_x", "actor_z", "body", "spawned", "punch", "struck", "level",
+        "damage",
+    )
 
     def __init__(self, jacks, axes, cam_x, actor_z, body, level=None) -> None:
         self.jacks: list[JackSim] = jacks
@@ -537,6 +549,8 @@ class World:
         # it), and whether this press has already landed on someone.
         self.punch: tuple[int, int] | None = None
         self.struck: bool = False
+        # What the live strike takes off: the punch's 1, a weapon's +$34.
+        self.damage: int = PUNCH_DAMAGE
         # The 0-based round (``$FFFF02``), when known: his dodge's lane
         # direction and his walks' X bounds depend on it.
         self.level: int | None = level
@@ -975,17 +989,17 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
         j.state = ST_HELD
         return outcome
     if outcome is Outcome.STRUCK:
-        _struck(j, a)
+        _struck(j, a, world.damage)
         world.struck = True
         return outcome
     _step_animation(j)
     return outcome
 
 
-def _struck(j: JackSim, a: ActorSim) -> None:
+def _struck(j: JackSim, a: ActorSim, damage: int = PUNCH_DAMAGE) -> None:
     """``$9B88``: the damage, 24 updates of stun, a 2 px push; dead only below 0."""
 
-    j.hp -= PUNCH_DAMAGE
+    j.hp -= damage
     j.juggle = False
     j.anim = ANIM_HIT | (ANIM_MIRROR_BIT if j.facing_left else 0)
     j.animating = False
@@ -1486,6 +1500,7 @@ def _rollout(
             age = moves - 1 - punched_on
             if punch.live[0] <= age <= punch.live[1]:
                 world.punch = punch.box
+                world.damage = punch.damage
         outcome, grabbed = world_update(world, a)
         if outcome is Outcome.HIT:
             return outcome, k, world, a
@@ -1553,6 +1568,58 @@ def build_world(
     return World(sims, axes, cam_x, floor, actor_body(actor), level)
 
 
+# A weapon's own B, for the lookahead (user: "A IA não sabe que quando tem
+# armas, pode atacar o Jack, mesmo que ele tenha tochas/machados, porque ao
+# contrário de ataques só com os punhos, com armas, acertam no Jack sem ferir a
+# personagem"). The weapon is its own object in the attacker list ($95CE), and
+# $AAA0 tests a live strike box before anything lands on the striker: an axe
+# whose box meets it is struck (``_punch_meets_axe``), not the actor. A bat or
+# pipe's box sits out at the swing's peak (Axel 36, Blaze 53), ahead of the
+# arm the axes would reach, and stays out longer than a fist -- which is what
+# the user saw. What is unmeasured is *when* it is live: the swing commits the
+# actor ~26 frames (13 updates), live only near its peak. So the plan plays
+# every weapon strike under several live windows and keeps the worst, and a
+# swing is only thrown when every one of them lands and nothing reaches the
+# actor through the lock.
+WEAPON_DAMAGE: dict[int, int] = {KNIFE_TYPE: 5, BOTTLE_TYPE: 3, 0x0A: 4, 0x0B: 4}
+SWING_LOCK_UPDATES = MELEE_WEAPON_SWING_LOCK_UPDATES
+SWING_LIVE_WINDOWS = tuple(
+    (start, start + 2)
+    for start in range(MELEE_WEAPON_SWING_LIVE_UPDATES[0], MELEE_WEAPON_SWING_LIVE_UPDATES[1] - 1, 2)
+)
+# Knife stab / bottle: the hand is the punch's; their live frames are not
+# measured either, so the punch's and one two updates later.
+STAB_LIVE_SHIFTS = (0, 2)
+
+
+def strike_specs(character_id: int | None, weapon_type: int) -> tuple[PunchSpec, ...]:
+    """Every timing a B press can have for this hand -- one for the punch,
+    several for a weapon (``SWING_LIVE_WINDOWS``, ``STAB_LIVE_SHIFTS``), none
+    for pepper spray (its B throws the can)."""
+
+    punch = punch_spec(character_id)
+    if weapon_type == 0:
+        return (punch,)
+    damage = WEAPON_DAMAGE.get(weapon_type)
+    if damage is None:
+        return ()
+    if weapon_type in MELEE_WEAPON_TYPES:
+        peak = swing_peak_x(character_id)
+        box = (peak - MELEE_WEAPON_SWING_BACK_X, peak)
+        return tuple(
+            PunchSpec(box, live, SWING_LOCK_UPDATES, damage) for live in SWING_LIVE_WINDOWS
+        )
+    return tuple(
+        PunchSpec(
+            punch.box,
+            (punch.live[0] + shift, punch.live[1] + shift),
+            punch.lock + shift,
+            damage,
+        )
+        for shift in STAB_LIVE_SHIFTS
+    )
+
+
 def _punch_worth_trying(world: World, index: int, a: ActorSim) -> bool:
     """A punch can land inside the horizon: on him (in a state that tests
     contact, and not while his stun still has more than ``REPUNCH_T50`` to
@@ -1582,6 +1649,7 @@ def plan_engage(
     camera: CameraRange | None = None,
     can_punch: bool = False,
     level: int | None = None,
+    strikes: Sequence[PunchSpec] | None = None,
 ) -> EngagePlan:
     """The stick for this tick: every candidate played out against him and his axes.
 
@@ -1597,6 +1665,10 @@ def plan_engage(
     scores below everything else; the rest score by how far the actor ends
     from ``engage_aim``'s point, what that mode costs, and whether it ends in a
     live juggle's reach or a throw's lane.
+
+    ``strikes`` is every timing the actor's B can have (``strike_specs``: the
+    punch, or a weapon's several); a strike candidate scores by the worst of
+    them. Without it, ``can_punch`` stands for the bare punch.
     """
 
     lane_lo, lane_hi = float(LANE_Y_MIN), float(LANE_Y_MAX_DEFAULT)
@@ -1613,21 +1685,26 @@ def plan_engage(
     # In his dodge the aim is a place to wait: no tie-break toward him, or the
     # first moves of every tick drift along with him to the screen's edge.
     dodging = world0.jacks[0].state == ST_EVADE
-    spec = punch_spec(actor.character_id) if can_punch else None
+    if strikes is None:
+        strikes = (punch_spec(actor.character_id),) if can_punch else ()
+    specs: tuple[PunchSpec | None, ...] = tuple(strikes)
     best: EngagePlan | None = None
 
     def consider(first: tuple[int, int], hold: bool, punch_at: int | None) -> None:
         nonlocal best
         worst: tuple[float, Outcome, int | None] | None = None
-        for actor_first in (True, False):
-            outcome, at, world, a = _rollout(
-                world0.copy(), actor0.copy(), index, first, hold,
-                actor_first=actor_first, punch=spec, punch_at=punch_at,
-            )
-            score = _score(outcome, at, world, a, index)
-            if worst is None or score < worst[0]:
-                worst = (score, outcome, at)
-            if outcome is Outcome.HIT:
+        for spec in specs if punch_at is not None else (None,):
+            for actor_first in (True, False):
+                outcome, at, world, a = _rollout(
+                    world0.copy(), actor0.copy(), index, first, hold,
+                    actor_first=actor_first, punch=spec, punch_at=punch_at,
+                )
+                score = _score(outcome, at, world, a, index)
+                if worst is None or score < worst[0]:
+                    worst = (score, outcome, at)
+                if outcome is Outcome.HIT:
+                    break
+            if worst is not None and worst[1] is Outcome.HIT:
                 break
         assert worst is not None
         score, outcome, at = worst
@@ -1655,7 +1732,7 @@ def plan_engage(
             if hold and first == (0, 0):
                 continue
             consider(first, hold, None)
-    if spec is not None and _punch_worth_trying(world0, index, actor0):
+    if specs and _punch_worth_trying(world0, index, actor0):
         for punch_at in PUNCH_WAITS:
             consider((0, 0), True, punch_at)
             if punch_at:

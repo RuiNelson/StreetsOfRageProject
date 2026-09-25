@@ -305,7 +305,9 @@ also writes every tick's raw slots (the player, him, his bullets, the
 Garcias, and the office waves before him as `pre` rows), which
 `autoplay/tools/mr_x_sim.py --replay FILE --at T` feeds back through the plan.
 The user's verdict after the Garcia work: "a performance da luta é
-suficientemente boa por hoje". See `autoplay/CLAUDE.md`, **Mr. X: the ROM
+suficientemente boa por hoje". The office's waves before he appears are
+`FightMrXOffice`'s, never an `EngageMrX` (user: "A IA emite EngageMrX, mesmo
+quando o Mr. X não está no contexto"). See `autoplay/CLAUDE.md`, **Mr. X: the ROM
 model and the plan**.
 
 ### Testing against Jack
@@ -338,7 +340,12 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \
     tools/jack_fight.py --level 5 --seconds 420 --out /tmp/jack5.jsonl
 ```
 
-See `autoplay/CLAUDE.md`, **Jack: the ROM model and the plan**.
+Armed, the plan strikes him through his juggle with the weapon's own move
+(user: "com armas, acertam no Jack sem ferir a personagem"), and it waits
+while a nearer grunt is in the fight (user: "A IA dá muita prioridade ao
+EngageJack, mesmo quando tem muitos mais outros inimigos mais iminentes que o
+Jack"). See `autoplay/CLAUDE.md`, **Jack: the ROM model and the plan** and
+**Seven fixes: weapons, the floor, Jack, Mr. X, the camera and no whiffs**.
 
 ## Validation and handoff
 

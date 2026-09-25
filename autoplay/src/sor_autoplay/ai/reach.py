@@ -50,6 +50,13 @@ from .kinematics import (
     WALK_SPEED_X,
     enemy_projected,
     enemy_projected_without_crossing,
+    updates_in,
+)
+from .tokens.character import (
+    KNIFE_TYPE,
+    MELEE_WEAPON_TYPES,
+    PEPPER_SPRAY_TYPE,
+    knife_cone_contains,
 )
 from .tokens import (
     Antonio,
@@ -581,7 +588,11 @@ def nearby_enemies(
 
 def in_punch_band(actor: PlayableCharacter, enemy: Character) -> bool:
     """Raw distance box only -- ignores facing. Callers that want "a strike
-    would actually connect" want :func:`punch_would_connect` instead."""
+    would actually connect" want :func:`punch_would_connect` instead.
+
+    The band is the held weapon's: a bat or pipe swing's peak on both edges
+    (``punch_usable_inner_x``/``punch_outer_x`` with the weapon), the punch's
+    otherwise."""
 
     dx = abs(enemy.world_x - actor.world_x)
     dy = abs(enemy.world_y - actor.world_y)
@@ -591,7 +602,92 @@ def in_punch_band(actor: PlayableCharacter, enemy: Character) -> bool:
     # The *usable* inner edge: a body centred just inside the box's own edge
     # still overlaps it, and treating it as unhittable had the AI dithering
     # in punching range (see tokens/character.py's BODY_OVERLAP_X).
-    return punch_usable_inner_x(actor.character_id) <= dx <= outer
+    return punch_usable_inner_x(actor.character_id, actor.held_weapon_type) <= dx <= outer
+
+
+# Phases a strike passes through the body in. The ordinary enemies' knockdown
+# (state ``$0300``, ``$991A``/``$99A2``: the flight, the floor and the getting
+# up) runs no contact test -- Jack's decode says it outright ("``$10`` and the
+# knockdown cannot" be grabbed or hit, enemy-ai.md) and the shared handler is
+# every ordinary type's -- so a punch, a swing, a kick or a knife thrown at a
+# body on the floor lands on nothing (user: "A IA não reage bem quando um
+# inimigo não pode ser atacado (por exemplo quando está no chão), e tenta
+# atacar esse inimigo, mesmo que seja impossível"). ``is_punishable`` still
+# names KNOCKDOWN -- for the bosses' own plans it is a time to close in, not a
+# time to strike.
+UNSTRIKABLE_PHASES = frozenset({CombatPhase.KNOCKDOWN, CombatPhase.DEATH, CombatPhase.SCRIPTED})
+
+
+def can_be_struck(enemy: Character) -> bool:
+    """True when a strike that meets ``enemy``'s body can land at all: not
+    down (``UNSTRIKABLE_PHASES``), not dead by its health word, and not still
+    rising from below the floor (``enemy_still_emerging`` needs the context,
+    and ``live_enemies`` already applies it)."""
+
+    if enemy.combat_phase in UNSTRIKABLE_PHASES:
+        return False
+    return not getattr(enemy, "is_defeated", False)
+
+
+def melee_strike_would_connect(actor: PlayableCharacter, enemy: Character) -> bool:
+    """B pressed now, with whatever the actor holds, lands on ``enemy``.
+
+    One predicate for ``Punch`` and ``MeleeWeaponAttack``, because the ROM
+    picks the move from the hand (``$3084``):
+
+    - unarmed, the punch (``punch_would_connect``);
+    - a bat or pipe, the swing: strictly in front, between its peak's inner
+      edge and the peak (``in_punch_band`` with the weapon) -- nearer is under
+      the swing;
+    - the knife, the stab -- which is only the stab while ``enemy`` itself is
+      in the knife's cone (``knife_cone_contains``: in front, under 144 px, on
+      a lane in ``[y - 12, y + 12)``; out of it B is the throw) -- inside the
+      punch's band;
+    - pepper spray: never. Its B throws the can (``$44``, released on frame
+      1, 48 px out), which is ``ThrowPepper``'s.
+    """
+
+    weapon = actor.held_weapon_type
+    if not can_be_struck(enemy):
+        return False
+    if weapon == PEPPER_SPRAY_TYPE:
+        return False
+    if weapon == KNIFE_TYPE:
+        if not knife_cone_contains(
+            actor.world_x, actor.world_y, actor.facing_left, enemy.world_x, enemy.world_y
+        ):
+            return False
+        return in_punch_band(actor, enemy)
+    if weapon in MELEE_WEAPON_TYPES:
+        return enemy_in_front(actor, enemy) and in_punch_band(actor, enemy)
+    return punch_would_connect(actor, enemy)
+
+
+def strike_lands(band, actor: PlayableCharacter, enemy: Enemy, frames) -> bool:
+    """True when a strike pressed now lands on ``enemy`` whatever it does in
+    the meantime -- the no-whiff rule (user: "A IA dá muitos ataques em falso,
+    a IA só deve atacar quando esse ataque resultar").
+
+    ``frames`` is the move's own timeline (``kinematics.connect_frames``); its
+    last frame is where the hit arms. The strike must land on both timings the
+    target can take: it stops where it stands (the observed position), and it
+    keeps its velocity (projected over the updates that really pass before the
+    hit arms -- every object moves at 30 Hz, ``kinematics.updates_in`` -- and
+    never through the actor). ``connects`` asks *any* frame, which offered a
+    punch at a body walking into reach that then stopped short of it, and at
+    one standing in reach that was walking out of it: the whiffs.
+
+    A body that cannot be struck (``can_be_struck``) is never in reach.
+    """
+
+    if not can_be_struck(enemy):
+        return False
+    if not band(actor, enemy):
+        return False
+    arm = max(frames) if frames else 0
+    if arm <= 0:
+        return True
+    return band(actor, enemy_projected_without_crossing(actor, enemy, updates_in(arm)))
 
 
 def punch_would_connect(actor: PlayableCharacter, enemy: Character) -> bool:
@@ -908,9 +1004,12 @@ def enemy_actionable(
     ``decide._actionable_targets``.
     """
 
+    if not can_be_struck(enemy):
+        # Down on the floor: nothing fires on it, so the walk still owns it.
+        return False
     if in_rear_band(actor, enemy) and rear_attack_is_warranted(actor, enemy, enemies):
         return True
-    return punch_would_connect(actor, enemy)
+    return melee_strike_would_connect(actor, enemy)
 
 
 def enemy_forward_dx(enemy: Enemy, actor: PlayableCharacter) -> int:
@@ -1111,6 +1210,35 @@ def is_incoming_melee(actor: PlayableCharacter, enemy: Enemy) -> bool:
         or enemy_will_close_soon(actor, enemy)
         or souther_dash_arrives_soon(actor, enemy)
     )
+
+
+def presses_sooner_than(actor: PlayableCharacter, enemy: Enemy, other: Enemy) -> bool:
+    """Is ``enemy`` a more imminent fight for ``actor`` than ``other``?
+
+    An ordinary enemy (not a Jack, not a boss -- each has its own engage)
+    that can act and be struck -- not down, not held, not frozen on a stun --
+    nearer the actor than ``other``, and either inside the fight's own box
+    (``SURROUNDED_NEAR_X``/``_Y``, the box ``Surrounded`` is judged in) or
+    committed and closing on it (``is_incoming_melee``). What ``EngageJack``
+    yields to (user: "A IA dá muita prioridade ao EngageJack, mesmo quando tem
+    muitos mais outros inimigos mais iminentes que o Jack")."""
+
+    if enemy.slot == other.slot or isinstance(enemy, Jack) or not isinstance(enemy, Grunt):
+        return False
+    if not can_be_struck(enemy) or enemy.combat_phase in (
+        CombatPhase.STUNNED,
+        CombatPhase.GRABBED,
+    ):
+        return False
+    near = math.hypot(enemy.world_x - actor.world_x, enemy.world_y - actor.world_y)
+    far = math.hypot(other.world_x - actor.world_x, other.world_y - actor.world_y)
+    if near >= far:
+        return False
+    in_box = (
+        abs(enemy.world_x - actor.world_x) <= SURROUNDED_NEAR_X
+        and abs(enemy.world_y - actor.world_y) <= SURROUNDED_NEAR_Y
+    )
+    return in_box or is_incoming_melee(actor, enemy)
 
 
 def frames_until_melee_lands(actor: PlayableCharacter, enemy: Enemy) -> int | None:

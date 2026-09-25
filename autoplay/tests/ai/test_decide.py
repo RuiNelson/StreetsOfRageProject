@@ -493,14 +493,41 @@ class CouldMeleeWeaponAttackTests(unittest.TestCase):
             result, {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x09)}
         )
 
-    def test_pepper_fires_within_the_unarmed_punch_band(self) -> None:
+    def test_pepper_never_strikes(self) -> None:
+        # $3084: pepper's B is always the throw ($44, the can released 48 px
+        # out), so a "melee" spray at 30 px lands nowhere -- ThrowPepper's.
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
         enemy = make_enemy(world_x=130, world_y=105)
 
-        result = could_melee_weapon_attack({myself, enemy})
+        self.assertEqual(could_melee_weapon_attack({myself, enemy}), set())
+
+    def test_the_knife_stabs_what_is_in_its_cone(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
+        enemy = make_enemy(world_x=130, world_y=105)
 
         self.assertEqual(
-            result, {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x0C)}
+            could_melee_weapon_attack({myself, enemy}),
+            {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x08)},
+        )
+
+    def test_the_knife_does_not_stab_a_lane_the_cone_misses(self) -> None:
+        # [y - 12, y + 12): 12 below the actor's lane is out of the cone, and B
+        # would throw the knife 48 px out, over the body.
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
+        enemy = make_enemy(world_x=130, world_y=112)
+
+        self.assertEqual(could_melee_weapon_attack({myself, enemy}), set())
+
+    def test_a_bat_does_not_swing_at_a_body_under_the_swing(self) -> None:
+        # Blaze's swing peaks 53 px out and reaches 18 back from there: a body
+        # 15 px away is under it (the booth she swung at 93 times from 17 px).
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A, character_id=2)
+        near = make_enemy(world_x=115, world_y=100)
+        at_peak = make_enemy(slot="obj02", world_x=145, world_y=100)
+
+        self.assertEqual(
+            could_melee_weapon_attack({myself, near, at_peak}),
+            {MeleeWeaponAttack(actor_slot="P1", target_slot="obj02", weapon_type=0x0A)},
         )
 
 
@@ -1992,9 +2019,9 @@ class CouldJumpAttackTests(unittest.TestCase):
 
 
 class CouldThrowKnifeTests(unittest.TestCase):
-    def test_fires_when_holding_knife_and_enemy_outside_melee_but_in_knife_range(self) -> None:
+    def test_fires_when_holding_knife_and_the_cone_is_empty(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
-        enemy = make_enemy(world_x=160, world_y=100)  # outside KNIFE_MELEE_X=40
+        enemy = make_enemy(world_x=250, world_y=100)  # past the 144 px cone
         context: set[Token] = {myself, enemy}
 
         result = could_throw_knife(context)
@@ -2010,7 +2037,7 @@ class CouldThrowKnifeTests(unittest.TestCase):
 
     def test_does_not_fire_when_holding_a_different_weapon(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x09)
-        enemy = make_enemy(world_x=160, world_y=100)
+        enemy = make_enemy(world_x=250, world_y=100)
         context: set[Token] = {myself, enemy}
 
         self.assertEqual(could_throw_knife(context), set())
@@ -2022,17 +2049,36 @@ class CouldThrowKnifeTests(unittest.TestCase):
 
         self.assertEqual(could_throw_knife(context), set())
 
-    def test_fires_at_an_enemy_that_will_walk_into_range(self) -> None:
-        # dx=32 is inside melee right now, so a throw would be the wrong
-        # move -- but the knife flies at 16 px/frame and the enemy is walking
-        # *away* at 2, so by the time it is released and lands the gap is a
-        # throwing gap. Judged at the impact point, not at the current one.
+    def test_never_throws_while_b_would_stab(self) -> None:
+        # $3084: anything in front under 144 px on the actor's lane turns the
+        # knife's B into the stab. The old 40-90 px envelope was a stab into
+        # the air, every time.
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
-        enemy = make_enemy(world_x=132, world_y=100, grunt_vel_x=2.0)
+        for dx in (40, 60, 90, 143):
+            with self.subTest(dx=dx):
+                enemy = make_enemy(world_x=100 + dx, world_y=100)
+                self.assertEqual(could_throw_knife({myself, enemy}), set())
 
-        result = could_throw_knife({myself, enemy})
+    def test_anything_in_the_cone_blocks_the_throw(self) -> None:
+        # The scan counts every object, not only enemies: an apple on the
+        # floor 80 px ahead makes B the stab.
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
+        enemy = make_enemy(world_x=260, world_y=100)
+        apple = HealthPickup(slot="obj10", world_x=180, world_y=104, pickup_type=0x4B, health_delta=20)
+        self.assertEqual(could_throw_knife({myself, enemy, apple}), set())
+        observed = make_myself(world_x=100, world_y=100, held_weapon_type=0x08, knife_cone_occupied=True)
+        self.assertEqual(could_throw_knife({observed, enemy}), set())
 
-        self.assertEqual(result, {ThrowKnife(actor_slot="P1", target_slot="obj01")})
+    def test_never_throws_behind(self) -> None:
+        # B is read with the facing the actor has: the knife flies that way.
+        myself = make_myself(world_x=300, world_y=100, held_weapon_type=0x08, facing_left=False)
+        enemy = make_enemy(world_x=100, world_y=100)
+        self.assertEqual(could_throw_knife({myself, enemy}), set())
+
+    def test_never_throws_at_a_body_on_the_floor(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x08)
+        down = make_enemy(world_x=260, world_y=100, combat_phase=CombatPhase.KNOCKDOWN)
+        self.assertEqual(could_throw_knife({myself, down}), set())
 
 
 class CouldThrowPepperTests(unittest.TestCase):
@@ -2066,32 +2112,35 @@ class CouldThrowPepperTests(unittest.TestCase):
 
         self.assertEqual(could_throw_pepper(context), set())
 
-    def test_fires_at_a_target_still_walking_into_throw_range(self) -> None:
-        # dx=100 is outside the 90px envelope right now. Pepper spray crawls
-        # at 6 px/frame (weapons-range-and-damage.md) against a target closing
-        # at 2, so the can and the target meet at 66px -- well inside it. The
-        # throw is judged where they meet, not where the target stands.
+    def test_waits_for_a_target_still_walking_into_throw_range(self) -> None:
+        # dx=100 is outside the 90px envelope right now. The can and a target
+        # closing at 2 would meet inside it -- but the target may stop, and a
+        # can thrown at where it stops lands short: the no-whiff rule wants
+        # the envelope now *and* at the meeting point.
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
         closing = make_enemy(world_x=200, world_y=100, grunt_vel_x=-2.0)
 
-        result = could_throw_pepper({myself, closing})
+        self.assertEqual(could_throw_pepper({myself, closing}), set())
 
-        self.assertEqual(result, {ThrowPepper(actor_slot="P1", target_slot="obj01")})
-
-    def test_never_withdraws_a_throw_the_current_position_allows(self) -> None:
-        # The additive rule, swept: a target inside the envelope now yields a
-        # throw whatever it is doing, exactly as it did before any prediction
-        # existed. A throw is cheap and the weapon is spent either way; losing
-        # one to a mis-modelled flight is the expensive mistake.
+    def test_a_still_target_in_the_envelope_is_thrown_at(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
         for dx in range(42, 90, 4):
+            enemy = make_enemy(world_x=100 + dx, world_y=100)
+            with self.subTest(dx=dx):
+                self.assertEqual(
+                    could_throw_pepper({myself, enemy}),
+                    {ThrowPepper(actor_slot="P1", target_slot="obj01")},
+                )
+
+    def test_never_offers_a_throw_the_current_position_misses(self) -> None:
+        # The no-whiff rule, swept: a prediction may withdraw a throw, never
+        # add one the target has to walk into.
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
+        for dx in list(range(10, 40, 4)) + list(range(92, 140, 4)):
             for vel in (-3.0, -2.0, 0.0, 2.0, 3.0):
                 enemy = make_enemy(world_x=100 + dx, world_y=100, grunt_vel_x=vel)
                 with self.subTest(dx=dx, vel=vel):
-                    self.assertEqual(
-                        could_throw_pepper({myself, enemy}),
-                        {ThrowPepper(actor_slot="P1", target_slot="obj01")},
-                    )
+                    self.assertEqual(could_throw_pepper({myself, enemy}), set())
 
 
 class InSmashRangeTests(unittest.TestCase):

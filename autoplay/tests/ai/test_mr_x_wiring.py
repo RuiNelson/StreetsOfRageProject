@@ -24,7 +24,7 @@ from sor_autoplay.ai.decide import (
     could_walk_to_pickup,
     live_mr_x,
 )
-from sor_autoplay.ai.execute import execute_verb
+from sor_autoplay.ai.execute import engage_mr_x_plan, execute_verb
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.priority import determine_priority_verb
@@ -32,6 +32,7 @@ from sor_autoplay.ai.tokens import (
     AttackHeldEnemy,
     CameraRange,
     EngageMrX,
+    FightMrXOffice,
     HealthPickup,
     Garcia,
     Myself,
@@ -148,6 +149,25 @@ class OwnershipTests(unittest.TestCase):
         verbs = _infer(could_engage_mr_x)({_myself(), _mr_x(420.0), CAMERA})
         self.assertEqual([type(v) for v in verbs], [EngageMrX])
 
+    def test_no_engage_on_mr_x_without_him(self) -> None:
+        # The office's first waves (user: "A IA emite EngageMrX, mesmo quando
+        # o Mr. X não está no contexto"): his helpers are the office verb's,
+        # aimed at the nearest of them, and no EngageMrX names a boss who is
+        # not there.
+        near, far = _garcia(340.0, 60.0, slot="obj06"), _garcia(460.0, 60.0, slot="obj07")
+        verbs = _infer(could_engage_mr_x)({_myself(), near, far, MrXOffice(), CAMERA})
+        self.assertEqual([type(v) for v in verbs], [FightMrXOffice])
+        self.assertEqual(next(iter(verbs)).target_slot, "obj06")
+
+    def test_nothing_outside_his_office(self) -> None:
+        # A type-$22 Garcia anywhere else is an ordinary grunt.
+        verbs = _infer(could_engage_mr_x)({_myself(), _garcia(340.0, 60.0), CAMERA})
+        self.assertEqual(verbs, set())
+
+    def test_with_him_in_the_room_only_the_engage(self) -> None:
+        verbs = _infer(could_engage_mr_x)({_myself(), _mr_x(420.0), _garcia(340.0, 60.0), MrXOffice(), CAMERA})
+        self.assertEqual([type(v) for v in verbs], [EngageMrX])
+
     def test_not_when_he_is_dying(self) -> None:
         dying = _mr_x(420.0, primary=model.PRIMARY_DYING)
         self.assertEqual(live_mr_x({dying}), [])
@@ -235,6 +255,15 @@ class HoldTests(unittest.TestCase):
 
 
 class ExecuteTests(unittest.TestCase):
+    def test_the_office_waves_play_the_plan(self) -> None:
+        me = _myself(250.0, 60.0)
+        verb = FightMrXOffice(actor_slot="P1", target_slot="obj06")
+        context = {me, _garcia(400.0, 60.0), MrXOffice(), CAMERA}
+        self.assertIsNotNone(engage_mr_x_plan(verb, context))
+        gamepad, client = _gamepad()
+        execute_verb(verb, context, gamepad)
+        self.assertTrue(client.hold_buttons.called or client.press_buttons.called)
+
     def test_the_gun_is_walked_into(self) -> None:
         # He waits at the top lane for his gun: nothing of his is out, and the
         # stick walks the actor at him.

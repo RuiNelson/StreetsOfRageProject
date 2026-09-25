@@ -26,11 +26,11 @@ factor-of-two error, which is exactly what a velocity in px per *frame*
 multiplied by a *tick* count used to be. ``FRAMES_PER_TICK`` is the one
 conversion point.
 
-**A prediction may only ever add an attack, never take one away.** An attack
-is not an instant: a punch damages for 10 frames (3-12), Adam's chord for 18,
-so the honest question is "is the target inside the box at *any* damaging
-frame", and frame 0 -- the position actually observed -- is always one of the
-frames sampled. Judging a move at a single future instant instead is a real
+**For a walk-in, a prediction may only ever add an attack; a strike must land
+under every timing** (``reach.connects`` against ``reach.strike_lands`` --
+user: "a IA só deve atacar quando esse ataque resultar"). An attack is not an
+instant: a punch damages for 10 frames (3-12), Adam's chord for 18, and frame 0
+-- the position actually observed -- is always one of the frames sampled. Judging a move at a single future instant instead is a real
 regression, measured over a swept pipeline: an enemy walking *into* Axel from
 20px projects into the punch's own inner dead zone, which deleted the
 ``Punch``, handed the tick to ``WalkToNearEnemy`` and had the actor walk into
@@ -85,6 +85,7 @@ from .tokens import (
     ThrowPepper,
     punch_outer_x,
 )
+from .tokens.character import MELEE_WEAPON_SWING_LIVE_UPDATES, MELEE_WEAPON_TYPES
 
 # The emulated machine's frame rate, and the AI's own sample period expressed
 # in those frames (app.DEFAULT_POLL_MS = 33 ms at app.ASSUMED_HZ = 60). Kept
@@ -100,6 +101,23 @@ FRAMES_PER_TICK = 2
 # reaches the emulator (observe -> infer -> decide -> rank -> execute all run
 # between two polls). One tick, deliberately -- not a tuned fudge factor.
 AI_LATENCY_FRAMES = FRAMES_PER_TICK
+
+# Every object moves at 30 Hz (``$AD8E`` waits a VBlank itself between the
+# players and the object slots, ``ai/jump_kick.py``), so an enemy's ``+$1C``/
+# ``+$20`` is a rate per *update*, two frames. ``enemy_projected`` multiplies
+# by the count it is handed; ``updates_in`` is how many updates a span of
+# frames holds. The projections below keep their 2x-fast frame count (**The
+# 30 Hz time axis: fixed, measured, not kept**, CLAUDE.md); the no-whiff
+# strike test (``reach.strike_lands``) is the one that asks where the body
+# really is when the strike arms.
+OBJECT_UPDATE_FRAMES = 2
+
+
+def updates_in(frames: int) -> int:
+    """Object updates in ``frames`` game frames, rounded up."""
+
+    return -(-max(0, frames) // OBJECT_UPDATE_FRAMES)
+
 
 # How far a constant-velocity extrapolation is trusted at all. Half a second
 # of an enemy holding exactly its current velocity is already generous: the
@@ -515,8 +533,15 @@ def melee_strike_connect_frames(
     actor: PlayableCharacter, target: object = None
 ) -> tuple[int, ...]:
     """Now, and the frame the punch arms on: startup 3 (5 for Blaze) plus
-    the poll latency, so about 10px of an ordinary walk."""
+    the poll latency, so about 10px of an ordinary walk.
 
+    With a bat or pipe, the swing's: its box may be out as late as the last
+    update of ``MELEE_WEAPON_SWING_LIVE_UPDATES``, and a target walking out
+    of the peak before then is a miss (``reach.strike_lands`` tests both
+    ends)."""
+
+    if actor.held_weapon_type in MELEE_WEAPON_TYPES:
+        return startup_window(MELEE_WEAPON_SWING_LIVE_UPDATES[1] * OBJECT_UPDATE_FRAMES)
     return startup_window(punch_startup_frames(actor.character_id))
 
 

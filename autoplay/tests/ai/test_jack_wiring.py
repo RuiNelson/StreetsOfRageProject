@@ -144,9 +144,32 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(len(verbs), 1)
         return verbs[0]
 
-    def test_he_outranks_walking_to_a_plain_grunt(self) -> None:
+    def test_he_outranks_walking_to_a_farther_grunt(self) -> None:
+        me = _myself(2760, 60)
+        grunt = _grunt(2640)
+        winner = self._winner({
+            me, _jack(), grunt, CAMERA,
+            EngageJack(actor_slot="P1", target_slot="obj00"),
+            WalkToNearEnemy(actor_slot="P1", target_slot=grunt.slot),
+        })
+        self.assertIsInstance(winner, EngageJack)
+
+    def test_a_nearer_grunt_in_the_fight_comes_first(self) -> None:
+        # User: "A IA dá muita prioridade ao EngageJack, mesmo quando tem
+        # muitos mais outros inimigos mais iminentes que o Jack". A grunt 40 px
+        # off, Jack 90: walking to the grunt (and anything aimed at it) wins.
         me = _myself(2760, 60)
         grunt = _grunt(2720)
+        winner = self._winner({
+            me, _jack(), grunt, CAMERA,
+            EngageJack(actor_slot="P1", target_slot="obj00"),
+            WalkToNearEnemy(actor_slot="P1", target_slot=grunt.slot),
+        })
+        self.assertIsInstance(winner, WalkToNearEnemy)
+
+    def test_a_nearer_grunt_down_on_the_floor_does_not_hold_him_up(self) -> None:
+        me = _myself(2760, 60)
+        grunt = _grunt(2720, combat_phase=CombatPhase.KNOCKDOWN)
         winner = self._winner({
             me, _jack(), grunt, CAMERA,
             EngageJack(actor_slot="P1", target_slot="obj00"),

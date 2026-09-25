@@ -457,14 +457,23 @@ def launch_hits(actor: PlayableCharacter, target: Enemy) -> bool:
 
     direction = launch_direction(actor, target)
     body = enemy_body(target, ground_z=float(actor.world_z))
+    placements: list[Callable[[int], Hitbox]] = [lambda frame: body]
+    # The other timing it can take: it keeps walking for the whole flight
+    # (its +$1C is per update). A kick that lands only if it stops is a
+    # whiff whenever it does not (user: "a IA só deve atacar quando esse
+    # ataque resultar").
+    vel_x = float(getattr(target, "grunt_vel_x", 0.0) or 0.0)
+    if vel_x:
+        placements.append(moving_body(body, vel_x))
     return all(
         first_hit_frame(
             launch_arc(actor, direction=direction, kick_on=kick_on),
-            lambda frame: body,
+            body_at,
             inclusive=False,
         )
         is not None
         for kick_on in KICK_EDGE_UPDATES
+        for body_at in placements
     )
 
 

@@ -813,6 +813,39 @@ class StageAndCameraTests(unittest.TestCase):
         self.assertEqual(camera.top, 0.0)
         self.assertEqual(camera.bottom, 112.0)
 
+    def test_camera_range_knows_how_far_the_corridor_goes(self) -> None:
+        # The camera scrolls only between $FFE01E and $FFE01A: $43AA's clamp
+        # at those bounds is as far as a walk can take the actor.
+        players = (_player_snapshot(index=1), _player_snapshot(index=2, is_playable=False))
+        snapshot = _snapshot(players=players)
+        world = replace(snapshot.world_map, scroll_min_x=768, scroll_max_x=0x07C0)
+        context = generate_direct_observation_tokens(replace(snapshot, world_map=world), player_index=1)
+        camera = find(context, CameraRange)
+        assert camera is not None
+        self.assertEqual((camera.world_left, camera.world_right), (768.0 + 32.0, 0x07C0 + 288.0))
+        self.assertEqual((camera.visible_left, camera.visible_right), (768.0, 768.0 + 320.0))
+        self.assertTrue(camera.scrolls_right)
+        self.assertFalse(camera.scrolls_left)
+
+    def test_the_knife_cone_is_read_off_the_object_table(self) -> None:
+        players = (_player_snapshot(index=1), _player_snapshot(index=2, is_playable=False))
+        me = _player_entity(slot="P1", world_x=800, world_y=64, facing_left=False)
+        snapshot = _snapshot(players=players, entities=(me,))
+        for scan, expected in (
+            (((0x48, 900, 60),), True),   # anything at all, 100 px ahead
+            (((0x20, 944, 64),), False),  # 144 px: out
+            (((0x20, 900, 76),), False),  # 12 lanes below: out
+            (((0x20, 700, 64),), False),  # behind
+        ):
+            with self.subTest(scan=scan):
+                world = replace(snapshot.world_map, front_scan=scan)
+                context = generate_direct_observation_tokens(
+                    replace(snapshot, world_map=world), player_index=1
+                )
+                myself = find(context, Myself)
+                assert myself is not None
+                self.assertIs(myself.knife_cone_occupied, expected)
+
     def test_scrolled_forward_enemy_is_still_seen_as_on_screen_by_decide(self) -> None:
         """Regression: observe.py's CameraRange must stay in the same
         world-absolute coordinate space as every other token's world_x, or

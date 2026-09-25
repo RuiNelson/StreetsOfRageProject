@@ -1070,8 +1070,9 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         self.assertIsInstance(verbs[0], WalkToNearEnemy)
 
     def test_throw_knife_scores_within_range_beyond_melee(self) -> None:
+        # Past the knife's 144 px cone: B throws.
         actor = _myself(world_x=0, world_y=64)
-        far_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=60, world_y=64)
+        far_enemy = _enemy("obj01", CombatPhase.NORMAL, world_x=160, world_y=64)
         context = {
             actor,
             far_enemy,
@@ -1106,8 +1107,9 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         # enemy -- this is now determine_priority_verb's job, via the
         # shared _emergency_thrown_weapon's distance-bucketed score.
         actor = _myself(world_x=0, world_y=64)
-        near = _enemy("obj01", CombatPhase.NORMAL, world_x=50, world_y=64)
-        far = _enemy("obj02", CombatPhase.NORMAL, world_x=85, world_y=64)
+        # Both past the knife's 144 px cone, so B throws at either.
+        near = _enemy("obj01", CombatPhase.NORMAL, world_x=160, world_y=64)
+        far = _enemy("obj02", CombatPhase.NORMAL, world_x=250, world_y=64)
         context = {
             actor,
             near,
