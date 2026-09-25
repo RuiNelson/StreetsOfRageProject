@@ -629,6 +629,61 @@ def can_be_struck(enemy: Character) -> bool:
     return not getattr(enemy, "is_defeated", False)
 
 
+def _melee_band(actor: PlayableCharacter, enemy: Character) -> bool:
+    """``melee_strike_would_connect``'s geometry alone, for a body that may not
+    be struck yet (``wake_up_strike_due``)."""
+
+    weapon = actor.held_weapon_type
+    if weapon == PEPPER_SPRAY_TYPE:
+        return False
+    if weapon == KNIFE_TYPE:
+        if not knife_cone_contains(
+            actor.world_x, actor.world_y, actor.facing_left, enemy.world_x, enemy.world_y
+        ):
+            return False
+        return in_punch_band(actor, enemy)
+    if weapon in MELEE_WEAPON_TYPES:
+        return enemy_in_front(actor, enemy) and in_punch_band(actor, enemy)
+    return punch_would_connect(actor, enemy)
+
+
+# How many ticks before a body on the floor is expected up the wake-up strike
+# starts, on top of the strike's own lead: the poll lands a tick either side.
+WAKE_UP_EARLY_TICKS = 1
+
+
+def wake_up_strike_due(actor: PlayableCharacter, enemy: Character, frames) -> bool:
+    """Press B now at a body on the floor, so the strike is out as it stands up
+    (user: "A IA tem de mandar o murro antes que ele recupere do 'stun', para
+    o inimigo não ter hipótese de mandar ele o murro").
+
+    Waiting for it to be up hands it the first move: a Garcia punches as soon
+    as it stands, while a punch pressed then still has its startup to run. So
+    for an ordinary enemy lying on the floor (KNOCKDOWN, landed:
+    ``Grunt.floor_ticks``), in the band of the actor's B where it lies (it gets
+    up where it fell), the strike goes out ``frames`` -- its own lead to the
+    hit -- plus ``WAKE_UP_EARLY_TICKS`` before the shortest floor time seen
+    for its type (``Grunt.wake_expected_ticks``), and every tick after. With
+    none seen yet, from the landing on: pressure until one is learned.
+    """
+
+    if enemy.combat_phase is not CombatPhase.KNOCKDOWN or isinstance(enemy, Jack):
+        return False
+    if not isinstance(enemy, Grunt) or getattr(enemy, "is_defeated", False):
+        return False
+    floor = getattr(enemy, "floor_ticks", 0)
+    if floor <= 0:
+        return False  # still in the flight
+    if not _melee_band(actor, enemy):
+        return False
+    expected = getattr(enemy, "wake_expected_ticks", None)
+    if expected is None:
+        return True
+    arm = max(frames) if frames else 0
+    lead_ticks = -(-arm // FRAMES_PER_TICK) + WAKE_UP_EARLY_TICKS
+    return floor + lead_ticks >= expected
+
+
 def melee_strike_would_connect(actor: PlayableCharacter, enemy: Character) -> bool:
     """B pressed now, with whatever the actor holds, lands on ``enemy``.
 
@@ -647,20 +702,9 @@ def melee_strike_would_connect(actor: PlayableCharacter, enemy: Character) -> bo
       1, 48 px out), which is ``ThrowPepper``'s.
     """
 
-    weapon = actor.held_weapon_type
     if not can_be_struck(enemy):
         return False
-    if weapon == PEPPER_SPRAY_TYPE:
-        return False
-    if weapon == KNIFE_TYPE:
-        if not knife_cone_contains(
-            actor.world_x, actor.world_y, actor.facing_left, enemy.world_x, enemy.world_y
-        ):
-            return False
-        return in_punch_band(actor, enemy)
-    if weapon in MELEE_WEAPON_TYPES:
-        return enemy_in_front(actor, enemy) and in_punch_band(actor, enemy)
-    return punch_would_connect(actor, enemy)
+    return _melee_band(actor, enemy)
 
 
 def strike_lands(band, actor: PlayableCharacter, enemy: Enemy, frames) -> bool:
@@ -685,9 +729,16 @@ def strike_lands(band, actor: PlayableCharacter, enemy: Enemy, frames) -> bool:
     if not band(actor, enemy):
         return False
     arm = max(frames) if frames else 0
-    if arm <= 0:
+    moving = arm
+    if enemy.combat_phase is CombatPhase.STUNNED:
+        # A timed stun moves nothing ($9B88 and $A43E only count +$50 down):
+        # whatever +$1C still reads from before the hit is not a walk. Only
+        # what is left after the stun can carry it (the timer read as frames,
+        # the shorter of its two readings).
+        moving = max(0, arm - getattr(enemy, "stun_timer", 0))
+    if moving <= 0:
         return True
-    return band(actor, enemy_projected_without_crossing(actor, enemy, updates_in(arm)))
+    return band(actor, enemy_projected_without_crossing(actor, enemy, updates_in(moving)))
 
 
 def punch_would_connect(actor: PlayableCharacter, enemy: Character) -> bool:

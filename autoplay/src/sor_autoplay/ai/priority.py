@@ -132,6 +132,10 @@ _EMERGENCY_PUNCH_DEFAULT = 20
 # sits far below the RearAttack escape (55/60), so a real threat elsewhere
 # interrupts the combo -- as it should.
 _EMERGENCY_ATTACK_HITSTUN = 21
+# The wake-up strike on a body getting up off the floor (user: "A IA tem de
+# mandar o murro antes que ele recupere do 'stun', para o inimigo não ter
+# hipótese de mandar ele o murro"): the same place in the fight as a hitstun.
+_EMERGENCY_ATTACK_WAKE_UP = 21
 # A **pepper-spray stun** ($A0 frames, nearly three seconds) is the opposite:
 # the enemy is parked. Hitting it must lose to a strike on anything that can
 # still act (20), while staying above every Walk tier (WalkToNearEnemy peaks
@@ -1223,9 +1227,12 @@ def _stunned_target_ceiling(
     if actor_slot is not None and _other_enemy_is_incoming(context, actor_slot, target_slot):
         return _EMERGENCY_ATTACK_PARKED_UNDER_THREAT
     if not target.is_stunned:
-        # A knockdown with nothing incoming: no ceiling at all, exactly as
-        # before. Only the branch above is new for it.
-        return None
+        # A knockdown with nothing incoming: the only strike on one is the
+        # wake-up strike (reach.wake_up_strike_due), timed to land as it gets
+        # up -- the combo's own tier, as for a hitstun: above a strike on a
+        # fresh enemy, under every escape. (It used to be the punishable 60,
+        # at a body the knockdown's missing contact test made unhittable.)
+        return _EMERGENCY_ATTACK_WAKE_UP
     frames_left = target.stun_timer
     if frames_left > HITSTUN_FRAMES:
         return _EMERGENCY_ATTACK_LONG_STUN

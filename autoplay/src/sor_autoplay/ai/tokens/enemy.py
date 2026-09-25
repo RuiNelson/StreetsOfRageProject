@@ -152,6 +152,13 @@ class Grunt(Enemy, ABC):
     """
 
     stun_timer: int = 0  # +$50, frames left; only meaningful while stunned
+    # The knockdown, across ticks (``observe.KnockdownTracker``): how many
+    # ticks this body has lain on the floor so far, and how long this type's
+    # shortest knockdown seen this session lay there before it got up
+    # (``None`` until one has been seen). What the wake-up strike is timed by
+    # (``reach.wake_up_strike_due``).
+    floor_ticks: int = 0
+    wake_expected_ticks: int | None = None
 
     @property
     def is_stunned(self) -> bool:

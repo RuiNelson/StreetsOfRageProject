@@ -9,8 +9,10 @@ from sor_autoplay.ai.tokens import Abadede, Enemy, Garcia, Jack, Nora, Souther
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, Stage
 from sor_autoplay.ai.tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
 from sor_autoplay.ai.tokens import Pit, Press, Projectile, Wall
+from sor_autoplay import hazards
 from sor_autoplay.ai.observe import (
     HoldTracker,
+    KnockdownTracker,
     NoraAttackTracker,
     generate_direct_observation_tokens,
 )
@@ -930,6 +932,61 @@ class GruntStunObservationTests(unittest.TestCase):
         boss = find(context, Abadede, slot="obj01")
         assert boss is not None
         self.assertFalse(hasattr(boss, "stun_timer"))
+
+
+class KnockdownTrackerTests(unittest.TestCase):
+    """``observe.KnockdownTracker``: how long a knocked-down body has lain on
+    the floor, and the shortest a type has lain there before getting up."""
+
+    def test_the_floor_is_counted_from_the_landing(self) -> None:
+        tracker = KnockdownTracker()
+        seen = [
+            tracker.update("obj00", type_id=0x20, phase=CombatPhase.KNOCKDOWN, grounded=grounded, alive=True)
+            for grounded in (False, False, True, True, True)
+        ]
+        self.assertEqual([floor for floor, _ in seen], [0, 0, 1, 2, 3])
+        self.assertEqual({expected for _, expected in seen}, {None})
+
+    def test_getting_up_teaches_the_type_its_shortest_floor_time(self) -> None:
+        tracker = KnockdownTracker()
+
+        def knockdown(slot: str, floor: int, *, then=CombatPhase.NORMAL, alive=True) -> None:
+            for _ in range(floor):
+                tracker.update(slot, type_id=0x20, phase=CombatPhase.KNOCKDOWN, grounded=True, alive=True)
+            tracker.update(slot, type_id=0x20, phase=then, grounded=True, alive=alive)
+
+        knockdown("obj00", 12)
+        self.assertEqual(tracker.expected(0x20), 12)
+        knockdown("obj01", 9)
+        self.assertEqual(tracker.expected(0x20), 9)
+        knockdown("obj02", 3, then=CombatPhase.DEATH, alive=False)  # died on the floor
+        self.assertEqual(tracker.expected(0x20), 9)
+        self.assertIsNone(tracker.expected(0x21))
+
+    def test_forgetting_a_slot_keeps_what_the_type_taught(self) -> None:
+        tracker = KnockdownTracker()
+        for _ in range(5):
+            tracker.update("obj00", type_id=0x20, phase=CombatPhase.KNOCKDOWN, grounded=True, alive=True)
+        tracker.update("obj00", type_id=0x20, phase=CombatPhase.NORMAL, grounded=True, alive=True)
+        tracker.forget_missing(frozenset())
+        self.assertEqual(
+            tracker.update("obj00", type_id=0x20, phase=CombatPhase.KNOCKDOWN, grounded=True, alive=True),
+            (1, 5),
+        )
+
+    def test_the_grunt_token_carries_it(self) -> None:
+        players = (_player_snapshot(index=1), _player_snapshot(index=2, is_playable=False))
+        lying = replace(
+            _enemy_entity(world_x=880, world_y=64, combat_phase=CombatPhase.KNOCKDOWN),
+            world_z=hazards.base_floor_z(0),
+        )
+        snapshot = _snapshot(players=players, entities=(_player_entity(slot="P1", world_x=800, world_y=64), lying))
+        tracker = KnockdownTracker()
+        for _ in range(3):
+            context = generate_direct_observation_tokens(snapshot, player_index=1, knockdown_tracker=tracker)
+        garcia = find(context, Garcia, slot="obj00")
+        assert garcia is not None
+        self.assertEqual((garcia.floor_ticks, garcia.wake_expected_ticks), (3, None))
 
 
 class NoraAttackTrackerObservationTests(unittest.TestCase):

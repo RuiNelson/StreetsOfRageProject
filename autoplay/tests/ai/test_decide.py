@@ -531,6 +531,46 @@ class CouldMeleeWeaponAttackTests(unittest.TestCase):
         )
 
 
+class WakeUpStrikeTests(unittest.TestCase):
+    """A body on the floor is struck as it gets up (user: "A IA espera que o
+    inimigo recupere do 'stun' ... A IA tem de mandar o murro antes que ele
+    recupere"), and a body in reach is never left with no verb at all."""
+
+    def test_a_lying_garcia_due_to_get_up_is_punched(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, character_id=2)
+        lying = make_garcia(
+            world_x=130, combat_phase=CombatPhase.KNOCKDOWN, floor_ticks=16, wake_expected_ticks=20
+        )
+        self.assertEqual(could_punch({myself, lying}), {Punch(actor_slot="P1", target_slot="obj01")})
+
+    def test_not_while_it_still_flies_or_is_far_from_getting_up(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, character_id=2)
+        for floor, expected in ((0, None), (4, 20)):
+            with self.subTest(floor=floor):
+                lying = make_garcia(
+                    world_x=130, combat_phase=CombatPhase.KNOCKDOWN,
+                    floor_ticks=floor, wake_expected_ticks=expected,
+                )
+                self.assertEqual(could_punch({myself, lying}), set())
+
+    def test_a_body_walking_out_of_reach_is_walked_after(self) -> None:
+        # In the band now, out of it when the punch arms: no punch -- and the
+        # walk must not skip it as "already in reach", or nothing is done.
+        myself = make_myself(world_x=100, world_y=100, character_id=1)
+        leaving = make_garcia(world_x=145, grunt_vel_x=1.5)
+        self.assertEqual(could_punch({myself, leaving}), set())
+        self.assertEqual(
+            {type(v) for v in could_walk_to_near_enemy({myself, leaving})}, {WalkToNearEnemy}
+        )
+
+    def test_a_stunned_body_with_a_stale_velocity_is_punched(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, character_id=1)
+        stunned = make_garcia(
+            world_x=145, grunt_vel_x=1.5, combat_phase=CombatPhase.STUNNED, stun_timer=20
+        )
+        self.assertEqual(could_punch({myself, stunned}), {Punch(actor_slot="P1", target_slot="obj01")})
+
+
 class CouldRearAttackTests(unittest.TestCase):
     def test_fires_when_enemy_is_behind(self) -> None:
         myself = make_myself(world_x=100, world_y=100, facing_left=False)

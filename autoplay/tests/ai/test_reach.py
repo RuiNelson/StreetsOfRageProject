@@ -1325,6 +1325,39 @@ class ConnectsBandTimelineTests(unittest.TestCase):
                 self.assertFalse(_lands(band, myself, down, verb))
         self.assertFalse(reach.enemy_actionable(myself, down, [down]))
 
+    def test_a_stunned_body_does_not_walk_out_of_reach(self) -> None:
+        # $9B88 counts the stun down and moves nothing: a +$1C left over from
+        # before the hit is not a walk, and refusing the punch on it let the
+        # stun run out -- then the Garcia punched first.
+        myself = _myself(world_x=100, world_y=100, facing_left=False)
+        stunned = _garcia(
+            world_x=148, combat_phase=CombatPhase.STUNNED, stun_timer=20, grunt_vel_x=3.0
+        )
+        self.assertTrue(_lands(reach.melee_strike_would_connect, myself, stunned, Punch))
+        # With the stun about to end, the walk it may resume counts again.
+        ending = replace(stunned, stun_timer=0)
+        self.assertFalse(_lands(reach.melee_strike_would_connect, myself, ending, Punch))
+
+    def test_the_wake_up_strike_goes_out_before_it_stands(self) -> None:
+        # User: "A IA tem de mandar o murro antes que ele recupere". Blaze's
+        # punch arms 7 frames after the press (4 ticks, and one early).
+        blaze = _myself(world_x=100, world_y=100, facing_left=False, character_id=2)
+        frames = kinematics.connect_frames(Punch, blaze)
+
+        def lying(floor: int, expected):
+            return _garcia(
+                world_x=130, combat_phase=CombatPhase.KNOCKDOWN,
+                floor_ticks=floor, wake_expected_ticks=expected,
+            )
+
+        self.assertFalse(reach.wake_up_strike_due(blaze, lying(0, None), frames))  # still flying
+        self.assertTrue(reach.wake_up_strike_due(blaze, lying(1, None), frames))  # nothing learned: pressure
+        self.assertFalse(reach.wake_up_strike_due(blaze, lying(10, 20), frames))
+        self.assertTrue(reach.wake_up_strike_due(blaze, lying(15, 20), frames))
+        self.assertTrue(reach.wake_up_strike_due(blaze, lying(30, 20), frames))
+        far = replace(lying(15, 20), world_x=220)
+        self.assertFalse(reach.wake_up_strike_due(blaze, far, frames))
+
     def test_adams_slow_chord_reaches_a_target_walking_into_it(self) -> None:
         # Adam's chord damages from frame 21 to frame 38 -- more than half a
         # second -- so a target 90px behind him and walking in is inside his

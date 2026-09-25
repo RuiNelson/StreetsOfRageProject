@@ -14,6 +14,7 @@ tick memory that a single snapshot cannot supply.
 
 from __future__ import annotations
 
+from sor_autoplay import hazards
 from sor_autoplay.memory_map import ACTION_HOLDING
 from sor_autoplay.phases import CombatPhase, is_dangerous, player_phase
 from sor_autoplay.state import GameSnapshot, PlayerSnapshot
@@ -77,6 +78,70 @@ class NoraAttackTracker:
         for slot in tuple(self._ticks):
             if slot not in live_slots:
                 del self._ticks[slot]
+
+
+# A knocked-down body is on the floor once its height is back at the street's
+# surface (z grows downward: in the flight it reads less) and it has stopped.
+KNOCKDOWN_FLOOR_MARGIN_Z = 2
+KNOCKDOWN_STILL_SPEED = 0.25
+
+
+class KnockdownTracker:
+    """Cross-tick memory of each ordinary enemy's knockdown (user: "A IA
+    espera que o inimigo recupere do 'stun', mas o problema é que logo depois
+    da recuperação, o inimigo lança logo um murro ... A IA tem de mandar o
+    murro antes que ele recupere").
+
+    Nothing in a single snapshot says when a body on the floor gets up: the
+    ordinary knockdown (``$0300``, ``$991A``/``$99A2``) is not decoded to a
+    timer, and its landing delay has a random part (``(rng & 3)*2+3`` at
+    ``$9A32``). So the tracker counts the ticks each body has lain on the
+    floor (``floor_ticks``: knocked down, back at the floor, still), and every
+    time one gets up -- out of KNOCKDOWN, alive -- keeps the shortest floor
+    time seen for its type (``expected``). ``reach.wake_up_strike_due`` then
+    presses the punch that many ticks, less the punch's own lead, after the
+    landing, so its box is out when the body stands. Per ``AgentLoop``, like
+    ``NoraAttackTracker``; ``forget_missing`` every tick.
+    """
+
+    def __init__(self) -> None:
+        self._floor: dict[str, int] = {}
+        self._down: dict[str, bool] = {}
+        self._type: dict[str, int] = {}
+        self._expected: dict[int, int] = {}
+
+    def update(
+        self, slot: str, *, type_id: int, phase: CombatPhase, grounded: bool, alive: bool
+    ) -> tuple[int, int | None]:
+        """Advance one enemy's knockdown by a tick: ``(floor_ticks, expected)``."""
+
+        down = phase is CombatPhase.KNOCKDOWN
+        was_down = self._down.get(slot, False)
+        floor = self._floor.get(slot, 0)
+        if was_down and not down:
+            if alive and phase not in (CombatPhase.DEATH, CombatPhase.SCRIPTED) and floor > 0:
+                known = self._expected.get(type_id)
+                self._expected[type_id] = floor if known is None else min(known, floor)
+            floor = 0
+        elif down:
+            floor = floor + 1 if grounded else floor
+        else:
+            floor = 0
+        self._down[slot] = down
+        self._floor[slot] = floor
+        self._type[slot] = type_id
+        return floor, self._expected.get(type_id)
+
+    def expected(self, type_id: int) -> int | None:
+        return self._expected.get(type_id)
+
+    def forget_missing(self, live_slots: frozenset[str]) -> None:
+        """Drop every slot not seen this tick; what each type taught stays."""
+
+        for table in (self._floor, self._down, self._type):
+            for slot in tuple(table):
+                if slot not in live_slots:
+                    del table[slot]
 
 
 class HoldTracker:
@@ -291,9 +356,11 @@ def generate_direct_observation_tokens(
     nora_tracker: NoraAttackTracker | None = None,
     hold_tracker: HoldTracker | None = None,
     ground_tracker: GroundTracker | None = None,
+    knockdown_tracker: KnockdownTracker | None = None,
 ) -> Context:
     context: Context = set()
     live_nora_slots: set[str] = set()
+    grunt_slots: set[str] = set()
 
     myself_snapshot = snapshot.players[player_index - 1]
     if myself_snapshot.is_continue_ui:
@@ -377,6 +444,22 @@ def generate_direct_observation_tokens(
                 # a stun timer for kind=="enemy", which is exactly the Grunt
                 # family here. Boss keeps its own +$50 (distance to target).
                 extra["stun_timer"] = entity.stun_timer
+                if knockdown_tracker is not None:
+                    grunt_slots.add(entity.slot)
+                    floor_z = hazards.base_floor_z(snapshot.level_index)
+                    floor_ticks, expected = knockdown_tracker.update(
+                        entity.slot,
+                        type_id=entity.type_id,
+                        phase=entity.combat_phase,
+                        grounded=(
+                            entity.world_z >= floor_z - KNOCKDOWN_FLOOR_MARGIN_Z
+                            and abs(entity.enemy_vel_x) < KNOCKDOWN_STILL_SPEED
+                            and abs(entity.enemy_vel_y) < KNOCKDOWN_STILL_SPEED
+                        ),
+                        alive=not entity.is_defeated,
+                    )
+                    extra["floor_ticks"] = floor_ticks
+                    extra["wake_expected_ticks"] = expected
             if cls is Jack:
                 extra.update(
                     has_projectile=bool(entity.family_state & 0x01),
@@ -554,6 +637,8 @@ def generate_direct_observation_tokens(
 
     if nora_tracker is not None:
         nora_tracker.forget_missing(frozenset(live_nora_slots))
+    if knockdown_tracker is not None:
+        knockdown_tracker.forget_missing(frozenset(grunt_slots))
 
     for hole in snapshot.floor_holes:
         context.add(

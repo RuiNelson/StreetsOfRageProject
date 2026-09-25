@@ -1905,9 +1905,39 @@ written on). In the user's order:
    meet it now and at the interception; the bat arms at the end of its live
    span. Together with items 4 and 5.
 
+**...and the wake-up strike** (user, after the above: "A IA espera que o
+inimigo recupere do 'stun', mas o problema é que logo depois da recuperação,
+o inimigo lança logo um murro (pelo menos com o Garcia que observei) e a IA
+perde. A IA tem de mandar o murro e antes que ele recupere do stun, para o
+inimigo não ter hipótese de mandar ele o murro"). Items 5 and 7 had the actor
+wait where it should strike first, two ways:
+
+- **A body on the floor**: item 5 left it at a walk into striking position
+  and nothing more, so the punch only went out once it stood -- with its
+  startup still to run while the Garcia's punch came. `observe.
+  KnockdownTracker` (per `AgentLoop`, like `NoraAttackTracker`) counts the
+  ticks each ordinary enemy has lain on the floor (`Grunt.floor_ticks`:
+  KNOCKDOWN, back at `hazards.base_floor_z`, still) and learns, per type, the
+  shortest floor time before one got up alive (`Grunt.wake_expected_ticks`) --
+  the knockdown's timer is not decoded and its landing delay has a random
+  part (`$9A32`). `reach.wake_up_strike_due` offers `Punch`/
+  `MeleeWeaponAttack` at the body where it lies once the floor time plus the
+  strike's own lead (and one tick) reaches that, and every tick after; before
+  any is learned, from the landing on. Scored at the combo's tier
+  (`_EMERGENCY_ATTACK_WAKE_UP`, 21; 10 while another enemy's strike is
+  coming), so the box is out as it stands.
+- **A body in hitstun**: `$9B88` and `$A43E` only count `+$50` down, but a
+  `+$1C` left from before the hit made `strike_lands` project it walking out
+  of reach and refuse the punch until the stun had run out. A stunned body is
+  now projected in place for the stun's remaining frames. And where the walk
+  skipped a body as "already in reach" while no strike was offered on it (in
+  the band, walking out), the tick had no verb at all: `decide.
+  _actionable_targets` now also asks for a strike that lands.
+
 Scoring to do: `tools/jack_fight.py` armed (a round-2 pipe), a whiff count
-for grunts (a strike pressed with no enemy's health moving), and the round-8
-office walk to Mr. X.
+for grunts (a strike pressed with no enemy's health moving), the wake-up
+strike against a round-1 Garcia (who hits first as it gets up), and the
+round-8 office walk to Mr. X.
 
 ## Ownership
 

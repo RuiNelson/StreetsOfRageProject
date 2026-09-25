@@ -1650,7 +1650,10 @@ class DetermineEmergencyGrabEnemyTests(unittest.TestCase):
             targets_player=1,
             facing_left=True,
         )
-        downed = self._grunt("downed", world_x=140, world_y=100, combat_phase=CombatPhase.KNOCKDOWN)
+        # Stuck on geometry: free damage. (A body on the floor is not -- the
+        # knockdown runs no contact test, and its only strike is the wake-up
+        # one at the combo's tier.)
+        downed = self._grunt("downed", world_x=140, world_y=100, combat_phase=CombatPhase.BLOCKED)
         context = {
             myself,
             nora,
@@ -2231,6 +2234,24 @@ def _garcia(slot: str, combat_phase: CombatPhase, **overrides) -> Garcia:
     )
     fields.update(overrides)
     return Garcia(**fields)
+
+
+class WakeUpStrikeRankingTests(unittest.TestCase):
+    def test_the_wake_up_strike_is_the_combos_tier(self) -> None:
+        # A body getting up is the same fight as one in hitstun: above a
+        # strike on a fresh enemy (20), under every escape.
+        me = _myself(world_x=100, world_y=64, character_id=2)
+        lying = _garcia("obj01", CombatPhase.KNOCKDOWN, world_x=130, floor_ticks=16, wake_expected_ticks=20)
+        fresh = _garcia("obj02", CombatPhase.NORMAL, world_x=70, facing_left=False)
+        verbs = find_all(
+            determine_priority_verb({
+                me, lying, fresh,
+                Punch(actor_slot="P1", target_slot="obj01"),
+                Punch(actor_slot="P1", target_slot="obj02"),
+            }),
+            Verb,
+        )
+        self.assertEqual([v.target_slot for v in verbs], ["obj01"])
 
 
 def _jack(slot: str, combat_phase: CombatPhase, **overrides) -> Jack:

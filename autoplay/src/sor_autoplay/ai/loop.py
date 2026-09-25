@@ -27,6 +27,7 @@ from .inference import generate_inference_tokens
 from .observe import (
     GroundTracker,
     HoldTracker,
+    KnockdownTracker,
     NoraAttackTracker,
     generate_direct_observation_tokens,
 )
@@ -80,6 +81,9 @@ class AgentLoop:
         # Cross-tick memory for PlayableCharacter.ground_z -- the floor a
         # flight lands back on (observe.GroundTracker, ai/jump_kick.py).
         self._ground_tracker = GroundTracker()
+        # Cross-tick memory of each enemy's knockdown, and how long each type
+        # lies on the floor (observe.KnockdownTracker): the wake-up strike.
+        self._knockdown_tracker = KnockdownTracker()
         # Cross-tick memory of which enemies are the partner's fight -- see
         # partner.PartnerFightTracker. Same per-AgentLoop granularity.
         self._partner_fight_tracker = PartnerFightTracker()
@@ -146,6 +150,7 @@ class AgentLoop:
             nora_tracker=self._nora_tracker,
             hold_tracker=self._hold_tracker,
             ground_tracker=self._ground_tracker,
+            knockdown_tracker=self._knockdown_tracker,
         )
         context |= generate_inference_tokens(context)
         # Which enemies are the partner's fight (PartnerFight): read here,

@@ -236,7 +236,39 @@ def _actionable_targets(context: Context, actor: PlayableCharacter) -> set[str]:
     """
 
     enemies = reach.live_enemies(context)
-    return {enemy.slot for enemy in enemies if reach.enemy_actionable(actor, enemy, enemies)}
+    return {
+        enemy.slot
+        for enemy in enemies
+        if reach.enemy_actionable(actor, enemy, enemies) and _a_strike_is_offered(actor, enemy)
+    }
+
+
+def _a_strike_is_offered(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """Whether a strike the ``could_*`` generators produce lands on it now.
+
+    ``enemy_actionable`` answers the observed position; a strike also has to
+    pass the no-whiff rule (``reach.strike_lands``). Where the two disagreed
+    -- a body in the band walking out of it -- the walk skipped it as already
+    in reach while no strike was offered either, and the actor did nothing.
+    """
+
+    if reach.in_rear_band(actor, enemy) and reach.strike_lands(
+        reach.in_rear_band, actor, enemy, kinematics.connect_frames(RearAttack, actor, enemy)
+    ):
+        return True
+    return reach.strike_lands(
+        reach.melee_strike_would_connect, actor, enemy, kinematics.connect_frames(Punch, actor, enemy)
+    )
+
+
+def _wake_up_targets(context: Context, actor: PlayableCharacter) -> set[str]:
+    """Bodies on the floor whose wake-up strike is due (``reach.wake_up_strike_due``)."""
+
+    return {
+        enemy.slot
+        for enemy in reach.live_enemies(context)
+        if reach.wake_up_strike_due(actor, enemy, kinematics.connect_frames(Punch, actor, enemy))
+    }
 
 
 STAB_WEAPON_TYPES = frozenset({0x08, 0x09})  # knife, bottle
@@ -288,7 +320,10 @@ def _could_melee_strike(
             continue
         # _targets_in_reach already carries the "in front (within tolerance)
         # and inside the band" judgment this used to recompute inline.
-        for target_slot in _targets_in_reach(context, actor, reach.melee_strike_would_connect, Punch):
+        in_reach = _targets_in_reach(context, actor, reach.melee_strike_would_connect, Punch)
+        # A body on the floor is struck as it gets up, not after: the press
+        # goes out early enough that the box is live when it stands.
+        for target_slot in in_reach | _wake_up_targets(context, actor):
             target = find(context, Enemy, slot=target_slot)
             # Jack is taken in a hold from his back or out of his axes' way
             # (jack.py); EngageJack owns him.
