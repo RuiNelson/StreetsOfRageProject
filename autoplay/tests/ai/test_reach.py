@@ -1265,8 +1265,9 @@ class ConnectsBandTimelineTests(unittest.TestCase):
                     self.assertTrue(baseline <= _bands(myself, moving))
 
     def test_a_strike_never_lands_where_the_observed_position_misses(self) -> None:
-        # The no-whiff rule (``strike_lands``), swept: a velocity may withdraw
-        # a strike, never add one the target has to walk into.
+        # The no-whiff rule (``strike_lands``), swept: for a body standing or
+        # walking away, a velocity may withdraw a strike, never add one. (A
+        # body walking in meets the strike as it arrives: ``connects``.)
         myself = _myself(world_x=100, world_y=100, facing_left=False)
         for dx in range(8, 130, 2):
             still = _enemy(world_x=100 + dx, world_y=100)
@@ -1276,7 +1277,7 @@ class ConnectsBandTimelineTests(unittest.TestCase):
                 (reach.in_jump_attack_band, JumpAttack),
             ):
                 offered = _lands(band, myself, still, verb)
-                for vel in (-3.0, -2.0, -1.0, 1.0, 2.0, 3.0):
+                for vel in (1.0, 2.0, 3.0):
                     moving = _enemy(world_x=100 + dx, world_y=100, grunt_vel_x=vel)
                     with self.subTest(dx=dx, vel=vel, verb=verb.__name__):
                         if not offered:
@@ -1293,14 +1294,15 @@ class ConnectsBandTimelineTests(unittest.TestCase):
             with self.subTest(character_id=character_id):
                 self.assertTrue(_lands(reach.melee_strike_would_connect, actor, closing, Punch))
 
-    def test_a_punch_waits_for_a_body_still_walking_in(self) -> None:
-        # dx=58 is outside Axel's band: it may stop there, and a punch thrown
-        # at it lands on nothing. Next tick, once it is in, it goes.
+    def test_a_punch_meets_a_body_walking_in(self) -> None:
+        # dx=58 is outside Axel's band, but it walks in: the punch arms as it
+        # arrives. Waiting for it to be in first handed it the first blow --
+        # measured live, worse ("a IA a perder muito mais vida que antes").
         myself = _myself(world_x=100, world_y=100, facing_left=False)
         arriving = _enemy(world_x=158, world_y=100, grunt_vel_x=-2.0)
-        self.assertFalse(_lands(reach.melee_strike_would_connect, myself, arriving, Punch))
-        arrived = _enemy(world_x=140, world_y=100, grunt_vel_x=-2.0)
-        self.assertTrue(_lands(reach.melee_strike_would_connect, myself, arrived, Punch))
+        self.assertTrue(_lands(reach.melee_strike_would_connect, myself, arriving, Punch))
+        standing = _enemy(world_x=158, world_y=100)
+        self.assertFalse(_lands(reach.melee_strike_would_connect, myself, standing, Punch))
 
     def test_a_punch_is_not_thrown_at_a_body_walking_out_of_reach(self) -> None:
         # 48 px out, leaving at 3 px an update: by the time the hit arms it is

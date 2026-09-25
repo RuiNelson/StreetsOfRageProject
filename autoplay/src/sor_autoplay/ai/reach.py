@@ -678,7 +678,11 @@ def wake_up_strike_due(actor: PlayableCharacter, enemy: Character, frames) -> bo
         return False
     expected = getattr(enemy, "wake_expected_ticks", None)
     if expected is None:
-        return True
+        # Nothing learned for its type yet: pressure with the fist only. A bat
+        # or pipe swing locks the actor ~13 updates, and swinging at the floor
+        # from the landing on left it locked as the body stood (user: "espera
+        # muito depois de dar um ataque com pipe ou bat").
+        return actor.held_weapon_type not in MELEE_WEAPON_TYPES
     arm = max(frames) if frames else 0
     lead_ticks = -(-arm // FRAMES_PER_TICK) + WAKE_UP_EARLY_TICKS
     return floor + lead_ticks >= expected
@@ -707,28 +711,45 @@ def melee_strike_would_connect(actor: PlayableCharacter, enemy: Character) -> bo
     return _melee_band(actor, enemy)
 
 
+def closing_on(actor: PlayableCharacter, enemy: Enemy) -> bool:
+    """``enemy`` walks toward the actor on X on its own (not a timed stun)."""
+
+    if enemy.combat_phase is CombatPhase.STUNNED:
+        return False
+    vel = float(getattr(enemy, "grunt_vel_x", 0.0) or 0.0)
+    side = enemy.world_x - actor.world_x
+    return side != 0 and vel != 0 and (vel > 0) != (side > 0)
+
+
 def strike_lands(band, actor: PlayableCharacter, enemy: Enemy, frames) -> bool:
     """True when a strike pressed now lands on ``enemy`` whatever it does in
     the meantime -- the no-whiff rule (user: "A IA dá muitos ataques em falso,
     a IA só deve atacar quando esse ataque resultar").
 
     ``frames`` is the move's own timeline (``kinematics.connect_frames``); its
-    last frame is where the hit arms. The strike must land on both timings the
-    target can take: it stops where it stands (the observed position), and it
-    keeps its velocity (projected over the updates that really pass before the
-    hit arms -- every object moves at 30 Hz, ``kinematics.updates_in`` -- and
-    never through the actor). ``connects`` asks *any* frame, which offered a
-    punch at a body walking into reach that then stopped short of it, and at
-    one standing in reach that was walking out of it: the whiffs.
+    last frame is where the hit arms. A body standing or walking away must be
+    in the band both where it stands and where its velocity carries it by then
+    (projected at 30 Hz, ``kinematics.updates_in``): a punch at one walking
+    out of reach was a whiff. A body walking *in* needs only one of the two --
+    it meets the strike as it arrives, and demanding both handed it the first
+    blow (measured live: worse, "a IA a perder muito mais vida que antes").
 
     A body that cannot be struck (``can_be_struck``) is never in reach.
     """
 
     if not can_be_struck(enemy):
         return False
+    arm = max(frames) if frames else 0
+    if closing_on(actor, enemy):
+        # Walking in: it meets the strike as it arrives. Waiting for it to be
+        # in the band first handed it the first blow (user: "Muito mau, vejo a
+        # IA a perder muito mais vida que antes"), and an enemy walking at the
+        # actor stops at its own striking distance, which is inside the band.
+        # Exactly ``connects``' union, on the pipeline's own (2x-fast) time
+        # axis -- the one every earlier pre-emptive strike was tuned on.
+        return connects(band, actor, enemy, frames)
     if not band(actor, enemy):
         return False
-    arm = max(frames) if frames else 0
     moving = arm
     if enemy.combat_phase is CombatPhase.STUNNED:
         # A timed stun moves nothing ($9B88 and $A43E only count +$50 down):
@@ -738,7 +759,8 @@ def strike_lands(band, actor: PlayableCharacter, enemy: Enemy, frames) -> bool:
         moving = max(0, arm - getattr(enemy, "stun_timer", 0))
     if moving <= 0:
         return True
-    return band(actor, enemy_projected_without_crossing(actor, enemy, updates_in(moving)))
+    projected = enemy_projected_without_crossing(actor, enemy, updates_in(moving))
+    return band(actor, projected)
 
 
 def punch_would_connect(actor: PlayableCharacter, enemy: Character) -> bool:

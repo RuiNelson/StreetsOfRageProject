@@ -113,19 +113,16 @@ class PunchOuterXWeaponAwareTests(unittest.TestCase):
         self.assertEqual(punch_outer_x(1), 48)  # Adam
         self.assertEqual(punch_outer_x(2), 60)  # Blaze
 
-    def test_bat_or_pipe_reaches_to_the_swing_peak(self) -> None:
-        # Axel's measured 36 (weapons-range-and-damage.md §5), Blaze's 53
-        # (round 1's booths), Adam unmeasured and taking Axel's.
-        for character_id, peak in ((0, 36), (1, 36), (2, 53)):
-            self.assertEqual(punch_outer_x(character_id, held_weapon_type=0x0A), peak)
-            self.assertEqual(punch_outer_x(character_id, held_weapon_type=0x0B), peak)
-
-    def test_a_body_under_the_swing_is_out_of_reach(self) -> None:
-        # The swing's box reaches 18 px back from its peak; a +-6 body closer
-        # than peak - 24 is under it.
-        self.assertEqual(punch_usable_inner_x(0, held_weapon_type=0x0A), 12)
-        self.assertEqual(punch_usable_inner_x(2, held_weapon_type=0x0B), 29)
-        self.assertEqual(punch_usable_inner_x(2), 12)  # unarmed: the punch's
+    def test_bat_or_pipe_shrinks_reach_to_measured_36px_for_every_character(self) -> None:
+        # A band from the swing's peak (Blaze 29..53) was tried and measured
+        # worse live; Axel's measured 36 stands for everyone.
+        for character_id in (0, 1, 2):
+            self.assertEqual(punch_outer_x(character_id, held_weapon_type=0x0A), 36)
+            self.assertEqual(punch_outer_x(character_id, held_weapon_type=0x0B), 36)
+            self.assertEqual(
+                punch_usable_inner_x(character_id, held_weapon_type=0x0A),
+                punch_usable_inner_x(character_id),
+            )
 
     def test_other_held_types_do_not_shrink_reach(self) -> None:
         # Knife (0x08) and unarmed grab-slot values are unaffected.

@@ -2070,9 +2070,12 @@ def thrown_weapon_would_connect(
     if verb_cls is ThrowKnife:
         if knife_would_stab(actor, context):
             return False
-    return _in_throw_envelope(actor, enemy, verb_cls) and _in_throw_envelope(
-        actor, thrown_weapon_impact_point(actor, enemy, verb_cls), verb_cls
-    )
+    now = _in_throw_envelope(actor, enemy, verb_cls)
+    impact = _in_throw_envelope(actor, thrown_weapon_impact_point(actor, enemy, verb_cls), verb_cls)
+    if reach.closing_on(actor, enemy):
+        # Walking in, it meets the weapon as it arrives (as for the strikes).
+        return now or impact
+    return now and impact
 
 
 def _could_throw_ranged_weapon(context: Context, *, weapon_type: int, verb_cls) -> Context:

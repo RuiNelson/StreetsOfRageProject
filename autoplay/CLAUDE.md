@@ -1860,13 +1860,17 @@ written on). In the user's order:
    `ThrowKnife` needs an empty cone, the target in front (B is sampled before
    a turn) on the lane band (`KNIFE_THROW_LANE_Y` 8) -- so 144 px out or more
    on the actor's lane; `MeleeWeaponAttack` with a knife needs the target in
-   the cone (a stab); pepper never melee-strikes. The bat/pipe band is the
-   swing's (`tokens/character.py`: `swing_peak_x`, `swing_inner_x`): Axel 12..36,
-   Blaze 29..53 (it was 12..36 for everyone -- Blaze swung under her own
-   swing), Adam estimated as Axel (unmeasured). The approach stops inside it
-   (`execute._enemy_stop_dx`, the strike goal's `inner_dx`). Still unmeasured,
-   and marked so: the knife/bottle stab's reach (kept at the punch's), every
-   weapon's live frames, Adam's swing.
+   the cone (a stab); pepper never melee-strikes. The bat/pipe band stays the
+   punch's inner edge to Axel's measured 36 for everyone: a band from the
+   swing's peak (Blaze 29..53) and a swing armed at the end of its live span
+   (18 frames) were shipped and **reverted after a live run** (user: "Muito
+   mau, vejo a IA a perder muito mais vida que antes, por exemplo, espera muito
+   depois de dar um ataque com pipe ou bat"): they rested on a booth's wall,
+   not a body, and projected every enemy walking in under the swing -- Blaze
+   would not swing at one closer than 45 px, walked instead, and took the hit.
+   The peaks (`swing_peak_x`) are read by `EngageJack`'s lookahead only. Still
+   unmeasured, and marked so: the knife/bottle stab's reach (kept at the
+   punch's), every weapon's live frames, Adam's swing.
 5. **Nothing is struck on the floor** ("A IA não reage bem quando um inimigo
    não pode ser atacado (por exemplo quando está no chão), e tenta atacar esse
    inimigo, mesmo que seja impossível"). `is_punishable` names KNOCKDOWN, so a
@@ -1895,12 +1899,15 @@ written on). In the user's order:
    só deve atacar quando esse ataque resultar"). `reach.strike_lands`
    replaces the additive `reach.connects` for every strike (`Punch`,
    `MeleeWeaponAttack`, `RearAttack`, `JumpAttack`; the grab walk-in keeps
-   `connects`): the band must hold where the target stands *and* where its
-   velocity carries it by the time the hit arms -- projected at 30 Hz
-   (`kinematics.updates_in`; the rest of `kinematics` keeps its 2x-fast
-   frames, **The 30 Hz time axis**) and never through the actor. A punch at a
-   body still walking in waits a tick; one at a body walking out is not
-   thrown. The jump kick must land whether the body stops or keeps its `+$1C`
+   `connects`): a body standing or walking away must be in the band where it
+   stands *and* where its velocity carries it by the time the hit arms --
+   projected at 30 Hz (`kinematics.updates_in`; the rest of `kinematics` keeps
+   its 2x-fast frames, **The 30 Hz time axis**) -- so a punch at a body walking
+   out of reach is not thrown. A body walking *in* (`reach.closing_on`) keeps
+   `connects`' union on the old axis: it meets the strike as it arrives. The
+   first version asked both of it too, and the actor waited a tick while the
+   enemy came in and struck first -- part of the live regression reverted
+   above. The throws follow the same split. The jump kick must land whether the body stops or keeps its `+$1C`
    for the whole flight (`jump_kick.launch_hits`); the thrown weapons must
    meet it now and at the interception; the bat arms at the end of its live
    span. Together with items 4 and 5.
@@ -1920,7 +1927,9 @@ wait where it should strike first, two ways:
   KNOCKDOWN, back at `hazards.base_floor_z`, still) and learns, per type, the
   shortest floor time before one got up alive (`Grunt.wake_expected_ticks`) --
   the knockdown's timer is not decoded and its landing delay has a random
-  part (`$9A32`). `reach.wake_up_strike_due` offers `Punch`/
+  part (`$9A32`). Until a type has taught it, the pressure is with the fist
+  only: a bat/pipe swing at the floor locks the actor ~13 updates, and
+  swinging from the landing on left it locked as the body stood. `reach.wake_up_strike_due` offers `Punch`/
   `MeleeWeaponAttack` at the body where it lies once the floor time plus the
   strike's own lead (and one tick) reaches that, and every tick after; before
   any is learned, from the landing on. Scored at the combo's tier

@@ -1604,6 +1604,11 @@ def strike_specs(character_id: int | None, weapon_type: int) -> tuple[PunchSpec,
     if damage is None:
         return ()
     if weapon_type in MELEE_WEAPON_TYPES:
+        # The weapon's origin at its peak (Axel 36, Blaze 53, both measured;
+        # Adam as Axel). Only this lookahead reads Blaze's 53 -- for the
+        # grunts the 36 band stands (``punch_outer_x``) -- and here every live
+        # window must land with no axe on the actor, which is what the user
+        # saw ("com armas, acertam no Jack sem ferir a personagem").
         peak = swing_peak_x(character_id)
         box = (peak - MELEE_WEAPON_SWING_BACK_X, peak)
         return tuple(

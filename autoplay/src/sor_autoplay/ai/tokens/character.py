@@ -124,29 +124,30 @@ def punch_usable_inner_x(character_id: int | None, held_weapon_type: int = 0) ->
     edge stays available for anything that really is about the box (the walk
     verb's stop distance, which wants the box comfortably clear).
 
-    With a bat or pipe it is the swing's (``swing_inner_x``): the swing only
-    connects near its peak, and an enemy under it is a miss (user: "A IA não
-    sabe bem o alcance das armas").
+    The same with a bat or pipe. A band from the swing's peak (Blaze 29..53,
+    ``swing_inner_x``) was tried and measured worse live (user: "Muito mau,
+    vejo a IA a perder muito mais vida que antes, por exemplo, espera muito
+    depois de dar um ataque com pipe ou bat"): it rested on a booth's wall,
+    not a body, and it left the actor walking while enemies came in under it.
+    ``held_weapon_type`` is kept so the question stays asked in one place.
     """
 
-    if held_weapon_type in MELEE_WEAPON_TYPES:
-        return swing_inner_x(character_id)
     return max(0, punch_inner_x(character_id) - BODY_OVERLAP_X)
 
 
 def punch_outer_x(character_id: int | None, held_weapon_type: int = 0) -> int:
     """The farthest B lands from, for the weapon in hand.
 
-    Bat/pipe: the swing's peak, Axel's measured 36 and Blaze's 53 (a body
-    centred there still meets the box, which reaches back from the peak).
-    Knife and bottle: the punch's own box -- their stab (``$46``) and swing
+    Bat/pipe: Axel's measured 36 for everyone (weapons-range-and-damage.md
+    §5) -- Blaze's 53 went with the swing-peak band, reverted (see
+    ``punch_usable_inner_x``). Knife and bottle: the punch's own box -- their stab (``$46``) and swing
     (``$44`` without a release) are unmeasured, and the hand that carries them
     is the punch's. Pepper's B is a throw, never a strike; its number is the
     punch's only so the geometry that asks "how far does this actor reach"
     has one."""
 
     if held_weapon_type in MELEE_WEAPON_TYPES:
-        return swing_peak_x(character_id)
+        return MELEE_WEAPON_PUNCH_OUTER_X
     if character_id is None:
         return DEFAULT_PUNCH_OUTER_X
     return PUNCH_OUTER_X.get(character_id, DEFAULT_PUNCH_OUTER_X)

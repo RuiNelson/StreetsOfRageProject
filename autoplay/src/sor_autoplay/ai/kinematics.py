@@ -85,7 +85,6 @@ from .tokens import (
     ThrowPepper,
     punch_outer_x,
 )
-from .tokens.character import MELEE_WEAPON_SWING_LIVE_UPDATES, MELEE_WEAPON_TYPES
 
 # The emulated machine's frame rate, and the AI's own sample period expressed
 # in those frames (app.DEFAULT_POLL_MS = 33 ms at app.ASSUMED_HZ = 60). Kept
@@ -533,15 +532,11 @@ def melee_strike_connect_frames(
     actor: PlayableCharacter, target: object = None
 ) -> tuple[int, ...]:
     """Now, and the frame the punch arms on: startup 3 (5 for Blaze) plus
-    the poll latency, so about 10px of an ordinary walk.
+    the poll latency, so about 10px of an ordinary walk. Armed too: arming a
+    swing at the end of its unmeasured live span (18 frames) was tried and
+    measured worse live -- an enemy walking in was projected under the
+    swing, and the actor walked while it came in and hit."""
 
-    With a bat or pipe, the swing's: its box may be out as late as the last
-    update of ``MELEE_WEAPON_SWING_LIVE_UPDATES``, and a target walking out
-    of the peak before then is a miss (``reach.strike_lands`` tests both
-    ends)."""
-
-    if actor.held_weapon_type in MELEE_WEAPON_TYPES:
-        return startup_window(MELEE_WEAPON_SWING_LIVE_UPDATES[1] * OBJECT_UPDATE_FRAMES)
     return startup_window(punch_startup_frames(actor.character_id))
 
 

@@ -518,16 +518,15 @@ class CouldMeleeWeaponAttackTests(unittest.TestCase):
 
         self.assertEqual(could_melee_weapon_attack({myself, enemy}), set())
 
-    def test_a_bat_does_not_swing_at_a_body_under_the_swing(self) -> None:
-        # Blaze's swing peaks 53 px out and reaches 18 back from there: a body
-        # 15 px away is under it (the booth she swung at 93 times from 17 px).
+    def test_a_bat_swings_at_a_body_close_in(self) -> None:
+        # The band stays the punch's inner edge to 36 px (the swing-peak band
+        # was reverted after a live run: "espera muito depois de dar um ataque
+        # com pipe ou bat").
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0A, character_id=2)
         near = make_enemy(world_x=115, world_y=100)
-        at_peak = make_enemy(slot="obj02", world_x=145, world_y=100)
-
         self.assertEqual(
-            could_melee_weapon_attack({myself, near, at_peak}),
-            {MeleeWeaponAttack(actor_slot="P1", target_slot="obj02", weapon_type=0x0A)},
+            could_melee_weapon_attack({myself, near}),
+            {MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x0A)},
         )
 
 
@@ -2152,15 +2151,20 @@ class CouldThrowPepperTests(unittest.TestCase):
 
         self.assertEqual(could_throw_pepper(context), set())
 
-    def test_waits_for_a_target_still_walking_into_throw_range(self) -> None:
-        # dx=100 is outside the 90px envelope right now. The can and a target
-        # closing at 2 would meet inside it -- but the target may stop, and a
-        # can thrown at where it stops lands short: the no-whiff rule wants
-        # the envelope now *and* at the meeting point.
+    def test_fires_at_a_target_still_walking_into_throw_range(self) -> None:
+        # dx=100 is outside the 90px envelope right now. Pepper spray crawls
+        # at 6 px/frame against a target closing at 2, so the can and the
+        # target meet inside it: walking in, it meets the throw as it arrives.
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
         closing = make_enemy(world_x=200, world_y=100, grunt_vel_x=-2.0)
 
-        self.assertEqual(could_throw_pepper({myself, closing}), set())
+        self.assertEqual(could_throw_pepper({myself, closing}), {ThrowPepper(actor_slot="P1", target_slot="obj01")})
+
+    def test_waits_while_a_target_walks_out_of_throw_range(self) -> None:
+        myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
+        leaving = make_enemy(world_x=186, world_y=100, grunt_vel_x=3.0)
+
+        self.assertEqual(could_throw_pepper({myself, leaving}), set())
 
     def test_a_still_target_in_the_envelope_is_thrown_at(self) -> None:
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
@@ -2173,11 +2177,11 @@ class CouldThrowPepperTests(unittest.TestCase):
                 )
 
     def test_never_offers_a_throw_the_current_position_misses(self) -> None:
-        # The no-whiff rule, swept: a prediction may withdraw a throw, never
-        # add one the target has to walk into.
+        # The no-whiff rule, swept: for a target standing or walking away, a
+        # prediction may withdraw a throw, never add one.
         myself = make_myself(world_x=100, world_y=100, held_weapon_type=0x0C)
         for dx in list(range(10, 40, 4)) + list(range(92, 140, 4)):
-            for vel in (-3.0, -2.0, 0.0, 2.0, 3.0):
+            for vel in (0.0, 2.0, 3.0):
                 enemy = make_enemy(world_x=100 + dx, world_y=100, grunt_vel_x=vel)
                 with self.subTest(dx=dx, vel=vel):
                     self.assertEqual(could_throw_pepper({myself, enemy}), set())
