@@ -12,3 +12,4 @@ controls.yaml
 calls.csv
 call-map.mmd
 call-map.sqlite
+/.cache
