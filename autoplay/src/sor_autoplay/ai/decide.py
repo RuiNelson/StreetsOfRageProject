@@ -521,14 +521,22 @@ def could_hold_actions(context: Context) -> Context:
         if isinstance(held, Bongo) and base == 0x60:
             # Round 4 keeps a grunt coming through the whole fight (user: "não
             # se focar nesse inimigo, mas prevenir ataques iminentes"). A
-            # strike from behind that lands before a knee could finish is
-            # answered the way any hold answers it here: throw the body in hand
-            # back into it (B+back). The one measured live came the other way
-            # -- a type-$22 punch from in front, over the held Bongo, 8 points
-            # mid-knee -- which no hold move answers (the throw goes backward
-            # and locks the actor 41-46 frames), so it is left alone. Bongo
-            # only -- Souther's and Antonio's rounds are swept clean and their
-            # loops were measured without it.
+            # strike from behind that lands before a knee could finish used to
+            # be answered by throwing the body in hand back into it (B+back),
+            # like any other hold; by design (user: Bongo is too heavy for a
+            # character to lift), he is never thrown or suplexed, so an early
+            # release stands in instead -- it gives up the knee progress but
+            # gets the actor free of the strike rather than locked in a 41-46
+            # frame throw animation. The ROM itself has no weight check on the
+            # move (ai-analysis/enemy-ai.md, "Holding him": suplex/throw are
+            # flat, boss-type-agnostic damage like every later boss), so this
+            # is a deliberate behavior choice, not a ROM constraint. The other
+            # measured case, a type-$22 punch from in front, over the held
+            # Bongo, 8 points mid-knee, still has no hold move that answers it
+            # (release loses the knee progress for nothing, since the punch
+            # already lands before a walk-in could regrab), so it is left
+            # alone. Bongo only -- Souther's and Antonio's rounds are swept
+            # clean and their loops were measured without it.
             grace = reach.frames_until_any_melee_lands(
                 actor, enemies, ignore_slots=frozenset({held.slot})
             )
@@ -537,7 +545,7 @@ def could_hold_actions(context: Context) -> Context:
                 and grace < kinematics.hold_knee_frames(actor.character_id)
                 and reach.rear_threats(actor, enemies)
             ):
-                verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
+                verbs.add(ReleaseToRegrab(actor_slot=actor.slot, target_slot=held.slot))
                 continue
 
         def crossover_lands_under_a_press(body_in_hand: Enemy) -> bool:
@@ -621,6 +629,11 @@ def could_hold_actions(context: Context) -> Context:
                 step = souther_plan.hold_step(actor, held)
             if step is souther_plan.HoldStep.CROSS and crossover_lands_under_a_press(held):
                 step = souther_plan.HoldStep.KNEE
+            if isinstance(held, Bongo) and step is souther_plan.HoldStep.SUPLEX:
+                # By design, never suplex Bongo either (see the throw note
+                # above): release instead of finishing from a back hold, and
+                # the next front hold's knee chain kills him instead.
+                step = souther_plan.HoldStep.RELEASE
             if step is souther_plan.HoldStep.KNEE:
                 verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
             elif step is souther_plan.HoldStep.RELEASE:
