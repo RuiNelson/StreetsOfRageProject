@@ -192,51 +192,34 @@ exact file. Use this map together with `ai-analysis/*.md` manuscripts and
 
 ## Testing the symbolic AI live
 
-When a change needs a live session of the symbolic AI (not unit tests),
-run the host in turbo and raise autoplay's poll cadence so the agent
-still samples about two game frames per tick. Prefer the wrapper:
+Live sessions (not unit tests) must run the host in turbo with a matching
+autoplay poll cadence. Use the wrapper:
 
 ```bash
 ./scripts/both_turbo
 ```
 
-That is equivalent to:
-
-```bash
-./scripts/run --turbo 2 --lang en --debugUtils --port 7777 --silent &
-./scripts/autoplay --poll-ms 16 --port 7777 --agent-p1 --reach-gameplay blaze
-```
-
-- `--turbo 2` (with the default `--vsync 0`) runs the internal VDP at
-  `60 × 2` Hz. Never more on the development machine (user: "use turbo 2x
-  at max, this PC can't handle turbo 4x at full speed"): measured, `--turbo
-  4` ran at 120 fps there as well, so anything paced by the wall clock was
-  off by two.
-- `--poll-ms 16` replaces the default 33 ms wall-clock poll (~2 frames
-  at 60 Hz) with ~2 frames at 120 Hz. Do not leave `--poll-ms` at 33
-  under turbo: the AI would see every fourth frame and miss holds,
-  jumps, and incoming attacks. Mind the pacing when timing moves (user:
-  "take care with the game running speed, the AI pooling speed, and the
-  'emulated' game frame pacing!"): a tick is about one player update at 2x,
-  and a stick written after planning lands on the next player update or the
-  one after -- plans that time a move must survive both (see
-  `autoplay/CLAUDE.md`, **Onihime and Yasha: the ROM model and the plan**).
-- `--silent` is required whenever the game is launched for debug.
-- Only start a live `sor` session when necessary; prefer `autoplay`
-  unit tests for logic changes.
-
-Keep `scripts/both_turbo` as the source of truth for these flags. If the
-wrapper's turbo factor or `--poll-ms` changes, update this section to
-match.
+equivalent to `./scripts/run --turbo 2 --lang en --debugUtils --port 7777
+--silent &` plus `./scripts/autoplay --poll-ms 16 --port 7777 --agent-p1
+--reach-gameplay blaze`. `--turbo 2` is the ceiling on the development
+machine (measured: `--turbo 4` also ran at 120 fps there, so anything paced
+by the wall clock was off by two). `--poll-ms 16` keeps sampling at ~2
+frames per tick under turbo — the 33 ms default would drop to one sample per
+four frames and miss holds, jumps, and incoming attacks. `--silent` is
+required whenever the game is launched for debug. Only start a live `sor`
+session when necessary; prefer `autoplay` unit tests for logic changes.
+`scripts/both_turbo` is the source of truth for these flags — update this
+section if its turbo factor or `--poll-ms` changes. Full rationale,
+including frame-pacing details for timing moves, is in `autoplay/CLAUDE.md`
+under **Live AI testing**.
 
 ### Going straight to a boss
 
 `scripts/go_to_boss_1` … `scripts/go_to_boss_8` put the AI in front of one
-round's boss with nothing else on screen: same turbo host and poll cadence as
-`both_turbo`, plus `--start-level N`, `--kill-street-enemies` and
-`--no-police`, so autoplay navigates the menus, jumps to the round, keeps
-every ordinary family swept for the rest of the session, and never calls the
-police.
+round's boss with nothing else on screen: same turbo host and poll cadence
+as `both_turbo`, plus `--start-level N`, `--kill-street-enemies` (or
+`--kill-until-mr-x` for round 8) and `--no-police` throughout; rounds 2-5
+and 8 also pass `--no-food`.
 
 ```bash
 ./scripts/go_to_boss_1            # round 1, Antonio
@@ -256,89 +239,24 @@ police.
 | `go_to_boss_8` | 8 | boss rush, `$56` → `$55` → `$30` → `$57` → `$58` → Mr. X (`$35`); `--kill-until-mr-x` instead of the street sweep, `--no-food` |
 
 The numbered scripts are one line each; the turbo/poll/port flags live only
-in `scripts/go_to_boss`, so eight copies cannot drift apart. Sweeping is not
-optional for boss work — see `autoplay/CLAUDE.md`. Neither is `--no-police`
-(user: "The police is allowed for Souther/Antonio, just don't test with the
-police on"): the AI may call it in play, as its last resort, but never in a
-test; `autoplay/tools/boss_fight.py` and the labs keep it off too. Rounds 2,
-3 and 4 also pass `--no-food` (user, for Bongo and again for Abadede: "Nos
-testes, não te esqueças de não usar o ataque especial (chamar a polícia), e
-de não consumir items de recuperação de vida"): a heal hides every hit landed
-after it, so a boss test is fought on the health the round left -- score
-with `boss_fight.py --no-food` too. Rounds 3 and 4 keep a Garcia-family grunt
-coming through the boss fight even with the sweep on (one is killed, the next
-arrives; in round 3 it comes from behind the actor): the AI must not chase
-it, only stop its strikes (user: "não se focar nesse inimigo, mas prevenir
-ataques iminentes"; for Abadede: "a AI deve-se proteger desse inimigo, sem se
-desviar o objetivo principal, o boss"). Quitting
-the HUD (Esc/Q) also shuts the host down, so the port is free for the next
-run.
+in `scripts/go_to_boss`, so eight copies cannot drift apart. Sweeping and
+`--no-police` are not optional for boss testing — the police call is a
+last-resort option in play, never in a test. Quitting the HUD (Esc/Q) also
+shuts the host down, so the port is free for the next run. Full rationale
+(why `--no-food`/`--no-police`, the swept-but-not-chased Garcia grunt in
+rounds 3-4) is in `autoplay/CLAUDE.md` under **Scoring a fight without the
+food**.
 
-### Testing against the twins
+### Testing against the twins, Mr. X, and Jack
 
-Round 5's Onihime and Yasha are fought with rear attacks from an edge
-(`autoplay/CLAUDE.md`, **Onihime and Yasha: the ROM model and the plan**).
-Score a fight with `boss_fight.py --level 5 --boss-type 0x58 --no-food
---poll-ms 16` (a pair: killed when both are dead) on a `--turbo 2` host;
-check the model in lockstep with `tools/twins_lab.py` (`--actor engage`,
-then `--check` on the recording), and tune the plan offline with
-`tools/twins_sim.py`. A rear attack that lands on nothing is a defect, not a
-cost (user: "Vi que a IA dá vários `BackAttack` em falso, não quero que dê
-ataques em falso"): the plan presses B+C only when its lookahead has the
-press striking a twin under every timing, and `boss_fight.py` reports
-`chords` and `chord_whiffs` so a live run shows it.
+Score/tune commands and the ROM model + plan for each boss are documented in
+`autoplay/CLAUDE.md`, not duplicated here:
 
-### Testing against Mr. X
-
-Round 8 is long -- the street, then the whole boss rush -- so its sweep is its
-own flag (user: "é melhor haver uma flag para automaticamente eliminar todos os
-inimigos e bosses que aparecem até o Mr X estar no ar ... ter em atenção para
-essa flag não automaticamente matar esses ajudantes nem o Mr X"):
-`--kill-until-mr-x` (autoplay; the host's `Alt/Option+X`) kills every enemy and
-boss until his office scene is up, and nothing after -- his type-`$22` Garcias
-(the user's "Glasia") and he are the fight. `scripts/go_to_boss_8` passes it
-with `--no-food`; score with `autoplay/tools/boss_fight.py --level 8
---boss-type 0x35 --no-food --poll-ms 16` on a `--turbo 2` host (the same
-optimisation goals as the twins: minimum time, minimum damage, reliability; no
-police, no recovery items; no attack that can miss). For Mr. X the harness
-also writes every tick's raw slots (the player, him, his bullets, the
-Garcias, and the office waves before him as `pre` rows), which
-`autoplay/tools/mr_x_sim.py --replay FILE --at T` feeds back through the plan.
-The user's verdict after the Garcia work: "a performance da luta é
-suficientemente boa por hoje". See `autoplay/CLAUDE.md`, **Mr. X: the ROM
-model and the plan**.
-
-### Testing against Jack
-
-Jack (type `$27`) never appears in round 1 (user: "o inimigo não aparece no
-Stage 1"). The ELC streams place him in rounds 2 and 4 (his personality 0:
-juggle approach and aligned throw), 5 (personality 2, the jumpers -- eight
-records in one batch -- and 3, the juggle walk), 6 and 8 (0 and 1, the
-retreat and ranged throw). `autoplay/tools/jack_fight.py` scores him: with the
-turbo host up (`./scripts/run --turbo 2 --lang en --debugUtils --port 7777
---silent`), it plays the round with every other ordinary family swept
-(`DebugScenario(only_enemy="jack")`), police and food off, attributes each
-hit to the axe that landed it, its state and its owner's, and logs the round
-clock (`$FFFB01`, two BCD digits) every tick. A loss with no attacker is the
-clock's when it comes within 15 s of a time-over (`$FFFA49`; the hit reads
-`source: round_clock`): the time-over ends by writing 55 to the clock and
-taking the player's health on the same frame, so the clock never reads 00
-there. A Jack stalemate runs it out, and so does a walk stuck on terrain --
-round 6 has no pits, but it has machine housings and drop presses (see
-`autoplay/CLAUDE.md`, **Round 6: the factory floor**). Round 2 has three
-personality-0 Jacks; round 4 one; round 5 four jumpers at once, then a
-juggle-walker at the level's right X bound (`$1510`); round 6 a personality 1
-(retreat and ranged throw).
-
-```bash
-cd autoplay
-PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \
-    tools/jack_fight.py --level 2 --out /tmp/jack.jsonl
-PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \
-    tools/jack_fight.py --level 5 --seconds 420 --out /tmp/jack5.jsonl
-```
-
-See `autoplay/CLAUDE.md`, **Jack: the ROM model and the plan**.
+- Twins (round 5, `$58`) — **Onihime and Yasha: the ROM model and the plan**.
+- Mr. X (round 8, `$35`, via `--kill-until-mr-x`) — **Mr. X: the ROM model
+  and the plan**.
+- Jack (`$27`, never in round 1; appears rounds 2, 4, 5, 6, 8) — **Jack: the
+  ROM model and the plan**.
 
 ## Validation and handoff
 
