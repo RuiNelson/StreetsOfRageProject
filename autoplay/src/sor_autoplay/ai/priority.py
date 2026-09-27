@@ -433,12 +433,26 @@ _EMERGENCY_ENGAGE_MR_X = 62
 # rank by distance rather than flip on the random tie-break. While an axe of
 # his is out at the actor it takes the tick outright (72): the plan dodges it,
 # and nothing else knows where it flies. While another enemy's committed
-# strike is about to land it drops under the punch on that enemy (5), as the
-# boss engages do for their rounds' grunts.
+# strike is about to land, or another grunt is meaningfully closer to the
+# actor than he is, it drops under the punch on that enemy (5), as the boss
+# engages do for their rounds' grunts.
+#
+# The floor (22, or 29 juggling) sat *above* WalkToNearEnemy's own ceiling
+# (21 armed, 14 unarmed) unconditionally, so once Jack was on screen and not
+# mid-throw, the AI ignored every other approaching enemy no matter how close
+# or how many, and only backed off the instant one of them committed to a
+# swing (user, in Portuguese: "A IA da muita prioridade ao EngageJack, mesmo
+# quando tem muitos mais outros inimigos mais imminentes que o Jack" -- the
+# AI gives too much priority to EngageJack even with many more imminent
+# enemies than Jack). `_EMERGENCY_ENGAGE_JACK_NEARER_ENEMY_MARGIN_PX` is the
+# fix: a plain (not yet swinging) grunt closer than Jack by more than this
+# margin is judged more imminent on proximity alone, same as the committed-
+# strike case, rather than only in the brief window right before it hits.
 _EMERGENCY_ENGAGE_JACK = 30
 _EMERGENCY_ENGAGE_JACK_FLOOR = 22
 _EMERGENCY_ENGAGE_JACK_PER_PX = 40
 _EMERGENCY_ENGAGE_JACK_AXE_OUT = 72
+_EMERGENCY_ENGAGE_JACK_NEARER_ENEMY_MARGIN_PX = 40
 _EMERGENCY_ENGAGE_JACK_UNDER_GRUNT = 5
 # Lowest of any verb that still scores. Must sit under every other live
 # candidate -- including ScorePickup (9), SpecialPickup (11), LifePickup
@@ -724,13 +738,21 @@ def _emergency_engage_jack(verb: EngageJack, context: Context) -> int:
         return _EMERGENCY_DEFAULT
     if jack_plan.axe_threatens(actor, target, find_all(context, Projectile)):
         return _EMERGENCY_ENGAGE_JACK_AXE_OUT
-    grunt_incoming = any(
-        isinstance(enemy, Grunt) and reach.is_incoming_melee(actor, enemy)
+    other_grunts = [
+        enemy
         for enemy in reach.on_screen_enemies(context)
-    )
-    if grunt_incoming:
-        return _with_target_class(_EMERGENCY_ENGAGE_JACK_UNDER_GRUNT, target)
+        if isinstance(enemy, Grunt) and not isinstance(enemy, Jack)
+    ]
     distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
+    grunt_incoming = any(reach.is_incoming_melee(actor, enemy) for enemy in other_grunts)
+    nearer_grunt = any(
+        math.hypot(enemy.world_x - actor.world_x, enemy.world_y - actor.world_y)
+        + _EMERGENCY_ENGAGE_JACK_NEARER_ENEMY_MARGIN_PX
+        < distance
+        for enemy in other_grunts
+    )
+    if grunt_incoming or nearer_grunt:
+        return _with_target_class(_EMERGENCY_ENGAGE_JACK_UNDER_GRUNT, target)
     score = max(
         _EMERGENCY_ENGAGE_JACK_FLOOR,
         _EMERGENCY_ENGAGE_JACK - int(distance // _EMERGENCY_ENGAGE_JACK_PER_PX),

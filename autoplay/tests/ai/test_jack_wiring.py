@@ -144,15 +144,32 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(len(verbs), 1)
         return verbs[0]
 
-    def test_he_outranks_walking_to_a_plain_grunt(self) -> None:
+    def test_he_outranks_walking_to_a_plain_grunt_no_closer_than_him(self) -> None:
+        # Jack (default _jack()) is 90px out; this grunt is 110px out, so it
+        # is not the "meaningfully closer" case below.
         me = _myself(2760, 60)
-        grunt = _grunt(2720)
+        grunt = _grunt(2650)
         winner = self._winner({
             me, _jack(), grunt, CAMERA,
             EngageJack(actor_slot="P1", target_slot="obj00"),
             WalkToNearEnemy(actor_slot="P1", target_slot=grunt.slot),
         })
         self.assertIsInstance(winner, EngageJack)
+
+    def test_yields_to_a_meaningfully_closer_grunt(self) -> None:
+        # user: "A IA da muita prioridade ao EngageJack, mesmo quando tem
+        # muitos mais outros inimigos mais imminentes que o Jack." Jack (not
+        # currently juggling, so no armed raise of his own) is 90px out;
+        # this grunt is 20px out -- well past the margin -- and is not yet
+        # swinging, so only the proximity check catches it.
+        me = _myself(2760, 60)
+        grunt = _grunt(2740)
+        winner = self._winner({
+            me, _jack(has_projectile=False), grunt, CAMERA,
+            EngageJack(actor_slot="P1", target_slot="obj00"),
+            WalkToNearEnemy(actor_slot="P1", target_slot=grunt.slot),
+        })
+        self.assertIsInstance(winner, WalkToNearEnemy)
 
     def test_a_throw_out_at_the_actor_takes_the_tick(self) -> None:
         me = _myself(2760, 60)

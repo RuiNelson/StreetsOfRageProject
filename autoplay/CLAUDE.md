@@ -1636,6 +1636,44 @@ every Jack and axe byte per tick, and a hit names the axe from the player's
   suplex threw a round-5 Jack past the right bound, and his jumps kept him
   out of reach for 30 s.
 
+**EngageJack ignored closer, more imminent enemies** (user, in Portuguese:
+"A IA dá muita prioridade ao EngageJack, mesmo quando tem muitos mais outros
+inimigos mais iminentes que o Jack"). All the measurements above (the table
+and every `jack_fight.py` run) isolate Jack with `--only-enemy jack`, which
+is why this went unmeasured: `_emergency_engage_jack`'s floor (22, or 29
+while he juggles, from the armed raise) sat above `WalkToNearEnemy`'s own
+ceiling (21 armed, 14 unarmed) unconditionally, so once a live Jack was in
+camera and not mid-throw, no other approaching enemy could ever outrank him
+by proximity alone -- the only escape was `grunt_incoming`
+(`reach.is_incoming_melee`), which only fires in the brief window right
+before another grunt's own committed strike actually lands. In a real level
+(Jack sharing the screen with a wave of street enemies, unlike every scored
+fight above) that meant the AI kept walking at/holding Jack while closer
+grunts went unanswered until the instant one of them swung.
+
+The fix is a second condition in `_emergency_engage_jack` (`priority.py`):
+alongside `grunt_incoming`, `nearer_grunt` compares Jack's own distance
+against every other on-screen `Grunt`'s (Jack himself excluded, since a
+second Jack already competes on the same distance-based formula). A grunt
+closer than Jack by more than
+`_EMERGENCY_ENGAGE_JACK_NEARER_ENEMY_MARGIN_PX` (40 px, the same granularity
+as Jack's own per-px falloff) drops `EngageJack` to the existing
+`_EMERGENCY_ENGAGE_JACK_UNDER_GRUNT` tier (5, plus the armed raise if he is
+juggling), the same tier a committed strike already used -- proximity is now
+judged the same way emergency, not just the swing itself. Both checks share
+one pass over `other_grunts` rather than iterating `on_screen_enemies` twice.
+`tests/ai/test_jack_wiring.py`'s `RankingTests` pins it:
+`test_he_outranks_walking_to_a_plain_grunt_no_closer_than_him` (a grunt
+110 px out against a 90 px Jack still loses to the engage) and
+`test_yields_to_a_meaningfully_closer_grunt` (a grunt 20 px out against the
+same 90 px Jack wins). Not yet measured live or with `jack_fight.py`, which
+has no mixed-enemy mode to measure it with (**Testing the AI against a
+boss**'s own "no 'real waves' mode" rule is about isolating a *boss* fight
+from the street sweep, but the same isolation is why this exact regression
+was invisible to every number in the table above) -- a live run with street
+enemies left alive alongside Jack would confirm the fix the way every other
+change in this section was confirmed.
+
 **Round 6: the factory floor** (user, after a live `jack_fight.py --level 6`
 run: from t≈40 s to 109 s "the actor stood at world x=2557 with the verb
 `WalkToAdvanceStage` every tick and no enemy on screen", then lost a life with

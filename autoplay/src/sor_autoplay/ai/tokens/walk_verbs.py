@@ -405,9 +405,11 @@ class EngageJack(Walk):
     while he juggles; ×72 while an axe of his is out at the actor (a released
     throw coming its way, or one about to be released along its lane); ×5
     instead (just under a punch) while another enemy's committed strike is
-    about to land (``reach.is_incoming_melee``) and no axe of his is out;
-    below CounterGrab/TechRecover and the dialogs; the hold family never
-    coexists with it.
+    about to land (``reach.is_incoming_melee``), or another grunt is closer
+    to the actor than he is by more than
+    ``priority._EMERGENCY_ENGAGE_JACK_NEARER_ENEMY_MARGIN_PX`` -- and no axe
+    of his is out; below CounterGrab/TechRecover and the dialogs; the hold
+    family never coexists with it.
     """
 
     priority: int = 24
