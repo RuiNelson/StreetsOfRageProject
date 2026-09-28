@@ -771,12 +771,19 @@ class ObserverApp:
                 if tick_ms >= 8.0:
                     slow = []
                     for player_index in (1, 2):
-                        winning = self._agent_loops[
-                            player_index
-                        ].verb_state().winning
+                        state = self._agent_loops[player_index].verb_state()
+                        winning = state.winning
                         if winning is not None:
+                            route = state.route
+                            route_bit = (
+                                f" route_nodes={route.nodes_expanded}"
+                                f" reached={route.reached}"
+                                if route is not None
+                                else " route=none"
+                            )
                             slow.append(
                                 f"P{player_index}:{type(winning).__name__}"
+                                f"{route_bit}"
                             )
                     logger.warning(
                         "slow lockstep tick: %.1fms winning=%s",

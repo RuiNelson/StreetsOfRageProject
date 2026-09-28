@@ -105,6 +105,15 @@ NAV_STEP = 4
 # a worse route rather than a missed tick.
 NAV_MAX_NODES = 4000
 
+# The same bound for the danger-aware pass only. Proving no danger-free
+# route exists costs the whole reachable lattice (thousands of nodes, tens
+# of ms -- the slow lockstep ticks), while a danger-free route worth taking
+# shows up early; anything longer is a long detour the solids fallback
+# answers with the direct path instead. A game AI takes the small risk
+# quickly rather than proving the safe road slowly. The solids pass keeps
+# the full bound: physics is never approximated.
+DANGER_MAX_NODES = 100
+
 # Body box used when the actor's real one is unknown (`hitbox` is None on a
 # no-attack frame with a degenerate cached box). "Unknown" is not "no body":
 # planning as a point would route the actor through gaps it cannot fit.
@@ -740,9 +749,9 @@ def plan_route(
     danger rect (replayed step by step above), no danger-aware search can
     improve on it: it is already a cheapest danger-free arrival, and only
     an equal-cost tie could pick a different first step. Only a solids
-    route that actually crosses danger pays for the danger pass, which then
-    runs exactly as before -- and its best-effort failure still answers
-    with the solids route.
+    route that actually crosses danger pays for the danger pass, which runs
+    bounded by ``DANGER_MAX_NODES`` -- and its best-effort failure still
+    answers with the solids route.
     """
 
     body = body_rect(actor)
@@ -763,7 +772,10 @@ def plan_route(
         return direct
     if _path_avoids_dangers(body, world, direct, dangers):
         return direct
-    careful = find_path(obstacles=[*solids, *dangers], **options)
+    careful = find_path(
+        obstacles=[*solids, *dangers],
+        **{**options, "max_nodes": DANGER_MAX_NODES},
+    )
     if careful.reached:
         return careful
     return direct

@@ -2010,14 +2010,20 @@ in one region pass, no `_yx_aims` re-sort -- a worst-case street route went
 first (a failed solids search proves the danger one is doomed; a solids
 route replayed clear of every danger rect is already a cheapest danger-free
 arrival, so the danger pass runs only when the solids route actually
-crosses danger). What remains is the danger fail-proof itself: proving no
-danger-free route exists costs the whole reachable lattice (~3000 nodes,
-tens of ms), and no exact method avoids that work -- a hard 2 ms max needs
-either a node cap on the danger pass (visible on long detours; a 200-tick
-sweep reads 0 winner diffs down to a 250-node cap, but the worst routed
-tick still reads 11-15 ms through the retreat/jump multipliers) or accepting
-the rare bursts (in lockstep they only slow wall-clock -- `frames/tick`
-stays exactly 2; in turbo they miss frames).
+crosses danger). The danger pass itself is now capped at `DANGER_MAX_NODES
+= 100` (0 winner diffs over 200 full ticks; long safe detours take the
+direct path instead). What remains is the solids fail-proof: with the cap
+in, every remaining slow tick is a `WalkToNearEnemy` solids proof of ~3000
+nodes (`reached=False`, 25-30 ms bursts, spikes to ~59 ms live) while
+chasing a target past the plannable world -- and the slow-tick log now
+carries `route_nodes`/`reached` for attribution. Replacing those
+best-effort first steps with the straight-line fallback was measured and
+rejected: they agree on only 69 of 162 failed ticks, and the fallback
+drifts lanes toward an unreachable target where the proof holds its lane
+and pushes right. Proving no route exists costs the whole reachable
+lattice, and no exact method avoids that work -- so a hard 2 ms max is
+incompatible with identical motion here. In lockstep the bursts only slow
+wall-clock (`frames/tick` stays exactly 2); in turbo they miss frames.
 
 ## Diagnostic tools (`tools/`)
 
