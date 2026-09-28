@@ -765,6 +765,24 @@ class ObserverApp:
                             snapshot, player_index=player_index
                         )
                 tick_ms = (time.monotonic() - tick_started) * 1000.0
+                # Slow-tick attribution (diagnostic only, never read by the
+                # AI): a tick past this budget is what a weaker machine
+                # feels as blindness, so it names the winning verb(s).
+                if tick_ms >= 8.0:
+                    slow = []
+                    for player_index in (1, 2):
+                        winning = self._agent_loops[
+                            player_index
+                        ].verb_state().winning
+                        if winning is not None:
+                            slow.append(
+                                f"P{player_index}:{type(winning).__name__}"
+                            )
+                    logger.warning(
+                        "slow lockstep tick: %.1fms winning=%s",
+                        tick_ms,
+                        ",".join(slow) if slow else "none",
+                    )
                 masks = [
                     self._capture.next_frame_masks()
                     for _ in range(LOCKSTEP_FRAMES_PER_TICK)

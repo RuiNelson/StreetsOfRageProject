@@ -42,6 +42,25 @@ from collections.abc import Sequence
 from .geometry import EPS, Direction, Rect
 
 
+_DIR_PARAMS: dict[Direction, tuple[int, int, bool]] = {}
+
+
+def _dir_params(direction: Direction) -> tuple[int, int, bool]:
+    """Cached ``(dx, dy, is_diagonal)`` for a direction.
+
+    The ``Direction.dx``/``dy``/``is_diagonal`` properties re-read
+    ``direction.value`` on every call; the search asks several times per
+    neighbour, so the tuple is computed once per direction instead.
+    """
+
+    cached = _DIR_PARAMS.get(direction)
+    if cached is None:
+        dx, dy = direction.value
+        cached = (dx, dy, dx != 0 and dy != 0)
+        _DIR_PARAMS[direction] = cached
+    return cached
+
+
 def _center_buried_in(start: Rect, obstacle: Rect) -> bool:
     """True when the body is sitting *in* the obstacle, not merely clipping it.
 
@@ -89,26 +108,97 @@ class Lattice:
         self.obstacles = tuple(
             obstacle for obstacle in relevant if obstacle not in self.ignored
         )
-        self.start_is_free = self._is_free(start)
+        # Coordinate caches for the hot loop: the same geometry as the Rect
+        # methods below, but as plain floats so thousands of overlap tests
+        # per search cost comparisons instead of dataclass allocations and
+        # property lookups. ``obstacles`` stays the public, Rect-typed tuple.
+        self._sx = start.x
+        self._sy = start.y
+        self._bw = start.width
+        self._bh = start.height
+        self._wl = world.x
+        self._wt = world.y
+        self._wr = world.x + world.width
+        self._wb = world.y + world.height
+        self._obs: tuple[tuple[float, float, float, float], ...] = tuple(
+            (o.x, o.y, o.x + o.width, o.y + o.height) for o in self.obstacles
+        )
+        self.start_is_free = self._is_free_coords(self._sx, self._sy)
         self._free: dict[tuple[int, int], bool] = {}
 
+    def coords_at(self, node: tuple[int, int]) -> tuple[float, float]:
+        """Top-left corner of the body at ``node``, without allocating a Rect.
+
+        Pure arithmetic on purpose: the coordinates are an affine function
+        of the indices, so a dict cache would cost more per hit than the two
+        multiplications it saves.
+        """
+
+        return (self._sx + node[0] * self.step, self._sy + node[1] * self.step)
+
     def rect_at(self, node: tuple[int, int]) -> Rect:
-        i, j = node
-        return self.start.moved_by(i * self.step, j * self.step)
+        x, y = self.coords_at(node)
+        return Rect(x, y, self._bw, self._bh)
 
     def is_free(self, node: tuple[int, int]) -> bool:
         """Can the body stand here?"""
 
         cached = self._free.get(node)
         if cached is None:
-            cached = self._is_free(self.rect_at(node))
+            x, y = self.coords_at(node)
+            cached = self._is_free_coords(x, y)
             self._free[node] = cached
         return cached
+
+    def swept_is_free_coords(
+        self, ax: float, ay: float, bx: float, by: float
+    ) -> bool:
+        """Is the swept volume between two body origins clear of obstacles?
+
+        The union of the body at ``(ax, ay)`` and at ``(bx, by)``, tested
+        without allocating either rectangle.
+        """
+
+        bw, bh = self._bw, self._bh
+        x0 = ax if ax < bx else bx
+        y0 = ay if ay < by else by
+        ax1 = ax + bw
+        bx1 = bx + bw
+        x1 = ax1 if ax1 > bx1 else bx1
+        ay1 = ay + bh
+        by1 = by + bh
+        y1 = ay1 if ay1 > by1 else by1
+        eps = EPS
+        for ox0, oy0, ox1, oy1 in self._obs:
+            if x0 < ox1 - eps and ox0 < x1 - eps and y0 < oy1 - eps and oy0 < y1 - eps:
+                return False
+        return True
 
     def can_move(self, node: tuple[int, int], direction: Direction) -> bool:
         """Is a single step from ``node`` in ``direction`` walkable?"""
 
-        target = (node[0] + direction.dx, node[1] + direction.dy)
+        dx, dy, is_diag = _dir_params(direction)
+        ax, ay = self.coords_at(node)
+        return self.can_move_from(node, ax, ay, dx, dy, is_diag)
+
+    def can_move_from(
+        self,
+        node: tuple[int, int],
+        ax: float,
+        ay: float,
+        dx: int,
+        dy: int,
+        is_diag: bool,
+    ) -> bool:
+        """``can_move`` with the node's coordinates already computed.
+
+        The search expands a node once but tests up to eight neighbours from
+        it; looking the same coordinates up per neighbour is pure overhead.
+        Target and side coordinates are affine in the node's, so they are
+        derived arithmetically rather than looked up.
+        """
+
+        target = (node[0] + dx, node[1] + dy)
         if not self.is_free(target):
             return False
 
@@ -118,27 +208,43 @@ class Lattice:
             # only by where it lands, so the body can walk back in.
             return True
 
-        if not direction.is_diagonal:
-            return self._sweep_is_free(node, target)
+        step = self.step
+        bx = ax + dx * step
+        by = ay + dy * step
+        if not is_diag:
+            return self.swept_is_free_coords(ax, ay, bx, by)
 
-        side_x = (node[0] + direction.dx, node[1])
-        side_y = (node[0], node[1] + direction.dy)
+        side_x = (node[0] + dx, node[1])
+        side_y = (node[0], node[1] + dy)
         if not self.is_free(side_x) or not self.is_free(side_y):
             return False
+        sx, sy = ax + dx * step, ay
+        qx, qy = ax, ay + dy * step
         # Both L-shaped detours, each leg swept -- a diagonal is allowed only
         # where the two routes it stands in for are themselves walkable.
         return (
-            self._sweep_is_free(node, side_x)
-            and self._sweep_is_free(side_x, target)
-            and self._sweep_is_free(node, side_y)
-            and self._sweep_is_free(side_y, target)
+            self.swept_is_free_coords(ax, ay, sx, sy)
+            and self.swept_is_free_coords(sx, sy, bx, by)
+            and self.swept_is_free_coords(ax, ay, qx, qy)
+            and self.swept_is_free_coords(qx, qy, bx, by)
         )
 
     def _sweep_is_free(self, node: tuple[int, int], other: tuple[int, int]) -> bool:
-        swept = self.rect_at(node).union(self.rect_at(other))
-        return not any(swept.overlaps(obstacle) for obstacle in self.obstacles)
+        ax, ay = self.coords_at(node)
+        bx, by = self.coords_at(other)
+        return self.swept_is_free_coords(ax, ay, bx, by)
 
     def _is_free(self, rect: Rect) -> bool:
-        if not self.world.contains(rect):
+        return self._is_free_coords(rect.x, rect.y)
+
+    def _is_free_coords(self, x: float, y: float) -> bool:
+        bw, bh = self._bw, self._bh
+        x1 = x + bw
+        y1 = y + bh
+        eps = EPS
+        if x < self._wl - eps or x1 > self._wr + eps or y < self._wt - eps or y1 > self._wb + eps:
             return False
-        return not any(rect.overlaps(obstacle) for obstacle in self.obstacles)
+        for ox0, oy0, ox1, oy1 in self._obs:
+            if x < ox1 - eps and ox0 < x1 - eps and y < oy1 - eps and oy0 < y1 - eps:
+                return False
+        return True

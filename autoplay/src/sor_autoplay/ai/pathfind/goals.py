@@ -44,6 +44,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
+from functools import lru_cache
+
 from .geometry import (
     EPS,
     HORIZONTAL_EDGES,
@@ -55,6 +57,90 @@ from .geometry import (
     contact_length,
     contact_shortfall,
 )
+
+
+@lru_cache(maxsize=512)
+def _region_coords(
+    regions: tuple[Rect, ...],
+) -> tuple[tuple[float, float, float, float], ...]:
+    """Regions as ``(x0, y0, x1, y1)`` tuples, cached per region set.
+
+    Pure function of the regions (all inputs hashable), so caching is
+    invisible. A search tests arrival thousands of times against one goal;
+    without this each test would rebuild the tuples it compares.
+    """
+
+    return tuple((r.x, r.y, r.x + r.width, r.y + r.height) for r in regions)
+
+
+def region_arrival(
+    rc: tuple[tuple[float, float, float, float], ...],
+    axis: str,
+    body_extent: float,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    min_contact: float,
+) -> tuple[bool, float]:
+    """Arrival test and misalignment over precomputed region coords, in one pass.
+
+    The same comparisons ``RegionGoal.is_reached``/``contact``/``misalignment``
+    make, combined: reached needs a touch (inclusive, like ``_touches``) and,
+    when ``min_contact > 0``, the max contact over touching regions at or
+    past ``min_contact - 1e-9``; misalignment is the min shortfall over the
+    touching regions (``0.0`` when nothing touches, matching the defaults).
+    One pass instead of up to three, and the caller precomputes ``rc`` once
+    per goal rather than per test.
+    """
+
+    x1 = x + width
+    y1 = y + height
+    eps = EPS
+    best_contact = 0.0
+    best_shortfall = 0.0
+    found = False
+    for rx0, ry0, rx1, ry1 in rc:
+        if not (x <= rx1 + eps and rx0 <= x1 + eps and y <= ry1 + eps and ry0 <= y1 + eps):
+            continue
+        ox = max(0.0, min(x1, rx1) - max(x, rx0))
+        oy = max(0.0, min(y1, ry1) - max(y, ry0))
+        if axis == "x":
+            contact = ox
+            region_extent = rx1 - rx0
+        elif axis == "y":
+            contact = oy
+            region_extent = ry1 - ry0
+        else:
+            contact = ox if ox < oy else oy
+            region_extent = rx1 - rx0
+            region_height = ry1 - ry0
+            if region_height < region_extent:
+                region_extent = region_height
+        if contact > best_contact:
+            best_contact = contact
+        shortfall = body_extent if body_extent < region_extent else region_extent
+        shortfall -= contact
+        if shortfall < 0.0:
+            shortfall = 0.0
+        if not found or shortfall < best_shortfall:
+            best_shortfall = shortfall
+            found = True
+    if not found:
+        return False, 0.0
+    if min_contact > 0 and best_contact < min_contact - 1e-9:
+        return False, 0.0
+    return True, best_shortfall
+
+
+def _body_extent(axis: str, width: float, height: float) -> float:
+    """The body's extent on the goal's contact axis (``RegionGoal._extent``)."""
+
+    if axis == "x":
+        return width
+    if axis == "y":
+        return height
+    return width if width < height else height
 
 
 def _touches(a: Rect, b: Rect) -> bool:
@@ -104,7 +190,7 @@ class Goal(Protocol):
         """
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PointGoal:
     """Reached when the moving rectangle covers ``point``.
 
@@ -118,8 +204,17 @@ class PointGoal:
     tolerance: float = 0.0
 
     def is_reached(self, rect: Rect) -> bool:
-        target = rect.grown_by(self.tolerance) if self.tolerance else rect
-        return target.contains_point(self.point)
+        return self.reached_at(rect.x, rect.y, rect.width, rect.height)
+
+    def reached_at(self, x: float, y: float, width: float, height: float) -> bool:
+        """``is_reached`` from plain coordinates, without allocating a Rect."""
+
+        tol = self.tolerance
+        px, py = self.point.x, self.point.y
+        return (
+            x - tol - EPS <= px <= x + width + tol + EPS
+            and y - tol - EPS <= py <= y + height + tol + EPS
+        )
 
     def bounding_box(self) -> Rect:
         return Rect(self.point.x, self.point.y, 0.0, 0.0).grown_by(self.tolerance)
@@ -135,7 +230,7 @@ class PointGoal:
         return 0.0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SegmentGoal:
     """Reached when one of ``edges`` of the moving rectangle meets ``segment``.
 
@@ -195,7 +290,7 @@ class SegmentGoal:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RegionGoal:
     """Reached when the moving rectangle *overlaps* ``region``.
 
@@ -258,6 +353,59 @@ class RegionGoal:
 
         return any(_touches(rect, region) for region in self.regions)
 
+
+    def reached_at(self, x: float, y: float, width: float, height: float) -> bool:
+        """``is_reached`` from plain coordinates, without allocating a Rect."""
+
+        return region_arrival(
+            _region_coords(self.regions),
+            self.axis,
+            _body_extent(self.axis, width, height),
+            x,
+            y,
+            width,
+            height,
+            0.0,
+        )[0]
+
+    def contact_at(self, x: float, y: float, width: float, height: float) -> float:
+        """``contact`` from plain coordinates, without allocating a Rect."""
+
+        rc = _region_coords(self.regions)
+        x1 = x + width
+        y1 = y + height
+        eps = EPS
+        axis = self.axis
+        best = 0.0
+        for rx0, ry0, rx1, ry1 in rc:
+            if not (x <= rx1 + eps and rx0 <= x1 + eps and y <= ry1 + eps and ry0 <= y1 + eps):
+                continue
+            ox = max(0.0, min(x1, rx1) - max(x, rx0))
+            oy = max(0.0, min(y1, ry1) - max(y, ry0))
+            if axis == "x":
+                contact = ox
+            elif axis == "y":
+                contact = oy
+            else:
+                contact = ox if ox < oy else oy
+            if contact > best:
+                best = contact
+        return best
+
+    def misalignment_at(self, x: float, y: float, width: float, height: float) -> float:
+        """``misalignment`` from plain coordinates, without allocating a Rect."""
+
+        return region_arrival(
+            _region_coords(self.regions),
+            self.axis,
+            _body_extent(self.axis, width, height),
+            x,
+            y,
+            width,
+            height,
+            0.0,
+        )[1]
+
     def bounding_box(self) -> Rect:
         box = self.regions[0]
         for region in self.regions[1:]:
@@ -307,7 +455,7 @@ class RegionGoal:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RectGoal:
     """Reached when a named edge of the body meets a named edge of ``target``.
 

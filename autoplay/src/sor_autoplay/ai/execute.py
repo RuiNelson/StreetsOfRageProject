@@ -478,8 +478,9 @@ def _routed_mask(
     Only the **first** vector, and the whole route is thrown away and rebuilt
     next tick. That looks wasteful and is not: the world moves under a plan
     -- enemies walk, crates break, phases flip -- so a plan kept across ticks
-    is a plan that is quietly wrong, while a search of this playfield costs
-    well under a millisecond against a 33 ms tick.
+    is a plan that is quietly wrong, while a typical search of this playfield
+    costs well under a millisecond against a 33 ms tick (a danger-dense
+    failed proof can cost tens of ms -- see autoplay/CLAUDE.md, Tick budget).
 
     An empty mask means one of two very different things, and they must not
     be confused. Either the goal is already satisfied -- stand still, which
