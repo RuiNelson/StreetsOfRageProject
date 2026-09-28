@@ -541,6 +541,67 @@ def read_snapshot(client: MemorySource, *, rom: RomData | None = None) -> GameSn
     )
 
 
+WORK_RAM_BASE = 0xFF0000
+WORK_RAM_SIZE = 65536
+
+
+def snapshot_from_work_ram(
+    ram: bytes | bytearray | memoryview,
+    *,
+    rom: RomData | None = None,
+    uptime_frames: int = 0,
+) -> GameSnapshot:
+    """Build a snapshot from a lockstep step's 64 KiB work-RAM image.
+
+    The same windows :func:`read_snapshot` fetches over the wire, sliced
+    locally instead -- the shape every ``tools/*_lab.py`` ``snapshot_from_ram``
+    helper uses, promoted here so the live lockstep loop (``app.py``) and the
+    labs share one definition. ``uptime_frames`` is the step response's own
+    frame counter, since a frozen host has no newer ``get_game_uptime_frames``
+    to ask for.
+    """
+
+    from .world_map import ACTORS_BYTES, CAMERA_BYTES
+
+    view = bytes(ram)
+
+    def _window(address: int, length: int) -> bytes:
+        offset = address - WORK_RAM_BASE
+        if offset < 0 or offset + length > len(view):
+            return b""
+        return view[offset : offset + length]
+
+    stride = int.from_bytes(
+        _window(mm.ADDR_PRIMARY_BLOCKMAP_STRIDE, 2) or b"\0\0", "big"
+    )
+    police_blob = _window(mm.ADDR_POLICE_SPECIAL_ACTIVE, 3) or b"\0\0\0"
+    mr_x_blob = _window(mm.ADDR_MR_X_OFFER_FLAG, 6) or bytes(6)
+    actors = _window(mm.ADDR_P1_OBJECT, ACTORS_BYTES)
+    collision_map = (
+        _window(mm.ADDR_LEVEL_COLLISION_CLASS_MAP, stride * 0x18)
+        if stride
+        else b""
+    )
+    return snapshot_from_memory_blocks(
+        globals_block=_window(0xFFFF00, 0x40),
+        timer_block=_window(mm.ADDR_GAME_TIMER, 4),
+        objects_block=actors[:0x100],
+        actors_block=actors,
+        camera_block=_window(mm.ADDR_PRIMARY_CAMERA, CAMERA_BYTES),
+        stop_clock=(_window(mm.ADDR_STOP_CLOCK, 1) or b"\0")[0],
+        pause_text_flag=(_window(mm.ADDR_PAUSE_TEXT_FLAG, 1) or b"\0")[0],
+        police_special_active_byte=police_blob[0],
+        police_special_caller_byte=police_blob[2],
+        collision_map=collision_map,
+        blockmap_stride=stride if collision_map else 0,
+        mr_x_offer_flag=mr_x_blob[0],
+        mr_x_offer_state=int.from_bytes(mr_x_blob[4:6], "big"),
+        uptime_frames=uptime_frames,
+        connected=True,
+        rom=rom,
+    )
+
+
 def disconnected_snapshot(error: str | None = None) -> GameSnapshot:
     empty_player = PlayerSnapshot(
         index=1,

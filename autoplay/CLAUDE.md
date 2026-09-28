@@ -1859,6 +1859,9 @@ has actually landed. Unit coverage:
 # Live AI testing (turbo host + matching poll cadence; see below)
 ./scripts/both_turbo
 
+# Live AI testing, AI-driven clock (no turbo, no poll pacing; see below)
+./scripts/both_lockstep_speed
+
 # Path-finding viewer (standalone Tk; connects to nothing, so no host/port)
 ./scripts/pathfind_viewer
 ./scripts/pathfind_viewer --width 480 --height 200 --step 4 --body 24
@@ -1955,13 +1958,28 @@ Wiring live jitter into every boss lookahead's tuned lead time needs the same
 measure-first discipline before it touches combat, not a guess. The frame
 counter above is step one -- watch `poll timing:` lines under real load
 before deciding whether `--poll-ms 16` at `--turbo 2` is actually drifting
-enough to be worth it. A further, larger option surfaced by that
-investigation and also not started: the remote protocol's
-`SET_LOCKSTEP`/`STEP_INPUT` primitive (`MegaDriveEnvironment`, used by every
-`*_lab.py` tool) could drive live AI-controlled play frame-exactly (poll →
-decide → step N frames → poll) instead of wall-clock sleeping, with zero
-effect on the human-player `--vsync` path since it is a separate protocol
-call the AI alone would use.
+enough to be worth it. The further, larger option that investigation
+surfaced -- the remote protocol's `SET_LOCKSTEP`/`STEP_INPUT` primitive
+(`MegaDriveEnvironment`, used by every `*_lab.py` tool) driving live
+AI-controlled play frame-exactly (poll → decide → step N frames → poll)
+instead of wall-clock sleeping -- is now built, as `--lockstep`
+(`app.py`'s `_lockstep_loop`, exercised live through
+`scripts/both_lockstep_speed`):
+
+```bash
+./scripts/both_lockstep_speed
+./scripts/both_lockstep_speed --start-level 2 --kill-street-enemies --no-food --no-police
+```
+
+While an AI is engaged and the game is playable the host is frozen and each
+tick steps exactly 2 game frames as fast as they run -- no `--poll-ms`
+sleeping, no `--turbo`, so the plan's stick lands exactly instead of 0-1
+updates late (which is what the twins' five `SCENARIOS` exist to absorb).
+With no AI engaged, before the level jump, or on a level mismatch the host
+runs realtime and the loop only observes. Own port (6767), debug sweeps and
+extra args pass through to autoplay. It has zero effect on the
+human-player `--vsync` path since lockstep is a separate protocol call the
+AI alone uses.
 
 ## Diagnostic tools (`tools/`)
 
@@ -1998,8 +2016,8 @@ do not commit `.jsonl` runs.
 
 | Piece | Role |
 | --- | --- |
-| `app.py` | CLI (`--host`, `--port`, `--poll-ms`, `--hud-ms`, `--once`, `--agent-p1`, `--agent-p2`), poll loop, AI dispatch. `_record_frame_timing` logs measured frames/tick at DEBUG (**Poll timing is now measured, not just assumed**, above) -- diagnostic only, never read by the AI |
-| `state.py` | Work-RAM / remote reads → `GameSnapshot`. `snapshot_from_memory_blocks` skips both `hazards.holes_for_level` and `hazards.barriers_for_level` on the elevator stage (`level_index == 6`, stage 7): its moving platform is not represented by the class-0/2 collision map the same way ordinary terrain is, so both reads would be class-map noise rather than real hazards. Barrier solids were skipped first ("class map noise cannot invent walls on the lift"); holes got the identical carve-out once a phantom `Pit` reached the AI pipeline (`ai/observe.py` builds one per `snapshot.floor_holes` entry, unconditionally) and the HUD drew a hole that was never there. `snapshot.floor_holes`/`floor_barriers` are therefore always `()` on stage 7, which is the one place both the HUD and the token pipeline need to change to make pits disappear there — everything downstream already just reads the snapshot |
+| `app.py` | CLI (`--host`, `--port`, `--poll-ms`, `--hud-ms`, `--once`, `--agent-p1`, `--agent-p2`, `--lockstep`), realtime poll loop or lockstep loop (AI-driven clock: tick, then 2 stepped frames), AI dispatch. ``_record_frame_timing` logs measured frames/tick at DEBUG (**Poll timing is now measured, not just assumed**, above) -- diagnostic only, never read by the AI |
+| `state.py` | Work-RAM / remote reads → `GameSnapshot`. `snapshot_from_work_ram` builds one from a lockstep step's 64 KiB image (the same windows `read_snapshot` fetches, sliced locally -- shared with the labs' shape). `snapshot_from_memory_blocks` skips both `hazards.holes_for_level` and `hazards.barriers_for_level` on the elevator stage (`level_index == 6`, stage 7): its moving platform is not represented by the class-0/2 collision map the same way ordinary terrain is, so both reads would be class-map noise rather than real hazards. Barrier solids were skipped first ("class map noise cannot invent walls on the lift"); holes got the identical carve-out once a phantom `Pit` reached the AI pipeline (`ai/observe.py` builds one per `snapshot.floor_holes` entry, unconditionally) and the HUD drew a hole that was never there. `snapshot.floor_holes`/`floor_barriers` are therefore always `()` on stage 7, which is the one place both the HUD and the token pipeline need to change to make pits disappear there — everything downstream already just reads the snapshot |
 | `world_map.py` | Camera + actors → map entities (incl. hunt targets); `MapEntity.stun_timer` is the ordinary-enemy `+$50` stun countdown, read only in the `kind=="enemy"` branch (the same offset is weapon wear / boss distance / player character id for other kinds) and only meaningful while `combat_phase` is `STUNNED`; `MapEntity.held_type` on an ordinary enemy is the pickup weapon `$08-$0C` it is carrying, resolved from a held weapon object's `+$52` holder pointer (`interaction==1`) -- enemies do not store the type at `+$60` (that word is their scripted approach X); `parse_world_map` takes `police_special_active` purely to disambiguate enemy state `$0400`; `MapEntity.hitbox` is the object's real body AABB -- for a player, `_object_geometry` reads it straight from the cached box at `+$70` and needs no `RomData` at all; for everything else it is rebuilt per tick from the ROM shape tables and `None` without `RomData` (*unknown*, never *no body*) -- and `MapEntity.attack_ranges` is every reach its type has (empty for a player, whose reach lives in `tokens/character.py` instead, and for bosses, whose animation sets are not labelled); `MapEntity.character_id` (0/1/2 = Axel/Adam/Blaze, `None` for non-players) is threaded through from `parse_world_map`'s own resolved `char_id` purely so a display-side consumer (today, `hud.py`'s `_display_attack_ranges`) can look up a player's per-character punch reach -- it is not read anywhere in `world_map.py` itself; `_is_dormant_combatant` drops a combatant whose **primary state is still `$0000`** whether or not the SAT-hidden bit is set: a wave's object slots are populated before `$937A` runs, so for one frame they hold a complete, *visible*, uninitialised entity -- recorded live, five of them appearing for a single tick at state `$00` with zero health and zero velocity, spread across the level ahead, and the AI punched at the nearest of them (48px away, at nothing) before they vanished. The hidden bit is a symptom `$937A` sets while testing eligibility, not the definition of dormancy. `MapEntity.enemy_vel_x`/`enemy_vel_y` carry ordinary-enemy velocity (+$1C/+$20), read only in the `kind=="enemy"` branch -- distinct fields/offsets from the boss-only `vel_x`/`vel_z` (+$20/+$24) already on the same dataclass, left untouched. `MapEntity.contact_slot` resolves the player's `+$4C` hold link to a slot name -- the ROM's own "which body am I holding", and the only field that answers it for a later boss (see **Holding a boss**); meaningful only while the action byte is in a grab/hold family, which is why `observe.py` and `is_grabbing` both gate on that |
 | `object_catalog.py` | Type → symbol / color / family. Antonio's boomerang (`$96`), Bongo's flame (`$97`) and Souther's claw/afterimage (`$98`/`$99`) are catalogued so the linked boss attack objects become map entities at all (the flame reads the later-boss layout like the boomerang: animation, countdown, latched box, `+$6E`); the claw pair is then withheld **unconditionally** from being a projectile threat (`reach.is_souther_claw`), unlike the boomerang, which is only withheld while attached (`reach.antonio_still_holding_boomerang`) -- they are animation-synchronized visuals re-created from Souther's own position every tick, with no flight to intercept and no box of their own (the claw's hit is his own attack box; `ai-analysis/enemy-ai.md`) |
 | `memory_map.py` | Known addresses; `OBJ_VEL_X_ORDINARY`/`OBJ_VEL_LANE_ORDINARY` (+$1C/+$20) are ordinary-enemy velocity per enemy-ai.md's object-layout table, corroborated live (a moving Garcia's +$1C tracked its actual displacement direction while +$20 stayed 0) -- distinct from the pre-existing boss-only `OBJ_VEL_X = 0x20`, which is in fact the lane velocity for the later-boss object family (`$17AB8` adds `+$1C` to X and `+$20` to the lane) -- still what `vel_x` reads for a boss and for most projectiles, while Antonio's `$96` boomerang reads its X velocity from `+$1C` (`OBJ_BOSS_VEL_X`) |

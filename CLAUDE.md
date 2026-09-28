@@ -213,6 +213,20 @@ section if its turbo factor or `--poll-ms` changes. Full rationale,
 including frame-pacing details for timing moves, is in `autoplay/CLAUDE.md`
 under **Live AI testing**.
 
+For frame-exact sessions where the AI drives the clock instead of the wall
+clock (tick, step exactly 2 game frames as fast as they run, back to the
+tick — no turbo, no poll pacing), use the wrapper:
+
+```bash
+./scripts/both_lockstep_speed
+```
+
+equivalent to `./scripts/run --lang en --debugUtils --port 6767 --silent &`
+plus `./scripts/autoplay --lockstep --port 6767 --agent-p1 --reach-gameplay
+blaze`. Own port (6767) so it runs next to the turbo wrappers. Extra args
+pass through to autoplay (`--start-level`, `--kill-street-enemies`,
+`--no-food`, `--no-police`).
+
 ### Going straight to a boss
 
 `scripts/go_to_boss_1` … `scripts/go_to_boss_8` put the AI in front of one
