@@ -54,6 +54,8 @@ from .pathfind import (
     RegionGoal,
     find_path,
 )
+from .pathfind.geometry import direction_from_offset
+from .pathfind.grid import Lattice
 from . import jump_kick
 from .reach import (
     PIT_AVOID_MARGIN,
@@ -98,10 +100,18 @@ from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
 NAV_STEP = 4
 
 # A bound on how much lattice one tick may explore. The playable band is
-# about 320x112 px, so at NAV_STEP that is under 600 positions and this is
-# never reached in practice -- it exists so a pathological arrangement costs
-# a worse route rather than a missed tick.
-NAV_MAX_NODES = 4000
+# about 320x112 px, so at NAV_STEP that is under 600 positions: with this
+# bound at 10 nearly every search stops as best-effort after 10 expansions.
+NAV_MAX_NODES = 10
+
+# The same bound for the danger-aware pass only. Proving no danger-free
+# route exists costs the whole reachable lattice (thousands of nodes, tens
+# of ms -- the slow lockstep ticks), while a danger-free route worth taking
+# shows up early; anything longer is a long detour the solids fallback
+# answers with the direct path instead. A game AI takes the small risk
+# quickly rather than proving the safe road slowly. The solids pass keeps
+# the full bound: physics is never approximated.
+DANGER_MAX_NODES = 100
 
 # Body box used when the actor's real one is unknown (`hitbox` is None on a
 # no-attack frame with a degenerate cached box). "Unknown" is not "no body":
@@ -688,6 +698,36 @@ def advance_goal(context: Context, ahead_x: float) -> Goal:
     return RegionGoal.of(Rect(ahead_x, lo, 1.0, max(1.0, hi - lo)), axis="x")
 
 
+def _path_avoids_dangers(
+    body: Rect,
+    world: Rect,
+    path: Path,
+    dangers: Sequence[Rect],
+) -> bool:
+    """Does ``path`` walk clear of every danger rect, under search rules?
+
+    Replays the path's own unit steps through a lattice built on ``dangers``
+    alone, with the same ``can_move`` collision semantics (whole-body
+    overlap, swept moves, no diagonal corner cutting, start-buried dangers
+    dropped) the danger pass searches with. An empty path counts only when
+    standing still is itself danger-free. A few dozen ``can_move`` calls
+    against the cost of a second full search.
+    """
+
+    lattice = Lattice(start=body, world=world, obstacles=list(dangers), step=NAV_STEP)
+    if not path.steps:
+        return lattice.is_free((0, 0))
+    node = (0, 0)
+    for step in path.steps:
+        units = int(round(step.length / NAV_STEP))
+        direction = direction_from_offset(step.direction.dx, step.direction.dy)
+        for _ in range(units):
+            if not lattice.can_move(node, direction):
+                return False
+            node = (node[0] + step.direction.dx, node[1] + step.direction.dy)
+    return True
+
+
 def plan_route(
     context: Context,
     actor: Myself | Partner,
@@ -700,14 +740,17 @@ def plan_route(
 ) -> Path:
     """Route the actor to ``goal``, preferring to keep clear of danger.
 
-    Two passes, and the order is the point. The first treats enemy bodies
-    and their reaches as solid, which is the route worth having. The second
-    drops them and keeps only what is physically impassable, because a
-    screen with four enemies on it can easily have no danger-free route at
-    all -- and an AI that stops moving whenever the room is busy is worse
-    than one that accepts a risky path. Only a route that actually *arrives*
-    wins the first pass; a best effort through danger is no better than a
-    best effort without it.
+    Solids first, danger second -- and the order is exact, not a heuristic.
+    A danger-feasible route is also solids-feasible (danger obstacles only
+    add constraints), so when the solids pass fails the danger pass is
+    doomed too and its best-effort answer is the solids one, returned
+    without running it. When the solids route arrives clear of every
+    danger rect (replayed step by step above), no danger-aware search can
+    improve on it: it is already a cheapest danger-free arrival, and only
+    an equal-cost tie could pick a different first step. Only a solids
+    route that actually crosses danger pays for the danger pass, which runs
+    bounded by ``DANGER_MAX_NODES`` -- and its best-effort failure still
+    answers with the solids route.
     """
 
     body = body_rect(actor)
@@ -721,11 +764,20 @@ def plan_route(
         maximize_contact=maximize_contact,
         max_nodes=NAV_MAX_NODES,
     )
-    if dangers:
-        careful = find_path(obstacles=[*solids, *dangers], **options)
-        if careful.reached:
-            return careful
-    return find_path(obstacles=list(solids), **options)
+    if not dangers:
+        return find_path(obstacles=list(solids), **options)
+    direct = find_path(obstacles=list(solids), **options)
+    if not direct.reached:
+        return direct
+    if _path_avoids_dangers(body, world, direct, dangers):
+        return direct
+    careful = find_path(
+        obstacles=[*solids, *dangers],
+        **{**options, "max_nodes": DANGER_MAX_NODES},
+    )
+    if careful.reached:
+        return careful
+    return direct
 
 
 _DIRECTION_MASKS = {

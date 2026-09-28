@@ -28,7 +28,7 @@ from dataclasses import dataclass
 EPS = 1e-9
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Point:
     """A position in the plane."""
 
@@ -36,7 +36,7 @@ class Point:
     y: float
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Segment:
     """A straight line segment between two points, in any orientation.
 
@@ -210,7 +210,7 @@ def direction_from_offset(dx: int, dy: int) -> Direction:
     return _BY_OFFSET[key]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Rect:
     """An axis-aligned rectangle, anchored at its top-left corner."""
 

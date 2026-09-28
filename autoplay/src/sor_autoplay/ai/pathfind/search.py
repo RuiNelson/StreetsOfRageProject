@@ -74,7 +74,7 @@ from .geometry import (
     direction_from_offset,
     octile_distance,
 )
-from .goals import Goal
+from .goals import Goal, RegionGoal, _body_extent, _region_coords, region_arrival
 from .grid import Lattice
 
 DIAGONAL_COST = math.sqrt(2.0)
@@ -109,7 +109,27 @@ UNREACHABLE_MAX_NODES = 600
 MAX_YX_WINDOW = 64
 
 
-@dataclass(frozen=True)
+def _move_table(
+    directions: Sequence[Direction],
+) -> tuple[tuple[int, int, bool], ...]:
+    """``(dx, dy, is_diagonal)`` per direction, computed once, in order.
+
+    Same values the neighbour loop used to re-read off the ``Direction``
+    properties for every expanded node. The order is the input's own --
+    neighbour ties break by insertion order, so it must not change.
+    """
+
+    return tuple(
+        (d.value[0], d.value[1], d.value[0] != 0 and d.value[1] != 0)
+        for d in directions
+    )
+
+
+_ALL_MOVES = _move_table(ALL_DIRECTIONS)
+_CARDINAL_MOVES = _move_table(CARDINALS)
+
+
+@dataclass(frozen=True, slots=True)
 class Step:
     """One movement vector: a direction and how far to travel along it."""
 
@@ -125,7 +145,7 @@ class Step:
         return self.direction.dy * self.length
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Path:
     """The answer: where to go, and whether it actually gets there."""
 
@@ -193,25 +213,96 @@ def find_path(
     """
 
     lattice = Lattice(start=start, world=world, obstacles=obstacles, step=step)
-    directions = ALL_DIRECTIONS if allow_diagonals else CARDINALS
+    # Per-direction move data, computed once: the Direction.dx/dy/is_diagonal
+    # properties re-read direction.value on every access, and the neighbour
+    # loop asks several times per node.
+    if allow_diagonals:
+        moves = _ALL_MOVES
+    else:
+        moves = _CARDINAL_MOVES
     target_box = goal.bounding_box()
+    tbx0, tby0 = target_box.x, target_box.y
+    tbx1, tby1 = tbx0 + target_box.width, tby0 + target_box.height
+    body_w, body_h = lattice._bw, lattice._bh
+    sx, sy, step_size = lattice._sx, lattice._sy, step
 
     def heuristic(node: tuple[int, int]) -> float:
-        dx, dy = lattice.rect_at(node).gap_to(target_box)
+        nx = sx + node[0] * step_size
+        ny = sy + node[1] * step_size
+        nx1 = nx + body_w
+        ny1 = ny + body_h
+        # Same as Rect.gap_to: per-axis distance to touch the target box.
+        dx = tbx0 - nx1
+        if dx < 0.0:
+            dx = nx - tbx1
+            if dx < 0.0:
+                dx = 0.0
+        dy = tby0 - ny1
+        if dy < 0.0:
+            dy = ny - tby1
+            if dy < 0.0:
+                dy = 0.0
         return octile_distance(dx, dy)
 
     weight = alignment_weight if maximize_contact else 0.0
 
-    def arrived(rect: Rect) -> bool:
-        """Goal satisfied *and*, if one was asked for, contact enough."""
+    # Coordinate fast path: RegionGoal answers arrival and misalignment from
+    # precomputed region coords with the same comparisons its Rect methods
+    # make, in a single pass per test, so thousands of tests per search cost
+    # arithmetic instead of dataclass allocations and property lookups.
+    # PointGoal's check is already one comparison; other goal kinds keep the
+    # Rect API below. The paths chosen are identical either way.
+    if isinstance(goal, RegionGoal):
+        _rc = _region_coords(goal.regions)
+        _axis = goal.axis
+        _bext = _body_extent(_axis, body_w, body_h)
+        _min_contact = enough_contact
 
-        if not goal.is_reached(rect):
-            return False
-        return enough_contact <= 0 or goal.contact(rect) >= enough_contact - 1e-9
+        def arrival_at(x: float, y: float) -> tuple[bool, float]:
+            """``(reached, misalignment)``: arrival *and* lineup in one pass."""
+
+            return region_arrival(
+                _rc, _axis, _bext, x, y, body_w, body_h, _min_contact
+            )
+
+        def contact_at_xy(x: float, y: float) -> float:
+            return goal.contact_at(x, y, body_w, body_h)
+    elif hasattr(goal, "reached_at"):
+
+        def arrival_at(x: float, y: float) -> tuple[bool, float]:
+            """``(reached, misalignment)``: a point has no lineup to grade."""
+
+            return goal.reached_at(x, y, body_w, body_h), 0.0
+
+        def contact_at_xy(x: float, y: float) -> float:
+            return math.inf
+    else:
+
+        def arrival_at(x: float, y: float) -> tuple[bool, float]:
+            """``(reached, misalignment)`` through the Rect API (cold path)."""
+
+            rect = Rect(x, y, body_w, body_h)
+            if not goal.is_reached(rect):
+                return False, 0.0
+            if enough_contact > 0 and goal.contact(rect) < enough_contact - 1e-9:
+                return False, 0.0
+            return True, goal.misalignment(rect)
+
+        def contact_at_xy(x: float, y: float) -> float:
+            return goal.contact(Rect(x, y, body_w, body_h))
 
     origin = (0, 0)
-    if arrived(start) and (weight <= 0 or goal.misalignment(start) <= 0):
-        return Path((), True, start, start, 0, goal.misalignment(start), goal.contact(start))
+    start_ok, start_mis = arrival_at(start.x, start.y)
+    if start_ok and (weight <= 0 or start_mis <= 0):
+        return Path(
+            (),
+            True,
+            start,
+            start,
+            0,
+            start_mis,
+            contact_at_xy(start.x, start.y),
+        )
 
     came_from: dict[tuple[int, int], tuple[int, int]] = {}
     best_cost: dict[tuple[int, int], float] = {origin: 0.0}
@@ -232,7 +323,7 @@ def find_path(
     # that node; reconstruction walks A* to it and then appends the two legs.
     yx_from: tuple[int, int] | None = None
     goal_window = _touch_window(lattice, target_box)
-    arrivals = _free_arrivals(lattice, goal_window, arrived)
+    arrivals = _free_arrivals(lattice, goal_window, arrival_at)
     if arrivals is not None and not arrivals:
         max_nodes = min(max_nodes, UNREACHABLE_MAX_NODES)
     # A cheaper route to an already-queued node pushes a second entry rather
@@ -252,9 +343,11 @@ def find_path(
         cost = best_cost[node]
 
         expanded += 1
-        rect = lattice.rect_at(node)
-        if arrived(rect):
-            misalignment = goal.misalignment(rect) if weight else 0.0
+        nx = sx + node[0] * step_size
+        ny = sy + node[1] * step_size
+        ok, mis = arrival_at(nx, ny)
+        if ok:
+            misalignment = mis if weight else 0.0
             score = cost + weight * misalignment
             if score < goal_score:
                 goal_score = score
@@ -268,18 +361,17 @@ def find_path(
         finish = _best_yx_from(
             lattice,
             node,
-            arrived,
-            goal,
+            arrival_at,
             goal_window,
             require_flush=weight > 0,
             arrivals=arrivals,
         )
         if finish is not None:
-            arrival, arrival_rect = finish
+            arrival, arrival_mis = finish
             extra = step * (
                 abs(arrival[0] - node[0]) + abs(arrival[1] - node[1])
             )
-            misalignment = goal.misalignment(arrival_rect) if weight else 0.0
+            misalignment = arrival_mis if weight else 0.0
             score = cost + extra + weight * misalignment
             if score < goal_score:
                 goal_score = score
@@ -290,11 +382,12 @@ def find_path(
         if expanded >= max_nodes:
             break
 
-        for direction in directions:
-            if not lattice.can_move(node, direction):
+        can_move_from = lattice.can_move_from
+        for ddx, ddy, is_diag in moves:
+            if not can_move_from(node, nx, ny, ddx, ddy, is_diag):
                 continue
-            neighbour = (node[0] + direction.dx, node[1] + direction.dy)
-            move_cost = step * (DIAGONAL_COST if direction.is_diagonal else 1.0)
+            neighbour = (node[0] + ddx, node[1] + ddy)
+            move_cost = step * (DIAGONAL_COST if is_diag else 1.0)
             tentative = cost + move_cost
             if tentative >= best_cost.get(neighbour, math.inf) - 1e-12:
                 continue
@@ -340,20 +433,23 @@ def find_path(
 def _best_yx_from(
     lattice: Lattice,
     origin: tuple[int, int],
-    arrived: Callable[[Rect], bool],
-    goal: Goal,
+    arrival_at: Callable[[float, float], tuple[bool, float]],
     window: tuple[int, int, int, int] | None,
     *,
     require_flush: bool,
-    arrivals: dict[tuple[int, int], Rect] | None = None,
-) -> tuple[tuple[int, int], Rect] | None:
+    arrivals: dict[tuple[int, int], float] | None = None,
+) -> tuple[tuple[int, int], float] | None:
     """Y-then-X arrival from ``origin`` onto the goal window, or ``None``.
 
     Small windows (a crate, a point at a coarse step) are tried in full.
     Large ones (a full-height segment at 1px) only aim at the cheapest
     cell and the aligned one -- walking every row from every expanded
     node is what froze the viewer. ``arrivals``, when the search could
-    enumerate them, are the only cells worth a sweep.
+    enumerate them, are the only cells worth a sweep, each already mapped
+    to its misalignment.
+
+    Arrival and misalignment come back together from plain coordinates, so
+    trying a cell costs arithmetic rather than rectangle allocations.
     """
 
     if window is None or arrivals is not None and not arrivals:
@@ -361,7 +457,7 @@ def _best_yx_from(
 
     best_key: tuple[int, float, int, int, int, int] | None = None
     best_node: tuple[int, int] | None = None
-    best_rect: Rect | None = None
+    best_misalignment = 0.0
 
     for node in _yx_aims(origin, window, require_flush):
         if node == origin:
@@ -371,16 +467,16 @@ def _best_yx_from(
             if abs(node[0] - origin[0]) + abs(node[1] - origin[1]) > best_key[0]:
                 break
         if arrivals is not None:
-            rect = arrivals.get(node)
-            if rect is None:
+            misalignment = arrivals.get(node)
+            if misalignment is None:
                 continue
         if not _yx_clear(lattice, origin, node):
             continue
         if arrivals is None:
-            rect = lattice.rect_at(node)
-            if not arrived(rect):
+            ax, ay = lattice.coords_at(node)
+            arrived, misalignment = arrival_at(ax, ay)
+            if not arrived:
                 continue
-        misalignment = goal.misalignment(rect)
         if require_flush and misalignment > 0:
             continue
         di = abs(node[0] - origin[0])
@@ -389,36 +485,38 @@ def _best_yx_from(
         if best_key is None or key < best_key:
             best_key = key
             best_node = node
-            best_rect = rect
+            best_misalignment = misalignment
 
-    if best_node is None or best_rect is None:
+    if best_node is None:
         return None
-    return best_node, best_rect
+    return best_node, best_misalignment
 
 
 def _free_arrivals(
     lattice: Lattice,
     window: tuple[int, int, int, int] | None,
-    arrived: Callable[[Rect], bool],
-) -> dict[tuple[int, int], Rect] | None:
-    """Every window cell a body may stand on and arrive at, or ``None`` when
-    the window is too large to enumerate. The start counts when it arrives,
-    free or not (a hanging start still walks back in)."""
+    arrival_at: Callable[[float, float], tuple[bool, float]],
+) -> dict[tuple[int, int], float] | None:
+    """Every window cell a body may stand on and arrive at, mapped to its
+    misalignment, or ``None`` when the window is too large to enumerate.
+    The start counts when it arrives, free or not (a hanging start still
+    walks back in)."""
 
     if window is None:
         return {}
     i_lo, i_hi, j_lo, j_hi = window
     if (i_hi - i_lo + 1) * (j_hi - j_lo + 1) > MAX_ARRIVAL_WINDOW:
         return None
-    found: dict[tuple[int, int], Rect] = {}
+    found: dict[tuple[int, int], float] = {}
     for j in range(j_lo, j_hi + 1):
         for i in range(i_lo, i_hi + 1):
             node = (i, j)
             if node != (0, 0) and not lattice.is_free(node):
                 continue
-            rect = lattice.rect_at(node)
-            if arrived(rect):
-                found[node] = rect
+            ax, ay = lattice.coords_at(node)
+            arrived, misalignment = arrival_at(ax, ay)
+            if arrived:
+                found[node] = misalignment
     return found
 
 
@@ -451,7 +549,9 @@ def _yx_aims(
         cells = [
             (i, j) for j in range(j_lo, j_hi + 1) for i in range(i_lo, i_hi + 1)
         ]
-        # Flush wants the centred face first; otherwise the cheapest L.
+        # Nearest-to-the-aim first: the caller stops early once nothing left
+        # in the list could beat its best key, which only holds if cells
+        # arrive in non-decreasing distance from what they are sorted on.
         if require_flush:
             cells.sort(
                 key=lambda node: (
@@ -525,8 +625,9 @@ def _axis_clear_uncached(lattice: Lattice, start: tuple[int, int], end: tuple[in
                 return False
             node = (node[0] + di, node[1] + dj)
         return True
-    swept = lattice.rect_at(start).union(lattice.rect_at(end))
-    return not any(swept.overlaps(obstacle) for obstacle in lattice.obstacles)
+    ax, ay = lattice.coords_at(start)
+    bx, by = lattice.coords_at(end)
+    return lattice.swept_is_free_coords(ax, ay, bx, by)
 
 
 def _yx_steps(i: int, j: int, step: float) -> tuple[Step, ...]:

@@ -1,0 +1,67 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+# AI-driven clock: the host only advances when the AI ticks.
+#
+# Starts the host with --turbo 10 and drives autoplay in --lockstep mode:
+# tick the pipeline, step exactly 2 game frames as fast as the host runs
+# them, back to the tick. No wall-clock pacing on either side, so the plan's
+# stick lands exactly instead of 0-1 updates late (see autoplay/CLAUDE.md).
+#
+# --turbo only speeds the realtime phases (menus, reach-gameplay, any
+# stretch with the AI off): lockstep stepping never waits on the frame
+# clock to begin with (VDP::advanceRemoteLockstepFrame is purely
+# condition-variable driven), so turbo changes nothing there. Kept at 10,
+# not higher: reach-gameplay is validated at this rate.
+#
+# Own port (6767) so it can run next to both_turbo/go_to_boss (7777).
+#
+# Usage:
+#   ./scripts/both_lockstep_speed [extra autoplay args...]
+#   ./scripts/both_lockstep_speed --start-level 2 --kill-street-enemies --no-food --no-police
+#
+# Extra args pass through to autoplay. The host is started in the background
+# and killed again when this script exits, however it exits -- including
+# Ctrl-C (same shape as scripts/go_to_boss).
+
+SCRIPT_DIR="${0:A:h}"
+META_ROOT="${SCRIPT_DIR:h}"
+
+PORT=6767
+CHARACTER=blaze
+
+host_pid=""
+cleanup() {
+    if [[ -n "$host_pid" ]] && kill -0 "$host_pid" 2>/dev/null; then
+        kill "$host_pid" 2>/dev/null || true
+        wait "$host_pid" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+"$META_ROOT/scripts/run" --turbo 10 --lang en --debugUtils --port "$PORT" --silent &
+host_pid=$!
+
+# Wait for the host to actually listen rather than sleeping a guessed amount:
+# autoplay's first connection fails outright if it arrives too early.
+for _ in {1..60}; do
+    if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+        break
+    fi
+    if ! kill -0 "$host_pid" 2>/dev/null; then
+        print -u2 "${0:t}: host exited before it started listening"
+        exit 1
+    fi
+    sleep 0.5
+done
+
+# Foreground, and deliberately not exec'd. exec would replace this shell and
+# take the EXIT trap with it, leaving `sor` on the port after the HUD is
+# closed -- which is the case that matters, since quitting the HUD with
+# Esc/Q is how a run normally ends and the next run needs that port back.
+"$META_ROOT/scripts/autoplay" \
+    --lockstep \
+    --port "$PORT" \
+    --agent-p1 \
+    --reach-gameplay "$CHARACTER" \
+    "$@"

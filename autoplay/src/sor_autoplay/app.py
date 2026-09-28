@@ -18,11 +18,21 @@ from .ai.loop import AgentLoop
 from .debug_scenario import ENEMY_FAMILY_HOTKEYS, DebugScenario
 from .hud import HUD_PAINT_MS_DEFAULT, ObserverHud
 from .rom_data import RomData
-from .state import GameSnapshot, disconnected_snapshot, read_snapshot
+from .state import (
+    GameSnapshot,
+    disconnected_snapshot,
+    read_snapshot,
+    snapshot_from_work_ram,
+)
 
 # Wall-clock sample period. ~2 frames at 60 Hz (2 / 60 * 1000 ≈ 33.3 ms).
 DEFAULT_POLL_MS = 33
 ASSUMED_HZ = 60
+
+# Lockstep cadence: game frames stepped per AI tick. Matches the labs'
+# FRAMES_PER_TICK and kinematics.FRAMES_PER_TICK's nominal 2 -- one tick per
+# object update (objects run at 30 Hz), so the plan's stick lands exactly.
+LOCKSTEP_FRAMES_PER_TICK = 2
 
 
 class _RemoteClientProxy:
@@ -43,6 +53,88 @@ class _RemoteClientProxy:
         client = self._app._client
         if client is not None:
             client.press_buttons(player1=player1, player2=player2, frames=frames)
+
+
+class _LockstepCapture:
+    """Capture (instead of send) both players' button commands in lockstep mode.
+
+    The two-player ``RecordingClient`` the ``tools/*_lab.py`` labs each
+    reimplement for player 1 alone, promoted here. ``SharedGamepadState.press``
+    sends a full two-player payload -- the acting player's edge plus the other
+    player's current hold -- so replaying that payload verbatim for its frames
+    and then falling back to the sticky holds reproduces the tick exactly.
+
+    Touched from the poll thread (AI ticks, stepping) and the Tk thread (HUD
+    toggle releases), so every method takes the lock.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._held: dict[int, int] = {1: 0, 2: 0}
+        self._press_mask: dict[int, int] = {1: 0, 2: 0}
+        self._press_frames: dict[int, int] = {1: 0, 2: 0}
+
+    def reset(self) -> None:
+        with self._lock:
+            self._held = {1: 0, 2: 0}
+            self._press_mask = {1: 0, 2: 0}
+            self._press_frames = {1: 0, 2: 0}
+
+    def hold_buttons(self, *, player1: int = 0, player2: int = 0) -> None:
+        with self._lock:
+            self._held[1] = int(player1)
+            self._held[2] = int(player2)
+
+    def press_buttons(
+        self, *, player1: int = 0, player2: int = 0, frames: int = 1
+    ) -> None:
+        with self._lock:
+            self._press_mask[1] = int(player1)
+            self._press_mask[2] = int(player2)
+            self._press_frames[1] = int(frames)
+            self._press_frames[2] = int(frames)
+
+    def press_pending(self, player_index: int) -> bool:
+        with self._lock:
+            return self._press_frames[player_index] > 0
+
+    def next_frame_masks(self) -> tuple[int, int]:
+        """Masks for one stepped frame, draining any pending press first."""
+
+        with self._lock:
+            out = {}
+            for index in (1, 2):
+                if self._press_frames[index] > 0:
+                    self._press_frames[index] -= 1
+                    out[index] = self._press_mask[index]
+                else:
+                    out[index] = self._held[index]
+            return (out[1], out[2])
+
+
+def _group_step_masks(
+    masks: list[tuple[int, int]],
+) -> list[tuple[int, int, int, int]]:
+    """Group consecutive equal per-frame masks into ``step_input`` calls.
+
+    Returns ``(player1, player2, held_frames, total_frames)`` tuples:
+    ``held_frames`` covers the whole group when any button is down, else the
+    group plays released. Grouping keeps the common case -- one tick, one
+    mask -- to a single round trip while staying frame-exact when a press
+    edge falls mid-tick.
+    """
+
+    groups: list[list[int]] = []
+    for player1, player2 in masks:
+        if groups and groups[-1][0] == player1 and groups[-1][1] == player2:
+            groups[-1][3] += 1
+        else:
+            groups.append([player1, player2, 0, 1])
+    result = []
+    for player1, player2, _, total in groups:
+        held = total if (player1 or player2) else 0
+        result.append((player1, player2, held, total))
+    return result
 
 
 def _default_megadrive_python_src() -> Path | None:
@@ -196,6 +288,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--once",
         action="store_true",
         help="Print one snapshot to stdout and exit (no GUI)",
+    )
+    parser.add_argument(
+        "--lockstep",
+        action="store_true",
+        help=(
+            "Drive the host in lockstep while an AI is engaged: tick the "
+            "pipeline, then step exactly "
+            f"{LOCKSTEP_FRAMES_PER_TICK} game frames as fast as the host runs "
+            "them (no --poll-ms pacing, no --turbo). Falls back to realtime "
+            "polling with no AI engaged or while the game is not playable. "
+            "Requires the host's --debugUtils."
+        ),
     )
     parser.add_argument(
         "--agent-p1",
@@ -370,12 +474,19 @@ class ObserverApp:
         scenario: DebugScenario | None = None,
         no_food: bool = False,
         no_police: bool = False,
+        lockstep: bool = False,
     ) -> None:
         self.host = host
         self.port = port
         self.poll_ms = max(1, poll_ms)
         self.hud_ms = max(16, hud_ms)
         self.scenario = scenario
+        # --lockstep: while an AI is engaged and the game is playable, tick
+        # the pipeline and then step exactly LOCKSTEP_FRAMES_PER_TICK game
+        # frames as fast as the host runs them (no wall-clock pacing, no
+        # turbo). Falls back to realtime polling otherwise.
+        self.lockstep = lockstep
+        self._lockstep_engaged = False
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._latest: GameSnapshot = disconnected_snapshot("starting")
@@ -403,6 +514,12 @@ class ObserverApp:
         if agent_p2:
             self.agent_p2_enabled.set()
         self._gamepad_state = SharedGamepadState(_RemoteClientProxy(self))
+        # In lockstep mode the AI never touches the live latch: the tick's
+        # output is captured and replayed through step_input instead, so the
+        # sticky hold and the stepped masks cannot fight over the pad.
+        self._capture = _LockstepCapture()
+        if lockstep:
+            self._gamepad_state = SharedGamepadState(self._capture)
         self._gamepads = {
             1: VirtualGamepad(self._gamepad_state, player_index=1),
             2: VirtualGamepad(self._gamepad_state, player_index=2),
@@ -423,8 +540,15 @@ class ObserverApp:
             self._gamepads[player_index].release()
 
     def start_poller(self) -> None:
-        thread = threading.Thread(target=self._poll_loop, name="sor-remote-poll", daemon=True)
+        target = self._lockstep_loop if self.lockstep else self._poll_loop
+        thread = threading.Thread(target=target, name="sor-remote-poll", daemon=True)
         thread.start()
+
+    def _sleep_remaining(self, started: float, poll_s: float) -> None:
+        elapsed = time.monotonic() - started
+        remaining = poll_s - elapsed
+        if remaining > 0:
+            self._stop.wait(remaining)
 
     def _poll_loop(self) -> None:
         from megadrive_remote import MegaDriveClient
@@ -486,6 +610,219 @@ class ObserverApp:
                 if remaining > 0:
                     self._stop.wait(remaining)
             except Exception as exc:  # noqa: BLE001 - surface any link failure in HUD
+                with self._lock:
+                    self._latest = disconnected_snapshot(str(exc))
+                    client, self._client = self._client, None
+                if client is not None:
+                    try:
+                        client.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                self._stop.wait(backoff_s)
+                backoff_s = min(2.0, backoff_s * 1.5)
+
+    def _engage_lockstep(self, client) -> bool:
+        """Freeze the host at a frame boundary and take over its clock.
+
+        Clears the sticky button latch first (the labs release the pad before
+        entering lockstep for the same reason): from here on the only input
+        the game sees is each step's own masks.
+        """
+
+        try:
+            client.hold_buttons(player1=0, player2=0)
+        except Exception:  # noqa: BLE001 - engage fails below instead
+            return False
+        self._capture.reset()
+        self._gamepad_state.reset()
+        try:
+            # Short timeout on purpose: entry cannot latch while the host CPU
+            # is inside a run-to-completion ROM load (level/decompression --
+            # no interrupt dispatch, so no checkpoint latches until the load
+            # finishes), and a failed attempt freezes the game for the whole
+            # wait. 2 s of freeze with a retry right after beats 10 s; the
+            # loop retries until it lands. Measured: instant entry in settled
+            # gameplay, timeouts only across loads, at any turbo.
+            client.set_lockstep(True, timeout_ms=2_000)
+        except Exception as exc:  # noqa: BLE001 - reported, retried next poll
+            logger.warning("lockstep engage failed: %s", exc)
+            return False
+        self._lockstep_engaged = True
+        logger.info(
+            "lockstep engaged: driving %d frames per AI tick", LOCKSTEP_FRAMES_PER_TICK
+        )
+        return True
+
+    def _disengage_lockstep(self, client) -> None:
+        """Release the host back to realtime; never fails the caller."""
+
+        self._lockstep_engaged = False
+        try:
+            client.set_lockstep(False)
+        except Exception:  # noqa: BLE001 - best effort on the way out
+            pass
+        try:
+            client.hold_buttons(player1=0, player2=0)
+        except Exception:  # noqa: BLE001 - best effort on the way out
+            pass
+
+    def _lockstep_loop(self) -> None:
+        """Tick the AI and step the game, alternating, as fast as possible.
+
+        While an AI is engaged and the game is playable the host is frozen
+        and this loop owns its clock: one pipeline tick, then exactly
+        ``LOCKSTEP_FRAMES_PER_TICK`` stepped frames, then back to the tick --
+        the labs' shape (``tools/antonio_lab.py``), live. No ``--poll-ms``
+        sleeping and no ``--turbo``: each step runs the moment the tick lands.
+
+        With no AI engaged, before the level jump, or on a level mismatch
+        (reset/title), the host runs realtime and this loop only observes --
+        the AI never ticks there, so menus and the continue UI are crossed in
+        realtime and play resumes in lockstep.
+        """
+
+        from megadrive_remote import MegaDriveClient
+
+        backoff_s = 0.25
+        poll_s = self.poll_ms / 1000.0
+        ram: bytes | None = None
+        frame_no = 0
+        # Lockstep cost breakdown (diagnostic only, logged at DEBUG): how
+        # much of each tick the AI pipeline vs. the stepped frames take, so
+        # a slowdown can be told apart between "the plan is heavy" and "the
+        # host is heavy" without guessing.
+        lockstep_tick_ms: list[float] = []
+        lockstep_step_ms: list[float] = []
+        lockstep_logged_at = 0.0
+
+        while not self._stop.is_set():
+            started = time.monotonic()
+            try:
+                if self._client is None:
+                    client = MegaDriveClient(
+                        self.host,
+                        self.port,
+                        connect_timeout=1.5,
+                        io_timeout=1.5,
+                    )
+                    client.connect()
+                    client.ping()
+                    with self._lock:
+                        if self._stop.is_set():
+                            client.close()
+                            break
+                        self._client = client
+                    self._gamepad_state.reset()
+                    self._rom = _read_rom_data(client)
+                    backoff_s = 0.25
+                    ram = None
+
+                assert self._client is not None
+                client = self._client
+                if ram is None:
+                    snapshot = read_snapshot(client, rom=self._rom)
+                else:
+                    snapshot = snapshot_from_work_ram(
+                        ram, rom=self._rom, uptime_frames=frame_no
+                    )
+                self._record_frame_timing(snapshot, time.monotonic() - started)
+
+                with self._lock:
+                    self._latest = snapshot
+
+                ai_on = (
+                    self.agent_p1_enabled.is_set()
+                    or self.agent_p2_enabled.is_set()
+                )
+                if not self._lockstep_engaged:
+                    if not self._apply_scenario(snapshot):
+                        self._sleep_remaining(started, poll_s)
+                        continue
+                    playable = any(p.is_playable for p in snapshot.players)
+                    if ai_on and playable and self._engage_lockstep(client):
+                        ram = None
+                        continue
+                    self._sleep_remaining(started, poll_s)
+                    continue
+
+                if not ai_on or not self._apply_scenario(snapshot):
+                    self._disengage_lockstep(client)
+                    ram = None
+                    continue
+
+                tick_started = time.monotonic()
+                for player_index in (1, 2):
+                    enabled = (
+                        self.agent_p1_enabled.is_set()
+                        if player_index == 1
+                        else self.agent_p2_enabled.is_set()
+                    )
+                    # A tick with no verb releases the pad, which would drop
+                    # both a press still draining and the launch direction a
+                    # crouch is sampling -- the labs skip the tick instead.
+                    if enabled and not self._capture.press_pending(player_index):
+                        self._agent_loops[player_index].tick(
+                            snapshot, player_index=player_index
+                        )
+                tick_ms = (time.monotonic() - tick_started) * 1000.0
+                # Slow-tick attribution (diagnostic only, never read by the
+                # AI): a tick past this budget is what a weaker machine
+                # feels as blindness, so it names the winning verb(s).
+                if tick_ms >= 8.0:
+                    slow = []
+                    for player_index in (1, 2):
+                        state = self._agent_loops[player_index].verb_state()
+                        winning = state.winning
+                        if winning is not None:
+                            route = state.route
+                            route_bit = (
+                                f" route_nodes={route.nodes_expanded}"
+                                f" reached={route.reached}"
+                                if route is not None
+                                else " route=none"
+                            )
+                            slow.append(
+                                f"P{player_index}:{type(winning).__name__}"
+                                f"{route_bit}"
+                            )
+                    logger.warning(
+                        "slow lockstep tick: %.1fms winning=%s",
+                        tick_ms,
+                        ",".join(slow) if slow else "none",
+                    )
+                masks = [
+                    self._capture.next_frame_masks()
+                    for _ in range(LOCKSTEP_FRAMES_PER_TICK)
+                ]
+                for player1, player2, held, total in _group_step_masks(masks):
+                    result = client.step_input(
+                        player1=player1, player2=player2,
+                        held_frames=held, total_frames=total,
+                    )
+                step_ms = (time.monotonic() - tick_started) * 1000.0 - tick_ms
+                lockstep_tick_ms.append(tick_ms)
+                lockstep_step_ms.append(step_ms)
+                now = time.monotonic()
+                if now - lockstep_logged_at >= 3.0 and lockstep_tick_ms:
+                    logger.debug(
+                        "lockstep timing: %d ticks, tick min=%.1fms mean=%.1fms "
+                        "max=%.1fms, step min=%.1fms mean=%.1fms max=%.1fms",
+                        len(lockstep_tick_ms),
+                        min(lockstep_tick_ms),
+                        sum(lockstep_tick_ms) / len(lockstep_tick_ms),
+                        max(lockstep_tick_ms),
+                        min(lockstep_step_ms),
+                        sum(lockstep_step_ms) / len(lockstep_step_ms),
+                        max(lockstep_step_ms),
+                    )
+                    lockstep_tick_ms.clear()
+                    lockstep_step_ms.clear()
+                    lockstep_logged_at = now
+                ram = result.work_ram
+                frame_no = result.frame
+            except Exception as exc:  # noqa: BLE001 - surface any link failure in HUD
+                self._lockstep_engaged = False
+                ram = None
                 with self._lock:
                     self._latest = disconnected_snapshot(str(exc))
                     client, self._client = self._client, None
@@ -585,9 +922,16 @@ class ObserverApp:
 
     def stop(self) -> None:
         self._stop.set()
+        self._lockstep_engaged = False
         with self._lock:
             client, self._client = self._client, None
         if client is not None:
+            try:
+                # A host left in lockstep stays frozen: release it before the
+                # latch clear below, best effort like everything else here.
+                client.set_lockstep(False)
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 # Release directly on the captured client, not through
                 # ai.gamepad — self._client is already cleared above, so the
@@ -618,10 +962,15 @@ class ObserverApp:
         """
 
         approx_frames = self.poll_ms * ASSUMED_HZ / 1000.0
+        subtitle = (
+            f"lockstep {LOCKSTEP_FRAMES_PER_TICK}f/tick"
+            if self.lockstep
+            else f"poll {self.poll_ms}ms (~{approx_frames:.1f}f)"
+        )
         self._hud = ObserverHud(
             on_close=self.stop,
             on_toggle_agent=self._handle_toggle_agent_ui,
-            subtitle=f"poll {self.poll_ms}ms (~{approx_frames:.1f}f)",
+            subtitle=subtitle,
         )
 
         def tick() -> None:
@@ -724,6 +1073,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         agent_p2=args.agent_p2,
         no_food=args.no_food,
         no_police=args.no_police,
+        lockstep=args.lockstep,
         scenario=DebugScenario(
             start_level=args.start_level,
             only_enemy=args.only_enemy,
@@ -765,7 +1115,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     scenario_text = f"; debug scenario: {', '.join(scenario_bits)}" if scenario_bits else ""
     print(
         f"Starting SoR Autoplay GUI → {args.host}:{args.port} "
-        f"(poll {args.poll_ms}ms{agent_text}{reach_text}{scenario_text}; Esc/Q to quit)",
+        f"({'lockstep 2f/tick' if args.lockstep else f'poll {args.poll_ms}ms'}"
+        f"{agent_text}{reach_text}{scenario_text}; Esc/Q to quit)",
         file=sys.stderr,
     )
     return app.run_gui(
