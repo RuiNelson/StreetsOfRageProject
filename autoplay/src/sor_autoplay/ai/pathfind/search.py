@@ -103,6 +103,17 @@ DEFAULT_ALIGNMENT_WEIGHT = 2.0
 MAX_ARRIVAL_WINDOW = 4096
 UNREACHABLE_MAX_NODES = 600
 
+# The other way a goal is unreachable is not about the goal at all: an
+# obstacle line that leaves no y for the body to cross at some x between the
+# start and the goal (``Lattice.sealed_between`` -- a wall, or a wall whose
+# hole is too small for the body). That is a proof, not a heuristic: a
+# continuous route must cross every x between its ends, so it holds for any
+# move set. Such a search keeps only this much A*, enough for the best-effort
+# walk up to the wall. Only a budget above it is capped: a search already
+# smaller than this is as cheap as the check, and callers that small rely on
+# their best-effort answer as it is.
+SEALED_MAX_NODES = 100
+
 # A crate-sized goal window is a handful of lattice cells and is cheap to
 # try in full. A full-height segment at a 1px step is thousands, and trying
 # every one from every expanded node is what froze the viewer.
@@ -210,6 +221,10 @@ def find_path(
     Mid-search, a node from which the goal is one or two axis-aligned legs
     away (Y first, then X) finishes that way instead of generating more
     neighbours.
+
+    A goal walled off from the start (``Lattice.sealed_between``) or with no
+    free arrival is still answered with a best-effort route, but a budget above
+    ``SEALED_MAX_NODES`` / ``UNREACHABLE_MAX_NODES`` is cut to it.
     """
 
     lattice = Lattice(start=start, world=world, obstacles=obstacles, step=step)
@@ -326,6 +341,10 @@ def find_path(
     arrivals = _free_arrivals(lattice, goal_window, arrival_at)
     if arrivals is not None and not arrivals:
         max_nodes = min(max_nodes, UNREACHABLE_MAX_NODES)
+    elif max_nodes > SEALED_MAX_NODES and _route_is_sealed(
+        lattice, start, tbx0, tbx1, step
+    ):
+        max_nodes = SEALED_MAX_NODES
     # A cheaper route to an already-queued node pushes a second entry rather
     # than sifting the heap; the stale one is dropped here when it surfaces.
     closed: set[tuple[int, int]] = set()
@@ -531,6 +550,29 @@ def _touch_window(lattice: Lattice, box: Rect) -> tuple[int, int, int, int] | No
     if i_lo > i_hi or j_lo > j_hi:
         return None
     return i_lo, i_hi, j_lo, j_hi
+
+
+def _route_is_sealed(
+    lattice: Lattice, start: Rect, tbx0: float, tbx1: float, step: float
+) -> bool:
+    """Does an obstacle line seal every row between ``start`` and the goal?
+
+    Every arrival touches the goal's bounding box, so the body's origin has
+    to reach some x in ``[tbx0 - bw, tbx1]``; any x between the start and
+    that hull is crossed by every route (see ``SEALED_MAX_NODES``). A start
+    that is still not free once its buried obstacles are dropped judges its
+    first move by where it lands alone, so that one step can leave a sealed
+    sliver and is left out of the range. A start already alongside the hull
+    has nothing it must cross.
+    """
+
+    bw = lattice._bw
+    shift = 0.0 if lattice.start_is_free else step
+    if start.x < tbx0 - bw - EPS:
+        return lattice.sealed_between(start.x + shift, tbx0 - bw - EPS)
+    if start.x > tbx1 + EPS:
+        return lattice.sealed_between(tbx1 + EPS, start.x - shift)
+    return False
 
 
 def _yx_aims(

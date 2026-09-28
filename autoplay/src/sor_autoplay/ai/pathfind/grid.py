@@ -85,6 +85,22 @@ def _center_buried_in(start: Rect, obstacle: Rect) -> bool:
     )
 
 
+def _band_covered(intervals, lo: float, hi: float) -> bool:
+    """Do these OPEN intervals jointly cover the CLOSED band ``[lo, hi]``?
+
+    Open on purpose: two intervals that merely touch leave their shared
+    point uncovered, which is a body sliding flush between two obstacles.
+    """
+
+    covered = lo
+    for a, b in sorted(intervals):
+        if a >= covered:
+            return False
+        if b > covered:
+            covered = b
+    return covered > hi
+
+
 class Lattice:
     """Body positions reachable by whole steps from the start rectangle."""
 
@@ -263,3 +279,48 @@ class Lattice:
             if x < ox1 - eps and ox0 < x1 - eps and y < oy1 - eps and oy0 < y1 - eps:
                 return False
         return True
+
+    def sealed_between(self, x_lo: float, x_hi: float) -> bool:
+        """Is some vertical line strictly inside ``(x_lo, x_hi)`` blocked at every y?
+
+        ``_is_free_coords`` read as intervals: an obstacle blocks the body's
+        top-left corner on the open box ``(ox0 - bw, ox1) x (oy0 - bh, oy1)``
+        (each edge narrowed by ``EPS``), and a corner is only valid inside
+        the closed band ``[wt, wb - bh]`` (widened by ``EPS``). A continuous
+        route has to cross every x between its two ends, so a line where the
+        open y-intervals cover the whole band cannot be crossed by any
+        route -- diagonals, steps and the Y-then-X finish included. ``True``
+        is a proof; ``False`` only means not proven this way.
+        """
+
+        if x_hi <= x_lo:
+            return False
+        bw, bh, eps = self._bw, self._bh, EPS
+        boxes = []
+        for ox0, oy0, ox1, oy1 in self._obs:
+            gx0, gx1 = ox0 - bw + eps, ox1 - eps
+            if gx1 <= x_lo or gx0 >= x_hi:
+                continue
+            boxes.append((gx0, gx1, oy0 - bh + eps, oy1 - eps))
+        lo, hi = self._wt - eps, self._wb - bh + eps
+        # If every y-projection together cannot cover the band, no vertical
+        # line can be sealed: the common, cheap exit.
+        if not boxes or not _band_covered(((b[2], b[3]) for b in boxes), lo, hi):
+            return False
+        xs = {x_lo, x_hi}
+        for gx0, gx1, _, _ in boxes:
+            if x_lo < gx0 < x_hi:
+                xs.add(gx0)
+            if x_lo < gx1 < x_hi:
+                xs.add(gx1)
+        edges = sorted(xs)
+        for a, b in zip(edges, edges[1:]):
+            # The active set is constant between edges; rounding the probe
+            # can only leave an obstacle out, which is the safe direction.
+            probe = (a + b) / 2.0
+            active = [
+                (gy0, gy1) for gx0, gx1, gy0, gy1 in boxes if gx0 < probe < gx1
+            ]
+            if _band_covered(active, lo, hi):
+                return True
+        return False

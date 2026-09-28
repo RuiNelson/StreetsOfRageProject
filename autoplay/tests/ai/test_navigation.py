@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from unittest import mock
 
 from sor_autoplay.ai import navigation as nav
 from sor_autoplay.ai.pathfind import PointGoal, Rect, RegionGoal
+from sor_autoplay.ai.pathfind.search import SEALED_MAX_NODES
 from sor_autoplay.ai.tokens import (
     AttackRange,
     Breakable,
@@ -526,6 +528,35 @@ class PlanRouteTests(unittest.TestCase):
         for rect in route.positions():
             for solid in solids:
                 self.assertFalse(rect.overlaps(solid))
+
+    def _behind_a_wall(self):
+        # A solid across the whole lane band between the actor and the goal.
+        return nav.plan_route(
+            self._context(),
+            _myself(world_x=20, world_y=60),
+            PointGoal(nav.Point(240, 60)),
+            solids=[Rect(100, -50, 24, 250)],
+        )
+
+    def test_a_walled_off_goal_still_gets_a_best_effort_route(self) -> None:
+        # The bound the router ships with is under the sealed cap, so the
+        # sealed check never applies and the route is exactly what it was.
+        route = self._behind_a_wall()
+
+        self.assertFalse(route.reached)
+        self.assertTrue(route.steps)
+        self.assertLessEqual(route.nodes_expanded, nav.NAV_MAX_NODES)
+
+    def test_a_larger_bound_does_not_search_a_sealed_goal_at_length(self) -> None:
+        # Raise NAV_MAX_NODES and the proof that no route exists stops at the
+        # sealed cap instead of exploring the whole lattice -- and still walks
+        # towards the wall, which the pit hop and the advance rely on.
+        with mock.patch.object(nav, "NAV_MAX_NODES", 4000):
+            route = self._behind_a_wall()
+
+        self.assertFalse(route.reached)
+        self.assertTrue(route.steps)
+        self.assertLessEqual(route.nodes_expanded, SEALED_MAX_NODES)
 
 
 class FirstVectorTests(unittest.TestCase):

@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import math
+import random
 import time
 import unittest
+from unittest import mock
 
 from sor_autoplay.ai.pathfind import (
     Direction,
     Edge,
+    Lattice,
     Point,
     PointGoal,
     Rect,
     RectGoal,
+    RegionGoal,
     Segment,
     SegmentGoal,
     find_path,
 )
+from sor_autoplay.ai.pathfind import search as search_module
 
 WORLD = Rect(0, 0, 320, 112)
 BODY = Rect(0, 0, 16, 16)
@@ -534,3 +539,258 @@ class BudgetAndDeterminismTests(unittest.TestCase):
     def test_a_zero_or_negative_step_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             plan(start=BODY, goal=PointGoal(Point(10, 10)), step=0)
+
+
+def _random_goal(rng: random.Random, world: Rect):
+    gx = rng.randrange(0, int(world.width))
+    gy = rng.randrange(0, int(world.height))
+    kind = rng.randrange(6)
+    if kind == 0:
+        return PointGoal(Point(gx, gy))
+    if kind == 1:
+        return PointGoal(Point(gx, gy), tolerance=rng.choice((4, 8)))
+    if kind == 2:
+        return RegionGoal.of(
+            Rect(gx, gy, rng.randrange(4, 24), rng.randrange(4, 24)),
+            axis=rng.choice(("both", "x", "y")),
+        )
+    if kind == 3:
+        w, h = rng.randrange(6, 16), rng.randrange(8, 24)
+        gap = rng.randrange(8, 32)
+        return RegionGoal.of(
+            Rect(gx, gy, w, h),
+            Rect(gx + w + gap, gy, w, h),
+            axis=rng.choice(("both", "y")),
+        )
+    if kind == 4:
+        length = rng.randrange(8, 48)
+        end = Point(gx, gy + length) if rng.random() < 0.5 else Point(gx + length, gy)
+        edges = rng.choice(
+            ([Edge.LEFT], [Edge.RIGHT], [Edge.TOP], [Edge.BOTTOM], list(Edge))
+        )
+        return SegmentGoal.of(Segment(Point(gx, gy), end), edges)
+    target = Rect(gx, gy, rng.randrange(4, 24), rng.randrange(4, 24))
+    return RectGoal.horizontal(target) if rng.random() < 0.5 else RectGoal.vertical(target)
+
+
+def _random_scene(rng: random.Random):
+    step = rng.choice((4, 8))
+    world = Rect(0, 0, rng.randrange(8, 20) * 8, rng.randrange(6, 12) * 8)
+    bw, bh = rng.choice((8, 12, 16)), rng.choice((8, 12, 16))
+    obstacles = []
+    if rng.random() < 0.5:
+        # A wall across the lane band, half the time with a hole in it.
+        x = rng.randrange(8, max(9, int(world.width) - 24))
+        w = rng.randrange(2, 12)
+        gap = rng.choice((0, bh - 1, bh, bh + 4, rng.randrange(1, 24)))
+        if gap == 0:
+            obstacles.append(Rect(x, -4, w, world.height + 8))
+        else:
+            top = rng.randrange(0, max(1, int(world.height) - gap))
+            obstacles.append(Rect(x, -4, w, top + 4))
+            obstacles.append(
+                Rect(
+                    x + rng.randrange(-4, 5),
+                    top + gap,
+                    w,
+                    world.height - top - gap + 4,
+                )
+            )
+    edge_row = None
+    if rng.random() < 0.3:
+        # A shelf that leaves a corridor exactly one body tall along the top
+        # or the bottom of the world: passable, since touching is not
+        # overlapping, and the case a sliver-tolerant cover test gets wrong.
+        x = rng.randrange(8, max(9, int(world.width) - 24))
+        w = rng.randrange(2, 24)
+        if rng.random() < 0.5:
+            obstacles.append(Rect(x, bh, w, world.height - bh))
+            edge_row = 0
+        else:
+            obstacles.append(Rect(x, 0, w, world.height - bh))
+            edge_row = int(world.height) - bh
+    for _ in range(rng.randrange(0, 5)):
+        obstacles.append(
+            Rect(
+                rng.randrange(0, int(world.width)),
+                rng.randrange(0, int(world.height)),
+                rng.randrange(2, 30),
+                rng.randrange(2, 40),
+            )
+        )
+    sx = rng.randrange(0, int(world.width) - bw + 1)
+    sy = rng.randrange(0, int(world.height) - bh + 1)
+    if edge_row is not None and rng.random() < 0.7:
+        sy = edge_row
+    if obstacles and rng.random() < 0.25:
+        # A start clipping an obstacle without being buried in it.
+        grazed = rng.choice(obstacles)
+        clipped = int(grazed.right) - rng.randrange(1, 3)
+        if 0 <= clipped <= world.width - bw:
+            sx = clipped
+    return Rect(sx, sy, bw, bh), _random_goal(rng, world), obstacles, world, step
+
+
+class SealedRouteTests(unittest.TestCase):
+    """A vertical line with no y left for the body proves a goal unreachable.
+
+    The check is a proof or nothing: it may miss a walled-off goal (A* still
+    answers) but must never call a reachable one sealed.
+    """
+
+    def _sealed(self, start, goal, obstacles, *, world=WORLD, step=8) -> bool:
+        lattice = Lattice(start=start, world=world, obstacles=obstacles, step=step)
+        box = goal.bounding_box()
+        return search_module._route_is_sealed(
+            lattice, start, box.x, box.x + box.width, step
+        )
+
+    def test_a_sealed_verdict_is_never_a_reachable_scene(self) -> None:
+        rng = random.Random(0x5EA1ED)
+        sealed_scenes = []
+        for _ in range(1500):
+            scene = _random_scene(rng)
+            start, goal, obstacles, world, step = scene
+            if self._sealed(start, goal, obstacles, world=world, step=step):
+                sealed_scenes.append(scene)
+
+        # Not vacuous: plenty of the random walls really do seal the goal.
+        self.assertGreater(len(sealed_scenes), 100)
+        with mock.patch.object(search_module, "SEALED_MAX_NODES", 10**9):
+            for start, goal, obstacles, world, step in sealed_scenes:
+                path = find_path(
+                    start=start,
+                    goal=goal,
+                    world=world,
+                    obstacles=obstacles,
+                    step=step,
+                    max_nodes=10**6,
+                )
+                self.assertFalse(path.reached, (start, goal, world, obstacles, step))
+
+    def test_a_wall_far_from_the_start_is_not_searched_at_length(self) -> None:
+        wall = Rect(300, 0, 16, 112)
+        path = plan(
+            start=BODY,
+            goal=PointGoal(Point(600, 56)),
+            world=Rect(0, 0, 640, 112),
+            obstacles=[wall],
+            step=4,
+        )
+
+        self.assertFalse(path.reached)
+        self.assertLessEqual(path.nodes_expanded, search_module.SEALED_MAX_NODES)
+        self.assertTrue(path.steps)  # still walks towards the wall
+        self.assertLessEqual(path.final.right, wall.left)
+
+    def test_a_budget_within_the_sealed_cap_is_never_checked(self) -> None:
+        with mock.patch.object(
+            search_module, "_route_is_sealed", side_effect=AssertionError("checked")
+        ):
+            path = plan(
+                start=BODY,
+                goal=PointGoal(Point(200, 56)),
+                obstacles=[Rect(64, 0, 16, 112)],
+                max_nodes=search_module.SEALED_MAX_NODES,
+            )
+
+        self.assertFalse(path.reached)
+
+    def test_a_gap_exactly_one_body_tall_passes(self) -> None:
+        start = Rect(0, 48, 16, 16)
+        goal = PointGoal(Point(160, 56))
+        obstacles = [Rect(64, 0, 16, 48), Rect(64, 64, 16, 48)]
+
+        self.assertFalse(self._sealed(start, goal, obstacles))
+        self.assertTrue(plan(start=start, goal=goal, obstacles=obstacles).reached)
+
+    def test_a_gap_a_pixel_short_of_the_body_is_sealed(self) -> None:
+        start = Rect(0, 48, 16, 16)
+        goal = PointGoal(Point(160, 56))
+        obstacles = [Rect(64, 0, 16, 48), Rect(64, 63, 16, 49)]
+
+        self.assertTrue(self._sealed(start, goal, obstacles))
+        self.assertFalse(plan(start=start, goal=goal, obstacles=obstacles).reached)
+
+    def test_a_corridor_one_body_tall_along_the_world_edge_is_not_sealed(self) -> None:
+        # Touching is not overlapping: the body runs flush between the top of
+        # the world and the top of the obstacles. A sliver-tolerant cover test
+        # called this sealed.
+        top = [Rect(64, 16, 16, 40), Rect(64, 56, 16, 56)]
+        goal = PointGoal(Point(200, 8))
+        self.assertFalse(self._sealed(BODY, goal, top))
+        self.assertTrue(plan(start=BODY, goal=goal, obstacles=top).reached)
+
+        bottom = [Rect(64, 0, 16, 96)]
+        start = Rect(0, 96, 16, 16)
+        goal = PointGoal(Point(200, 104))
+        self.assertFalse(self._sealed(start, goal, bottom))
+        self.assertTrue(plan(start=start, goal=goal, obstacles=bottom).reached)
+
+    def test_a_start_clipping_a_wall_may_step_out_through_it(self) -> None:
+        # Not buried (its centre is clear of the wall) but not free either:
+        # the first move is judged by where it lands alone, so it steps over
+        # the wall's last 2 px and the goal is reachable.
+        wall = Rect(20, -10, 4, 132)
+        start = Rect(22, 40, 16, 16)
+        goal = PointGoal(Point(200, 48))
+
+        self.assertFalse(self._sealed(start, goal, [wall], step=4))
+        self.assertTrue(plan(start=start, goal=goal, obstacles=[wall], step=4).reached)
+
+    def test_a_one_row_corridor_is_sealed_only_by_what_stands_in_it(self) -> None:
+        lane = Rect(0, 40, 320, 16)  # a world exactly one body tall
+        start = Rect(0, 40, 16, 16)
+        goal = PointGoal(Point(200, 48))
+        pit = Rect(100, 30, 40, 40)
+
+        self.assertFalse(self._sealed(start, goal, [], world=lane))
+        self.assertTrue(plan(start=start, goal=goal, world=lane).reached)
+        self.assertTrue(self._sealed(start, goal, [pit], world=lane))
+        self.assertFalse(
+            plan(start=start, goal=goal, world=lane, obstacles=[pit]).reached
+        )
+
+    def test_a_goal_to_the_left_is_sealed_by_a_wall_between(self) -> None:
+        start = Rect(200, 40, 16, 16)
+        goal = PointGoal(Point(20, 48))
+        with_hole = [Rect(100, 0, 16, 40), Rect(100, 64, 16, 48)]
+
+        self.assertTrue(self._sealed(start, goal, [Rect(100, 0, 16, 112)]))
+        self.assertFalse(self._sealed(start, goal, with_hole))
+        self.assertTrue(plan(start=start, goal=goal, obstacles=with_hole).reached)
+
+    def test_a_start_inside_the_goals_hull_has_nothing_to_cross(self) -> None:
+        # The start sits in the hole of an annulus whose left band is behind
+        # a wall; the right band is open, so the goal is reachable.
+        goal = RegionGoal.of(Rect(0, 40, 20, 24), Rect(100, 40, 20, 24), axis="y")
+        start = Rect(50, 40, 16, 16)
+        wall = Rect(30, 0, 8, 112)
+
+        self.assertFalse(self._sealed(start, goal, [wall]))
+        self.assertTrue(plan(start=start, goal=goal, obstacles=[wall]).reached)
+
+    def test_two_obstacles_can_seal_a_line_neither_seals_alone(self) -> None:
+        upper = Rect(64, 0, 16, 60)
+        lower = Rect(72, 50, 16, 62)
+        goal = PointGoal(Point(200, 56))
+
+        self.assertFalse(self._sealed(BODY, goal, [upper]))
+        self.assertFalse(self._sealed(BODY, goal, [lower]))
+        self.assertTrue(self._sealed(BODY, goal, [upper, lower]))
+        self.assertFalse(plan(start=BODY, goal=goal, obstacles=[upper, lower]).reached)
+
+    def test_a_staircase_wall_is_a_known_miss(self) -> None:
+        # Each piece leaves a hole at every x it covers, yet the holes step
+        # from the bottom of the street to the top, so nothing gets through.
+        # No single vertical line is sealed, so the check cannot see it and
+        # A* has to prove it, as it always did.
+        world = Rect(0, 0, 240, 126)
+        pieces = [Rect(16, 0, 44, 50), Rect(56, 46, 44, 34), Rect(96, 76, 44, 50)]
+        start = Rect(0, 90, 16, 16)
+        goal = PointGoal(Point(200, 20))
+
+        self.assertFalse(self._sealed(start, goal, pieces, world=world))
+        self.assertFalse(
+            plan(start=start, goal=goal, world=world, obstacles=pieces).reached
+        )
