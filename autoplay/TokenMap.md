@@ -68,7 +68,6 @@ classDiagram
     Walk <|-- CatchUpPartner
     Walk <|-- WalkToWeapon
     Walk <|-- WalkToPickup
-    Walk <|-- WalkToScreenCenter
     Walk <|-- RetreatFromDanger
     Walk <|-- ProjectileSidestep
     Walk <|-- EngageSouther

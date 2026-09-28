@@ -152,17 +152,7 @@ parametrized intent that precedes any concrete action.
   past them; it walks up to `decide.CATCH_UP_DISTANCE_X` behind them and
   waits there. See `decide.could_catch_up_partner`,
   `decide._partner_ahead_of` and `autoplay/CLAUDE.md`'s **Following a
-  partner who is ahead**. `WalkToScreenCenter`
-  is the lowest-priority `Walk` of all: it walks toward the visible screen's
-  own centre to draw an off-screen enemy into view, human-like, when
-  `WalkToNearEnemy`'s off-screen fallback is pinned against the camera's
-  walk-clamp edge with nowhere left to route (user: "a IA fica presa a um
-  canto do ecrã a tentar chegar a inimigos que estão fora do campo visível
-  no ecrã, a IA nesse caso deve-se andar para o centro do ecrã para os
-  'chamar'"). See `decide.could_walk_to_screen_center`,
-  `decide._actor_pinned_for_screen_center`, and
-  `priority._EMERGENCY_WALK_TO_SCREEN_CENTER` for the gating and scoring,
-  and `autoplay/CLAUDE.md`'s dedicated entry for the full mechanism.
+  partner who is ahead**.
 - `Attack` — for example, `Punch`, `JumpAttack`, `GrabEnemy`, `Supplex`,
   `ThrowKnife`, `RearAttack` (simultaneous B+C rear/escape chord), and
   `CounterGrab` (enemy-held C then B sequence), each parametrized with the
