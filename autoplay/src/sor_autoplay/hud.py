@@ -110,6 +110,22 @@ _KIND_Z = {
     "player": 7,
 }
 
+# Inferred-token overlays (EnemyCluster / PartnerFight), drawn from the
+# enabled agents' VerbState only -- never from the snapshot, which has no
+# notion of what the AI inferred. Amber dashed squares read as "AI grouping"
+# (matching the Verb label colour) without reusing any combat-phase outline
+# colour; the partner badge is a small light disc with a dark "P", deliberately
+# neutral so it does not clash with either player's header colour.
+_CLUSTER_COLOR = "#ffd84d"
+_CLUSTER_DASH = (6, 4)
+_CLUSTER_PAD_X = 16.0
+_CLUSTER_PAD_Y = 10.0
+_PARTNER_BADGE_FILL = "#e8eaf2"
+_PARTNER_BADGE_OUTLINE = "#050508"
+_PARTNER_BADGE_TEXT = "#050508"
+_PARTNER_BADGE_R = 7.0
+_PARTNER_BADGE_DY = 15.0
+
 
 class ObserverHud:
     """Observer window: state/P1/P2 columns on top; map takes the rest.
@@ -130,6 +146,8 @@ class ObserverHud:
         self._latest_map: WorldMap | None = None
         self._latest_holes: tuple = ()
         self._latest_routes: dict[str, RoutePath] = {}
+        self._latest_clusters: tuple = ()
+        self._latest_partner_slots: frozenset = frozenset()
         self._map_draw_job: str | None = None
         # Stable canvas items — avoid delete("all") every poll (that flashes).
         self._bg_rect: int | None = None
@@ -142,6 +160,9 @@ class ObserverHud:
         self._hole_rects: list[int] = []
         self._range_rects: list[int] = []  # AttackRange squares, pooled like holes
         self._closing_lines: list[int] = []  # velocity-projection arrows
+        self._cluster_rects: list[int] = []  # EnemyCluster dashed squares
+        self._partner_badges: list[int] = []  # PartnerFight discs (ovals)
+        self._partner_badge_texts: list[int] = []  # PartnerFight "P" labels
         self._route_lines: list[int] = []  # pathfind.Path vectors, one per Step
         self._route_marker: int | None = None  # ring at the planned final position
         self._last_canvas_size: tuple[int, int] = (0, 0)
@@ -267,6 +288,7 @@ class ObserverHud:
                 "(green=down  orange=charge  red=atk  cyan=block  purple=held  gray=dead)  "
                 "dashed box = camera · dim letters = off-camera  "
                 "green line = planned route (red = no path found), ring = target  "
+                "amber dashed square = enemy cluster · P badge = partner's fight  "
                 "1/2  G/S/H/N/J  B boss  k/b/|/p weapons  a/+ food"
             ),
             fg=_DIM,
@@ -506,7 +528,13 @@ class ObserverHud:
     def _redraw_map_if_any(self) -> None:
         self._map_draw_job = None
         if self._latest_map is not None:
-            self._draw_map(self._latest_map, self._latest_holes, self._latest_routes)
+            self._draw_map(
+                self._latest_map,
+                self._latest_holes,
+                self._latest_routes,
+                clusters=self._latest_clusters,
+                partner_slots=self._latest_partner_slots,
+            )
 
     def update(
         self,
@@ -598,10 +626,28 @@ class ObserverHud:
         if agent_p2_enabled and p2_state is not None and p2_state.route is not None:
             routes["P2"] = p2_state.route
 
+        # Inferred-token overlays: only from agents that are actually on, so
+        # the map stays clean when the AI is off. With both agents on, both
+        # states contribute (deduplicated display-side by slot sets).
+        clusters = _collect_clusters(
+            agent_p1_enabled, p1_state, agent_p2_enabled, p2_state
+        )
+        partner_slots = _collect_partner_slots(
+            agent_p1_enabled, p1_state, agent_p2_enabled, p2_state
+        )
+
         self._latest_map = snapshot.world_map
         self._latest_holes = snapshot.floor_holes
         self._latest_routes = routes
-        self._draw_map(snapshot.world_map, snapshot.floor_holes, routes)
+        self._latest_clusters = clusters
+        self._latest_partner_slots = partner_slots
+        self._draw_map(
+            snapshot.world_map,
+            snapshot.floor_holes,
+            routes,
+            clusters=clusters,
+            partner_slots=partner_slots,
+        )
 
     def _render_agent_toggle(self, label: tk.Label, enabled: bool) -> None:
         if enabled:
@@ -663,7 +709,13 @@ class ObserverHud:
         score.configure(text=f"Score   {player.score_text}")
 
     def _draw_map(
-        self, world: WorldMap, holes: tuple = (), routes: dict[str, RoutePath] | None = None
+        self,
+        world: WorldMap,
+        holes: tuple = (),
+        routes: dict[str, RoutePath] | None = None,
+        *,
+        clusters: tuple = (),
+        partner_slots: frozenset | set = frozenset(),
     ) -> None:
         """Update the map in place (letterboxed to the live *view* aspect)."""
 
@@ -891,6 +943,62 @@ class ObserverHud:
         for index in range(closing_drawn, len(self._closing_lines)):
             canvas.itemconfigure(self._closing_lines[index], state="hidden")
 
+        # EnemyCluster: one dashed amber square per deduplicated member group.
+        cluster_groups = _cluster_member_groups(world, clusters or ())
+        self._ensure_cluster_pool(len(cluster_groups))
+        cluster_drawn = 0
+        for members in cluster_groups:
+            rect = _cluster_canvas_rect(
+                members, world, ox, oy, plot_w, plot_h
+            )
+            if rect is None:
+                continue
+            rx0, ry0, rx1, ry1 = rect
+            rx0 = max(plot_left, min(plot_right, rx0))
+            rx1 = max(plot_left, min(plot_right, rx1))
+            ry0 = max(plot_top, min(plot_bottom, ry0))
+            ry1 = max(plot_top, min(plot_bottom, ry1))
+            if rx1 - rx0 < 2 or ry1 - ry0 < 2:
+                continue
+            if cluster_drawn >= len(self._cluster_rects):
+                self._ensure_cluster_pool(cluster_drawn + 1)
+            cluster_id = self._cluster_rects[cluster_drawn]
+            canvas.coords(cluster_id, rx0, ry0, rx1, ry1)
+            canvas.itemconfigure(cluster_id, state="normal")
+            canvas.tag_raise(cluster_id, "cam")
+            canvas.tag_lower(cluster_id, "marker")
+            cluster_drawn += 1
+        for index in range(cluster_drawn, len(self._cluster_rects)):
+            canvas.itemconfigure(self._cluster_rects[index], state="hidden")
+
+        # PartnerFight: a small "P" badge above each partner-owned enemy.
+        by_slot = {entity.slot: entity for entity in world.entities}
+        partner_drawn = 0
+        for slot in sorted(partner_slots or ()):
+            entity = by_slot.get(slot)
+            if entity is None:
+                continue
+            cx = _map_x(entity.map_x, world, ox, plot_w)
+            cy = _map_y(entity.map_y, world, oy, plot_h)
+            if not (plot_left <= cx <= plot_right and plot_top <= cy <= plot_bottom):
+                continue
+            if partner_drawn >= len(self._partner_badges):
+                self._ensure_partner_badge_pool(partner_drawn + 1)
+            badge_id = self._partner_badges[partner_drawn]
+            text_id = self._partner_badge_texts[partner_drawn]
+            r = _PARTNER_BADGE_R
+            bx, by = cx, cy - _PARTNER_BADGE_DY
+            canvas.coords(badge_id, bx - r, by - r, bx + r, by + r)
+            canvas.itemconfigure(badge_id, state="normal")
+            canvas.coords(text_id, bx, by)
+            canvas.itemconfigure(text_id, state="normal")
+            canvas.tag_raise(badge_id, "marker")
+            canvas.tag_raise(text_id, "marker")
+            partner_drawn += 1
+        for index in range(partner_drawn, len(self._partner_badges)):
+            canvas.itemconfigure(self._partner_badges[index], state="hidden")
+            canvas.itemconfigure(self._partner_badge_texts[index], state="hidden")
+
         route_drawn = 0
         route_final: tuple[float, float] | None = None
         for path in (routes or {}).values():
@@ -1069,6 +1177,66 @@ class ObserverHud:
                     arrow=tk.LAST,
                     state="hidden",
                     tags=("closing",),
+                )
+            )
+
+    def _ensure_cluster_pool(self, count: int) -> None:
+        """Grow the reusable EnemyCluster dashed-square pool to ``count``.
+
+        One rectangle per deduplicated member group (see
+        ``_cluster_member_groups``), not per token: reciprocal ``EnemyCluster``
+        pairs (A names B, B names A) draw a single square.
+        """
+
+        canvas = self._canvas
+        while len(self._cluster_rects) < count:
+            self._cluster_rects.append(
+                canvas.create_rectangle(
+                    0,
+                    0,
+                    0,
+                    0,
+                    fill="",
+                    outline=_CLUSTER_COLOR,
+                    width=2,
+                    dash=_CLUSTER_DASH,
+                    state="hidden",
+                    tags=("cluster",),
+                )
+            )
+
+    def _ensure_partner_badge_pool(self, count: int) -> None:
+        """Grow the reusable PartnerFight badge pools to at least ``count``.
+
+        One disc plus one "P" label per partner-owned enemy slot. The disc is
+        a light neutral fill so it reads as an annotation rather than another
+        combat-phase outline colour.
+        """
+
+        canvas = self._canvas
+        while len(self._partner_badges) < count:
+            self._partner_badges.append(
+                canvas.create_oval(
+                    0,
+                    0,
+                    0,
+                    0,
+                    fill=_PARTNER_BADGE_FILL,
+                    outline=_PARTNER_BADGE_OUTLINE,
+                    width=1,
+                    state="hidden",
+                    tags=("partner",),
+                )
+            )
+            self._partner_badge_texts.append(
+                canvas.create_text(
+                    0,
+                    0,
+                    text="P",
+                    fill=_PARTNER_BADGE_TEXT,
+                    font=self._font_map_tiny,
+                    state="hidden",
+                    tags=("partner",),
                 )
             )
 
@@ -1251,6 +1419,113 @@ def _expand_to_min(a: float, b: float, minimum: float) -> tuple[float, float]:
         return a, b
     pad = (minimum - span) / 2.0
     return a - pad, b + pad
+
+
+def _collect_clusters(
+    agent_p1_enabled: bool,
+    p1_state: VerbState | None,
+    agent_p2_enabled: bool,
+    p2_state: VerbState | None,
+) -> tuple:
+    """Every ``EnemyCluster`` to draw, from the agents that are actually on.
+
+    Pure (no Tk): ``update`` feeds it the two agents' enabled flags plus
+    their ``VerbState``, and the map draws what comes back. With both agents
+    on, both states contribute; reciprocal pairs are deduplicated later by
+    ``_cluster_member_groups``, not here.
+    """
+
+    clusters: list = []
+    if agent_p1_enabled and p1_state is not None:
+        clusters.extend(getattr(p1_state, "clusters", ()))
+    if agent_p2_enabled and p2_state is not None:
+        clusters.extend(getattr(p2_state, "clusters", ()))
+    return tuple(clusters)
+
+
+def _collect_partner_slots(
+    agent_p1_enabled: bool,
+    p1_state: VerbState | None,
+    agent_p2_enabled: bool,
+    p2_state: VerbState | None,
+) -> frozenset:
+    """Every partner-owned enemy slot to badge, from the agents on.
+
+    Pure (no Tk): the union of both enabled states' ``PartnerFight``
+    ``enemy_slot`` values. An empty set draws no badges.
+    """
+
+    slots: set[str] = set()
+    if agent_p1_enabled and p1_state is not None:
+        slots.update(
+            fight.enemy_slot
+            for fight in getattr(p1_state, "partner_fights", ())
+        )
+    if agent_p2_enabled and p2_state is not None:
+        slots.update(
+            fight.enemy_slot
+            for fight in getattr(p2_state, "partner_fights", ())
+        )
+    return frozenset(slots)
+
+
+def _cluster_member_groups(world: WorldMap, clusters: tuple) -> list[list[MapEntity]]:
+    """Resolve ``EnemyCluster`` tokens to drawable member groups.
+
+    Pure (no Tk): each token's ``{slot} | member_slots`` is looked up in the
+    live map, deduplicated by the full slot set (a reciprocal A-names-B /
+    B-names-A pair draws one square), and dropped unless at least two members
+    are still on the map. A single visible member is just its own marker --
+    there is no square worth drawing around it.
+    """
+
+    by_slot = {entity.slot: entity for entity in world.entities}
+    seen: set[frozenset] = set()
+    groups: list[list[MapEntity]] = []
+    for cluster in clusters or ():
+        slot = getattr(cluster, "slot", None)
+        member_slots = getattr(cluster, "member_slots", frozenset())
+        try:
+            key = frozenset({slot} | set(member_slots))
+        except TypeError:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        members = [by_slot[s] for s in key if s in by_slot]
+        if len(members) < 2:
+            continue
+        groups.append(members)
+    return groups
+
+
+def _cluster_canvas_rect(
+    members: list[MapEntity],
+    world: WorldMap,
+    ox: float,
+    oy: float,
+    plot_w: float,
+    plot_h: float,
+) -> tuple[float, float, float, float] | None:
+    """Canvas rectangle enclosing one cluster group, or ``None`` when empty.
+
+    Pure (no Tk calls): the member bounding box in map coordinates, grown by
+    ``_CLUSTER_PAD_X``/``_CLUSTER_PAD_Y`` so the dashed square sits clear of
+    the members' own markers, then projected through ``_map_x``/``_map_y``.
+    """
+
+    if not members:
+        return None
+    min_x = min(entity.map_x for entity in members) - _CLUSTER_PAD_X
+    max_x = max(entity.map_x for entity in members) + _CLUSTER_PAD_X
+    min_y = min(entity.map_y for entity in members) - _CLUSTER_PAD_Y
+    max_y = max(entity.map_y for entity in members) + _CLUSTER_PAD_Y
+    return (
+        _map_x(min_x, world, ox, plot_w),
+        _map_y(min_y, world, oy, plot_h),
+        _map_x(max_x, world, ox, plot_w),
+        _map_y(max_y, world, oy, plot_h),
+    )
 
 
 def _describe_verb(verb: Verb | None) -> str:

@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from sor_autoplay.ai.tokens import Punch
-from sor_autoplay.ai.tokens import Enemy
+from sor_autoplay.ai.tokens import Enemy, EnemyCluster, PartnerFight
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.loop import AgentLoop, VerbState
 from sor_autoplay.ai.tokens import WalkToAdvanceStage
@@ -290,6 +290,31 @@ class VerbStateHudTests(unittest.TestCase):
         state = loop.verb_state()
         self.assertIsNone(state.winning)
         self.assertEqual(state.pending, ())
+
+    def test_inform_hud_exposes_clusters_and_partner_fights(self) -> None:
+        loop = AgentLoop(_gamepad()[0])
+        enemy = self._enemy()
+        punch = Punch(actor_slot="P1", target_slot="obj01")
+        cluster = EnemyCluster(slot="obj01", member_slots=frozenset({"obj02"}))
+        fight = PartnerFight(enemy_slot="obj02")
+
+        loop.inform_hud({enemy, punch, cluster, fight}, pending=(punch,))
+
+        state = loop.verb_state()
+        self.assertEqual(state.clusters, (cluster,))
+        self.assertEqual(state.partner_fights, (fight,))
+
+    def test_inform_hud_clears_clusters_with_empty_context(self) -> None:
+        loop = AgentLoop(_gamepad()[0])
+        cluster = EnemyCluster(slot="obj01", member_slots=frozenset({"obj02"}))
+        fight = PartnerFight(enemy_slot="obj02")
+        loop.inform_hud({cluster, fight})
+
+        loop.inform_hud(set())
+
+        state = loop.verb_state()
+        self.assertEqual(state.clusters, ())
+        self.assertEqual(state.partner_fights, ())
 
 
 if __name__ == "__main__":

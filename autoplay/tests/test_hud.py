@@ -2,7 +2,7 @@ import os
 import unittest
 
 from sor_autoplay.ai.reach import CLOSING_ENEMY_THREAT_FRAMES
-from sor_autoplay.ai.tokens import CounterGrab, Punch
+from sor_autoplay.ai.tokens import CounterGrab, EnemyCluster, PartnerFight, Punch
 from sor_autoplay.ai.loop import VerbState
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import WalkToAdvanceStage
@@ -13,10 +13,15 @@ from sor_autoplay.hud import _describe_verb, _describe_pending
 from sor_autoplay.hud import (
     _blend_hex,
     _closing_projection,
+    _cluster_canvas_rect,
+    _cluster_member_groups,
+    _collect_clusters,
+    _collect_partner_slots,
     _display_attack_ranges,
     _expand_to_min,
     _hitbox_to_canvas,
 )
+from sor_autoplay.hud import _CLUSTER_PAD_X, _CLUSTER_PAD_Y
 from sor_autoplay.phases import CombatPhase
 from sor_autoplay.world_map import MapEntity, WorldMap
 
@@ -300,6 +305,169 @@ class ExpandToMinTests(unittest.TestCase):
     def test_never_shrinks_a_real_box(self) -> None:
         a, b = _expand_to_min(0.0, 100.0, 6.0)
         self.assertEqual((a, b), (0.0, 100.0))
+
+
+class CollectClustersTests(unittest.TestCase):
+    """_collect_clusters draws only from agents that are actually on, so the
+    map stays clean when the AI is off."""
+
+    def test_disabled_agents_contribute_nothing(self) -> None:
+        cluster = EnemyCluster(slot="obj01", member_slots=frozenset({"obj02"}))
+        state = VerbState(winning=None, pending=(), clusters=(cluster,))
+
+        self.assertEqual(_collect_clusters(False, state, False, state), ())
+        self.assertEqual(_collect_clusters(False, state, False, None), ())
+
+    def test_only_enabled_states_contribute(self) -> None:
+        on = EnemyCluster(slot="obj01", member_slots=frozenset({"obj02"}))
+        off = EnemyCluster(slot="obj03", member_slots=frozenset({"obj04"}))
+        p1 = VerbState(winning=None, pending=(), clusters=(on,))
+        p2 = VerbState(winning=None, pending=(), clusters=(off,))
+
+        self.assertEqual(_collect_clusters(True, p1, False, p2), (on,))
+        self.assertEqual(_collect_clusters(False, p1, True, p2), (off,))
+
+    def test_both_agents_on_union_their_clusters(self) -> None:
+        first = EnemyCluster(slot="obj01", member_slots=frozenset({"obj02"}))
+        second = EnemyCluster(slot="obj03", member_slots=frozenset({"obj04"}))
+        p1 = VerbState(winning=None, pending=(), clusters=(first,))
+        p2 = VerbState(winning=None, pending=(), clusters=(second,))
+
+        self.assertEqual(
+            set(_collect_clusters(True, p1, True, p2)), {first, second}
+        )
+
+    def test_none_state_is_ignored(self) -> None:
+        cluster = EnemyCluster(slot="obj01", member_slots=frozenset({"obj02"}))
+        p2 = VerbState(winning=None, pending=(), clusters=(cluster,))
+
+        self.assertEqual(_collect_clusters(True, None, True, p2), (cluster,))
+
+
+class CollectPartnerSlotsTests(unittest.TestCase):
+    """_collect_partner_slots unions both enabled states' PartnerFight slots."""
+
+    def test_disabled_agents_contribute_nothing(self) -> None:
+        state = VerbState(
+            winning=None, pending=(), partner_fights=(PartnerFight(enemy_slot="obj01"),)
+        )
+
+        self.assertEqual(_collect_partner_slots(False, state, False, state), frozenset())
+
+    def test_only_enabled_states_contribute(self) -> None:
+        p1 = VerbState(
+            winning=None, pending=(), partner_fights=(PartnerFight(enemy_slot="obj01"),)
+        )
+        p2 = VerbState(
+            winning=None, pending=(), partner_fights=(PartnerFight(enemy_slot="obj02"),)
+        )
+
+        self.assertEqual(_collect_partner_slots(True, p1, False, p2), frozenset({"obj01"}))
+        self.assertEqual(_collect_partner_slots(False, p1, True, p2), frozenset({"obj02"}))
+
+    def test_both_agents_on_union_their_slots(self) -> None:
+        p1 = VerbState(
+            winning=None, pending=(), partner_fights=(PartnerFight(enemy_slot="obj01"),)
+        )
+        p2 = VerbState(
+            winning=None, pending=(), partner_fights=(PartnerFight(enemy_slot="obj02"),)
+        )
+
+        self.assertEqual(
+            _collect_partner_slots(True, p1, True, p2),
+            frozenset({"obj01", "obj02"}),
+        )
+
+
+class ClusterMemberGroupsTests(unittest.TestCase):
+    """_cluster_member_groups resolves tokens to drawable groups: deduped by
+    full slot set, and dropped unless at least two members are on the map."""
+
+    def _world_with(self, *slots: str) -> WorldMap:
+        entities = tuple(
+            _enemy_entity(slot=slot, map_x=100.0 + i * 40.0, map_y=60.0)
+            for i, slot in enumerate(slots)
+        )
+        world = _world()
+        return WorldMap(
+            camera_x=world.camera_x,
+            camera_y=world.camera_y,
+            camera_left=world.camera_left,
+            camera_right=world.camera_right,
+            camera_top=world.camera_top,
+            camera_bottom=world.camera_bottom,
+            view_left=world.view_left,
+            view_right=world.view_right,
+            view_top=world.view_top,
+            view_bottom=world.view_bottom,
+            entities=entities,
+        )
+
+    def test_reciprocal_pair_draws_one_group(self) -> None:
+        world = self._world_with("obj01", "obj02")
+        clusters = (
+            EnemyCluster(slot="obj01", member_slots=frozenset({"obj02"})),
+            EnemyCluster(slot="obj02", member_slots=frozenset({"obj01"})),
+        )
+
+        groups = _cluster_member_groups(world, clusters)
+
+        self.assertEqual(len(groups), 1)
+        self.assertEqual({e.slot for e in groups[0]}, {"obj01", "obj02"})
+
+    def test_group_with_only_one_member_on_the_map_is_dropped(self) -> None:
+        world = self._world_with("obj01")
+        clusters = (EnemyCluster(slot="obj01", member_slots=frozenset({"obj02"})),)
+
+        self.assertEqual(_cluster_member_groups(world, clusters), [])
+
+    def test_unknown_slots_are_dropped(self) -> None:
+        world = self._world_with("obj01", "obj02")
+        clusters = (EnemyCluster(slot="obj09", member_slots=frozenset({"obj10"})),)
+
+        self.assertEqual(_cluster_member_groups(world, clusters), [])
+
+    def test_distinct_clusters_draw_distinct_groups(self) -> None:
+        world = self._world_with("obj01", "obj02", "obj03", "obj04")
+        clusters = (
+            EnemyCluster(slot="obj01", member_slots=frozenset({"obj02"})),
+            EnemyCluster(slot="obj03", member_slots=frozenset({"obj04"})),
+        )
+
+        groups = _cluster_member_groups(world, clusters)
+
+        self.assertEqual(len(groups), 2)
+
+
+class ClusterCanvasRectTests(unittest.TestCase):
+    """_cluster_canvas_rect encloses the member box plus the display padding."""
+
+    def test_rect_covers_members_plus_padding(self) -> None:
+        world = _world()
+        members = [
+            _enemy_entity(slot="obj01", map_x=100.0, map_y=50.0),
+            _enemy_entity(slot="obj02", map_x=180.0, map_y=70.0),
+        ]
+        ox, oy, plot_w, plot_h = 10.0, 10.0, 260.0, 112.0
+
+        rect = _cluster_canvas_rect(members, world, ox, oy, plot_w, plot_h)
+
+        self.assertIsNotNone(rect)
+        assert rect is not None
+        from sor_autoplay.hud import _map_x, _map_y
+
+        self.assertEqual(
+            rect,
+            (
+                _map_x(100.0 - _CLUSTER_PAD_X, world, ox, plot_w),
+                _map_y(50.0 - _CLUSTER_PAD_Y, world, oy, plot_h),
+                _map_x(180.0 + _CLUSTER_PAD_X, world, ox, plot_w),
+                _map_y(70.0 + _CLUSTER_PAD_Y, world, oy, plot_h),
+            ),
+        )
+
+    def test_empty_group_has_no_rect(self) -> None:
+        self.assertIsNone(_cluster_canvas_rect([], _world(), 0.0, 0.0, 10.0, 10.0))
 
 
 class _FakeRoot:

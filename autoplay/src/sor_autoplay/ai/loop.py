@@ -33,7 +33,17 @@ from .observe import (
 from .partner import PartnerFightTracker, do_not_harm_partner
 from .pathfind import Path
 from .priority import determine_priority_verb
-from .tokens import Context, DebugNoFood, DebugNoPolice, Myself, Verb, find, find_all
+from .tokens import (
+    Context,
+    DebugNoFood,
+    DebugNoPolice,
+    EnemyCluster,
+    Myself,
+    PartnerFight,
+    Verb,
+    find,
+    find_all,
+)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -50,11 +60,19 @@ class VerbState:
     was a verb that routes (``WalkToNearEnemy``, ``OpenBreakable`` today) --
     ``None`` for every other verb, not an empty path, so the HUD can tell
     "nothing to route" from "routed and found no way through".
+
+    ``clusters`` holds every ``EnemyCluster`` in the post-collapse context
+    this tick, and ``partner_fights`` every ``PartnerFight`` -- the
+    ``Inferred`` tokens the map draws (a dashed square around each cluster,
+    an icon on each partner-owned enemy). Both are empty when the agent is
+    off or the tick produced no such judgment.
     """
 
     winning: Verb | None
     pending: tuple[Verb, ...]
     route: Path | None = None
+    clusters: tuple[EnemyCluster, ...] = ()
+    partner_fights: tuple[PartnerFight, ...] = ()
 
 
 class AgentLoop:
@@ -107,8 +125,16 @@ class AgentLoop:
 
         verbs = tuple(find_all(context, Verb))
         winning = verbs[0] if verbs else None
+        clusters = tuple(sorted(find_all(context, EnemyCluster), key=repr))
+        partner_fights = tuple(sorted(find_all(context, PartnerFight), key=repr))
         with self._state_lock:
-            self._verb_state = VerbState(winning=winning, pending=pending, route=route)
+            self._verb_state = VerbState(
+                winning=winning,
+                pending=pending,
+                route=route,
+                clusters=clusters,
+                partner_fights=partner_fights,
+            )
 
     def verb_state(self) -> VerbState:
         with self._state_lock:
