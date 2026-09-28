@@ -258,6 +258,17 @@ Score/tune commands and the ROM model + plan for each boss are documented in
 - Jack (`$27`, never in round 1; appears rounds 2, 4, 5, 6, 8) — **Jack: the
   ROM model and the plan**.
 
+### Testing against the street enemies
+
+Garcia (`$20`-`$23`), Signal, HakuRo and Nora are fought by one lookahead
+(`autoplay/src/sor_autoplay/ai/grunt.py`, `grunt_plan.py`, the verb
+`EngageGrunts`). Score it with `autoplay/tools/grunt_fight.py` (`--family
+garcia|signal|hakuro|nora|jack|all`, `--level N`; food and police off, a
+fresh host per run at `--turbo 2` with `--silent`), and check the models in
+lockstep with `autoplay/tools/grunt_lab.py --check`. Results, ROM facts and
+open items are in `autoplay/CLAUDE.md` under **The street enemies: Garcia,
+Signal, HakuRo and Nora**.
+
 ## Validation and handoff
 
 - Documentation-only changes: check Markdown structure, links, paths, command

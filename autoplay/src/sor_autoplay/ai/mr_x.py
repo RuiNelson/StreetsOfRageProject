@@ -1029,6 +1029,9 @@ def actor_from_bytes(data: bytes, *, cam_x: int) -> ActorSim:
         invulnerable=bool(data[0x4B] & 0x02),
         punch=None,
         blink=data[0x49] if data[0x4B] & 0x02 else 0,
+        action=data[0x30],
+        anim=_u16(data, 0x08),
+        weapon=data[0x60],
     )
     a.chord = chord_step_from(character, data[0x30], data[0x0A], data[0x0D])
     words = [_s16(data, 0x64 + 2 * i) for i in range(6)]

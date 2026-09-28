@@ -373,6 +373,23 @@ class ActorSim:
         # +$49 while +$4B bit 1 is set: the blink's updates still to run
         # (ai/mr_x.py, actor_step; invulnerable while it runs).
         "blink",
+        # +$30 (the action) and +$08 (the animation word): the street enemies
+        # read both off their target (ai/grunt.py).
+        "action", "anim",
+        # The held weapon (+$60) and its swing: the update since the B press
+        # (None when free), and the weapon's box and damage on its live
+        # updates -- a registered attacker every enemy tests first
+        # (ai/grunt_plan.py, ai/grunt.py).
+        "weapon", "swing", "weapon_box", "weapon_damage",
+        # Ground the actor's own position may not enter (props, walls, pits:
+        # (x0, x1, y0, y1), strict), when a plan knows it (ai/grunt_plan.py).
+        "solids",
+        # The enemies' knives in flight when the plan was asked (ai/grunt.py).
+        "knives",
+        # The partner's body box, and the enemies that are the partner's fight
+        # (slot numbers): no strike of the plan's may meet the one, and the
+        # others are nobody's target but the partner's (ai/grunt_plan.py).
+        "partner_body", "spared",
     )
 
     def __init__(self, **fields) -> None:

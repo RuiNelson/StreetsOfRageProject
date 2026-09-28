@@ -28,6 +28,15 @@ one step and would otherwise be planned as permanently stuck. It costs
 nothing in practice: a route that re-entered an obstacle it had already left
 is never cheaper than one that did not, so the search does not produce one.
 
+A move's sweep is only tested when it can find something the two ends did
+not: a body at least a step (plus ``2 * EPS``) long along the move's axis
+covers the whole swept strip with its start and end positions, so an
+obstacle meeting the strip meets one of them, and both ends are already
+known free when the sweep is asked about. Every character body is 16 px or
+more against a 4 px step, and the sweep was most of what a search cost --
+a route to an unreachable goal explored the whole lattice twice and held
+the AI's tick for up to a second (``tools/grunt_fight.py --profile-ms``).
+
 "Inside" means the body's **centre** sits in the obstacle's interior, not
 that the rectangles merely overlap. A 1px-tall floor (a wall shallower than
 the body) is routinely overlapped by a body standing legally in front of it;
@@ -91,6 +100,12 @@ class Lattice:
         )
         self.start_is_free = self._is_free(start)
         self._free: dict[tuple[int, int], bool] = {}
+        # ``search._axis_clear``'s memo: (start, end) -> clear.
+        self.runs: dict[tuple[tuple[int, int], tuple[int, int]], bool] = {}
+        # Whether a sweep along each axis can see more than its two ends (the
+        # module docstring): only for a body shorter than a step on that axis.
+        self._sweep_x = start.width < step + 2 * EPS
+        self._sweep_y = start.height < step + 2 * EPS
 
     def rect_at(self, node: tuple[int, int]) -> Rect:
         i, j = node
@@ -135,6 +150,10 @@ class Lattice:
         )
 
     def _sweep_is_free(self, node: tuple[int, int], other: tuple[int, int]) -> bool:
+        # Both ends are free whenever this is asked (``can_move``), so a body
+        # at least a step long along the move's axis has nothing left to find.
+        if not (self._sweep_x if other[0] != node[0] else self._sweep_y):
+            return True
         swept = self.rect_at(node).union(self.rect_at(other))
         return not any(swept.overlaps(obstacle) for obstacle in self.obstacles)
 

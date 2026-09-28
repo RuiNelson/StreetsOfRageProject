@@ -24,6 +24,7 @@ from .tokens import Boss, Enemy, Grunt, Jack, Nora, enemy_class_for_type
 from .tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, MrXOffice, Stage
 from .tokens import Breakable, Pit, Press, Projectile, Wall
 from .press import PRESS_TYPE
+from . import grunt as grunt_model
 from .tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
 from .tokens import Weapon, build_pickup_token
 from .tokens import Context
@@ -474,6 +475,24 @@ def generate_direct_observation_tokens(
                     fine_z=entity.fine_z,
                 )
             )
+        elif entity.kind == "weapon" and entity.raw and entity.raw[0x30] == grunt_model.KNIFE_FLYING:
+            # A knife in flight is no item on the floor ($3136 would take it,
+            # but it moves 16 px an update): one an enemy threw is a
+            # projectile (its box reaches 20 lanes either side); the actor's
+            # own is nothing to walk to.
+            if grunt_model.is_enemy_knife_in_flight(entity.raw):
+                context.add(
+                    Projectile(
+                        slot=entity.slot,
+                        world_x=entity.world_x,
+                        world_y=entity.world_y,
+                        vel_x=int.from_bytes(entity.raw[0x1C:0x20], "big", signed=True) / 65536.0,
+                        vel_z=0.0,
+                        type_id=entity.type_id,
+                        state=entity.raw[0x30],
+                        raw=entity.raw,
+                    )
+                )
         elif entity.kind == "weapon" and entity.is_free_ground_item:
             context.add(
                 Weapon(

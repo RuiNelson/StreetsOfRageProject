@@ -93,6 +93,16 @@ DEFAULT_MAX_NODES = 20_000
 # long detours for it.
 DEFAULT_ALIGNMENT_WEIGHT = 2.0
 
+# Every goal is reached only by a body touching its bounding box, so the
+# arrivals all sit in the touch window. Up to this many cells the window is
+# enumerated once per search: the free arrivals are what the Y-then-X finish
+# may aim at, and none at all means the goal cannot be reached from anywhere
+# -- a search that knows that stops at ``UNREACHABLE_MAX_NODES`` rather than
+# exploring the whole lattice for its best effort (the enemy's punch band
+# inside another's reach was a whole lattice twice, up to a second a tick).
+MAX_ARRIVAL_WINDOW = 4096
+UNREACHABLE_MAX_NODES = 600
+
 # A crate-sized goal window is a handful of lattice cells and is cheap to
 # try in full. A full-height segment at a 1px step is thousands, and trying
 # every one from every expanded node is what froze the viewer.
@@ -222,6 +232,9 @@ def find_path(
     # that node; reconstruction walks A* to it and then appends the two legs.
     yx_from: tuple[int, int] | None = None
     goal_window = _touch_window(lattice, target_box)
+    arrivals = _free_arrivals(lattice, goal_window, arrived)
+    if arrivals is not None and not arrivals:
+        max_nodes = min(max_nodes, UNREACHABLE_MAX_NODES)
     # A cheaper route to an already-queued node pushes a second entry rather
     # than sifting the heap; the stale one is dropped here when it surfaces.
     closed: set[tuple[int, int]] = set()
@@ -259,6 +272,7 @@ def find_path(
             goal,
             goal_window,
             require_flush=weight > 0,
+            arrivals=arrivals,
         )
         if finish is not None:
             arrival, arrival_rect = finish
@@ -331,16 +345,18 @@ def _best_yx_from(
     window: tuple[int, int, int, int] | None,
     *,
     require_flush: bool,
+    arrivals: dict[tuple[int, int], Rect] | None = None,
 ) -> tuple[tuple[int, int], Rect] | None:
     """Y-then-X arrival from ``origin`` onto the goal window, or ``None``.
 
     Small windows (a crate, a point at a coarse step) are tried in full.
     Large ones (a full-height segment at 1px) only aim at the cheapest
     cell and the aligned one -- walking every row from every expanded
-    node is what froze the viewer.
+    node is what froze the viewer. ``arrivals``, when the search could
+    enumerate them, are the only cells worth a sweep.
     """
 
-    if window is None:
+    if window is None or arrivals is not None and not arrivals:
         return None
 
     best_key: tuple[int, float, int, int, int, int] | None = None
@@ -350,11 +366,20 @@ def _best_yx_from(
     for node in _yx_aims(origin, window, require_flush):
         if node == origin:
             continue
+        if best_key is not None and not require_flush:
+            # The aims come nearest first: nothing further on is cheaper.
+            if abs(node[0] - origin[0]) + abs(node[1] - origin[1]) > best_key[0]:
+                break
+        if arrivals is not None:
+            rect = arrivals.get(node)
+            if rect is None:
+                continue
         if not _yx_clear(lattice, origin, node):
             continue
-        rect = lattice.rect_at(node)
-        if not arrived(rect):
-            continue
+        if arrivals is None:
+            rect = lattice.rect_at(node)
+            if not arrived(rect):
+                continue
         misalignment = goal.misalignment(rect)
         if require_flush and misalignment > 0:
             continue
@@ -369,6 +394,32 @@ def _best_yx_from(
     if best_node is None or best_rect is None:
         return None
     return best_node, best_rect
+
+
+def _free_arrivals(
+    lattice: Lattice,
+    window: tuple[int, int, int, int] | None,
+    arrived: Callable[[Rect], bool],
+) -> dict[tuple[int, int], Rect] | None:
+    """Every window cell a body may stand on and arrive at, or ``None`` when
+    the window is too large to enumerate. The start counts when it arrives,
+    free or not (a hanging start still walks back in)."""
+
+    if window is None:
+        return {}
+    i_lo, i_hi, j_lo, j_hi = window
+    if (i_hi - i_lo + 1) * (j_hi - j_lo + 1) > MAX_ARRIVAL_WINDOW:
+        return None
+    found: dict[tuple[int, int], Rect] = {}
+    for j in range(j_lo, j_hi + 1):
+        for i in range(i_lo, i_hi + 1):
+            node = (i, j)
+            if node != (0, 0) and not lattice.is_free(node):
+                continue
+            rect = lattice.rect_at(node)
+            if arrived(rect):
+                found[node] = rect
+    return found
 
 
 def _touch_window(lattice: Lattice, box: Rect) -> tuple[int, int, int, int] | None:
@@ -443,8 +494,19 @@ def _yx_clear(lattice: Lattice, start: tuple[int, int], end: tuple[int, int]) ->
 
 
 def _axis_clear(lattice: Lattice, start: tuple[int, int], end: tuple[int, int]) -> bool:
-    """Is the axis-aligned run from ``start`` to ``end`` standable and unswept?"""
+    """Is the axis-aligned run from ``start`` to ``end`` standable and unswept?
 
+    Memoised on the lattice: the Y legs of every finish from one node, and the
+    X legs into one row, are the same runs over and over."""
+
+    key = (start, end)
+    cached = lattice.runs.get(key)
+    if cached is None:
+        cached = lattice.runs[key] = _axis_clear_uncached(lattice, start, end)
+    return cached
+
+
+def _axis_clear_uncached(lattice: Lattice, start: tuple[int, int], end: tuple[int, int]) -> bool:
     if start == end:
         return start == (0, 0) or lattice.is_free(start)
     if start[0] != end[0] and start[1] != end[1]:

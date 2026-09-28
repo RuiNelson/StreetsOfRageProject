@@ -138,6 +138,7 @@ from .walk_verbs import (
     EngageTwins,
     EngageAntonio,
     EngageBongo,
+    EngageGrunts,
     EngageJack,
     EngageSouther,
     ProjectileSidestep,

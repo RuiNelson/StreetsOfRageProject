@@ -384,6 +384,34 @@ class EngageMrX(Walk):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class EngageGrunts(Walk):
+    """Fight the street enemies on screen -- Garcia, Signal, HakuRo, Nora --
+    from where nothing of theirs lands first.
+
+    Produced by ``could_engage_grunts`` once while the actor is free to move
+    (not mid-animation, not held, not holding a body, not airborne), unarmed,
+    and a modelled enemy (``grunt.MODELLED_TYPES``) stands within
+    ``grunt_plan.RELEVANT_DX`` of it. It is the whole fight against them: the
+    strike, grab, hop, walk-in, retreat and rear-chord verbs stand down while
+    it is produced, and every tick's stick, punch and rear attack are
+    ``grunt_plan.plan``'s -- a lookahead over every such enemy's own state
+    machine (``grunt.py``: Garcia's jab trigger, the knife's body-box run, the
+    bat's swing, Signal's hold and slide, HakuRo's dash and kicks, Nora's
+    whip) that takes the hold where no other's blow reaches the holder, or
+    the punch that lands first, and otherwise keeps out of every box.
+    ``target_slot`` is the plan's target, informational only.
+
+    Raises emergency: ×40 flat -- over every generic attack and walk it
+    replaces, under ProjectileSidestep's imminent end (45), the boss engages
+    (76), the hold family and the recoveries.
+    """
+
+    priority: int = 24
+    actor_slot: str
+    target_slot: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class EngageJack(Walk):
     """Take a hold on Jack from where none of his axes reaches.
 

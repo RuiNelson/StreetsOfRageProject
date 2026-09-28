@@ -22,6 +22,8 @@ from ..phases import CombatPhase, is_dangerous
 from . import (
     abadede as abadede_plan,
     garcia as garcia_model,
+    grunt as grunt_model,
+    grunt_plan,
     mr_x as mr_x_model,
     mr_x_plan,
     bongo as bongo_plan,
@@ -55,6 +57,8 @@ from .tokens import (
 from .tokens import (
     MELEE_WEAPON_TYPES,
     Myself,
+    Partner,
+    PartnerFight,
     PlayableCharacter,
     punch_usable_inner_x,
 )
@@ -85,6 +89,7 @@ from .tokens import (
     EngageTwins,
     EngageAntonio,
     EngageBongo,
+    EngageGrunts,
     EngageJack,
     EngageSouther,
     ProjectileSidestep,
@@ -707,10 +712,22 @@ def could_hold_actions(context: Context) -> Context:
 
         # How long the actor has before anything *else* on screen can hit it,
         # in the same 60 Hz frames the hold moves are measured in. The body in
-        # hand is excluded: it is not a threat while held.
-        grace = reach.frames_until_any_melee_lands(
-            actor, enemies, ignore_slots=frozenset({target_slot})
-        )
+        # hand is excluded: it is not a threat while held. The street enemies
+        # grunt.py models are played through their own AI (a Garcia's jab
+        # trigger fires the update the holder's body meets its box -- nothing
+        # a velocity projection sees coming); the rest keep the projection.
+        modelled = _grunt_hold_grace(context, actor, target_slot)
+        if modelled is not None:
+            frames, slots = modelled
+            grace = reach.frames_until_any_melee_lands(
+                actor, enemies, ignore_slots=frozenset({target_slot}) | slots
+            )
+            if frames is not None:
+                grace = frames if grace is None else min(grace, frames)
+        else:
+            grace = reach.frames_until_any_melee_lands(
+                actor, enemies, ignore_slots=frozenset({target_slot})
+            )
         knee_frames = kinematics.hold_knee_frames(actor.character_id)
         suplex_frames = kinematics.hold_finisher_frames(
             actor.character_id, from_back_hold=False
@@ -1784,6 +1801,115 @@ def live_mr_x(context: Context) -> list[MrX]:
     ]
 
 
+def grunt_sims(context: Context, actor) -> tuple | None:
+    """The street fight from the context's raw slots, as ``grunt_plan`` plays
+    it: (the actor, every modelled enemy alive -- Mr. X's office helpers
+    excepted, his plan's), or None without the actor's bytes or a camera."""
+
+    camera = find(context, CameraRange)
+    if camera is None or not getattr(actor, "raw", b""):
+        return None
+    cam_x = int(camera.left) - mr_x_model.PLAYER_X_MIN_OFFSET
+    stage = find(context, Stage)
+    level = stage.level_index if stage is not None else 0
+    office = find(context, MrXOffice) is not None
+    sims = []
+    for enemy in find_all(context, Enemy):
+        if enemy.type_id not in grunt_model.MODELLED_TYPES or not enemy.raw or enemy.is_defeated:
+            continue
+        if office and is_office_helper(context, enemy):
+            continue
+        g = grunt_model.GruntSim.from_bytes(enemy.raw, slot=_slot_number(enemy.slot), cam_x=cam_x, level=level)
+        if g.alive:
+            sims.append(g)
+    a = mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x)
+    a.punch = None
+    a.lane_lo, a.lane_hi = nav.lane_bounds(context)  # round 7's lift is wider
+    a.knives = tuple(
+        grunt_model.KnifeSim.from_bytes(p.raw)
+        for p in find_all(context, Projectile)
+        if p.type_id == grunt_model.KNIFE_TYPE and p.raw
+    )
+    partner = find(context, Partner) if isinstance(actor, Myself) else find(context, Myself)
+    box = getattr(partner, "hitbox", None) if partner is not None else None
+    # The partner's body, grown by a walk's worth of the horizon on X: they
+    # move too, and no punch of the plan's may meet them.
+    a.partner_body = (box.x0 - 24, box.x1 + 24, box.y0 - 4, box.y1 + 4, box.z0, box.z1) if box is not None else None
+    a.spared = frozenset(
+        _slot_number(fight.enemy_slot) for fight in find_all(context, PartnerFight)
+    )
+    # Props, walls and pits as the ROM tests them, against the position itself.
+    a.solids = tuple(
+        (r.left, r.right, r.top, r.bottom)
+        for r in nav.solid_obstacles(context)
+        if abs(r.left + r.width / 2 - a.x) < 200 + r.width / 2
+    )
+    return a, sims
+
+
+def could_engage_grunts(context: Context) -> Context:
+    """Fight the street enemies near the actor -- one verb, ``grunt_plan``'s.
+
+    Once while the actor is free to move (not mid-animation, not held, not
+    holding a body, not airborne), unarmed or holding a weapon the plan swings
+    (``grunt_plan.SWING_WEAPONS``: the pepper is thrown, not swung), and some
+    modelled enemy
+    (``grunt.MODELLED_TYPES``) stands within ``grunt_plan.RELEVANT_DX``.
+    ``generate_verb_tokens`` withdraws the generic strike, grab, hop, walk-in,
+    retreat and rear-chord verbs whenever it is produced.
+    """
+
+    verbs: set[Token] = set()
+    for actor in _actors(context):
+        if _blocked(context, actor):
+            continue
+        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+            continue
+        if _is_holding_enemy(actor) or actor.is_airborne:
+            continue
+        if actor.held_weapon_type != 0 and actor.held_weapon_type not in grunt_plan.SWING_WEAPONS:
+            continue
+        built = grunt_sims(context, actor)
+        if built is None:
+            continue
+        a, sims = built
+        if not grunt_plan.engages(a, sims):
+            continue
+        near = grunt_plan.relevant(a, sims)
+        target = grunt_plan.pick_target(a, near)
+        verbs.add(EngageGrunts(actor_slot=actor.slot, target_slot=f"obj{target.slot:02d}" if target else ""))
+    return verbs
+
+
+# How far ahead a holder looks for a modelled enemy's blow, in updates: the
+# suplex chain, the longest finisher (~115 frames).
+GRUNT_HOLD_LOOKAHEAD = 60
+
+
+def _grunt_hold_grace(context: Context, actor, held_slot: str) -> tuple[int | None, frozenset[str]] | None:
+    """For a holder: (60 Hz frames until a modelled street enemy's blow lands
+    on it where it stands -- None if none does within the look -- and the
+    slots so judged), or None when no modelled enemy is on screen."""
+
+    built = grunt_sims(context, actor)
+    if built is None:
+        return None
+    a, sims = built
+    held = _slot_number(held_slot) if held_slot.startswith("obj") else None
+    others = [g for g in grunt_plan.relevant(a, sims) if g.slot != held]
+    if not others:
+        return None
+    blow = grunt_plan.holder_blow(others, a, GRUNT_HOLD_LOOKAHEAD, exclude=held, knives=a.knives or ())
+    slots = frozenset(f"obj{g.slot:02d}" for g in others)
+    return (None if blow is None else 2 * blow), slots
+
+
+# The generic verbs EngageGrunts replaces while it is produced.
+_REPLACED_BY_ENGAGE_GRUNTS = (
+    Punch, MeleeWeaponAttack, GrabEnemy, RearAttack, WalkToNearEnemy, JumpAttack, RetreatFromDanger,
+)
+
+
 def could_engage_jack(context: Context) -> Context:
     """Take a hold on Jack from where no axe of his reaches -- one verb per Jack.
 
@@ -2333,7 +2459,7 @@ def could_open_breakable(context: Context) -> Context:
 def generate_verb_tokens(context: Context) -> Context:
     """Returns context | every could_* candidate that applies."""
 
-    return (
+    verbs = (
         context
         | could_handle_continue_menu(context)
         | could_handle_mr_x_dialog(context)
@@ -2365,4 +2491,24 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_walk_to_weapon(context)
         | could_walk_to_pickup(context)
         | could_open_breakable(context)
+        | could_engage_grunts(context)
     )
+    if any(isinstance(token, EngageGrunts) for token in verbs):
+        modelled = {
+            enemy.slot for enemy in find_all(context, Enemy)
+            if enemy.type_id in grunt_model.MODELLED_TYPES
+        }
+        verbs = {
+            token for token in verbs
+            if not isinstance(token, _REPLACED_BY_ENGAGE_GRUNTS) or not _replaced_by_the_plan(token, modelled)
+        }
+    return verbs
+
+
+def _replaced_by_the_plan(verb: Token, modelled: set[str]) -> bool:
+    """Is this generic verb EngageGrunts' to replace? Yes unless it names a
+    target the plan does not model (a HakuRo $2A, Jack, a boss): those keep
+    the generic answer."""
+
+    target = getattr(verb, "target_slot", None)
+    return target is None or not target or target in modelled
