@@ -407,10 +407,12 @@ class RearAttack(MeleeAttacks):
 
     Produced by ``could_rear_attack`` for a target ``reach.in_rear_band``
     names -- an enemy inside the character-specific ``$322A`` attack box
-    (measured live, controls-and-input.md): behind the player for all
-    three characters
-    (Axel/Adam/Blaze up to 40/42/53px), and additionally in front only for
-    Adam (up to 14px — his chord is a forward-reaching hop, not a backfist).
+    (measured live, controls-and-input.md) **behind** the player
+    (Axel/Adam/Blaze up to 40/42/53px). Adam's hop box additionally spans
+    14px in front, but that forward overlap is never targeted: $322A is the
+    ROM's rear/escape attack, so a body closed in front is punch/grab/
+    walk-back business (``reach.in_rear_band`` stays the pure geometry for
+    partner safety).
 
     Raises emergency, when ``reach.rear_attack_is_warranted`` holds --
     boxed in, punch dead zone, or ``Jack`` facing the actor (his axe and
@@ -426,9 +428,7 @@ class RearAttack(MeleeAttacks):
     alone does not make it preferred: it stays a produced, usable option,
     but ranks under the ``WalkToNearEnemy`` turn-around
     (``execute._walk_to_near_enemy_target``) that reaches the same enemy
-    faster and more reliably. For Adam only, the forward reach of his hop
-    ($322A is a hop for him, not a backfist) means the same applies to a
-    body closed inside 14px in front.
+    faster and more reliably.
     """
 
     priority: int = 15

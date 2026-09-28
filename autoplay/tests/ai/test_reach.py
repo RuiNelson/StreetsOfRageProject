@@ -409,6 +409,17 @@ class BodyWidthGeometryTests(unittest.TestCase):
         actor = _myself(world_x=100, character_id=1, facing_left=False)
         self.assertTrue(reach.in_rear_band(actor, _garcia(world_x=110, world_y=100)))
 
+    def test_adams_front_point_blank_is_not_actionable_via_rear(self) -> None:
+        # dx=1 in front of Adam: inside the punch dead zone (usable inner 2)
+        # and inside the hop's +14 forward overlap, but $322A is rear-only --
+        # so neither punch nor rear marks it actionable, and the walk-back
+        # to punch/grab range is free to move.
+        actor = _myself(world_x=100, world_y=100, character_id=1, facing_left=False)
+        enemy = _garcia(world_x=101, world_y=100)
+        self.assertTrue(reach.in_rear_band(actor, enemy))
+        self.assertFalse(reach.punch_would_connect(actor, enemy))
+        self.assertFalse(reach.enemy_actionable(actor, enemy, [enemy]))
+
 
 class LiveEnemyTests(unittest.TestCase):
     def test_an_enemy_past_the_lethal_boundary_is_not_a_target(self) -> None:

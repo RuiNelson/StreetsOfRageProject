@@ -757,6 +757,12 @@ def walking_box_would_grab(
 def in_rear_band(actor: PlayableCharacter, enemy: Character) -> bool:
     """Inside the ``$322A`` chord's real reach on the enemy's own side.
 
+    Pure geometry: Adam's hop truly spans -42..+14 (controls-and-input.md
+    "Measured chord timing"), so a body closed in front of him is inside the
+    box. Targeting is gated elsewhere -- ``could_rear_attack`` and
+    ``enemy_actionable`` both require the target behind the actor, since
+    $322A is the ROM's rear/escape attack, never a front attack.
+
     The behind and front bands differ per character (Axel/Blaze have zero
     forward reach), so this must pick the side-specific band, never their
     union -- and the behind band has an *inner* edge as well as an outer one
@@ -901,6 +907,12 @@ def enemy_actionable(
     vacuum -- nothing attacking it, and ``could_walk_to_near_enemy``
     declining to turn toward it.
 
+    Rear-only, like ``could_rear_attack``: ``in_rear_band`` stays the pure
+    $322A geometry (Adam's hop truly spans -42..+14, still used for partner
+    safety), but a front body is never "actionable via rear" -- it is
+    punch/grab/walk-back business, and marking it actionable here would stop
+    the walk while no rear verb will ever be produced for it.
+
     Answered about the observed position only, unlike ``connects``' bands,
     which sweep their move's own timeline: this is the "stop walking, you
     can already hit it" signal, and a future-tense answer to it halts the
@@ -908,7 +920,11 @@ def enemy_actionable(
     ``decide._actionable_targets``.
     """
 
-    if in_rear_band(actor, enemy) and rear_attack_is_warranted(actor, enemy, enemies):
+    if (
+        enemy_behind_actor(actor, enemy)
+        and in_rear_band(actor, enemy)
+        and rear_attack_is_warranted(actor, enemy, enemies)
+    ):
         return True
     return punch_would_connect(actor, enemy)
 

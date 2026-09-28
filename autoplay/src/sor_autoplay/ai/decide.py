@@ -355,10 +355,20 @@ def could_rear_attack(context: Context) -> Context:
         # rather than turning around and punching -- is a ranking question,
         # and lives in priority._emergency_rear_attack via
         # reach.rear_attack_is_warranted.
+        # Rear-only by design, for all three characters: Adam's hop box
+        # genuinely spans -42..+14 (controls-and-input.md "Measured chord
+        # timing"), but $322A is the ROM's rear/escape attack with a 21-frame
+        # startup and a hop landing -- never a front attack. A body closed
+        # in front is punch/grab/walk-back business, so a front target is
+        # skipped here even when the box would touch it (in_rear_band stays
+        # the pure geometry, still used for partner safety).
         for target_slot in _targets_in_reach(context, actor, reach.in_rear_band, RearAttack):
+            target = find(context, Enemy, slot=target_slot)
+            if target is None or not reach.enemy_behind_actor(actor, target):
+                continue
             if isinstance(
-                find(context, Enemy, slot=target_slot), (Souther, Antonio, Bongo, Abadede, Jack, Onihime, MrX)
-            ) or is_office_helper(context, find(context, Enemy, slot=target_slot)):
+                target, (Souther, Antonio, Bongo, Abadede, Jack, Onihime, MrX)
+            ) or is_office_helper(context, target):
                 # The chord is a strike like any other: it turns the grab
                 # contact into a hit. Each boss's engage owns him, and
                 # EngageJack owns Jack.

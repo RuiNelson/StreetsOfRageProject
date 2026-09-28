@@ -525,12 +525,27 @@ class CouldRearAttackTests(unittest.TestCase):
 
         self.assertEqual(result, set())
 
-    def test_adams_hop_fires_for_an_enemy_closed_in_front(self) -> None:
-        # Adam's chord ($22 -> $24) is a forward-reaching hop, X -42..+14.
+    def test_adams_hop_does_not_fire_for_an_enemy_in_front(self) -> None:
+        # Adam's chord box genuinely spans X -42..+14 (controls-and-input.md
+        # "Measured chord timing"), but $322A is the ROM's rear/escape attack
+        # -- never a front attack. A body closed in front is punch/grab/
+        # walk-back business, so no RearAttack is produced for it even
+        # inside the forward overlap.
         myself = make_myself(
             character_id=1, character_name="Adam", world_x=100, world_y=100, facing_left=False
         )
         enemy = make_enemy(world_x=108, world_y=100)  # dx=8, within Adam's +14 front reach
+        context: set[Token] = {myself, enemy}
+
+        result = could_rear_attack(context)
+
+        self.assertEqual(result, set())
+
+    def test_adams_hop_still_fires_for_an_enemy_behind(self) -> None:
+        myself = make_myself(
+            character_id=1, character_name="Adam", world_x=100, world_y=100, facing_left=False
+        )
+        enemy = make_enemy(world_x=80, world_y=100)  # dx=-20, behind
         context: set[Token] = {myself, enemy}
 
         result = could_rear_attack(context)
