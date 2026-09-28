@@ -2179,9 +2179,17 @@ in one region pass, no `_yx_aims` re-sort -- a worst-case street route went
 first (a failed solids search proves the danger one is doomed; a solids
 route replayed clear of every danger rect is already a cheapest danger-free
 arrival, so the danger pass runs only when the solids route actually
-crosses danger). The danger pass itself is now capped at `DANGER_MAX_NODES
-= 100` (0 winner diffs over 200 full ticks; long safe detours take the
-direct path instead). What remains is the solids fail-proof: with the cap
+crosses danger). The danger pass itself is now capped at `DANGER_MAX_NODES`
+(measured at 100: 0 winner diffs over 200 full ticks; long safe detours take
+the direct path instead -- and 10 now, like `NAV_MAX_NODES`: user, "para o
+jogo que é, é mais que suficiente"; not measured live). At 10 the danger
+pass no longer finds a detour round an enemy's committed reach (one needs
+11-100 expansions), so the AI walks straight through it to a pickup, a weapon
+or a projectile sidestep; the three tests that pinned the detour in
+`test_execute.py` (`test_steps_off_the_lane_through_a_committed_enemys_reach`,
+`test_walks_through_a_dangerous_enemys_swing_to_the_weapon` and `..._pickup`)
+now pin the straight walk, and `PlanRouteTests` still covers the danger pass
+where a detour is short. What remains is the solids fail-proof: with the cap
 in, every remaining slow tick is a `WalkToNearEnemy` solids proof of ~3000
 nodes (`reached=False`, 25-30 ms bursts, spikes to ~59 ms live) while
 chasing a target past the plannable world -- and the slow-tick log now
@@ -2220,9 +2228,9 @@ step): 50 1.0 / 1.7 ms 99.0%; 300 5.4 / 7.0 ms 99.5%; 600 10.3 / 13.6 ms
 so the first step is the figure that matters; the same final position was
 83% at 100. The check itself costs 0.3-135 us (0-66 obstacles).
 
-**No in-game effect today, on purpose.** `NAV_MAX_NODES` is 10 and
-`DANGER_MAX_NODES` 100, neither above the gate, so `plan_route` is exactly what
-it was; the check protects larger budgets (the viewer's 20,000 default, any
+**No in-game effect from the sealed check, on purpose.** `NAV_MAX_NODES` and
+`DANGER_MAX_NODES` are both 10 (user: for this game it is more than enough),
+neither above the gate, so `plan_route` is exactly what it was; the check protects larger budgets (the viewer's 20,000 default, any
 future raise). An empty route for a sealed goal (0 nodes) was rejected:
 `WalkToAdvanceStage` walks its best-effort first vector up to a full-width
 pit's edge before `hop_landing_x` can jump, so an empty one stops it ~40 px

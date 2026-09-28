@@ -104,14 +104,14 @@ NAV_STEP = 4
 # bound at 10 nearly every search stops as best-effort after 10 expansions.
 NAV_MAX_NODES = 10
 
-# The same bound for the danger-aware pass only. Proving no danger-free
-# route exists costs the whole reachable lattice (thousands of nodes, tens
-# of ms -- the slow lockstep ticks), while a danger-free route worth taking
-# shows up early; anything longer is a long detour the solids fallback
-# answers with the direct path instead. A game AI takes the small risk
-# quickly rather than proving the safe road slowly. The solids pass keeps
-# the full bound: physics is never approximated.
-DANGER_MAX_NODES = 100
+# The danger-aware pass's bound, the same 10 as the solids pass (user: for
+# this game it is more than enough). Proving no danger-free route exists
+# costs the whole reachable lattice (thousands of nodes, tens of ms -- the
+# slow lockstep ticks), while a danger-free route worth taking shows up
+# early; anything longer is a long detour the solids fallback answers with
+# the direct path instead. A game AI takes the small risk quickly rather
+# than proving the safe road slowly.
+DANGER_MAX_NODES = 10
 
 # Body box used when the actor's real one is unknown (`hitbox` is None on a
 # no-attack frame with a degenerate cached box). "Unknown" is not "no body":
