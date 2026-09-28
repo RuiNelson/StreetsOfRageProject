@@ -100,10 +100,9 @@ from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
 NAV_STEP = 4
 
 # A bound on how much lattice one tick may explore. The playable band is
-# about 320x112 px, so at NAV_STEP that is under 600 positions and this is
-# never reached in practice -- it exists so a pathological arrangement costs
-# a worse route rather than a missed tick.
-NAV_MAX_NODES = 4000
+# about 320x112 px, so at NAV_STEP that is under 600 positions: with this
+# bound at 10 nearly every search stops as best-effort after 10 expansions.
+NAV_MAX_NODES = 10
 
 # The same bound for the danger-aware pass only. Proving no danger-free
 # route exists costs the whole reachable lattice (thousands of nodes, tens
