@@ -65,6 +65,7 @@ classDiagram
     Verb <|-- Walk
     Walk <|-- WalkToNearEnemy
     Walk <|-- WalkToAdvanceStage
+    Walk <|-- CatchUpPartner
     Walk <|-- WalkToWeapon
     Walk <|-- WalkToPickup
     Walk <|-- WalkToScreenCenter

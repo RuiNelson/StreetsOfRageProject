@@ -77,6 +77,41 @@ class WalkToAdvanceStage(Walk):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class CatchUpPartner(Walk):
+    """Follow a partner who is further along the stage, to a sensible
+    distance behind them, instead of running on past them.
+
+    User (in Portuguese): "Quero que a IA deixe de emitir
+    `WalkToAdvanceStage` quando tiver um `Partner`, e esse partner estiver
+    mais avançado que a personagem controlada ... `CatchUpPartner` que segue
+    o `Partner` a uma distância razoável dele ... se tiver em modo de 2
+    jogadores, por exemplo, um humano e uma IA, a IA não tente sempre
+    avançar o estágio."
+
+    Produced by ``decide.could_catch_up_partner`` in place of
+    ``WalkToAdvanceStage``, under exactly its gates (a stage with a lateral
+    direction, no blocking Enemy, no Breakable on the stage path, the actor
+    free to walk) and only while the ``Partner`` is *more advanced* than the
+    actor along ``direction`` -- the larger world X on the rightward rounds,
+    the smaller on round 8's leftward one, never on the elevator's ``"none"``
+    -- by more than ``decide.CATCH_UP_DISTANCE_X``. Within that distance
+    neither verb is produced (the actor waits), and ``could_walk_to_advance_
+    stage`` stands down for the same actor for as long as the partner is
+    ahead at all, so a co-op AI never overtakes a partner in front of it.
+    ``target_slot`` is that partner's slot, ``direction`` the stage's.
+
+    Raises emergency: (no blocking Enemy or ahead Breakable, partner still
+    ahead)×1 -- the tier of ``WalkToAdvanceStage``, which it replaces, so it
+    loses to every other live candidate, a ScorePickup included.
+    """
+
+    priority: int = 5
+    actor_slot: str
+    target_slot: str  # the Partner's slot ("P1" | "P2")
+    direction: str  # the stage's progress direction: "left" | "right"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class WalkToScreenCenter(Walk):
     """Walk toward the visible screen's own horizontal centre to draw an
     off-screen enemy into view, rather than stand pinned against the camera

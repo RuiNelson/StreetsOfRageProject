@@ -84,6 +84,7 @@ from .tokens import CallPolice
 from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDialog
 from .tokens import Context, Token, find, find_all
 from .tokens import (
+    CatchUpPartner,
     EngageAbadede,
     EngageMrX,
     EngageTwins,
@@ -1141,6 +1142,113 @@ def _advance_blocking_enemies(context: Context) -> list[Enemy]:
     return blocking
 
 
+# How far behind a partner who is further along the stage CatchUpPartner
+# keeps the actor. Two bodies and a bit past the walking box's grab -- a walk
+# into the other player takes a hold on them ($4478; reach.walk_box_reach_x 16-20
+# plus reach.player_body_span_x's 7-13 is at most 33 px, and navigation.
+# partner_obstacles keeps the route out of it) -- so following never brushes the
+# partner into one, and about a fifth of the 320 px screen, so the actor is still
+# at hand when the next wave walks in. The verb is produced only while the
+# partner is further ahead than this, which makes it the distance the actor
+# stops at (a memoryless pipeline has no other way to stop), and the router's
+# own arrival -- the body overlapping the 1 px goal strip -- puts it a few px
+# outside. Not measured against a human partner live; the unit tests pin it.
+CATCH_UP_DISTANCE_X = 64
+
+
+def partner_lead_x(direction: str, actor: PlayableCharacter, partner: PlayableCharacter) -> int:
+    """How far in front of ``actor`` the partner stands along the stage's own
+    progress direction, in px -- negative when the partner is behind.
+
+    "More advanced" is the round's, not the screen's: the larger world X on
+    the rightward rounds (1-6), the smaller on round 8's leftward one, and
+    nothing on the elevator's ``"none"`` (stage 7 has no lateral progress, so
+    nobody is ahead of anybody). Equal X is not ahead.
+    """
+
+    if direction == "right":
+        return partner.world_x - actor.world_x
+    if direction == "left":
+        return actor.world_x - partner.world_x
+    return 0
+
+
+def catch_up_point_x(direction: str, partner: PlayableCharacter) -> int:
+    """The X ``CatchUpPartner`` walks to: ``CATCH_UP_DISTANCE_X`` behind the
+    partner, on the side the stage is coming from."""
+
+    if direction == "left":
+        return partner.world_x + CATCH_UP_DISTANCE_X
+    return partner.world_x - CATCH_UP_DISTANCE_X
+
+
+def _partner_ahead_of(context: Context, actor: PlayableCharacter) -> Partner | None:
+    """The partner standing further along the stage than ``actor``, if any.
+
+    Single owner of "the partner is more advanced", so that
+    ``could_walk_to_advance_stage`` (which stands down for it) and
+    ``could_catch_up_partner`` / ``priority._emergency_catch_up_partner``
+    (which act on it) can never disagree about who is in front -- the same
+    pattern ``_actor_pinned_for_screen_center`` is for WalkToScreenCenter.
+    ``None`` with no ``Partner`` (every one-player session: nothing changes),
+    with no ``Stage``, on the elevator, and while the partner is level with
+    the actor or behind it.
+    """
+
+    stage = find(context, Stage)
+    partner = find(context, Partner)
+    if stage is None or partner is None or stage.direction not in ("left", "right"):
+        return None
+    if partner_lead_x(stage.direction, actor, partner) <= 0:
+        return None
+    return partner
+
+
+def _partner_to_catch_up(context: Context, actor: PlayableCharacter) -> Partner | None:
+    """The partner ``actor`` should walk up to: ahead of it
+    (``_partner_ahead_of``) by more than ``CATCH_UP_DISTANCE_X``.
+
+    Owns ``CatchUpPartner``'s whole partner-side condition, for production
+    (``could_catch_up_partner``) and scoring (``priority._emergency_catch_up_
+    partner``) alike.
+    """
+
+    partner = _partner_ahead_of(context, actor)
+    if partner is None:
+        return None
+    stage = find(context, Stage)
+    if partner_lead_x(stage.direction, actor, partner) <= CATCH_UP_DISTANCE_X:
+        return None
+    return partner
+
+
+def _actors_free_to_advance(context: Context) -> list[PlayableCharacter]:
+    """The actors the stage-progress fallbacks may move this tick.
+
+    The gates ``WalkToAdvanceStage`` and ``CatchUpPartner`` share, in one
+    place so the verb that replaces the other cannot open under a different
+    set of them: a ``Stage`` with a lateral direction, no live Enemy that
+    should hold the stage back (``_advance_blocking_enemies``), no on-camera
+    Breakable on the stage path (``_advance_blocking_breakables``), and an
+    actor that is not mid-animation, held by an enemy, or holding one.
+    """
+
+    stage = find(context, Stage)
+    if stage is None or stage.direction == "none":
+        return []
+    if _advance_blocking_enemies(context):
+        return []
+    if _advance_blocking_breakables(context):
+        return []
+    return [
+        actor
+        for actor in _actors(context)
+        if not _blocked(context, actor)
+        and actor.combat_phase is not CombatPhase.HELD_BY_ENEMY
+        and not _is_holding_enemy(actor)
+    ]
+
+
 def could_walk_to_advance_stage(context: Context) -> Context:
     """Scroll the stage only once every spawned enemy is gone.
 
@@ -1154,24 +1262,53 @@ def could_walk_to_advance_stage(context: Context) -> Context:
     blocks lateral progress until smashed, and producing this verb next to
     OpenBreakable is what made the two flip every few ticks (see
     ``_advance_blocking_breakables``).
+
+    And never past a partner who is further along the stage than the actor
+    (``_partner_ahead_of``; user, in Portuguese: "a IA não tente sempre
+    avançar o estágio"): that actor's stage-progress verb is
+    ``CatchUpPartner`` instead, or nothing while it is already within
+    ``CATCH_UP_DISTANCE_X`` of them. A partner level with the actor or behind
+    it changes nothing -- the actor is the one in front and advances as it
+    always did.
     """
 
     verbs: set[Token] = set()
     stage = find(context, Stage)
-    if stage is None or stage.direction == "none":
-        return verbs
-    if _advance_blocking_enemies(context):
-        return verbs
-    if _advance_blocking_breakables(context):
-        return verbs
-    for actor in _actors(context):
-        if _blocked(context, actor):
-            continue
-        if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
-            continue
-        if _is_holding_enemy(actor):
+    for actor in _actors_free_to_advance(context):
+        if _partner_ahead_of(context, actor) is not None:
             continue
         verbs.add(WalkToAdvanceStage(actor_slot=actor.slot, direction=stage.direction))
+    return verbs
+
+
+def could_catch_up_partner(context: Context) -> Context:
+    """Follow a partner who is further along the stage, in place of advancing.
+
+    ``WalkToAdvanceStage``'s replacement while ``_partner_ahead_of`` names one
+    (user: "em vez desse token, a IA emita antes um novo token:
+    ``CatchUpPartner`` que segue o ``Partner`` a uma distância razoável
+    dele"), under the same gates (``_actors_free_to_advance``) -- with an
+    enemy about, the AI's business is the enemy -- and only while the partner
+    is further ahead than ``CATCH_UP_DISTANCE_X``: closer than that there is
+    nothing to catch up, and the actor waits rather than overtake. The
+    elevator (``direction == "none"``) never gets it: nobody leads there.
+    """
+
+    verbs: set[Token] = set()
+    if find(context, Partner) is None:
+        # Every one-player session: skip the enemy and prop scans the gates
+        # below would make for nothing (the tick budget is 2 ms).
+        return verbs
+    stage = find(context, Stage)
+    for actor in _actors_free_to_advance(context):
+        partner = _partner_to_catch_up(context, actor)
+        if partner is None:
+            continue
+        verbs.add(
+            CatchUpPartner(
+                actor_slot=actor.slot, target_slot=partner.slot, direction=stage.direction
+            )
+        )
     return verbs
 
 
@@ -2480,6 +2617,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_hit_antonio_boomerang(context)
         | could_hit_table(context)
         | could_walk_to_advance_stage(context)
+        | could_catch_up_partner(context)
         | could_walk_to_screen_center(context)
         | could_punch(context)
         | could_melee_weapon_attack(context)

@@ -32,6 +32,7 @@ from .decide import (
     _actor_pinned_for_screen_center,
     _advance_blocking_breakables,
     _advance_blocking_enemies,
+    _partner_to_catch_up,
 )
 from . import jump_kick
 from .tokens import (
@@ -86,6 +87,7 @@ from .tokens import Projectile
 from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDialog
 from .tokens import Context, Verb, find, find_all
 from .tokens import (
+    CatchUpPartner,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -468,6 +470,13 @@ _EMERGENCY_ENGAGE_JACK_UNDER_GRUNT = 5
 # this verb when those targets exist, so the high floor is no longer needed
 # to win those contests.
 _EMERGENCY_WALK_TO_ADVANCE_STAGE = 1
+# CatchUpPartner replaces WalkToAdvanceStage whenever a partner stands further
+# along the stage (decide.could_catch_up_partner), so it takes that verb's
+# place in the ranking and for the same reason: the lowest of any verb that
+# still scores, under a ScorePickup and every approach -- catching up is what
+# the actor does when nothing else asks for it. The two are never produced
+# for one actor together, so the tie never has to be broken.
+_EMERGENCY_CATCH_UP_PARTNER = 1
 # Added to an engagement verb (walk-in, strike, grab, throw) whose target
 # is an armed ordinary enemy or a Boss. Sized to dominate WalkToNearEnemy's
 # 6-point distance span (base 14, floor 8) so a far armed foe still beats a
@@ -932,6 +941,22 @@ def _emergency_walk_to_advance_stage(verb: WalkToAdvanceStage, context: Context)
     return _EMERGENCY_WALK_TO_ADVANCE_STAGE
 
 
+def _emergency_catch_up_partner(verb: CatchUpPartner, context: Context) -> int:
+    """The advance's tier, zeroed by the advance's own gates and by the
+    partner no longer being further ahead than ``decide.CATCH_UP_DISTANCE_X``
+    (``decide._partner_to_catch_up``, the predicate that produced the verb):
+    a candidate whose condition lapsed this tick scores nothing, as a
+    ``WalkToPickup`` aimed at a vanished pickup does.
+    """
+
+    if _advance_blocking_enemies(context) or _advance_blocking_breakables(context):
+        return _EMERGENCY_DEFAULT
+    actor = _find_actor(context, verb.actor_slot)
+    if actor is None or _partner_to_catch_up(context, actor) is None:
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_CATCH_UP_PARTNER
+
+
 def _emergency_thrown_weapon(verb: Verb, context: Context, weight: int) -> int:
     """Shared range check for the two attack-thrown weapons (knife, pepper —
     items-and-weapons.md's ``$21E6``): beyond melee, within throw range.
@@ -1157,6 +1182,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     HitTable: _emergency_hit_table,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
+    CatchUpPartner: _emergency_catch_up_partner,
     WalkToScreenCenter: _emergency_walk_to_screen_center,
 }
 

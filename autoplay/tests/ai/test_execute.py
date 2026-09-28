@@ -56,6 +56,7 @@ from sor_autoplay.ai.execute import (
     press_no_button,
 )
 from sor_autoplay.ai.decide import (
+    CATCH_UP_DISTANCE_X,
     BREAKABLE_PUNCH_X,
     breakable_smash_outer_x,
     in_smash_range,
@@ -79,6 +80,7 @@ from sor_autoplay.ai.tokens import (
     InMrXDialog,
 )
 from sor_autoplay.ai.tokens import (
+    CatchUpPartner,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -1431,6 +1433,203 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
         _settle(verb, {actor, camera, Stage(level_index=0, direction="right")}, gamepad)
 
         client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+
+class ExecuteCatchUpPartnerTests(unittest.TestCase):
+    """See ``CatchUpPartner`` and ``decide.could_catch_up_partner``: walk up to
+    ``CATCH_UP_DISTANCE_X`` behind a partner who is further along the stage,
+    and stand there (user, in Portuguese: "segue o `Partner` a uma distância
+    razoável dele")."""
+
+    RIGHT_STAGE = Stage(level_index=0, direction="right")
+    LEFT_STAGE = Stage(level_index=7, direction="left")
+    CAMERA = CameraRange(left=0, right=700, top=0, bottom=112)
+
+    def _verb(self, direction: str = "right") -> CatchUpPartner:
+        return CatchUpPartner(actor_slot="P1", target_slot="P2", direction=direction)
+
+    def _lead(self, actor, partner, direction: str = "right") -> int:
+        sign = 1 if direction == "right" else -1
+        return sign * (partner.world_x - actor.world_x)
+
+    def test_walks_toward_a_partner_far_ahead_on_a_rightward_round(self) -> None:
+        actor = _myself(world_x=100, world_y=64)
+        partner = _partner_token(world_x=500, world_y=64)
+        gamepad, client = _gamepad()
+
+        _settle(self._verb(), {actor, partner, self.RIGHT_STAGE, self.CAMERA}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+    def test_walks_toward_a_partner_far_ahead_on_the_leftward_round(self) -> None:
+        actor = _myself(world_x=500, world_y=64, facing_left=True)
+        partner = _partner_token(world_x=100, world_y=64)
+        gamepad, client = _gamepad()
+
+        _settle(
+            self._verb("left"), {actor, partner, self.LEFT_STAGE, self.CAMERA}, gamepad
+        )
+
+        client.hold_buttons.assert_called_with(player1=LEFT, player2=0)
+
+    def test_stops_the_follow_distance_behind_a_still_partner(self) -> None:
+        # The whole point: the trail ends behind the partner, never on them
+        # and never past them, at about the distance the verb is named for.
+        partner = _partner_token(world_x=500, world_y=64)
+        trail = _walk(
+            self._verb(),
+            _myself(world_x=100, world_y=64),
+            {partner, self.RIGHT_STAGE, self.CAMERA},
+            ticks=160,
+        )
+
+        lead = self._lead(trail[-1], partner)
+        self.assertLessEqual(abs(lead - CATCH_UP_DISTANCE_X), 12, f"stopped {lead} px behind")
+        self.assertLess(max(a.world_x for a in trail), partner.world_x, "reached the partner")
+
+    def test_stops_behind_a_still_partner_on_the_leftward_round(self) -> None:
+        partner = _partner_token(world_x=100, world_y=64)
+        trail = _walk(
+            self._verb("left"),
+            _myself(world_x=500, world_y=64, facing_left=True),
+            {partner, self.LEFT_STAGE, self.CAMERA},
+            ticks=160,
+        )
+
+        lead = self._lead(trail[-1], partner, "left")
+        self.assertLessEqual(abs(lead - CATCH_UP_DISTANCE_X), 12, f"stopped {lead} px behind")
+        self.assertGreater(min(a.world_x for a in trail), partner.world_x, "reached the partner")
+
+    def test_stands_still_once_it_has_arrived(self) -> None:
+        # Nothing forces a direction bit back onto the pad the way
+        # WalkToAdvanceStage's `or mask` does: walking on is exactly what
+        # this verb exists not to do.
+        partner = _partner_token(world_x=500, world_y=64)
+        actor = _myself(world_x=500 - CATCH_UP_DISTANCE_X, world_y=64)
+        gamepad, _client = _gamepad()
+
+        _settle(self._verb(), {actor, partner, self.RIGHT_STAGE, self.CAMERA}, gamepad)
+
+        self.assertEqual(gamepad.held & (LEFT | RIGHT), 0, f"mask {gamepad.held:#x}")
+
+    def test_keeps_its_lane_and_does_not_chase_the_partners(self) -> None:
+        # The goal is a strip across the lane band, not the partner's lane: a
+        # partner walking up and down is not a reason to follow them there.
+        partner = _partner_token(world_x=500, world_y=100)
+        trail = _walk(
+            self._verb(),
+            _myself(world_x=100, world_y=30),
+            {partner, self.RIGHT_STAGE, self.CAMERA},
+            ticks=60,
+        )
+
+        self.assertEqual({a.world_y for a in trail}, {30})
+
+    def test_the_route_goes_round_a_crate_in_the_way(self) -> None:
+        prop = Breakable(slot="obj09", world_x=200, world_y=64, type_id=0x40)
+        partner = _partner_token(world_x=520, world_y=64)
+        trail = _walk(
+            self._verb(),
+            _myself(world_x=100, world_y=64),
+            {prop, partner, self.RIGHT_STAGE, self.CAMERA},
+            ticks=140,
+        )
+
+        wall = prop_solids.solid_box(prop.type_id, prop.world_x, prop.world_y)
+        overlapped = [(a.world_x, a.world_y) for a in trail if wall.blocks(a.world_x, a.world_y)]
+        self.assertFalse(overlapped, f"walked into the crate at {overlapped[:3]}")
+        self.assertGreater(trail[-1].world_x, prop.world_x + 40, "never got past the crate")
+
+    def test_hops_when_the_pathfinder_cannot_walk_around_a_pit(self) -> None:
+        # Full-width pit, landing in Axel's kick range: WalkToAdvanceStage's
+        # hop, for the same reason -- the partner is on the far side of it.
+        pit = Pit(world_x=120, lane_y=0, width=24, height=130)
+        actor = _myself(world_x=100, world_y=64)
+        partner = _partner_token(world_x=400, world_y=64)
+        gamepad, client = _gamepad()
+        context = {actor, partner, pit, Stage(level_index=3, direction="right"), self.CAMERA}
+
+        execute_verb(self._verb(), context, gamepad)
+
+        client.press_buttons.assert_called_once_with(player1=C | RIGHT, player2=0, frames=3)
+
+    def test_does_not_walk_into_an_unjumpable_full_width_pit(self) -> None:
+        pit = Pit(world_x=400, lane_y=0, width=96, height=130)
+        partner = _partner_token(world_x=620, world_y=64)
+        trail = _walk(
+            self._verb(),
+            _myself(world_x=360, world_y=60),
+            {
+                pit,
+                partner,
+                Stage(level_index=3, direction="right"),
+                CameraRange(left=200, right=700, top=0, bottom=112),
+            },
+            ticks=40,
+        )
+
+        entered = [
+            (a.world_x, a.world_y) for a in trail if pit_endangers(pit, a.world_x, a.world_y)
+        ]
+        self.assertFalse(entered, f"walked into the pit at {entered[:3]}")
+        self.assertFalse(
+            any(a.world_x > pit.world_x for a in trail), "went past the pit wall without hopping"
+        )
+
+    def test_finishes_a_hop_already_in_the_air(self) -> None:
+        # A launch made last tick: free flight (`$12`) presses the kick edge
+        # and keeps the direction toward the partner, never releases the pad.
+        actor = _myself(world_x=100, world_y=64, action_state=0x12, is_airborne=True)
+        partner = _partner_token(world_x=400, world_y=64)
+        gamepad, client = _gamepad()
+
+        execute_verb(
+            self._verb(), {actor, partner, self.RIGHT_STAGE, self.CAMERA}, gamepad
+        )
+
+        self.assertEqual(client.press_buttons.call_args.kwargs["player1"], B)
+        self.assertTrue(gamepad.held & RIGHT)
+
+    def test_releases_when_the_partner_is_gone(self) -> None:
+        actor = _myself(world_x=100, world_y=64)
+        gamepad, client = _gamepad()
+        gamepad.hold(RIGHT)
+
+        execute_verb(self._verb(), {actor, self.RIGHT_STAGE, self.CAMERA}, gamepad)
+
+        self.assertEqual(gamepad.held, 0)
+
+    def test_does_not_hold_into_the_camera_walk_clamp(self) -> None:
+        # The partner stands past the camera's edge and the actor is already
+        # on the clamp: the ROM undoes every step, so holding into it only
+        # pins the actor there.
+        actor = _myself(world_x=1504, world_y=64)
+        partner = _partner_token(world_x=1700, world_y=64)
+        camera = CameraRange(left=1248, right=1504, top=0, bottom=112)
+        gamepad, _client = _gamepad()
+
+        _settle(self._verb(), {actor, partner, self.RIGHT_STAGE, camera}, gamepad)
+
+        self.assertFalse(gamepad.held & RIGHT, f"pushed into the camera clamp: {gamepad.held:#x}")
+
+    def test_the_partner_pad_never_lets_the_follow_walk_grab_them(self) -> None:
+        # Through execute_tick, the way the loop runs it: whatever the plan
+        # asks for, no step it lets through may put the walking box on the
+        # partner's body.
+        partner = _partner_token(world_x=500, world_y=64, facing_left=True)
+        gamepad, _client = _gamepad()
+        actor = _myself(world_x=100, world_y=64)
+        for _ in range(200):
+            context = {actor, partner, self.RIGHT_STAGE, self.CAMERA}
+            execute_tick(self._verb(), context, gamepad)
+            mask = gamepad.held
+            self.assertFalse(
+                _walk_grabs(actor, partner, mask),
+                f"a step that grabs the partner at x={actor.world_x} (mask {mask:#x})",
+            )
+            dx = (WALK_PX_PER_TICK if mask & RIGHT else 0) - (WALK_PX_PER_TICK if mask & LEFT else 0)
+            actor = replace(actor, world_x=actor.world_x + dx)
+        self.assertLess(actor.world_x, partner.world_x)
 
 
 class ExecuteWalkToScreenCenterTests(unittest.TestCase):

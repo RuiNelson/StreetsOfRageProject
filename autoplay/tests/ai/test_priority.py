@@ -31,7 +31,7 @@ from sor_autoplay.ai.tokens import (
     ThrowPepper,
     Weapon,
 )
-from sor_autoplay.ai.tokens import Myself
+from sor_autoplay.ai.tokens import Myself, Partner
 from dataclasses import replace
 from sor_autoplay.ai.tokens import (
     AttackRange,
@@ -59,6 +59,7 @@ from sor_autoplay.ai.kinematics import (
 )
 from sor_autoplay.ai.tokens import Verb, find_all
 from sor_autoplay.ai.tokens import (
+    CatchUpPartner,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -139,6 +140,28 @@ def _myself(**overrides) -> Myself:
     )
     fields.update(overrides)
     return Myself(**fields)
+
+
+def _partner(**overrides) -> Partner:
+    fields = dict(
+        slot="P2",
+        player_index=2,
+        character_id=2,
+        character_name="Blaze",
+        world_x=300,
+        world_y=64,
+        health=80,
+        health_percent=100.0,
+        lives=3,
+        specials=1,
+        held_weapon_type=0,
+        facing_left=False,
+        combat_phase=CombatPhase.NORMAL,
+        action_state=0x02,
+        is_airborne=False,
+    )
+    fields.update(overrides)
+    return Partner(**fields)
 
 
 def _spent_knee_ticks(character_id: int = 0) -> int:
@@ -2597,3 +2620,74 @@ class ReleasePartnerPriorityTests(unittest.TestCase):
         }
         winner = find_all(determine_priority_verb(context), Verb)[0]
         self.assertIsInstance(winner, AttackHeldEnemy)
+
+
+class CatchUpPartnerPriorityTests(unittest.TestCase):
+    """``CatchUpPartner`` is ``WalkToAdvanceStage``'s replacement, so it ranks
+    where that verb ranks: the lowest of any verb that still scores, under
+    every pickup, and zeroed when the conditions that produced it lapse."""
+
+    STAGE = Stage(level_index=0, direction="right")
+
+    def _catch_up(self) -> CatchUpPartner:
+        return CatchUpPartner(actor_slot="P1", target_slot="P2", direction="right")
+
+    def _score(self, context) -> int:
+        return priority._emergency(self._catch_up(), generate_inference_tokens(set(context)))
+
+    def test_scores_the_advance_tier(self) -> None:
+        context = {_myself(world_x=100), _partner(world_x=300), self.STAGE}
+
+        self.assertEqual(self._score(context), priority._EMERGENCY_WALK_TO_ADVANCE_STAGE)
+        self.assertEqual(self._score(context), priority._EMERGENCY_CATCH_UP_PARTNER)
+
+    def test_loses_to_a_score_pickup(self) -> None:
+        pickup = ScorePickup(slot="obj01", world_x=0, world_y=64, pickup_type=0x3F, points=3000)
+        context = {
+            _myself(world_x=100),
+            _partner(world_x=300),
+            self.STAGE,
+            pickup,
+            WalkToPickup(actor_slot="P1", target_slot="obj01"),
+            self._catch_up(),
+        }
+
+        winner = find_all(determine_priority_verb(context), Verb)
+
+        self.assertEqual(len(winner), 1)
+        self.assertIsInstance(winner[0], WalkToPickup)
+
+    def test_wins_when_nothing_else_is_live(self) -> None:
+        context = {_myself(world_x=100), _partner(world_x=300), self.STAGE, self._catch_up()}
+
+        winner = find_all(determine_priority_verb(context), Verb)
+
+        self.assertEqual(len(winner), 1)
+        self.assertIsInstance(winner[0], CatchUpPartner)
+
+    def test_scores_nothing_while_an_enemy_holds_the_stage_back(self) -> None:
+        context = {
+            _myself(world_x=100),
+            _partner(world_x=300),
+            self.STAGE,
+            _enemy("obj01", CombatPhase.NORMAL, world_x=200),
+        }
+
+        self.assertEqual(self._score(context), priority._EMERGENCY_DEFAULT)
+
+    def test_scores_nothing_once_the_partner_is_no_longer_ahead(self) -> None:
+        # A candidate whose condition lapsed this tick must not outrank
+        # anything: the partner walked back past the actor.
+        context = {_myself(world_x=300), _partner(world_x=100), self.STAGE}
+
+        self.assertEqual(self._score(context), priority._EMERGENCY_DEFAULT)
+
+    def test_scores_nothing_within_the_follow_distance(self) -> None:
+        context = {_myself(world_x=100), _partner(world_x=130), self.STAGE}
+
+        self.assertEqual(self._score(context), priority._EMERGENCY_DEFAULT)
+
+    def test_scores_nothing_without_a_partner(self) -> None:
+        context = {_myself(world_x=100), self.STAGE}
+
+        self.assertEqual(self._score(context), priority._EMERGENCY_DEFAULT)

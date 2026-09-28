@@ -13,16 +13,18 @@ output back in the way the game would, and assert on the resulting sequence.
 import unittest
 from dataclasses import replace
 
-from sor_autoplay.ai.decide import generate_verb_tokens, in_smash_range
-from sor_autoplay.ai.execute import execute_verb
+from sor_autoplay.ai.decide import CATCH_UP_DISTANCE_X, generate_verb_tokens, in_smash_range
+from sor_autoplay.ai.execute import execute_tick, execute_verb
 from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.inference import generate_inference_tokens
+from sor_autoplay.ai.partner import do_not_harm_partner
 from sor_autoplay.ai import reach
 from sor_autoplay.ai.priority import determine_priority_verb
 from sor_autoplay.ai.tokens import (
     AttackHeldEnemy,
     Breakable,
     CameraRange,
+    CatchUpPartner,
     EngageSouther,
     Enemy,
     FlipHold,
@@ -30,6 +32,7 @@ from sor_autoplay.ai.tokens import (
     JumpAttack,
     Myself,
     OpenBreakable,
+    Partner,
     Punch,
     Souther,
     Stage,
@@ -1143,6 +1146,182 @@ class BreakableAdvanceStabilityTests(unittest.TestCase):
             any(mask & LEFT for mask in masks),
             f"turned back toward a passed crate: {[hex(m) for m in masks]}",
         )
+
+
+class PartnerFollowStabilityTests(unittest.TestCase):
+    """A two-player session with nothing to fight: the AI follows a partner who
+    is in front of it, leads one who is behind it, and never chatters or
+    overtakes on the way (user, in Portuguese: "a IA não tente sempre avançar
+    o estágio ... segue o `Partner` a uma distância razoável dele").
+
+    Driven through the whole loop -- the generators, the co-op filter, the
+    ranking and ``execute_tick`` with its partner pad -- because the contract
+    is a sequence: which verb each tick, and that the actor ends where it
+    should without ever reversing.
+    """
+
+    def _partner(self, world_x: int, direction: str) -> Partner:
+        return Partner(
+            slot="P2",
+            player_index=2,
+            character_id=2,
+            character_name="Blaze",
+            world_x=world_x,
+            world_y=64,
+            health=100,
+            health_percent=100.0,
+            lives=3,
+            specials=1,
+            held_weapon_type=0,
+            facing_left=direction == "left",
+            combat_phase=CombatPhase.NORMAL,
+            action_state=0x02,
+            is_airborne=False,
+        )
+
+    def _run(
+        self,
+        *,
+        ticks: int,
+        actor_x: int,
+        partner_x,
+        direction: str = "right",
+        level_index: int = 0,
+    ) -> tuple[list[int], list[str], list[int], list[int]]:
+        """``partner_x`` is the partner's X, or a function of the tick number
+        for one who walks. Returns the masks, the winning verbs' names, the
+        actor's X and the partner's X, one per tick."""
+
+        masks: list[int] = []
+        names: list[str] = []
+        actor_xs: list[int] = []
+        partner_xs: list[int] = []
+        ax, facing_left = actor_x, direction == "left"
+        client = _FakeClient()
+        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+        for tick in range(ticks):
+            px = partner_x(tick) if callable(partner_x) else partner_x
+            context = {
+                _actor(ax, 64, facing_left),
+                self._partner(px, direction),
+                CameraRange(left=-400, right=1200, top=0, bottom=112),
+                Stage(level_index=level_index, direction=direction),
+            }
+            context |= generate_inference_tokens(context)
+            context |= generate_verb_tokens(context)
+            context = do_not_harm_partner(context)
+            context = determine_priority_verb(context)
+
+            verbs = find_all(context, Verb)
+            verb = verbs[0] if verbs else None
+            execute_tick(verb, context, gamepad)
+            held = client.held
+            masks.append(held)
+            names.append(type(verb).__name__ if verb else "")
+            actor_xs.append(ax)
+            partner_xs.append(px)
+
+            if held & RIGHT:
+                ax += STEP_X
+                facing_left = False
+            elif held & LEFT:
+                ax -= STEP_X
+                facing_left = True
+        return masks, names, actor_xs, partner_xs
+
+    def test_catches_up_with_a_still_partner_then_waits_without_overtaking(self) -> None:
+        masks, names, xs, pxs = self._run(ticks=140, actor_x=100, partner_x=500)
+
+        self.assertNotIn(WalkToAdvanceStage.__name__, names)
+        self.assertIn(CatchUpPartner.__name__, names)
+        self.assertEqual(_reversals(masks, RIGHT, LEFT), 0, f"chattered: {masks}")
+        self.assertLess(max(xs), 500, "walked into or past the partner")
+        gap = 500 - xs[-1]
+        self.assertTrue(
+            CATCH_UP_DISTANCE_X - 8 <= gap <= CATCH_UP_DISTANCE_X + 16,
+            f"settled {gap} px behind",
+        )
+        self.assertFalse(
+            any(mask & (LEFT | RIGHT) for mask in masks[-20:]),
+            f"still walking at the end: {[hex(m) for m in masks[-20:]]}",
+        )
+
+    def test_follows_a_partner_who_keeps_walking(self) -> None:
+        # The partner walks on at 3 px a tick, slower than the actor's 4: the
+        # actor closes the gap, then trails at about the follow distance,
+        # stopping and starting with them -- never reversing, never past.
+        masks, names, xs, pxs = self._run(
+            ticks=200, actor_x=100, partner_x=lambda tick: 300 + 3 * tick
+        )
+
+        self.assertNotIn(WalkToAdvanceStage.__name__, names)
+        self.assertEqual(_reversals(masks, RIGHT, LEFT), 0, f"chattered: {masks}")
+        self.assertTrue(all(x < px for x, px in zip(xs, pxs)), "overtook the partner")
+        gap = pxs[-1] - xs[-1]
+        self.assertTrue(
+            CATCH_UP_DISTANCE_X - 8 <= gap <= CATCH_UP_DISTANCE_X + 3 * STEP_X + 16,
+            f"trailing {gap} px behind",
+        )
+
+    def test_leads_a_partner_who_is_behind(self) -> None:
+        masks, names, xs, _pxs = self._run(ticks=30, actor_x=300, partner_x=100)
+
+        self.assertTrue(
+            all(name == WalkToAdvanceStage.__name__ for name in names),
+            f"expected WalkToAdvanceStage throughout, got {names}",
+        )
+        self.assertNotIn(CatchUpPartner.__name__, names)
+        self.assertGreater(xs[-1], 300)
+
+    def test_the_leftward_round_mirrors_it(self) -> None:
+        masks, names, xs, _pxs = self._run(
+            ticks=140, actor_x=900, partner_x=500, direction="left", level_index=7
+        )
+
+        self.assertNotIn(WalkToAdvanceStage.__name__, names)
+        self.assertIn(CatchUpPartner.__name__, names)
+        self.assertEqual(_reversals(masks, RIGHT, LEFT), 0, f"chattered: {masks}")
+        self.assertGreater(min(xs), 500, "walked into or past the partner")
+        gap = xs[-1] - 500
+        self.assertTrue(
+            CATCH_UP_DISTANCE_X - 8 <= gap <= CATCH_UP_DISTANCE_X + 16,
+            f"settled {gap} px behind",
+        )
+
+    def test_the_leftward_round_leads_a_partner_who_is_behind(self) -> None:
+        _masks, names, xs, _pxs = self._run(
+            ticks=30, actor_x=300, partner_x=800, direction="left", level_index=7
+        )
+
+        self.assertTrue(all(name == WalkToAdvanceStage.__name__ for name in names), names)
+        self.assertLess(xs[-1], 300)
+
+    def test_the_elevator_has_no_advance_and_no_follow(self) -> None:
+        masks, names, xs, _pxs = self._run(
+            ticks=20, actor_x=100, partner_x=500, direction="none", level_index=6
+        )
+
+        self.assertEqual(set(names), {""}, names)
+        self.assertEqual(set(xs), {100})
+
+    def test_hands_over_to_the_advance_once_when_the_partner_falls_behind(self) -> None:
+        # The partner walks back through the actor. From that tick the actor
+        # is the one in front and advances: one hand-over, never a return.
+        masks, names, xs, pxs = self._run(
+            ticks=120, actor_x=200, partner_x=lambda tick: max(0, 330 - 3 * tick)
+        )
+
+        advance_ticks = [i for i, name in enumerate(names) if name == WalkToAdvanceStage.__name__]
+        self.assertTrue(advance_ticks, "never took the lead")
+        first = advance_ticks[0]
+        self.assertEqual(
+            advance_ticks, list(range(first, len(names))), f"handed back and forth: {names}"
+        )
+        self.assertTrue(
+            all(x >= px for x, px in zip(xs[first:], pxs[first:])),
+            "advanced while the partner was still ahead",
+        )
+        self.assertEqual(_reversals(masks, RIGHT, LEFT), 0, f"chattered: {masks}")
 
 
 class FirstLevelBreakableStallTests(unittest.TestCase):

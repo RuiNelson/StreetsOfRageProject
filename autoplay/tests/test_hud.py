@@ -5,7 +5,7 @@ from sor_autoplay.ai.reach import CLOSING_ENEMY_THREAT_FRAMES
 from sor_autoplay.ai.tokens import CounterGrab, EnemyCluster, PartnerFight, Punch
 from sor_autoplay.ai.loop import VerbState
 from sor_autoplay.ai.tokens import CallPolice
-from sor_autoplay.ai.tokens import WalkToAdvanceStage
+from sor_autoplay.ai.tokens import CatchUpPartner, WalkToAdvanceStage
 from sor_autoplay.ai.tokens.character import PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
 from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay.hud import ObserverHud, _window_config_path
@@ -44,6 +44,11 @@ class DescribeVerbTests(unittest.TestCase):
         verb = WalkToAdvanceStage(actor_slot="P1", direction="right")
 
         self.assertEqual(_describe_verb(verb), "WalkToAdvanceStage  (right)")
+
+    def test_catch_up_partner_names_the_partner_and_the_stage_direction(self) -> None:
+        verb = CatchUpPartner(actor_slot="P1", target_slot="P2", direction="right")
+
+        self.assertEqual(_describe_verb(verb), "CatchUpPartner  (right →P2)")
 
     def test_verb_with_no_extra_fields_shows_bare_name(self) -> None:
         self.assertEqual(_describe_verb(CallPolice(actor_slot="P1")), "CallPolice")

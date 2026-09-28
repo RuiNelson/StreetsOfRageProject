@@ -28,6 +28,7 @@ from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay import prop_solids
 from sor_autoplay.ai.decide import (
     BREAKABLE_PUNCH_X,
+    CATCH_UP_DISTANCE_X,
     PINNED_AT_CAMERA_EDGE_MARGIN,
     breakable_smash_outer_x,
     in_smash_range,
@@ -51,6 +52,7 @@ from sor_autoplay.ai.decide import (
     could_tech_recover,
     could_throw_knife,
     could_throw_pepper,
+    could_catch_up_partner,
     could_walk_to_advance_stage,
     could_open_breakable,
     could_walk_to_near_enemy,
@@ -82,6 +84,7 @@ from sor_autoplay.ai.tokens import (
 )
 from sor_autoplay.ai.tokens import Verb, Token
 from sor_autoplay.ai.tokens import (
+    CatchUpPartner,
     ProjectileSidestep,
     RetreatFromDanger,
     Walk,
@@ -131,6 +134,7 @@ could_retreat_from_danger = _with_inference(could_retreat_from_danger)
 could_tech_recover = _with_inference(could_tech_recover)
 could_throw_knife = _with_inference(could_throw_knife)
 could_throw_pepper = _with_inference(could_throw_pepper)
+could_catch_up_partner = _with_inference(could_catch_up_partner)
 could_walk_to_advance_stage = _with_inference(could_walk_to_advance_stage)
 could_open_breakable = _with_inference(could_open_breakable)
 could_walk_to_near_enemy = _with_inference(could_walk_to_near_enemy)
@@ -160,6 +164,28 @@ def make_myself(**overrides) -> Myself:
     )
     fields.update(overrides)
     return Myself(**fields)
+
+
+def make_partner(**overrides) -> Partner:
+    fields = dict(
+        slot="P2",
+        player_index=2,
+        character_id=2,
+        character_name="Blaze",
+        world_x=100,
+        world_y=100,
+        health=100,
+        health_percent=100.0,
+        lives=3,
+        specials=1,
+        held_weapon_type=0,
+        facing_left=False,
+        combat_phase=CombatPhase.NORMAL,
+        action_state=0,
+        is_airborne=False,
+    )
+    fields.update(overrides)
+    return Partner(**fields)
 
 
 def make_enemy(**overrides) -> Enemy:
@@ -1144,6 +1170,291 @@ class CouldWalkToAdvanceStageTests(unittest.TestCase):
             could_walk_to_advance_stage(context),
             {WalkToAdvanceStage(actor_slot="P1", direction="right")},
         )
+
+
+class CouldCatchUpPartnerTests(unittest.TestCase):
+    """``CatchUpPartner`` takes ``WalkToAdvanceStage``'s place while a partner
+    stands further along the stage (user, in Portuguese: "Quero que a IA
+    deixe de emitir `WalkToAdvanceStage` quando tiver um `Partner`, e esse
+    partner estiver mais avançado que a personagem controlada ... a IA não
+    tente sempre avançar o estágio. Obviamente que em certos níveis o mais
+    avançado é o mais à direita, noutros nível é o mais à esquerda, no nível
+    do elevador, não há necessidade").
+
+    Every case asks both generators about the same context, because the
+    contract is the *swap*: exactly one of the two verbs, or neither -- never
+    both, never a gap where the actor should have had one.
+    """
+
+    RIGHT_STAGE = Stage(level_index=0, direction="right")
+    LEFT_STAGE = Stage(level_index=7, direction="left")
+    ELEVATOR = Stage(level_index=6, direction="none")
+
+    def _both(self, context):
+        return could_walk_to_advance_stage(context), could_catch_up_partner(context)
+
+    def test_follows_a_partner_who_is_further_right_on_a_rightward_round(self) -> None:
+        context = {
+            make_myself(world_x=100),
+            make_partner(world_x=300),
+            self.RIGHT_STAGE,
+        }
+
+        advance, catch_up = self._both(context)
+
+        self.assertEqual(advance, set())
+        self.assertEqual(
+            catch_up,
+            {CatchUpPartner(actor_slot="P1", target_slot="P2", direction="right")},
+        )
+
+    def test_follows_a_partner_who_is_further_left_on_the_leftward_round(self) -> None:
+        # Round 8 scrolls the other way: the more advanced player is the one
+        # with the smaller world X.
+        context = {
+            make_myself(world_x=300),
+            make_partner(world_x=100),
+            self.LEFT_STAGE,
+        }
+
+        advance, catch_up = self._both(context)
+
+        self.assertEqual(advance, set())
+        self.assertEqual(
+            catch_up,
+            {CatchUpPartner(actor_slot="P1", target_slot="P2", direction="left")},
+        )
+
+    def test_a_partner_behind_is_not_followed_and_the_actor_advances(self) -> None:
+        # The actor is the one in front: nothing about it changes.
+        context = {
+            make_myself(world_x=300),
+            make_partner(world_x=100),
+            self.RIGHT_STAGE,
+        }
+
+        advance, catch_up = self._both(context)
+
+        self.assertEqual(advance, {WalkToAdvanceStage(actor_slot="P1", direction="right")})
+        self.assertEqual(catch_up, set())
+
+    def test_on_the_leftward_round_a_partner_to_the_right_is_behind(self) -> None:
+        context = {
+            make_myself(world_x=100),
+            make_partner(world_x=300),
+            self.LEFT_STAGE,
+        }
+
+        advance, catch_up = self._both(context)
+
+        self.assertEqual(advance, {WalkToAdvanceStage(actor_slot="P1", direction="left")})
+        self.assertEqual(catch_up, set())
+
+    def test_a_partner_level_with_the_actor_is_not_ahead(self) -> None:
+        # Lanes differ, X does not. Equal is not "more advanced".
+        context = {
+            make_myself(world_x=200, world_y=40),
+            make_partner(world_x=200, world_y=90),
+            self.RIGHT_STAGE,
+        }
+
+        advance, catch_up = self._both(context)
+
+        self.assertEqual(advance, {WalkToAdvanceStage(actor_slot="P1", direction="right")})
+        self.assertEqual(catch_up, set())
+
+    def test_closer_than_the_follow_distance_the_actor_waits_and_does_not_overtake(
+        self,
+    ) -> None:
+        # The partner is ahead, so the advance stands down -- but there is
+        # nothing to catch up either. Standing still is the whole answer;
+        # advancing would carry the actor past them.
+        for lead in (1, 30, CATCH_UP_DISTANCE_X):
+            with self.subTest(lead=lead):
+                context = {
+                    make_myself(world_x=100),
+                    make_partner(world_x=100 + lead),
+                    self.RIGHT_STAGE,
+                }
+
+                advance, catch_up = self._both(context)
+
+                self.assertEqual(advance, set())
+                self.assertEqual(catch_up, set())
+
+    def test_one_pixel_past_the_follow_distance_it_follows(self) -> None:
+        context = {
+            make_myself(world_x=100),
+            make_partner(world_x=100 + CATCH_UP_DISTANCE_X + 1),
+            self.RIGHT_STAGE,
+        }
+
+        advance, catch_up = self._both(context)
+
+        self.assertEqual(advance, set())
+        self.assertEqual(len(catch_up), 1)
+
+    def test_the_follow_distance_clears_the_partners_grab_reach(self) -> None:
+        # Walking into the other player takes a hold on them ($4478): the
+        # walking box's reach plus their body is the least distance the actor
+        # may stand at, whoever the two characters are.
+        widest_grab = max(reach.WALK_BOX_REACH_X.values()) + max(
+            reach.PLAYER_BODY_REACH_X.values()
+        )
+        self.assertGreater(CATCH_UP_DISTANCE_X, widest_grab)
+
+    def test_the_elevator_has_neither_verb(self) -> None:
+        # Stage 7 has no lateral progress: nobody is ahead of anybody there.
+        context = {
+            make_myself(world_x=100),
+            make_partner(world_x=400),
+            self.ELEVATOR,
+        }
+
+        advance, catch_up = self._both(context)
+
+        self.assertEqual(advance, set())
+        self.assertEqual(catch_up, set())
+
+    def test_without_a_partner_nothing_changes(self) -> None:
+        # Every one-player session.
+        context = {make_myself(world_x=100), self.RIGHT_STAGE}
+
+        advance, catch_up = self._both(context)
+
+        self.assertEqual(advance, {WalkToAdvanceStage(actor_slot="P1", direction="right")})
+        self.assertEqual(catch_up, set())
+
+    def test_without_a_stage_neither_verb_is_produced(self) -> None:
+        context = {make_myself(world_x=100), make_partner(world_x=400)}
+
+        advance, catch_up = self._both(context)
+
+        self.assertEqual(advance, set())
+        self.assertEqual(catch_up, set())
+
+    def test_names_the_partner_from_the_other_players_side(self) -> None:
+        # The AI on P2 follows P1.
+        context = {
+            make_myself(slot="P2", player_index=2, world_x=100),
+            make_partner(slot="P1", player_index=1, world_x=300),
+            self.RIGHT_STAGE,
+        }
+
+        _advance, catch_up = self._both(context)
+
+        self.assertEqual(
+            catch_up,
+            {CatchUpPartner(actor_slot="P2", target_slot="P1", direction="right")},
+        )
+
+    def test_a_live_enemy_holds_it_back_like_the_advance(self) -> None:
+        # With an enemy about the AI's business is the enemy: catching up is
+        # the advance's replacement, under the advance's gates.
+        context = {
+            make_myself(world_x=100),
+            make_partner(world_x=300),
+            make_enemy(world_x=250),
+            self.RIGHT_STAGE,
+        }
+
+        advance, catch_up = self._both(context)
+
+        self.assertEqual(advance, set())
+        self.assertEqual(catch_up, set())
+
+    def test_an_off_screen_enemy_holds_it_back_too(self) -> None:
+        context = {
+            make_myself(world_x=100),
+            make_partner(world_x=180),
+            CameraRange(left=0, right=200, top=0, bottom=200),
+            make_enemy(world_x=500),
+            self.RIGHT_STAGE,
+        }
+
+        self.assertEqual(could_catch_up_partner(context), set())
+
+    def test_an_off_screen_straggler_at_zero_health_does_not(self) -> None:
+        # The advance's own carve-out (`_advance_blocking_enemies`): nothing
+        # will ever chase that body down, so it must not hold anything back.
+        context = {
+            make_myself(world_x=100),
+            make_partner(world_x=300),
+            CameraRange(left=0, right=400, top=0, bottom=200),
+            make_enemy(world_x=900, health=0),
+            self.RIGHT_STAGE,
+        }
+
+        self.assertEqual(len(could_catch_up_partner(context)), 1)
+
+    def test_a_breakable_on_the_path_holds_it_back(self) -> None:
+        # OpenBreakable owns the crate; a walk that routes round it is the
+        # limit cycle `_advance_blocking_breakables` was written to prevent.
+        context = {
+            make_myself(world_x=100),
+            make_partner(world_x=300),
+            CameraRange(left=0, right=400, top=0, bottom=200),
+            Breakable(slot="obj09", world_x=180, world_y=100, type_id=0x40),
+            self.RIGHT_STAGE,
+        }
+
+        advance, catch_up = self._both(context)
+
+        self.assertEqual(advance, set())
+        self.assertEqual(catch_up, set())
+
+    def test_a_breakable_already_behind_does_not(self) -> None:
+        context = {
+            make_myself(world_x=200),
+            make_partner(world_x=400),
+            CameraRange(left=0, right=500, top=0, bottom=200),
+            Breakable(slot="obj09", world_x=100, world_y=100, type_id=0x40),
+            self.RIGHT_STAGE,
+        }
+
+        self.assertEqual(len(could_catch_up_partner(context)), 1)
+
+    def test_not_while_an_animation_holds_the_actor(self) -> None:
+        context = {
+            make_myself(world_x=100),
+            make_partner(world_x=300),
+            AnimationInProgress(slot="P1"),
+            self.RIGHT_STAGE,
+        }
+
+        self.assertEqual(could_catch_up_partner(context), set())
+
+    def test_not_while_held_by_an_enemy(self) -> None:
+        context = {
+            make_myself(world_x=100, combat_phase=CombatPhase.HELD_BY_ENEMY),
+            make_partner(world_x=300),
+            self.RIGHT_STAGE,
+        }
+
+        self.assertEqual(could_catch_up_partner(context), set())
+
+    def test_not_while_holding_an_enemy(self) -> None:
+        context = {
+            make_myself(world_x=100, action_state=0x60, held_enemy_slot="obj00"),
+            make_partner(world_x=300),
+            self.RIGHT_STAGE,
+        }
+
+        self.assertEqual(could_catch_up_partner(context), set())
+
+    def test_generate_verb_tokens_swaps_the_advance_for_it(self) -> None:
+        # Through the whole generator chain, not the two `could_*` alone.
+        ahead = generate_verb_tokens(
+            {make_myself(world_x=100), make_partner(world_x=300), self.RIGHT_STAGE}
+        )
+        behind = generate_verb_tokens(
+            {make_myself(world_x=300), make_partner(world_x=100), self.RIGHT_STAGE}
+        )
+
+        self.assertTrue(any(isinstance(v, CatchUpPartner) for v in ahead))
+        self.assertFalse(any(isinstance(v, WalkToAdvanceStage) for v in ahead))
+        self.assertTrue(any(isinstance(v, WalkToAdvanceStage) for v in behind))
+        self.assertFalse(any(isinstance(v, CatchUpPartner) for v in behind))
 
 
 class CouldWalkToScreenCenterTests(unittest.TestCase):

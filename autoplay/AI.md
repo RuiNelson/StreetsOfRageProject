@@ -144,7 +144,15 @@ parametrized intent that precedes any concrete action.
 
 - `Walk` — for example, `WalkToNearEnemy`,
   `WalkToAdvanceStage`, `WalkToWeapon`, and `WalkToPickup`; grabbing a
-  lay-down weapon or consumable is a `Walk` descendant. `WalkToScreenCenter`
+  lay-down weapon or consumable is a `Walk` descendant. `CatchUpPartner`
+  is `WalkToAdvanceStage`'s replacement in a two-player session (user: "a IA
+  não tente sempre avançar o estágio"): while the `Partner` stands further
+  along the stage than the actor -- the larger world X on rounds 1-6, the
+  smaller on round 8, nobody on the elevator -- the actor no longer runs on
+  past them; it walks up to `decide.CATCH_UP_DISTANCE_X` behind them and
+  waits there. See `decide.could_catch_up_partner`,
+  `decide._partner_ahead_of` and `autoplay/CLAUDE.md`'s **Following a
+  partner who is ahead**. `WalkToScreenCenter`
   is the lowest-priority `Walk` of all: it walks toward the visible screen's
   own centre to draw an off-screen enemy into view, human-like, when
   `WalkToNearEnemy`'s off-screen fallback is pinned against the camera's
@@ -1175,6 +1183,8 @@ used to break the tie — for example, picking up a weapon carries a higher
 priority than advancing to the next stage. `WalkToAdvanceStage` itself
 always has the lowest emergency of any verb that still scores, so a
 pickup, a walk-in, or an attack will beat it whenever one is available.
+`CatchUpPartner`, which takes its place beside a partner who is further
+along the stage, ranks at the same tier.
 
 Among enemy targets, a `Boss` outranks an armed ordinary enemy, and an
 armed ordinary enemy (pickup `$08-$0C`, or Jack still juggling his axe)

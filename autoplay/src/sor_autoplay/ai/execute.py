@@ -68,6 +68,7 @@ from .tokens import (
 )
 from .tokens import Context, Dialog, Verb, find, find_all
 from .tokens import (
+    CatchUpPartner,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -94,6 +95,7 @@ from .decide import (
     BREAKABLE_APPROACH_Y,
     breakable_smash_outer_x,
     breakable_strike_inner_x,
+    catch_up_point_x,
     in_smash_range,
 )
 from .reach import (
@@ -2089,6 +2091,72 @@ def state_machine_walk_to_advance_stage(
     _hold_steered(gamepad, _clamp_mask(context, actor.world_x, actor.world_y, held))
 
 
+def state_machine_catch_up_partner(
+    verb: CatchUpPartner, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Walk up to ``CATCH_UP_DISTANCE_X`` behind a partner who is further
+    along the stage, and stand there.
+
+    See ``CatchUpPartner`` and ``decide.could_catch_up_partner`` for why the
+    verb exists and how it is gated. It is ``WalkToAdvanceStage``'s
+    replacement, so it is routed the same way -- a vertical strip
+    (``nav.advance_goal``) that spans the lane band rather than a point on
+    the actor's own lane, so a pit or a crate on that lane cannot make the
+    goal unreachable; solids only, plus the partner's grab zone
+    (``nav.partner_obstacles``) as the one danger; a hop over a pit the walk
+    cannot go round -- with two differences that follow from having a real
+    destination. The strip is fixed to the partner (``decide.catch_up_point_x``,
+    not a lookahead that slides forward with the actor), so it can be
+    *reached*: an empty route with the goal reached is the answer -- stand
+    still, and nothing forces a direction bit back onto the pad the way
+    ``WalkToAdvanceStage``'s ``or mask`` does, since walking on past the
+    partner is exactly what this verb exists not to do. And the strip lies
+    outside the partner's grab zone by construction (``CATCH_UP_DISTANCE_X``
+    is wider than the walking box's reach plus their body), so the plan never
+    has to route round the one danger it takes; ``execute_tick``'s partner
+    pad still refuses any step that would grab them.
+    """
+
+    actor = _find_actor(context, verb.actor_slot)
+    partner = find(context, Partner, slot=verb.target_slot)
+    if actor is None or partner is None:
+        gamepad.release()
+        return
+    follow_x = catch_up_point_x(verb.direction, partner)
+    if actor.is_airborne or actor.action_base in JUMP_CROUCH_ACTIONS:
+        # Finish a hop launched last tick -- do not start walking mid-crouch
+        # or the hold $384E samples is lost (as WalkToAdvanceStage).
+        landing = nav.hop_landing_x(context, actor, verb.direction)
+        _jump_toward(actor, landing if landing is not None else follow_x, gamepad)
+        return
+    goal = nav.advance_goal(context, follow_x)
+    body, origin = nav.actor_footprint(actor)
+    solids = nav.solid_obstacles(context, body=body, origin=origin)
+    path = nav.plan_route(
+        context, actor, goal, solids=solids, dangers=nav.partner_obstacles(context)
+    )
+    sink = _ROUTE_TRACE.get()
+    if sink is not None:
+        sink[actor.slot] = path
+    if not path.reached:
+        # A pit the walk cannot go round lies between the actor and the
+        # partner: hop it when the landing is in kick range, else walk the
+        # best-effort first vector up to its wall and never into it.
+        landing = nav.hop_landing_x(context, actor, verb.direction)
+        if landing is not None:
+            _jump_toward(actor, landing, gamepad)
+            return
+        routed = nav.first_vector_mask(path)
+        _hold_steered(gamepad, _clamp_mask(context, actor.world_x, actor.world_y, routed))
+        return
+    mask = nav.first_vector_mask(path)
+    if not mask and not goal.is_reached(nav.body_rect(actor)):
+        # Boxed in on every side without having arrived: the straight line is
+        # all there is (the same fallback _routed_mask makes).
+        mask = _movement_mask(context, actor.world_x, actor.world_y, follow_x, actor.world_y)
+    _hold_steered(gamepad, _clamp_mask(context, actor.world_x, actor.world_y, mask))
+
+
 def state_machine_walk_to_screen_center(
     verb: WalkToScreenCenter, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -2901,6 +2969,7 @@ _HANDLERS = {
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     HitTable: state_machine_hit_table,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,
+    CatchUpPartner: state_machine_catch_up_partner,
     WalkToScreenCenter: state_machine_walk_to_screen_center,
     Punch: state_machine_melee_strike,
     MeleeWeaponAttack: state_machine_melee_strike,
