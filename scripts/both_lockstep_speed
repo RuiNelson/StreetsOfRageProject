@@ -3,10 +3,16 @@ set -euo pipefail
 
 # AI-driven clock: the host only advances when the AI ticks.
 #
-# Starts the host *without* --turbo and drives autoplay in --lockstep mode:
+# Starts the host with --turbo 10 and drives autoplay in --lockstep mode:
 # tick the pipeline, step exactly 2 game frames as fast as the host runs
 # them, back to the tick. No wall-clock pacing on either side, so the plan's
 # stick lands exactly instead of 0-1 updates late (see autoplay/CLAUDE.md).
+#
+# --turbo only speeds the realtime phases (menus, reach-gameplay, any
+# stretch with the AI off): lockstep stepping never waits on the frame
+# clock to begin with (VDP::advanceRemoteLockstepFrame is purely
+# condition-variable driven), so turbo changes nothing there. Kept at 10,
+# not higher: reach-gameplay is validated at this rate.
 #
 # Own port (6767) so it can run next to both_turbo/go_to_boss (7777).
 #
@@ -33,7 +39,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-"$META_ROOT/scripts/run" --lang en --debugUtils --port "$PORT" --silent &
+"$META_ROOT/scripts/run" --turbo 10 --lang en --debugUtils --port "$PORT" --silent &
 host_pid=$!
 
 # Wait for the host to actually listen rather than sleeping a guessed amount:

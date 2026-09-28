@@ -636,7 +636,14 @@ class ObserverApp:
         self._capture.reset()
         self._gamepad_state.reset()
         try:
-            client.set_lockstep(True, timeout_ms=10_000)
+            # Short timeout on purpose: entry cannot latch while the host CPU
+            # is inside a run-to-completion ROM load (level/decompression --
+            # no interrupt dispatch, so no checkpoint latches until the load
+            # finishes), and a failed attempt freezes the game for the whole
+            # wait. 2 s of freeze with a retry right after beats 10 s; the
+            # loop retries until it lands. Measured: instant entry in settled
+            # gameplay, timeouts only across loads, at any turbo.
+            client.set_lockstep(True, timeout_ms=2_000)
         except Exception as exc:  # noqa: BLE001 - reported, retried next poll
             logger.warning("lockstep engage failed: %s", exc)
             return False
@@ -680,6 +687,13 @@ class ObserverApp:
         poll_s = self.poll_ms / 1000.0
         ram: bytes | None = None
         frame_no = 0
+        # Lockstep cost breakdown (diagnostic only, logged at DEBUG): how
+        # much of each tick the AI pipeline vs. the stepped frames take, so
+        # a slowdown can be told apart between "the plan is heavy" and "the
+        # host is heavy" without guessing.
+        lockstep_tick_ms: list[float] = []
+        lockstep_step_ms: list[float] = []
+        lockstep_logged_at = 0.0
 
         while not self._stop.is_set():
             started = time.monotonic()
@@ -736,6 +750,7 @@ class ObserverApp:
                     ram = None
                     continue
 
+                tick_started = time.monotonic()
                 for player_index in (1, 2):
                     enabled = (
                         self.agent_p1_enabled.is_set()
@@ -749,6 +764,7 @@ class ObserverApp:
                         self._agent_loops[player_index].tick(
                             snapshot, player_index=player_index
                         )
+                tick_ms = (time.monotonic() - tick_started) * 1000.0
                 masks = [
                     self._capture.next_frame_masks()
                     for _ in range(LOCKSTEP_FRAMES_PER_TICK)
@@ -758,6 +774,25 @@ class ObserverApp:
                         player1=player1, player2=player2,
                         held_frames=held, total_frames=total,
                     )
+                step_ms = (time.monotonic() - tick_started) * 1000.0 - tick_ms
+                lockstep_tick_ms.append(tick_ms)
+                lockstep_step_ms.append(step_ms)
+                now = time.monotonic()
+                if now - lockstep_logged_at >= 3.0 and lockstep_tick_ms:
+                    logger.debug(
+                        "lockstep timing: %d ticks, tick min=%.1fms mean=%.1fms "
+                        "max=%.1fms, step min=%.1fms mean=%.1fms max=%.1fms",
+                        len(lockstep_tick_ms),
+                        min(lockstep_tick_ms),
+                        sum(lockstep_tick_ms) / len(lockstep_tick_ms),
+                        max(lockstep_tick_ms),
+                        min(lockstep_step_ms),
+                        sum(lockstep_step_ms) / len(lockstep_step_ms),
+                        max(lockstep_step_ms),
+                    )
+                    lockstep_tick_ms.clear()
+                    lockstep_step_ms.clear()
+                    lockstep_logged_at = now
                 ram = result.work_ram
                 frame_no = result.frame
             except Exception as exc:  # noqa: BLE001 - surface any link failure in HUD

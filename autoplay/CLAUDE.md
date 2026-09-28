@@ -1973,13 +1973,26 @@ instead of wall-clock sleeping -- is now built, as `--lockstep`
 
 While an AI is engaged and the game is playable the host is frozen and each
 tick steps exactly 2 game frames as fast as they run -- no `--poll-ms`
-sleeping, no `--turbo`, so the plan's stick lands exactly instead of 0-1
-updates late (which is what the twins' five `SCENARIOS` exist to absorb).
-With no AI engaged, before the level jump, or on a level mismatch the host
-runs realtime and the loop only observes. Own port (6767), debug sweeps and
-extra args pass through to autoplay. It has zero effect on the
-human-player `--vsync` path since lockstep is a separate protocol call the
-AI alone uses.
+sleeping, so the plan's stick lands exactly instead of 0-1 updates late
+(which is what the twins' five `SCENARIOS` exist to absorb). `--turbo 10`
+in the wrapper speeds only the realtime phases (menus, reach-gameplay, any
+stretch with the AI off): lockstep stepping never waits on the frame clock
+to begin with (`VDP::advanceRemoteLockstepFrame` is purely
+condition-variable driven). With no AI engaged, before the level jump, or
+on a level mismatch the host runs realtime and the loop only observes. Own
+port (6767), debug sweeps and extra args pass through to autoplay. It has
+zero effect on the human-player `--vsync` path since lockstep is a separate
+protocol call the AI alone uses.
+
+Measured on the development machine (Blaze, round 1, log level normal):
+~174 game fps wall-clock (~3x realtime) with the game window visible --
+tick ~0.6 ms (the pipeline is not the bottleneck), step ~14 ms per 2
+frames (host-bound: frame emulation plus an SDL present per frame, which
+stays because watching the game matters). `frames/tick` reads exactly 2 on
+every timing line. Entry cannot latch while the host CPU is inside a
+run-to-completion ROM load (no interrupt dispatch, so no checkpoint), at
+any turbo -- the 2 s engage timeout plus retry rides those windows out;
+entry in settled gameplay is instant (1-7 ms).
 
 ## Diagnostic tools (`tools/`)
 
