@@ -43,6 +43,7 @@ from .tokens import (
     EngageJack,
     EngageSouther,
     EngageMrX,
+    EngageGrunts,
     EngageTwins,
     FlipHold,
     GrabEnemy,
@@ -426,6 +427,11 @@ _EMERGENCY_ENGAGE_TWINS = 62
 # their jabs. A generic punch at one used to take the tick while his lunge
 # came (three of four lunge hits in a scored fight).
 _EMERGENCY_ENGAGE_MR_X = 62
+# The street fight (EngageGrunts): over every generic attack and walk it
+# replaces (they are withdrawn while it is produced anyway), under the
+# imminent end of ProjectileSidestep (45) -- a thrown knife or axe is not in
+# its model -- the boss engages, the hold family and the recoveries.
+_EMERGENCY_ENGAGE_GRUNTS = 40
 # The whole engage against Jack (EngageJack). His body never strikes -- every
 # hit he lands is a type-$28 axe (jack.py) -- so this is an ordinary enemy's
 # approach, not a boss tier: just above a strike on a plain grunt (20), with
@@ -729,6 +735,12 @@ def _emergency_engage_mr_x(verb: EngageMrX, context: Context) -> int:
     if target is None or target.is_defeated or not target.raw:
         return _EMERGENCY_DEFAULT
     return _with_target_class(_EMERGENCY_ENGAGE_MR_X, target)
+
+
+def _emergency_engage_grunts(verb: EngageGrunts, context: Context) -> int:
+    if _find_actor(context, verb.actor_slot) is None:
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_ENGAGE_GRUNTS
 
 
 def _emergency_engage_jack(verb: EngageJack, context: Context) -> int:
@@ -1140,6 +1152,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     EngageAbadede: _emergency_engage_abadede,
     EngageTwins: _emergency_engage_twins,
     EngageMrX: _emergency_engage_mr_x,
+    EngageGrunts: _emergency_engage_grunts,
     EngageJack: _emergency_engage_jack,
     HitAntonioBoomerang: _emergency_hit_antonio_boomerang,
     HitTable: _emergency_hit_table,

@@ -23,6 +23,7 @@ from .tokens import (
     EngageAntonio,
     EngageBongo,
     EngageJack,
+    EngageGrunts,
     EngageSouther,
     FlipHold,
     GrabEnemy,
@@ -79,7 +80,7 @@ from .gamepad import VirtualGamepad
 from . import kinematics
 from . import jump_kick
 from . import abadede as abadede_plan
-from . import garcia as garcia_model, mr_x as mr_x_model, mr_x_plan
+from . import garcia as garcia_model, grunt_plan, mr_x as mr_x_model, mr_x_plan
 from . import antonio as antonio_plan
 from . import bongo as bongo_plan
 from . import jack as jack_plan
@@ -1792,6 +1793,65 @@ def state_machine_engage_mr_x(verb: EngageMrX, context: Context, gamepad: Virtua
     gamepad.hold(mask)
 
 
+_GRUNT_MEMORY: dict[str, grunt_plan.PlanMemory] = {}
+
+
+def engage_grunts_plan(verb: EngageGrunts, context: Context, held: int = 0) -> grunt_plan.GruntPlan | None:
+    """``grunt_plan.plan`` for this verb, from the context's raw slots --
+    shared by the handler and the diagnostics. ``held`` is the mask the pad
+    latches now: it plays the updates before this tick's stick lands."""
+
+    from .decide import grunt_sims  # decide imports this module's neighbours
+
+    actor = _find_actor(context, verb.actor_slot)
+    if actor is None:
+        return None
+    built = grunt_sims(context, actor)
+    if built is None:
+        return None
+    a, sims = built
+    committed = (
+        1 if held & RIGHT_MASK else (-1 if held & LEFT_MASK else 0),
+        1 if held & DOWN_MASK else (-1 if held & UP_MASK else 0),
+    )
+    memory = _GRUNT_MEMORY.setdefault(verb.actor_slot, grunt_plan.PlanMemory())
+    # Armed, B is the weapon's swing (grunt_plan.actor_step models it); bare-
+    # handed, B over an item underfoot is a pickup (abadede_can_punch).
+    can_strike = actor.held_weapon_type in grunt_plan.SWING_WEAPONS or abadede_can_punch(actor, context)
+    return grunt_plan.plan(
+        a, sims, committed=committed, memory=memory, can_punch=can_strike, knives=a.knives or (),
+    )
+
+
+def state_machine_engage_grunts(verb: EngageGrunts, context: Context, gamepad: VirtualGamepad) -> None:
+    """Hold the stick ``grunt_plan.plan`` chose this tick, or throw the punch
+    or the rear attack it timed -- as ``state_machine_engage_mr_x`` does, held
+    directly: the lane step into a Garcia's band with the walking box already
+    on his X is a lane or two wide. The punch is B alone, in the facing the
+    actor already has; the plan turns by walking."""
+
+    plan = engage_grunts_plan(verb, context, getattr(gamepad, "held", 0))
+    if plan is None:
+        gamepad.release()
+        return
+    if plan.chord:
+        _press(gamepad, PUNCH_MASK | JUMP_MASK, frames=REAR_ATTACK_FRAMES)
+        return
+    if plan.punch:
+        _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
+        return
+    mask = 0
+    if plan.dir_x > 0:
+        mask |= RIGHT_MASK
+    elif plan.dir_x < 0:
+        mask |= LEFT_MASK
+    if plan.dir_y > 0:
+        mask |= DOWN_MASK
+    elif plan.dir_y < 0:
+        mask |= UP_MASK
+    gamepad.hold(mask)
+
+
 def engage_jack_plan(verb: EngageJack, context: Context) -> jack_plan.EngagePlan | None:
     """``jack.plan_engage`` for this verb, from the context -- shared by the
     handler and the diagnostics, so both see the one plan."""
@@ -2836,6 +2896,7 @@ _HANDLERS = {
     EngageJack: state_machine_engage_jack,
     EngageTwins: state_machine_engage_twins,
     EngageMrX: state_machine_engage_mr_x,
+    EngageGrunts: state_machine_engage_grunts,
     ReleaseToRegrab: state_machine_release_to_regrab,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     HitTable: state_machine_hit_table,

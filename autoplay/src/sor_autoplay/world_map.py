@@ -1086,8 +1086,11 @@ def _entity_from_object(
     )
 
 
-# Types whose MapEntity carries its raw slot (MapEntity.raw).
-RAW_SLOT_TYPES = frozenset({0x35, 0x36, 0x20, 0x21, 0x22, 0x23})
+# Types whose MapEntity carries its raw slot (MapEntity.raw): Mr. X and his
+# bullets, every street enemy ai/grunt.py plays (Garcia $20-$23, Signal $24,
+# HakuRo $25, Nora $26), and the weapons -- a knife in flight is told from one
+# on the floor by its own +$30 (grunt.is_enemy_knife_in_flight).
+RAW_SLOT_TYPES = frozenset({0x35, 0x36, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x2A, 0x08, 0x09, 0x0A, 0x0B, 0x0C})
 
 
 def _is_hidden(slot: bytes) -> bool:

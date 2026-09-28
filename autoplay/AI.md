@@ -789,6 +789,19 @@ state as a fresh, on-demand check (`reach.actor_is_surrounded`) rather
 than reading a value some earlier stage wrote — see [Judging without a
 cache](#judging-without-a-cache).
 
+The street enemies themselves -- Garcia (`$20`-`$23`), Signal (`$24`),
+HakuRo (`$25`) and Nora (`$26`) -- are no longer fought through these
+reasons at all while one stands near the actor: `EngageGrunts` is produced
+(unarmed, or holding a weapon it swings), `generate_verb_tokens` withdraws
+the generic `Punch`, `MeleeWeaponAttack`, `GrabEnemy`, `RearAttack`,
+`WalkToNearEnemy`, `JumpAttack` and `RetreatFromDanger`, and the tick's stick
+and button are `grunt_plan.plan`'s: a lookahead over every such enemy's own
+state machine (`ai/grunt.py`, checked against lockstep recordings) that sees
+the jab trigger fire the update the actor's body enters its box, and so
+takes the hold from off the enemy's lane band, from his back, or with a punch
+that lands first. The generic verbs remain for everything the models do not
+cover (an enemy further than `grunt_plan.RELEVANT_DX`, Jack, the bosses).
+
 `GrabReason` is an `Enum`, not a discriminator field on a token: it is the
 return type of a pure function now, and `grab_reasons` returns every
 reason that applies to a pair at once (a whip enemy in front *and* a body

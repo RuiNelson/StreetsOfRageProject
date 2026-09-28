@@ -75,6 +75,7 @@ classDiagram
     Walk <|-- EngageBongo
     Walk <|-- EngageAbadede
     Walk <|-- EngageJack
+    Walk <|-- EngageGrunts
     Walk <|-- EngageTwins
     Walk <|-- EngageMrX
 
