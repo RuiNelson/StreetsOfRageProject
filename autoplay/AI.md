@@ -304,6 +304,20 @@ earlier plan (`autoplay/CLAUDE.md`, "Souther: the ROM model and the plan"):
   primary 1, which the walk-in re-takes in 4-7 frames — measured in lockstep
   with up to 3 frames of injected input latency and no damage.
 
+Round 6 sends two of him, and `ai/souther_pair.py` adds what one Souther never
+needed: a replay of his state 1 (`souther_pair.update` -- the commit gate, and
+the standoff that rushes a target facing away from him and backs off from one
+facing him), asked one question: *can the free one commit on the actor before
+it is out of this hold?* The hold roots the actor and faces it at the body in
+its hands, and `$179F8` never counts a holder unavailable, so the free one
+claws it. `EngageSouther` goes to one of them (`pick_target`: the one just let
+go, else the nearest grabbable), the hold loop throws the body in hand when
+the free one would arrive before a knee and a throw fit (`hold_step`), and the
+engage steps out of the free one's live claw by lane (`plan_engage`). A boss
+at health 0 is dead (`Boss.is_defeated`; every boss's lethal test is `<= 0`)
+-- round 6's corpse was the engage's target for ~1.7 s. See
+`autoplay/CLAUDE.md`, "Round 6: the Souther pair".
+
 `reach.souther_would_punish_jump(actor, context)` is the one predicate
 keyed on the actor alone rather than on an actor/target pair, and the
 reason is the ROM's own: `$162A4 (souther_flag_target_jump_attack)` watches

@@ -76,8 +76,14 @@ LATER_BOSS_TYPES = frozenset({0x55, 0x56, 0x57, 0x58})
 # Mr. X ($35): $13F9A takes him to $E, his death, at 0 or below.
 ZERO_IS_LETHAL = LATER_BOSS_TYPES | {0x30, 0x35}
 # Bosses that come as a pair of one type: the fight is over when every one
-# seen is dead (round 5's twins).
+# seen is dead. Round 5's twins always; Souther only in round 6, where two
+# `$55` records follow Bongo (round 2's and round 8's come alone).
 PAIR_TYPES = frozenset({0x58})
+PAIR_FIGHTS = frozenset({(6, 0x55)})
+
+
+def is_pair_fight(level: int, type_id: int) -> bool:
+    return type_id in PAIR_TYPES or (level, type_id) in PAIR_FIGHTS
 # The rear attack's actions ($322A): bare and armed, and Adam's crouch that
 # starts his hop.
 CHORD_ACTIONS = frozenset({0x20, 0x22, 0x4A, 0x4C})
@@ -101,16 +107,29 @@ def compress(names: list[str | None]) -> list[str]:
     return [f"{label} x{count}" for label, count in runs]
 
 
-def find_boss(snapshot, type_id: int) -> MapEntity | None:
+def find_boss(
+    snapshot, type_id: int, *, pair: bool = False, near: MapEntity | None = None
+) -> MapEntity | None:
+    """The boss to score against. In a pair: the live one nearest ``near``
+    (the actor), so a hit's dx/dy is measured to the body that could land it."""
+
     if not snapshot.world_map:
         return None
-    for entity in snapshot.world_map.entities:
-        if entity.type_id == type_id and entity.kind == "boss":
-            # A pair (Onihime and Yasha, $58): the one still standing.
-            if type_id in PAIR_TYPES and boss_is_dead(entity):
-                continue
-            return entity
-    return None
+    found = [
+        entity
+        for entity in snapshot.world_map.entities
+        if entity.type_id == type_id and entity.kind == "boss"
+        # A pair (the twins, round 6's Southers): the ones still standing.
+        and not (pair and boss_is_dead(entity))
+    ]
+    if not found:
+        return None
+    if pair and near is not None:
+        return min(
+            found,
+            key=lambda e: abs(e.world_x - near.world_x) + abs(e.world_y - near.world_y),
+        )
+    return found[0]
 
 
 def find_bosses(snapshot, type_id: int) -> list[MapEntity]:
@@ -241,6 +260,7 @@ def main() -> int:
     args = ap.parse_args()
     poll_s = args.poll_ms / 1000.0
     level_index = args.level - 1
+    pair = is_pair_fight(args.level, args.boss_type)
 
     with MegaDriveClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
@@ -333,12 +353,12 @@ def main() -> int:
                     and args.idle_seconds > 0
                     and playable
                     and snap.level_index == level_index
-                    and find_boss(snap, args.boss_type) is not None
+                    and find_boss(snap, args.boss_type, pair=pair) is not None
                 ):
                     if idle_until is None:
                         idle_until = started + args.idle_seconds
                         print(f"boss up: hands off for {args.idle_seconds:.1f} s", flush=True)
-                    up = find_boss(snap, args.boss_type)
+                    up = find_boss(snap, args.boss_type, pair=pair)
                     # ...and past it, until he is out of a charge: handed the
                     # pad with a flame already on it, no plan has a move left
                     # (measured: a 32-point hit 0.04 s after one such handover).
@@ -386,7 +406,7 @@ def main() -> int:
                     (e for e in entities if e.kind == "player" and e.slot == "P1"),
                     None,
                 )
-                boss = find_boss(snap, args.boss_type)
+                boss = find_boss(snap, args.boss_type, pair=pair, near=p1_entity)
 
                 if boss is not None and not boss_seen:
                     boss_seen = True
@@ -395,6 +415,16 @@ def main() -> int:
                     last_lives = p1.lives
                     boss_hp_start = boss.health
                     print(f"boss up: hp={start_hp} lives={start_lives}", flush=True)
+                    if pair:
+                        # The floor the pair is fought on: walls by the round's
+                        # own table (hazards.find_collision_barriers), near it.
+                        cam = snap.world_map.camera_x if snap.world_map else 0
+                        walls = [
+                            [w.world_x, w.lane_y, w.width, w.height]
+                            for w in snap.floor_barriers
+                            if w.world_x + w.width >= cam - 64 and w.world_x <= cam + 384
+                        ]
+                        print(f"arena walls (cam {cam}): {walls}", flush=True)
 
                 if not boss_seen:
                     if args.boss_type == 0x35 and scenario.mr_x_reached:
@@ -482,6 +512,24 @@ def main() -> int:
                             "dx": dx,
                             "dy": dy,
                             "in_pocket": (dx is not None and abs(dx) < POCKET_DX),
+                            "p1_action": p1_entity.action_state if p1_entity else None,
+                            # A pair: where the *other* live one stood (dx, dy,
+                            # primary, tactical), which is the body a hit taken
+                            # mid-hold on the first one can only have come from.
+                            "others": [
+                                [
+                                    other.world_x - p1_entity.world_x,
+                                    other.world_y - p1_entity.world_y,
+                                    other.action_state,
+                                    getattr(other, "tactical", None),
+                                ]
+                                for other in find_bosses(snap, args.boss_type)
+                                if pair
+                                and p1_entity is not None
+                                and boss is not None
+                                and other.slot != boss.slot
+                                and not boss_is_dead(other)
+                            ],
                             "verb": verb_name,
                             "recent_verbs": compress(list(recent_verbs)),
                             "before_first_hold": first_hold_t is None,
@@ -531,6 +579,15 @@ def main() -> int:
                             "p1_y": p1_entity.world_y if p1_entity else None,
                             "boss_x": boss.world_x if boss else None,
                             "boss_y": boss.world_y if boss else None,
+                            "bosses": (
+                                [
+                                    [b.slot, b.world_x, b.world_y, b.action_state,
+                                     getattr(b, "tactical", None), b.health]
+                                    for b in find_bosses(snap, args.boss_type)
+                                ]
+                                if pair
+                                else None
+                            ),
                             # The nearest ordinary enemy alive -- round 4's
                             # grunt, which the street keeps sending.
                             "grunt": next(
@@ -547,7 +604,11 @@ def main() -> int:
                                 ),
                                 None,
                             ),
-                            **(raw_bytes(snap) if args.boss_type == 0x35 else {}),
+                            # A pair's raw slots too, and the game frame they
+                            # were read on: what souther_pair's replay of the
+                            # free Souther is checked against, update by update.
+                            **(raw_bytes(snap) if args.boss_type == 0x35 or pair else {}),
+                            **({"frame": client.get_game_uptime_frames()} if pair else {}),
                         }
                     )
                     + "\n"
@@ -565,7 +626,7 @@ def main() -> int:
                         if before is not None and each.health < before and chord_starts:
                             chord_starts[-1] = True
                         boss_hp_seen[each.slot] = each.health
-                if args.boss_type in PAIR_TYPES:
+                if pair:
                     for twin in find_bosses(snap, args.boss_type):
                         pair_seen.setdefault(twin.slot, twin.health or 0)
                         if boss_is_dead(twin):

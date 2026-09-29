@@ -312,6 +312,26 @@ class Boss(Enemy, ABC):
     flags_37: int = 0
     flags_6d: int = 0
 
+    @property
+    def is_defeated(self) -> bool:
+        """Dead at **zero** health too, unlike an ordinary enemy.
+
+        Every boss's lethal test is ``<= 0``: the ``$55``-``$58`` family's
+        ``$17C36 (boss_apply_pending_damage)`` subtracts and branches ``bgt``
+        to the living path, Abadede's damage paths (``$15632``, ``$15094``,
+        ``$14A56``) do the same, and Mr. X's ``$13F9A`` takes him to his
+        death at 0 or less. A knee from 2 health leaves exactly 0 more often
+        than not, and the body then lies in its slot for ~1.7 s (the lethal
+        gate ``$05``, then the death), health 0 the whole time. Read as alive,
+        round 6's dead Souther stayed ``EngageSouther``'s target -- the
+        stable tie-break picks the lower slot -- and the actor stood against
+        the corpse while the live one walked up and clawed it (20 points,
+        measured). ``decide.live_twins`` and ``decide.live_mr_x`` already
+        applied this for their bosses by hand.
+        """
+
+        return self.health is not None and (self.health == 0 or self.health >= 0x8000)
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Abadede(Boss):

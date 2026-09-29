@@ -31,7 +31,9 @@ him, or 38px below), walk into him from the grab's lane -- contact is the
 hold, and `$AAA0` tests the grab before his claw -- then two knees, a release
 by holding back, and straight back into him. Armed or not; the police special
 and life-gaining items are never used while he lives (user). See **Souther:
-the ROM model and the plan**).
+the ROM model and the plan**). Round 6 sends two of him: `ai/souther_pair.py`
+replays the free one's state 1 and throws the body in hand when he would
+claw the rooted holder first (**Round 6: the Souther pair**).
 
 **Never hurt the partner** (user, playing P1 with the AI on P2: "The AI
 grabbed me and supplexed me, it shouldn't, because it should never hurt it's
@@ -616,7 +618,8 @@ animations give 16 and 20 (`reach.WALK_BOX_REACH_X`, decoded for **Never
 hurt the partner** above). `souther.WALK_BOX_REACH_X` still carries Blaze's
 19 alone, with the narrower 14 for the other two, because adopting the wider
 figures widens their walk-in and no fight has measured that yet. Not
-measured yet: that, the round-6 Souther pair, and two players.
+measured yet: that, and two players. The round-6 pair has its own section,
+**Round 6: the Souther pair**, below.
 
 **What the earlier attempts taught**, kept because each one was paid for in
 runs:
@@ -653,6 +656,108 @@ runs:
   apanhar dano" -- are what the plan above does in the form the ROM allows:
   the hold is the plan, the approach is direct, and the only evasion is
   staying out of the claw's own box.
+
+**Round 6: the Souther pair** (user, in Portuguese: "A IA tem problemas em
+enfrentar dois Souther ao mesmo tempo (por exemplo, boss nível 6)"). Round 6
+sends two `$55` records after Bongo; in a 1P game both target P1. The plan
+above never looked at the second one, and scored with `tools/boss_fight.py
+--level 6 --boss-type 0x55 --no-food` (Blaze, police off, a fresh host per
+fight) it took **7.6 hits and two lives a fight, and lost the whole game in
+three fights of nine**. `ai/souther_pair.py` is the pair's part; round 2 and
+round 8 (one Souther) do not reach it.
+
+What the ROM and the traces say:
+
+- **A holding actor is a target.** `$179F8 (later_boss_target_unavailable)`
+  rules a player out only on `+$59` bit 1, `+$4B` bit 1 (the post-knockdown
+  grace, `$4F62`) or an action in `$5A`-`$5F`; the holds (`$60`-`$6F`) are
+  none of them. The hold roots the actor, so the free Souther walks up and
+  claws a body that cannot move -- most of the baseline's hits.
+- **Which way the actor faces decides what he does** (`$15F98`, replayed in
+  `souther_pair.update`): a target facing *away* from him is **rushed** at 4 px
+  an update (4.5 for pair role 2) while `$179AC` settles him 18-21 lanes above
+  it, inside his below-side gate (`$1C`) -- that ends in a claw; a target
+  facing him gets the **band-restore** -- 1 px an update away inside `$78`
+  (`$88` role 2), the lane *mirroring* the target's own `+$20`, 1 px up while
+  it walks level, and half a pixel down for role 2 (`addi.w #$8000` on the
+  fraction, no carry) -- and claws only from inside his gate. Every `$78`
+  updates of `+$7B` with the target's lane at `$10` or more he makes an
+  **attack run** (tactical 1: 4 px an update at it with the same lane homing,
+  until its lane is under `$14`). A hold faces the actor at the body in its
+  hands, so a second Souther behind it rushes.
+- **A dead Souther lay in the target set.** The kill is usually a knee from 2
+  health, leaving exactly 0, which `$17C36` treats as lethal (`bgt` to the
+  living path); the body then sat ~1.7 s in the lethal gate `$05` at health 0.
+  `Enemy.is_defeated` counted 0 as alive (right for ordinary enemies, whose
+  checks are signed), both Southers tied in the ranking, and the stable
+  tie-break took the lower slot -- the corpse. The actor stood against it while
+  the live one clawed it (20 points, measured). `Boss.is_defeated` now reads 0
+  as dead for every boss: the `$55`-`$58` family, Abadede and Mr. X all test
+  `<= 0` (`decide.live_twins`/`live_mr_x` already applied it by hand).
+
+The plan (`souther_pair.pick_target`, `souther_pair.hold_step`,
+`souther_pair.plan_engage`):
+
+1. **One engage for the pair**, on the Souther the actor can walk into this
+   instant (after a release, the one it just let go, 32 px in front on its
+   lane -- so the loop stays on one body), else one that can be grabbed at all
+   over one knocked down, else the nearest. Left to the ranking the two tied
+   and the stable tie-break walked the actor past one to reach the other.
+2. **The hold loop asks the other one first.** Before each knee (or the
+   release after two), the free Souther is replayed update by update
+   (`souther_pair.update`: the commit gate, the standoff, the rush, the attack
+   run, the off-screen dash) against the actor rooted where it stands, facing
+   the body in its hands. If he commits inside a knee plus a throw (plus two
+   updates of slack, `hold_safe_updates`), the actor **throws** the body in
+   hand (B+back, 41-46 frames; he lands 100-165 px off, knocked down) -- the
+   one way out of a hold that fits: a release lands the body 32 px in front
+   inside its own gate, which commits at once unless walked straight back
+   into. A knee that kills is never traded for the throw.
+3. **Out of the other one's live claw** by lane, X held: when his claw is
+   swinging and the actor stands in its reach, the engage aims at the nearer
+   lane out of his band instead of his partner's corridor.
+
+Scored, Blaze, `--no-food`, police off, two hosts at a time (120 fps each):
+
+| | fights | hits a fight, mean (median) | lives lost | whole game lost | fight length, median |
+| --- | --- | --- | --- | --- | --- |
+| before | 9 | 7.6 (8) | 18 | 3 | -- |
+| **the plan above** | 12 | **1.75 (0)** | **5** | **0** | 7.6 s |
+| + a lookahead over both for the whole approach | 6 | 2.0 (1.5) | 3 | 0 | -- |
+| + a safety filter on the approach's stick | 6 | 3.2 (3.5) | 6 | 0 | -- |
+
+Both rejected variants replayed both Southers (`souther_pair.update`) over
+every stick. The **lookahead** (`antonio.plan_engage`'s shape: 17 sticks x 14
+updates x both update orders, a grab scored only if the other one could not
+reach the rooted actor for a knee and a throw) fled an attack run it could not
+out-walk -- 3.25 px an update against his 4.5, its back to him -- and turned
+into his gate. The **filter** (the measured single plan's stick, swapped for
+the nearest one nobody commits on within 8 updates) delayed the first hold
+from 0.95 s to 2.4 s, and the exposure cost more than the swaps saved: in this
+fight, the hold taken early is the protection. Neither is kept.
+
+What is left (the plan's 21 hits over 12 fights, each traced to the commit
+that landed it): 12 from a Souther the actor *faces*, through his gate, as the
+engage converges on the other from 20-28 lanes below them -- the opening (the
+pair arrives stacked at the top of the street, lanes 0-10) and the re-approach
+after a knockdown; 5 rushes from behind, 2 of them into a hold; 2 attack runs;
+2 off-screen dashes. Of the throws, 4 in 11 were followed by a hit, all in one
+fight: a Souther already rushing when the throw ends. The round-6 arena has no
+walls (`boss_fight.py` prints them when the pair is up), so lanes `$02`-`$0D`
+above the AI's own `_lane_bounds` are open, and a target under lane `$10` is
+never given an attack run -- untried.
+
+The replay is checked against the fights themselves:
+`tools/souther_pair_check.py` rebuilds every Souther in primary 1 from
+`boss_fight.py`'s raw rows (logged for the pair with the game frame), runs one
+update and compares primary, tactical, `+$1C` and `+$20` with the next row
+one update later. Over 26 fights: ~90% of standoff updates, ~92% of attack
+run updates and 99.6% of dash updates exact; the misses are the actor turning
+or stopping between two polls, and a body walked back into (`$17B52`'s contact
+test runs before the gate, so it is re-held instead of committing). The claw's
+reach per frame, read off the same raw rows (`+$0A` against the latched
+`+$02`): `$6D` 0..48 px on frames 0-3, 8-12 and 17-18, `$6F` 46..86 on 4-7,
+`$71` 40..80 on 13-16.
 
 **Bongo: the ROM model and the plan** (user: "Neste momento a IA lida muito mal
 com o inimigo Bongo, o boss do stage 4 ... Deves primeiro pensar bem para chegar
@@ -2297,7 +2402,7 @@ do not commit `.jsonl` runs.
 
 | Tool | Role |
 | --- | --- |
-| `boss_fight.py` | **Scores** one boss fight: plays the level for real, then reports killed/died, damage taken, fight length and the verb histogram. `--level`/`--boss-type` select the fight (`--level 1 --boss-type 0x56` is Antonio, `--level 2 --boss-type 0x55` Souther, the default; `--level 3 --boss-type 0x30` Abadede, `--level 4 --boss-type 0x57` Bongo, `--level 5 --boss-type 0x58` the twins -- a pair: killed when every twin seen is dead, and the summary counts the rear attacks, `chords`, and those no boss lost health to, `chord_whiffs`). `--idle-seconds N` keeps the pad released -- no tick, nothing scored -- for N s after the boss appears, and past that until a Bongo is out of his charge (handed the pad with a flame already on the actor, no plan has a move left) or an Abadede out of his run's set-up and run: a start other than the entrance. Each row also carries the nearest ordinary enemy (`grunt`: type, x, lane, state), which is how round 4's grunt was caught punching over a held Bongo. `--level 8 --boss-type 0x35` is Mr. X: the walk runs `--kill-until-mr-x`, and every row -- the office's waves before him too, as `pre` rows -- carries the raw slots of the player, him, his bullets and every Garcia (`tools/mr_x_sim.py --replay`). Boss death is the raw signed health word only (zero counts for the later bosses `$55`-`$58`, whose `$17C36` lethal test is `<= 0`, and for Abadede, whose own damage paths branch the same way) -- both `phases.boss_phase`'s `DEATH` decode and `MapEntity.is_defeated` false-positive on the transient `$164FC` lethality test, twice confirmed live |
+| `boss_fight.py` | **Scores** one boss fight: plays the level for real, then reports killed/died, damage taken, fight length and the verb histogram. `--level`/`--boss-type` select the fight (`--level 1 --boss-type 0x56` is Antonio, `--level 2 --boss-type 0x55` Souther, the default; `--level 3 --boss-type 0x30` Abadede, `--level 4 --boss-type 0x57` Bongo, `--level 5 --boss-type 0x58` the twins -- a pair: killed when every twin seen is dead, and the summary counts the rear attacks, `chords`, and those no boss lost health to, `chord_whiffs`; `--level 6 --boss-type 0x55` round 6's Souther pair, scored the same way, a hit's `dx`/`dy` taken to the nearest live one and its partner's position and state in `others`, and every row carrying both Southers (`bosses`), the raw slots of the player and every object with one (`tools/souther_pair_check.py`) and the game frame they were read on; the arena's walls are printed when the pair is up). `--idle-seconds N` keeps the pad released -- no tick, nothing scored -- for N s after the boss appears, and past that until a Bongo is out of his charge (handed the pad with a flame already on the actor, no plan has a move left) or an Abadede out of his run's set-up and run: a start other than the entrance. Each row also carries the nearest ordinary enemy (`grunt`: type, x, lane, state), which is how round 4's grunt was caught punching over a held Bongo. `--level 8 --boss-type 0x35` is Mr. X: the walk runs `--kill-until-mr-x`, and every row -- the office's waves before him too, as `pre` rows -- carries the raw slots of the player, him, his bullets and every Garcia (`tools/mr_x_sim.py --replay`). Boss death is the raw signed health word only (zero counts for the later bosses `$55`-`$58`, whose `$17C36` lethal test is `<= 0`, and for Abadede, whose own damage paths branch the same way) -- both `phases.boss_phase`'s `DEATH` decode and `MapEntity.is_defeated` false-positive on the transient `$164FC` lethality test, twice confirmed live |
 | `jack_fight.py` | **Scores** the Jacks of one round (`--level`, 2 by default): jumps to it, keeps every other ordinary family swept (`DebugScenario(only_enemy="jack")`), food and police off, and plays it through with the real pipeline until a boss appears, the level changes or the game is over. Every tick with a Jack or an axe on screen logs both objects' bytes (state, flags, position and fine height, velocities, `+$54` offset, owner, approach point, timers); a hit is attributed through the player's `+$7E` to the axe that landed it -- read from the previous tick when the axe has already removed itself -- with its state and its owner's. The summary gives hits by source and by Jack state, each Jack's life span and personality, and the verb mix while a Jack lived. A loss with no attacker within 15 s of a time-over (`$FFFA49`) is filed as `round_clock`, with the tick before it (`clock_before`, `p1_before`): the time-over writes 55 to the clock on the frame it takes the life, and a respawn moves the player to `cam_x` |
 | `grunt_fight.py` | **Scores** a round against the street enemies (`--family garcia|signal|hakuro|nora|jack`, or `all` for the mixed waves; `--level`, 1 by default): jumps to it, keeps every other ordinary family swept unless `all` (`DebugScenario(only_enemy=...)`), food (unless `--food`) and police off, and plays it with the real pipeline until the round's boss appears (or on through it with `--through-bosses`), the level changes or the game is over. Every tick logs the player's raw slot, every modelled enemy's and every weapon's bytes, the verb, its target and the pending list, and the tick's own cost (`tick_ms`; `--profile-ms N` prints the profile of every tick slower than N ms). A hit is attributed through the player's `+$7E`, named by family and state (`garcia_s0a`, `garcia_s0c_knife`); a loss with no attacker near a time-over is `round_clock`, as in `jack_fight.py`. The summary gives hits by source and verb, each enemy's life span and states, and the verb mix |
 | `grunt_lab.py` | **Records, and checks the models against,** the street enemies in lockstep (`--family`, `--level`): the real pipeline walks to the family's waves, then one of three actors plays a frame at a time -- `engage` (the real pipeline), `wander` (a seeded walk that never attacks) or `stand` -- for `--frames` a wave over `--waves` waves, every frame's row carrying the input, the camera and the raw bytes of the player and every enemy. `--check FILE` replays a recording through `grunt.check_recording`, update by update, and reports every field and contact outcome that differs |
@@ -2314,6 +2419,7 @@ do not commit `.jsonl` runs.
 | `hold_timing_diag.py` | **Measures** how long each hold move commits the actor for, in 60 Hz frames: the AI plays until it holds a body, then the host enters **lockstep** and the move is issued on frame 0 with the player's `+$30` sampled every frame until it settles. One fresh hold per session -- a throw and a suplex both end the hold, and re-entering lockstep on one that is already ending measures the ending. Feeds `kinematics.HOLD_*_FRAMES`; a lockstep step is one game frame regardless of `--turbo` |
 | `hold_threat_diag.py` | **Checks** the other half live: plays an ordinary level with the waves left **alive** (no sweep, deliberately) and logs every tick the actor is holding a body -- action base, the winning verb, live enemy count, and `reach.frames_until_any_melee_lands` with the held body excluded. Summarises the decision ticks only ($60/$66; the animation locks in between ignore fresh edges, so counting them would dilute the question), and reports `knees_while_threatened`, which must be 0 |
 | `souther_diag.py` | The round-2 equivalent: `dx`/`dy`, `souther.plan_engage`'s mode, `souther.can_commit_on`, the holder's knee chain and release countdown, and whether he is untouchable, per tick. Stops on the boss's own death (raw signed health, like `boss_fight.py`) or a level reset after the boss was seen, with a `--fight-seconds` backstop -- do not run it, or any tool that drives a live host, without a real stop condition. |
+| `souther_pair_check.py` | **Checks** `souther_pair.update`, the replay of Souther's state 1 the pair plan asks about the free one, against `boss_fight.py --level 6` recordings: every Souther in primary 1 rebuilt from a row's raw slot, one update run against P1 (taken from that row and from the next, since a poll can land on either side of the player's update), and primary, tactical, `+$1C` and `+$20` compared with the row one object update (two frames) later -- see **Round 6: the Souther pair** |
 | `souther_hold_lab.py` | **Lockstep lab** for the Souther hold loop: the AI plays to its first hold, then the host steps one frame at a time through scripted experiments (`--experiments`, comma-separated, one fresh hold each: `release_regrab`, `release_loop`, `second_crossover`, `throw`, `suplex`), logging both bodies' bytes every frame; `--regrab-delay` injects input latency into the walk back in. Sweeps the street families itself every 30 frames, since lockstep stops the ordinary sweep. It measured the release countdown, the one-crossover rule and the re-grab timing `souther.py` is built on |
 | `round2_death_diag.py` | **Traces** a whole round-2 run tick by tick (`--trace`) and stops the moment the game leaves the level for the title, which is what four lost measurement runs actually were: not the AI dying but the **console resetting**, caused by the debug sweep writing a death into an object slot that was still spawning (fixed host-side -- see `StreetsOfRageRecompilation/CLAUDE.md`). Records every `Pit` with `reach.pit_endangers` per tick, which is how the pit theory was ruled out: round 2 has none |
 | `breakable_diag.py` | Breakable stalls, per tick while a `Breakable` is in context. Round 1 by default, with **real** enemies (the sweep did not reproduce that stall); `--level N` jumps to a round first, `--sweep` keeps the ordinary families swept (the walk `scripts/go_to_boss` and the boss harnesses make -- how the round-4 stall was reproduced), `--heartbeat-s` logs a position row that often with no breakable around (so a stall anywhere shows), `--until-boss` stops at the boss |
@@ -2525,6 +2631,14 @@ and the measurements are in **Souther: the ROM model and the plan** above).
 - `HealthPickup`/`LifePickup` are refused while he lives, the police is the
   panic button only (as everywhere; tests run with `--no-police`), and the
   weapon detour stays refused (`_a_weapon_would_disarm_the_plan`).
+- **Two of him** (round 6, `ai/souther_pair.py`; **Round 6: the Souther
+  pair** above): `could_engage_souther` offers one `EngageSouther`, on
+  `souther_pair.pick_target`'s choice; `could_hold_actions` asks
+  `souther_pair.hold_step`, which is `souther.hold_step` until the free one
+  would commit before a knee and a throw fit, and then `ThrowHeldEnemy`;
+  `state_machine_engage_souther` takes `souther_pair.plan_engage` (his plan,
+  out of the free one's live claw first). With only one live Souther -- round
+  2, round 8, or the pair's survivor -- none of it runs.
 - **He counters jump attacks.** `$162A4 (souther_flag_target_jump_attack)`
   arms `+$79` from the *player's* own action state — `$16`/`$17`/`$42`/`$43`,
   the unarmed and armed jump attacks — and `$16234

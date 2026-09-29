@@ -271,6 +271,9 @@ Score/tune commands and the ROM model + plan for each boss are documented in
   and the plan**.
 - Jack (`$27`, never in round 1; appears rounds 2, 4, 5, 6, 8) — **Jack: the
   ROM model and the plan**.
+- Round 6's Souther pair (two `$55`, via `go_to_boss_6` or `boss_fight.py
+  --level 6 --boss-type 0x55`) — **Round 6: the Souther pair**; the replay
+  of the free one is checked with `autoplay/tools/souther_pair_check.py`.
 
 ### Testing against the street enemies
 

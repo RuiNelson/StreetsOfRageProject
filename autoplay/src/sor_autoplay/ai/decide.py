@@ -32,6 +32,7 @@ from . import (
     navigation as nav,
     reach,
     souther as souther_plan,
+    souther_pair,
 )
 from .tokens import (
     CounterGrab,
@@ -640,6 +641,14 @@ def could_hold_actions(context: Context) -> Context:
             # update his hold reads the holder's +$7D (abadede.hold_step).
             if isinstance(held, Abadede):
                 step = abadede_plan.hold_step(actor, held)
+            elif isinstance(held, Souther) and (
+                others := [
+                    e for e in souther_pair.live_southers(find_all(context, Souther)) if e.slot != held.slot
+                ]
+            ):
+                # Round 6: the other one is free while this one is in hand, and
+                # the hold roots the actor (souther_pair.hold_step).
+                step = souther_pair.hold_step(actor, held, others)
             else:
                 step = souther_plan.hold_step(actor, held)
             if step is souther_plan.HoldStep.CROSS and crossover_lands_under_a_press(held):
@@ -657,6 +666,8 @@ def could_hold_actions(context: Context) -> Context:
                 verbs.add(FlipHold(actor_slot=actor.slot, target_slot=held.slot))
             elif step is souther_plan.HoldStep.SUPLEX:
                 verbs.add(Supplex(actor_slot=actor.slot, target_slot=held.slot))
+            elif step is souther_plan.HoldStep.THROW:
+                verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
             continue
 
         if base == 0x60 and is_office_helper(context, held) and live_mr_x(context):
@@ -1574,9 +1585,14 @@ def could_engage_souther(context: Context) -> Context:
             continue
         if actor.is_airborne:
             continue
-        for enemy in reach.on_screen_enemies(context):
-            if isinstance(enemy, Souther):
-                verbs.add(EngageSouther(actor_slot=actor.slot, target_slot=enemy.slot))
+        southers = [e for e in reach.on_screen_enemies(context) if isinstance(e, Souther)]
+        if len(southers) > 1:
+            # Round 6's pair: one engage, on the one souther_pair picks -- the
+            # one just let go, else the nearest. Left to the ranking, the two
+            # tied and the stable tie-break took the lower slot every time.
+            southers = [souther_pair.pick_target(actor, southers)]
+        for enemy in southers:
+            verbs.add(EngageSouther(actor_slot=actor.slot, target_slot=enemy.slot))
     return verbs
 
 

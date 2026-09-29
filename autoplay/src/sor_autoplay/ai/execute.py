@@ -87,6 +87,7 @@ from . import jack as jack_plan
 from . import twins as twins_model
 from . import twins_plan
 from . import souther as souther_plan
+from . import souther_pair
 from . import navigation as nav
 from . import press as press_model
 from .decide import (
@@ -1449,7 +1450,16 @@ def state_machine_engage_souther(
         gamepad.release()
         return
     lo, hi = _lane_bounds(context)
-    plan = souther_plan.plan_engage(actor, target, lane_lo=lo, lane_hi=hi)
+    others = [
+        other
+        for other in souther_pair.live_southers(find_all(context, Souther))
+        if other.slot != target.slot
+    ]
+    if others:
+        # Round 6's pair: his plan, out of the other one's claw first.
+        plan = souther_pair.plan_engage(actor, target, others, lane_lo=lo, lane_hi=hi)
+    else:
+        plan = souther_plan.plan_engage(actor, target, lane_lo=lo, lane_hi=hi)
     mask = _movement_mask(context, actor.world_x, actor.world_y, plan.target_x, plan.target_y)
     toward_mask = RIGHT_MASK if plan.toward > 0 else LEFT_MASK
     away_mask = LEFT_MASK if plan.toward > 0 else RIGHT_MASK

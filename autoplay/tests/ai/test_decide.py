@@ -3038,6 +3038,21 @@ class CouldEngageSoutherTests(unittest.TestCase):
     def test_not_for_a_dead_souther(self) -> None:
         self.assertEqual(could_engage_souther({make_myself(), _souther(health=0xFFFF)}), set())
 
+    def test_zero_health_is_dead_and_the_pair_moves_on(self) -> None:
+        # Round 6: a knee from 2 leaves the first Souther at exactly 0, which
+        # $17C36's `bgt` makes lethal, and the body lies there ~1.7 s in the
+        # lethal gate ($05). Read as alive it was still engaged -- the stable
+        # tie-break picks the lower slot -- and the actor stood on the corpse
+        # while the live one clawed it (20 points, measured).
+        myself = make_myself(world_x=5091, world_y=14)
+        corpse = _souther(slot="obj00", world_x=5076, world_y=27, health=0, primary_state=5)
+        live = _souther(slot="obj01", world_x=5173, world_y=96)
+        self.assertTrue(corpse.is_defeated)
+        self.assertEqual(
+            could_engage_souther({myself, corpse, live}),
+            {EngageSouther(actor_slot="P1", target_slot="obj01")},
+        )
+
     def test_the_generic_verbs_stand_down_for_him(self) -> None:
         # On his lane, inside punch and grab range: a punch would turn the
         # grab contact into a hit, and GrabEnemy/WalkToNearEnemy/RearAttack
