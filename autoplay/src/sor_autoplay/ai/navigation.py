@@ -100,8 +100,12 @@ from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
 NAV_STEP = 4
 
 # A bound on how much lattice one tick may explore. The playable band is
-# about 320x112 px, so at NAV_STEP that is under 600 positions: with this
-# bound at 10 nearly every search stops as best-effort after 10 expansions.
+# about 320x112 px, so at NAV_STEP that is under 600 positions. At 10, a
+# route that arrives does so through the search's Y-then-X finish, tried
+# from every expanded node against every free arrival: an open approach or a
+# walk round a pit arrives from the first node, and only what no finish from
+# those 10 nodes can see comes back as best effort (see autoplay/CLAUDE.md,
+# "What 10 nodes needed").
 NAV_MAX_NODES = 10
 
 # The danger-aware pass's bound, the same 10 as the solids pass (user: for
@@ -903,6 +907,14 @@ def jump_landing_is_safe(
       landing origin is not itself in a pit, i.e. this is a jump *over* to
       solid ground, not a jump *into* the hole.
 
+    "Gets there" is asked as :func:`advance_goal`'s strip at ``target_x``
+    -- that far along, on any lane -- not as the landing point itself. The
+    landing's own lane is the one the pit blocks, so a walk to the point is
+    three legs (off the lane, past the hole, back on), which the path
+    finder's Y-then-X finish cannot express and ``NAV_MAX_NODES`` of A* never
+    reached: the jump was allowed through a pit with room round it. Past the
+    hole on another lane is the same answer, found from the first node.
+
     Never onto a live press's drop zone (``press.lands_in_reach``): the
     landing sets it off and the recovery holds the actor under it.
     """
@@ -917,7 +929,7 @@ def jump_landing_is_safe(
     walk = plan_route(
         context,
         actor,
-        PointGoal(Point(float(target_x), origin[1]), tolerance=NAV_STEP),
+        advance_goal(context, float(target_x)),
         solids=solid_obstacles(context, body=body, origin=origin),
         dangers=(),
     )
