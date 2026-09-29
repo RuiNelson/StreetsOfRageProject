@@ -18,6 +18,15 @@ once a node can see the goal that way. ``maximize_contact`` is stricter:
 the two legs have to line up flush, otherwise a corner clip would hide the
 around-the-crate walk the rest of A* is there to find.
 
+The finish aims at **every** free arrival, not only at the goal window's
+nearest cell and its middle. Those two are often exactly the cells that are
+out: a strip across the lane band whose cells on the actor's own lane sit in
+a pit, a strike band whose lane margin only rows further up satisfy, the gap
+between an annulus's two bands. Aiming at them alone left the finish silent
+for such goals, and a node budget small enough for a tick (the AI's is 10)
+then never arrived at all -- a 170 px approach in open space took 219
+expansions, a strip with room above the pit ~100.
+
 Two other things are worth knowing about the result.
 
 **The vectors are merged, not one per cell.** A route of nine cells to the
@@ -62,6 +71,7 @@ from __future__ import annotations
 
 import heapq
 import math
+from bisect import bisect_left
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -96,10 +106,14 @@ DEFAULT_ALIGNMENT_WEIGHT = 2.0
 # Every goal is reached only by a body touching its bounding box, so the
 # arrivals all sit in the touch window. Up to this many cells the window is
 # enumerated once per search: the free arrivals are what the Y-then-X finish
-# may aim at, and none at all means the goal cannot be reached from anywhere
-# -- a search that knows that stops at ``UNREACHABLE_MAX_NODES`` rather than
-# exploring the whole lattice for its best effort (the enemy's punch band
-# inside another's reach was a whole lattice twice, up to a second a tick).
+# aims at (all of them, `_best_yx_by_rows`), and none at all means the goal
+# cannot be reached from anywhere -- a search that knows that stops at
+# ``UNREACHABLE_MAX_NODES`` rather than exploring the whole lattice for its
+# best effort (the enemy's punch band inside another's reach was a whole
+# lattice twice, up to a second a tick). A window larger than this -- a
+# full-height segment at a 1px step -- is never enumerated, and its finish
+# aims only at the cheapest cell and the aligned one (`_yx_aims`): trying
+# every cell of it from every expanded node is what froze the viewer.
 MAX_ARRIVAL_WINDOW = 4096
 UNREACHABLE_MAX_NODES = 600
 
@@ -113,11 +127,6 @@ UNREACHABLE_MAX_NODES = 600
 # smaller than this is as cheap as the check, and callers that small rely on
 # their best-effort answer as it is.
 SEALED_MAX_NODES = 100
-
-# A crate-sized goal window is a handful of lattice cells and is cheap to
-# try in full. A full-height segment at a 1px step is thousands, and trying
-# every one from every expanded node is what froze the viewer.
-MAX_YX_WINDOW = 64
 
 
 def _move_table(
@@ -339,6 +348,9 @@ def find_path(
     yx_from: tuple[int, int] | None = None
     goal_window = _touch_window(lattice, target_box)
     arrivals = _free_arrivals(lattice, goal_window, arrival_at)
+    arrival_rows = (
+        None if arrivals is None else _arrival_rows(arrivals, require_flush=weight > 0)
+    )
     if arrivals is not None and not arrivals:
         max_nodes = min(max_nodes, UNREACHABLE_MAX_NODES)
     elif max_nodes > SEALED_MAX_NODES and _route_is_sealed(
@@ -384,6 +396,7 @@ def find_path(
             goal_window,
             require_flush=weight > 0,
             arrivals=arrivals,
+            arrival_rows=arrival_rows,
         )
         if finish is not None:
             arrival, arrival_mis = finish
@@ -457,22 +470,26 @@ def _best_yx_from(
     *,
     require_flush: bool,
     arrivals: dict[tuple[int, int], float] | None = None,
+    arrival_rows: dict[int, list[int]] | None = None,
 ) -> tuple[tuple[int, int], float] | None:
     """Y-then-X arrival from ``origin`` onto the goal window, or ``None``.
 
-    Small windows (a crate, a point at a coarse step) are tried in full.
-    Large ones (a full-height segment at 1px) only aim at the cheapest
-    cell and the aligned one -- walking every row from every expanded
-    node is what froze the viewer. ``arrivals``, when the search could
-    enumerate them, are the only cells worth a sweep, each already mapped
-    to its misalignment.
+    When the search could enumerate the free arrivals (``arrivals``, each
+    mapped to its misalignment, and ``arrival_rows``, the ones a finish may
+    aim at by row), the answer is the exact cheapest one
+    (:func:`_best_yx_by_rows`). A window too large to enumerate (a
+    full-height segment at 1px) only aims at the cheapest cell and the
+    aligned one -- trying every cell from every expanded node is what froze
+    the viewer.
 
-    Arrival and misalignment come back together from plain coordinates, so
-    trying a cell costs arithmetic rather than rectangle allocations.
+    Every finish is ranked by the same key: cost, then misalignment, then
+    less Y, less X, and the upper, left cell.
     """
 
     if window is None or arrivals is not None and not arrivals:
         return None
+    if arrival_rows is not None:
+        return _best_yx_by_rows(lattice, origin, window, arrivals, arrival_rows)
 
     best_key: tuple[int, float, int, int, int, int] | None = None
     best_node: tuple[int, int] | None = None
@@ -485,17 +502,15 @@ def _best_yx_from(
             # The aims come nearest first: nothing further on is cheaper.
             if abs(node[0] - origin[0]) + abs(node[1] - origin[1]) > best_key[0]:
                 break
-        if arrivals is not None:
-            misalignment = arrivals.get(node)
-            if misalignment is None:
-                continue
         if not _yx_clear(lattice, origin, node):
             continue
-        if arrivals is None:
-            ax, ay = lattice.coords_at(node)
-            arrived, misalignment = arrival_at(ax, ay)
-            if not arrived:
-                continue
+        # Arrival and misalignment come back together from plain
+        # coordinates, so trying a cell costs arithmetic rather than
+        # rectangle allocations.
+        ax, ay = lattice.coords_at(node)
+        arrived, misalignment = arrival_at(ax, ay)
+        if not arrived:
+            continue
         if require_flush and misalignment > 0:
             continue
         di = abs(node[0] - origin[0])
@@ -509,6 +524,101 @@ def _best_yx_from(
     if best_node is None:
         return None
     return best_node, best_misalignment
+
+
+def _best_yx_by_rows(
+    lattice: Lattice,
+    origin: tuple[int, int],
+    window: tuple[int, int, int, int],
+    arrivals: dict[tuple[int, int], float],
+    rows: dict[int, list[int]],
+) -> tuple[tuple[int, int], float] | None:
+    """The cheapest clear Y-then-X finish onto any enumerated arrival.
+
+    Exactly what trying every arrival would answer, for a few sweeps a row.
+    A Y-then-X route to ``(i, j)`` is the column run from ``origin`` to row
+    ``j``, then that row's run to ``i``, and blocking is monotonic along
+    either run: the sweep to a cell further out contains the sweep to a
+    nearer one, and so does the body standing there. So in each row only
+    the nearest arrival on each side of the origin's column can win -- one
+    further out on the same side costs more, and is blocked whenever the
+    nearer one is -- and a column run blocked at some row is blocked at
+    every row past it. Rows are taken outward from the origin's, until even
+    the window's nearest column could no longer beat the best found.
+    """
+
+    i0, j0 = origin
+    i_lo, i_hi, j_lo, j_hi = window
+    # Every arrival lies inside the window, so no finish walks less X than
+    # the gap from the origin's column to the window's.
+    x_floor = max(0, i_lo - i0, i0 - i_hi)
+    best_key: tuple[int, float, int, int, int, int] | None = None
+    best_node: tuple[int, int] | None = None
+    best_misalignment = 0.0
+    open_up = open_down = True
+
+    for dj in range(max(0, j_lo - j0, j0 - j_hi), max(j_hi - j0, j0 - j_lo) + 1):
+        if best_key is not None and dj + x_floor > best_key[0]:
+            break
+        if dj and not (open_up or open_down):
+            break
+        for j in (j0,) if dj == 0 else (j0 - dj, j0 + dj):
+            up = j < j0
+            if dj and not (open_up if up else open_down):
+                continue
+            cols = rows.get(j)
+            if not cols:
+                continue
+            corner = (i0, j)
+            if dj and not _axis_clear(lattice, origin, corner):
+                if up:
+                    open_up = False
+                else:
+                    open_down = False
+                continue
+            at = bisect_left(cols, i0)
+            aims = []
+            if at > 0:
+                aims.append(cols[at - 1])
+            if at < len(cols) and cols[at] == i0 and dj == 0:
+                # The origin itself: A* has already asked it.
+                at += 1
+            if at < len(cols):
+                aims.append(cols[at])
+            for i in aims:
+                node = (i, j)
+                if not _axis_clear(lattice, corner, node):
+                    continue
+                misalignment = arrivals[node]
+                di = abs(i - i0)
+                key = (di + dj, misalignment, dj, di, j, i)
+                if best_key is None or key < best_key:
+                    best_key = key
+                    best_node = node
+                    best_misalignment = misalignment
+
+    if best_node is None:
+        return None
+    return best_node, best_misalignment
+
+
+def _arrival_rows(
+    arrivals: dict[tuple[int, int], float], *, require_flush: bool
+) -> dict[int, list[int]]:
+    """The arrivals a finish may aim at, as sorted columns per row.
+
+    Built once per search. Under ``maximize_contact`` only a flush arrival
+    may end a finish (see the module docstring).
+    """
+
+    rows: dict[int, list[int]] = {}
+    for (i, j), misalignment in arrivals.items():
+        if require_flush and misalignment > 0:
+            continue
+        rows.setdefault(j, []).append(i)
+    for cols in rows.values():
+        cols.sort()
+    return rows
 
 
 def _free_arrivals(
@@ -580,37 +690,13 @@ def _yx_aims(
     window: tuple[int, int, int, int],
     require_flush: bool,
 ) -> list[tuple[int, int]]:
-    """Window cells worth finishing toward from ``origin``."""
+    """Window cells worth finishing toward from ``origin`` when the window is
+    too large to enumerate: the cheapest one first, then the aligned one."""
 
     i_lo, i_hi, j_lo, j_hi = window
     i0, j0 = origin
     cheap = (_clamp(i0, i_lo, i_hi), _clamp(j0, j_lo, j_hi))
     aligned = (_align_index(i_lo, i_hi), _align_index(j_lo, j_hi))
-    size = (i_hi - i_lo + 1) * (j_hi - j_lo + 1)
-    if size <= MAX_YX_WINDOW:
-        cells = [
-            (i, j) for j in range(j_lo, j_hi + 1) for i in range(i_lo, i_hi + 1)
-        ]
-        # Nearest-to-the-aim first: the caller stops early once nothing left
-        # in the list could beat its best key, which only holds if cells
-        # arrive in non-decreasing distance from what they are sorted on.
-        if require_flush:
-            cells.sort(
-                key=lambda node: (
-                    abs(node[0] - aligned[0]) + abs(node[1] - aligned[1]),
-                    abs(node[1] - aligned[1]),
-                    abs(node[0] - aligned[0]),
-                )
-            )
-        else:
-            cells.sort(
-                key=lambda node: (
-                    abs(node[0] - i0) + abs(node[1] - j0),
-                    abs(node[1] - j0),
-                    abs(node[0] - i0),
-                )
-            )
-        return cells
     if require_flush:
         return [aligned]
     if aligned == cheap:

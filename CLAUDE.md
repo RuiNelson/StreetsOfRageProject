@@ -192,6 +192,10 @@ exact file. Use this map together with `ai-analysis/*.md` manuscripts and
 
 ## Testing the symbolic AI live
 
+No AI behaviour change ships unmeasured (user's no-regression rule): measure
+it live before it goes to `main`. A change that could only be validated
+offline (unit tests, offline sims) goes to a branch and says so.
+
 Live sessions (not unit tests) must run the host in turbo with a matching
 autoplay poll cadence. Use the wrapper:
 

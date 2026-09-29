@@ -147,6 +147,103 @@ class StepShapeTests(unittest.TestCase):
         self.assertTrue(PointGoal(Point(64, 64)).is_reached(path.final))
 
 
+class FinishAimTests(unittest.TestCase):
+    """The Y-then-X finish aims at every free arrival.
+
+    It used to aim at two cells of a goal window too big to try in full (over
+    64 cells): the one nearest the node and the middle. Both are often
+    exactly the cells that are out, and with a node budget as small as the
+    AI's (10) the search then never arrived at all. Each scene below has a
+    window over 64 cells where both of those cells are out, and is reached
+    from the first node.
+    """
+
+    def test_a_strip_whose_nearest_rows_sit_in_a_hole_goes_round_it(self) -> None:
+        # WalkToAdvanceStage's goal: a strip across the band, here inside the
+        # hole's X. The start's own rows and the middle ones are in the hole.
+        hole = Rect(80, 32, 64, 48)
+        path = plan(
+            start=Rect(40, 48, 16, 16),
+            goal=RegionGoal.of(Rect(100, 0, 1, 112), axis="x"),
+            obstacles=[hole],
+            step=4,
+            max_nodes=1,
+        )
+
+        self.assertTrue(path.reached)
+        self.assertEqual(path.nodes_expanded, 1)
+        self.assertEqual(
+            [step.direction for step in path.steps], [Direction.UP, Direction.RIGHT]
+        )
+        for rect in path.positions():
+            self.assertFalse(rect.overlaps(hole))
+
+    def test_a_band_only_further_rows_cover_is_closed_lane_first(self) -> None:
+        # A strike goal: two bands with a gap between them, and a lane margin
+        # (enough_contact) only a body covering the whole band meets. Open
+        # space, yet the nearest window cell is short of the band and the
+        # middle one sits in the gap.
+        path = plan(
+            start=Rect(0, 60, 16, 16),
+            goal=RegionGoal(
+                (Rect(200, 20, 20, 8), Rect(256, 20, 20, 8)), axis="y"
+            ),
+            enough_contact=8,
+            step=4,
+            max_nodes=1,
+        )
+
+        self.assertTrue(path.reached)
+        self.assertEqual(path.nodes_expanded, 1)
+        self.assertEqual(
+            [step.direction for step in path.steps], [Direction.UP, Direction.RIGHT]
+        )
+
+    def test_the_finish_is_the_cheapest_over_every_free_arrival(self) -> None:
+        # Checked against the brute force it replaces: every free arrival
+        # tried from the node, ranked by the finish's own key.
+        real = search_module._best_yx_from
+        checked = 0
+
+        def compare(lattice, origin, arrival_at, window, **kwargs):
+            nonlocal checked
+            got = real(lattice, origin, arrival_at, window, **kwargs)
+            arrivals = kwargs.get("arrivals")
+            if window is None or not arrivals:
+                return got
+            flush = kwargs["require_flush"]
+            best = None
+            for node, misalignment in arrivals.items():
+                if node == origin or (flush and misalignment > 0):
+                    continue
+                if not search_module._yx_clear(lattice, origin, node):
+                    continue
+                di, dj = abs(node[0] - origin[0]), abs(node[1] - origin[1])
+                key = (di + dj, misalignment, dj, di, node[1], node[0])
+                if best is None or key < best[0]:
+                    best = (key, node, misalignment)
+            self.assertEqual(got, None if best is None else best[1:], (origin, window))
+            checked += 1
+            return got
+
+        rng = random.Random(0xF1415)
+        with mock.patch.object(search_module, "_best_yx_from", compare):
+            for _ in range(300):
+                start, goal, obstacles, world, step = _random_scene(rng)
+                for options in ({}, {"enough_contact": 4}, {"maximize_contact": True}):
+                    find_path(
+                        start=start,
+                        goal=goal,
+                        world=world,
+                        obstacles=obstacles,
+                        step=step,
+                        max_nodes=100,
+                        **options,
+                    )
+
+        self.assertGreater(checked, 1000)
+
+
 class ObstacleTests(unittest.TestCase):
     def test_the_body_walks_around_an_obstacle_instead_of_through_it(self) -> None:
         wall = Rect(48, 0, 16, 64)

@@ -552,9 +552,15 @@ class DeadZoneApproachTests(unittest.TestCase):
 class ExecuteWalkToNearEnemyTests(unittest.TestCase):
     def test_walks_toward_enemy_to_the_right_and_below(self) -> None:
         # Enemy far enough right that the stopping point (its x minus Axel's
-        # stop_dx of 46) is still well outside MOVE_DEADBAND_X -- otherwise
-        # the actor has effectively arrived on X and only the lane component
-        # should be held.
+        # stop_dx of 46) is still well outside MOVE_DEADBAND_X, so the walk
+        # has not arrived on X and aims at the approach's own offset lane,
+        # WALK_TO_ENEMY_LANE_SAFETY_Y above the enemy's. The route reaches
+        # that lane first and only then turns along X (find_path's Y-then-X
+        # finish), so the first vector is DOWN -- the mirror of the
+        # left-and-above case below. It read RIGHT|DOWN while the finish
+        # only aimed at the goal window's nearest cell and its middle, both
+        # off the rows the strike's lane margin allows: no finish, the node
+        # budget ran out, and a best-effort diagonal came back.
         actor = _myself(world_x=0, world_y=0)
         target = _enemy(world_x=100, world_y=50)
         context = {actor, target}
@@ -563,7 +569,7 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
 
         _settle(verb, context, gamepad)
 
-        client.hold_buttons.assert_called_with(player1=RIGHT | DOWN, player2=0)
+        client.hold_buttons.assert_called_with(player1=DOWN, player2=0)
 
     def test_walks_toward_enemy_to_the_left_and_above(self) -> None:
         # dx=44 is inside Axel's stop_dx (46), so the walk has arrived on X
@@ -1694,10 +1700,15 @@ class VirtualAxisSmoothingTests(unittest.TestCase):
         # enemy -- the kind of single-tick flip that used to flip the D-pad
         # immediately. The axis should still be short of any edge, so no
         # LEFT should ever have been commanded.
+        #
+        # On a lane inside the band: at y=0, under LANE_Y_MIN, the body
+        # starts outside the planner's world and the route's first vector is
+        # the DOWN step back into it -- no side is requested at all, and the
+        # test would pass without testing anything.
         gamepad, client = _gamepad()
-        right_enemy = _enemy(world_x=200, world_y=0)
-        left_enemy = _enemy(world_x=-200, world_y=0)
-        actor = _myself(world_x=0, world_y=0)
+        right_enemy = _enemy(world_x=200, world_y=50)
+        left_enemy = _enemy(world_x=-200, world_y=50)
+        actor = _myself(world_x=0, world_y=50)
         verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
 
         execute_verb(verb, {actor, right_enemy}, gamepad)
@@ -1713,10 +1724,11 @@ class VirtualAxisSmoothingTests(unittest.TestCase):
 
     def test_a_sustained_direction_does_eventually_press(self) -> None:
         # Confirms the smoothing only delays, rather than swallowing, a
-        # direction that is actually requested every tick.
+        # direction that is actually requested every tick. On a lane inside
+        # the band, as above: from y=0 the request is DOWN, not RIGHT.
         gamepad, client = _gamepad()
-        actor = _myself(world_x=0, world_y=0)
-        target = _enemy(world_x=200, world_y=0)
+        actor = _myself(world_x=0, world_y=50)
+        target = _enemy(world_x=200, world_y=50)
         verb = WalkToNearEnemy(actor_slot="P1", target_slot="obj01")
 
         _settle(verb, {actor, target}, gamepad)
