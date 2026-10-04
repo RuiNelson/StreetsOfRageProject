@@ -1270,7 +1270,11 @@ with P2 on the right, so the equal-X tie-break and a crossing are pinned by
 the unit tests only (`PartnerWallTests`, `TwoPlayerTests`). **Not run against
 a human partner.** The host crashed (`reportUnhandledDispatch`, an indirect
 target the recompilation does not cover) before the fight in 3 of the
-14 two-player sessions, in both arms -- not the AI.
+14 two-player sessions, in both arms -- not the AI. It was round 5's clock
+running out with both players in: the time-over penalty jumps through a
+`player_mode` table at `$109D4`, and the two-player entry `$109DC` (and the
+P2-only `$109EA`) were missing from `code-analysis/aux_addresses.txt`. Fixed
+there; a two-player time-over now takes a life from each player.
 
 **First-level breakables (user):** Round-1 phone booths (`$11`) and the
 type-`$19` family share the shallowest ROM solid (14px on lane vs a 16px
