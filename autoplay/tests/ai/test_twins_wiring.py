@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import MagicMock
 
 from sor_autoplay.ai import twins as model
+from sor_autoplay.ai import twins_plan
 from sor_autoplay.ai.decide import (
     could_call_police,
     could_engage_twins,
@@ -31,6 +32,7 @@ from sor_autoplay.ai.tokens import (
     HealthPickup,
     Myself,
     Onihime,
+    Partner,
     Verb,
     find_all,
 )
@@ -58,6 +60,18 @@ def _myself(world_x: int = EDGE, world_y: int = 60, **overrides) -> Myself:
     return Myself(**fields)
 
 
+def _partner(world_x: int, world_y: int = 60, **overrides) -> Partner:
+    fields = dict(
+        slot="P2", player_index=2, character_id=0, character_name="Axel",
+        world_x=world_x, world_y=world_y, world_z=160, ground_z=160, health=80,
+        health_percent=100.0, lives=3, specials=1, held_weapon_type=0, facing_left=True,
+        combat_phase=CombatPhase.NORMAL, action_state=0x02, is_airborne=False,
+        fine_x=float(world_x), fine_y=float(world_y),
+    )
+    fields.update(overrides)
+    return Partner(**fields)
+
+
 def _twin(world_x: int, world_y: int = 60, *, slot: str = "obj01", grab: bool = True, **overrides) -> Onihime:
     fields = dict(
         slot=slot, type_id=0x58, world_x=world_x, world_y=world_y, health=32,
@@ -72,9 +86,9 @@ def _twin(world_x: int, world_y: int = 60, *, slot: str = "obj01", grab: bool = 
     return Onihime(**fields)
 
 
-def _gamepad() -> tuple[VirtualGamepad, MagicMock]:
+def _gamepad(player_index: int = 1) -> tuple[VirtualGamepad, MagicMock]:
     client = MagicMock()
-    return VirtualGamepad(SharedGamepadState(client), player_index=1), client
+    return VirtualGamepad(SharedGamepadState(client), player_index=player_index), client
 
 
 class OwnershipTests(unittest.TestCase):
@@ -146,6 +160,77 @@ class ExecuteTests(unittest.TestCase):
         self.assertFalse(client.press_buttons.called)
         held = client.hold_buttons.call_args.kwargs["player1"]
         self.assertEqual(held & RIGHT, RIGHT)  # to the right edge, back to the twin
+
+
+LO = CAM_X + 0x20  # the left edge
+
+
+class TwoPlayerTests(unittest.TestCase):
+    """With a partner (user): the one nearer the right edge takes it, the
+    other the left; on the same X, P1 left and P2 right. The twins whose
+    target is the partner are theirs."""
+
+    def _held(self, me, others, player_index: int = 1) -> int:
+        verb = EngageTwins(actor_slot=me.slot, target_slot=others[-1].slot)
+        gamepad, client = _gamepad(player_index)
+        execute_verb(verb, {me, *others, CAMERA}, gamepad)
+        self.assertFalse(client.press_buttons.called)
+        return client.hold_buttons.call_args.kwargs[f"player{player_index}"]
+
+    def test_the_left_player_goes_left(self) -> None:
+        # Alone, the edge would be the one away from this twin: the right.
+        me = _myself(LO + 200)
+        twin = _twin(LO + 60, grab=False, targets_player=1)
+        self.assertEqual(twins_plan.choose_wall(_sim(me), [_sim_twin(twin)]), 1)
+        held = self._held(me, [_partner(LO + 250), twin])
+        self.assertEqual(held & (LEFT | RIGHT), LEFT)
+
+    def test_the_right_player_goes_right(self) -> None:
+        me = _myself(LO + 100, facing_left=True)
+        twin = _twin(LO + 240, grab=False, targets_player=1)
+        self.assertEqual(twins_plan.choose_wall(_sim(me), [_sim_twin(twin)]), -1)
+        held = self._held(me, [_partner(LO + 20), twin])
+        self.assertEqual(held & (LEFT | RIGHT), RIGHT)
+
+    def test_on_the_same_x_p1_goes_left_and_p2_right(self) -> None:
+        twin = _twin(LO + 20, targets_player=1)
+        held = self._held(_myself(LO + 150), [_partner(LO + 150), twin])
+        self.assertEqual(held & (LEFT | RIGHT), LEFT)
+        # The AI on P2, the other player on P1.
+        me = Myself(**{**vars_of(_partner(LO + 150)), "facing_left": False})
+        other = Partner(**{**vars_of(_myself(LO + 150)), "facing_left": False})
+        twin = _twin(LO + 280, targets_player=2)
+        held = self._held(me, [other, twin], player_index=2)
+        self.assertEqual(held & (LEFT | RIGHT), RIGHT)
+
+    def test_the_partners_twin_is_left_to_them(self) -> None:
+        # The grab twin walking into the actor's box from behind: the chord,
+        # unless its target is the partner.
+        me = _myself()
+        mine = _twin(EDGE - 58, targets_player=1)
+        verb = EngageTwins(actor_slot="P1", target_slot=mine.slot)
+        gamepad, client = _gamepad()
+        execute_verb(verb, {me, _partner(LO), mine, CAMERA}, gamepad)
+        pressed = [c.kwargs.get("player1") for c in client.press_buttons.call_args_list]
+        self.assertIn(B | C, pressed)
+        theirs = _twin(EDGE - 58, targets_player=2)
+        gamepad, client = _gamepad()
+        execute_verb(verb, {me, _partner(LO), theirs, CAMERA}, gamepad)
+        self.assertFalse(client.press_buttons.called)
+
+
+def _sim(actor):
+    return model.actor_from_token(actor, cam_x=CAM_X)
+
+
+def _sim_twin(twin):
+    return model.twin_from_token(twin, cam_x=CAM_X)
+
+
+def vars_of(token) -> dict:
+    from dataclasses import fields
+
+    return {f.name: getattr(token, f.name) for f in fields(token)}
 
 
 if __name__ == "__main__":

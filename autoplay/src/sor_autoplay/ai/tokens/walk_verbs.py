@@ -330,7 +330,9 @@ class EngageTwins(Walk):
     are ``twins_plan.plan``'s -- a lookahead over both twins' own AI
     (``twins.py``) that keeps the actor at the edge with its back to them,
     holds or leaves the approach twin's lane, steps off its flying kick, and
-    throws the rear attack on the update that lands it.
+    throws the rear attack on the update that lands it. With a partner on
+    screen each player takes one edge (``twins_plan.partner_wall``) and the
+    twins that target the partner are left to them.
 
     Raises emergency: a live twin×62, plus the boss raise (14) -- 76, the tier
     of the other boss engages; below CounterGrab/TechRecover and the dialogs;

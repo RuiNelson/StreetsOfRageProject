@@ -260,5 +260,31 @@ class PlanTests(unittest.TestCase):
             self.assertNotIn(Outcome.HIT, outcomes)
 
 
+class PartnerWallTests(unittest.TestCase):
+    """Two players (user): one per edge, the twins between the two backs."""
+
+    def test_the_one_nearer_the_right_edge_takes_it(self) -> None:
+        self.assertEqual(twins_plan.partner_wall(5200, 5100, 1), 1)
+        self.assertEqual(twins_plan.partner_wall(5100, 5200, 1), -1)
+        self.assertEqual(twins_plan.partner_wall(5200, 5100, 2), 1)
+        self.assertEqual(twins_plan.partner_wall(5100, 5200, 2), -1)
+
+    def test_on_the_same_x_p1_goes_left_and_p2_right(self) -> None:
+        self.assertEqual(twins_plan.partner_wall(5150, 5150, 1), -1)
+        self.assertEqual(twins_plan.partner_wall(5150, 5150, 2), 1)
+
+    def test_two_players_never_pick_the_same_edge(self) -> None:
+        for x, other in ((5150, 5150), (5150, 5151), (5300, 5100)):
+            self.assertEqual(
+                twins_plan.partner_wall(x, other, 1), -twins_plan.partner_wall(other, x, 2)
+            )
+
+    def test_with_no_twin_of_its_own_the_actor_walks_to_its_edge(self) -> None:
+        lo = CAM + model.PLAYER_X_MIN_OFFSET
+        a = _actor(lo + 120.0, 60.0, facing_left=False)
+        p = twins_plan.plan(a, [], wall=-1)
+        self.assertEqual((p.dir_x, p.chord), (-1, False))
+
+
 if __name__ == "__main__":
     unittest.main()

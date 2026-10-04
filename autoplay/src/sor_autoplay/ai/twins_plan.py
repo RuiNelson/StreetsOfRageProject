@@ -36,6 +36,13 @@ No chord that can miss (user: "não quero que dê ataques em falso"): a
 program whose first update presses B+C is admissible only if that press
 strikes a twin under every timing; otherwise it is dropped, whatever it
 scores.
+
+Two players (user: "um jogador deve ficar de um lado do ecrã e o outro do
+outro lado"): the edge is no longer ``choose_wall``'s but the one
+``partner_wall`` gives each player -- the one nearer the right edge takes the
+right, the other the left, P1 left and P2 right on the same X -- so the twins
+stay between the two backs. The caller hands it as ``wall``. Without a
+partner nothing here changes.
 """
 
 from __future__ import annotations
@@ -52,7 +59,7 @@ from .twins import (
     object_pass,
 )
 
-__all__ = ["TwinsPlan", "plan", "choose_wall", "tail_action"]
+__all__ = ["TwinsPlan", "plan", "choose_wall", "partner_wall", "tail_action"]
 
 HORIZON = 30
 HORIZON_MAX = 40
@@ -131,6 +138,28 @@ def choose_wall(a: ActorSim, twins: Sequence[TwinSim]) -> int:
     if abs(dx) < 2:
         return -1 if a.facing_left else 1
     return -1 if dx > 0 else 1
+
+
+def partner_wall(x: int, partner_x: int, player_index: int) -> int:
+    """Which edge is home with a partner on screen (user): -1 left, +1 right.
+
+    Both players share the camera, so the one with the larger X is the one
+    nearer the right edge and takes it; the other takes the left. On the same
+    X, P1 goes left and P2 right. Both sides read the same two positions, so
+    two AIs never pick the same edge, and neither ever walks toward the
+    other (``_partner_safe_gamepad`` would strip the step that grabs them).
+
+    A grab twin can then stand between the actor and its edge, which
+    ``choose_wall`` never allows; the lookahead gets past it as it is. Turning
+    the back to it until it crossed over was tried on the model (12 starts
+    each, the grab twin on the edge's side): no hit either way, but with both
+    twins at the actor, 4 starts of 12 had not killed them in 1,500 updates
+    (none with the plain wall), so it was not kept.
+    """
+
+    if x == partner_x:
+        return -1 if player_index == 1 else 1
+    return 1 if x > partner_x else -1
 
 
 def _home_x(a: ActorSim, wall: int) -> float:
@@ -600,7 +629,11 @@ def plan(
 ) -> TwinsPlan:
     """The stick and buttons for this tick: every program played out under
     every timing scenario, scored by the worst. A program whose running worst
-    already falls below the best found is dropped without the rest."""
+    already falls below the best found is dropped without the rest.
+
+    ``wall``: the edge, ``choose_wall``'s when not given (with a partner on
+    screen the caller passes ``partner_wall``'s, and only the twins that may
+    come at this actor)."""
 
     wall = choose_wall(a, twins) if wall is None else wall
     free = a.chord is None and not a.unavailable

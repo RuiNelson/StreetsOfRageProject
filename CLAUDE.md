@@ -270,7 +270,9 @@ food**.
 Score/tune commands and the ROM model + plan for each boss are documented in
 `autoplay/CLAUDE.md`, not duplicated here:
 
-- Twins (round 5, `$58`) — **Onihime and Yasha: the ROM model and the plan**.
+- Twins (round 5, `$58`) — **Onihime and Yasha: the ROM model and the plan**;
+  with two players (one per edge, P2 joining with Start) scored by
+  `autoplay/tools/twins_2p_fight.py` — **Two players against the twins**.
 - Mr. X (round 8, `$35`, via `--kill-until-mr-x`) — **Mr. X: the ROM model
   and the plan**.
 - Jack (`$27`, never in round 1; appears rounds 2, 4, 5, 6, 8) — **Jack: the

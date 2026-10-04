@@ -1659,7 +1659,14 @@ def engage_twins_plan(
     """``twins_plan.plan`` for this verb, from the context -- shared by the
     handler and the diagnostics, so both see the one plan. ``held`` is the
     mask the pad latches now: it plays the updates before this tick's stick
-    lands (``twins_plan.SCENARIOS``)."""
+    lands (``twins_plan.SCENARIOS``).
+
+    With a partner on screen (a human or another AI; user: "um jogador deve
+    ficar de um lado do ecrã e o outro do outro lado") the edge is
+    ``twins_plan.partner_wall``'s, and a twin whose target (``+$72``) is the
+    partner is theirs: the model plays every twin at this actor, and one
+    walking to the far edge would be read as coming here. With none, the
+    plan is the one-player plan, unchanged."""
 
     actor = _find_actor(context, verb.actor_slot)
     camera = find(context, CameraRange)
@@ -1667,10 +1674,17 @@ def engage_twins_plan(
         return None
     from .decide import live_twins  # decide imports this module's neighbours
 
+    partner = find(context, Partner) if isinstance(actor, Myself) else find(context, Myself)
+    tokens = find_all(context, Onihime)
+    wall = None
+    if partner is not None:
+        wall = twins_plan.partner_wall(actor.world_x, partner.world_x, actor.player_index)
+        tokens = [twin for twin in tokens if twin.targets_player != partner.player_index]
     cam_x = int(camera.left) - twins_model.PLAYER_X_MIN_OFFSET
-    twins = [twins_model.twin_from_token(twin, cam_x=cam_x) for twin in find_all(context, Onihime)]
+    twins = [twins_model.twin_from_token(twin, cam_x=cam_x) for twin in tokens]
     twins = [t for t in twins if not t.gone]
-    if not live_twins(context) or not twins:
+    # Both twins on the partner is still a plan: the walk to this actor's edge.
+    if not live_twins(context) or (not twins and partner is None):
         return None
     twins.sort(key=lambda t: t.slot)
     sim = twins_model.actor_from_token(actor, cam_x=cam_x)
@@ -1679,7 +1693,7 @@ def engage_twins_plan(
         1 if held & DOWN_MASK else (-1 if held & UP_MASK else 0),
     )
     memory = _TWINS_MEMORY.setdefault(verb.actor_slot, twins_plan.PlanMemory())
-    return twins_plan.plan(sim, twins, committed=committed, memory=memory)
+    return twins_plan.plan(sim, twins, wall=wall, committed=committed, memory=memory)
 
 
 def state_machine_engage_twins(verb: EngageTwins, context: Context, gamepad: VirtualGamepad) -> None:
