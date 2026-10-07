@@ -32,7 +32,7 @@ study.
 | [`StreetsOfRageRecompilation/`](StreetsOfRageRecompilation/) | Generated and hand-written C++, analysis data, build scripts, and the `sor` executable |
 | [`RageDecompiler/`](RageDecompiler/) | Python tools for disassembly, recompilation, label generation, and runtime discovery |
 | [`MegaDriveEnvironmentSampleGame/`](MegaDriveEnvironmentSampleGame/) | A small game targeting both the PC runtime and real Mega Drive hardware |
-| [`autoplay/`](autoplay/) | Python remote observer for a running `sor` host |
+| [`autoplay/`](autoplay/) | Python remote observer and symbolic AI player for a running `sor` host |
 
 The playable host expects `MegaDriveEnvironment`, `RageDecompiler`, and
 `StreetsOfRageRecompilation` to remain sibling directories. This is the layout
@@ -158,18 +158,64 @@ recompiler-generated code. These parts include routines such as the
 compressor/decompressor and substitutes for the "wait for VBlank" routines
 that use busy waiting.
 
-### The `autoplay` remote observer
+### The `autoplay` observer and symbolic AI
 
 `autoplay` is a Python application that attaches to a running `sor` executable
 through the remote-access library shipped with `MegaDriveEnvironment`
-(`megadrive_remote`). The game process remains the host; autoplay observes
-live state over the remote connection without injecting controller input.
+(`megadrive_remote`). The game process remains the host; autoplay reads live
+state over the remote connection and, when its AI is enabled, plays the game
+through a virtual gamepad.
 
 The app provides a live HUD that reports game mode, level, wave, timer, and
 per-player status, together with a 2D world map of on-screen and off-camera
 actors (including combat-phase outlines and hunt counts).
 
-Launch instructions and CLI options are in `autoplay/README.md`.
+#### The AI player
+
+The AI is symbolic, not learned: there is no training and no neural network.
+It is built on what the reverse-engineering uncovered — the disassembly, the
+labels, and the `ai-analysis` manuscripts — so it can anticipate an enemy
+because it knows the routine that drives that enemy. It can be switched on for
+player 1, player 2, or both. It may read RAM freely but never writes it: every
+action goes through the controller, exactly as a human player's would (the
+original A/B/C scheme only, for now).
+
+Each poll runs one pass of a pipeline built on *tokens*:
+
+1. **Observe** — turn the snapshot the HUD already reads into `Information`
+   tokens: both players, each enemy and boss as its own class, weapons, food,
+   and hazards.
+2. **Infer** — derive the few facts that need calculation, such as being
+   surrounded.
+3. **Propose** — generate every `Verb` that currently makes sense: walk,
+   punch, jump-kick, grab and suplex, throw a knife, dodge a projectile, open a
+   breakable, advance the stage, call the police.
+4. **Filter** — withdraw any verb that would hit the other player, human or
+   AI.
+5. **Rank** — score each verb's urgency from the information present and keep
+   the winner. The HUD shows it, along with the candidates it beat.
+6. **Execute** — the winning verb selects a small, non-blocking state machine
+   that produces this tick's buttons.
+
+General rules only go so far in a fight, so the harder opponents get *ROM
+models*: Python restatements of an enemy's state machine, timings, and
+hitboxes, which the AI plays forward to choose its next move. The street
+enemies (Garcia, Signal, Haku-Ro, and Nora) share one lookahead, while Jack and
+every boss — Antonio, Souther, Abadede, Bongo, Onihime & Yasha, and Mr. X —
+have a model and plan of their own. Movement relies on a standalone rectangle
+path finder that steers around walls, floor holes, props, and round 6's drop
+press.
+
+No behaviour change ships without being measured against the running game.
+Helper scripts put the AI straight in front of any round's boss
+(`scripts/go_to_boss_N`), run it in turbo, or let it step the game frame by
+frame in lockstep, and a recorded stall can be replayed offline through the
+real pipeline.
+
+The design is described in [`autoplay/AI.md`](autoplay/AI.md); launch
+instructions and CLI options are in [`autoplay/README.md`](autoplay/README.md);
+the ROM models, measurements, and test procedures are in
+[`autoplay/CLAUDE.md`](autoplay/CLAUDE.md).
 
 ## How to build
 
