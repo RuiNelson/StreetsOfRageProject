@@ -712,3 +712,108 @@ class HoleTests(unittest.TestCase):
             x0, x1, y0, y1 = self.HOLE
             self.assertFalse(x0 <= actor.x <= x1 and y0 <= actor.y <= y1, (actor.x, actor.y))
 
+
+
+class CopyTests(unittest.TestCase):
+    """``copy`` is written out slot by slot (speed): it must cover every slot."""
+
+    def test_every_slot_is_copied_and_the_copy_is_independent(self) -> None:
+        for original in (_jack_sim(), J.AxeSim.spawned(0, J.AXE_JUGGLED, 0x2B), _actor(2700, 60)):
+            for index, name in enumerate(original.__slots__):
+                setattr(original, name, (index + 1) * 1.5)  # a distinct value in every slot
+            clone = original.copy()
+            for name in original.__slots__:
+                self.assertEqual(getattr(clone, name), getattr(original, name), name)
+            clone.x = -1.0
+            self.assertNotEqual(original.x, -1.0)
+
+
+def _reference_plan_world(world0, actor0, *, spec, moving_x=0):
+    """``plan_world`` as it was written before the bound on the second update
+    order: every candidate under both orders, in order, ``>`` keeping the first
+    of equal scores. The optimised plan must agree with it field for field."""
+
+    index = 0
+    toward_x = 1 if world0.jacks[0].x > actor0.x else -1
+    mode_now = J.engage_aim(actor0, world0, index)[0]
+    dodging = world0.jacks[0].state == J.ST_EVADE
+    best = None
+
+    def consider(first, hold, punch_at):
+        nonlocal best
+        worst = None
+        for actor_first in (True, False):
+            outcome, at, world, a = J._rollout(
+                world0.copy(), actor0.copy(), index, first, hold,
+                actor_first=actor_first, punch=spec, punch_at=punch_at,
+            )
+            score = J._score(outcome, at, world, a, index)
+            if worst is None or score < worst[0]:
+                worst = (score, outcome, at)
+            if outcome is J.Outcome.HIT:
+                break
+        score, outcome, at = worst
+        if punch_at is None:
+            if moving_x and first[0] == -moving_x:
+                score -= J._REVERSE_X_COST
+            if first[0] == toward_x and not dodging:
+                score += J._TOWARD_BONUS
+            if first[1] == 0:
+                score += J._KEEP_LANE_BONUS
+        if best is None or score > best.score:
+            now = (0, 0) if punch_at == 0 else first
+            best = J.EngagePlan(
+                dir_x=now[0], dir_y=now[1], mode=mode_now,
+                outcome=None if outcome is J.Outcome.NONE else outcome.name.lower(),
+                at_update=at, score=score, punch=punch_at == 0,
+            )
+
+    for hold in (False, True):
+        for first in J._CANDIDATES:
+            if hold and first == (0, 0):
+                continue
+            consider(first, hold, None)
+    if spec is not None and J._punch_worth_trying(world0, index, actor0):
+        for punch_at in J.PUNCH_WAITS:
+            consider((0, 0), True, punch_at)
+            if punch_at:
+                consider((toward_x, 0), True, punch_at)
+    return best
+
+
+class ExactPlanTests(unittest.TestCase):
+    """The plan is exactly the exhaustive search it replaced (the tick budget)."""
+
+    STATES = (
+        dict(state=J.ST_APPROACH),
+        dict(state=J.ST_JUGGLE_WALK),
+        dict(state=J.ST_EVADE, flags=0x07, vx=-3.0),
+        dict(state=J.ST_LANE_SETUP, aim_y=J.LANE_SETUP_HIGH),
+        dict(state=J.ST_ALIGNED_THROW),
+        dict(state=J.ST_THROW, juggle=False),
+        dict(state=J.ST_HITSTUN, t50=20, juggle=False),
+        dict(state=J.ST_KNOCKDOWN, juggle=False),
+    )
+
+    def test_it_agrees_with_the_exhaustive_search(self) -> None:
+        from sor_autoplay.ai.abadede import punch_spec
+
+        spec = punch_spec(2)
+        checked = 0
+        for left in (True, False):
+            for overrides in self.STATES:
+                for dx in (-90, -40, -20, 4, 24, 70):
+                    for dy in (-24, -12, 0, 12, 30):
+                        world = _juggling_world(left=left, x=2800.0, y=60.0)
+                        jack = world.jacks[0]
+                        for name, value in overrides.items():
+                            setattr(jack, name, value)
+                        actor = _actor(2800 + dx, 60 + dy, left=not left)
+                        for moving_x, with_spec in ((0, spec), (1, None)):
+                            expected = _reference_plan_world(
+                                world.copy(), actor.copy(), spec=with_spec, moving_x=moving_x
+                            )
+                            got = J.plan_world(world.copy(), actor.copy(), spec=with_spec, moving_x=moving_x)
+                            self.assertEqual(got, expected, (left, overrides, dx, dy, moving_x))
+                            checked += 1
+        self.assertEqual(checked, 960)

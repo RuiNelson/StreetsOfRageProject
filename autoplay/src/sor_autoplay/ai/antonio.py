@@ -537,7 +537,28 @@ class ActorSim:
             setattr(self, name, fields[name])
 
     def copy(self) -> ActorSim:
-        return ActorSim(**{name: getattr(self, name) for name in self.__slots__})
+        # Written out, slot by slot (``jack.plan_world`` copies the actor ~40
+        # times a plan; tests/ai/test_jack.py pins that every slot is here).
+        new = ActorSim.__new__(ActorSim)
+        new.x = self.x
+        new.y = self.y
+        new.facing_left = self.facing_left
+        new.walking = self.walking
+        new.vx = self.vx
+        new.flags_31 = self.flags_31
+        new.speeds = self.speeds
+        new.walk_reach = self.walk_reach
+        new.body_reach = self.body_reach
+        new.lane_lo = self.lane_lo
+        new.lane_hi = self.lane_hi
+        new.x_lo = self.x_lo
+        new.x_hi = self.x_hi
+        new.holding = self.holding
+        new.untouchable = self.untouchable
+        new.unavailable = self.unavailable
+        new.box_x = self.box_x
+        new.box_y = self.box_y
+        return new
 
     @classmethod
     def from_token(

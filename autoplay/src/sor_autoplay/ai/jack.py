@@ -309,6 +309,11 @@ class Outcome(Enum):
     STRUCK = auto()  # the actor's punch landed on him: his hitstun
 
 
+# Module-level aliases: ``Outcome.X`` is a class-attribute lookup (30 ns on 3.11),
+# and the update functions test it a hundred times an update.
+_NONE, _GRAB, _HIT, _STRUCK = Outcome.NONE, Outcome.GRAB, Outcome.HIT, Outcome.STRUCK
+
+
 # The punch (the actor's own, abadede.punch_spec): a hit on him is $9B88's
 # stun -- 24 updates, reseeded by every new hit, his pose off the juggle stance
 # so each axe drops at the end of its arc, his juggle latch cleared.
@@ -375,8 +380,7 @@ def signed_health(jack: Jack) -> int:
     return health - 0x10000 if health >= 0x8000 else health
 
 
-def _hi(value: float) -> int:
-    return math.floor(value)
+_hi = math.floor  # the integer part ($xxxx.xx's high word); an alias, not a wrapper: it runs ~8,000 times a plan
 
 
 def _vector_velocity(dx: int, dy: int, speed: int) -> tuple[float, float]:
@@ -413,7 +417,39 @@ class JackSim:
             setattr(self, name, fields[name])
 
     def copy(self) -> JackSim:
-        return JackSim(**{name: getattr(self, name) for name in self.__slots__})
+        # Written out, slot by slot: a plan copies the world and the actor
+        # ~40 times, and the generic getattr/setattr loop was a visible share of it
+        # (tests/ai/test_jack.py pins that every slot is here).
+        new = JackSim.__new__(JackSim)
+        new.slot = self.slot
+        new.x = self.x
+        new.y = self.y
+        new.z = self.z
+        new.floor = self.floor
+        new.state = self.state
+        new.flags = self.flags
+        new.facing_left = self.facing_left
+        new.vx = self.vx
+        new.vy = self.vy
+        new.vz = self.vz
+        new.aim_x = self.aim_x
+        new.aim_y = self.aim_y
+        new.speed = self.speed
+        new.t50 = self.t50
+        new.t51 = self.t51
+        new.t54 = self.t54
+        new.anim = self.anim
+        new.frame = self.frame
+        new.countdown = self.countdown
+        new.reload = self.reload
+        new.animating = self.animating
+        new.personality = self.personality
+        new.juggle = self.juggle
+        new.torch = self.torch
+        new.alive = self.alive
+        new.hold_dx = self.hold_dx
+        new.hp = self.hp
+        return new
 
     @classmethod
     def from_token(cls, jack: Jack, *, floor: float) -> JackSim:
@@ -487,7 +523,29 @@ class AxeSim:
             setattr(self, name, fields[name])
 
     def copy(self) -> AxeSim:
-        return AxeSim(**{name: getattr(self, name) for name in self.__slots__})
+        # Written out, slot by slot: a plan copies the world and the actor
+        # ~40 times, and the generic getattr/setattr loop was a visible share of it
+        # (tests/ai/test_jack.py pins that every slot is here).
+        new = AxeSim.__new__(AxeSim)
+        new.slot = self.slot
+        new.owner = self.owner
+        new.state = self.state
+        new.entry = self.entry
+        new.x = self.x
+        new.y = self.y
+        new.z = self.z
+        new.vx = self.vx
+        new.vz = self.vz
+        new.off = self.off
+        new.returning = self.returning
+        new.released = self.released
+        new.hanging = self.hanging
+        new.t50 = self.t50
+        new.t51 = self.t51
+        new.box = self.box
+        new.gone = self.gone
+        new.harmless = self.harmless
+        return new
 
     @classmethod
     def from_token(cls, axe: Projectile, owner: int | None) -> AxeSim:
@@ -716,8 +774,10 @@ def _touch(j: JackSim, a: ActorSim, world: World) -> Outcome:
     no grab), else the walking box's grab."""
 
     if world.punch is not None and not world.struck and punch_hits(j, a, world.punch, world):
-        return Outcome.STRUCK
-    return Outcome.GRAB if grab_contact(j, a, world) else Outcome.NONE
+        return _STRUCK
+    if not a.walking:  # grab_contact's first test, without the call
+        return _NONE
+    return _GRAB if grab_contact(j, a, world) else _NONE
 
 
 def axe_hits(x: AxeSim, a: ActorSim, world: World, *, margin: bool = True) -> bool:
@@ -726,16 +786,20 @@ def axe_hits(x: AxeSim, a: ActorSim, world: World, *, margin: bool = True) -> bo
     if a.untouchable:
         return False
     bx0, bx1, by0, by1, bz0, bz1 = AXE_BOX[x.box]
-    ax, ay, az = _hi(x.x), _hi(x.y), _hi(x.z)
-    px, py = _hi(a.box_x), _hi(a.box_y)
+    ax = _hi(x.x)
+    px = _hi(a.box_x)
     mx = HIT_MARGIN_X if margin else 0
-    ml = HIT_MARGIN_LANE if margin else 0
     reach = a.body_reach
+    # Most axes are nowhere near the actor: the first test usually answers.
     if ax + bx0 - mx > px + reach or ax + bx1 + mx < px - reach:
         return False
+    ay = _hi(x.y)
+    py = _hi(a.box_y)
+    ml = HIT_MARGIN_LANE if margin else 0
     if ay + by0 - ml > py + PLAYER_LANE_HALF or ay + by1 + ml < py - PLAYER_LANE_HALF:
         return False
-    _, _, _, _, rz0, rz1 = world.body
+    rz0, rz1 = world.body[4], world.body[5]
+    az = _hi(x.z)
     pz = _hi(world.actor_z)
     return az + bz0 <= pz + rz1 and az + bz1 >= pz + rz0
 
@@ -745,12 +809,12 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
 
     j = world.jacks[index]
     if not j.alive:
-        return Outcome.NONE
+        return _NONE
     st = j.state
     entry = not j.flags & 0x01
     if st != ST_HELD:
         j.flags |= 0x01
-    outcome = Outcome.NONE
+    outcome = _NONE
 
     if st == ST_ACTIVATE:
         _goto(j, ST_RESELECT)
@@ -771,7 +835,7 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
         j.t50 -= 1
         if j.t50 <= 0:
             _goto(j, ST_RESELECT)
-        elif (touched := _touch(j, a, world)) is not Outcome.NONE:
+        elif (touched := _touch(j, a, world)) is not _NONE:
             outcome = touched
         elif _approach(j):
             _goto(j, ST_LANE_SETUP)
@@ -780,7 +844,7 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
     elif st == ST_LANE_SETUP:
         if entry:
             j.aim_y = LANE_SETUP_HIGH if _hi(a.y) > LANE_SETUP_SPLIT else LANE_SETUP_LOW
-        if (touched := _touch(j, a, world)) is not Outcome.NONE:
+        if (touched := _touch(j, a, world)) is not _NONE:
             outcome = touched
         elif not _approach(j):
             _move(j)
@@ -804,7 +868,7 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
                 return outcome
             j.speed = BACKOFF_SPEED
             j.aim_x += STEP_DX if _hi(j.x) > _hi(a.x) else -STEP_DX
-        if (touched := _touch(j, a, world)) is not Outcome.NONE:
+        if (touched := _touch(j, a, world)) is not _NONE:
             outcome = touched
         elif _approach(j):
             _goto(j, ST_GATE)
@@ -814,7 +878,7 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
         if entry:
             j.vx = BACK_OFF_VX if _hi(a.x) < _hi(j.x) else -BACK_OFF_VX
             j.vy = BACK_OFF_VY if _hi(a.y) > _hi(j.y) else -BACK_OFF_VY
-        if (touched := _touch(j, a, world)) is not Outcome.NONE:
+        if (touched := _touch(j, a, world)) is not _NONE:
             outcome = touched
         elif abs(_hi(a.y) - _hi(j.y)) > ALIGN_LANE:
             _move(j)
@@ -827,7 +891,7 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
             j.t51 = 2
             j.t50 = ALIGNED_SECOND
             j.t54 = ALIGNED_WAIT
-        if (touched := _touch(j, a, world)) is not Outcome.NONE:
+        if (touched := _touch(j, a, world)) is not _NONE:
             outcome = touched
         else:
             _aligned_throw(j, a)
@@ -836,7 +900,7 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
             _face(j, a, ANIM_IDLE)
             j.animating = True
             j.t50 = 8
-        if (touched := _touch(j, a, world)) is not Outcome.NONE:
+        if (touched := _touch(j, a, world)) is not _NONE:
             outcome = touched
         elif abs(_hi(a.x) - _hi(j.x)) < ABORT_DX:
             _goto(j, ST_EVADE)
@@ -862,7 +926,7 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
             j.animating = True
             j.t50 = RANGED_THROW_COUNT
             j.juggle = False
-        if (touched := _touch(j, a, world)) is not Outcome.NONE:
+        if (touched := _touch(j, a, world)) is not _NONE:
             outcome = touched
         elif abs(_hi(a.x) - _hi(j.x)) < ABORT_DX:
             _goto(j, ST_EVADE)
@@ -884,7 +948,7 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
             _approach(j)
             j.vz = JUMP_VZ
             j.z += j.vz
-        if (touched := _touch(j, a, world)) is not Outcome.NONE:
+        if (touched := _touch(j, a, world)) is not _NONE:
             outcome = touched
         elif not j.flags & 0x04:
             j.x += j.vx
@@ -917,7 +981,7 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
             j.aim_y = _hi(a.y)
             j.speed = DEFAULT_WALK_SPEED
             _approach(j)
-        if (touched := _touch(j, a, world)) is not Outcome.NONE:
+        if (touched := _touch(j, a, world)) is not _NONE:
             outcome = touched
         elif j.frame != 1:
             j.flags |= 0x08
@@ -935,14 +999,14 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
             if _hi(j.x) >= _hi(a.x):
                 j.flags |= 0x04
             j.t50 = 0
-        if (touched := _touch(j, a, world)) is not Outcome.NONE:
+        if (touched := _touch(j, a, world)) is not _NONE:
             outcome = touched
         else:
             # $9E4C, every update after the contact test: he faces the target.
             # In this state there is no "behind him" -- walk past him and he
             # turns, and the next arc of his juggle starts on the actor's side.
             _face_only(j, a)
-        if outcome is Outcome.GRAB:
+        if outcome is _GRAB:
             pass
         elif not j.flags & 0x02:
             if (j.vy >= 0 and _hi(j.y) > EVADE_BOTTOM) or (j.vy < 0 and _hi(j.y) < EVADE_TOP):
@@ -960,7 +1024,7 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
             else:
                 _bounded_step(j, world.level)
     elif st in (ST_HITSTUN, ST_PEPPER):
-        if st == ST_HITSTUN and (touched := _touch(j, a, world)) is not Outcome.NONE:
+        if st == ST_HITSTUN and (touched := _touch(j, a, world)) is not _NONE:
             outcome = touched
         else:
             j.t50 -= 1
@@ -976,16 +1040,17 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
     else:
         j.alive = st != ST_DYING
 
-    if outcome is Outcome.GRAB:
+    if outcome is _GRAB:
         # $A9D4 only writes the state: $A04A places and poses him on his next
         # update (hold_is_burnt), so this pass's axes still see him juggling.
         j.state = ST_HELD
         return outcome
-    if outcome is Outcome.STRUCK:
+    if outcome is _STRUCK:
         _struck(j, a)
         world.struck = True
         return outcome
-    _step_animation(j)
+    if j.animating:  # _step_animation's first test, without the call
+        _step_animation(j)
     return outcome
 
 
@@ -1044,8 +1109,14 @@ def axe_update(x: AxeSim, a: ActorSim, world: World, *, margin: bool = True) -> 
     """One update of an axe, against the actor."""
 
     if x.gone:
-        return Outcome.NONE
-    j = world.jacks[x.owner] if x.owner is not None and x.owner < len(world.jacks) else None
+        return _NONE
+    jacks = world.jacks
+    j = jacks[x.owner] if x.owner is not None and x.owner < len(jacks) else None
+    if x.state == AXE_JUGGLED:  # by far the commonest: tested first
+        if j is None:
+            x.gone = True
+            return _NONE
+        return _juggle_update(x, j, a, world, margin=margin)
     if x.state == AXE_SPAWNER:
         x.t51 -= 1
         if x.t51 <= 0:
@@ -1055,25 +1126,25 @@ def axe_update(x: AxeSim, a: ActorSim, world: World, *, margin: bool = True) -> 
                 x.gone = True
             else:
                 x.t51 = SPAWN_GAP
-        return Outcome.NONE
+        return _NONE
     if x.state == AXE_INIT:
         x.state = AXE_THROWN
         x.entry = True
-        return Outcome.NONE
+        return _NONE
     if x.state == AXE_DROPPED:
         return _dropped_update(x, a, world, margin=margin)
     if j is None:
         x.gone = True
-        return Outcome.NONE
+        return _NONE
     if x.state == AXE_JUGGLED:
         return _juggle_update(x, j, a, world, margin=margin)
     if x.state == AXE_TOSSED:
         _toss_update(x, j)
-        return Outcome.NONE
+        return _NONE
     if x.state == AXE_THROWN:
         return _thrown_update(x, j, a, world, margin=margin)
     x.gone = True
-    return Outcome.NONE
+    return _NONE
 
 
 def _dropped_update(x: AxeSim, a: ActorSim, world: World, *, margin: bool) -> Outcome:
@@ -1090,7 +1161,7 @@ def _dropped_update(x: AxeSim, a: ActorSim, world: World, *, margin: bool) -> Ou
     x.z += x.vz
     if x.z >= world.actor_z:
         x.gone = True
-    return Outcome.HIT if hit else Outcome.NONE
+    return _HIT if hit else _NONE
 
 
 def _juggle_update(x: AxeSim, j: JackSim, a: ActorSim, world: World, *, margin: bool) -> Outcome:
@@ -1112,14 +1183,14 @@ def _juggle_update(x: AxeSim, j: JackSim, a: ActorSim, world: World, *, margin: 
         x.vz = min(x.vz + GRAVITY, VZ_CAP)
         x.z += x.vz
         if _hi(x.z) < JUGGLE_Z:
-            return Outcome.HIT if hit else Outcome.NONE
+            return _HIT if hit else _NONE
         if not j.idle:
             x.state = AXE_DROPPED
-            return Outcome.HIT if hit else Outcome.NONE
+            return _HIT if hit else _NONE
         x.returning = True
         x.vx = RETURN_VX
     if _hi(j.x) + HAND_DX[j.facing_left] > _hi(x.x):
-        return Outcome.HIT if hit else Outcome.NONE
+        return _HIT if hit else _NONE
     if j.state == ST_ALIGNED_THROW:
         if not j.flags & 0x04:
             j.flags |= 0x04
@@ -1131,7 +1202,7 @@ def _juggle_update(x: AxeSim, j: JackSim, a: ActorSim, world: World, *, margin: 
             x.entry = True
     else:
         x.entry = True
-    return Outcome.HIT if hit else Outcome.NONE
+    return _HIT if hit else _NONE
 
 
 def _toss_update(x: AxeSim, j: JackSim) -> None:
@@ -1174,7 +1245,7 @@ def _thrown_update(x: AxeSim, j: JackSim, a: ActorSim, world: World, *, margin: 
         if j.frame != THROW_RELEASE_FRAME or not j.throwing:
             if not j.throwing:
                 x.state = AXE_DROPPED
-            return Outcome.NONE
+            return _NONE
         x.released = True
         x.z += THROW_DROP_Z
         x.vx = -THROW_SPEED if j.facing_left else THROW_SPEED
@@ -1183,31 +1254,31 @@ def _thrown_update(x: AxeSim, j: JackSim, a: ActorSim, world: World, *, margin: 
         # $10044: a player strike bounces it harmlessly off the street.
         x.state = AXE_DROPPED
         x.harmless = True
-        return Outcome.NONE
+        return _NONE
     if axe_hits(x, a, world, margin=margin):
         x.gone = True
-        return Outcome.HIT
+        return _HIT
     screen = _hi(x.x) - world.cam_x + SCREEN_BIAS
     if not 0x70 <= screen < 0x1D0:
         x.gone = True
-        return Outcome.NONE
+        return _NONE
     x.x += x.vx
-    return Outcome.NONE
+    return _NONE
 
 
 def world_update(world: World, a: ActorSim, *, margin: bool = True) -> tuple[Outcome, int | None]:
     """One object pass: every Jack, then every axe. Returns the first outcome
     and, for a grab or a strike, which Jack it was."""
 
-    result, grabbed = Outcome.NONE, None
+    result, grabbed = _NONE, None
     for index in range(len(world.jacks)):
         outcome = jack_update(index, a, world)
-        if outcome in (Outcome.GRAB, Outcome.STRUCK) and result is Outcome.NONE:
+        if outcome in (_GRAB, _STRUCK) and result is _NONE:
             result, grabbed = outcome, index
     for x in world.axes:
         outcome = axe_update(x, a, world, margin=margin)
-        if outcome is Outcome.HIT:
-            return Outcome.HIT, None
+        if outcome is _HIT:
+            return _HIT, None
     if world.spawned:
         world.axes.extend(world.spawned)
         world.spawned = []
@@ -1241,7 +1312,7 @@ def hold_is_burnt(world: World, a: ActorSim, index: int, *, updates: int = POST_
             j.anim = 0x10 | (ANIM_MIRROR_BIT if j.facing_left else 0)
             j.animating = False
         for x in world.axes:
-            if axe_update(x, a, world) is Outcome.HIT:
+            if axe_update(x, a, world) is _HIT:
                 return True
         if world.spawned:
             world.axes.extend(world.spawned)
@@ -1553,30 +1624,30 @@ def _rollout(
             if punch.live[0] <= age <= punch.live[1]:
                 world.punch = punch.box
         outcome, grabbed = world_update(world, a)
-        if outcome is Outcome.HIT:
+        if outcome is _HIT:
             return outcome, k, world, a
-        if outcome is Outcome.GRAB:
+        if outcome is _GRAB:
             if hold_is_burnt(world.copy(), a.copy(), grabbed):
-                return Outcome.HIT, k + 1, world, a
+                return _HIT, k + 1, world, a
             return outcome, k, world, a
-        if outcome is Outcome.STRUCK and struck_at is None:
+        if outcome is _STRUCK and struck_at is None:
             struck_at = k
             if not world.jacks[grabbed].alive:
                 # The punch killed him: as good as the hold.
-                return Outcome.GRAB, k, world, a
+                return _GRAB, k, world, a
         step_actor()
     world.punch = None
     if struck_at is not None:
-        return Outcome.STRUCK, struck_at, world, a
-    return Outcome.NONE, None, world, a
+        return _STRUCK, struck_at, world, a
+    return _NONE, None, world, a
 
 
 def _score(outcome: Outcome, at: int | None, world: World, a: ActorSim, index: int) -> float:
-    if outcome is Outcome.GRAB:
+    if outcome is _GRAB:
         return _SCORE_GRAB - _SCORE_PER_UPDATE * at
-    if outcome is Outcome.HIT:
+    if outcome is _HIT:
         return _SCORE_HIT + _SCORE_PER_UPDATE * at
-    if outcome is Outcome.STRUCK:
+    if outcome is _STRUCK:
         return _SCORE_STRUCK - _SCORE_PER_UPDATE * at
     mode, aim_x, aim_y = engage_aim(a, world, index)
     return -(
@@ -1695,23 +1766,24 @@ def plan_world(
     # In his dodge the aim is a place to wait: no tie-break toward him, or the
     # first moves of every tick drift along with him to the screen's edge.
     dodging = world0.jacks[0].state == ST_EVADE
-    best: EngagePlan | None = None
+    # Every candidate is scored by the worse of its two update orders. The
+    # first order's score bounds the candidate from above, so the candidates
+    # are first rolled out under that order alone and the second order is only
+    # played where the bound can still beat the best plan so far (``_choose``).
+    candidates: list[tuple[tuple[int, int], bool, int | None]] = []
+    for hold in (False, True):
+        for first in _CANDIDATES:
+            if hold and first == (0, 0):
+                continue
+            candidates.append((first, hold, None))
+    if spec is not None and _punch_worth_trying(world0, index, actor0):
+        for punch_at in PUNCH_WAITS:
+            candidates.append(((0, 0), True, punch_at))
+            if punch_at:
+                # Walking toward him first is how the actor turns to him.
+                candidates.append(((toward_x, 0), True, punch_at))
 
-    def consider(first: tuple[int, int], hold: bool, punch_at: int | None) -> None:
-        nonlocal best
-        worst: tuple[float, Outcome, int | None] | None = None
-        for actor_first in (True, False):
-            outcome, at, world, a = _rollout(
-                world0.copy(), actor0.copy(), index, first, hold,
-                actor_first=actor_first, punch=spec, punch_at=punch_at,
-            )
-            score = _score(outcome, at, world, a, index)
-            if worst is None or score < worst[0]:
-                worst = (score, outcome, at)
-            if outcome is Outcome.HIT:
-                break
-        assert worst is not None
-        score, outcome, at = worst
+    def bonus(score: float, first: tuple[int, int], punch_at: int | None) -> float:
         if punch_at is None:
             if moving_x and first[0] == -moving_x:
                 score -= _REVERSE_X_COST
@@ -1719,31 +1791,57 @@ def plan_world(
                 score += _TOWARD_BONUS
             if first[1] == 0:
                 score += _KEEP_LANE_BONUS
-        if best is None or score > best.score:
-            now = (0, 0) if punch_at == 0 else first
-            best = EngagePlan(
-                dir_x=now[0],
-                dir_y=now[1],
-                mode=mode_now,
-                outcome=None if outcome is Outcome.NONE else outcome.name.lower(),
-                at_update=at,
-                score=score,
-                punch=punch_at == 0,
-            )
+        return score
 
-    for hold in (False, True):
-        for first in _CANDIDATES:
-            if hold and first == (0, 0):
-                continue
-            consider(first, hold, None)
-    if spec is not None and _punch_worth_trying(world0, index, actor0):
-        for punch_at in PUNCH_WAITS:
-            consider((0, 0), True, punch_at)
-            if punch_at:
-                # Walking toward him first is how the actor turns to him.
-                consider((toward_x, 0), True, punch_at)
+    # (final score, index, outcome, at) of the best candidate so far; the
+    # sequential ``score > best.score`` of the plain loop is the highest score
+    # with the lowest index among equals.
+    best: tuple[float, int, Outcome, int | None] | None = None
+    pending: list[tuple[float, int, float, Outcome, int | None]] = []
+    for i, (first, hold, punch_at) in enumerate(candidates):
+        outcome, at, world, a = _rollout(
+            world0.copy(), actor0.copy(), index, first, hold,
+            actor_first=True, punch=spec, punch_at=punch_at,
+        )
+        score = _score(outcome, at, world, a, index)
+        if outcome is _HIT:
+            # Nothing is worse than a hit: the second order cannot lower it.
+            final = bonus(score, first, punch_at)
+            if best is None or final > best[0] or (final == best[0] and i < best[1]):
+                best = (final, i, outcome, at)
+        else:
+            pending.append((bonus(score, first, punch_at), i, score, outcome, at))
+    # The float ``+``/``-`` of ``bonus`` never decreases when its operand does,
+    # so ``bonus(worst) <= bonus(first order's score)``: the bound is exact.
+    pending.sort(key=lambda item: (-item[0], item[1]))
+    for bound, i, score1, outcome1, at1 in pending:
+        if best is not None and (bound < best[0] or (bound == best[0] and i > best[1])):
+            break
+        first, hold, punch_at = candidates[i]
+        outcome, at, world, a = _rollout(
+            world0.copy(), actor0.copy(), index, first, hold,
+            actor_first=False, punch=spec, punch_at=punch_at,
+        )
+        score = _score(outcome, at, world, a, index)
+        worst = (score1, outcome1, at1)
+        if score < score1:
+            worst = (score, outcome, at)
+        final = bonus(worst[0], first, punch_at)
+        if best is None or final > best[0] or (final == best[0] and i < best[1]):
+            best = (final, i, worst[1], worst[2])
     assert best is not None
-    return best
+    final, i, outcome, at = best
+    first, hold, punch_at = candidates[i]
+    now = (0, 0) if punch_at == 0 else first
+    return EngagePlan(
+        dir_x=now[0],
+        dir_y=now[1],
+        mode=mode_now,
+        outcome=None if outcome is _NONE else outcome.name.lower(),
+        at_update=at,
+        score=final,
+        punch=punch_at == 0,
+    )
 
 
 AXE_OUT_LANE = 18  # +-8 box, +-8 body, and a step
@@ -1801,7 +1899,7 @@ def held_axes_threaten(
     a.untouchable = False
     for _ in range(updates):
         for x in world.axes:
-            if axe_update(x, a, world) is Outcome.HIT:
+            if axe_update(x, a, world) is _HIT:
                 return True
         world.axes = [x for x in world.axes if not x.gone]
         if not world.axes:

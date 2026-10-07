@@ -1557,8 +1557,8 @@ press hits each, all under `WalkToAdvanceStage`, and the same Souther-pair
 losses -- not this change's; **Round 6: the factory floor**'s one run had
 none). Not measured: the Signal-behind-props stall (once, 30 s, recording
 lost; `grunt.py` does not model an enemy blocked by a prop wall). The Jack
-plan's tick is ~2.5 ms median on these recordings, as before (2.4); over the
-2 ms budget before this change too.
+plan's tick was ~2.5 ms median on these recordings (2.4), over the 2 ms
+budget; **Jack's plan inside the 2 ms budget** brought it to ~1.0.
 
 **Mr. X: the ROM model and the plan** (user: "Agora fazer o mesmo tipo de
 optimização, mas para o boss Mr. X (o último nível). A estratégia das Twins já
@@ -1805,7 +1805,8 @@ The plan (`jack.plan_engage`, `EngageJack`, `execute.state_machine_engage_jack`,
    updates with the one-update pose lag) says an axe meets the holder, which
    scores as the hit it is; a hit below everything else; the rest by the time
    to `engage_aim`'s point and whether the end sits in a live juggle's band or
-   a throw's lane. 2.4 ms a tick with one Jack, 9 with eight. **The punch**
+   a throw's lane. 1.0 ms a tick (p95 1.1-1.5, max 1.8) with one Jack, up to 2.6 with
+   two to four; was 2.5 and 4.2-7 before **Jack's plan inside the 2 ms budget**. **The punch**
    (when `abadede_can_punch`): thirteen more candidates stand, or walk toward
    him -- the walk is the turn: B with a turn on one press is sampled
    pre-turn, a committed miss -- and punch on update 0-6; a strike (`$9B88`: 1 damage, 24 updates of stun, his
@@ -2600,6 +2601,72 @@ max is incompatible with identical motion here, bar the one class the next
 paragraph proves cheaply. In lockstep the bursts only slow wall-clock
 (`frames/tick` stays exactly 2); in turbo they miss frames.
 
+**Jack's plan inside the 2 ms budget (user: no AI tick over 2 ms).**
+`jack.plan_engage` (`EngageJack`, via `execute.engage_jack_plan`) rolled 17
+stick candidates (+13 punch candidates) x 2 update orders x 16 updates of
+`world_update`/`actor_update`: 2.5-2.6 ms median and 2.8-3.6 p95 with one Jack
+(max 4.5-5), 4.2 median with two, 7.3 at most with four. It now takes 1.0 ms
+median, 1.05-1.4 p95 and 1.8 max with one Jack, with **zero plan differences**
+(`dir_x`, `dir_y`, `punch`, `mode`, `outcome`, `at_update`, `score`) over every
+`EngageJack` tick of three live recordings -- round 4 (412 ticks, Axel), round 2
+(13,953, Axel, including a long stalemate with two Jacks) and round 5 (725, one
+to four Jacks) -- measured by `tools/jack_plan_bench.py` (this machine,
+`engage_jack_plan` alone, the best of 2-5 passes per tick):
+
+| recording | Jacks | ticks | before: median / p95 / max | after: median / p95 / max |
+| --- | --- | --- | --- | --- |
+| round 4 | 1 | 412 | 2.62 / 2.95 / 4.5 ms | 1.02 / 1.12 / 1.74 ms |
+| round 2 | 1 | 12,759 | 2.62 / 2.9 / 4.5 | 0.99 / 1.06 / 1.64 |
+| round 2 | 2 | 1,194 | 4.18 / 4.5 / 7.1 | 1.51 / 1.73 / 2.47 (41 over 2 ms) |
+| round 5 | 1 | 247 | 2.55 / 3.58 / 3.7 | 0.93 / 1.36 / 1.46 |
+| round 5 | 2-3 | 148 | 1.7-2.3 / 2.6-3.6 / 4.1 | 0.64-0.75 / 0.9-1.15 / 1.35 |
+| round 5 | 4 | 330 | 2.91 / 4.86 / 7.4 | 0.97 / 1.67 / 2.64 (7 over 2 ms) |
+
+What changed, all exact:
+
+- **A bound on the second update order** (`plan_world`; the biggest share,
+  2.5 -> 1.4 ms). A candidate's score is the worse of its two update orders,
+  so the first order's score (with the tie-break bonuses applied -- float `+`
+  and `-` of constants never decrease when their operand does) is an upper
+  bound on the candidate's final score. Every candidate is now rolled out under
+  one order; the second order only runs for candidates, in descending bound,
+  whose bound can still beat the best final score so far (`>` with the lowest
+  index among equals, exactly the old sequential rule), and it stops at the
+  first that cannot. A hit under the first order is final, as before. ~19
+  rollouts a tick instead of ~33.
+- `_hi` is `math.floor` itself (no wrapper: ~8,000 calls a plan); `Outcome`
+  members are read through module aliases (`_NONE`, `_GRAB`, `_HIT`,
+  `_STRUCK`: a class-attribute lookup costs 30 ns on 3.11);
+  `JackSim`/`AxeSim`/`ActorSim.copy` are written out slot by slot instead of a
+  `getattr`/`setattr` loop (`CopyTests` pins that every slot is there);
+  `axe_hits` rejects on X before it floors Y and Z; `axe_update` tests a
+  juggled axe (the commonest) first; `_touch` and `jack_update` skip the calls
+  whose first test is false (`a.walking`, `j.animating`).
+- Not done, because it is not exact or not worth it: a shorter horizon, fewer
+  candidates, sharing the identical first two updates of the held and
+  tail-policy candidates (~6% of the work).
+
+**Method and a trap.** `tools/jack_plan_bench.py` replays `--raw` recordings
+through the real `AgentLoop`, keeps every tick whose winning verb is
+`EngageJack`, times `engage_jack_plan` and writes (`--save`) or checks
+(`--compare`) every plan. `ExactPlanTests` (`tests/ai/test_jack.py`) also holds
+the pre-optimisation search as `_reference_plan_world` and checks the plan
+against it on 960 swept scenes (eight Jack states, 30 actor offsets, both
+facings, with and without the punch). **The contexts must be replayed in a
+fixed order:** a context is a set, `find_all` walks it, and the order of the
+Jacks and axes it hands the plan -- a tie between two equally scored sticks --
+depends on the set's hash order, which varies between processes (string hash
+seeds, and `hash(None)` is an address on 3.11, so `PYTHONHASHSEED=0` is not
+enough). The unmodified code gave a different stick on 2 of 13,953 round-2
+ticks between two runs; the tool sorts each context by `repr`. (In play that
+is an arbitrary tie-break; nothing relies on it.) A live sanity run
+(`jack_fight.py --level 2`, Blaze, `--turbo 2`, `--poll-ms 16`): three Jacks
+killed, 0 hits, no life lost, the boss reached at 87 s.
+
+**Still over 2 ms:** with two to four Jacks on screen 41 of 1,194 and 7 of 330
+ticks (max 2.6 ms); every world update runs every Jack and every axe, and no
+exact shortcut for the Jacks other than the target was found.
+
 **Sealed corridors (user: a cheap check for "a wall, or a wall whose hole is
 too small to pass" between the actor and the goal).** `_free_arrivals` only
 asks whether the goal's own cells are free; a goal that is free but cut off by
@@ -2751,6 +2818,7 @@ do not commit `.jsonl` runs.
 | `round2_death_diag.py` | **Traces** a whole round-2 run tick by tick (`--trace`) and stops the moment the game leaves the level for the title, which is what four lost measurement runs actually were: not the AI dying but the **console resetting**, caused by the debug sweep writing a death into an object slot that was still spawning (fixed host-side -- see `StreetsOfRageRecompilation/CLAUDE.md`). Records every `Pit` with `reach.pit_endangers` per tick, which is how the pit theory was ruled out: round 2 has none |
 | `snapshot_replay.py` | **Records and replays** the reads `read_snapshot` makes: `RecordingSource` wraps the client, `SnapshotRecorder` writes the ROM tables once and each tick's changed reads as JSONL, and `ReplaySource`/`iter_ticks`/`load_rom` rebuild any tick's `GameSnapshot` offline -- the real `AgentLoop`, or any `decide`/`priority`/`execute` function, run again on a live stall as often as the question needs. Used by `stage_walk_diag.py --raw` and `jack_sim.py`; recordings run ~4 MB a second, local only |
 | `jack_sim.py` | **Plays the Jack engage offline**: every `--every`th tick with a Jack in a `--raw` recording (`--from`/`--to`) seeds `jack.plan_world` against `jack.py`'s model, update by update, until he is held, the actor is hit or `--updates` run out (a stalemate); `--timing ideal|fixed|jitter`. Found round 4's off-screen reset loop (**Round 4: the bridge, its props and its Jack**) |
+| `jack_plan_bench.py` | **Times and checks `jack.plan_engage`**: replays `--raw` recordings (`--raw A B ...`, or the `--cache` pickle of the captured contexts) through the real `AgentLoop`, keeps every tick whose winning verb is `EngageJack`, times `execute.engage_jack_plan` (best of `--passes`; median/p95/p99/max by Jack count) and `--save`s every `EngagePlan` field, or `--compare`s against a saved file (exit 1 on any plan diff) -- the proof that a speed-up is exact. Contexts are replayed in a canonical order (**Jack's plan inside the 2 ms budget**). `--profile` prints a cProfile. Recordings and caches stay out of the repo |
 | `breakable_diag.py` | Breakable stalls, per tick while a `Breakable` is in context. Round 1 by default, with **real** enemies (the sweep did not reproduce that stall); `--level N` jumps to a round first, `--sweep` keeps the ordinary families swept (the walk `scripts/go_to_boss` and the boss harnesses make -- how the round-4 stall was reproduced), `--heartbeat-s` logs a position row that often with no breakable around (so a stall anywhere shows), `--until-boss` stops at the boss |
 | `armed_combat_diag.py` | Held-weapon reach and swing timing |
 
