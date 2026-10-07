@@ -80,7 +80,7 @@ from .gamepad import VirtualGamepad
 from . import kinematics
 from . import jump_kick
 from . import abadede as abadede_plan
-from . import garcia as garcia_model, grunt_plan, mr_x as mr_x_model, mr_x_plan
+from . import garcia as garcia_model, grunt as grunt_model, grunt_plan, mr_x as mr_x_model, mr_x_plan
 from . import antonio as antonio_plan
 from . import bongo as bongo_plan
 from . import jack as jack_plan
@@ -117,6 +117,7 @@ from .reach import (
 from .partner import item_is_the_partners
 from .. import prop_solids
 from ..phases import is_dangerous, is_punishable
+from ..memory_map import OBJ_PRIMARY_STATE
 from ..world_map import LANE_Y_MIN
 
 UP_MASK = 0x0001
@@ -764,6 +765,16 @@ def _dead_zone_stop_dx(actor: Myself | Partner, target: Enemy, stop_dx: int) -> 
     return max(floor, min(stop_dx, inside))
 
 
+def _in_scripted_entry(enemy: Enemy) -> bool:
+    """Whether ``enemy`` is frozen in a scripted entry (``grunt.ENTRY_STATES``,
+    read from its slot's ``+$30`` state byte)."""
+
+    raw = enemy.raw
+    return len(raw) > OBJ_PRIMARY_STATE and raw[OBJ_PRIMARY_STATE] in grunt_model.ENTRY_STATES.get(
+        enemy.type_id, ()
+    )
+
+
 def _crossing_would_walk_into_the_swing(actor: Myself | Partner, target: Enemy) -> bool:
     """True while starting the walk into a dead-zone enemy would cross a
     live swing.
@@ -793,6 +804,13 @@ def _crossing_would_walk_into_the_swing(actor: Myself | Partner, target: Enemy) 
     if target.min_reach <= 0 or not is_dangerous(target.combat_phase):
         return False
     if target.max_reach <= 0:
+        return False
+    if _in_scripted_entry(target):
+        # Not a swing: her scripted entry ($0A, which phases reads as the
+        # damaging special) waits for the camera, and the camera only moves
+        # when the actor walks on. Waiting it out was a deadlock -- live,
+        # 73 s on round 1's top lanes at x~3290 until the round clock took a
+        # life (autoplay/CLAUDE.md, **Presses do not block the tick**).
         return False
     if not enemy_lane_covers(target, actor):
         # The swing is not aimed anywhere near this lane, so there is nothing

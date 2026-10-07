@@ -2582,8 +2582,21 @@ old 85-97 s, 2-6 hits, no life lost; new 92-96 s, 2-6 hits, and one run
 stalled 73 s at x=3204 on `WalkToNearEnemy` toward a Nora still in her
 scripted entry (`$0A`, lane 0, off-screen right) until the round clock took a
 life -- real ticks (0.2 ms each, the decision code untouched by this change),
-not the skip; not reproduced offline. Souther, `--no-food`: new 4.1/4.1 s, no
-damage; old 4.8/4.2 s.
+not the skip. Souther, `--no-food`: new 4.1/4.1 s, no damage; old 4.8/4.2 s.
+
+That stall was caught again with `stage_walk_diag.py --raw` and replayed
+offline: the same decision with the old code, so not the press. `$0A` is
+Nora's scripted entry (`grunt.ENTRY_STATES`, frozen until the camera reaches
+her) and also what `phases` reads as her damaging special, so she was
+`ATTACKING`, and `execute._crossing_would_walk_into_the_swing` waited for the
+swing to end before crossing her 32-80 px band -- holding nothing, while the
+camera only moves when the actor walks on. Her lane is 0, so it caught only
+an actor on the top lanes (14-19) near x~3290. `_in_scripted_entry` now
+exempts an enemy in a scripted entry from that wait; on the recorded tick the
+walk holds Up+Right instead of nothing. Measured after: round 1 street x5,
+86-95 s, 1-6 hits, no life lost (none of the five crossed the top lanes
+there, so the replay is what covers the fix); Nora-only round 1 x3 a side,
+4/4 kills and no hit either way (52-56 s old, 55-56 s new).
 
 **Tick budget (user: no tick over 2 ms -- a slower tick is blindness on a
 weaker machine).** Measured live in lockstep on round-1 street (Blaze,

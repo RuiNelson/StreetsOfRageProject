@@ -587,6 +587,22 @@ class DeadZoneApproachTests(unittest.TestCase):
 
         self.assertEqual((target_x, target_y), (actor.world_x, actor.world_y))
 
+    def test_does_not_wait_on_her_scripted_entry(self) -> None:
+        # $0A is also her scripted entry, frozen until the camera reaches
+        # her -- and phases reads it as ATTACKING. The camera only moves when
+        # the actor walks on, so waiting it out was a deadlock: live, 73 s on
+        # round 1's top lanes until the round clock took a life.
+        actor = _myself(world_x=100, world_y=100)
+        raw = bytearray(0x80)
+        raw[0x30] = 0x0A
+        entry = self._nora(
+            world_x=200, world_y=100, combat_phase=CombatPhase.ATTACKING, raw=bytes(raw)
+        )
+
+        target_x, _ = _walk_to_near_enemy_target(actor, entry, set())
+
+        self.assertNotEqual(target_x, actor.world_x)
+
     def test_crosses_anyway_once_already_inside_the_band(self) -> None:
         # Standing in the band is the worst place to be: press on to the
         # pocket rather than waiting there.
