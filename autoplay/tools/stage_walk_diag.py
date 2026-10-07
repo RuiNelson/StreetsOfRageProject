@@ -41,6 +41,8 @@ from sor_autoplay.reach_gameplay import reach_gameplay
 from sor_autoplay.rom_data import RomData
 from sor_autoplay.state import read_snapshot
 
+from snapshot_replay import RecordingSource, SnapshotRecorder
+
 SLOT_COUNT = mm.OBJECT_TABLE_SLOTS
 # Offsets inside the camera block read_snapshot already fetches ($FFE000).
 CAMERA_X_MAX = 0x1A
@@ -87,6 +89,10 @@ def main() -> int:
     sweep.add_argument("--kill-street-enemies", action="store_true", help="sweep every family")
     ap.add_argument("--until-x", type=int, help="stop once the actor's X passes this")
     ap.add_argument(
+        "--raw",
+        help="also record every tick's snapshot reads here (snapshot_replay.py), for offline replay",
+    )
+    ap.add_argument(
         "--stop-at-boss",
         action="store_true",
         help="stop when a round boss appears (round 6 meets Bongo mid-round, so off by default)",
@@ -105,8 +111,14 @@ def main() -> int:
         kill_street_enemies=args.kill_street_enemies,
     )
 
-    with MegaDriveClient(host=args.host, port=args.port) as client:
+    with MegaDriveClient(host=args.host, port=args.port) as live:
+        client = RecordingSource(live)
+        recorder = SnapshotRecorder(args.raw) if args.raw else None
+        client.start()
         rom = RomData.read(client)
+        rom_reads = client.stop()
+        if recorder is not None:
+            recorder.write_rom(rom_reads)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         loop = AgentLoop(gamepad, no_food=True, no_police=True)
 
@@ -121,7 +133,9 @@ def main() -> int:
         with open(args.out, "w", encoding="utf-8") as sink:
             while time.monotonic() < deadline:
                 t0 = time.monotonic()
+                client.start()
                 snap = read_snapshot(client, rom=rom)
+                tick_reads = client.stop()
                 playable = any(p.is_playable for p in snap.players)
                 if scenario.level_jump_pending:
                     if playable:
@@ -145,6 +159,8 @@ def main() -> int:
                     print(f"on level {args.level}", flush=True)
                 scenario.sweep_other_families(client)
                 elapsed = t0 - started_at
+                if recorder is not None:
+                    recorder.write_tick(round(elapsed, 3), tick_reads)
 
                 p1raw = client.read_memory(mm.ADDR_P1_OBJECT, mm.OBJECT_SLOT_SIZE)
                 table = client.read_memory(mm.ADDR_OBJECT_TABLE, SLOT_COUNT * mm.OBJECT_SLOT_SIZE)
@@ -175,6 +191,7 @@ def main() -> int:
                     "attacker": _s16(p1raw, 0x7E) & 0xFFFF,
                     "held": gamepad.held,
                     "verb": type(verb).__name__ if verb else None,
+                    "target": getattr(verb, "target_slot", None),
                     "pending": sorted({type(v).__name__ for v in state.pending}),
                     "route": None
                     if route is None
@@ -224,6 +241,8 @@ def main() -> int:
             client.hold_buttons(player1=0, player2=0)
         except Exception:  # noqa: BLE001
             pass
+        if recorder is not None:
+            recorder.close()
 
     print(json.dumps({"end_state": end_state, "seconds": round(time.monotonic() - started_at, 1) if started_at else None}))
     return 0

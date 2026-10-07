@@ -1128,23 +1128,27 @@ class BreakableAdvanceStabilityTests(unittest.TestCase):
             f"around-path chattered left/right: {[hex(m) for m in masks]}",
         )
 
-    def test_a_crate_already_behind_does_not_turn_the_actor_around(self) -> None:
+    def test_a_crate_already_behind_is_gone_back_for_without_flipping(self) -> None:
+        # User: the AI "ignores many breakables (should not ignore them)".
+        # A prop the actor has walked past -- a fight drifts it past them --
+        # is still on screen and still worth opening: the camera never
+        # scrolls back for it. Going back must be one steady walk, never the
+        # old OpenBreakable / WalkToAdvanceStage flip.
         masks, names = self._run_crate(
             ticks=12, actor_x=200, actor_y=64, prop_x=80, prop_y=64
         )
 
-        self.assertNotIn(
-            OpenBreakable.__name__,
-            names,
-            f"walked back to a crate already behind: {names}",
+        self.assertTrue(
+            all(name == OpenBreakable.__name__ for name in names),
+            f"expected OpenBreakable throughout, got {names}",
         )
         self.assertTrue(
-            all(name == WalkToAdvanceStage.__name__ for name in names),
-            f"expected WalkToAdvanceStage throughout, got {names}",
+            any(mask & LEFT for mask in masks),
+            f"never walked back toward the passed crate: {[hex(m) for m in masks]}",
         )
         self.assertFalse(
-            any(mask & LEFT for mask in masks),
-            f"turned back toward a passed crate: {[hex(m) for m in masks]}",
+            any(mask & RIGHT for mask in masks),
+            f"turned away from the crate it was going back for: {[hex(m) for m in masks]}",
         )
 
 

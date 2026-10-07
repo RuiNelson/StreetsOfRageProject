@@ -1013,8 +1013,13 @@ current weapon held — never because it judges that upgrade more urgent
 than some other candidate action. The same "does it make sense to pursue
 at all" test rules out a target whose own position sits inside a `Pit`'s
 danger zone (`reach.any_pit_endangers`): every walk toward a fixed point
-(a nearby enemy, a weapon, a pickup, a breakable prop) skips a candidate
-there, since reaching it means standing in the pit. Live testing found
+(a nearby enemy, a weapon, a pickup) skips a candidate there, since
+reaching it means standing in the pit. A breakable prop is asked the same
+question of the places it is *struck from* rather than of its own origin
+(`decide._strike_stand_is_open`: a pocket either side, out of every pit's
+danger zone, every prop's wall and the camera's walk clamp) -- round 4's
+bridge puts props beside its holes, one side in the hole and the other
+open floor. Live testing found
 the alternative — producing the walk and letting `execute_tick`'s pit
 override fight it back out once the actor arrived — meant the two
 disagreed every tick right at the pit's own edge, the walk pulling the

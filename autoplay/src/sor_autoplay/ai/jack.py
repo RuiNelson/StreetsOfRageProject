@@ -271,6 +271,9 @@ EVADE_EXIT_DX = EVADE_PAST_DX + 8  # this far behind his walk, $DBCC reselects
 # (plus a step) then stays inside the screen's [0, $140) on either side.
 EVADE_CENTRE = (EVADE_PAST_DX + 24, 0x140 - EVADE_PAST_DX - 24)
 ZONE_AHEAD = (-16, 48)  # where a live juggle can meet a body, in his frame
+# Out of his juggle's reach on X (ZONE_AHEAD's far edge and a step): far
+# enough to wait out his $08-$0A on the lane next to his set-up lane.
+SETUP_KEEP_DX = ZONE_AHEAD[1] + 16
 ZONE_LANE = (-8, 24)
 THROW_BAND = (-17, 15)  # player lanes a throw along his lane - 1 can meet
 SIDE_DEADBAND_X = 4
@@ -524,9 +527,9 @@ class AxeSim:
 class World:
     """Every Jack and every axe on screen, and what the actor is standing on."""
 
-    __slots__ = ("jacks", "axes", "cam_x", "actor_z", "body", "spawned", "punch", "struck", "level")
+    __slots__ = ("jacks", "axes", "cam_x", "actor_z", "body", "spawned", "punch", "struck", "level", "holes")
 
-    def __init__(self, jacks, axes, cam_x, actor_z, body, level=None) -> None:
+    def __init__(self, jacks, axes, cam_x, actor_z, body, level=None, holes=()) -> None:
         self.jacks: list[JackSim] = jacks
         self.axes: list[AxeSim] = axes
         self.cam_x: int = cam_x
@@ -540,6 +543,9 @@ class World:
         # The 0-based round (``$FFFF02``), when known: his dodge's lane
         # direction and his walks' X bounds depend on it.
         self.level: int | None = level
+        # Floor holes' danger zones, (x0, x1, y0, y1) on the actor's origin
+        # (``reach.pit_endangers``): a step into one is undone in a rollout.
+        self.holes: tuple[tuple[float, float, float, float], ...] = tuple(holes)
 
     def copy(self) -> World:
         return World(
@@ -549,6 +555,7 @@ class World:
             self.actor_z,
             self.body,
             self.level,
+            self.holes,
         )
 
 
@@ -1298,6 +1305,27 @@ def _band_exit(a: ActorSim, j: JackSim) -> float:
     return up if a.y - up <= down - a.y else down
 
 
+def _evade_wait_x(x: float, world: World) -> float:
+    """``x`` held inside ``EVADE_CENTRE``: where his ``$07`` reset, 80 px past
+    the actor, still lands on screen."""
+
+    return min(max(x, float(world.cam_x + EVADE_CENTRE[0])), float(world.cam_x + EVADE_CENTRE[1]))
+
+
+def _evade_window_cost(world: World, a: ActorSim, index: int) -> float:
+    """Time to walk back inside ``EVADE_CENTRE`` while he is in his ``$07``.
+
+    The aim already says so, but a rollout's end can be past his reset,
+    where the aim no longer does: scored on the aim alone, standing at the
+    screen's edge cost nothing and the actor drifted there -- the round-4
+    stalemate (``_evade_exit``)."""
+
+    j = world.jacks[index]
+    if j.state != ST_EVADE or not j.alive:
+        return 0.0
+    return _time_to(a, _evade_wait_x(a.x, world), a.y)
+
+
 def _evade_exit(a: ActorSim, world: World, j: JackSim) -> float | None:
     """Where the actor stands to end his ``$07`` when waiting for him cannot:
     he is out of the actor's reach (past the camera clamp) and either pinned at
@@ -1321,8 +1349,12 @@ def _evade_exit(a: ActorSim, world: World, j: JackSim) -> float | None:
             return None  # he is walking back into reach
         # Walking on out of reach: stand, and his own walk makes the 80 px.
         # Traced live, an actor that went after the exit point kept pace ~70
-        # px behind him and never let him reset.
-        return a.x
+        # px behind him and never let him reset. But stand mid-screen: he
+        # resets 80 px past the actor, and a reset off screen fails $0C's
+        # entry test and puts him straight back in $07 (round 4, Axel, live:
+        # standing at the camera's edge, 30 s of $07 at lane 22 until the
+        # round clock took a life; the offline sim loops the same way).
+        return _evade_wait_x(a.x, world)
     return min(max(j.x - walk * EVADE_EXIT_DX, a.x_lo), a.x_hi)
 
 
@@ -1377,7 +1409,7 @@ def engage_aim(a: ActorSim, world: World, index: int) -> tuple[EngageMode, float
         # -- and punch him as he walks by: the stun drops his axes. Traced
         # live, an actor that only kept out of the band sat at lane 2 while he
         # walked lane 91 to and fro for 50 s.
-        centre_x = min(max(a.x, float(world.cam_x + EVADE_CENTRE[0])), float(world.cam_x + EVADE_CENTRE[1]))
+        centre_x = _evade_wait_x(a.x, world)
         pocket_y = j.y - POCKET_DY
         if pocket_y >= a.lane_lo and dy < ZONE_LANE[0]:
             # Only from above his band: from below, the way there crosses it
@@ -1388,6 +1420,19 @@ def engage_aim(a: ActorSim, world: World, index: int) -> tuple[EngageMode, float
         if in_band:
             return EngageMode.AROUND, centre_x, _band_exit(a, j)
         return EngageMode.AROUND, centre_x, a.y
+    if j.state in (ST_LANE_SETUP, ST_GATE, ST_BACK_OFF) and abs(a.x - j.x) >= SETUP_KEEP_DX:
+        # His $0A backs off along X, away from the actor, until he is within
+        # 8 lanes of its lane, and only a back-off that ends on screen goes on
+        # to the aligned throw (and his axes leave his hands): one that ends
+        # off it puts him back in $07. Waiting 40-60 lanes from his set-up
+        # lane ($08: 8 or 56) made that leg 40-75 px and, with the camera held
+        # at a wave gate, ran it off screen every time -- round 4, Axel, live:
+        # 30 s of $07 -> $0C -> $08 -> $0A -> $07 until the round clock took a
+        # life. So wait on the nearest lane out of his juggle's band next to
+        # that lane: the pocket above it, or the lanes past the band below.
+        lane_y = float(j.aim_y) if j.state == ST_LANE_SETUP else j.y
+        target = lane_y - POCKET_DY if lane_y - POCKET_DY >= a.lane_lo else lane_y + BELOW_DY
+        return EngageMode.AROUND, a.x, min(max(target, a.lane_lo), a.lane_hi)
     if ahead <= ZONE_AHEAD[0] - 2:
         if j.state not in GRABBABLE_STATES:
             return EngageMode.WAIT, back_x - facing * 12, j.y
@@ -1438,6 +1483,27 @@ def _end_danger(world: World, a: ActorSim, index: int) -> int:
 _CANDIDATES: tuple[tuple[int, int], ...] = tuple((dx, dy) for dx in (0, 1, -1) for dy in (0, -1, 1))
 
 
+def _step_clear_of_holes(a: ActorSim, world: World, dir_x: int, dir_y: int) -> None:
+    """``actor_update``, the step undone when it ends in a hole's danger zone.
+
+    A fall costs a life, and ``execute_tick``'s pit escape overrides any stick
+    that stands the actor there; a plan that walks into one is therefore a
+    plan that goes nowhere, and scored as such it is not chosen. Round 4,
+    Axel, live: the stick walked the actor along lane 73 into the bridge's
+    second hole (the escape, blind to that hole then, did not stop it)."""
+
+    if not world.holes or not (dir_x or dir_y):
+        actor_update(a, dir_x, dir_y)
+        return
+    x, y, box_x, box_y = a.x, a.y, a.box_x, a.box_y
+    actor_update(a, dir_x, dir_y)
+    if (a.x != x or a.y != y) and any(
+        x0 <= a.x <= x1 and y0 <= a.y <= y1 for x0, x1, y0, y1 in world.holes
+    ) and not any(x0 <= x <= x1 and y0 <= y <= y1 for x0, x1, y0, y1 in world.holes):
+        a.x, a.y, a.box_x, a.box_y = x, y, box_x, box_y
+        a.vx = 0.0
+
+
 def _rollout(
     world: World,
     a: ActorSim,
@@ -1475,7 +1541,7 @@ def _rollout(
             a.box_x, a.box_y = a.x, a.y
         else:
             move = first if hold or moves < FIRST_UPDATES else _track(a, world, index)
-            actor_update(a, *move)
+            _step_clear_of_holes(a, world, *move)
         moves += 1
 
     if actor_first:
@@ -1513,7 +1579,12 @@ def _score(outcome: Outcome, at: int | None, world: World, a: ActorSim, index: i
     if outcome is Outcome.STRUCK:
         return _SCORE_STRUCK - _SCORE_PER_UPDATE * at
     mode, aim_x, aim_y = engage_aim(a, world, index)
-    return -(_time_to(a, aim_x, aim_y) + _MODE_COST[mode] + _end_danger(world, a, index))
+    return -(
+        _time_to(a, aim_x, aim_y)
+        + _MODE_COST[mode]
+        + _end_danger(world, a, index)
+        + _evade_window_cost(world, a, index)
+    )
 
 
 def actor_body(actor: PlayableCharacter) -> tuple[int, int, int, int, int, int]:
@@ -1529,6 +1600,7 @@ def build_world(
     *,
     camera: CameraRange | None = None,
     level: int | None = None,
+    holes: Sequence[tuple[float, float, float, float]] = (),
 ) -> World:
     floor = float(actor.ground_z if actor.ground_z is not None else actor.world_z)
     if actor.is_airborne and actor.ground_z is None:
@@ -1550,7 +1622,7 @@ def build_world(
         if jack.screen_x:
             cam_x = jack.world_x + SCREEN_BIAS - jack.screen_x
             break
-    return World(sims, axes, cam_x, floor, actor_body(actor), level)
+    return World(sims, axes, cam_x, floor, actor_body(actor), level, holes)
 
 
 def _punch_worth_trying(world: World, index: int, a: ActorSim) -> bool:
@@ -1582,6 +1654,7 @@ def plan_engage(
     camera: CameraRange | None = None,
     can_punch: bool = False,
     level: int | None = None,
+    holes: Sequence[tuple[float, float, float, float]] = (),
 ) -> EngagePlan:
     """The stick for this tick: every candidate played out against him and his axes.
 
@@ -1604,16 +1677,24 @@ def plan_engage(
     actor0 = ActorSim.from_token(actor, lane_lo=lane_lo, lane_hi=lane_hi, x_lo=x_lo, x_hi=x_hi)
     actor0.untouchable = False
     everyone = [jack] + [o for o in others if o.slot != jack.slot]
-    world0 = build_world(actor, everyone, projectiles, camera=camera, level=level)
-    index = 0
-
+    world0 = build_world(actor, everyone, projectiles, camera=camera, level=level, holes=holes)
     moving_x = 1 if actor.vel_x > 0.5 else (-1 if actor.vel_x < -0.5 else 0)
+    spec = punch_spec(actor.character_id) if can_punch else None
+    return plan_world(world0, actor0, spec=spec, moving_x=moving_x)
+
+
+def plan_world(
+    world0: World, actor0: ActorSim, *, spec: PunchSpec | None, moving_x: int = 0
+) -> EngagePlan:
+    """``plan_engage`` on a world already built: the first Jack is the target.
+    Split out so an offline sim can run the plan against the model."""
+
+    index = 0
     toward_x = 1 if world0.jacks[0].x > actor0.x else -1
     mode_now = engage_aim(actor0, world0, index)[0]
     # In his dodge the aim is a place to wait: no tie-break toward him, or the
     # first moves of every tick drift along with him to the screen's edge.
     dodging = world0.jacks[0].state == ST_EVADE
-    spec = punch_spec(actor.character_id) if can_punch else None
     best: EngagePlan | None = None
 
     def consider(first: tuple[int, int], hold: bool, punch_at: int | None) -> None:

@@ -590,9 +590,16 @@ def _movement_mask(
         pit_bottom = pit.lane_y + pit.height
         pit_center_x = (pit.world_x + pit_right) / 2
         pit_center_y = (pit.lane_y + pit_bottom) / 2
+        # The pit's footprint, not its centre: a hole that only begins inside
+        # the camera's walk clamp is still a hole there. Round 4, Axel, live:
+        # the bridge's second hole (x 2240-2344) had its centre 20 px past the
+        # clamp's right edge, so this skipped it, the pit escape's walk to its
+        # far side came back as plain RIGHT, and the actor walked into it.
         if camera is not None and not (
-            camera.left <= pit_center_x <= camera.right
-            and camera.top <= pit_center_y <= camera.bottom
+            pit.world_x <= camera.right
+            and pit_right >= camera.left
+            and pit.lane_y <= camera.bottom
+            and pit_bottom >= camera.top
         ):
             continue
         between = (from_x < pit_center_x < to_x) or (to_x < pit_center_x < from_x)
@@ -1877,6 +1884,11 @@ def state_machine_engage_grunts(verb: EngageGrunts, context: Context, gamepad: V
     gamepad.hold(mask)
 
 
+# How far a Jack rollout can walk the actor (16 updates at a run's 4 px or so)
+# plus the hole's danger margin: holes further than this are left out of it.
+JACK_HOLE_REACH_X = 80
+
+
 def engage_jack_plan(verb: EngageJack, context: Context) -> jack_plan.EngagePlan | None:
     """``jack.plan_engage`` for this verb, from the context -- shared by the
     handler and the diagnostics, so both see the one plan."""
@@ -1894,6 +1906,18 @@ def engage_jack_plan(verb: EngageJack, context: Context) -> jack_plan.EngagePlan
         camera=find(context, CameraRange),
         can_punch=abadede_can_punch(actor, context),
         level=stage.level_index if stage is not None else None,
+        holes=[
+            (
+                pit.world_x - PIT_AVOID_MARGIN,
+                pit.world_x + pit.width + PIT_AVOID_MARGIN,
+                pit.lane_y - PIT_AVOID_MARGIN,
+                pit.lane_y + pit.height + PIT_AVOID_MARGIN,
+            )
+            for pit in find_all(context, Pit)
+            # Only the holes a 16-update rollout can reach: the check runs on
+            # every step of every candidate (``jack._step_clear_of_holes``).
+            if pit.world_x - JACK_HOLE_REACH_X <= actor.world_x <= pit.world_x + pit.width + JACK_HOLE_REACH_X
+        ],
     )
 
 
@@ -2700,9 +2724,7 @@ def _walk_to_breakable_target(
     stop_dx = max(0, min(outer, max(outer - BREAKABLE_STOP_BUFFER, wall + BREAKABLE_WALL_GAP_X)))
     dx = target.world_x - actor.world_x
     if abs(dx) <= DIRECTION_HYSTERESIS_X:
-        stage = find(context, Stage)
-        direction = stage.direction if stage is not None else "right"
-        approach_from_right = direction == "left"
+        approach_from_right = _breakable_tie_side(actor, target, context) == "right"
     else:
         approach_from_right = dx < 0
     target_x = target.world_x + stop_dx if approach_from_right else target.world_x - stop_dx
@@ -2724,6 +2746,49 @@ def _walk_to_breakable_target(
     if in_column and not at_smash_x:
         return target_x, actor.world_y
     return target_x, target.world_y
+
+
+def _breakable_strike_goal(actor: Myself | Partner, target: Breakable, side: str):
+    """The pocket beside ``target`` that ``OpenBreakable`` walks to."""
+
+    return nav.strike_goal(
+        nav.body_rect(actor),
+        actor.world_x,
+        actor.world_y,
+        target.world_x,
+        target.world_y,
+        stop_dx=breakable_smash_outer_x(target),
+        lane_slack=BREAKABLE_APPROACH_Y,
+        inner_dx=breakable_strike_inner_x(actor, target),
+        side=side,
+    )
+
+
+def _breakable_tie_side(actor: Myself | Partner, target: Breakable, context: Context) -> str:
+    """Which side to open ``target`` from, standing essentially on it.
+
+    The stage's progress direction names it -- fixed for the whole level, so
+    it cannot oscillate (``_walk_to_breakable_target``) -- unless the path
+    finder cannot arrive there and can on the other side. Round 4's bridge
+    (live, with Blaze and with Axel): beside a hole, the stage's side of a
+    prop is in the hole, or in the prop's own wall where the hole's danger
+    zone ends; its route never arrived, the pit escape pushed the actor
+    back, and it rocked there until the round clock took a life. Which side
+    arrives is fixed for as long as the prop and the hole are, so this
+    cannot oscillate either.
+    """
+
+    stage = find(context, Stage)
+    direction = stage.direction if stage is not None else "right"
+    preferred = "right" if direction == "left" else "left"
+    other = "left" if preferred == "right" else "right"
+    body, origin = nav.actor_footprint(actor)
+    solids, _ = nav.obstacle_sets(context, body=body, origin=origin)
+    for side in (preferred, other):
+        path = nav.plan_route(context, actor, _breakable_strike_goal(actor, target, side), solids=solids)
+        if path.reached:
+            return side
+    return preferred
 
 
 def state_machine_open_breakable(
@@ -2881,20 +2946,8 @@ def state_machine_open_breakable(
     # coming from. Anywhere else the sides genuinely differ, and cost decides.
     side = "both"
     if abs(target.world_x - actor.world_x) <= DIRECTION_HYSTERESIS_X:
-        stage = find(context, Stage)
-        direction = stage.direction if stage is not None else "right"
-        side = "right" if direction == "left" else "left"
-    goal = nav.strike_goal(
-        nav.body_rect(actor),
-        actor.world_x,
-        actor.world_y,
-        target.world_x,
-        target.world_y,
-        stop_dx=breakable_smash_outer_x(target),
-        lane_slack=BREAKABLE_APPROACH_Y,
-        inner_dx=breakable_strike_inner_x(actor, target),
-        side=side,
-    )
+        side = _breakable_tie_side(actor, target, context)
+    goal = _breakable_strike_goal(actor, target, side)
     body, origin = nav.actor_footprint(actor)
     solids, dangers = nav.obstacle_sets(context, body=body, origin=origin)
 

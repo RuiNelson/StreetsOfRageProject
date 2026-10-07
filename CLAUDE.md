@@ -265,6 +265,16 @@ shuts the host down, so the port is free for the next run. Full rationale
 rounds 3-4) is in `autoplay/CLAUDE.md` under **Scoring a fight without the
 food**.
 
+### Replaying a live stall offline
+
+`autoplay/tools/stage_walk_diag.py --raw FILE` records every tick's snapshot
+reads; `autoplay/tools/snapshot_replay.py` rebuilds any tick so the real
+pipeline can be run on it again without a host, and
+`autoplay/tools/jack_sim.py` plays the Jack engage against his model from such
+a recording. Recordings are local analysis output (~4 MB a second): never
+commit them. Round 4's props, hole and Jack stalemate were found this way
+(`autoplay/CLAUDE.md`, **Round 4: the bridge, its props and its Jack**).
+
 ### Testing against the twins, Mr. X, and Jack
 
 Score/tune commands and the ROM model + plan for each boss are documented in

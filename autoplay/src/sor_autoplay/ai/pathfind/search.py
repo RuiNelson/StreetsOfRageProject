@@ -14,7 +14,11 @@ then walk in. If those one or two legs are walkable and satisfy the same
 the A* prefix to this node plus those legs, and the search stops. A
 free-space start therefore comes out as Y then X even though a diagonal is
 shorter; a start boxed in still walks around with A* and only straightens
-once a node can see the goal that way. ``maximize_contact`` is stricter:
+once a node can see the goal that way. Only a search that ends without
+arriving at all then asks the other order, X then Y, from every node it
+expanded (``_best_xy_around``): the walk *around* a wall along the own lane,
+which a goal whose near side is out needs and a 10-node budget never reaches
+by A* (round 4's bridge props) -- so every route Y-then-X finds is unchanged. ``maximize_contact`` is stricter:
 the two legs have to line up flush, otherwise a corner clip would hide the
 around-the-crate walk the rest of A* is there to find.
 
@@ -341,6 +345,7 @@ def find_path(
     closest = origin
     closest_key = (start_h, 0.0)
     expanded = 0
+    expanded_nodes: list[tuple[tuple[int, int], float]] = []
     goal_node: tuple[int, int] | None = None
     goal_score = math.inf
     # When the search finishes by Y-then-X from an expanded node, this is
@@ -374,6 +379,7 @@ def find_path(
         cost = best_cost[node]
 
         expanded += 1
+        expanded_nodes.append((node, cost))
         nx = sx + node[0] * step_size
         ny = sy + node[1] * step_size
         ok, mis = arrival_at(nx, ny)
@@ -438,9 +444,19 @@ def find_path(
                 closest_key = key
                 closest = neighbour
 
+    xy_from: tuple[int, int] | None = None
+    if goal_node is None and arrivals:
+        around = _best_xy_around(lattice, expanded_nodes, arrivals, step)
+        if around is not None:
+            xy_from, goal_node = around
     end = goal_node if goal_node is not None else closest
     final = lattice.rect_at(end)
-    if yx_from is not None and goal_node is not None:
+    if xy_from is not None and goal_node is not None:
+        prefix = _reconstruct(came_from, origin, xy_from)
+        di = goal_node[0] - xy_from[0]
+        dj = goal_node[1] - xy_from[1]
+        steps = _merge(prefix, step) + _xy_steps(di, dj, step)
+    elif yx_from is not None and goal_node is not None:
         prefix = _reconstruct(came_from, origin, yx_from)
         di = goal_node[0] - yx_from[0]
         dj = goal_node[1] - yx_from[1]
@@ -600,6 +616,49 @@ def _best_yx_by_rows(
     if best_node is None:
         return None
     return best_node, best_misalignment
+
+
+def _best_xy_around(
+    lattice: Lattice,
+    expanded: list[tuple[tuple[int, int], float]],
+    arrivals: dict[tuple[int, int], float],
+    step: float,
+) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """The walk *around*: X along the node's own lane, then Y onto an arrival.
+
+    Only asked once the search has ended without arriving, so it never
+    changes a route the Y-then-X finish already finds. It exists for the
+    goal whose near side is out -- a strike pocket sitting in a pit, beside
+    a prop whose wall fills the lanes between: Y first walks into the wall
+    from every node a tick's budget reaches, while the far pocket is one
+    walk along the open lane and one step down. Recorded live on round 4
+    (both Blaze and Axel): a type-``$1D`` prop at (1816, 96) beside the
+    bridge's first hole, the actor rocking at x 1750-1778 on lane 62 for 60
+    s, then losing a life to the round clock.
+
+    Ranked as the Y-then-X finish is: route cost (A* prefix plus the two
+    legs), then misalignment, then the less-travelled Y. Returns the node the
+    legs start from and the arrival they end on.
+    """
+
+    best_key: tuple[float, float, int, int, int] | None = None
+    best: tuple[tuple[int, int], tuple[int, int]] | None = None
+    ranked = sorted(arrivals.items(), key=lambda item: (item[0][1], item[0][0]))
+    for node, cost in expanded:
+        i0, j0 = node
+        for (i, j), misalignment in ranked:
+            legs = abs(i - i0) + abs(j - j0)
+            key = (cost + step * legs, misalignment, abs(j - j0), j, i)
+            if best_key is not None and key >= best_key:
+                continue
+            corner = (i, j0)
+            if not _axis_clear(lattice, node, corner):
+                continue
+            if not _axis_clear(lattice, corner, (i, j)):
+                continue
+            best_key = key
+            best = (node, (i, j))
+    return best
 
 
 def _arrival_rows(
@@ -766,6 +825,17 @@ def _yx_steps(i: int, j: int, step: float) -> tuple[Step, ...]:
         steps.append(Step(Direction.UP if j < 0 else Direction.DOWN, abs(j) * step))
     if i:
         steps.append(Step(Direction.LEFT if i < 0 else Direction.RIGHT, abs(i) * step))
+    return tuple(steps)
+
+
+def _xy_steps(i: int, j: int, step: float) -> tuple[Step, ...]:
+    """The one or two vectors that walk to lattice node ``(i, j)``, X first."""
+
+    steps: list[Step] = []
+    if i:
+        steps.append(Step(Direction.LEFT if i < 0 else Direction.RIGHT, abs(i) * step))
+    if j:
+        steps.append(Step(Direction.UP if j < 0 else Direction.DOWN, abs(j) * step))
     return tuple(steps)
 
 

@@ -1455,6 +1455,111 @@ before). `tests/ai/test_execute.py`'s `_walk` now undoes a step into a prop's
 wall the way `$3BAE` does -- the facing kept -- which is what a trail
 through that nudge has to look like.
 
+**Round 4: the bridge, its props and its Jack** (user: "The [AI] doesn't
+handle well the stage 4": it "gets stuck on obstacles", "ignores many
+breakables (should not ignore them)", and "often (not always) gets stuck with
+a `Jack` enemy, in a stalemate situation where the enemy can't attack the AI,
+and the AI doesn't attack the enemy. Normally leading to a Timeout"; then,
+watching both live runs: "both Axel and Blaze are stuck"). Reproduced with
+`tools/stage_walk_diag.py --level 4` and **no sweep** (real waves -- every
+earlier round-4 measurement swept them), Blaze and Axel, and replayed offline
+from `--raw` recordings (`tools/snapshot_replay.py`). Five causes:
+
+- **Props beside a hole were dropped, or chased into it.** The bridge's
+  first hole runs x 1664-1800 (lanes 72-120) with a `$1B` prop 8 px left of
+  it at (1656, 96) and a `$1D` 16 px right of it at (1816, 96); the second
+  hole (2240-2344) has a `$1B` 24 px right of it at (2368, 104).
+  `could_open_breakable` asked `any_pit_endangers` of the prop's *origin*, so
+  the first two were never targeted, and the "ahead on the stage path" filter
+  wrote off every prop a fight had drifted the actor past while it was still
+  on screen: 6 of 9 opened. Both filters are now one question,
+  `decide._strike_stand_is_open`: is there a pocket either side -- the
+  strike's inner to outer edge, the punch's +-8 on the prop's body -- inside
+  the camera's walk clamp, outside every pit's danger zone **and every prop's
+  wall**, behind the actor or ahead of it (the camera never scrolls back; the
+  old limit cycle with `WalkToAdvanceStage` cannot return because advance is
+  withheld while such a prop is up). The wall clause matters at (2368, 104):
+  the hole's danger zone ends at 2352 and the prop's own wall starts at 2332.
+- **The approach could not walk round the prop.** With the near pocket in
+  the hole and the prop's wall over the lanes between, every Y-then-X finish a
+  10-node search reaches walks into the wall; the route never arrived and the
+  straight-line fallback pushed into the hole's margin, the pit escape pushed
+  back, and the actor rocked at x 1750-1810 until the round clock took a life
+  -- Blaze and Axel alike, three lives and the game. `pathfind/search.py`
+  now asks the X-then-Y finish (`_best_xy_around`: along the own lane, then
+  onto an arrival) from every expanded node, **only once a search has ended
+  without arriving**, so every route Y-then-X finds is unchanged.
+- **Standing on the prop, the tie-break picked the side in the hole.**
+  `OpenBreakable` within `DIRECTION_HYSTERESIS_X` of a prop routes to the side
+  the stage direction names (fixed, so it cannot oscillate);
+  `execute._breakable_tie_side` keeps that unless the path finder cannot
+  arrive there and can on the other side -- also fixed while the prop and
+  hole are.
+- **The pit escape ignored a hole whose centre was past the walk clamp.**
+  `_movement_mask`'s pit dodge filtered pits by their *centre* in the camera
+  range; with the clamp ending at 2272 the second hole's centre (2292) was
+  out, so the escape's walk to the far side came back as plain RIGHT and
+  `EngageJack`'s stick walked Axel into the hole. It tests the footprint now.
+  And the Jack lookahead itself steps round holes (`jack._step_clear_of_holes`,
+  `World.holes`: a rollout step into a hole's danger zone is undone, as
+  `grunt_plan` already undoes one into a prop, wall or pit), fed only the
+  holes within `JACK_HOLE_REACH_X` of the actor so the tick cost stays put.
+- **The Jack stalemate was his `$07` resetting off screen.** Round 4's `$07`
+  always dodges up (lane <= 24), the camera sits held at the wave gate, and
+  the actor waits below his band (from below the pocket is out -- see the Jack
+  section). His reset comes 80 px past the actor; standing at the screen's
+  edge put it off screen, `$0C`'s entry test failed and he went straight back
+  into `$07` -- 30-35 s of it at lane 22, twice, until the round clock took a
+  life (Axel, live). Two leaks let the actor drift there: `_evade_exit`'s
+  "out of reach, walking on: stand" stood wherever it was, and a rollout ending
+  past his reset scored the edge as free. Both now hold it inside
+  `EVADE_CENTRE` (`_evade_wait_x`, `_evade_window_cost`). That moved the loop
+  one leg on: `$0C` -> `$08` (to lane 8 or 56) -> `$0A`, whose back-off walks
+  away from the actor until within 8 lanes of its lane, ran off screen too
+  with the actor 40-60 lanes from his set-up lane. So in `$08`-`$0A`, 64+ px
+  away on X, the actor waits on the lane out of his juggle next to his
+  set-up lane (the pocket 13 above it, or 30 below): the back-off is short and
+  ends on screen in the aligned throw the plan already answers.
+
+The Jack changes were chosen offline: `tools/jack_sim.py` plays
+`jack.plan_world` (the plan, split from `plan_engage` for this) against the
+model from every 60th tick of the recorded stalemate, 1500 updates each (52
+seeds):
+
+| aim in his `$07`/`$08`-`$0A` | ideal timing: hold / hit / stalemate | one update late |
+| --- | --- | --- |
+| before | 37 / 3 / 12 | 24 / 12 / 16 |
+| climb to the pocket from below when 72+ px off (live too: a 30 s stalemate; reverted) | 32 / 11 / 9 | 16 / 27 / 9 |
+| mid-screen window only | 31 / 3 / 18 | 13 / 1 / 38 |
+| **+ the lane next to his set-up lane (shipped)** | 34 / 14 / 4 | 32 / 18 / 2 |
+
+More hits in the sim, far fewer stalemates: a stalemate costs a life to the
+round clock (80), a hit 12. Live, below, the shipped plan took no axe hit.
+
+Live, `stage_walk_diag.py --level 4` with the waves alive (turbo 2, no food,
+no police):
+
+| code | runs | Bongo | lives lost | props opened | notes |
+| --- | --- | --- | --- | --- | --- |
+| before | Blaze x2, Axel | 1 of 3, 125 s | 1 each in the two others, still frozen when stopped | 6/9 | frozen at (1816, 96) |
+| prop filters + X-then-Y finish | Blaze, Axel | 0 of 2 | 3 each, game over | -- | the tie-break's side in the hole |
+| + tie-break | Blaze, Axel | 2 of 2, 138 / 182 s | 0 / 1 | 9 | Axel: Jack stalemate, the clock; a 30 s stall at a Signal behind the (2592, 48) props |
+| + Jack aim | Axel x2, Blaze x2 | 4 of 4, 118-137 s | 0, 0, 1 (damage), 1 (the pit) | 9/9 each | Axel walked into the second hole under `EngageJack` |
+| + pit escape footprint, Jack rollouts round holes | Axel x3, Blaze x2 | 5 of 5, 121-133 s | **0** | 8-9 | Jack dead 12-22 s after he appeared, no axe hit; a prop left only when a fight scrolled the camera past it |
+
+Elsewhere, with the Jack aim in: `jack_fight.py --level 2` 82 s, one hit, no
+life (the table above: 81-112 s); `--level 5` 111 s, one hit (not his), no
+life (93-132 s); `--level 4` (swept) Bongo in 70 s, no hit -- the prop
+filters alone had stalled this run two round clocks at (2368, 104). Swept
+walks: round 1 Antonio in 49 s, 7/7 booths; round 3 Abadede in 58 s, 4/4
+props; round 6 unchanged against the baseline worktree run beside it (six
+press hits each, all under `WalkToAdvanceStage`, and the same Souther-pair
+losses -- not this change's; **Round 6: the factory floor**'s one run had
+none). Not measured: the Signal-behind-props stall (once, 30 s, recording
+lost; `grunt.py` does not model an enemy blocked by a prop wall). The Jack
+plan's tick is ~2.5 ms median on these recordings, as before (2.4); over the
+2 ms budget before this change too.
+
 **Mr. X: the ROM model and the plan** (user: "Agora fazer o mesmo tipo de
 optimização, mas para o boss Mr. X (o último nível). A estratégia das Twins já
 não serve, é claro. O Mr X está no fim do último nível, um nível bastante
@@ -1833,7 +1938,13 @@ every Jack and axe byte per tick, and a hit names the axe from the player's
   `hold_is_burnt` called that hold clean;
 - at a camera bound the finisher's landing side matters: cross over and
   suplex threw a round-5 Jack past the right bound, and his jumps kept him
-  out of reach for 30 s.
+  out of reach for 30 s;
+- a `$07` reset or a `$0A` back-off that ends off screen puts him straight
+  back in `$07`: with the waves alive in round 4 the actor drifted to the
+  screen's edge and waited 40-60 lanes from his set-up lane, and he cycled
+  for 30 s until the round clock ran out. The wait now stays inside
+  `EVADE_CENTRE`, and in `$08`-`$0A` it takes the lane next to his set-up lane
+  (**Round 4: the bridge, its props and its Jack**).
 
 **EngageJack ignored closer, more imminent enemies** (user, in Portuguese:
 "A IA dá muita prioridade ao EngageJack, mesmo quando tem muitos mais outros
@@ -2548,7 +2659,7 @@ do not commit `.jsonl` runs.
 | `mr_x_lab.py` | **Records, and checks the model against,** Mr. X in lockstep: the real pipeline walks round 8 with `--kill-until-mr-x`, then one of four actors plays a frame at a time -- `engage` (the real pipeline), `hold` (a scripted knee/release loop), `wander` or `stand` -- and every frame's row carries the input, the camera, a census, and the raw bytes of the player, him, his bullets and every Garcia. `--check FILE` replays it through `mr_x.check_recording` (and the Garcias through `garcia.check_recording`) |
 | `mr_x_sim.py` | **Plays the approach to Mr. X offline**, `mr_x_plan.plan` against `mr_x.py` and `garcia.py`, from a lab recording's frame with the actor shifted around (`--starts N`, seeded), `twins_sim.py`'s timing; per start the first hold (marked `burnt` when a Garcia's blow reaches the holder before a knee is spent), the first hit, a Garcia held, punches and chords. `--replay FILE --at T` runs the plan on one row of a `boss_fight.py` recording (its raw slots) and prints every program's worst and mean -- why the live pipeline did what it did |
 | `hakuro_emerge_diag.py` | **Traces** round 5's wave-3 HakuRo group tick by tick while the real pipeline plays, with every other ordinary family swept (`--only-enemy hakuro`): every HakuRo's raw type/position/elevation/state/health/animation, the winning verb and its target, and the wave counter, all to JSONL; stops the instant `level_index` leaves round 5, on a wave past the target, on a wall-clock backstop past the target wave, or a hard overall backstop -- see **HakuRo: rising from below deck**. Found the camera-gated freeze (`world_z` pinned bit-exact for 30+s) that `reach.enemy_still_emerging` now excludes from targeting |
-| `stage_walk_diag.py` | **Traces** a round's stage walk tick by tick (`--level`, 6 by default; `--only-enemy FAMILY` or `--kill-street-enemies`), for stalls with nothing on screen: the actor's position, height, action and velocities, the mask the pad holds, the winning verb and whether its route arrived, the camera and its scroll bounds (`$FFE01A`/`$FFE01E`), the class under the actor, pits and walls, the round clock, the time-over byte and a census of every object slot; the class map (lane-band rows only -- more runs into `$FFB800`) is written as its own row whenever it changes. Runs past a mid-round boss unless `--stop-at-boss`. Found round 6's housings, belts and presses (**Round 6: the factory floor**) |
+| `stage_walk_diag.py` | **Traces** a round's stage walk tick by tick (`--level`, 6 by default; `--only-enemy FAMILY` or `--kill-street-enemies`), for stalls with nothing on screen: the actor's position, height, action and velocities, the mask the pad holds, the winning verb and whether its route arrived, the camera and its scroll bounds (`$FFE01A`/`$FFE01E`), the class under the actor, pits and walls, the round clock, the time-over byte and a census of every object slot; the class map (lane-band rows only -- more runs into `$FFB800`) is written as its own row whenever it changes. Runs past a mid-round boss unless `--stop-at-boss`. `--raw FILE` also records every tick's snapshot reads (`snapshot_replay.py`), and each row names the winning verb's `target`. Found round 6's housings, belts and presses (**Round 6: the factory floor**) and round 4's props, hole and Jack loop (**Round 4: the bridge, its props and its Jack**) |
 | `antonio_diag.py` | **Explains** a round-1 fight tick by tick: every candidate `Verb` with its own emergency, the actor's hold state (`+$4C` link and the action byte behind it), every byte of Antonio's AI state that `ai/antonio.py` replays (primary, tactical, `+$78`, `+$5C`, screen X, animation frame, countdown and latched box ids, velocities, 16.16 position), `antonio.kick_gate_open`, and `antonio.plan_engage`'s stick, mode and predicted outcome. First written for, and found, the front-hold stall in **Holding a boss** above |
 | `antonio_lab.py` | **Lockstep lab** for round 1: plays to Antonio in real time, then steps the host one frame at a time with the real `AgentLoop` ticking every two frames (its pad recorded and replayed through `step_input`), and on every frame his object updates replays `antonio.boss_update` from the previous frame's work RAM and compares every field -- position, lane, primary, tactical, both timers, both velocities, animation, countdown, latched boxes, screen X -- the same for every boomerang of his while it flies (his linked one by his `+$6E`, older ones by slot), plus the contact outcome against the player's own `+$7C`. `--actor wander` swaps the pipeline for a seeded walk that never attacks, to run the model through all of his states; `--input-delay` adds latency. Scores the fight too (hits, holds, kicks started) |
 | `bongo_lab.py` | **Lockstep lab** for round 4, `antonio_lab.py`'s shape: the real pipeline plays to Bongo, then every frame his object updates is checked against `bongo.boss_update` field by field -- position, lane, primary, tactical, `+$68`, `+$79`, both velocities, the animation, its countdown, the latched boxes, screen X -- and his flame (`$97`) the same while it exists, plus the contact outcome against the player's `+$7C` (3 grab, 1 flame hit). `--actor wander` walks a seeded path that never attacks, to run the model through every state; rows also carry the other enemies alive (how the round's grunt was identified) |
@@ -2559,6 +2670,8 @@ do not commit `.jsonl` runs.
 | `souther_pair_check.py` | **Checks** `souther_pair.update`, the replay of Souther's state 1 the pair plan asks about the free one, against `boss_fight.py --level 6` recordings: every Souther in primary 1 rebuilt from a row's raw slot, one update run against P1 (taken from that row and from the next, since a poll can land on either side of the player's update), and primary, tactical, `+$1C` and `+$20` compared with the row one object update (two frames) later -- see **Round 6: the Souther pair** |
 | `souther_hold_lab.py` | **Lockstep lab** for the Souther hold loop: the AI plays to its first hold, then the host steps one frame at a time through scripted experiments (`--experiments`, comma-separated, one fresh hold each: `release_regrab`, `release_loop`, `second_crossover`, `throw`, `suplex`), logging both bodies' bytes every frame; `--regrab-delay` injects input latency into the walk back in. Sweeps the street families itself every 30 frames, since lockstep stops the ordinary sweep. It measured the release countdown, the one-crossover rule and the re-grab timing `souther.py` is built on |
 | `round2_death_diag.py` | **Traces** a whole round-2 run tick by tick (`--trace`) and stops the moment the game leaves the level for the title, which is what four lost measurement runs actually were: not the AI dying but the **console resetting**, caused by the debug sweep writing a death into an object slot that was still spawning (fixed host-side -- see `StreetsOfRageRecompilation/CLAUDE.md`). Records every `Pit` with `reach.pit_endangers` per tick, which is how the pit theory was ruled out: round 2 has none |
+| `snapshot_replay.py` | **Records and replays** the reads `read_snapshot` makes: `RecordingSource` wraps the client, `SnapshotRecorder` writes the ROM tables once and each tick's changed reads as JSONL, and `ReplaySource`/`iter_ticks`/`load_rom` rebuild any tick's `GameSnapshot` offline -- the real `AgentLoop`, or any `decide`/`priority`/`execute` function, run again on a live stall as often as the question needs. Used by `stage_walk_diag.py --raw` and `jack_sim.py`; recordings run ~4 MB a second, local only |
+| `jack_sim.py` | **Plays the Jack engage offline**: every `--every`th tick with a Jack in a `--raw` recording (`--from`/`--to`) seeds `jack.plan_world` against `jack.py`'s model, update by update, until he is held, the actor is hit or `--updates` run out (a stalemate); `--timing ideal|fixed|jitter`. Found round 4's off-screen reset loop (**Round 4: the bridge, its props and its Jack**) |
 | `breakable_diag.py` | Breakable stalls, per tick while a `Breakable` is in context. Round 1 by default, with **real** enemies (the sweep did not reproduce that stall); `--level N` jumps to a round first, `--sweep` keeps the ordinary families swept (the walk `scripts/go_to_boss` and the boss harnesses make -- how the round-4 stall was reproduced), `--heartbeat-s` logs a position row that often with no breakable around (so a stall anywhere shows), `--until-boss` stops at the boss |
 | `armed_combat_diag.py` | Held-weapon reach and swing timing |
 

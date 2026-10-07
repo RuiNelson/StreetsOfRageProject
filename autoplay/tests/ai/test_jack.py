@@ -401,6 +401,42 @@ class AimTests(unittest.TestCase):
         _, _, aim_y = self._aim(_actor(2850, 60), jack)
         self.assertEqual(aim_y, 60)
 
+    def test_walking_away_out_of_reach_it_stands_where_his_reset_stays_on_screen(self) -> None:
+        # Round 4, Axel, live: standing at the camera's edge, he reset 80 px
+        # past the actor -- off screen -- and $0C put him straight back in
+        # $07, for 30 s, until the round clock took a life.
+        jack = _jack_sim(CAM_X + 330, 22, left=False, state=J.ST_EVADE, flags=0x03, vx=3.0, juggle=False)
+        actor = _actor(CAM_X + 270, 46)
+        actor.x_lo, actor.x_hi = float(CAM_X + 32), float(CAM_X + 288)
+        _, aim_x, _ = J.engage_aim(actor, _world(jack), 0)
+        self.assertEqual(aim_x, CAM_X + J.EVADE_CENTRE[1])
+        self.assertLess(aim_x + J.EVADE_PAST_DX, CAM_X + 320)
+
+    def test_in_his_dodge_ending_off_the_middle_of_the_screen_costs(self) -> None:
+        jack = _jack_sim(CAM_X + 100, 22, left=False, state=J.ST_EVADE, flags=0x03, vx=3.0)
+        world = _world(jack)
+        mid = J._evade_window_cost(world, _actor(CAM_X + 160, 50), 0)
+        edge = J._evade_window_cost(world, _actor(CAM_X + 270, 50), 0)
+        self.assertEqual(mid, 0.0)
+        self.assertGreater(edge, 0.0)
+        jack.state = J.ST_APPROACH
+        self.assertEqual(J._evade_window_cost(world, _actor(CAM_X + 270, 50), 0), 0.0)
+
+    def test_on_his_way_to_the_throw_it_waits_next_to_his_set_up_lane(self) -> None:
+        # $08 to lane 8 (the actor below 32): the band below it, not 40-60
+        # lanes further down, so his $0A back-off is short and ends on screen.
+        high = _jack_sim(2800, 30, left=True, state=J.ST_LANE_SETUP, aim_y=J.LANE_SETUP_HIGH)
+        _, aim_x, aim_y = self._aim(_actor(2700, 70), high)
+        self.assertEqual((aim_x, aim_y), (2700, J.LANE_SETUP_HIGH + J.BELOW_DY))
+        # $08 to lane 56: the pocket above it.
+        low = _jack_sim(2800, 40, left=True, state=J.ST_LANE_SETUP, aim_y=J.LANE_SETUP_LOW)
+        _, _, aim_y = self._aim(_actor(2700, 20), low)
+        self.assertEqual(aim_y, J.LANE_SETUP_LOW - J.POCKET_DY)
+        # In the juggle's reach on X the old aim stands.
+        near = _jack_sim(2800, 30, left=True, state=J.ST_LANE_SETUP, aim_y=J.LANE_SETUP_HIGH)
+        _, aim_x, aim_y = self._aim(_actor(2760, 70), near)
+        self.assertNotEqual((aim_x, aim_y), (2760, J.LANE_SETUP_HIGH + J.BELOW_DY))
+
     def test_pinned_out_of_reach_in_his_dodge_it_steps_80_px_behind_his_walk(self) -> None:
         jack = _jack_sim(5390, 23, left=True, state=J.ST_EVADE, flags=0x03, vx=3.0, juggle=False)
         actor = _actor(5344, 41)
@@ -408,14 +444,17 @@ class AimTests(unittest.TestCase):
         _, aim_x, _ = J.engage_aim(actor, _world(jack), 0)
         self.assertLessEqual(aim_x + J.EVADE_PAST_DX, 5390)
 
-    def test_walking_away_out_of_reach_in_his_dodge_it_stands(self) -> None:
+    def test_walking_away_out_of_reach_in_his_dodge_it_does_not_follow(self) -> None:
         # Traced live: going after the exit point kept the actor ~70 px behind
-        # him, inside the 80 his reset needs.
+        # him, inside the 80 his reset needs. Standing where it was (cam + 60)
+        # put that reset at cam - 20, off screen, back into $07: it waits
+        # mid-screen instead, further from him.
         jack = _jack_sim(2690, 22, left=False, state=J.ST_EVADE, flags=0x07, vx=-4.0, juggle=False)
         actor = _actor(2760, 46)
         actor.x_lo = 2732.0
         _, aim_x, _ = J.engage_aim(actor, _world(jack), 0)
-        self.assertEqual(aim_x, 2760)
+        self.assertEqual(aim_x, CAM_X + J.EVADE_CENTRE[0])
+        self.assertGreaterEqual(aim_x - J.EVADE_PAST_DX, CAM_X)
 
     def test_walking_back_into_reach_in_his_dodge_it_waits(self) -> None:
         jack = _jack_sim(2690, 91, left=False, state=J.ST_EVADE, flags=0x03, vx=3.0, juggle=False)
@@ -638,3 +677,38 @@ class HoldStepTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HoleTests(unittest.TestCase):
+    """The lookahead's own steps stay out of floor holes (round 4's bridge)."""
+
+    HOLE = (2232.0, 2352.0, 64.0, 128.0)  # (2240, 72, 104, 48) and the 8 px margin
+
+    def test_a_step_into_a_hole_is_undone(self) -> None:
+        world = _world(_jack_sim(2400, 73))
+        world.holes = (self.HOLE,)
+        actor = _actor(2229, 73)
+        J._step_clear_of_holes(actor, world, 1, 0)
+        self.assertEqual((actor.x, actor.y), (2229.0, 73.0))
+        J._step_clear_of_holes(actor, world, 0, -1)
+        self.assertLess(actor.y, 73.0)
+
+    def test_a_step_out_of_one_is_not(self) -> None:
+        world = _world(_jack_sim(2400, 73))
+        world.holes = (self.HOLE,)
+        actor = _actor(2240, 70)
+        J._step_clear_of_holes(actor, world, 0, -1)
+        self.assertLess(actor.y, 70.0)
+
+    def test_the_plan_does_not_walk_into_the_hole_between_it_and_him(self) -> None:
+        # Live (Axel): RIGHT along lane 73 into the hole, toward a Jack past it.
+        jack = _jack_sim(2380, 60, left=True, state=J.ST_LANE_SETUP, juggle=False, aim_y=J.LANE_SETUP_HIGH)
+        world = _world(jack)
+        world.holes = (self.HOLE,)
+        actor = _actor(2229, 73)
+        for _ in range(20):
+            plan = J.plan_world(world.copy(), actor.copy(), spec=None)
+            J._step_clear_of_holes(actor, world, plan.dir_x, plan.dir_y)
+            x0, x1, y0, y1 = self.HOLE
+            self.assertFalse(x0 <= actor.x <= x1 and y0 <= actor.y <= y1, (actor.x, actor.y))
+

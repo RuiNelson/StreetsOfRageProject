@@ -244,6 +244,61 @@ class FinishAimTests(unittest.TestCase):
         self.assertGreater(checked, 1000)
 
 
+class AroundFinishTests(unittest.TestCase):
+    """The X-then-Y finish, asked only once a search has ended without
+    arriving: walk along the own lane past a wall, then step onto the goal.
+
+    Round 4's bridge (both Blaze and Axel, live): a prop beside the first
+    hole, its near pocket in the hole and its wall over the lanes between,
+    so every Y-then-X finish a 10-node budget reaches walks into the wall or
+    the hole. The actor rocked in front of it until the round clock took a
+    life.
+    """
+
+    def scene(self, **kwargs):
+        hole = Rect(60, 64, 64, 48)
+        wall = Rect(124, 60, 48, 40)
+        goal = RegionGoal((Rect(100, 72, 16, 16), Rect(176, 72, 16, 16)), axis="y")
+        path = plan(
+            start=Rect(40, 36, 16, 16),
+            goal=goal,
+            obstacles=[hole, wall],
+            step=4,
+            max_nodes=10,
+            **kwargs,
+        )
+        return path, (hole, wall)
+
+    def test_a_far_pocket_past_a_wall_is_walked_round_to(self) -> None:
+        path, obstacles = self.scene()
+
+        self.assertTrue(path.reached)
+        self.assertEqual(path.steps[-1].direction, Direction.DOWN)
+        self.assertIn(Direction.RIGHT, [step.direction for step in path.steps])
+        for rect in path.positions():
+            for obstacle in obstacles:
+                self.assertFalse(rect.overlaps(obstacle))
+
+    def test_also_under_maximize_contact(self) -> None:
+        path, _ = self.scene(maximize_contact=True)
+
+        self.assertTrue(path.reached)
+
+    def test_a_route_y_then_x_already_finds_is_left_as_it_was(self) -> None:
+        # Open floor: the lane first, then the walk in, as before.
+        path = plan(
+            start=Rect(40, 36, 16, 16),
+            goal=RegionGoal.of(Rect(200, 72, 16, 16), axis="y"),
+            step=4,
+            max_nodes=10,
+        )
+
+        self.assertTrue(path.reached)
+        self.assertEqual(
+            [step.direction for step in path.steps], [Direction.DOWN, Direction.RIGHT]
+        )
+
+
 class ObstacleTests(unittest.TestCase):
     def test_the_body_walks_around_an_obstacle_instead_of_through_it(self) -> None:
         wall = Rect(48, 0, 16, 64)

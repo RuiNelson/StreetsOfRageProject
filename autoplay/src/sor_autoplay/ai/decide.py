@@ -19,6 +19,7 @@ from . import press as press_model
 from .. import prop_solids
 from ..memory_map import ACTION_HOLD_CROSSOVER
 from ..phases import CombatPhase, is_dangerous
+from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN, lane_y_max_for_level
 from . import (
     abadede as abadede_plan,
     garcia as garcia_model,
@@ -139,11 +140,6 @@ BREAKABLE_APPROACH_Y = 16
 # comes to rest short of the exact position it aimed at. See
 # ``breakable_smash_outer_x``.
 SMASH_WALL_CLEARANCE_X = 8
-# How far past a prop the actor can step and still treat it as "ahead" on
-# the stage path. Without this slack, one pixel past the origin dropped
-# OpenBreakable and handed the tick to WalkToAdvanceStage, which walked
-# straight back into the crate -- the two verbs flipping every few ticks.
-BREAKABLE_AHEAD_SLACK = 8
 # A held bat/pipe swing ($48) connects near its peak, not in the hand. The
 # weapon is its own object, and its origin runs from the hand (w_x-p_x = 6)
 # out to the peak: 36px for Axel (weapons-range-and-damage.md §5), 53px for
@@ -1064,27 +1060,85 @@ def could_projectile_sidestep(context: Context) -> Context:
     return verbs
 
 
-def _ahead_on_stage_path(stage: Stage | None, actor_x: int, target_x: int) -> bool:
-    """Whether ``target_x`` still sits on the way to stage progress.
+def _strike_stand_is_open(
+    context: Context, actor: PlayableCharacter, prop: Breakable, camera: CameraRange | None
+) -> bool:
+    """Is there somewhere beside ``prop`` the actor may stand and hit it?
+
+    A side pocket on either side, from the strike's inner edge out to its
+    outer one (``in_smash_range``'s own band), on the prop's lanes within the
+    punch's +-8: some position in it must lie inside the camera's walk clamp
+    and the lane band and outside every pit's danger zone. The question used
+    to be asked of the prop's *origin* -- in the camera, not near a pit --
+    and on round 4's bridge that dropped props whose near side is a hole and
+    whose far side is open floor: (1656, 96) sits 8 px left of the first
+    hole and (1816, 96) 16 px right of it, and the AI walked past both every
+    run. A prop whose every pocket is in a hole, or past the clamp, is the
+    one that is really out of reach -- and since a reachable prop holds back
+    stage advance (``_advance_blocking_breakables``), saying "reachable" of
+    one that is not would be a stall.
+    """
+
+    inner = breakable_strike_inner_x(actor, prop)
+    outer = breakable_smash_outer_x(prop)
+    stage = find(context, Stage)
+    lane_max = lane_y_max_for_level(stage.level_index) if stage is not None else LANE_Y_MAX_DEFAULT
+    # in_smash_range's own lane test: the punch's +-8 on the prop's body.
+    box = prop.hitbox
+    if box is not None and not box.is_degenerate:
+        lanes = range(int(box.y0) - BREAKABLE_PUNCH_Y + 1, int(box.y1) + BREAKABLE_PUNCH_Y, 2)
+    else:
+        lanes = range(prop.world_y - BREAKABLE_PUNCH_Y, prop.world_y + BREAKABLE_PUNCH_Y + 1, 2)
+    lanes = [y for y in lanes if LANE_Y_MIN <= y <= lane_max]
+    # A stand point inside a prop's wall -- this one's, or a neighbour's --
+    # is one $3BAE never lets the actor reach: round 4's (2368, 104) has the
+    # hole's danger zone ending at 2352 and its own wall starting at 2332, so
+    # the left pocket that cleared the hole was all wall, and the actor stood
+    # over it for two round clocks.
+    walls = [
+        prop_solids.solid_box(other.type_id, other.world_x, other.world_y)
+        for other in find_all(context, Breakable)
+    ]
+    for sign in (-1, 1):
+        for dx in range(inner, outer + 1, 2):
+            x = prop.world_x + sign * dx
+            if camera is not None and not (camera.left <= x <= camera.right):
+                continue
+            for y in lanes:
+                if any(wall.blocks(x, y) for wall in walls):
+                    continue
+                if not reach.any_pit_endangers(context, x, y):
+                    return True
+    return False
+
+
+def _openable_breakables(context: Context, actor: PlayableCharacter) -> list[Breakable]:
+    """Every intact prop the actor can still break: on either side of it.
 
     Shared by ``could_open_breakable`` (which props to walk to) and
     ``_advance_blocking_breakables`` (which props hold back stage advance)
-    so the two cannot disagree about the same crate. No stage, or a stage
-    with no lateral direction, means every X is a candidate -- there is
-    nothing to be "behind".
+    so the two cannot disagree about the same crate. No longer "ahead on the
+    stage path" only (user: the AI "ignores many breakables (should not
+    ignore them)"): a fight drifts the actor past props, and the old filter
+    then wrote them off while they were still on screen -- round 4's swept
+    walks left four of its eleven props intact. The camera never scrolls
+    back, so a prop is lost for good once it leaves it; while it is in reach
+    it is opened, behind or not. The flip this filter once guarded against
+    (``WalkToAdvanceStage`` walking back into a crate ``OpenBreakable`` had
+    just let go of) cannot return: advance is withheld while any prop this
+    returns is up.
     """
 
-    if stage is None or stage.direction == "none":
-        return True
-    if stage.direction == "right":
-        return target_x >= actor_x - BREAKABLE_AHEAD_SLACK
-    if stage.direction == "left":
-        return target_x <= actor_x + BREAKABLE_AHEAD_SLACK
-    return True
+    camera = find(context, CameraRange)
+    return [
+        prop
+        for prop in find_all(context, Breakable)
+        if _strike_stand_is_open(context, actor, prop, camera)
+    ]
 
 
 def _advance_blocking_breakables(context: Context) -> list[Breakable]:
-    """On-camera breakables sitting on the stage path.
+    """On-camera breakables the actor can still open.
 
     A Breakable blocks lateral progress until destroyed. WalkToAdvanceStage
     walking into one, then OpenBreakable walking back (or around) to smash
@@ -1097,25 +1151,14 @@ def _advance_blocking_breakables(context: Context) -> list[Breakable]:
     return, but this gate still refuses to produce the verb next to
     OpenBreakable.
 
-    Same camera and pit filters as ``could_open_breakable``, so a crate
-    this refuses to walk to cannot hold back advance either.
+    The same filter as ``could_open_breakable`` (``_openable_breakables``),
+    so a crate this refuses to walk to cannot hold back advance either.
     """
 
-    stage = find(context, Stage)
-    camera = find(context, CameraRange)
     actors = _actors(context)
     if not actors:
         return []
-    actor = actors[0]
-    blocking: list[Breakable] = []
-    for prop in find_all(context, Breakable):
-        if camera is not None and not reach.in_camera(camera, prop.world_x, prop.world_y):
-            continue
-        if reach.any_pit_endangers(context, prop.world_x, prop.world_y):
-            continue
-        if _ahead_on_stage_path(stage, actor.world_x, prop.world_x):
-            blocking.append(prop)
-    return blocking
+    return _openable_breakables(context, actors[0])
 
 
 def _advance_blocking_enemies(context: Context) -> list[Enemy]:
@@ -2475,16 +2518,7 @@ def could_open_breakable(context: Context) -> Context:
     """
 
     verbs: set[Token] = set()
-    stage = find(context, Stage)
-    camera = find(context, CameraRange)
-    breakables = find_all(context, Breakable)
-    if camera is not None:
-        breakables = [b for b in breakables if reach.in_camera(camera, b.world_x, b.world_y)]
-    # Never walk toward a target sitting in a pit's danger zone.
-    breakables = [
-        b for b in breakables if not reach.any_pit_endangers(context, b.world_x, b.world_y)
-    ]
-    if not breakables:
+    if not find_all(context, Breakable):
         return verbs
     for actor in _actors(context):
         if _blocked(context, actor):
@@ -2493,16 +2527,10 @@ def could_open_breakable(context: Context) -> Context:
             continue
         if _is_holding_enemy(actor):
             continue
-        # Ahead on the stage path -- never a crate already behind, which
-        # used to be the ``if not ahead: ahead = breakables`` fallback and
-        # made the actor turn around after walking past one. A prop already
-        # within smash range is still worth the B press on either side.
-        candidates = {
-            b.slot: b
-            for b in breakables
-            if _ahead_on_stage_path(stage, actor.world_x, b.world_x)
-        }
-        candidates.update({b.slot: b for b in breakables if in_smash_range(actor, b)})
+        # Every prop with an open pocket on either side, behind the actor or
+        # ahead (``_openable_breakables``), plus one already in smash range.
+        candidates = {b.slot: b for b in _openable_breakables(context, actor)}
+        candidates.update({b.slot: b for b in find_all(context, Breakable) if in_smash_range(actor, b)})
         # One candidate per reachable breakable -- priority.py's distance-
         # scored emergency picks the closest one.
         for prop in candidates.values():

@@ -1152,14 +1152,23 @@ class CouldWalkToAdvanceStageTests(unittest.TestCase):
 
         self.assertEqual(could_walk_to_advance_stage(context), set())
 
-    def test_fires_when_the_only_breakable_is_already_behind(self) -> None:
-        # A crate the actor has already walked past must not hold back
-        # advance -- otherwise every smashed-or-passed prop turns the
-        # actor around.
+    def test_withheld_while_a_passed_breakable_is_still_on_screen(self) -> None:
+        # User: the AI "ignores many breakables (should not ignore them)".
+        # A crate the actor has walked past is still on screen, and the
+        # camera never scrolls back for it: it is opened before advancing.
         myself = make_myself(world_x=200, world_y=100)
         camera = CameraRange(left=0, right=400, top=0, bottom=200)
         stage = Stage(level_index=0, direction="right")
         prop = Breakable(slot="obj09", world_x=100, world_y=100, type_id=0x40)
+        context: set[Token] = {myself, camera, stage, prop}
+
+        self.assertEqual(could_walk_to_advance_stage(context), set())
+
+    def test_fires_once_the_passed_breakable_has_left_the_camera(self) -> None:
+        myself = make_myself(world_x=200, world_y=100)
+        camera = CameraRange(left=150, right=400, top=0, bottom=200)
+        stage = Stage(level_index=0, direction="right")
+        prop = Breakable(slot="obj09", world_x=60, world_y=100, type_id=0x40)
         context: set[Token] = {myself, camera, stage, prop}
 
         self.assertEqual(
@@ -1399,12 +1408,12 @@ class CouldCatchUpPartnerTests(unittest.TestCase):
         self.assertEqual(advance, set())
         self.assertEqual(catch_up, set())
 
-    def test_a_breakable_already_behind_does_not(self) -> None:
+    def test_a_breakable_already_off_camera_does_not(self) -> None:
         context = {
             make_myself(world_x=200),
             make_partner(world_x=400),
-            CameraRange(left=0, right=500, top=0, bottom=200),
-            Breakable(slot="obj09", world_x=100, world_y=100, type_id=0x40),
+            CameraRange(left=150, right=500, top=0, bottom=200),
+            Breakable(slot="obj09", world_x=60, world_y=100, type_id=0x40),
             self.RIGHT_STAGE,
         }
 
@@ -2544,13 +2553,43 @@ class CouldOpenBreakableTests(unittest.TestCase):
         )
 
     def test_never_targets_a_breakable_sitting_in_a_pit(self) -> None:
-        myself = make_myself(world_x=0, world_y=0)
+        # Every pocket either side of it is in the hole's danger zone.
+        myself = make_myself(world_x=0, world_y=40)
         camera = CameraRange(left=-50, right=200, top=-50, bottom=200)
-        prop = Breakable(slot="obj09", world_x=60, world_y=0, type_id=0x40)
-        pit = Pit(world_x=50, lane_y=-10, width=20, height=20)
+        prop = Breakable(slot="obj09", world_x=60, world_y=40, type_id=0x40)
+        pit = Pit(world_x=10, lane_y=20, width=100, height=40)
         context: set[Token] = {myself, camera, prop, pit}
 
         self.assertEqual(could_open_breakable(context), set())
+
+    def test_targets_a_breakable_beside_a_pit_from_its_open_side(self) -> None:
+        # Round 4's bridge: a $1D prop at (1816, 96) 16 px right of the first
+        # hole (x 1664-1800, lanes 72-120). Its left pocket is in the hole,
+        # its right one open floor -- reachable, so it is opened.
+        myself = make_myself(world_x=1752, world_y=62)
+        camera = CameraRange(left=1746, right=2002, top=2, bottom=112)
+        stage = Stage(level_index=3, direction="right")
+        prop = Breakable(slot="obj06", world_x=1816, world_y=96, type_id=0x1D)
+        pit = Pit(world_x=1664, lane_y=72, width=136, height=48)
+        context: set[Token] = {myself, camera, stage, prop, pit}
+
+        self.assertEqual(
+            could_open_breakable(context), {OpenBreakable(actor_slot="P1", target_slot="obj06")}
+        )
+
+    def test_goes_back_for_a_breakable_already_behind(self) -> None:
+        # User: the AI "ignores many breakables (should not ignore them)".
+        # The old "ahead only" filter dropped every prop a fight had drifted
+        # the actor past, while it was still on screen.
+        myself = make_myself(world_x=200, world_y=40)
+        camera = CameraRange(left=-50, right=400, top=-50, bottom=200)
+        stage = Stage(level_index=0, direction="right")
+        prop = Breakable(slot="obj09", world_x=60, world_y=40, type_id=0x40)
+        context: set[Token] = {myself, camera, stage, prop}
+
+        self.assertEqual(
+            could_open_breakable(context), {OpenBreakable(actor_slot="P1", target_slot="obj09")}
+        )
 
     def test_fires_for_a_prop_in_range_behind_the_actor(self) -> None:
         # Behind the stage direction, so the "ahead" filter drops it -- but
@@ -2594,18 +2633,6 @@ class CouldOpenBreakableTests(unittest.TestCase):
         result = could_open_breakable(context)
 
         self.assertEqual(result, {OpenBreakable(actor_slot="P1", target_slot="obj09")})
-
-    def test_does_not_walk_back_to_a_breakable_already_behind(self) -> None:
-        # The old fallback (if nothing is ahead, consider every crate)
-        # made the actor turn around after walking past one, then
-        # WalkToAdvanceStage walked past it again.
-        myself = make_myself(world_x=200, world_y=0)
-        camera = CameraRange(left=-50, right=400, top=-50, bottom=200)
-        stage = Stage(level_index=0, direction="right")
-        prop = Breakable(slot="obj09", world_x=60, world_y=0, type_id=0x40)
-        context: set[Token] = {myself, camera, stage, prop}
-
-        self.assertEqual(could_open_breakable(context), set())
 
 
 class JackIsEngageJacksTests(unittest.TestCase):

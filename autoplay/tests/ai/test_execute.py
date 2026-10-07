@@ -357,6 +357,98 @@ def _body_of(actor) -> Rect:
     return nav.body_rect(actor)
 
 
+class Round4BridgePropTests(unittest.TestCase):
+    """Round 4's bridge, as recorded live with Blaze and with Axel: a type-
+    ``$1D`` prop at (1816, 96) 16 px right of the first hole (x 1664-1800,
+    lanes 72-120). Its left pocket is in the hole. Standing nearly over it,
+    the approach used to aim for the left side (the stage's progress
+    direction), the route never arrived, the pit escape pushed the actor
+    back, and it rocked at x 1750-1810 until the round clock took a life --
+    three lives, then the game, in both runs. ``execute_tick`` runs here, the
+    pit escape included; a press is the punch."""
+
+    PIT = Pit(world_x=1664, lane_y=72, width=136, height=48)
+    PROP = Breakable(
+        slot="obj06",
+        world_x=1816,
+        world_y=96,
+        type_id=0x1D,
+        hitbox=Hitbox(x0=1796, x1=1836, y0=86, y1=106, z0=104, z1=160),
+    )
+
+    # The bridge's second hole, and the $1B prop 24 px right of it: the
+    # hole's danger zone ends at 2352 and the prop's own wall starts at 2332,
+    # so its left pocket is all wall. Live (Blaze, jack_fight.py --level 4),
+    # the actor stood at (2357, 81) over it for two round clocks.
+    PIT_2 = Pit(world_x=2240, lane_y=72, width=104, height=48)
+    PROP_2 = Breakable(
+        slot="obj05",
+        world_x=2368,
+        world_y=104,
+        type_id=0x1B,
+        hitbox=Hitbox(x0=2348, x1=2388, y0=94, y1=114, z0=104, z1=160),
+    )
+
+    def _run(
+        self, start_x: int, start_y: int, *, facing_left: bool, ticks: int = 120, prop=None, pit=None, camera_x=1746
+    ):
+        prop = prop or self.PROP
+        pit = pit or self.PIT
+        gamepad, client = _gamepad()
+        actor = _myself(world_x=start_x, world_y=start_y, facing_left=facing_left)
+        others = {
+            prop,
+            pit,
+            CameraRange(left=camera_x, right=camera_x + 256, top=2, bottom=112),
+            Stage(level_index=3, direction="right"),
+        }
+        verb = OpenBreakable(actor_slot="P1", target_slot=prop.slot)
+        wall = prop_solids.solid_box(prop.type_id, prop.world_x, prop.world_y)
+        trail = [actor]
+        for _ in range(ticks):
+            client.press_buttons.reset_mock()
+            execute_tick(verb, {actor, *others}, gamepad)
+            if client.press_buttons.called:
+                return trail, True
+            mask = gamepad.held
+            dx = (WALK_PX_PER_TICK if mask & RIGHT else 0) - (WALK_PX_PER_TICK if mask & LEFT else 0)
+            dy = (WALK_PX_PER_TICK if mask & DOWN else 0) - (WALK_PX_PER_TICK if mask & UP else 0)
+            x, y = actor.world_x + dx, actor.world_y + dy
+            if wall.blocks(x, y):
+                x, y = actor.world_x, actor.world_y
+            actor = replace(actor, world_x=x, world_y=y, facing_left=dx < 0 if dx else actor.facing_left)
+            trail.append(actor)
+        return trail, False
+
+    def test_opens_it_from_the_open_side_when_standing_nearly_over_it(self) -> None:
+        for start_x, facing_left in ((1806, True), (1809, False), (1778, False)):
+            with self.subTest(start_x=start_x):
+                trail, punched = self._run(start_x, 62, facing_left=facing_left)
+                self.assertTrue(punched, [(a.world_x, a.world_y) for a in trail[-12:]])
+                last = trail[-1]
+                self.assertGreater(last.world_x, self.PROP.world_x)
+                self.assertTrue(in_smash_range(last, self.PROP))
+                for a in trail:
+                    self.assertFalse(
+                        self.PIT.world_x <= a.world_x <= self.PIT.world_x + self.PIT.width
+                        and self.PIT.lane_y <= a.world_y <= self.PIT.lane_y + self.PIT.height,
+                        (a.world_x, a.world_y),
+                    )
+
+    def test_a_pocket_inside_the_props_own_wall_is_no_pocket(self) -> None:
+        for start_x, start_y in ((2357, 81), (2300, 40), (2420, 60)):
+            with self.subTest(start=(start_x, start_y)):
+                trail, punched = self._run(
+                    start_x, start_y, facing_left=False, prop=self.PROP_2, pit=self.PIT_2, camera_x=2200
+                )
+                self.assertTrue(punched, [(a.world_x, a.world_y) for a in trail[-12:]])
+                last = trail[-1]
+                self.assertGreater(last.world_x, self.PROP_2.world_x)
+                self.assertTrue(in_smash_range(last, self.PROP_2))
+                for a in trail:
+                    self.assertFalse(pit_endangers(self.PIT_2, a.world_x, a.world_y, margin=0), (a.world_x, a.world_y))
+
+
 class PressNoButtonTests(unittest.TestCase):
     def test_press_no_button_releases(self) -> None:
         gamepad, client = _gamepad()
@@ -2912,6 +3004,21 @@ class ExecuteTickPitEscapeTests(unittest.TestCase):
         self._settle_tick(verb, {actor, target, pit}, gamepad)
 
         client.hold_buttons.assert_called_with(player1=UP, player2=0)
+
+    def test_a_pit_whose_centre_is_past_the_camera_clamp_is_still_escaped(self) -> None:
+        # Round 4, Axel, live: the bridge's second hole (x 2240-2344, lanes
+        # 72-120) with the camera's walk clamp ending at 2272 -- its centre
+        # past it. The dodge skipped the hole, the escape's walk to its far
+        # side came back as RIGHT, and EngageJack's RIGHT walked the actor in.
+        actor = _myself(world_x=2235, world_y=73)
+        pit = Pit(world_x=2240, lane_y=72, width=104, height=48)
+        camera = CameraRange(left=2016, right=2272, top=2, bottom=112)
+        verb = Punch(actor_slot="P1", target_slot="obj01")
+        gamepad, client = _gamepad()
+
+        self._settle_tick(verb, {actor, pit, camera, _enemy(world_x=2300, world_y=73)}, gamepad)
+
+        self.assertEqual(gamepad.held, UP)
 
     def test_escapes_downward_from_the_upper_half_of_the_lane(self) -> None:
         # Same shape pit, now sitting in the upper half of the lane --
