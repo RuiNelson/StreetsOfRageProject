@@ -112,14 +112,19 @@ hardware-facing subsystems have been reimplemented.
 The long-term roadmap is:
 
 1. Reimplement every game procedure in C++.
-2. Refactor the code into a medium- or high-level architecture, with functions
-   that accept explicit arguments and use dynamic memory where appropriate,
-   while preserving the original gameplay rules.
+2. Make that C++ readable — named routines, fields, and constants in place of
+   translated opcodes — while preserving the original gameplay rules. The game
+   state stays in the original Mega Drive work RAM, at the original addresses
+   and in the original formats, and is updated on the same frames as before:
+   the [`autoplay`](#the-autoplay-observer-and-symbolic-ai) AI reads the game
+   by address, so moving that state into C++ objects or dynamic memory would
+   blind it.
 3. Remove the dependency on the hardware emulated by `MegaDriveEnvironment`
    and implement the graphics pipeline, audio, and input directly through SDL.
-4. Enable enhancements such as higher-resolution replacement assets, 16:9
-   support, and variable frame rates, with object motion designed to benefit
-   from the available frame rate.
+   This replaces the emulated devices, not the work-RAM layout.
+4. Enable enhancements such as higher-resolution replacement assets and 16:9
+   support, and variable frame rates through rendering interpolation, so the
+   game logic still advances one original frame at a time.
 
 ### The recompiled game in `StreetsOfRageRecompilation`
 

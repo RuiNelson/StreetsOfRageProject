@@ -152,6 +152,9 @@ writing the manual body. This was required for OPTIONS handlers `$1404` and
 
 ## Cross-routine contracts learned
 
+- **Memory contract:** game state stays at its original RAM address and
+  encoding, written on the original frame, because `autoplay` reads it by
+  address. See **Memory contract (autoplay)** in `SKILL.md`.
 - **Fall-through wrappers:** `$9170` and `$927C` initialize a mode and flow
   directly into the adjacent update wrapper. Their manual init bodies must
   tail-call the update path, not pop an extra return address.

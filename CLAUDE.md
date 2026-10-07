@@ -126,6 +126,17 @@ it whenever ROM analysis or recompiler inputs change:
 Do not commit ROMs, ignored generated C++, build trees, CMake download trees,
 caches, screenshots, or transient discovery output.
 
+## Hand-written C++ keeps the original memory layout
+
+Reimplemented routines make the code readable; they never move game state.
+Every field stays in 68000 work RAM at its original address, width, and
+encoding, updated on the same frame as the ROM, and data tables are still read
+from the ROM. `autoplay` reads the game by address
+(`autoplay/src/sor_autoplay/memory_map.py`, `rom_data.py`), so relocating
+state into C++ objects or dynamic memory — the old roadmap's plan — is ruled
+out. Details: `StreetsOfRageRecompilation/CLAUDE.md` (**Manual subroutines**)
+and the `reimplement-subroutine` skill.
+
 
 
 ## Reverse-engineering tools

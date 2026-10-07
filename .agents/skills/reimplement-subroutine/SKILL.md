@@ -33,6 +33,30 @@ Avoid (or keep generated until proven):
 - Full sound engine / channel sequencers
 - Large, poorly labeled state machines
 - Anything whose side effects on D/A/SR/memory are not understood
+- Any change to the layout, width, or encoding of RAM that `autoplay` or
+  `code-analysis/addresses.csv` names (see the memory contract below)
+
+## Memory contract (autoplay)
+
+Reimplementation makes the code readable; it never changes the data model.
+`autoplay` reads the running game by address over `megadrive_remote`
+(`autoplay/src/sor_autoplay/memory_map.py`, `rom_data.py`), and its enemy
+models are frame-exact. A manual body must therefore:
+
+- keep every piece of game state in 68000 work RAM at its original address,
+  width, big-endian byte order, and encoding (object slots, globals, BCD
+  fields, flag bits, packed bytes), read and written through `memory()`;
+- hold no game state in `Sor` members, statics, or heap memory between calls
+  — C++ locals live only for one call;
+- write the same fields on the same frame as the ROM, leaving no intermediate
+  state at a VBlank that the ROM never left;
+- keep reading data tables (hitboxes, animations, scripts) from the ROM at
+  their original addresses instead of copying them into C++ constants;
+- add no new RAM fields and repurpose no bytes; storage needed only by a host
+  feature lives outside the 68000 address space.
+
+Explicit C++ arguments and named locals are fine inside a body; the contract
+is about what is visible in memory between calls.
 
 ## Inputs
 
@@ -266,6 +290,18 @@ states) or add a focused check the user agrees on. Do not claim that a menu or
 state was runtime-tested when the smoke run only reached an earlier boot mode;
 report the last observed `game_state` and what remains unexercised.
 
+When the routine writes state that `autoplay` reads, also run the autoplay
+unit tests:
+
+```bash
+cd autoplay
+PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m unittest discover -s tests -q
+```
+
+If gameplay could change, follow up with a short live session through
+`./scripts/both_turbo` or `./scripts/both_lockstep_speed` (both already pass
+`--silent`) and check that the AI still plays normally.
+
 ### 7. Docs and publish
 
 - Update the “currently manual” blurb in `StreetsOfRageRecompilation/README.md`
@@ -294,6 +330,8 @@ report the last observed `game_state` and what remains unexercised.
 - [ ] Fall-through/tail entries and caller-visible flags preserved
 - [ ] Partial registers and temporary stack saves preserved
 - [ ] No IRQ-starving busy loops
+- [ ] RAM layout, encoding, and per-frame write timing unchanged (autoplay
+      contract); no state kept in C++ between calls
 - [ ] `./build.sh --full` succeeds; count, declarations, dispatch, and body omission checked
 - [ ] `timeout -k` smoke run; actual reached state reported; no leftover `sor` process
 - [ ] README + submodule commit/push + meta gitlink
