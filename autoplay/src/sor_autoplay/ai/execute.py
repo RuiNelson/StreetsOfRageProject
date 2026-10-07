@@ -11,10 +11,10 @@ Police special = physical A (0x0010), Jump = physical C (0x0040).
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextvars import ContextVar
 
-from .pathfind import Path, Point, PointGoal
+from .pathfind import Path, Point, PointGoal, Rect
 from .tokens import (
     CounterGrab,
     EngageAbadede,
@@ -3097,12 +3097,19 @@ def _press_escape_mask(context: Context, actor: Myself) -> int | None:
     (``press.escape_step``) with the ROM's refusals -- the lane band and the
     camera clamp hold the origin, a wall (``$3C92``) or a pit's danger undoes
     the step -- and the one out soonest is held.
+
+    "Out" is the actor's :func:`press.standing_envelope`, not this frame's
+    box: a body that stops, or turns, takes a different box on the next
+    frame (Blaze's idle box facing left is 10 px left of her walking one),
+    and the escape that ended with the box just clear handed the router a
+    body a turn put back inside ``$EA``.
     """
 
     zones = press_model.committed_zones(context)
     if not zones:
         return None
-    body = nav.body_rect(actor)
+    origin = (float(actor.world_x), float(actor.world_y))
+    body = press_model.standing_envelope(nav.body_rect(actor), origin, actor.character_id)
     if not any(body.overlaps(zone) for zone in zones):
         return None
     lane_lo, lane_hi = _lane_bounds(context)
@@ -3121,7 +3128,7 @@ def _press_escape_mask(context: Context, actor: Myself) -> int | None:
 
     step_x, step_y = press_model.escape_step(
         body,
-        (float(actor.world_x), float(actor.world_y)),
+        origin,
         zones,
         speeds=kinematics.walk_speeds(actor.character_id),
         constrain=constrain,
@@ -3131,6 +3138,64 @@ def _press_escape_mask(context: Context, actor: Myself) -> int | None:
 
 
 _DIRECTION_MASKS = UP_MASK | DOWN_MASK | LEFT_MASK | RIGHT_MASK
+
+# How many updates of a held walk the press guard looks ahead: the one the
+# mask is held for, and the one the next observation is late by.
+PRESS_GUARD_UPDATES = 2
+
+
+def _keep_off_press(actor: Myself, zones: Sequence[Rect]) -> Callable[[int], int]:
+    """A filter that drops the directions of a mask whose walk would carry the
+    actor's :func:`press.standing_envelope` into a committed press's zone.
+
+    Diagonal first: the lane bit alone, then the X bit alone, is kept when its
+    own step stays clear; otherwise no direction at all (buttons pass).
+    """
+
+    origin = (float(actor.world_x), float(actor.world_y))
+    envelope = press_model.standing_envelope(nav.body_rect(actor), origin, actor.character_id)
+    straight_x, diagonal_x, diagonal_y, straight_y = kinematics.walk_speeds(actor.character_id)
+
+    def lands(step_x: int, step_y: int) -> bool:
+        vx = step_x * (diagonal_x if step_y else straight_x)
+        vy = step_y * (diagonal_y if step_x else straight_y)
+        moved = envelope.moved_by(vx * PRESS_GUARD_UPDATES, vy * PRESS_GUARD_UPDATES)
+        return any(moved.overlaps(zone) for zone in zones)
+
+    def keep(mask: int) -> int:
+        step_x, step_y = _walk_steps(mask)
+        if not (step_x or step_y) or not lands(step_x, step_y):
+            return mask
+        if step_x and step_y:
+            if not lands(step_x, 0):
+                return mask & ~(UP_MASK | DOWN_MASK)
+            if not lands(0, step_y):
+                return mask & ~(LEFT_MASK | RIGHT_MASK)
+        return mask & ~_DIRECTION_MASKS
+
+    return keep
+
+
+def _press_safe_gamepad(verb: Verb, context: Context, actor: Myself | None, gamepad):
+    """``gamepad``, wrapped so no walk this tick enters a committed press's
+    zone -- or ``gamepad`` itself when no press is committed.
+
+    Whatever the verb: the router keeps its routes out (``press_obstacles``),
+    but not every handler routes. Measured live: ``EngageGrunts``'s rollout
+    takes a solid as a wall that undoes the step, so stepping DOWN into a
+    press's ``$F4`` cost it nothing, and it held DOWN-RIGHT toward a Garcia
+    while the escape held UP, tick about, until the box came down. Same
+    exemptions as the partner guard: airborne (committed), holding a body
+    (the directions are hold inputs), a ``Dialog``.
+    """
+
+    if actor is None or actor.is_airborne or actor.is_holding_enemy or isinstance(verb, Dialog):
+        return gamepad
+    zones = press_model.committed_zones(context)
+    if not zones:
+        return gamepad
+    # The partner guard's wrapper does the plumbing; this one keeps off presses.
+    return _PartnerSafeGamepad(gamepad, _keep_off_press(actor, zones))
 
 
 def _walk_steps(mask: int) -> tuple[int, int]:
@@ -3432,17 +3497,23 @@ def execute_tick(
         # only: once airborne the trajectory is committed.
         if actor is not None and not actor.is_airborne:
             mask = _pit_escape_mask(context, actor)
-            if mask is None:
-                # The same kind of constraint, after the pit: a fall costs a
-                # life, a press 20 and a knockdown.
-                mask = _press_escape_mask(context, actor)
             if mask is not None:
                 _hold_steered(gamepad, mask)
+                return
+            # The same kind of constraint, after the pit: a fall costs a
+            # life, a press 20 and a knockdown. Held at once, not ramped: a
+            # walk set it off heading the other way, and the ramp's six ticks
+            # with no direction were most of the time the box takes to land.
+            mask = _press_escape_mask(context, actor)
+            if mask is not None:
+                gamepad.snap_x(1 if mask & RIGHT_MASK else -1 if mask & LEFT_MASK else 0)
+                gamepad.hold(mask)
                 return
         if verb is None:
             press_no_button(gamepad)
             return
-        execute_verb(verb, context, _partner_safe_gamepad(verb, context, actor, gamepad))
+        pad = _partner_safe_gamepad(verb, context, actor, gamepad)
+        execute_verb(verb, context, _press_safe_gamepad(verb, context, actor, pad))
     finally:
         if token is not None:
             _ROUTE_TRACE.reset(token)

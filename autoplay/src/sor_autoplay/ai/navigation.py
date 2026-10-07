@@ -345,7 +345,7 @@ def solid_obstacles(
         )
     rects.extend(pit_obstacles(context, body=body, origin=origin))
     rects.extend(wall_obstacles(context, body=body, origin=origin))
-    rects.extend(press_obstacles(context))
+    rects.extend(press_obstacles(context, body=body, origin=origin))
     return rects
 
 
@@ -396,15 +396,39 @@ def wall_probe_blocks(context: Context, world_x: float, lane_y: float, vel_x: fl
     )
 
 
-def press_obstacles(context: Context) -> list[Rect]:
-    """The drop zones of every committed press (``ai/press.py``), as they are.
+def press_obstacles(
+    context: Context,
+    *,
+    body: Rect | None = None,
+    origin: tuple[float, float] | None = None,
+) -> list[Rect]:
+    """The drop zones of every committed press (``ai/press.py``).
 
-    Already a body test -- the fall's box against the player's own box -- so
-    there is nothing to restate. Only while the press is committed: armed with
-    nobody in its window it must stay walkable, or nothing would set it off.
+    Already a body test -- the fall's box against the player's own box -- but
+    against whichever box the frame gives it, and a turn swaps the box (Blaze
+    facing left spans -12..-2 of her origin, facing right +2..+12): with the
+    moving ``body`` and its ``origin``, each zone is grown by what the
+    actor's :func:`press.standing_envelope` adds to that body
+    (``press.zones_for_body``). Without a body, for planners that test the
+    origin alone (``grunt_plan``'s steps, like a prop's or a wall's), the
+    zones in point form (``press.zones_for_origin``): handed the raw zones,
+    the street plan stepped DOWN-RIGHT to a Garcia with its origin 7 lanes
+    above ``$F4`` and its body inside it, the escape stepped it back UP, and
+    the box came down on the third round of that. Only while the press is
+    committed: armed with nobody in its window it must stay walkable, or
+    nothing would set it off.
     """
 
-    return press_model.committed_zones(context)
+    zones = press_model.committed_zones(context)
+    if not zones:
+        return zones
+    actor = find(context, Myself)
+    character_id = actor.character_id if actor is not None else None
+    if body is None:
+        return press_model.zones_for_origin(zones, character_id)
+    if origin is None:
+        origin = (body.left + body.width / 2, body.top + body.height / 2)
+    return press_model.zones_for_body(zones, body, origin, character_id)
 
 
 def pit_obstacles(
@@ -921,7 +945,12 @@ def jump_landing_is_safe(
 
     if any_pit_endangers(context, target_x, actor.world_y):
         return False
-    if press_model.lands_in_reach(context, body_rect(actor).moved_by(target_x - actor.world_x, 0)):
+    if press_model.lands_in_reach(
+        context,
+        body_rect(actor).moved_by(target_x - actor.world_x, 0),
+        origin=(float(target_x), float(actor.world_y)),
+        character_id=actor.character_id,
+    ):
         return False
     if plan_lane_route(context, actor, target_x).reached:
         return True

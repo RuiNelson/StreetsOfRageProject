@@ -20,6 +20,7 @@ from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.kinematics import walk_speeds
 from sor_autoplay.ai.pathfind import Rect
+from sor_autoplay.hitboxes import Hitbox
 from sor_autoplay.ai.tokens import (
     AttackHeldEnemy,
     CameraRange,
@@ -88,23 +89,58 @@ def _probe_hits(walls, x: float, y: float, vx: float) -> bool:
     )
 
 
-class _Walker:
-    """Blaze's walk, one update per tick: ``$2D00``'s speeds, the clamps, the probe."""
+# Blaze's body box (+$70) by frame, X relative to her origin, lanes +-8: idle
+# facing right and left (controls-and-input.md), and walking (measured live).
+BLAZE_IDLE_RIGHT = (2, 12)
+BLAZE_IDLE_LEFT = (-12, -2)
+BLAZE_WALK = (-5, 5)
 
-    def __init__(self, x: float, y: float, *, walls, camera: CameraRange) -> None:
+
+def _blaze_box(x: float, y: float, span: tuple[int, int]) -> Hitbox:
+    return Hitbox(round(x) + span[0], round(x) + span[1], round(y) - 8, round(y) + 8, -48, 0)
+
+
+class _Walker:
+    """Blaze's walk, one update per tick: ``$2D00``'s speeds, the clamps, the probe.
+
+    With ``boxes`` the actor also carries the ROM's body box for the frame --
+    the walk's, or the idle one for the way she faces -- and that box is the
+    one the press hits.
+    """
+
+    def __init__(self, x: float, y: float, *, walls, camera: CameraRange, boxes: bool = False) -> None:
         self.x, self.y = float(x), float(y)
         self.walls = walls
         self.camera = camera
         self.refused = 0
+        self.boxes = boxes
+        self.facing_left = False
+        self.walking = False
+
+    @property
+    def span(self) -> tuple[int, int]:
+        if self.walking:
+            return BLAZE_WALK
+        return BLAZE_IDLE_LEFT if self.facing_left else BLAZE_IDLE_RIGHT
 
     @property
     def actor(self) -> Myself:
-        return _blaze(self.x, self.y)
+        actor = _blaze(self.x, self.y)
+        if not self.boxes:
+            return actor
+        return replace(actor, facing_left=self.facing_left, hitbox=_blaze_box(self.x, self.y, self.span))
+
+    @property
+    def body(self) -> Rect:
+        return nav.body_rect(self.actor)
 
     def step(self, mask: int) -> None:
         straight_x, diagonal_x, diagonal_y, straight_y = walk_speeds(BLAZE)
         step_x = 1 if mask & RIGHT else -1 if mask & LEFT else 0
         step_y = 1 if mask & DOWN else -1 if mask & UP else 0
+        if step_x:
+            self.facing_left = step_x < 0
+        self.walking = bool(step_x or step_y)
         vx = step_x * (diagonal_x if step_y else straight_x)
         vy = step_y * (diagonal_y if step_x else straight_y)
         x = min(max(self.x + vx, self.camera.left), self.camera.right)
@@ -309,12 +345,25 @@ class PressWalkTests(unittest.TestCase):
     # z > 112 from the 11th update of the fall: the box reaches a standing body.
     HURTS_FROM = 11
 
-    def _run(self, *, walls, ticks: int = 260):
-        camera = CameraRange(left=1600, right=1990, top=0, bottom=112)
-        walker = _Walker(1700, 72, walls=walls, camera=camera)
-        press = _press()
+    def _run(
+        self,
+        *,
+        walls,
+        ticks: int = 260,
+        boxes: bool = False,
+        press_x: int = 1832,
+        start: tuple[float, float] = (1700, 72),
+        camera: CameraRange = CameraRange(left=1600, right=1990, top=0, bottom=112),
+        facing_left: bool = False,
+        since_trigger: int | None = None,
+    ):
+        walker = _Walker(*start, walls=walls, camera=camera, boxes=boxes)
+        walker.facing_left = facing_left
+        press = _press(x=press_x)
+        if since_trigger is not None:
+            state = press_model.STATE_SHAKING if since_trigger < self.SHAKE_UPDATES else press_model.STATE_FALLING
+            press = replace(press, state=state)
         gamepad = _gamepad()
-        since_trigger = None
         hits = []
         for tick in range(ticks):
             if press.state == press_model.STATE_ARMED and press_model.in_trigger_window(press, walker.x):
@@ -331,7 +380,12 @@ class PressWalkTests(unittest.TestCase):
                     Rect(press.world_x + x0, press.world_y + y0, x1 - x0, y1 - y0)
                     for x0, x1, y0, y1 in press_model.DROP_BOXES
                 ]
-                if any(_body(walker.x, walker.y).overlaps(b) for b in boxes):
+                # The ROM's test is inclusive ($AB88: bgt / blt).
+                body = walker.body
+                if any(
+                    body.left <= b.right and body.right >= b.left and body.top <= b.bottom and body.bottom >= b.top
+                    for b in boxes
+                ):
                     hits.append((tick, walker.x, walker.y))
             context = {
                 walker.actor,
@@ -365,6 +419,169 @@ class PressWalkTests(unittest.TestCase):
         self.assertIsNotNone(since_trigger, "never set the press off")
         self.assertEqual(hits, [])
         self.assertGreater(walker.x, 1900)
+
+    def test_a_turn_does_not_carry_the_body_back_in(self) -> None:
+        # The live hits (round 6, swept): the walk set the press at 2632 off
+        # on lane 84, the escape backed out left, and the router -- planning
+        # with the idle box facing left, 9 px clear -- sent her RIGHT. Turning
+        # moved the box 7-10 px right, into $EA, as it came down: hit at x
+        # 2574. The same with the press at 3688 and 4520.
+        for walls in ((), HOUSING):
+            with self.subTest(housing=bool(walls)):
+                walker, since_trigger, hits = self._run(
+                    walls=walls,
+                    boxes=True,
+                    press_x=2632,
+                    start=(2500, 84),
+                    camera=CameraRange(left=2400, right=2752, top=0, bottom=112),
+                )
+
+                self.assertIsNotNone(since_trigger, "never set the press off")
+                self.assertEqual(hits, [])
+                self.assertGreater(walker.x, 2700)
+
+    def test_standing_where_the_escape_left_her(self) -> None:
+        # The live moment itself: backed out to x 2573, idle facing left --
+        # her box 2561..2571, clear of $EA's zone from 2580 -- as the press
+        # at 2632 starts to fall. Facing right her box would reach 2585.
+        for walls in ((), HOUSING):
+            with self.subTest(housing=bool(walls)):
+                walker, _, hits = self._run(
+                    walls=walls,
+                    boxes=True,
+                    press_x=2632,
+                    start=(2573, 84),
+                    camera=CameraRange(left=2400, right=2752, top=0, bottom=112),
+                    facing_left=True,
+                    since_trigger=self.SHAKE_UPDATES,
+                )
+
+                self.assertEqual(hits, [])
+                self.assertGreater(walker.x, 2700)
+
+    def test_both_scenarios_with_the_rom_boxes(self) -> None:
+        housing = tuple(
+            Wall(world_x=1680 + 8 * row, lane_y=8 * row, width=240 - 8 * row, height=8)
+            for row in range(8)
+        )
+        for walls in ((), housing):
+            with self.subTest(housing=bool(walls)):
+                walker, since_trigger, hits = self._run(walls=walls, boxes=True)
+
+                self.assertIsNotNone(since_trigger, "never set the press off")
+                self.assertEqual(hits, [])
+                self.assertGreater(walker.x, 1900)
+
+
+class PressEnvelopeTests(unittest.TestCase):
+    """The zone is tested against every box a turn or a step could swap in."""
+
+    def test_the_envelope_covers_both_facings(self) -> None:
+        for span in (BLAZE_IDLE_LEFT, BLAZE_IDLE_RIGHT, BLAZE_WALK):
+            body = nav.body_rect(replace(_blaze(2573, 84), hitbox=_blaze_box(2573, 84, span)))
+            envelope = press_model.standing_envelope(body, (2573, 84), BLAZE)
+            self.assertEqual((envelope.left, envelope.right), (2561, 2585), span)
+            self.assertEqual((envelope.top, envelope.bottom), (76, 92))
+
+    def test_the_router_sees_the_envelope(self) -> None:
+        # Idle facing left at 2573: the box (2561..2571) is clear of $EA's
+        # zone (from 2580), the body facing right (2575..2585) is not.
+        actor = replace(_blaze(2573, 84), facing_left=True, hitbox=_blaze_box(2573, 84, BLAZE_IDLE_LEFT))
+        press = _press(x=2632, state=press_model.STATE_FALLING)
+        body, origin = nav.actor_footprint(actor)
+        zones = press_model.drop_zones(press)
+
+        self.assertFalse(any(body.overlaps(z) for z in zones))
+        grown = nav.press_obstacles({actor, press}, body=body, origin=origin)
+        self.assertTrue(any(body.overlaps(z) for z in grown))
+        # Grown only by what the envelope adds: once the origin is 12 px
+        # clear of the zone (x 2568 and left), so is the body.
+        self.assertTrue(any(body.moved_by(-4, 0).overlaps(z) for z in grown))
+        self.assertFalse(any(body.moved_by(-5, 0).overlaps(z) for z in grown))
+
+    def test_the_point_form_for_the_street_plan(self) -> None:
+        # The live case: the press at 4520 re-armed with the actor in its
+        # window, and the street plan stepped DOWN-RIGHT to x 4576 lane 96 --
+        # origin above $F4's zone (from lane 101), body (to 104) inside it.
+        actor = _blaze(4576, 96)
+        press = _press(x=4520, state=press_model.STATE_FALLING)
+        points = nav.solid_obstacles({actor, press})
+
+        def inside(x, y):
+            return any(r.left < x < r.right and r.top < y < r.bottom for r in points)
+
+        self.assertTrue(inside(4576, 96))
+        self.assertTrue(inside(4591, 94))  # the envelope (from 4579) still reaches 4580
+        self.assertFalse(inside(4593, 94))
+        self.assertFalse(inside(4576, 92))  # body to lane 100: clear
+
+    def test_no_step_right_after_backing_out(self) -> None:
+        # The live tick after the escape: idle facing left at (2573, 86), her
+        # box 9 px clear of $EA's zone, while the press falls. RIGHT is the
+        # turn that puts it inside -- what the router chose, live.
+        camera = CameraRange(left=2400, right=2752, top=0, bottom=112)
+        actor = replace(_blaze(2573, 86), facing_left=True, hitbox=_blaze_box(2573, 86, BLAZE_IDLE_LEFT))
+        press = _press(x=2632, state=press_model.STATE_FALLING)
+        gamepad = _gamepad()
+
+        for _ in range(8):
+            execute_tick(
+                ADVANCE,
+                {actor, press, camera, Stage(level_index=ROUND_6, direction="right"), *HOUSING},
+                gamepad,
+            )
+            self.assertFalse(gamepad.held & RIGHT, "turned back into the zone")
+
+    def test_the_escape_is_held_at_once(self) -> None:
+        # Walking right when the walk set it off: the escape reverses on the
+        # first tick instead of ramping the axis through the centre.
+        camera = CameraRange(left=2400, right=2752, top=0, bottom=112)
+        actor = replace(_blaze(2586, 84), hitbox=_blaze_box(2586, 84, BLAZE_WALK))
+        press = _press(x=2632, state=press_model.STATE_SHAKING)
+        gamepad = _gamepad()
+        for _ in range(3):
+            gamepad.steer_x(1)
+
+        execute_tick(ADVANCE, {actor, press, camera, Stage(level_index=ROUND_6, direction="right")}, gamepad)
+
+        self.assertTrue(gamepad.held & LEFT)
+        self.assertFalse(gamepad.held & RIGHT)
+
+    def test_no_verb_walks_into_a_committed_zone(self) -> None:
+        # The live case: the press at 4520 re-armed with the actor in its
+        # window, the street plan held DOWN-RIGHT at x 4576 lane 93 (camera
+        # edge), the escape held UP the tick after, and so on until it landed.
+        # The pad the verb drives keeps the step that stays clear.
+        import sor_autoplay.ai.execute as execute_module
+
+        actor = _blaze(4576, 93)
+        press = _press(x=4520, state=press_model.STATE_FALLING)
+        camera = CameraRange(left=4288, right=4576, top=0, bottom=112)
+        held = {}
+
+        def drive(verb, context, gamepad):
+            for mask in (DOWN | RIGHT, DOWN, RIGHT | 0x0010):
+                gamepad.hold(mask)
+                held[mask] = gamepad.held
+
+        real = execute_module.execute_verb
+        execute_module.execute_verb = drive
+        try:
+            execute_tick(ADVANCE, {actor, press, camera, Stage(level_index=ROUND_6, direction="right")}, _gamepad())
+        finally:
+            execute_module.execute_verb = real
+
+        self.assertEqual(held[DOWN | RIGHT], RIGHT)
+        self.assertEqual(held[DOWN], 0)
+        self.assertEqual(held[RIGHT | 0x0010], RIGHT | 0x0010)
+
+    def test_a_landing_in_reach_counts_the_turn(self) -> None:
+        # A landing whose box, as it is, ends 1 px short of $EA's zone but
+        # whose origin a turn would put inside it.
+        press = _press(x=2632)
+        body = Rect(2569, 76, 10, 16)  # idle facing left at 2581
+        self.assertFalse(press_model.lands_in_reach({press}, body))
+        self.assertTrue(press_model.lands_in_reach({press}, body, origin=(2581, 84), character_id=BLAZE))
 
 
 if __name__ == "__main__":

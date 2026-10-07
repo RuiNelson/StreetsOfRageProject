@@ -567,8 +567,13 @@ def could_hold_actions(context: Context) -> Context:
             # actor still locked in the hold (press.lands_in_reach). Where it
             # would, the hold keeps to B -- a knee, or in a back hold the
             # suplex -- and the actor stays where it is.
-            landing = nav.body_rect(actor).moved_by(2 * (body_in_hand.world_x - actor.world_x), 0)
-            return press_model.lands_in_reach(context, landing)
+            shift = 2 * (body_in_hand.world_x - actor.world_x)
+            return press_model.lands_in_reach(
+                context,
+                nav.body_rect(actor).moved_by(shift, 0),
+                origin=(float(actor.world_x + shift), float(actor.world_y)),
+                character_id=actor.character_id,
+            )
 
         if isinstance(held, Jack):
             # Jack's loop (jack.hold_step): in a back hold, wait out his axes

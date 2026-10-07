@@ -188,6 +188,18 @@ class VirtualGamepad:
             return -1
         return 0
 
+    def snap_x(self, direction: int) -> None:
+        """Put the virtual axis straight on ``direction``'s edge (or centre).
+
+        For the escapes that cannot spend the ramp: from one edge to the
+        other :meth:`steer_x` holds no direction for ``2 * AXIS_RAMP_TICKS -
+        1`` ticks, which is most of the time a press's box takes to come
+        down. Whoever snaps holds the matching D-pad bit itself; the next
+        :meth:`steer_x` carries on from this edge.
+        """
+
+        self._axis_x = AXIS_RAMP_TICKS if direction > 0 else -AXIS_RAMP_TICKS if direction < 0 else 0
+
     def release(self) -> None:
         self._axis_x = 0
         self._state.release(self._player_index)

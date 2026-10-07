@@ -31,6 +31,15 @@ to walk out of when the actor is already in it (``execute._press_escape_mask``).
 Armed with nobody in the window it is left alone on purpose: the window
 starts exactly where ``$EA`` does, so an actor kept out of the zone before it
 drops would never set it off, and the walk would wait on it forever.
+
+The zone is tested against the body the actor *could* have, not the one it
+has this tick (:func:`standing_envelope`). The box the fall hits is the
+player's own (``+$70``, ``player_cache_boxes``), and its shape id comes with
+the animation frame: Blaze idle facing right spans +2..+12 of her origin,
+idle facing left -12..-2, walking -5..+5. Measured live (round 6, swept: six
+hits in the reported run, three in the reproduction): the escape backed her out left, the router -- planning with
+the left-facing box, 9 px clear -- sent her RIGHT, and turning round put the
+box 10 px further right, inside ``$EA``, as it came down.
 """
 
 from __future__ import annotations
@@ -61,6 +70,16 @@ DROP_BOXES: tuple[tuple[int, int, int, int], ...] = (
 # up to 3.25 px on X and 2.375 on the lane in one.
 ZONE_MARGIN_X = 4
 ZONE_MARGIN_Y = 3
+
+# How far a standing or walking body box reaches from the origin, either way:
+# the idle boxes facing right (controls-and-input.md, "Standing (idle) body
+# boxes") are Axel 0..+13, Adam -5..+7 and Blaze +2..+12, facing left the
+# mirrored ones, and the walk frames sit inside them (Blaze's -5..+5,
+# measured). Keyed by character id; unknown is the widest.
+STANDING_REACH_X: dict[int, int] = {0: 13, 1: 7, 2: 12}
+DEFAULT_STANDING_REACH_X = 13
+# Every frame's body box spans +-8 lanes of the origin.
+BODY_LANE_REACH = 8
 
 # The directions an escape may walk, straight ones first: on a tie the step
 # that keeps to one axis is the one that does not wander into the other box.
@@ -111,8 +130,71 @@ def drop_zones(press: Press) -> tuple[Rect, ...]:
     )
 
 
-def lands_in_reach(context: Context, body: Rect) -> bool:
+def standing_reach_x(character_id: int | None) -> int:
+    if character_id is None:
+        return DEFAULT_STANDING_REACH_X
+    return STANDING_REACH_X.get(character_id, DEFAULT_STANDING_REACH_X)
+
+
+def standing_envelope(body: Rect, origin: tuple[float, float], character_id: int | None) -> Rect:
+    """``body`` and every box a turn or a step could swap in at ``origin``.
+
+    The union of the box the actor has now and ``STANDING_REACH_X`` either
+    side of its origin, on the body's own lanes (every frame's box is +-8).
+    """
+
+    reach = standing_reach_x(character_id)
+    left = min(body.left, origin[0] - reach)
+    right = max(body.right, origin[0] + reach)
+    return Rect(left, body.top, right - left, body.height)
+
+
+def zones_for_body(
+    zones: Iterable[Rect],
+    body: Rect,
+    origin: tuple[float, float],
+    character_id: int | None,
+) -> list[Rect]:
+    """``zones`` restated for the router's moving ``body``.
+
+    The path finder moves the box the actor has now; grown by what the
+    envelope adds on each side, "``body`` overlaps the grown zone" is exactly
+    "the envelope overlaps the zone", wherever the route takes it.
+    """
+
+    envelope = standing_envelope(body, origin, character_id)
+    behind = body.left - envelope.left
+    ahead = envelope.right - body.right
+    return [Rect(z.left - ahead, z.top, z.width + ahead + behind, z.height) for z in zones]
+
+
+def zones_for_origin(zones: Iterable[Rect], character_id: int | None) -> list[Rect]:
+    """``zones`` restated for a planner that tests the origin alone.
+
+    The origin strictly inside a returned rectangle is exactly the
+    :func:`standing_envelope` there overlapping the zone: each grown by the
+    body's reach either side on X and its +-8 lanes.
+    """
+
+    reach = standing_reach_x(character_id)
+    return [
+        Rect(z.left - reach, z.top - BODY_LANE_REACH, z.width + 2 * reach, z.height + 2 * BODY_LANE_REACH)
+        for z in zones
+    ]
+
+
+def lands_in_reach(
+    context: Context,
+    body: Rect,
+    *,
+    origin: tuple[float, float] | None = None,
+    character_id: int | None = None,
+) -> bool:
     """Would ``body``, set down here, stand in a live press's drop zone?
+
+    With the ``origin`` it is set down at, the :func:`standing_envelope`
+    there: the move ends in whichever box the landing frame and the facing
+    give it.
 
     For moves that put the actor somewhere and keep it there -- a jump's
     landing, a hold's crossover -- so armed counts as well as committed: the
@@ -123,6 +205,8 @@ def lands_in_reach(context: Context, body: Rect) -> bool:
     release held the actor there until the box landed.
     """
 
+    if origin is not None:
+        body = standing_envelope(body, origin, character_id)
     return any(
         body.overlaps(zone)
         for press in find_all(context, Press)
