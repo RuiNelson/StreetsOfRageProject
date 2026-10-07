@@ -200,7 +200,7 @@ class PartnerPadItemGuardTests(unittest.TestCase):
 
     @staticmethod
     def _pressed_b(client) -> bool:
-        return any(call.kwargs["player1"] & B for call in client.press_buttons.call_args_list)
+        return any(call.kwargs["buttons"] & B for call in client.queue_press_buttons.call_args_list)
 
     @staticmethod
     def _held(client) -> int:

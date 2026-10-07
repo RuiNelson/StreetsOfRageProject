@@ -232,7 +232,7 @@ class PartnerPadKickTests(unittest.TestCase):
         return client
 
     def _pressed_b(self, client) -> bool:
-        return any(call.kwargs["player1"] & self.B for call in client.press_buttons.call_args_list)
+        return any(call.kwargs["buttons"] & self.B for call in client.queue_press_buttons.call_args_list)
 
     def test_no_kick_edge_while_the_kick_would_land_on_the_partner(self) -> None:
         client = self._tick(partner_x=880)

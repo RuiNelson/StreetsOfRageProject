@@ -9,7 +9,32 @@ A = 0x0010
 C = 0x0040
 
 
+def _blocking_client() -> MagicMock:
+    """A client without ``queue_press_buttons`` (the labs' recording
+    clients): presses take the blocking ``PRESS_BUTTONS`` fallback."""
+
+    return MagicMock(spec=["hold_buttons", "press_buttons"])
+
+
 class SharedGamepadStateTests(unittest.TestCase):
+    def test_press_is_queued_for_the_acting_player_alone(self) -> None:
+        """QUEUE_PRESS_BUTTONS returns at once and is ORed with the latch
+        host-side, so the press names one player and neither hold is
+        re-sent: the AI is not blind for the press's frames."""
+
+        client = MagicMock()
+        state = SharedGamepadState(client)
+        state.hold(1, RIGHT)
+        state.hold(2, LEFT)
+        client.hold_buttons.reset_mock()
+
+        state.press(2, C, frames=3)
+
+        client.queue_press_buttons.assert_called_once_with(player=2, buttons=C, frames=3)
+        client.press_buttons.assert_not_called()
+        client.hold_buttons.assert_not_called()
+        self.assertEqual((state.held(1), state.held(2)), (RIGHT, LEFT))
+
     def test_hold_sends_both_masks_together(self) -> None:
         client = MagicMock()
         state = SharedGamepadState(client)
@@ -55,7 +80,7 @@ class SharedGamepadStateTests(unittest.TestCase):
         acting player would silently zero the other player's hold for the
         press's duration."""
 
-        client = MagicMock()
+        client = _blocking_client()
         state = SharedGamepadState(client)
         state.hold(1, RIGHT)
         client.press_buttons.reset_mock()
@@ -72,7 +97,7 @@ class SharedGamepadStateTests(unittest.TestCase):
         (hold()'s no-op short-circuit), silently freezing that player even
         though the server no longer holds anything."""
 
-        client = MagicMock()
+        client = _blocking_client()
         state = SharedGamepadState(client)
         state.hold(1, RIGHT)
         state.hold(2, LEFT)
@@ -91,7 +116,7 @@ class SharedGamepadStateTests(unittest.TestCase):
         server is already back in sync by the time press() returns and this
         later hold() is a *correct* no-op, not a dropped command."""
 
-        client = MagicMock()
+        client = _blocking_client()
         state = SharedGamepadState(client)
         state.hold(1, RIGHT)
 
@@ -167,7 +192,7 @@ class VirtualGamepadTests(unittest.TestCase):
         pad.press(A, frames=2)
 
         self.assertEqual(pad.held, RIGHT)
-        client.press_buttons.assert_called_once_with(player1=A, player2=NONE_MASK, frames=2)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=A, frames=2)
 
     def test_invalid_player_index_is_rejected(self) -> None:
         client = MagicMock()

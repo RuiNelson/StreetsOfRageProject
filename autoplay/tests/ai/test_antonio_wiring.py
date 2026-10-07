@@ -268,7 +268,7 @@ class ExecuteTests(unittest.TestCase):
             {actor, _held_antonio(), CAMERA},
             gamepad,
         )
-        self.assertTrue(client.press_buttons.called)
+        self.assertTrue(client.queue_press_buttons.called)
         self.assertTrue(gamepad.held & RIGHT)
 
 

@@ -148,7 +148,7 @@ class ExecuteTests(unittest.TestCase):
         verb = EngageTwins(actor_slot="P1", target_slot=twin.slot)
         gamepad, client = _gamepad()
         execute_verb(verb, {me, twin, CAMERA}, gamepad)
-        pressed = [c.kwargs.get("player1") for c in client.press_buttons.call_args_list]
+        pressed = [c.kwargs.get("buttons") for c in client.queue_press_buttons.call_args_list]
         self.assertIn(B | C, pressed)
 
     def test_far_twins_hold_a_stick_and_press_nothing(self) -> None:
@@ -157,7 +157,7 @@ class ExecuteTests(unittest.TestCase):
         verb = EngageTwins(actor_slot="P1", target_slot=twin.slot)
         gamepad, client = _gamepad()
         execute_verb(verb, {me, twin, CAMERA}, gamepad)
-        self.assertFalse(client.press_buttons.called)
+        self.assertFalse(client.queue_press_buttons.called)
         held = client.hold_buttons.call_args.kwargs["player1"]
         self.assertEqual(held & RIGHT, RIGHT)  # to the right edge, back to the twin
 
@@ -174,7 +174,7 @@ class TwoPlayerTests(unittest.TestCase):
         verb = EngageTwins(actor_slot=me.slot, target_slot=others[-1].slot)
         gamepad, client = _gamepad(player_index)
         execute_verb(verb, {me, *others, CAMERA}, gamepad)
-        self.assertFalse(client.press_buttons.called)
+        self.assertFalse(client.queue_press_buttons.called)
         return client.hold_buttons.call_args.kwargs[f"player{player_index}"]
 
     def test_the_left_player_goes_left(self) -> None:
@@ -211,12 +211,12 @@ class TwoPlayerTests(unittest.TestCase):
         verb = EngageTwins(actor_slot="P1", target_slot=mine.slot)
         gamepad, client = _gamepad()
         execute_verb(verb, {me, _partner(LO), mine, CAMERA}, gamepad)
-        pressed = [c.kwargs.get("player1") for c in client.press_buttons.call_args_list]
+        pressed = [c.kwargs.get("buttons") for c in client.queue_press_buttons.call_args_list]
         self.assertIn(B | C, pressed)
         theirs = _twin(EDGE - 58, targets_player=2)
         gamepad, client = _gamepad()
         execute_verb(verb, {me, _partner(LO), theirs, CAMERA}, gamepad)
-        self.assertFalse(client.press_buttons.called)
+        self.assertFalse(client.queue_press_buttons.called)
 
 
 def _sim(actor):

@@ -268,7 +268,7 @@ class BreakableWeaponSwingBandTests(unittest.TestCase):
 
         _settle(OpenBreakable(actor_slot="P1", target_slot="obj06"), self._context(2903), gamepad)
 
-        client.press_buttons.assert_not_called()
+        client.queue_press_buttons.assert_not_called()
         self.assertTrue(gamepad.held & LEFT, f"did not back off (mask {hex(gamepad.held)})")
 
     def test_swings_from_inside_the_band(self) -> None:
@@ -276,7 +276,7 @@ class BreakableWeaponSwingBandTests(unittest.TestCase):
 
         _settle(OpenBreakable(actor_slot="P1", target_slot="obj06"), self._context(2893), gamepad)
 
-        self.assertTrue(client.press_buttons.called)
+        self.assertTrue(client.queue_press_buttons.called)
 
 
 def _live_antonio(*, world_x: int, world_y: int) -> Antonio:
@@ -406,9 +406,9 @@ class Round4BridgePropTests(unittest.TestCase):
         wall = prop_solids.solid_box(prop.type_id, prop.world_x, prop.world_y)
         trail = [actor]
         for _ in range(ticks):
-            client.press_buttons.reset_mock()
+            client.queue_press_buttons.reset_mock()
             execute_tick(verb, {actor, *others}, gamepad)
-            if client.press_buttons.called:
+            if client.queue_press_buttons.called:
                 return trail, True
             mask = gamepad.held
             dx = (WALK_PX_PER_TICK if mask & RIGHT else 0) - (WALK_PX_PER_TICK if mask & LEFT else 0)
@@ -944,7 +944,7 @@ class FaceTowardMaskHysteresisTests(unittest.TestCase):
 
             execute_verb(Punch(actor_slot="P1", target_slot="obj01"), {actor, target}, gamepad)
 
-            masks.append(client.press_buttons.call_args.kwargs["player1"])
+            masks.append(client.queue_press_buttons.call_args.kwargs["buttons"])
 
         self.assertFalse(
             any(m & LEFT for m in masks) and any(m & RIGHT for m in masks),
@@ -1410,8 +1410,8 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
 
         # Launch is a press (C + RIGHT), then hold keeps only the direction
         # -- same shape as JumpAttack. gamepad.held is the sticky latch,
-        # so the hop is visible on press_buttons.
-        _client.press_buttons.assert_called_once_with(player1=C | RIGHT, player2=0, frames=3)
+        # so the hop is visible on queue_press_buttons.
+        _client.queue_press_buttons.assert_called_once_with(player=1, buttons=C | RIGHT, frames=3)
 
     def test_does_not_walk_into_an_unjumpable_full_width_pit(self) -> None:
         # 96px gap, wider than Axel's kick. Pathfinder cannot walk around
@@ -1648,7 +1648,7 @@ class ExecuteCatchUpPartnerTests(unittest.TestCase):
 
         execute_verb(self._verb(), context, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=C | RIGHT, player2=0, frames=3)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=C | RIGHT, frames=3)
 
     def test_does_not_walk_into_an_unjumpable_full_width_pit(self) -> None:
         pit = Pit(world_x=400, lane_y=0, width=96, height=130)
@@ -1684,7 +1684,7 @@ class ExecuteCatchUpPartnerTests(unittest.TestCase):
             self._verb(), {actor, partner, self.RIGHT_STAGE, self.CAMERA}, gamepad
         )
 
-        self.assertEqual(client.press_buttons.call_args.kwargs["player1"], B)
+        self.assertEqual(client.queue_press_buttons.call_args.kwargs["buttons"], B)
         self.assertTrue(gamepad.held & RIGHT)
 
     def test_releases_when_the_partner_is_gone(self) -> None:
@@ -1890,7 +1890,7 @@ class ExecutePunchTests(unittest.TestCase):
 
         execute_verb(verb, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
     def test_punch_is_unconditional_even_while_holding_an_enemy(self) -> None:
         # Supplex now owns the "already holding" case (see priority.py /
@@ -1901,7 +1901,7 @@ class ExecutePunchTests(unittest.TestCase):
 
         execute_verb(verb, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
     def test_still_punches_while_holding_a_weapon(self) -> None:
         # could_punch no longer produces Punch while armed (that's
@@ -1913,7 +1913,7 @@ class ExecutePunchTests(unittest.TestCase):
 
         execute_verb(verb, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
 
 class ExecuteMeleeWeaponAttackTests(unittest.TestCase):
@@ -1923,7 +1923,7 @@ class ExecuteMeleeWeaponAttackTests(unittest.TestCase):
 
         execute_verb(verb, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
     def test_presses_button_b_for_knife_or_bottle(self) -> None:
         verb = MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x08)
@@ -1931,7 +1931,7 @@ class ExecuteMeleeWeaponAttackTests(unittest.TestCase):
 
         execute_verb(verb, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
     def test_presses_button_b_for_pepper(self) -> None:
         verb = MeleeWeaponAttack(actor_slot="P1", target_slot="obj01", weapon_type=0x0C)
@@ -1939,7 +1939,7 @@ class ExecuteMeleeWeaponAttackTests(unittest.TestCase):
 
         execute_verb(verb, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
 
 class ExecuteCallPoliceTests(unittest.TestCase):
@@ -1949,7 +1949,7 @@ class ExecuteCallPoliceTests(unittest.TestCase):
 
         execute_verb(verb, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=A, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=A, frames=4)
 
 
 class ExecuteHandleContinueMenuTests(unittest.TestCase):
@@ -1960,7 +1960,7 @@ class ExecuteHandleContinueMenuTests(unittest.TestCase):
 
         execute_verb(verb, {menu}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
     def test_toggles_off_no_with_up(self) -> None:
         verb = HandleContinueMenu(actor_slot="P1")
@@ -1969,7 +1969,7 @@ class ExecuteHandleContinueMenuTests(unittest.TestCase):
 
         execute_verb(verb, {menu}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=UP, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=UP, frames=4)
 
     def test_name_entry_confirms_a_when_already_on_a(self) -> None:
         # $57D2 confirms on +$55 bits 5+6 (C/A). B is bit 4 -- backspace --
@@ -1987,7 +1987,7 @@ class ExecuteHandleContinueMenuTests(unittest.TestCase):
 
         execute_verb(verb, {menu}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=C, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=C, frames=4)
 
     def test_name_entry_confirms_i_with_c_not_b(self) -> None:
         verb = HandleContinueMenu(actor_slot="P1")
@@ -2002,7 +2002,7 @@ class ExecuteHandleContinueMenuTests(unittest.TestCase):
 
         execute_verb(verb, {menu}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=C, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=C, frames=4)
 
     def test_name_entry_steps_right_toward_i(self) -> None:
         verb = HandleContinueMenu(actor_slot="P1")
@@ -2017,7 +2017,7 @@ class ExecuteHandleContinueMenuTests(unittest.TestCase):
 
         execute_verb(verb, {menu}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=RIGHT, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=RIGHT, frames=4)
 
     def test_name_entry_finishes_with_start_after_two_letters(self) -> None:
         verb = HandleContinueMenu(actor_slot="P1")
@@ -2032,7 +2032,7 @@ class ExecuteHandleContinueMenuTests(unittest.TestCase):
 
         execute_verb(verb, {menu}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=START, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=START, frames=4)
 
 
 class ExecuteHandleMrXDialogTests(unittest.TestCase):
@@ -2052,7 +2052,7 @@ class ExecuteHandleMrXDialogTests(unittest.TestCase):
 
         execute_verb(verb, {dialog}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
 
 class ExecuteJumpAttackTests(unittest.TestCase):
@@ -2064,7 +2064,7 @@ class ExecuteJumpAttackTests(unittest.TestCase):
 
         execute_verb(verb, {actor, enemy}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=C | RIGHT, player2=0, frames=3)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=C | RIGHT, frames=3)
 
     def test_presses_a_clean_punch_edge_in_free_flight(self) -> None:
         # Free flight ($12): B on its own -- $3914 needs a rising edge, and
@@ -2077,7 +2077,7 @@ class ExecuteJumpAttackTests(unittest.TestCase):
 
         execute_verb(verb, {actor, enemy}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
     def test_pit_override_does_not_steal_an_airborne_actor(self) -> None:
         # Mid-jump, X overlaps the pit and pit_endangers is true (it is a
@@ -2091,7 +2091,7 @@ class ExecuteJumpAttackTests(unittest.TestCase):
 
         execute_tick(verb, {actor, enemy, pit}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
     def test_presses_nothing_during_the_launch_crouch(self) -> None:
         # $10 is the 5-frame crouch. A B pressed here is still *held* when
@@ -2106,7 +2106,7 @@ class ExecuteJumpAttackTests(unittest.TestCase):
 
         execute_verb(verb, {actor, enemy}, gamepad)
 
-        client.press_buttons.assert_not_called()
+        client.queue_press_buttons.assert_not_called()
         client.hold_buttons.assert_called_once_with(player1=RIGHT, player2=0)
 
     def test_presses_nothing_on_the_landing_frame(self) -> None:
@@ -2123,7 +2123,7 @@ class ExecuteJumpAttackTests(unittest.TestCase):
 
         execute_verb(verb, {actor, enemy}, gamepad)
 
-        client.press_buttons.assert_not_called()
+        client.queue_press_buttons.assert_not_called()
 
     def test_presses_nothing_once_the_kick_is_already_running(self) -> None:
         # $16 stays active for the rest of the airtime; a second edge buys
@@ -2135,7 +2135,7 @@ class ExecuteJumpAttackTests(unittest.TestCase):
 
         execute_verb(verb, {actor, enemy}, gamepad)
 
-        client.press_buttons.assert_not_called()
+        client.queue_press_buttons.assert_not_called()
 
     def test_missing_actor_does_nothing(self) -> None:
         verb = JumpAttack(actor_slot="P1", target_slot="obj01")
@@ -2143,7 +2143,7 @@ class ExecuteJumpAttackTests(unittest.TestCase):
 
         execute_verb(verb, set(), gamepad)
 
-        client.press_buttons.assert_not_called()
+        client.queue_press_buttons.assert_not_called()
 
     def test_no_target_does_not_hop_in_place(self) -> None:
         actor = _myself(is_airborne=False)
@@ -2152,7 +2152,7 @@ class ExecuteJumpAttackTests(unittest.TestCase):
 
         execute_verb(verb, {actor}, gamepad)
 
-        client.press_buttons.assert_not_called()
+        client.queue_press_buttons.assert_not_called()
 
 
 class ExecuteGrabEnemyTests(unittest.TestCase):
@@ -2167,7 +2167,7 @@ class ExecuteGrabEnemyTests(unittest.TestCase):
         _settle(verb, {actor, target}, gamepad)
 
         client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
-        client.press_buttons.assert_not_called()
+        client.queue_press_buttons.assert_not_called()
 
     def test_aims_at_the_enemy_itself_including_the_lane(self) -> None:
         actor = _myself(world_x=100, world_y=100)
@@ -2236,7 +2236,7 @@ class ExecuteSupplexTests(unittest.TestCase):
 
         execute_verb(verb, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=C, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=C, frames=4)
 
     def test_presses_punch_from_back_hold(self) -> None:
         actor = _myself(action_state=0x66)
@@ -2245,7 +2245,7 @@ class ExecuteSupplexTests(unittest.TestCase):
 
         execute_verb(verb, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
     def test_presses_punch_as_fallback_for_other_action_state(self) -> None:
         actor = _myself(action_state=0x10)
@@ -2254,7 +2254,7 @@ class ExecuteSupplexTests(unittest.TestCase):
 
         execute_verb(verb, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
     def test_facing_bit_is_cleared_before_comparison(self) -> None:
         actor = _myself(action_state=0x67)  # back hold, facing bit set
@@ -2263,7 +2263,7 @@ class ExecuteSupplexTests(unittest.TestCase):
 
         execute_verb(verb, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
 
 class ExecuteThrowKnifeTests(unittest.TestCase):
@@ -2273,7 +2273,7 @@ class ExecuteThrowKnifeTests(unittest.TestCase):
 
         execute_verb(verb, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
 
 class ExecuteThrowPepperTests(unittest.TestCase):
@@ -2283,7 +2283,7 @@ class ExecuteThrowPepperTests(unittest.TestCase):
 
         execute_verb(verb, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
 
 class ExecuteRearAttackTests(unittest.TestCase):
@@ -2293,7 +2293,7 @@ class ExecuteRearAttackTests(unittest.TestCase):
 
         execute_verb(verb, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B | C, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B | C, frames=4)
 
 
 class ExecuteCounterGrabTests(unittest.TestCase):
@@ -2309,7 +2309,7 @@ class ExecuteCounterGrabTests(unittest.TestCase):
 
         execute_verb(verb, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=C, player2=0, frames=3)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=C, frames=3)
 
     def test_presses_b_when_counter_window_open(self) -> None:
         actor = replace(
@@ -2323,7 +2323,7 @@ class ExecuteCounterGrabTests(unittest.TestCase):
 
         execute_verb(verb, {actor}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=3)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=3)
 
 
 class ExecuteTechRecoverTests(unittest.TestCase):
@@ -2333,7 +2333,7 @@ class ExecuteTechRecoverTests(unittest.TestCase):
 
         execute_verb(verb, set(), gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=C | UP, player2=0, frames=3)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=C | UP, frames=3)
 
 
 class ExecuteOpenBreakableTests(unittest.TestCase):
@@ -2379,7 +2379,7 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
 
         execute_verb(verb, {actor, prop}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B | RIGHT, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B | RIGHT, frames=4)
 
     def test_faces_the_prop_before_hitting_it(self) -> None:
         # In range (dx=-20) but facing right when the prop needs left: never
@@ -2394,7 +2394,7 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
 
         execute_verb(verb, {actor, prop}, gamepad)
 
-        client.press_buttons.assert_not_called()
+        client.queue_press_buttons.assert_not_called()
 
     def test_eventually_faces_and_hits_the_prop(self) -> None:
         # Same start as above, driven to completion: walking toward the
@@ -2409,7 +2409,7 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
 
         for _ in range(30):
             execute_verb(verb, {actor, prop}, gamepad)
-            if client.press_buttons.called:
+            if client.queue_press_buttons.called:
                 break
             mask = gamepad.held
             dx = (WALK_PX_PER_TICK if mask & RIGHT else 0) - (
@@ -2423,7 +2423,7 @@ class ExecuteOpenBreakableTests(unittest.TestCase):
                 actor = replace(actor, facing_left=dx < 0)
         else:
             self.fail("never punched the prop")
-        client.press_buttons.assert_called_once_with(player1=B | LEFT, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B | LEFT, frames=4)
 
     def test_side_pick_does_not_glitch_exactly_on_alignment(self) -> None:
         # Regression, same shape as the enemy/retreat/release-grab side
@@ -2591,8 +2591,8 @@ class OpenBreakableFacingTests(unittest.TestCase):
 
         for _ in range(30):
             execute_verb(verb, {actor, prop, stage}, gamepad)
-            if client.press_buttons.called:
-                return client.press_buttons.call_args.kwargs["player1"]
+            if client.queue_press_buttons.called:
+                return client.queue_press_buttons.call_args.kwargs["buttons"]
             mask = gamepad.held
             dx = (WALK_PX_PER_TICK if mask & RIGHT else 0) - (
                 WALK_PX_PER_TICK if mask & LEFT else 0
@@ -3154,7 +3154,7 @@ class ExecuteWalkToWeaponTests(unittest.TestCase):
 
         execute_verb(verb, {actor, weapon}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
     def test_missing_actor_or_target_does_nothing(self) -> None:
         verb = WalkToWeapon(actor_slot="P1", target_slot="obj05")
@@ -3163,7 +3163,7 @@ class ExecuteWalkToWeaponTests(unittest.TestCase):
         execute_verb(verb, set(), gamepad)
 
         client.hold_buttons.assert_not_called()
-        client.press_buttons.assert_not_called()
+        client.queue_press_buttons.assert_not_called()
 
     def test_walks_through_a_dangerous_enemys_swing_to_the_weapon(
         self,
@@ -3205,7 +3205,7 @@ class ExecuteWalkToPickupTests(unittest.TestCase):
 
         execute_verb(verb, {actor, food}, gamepad)
 
-        client.press_buttons.assert_called_once_with(player1=B, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 
     def test_walks_through_a_dangerous_enemys_swing_to_the_pickup(
         self,
@@ -3261,8 +3261,8 @@ class HitAntonioBoomerangExecuteTests(unittest.TestCase):
             {actor, boomerang},
             gamepad,
         )
-        client.press_buttons.assert_called_once_with(
-            player1=B | RIGHT, player2=0, frames=4
+        client.queue_press_buttons.assert_called_once_with(
+            player=1, buttons=B | RIGHT, frames=4
         )
 
 
@@ -3281,8 +3281,8 @@ class HitTableExecuteTests(unittest.TestCase):
             {actor, table},
             gamepad,
         )
-        client.press_buttons.assert_called_once_with(
-            player1=B | RIGHT, player2=0, frames=4
+        client.queue_press_buttons.assert_called_once_with(
+            player=1, buttons=B | RIGHT, frames=4
         )
 
 
@@ -3342,7 +3342,7 @@ class EngageSoutherExecuteTests(unittest.TestCase):
             _myself(world_x=140, world_y=70),
             _souther_token(primary_state=2, combat_phase=CombatPhase.ATTACKING),
         )
-        client.press_buttons.assert_not_called()
+        client.queue_press_buttons.assert_not_called()
         held = self._held(client)
         self.assertTrue(held & DOWN)
         self.assertFalse(held & (B | C | LEFT | RIGHT))
@@ -3356,7 +3356,7 @@ class EngageSoutherExecuteTests(unittest.TestCase):
             {_myself(world_x=100, world_y=50)},
             gamepad,
         )
-        client.press_buttons.assert_not_called()
+        client.queue_press_buttons.assert_not_called()
         self.assertEqual(self._held(client), 0)
 
 
@@ -3377,14 +3377,14 @@ class ReleaseToRegrabExecuteTests(unittest.TestCase):
 
     def test_the_back_press_spans_the_countdown_then_walks_back_in(self) -> None:
         client = self._run(3)
-        client.press_buttons.assert_called_once()
-        pressed = client.press_buttons.call_args.kwargs
-        self.assertEqual(pressed["player1"], LEFT)  # facing right: back is left
+        client.queue_press_buttons.assert_called_once()
+        pressed = client.queue_press_buttons.call_args.kwargs
+        self.assertEqual(pressed["buttons"], LEFT)  # facing right: back is left
         self.assertEqual(pressed["frames"], 8)
         self.assertEqual(client.hold_buttons.call_args.kwargs["player1"], RIGHT)
 
     def test_a_spent_countdown_presses_only_what_is_left(self) -> None:
-        self.assertEqual(self._run(1).press_buttons.call_args.kwargs["frames"], 4)
+        self.assertEqual(self._run(1).queue_press_buttons.call_args.kwargs["frames"], 4)
 
 
 class ReleasePartnerExecuteTests(unittest.TestCase):
@@ -3401,24 +3401,24 @@ class ReleasePartnerExecuteTests(unittest.TestCase):
 
     def test_presses_back_for_the_countdown_and_nothing_else(self) -> None:
         client = self._run(facing_left=False)
-        client.press_buttons.assert_called_once()
-        pressed = client.press_buttons.call_args.kwargs
-        self.assertEqual(pressed["player1"], LEFT)  # facing right: back is left
+        client.queue_press_buttons.assert_called_once()
+        pressed = client.queue_press_buttons.call_args.kwargs
+        self.assertEqual(pressed["buttons"], LEFT)  # facing right: back is left
         self.assertEqual(pressed["frames"], 8)
         # No walk back in: re-entering contact would take the partner again.
-        self.assertEqual(client.hold_buttons.call_args.kwargs["player1"], 0)
+        self.assertFalse(any(c.kwargs["player1"] for c in client.hold_buttons.call_args_list))
 
     def test_back_follows_facing_in_a_back_hold(self) -> None:
-        pressed = self._run(facing_left=True, action_state=0x67).press_buttons
-        self.assertEqual(pressed.call_args.kwargs["player1"], RIGHT)
+        pressed = self._run(facing_left=True, action_state=0x67).queue_press_buttons
+        self.assertEqual(pressed.call_args.kwargs["buttons"], RIGHT)
 
     def test_never_presses_b_or_c(self) -> None:
         for facing_left in (False, True):
             for countdown in (0, 1, 2, 3, 0xFF):
                 with self.subTest(facing_left=facing_left, countdown=countdown):
                     client = self._run(facing_left=facing_left, countdown=countdown)
-                    for call in client.press_buttons.call_args_list:
-                        self.assertFalse(call.kwargs["player1"] & (B | C))
+                    for call in client.queue_press_buttons.call_args_list:
+                        self.assertFalse(call.kwargs["buttons"] & (B | C))
                     for call in client.hold_buttons.call_args_list:
                         self.assertFalse(call.kwargs["player1"] & (B | C))
 
@@ -3537,7 +3537,7 @@ class ExecuteTickKeepsOffThePartnerTests(unittest.TestCase):
         last: a mask stripped after it went out was still a frame of it."""
 
         held = [call.kwargs["player1"] for call in client.hold_buttons.call_args_list]
-        pressed = [call.kwargs["player1"] for call in client.press_buttons.call_args_list]
+        pressed = [call.kwargs["buttons"] for call in client.queue_press_buttons.call_args_list]
         return held + pressed
 
     def test_after_a_release_it_never_turns_back_into_her(self) -> None:
@@ -3599,7 +3599,7 @@ class ExecuteTickKeepsOffThePartnerTests(unittest.TestCase):
 
         execute_tick(ReleasePartner(actor_slot="P1", target_slot="P2"), {actor, partner}, gamepad)
 
-        self.assertEqual(client.press_buttons.call_args.kwargs["player1"], LEFT)
+        self.assertEqual(client.queue_press_buttons.call_args.kwargs["buttons"], LEFT)
 
     def test_a_strike_keeps_its_facing_press(self) -> None:
         actor = _myself(world_x=100, world_y=60, facing_left=True)
@@ -3609,7 +3609,7 @@ class ExecuteTickKeepsOffThePartnerTests(unittest.TestCase):
 
         execute_tick(Punch(actor_slot="P1", target_slot="obj01"), {actor, target, partner}, gamepad)
 
-        self.assertEqual(client.press_buttons.call_args.kwargs["player1"], B | RIGHT)
+        self.assertEqual(client.queue_press_buttons.call_args.kwargs["buttons"], B | RIGHT)
 
     def test_a_partner_out_of_reach_changes_nothing(self) -> None:
         actor = _myself(world_x=0, world_y=90)

@@ -29,37 +29,43 @@ class LockstepCaptureTests(unittest.TestCase):
     def test_press_plays_its_frames_then_falls_back_to_hold(self):
         capture = _LockstepCapture()
         capture.hold_buttons(player1=0x0008, player2=0)
-        capture.press_buttons(player1=0x0010, player2=0, frames=2)
+        capture.queue_press_buttons(player=1, buttons=0x0010, frames=2)
+        # In place of the hold, as the host's QUEUE_PRESS_BUTTONS plays it.
         self.assertEqual(capture.next_frame_masks(), (0x0010, 0))
         self.assertEqual(capture.next_frame_masks(), (0x0010, 0))
         self.assertEqual(capture.next_frame_masks(), (0x0008, 0))
 
     def test_players_drain_independently(self):
         capture = _LockstepCapture()
-        capture.hold_buttons(player1=0x0008, player2=0x0004)
-        capture.press_buttons(player1=0x0010, player2=0x0004, frames=1)
-        # P1's edge plays once; P2's payload is its own hold, so it reads
-        # unchanged throughout.
+        capture.hold_buttons(player1=0, player2=0x0004)
+        capture.queue_press_buttons(player=1, buttons=0x0010, frames=1)
         self.assertEqual(capture.next_frame_masks(), (0x0010, 0x0004))
-        self.assertEqual(capture.next_frame_masks(), (0x0008, 0x0004))
+        self.assertEqual(capture.next_frame_masks(), (0, 0x0004))
 
-    def test_press_pending_tracks_frames_left(self):
+    def test_press_pending_is_per_player(self):
         capture = _LockstepCapture()
         self.assertFalse(capture.press_pending(1))
-        # A press carries the full two-player payload (SharedGamepadState.press
-        # folds the other player's hold into the same call), so both sides
-        # count down together.
-        capture.press_buttons(player1=0x0010, player2=0, frames=1)
+        capture.queue_press_buttons(player=1, buttons=0x0010, frames=1)
         self.assertTrue(capture.press_pending(1))
-        self.assertTrue(capture.press_pending(2))
+        self.assertFalse(capture.press_pending(2))
         capture.next_frame_masks()
         self.assertFalse(capture.press_pending(1))
-        self.assertFalse(capture.press_pending(2))
+
+    def test_a_press_behind_another_waits_one_released_frame(self):
+        capture = _LockstepCapture()
+        capture.queue_press_buttons(player=1, buttons=0x0010, frames=2)
+        self.assertEqual(capture.next_frame_masks(), (0x0010, 0))
+        capture.queue_press_buttons(player=1, buttons=0x0020, frames=1)
+        capture.queue_press_buttons(player=1, buttons=0x0040, frames=1)  # replaces the waiting one
+        self.assertEqual(capture.next_frame_masks(), (0x0010, 0))
+        self.assertEqual(capture.next_frame_masks(), (0, 0))
+        self.assertEqual(capture.next_frame_masks(), (0x0040, 0))
+        self.assertEqual(capture.next_frame_masks(), (0, 0))
 
     def test_reset_clears_holds_and_presses(self):
         capture = _LockstepCapture()
         capture.hold_buttons(player1=0x0008, player2=0x0004)
-        capture.press_buttons(player1=0x0010, player2=0, frames=4)
+        capture.queue_press_buttons(player=1, buttons=0x0010, frames=4)
         capture.reset()
         self.assertEqual(capture.next_frame_masks(), (0, 0))
         self.assertFalse(capture.press_pending(1))

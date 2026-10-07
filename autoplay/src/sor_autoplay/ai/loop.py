@@ -152,6 +152,17 @@ class AgentLoop:
         every tick.
         """
 
+        # The pipeline's own press is still playing (QUEUE_PRESS_BUTTONS
+        # replied at once with its release frame): skip the tick, pad
+        # untouched, as lockstep does with its capture's press_pending. A
+        # decision made now would be about a body the press has not acted on
+        # yet -- live, a ReleaseToRegrab chosen mid-press was pressed again
+        # after the release and lost the re-grab -- and the old blocking
+        # PRESS_BUTTONS never let one be made: it held the tick until release.
+        uptime_frames = (snapshot.raw or {}).get("uptime_frames")
+        if uptime_frames is not None and self._gamepad.press_pending(uptime_frames):
+            return self.verb_state().winning
+
         player = snapshot.players[player_index - 1]
         # Continue / name-entry replaces the playable object with type $0F,
         # so is_playable is false -- but the pipeline still has to answer

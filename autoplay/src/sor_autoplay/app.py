@@ -54,15 +54,25 @@ class _RemoteClientProxy:
         if client is not None:
             client.press_buttons(player1=player1, player2=player2, frames=frames)
 
+    def queue_press_buttons(self, *, player: int, buttons: int, frames: int = 1) -> int | None:
+        client = self._app._client
+        if client is None:
+            return None
+        return client.queue_press_buttons(player=player, buttons=buttons, frames=frames)
+
 
 class _LockstepCapture:
     """Capture (instead of send) both players' button commands in lockstep mode.
 
     The two-player ``RecordingClient`` the ``tools/*_lab.py`` labs each
-    reimplement for player 1 alone, promoted here. ``SharedGamepadState.press``
-    sends a full two-player payload -- the acting player's edge plus the other
-    player's current hold -- so replaying that payload verbatim for its frames
-    and then falling back to the sticky holds reproduces the tick exactly.
+    reimplement for player 1 alone, promoted here. Presses arrive as
+    ``queue_press_buttons`` (``SharedGamepadState.press``) and are replayed
+    the way the host's ``QUEUE_PRESS_BUTTONS`` plays them
+    (``Controllers::queueRemotePress``): per player, in place of that
+    player's hold, for exactly ``frames`` frames, and a press queued behind
+    another starts only after one released frame, so it is a fresh edge.
+    Only the newest waiting press is kept. It answers no release frame: the
+    lockstep loop skips a player's tick on ``press_pending`` itself.
 
     Touched from the poll thread (AI ticks, stepping) and the Tk thread (HUD
     toggle releases), so every method takes the lock.
@@ -70,45 +80,54 @@ class _LockstepCapture:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._held: dict[int, int] = {1: 0, 2: 0}
-        self._press_mask: dict[int, int] = {1: 0, 2: 0}
-        self._press_frames: dict[int, int] = {1: 0, 2: 0}
+        self.reset()
 
     def reset(self) -> None:
         with self._lock:
-            self._held = {1: 0, 2: 0}
-            self._press_mask = {1: 0, 2: 0}
-            self._press_frames = {1: 0, 2: 0}
+            self._held: dict[int, int] = {1: 0, 2: 0}
+            # [mask, frames left] while held; (mask, frames) waiting behind it.
+            self._active: dict[int, list[int] | None] = {1: None, 2: None}
+            self._waiting: dict[int, tuple[int, int] | None] = {1: None, 2: None}
+            self._released: dict[int, bool] = {1: False, 2: False}
 
     def hold_buttons(self, *, player1: int = 0, player2: int = 0) -> None:
         with self._lock:
             self._held[1] = int(player1)
             self._held[2] = int(player2)
 
-    def press_buttons(
-        self, *, player1: int = 0, player2: int = 0, frames: int = 1
-    ) -> None:
+    def queue_press_buttons(self, *, player: int, buttons: int, frames: int = 1) -> None:
         with self._lock:
-            self._press_mask[1] = int(player1)
-            self._press_mask[2] = int(player2)
-            self._press_frames[1] = int(frames)
-            self._press_frames[2] = int(frames)
+            self._waiting[player] = (int(buttons), int(frames))
 
     def press_pending(self, player_index: int) -> bool:
         with self._lock:
-            return self._press_frames[player_index] > 0
+            return (
+                self._active[player_index] is not None
+                or self._waiting[player_index] is not None
+            )
 
     def next_frame_masks(self) -> tuple[int, int]:
-        """Masks for one stepped frame, draining any pending press first."""
+        """Masks for one stepped frame, playing any queued press first."""
 
         with self._lock:
             out = {}
             for index in (1, 2):
-                if self._press_frames[index] > 0:
-                    self._press_frames[index] -= 1
-                    out[index] = self._press_mask[index]
-                else:
+                if self._released[index]:
+                    # The frame after a press plays released.
+                    self._released[index] = False
+                elif self._active[index] is None and self._waiting[index] is not None:
+                    mask, frames = self._waiting[index]
+                    self._active[index] = [mask, frames]
+                    self._waiting[index] = None
+                active = self._active[index]
+                if active is None:
                     out[index] = self._held[index]
+                    continue
+                out[index] = active[0]
+                active[1] -= 1
+                if active[1] == 0:
+                    self._active[index] = None
+                    self._released[index] = True
             return (out[1], out[2])
 
 

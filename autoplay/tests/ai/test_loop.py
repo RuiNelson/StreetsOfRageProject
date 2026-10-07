@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
 from sor_autoplay.ai.tokens import Punch
@@ -57,6 +58,33 @@ def _gamepad() -> tuple[VirtualGamepad, MagicMock]:
 
 
 class AgentLoopGatingTests(unittest.TestCase):
+    def test_skips_ticks_until_its_queued_press_is_released(self) -> None:
+        """QUEUE_PRESS_BUTTONS replies with the press's release frame; until
+        a snapshot reaches it the tick neither observes nor touches the pad,
+        as the blocking PRESS_BUTTONS never let it."""
+
+        gamepad, client = _gamepad()
+        client.queue_press_buttons.return_value = 105
+        gamepad.press(0x0020, frames=4)
+        client.reset_mock()
+        loop = AgentLoop(gamepad)
+
+        with patch("sor_autoplay.ai.loop.generate_direct_observation_tokens") as observe:
+            loop.tick(replace(_snapshot(), raw={"uptime_frames": 104}), player_index=1)
+            observe.assert_not_called()
+            self.assertEqual(client.mock_calls, [])
+            loop.tick(replace(_snapshot(), raw={"uptime_frames": 105}), player_index=1)
+            observe.assert_called_once()
+
+    def test_a_release_frame_out_of_reach_is_stale(self) -> None:
+        # The game restarted, and its frame count with it.
+        gamepad, client = _gamepad()
+        client.queue_press_buttons.return_value = 10_000
+        gamepad.press(0x0020, frames=4)
+        self.assertFalse(gamepad.press_pending(12))
+        self.assertFalse(gamepad.press_pending(9_999))
+
+
     def test_paused_releases_and_skips_observation(self) -> None:
         gamepad, client = _gamepad()
         gamepad.hold(0x0008)
@@ -173,7 +201,7 @@ class AgentLoopPipelineTests(unittest.TestCase):
         # generate_verb_tokens's return value stood in for the whole
         # accumulated context; determine_priority_verb keeps the single
         # Punch, and execute_verb should have pressed B (punch).
-        client.press_buttons.assert_called_once_with(player1=0x0020, player2=0, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=0x0020, frames=4)
         # tick() hands back the winning Verb (e.g. for a HUD to show
         # what the AI is doing) after execute_verb has already run.
         self.assertIs(result, punch)

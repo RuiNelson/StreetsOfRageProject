@@ -224,7 +224,7 @@ class ExecuteTests(unittest.TestCase):
         gamepad, client = _gamepad()
         execute_verb(EngageAbadede(actor_slot="P1", target_slot="obj00"), {me, boss, CAMERA}, gamepad)
         pressed = [
-            call.kwargs.get("player1", 0) for call in client.press_buttons.call_args_list
+            call.kwargs.get("buttons", 0) for call in client.queue_press_buttons.call_args_list
         ]
         self.assertIn(B, pressed)
         self.assertFalse(any(mask & (LEFT | RIGHT) for mask in pressed), pressed)
@@ -235,7 +235,7 @@ class ExecuteTests(unittest.TestCase):
         gamepad, client = _gamepad()
         execute_verb(EngageAbadede(actor_slot="P1", target_slot="obj00"), {me, boss, CAMERA}, gamepad)
         pressed = [
-            call.kwargs.get("player1", 0) for call in client.press_buttons.call_args_list
+            call.kwargs.get("buttons", 0) for call in client.queue_press_buttons.call_args_list
         ]
         self.assertFalse(any(mask & B for mask in pressed), pressed)
 
@@ -245,7 +245,7 @@ class ExecuteTests(unittest.TestCase):
         gamepad, client = _gamepad()
         execute_verb(EngageAbadede(actor_slot="P1", target_slot="obj00"), {me, boss, CAMERA}, gamepad)
         pressed = [
-            call.kwargs.get("player1", 0) for call in client.press_buttons.call_args_list
+            call.kwargs.get("buttons", 0) for call in client.queue_press_buttons.call_args_list
         ]
         self.assertFalse(any(mask & B for mask in pressed), pressed)
 

@@ -4,8 +4,9 @@
 cannot report which buttons are currently pressed (see
 ``MegaDriveEnvironment/docs/remote-access-protocol.md``), so this module is
 the single source of truth for "what are we currently holding" per player.
-It only ever calls ``hold_buttons`` / ``press_buttons`` / ``release_buttons``
-on the client — never ``write_memory`` / ``write_value``.
+It only ever calls ``hold_buttons`` / ``queue_press_buttons`` /
+``press_buttons`` / ``release_buttons`` on the client — never
+``write_memory`` / ``write_value``.
 """
 
 from __future__ import annotations
@@ -28,6 +29,12 @@ NONE_MASK = 0
 # VirtualGamepad.steer_x.
 AXIS_RAMP_TICKS = 3
 
+# How far past its own length a queued press's release frame may lie before
+# press_pending calls it stale: the press starts at the next VSync, and one
+# behind another waits for it plus a released frame; the snapshot that gave
+# the frame count is a little older than the press.
+PRESS_RELEASE_SLACK_FRAMES = 4
+
 
 class ButtonClient(Protocol):
     """The subset of ``MegaDriveClient`` the virtual gamepad needs."""
@@ -44,6 +51,9 @@ class ButtonClient(Protocol):
         frames: int = 1,
     ) -> None: ...
 
+    # Optional: ``queue_press_buttons(*, player, buttons, frames)``. A client
+    # that has it gets non-blocking presses (SharedGamepadState.press).
+
 
 def _validate_player_index(player_index: int) -> None:
     if player_index not in (1, 2):
@@ -52,6 +62,10 @@ def _validate_player_index(player_index: int) -> None:
 
 class SharedGamepadState:
     """Coordinates both players' held masks over one ``hold_buttons`` link.
+
+    Presses go out as ``QUEUE_PRESS_BUTTONS`` when the client has it -- one
+    player's mask, neither hold touched, no wait (see ``press``). The rest of
+    this note is about the blocking ``PRESS_BUTTONS`` fallback.
 
     Both ``HOLD_BUTTONS`` and ``PRESS_BUTTONS`` latch *both* player masks in
     a single remote call and — for ``PRESS_BUTTONS`` — unconditionally clear
@@ -73,6 +87,8 @@ class SharedGamepadState:
     def __init__(self, client: ButtonClient) -> None:
         self._client = client
         self._held: dict[int, int] = {1: NONE_MASK, 2: NONE_MASK}
+        # Per player: (release frame, frames) of the last queued press.
+        self._press_release: dict[int, tuple[int, int] | None] = {1: None, 2: None}
         # ObserverApp drives this from both the background poll thread (AI
         # ticks) and the Tk UI thread (HUD toggle clicks); RLock because
         # release() re-enters hold() on the same thread.
@@ -96,9 +112,20 @@ class SharedGamepadState:
         self.hold(player_index, NONE_MASK)
 
     def press(self, player_index: int, mask: "Buttons | int", *, frames: int = 1) -> None:
-        """Press one player's buttons, preserving and then re-arming both holds.
+        """Press one player's buttons for ``frames`` frames.
 
-        ``PRESS_BUTTONS`` applies a full two-player payload and, on return,
+        With a client that has ``queue_press_buttons`` (``MegaDriveClient``,
+        ``QUEUE_PRESS_BUTTONS``) this returns at once: the host plays the
+        press from the next VSync in place of this player's latch -- a hold
+        sent right after it (a release's walk back in) takes effect once it
+        ends -- and touches neither hold. The reply's release frame is kept
+        for :meth:`press_pending`. ``PRESS_BUTTONS`` instead replies only once
+        the press has been released -- ~4-5 frames for the 4-frame hold
+        moves, ~37 ms a tick at ``--turbo 2`` measured live -- so it is only
+        the fallback, for clients without the queue (the labs' recording
+        clients).
+
+        The blocking fallback: ``PRESS_BUTTONS`` applies a full two-player payload and, on return,
         has already cleared *both* players back to none server-side — never
         just the named player's mask (see the class docstring). Send the
         other player's currently cached hold in the same payload so it does
@@ -113,11 +140,41 @@ class SharedGamepadState:
 
         _validate_player_index(player_index)
         mask = int(mask)
+        queue = getattr(self._client, "queue_press_buttons", None)
+        if queue is not None:
+            release = queue(player=player_index, buttons=mask, frames=frames)
+            with self._lock:
+                # Only a host's answer counts (a lockstep capture or a test
+                # double has none).
+                self._press_release[player_index] = (
+                    (release, frames) if isinstance(release, int) else None
+                )
+            return
         with self._lock:
             other_index = 2 if player_index == 1 else 1
             masks = {player_index: mask, other_index: self._held[other_index]}
             self._client.press_buttons(player1=masks[1], player2=masks[2], frames=frames)
             self._client.hold_buttons(player1=self._held[1], player2=self._held[2])
+
+    def press_pending(self, player_index: int, uptime_frames: int) -> bool:
+        """Whether this player's last queued press is still playing at
+        ``uptime_frames`` (``GET_GAME_UPTIME_FRAMES``, as a snapshot reads it).
+
+        A release frame further off than the press itself could reach is a
+        stale one -- the game restarted and its frame count with it -- and is
+        dropped rather than trusted.
+        """
+
+        _validate_player_index(player_index)
+        with self._lock:
+            pending = self._press_release[player_index]
+            if pending is None:
+                return False
+            release, frames = pending
+            if uptime_frames >= release or release - uptime_frames > frames + PRESS_RELEASE_SLACK_FRAMES:
+                self._press_release[player_index] = None
+                return False
+            return True
 
     def reset(self) -> None:
         """Resync cached masks to none, without sending a command.
@@ -131,6 +188,7 @@ class SharedGamepadState:
 
         with self._lock:
             self._held = {1: NONE_MASK, 2: NONE_MASK}
+            self._press_release = {1: None, 2: None}
 
 
 class VirtualGamepad:
@@ -206,3 +264,6 @@ class VirtualGamepad:
 
     def press(self, mask: "Buttons | int", *, frames: int = 1) -> None:
         self._state.press(self._player_index, mask, frames=frames)
+
+    def press_pending(self, uptime_frames: int) -> bool:
+        return self._state.press_pending(self._player_index, uptime_frames)
