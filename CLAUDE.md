@@ -228,6 +228,10 @@ section if its turbo factor or `--poll-ms` changes. Full rationale,
 including frame-pacing details for timing moves, is in `autoplay/CLAUDE.md`
 under **Live AI testing**.
 
+`./scripts/both_sound` is the same pairing at normal speed with sound on
+(no `--turbo`, no `--silent`, default poll cadence), for watching a session;
+it is not a measurement wrapper.
+
 For frame-exact sessions where the AI drives the clock instead of the wall
 clock (tick, step exactly 2 game frames as fast as they run, back to the
 tick — no turbo, no poll pacing), use the wrapper:
