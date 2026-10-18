@@ -16,7 +16,7 @@ best-effort route gives up. That is a question for eyes.
 Launch it from the meta-repo root, which finds a Python with Tk for you (the
 default ``python3`` on this machine has none)::
 
-    ./scripts/pathfind_viewer
+    ./scripts/pathfind_viewer.py
 
 or directly::
 

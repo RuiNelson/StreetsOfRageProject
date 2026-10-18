@@ -10,7 +10,7 @@ geometry to tell a facing miss, a positional miss, and a genuine repeat
 punch apart.
 
 Run (host already up with ``--debugUtils``, e.g.
-``./scripts/run --turbo 4 --lang en --debugUtils --port 7777 --silent``):
+``./scripts/run.py --turbo 4 --lang en --debugUtils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
@@ -76,7 +76,7 @@ def main() -> int:
     ap.add_argument(
         "--sweep",
         action="store_true",
-        help="Keep every ordinary family swept, as scripts/go_to_boss and the boss "
+        help="Keep every ordinary family swept, as scripts/go_to_boss.py and the boss "
         "harnesses do -- the walk the user watches before a boss fight",
     )
     ap.add_argument("--out", required=True)

@@ -39,7 +39,7 @@ Every row carries both objects' raw fields (action/primary, timers, the
 so the numbers in the summary can be re-derived from the log.
 
 Run (host already up with ``--debugUtils``, e.g.
-``./scripts/run --turbo 4 --lang en --debugUtils --port 7777 --silent``):
+``./scripts/run.py --turbo 4 --lang en --debugUtils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\

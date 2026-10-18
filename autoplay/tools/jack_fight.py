@@ -27,7 +27,7 @@ Rounds with Jack (the ELC census in ``autoplay/CLAUDE.md``): 2 and 4
 appears, the level changes, or ``--seconds`` runs out.
 
 Run (host already up with ``--debugUtils``, e.g.
-``./scripts/run --turbo 4 --lang en --debugUtils --port 7777 --silent``):
+``./scripts/run.py --turbo 4 --lang en --debugUtils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\

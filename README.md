@@ -212,10 +212,10 @@ path finder that steers around walls, floor holes, props, and round 6's drop
 press.
 
 No behaviour change ships without being measured against the running game.
-Helper scripts put the AI straight in front of any round's boss
-(`scripts/go_to_boss_N`), run it in turbo, or let it step the game frame by
-frame in lockstep, and a recorded stall can be replayed offline through the
-real pipeline.
+The Python helpers put the AI straight in front of any round's boss
+(`scripts/go_to_boss.py LEVEL`), run it in turbo, or let it step the game
+frame by frame in lockstep, and a recorded stall can be replayed offline
+through the real pipeline.
 
 The design is described in [`autoplay/AI.md`](autoplay/AI.md); launch
 instructions and CLI options are in [`autoplay/README.md`](autoplay/README.md);
@@ -387,32 +387,30 @@ first three hexadecimal digits of the first subroutine entry address in that
 source file. Regenerate them whenever the ROM, analysis data, labels, auxiliary
 addresses, manual-function inputs, or recompiler changes.
 
-In the same **Developer PowerShell for VS 2022** session, configure and compile:
+In the same **Developer PowerShell for VS 2022** session, let the cross-platform
+Python launcher generate and build the host:
 
 ```powershell
 $VcpkgRoot = "C:\src\vcpkg"
-$BuildDir = "build/windows"
-$BinDir = (Join-Path (Resolve-Path ".") "$BuildDir/bin")
-
-cmake -S StreetsOfRageRecompilation -B $BuildDir -G "Visual Studio 17 2022" -A x64 `
-  -DCMAKE_TOOLCHAIN_FILE="$VcpkgRoot\scripts\buildsystems\vcpkg.cmake" `
-  -DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE="$BinDir"
-
-cmake --build $BuildDir --config Release --parallel
+$env:CMAKE_TOOLCHAIN_FILE = "$VcpkgRoot\scripts\buildsystems\vcpkg.cmake"
+py scripts\generate_cpp_and_build.py --release
 ```
 
-The Visual Studio generator is multi-configuration, so `--config Release`
-selects the optimized build. `sor.exe` and the required runtime DLLs are
-placed in `build/windows/bin`.
+The launcher passes `CMAKE_TOOLCHAIN_FILE` to CMake and selects `Release` for
+multi-configuration generators. It builds in `StreetsOfRageRecompilation\build`.
 
 Run the port:
 
 ```powershell
-.\build\windows\bin\sor.exe --rom ".\StreetsOfRageRecompilation\rom\SOR.bin" --lang en
+py scripts\run.py .\StreetsOfRageRecompilation\rom\SOR.bin --lang en
 ```
 
 If CMake cannot find SDL3, confirm that the toolchain path and vcpkg triplet
 match the installed `sdl3:x64-windows` package.
+
+The repository's `scripts/*.py` launchers work on all three desktop platforms
+and use only the Python standard library. On Windows invoke them with `py`;
+on macOS and Linux they are executable directly.
 
 ### 5. Build on macOS
 
@@ -433,13 +431,13 @@ SDL3 on the same architecture.
 After a fresh clone, generate the C++ port and create a Debug build:
 
 ```bash
-./scripts/generate_cpp_and_build
+./scripts/generate_cpp_and_build.py
 ```
 
 For the first optimized build:
 
 ```bash
-./scripts/generate_cpp_and_build --release
+./scripts/generate_cpp_and_build.py --release
 ```
 
 Once `generated/SoR.hpp`, `generated/SoR-common.hpp`, and the
@@ -447,13 +445,13 @@ Once `generated/SoR.hpp`, `generated/SoR-common.hpp`, and the
 use:
 
 ```bash
-./scripts/build
+./scripts/build.py
 ```
 
 Run the port:
 
 ```bash
-./scripts/run StreetsOfRageRecompilation/rom/SOR.bin
+./scripts/run.py StreetsOfRageRecompilation/rom/SOR.bin
 ```
 
 The equivalent direct CMake workflow is:
@@ -489,14 +487,14 @@ sudo apt install libsdl3-dev
 Generate the C++ port and create the first optimized build:
 
 ```bash
-./scripts/generate_cpp_and_build --release
+./scripts/generate_cpp_and_build.py --release
 ```
 
 Once the generated files exist locally, subsequent builds can use
-`./scripts/build`.
+`./scripts/build.py`.
 
 ```bash
-./scripts/run StreetsOfRageRecompilation/rom/SOR.bin
+./scripts/run.py StreetsOfRageRecompilation/rom/SOR.bin
 ```
 
 The equivalent direct CMake workflow is:

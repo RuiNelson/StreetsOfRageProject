@@ -61,7 +61,7 @@ From the meta-repository, with a legal ROM at
 `StreetsOfRageRecompilation/rom/SOR.bin`:
 
 ```bash
-./scripts/run StreetsOfRageRecompilation/rom/SOR.bin --debugUtils --port 6969
+./scripts/run.py StreetsOfRageRecompilation/rom/SOR.bin --debugUtils --port 6969
 ```
 
 `--debugUtils` enables the remote server. Default port is `6969`.
@@ -71,10 +71,10 @@ From the meta-repository, with a legal ROM at
 From the meta-repository (preferred):
 
 ```bash
-./scripts/autoplay
-./scripts/autoplay --host 127.0.0.1 --port 6969
-./scripts/autoplay --once
-./scripts/autoplay --poll-ms 33
+./scripts/autoplay.py
+./scripts/autoplay.py --host 127.0.0.1 --port 6969
+./scripts/autoplay.py --once
+./scripts/autoplay.py --poll-ms 33
 ```
 
 Or directly:
@@ -111,8 +111,8 @@ running `sor`. Draw a body, draw obstacles, pick a destination, and look at
 the vectors the planner returns.
 
 ```bash
-./scripts/pathfind_viewer
-./scripts/pathfind_viewer --width 480 --height 200 --step 4 --body 24
+./scripts/pathfind_viewer.py
+./scripts/pathfind_viewer.py --width 480 --height 200 --step 4 --body 24
 ```
 
 | Flag | Meaning |

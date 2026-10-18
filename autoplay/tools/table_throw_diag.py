@@ -23,7 +23,7 @@ Runs the real ``AgentLoop`` pipeline against a live host, the same shape as
 ``tools/hakuro_emerge_diag.py``, jumping straight to round 8
 (``DebugScenario(start_level=8)``, no family sweep -- the user says the
 tables are thrown right at the start, so the boss-rush sweep tooling
-(``--kill-until-mr-x``, ``scripts/go_to_boss_8``) is not needed here). Every
+(``--kill-until-mr-x``, ``scripts/go_to_boss.py 8``) is not needed here). Every
 tick with a live type-$45 object on the table logs its full raw geometry --
 world X/Y/Z, the velocity fields (+$1C/+$20/+$24, all signed 16.16 fixed),
 primary state (+$30), fine flags (+$31/+$3A), health, and the spawn/variant

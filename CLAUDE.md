@@ -85,8 +85,8 @@ Requirements:
 On macOS and Linux, the preferred wrappers are:
 
 ```bash
-./scripts/generate_cpp_and_build
-./scripts/generate_cpp_and_build --release
+./scripts/generate_cpp_and_build.py
+./scripts/generate_cpp_and_build.py --release
 ```
 
 After `generated/SoR.hpp`, `generated/SoR-common.hpp`, and the split
@@ -120,7 +120,7 @@ StreetsOfRageRecompilation/rom/SOR.bin
 it whenever ROM analysis or recompiler inputs change:
 
 ```bash
-./scripts/generate_cpp
+./scripts/generate_cpp.py
 ```
 
 Do not commit ROMs, ignored generated C++, build trees, CMake download trees,
@@ -152,8 +152,8 @@ PYTHONPATH=../RageDecompiler python3 -m tools --help
 Prefer the repository entry points for common workflows:
 
 ```bash
-./scripts/disassemble_to_asm
-./scripts/discover_aux_smart
+./scripts/disassemble_to_asm.py
+./scripts/discover_aux_smart.py
 ```
 
 The static disassembler follows known control flow. Active runtime discovery
@@ -211,11 +211,11 @@ Live sessions (not unit tests) must run the host in turbo with a matching
 autoplay poll cadence. Use the wrapper:
 
 ```bash
-./scripts/both_turbo
+./scripts/both_turbo.py
 ```
 
-equivalent to `./scripts/run --turbo 2 --lang en --debugUtils --port 7777
---silent &` plus `./scripts/autoplay --poll-ms 16 --port 7777 --agent-p1
+equivalent to `./scripts/run.py --turbo 2 --lang en --debugUtils --port 7777
+--silent &` plus `./scripts/autoplay.py --poll-ms 16 --port 7777 --agent-p1
 --reach-gameplay blaze`. `--turbo 2` is the ceiling on the development
 machine (measured: `--turbo 4` also ran at 120 fps there, so anything paced
 by the wall clock was off by two). `--poll-ms 16` keeps sampling at ~2
@@ -223,12 +223,12 @@ frames per tick under turbo — the 33 ms default would drop to one sample per
 four frames and miss holds, jumps, and incoming attacks. `--silent` is
 required whenever the game is launched for debug. Only start a live `sor`
 session when necessary; prefer `autoplay` unit tests for logic changes.
-`scripts/both_turbo` is the source of truth for these flags — update this
+`scripts/both_turbo.py` is the source of truth for these flags — update this
 section if its turbo factor or `--poll-ms` changes. Full rationale,
 including frame-pacing details for timing moves, is in `autoplay/CLAUDE.md`
 under **Live AI testing**.
 
-`./scripts/both_sound` is the same pairing at normal speed with sound on
+`./scripts/both_sound.py` is the same pairing at normal speed with sound on
 (no `--turbo`, no `--silent`, default poll cadence), for watching a session;
 it is not a measurement wrapper.
 
@@ -237,42 +237,41 @@ clock (tick, step exactly 2 game frames as fast as they run, back to the
 tick — no turbo, no poll pacing), use the wrapper:
 
 ```bash
-./scripts/both_lockstep_speed
+./scripts/both_lockstep_speed.py
 ```
 
-equivalent to `./scripts/run --lang en --debugUtils --port 6767 --silent &`
-plus `./scripts/autoplay --lockstep --port 6767 --agent-p1 --reach-gameplay
+equivalent to `./scripts/run.py --lang en --debugUtils --port 6767 --silent &`
+plus `./scripts/autoplay.py --lockstep --port 6767 --agent-p1 --reach-gameplay
 blaze`. Own port (6767) so it runs next to the turbo wrappers. Extra args
 pass through to autoplay (`--start-level`, `--kill-street-enemies`,
 `--no-food`, `--no-police`).
 
 ### Going straight to a boss
 
-`scripts/go_to_boss_1` … `scripts/go_to_boss_8` put the AI in front of one
-round's boss with nothing else on screen: same turbo host and poll cadence
-as `both_turbo`, plus `--start-level N`, `--kill-street-enemies` (or
-`--kill-until-mr-x` for round 8) and `--no-police` throughout; rounds 2-5
-and 8 also pass `--no-food`.
+`scripts/go_to_boss.py LEVEL` puts the AI in front of one round's boss with
+nothing else on screen: same turbo host and poll cadence as `both_turbo.py`,
+plus `--start-level LEVEL`, `--kill-street-enemies` (or `--kill-until-mr-x`
+for round 8) and `--no-police` throughout. It automatically adds `--no-food`
+for rounds 2-5 and 8.
 
 ```bash
-./scripts/go_to_boss_1            # round 1, Antonio
-./scripts/go_to_boss_2 --agent-p2 # extra args pass through to autoplay
-./scripts/go_to_boss 5            # the shared implementation, by level
+./scripts/go_to_boss.py 1            # round 1, Antonio
+./scripts/go_to_boss.py 2 --agent-p2 # extra args pass through to autoplay
+./scripts/go_to_boss.py 5            # Onihime and Yasha
 ```
 
-| Script | Round | Boss |
-| --- | --- | --- |
-| `go_to_boss_1` | 1 | Antonio (`$56`) |
-| `go_to_boss_2` | 2 | Souther (`$55`) |
-| `go_to_boss_3` | 3 | Abadede (`$30`) |
-| `go_to_boss_4` | 4 | Bongo (`$57`) |
-| `go_to_boss_5` | 5 | Onihime & Yasha (`$58` pair), `--no-food` |
-| `go_to_boss_6` | 6 | Bongo (`$57`), then a Souther pair (`$55`) |
-| `go_to_boss_7` | 7 | none — the ELC stream has no terminal boss section |
-| `go_to_boss_8` | 8 | boss rush, `$56` → `$55` → `$30` → `$57` → `$58` → Mr. X (`$35`); `--kill-until-mr-x` instead of the street sweep, `--no-food` |
+| Level | Boss |
+| --- | --- |
+| 1 | Antonio (`$56`) |
+| 2 | Souther (`$55`), `--no-food` |
+| 3 | Abadede (`$30`), `--no-food` |
+| 4 | Bongo (`$57`), `--no-food` |
+| 5 | Onihime & Yasha (`$58` pair), `--no-food` |
+| 6 | Bongo (`$57`), then a Souther pair (`$55`) |
+| 7 | none — the ELC stream has no terminal boss section |
+| 8 | boss rush, `$56` → `$55` → `$30` → `$57` → `$58` → Mr. X (`$35`); `--kill-until-mr-x`, `--no-food` |
 
-The numbered scripts are one line each; the turbo/poll/port flags live only
-in `scripts/go_to_boss`, so eight copies cannot drift apart. Sweeping and
+Sweeping and
 `--no-police` are not optional for boss testing — the police call is a
 last-resort option in play, never in a test. Quitting the HUD (Esc/Q) also
 shuts the host down, so the port is free for the next run. Full rationale
@@ -302,7 +301,7 @@ Score/tune commands and the ROM model + plan for each boss are documented in
   and the plan**.
 - Jack (`$27`, never in round 1; appears rounds 2, 4, 5, 6, 8) — **Jack: the
   ROM model and the plan**.
-- Round 6's Souther pair (two `$55`, via `go_to_boss_6` or `boss_fight.py
+- Round 6's Souther pair (two `$55`, via `go_to_boss.py 6` or `boss_fight.py
   --level 6 --boss-type 0x55`) — **Round 6: the Souther pair**; the replay
   of the free one is checked with `autoplay/tools/souther_pair_check.py`.
 
@@ -338,6 +337,5 @@ tested on the current host.
 - Keep this file and the other `CLAUDE.md` files updated as you work
 - Save in the `CLAUDE.md` all the information that charactizes the project that you obtain from the user.
 - If running the game for debug, only run if **necessary**, remember to use `--silent` to silence the sound
-- When testing the symbolic AI live, use turbo and a matching autoplay cadence (`./scripts/both_turbo`); see **Testing the symbolic AI live** above
+- When testing the symbolic AI live, use turbo and a matching autoplay cadence (`./scripts/both_turbo.py`); see **Testing the symbolic AI live** above
 
- 

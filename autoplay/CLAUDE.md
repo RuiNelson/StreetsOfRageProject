@@ -1581,7 +1581,7 @@ ordinary enemy and every boss of the rush -- Abadede through his police latch,
 `$55`-`$58` through their lethal path -- and returns without touching anything
 once a type `$33`-`$35` object exists; the scenario stops sending it for good
 once the offer flag (`$FFDE00`) or Mr. X has been seen (`note_snapshot`).
-`scripts/go_to_boss_8` passes it with `--no-food`.
+`scripts/go_to_boss.py 8` passes it with `--no-food`.
 
 What the ROM says (`ai-analysis/enemy-ai.md`, "Mr. X, state by state" and
 "The office's helpers"):
@@ -2408,22 +2408,22 @@ jabs from 59 px.
 
 ```bash
 # Host (meta-repo root)
-./scripts/run StreetsOfRageRecompilation/rom/SOR.bin --debugUtils --port 6969
+./scripts/run.py StreetsOfRageRecompilation/rom/SOR.bin --debugUtils --port 6969
 
 # Observer (meta-repo wrapper; defaults host 127.0.0.1 port 6969)
-./scripts/autoplay
-./scripts/autoplay --once
-./scripts/autoplay --poll-ms 33
+./scripts/autoplay.py
+./scripts/autoplay.py --once
+./scripts/autoplay.py --poll-ms 33
 
 # Live AI testing (turbo host + matching poll cadence; see below)
-./scripts/both_turbo
+./scripts/both_turbo.py
 
 # Live AI testing, AI-driven clock (no turbo, no poll pacing; see below)
-./scripts/both_lockstep_speed
+./scripts/both_lockstep_speed.py
 
 # Path-finding viewer (standalone Tk; connects to nothing, so no host/port)
-./scripts/pathfind_viewer
-./scripts/pathfind_viewer --width 480 --height 200 --step 4 --body 24
+./scripts/pathfind_viewer.py
+./scripts/pathfind_viewer.py --width 480 --height 200 --step 4 --body 24
 
 # Or direct module invoke
 cd autoplay
@@ -2436,8 +2436,8 @@ machine may lack Tk.
 
 ### Scoring a fight without the food
 
-`--no-food` (autoplay and `tools/boss_fight.py`; `scripts/go_to_boss_2`,
-`_3` and `_4` pass it) leaves every `HealthPickup` on the floor for the whole session.
+`--no-food` (autoplay and `tools/boss_fight.py`; `scripts/go_to_boss.py` for
+levels 2-5 and 8) leaves every `HealthPickup` on the floor for the whole session.
 Use it whenever a fight is being *scored*: `boss_fight.py`'s `damage_taken`
 is a running minimum, so every hit landed after a heal costs nothing on
 paper, and a plan that survives only because it ate is not a plan (user).
@@ -2446,7 +2446,7 @@ remove an option -- a session without it behaves exactly as before.
 
 **And without the police** (user: "The police is allowed for Souther/Antonio,
 just don't test with the police on"). `--no-police` (autoplay; passed by
-`scripts/go_to_boss` for every round) arrives as `tokens.DebugNoPolice`,
+`scripts/go_to_boss.py` for every round) arrives as `tokens.DebugNoPolice`,
 which removes `CallPolice` outright; `tools/boss_fight.py` runs with it on
 unless `--police` is given, and the labs and diags always do. In play the
 special is the last resort and nothing more: only below
@@ -2465,11 +2465,11 @@ goes to a branch and says so.
 When exercising the symbolic AI against a running host (not unit tests), do
 not use 1× speed with the default 33 ms poll. Turbo the host and raise the
 poll cadence so the agent still samples about two game frames per tick.
-`./scripts/both_turbo` is the canonical recipe (meta-repo root):
+`./scripts/both_turbo.py` is the canonical recipe (meta-repo root):
 
 ```bash
-./scripts/run --turbo 2 --lang en --debugUtils --port 7777 --silent &
-./scripts/autoplay --poll-ms 16 --port 7777 --agent-p1 --reach-gameplay blaze
+./scripts/run.py --turbo 2 --lang en --debugUtils --port 7777 --silent &
+./scripts/autoplay.py --poll-ms 16 --port 7777 --agent-p1 --reach-gameplay blaze
 ```
 
 `--poll-ms 16` is ~2 frames at 120 Hz (`--turbo 2`). 2x is the ceiling on
@@ -2477,14 +2477,14 @@ the development machine (user: "use turbo 2x at max, this PC can't handle
 turbo 4x at full speed"; measured, `--turbo 4` ran at 120 fps there too, so
 a 4x poll cadence sampled twice per frame and the wall clock lied). Leaving
 the default 33 ms under turbo makes the AI see every fourth frame. Keep
-`scripts/both_turbo` as the source of truth for these flags. Use `--silent`
+`scripts/both_turbo.py` as the source of truth for these flags. Use `--silent`
 whenever the game is launched for debug. Only start a live session when
 necessary; prefer the `autoplay` unit tests for logic changes.
 
 **Testing the AI against a boss (user):** the meta-repo's
-`scripts/go_to_boss_1` … `go_to_boss_8` do exactly this and are the intended
-entry point — turbo host, matching poll cadence, `--start-level N` and
-`--kill-street-enemies` in one command. Always run with the debug flags
+`scripts/go_to_boss.py LEVEL` is the intended entry point — turbo host,
+matching poll cadence, `--start-level LEVEL` and `--kill-street-enemies` in
+one command (or `--kill-until-mr-x` for level 8). Always run with the debug flags
 that kill every enemy family except the boss -- `tools/boss_fight.py` and
 `tools/antonio_diag.py` already do this through
 `DebugScenario(kill_street_enemies=True)`, and it is not optional. A boss
@@ -2528,11 +2528,11 @@ surfaced -- the remote protocol's `SET_LOCKSTEP`/`STEP_INPUT` primitive
 AI-controlled play frame-exactly (poll → decide → step N frames → poll)
 instead of wall-clock sleeping -- is now built, as `--lockstep`
 (`app.py`'s `_lockstep_loop`, exercised live through
-`scripts/both_lockstep_speed`):
+`scripts/both_lockstep_speed.py`):
 
 ```bash
-./scripts/both_lockstep_speed
-./scripts/both_lockstep_speed --start-level 2 --kill-street-enemies --no-food --no-police
+./scripts/both_lockstep_speed.py
+./scripts/both_lockstep_speed.py --start-level 2 --kill-street-enemies --no-food --no-police
 ```
 
 While an AI is engaged and the game is playable the host is frozen and each
@@ -2810,7 +2810,7 @@ with no ROM and no SDL3, so it went to a branch, not `main`, pending a live run.
   (lane gap over 40 px: 51.3 → 59.5), Axel 44.6 → 46.5, Adam unchanged --
   Blaze and Axel keep more speed on a diagonal than the L gives back.
   `EngageGrunts` owns the modelled street enemies, so this is the unmodelled
-  and far approaches. Measure it with `scripts/both_turbo`,
+  and far approaches. Measure it with `scripts/both_turbo.py`,
   `tools/grunt_fight.py --family all` and `tools/stage_walk_diag.py --level 4`.
 
 Still open, and not new: the 17 pit walks that stall at 4,000 nodes too. The
@@ -2859,7 +2859,7 @@ do not commit `.jsonl` runs.
 | `snapshot_replay.py` | **Records and replays** the reads `read_snapshot` makes: `RecordingSource` wraps the client, `SnapshotRecorder` writes the ROM tables once and each tick's changed reads as JSONL, and `ReplaySource`/`iter_ticks`/`load_rom` rebuild any tick's `GameSnapshot` offline -- the real `AgentLoop`, or any `decide`/`priority`/`execute` function, run again on a live stall as often as the question needs. Used by `stage_walk_diag.py --raw` and `jack_sim.py`; recordings run ~4 MB a second, local only |
 | `jack_sim.py` | **Plays the Jack engage offline**: every `--every`th tick with a Jack in a `--raw` recording (`--from`/`--to`) seeds `jack.plan_world` against `jack.py`'s model, update by update, until he is held, the actor is hit or `--updates` run out (a stalemate); `--timing ideal|fixed|jitter`. Found round 4's off-screen reset loop (**Round 4: the bridge, its props and its Jack**) |
 | `jack_plan_bench.py` | **Times and checks `jack.plan_engage`**: replays `--raw` recordings (`--raw A B ...`, or the `--cache` pickle of the captured contexts) through the real `AgentLoop`, keeps every tick whose winning verb is `EngageJack`, times `execute.engage_jack_plan` (best of `--passes`; median/p95/p99/max by Jack count) and `--save`s every `EngagePlan` field, or `--compare`s against a saved file (exit 1 on any plan diff) -- the proof that a speed-up is exact. Contexts are replayed in a canonical order (**Jack's plan inside the 2 ms budget**). `--profile` prints a cProfile. Recordings and caches stay out of the repo |
-| `breakable_diag.py` | Breakable stalls, per tick while a `Breakable` is in context. Round 1 by default, with **real** enemies (the sweep did not reproduce that stall); `--level N` jumps to a round first, `--sweep` keeps the ordinary families swept (the walk `scripts/go_to_boss` and the boss harnesses make -- how the round-4 stall was reproduced), `--heartbeat-s` logs a position row that often with no breakable around (so a stall anywhere shows), `--until-boss` stops at the boss |
+| `breakable_diag.py` | Breakable stalls, per tick while a `Breakable` is in context. Round 1 by default, with **real** enemies (the sweep did not reproduce that stall); `--level N` jumps to a round first, `--sweep` keeps the ordinary families swept (the walk `scripts/go_to_boss.py` and the boss harnesses make -- how the round-4 stall was reproduced), `--heartbeat-s` logs a position row that often with no breakable around (so a stall anywhere shows), `--until-boss` stops at the boss |
 | `armed_combat_diag.py` | Held-weapon reach and swing timing |
 
 ## Observer surface

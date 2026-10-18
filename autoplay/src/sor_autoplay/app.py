@@ -245,7 +245,7 @@ def _try_reach_gameplay(
     print(
         f"--reach-gameplay failed after {connect_attempts} attempts: {last_exc}\n"
         f"  Is the game host running with remote access on {host}:{port}?\n"
-        f"  Example: ./scripts/run --debugUtils --port {port}\n"
+        f"  Example: ./scripts/run.py --debugUtils --port {port}\n"
         f"  Observer will keep polling; AI flags still apply once connected.",
         file=sys.stderr,
     )
@@ -253,7 +253,7 @@ def _try_reach_gameplay(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    # scripts/autoplay sets SOR_AUTOPLAY_PROG so --help shows the wrapper name.
+    # scripts/autoplay.py sets SOR_AUTOPLAY_PROG so --help shows the wrapper name.
     prog = os.environ.get("SOR_AUTOPLAY_PROG") or "sor-autoplay"
     parser = argparse.ArgumentParser(
         prog=prog,
@@ -264,8 +264,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         epilog=(
             "Start the game host first (same --port), for example:\n"
-            "  ./scripts/run --debugUtils --port 7777\n"
-            "  ./scripts/autoplay --port 7777 --reach-gameplay axel --agent-p1\n"
+            "  ./scripts/run.py --debugUtils --port 7777\n"
+            "  ./scripts/autoplay.py --port 7777 --reach-gameplay axel --agent-p1\n"
             "\n"
             "AI is off by default; enable with --agent-p1 / --agent-p2 or the "
             "HUD toggle labels. --reach-gameplay runs after the GUI opens "
@@ -388,7 +388,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Use when *testing* (user: \"The police is allowed for "
             "Souther/Antonio, just don't test with the police on\"): a fight "
             "the special helped win measures the special, not the plan. "
-            "scripts/go_to_boss passes it."
+            "scripts/go_to_boss.py passes it."
         ),
     )
     parser.add_argument(

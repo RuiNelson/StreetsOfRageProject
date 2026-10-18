@@ -19,7 +19,7 @@ version answered a stall no summary could: the actor sat in back hold
 ``$67`` for 7746 consecutive ticks with the winning verb ``None``.
 
 Run (host already up with ``--debugUtils``, e.g.
-``./scripts/run --turbo 4 --lang en --debugUtils --port 7777 --silent``):
+``./scripts/run.py --turbo 4 --lang en --debugUtils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\

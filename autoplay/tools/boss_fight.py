@@ -7,7 +7,7 @@ earlier version of this harness poked the player's own X and health every
 tick to fast-forward to the boss; that corrupted wave progression and left
 the game visibly broken. This one lets the real ``AgentLoop`` walk the
 level, through ``ai/gamepad.py`` and nothing else, which ``--turbo 2`` makes
-affordable -- the same pairing ``scripts/both_turbo`` uses.
+affordable -- the same pairing ``scripts/both_turbo.py`` uses.
 
 Boss death is read from ``phases.boss_phase``'s own ``DEATH`` decode
 (primary ``$05``, or ``>=$0C`` for the ``$55``-``$58`` family) via
@@ -17,7 +17,7 @@ also what a level reset looks like and produced a false "boss defeated"
 report once already.
 
 Run (host already up with ``--debugUtils``, e.g.
-``./scripts/run --turbo 2 --lang en --debugUtils --port 7777 --silent``):
+``./scripts/run.py --turbo 2 --lang en --debugUtils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\

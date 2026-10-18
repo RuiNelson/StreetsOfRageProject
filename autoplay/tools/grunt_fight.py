@@ -20,7 +20,7 @@ A loss with no attacker within 15 s of a time-over (``$FFFA49``) is filed as
 ``--seconds`` runs out.
 
 Run (host already up with ``--debugUtils``, e.g.
-``./scripts/run --turbo 2 --lang en --debugUtils --port 7777 --silent``):
+``./scripts/run.py --turbo 2 --lang en --debugUtils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
