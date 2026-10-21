@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from _common import META_ROOT, absolute_path, executable_path, prepend_pythonpath, script_command
+from _common import META_ROOT, absolute_path, built_executable, prepend_pythonpath, script_command
 
 
 ADDRESS = re.compile(r"^\s*[0-9a-fA-F]{6}\s*$")
@@ -55,7 +55,7 @@ def main() -> int:
     if build():
         return 1
     for iteration in range(1, maximum + 1):
-        executable = executable_path(sor_root / "build", "sor")
+        executable = built_executable(sor_root / "build", "sor")
         print(f"==> [smart {iteration}] run")
         code = subprocess.run([str(executable), "--rom", str(rom), "--auxAddrFile", str(auxiliary), *sys.argv[1:], "--debugUtils", "--lang", "en", "--turbo", "4"]).returncode
         sort_aux_addresses(auxiliary)

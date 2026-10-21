@@ -40,6 +40,19 @@ def executable_path(directory: Path, name: str) -> Path:
     return directory / names[0]
 
 
+def built_executable(build_dir: Path, name: str) -> Path:
+    """Find the newest build of a host executable in a CMake build tree.
+
+    Single-configuration generators (Makefiles, Ninja) put it in the build
+    directory itself; Visual Studio, CMake's default on Windows, puts it in a
+    per-configuration subdirectory such as Release.
+    """
+    directories = [build_dir, *(build_dir / config for config in ("Debug", "Release", "RelWithDebInfo", "MinSizeRel"))]
+    candidates = [executable_path(directory, name) for directory in directories]
+    existing = [path for path in candidates if path.is_file()]
+    return max(existing, key=lambda path: path.stat().st_mtime) if existing else candidates[0]
+
+
 def absolute_path(path: str | Path) -> Path:
     return Path(path).expanduser().resolve()
 

@@ -307,6 +307,12 @@ cmake --version
 python3 --version
 ```
 
+The repository's `scripts/*.py` launchers generate, build, and run the port on
+all three desktop platforms, and use only the Python standard library. On
+Windows invoke them with `py scripts\NAME.py`; on macOS and Linux they are
+executable directly as `./scripts/NAME.py`. Run them from the meta-repository
+root.
+
 ### 4. Build on Windows
 
 #### Prerequisites
@@ -321,9 +327,6 @@ winget install --exact --id Git.Git --source winget `
   --accept-package-agreements --accept-source-agreements
 
 winget install --exact --id Kitware.CMake --source winget `
-  --accept-package-agreements --accept-source-agreements
-
-winget install --exact --id Ninja-build.Ninja --source winget `
   --accept-package-agreements --accept-source-agreements
 
 winget install --exact --id Python.Python.3.14 --source winget `
@@ -349,8 +352,7 @@ where.exe cl
 cl
 git --version
 cmake --version
-ninja --version
-python --version
+py --version
 ```
 
 Install SDL3 with [Microsoft's official vcpkg](https://github.com/microsoft/vcpkg):
@@ -363,54 +365,73 @@ git clone https://github.com/microsoft/vcpkg.git $VcpkgRoot
 & "$VcpkgRoot\vcpkg.exe" install sdl3:x64-windows
 ```
 
-#### Configure, compile, and run (PowerShell)
+#### Configure, compile, and run
 
-The native PowerShell workflow below performs the generation, CMake
-configuration, compilation, and launch directly. Generation is mandatory after
-a fresh clone because `generated/` is ignored by Git. Run these commands from
-the meta-repository root in the **Developer PowerShell for VS 2022**:
+Run the following from the meta-repository root in the **Developer PowerShell
+for VS 2022**. First point CMake at vcpkg's toolchain, so it finds SDL3:
 
 ```powershell
-$env:PYTHONPATH = (Resolve-Path RageDecompiler)
-
-python -m tools recompile StreetsOfRageRecompilation\rom\SOR.bin `
-  -o StreetsOfRageRecompilation\generated `
-  --aux StreetsOfRageRecompilation\code-analysis\aux_addresses.txt `
-  --labels-csv StreetsOfRageRecompilation\code-analysis\labels.csv `
-  --addresses-csv StreetsOfRageRecompilation\code-analysis\addresses.csv `
-  --manual-functions StreetsOfRageRecompilation\code-analysis\manual_functions.txt
+$env:CMAKE_TOOLCHAIN_FILE = "C:\src\vcpkg\scripts\buildsystems\vcpkg.cmake"
 ```
 
-The command creates `SoR.hpp`, `SoR-common.hpp`, and split `SoR-XXX.cpp` files
-under `StreetsOfRageRecompilation\generated`. Each `XXX` is formed from the
-first three hexadecimal digits of the first subroutine entry address in that
-source file. Regenerate them whenever the ROM, analysis data, labels, auxiliary
-addresses, manual-function inputs, or recompiler changes.
+The build script passes this variable to CMake whenever it configures a build
+tree, and `--release` always starts from a fresh one, so set it in every new
+session — or once for your user with `setx CMAKE_TOOLCHAIN_FILE
+"C:\src\vcpkg\scripts\buildsystems\vcpkg.cmake"`, which takes effect in the
+next terminal you open.
 
-In the same **Developer PowerShell for VS 2022** session, let the cross-platform
-Python launcher generate and build the host:
+After a fresh clone, generate the C++ port and create a Debug build:
 
 ```powershell
-$VcpkgRoot = "C:\src\vcpkg"
-$env:CMAKE_TOOLCHAIN_FILE = "$VcpkgRoot\scripts\buildsystems\vcpkg.cmake"
+py scripts\generate_cpp_and_build.py
+```
+
+For the first optimized build:
+
+```powershell
 py scripts\generate_cpp_and_build.py --release
 ```
 
-The launcher passes `CMAKE_TOOLCHAIN_FILE` to CMake and selects `Release` for
-multi-configuration generators. It builds in `StreetsOfRageRecompilation\build`.
+Generation is mandatory after a fresh clone because `generated/` is ignored by
+Git. It creates `SoR.hpp`, `SoR-common.hpp`, and split `SoR-XXX.cpp` files
+under `StreetsOfRageRecompilation\generated`; each `XXX` is formed from the
+first three hexadecimal digits of the first subroutine entry address in that
+source file. Regenerate them with `py scripts\generate_cpp.py` whenever the
+ROM, analysis data, labels, auxiliary addresses, manual-function inputs, or
+recompiler changes.
 
-Run the port:
+Once the generated files exist locally, subsequent incremental builds can use:
 
 ```powershell
-py scripts\run.py .\StreetsOfRageRecompilation\rom\SOR.bin --lang en
+py scripts\build.py
+py scripts\build.py --release
+```
+
+CMake uses the Visual Studio generator by default on Windows, so the build
+lands in a per-configuration folder: `StreetsOfRageRecompilation\build\Debug\sor.exe`
+or `StreetsOfRageRecompilation\build\Release\sor.exe`, with the SDL3, yaml-cpp,
+zlib, and libpng DLLs copied next to it. The scripts select the configuration
+for you.
+
+Run the port; `run.py` starts the most recently built configuration:
+
+```powershell
+py scripts\run.py StreetsOfRageRecompilation\rom\SOR.bin --lang en
+```
+
+The equivalent direct CMake workflow is:
+
+```powershell
+cmake -S StreetsOfRageRecompilation `
+  -B StreetsOfRageRecompilation\build `
+  -DCMAKE_TOOLCHAIN_FILE="C:\src\vcpkg\scripts\buildsystems\vcpkg.cmake"
+cmake --build StreetsOfRageRecompilation\build --config Release --parallel
 ```
 
 If CMake cannot find SDL3, confirm that the toolchain path and vcpkg triplet
-match the installed `sdl3:x64-windows` package.
-
-The repository's `scripts/*.py` launchers work on all three desktop platforms
-and use only the Python standard library. On Windows invoke them with `py`;
-on macOS and Linux they are executable directly.
+match the installed `sdl3:x64-windows` package. The toolchain is recorded when
+a build tree is first configured, so delete `StreetsOfRageRecompilation\build`
+(or build with `--release`) after correcting it.
 
 ### 5. Build on macOS
 
@@ -519,11 +540,11 @@ cd StreetsOfRageRecompilation
 ./build/sor --rom rom/SOR.bin
 ```
 
-On Windows, run:
+On Windows, run (use `Debug` in place of `Release` for a Debug build):
 
 ```powershell
 cd StreetsOfRageRecompilation
-..\build\windows\bin\sor.exe --rom rom\SOR.bin
+.\build\Release\sor.exe --rom rom\SOR.bin
 ```
 
 Press `Ctrl+Q` to exit the game. The controls below are the default keyboard
@@ -573,8 +594,11 @@ On macOS or Linux:
 On Windows:
 
 ```powershell
-..\build\windows\bin\sor.exe --configControls
+.\build\Release\sor.exe --configControls
 ```
+
+From the meta-repository root, `scripts/configure_controls.py` does the same on
+every platform.
 
 #### Host keyboard shortcuts
 

@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from _common import META_ROOT, absolute_path, executable_path, script_command
+from _common import META_ROOT, absolute_path, built_executable, script_command
 
 
 ADDRESS = re.compile(r"^\s*[0-9a-fA-F]{6}\s*$")
@@ -40,7 +40,7 @@ def main() -> int:
         environment["SOR_ROM"] = str(rom)
         if subprocess.run(script_command("build.py", "--full"), env=environment).returncode:
             return 1
-        executable = executable_path(sor_root / "build", "sor")
+        executable = built_executable(sor_root / "build", "sor")
         print(f"==> [discover {iteration}] run")
         code = subprocess.run([str(executable), "--auxAddrFile", str(auxiliary), "--rom", str(rom), *sys.argv[1:]]).returncode
         sort_aux_addresses(auxiliary)

@@ -7,14 +7,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from _common import META_ROOT, executable_path
+from _common import META_ROOT, built_executable
 
 
 def main() -> int:
     if sys.argv[1:] and sys.argv[1] in {"-h", "--help"}:
         print(f"Usage: {Path(sys.argv[0]).name}")
         return 0
-    executable = executable_path(META_ROOT / "StreetsOfRageRecompilation" / "build", "sor")
+    executable = built_executable(META_ROOT / "StreetsOfRageRecompilation" / "build", "sor")
     if not executable.is_file():
         print(f"Executable not found: {executable}", file=sys.stderr)
         print("Run scripts/build.py first.", file=sys.stderr)
