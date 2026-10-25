@@ -77,7 +77,7 @@ The game logic assumes a 320-pixel screen. In sprite space (`x - cam_x`) the scr
 widescreen it is `[-$20, $160)`, so every edge the logic uses moves out by `$20` on its side. Object `+$28` is the
 biased screen X (`x - cam_x + $80`): its screen is `[$80, $1C0)`, widescreen `[$60, $1E0)`.
 
-Each change is a hand-written port in `SoRWidescreenArena.cpp` (listed in `manual_functions.txt`) that behaves like
+Every manual function has a label in `labels.csv` (the former `sub_XXXXXX` ones are now `object_on_screen_margin_test`, `resolve_enemy_player_contact`, `resolve_enemy_registered_attacker_contact`, `abadede_state7_run_update`, `jack_retreat_to_screen_edge`, `ordinary_enemy_wait_until_on_screen` and `police_special_recover_player_off_screen_right`); keep it that way when adding one. Each change is a hand-written port in `SoRWidescreenArena.cpp` (listed in `manual_functions.txt`) that behaves like
 the ROM routine when the flag is off and widens the edge when it is on. **Not a ROM patch and not a generator
 feature**: both were tried and rejected (a ROM patch fails the checksum and is a workaround; the generator
 route was not wanted). Registers/flags that callers read are reproduced.
