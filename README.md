@@ -703,7 +703,9 @@ game already leaves in the planes and sprite table:
 - sprites reach 4 tiles further on each side (X 96-480), so a sprite keeps its
   place relative to the screen centre but sits 32 px right of its background
   compared to Mode 40;
-- the first tile row of every layer is not displayed.
+- the first tile row of every layer is not displayed;
+- the gameplay HUD loses its yellow frame and gray plate and moves one tile
+  down, so it clears the hidden first row.
 
 Remote-access framebuffer snapshots and debug PNGs are 384×216 too.
 
