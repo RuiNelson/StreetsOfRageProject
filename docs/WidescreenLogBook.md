@@ -91,6 +91,9 @@ route was not wanted). Registers/flags that callers read are reproduced.
 | `$06A6 update_camera_scroll_if_needed` | locked-arena push-back edge (`cam-$20` -> `cam-$40`; round 8 `cam+$160` -> `cam+$180`) |
 | `$14C38` | charging boss turns at screen X `$1C0`/`$80` -> `+$20`/`-$20` |
 | `$F4A6` | enemy walks to the clamp edge (`cam+$120`/`cam+$20` -> `cam+$140`/`cam`) |
+| `$A59C` | scripted-object activation, round 8 edge `cam+$144` -> `cam+$164` (the on-screen part is `$97E6`) |
+| `$7546` | round 8 thrown table arming edges `cam-$20` / `cam+$160` -> `cam-$40` / `cam+$180` |
+| `$40A6` | player carried off the right edge in a police special, `cam+$160` -> `cam+$180` |
 
 Verified live: player left limit `x-cam` 32 (plain) vs 0 (widescreen); new enemies first seen at `x-cam` 360 (right) and
 -40 (left) in widescreen. Round 1 `grunt_fight.py --family all` (Blaze, turbo 2): plain with the ports 89.8 s, 32/32
@@ -98,5 +101,17 @@ killed, 5 hits; before the ports 89.2 s, 3 hits; widescreen 91.4 s, 8 hits (the 
 One plain run with the ports stalled 52 s at the camera clamp on `WalkToNearEnemy` toward an off-screen HakuRo, the
 open stall documented in `autoplay/CLAUDE.md` ("off-screen-enemy corner stall"); the other did not.
 
-Not done: other routines that compare against screen edges (`$A59C`/`$7546`/`$6A70` round-8 variants, `$FEE4`, `$40A6`,
-`$E9CC`, the `$13188`-family centre windows) and the `autoplay` AI, which still believes the arena is 320 wide.
+Rounds 8 and 6 start and run in widescreen (live smoke test, no crash); the round 8 ports are otherwise unmeasured.
+
+Looked at and deliberately left alone:
+- `$6A70 delete_pickup_behind_camera`: not a subroutine entry (only reached by `jmp`), so it cannot be a manual
+  function without changing the analysis inputs. Only a pickup cleanup margin (round 8: `cam+$168`, 8 px outside the
+  widescreen edge); the left margin `cam-$60` is already outside.
+- `$FEE4` (Jack's deflected axe aims at `cam` / `cam+$140`): a flight target, not a gameplay edge; porting it means a
+  large function for no visible change.
+- `$E9CC` (HakuRo rising from below deck, `cam+$80`/`cam+$100`) and the `$13188`/`$13886`/`$13B22` windows
+  (`$B8`-`$188`): measured from the screen's centre or from the object's own position, and the centre of sprite space
+  (`cam+$A0`) is the same in both modes.
+
+Not done: the `autoplay` AI (it still believes the arena is 320 wide). Per the user: leave it until the widescreen
+feature is complete and they say so.
