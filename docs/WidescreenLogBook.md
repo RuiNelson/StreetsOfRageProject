@@ -17,7 +17,7 @@ applies while the game has selected H40, so H32 is untouched. Timing, DMA slots,
 | Layer | Behaviour |
 | --- | --- |
 | Planes A/B | 48 cells from plane pixel 0: **8 more tiles on the right**, scroll unchanged |
-| Window | keeps its 40 columns, **centred** (output columns 32-351) |
+| Window | keeps its 40 columns, **centred** (output columns 32-351); its **colour-0 pixels are transparent over plane A** (hardware: they replace it) |
 | Sprites | X 96-480 visible (hardware 128-448): raw X 128 lands on **output column 32** |
 | Vertical | game still runs 224 lines; the **first tile row (8 lines) is not output** (still evaluated for SOVR/SCOL) |
 | Output | framebuffer, SDL texture, remote snapshots and debug PNGs are 384×216 |
@@ -29,8 +29,10 @@ Code: `VDPState` (`widescreenActive()`, `hardwareWidth()`, `centerOffsetX()`, `s
 `VDPRenderer` (planes, centred window, sprite origin, crop), `VDP::setWidescreen` (window sizing), debug sheets in
 `VDPRendererDebug`. Tests: `tests/vdp_renderer_test.cpp`. Docs: `MegaDriveEnvironment/README.md` ("Mode 48").
 
-**Rule: game-specific behaviour never goes into MegaDriveEnvironment.** A window colour-key/transparency feature was
-added there for the HUD and then reverted; the game does it itself.
+**Rule: game-specific behaviour never goes into MegaDriveEnvironment.** A window colour-key feature (a game's plate
+colour) was added there for the HUD and reverted; the game clears its plate colour itself. What stays in Mode 48 is the
+generic rule above, which lets the HUD show the level instead of a black box (visible in rounds 5 and 7, where the
+art reaches up under the window).
 
 ## Gameplay HUD (StreetsOfRageRecompilation, `SoRManualFunctions.cpp`)
 
