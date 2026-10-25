@@ -94,6 +94,7 @@ route was not wanted). Registers/flags that callers read are reproduced.
 | `$A59C` | scripted-object activation, round 8 edge `cam+$144` -> `cam+$164` (the on-screen part is `$97E6`) |
 | `$7546` | round 8 thrown table arming edges `cam-$20` / `cam+$160` -> `cam-$40` / `cam+$180` |
 | `$40A6` | player carried off the right edge in a police special, `cam+$160` -> `cam+$180` |
+| `$B0FE cull_sprite_piece_x` | sprite pieces kept from raw X `$60` -> `$40` on the left (pieces were culled while still partly on screen: sprites vanished at the far left edge); the right bound `$1E0` is already widescreen's edge |
 
 Verified live: player left limit `x-cam` 32 (plain) vs 0 (widescreen); new enemies first seen at `x-cam` 360 (right) and
 -40 (left) in widescreen. Round 1 `grunt_fight.py --family all` (Blaze, turbo 2): plain with the ports 89.8 s, 32/32
