@@ -685,10 +685,27 @@ version.
 | `--fullScreen` | Start in desktop fullscreen |
 | `--altControls` | Use the alternative 6-button controls and hide the OPTIONS control remap |
 | `--vsync 0\|1\|2\|3` | Frame synchronization: `0` uses the internal timer (default), `1` uses display VSync, `2` uses half-rate VSync, and `3` uses third-rate VSync |
+| `--widescreen` | Use VDP Mode 48 (48×27 tiles, 384×216) instead of Mode 40; a host-only mode the hardware does not have, see [Widescreen](#widescreen-mode-48) |
 | `--turbo N` | With `--vsync 0`, run the internal VDP at `60 × N` Hz; `N` must be a positive integer |
 | `--port PORT` | With `--debugUtils`, select the remote-access TCP port; default: `6969`; `0` disables remote access |
 | `--auxAddrFile PATH` | Discovery mode: append an unknown indirect-dispatch address to this file and exit with status `42` instead of aborting |
 | `--callLog PATH` | Write every 68000 subroutine entry and call to a typed CSV log (six-digit hexadecimal ROM addresses); the file is replaced on startup |
+
+### Widescreen (Mode 48)
+
+`--widescreen` swaps Mode 40 (320×224) for Mode 48, a host-only VDP mode that
+real hardware does not have. The picture is 48×27 tiles (384×216, 16:9; 5× is
+1920×1080). The game logic is unchanged, so the extra columns show whatever the
+game already leaves in the planes and sprite table:
+
+- Layers A and B show 8 more tiles on the right;
+- the window plane keeps its 40 columns, centred on screen;
+- sprites reach 4 tiles further on each side (X 96-480), so a sprite keeps its
+  place relative to the screen centre but sits 32 px right of its background
+  compared to Mode 40;
+- the first tile row of every layer is not displayed.
+
+Remote-access framebuffer snapshots and debug PNGs are 384×216 too.
 
 Examples:
 
