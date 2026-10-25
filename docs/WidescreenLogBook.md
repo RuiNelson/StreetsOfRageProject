@@ -40,6 +40,11 @@ The HUD is the window plane, rows 0-3 at VRAM `$D000`. Wanted: no yellow frame, 
 - `$8064 (vdp_copy_stride)` is a manual function. In widescreen it recognises the two HUD uploads (static `$FF8000`,
   40×4 at `$50000003`; per-VBlank `$FF6000` block, 40×3 at `$50800003`), blanks the frame tiles `$6D4`-`$6D7`, drops
   the bottom edge and writes the rest one window row lower. Work RAM is untouched (digit writers, `autoplay`).
+- **Boss bar**: while a boss is registered `$10F80` also loads bundle 9 (`$FFF510`, every VBlank): 40×2 at
+  `$51800003` = window row 3 (the boss bar row with its frame) and row 4 (bottom edge); the game then sets the window
+  to 5 rows (`$9205`). Unshifted it overwrote the shifted HUD's last element row. `vdp_copy_stride` now reshapes it
+  like the other two uploads (one row down, frame tiles blanked, bottom edge dropped), so the bar lands on row 4.
+  Checked live only with the bundle forced on (`$FFF500`=1: HUD intact); a real boss fight is not run.
 - The plate is also palette 0 **colour 2 inside every glyph/digit/bar tile**. The first block upload after the
   level-start upload rewrites tiles `$6BE`-`$6FF` and `$7C0`-`$7F3` with colour 2 -> 0 through the VDP ports.
 - `$10F80 (vblank_update_gameplay_health_bars)` is a manual port so the bar tile rows use a transparent plate row
