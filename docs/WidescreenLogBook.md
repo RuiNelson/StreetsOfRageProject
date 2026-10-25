@@ -94,6 +94,7 @@ route was not wanted). Registers/flags that callers read are reproduced.
 | `$A59C` | scripted-object activation, round 8 edge `cam+$144` -> `cam+$164` (the on-screen part is `$97E6`) |
 | `$7546` | round 8 thrown table arming edges `cam-$20` / `cam+$160` -> `cam-$40` / `cam+$180` |
 | `$40A6` | player carried off the right edge in a police special, `cam+$160` -> `cam+$180` |
+| `$0CC0 spawn_object_batch` | wave columns are placed at absolute X; one created beyond the old screen edge is now placed `$20` further out (left edge likewise) so it is still dormant until the camera brings it in. Before, the first enemy of round 1 was activated at once and appeared inside the right edge |
 | `$B0FE cull_sprite_piece_x` | sprite pieces kept from raw X `$60` -> `$40` on the left (pieces were culled while still partly on screen: sprites vanished at the far left edge); the right bound `$1E0` is already widescreen's edge |
 
 Verified live: player left limit `x-cam` 32 (plain) vs 0 (widescreen); new enemies first seen at `x-cam` 360 (right) and
