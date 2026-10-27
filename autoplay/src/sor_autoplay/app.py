@@ -16,6 +16,7 @@ from . import __version__
 from .ai.gamepad import SharedGamepadState, VirtualGamepad
 from .ai.loop import AgentLoop
 from .debug_scenario import ENEMY_FAMILY_HOTKEYS, DebugScenario
+from .host_flags import HostModes, decode_host_modes
 from .hud import HUD_PAINT_MS_DEFAULT, ObserverHud
 from .rom_data import RomData
 from .state import (
@@ -513,6 +514,15 @@ class ObserverApp:
         self._rom: RomData | None = None
         self._hud: ObserverHud | None = None
 
+        # Host modes from GET_FLAGS (host_flags.py). Widescreen is read once
+        # per connection; the button layout whenever an AI is turned on (and
+        # on a fresh connection while one is) -- ``_button_mode_stale`` asks
+        # the poller, which owns the client, for that read.
+        self.widescreen = False
+        self.six_button = False
+        self._button_mode_stale = threading.Event()
+        self._button_mode_stale.set()
+
         # Diagnostic only (not read by the AI): how many emulated frames
         # actually landed between polls, vs. wall-clock time spent. Lets a
         # user judge whether --poll-ms is really tracking the host's frame
@@ -552,11 +562,43 @@ class ObserverApp:
         event = self.agent_p1_enabled if player_index == 1 else self.agent_p2_enabled
         if enabled:
             event.set()
+            self._button_mode_stale.set()
         else:
             event.clear()
             # Clear the HUD's live verb state so the label reads as idle.
             self._agent_loops[player_index].inform_hud(set())
             self._gamepads[player_index].release()
+
+    def _read_host_flags(self, client) -> HostModes | None:
+        """GET_FLAGS decoded; ``None`` from a host that predates the command."""
+
+        from megadrive_remote import ServerError
+
+        try:
+            return decode_host_modes(client.get_flags())
+        except ServerError as exc:
+            logger.warning("GET_FLAGS unavailable (%s); keeping the default modes", exc)
+            return None
+
+    def _read_widescreen(self, client) -> None:
+        modes = self._read_host_flags(client)
+        if modes is not None:
+            self.widescreen = modes.widescreen
+            logger.info("host widescreen: %s", "on" if modes.widescreen else "off")
+        # A new connection may be a different host: the layout is re-read the
+        # next tick an AI is on.
+        self._button_mode_stale.set()
+
+    def _refresh_button_mode(self, client) -> None:
+        if not self._button_mode_stale.is_set():
+            return
+        if not (self.agent_p1_enabled.is_set() or self.agent_p2_enabled.is_set()):
+            return
+        self._button_mode_stale.clear()
+        modes = self._read_host_flags(client)
+        if modes is not None:
+            self.six_button = modes.six_button
+            logger.info("host buttons: %s", "6-button" if modes.six_button else "3-button")
 
     def start_poller(self) -> None:
         target = self._lockstep_loop if self.lockstep else self._poll_loop
@@ -603,6 +645,7 @@ class ObserverApp:
                     # poll. A failure here is not fatal -- the observer keeps
                     # working, just without real hitboxes or attack ranges.
                     self._rom = _read_rom_data(client)
+                    self._read_widescreen(client)
                     backoff_s = 0.25
 
                 assert self._client is not None
@@ -611,6 +654,7 @@ class ObserverApp:
 
                 with self._lock:
                     self._latest = snapshot
+                self._refresh_button_mode(self._client)
 
                 if not self._apply_scenario(snapshot):
                     elapsed = time.monotonic() - started
@@ -733,6 +777,7 @@ class ObserverApp:
                         self._client = client
                     self._gamepad_state.reset()
                     self._rom = _read_rom_data(client)
+                    self._read_widescreen(client)
                     backoff_s = 0.25
                     ram = None
 
@@ -748,6 +793,7 @@ class ObserverApp:
 
                 with self._lock:
                     self._latest = snapshot
+                self._refresh_button_mode(client)
 
                 ai_on = (
                     self.agent_p1_enabled.is_set()
