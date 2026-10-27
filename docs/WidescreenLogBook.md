@@ -81,7 +81,7 @@ the default path is unchanged.
 | Mode 48 VDP | done, tested |
 | `--widescreen` flag | done |
 | HUD (frame, plate, one tile down) | done |
-| Gameplay arena (player bounds, spawn edges, on-screen tests) | ports done; verified live in round 1 only, see below |
+| Gameplay arena (player bounds, spawn edges, on-screen tests) | ports done; verified live in rounds 1, 2 and 8, see below |
 | `autoplay` (HUD camera box, `CameraRange`, walk clamp) | follows `GET_FLAGS` flag 0, models widened for the ported tests only (`autoplay/CLAUDE.md`) |
 
 ## Gameplay arena
@@ -107,7 +107,7 @@ route was not wanted). Registers/flags that callers read are reproduced.
 | `$A59C` | scripted-object activation, round 8 edge `cam+$144` -> `cam+$164` (the on-screen part is `$97E6`) |
 | `$7546` | round 8 thrown table arming edges `cam-$20` / `cam+$160` -> `cam-$40` / `cam+$180` |
 | `$40A6 police_special_player_update_gate` | the edge `cam+$160` -> `cam+$180`; **the Z flag it returns is what freezes the players during a police special** (the caller skips their update on `bne`), so every exit must set it like the ROM |
-| `$0CC0 spawn_object_batch` | wave columns are placed at absolute X; an **enemy or boss** created beyond the old screen edge is now placed `$20` further out (left edge likewise) so it is still dormant until the camera brings it in. Before, the first enemy of round 1 was activated at once and appeared inside the right edge. Scenery and props (round 1's shutters `$54`, round 2's posters/pipes `$13`/`$14`, breakables) keep their X, and so does an enemy waiting behind a shop front (Garcia `$22`/`$32` personality 4, Nora `$26` personality 1: their first state `$DDE6` creates the shutter at the enemy's X); moving them put them 32 px off their place in the background |
+| `$0CC0 spawn_object_batch` | wave columns are placed at absolute X; an **enemy or boss** created beyond the old screen edge is now placed `$20` further out (left edge likewise) so it is still dormant until the camera brings it in. Before, the first enemy of round 1 was activated at once and appeared inside the right edge. Camera-gated objects keep their X (`+$40` bit 7 set; bit 7 clear in round 8, which scrolls left). Scenery and props (round 1's shutters `$54`, round 2's posters/pipes `$13`/`$14`, breakables) keep their X, and so does an enemy waiting behind a shop front (Garcia `$22`/`$32` personality 4, Nora `$26` personality 1: their first state `$DDE6` creates the shutter at the enemy's X); moving them put them 32 px off their place in the background |
 | `$B0FE cull_sprite_piece_x` | sprite pieces kept from raw X `$60` -> `$40` on the left (pieces were culled while still partly on screen: sprites vanished at the far left edge); the right bound `$1E0` is already widescreen's edge |
 
 Verified live: player left limit `x-cam` 32 (plain) vs 0 (widescreen); new enemies first seen at `x-cam` 360 (right) and
@@ -121,7 +121,14 @@ port moved a camera-gated Jack (`+$40` bit 7) from `$0DA8` to `$0DC8`, past the 
 never woke him and `prepare_next_spawn_section`'s art check (`$884`) hit his unset tile word. Fixed: a camera-gated
 object keeps its X. Widescreen round 2 now reaches Souther (2 of 2); round 1 unchanged.
 
-Rounds 8 and 6 start and run in widescreen (live smoke test, no crash); the round 8 ports are otherwise unmeasured.
+Round 8 reset the console at ~120-180 s in widescreen (autoplay `grunt_fight.py --level 8 --family all --character
+axel --through-bosses`, 6 of 6 runs), at the last wave's lock (`cam` 1280). Round 8 scrolls left, so `$A59C` flips
+its gate there: the camera-gated objects are the ones with `+$40` bit 7 **clear** (`cam+$144` passing them), but the
+`$CC0` port only spared bit 7 set. It moved a HakuRo (`$25`, `+$40` `$12`) from `$0680` to `$0660`; against
+`$A59C`'s widened edge (`cam+$164`) it never woke at the lock, and `$884` hit its unset tile word. Fixed: in round 8
+the bit 7 clear objects keep their X. Widescreen round 8 now plays through to Mr. X (4 of 4, no reset).
+
+Round 6 starts and runs in widescreen (live smoke test, no crash).
 
 Looked at and deliberately left alone:
 - `$6A70 delete_pickup_behind_camera`: not a subroutine entry (only reached by `jmp`), so it cannot be a manual
