@@ -16,17 +16,22 @@ applies while the game has selected H40, so H32 is untouched. Timing, DMA slots,
 
 | Layer | Behaviour |
 | --- | --- |
-| Planes A/B | 48 cells from plane pixel 0: **8 more tiles on the right**, scroll unchanged |
+| Planes A/B | 48 cells from plane pixel -32: **4 more tiles on each side**, scroll unchanged |
 | Window | keeps its 40 columns, **centred** (output columns 32-351); its **colour-0 pixels are transparent over plane A** (hardware: they replace it) |
 | Sprites | X 96-480 visible (hardware 128-448): raw X 128 lands on **output column 32** |
 | Vertical | game still runs 224 lines; the **first tile row (8 lines) is not output** (still evaluated for SOVR/SCOL) |
 | Output | framebuffer, SDL texture, remote snapshots and debug PNGs are 384×216 |
 
-Decision (B): backgrounds are not shifted, sprites are. A sprite keeps its place relative to the screen centre but
-sits 32 px right of its background compared to Mode 40. Sprites do not interact with the background, so this is fine.
+Every layer is centred: Mode 48 is the H40 picture with 32 px more on each side, so sprites, planes and window keep
+the alignment they have in Mode 40. (The first version, "decision B", left the planes unshifted, drawn from plane pixel
+0, and only the sprites centred. Every sprite then sat 32 px right of its background: scenery drawn as sprites --
+round 1's shop shutters, round 2's posters and dripping pipes -- left their doorways and walls, and a player falling
+into round 4's holes fell 32 px off the drawn hole. Reversed: the planes are centred like the rest.) The plane's
+resident window is 512 px, `[cam-$60, cam+$1A0)` (`backgrounds-scrolling-and-effects.md` §8.1), so the 384 px from
+`cam-$20` are always streamed; rounds 7 (shaft) and 8 (reversed map) were checked for the left 32 px.
 
 Code: `VDPState` (`widescreenActive()`, `hardwareWidth()`, `centerOffsetX()`, `spriteOriginX()`, `topCropLines()`),
-`VDPRenderer` (planes, centred window, sprite origin, crop), `VDP::setWidescreen` (window sizing), debug sheets in
+`VDPRenderer` (centred planes, centred window, sprite origin, crop), `VDP::setWidescreen` (window sizing), debug sheets in
 `VDPRendererDebug`. Tests: `tests/vdp_renderer_test.cpp`. Docs: `MegaDriveEnvironment/README.md` ("Mode 48").
 
 **Rule: game-specific behaviour never goes into MegaDriveEnvironment.** A window colour-key feature (a game's plate
@@ -102,7 +107,7 @@ route was not wanted). Registers/flags that callers read are reproduced.
 | `$A59C` | scripted-object activation, round 8 edge `cam+$144` -> `cam+$164` (the on-screen part is `$97E6`) |
 | `$7546` | round 8 thrown table arming edges `cam-$20` / `cam+$160` -> `cam-$40` / `cam+$180` |
 | `$40A6 police_special_player_update_gate` | the edge `cam+$160` -> `cam+$180`; **the Z flag it returns is what freezes the players during a police special** (the caller skips their update on `bne`), so every exit must set it like the ROM |
-| `$0CC0 spawn_object_batch` | wave columns are placed at absolute X; one created beyond the old screen edge is now placed `$20` further out (left edge likewise) so it is still dormant until the camera brings it in. Before, the first enemy of round 1 was activated at once and appeared inside the right edge |
+| `$0CC0 spawn_object_batch` | wave columns are placed at absolute X; an **enemy or boss** created beyond the old screen edge is now placed `$20` further out (left edge likewise) so it is still dormant until the camera brings it in. Before, the first enemy of round 1 was activated at once and appeared inside the right edge. Scenery and props (round 1's shutters `$54`, round 2's posters/pipes `$13`/`$14`, breakables) keep their X, and so does an enemy waiting behind a shop front (Garcia `$22`/`$32` personality 4, Nora `$26` personality 1: their first state `$DDE6` creates the shutter at the enemy's X); moving them put them 32 px off their place in the background |
 | `$B0FE cull_sprite_piece_x` | sprite pieces kept from raw X `$60` -> `$40` on the left (pieces were culled while still partly on screen: sprites vanished at the far left edge); the right bound `$1E0` is already widescreen's edge |
 
 Verified live: player left limit `x-cam` 32 (plain) vs 0 (widescreen); new enemies first seen at `x-cam` 360 (right) and
