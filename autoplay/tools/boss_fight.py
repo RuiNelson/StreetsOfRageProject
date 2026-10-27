@@ -37,6 +37,7 @@ from megadrive_remote import MegaDriveClient
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.loop import AgentLoop
 from sor_autoplay.debug_scenario import DebugScenario
+from sor_autoplay.host_flags import decode_host_modes
 from sor_autoplay.memory_map import ACTION_HOLDING
 from sor_autoplay.phases import player_phase
 from sor_autoplay.reach_gameplay import reach_gameplay
@@ -277,6 +278,8 @@ def main() -> int:
         rom = RomData.read(client)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         loop = AgentLoop(gamepad, no_food=args.no_food, no_police=not args.police)
+        modes = decode_host_modes(client.get_flags())
+        loop.six_button = modes.six_button
 
         boss_seen = False
         start_hp = start_lives = None
@@ -321,7 +324,7 @@ def main() -> int:
         with open(args.out, "w", encoding="utf-8") as sink:
             while time.monotonic() < deadline:
                 started = time.monotonic()
-                snap = read_snapshot(client, rom=rom)
+                snap = read_snapshot(client, rom=rom, widescreen=modes.widescreen)
                 playable = any(p.is_playable for p in snap.players)
 
                 if scenario.level_jump_pending:

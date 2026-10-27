@@ -7,6 +7,9 @@ The game's own routines (``SoRWidescreenArena.cpp``) move the player clamp
 
 import dataclasses
 import unittest
+from types import SimpleNamespace
+
+from sor_autoplay.ai import abadede, arena, grunt, jack, mr_x
 
 from sor_autoplay.ai.mr_x import actor_from_bytes as mr_x_actor
 from sor_autoplay.ai.observe import generate_direct_observation_tokens
@@ -85,6 +88,83 @@ class ActorClampTests(unittest.TestCase):
         wide = mr_x_actor(data, cam_x=1000, widescreen=True)
         self.assertEqual((plain.x_lo, plain.x_hi), (1032.0, 1288.0))
         self.assertEqual((wide.x_lo, wide.x_hi), (1000.0, 1320.0))
+
+
+def _bytes(**offsets: int) -> bytes:
+    data = bytearray(0x80)
+    for key, value in offsets.items():
+        offset = int(key[1:], 16)
+        width = 2 if offset == 0x28 else 1
+        data[offset : offset + width] = value.to_bytes(width, "big")
+    return bytes(data)
+
+
+class ModelEdgeTests(unittest.TestCase):
+    """Each ROM test the widescreen ports widen, in the model that replays it."""
+
+    def test_arena_helpers(self):
+        self.assertTrue(arena.inside(0x80, (0x80, 0x1C0), False))
+        self.assertFalse(arena.inside(0x7F, (0x80, 0x1C0), False))
+        self.assertTrue(arena.inside(0x60, (0x80, 0x1C0), True))
+        self.assertFalse(arena.inside(0x1E0, (0x80, 0x1C0), True))
+        self.assertEqual((arena.lo(0x80, True), arena.hi(0x1C0, True)), (0x60, 0x1E0))
+
+    def test_grunt_windows_widen_but_92ac_stays(self):
+        # screen X $68: outside every plain window, inside every widened one
+        # except $97E6's own ($70 -> $50 still holds it).
+        plain = grunt.GruntSim.from_bytes(_bytes(x28=0x68), slot=0, cam_x=0)
+        wide = grunt.GruntSim.from_bytes(_bytes(x28=0x68), slot=0, cam_x=0, widescreen=True)
+        self.assertFalse(grunt._on_screen_97ce(plain))
+        self.assertTrue(grunt._on_screen_97ce(wide))
+        self.assertFalse(grunt._on_screen_wide(plain))
+        self.assertTrue(grunt._on_screen_wide(wide))
+        self.assertFalse(grunt._struck_window(plain))
+        self.assertTrue(grunt._struck_window(wide))
+        # $92AC is an inline compare the ports did not touch.
+        self.assertFalse(grunt._on_screen(wide))
+
+    def test_the_far_right_edge_widens_too(self):
+        plain = grunt.GruntSim.from_bytes(_bytes(x28=0x1D0), slot=0, cam_x=0)
+        wide = grunt.GruntSim.from_bytes(_bytes(x28=0x1D0), slot=0, cam_x=0, widescreen=True)
+        self.assertFalse(grunt._on_screen_97ce(plain))
+        self.assertTrue(grunt._on_screen_97ce(wide))
+
+    def test_mr_x_on_screen_and_bullets(self):
+        plain = mr_x._on_screen(mr_x.MrXSim.from_bytes(_bytes(x28=0x1D0), slot=0, cam_x=0))
+        wide = mr_x._on_screen(
+            mr_x.MrXSim.from_bytes(_bytes(x28=0x1D0), slot=0, cam_x=0, widescreen=True)
+        )
+        self.assertFalse(plain)
+        self.assertTrue(wide)
+        # His own band ($13188...) is inline: not widened.
+        sim = mr_x.MrXSim.from_bytes(_bytes(x28=0xB0), slot=0, cam_x=0, widescreen=True)
+        self.assertFalse(mr_x._in_band(sim))
+
+    def test_a_bullet_inherits_the_flag_from_mr_x(self):
+        sim = mr_x.MrXSim.from_bytes(_bytes(), slot=0, cam_x=0, widescreen=True)
+        self.assertTrue(mr_x.spawn_bullet(sim, 0).widescreen)
+
+    def test_abadede_on_screen_and_charge_edges(self):
+        def sim(screen_x, widescreen):
+            return abadede.AbadedeSim(
+                x=0.0, y=0.0, primary=1, sub=0, t54=0, vx=0.0, vy=0.0, anim=0, jitter=1,
+                screen_x=screen_x, cam_x=0, inert=0, variant=False, widescreen=widescreen,
+            )
+
+        self.assertFalse(abadede._on_screen(sim(0x1D0, False)))
+        self.assertTrue(abadede._on_screen(sim(0x1D0, True)))
+        self.assertEqual(
+            (arena.lo(abadede.CHARGE_EDGE_LEFT, True), arena.hi(abadede.CHARGE_EDGE_RIGHT, True)),
+            (0x60, 0x1E0),
+        )
+
+    def test_jack_on_screen_and_retreat_edge(self):
+        jack_at = SimpleNamespace(x=-0x18 + 0.0)  # screen X $68 with cam_x 0
+        plain = jack.World([], [], 0, 0.0, (0,) * 6)
+        wide = jack.World([], [], 0, 0.0, (0,) * 6, widescreen=True)
+        self.assertFalse(jack._on_screen(jack_at, plain))
+        self.assertTrue(jack._on_screen(jack_at, wide))
+        self.assertTrue(wide.copy().widescreen)
 
 
 if __name__ == "__main__":

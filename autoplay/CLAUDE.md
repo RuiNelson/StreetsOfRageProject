@@ -3300,14 +3300,31 @@ side `SoRWidescreenArena.cpp` adds to `$43AA`). Everything routed, clamped or
 "in camera" follows from it. `CameraRange` also carries `scroll_x` (the
 camera's own X, `origin_x`) and `widescreen`: models used to take `cam_x` as
 `camera.left - 0x20`, which is wrong there. The twins' and Mr. X's actor
-clamp is `twins.player_x_clamp`. **Not done:** the ROM models' own on-screen
-and edge constants (`ON_SCREEN`/`ON_SCREEN_MAX`/`SCREEN_RIGHT`/`SCREEN_CENTRE`
-in `grunt`, `garcia`, `mr_x`, `abadede`, `antonio`, `souther_pair`; `twins`
-`LEAP_SCREEN_MAX`; `jack` `ON_SCREEN`/`RETREAT_EDGE`; Abadede's charge edge)
-still replay the 320 px ROM routines, which are `$20` wider per side there.
-Live (round 1, `grunt_fight.py --family all`, Blaze, turbo 2, one run): 32/32
-killed, 3 hits, no life lost, the boss at 96 s, the actor over the whole
-x-cam 0..320.
+clamp is `twins.player_x_clamp`.
+
+**The models' own edges** (`ai/arena.py`): each sim (`GruntSim`, `GarciaSim`,
+`MrXSim`, `BulletSim`, `AbadedeSim`, `TwinSim`, Jack's `World`) carries
+`widescreen` (from `CameraRange.widescreen`, passed by `decide`/`execute`) and
+widens **exactly the ROM tests `SoRWidescreenArena.cpp` ported**, `$20` per
+side: the hit window `$AAA0`/`$ABA4` (`[$78,$1C8)`, every model that has one),
+`$97CE` (Signal's decide and slide, Mr. X's states 2/3 and bullets,
+Abadede's, Jack's `$F55E`/`$F64A`/`$F6BC`), `$97E6` (Nora's chase, the
+activation gate, Jack's axe cleanup), Abadede's charge `$14C38` and Jack's
+retreat `$F4A6`. Checked against the generated code, not assumed: `$92AC`
+(Garcia/Signal/HakuRo "refused off screen"), Antonio's, Souther's, the twins'
+and Bongo's own screen tests, Mr. X's band (`SCREEN_BAND_*`) and the thrown
+knife's cull are inline compares the ports left alone, so the models keep
+them at 320 px too -- widening them would be wrong. Jack's `$0C`-entry test
+(`EVADE_CENTRE`) has no ported call either and is untouched.
+
+Live, widescreen host, Blaze, turbo 2 (single runs, not a comparison): round 1
+`grunt_fight.py --family all` 32/32 killed, 4 hits, boss at 94 s; Abadede
+(`boss_fight.py --level 3 --boss-type 0x30 --no-food`) 2/2 killed in 4.4 s,
+no damage, 7 holds. **Round 2 in widescreen resets the console at ~110-120 s**
+(`level_index` leaves the round, game state 2, level 0, with Jack in play): 4 of
+4 runs, also with the AI as committed before the model edges, while the plain
+host reaches Souther. A host/port problem to chase in the recompilation, not
+the AI's.
 
 ## Observation notes (keep these)
 

@@ -77,7 +77,7 @@ the default path is unchanged.
 | `--widescreen` flag | done |
 | HUD (frame, plate, one tile down) | done |
 | Gameplay arena (player bounds, spawn edges, on-screen tests) | ports done; verified live in round 1 only, see below |
-| `autoplay` (HUD camera box, `CameraRange`, walk clamp) | follows `GET_FLAGS` flag 0; the boss/street models' on-screen constants still 320 px |
+| `autoplay` (HUD camera box, `CameraRange`, walk clamp) | follows `GET_FLAGS` flag 0, models widened for the ported tests only (`autoplay/CLAUDE.md`) |
 
 ## Gameplay arena
 
@@ -110,6 +110,8 @@ Verified live: player left limit `x-cam` 32 (plain) vs 0 (widescreen); new enemi
 killed, 5 hits; before the ports 89.2 s, 3 hits; widescreen 91.4 s, 8 hits (the AI still models a 320 arena).
 One plain run with the ports stalled 52 s at the camera clamp on `WalkToNearEnemy` toward an off-screen HakuRo, the
 open stall documented in `autoplay/CLAUDE.md` ("off-screen-enemy corner stall"); the other did not.
+
+**Open: round 2 in widescreen resets the console** at ~110-120 s (autoplay `grunt_fight.py --level 2`, 4 of 4 runs, Jack in play; the plain host does not). Found by the autoplay work, not chased yet.
 
 Rounds 8 and 6 start and run in widescreen (live smoke test, no crash); the round 8 ports are otherwise unmeasured.
 

@@ -77,6 +77,7 @@ from enum import Enum, auto
 from typing import Sequence
 
 from ..world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN
+from . import arena
 from .abadede import PUNCH_DAMAGE, PunchSpec, punch_spec
 from .antonio import ActorSim, actor_update
 from .jump_kick import DEFAULT_BODY, STANDING_BODY
@@ -585,9 +586,12 @@ class AxeSim:
 class World:
     """Every Jack and every axe on screen, and what the actor is standing on."""
 
-    __slots__ = ("jacks", "axes", "cam_x", "actor_z", "body", "spawned", "punch", "struck", "level", "holes")
+    __slots__ = (
+        "jacks", "axes", "cam_x", "actor_z", "body", "spawned", "punch", "struck", "level", "holes",
+        "widescreen",
+    )
 
-    def __init__(self, jacks, axes, cam_x, actor_z, body, level=None, holes=()) -> None:
+    def __init__(self, jacks, axes, cam_x, actor_z, body, level=None, holes=(), widescreen=False) -> None:
         self.jacks: list[JackSim] = jacks
         self.axes: list[AxeSim] = axes
         self.cam_x: int = cam_x
@@ -604,6 +608,8 @@ class World:
         # Floor holes' danger zones, (x0, x1, y0, y1) on the actor's origin
         # (``reach.pit_endangers``): a step into one is undone in a rollout.
         self.holes: tuple[tuple[float, float, float, float], ...] = tuple(holes)
+        # --widescreen: the on-screen tests and his retreat edge are $20 wider per side.
+        self.widescreen: bool = widescreen
 
     def copy(self) -> World:
         return World(
@@ -614,6 +620,7 @@ class World:
             self.body,
             self.level,
             self.holes,
+            self.widescreen,
         )
 
 
@@ -642,7 +649,7 @@ def _face_only(j: JackSim, a: ActorSim) -> None:
 
 def _on_screen(j: JackSim, world: World) -> bool:
     screen = _hi(j.x) - world.cam_x + SCREEN_BIAS
-    return ON_SCREEN[0] <= screen < ON_SCREEN[1]
+    return arena.inside(screen, ON_SCREEN, world.widescreen)
 
 
 def _approach(j: JackSim) -> bool:
@@ -907,7 +914,9 @@ def jack_update(index: int, a: ActorSim, world: World) -> Outcome:
         else:
             if not j.flags & 0x08:
                 j.flags |= 0x08
-                j.aim_x = world.cam_x + RETREAT_EDGE[j.facing_left]
+                j.aim_x = world.cam_x + RETREAT_EDGE[j.facing_left] + (
+                    (arena.GROW if j.facing_left else -arena.GROW) if world.widescreen else 0
+                )
                 if entry:
                     j.aim_y = _hi(j.y)
             if _approach(j):
@@ -1259,7 +1268,7 @@ def _thrown_update(x: AxeSim, j: JackSim, a: ActorSim, world: World, *, margin: 
         x.gone = True
         return _HIT
     screen = _hi(x.x) - world.cam_x + SCREEN_BIAS
-    if not 0x70 <= screen < 0x1D0:
+    if not arena.inside(screen, (0x70, 0x1D0), world.widescreen):
         x.gone = True
         return _NONE
     x.x += x.vx
@@ -1693,7 +1702,10 @@ def build_world(
         if jack.screen_x:
             cam_x = jack.world_x + SCREEN_BIAS - jack.screen_x
             break
-    return World(sims, axes, cam_x, floor, actor_body(actor), level, holes)
+    return World(
+        sims, axes, cam_x, floor, actor_body(actor), level, holes,
+        widescreen=camera.widescreen if camera is not None else False,
+    )
 
 
 def _punch_worth_trying(world: World, index: int, a: ActorSim) -> bool:

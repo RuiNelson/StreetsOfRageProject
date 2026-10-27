@@ -1851,14 +1851,14 @@ def office_sims(context: Context, actor, *, exclude: str = ""):
         return None
     cam_x = int(camera.origin_x)
     him = next(iter(live_mr_x(context)), None)
-    m = mr_x_model.MrXSim.from_bytes(him.raw, slot=_slot_number(him.slot), cam_x=cam_x) if him else None
+    m = mr_x_model.MrXSim.from_bytes(him.raw, slot=_slot_number(him.slot), cam_x=cam_x, widescreen=camera.widescreen) if him else None
     garcias = [
-        garcia_model.GarciaSim.from_bytes(g.raw, slot=_slot_number(g.slot), cam_x=cam_x)
+        garcia_model.GarciaSim.from_bytes(g.raw, slot=_slot_number(g.slot), cam_x=cam_x, widescreen=camera.widescreen)
         for g in office_helpers(context)
         if g.slot != exclude
     ]
     bullets = [
-        mr_x_model.BulletSim.from_bytes(p.raw, slot=_slot_number(p.slot), cam_x=cam_x)
+        mr_x_model.BulletSim.from_bytes(p.raw, slot=_slot_number(p.slot), cam_x=cam_x, widescreen=camera.widescreen)
         for p in find_all(context, Projectile)
         if p.type_id == mr_x_model.BULLET_TYPE and p.raw
     ]
@@ -1876,7 +1876,7 @@ def _office_threat(context: Context, actor, *, exclude: str = "") -> tuple[int, 
         return None
     cam_x = int(camera.origin_x)
     sims = [
-        garcia_model.GarciaSim.from_bytes(g.raw, slot=_slot_number(g.slot), cam_x=cam_x)
+        garcia_model.GarciaSim.from_bytes(g.raw, slot=_slot_number(g.slot), cam_x=cam_x, widescreen=camera.widescreen)
         for g in office_helpers(context)
         if g.slot != exclude
     ]
@@ -1921,7 +1921,7 @@ def grunt_sims(context: Context, actor) -> tuple | None:
             continue
         if office and is_office_helper(context, enemy):
             continue
-        g = grunt_model.GruntSim.from_bytes(enemy.raw, slot=_slot_number(enemy.slot), cam_x=cam_x, level=level)
+        g = grunt_model.GruntSim.from_bytes(enemy.raw, slot=_slot_number(enemy.slot), cam_x=cam_x, level=level, widescreen=camera.widescreen)
         if g.alive:
             sims.append(g)
     a = mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x, widescreen=camera.widescreen)

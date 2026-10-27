@@ -1738,7 +1738,7 @@ def engage_twins_plan(
         wall = twins_plan.partner_wall(actor.world_x, partner.world_x, actor.player_index)
         tokens = [twin for twin in tokens if twin.targets_player != partner.player_index]
     cam_x = int(camera.origin_x)
-    twins = [twins_model.twin_from_token(twin, cam_x=cam_x) for twin in tokens]
+    twins = [twins_model.twin_from_token(twin, cam_x=cam_x, widescreen=camera.widescreen) for twin in tokens]
     twins = [t for t in twins if not t.gone]
     # Both twins on the partner is still a plan: the walk to this actor's edge.
     if not live_twins(context) or (not twins and partner is None):
@@ -1808,19 +1808,19 @@ def engage_mr_x_plan(verb: EngageMrX, context: Context, held: int = 0) -> mr_x_p
 
     cam_x = int(camera.origin_x)
     m = (
-        mr_x_model.MrXSim.from_bytes(target.raw, slot=_slot_index(target.slot), cam_x=cam_x)
+        mr_x_model.MrXSim.from_bytes(target.raw, slot=_slot_index(target.slot), cam_x=cam_x, widescreen=camera.widescreen)
         if target is not None
         else None
     )
     garcias = [
-        garcia_model.GarciaSim.from_bytes(g.raw, slot=_slot_index(g.slot), cam_x=cam_x)
+        garcia_model.GarciaSim.from_bytes(g.raw, slot=_slot_index(g.slot), cam_x=cam_x, widescreen=camera.widescreen)
         for g in office_helpers(context)
     ]
     garcias = [g for g in garcias if g.alive]
     if m is None and not garcias:
         return None
     bullets = [
-        mr_x_model.BulletSim.from_bytes(p.raw, slot=_slot_index(p.slot), cam_x=cam_x)
+        mr_x_model.BulletSim.from_bytes(p.raw, slot=_slot_index(p.slot), cam_x=cam_x, widescreen=camera.widescreen)
         for p in find_all(context, Projectile)
         if p.type_id == mr_x_model.BULLET_TYPE and p.raw
     ]

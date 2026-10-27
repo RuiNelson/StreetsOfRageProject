@@ -35,6 +35,7 @@ import math
 from enum import Enum, auto
 from typing import Sequence
 
+from . import arena
 from .jack import _vector_velocity
 from .twins import ActorSim, overlaps
 
@@ -85,6 +86,7 @@ EVADE_LEGS = ((2.5, 6), (3.0, 5), (4.0, 4), (5.0, 4))
 EVADE_LANE_FAST = ((0x10, 13.0), (0x05, 10.0))
 SCREEN_BIAS = 0x80
 ON_SCREEN = (0x80, 0x1C0)
+STRUCK_SCREEN = (0x78, 0x1C8)  # $AAA0: a strike lands only here
 GRAB_Z = 8
 
 ANIM_WALK = 0x00
@@ -149,7 +151,7 @@ class GarciaSim:
     __slots__ = (
         "slot", "x", "y", "z", "vx", "vy", "state", "flags", "t50", "aim_x", "aim_y",
         "speed", "anim", "frame", "countdown", "reload", "animating", "attack_id",
-        "body_id", "hp", "param", "screen_x", "cam_x", "alive", "repeats",
+        "body_id", "hp", "param", "screen_x", "cam_x", "alive", "repeats", "widescreen",
     )
 
     def __init__(self, **fields) -> None:
@@ -167,7 +169,7 @@ class GarciaSim:
         return bool(self.anim & ANIM_MIRROR)
 
     @classmethod
-    def from_bytes(cls, data: bytes, *, slot: int, cam_x: int) -> GarciaSim:
+    def from_bytes(cls, data: bytes, *, slot: int, cam_x: int, widescreen: bool = False) -> GarciaSim:
         return cls(
             slot=slot,
             x=_s32(data, 0x10),
@@ -194,6 +196,7 @@ class GarciaSim:
             cam_x=cam_x,
             alive=data[0x30] != ST_DYING and data[0] in GARCIA_TYPES,
             repeats=data[0x6E],
+            widescreen=widescreen,
         )
 
 
@@ -265,7 +268,7 @@ def contact(g: GarciaSim, a: ActorSim) -> Outcome:
     body = box(g.body_id, x, y, z)
     if a.attack is not None and body is not None and overlaps(a.attack, body):
         if a.damage:
-            if 0x78 <= g.screen_x < 0x1C8:
+            if arena.inside(g.screen_x, STRUCK_SCREEN, g.widescreen):
                 return Outcome.STRUCK
             return Outcome.NONE
         if not a.holding and abs(a.z - z) <= GRAB_Z:

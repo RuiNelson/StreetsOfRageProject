@@ -79,6 +79,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Sequence
 
+from . import arena
 from .antonio import PLAYER_LANE_MAX, PLAYER_LANE_MIN, ActorSim, actor_update
 from .souther import HoldStep, release_press_frames, signed_health
 from .tokens import Abadede, Boss, CameraRange, PlayableCharacter
@@ -272,12 +273,12 @@ class AbadedeSim:
 
     __slots__ = (
         "x", "y", "primary", "sub", "t54", "vx", "vy", "anim", "jitter",
-        "screen_x", "cam_x", "inert", "variant",
+        "screen_x", "cam_x", "inert", "variant", "widescreen",
     )
 
     def __init__(self, **fields) -> None:
         for name in self.__slots__:
-            setattr(self, name, fields[name])
+            setattr(self, name, fields.get(name, False) if name == "widescreen" else fields[name])
 
     def copy(self) -> AbadedeSim:
         return AbadedeSim(**{name: getattr(self, name) for name in self.__slots__})
@@ -291,7 +292,7 @@ class AbadedeSim:
         return _FRAME_BOXES.get(self.anim, (0, 0))
 
     @classmethod
-    def from_token(cls, boss: Boss, *, cam_x: int) -> AbadedeSim:
+    def from_token(cls, boss: Boss, *, cam_x: int, widescreen: bool = False) -> AbadedeSim:
         x = boss.fine_x if boss.fine_x else float(boss.world_x)
         y = boss.fine_y if boss.fine_y else float(boss.world_y)
         screen_x = boss.screen_x if boss.screen_x else _hi(x) - cam_x + SCREEN_BIAS
@@ -310,6 +311,7 @@ class AbadedeSim:
             cam_x=cam_x,
             inert=_inert_updates(primary, boss.substate, boss.timer_54),
             variant=bool(boss.script_param & 0x0F),
+            widescreen=widescreen,
         )
 
 
@@ -374,7 +376,7 @@ def _gaps(b: AbadedeSim, t: ActorSim) -> tuple[int, int]:
 
 
 def _on_screen(b: AbadedeSim) -> bool:
-    return ON_SCREEN_MIN <= b.screen_x < ON_SCREEN_MAX
+    return arena.inside(b.screen_x, (ON_SCREEN_MIN, ON_SCREEN_MAX), b.widescreen)
 
 
 def _emit(b: AbadedeSim) -> None:
@@ -451,7 +453,7 @@ def contact(
         if punch is not None:
             lo, hi = (ax - punch[1], ax - punch[0]) if a.facing_left else (ax + punch[0], ax + punch[1])
             if _meets(lo, hi, ay, bx, by, body):
-                if STRIKE_SCREEN_MIN <= b.screen_x < STRIKE_SCREEN_MAX:
+                if arena.inside(b.screen_x, (STRIKE_SCREEN_MIN, STRIKE_SCREEN_MAX), b.widescreen):
                     return Outcome.STRUCK
                 return Outcome.NONE
         elif a.walking:
@@ -564,9 +566,9 @@ def _charge_step(b: AbadedeSim, t: ActorSim) -> None:
         b.x += b.vx
         b.y += b.vy
         if b.vx < 0:
-            stop = b.screen_x <= CHARGE_EDGE_LEFT
+            stop = b.screen_x <= arena.lo(CHARGE_EDGE_LEFT, b.widescreen)
         else:
-            stop = b.screen_x >= CHARGE_EDGE_RIGHT
+            stop = b.screen_x >= arena.hi(CHARGE_EDGE_RIGHT, b.widescreen)
         if stop:
             # loc_14C74
             _walk_aimed(b, t)
@@ -1061,7 +1063,9 @@ def build_sims(
     if boss.screen_x:
         cam_x = boss.world_x + SCREEN_BIAS - boss.screen_x
     a = ActorSim.from_token(actor, lane_lo=lane_lo, lane_hi=lane_hi, x_lo=x_lo, x_hi=x_hi)
-    b = AbadedeSim.from_token(boss, cam_x=cam_x)
+    b = AbadedeSim.from_token(
+        boss, cam_x=cam_x, widescreen=camera.widescreen if camera is not None else False
+    )
     return b, a
 
 

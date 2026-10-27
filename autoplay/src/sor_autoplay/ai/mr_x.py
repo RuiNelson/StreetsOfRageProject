@@ -70,6 +70,7 @@ import math
 from enum import Enum, auto
 from typing import Sequence
 
+from . import arena
 from .twins import (
     ADAM,
     AXEL,
@@ -289,7 +290,7 @@ class MrXSim:
         "slot", "x", "y", "z", "vx", "vy", "vz", "acc", "grav", "shake",
         "primary", "sub", "t54", "t56", "anim", "frame", "last_frame",
         "flags1", "f37", "hp", "damage", "screen_x", "cam_x", "floor",
-        "attack_id", "body_id", "latch", "gone",
+        "attack_id", "body_id", "latch", "gone", "widescreen",
     )
 
     def __init__(self, **fields) -> None:
@@ -307,7 +308,9 @@ class MrXSim:
         return bool(self.anim & ANIM_MIRROR)
 
     @classmethod
-    def from_bytes(cls, data: bytes, *, slot: int, cam_x: int, level_index: int = 7) -> MrXSim:
+    def from_bytes(
+        cls, data: bytes, *, slot: int, cam_x: int, level_index: int = 7, widescreen: bool = False
+    ) -> MrXSim:
         return cls(
             slot=slot,
             x=_s32(data, 0x10),
@@ -337,6 +340,7 @@ class MrXSim:
             body_id=data[0x03],
             latch=0,
             gone=False,
+            widescreen=widescreen,
         )
 
 
@@ -395,7 +399,7 @@ def _range(m: MrXSim, a: ActorSim, lane_gate: int, x_gate: int) -> tuple[int, in
 
 
 def _on_screen(m: MrXSim) -> bool:
-    return ON_SCREEN_MIN <= m.screen_x < ON_SCREEN_MAX
+    return arena.inside(m.screen_x, (ON_SCREEN_MIN, ON_SCREEN_MAX), m.widescreen)
 
 
 def _in_band(m: MrXSim) -> bool:
@@ -418,7 +422,7 @@ def contact(m: MrXSim, a: ActorSim) -> int:
     body = box(m.body_id, x, y, z)
     if a.attack is not None and body is not None and overlaps(a.attack, body):
         if a.damage:
-            if STRIKE_SCREEN_MIN <= m.screen_x < STRIKE_SCREEN_MAX:
+            if arena.inside(m.screen_x, (STRIKE_SCREEN_MIN, STRIKE_SCREEN_MAX), m.widescreen):
                 return CODE_STRUCK
             return 0
         if not a.holding and abs(a.z - z) <= GRAB_Z:
@@ -824,7 +828,7 @@ class BulletSim:
     """One ``$36``. ``delay`` counts passes before its set-up has run (a slot
     below his is set up a pass late); ``fresh`` marks one fired this pass."""
 
-    __slots__ = ("slot", "x", "y", "z", "vx", "vy", "state", "screen_x", "cam_x", "fresh", "delay")
+    __slots__ = ("slot", "x", "y", "z", "vx", "vy", "state", "screen_x", "cam_x", "fresh", "delay", "widescreen")
 
     def __init__(self, **fields) -> None:
         for name in self.__slots__:
@@ -837,7 +841,7 @@ class BulletSim:
         return other
 
     @classmethod
-    def from_bytes(cls, data: bytes, *, slot: int, cam_x: int) -> BulletSim:
+    def from_bytes(cls, data: bytes, *, slot: int, cam_x: int, widescreen: bool = False) -> BulletSim:
         if data[0x30] == 0:
             # Fired into a slot below his: $140EA runs on the next pass.
             vx, vy, _, dx, dl = BULLET_TABLE[min(data[0x58], len(BULLET_TABLE) - 1)]
@@ -846,7 +850,7 @@ class BulletSim:
             b = cls(
                 slot=slot, x=x, y=_s32(data, 0x14) + dl, z=_s32(data, 0x18) - BULLET_RISE,
                 vx=-vx if left else vx, vy=vy, state=1, screen_x=0, cam_x=cam_x,
-                fresh=False, delay=1,
+                fresh=False, delay=1, widescreen=widescreen,
             )
             b.screen_x = _hi(b.x) - cam_x + SCREEN_BIAS
             return b
@@ -862,6 +866,7 @@ class BulletSim:
             cam_x=cam_x,
             fresh=False,
             delay=0,
+            widescreen=widescreen,
         )
 
 
@@ -883,6 +888,7 @@ def spawn_bullet(m: MrXSim, index: int) -> BulletSim:
         cam_x=m.cam_x,
         fresh=True,
         delay=0,
+        widescreen=m.widescreen,
     )
     b.screen_x = _hi(b.x) - b.cam_x + SCREEN_BIAS
     return b
@@ -901,7 +907,7 @@ def bullet_update(b: BulletSim, a: ActorSim) -> Outcome:
     if b.delay:
         b.delay -= 1
         return Outcome.NONE
-    if not (ON_SCREEN_MIN <= b.screen_x < ON_SCREEN_MAX) or b.y > BULLET_LANE_MAX:
+    if not arena.inside(b.screen_x, (ON_SCREEN_MIN, ON_SCREEN_MAX), b.widescreen) or b.y > BULLET_LANE_MAX:
         b.state = 0
         return Outcome.NONE
     out = Outcome.NONE

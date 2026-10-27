@@ -59,6 +59,7 @@ from collections.abc import Sequence
 from enum import Enum, auto
 
 from ..hazards import base_floor_z
+from . import arena
 from .jack import _vector_velocity
 from .twins import ActorSim, overlaps
 
@@ -346,7 +347,7 @@ class GruntSim:
         "slot", "type", "x", "y", "z", "vx", "vy", "vz", "state", "flags", "t50", "t51", "t52",
         "f48", "aim_x", "aim_y", "speed", "off_x", "off_y", "anim", "frame", "countdown", "reload",
         "animating", "attack_id", "body_id", "hp", "param", "screen_x", "cam_x", "alive", "repeats",
-        "damage", "w54", "armed", "level", "floor", "last_frame_tick", "rng",
+        "widescreen", "damage", "w54", "armed", "level", "floor", "last_frame_tick", "rng",
         # A knife this update threw (``$D8EC``), for the object pass to fly.
         "thrown",
     )
@@ -371,7 +372,7 @@ class GruntSim:
 
     @classmethod
     def from_bytes(cls, data: bytes, *, slot: int, cam_x: int, level: int = 0,
-                   floor: float | None = None) -> GruntSim:
+                   floor: float | None = None, widescreen: bool = False) -> GruntSim:
         z = _s32(data, 0x18)
         if floor is None:
             # On the ground his z is his floor; in the air (a vertical
@@ -411,6 +412,7 @@ class GruntSim:
             cam_x=cam_x,
             alive=data[0x30] != ST_DYING and data[0x00] in MODELLED_TYPES and _s16(data, 0x32) >= 0,
             repeats=data[0x6E],
+            widescreen=widescreen,
             damage=data[0x34],
             w54=_s16(data, 0x54),
             armed=_u16(data, 0x6A) != 0,
@@ -464,8 +466,20 @@ def _on_screen(g: GruntSim) -> bool:
     return ON_SCREEN[0] <= g.screen_x < ON_SCREEN[1]
 
 
+def _on_screen_97ce(g: GruntSim) -> bool:
+    """``$97CE`` itself: widened in widescreen (``$92AC``'s own compare is not)."""
+
+    return arena.inside(g.screen_x, ON_SCREEN, g.widescreen)
+
+
 def _on_screen_wide(g: GruntSim) -> bool:
-    return ON_SCREEN_WIDE[0] <= g.screen_x < ON_SCREEN_WIDE[1]
+    return arena.inside(g.screen_x, ON_SCREEN_WIDE, g.widescreen)
+
+
+def _struck_window(g: GruntSim) -> bool:
+    """``$AAA0``/``$ABA4``: a strike or a swung weapon lands only here."""
+
+    return arena.inside(g.screen_x, STRUCK_SCREEN, g.widescreen)
 
 
 def _refused_off_screen(g: GruntSim) -> bool:
@@ -591,12 +605,12 @@ def contact(g: GruntSim, a: ActorSim) -> Outcome:
     if weapon is not None and body is not None and overlaps(weapon, body):
         # $AA34: the registered attackers ($FFFB22) first -- the swung weapon's
         # box on his body is $ABA4's code 5, $A9DC's knockdown.
-        if STRUCK_SCREEN[0] <= g.screen_x < STRUCK_SCREEN[1]:
+        if _struck_window(g):
             return Outcome.KNOCKED
         return Outcome.NONE
     if a.attack is not None and body is not None and overlaps(a.attack, body):
         if a.damage:
-            if STRUCK_SCREEN[0] <= g.screen_x < STRUCK_SCREEN[1]:
+            if _struck_window(g):
                 return Outcome.STRUCK
             return Outcome.NONE
         if not a.holding and abs(a.z - z) <= GRAB_Z:
@@ -1513,7 +1527,7 @@ def _st_24_decide(g: GruntSim, a: ActorSim) -> Outcome:
 
     if not g.flags & 0x01:
         g.flags |= 0x01
-        if not _on_screen(g):
+        if not _on_screen_97ce(g):
             _goto(g, 0x0700)
             return Outcome.NONE
         g.animating = False
@@ -1572,7 +1586,7 @@ def _st_24_slide(g: GruntSim, a: ActorSim) -> Outcome:
 
     if not g.flags & 0x01:
         g.flags |= 0x01
-        if not (ON_SCREEN[0] <= g.screen_x < ON_SCREEN[1]):
+        if not _on_screen_97ce(g):
             _goto(g, 0x0700)
             return Outcome.NONE
         g.animating = True

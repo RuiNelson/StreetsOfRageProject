@@ -64,6 +64,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Iterable, Sequence
 
+from . import arena
+
 __all__ = [
     "ActorSim",
     "Outcome",
@@ -537,7 +539,7 @@ class TwinSim:
         "anim", "frame", "countdown", "reload", "shown_attack", "shown_body", "screen_x",
         "cam_x", "mode", "toggle", "role", "unavailable", "f4b", "pending",
         "f37", "r62", "r63", "f66", "f6d", "hp", "left", "above", "d50", "d52",
-        "partner", "gone",
+        "partner", "gone", "widescreen",
     )
 
     def __init__(self, **fields) -> None:
@@ -551,7 +553,7 @@ class TwinSim:
         return other
 
     @classmethod
-    def from_bytes(cls, data: bytes, *, slot: int, cam_x: int) -> TwinSim:
+    def from_bytes(cls, data: bytes, *, slot: int, cam_x: int, widescreen: bool = False) -> TwinSim:
         """From the object's own 128 bytes (the lab's recordings)."""
 
         def s32(offset: int) -> float:
@@ -578,7 +580,7 @@ class TwinSim:
             f37=data[0x37], r62=data[0x62], r63=data[0x63], f66=data[0x66], f6d=data[0x6D],
             hp=s16(0x32), left=bool(data[0x60]), above=bool(data[0x61]),
             d50=int.from_bytes(data[0x50:0x52], "big"), d52=int.from_bytes(data[0x52:0x54], "big"),
-            partner=None, gone=False,
+            partner=None, gone=False, widescreen=widescreen,
         )
 
 
@@ -662,7 +664,7 @@ def contact(t: TwinSim, a: ActorSim, margin: int = 0) -> int:
     body_box = box(t.shown_body, _hi(t.x), _hi(t.y), _hi(t.z)) if t.shown_body else None
     if a.attack is not None and body_box is not None and overlaps(body_box, a.attack):
         if a.damage:
-            if STRIKE_SCREEN_MIN <= t.screen_x < STRIKE_SCREEN_MAX:
+            if arena.inside(t.screen_x, (STRIKE_SCREEN_MIN, STRIKE_SCREEN_MAX), t.widescreen):
                 return 2
             return 0
         if a.holding or a.latch == CODE_GRABBED_BOSS:
@@ -1197,7 +1199,7 @@ def check_recording(rows: Sequence[dict], *, verbose: bool = False) -> dict:
 # --- From the tokens -------------------------------------------------------------
 
 
-def twin_from_token(twin, *, cam_x: int) -> TwinSim:
+def twin_from_token(twin, *, cam_x: int, widescreen: bool = False) -> TwinSim:
     """A ``TwinSim`` from an ``Onihime`` token (``observe`` fills every field
     the update reads)."""
 
@@ -1244,6 +1246,7 @@ def twin_from_token(twin, *, cam_x: int) -> TwinSim:
         d52=twin.boss_dist_lane,
         partner=None,
         gone=False,
+        widescreen=widescreen,
     )
 
 
