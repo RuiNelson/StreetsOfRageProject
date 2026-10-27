@@ -3320,11 +3320,10 @@ them at 320 px too -- widening them would be wrong. Jack's `$0C`-entry test
 Live, widescreen host, Blaze, turbo 2 (single runs, not a comparison): round 1
 `grunt_fight.py --family all` 32/32 killed, 4 hits, boss at 94 s; Abadede
 (`boss_fight.py --level 3 --boss-type 0x30 --no-food`) 2/2 killed in 4.4 s,
-no damage, 7 holds. **Round 2 in widescreen resets the console at ~110-120 s**
-(`level_index` leaves the round, game state 2, level 0, with Jack in play): 4 of
-4 runs, also with the AI as committed before the model edges, while the plain
-host reaches Souther. A host/port problem to chase in the recompilation, not
-the AI's.
+no damage, 7 holds. Round 2 in widescreen used to reset the console at ~110-120 s (a
+camera-gated Jack moved past the camera's lock by the `$CC0` port, then the ROM's art
+check in `$810`); fixed in `StreetsOfRageRecompilation` (its `CLAUDE.md`), and widescreen
+round 2 now reaches Souther.
 
 ## Observation notes (keep these)
 

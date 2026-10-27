@@ -111,7 +111,10 @@ killed, 5 hits; before the ports 89.2 s, 3 hits; widescreen 91.4 s, 8 hits (the 
 One plain run with the ports stalled 52 s at the camera clamp on `WalkToNearEnemy` toward an off-screen HakuRo, the
 open stall documented in `autoplay/CLAUDE.md` ("off-screen-enemy corner stall"); the other did not.
 
-**Open: round 2 in widescreen resets the console** at ~110-120 s (autoplay `grunt_fight.py --level 2`, 4 of 4 runs, Jack in play; the plain host does not). Found by the autoplay work, not chased yet.
+Round 2 reset the console at ~110-120 s in widescreen (autoplay `grunt_fight.py --level 2`, 4 of 4 runs): the `$CC0`
+port moved a camera-gated Jack (`+$40` bit 7) from `$0DA8` to `$0DC8`, past the camera's lock at `$0DC0`, so `$A59C`
+never woke him and `prepare_next_spawn_section`'s art check (`$884`) hit his unset tile word. Fixed: a camera-gated
+object keeps its X. Widescreen round 2 now reaches Souther (2 of 2); round 1 unchanged.
 
 Rounds 8 and 6 start and run in widescreen (live smoke test, no crash); the round 8 ports are otherwise unmeasured.
 
