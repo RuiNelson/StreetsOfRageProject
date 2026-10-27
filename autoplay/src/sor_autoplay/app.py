@@ -598,6 +598,8 @@ class ObserverApp:
         modes = self._read_host_flags(client)
         if modes is not None:
             self.six_button = modes.six_button
+            for loop in self._agent_loops.values():
+                loop.six_button = modes.six_button
             logger.info("host buttons: %s", "6-button" if modes.six_button else "3-button")
 
     def start_poller(self) -> None:

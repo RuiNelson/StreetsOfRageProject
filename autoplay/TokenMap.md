@@ -23,6 +23,7 @@ classDiagram
     Essential <|-- MrXOffice
     Essential <|-- DebugNoFood
     Essential <|-- DebugNoPolice
+    Essential <|-- SixButtonLayout
 
     Observed <|-- Projectile
     Observed <|-- StageObjects

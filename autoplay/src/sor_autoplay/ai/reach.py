@@ -67,6 +67,7 @@ from .tokens import (
     Projectile,
     PUNCH_RANGE_Y,
     Souther,
+    SixButtonLayout,
     Stage,
     Surrounded,
     Weapon,
@@ -1339,9 +1340,12 @@ def item_a_b_press_takes(context: Context, actor: PlayableCharacter) -> Pickup |
     the food. That is how the AI used to take food the partner needed more
     while fighting beside it (user: "a IA a usar um item de recuperação de
     vida quando o partner precisa mais dele").
+
+    Under the 6-button layout B never picks anything up (Y does), so there is
+    nothing to take.
     """
 
-    if actor.is_airborne:
+    if actor.is_airborne or find(context, SixButtonLayout) is not None:
         return None
     candidates = [
         item

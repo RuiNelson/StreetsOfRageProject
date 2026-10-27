@@ -92,6 +92,7 @@ from .essential import (
     InContinueMenu,
     InMrXDialog,
     MrXOffice,
+    SixButtonLayout,
     Stage,
 )
 from .hazard_tokens import (

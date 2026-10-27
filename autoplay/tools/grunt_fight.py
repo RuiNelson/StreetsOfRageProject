@@ -41,6 +41,7 @@ from sor_autoplay import memory_map as mm
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.loop import AgentLoop
 from sor_autoplay.debug_scenario import DebugScenario
+from sor_autoplay.host_flags import decode_host_modes
 from sor_autoplay.reach_gameplay import reach_gameplay
 from sor_autoplay.rom_data import RomData
 from sor_autoplay.state import read_snapshot
@@ -196,6 +197,7 @@ def main() -> int:
         rom = RomData.read(client)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         loop = AgentLoop(gamepad, no_food=not args.food, no_police=True)
+        loop.six_button = decode_host_modes(client.get_flags()).six_button
 
         on_level = False
         started_at = None

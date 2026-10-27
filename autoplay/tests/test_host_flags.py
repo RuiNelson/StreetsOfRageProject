@@ -77,6 +77,11 @@ class ObserverAppModeTests(unittest.TestCase):
         self.assertTrue(app.six_button)
         self.assertEqual(client.reads, 2)
 
+    def test_the_layout_reaches_both_agent_loops(self):
+        app = self._app(agent_p2=True)
+        app._refresh_button_mode(_Client(_flags(FLAG_SIX_BUTTON)))
+        self.assertTrue(all(loop.six_button for loop in app._agent_loops.values()))
+
     def test_buttons_are_read_once_per_turn_on(self):
         app = self._app(agent_p1=True)
         client = _Client(_flags())

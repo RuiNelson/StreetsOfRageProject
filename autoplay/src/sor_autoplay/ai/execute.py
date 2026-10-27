@@ -53,7 +53,7 @@ from .tokens import (
     punch_usable_inner_x,
 )
 from .tokens import Abadede, Antonio, Bongo, Enemy, Jack, MrX, Onihime, Souther
-from .tokens import CameraRange, Stage
+from .tokens import CameraRange, SixButtonLayout, Stage
 from .tokens import Breakable, Pit, Projectile
 from .tokens import Pickup, Weapon
 from .tokens import CallPolice
@@ -134,6 +134,12 @@ START_MASK = 0x0080
 # stuck on the first initial forever. Yes/No still accepts any $F0 face
 # bit ($52AE); name-entry does not.
 NAME_CONFIRM_MASK = JUMP_MASK
+# The 6-button layout (--altControls, SixButtonLayout): A is the rear attack
+# (logical B+C), X the police special, Y a pickup and Z the knife throw.
+SIX_BUTTON_REAR_ATTACK_MASK = 0x0010  # physical A
+SIX_BUTTON_POLICE_MASK = 0x0100  # physical X
+SIX_BUTTON_PICKUP_MASK = 0x0200  # physical Y
+SIX_BUTTON_KNIFE_THROW_MASK = 0x0400  # physical Z
 PUNCH_FRAMES = 4
 CALL_POLICE_FRAMES = 4
 DIALOG_FRAMES = 4
@@ -272,6 +278,32 @@ BREAKABLE_AROUND_SLACK_X = MOVE_DEADBAND_X
 
 def press_no_button(gamepad: VirtualGamepad) -> None:
     gamepad.release()
+
+
+def _six_button(context: Context) -> bool:
+    return find(context, SixButtonLayout) is not None
+
+
+def rear_attack_mask(context: Context) -> int:
+    """The rear-attack chord: B+C, or the single A button on 6 buttons."""
+
+    return SIX_BUTTON_REAR_ATTACK_MASK if _six_button(context) else PUNCH_MASK | JUMP_MASK
+
+
+def police_mask(context: Context) -> int:
+    return SIX_BUTTON_POLICE_MASK if _six_button(context) else CALL_POLICE_MASK
+
+
+def pickup_mask(context: Context) -> int:
+    """The press that takes an item in reach: B, or Y on 6 buttons."""
+
+    return SIX_BUTTON_PICKUP_MASK if _six_button(context) else PUNCH_MASK
+
+
+def knife_throw_mask(context: Context) -> int:
+    """The knife throw: B, or Z on 6 buttons (B with a knife stabs there)."""
+
+    return SIX_BUTTON_KNIFE_THROW_MASK if _six_button(context) else PUNCH_MASK
 
 
 def _press(gamepad: VirtualGamepad, mask: int, *, frames: int) -> None:
@@ -1737,7 +1769,7 @@ def state_machine_engage_twins(verb: EngageTwins, context: Context, gamepad: Vir
         gamepad.release()
         return
     if plan.chord:
-        _press(gamepad, PUNCH_MASK | JUMP_MASK, frames=REAR_ATTACK_FRAMES)
+        _press(gamepad, rear_attack_mask(context), frames=REAR_ATTACK_FRAMES)
         return
     mask = 0
     if plan.dir_x > 0:
@@ -1826,7 +1858,7 @@ def state_machine_engage_mr_x(verb: EngageMrX, context: Context, gamepad: Virtua
     if plan.chord:
         # B+C with no direction: $322A runs before the walk, so the rear
         # attack goes out behind the facing the actor already has.
-        _press(gamepad, PUNCH_MASK | JUMP_MASK, frames=REAR_ATTACK_FRAMES)
+        _press(gamepad, rear_attack_mask(context), frames=REAR_ATTACK_FRAMES)
         return
     if plan.punch:
         _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
@@ -1885,7 +1917,7 @@ def state_machine_engage_grunts(verb: EngageGrunts, context: Context, gamepad: V
         gamepad.release()
         return
     if plan.chord:
-        _press(gamepad, PUNCH_MASK | JUMP_MASK, frames=REAR_ATTACK_FRAMES)
+        _press(gamepad, rear_attack_mask(context), frames=REAR_ATTACK_FRAMES)
         return
     if plan.punch:
         _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
@@ -2244,7 +2276,7 @@ def state_machine_melee_strike(verb: Verb, context: Context, gamepad: VirtualGam
 
 
 def state_machine_rear_attack(verb: RearAttack, context: Context, gamepad: VirtualGamepad) -> None:
-    _press(gamepad, PUNCH_MASK | JUMP_MASK, frames=REAR_ATTACK_FRAMES)
+    _press(gamepad, rear_attack_mask(context), frames=REAR_ATTACK_FRAMES)
 
 
 def state_machine_counter_grab(verb: CounterGrab, context: Context, gamepad: VirtualGamepad) -> None:
@@ -2273,7 +2305,7 @@ def state_machine_tech_recover(verb: TechRecover, context: Context, gamepad: Vir
 
 
 def state_machine_call_police(verb: CallPolice, context: Context, gamepad: VirtualGamepad) -> None:
-    _press(gamepad, CALL_POLICE_MASK, frames=CALL_POLICE_FRAMES)
+    _press(gamepad, police_mask(context), frames=CALL_POLICE_FRAMES)
 
 
 def _name_entry_letter_mask(current: int, target: int) -> int:
@@ -2596,24 +2628,31 @@ def state_machine_release_grab(verb: ReleaseGrab, context: Context, gamepad: Vir
     )
 
 
-def _throw_ranged_weapon(verb: Verb, context: Context, gamepad: VirtualGamepad, *, frames: int) -> None:
-    """Shared body for ``ThrowKnife``/``ThrowPepper``: identical B press
-    aimed at the interception point, differing only in the frame count."""
+def _throw_ranged_weapon(
+    verb: Verb, context: Context, gamepad: VirtualGamepad, *, frames: int, button: int
+) -> None:
+    """Shared body for ``ThrowKnife``/``ThrowPepper``: the same press aimed
+    at the interception point, differing in the frame count and the button
+    (the knife's is Z on 6 buttons, the pepper's stays B)."""
 
     actor = _find_actor(context, verb.actor_slot)
     target = find(context, Enemy, slot=verb.target_slot)
     face = 0
     if actor is not None and target is not None:
         face = _face_toward_mask(actor, _aim_point(verb, actor, target).world_x)
-    _press(gamepad, PUNCH_MASK | face, frames=frames)
+    _press(gamepad, button | face, frames=frames)
 
 
 def state_machine_throw_knife(verb: ThrowKnife, context: Context, gamepad: VirtualGamepad) -> None:
-    _throw_ranged_weapon(verb, context, gamepad, frames=THROW_KNIFE_FRAMES)
+    _throw_ranged_weapon(
+        verb, context, gamepad, frames=THROW_KNIFE_FRAMES, button=knife_throw_mask(context)
+    )
 
 
 def state_machine_throw_pepper(verb: ThrowPepper, context: Context, gamepad: VirtualGamepad) -> None:
-    _throw_ranged_weapon(verb, context, gamepad, frames=THROW_PEPPER_FRAMES)
+    _throw_ranged_weapon(
+        verb, context, gamepad, frames=THROW_PEPPER_FRAMES, button=PUNCH_MASK
+    )
 
 
 def _walk_to_item(verb: Verb, context: Context, gamepad: VirtualGamepad, target_type: type) -> None:
@@ -2650,7 +2689,7 @@ def _walk_to_item(verb: Verb, context: Context, gamepad: VirtualGamepad, target_
         gamepad.release()
         return
     if abs(target.world_x - actor.world_x) <= PICKUP_RANGE_X and abs(target.world_y - actor.world_y) <= PICKUP_RANGE_Y:
-        _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
+        _press(gamepad, pickup_mask(context), frames=PUNCH_FRAMES)
         return
 
     goal = nav.strike_goal(

@@ -116,3 +116,16 @@ class DebugNoPolice(Essential):
     special, not the plan. It only ever removes ``CallPolice``
     (``decide.could_call_police``), never adds anything.
     """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SixButtonLayout(Essential):
+    """The host runs ``--altControls``: the 6-button layout.
+
+    Added by ``AgentLoop`` from the host's ``GET_FLAGS`` (``host_flags``), not
+    read from RAM: its presence swaps the buttons that differ -- the rear
+    attack is A, the police special X, a pickup Y and the knife throw Z -- and
+    B stops picking things up (``execute.rear_attack_mask`` and the other
+    mask helpers, ``reach.item_a_b_press_takes``). Without it every mask is
+    the original three-button scheme's, as before.
+    """
