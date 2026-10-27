@@ -201,6 +201,34 @@ output: do not commit them unless the user explicitly asks to version that
 exact file. Use this map together with `ai-analysis/*.md` manuscripts and
 `labels.csv` when mapping control flow for reverse engineering or AI work.
 
+## Launching the game and autoplay: `scripts/play.py`
+
+One launcher for `sor` plus `autoplay`; it replaced the old `both_*.py` and
+`go_to_boss.py` wrappers (`run.py`, `autoplay.py`, `build.py` remain, and
+`play.py` drives them).
+
+```bash
+./scripts/play.py                       # window: configure, Ctrl+R runs both
+./scripts/play.py --last                # the saved settings, no window
+./scripts/play.py --preset turbo        # turbo | watch | quiet | lockstep | p2 | boss
+./scripts/play.py --preset boss --level 2 --dry-run   # print the command lines only
+```
+
+The window (Tk) saves its settings to `last_play_py_settings.yml` (repo root,
+gitignored) on every change and reads them back on the next launch. The port
+and the turbo factor are set once and feed both programs (`sor --port/--turbo`,
+`autoplay --port`, and `--poll-ms 16` under turbo); changing the start level
+under a street/Mr. X sweep also updates the sweep and `--no-food` for the
+round. Keys: `^R`/`^Return` run both, `^S` host only, `^A` autoplay only, `^B`
+build first, `^1`-`^6` presets, `^N` silent, `^T` turbo, `^W` widescreen, `^X`
+6-button, `^7`/`^8` AI P1/P2, `^L` lockstep, `^G` character, `^K` sweep,
+`^=`/`^-` start level, `^E` extra args, `^0` reset, `^Q` quit. Command-line
+runs start from the defaults plus the preset (never the saved file), do not
+overwrite it, and pass unknown options on to autoplay. Agents use the
+command-line form (it needs no Tk); `PRESETS` in `play.py` is the source of
+truth for the session flags. Add a setting in `DEFAULTS` and the two argument
+builders.
+
 ## Testing the symbolic AI live
 
 No AI behaviour change ships unmeasured (user's no-regression rule): measure
@@ -208,10 +236,10 @@ it live before it goes to `main`. A change that could only be validated
 offline (unit tests, offline sims) goes to a branch and says so.
 
 Live sessions (not unit tests) must run the host in turbo with a matching
-autoplay poll cadence. Use the wrapper:
+autoplay poll cadence. Use the preset:
 
 ```bash
-./scripts/both_turbo.py
+./scripts/play.py --preset turbo
 ```
 
 equivalent to `./scripts/run.py --turbo 2 --lang en --debugUtils --port 7777
@@ -223,41 +251,41 @@ frames per tick under turbo — the 33 ms default would drop to one sample per
 four frames and miss holds, jumps, and incoming attacks. `--silent` is
 required whenever the game is launched for debug. Only start a live `sor`
 session when necessary; prefer `autoplay` unit tests for logic changes.
-`scripts/both_turbo.py` is the source of truth for these flags — update this
-section if its turbo factor or `--poll-ms` changes. Full rationale,
+The `turbo` entry of `PRESETS` in `scripts/play.py` is the source of truth for these
+flags — update this section if its turbo factor or `--poll-ms` changes. Full rationale,
 including frame-pacing details for timing moves, is in `autoplay/CLAUDE.md`
 under **Live AI testing**.
 
-`./scripts/both_sound.py` is the same pairing at normal speed with sound on
+`./scripts/play.py --preset watch` is the same pairing at normal speed with sound on
 (no `--turbo`, no `--silent`, default poll cadence), for watching a session;
-it is not a measurement wrapper.
+it is not a measurement preset. `--preset quiet` is the same, silent.
 
 For frame-exact sessions where the AI drives the clock instead of the wall
 clock (tick, step exactly 2 game frames as fast as they run, back to the
-tick — no turbo, no poll pacing), use the wrapper:
+tick — no poll pacing), use the preset:
 
 ```bash
-./scripts/both_lockstep_speed.py
+./scripts/play.py --preset lockstep
 ```
 
 equivalent to `./scripts/run.py --lang en --debugUtils --port 6767 --silent &`
 plus `./scripts/autoplay.py --lockstep --port 6767 --agent-p1 --reach-gameplay
-blaze`. Own port (6767) so it runs next to the turbo wrappers. Extra args
+blaze`. Own port (6767) so it runs next to the turbo sessions. Extra args
 pass through to autoplay (`--start-level`, `--kill-street-enemies`,
 `--no-food`, `--no-police`).
 
 ### Going straight to a boss
 
-`scripts/go_to_boss.py LEVEL` puts the AI in front of one round's boss with
-nothing else on screen: same turbo host and poll cadence as `both_turbo.py`,
+`scripts/play.py --preset boss --level LEVEL` puts the AI in front of one round's boss with
+nothing else on screen: same turbo host and poll cadence as `--preset turbo`,
 plus `--start-level LEVEL`, `--kill-street-enemies` (or `--kill-until-mr-x`
 for round 8) and `--no-police` throughout. It automatically adds `--no-food`
 for rounds 2-5 and 8.
 
 ```bash
-./scripts/go_to_boss.py 1            # round 1, Antonio
-./scripts/go_to_boss.py 2 --agent-p2 # extra args pass through to autoplay
-./scripts/go_to_boss.py 5            # Onihime and Yasha
+./scripts/play.py --preset boss --level 1            # round 1, Antonio
+./scripts/play.py --preset boss --level 2 --agent-p2 # extra args pass through to autoplay
+./scripts/play.py --preset boss --level 5            # Onihime and Yasha
 ```
 
 | Level | Boss |
@@ -301,7 +329,7 @@ Score/tune commands and the ROM model + plan for each boss are documented in
   and the plan**.
 - Jack (`$27`, never in round 1; appears rounds 2, 4, 5, 6, 8) — **Jack: the
   ROM model and the plan**.
-- Round 6's Souther pair (two `$55`, via `go_to_boss.py 6` or `boss_fight.py
+- Round 6's Souther pair (two `$55`, via `play.py --preset boss --level 6` or `boss_fight.py
   --level 6 --boss-type 0x55`) — **Round 6: the Souther pair**; the replay
   of the free one is checked with `autoplay/tools/souther_pair_check.py`.
 
@@ -337,5 +365,5 @@ tested on the current host.
 - Keep this file and the other `CLAUDE.md` files updated as you work
 - Save in the `CLAUDE.md` all the information that charactizes the project that you obtain from the user.
 - If running the game for debug, only run if **necessary**, remember to use `--silent` to silence the sound
-- When testing the symbolic AI live, use turbo and a matching autoplay cadence (`./scripts/both_turbo.py`); see **Testing the symbolic AI live** above
+- When testing the symbolic AI live, use turbo and a matching autoplay cadence (`./scripts/play.py --preset turbo`); see **Testing the symbolic AI live** above
 

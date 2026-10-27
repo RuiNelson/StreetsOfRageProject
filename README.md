@@ -213,7 +213,7 @@ press.
 
 No behaviour change ships without being measured against the running game.
 The Python helpers put the AI straight in front of any round's boss
-(`scripts/go_to_boss.py LEVEL`), run it in turbo, or let it step the game
+(`scripts/play.py --preset boss --level N`), run it in turbo, or let it step the game
 frame by frame in lockstep, and a recorded stall can be replayed offline
 through the real pipeline.
 

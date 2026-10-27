@@ -1,6 +1,6 @@
 """``ObserverApp._apply_scenario``'s post-jump gating.
 
-Regression coverage for the bug reported live as "go_to_boss.py 2 resets the
+Regression coverage for the bug reported live as "play.py --preset boss --level 2 resets the
 game mid-level": once a ``DebugScenario`` level jump lands, the gate used to
 hold the AI off the continue/name-entry screen exactly like it holds it off
 being on the wrong level -- so a death before the boss (round 2's Souther
@@ -9,7 +9,7 @@ continue prompt unanswered until its own timer expired and the ROM fell back
 to the title screen. That is indistinguishable from the level resetting.
 ``tools/boss_fight.py`` hit the identical gate and documents it as hanging
 the harness completely; this test pins the fix in ``app.py`` itself, which
-``scripts/autoplay.py`` (and so ``scripts/go_to_boss.py 2``) actually runs.
+``scripts/autoplay.py`` (and so ``scripts/play.py --preset boss --level 2``) actually runs.
 """
 
 import unittest

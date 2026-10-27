@@ -389,7 +389,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Use when *testing* (user: \"The police is allowed for "
             "Souther/Antonio, just don't test with the police on\"): a fight "
             "the special helped win measures the special, not the plan. "
-            "scripts/go_to_boss.py passes it."
+            "scripts/play.py --preset boss passes it."
         ),
     )
     parser.add_argument(

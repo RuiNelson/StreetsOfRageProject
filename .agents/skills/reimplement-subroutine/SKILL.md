@@ -299,7 +299,7 @@ PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m unittest discove
 ```
 
 If gameplay could change, follow up with a short live session through
-`./scripts/both_turbo` or `./scripts/both_lockstep_speed` (both already pass
+`./scripts/play.py --preset turbo` or `--preset lockstep` (both already pass
 `--silent`) and check that the AI still plays normally.
 
 ### 7. Docs and publish

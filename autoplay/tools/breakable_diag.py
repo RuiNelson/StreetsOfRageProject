@@ -76,7 +76,7 @@ def main() -> int:
     ap.add_argument(
         "--sweep",
         action="store_true",
-        help="Keep every ordinary family swept, as scripts/go_to_boss.py and the boss "
+        help="Keep every ordinary family swept, as scripts/play.py --preset boss and the boss "
         "harnesses do -- the walk the user watches before a boss fight",
     )
     ap.add_argument("--out", required=True)
