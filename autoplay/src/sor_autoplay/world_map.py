@@ -51,6 +51,10 @@ LANE_Y_MAX_ROUND7 = 0xA0  # level_index == 6
 # reach.in_targetable_lane, which is the enemy-side band, against
 # reach.in_playable_lane, which stays the player's.
 LANE_Y_MIN_ENEMY = 0x00
+# `--widescreen` (Mode 48) widens every edge the game logic uses by $20 per side
+# (`StreetsOfRageRecompilation/SoRWidescreenArena.cpp`): the walk clamp $43AA
+# becomes [cam, cam+$140], the screen [-$20, $160).
+WIDESCREEN_EXTRA_X = 0x20
 CAMERA_X_MIN = 0x20  # left walk limit relative to camera
 CAMERA_X_SPAN = 0x100  # walkable width (not the full 320 px CRT)
 # Default camera height for aspect / empty maps (most rounds).
@@ -84,7 +88,7 @@ LOOT_CAMERA_LEFT = CAMERA_WORLD_LEFT - LOOT_REACH_X  # 16
 LOOT_CAMERA_RIGHT = CAMERA_WORLD_RIGHT + LOOT_REACH_X  # 304
 
 
-def is_in_loot_camera(map_x: float) -> bool:
+def is_in_loot_camera(map_x: float, *, widescreen: bool = False) -> bool:
     """True when map_x is within walk-band camera ± pickup reach.
 
     Items outside this band may still be drawn dim on the diagnostic map (view
@@ -93,7 +97,8 @@ def is_in_loot_camera(map_x: float) -> bool:
     camera edge).
     """
 
-    return LOOT_CAMERA_LEFT <= float(map_x) <= LOOT_CAMERA_RIGHT
+    extra = float(WIDESCREEN_EXTRA_X) if widescreen else 0.0
+    return LOOT_CAMERA_LEFT - extra <= float(map_x) <= LOOT_CAMERA_RIGHT + extra
 
 # HUD letterbox uses the same aspect as the lane camera band.
 SCREEN_HEIGHT = LANE_BAND_HEIGHT
@@ -469,6 +474,8 @@ class WorldMap:
     view_top: float
     view_bottom: float
     entities: tuple[MapEntity, ...]
+    # The host runs `--widescreen`: camera_left/right are the wider walk clamp.
+    widescreen: bool = False
 
     @property
     def view_width(self) -> float:
@@ -1185,16 +1192,20 @@ def _enforce_aspect(
 def _framed_view(
     lane_max: int,
     entities: tuple[MapEntity, ...] | list[MapEntity] = (),
+    *,
+    widescreen: bool = False,
 ) -> tuple[float, float, float, float, float, float, float, float]:
     """Camera = player walk band; view grows to include observed entities.
 
-    Camera rectangle stays 32..288 × 0..lane_max (ROM $43AA X clamp + lane max).
+    Camera rectangle stays 32..288 × 0..lane_max (ROM $43AA X clamp + lane max),
+    0..320 under ``--widescreen``.
     The wider view can expand for live off-screen actors while preserving the
     same aspect ratio. Dormant, uninitialized enemies are not observations.
     """
 
-    cam_left = CAMERA_WORLD_LEFT
-    cam_right = CAMERA_WORLD_RIGHT
+    extra = float(WIDESCREEN_EXTRA_X) if widescreen else 0.0
+    cam_left = CAMERA_WORLD_LEFT - extra
+    cam_right = CAMERA_WORLD_RIGHT + extra
     cam_top = 0.0
     cam_bottom = float(lane_max)
     aspect = (cam_right - cam_left) / cam_bottom
@@ -1231,6 +1242,7 @@ def parse_world_map(
     level_index: int = 0,
     police_special_active: bool = False,
     rom: RomData | None = None,
+    widescreen: bool = False,
 ) -> WorldMap:
     if len(actors_block) < ACTORS_BYTES:
         raise ValueError(f"actors_block too short ({len(actors_block)} < {ACTORS_BYTES})")
@@ -1298,7 +1310,9 @@ def parse_world_map(
         if entity is not None and _include_entity(entity, slot, lane_max=lane_max):
             entities.append(entity)
 
-    cam_l, cam_r, cam_t, cam_b, v_l, v_r, v_t, v_b = _framed_view(lane_max, entities)
+    cam_l, cam_r, cam_t, cam_b, v_l, v_r, v_t, v_b = _framed_view(
+        lane_max, entities, widescreen=widescreen
+    )
 
     return WorldMap(
         camera_x=camera_x,
@@ -1312,6 +1326,7 @@ def parse_world_map(
         view_top=v_t,
         view_bottom=v_b,
         entities=tuple(entities),
+        widescreen=widescreen,
     )
 
 

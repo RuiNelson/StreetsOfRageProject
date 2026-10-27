@@ -29,12 +29,26 @@ class Stage(Essential):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CameraRange(Essential):
-    """The camera's visible world rectangle."""
+    """The camera's visible world rectangle.
+
+    ``left``/``right`` are the players' walk clamp (``$43AA``): the camera's
+    X plus ``$20`` .. ``$120``, or plus ``0`` .. ``$140`` under ``--widescreen``
+    (``widescreen``). ``scroll_x`` is the camera's own X, which a hand-built
+    token may leave out (``origin_x`` then assumes the plain clamp).
+    """
 
     left: float
     right: float
     top: float
     bottom: float
+    scroll_x: float | None = None
+    widescreen: bool = False
+
+    @property
+    def origin_x(self) -> float:
+        """The camera's X (sprite space 0): what ``cam_x`` means in the ROM."""
+
+        return self.scroll_x if self.scroll_x is not None else self.left - 0x20
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

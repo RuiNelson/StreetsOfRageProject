@@ -278,6 +278,7 @@ def snapshot_from_memory_blocks(
     connected: bool = True,
     error: str | None = None,
     rom: RomData | None = None,
+    widescreen: bool = False,
 ) -> GameSnapshot:
     """Build a snapshot from pre-fetched RAM windows.
 
@@ -367,6 +368,7 @@ def snapshot_from_memory_blocks(
             # are what turns object slots into real hitboxes and attack
             # ranges instead of assumed rectangles.
             rom=rom,
+            widescreen=widescreen,
         )
 
     holes: tuple[FloorHole, ...] = ()
@@ -495,7 +497,9 @@ def _blank_player(index: int, previous: PlayerSnapshot) -> PlayerSnapshot:
     )
 
 
-def read_snapshot(client: MemorySource, *, rom: RomData | None = None) -> GameSnapshot:
+def read_snapshot(
+    client: MemorySource, *, rom: RomData | None = None, widescreen: bool = False
+) -> GameSnapshot:
     """Fetch the RAM windows needed for HUD + 2D map and build a snapshot."""
 
     from .world_map import ACTORS_BYTES, CAMERA_BYTES
@@ -538,6 +542,7 @@ def read_snapshot(client: MemorySource, *, rom: RomData | None = None) -> GameSn
         uptime_frames=uptime_frames,
         connected=True,
         rom=rom,
+        widescreen=widescreen,
     )
 
 
@@ -550,6 +555,7 @@ def snapshot_from_work_ram(
     *,
     rom: RomData | None = None,
     uptime_frames: int = 0,
+    widescreen: bool = False,
 ) -> GameSnapshot:
     """Build a snapshot from a lockstep step's 64 KiB work-RAM image.
 
@@ -599,6 +605,7 @@ def snapshot_from_work_ram(
         uptime_frames=uptime_frames,
         connected=True,
         rom=rom,
+        widescreen=widescreen,
     )
 
 

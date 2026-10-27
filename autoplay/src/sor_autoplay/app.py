@@ -651,7 +651,9 @@ class ObserverApp:
                     backoff_s = 0.25
 
                 assert self._client is not None
-                snapshot = read_snapshot(self._client, rom=self._rom)
+                snapshot = read_snapshot(
+                    self._client, rom=self._rom, widescreen=self.widescreen
+                )
                 self._record_frame_timing(snapshot, time.monotonic() - started)
 
                 with self._lock:
@@ -786,10 +788,13 @@ class ObserverApp:
                 assert self._client is not None
                 client = self._client
                 if ram is None:
-                    snapshot = read_snapshot(client, rom=self._rom)
+                    snapshot = read_snapshot(client, rom=self._rom, widescreen=self.widescreen)
                 else:
                     snapshot = snapshot_from_work_ram(
-                        ram, rom=self._rom, uptime_frames=frame_no
+                        ram,
+                        rom=self._rom,
+                        uptime_frames=frame_no,
+                        widescreen=self.widescreen,
                     )
                 self._record_frame_timing(snapshot, time.monotonic() - started)
 
@@ -1118,7 +1123,10 @@ class ObserverApp:
         try:
             with MegaDriveClient(self.host, self.port, connect_timeout=2.0, io_timeout=2.0) as client:
                 client.ping()
-                snapshot = read_snapshot(client, rom=_read_rom_data(client))
+                self._read_widescreen(client)
+                snapshot = read_snapshot(
+                    client, rom=_read_rom_data(client), widescreen=self.widescreen
+                )
         except Exception as exc:  # noqa: BLE001
             snapshot = disconnected_snapshot(str(exc))
             _print_snapshot(snapshot)

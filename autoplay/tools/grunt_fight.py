@@ -197,7 +197,8 @@ def main() -> int:
         rom = RomData.read(client)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         loop = AgentLoop(gamepad, no_food=not args.food, no_police=True)
-        loop.six_button = decode_host_modes(client.get_flags()).six_button
+        modes = decode_host_modes(client.get_flags())
+        loop.six_button = modes.six_button
 
         on_level = False
         started_at = None
@@ -216,7 +217,7 @@ def main() -> int:
         with open(args.out, "w", encoding="utf-8") as sink:
             while time.monotonic() < deadline:
                 t0 = time.monotonic()
-                snap = read_snapshot(client, rom=rom)
+                snap = read_snapshot(client, rom=rom, widescreen=modes.widescreen)
                 playable = any(p.is_playable for p in snap.players)
                 if scenario.level_jump_pending:
                     if playable:

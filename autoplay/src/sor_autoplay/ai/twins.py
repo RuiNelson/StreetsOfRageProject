@@ -305,6 +305,21 @@ WALK_SPEEDS = {
 # $43AA: the camera clamp (cam + $20 .. cam + $120) and the lane band.
 PLAYER_X_MIN_OFFSET = 0x20
 PLAYER_X_MAX_OFFSET = 0x120
+# --widescreen: SoRWidescreenArena.cpp widens the clamp to cam .. cam + $140.
+WIDESCREEN_PLAYER_X_MIN_OFFSET = 0
+WIDESCREEN_PLAYER_X_MAX_OFFSET = 0x140
+
+
+def player_x_clamp(cam_x: int, widescreen: bool = False) -> tuple[float, float]:
+    """The players' X clamp ``$43AA`` for a camera at ``cam_x``."""
+
+    if widescreen:
+        return (
+            float(cam_x + WIDESCREEN_PLAYER_X_MIN_OFFSET),
+            float(cam_x + WIDESCREEN_PLAYER_X_MAX_OFFSET),
+        )
+    return float(cam_x + PLAYER_X_MIN_OFFSET), float(cam_x + PLAYER_X_MAX_OFFSET)
+
 PLAYER_LANE_MIN = 2
 PLAYER_LANE_MAX = 0x70
 
@@ -415,11 +430,13 @@ class ActorSim:
         walking: bool = False,
         chord: tuple[int, int] | None = None,
         vx: float = 0.0,
+        widescreen: bool = False,
     ) -> ActorSim:
+        x_lo, x_hi = player_x_clamp(cam_x, widescreen)
         a = cls(
             x=float(x), y=float(y), z=int(z), facing_left=facing_left, character=character,
             walking=walking, vx=vx, chord=chord,
-            x_lo=float(cam_x + PLAYER_X_MIN_OFFSET), x_hi=float(cam_x + PLAYER_X_MAX_OFFSET),
+            x_lo=x_lo, x_hi=x_hi,
             lane_lo=float(PLAYER_LANE_MIN), lane_hi=float(PLAYER_LANE_MAX),
             attack=None, body=None, damage=0, knockdown=False,
             unavailable=False, untouchable=False, holding=False, latch=0, invulnerable=False,
@@ -1088,7 +1105,7 @@ _TWIN_FIELDS = (
 )
 
 
-def _actor_from_bytes(data: bytes, *, cam_x: int) -> ActorSim:
+def _actor_from_bytes(data: bytes, *, cam_x: int, widescreen: bool = False) -> ActorSim:
     """The actor as the twins' update reads it, straight from its bytes: the
     boxes ``$4140`` cached, not rebuilt."""
 
@@ -1103,10 +1120,11 @@ def _actor_from_bytes(data: bytes, *, cam_x: int) -> ActorSim:
         return None if words[0] == 0 else words
 
     action = data[0x30]
+    x_lo, x_hi = player_x_clamp(cam_x, widescreen)
     a = ActorSim(
         x=s32(0x10), y=s32(0x14), z=s16(0x18), facing_left=bool(data[0x09] & 2),
         character=data[0x50], walking=False, vx=s32(0x1C), chord=None,
-        x_lo=float(cam_x + PLAYER_X_MIN_OFFSET), x_hi=float(cam_x + PLAYER_X_MAX_OFFSET),
+        x_lo=x_lo, x_hi=x_hi,
         lane_lo=float(PLAYER_LANE_MIN), lane_hi=float(PLAYER_LANE_MAX),
         attack=cached(0x64), body=cached(0x70), damage=data[0x34], knockdown=bool(data[0x42] & 1),
         unavailable=bool(data[0x59] & 2) or bool(data[0x4B] & 2) or 0x5A <= action <= 0x5F,
@@ -1263,13 +1281,14 @@ def chord_step_from(character: int, action: int, frame: int, countdown: int) -> 
     return min(step, sum(rows) - 1)
 
 
-def actor_from_token(actor, *, cam_x: int) -> ActorSim:
+def actor_from_token(actor, *, cam_x: int, widescreen: bool = False) -> ActorSim:
     """An ``ActorSim`` from the ``Myself`` token."""
 
     base = actor.action_state & 0xFE
     character = actor.character_id if actor.character_id in (AXEL, ADAM, BLAZE) else BLAZE
     chord = chord_step_from(character, actor.action_state, actor.anim_frame, actor.anim_countdown)
     walking = base not in (0x02, 0x30) and base in FREE_ACTIONS
+    x_lo, x_hi = player_x_clamp(cam_x, widescreen)
     a = ActorSim(
         x=actor.fine_x or float(actor.world_x),
         y=actor.fine_y or float(actor.world_y),
@@ -1279,8 +1298,8 @@ def actor_from_token(actor, *, cam_x: int) -> ActorSim:
         walking=walking,
         vx=actor.vel_x,
         chord=chord,
-        x_lo=float(cam_x + PLAYER_X_MIN_OFFSET),
-        x_hi=float(cam_x + PLAYER_X_MAX_OFFSET),
+        x_lo=x_lo,
+        x_hi=x_hi,
         lane_lo=float(PLAYER_LANE_MIN),
         lane_hi=float(PLAYER_LANE_MAX),
         attack=None,

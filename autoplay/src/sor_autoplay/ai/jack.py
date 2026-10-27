@@ -1688,7 +1688,7 @@ def build_world(
         for p in projectiles
         if p.type_id == AXE_TYPE and p.owner_slot in index_of
     ]
-    cam_x = int(camera.left) - 0x20 if camera is not None else _hi(actor.world_x) - 0xA0
+    cam_x = int(camera.origin_x) if camera is not None else _hi(actor.world_x) - 0xA0
     for jack in jacks:
         if jack.screen_x:
             cam_x = jack.world_x + SCREEN_BIAS - jack.screen_x

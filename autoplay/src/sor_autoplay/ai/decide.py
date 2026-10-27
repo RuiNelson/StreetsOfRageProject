@@ -1849,7 +1849,7 @@ def office_sims(context: Context, actor, *, exclude: str = ""):
     camera = find(context, CameraRange)
     if camera is None or not getattr(actor, "raw", b""):
         return None
-    cam_x = int(camera.left) - mr_x_model.PLAYER_X_MIN_OFFSET
+    cam_x = int(camera.origin_x)
     him = next(iter(live_mr_x(context)), None)
     m = mr_x_model.MrXSim.from_bytes(him.raw, slot=_slot_number(him.slot), cam_x=cam_x) if him else None
     garcias = [
@@ -1862,7 +1862,7 @@ def office_sims(context: Context, actor, *, exclude: str = ""):
         for p in find_all(context, Projectile)
         if p.type_id == mr_x_model.BULLET_TYPE and p.raw
     ]
-    a = mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x)
+    a = mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x, widescreen=camera.widescreen)
     a.punch = None
     return a, m, [g for g in garcias if g.alive], [b for b in bullets if b.state == 1]
 
@@ -1874,7 +1874,7 @@ def _office_threat(context: Context, actor, *, exclude: str = "") -> tuple[int, 
     camera = find(context, CameraRange)
     if camera is None or not getattr(actor, "raw", b""):
         return None
-    cam_x = int(camera.left) - mr_x_model.PLAYER_X_MIN_OFFSET
+    cam_x = int(camera.origin_x)
     sims = [
         garcia_model.GarciaSim.from_bytes(g.raw, slot=_slot_number(g.slot), cam_x=cam_x)
         for g in office_helpers(context)
@@ -1882,7 +1882,7 @@ def _office_threat(context: Context, actor, *, exclude: str = "") -> tuple[int, 
     ]
     if not sims:
         return None
-    return mr_x_plan.garcia_threat(mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x), sims)
+    return mr_x_plan.garcia_threat(mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x, widescreen=camera.widescreen), sims)
 
 
 def _slot_number(slot: str) -> int:
@@ -1911,7 +1911,7 @@ def grunt_sims(context: Context, actor) -> tuple | None:
     camera = find(context, CameraRange)
     if camera is None or not getattr(actor, "raw", b""):
         return None
-    cam_x = int(camera.left) - mr_x_model.PLAYER_X_MIN_OFFSET
+    cam_x = int(camera.origin_x)
     stage = find(context, Stage)
     level = stage.level_index if stage is not None else 0
     office = find(context, MrXOffice) is not None
@@ -1924,7 +1924,7 @@ def grunt_sims(context: Context, actor) -> tuple | None:
         g = grunt_model.GruntSim.from_bytes(enemy.raw, slot=_slot_number(enemy.slot), cam_x=cam_x, level=level)
         if g.alive:
             sims.append(g)
-    a = mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x)
+    a = mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x, widescreen=camera.widescreen)
     a.punch = None
     a.lane_lo, a.lane_hi = nav.lane_bounds(context)  # round 7's lift is wider
     a.knives = tuple(

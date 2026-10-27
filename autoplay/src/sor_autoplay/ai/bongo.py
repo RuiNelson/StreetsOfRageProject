@@ -1151,7 +1151,7 @@ def build_sims(
 
     lane_lo, lane_hi = float(PLAYER_LANE_MIN), float(PLAYER_LANE_MAX)
     x_lo, x_hi = (camera.left, camera.right) if camera is not None else (-1e9, 1e9)
-    cam_x = int(camera.left) - 0x20 if camera is not None else 0
+    cam_x = int(camera.origin_x) if camera is not None else 0
     if bongo.screen_x:
         cam_x = bongo.world_x + SCREEN_BIAS - bongo.screen_x
     a = ActorSim.from_token(actor, lane_lo=lane_lo, lane_hi=lane_hi, x_lo=x_lo, x_hi=x_hi)

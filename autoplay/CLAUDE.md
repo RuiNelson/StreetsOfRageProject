@@ -3290,6 +3290,25 @@ and `abadede_can_punch`'s item test fall silent. Tech and name entry stay on
 C. Without the token every mask is the three-button scheme's, unchanged.
 `tests/ai/test_six_button.py` pins each press in both layouts.
 
+## Widescreen (`--widescreen`)
+
+`ObserverApp.widescreen` (host flag 0, read per connection) goes into
+`read_snapshot`/`snapshot_from_work_ram` and `parse_world_map(widescreen=)`:
+the walk clamp the HUD draws and `CameraRange` carries is `[0, 320]` of the
+camera instead of `[32, 288]` (`world_map.WIDESCREEN_EXTRA_X`, the `$20` per
+side `SoRWidescreenArena.cpp` adds to `$43AA`). Everything routed, clamped or
+"in camera" follows from it. `CameraRange` also carries `scroll_x` (the
+camera's own X, `origin_x`) and `widescreen`: models used to take `cam_x` as
+`camera.left - 0x20`, which is wrong there. The twins' and Mr. X's actor
+clamp is `twins.player_x_clamp`. **Not done:** the ROM models' own on-screen
+and edge constants (`ON_SCREEN`/`ON_SCREEN_MAX`/`SCREEN_RIGHT`/`SCREEN_CENTRE`
+in `grunt`, `garcia`, `mr_x`, `abadede`, `antonio`, `souther_pair`; `twins`
+`LEAP_SCREEN_MAX`; `jack` `ON_SCREEN`/`RETREAT_EDGE`; Abadede's charge edge)
+still replay the 320 px ROM routines, which are `$20` wider per side there.
+Live (round 1, `grunt_fight.py --family all`, Blaze, turbo 2, one run): 32/32
+killed, 3 hits, no life lost, the boss at 96 s, the actor over the whole
+x-cam 0..320.
+
 ## Observation notes (keep these)
 
 - Lives / specials: packed-BCD bytes at `$FFFF20+`

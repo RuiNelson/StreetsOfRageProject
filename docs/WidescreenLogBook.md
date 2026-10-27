@@ -77,6 +77,7 @@ the default path is unchanged.
 | `--widescreen` flag | done |
 | HUD (frame, plate, one tile down) | done |
 | Gameplay arena (player bounds, spawn edges, on-screen tests) | ports done; verified live in round 1 only, see below |
+| `autoplay` (HUD camera box, `CameraRange`, walk clamp) | follows `GET_FLAGS` flag 0; the boss/street models' on-screen constants still 320 px |
 
 ## Gameplay arena
 

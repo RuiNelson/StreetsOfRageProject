@@ -77,6 +77,7 @@ from .twins import (
     PLAYER_LANE_MAX,
     PLAYER_LANE_MIN,
     PLAYER_X_MAX_OFFSET,
+    player_x_clamp,
     PLAYER_X_MIN_OFFSET,
     ActorSim,
     _clamp_word,
@@ -1000,11 +1001,12 @@ def _punch_boxes(a: ActorSim) -> None:
 # --- The actor, from its bytes -------------------------------------------------------------
 
 
-def actor_from_bytes(data: bytes, *, cam_x: int) -> ActorSim:
+def actor_from_bytes(data: bytes, *, cam_x: int, widescreen: bool = False) -> ActorSim:
     """The actor as his update reads it: position, the ``+$64``/``+$70`` boxes
     ``$4140`` cached, ``+$34``, availability."""
 
     character = data[0x50] if data[0x50] in (AXEL, ADAM, BLAZE) else BLAZE
+    x_lo, x_hi = player_x_clamp(cam_x, widescreen)
     a = ActorSim(
         x=_s32(data, 0x10),
         y=_s32(data, 0x14),
@@ -1014,8 +1016,8 @@ def actor_from_bytes(data: bytes, *, cam_x: int) -> ActorSim:
         walking=(data[0x30] & 0xFE) in range(0x06, 0x10),
         vx=_s32(data, 0x1C),
         chord=None,
-        x_lo=float(cam_x + PLAYER_X_MIN_OFFSET),
-        x_hi=float(cam_x + PLAYER_X_MAX_OFFSET),
+        x_lo=x_lo,
+        x_hi=x_hi,
         lane_lo=float(PLAYER_LANE_MIN),
         lane_hi=float(PLAYER_LANE_MAX),
         attack=None,

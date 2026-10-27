@@ -1737,14 +1737,14 @@ def engage_twins_plan(
     if partner is not None:
         wall = twins_plan.partner_wall(actor.world_x, partner.world_x, actor.player_index)
         tokens = [twin for twin in tokens if twin.targets_player != partner.player_index]
-    cam_x = int(camera.left) - twins_model.PLAYER_X_MIN_OFFSET
+    cam_x = int(camera.origin_x)
     twins = [twins_model.twin_from_token(twin, cam_x=cam_x) for twin in tokens]
     twins = [t for t in twins if not t.gone]
     # Both twins on the partner is still a plan: the walk to this actor's edge.
     if not live_twins(context) or (not twins and partner is None):
         return None
     twins.sort(key=lambda t: t.slot)
-    sim = twins_model.actor_from_token(actor, cam_x=cam_x)
+    sim = twins_model.actor_from_token(actor, cam_x=cam_x, widescreen=camera.widescreen)
     committed = (
         1 if held & RIGHT_MASK else (-1 if held & LEFT_MASK else 0),
         1 if held & DOWN_MASK else (-1 if held & UP_MASK else 0),
@@ -1806,7 +1806,7 @@ def engage_mr_x_plan(verb: EngageMrX, context: Context, held: int = 0) -> mr_x_p
         return None
     from .decide import office_helpers  # decide imports this module's neighbours
 
-    cam_x = int(camera.left) - mr_x_model.PLAYER_X_MIN_OFFSET
+    cam_x = int(camera.origin_x)
     m = (
         mr_x_model.MrXSim.from_bytes(target.raw, slot=_slot_index(target.slot), cam_x=cam_x)
         if target is not None
@@ -1825,7 +1825,7 @@ def engage_mr_x_plan(verb: EngageMrX, context: Context, held: int = 0) -> mr_x_p
         if p.type_id == mr_x_model.BULLET_TYPE and p.raw
     ]
     bullets = [b for b in bullets if b.state == 1]
-    a = mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x)
+    a = mr_x_model.actor_from_bytes(actor.raw, cam_x=cam_x, widescreen=camera.widescreen)
     a.punch = None
     committed = (
         1 if held & RIGHT_MASK else (-1 if held & LEFT_MASK else 0),
