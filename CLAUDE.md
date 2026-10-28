@@ -253,7 +253,7 @@ under a street/Mr. X sweep also updates the sweep and `--no-food` for the
 round. The host panel's **Sound** (`--sound`, ignored when silent) and
 **Soundtrack folder** (`--soundtrack`, empty = next to the ROM, `...` opens a
 folder chooser) fields warn when the folder has no `manifest.tsv`. The launches run in a child `play.py --run-saved MODE` (internal) so the window stays responsive (no macOS beach ball) and shows the run's status; Quit stops the child. Keys: `^R`/`^Return` run both, `^S` host only, `^O` Configure Controls (`sor --configControls`, runs beside the window), `^A` autoplay only, `^B`
-build first, `^1`-`^6` presets, `^N` silent, `^T` turbo, `^W` widescreen, `^X`
+build first, `^1`-`^6` presets, `^N` silent, `^T` turbo, `^W` widescreen, `^U` integer scaling, `^X`
 6-button, `^7`/`^8` AI P1/P2, `^L` lockstep, `^G` character, `^K` sweep,
 `^=`/`^-` start level, `^E` extra args, `^0` reset, `^Q` quit. Command-line
 runs start from the defaults plus the preset (never the saved file), do not

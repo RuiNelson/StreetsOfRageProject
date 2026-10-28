@@ -50,6 +50,7 @@ DEFAULTS: dict[str, Any] = {
     "soundtrack": "",  # "" = sor's default, soundtrack/ next to the ROM
     "fullscreen": False,
     "widescreen": False,
+    "integer_scaling": False,  # --integerScaling, whole-number scale factors only
     "alt_controls": False,  # --altControls, the 6-button layout
     "debug_utils": True,  # remote access, hotkeys and cheats: always on when autoplay runs
     "debug": False,
@@ -71,7 +72,7 @@ DEFAULTS: dict[str, Any] = {
     "build_first": False,
 }
 
-# Fields a preset sets. The rest (widescreen, 6-button, fullscreen, ROM, sound source, soundtrack
+# Fields a preset sets. The rest (widescreen, integer scaling, 6-button, fullscreen, ROM, sound source, soundtrack
 # folder, call log, extra...) is the user's own and survives a preset.
 SESSION_FIELDS = (
     "port", "turbo", "vsync", "lang", "debug_utils", "silent", "agent_p1", "agent_p2", "reach",
@@ -197,6 +198,8 @@ def host_arguments(s: dict[str, Any], *, with_autoplay: bool) -> list[str]:
         args.append("--fullScreen")
     if s["widescreen"]:
         args.append("--widescreen")
+    if s["integer_scaling"]:
+        args.append("--integerScaling")
     if s["alt_controls"]:
         args.append("--altControls")
     args += ["--port", str(s["port"])]
@@ -421,11 +424,12 @@ class PlayWindow:
         self.entry(host, 5, "Soundtrack folder (empty = next to the ROM)", "soundtrack", browse=True)
         self.check(host, 6, "Fullscreen (^F)", "fullscreen")
         self.check(host, 7, "Widescreen (^W)", "widescreen")
-        self.check(host, 8, "6-button layout, --altControls (^X)", "alt_controls")
-        self.check(host, 9, "debugUtils: remote access, hotkeys (^D)", "debug_utils")
-        self.check(host, 10, "Log CPU/VDP state, --debug", "debug")
-        self.entry(host, 11, "Call log file", "call_log")
-        self.entry(host, 12, "ROM file", "rom")
+        self.check(host, 8, "Integer scaling (^U)", "integer_scaling")
+        self.check(host, 9, "6-button layout, --altControls (^X)", "alt_controls")
+        self.check(host, 10, "debugUtils: remote access, hotkeys (^D)", "debug_utils")
+        self.check(host, 11, "Log CPU/VDP state, --debug", "debug")
+        self.entry(host, 12, "Call log file", "call_log")
+        self.entry(host, 13, "ROM file", "rom")
 
         self.check(autoplay, 0, "AI plays P1 (^7)", "agent_p1")
         self.check(autoplay, 1, "AI plays P2 (^8)", "agent_p2")
@@ -678,7 +682,7 @@ class PlayWindow:
             "q": lambda: self.finish("quit"),
             "b": lambda: self.toggle("build_first"),
             "n": lambda: self.toggle("silent"), "f": lambda: self.toggle("fullscreen"),
-            "w": lambda: self.toggle("widescreen"), "x": lambda: self.toggle("alt_controls"),
+            "w": lambda: self.toggle("widescreen"), "u": lambda: self.toggle("integer_scaling"), "x": lambda: self.toggle("alt_controls"),
             "d": lambda: self.toggle("debug_utils"), "l": lambda: self.toggle("lockstep"),
             "7": lambda: self.toggle("agent_p1"), "8": lambda: self.toggle("agent_p2"),
             "t": lambda: self.cycle("turbo"), "g": lambda: self.cycle("reach"), "k": lambda: self.cycle("sweep"),
