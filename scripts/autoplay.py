@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -36,7 +37,14 @@ def main() -> int:
     environment = os.environ.copy()
     environment["SOR_AUTOPLAY_PROG"] = Path(sys.argv[0]).name
     prepend_pythonpath(environment, autoplay_src, remote_src)
-    os.execve(python, [python, "-m", "sor_autoplay", *arguments], environment)
+
+    command = [python, "-m", "sor_autoplay", *arguments]
+    if os.name == "nt":
+        # Windows has no exec: os.execve with a copied environment crashes the
+        # wrapper outright (status C0000005, no child at all), so run the HUD
+        # as this process's child, as run.py does with its host there.
+        return subprocess.run(command, env=environment).returncode
+    os.execve(python, command, environment)
     return 1
 
 
