@@ -339,7 +339,7 @@ def execute(s: dict[str, Any], mode: str) -> int:
 # Window
 
 LANG_CHOICES = [("default", ""), ("en (overseas)", "en"), ("jp (Japan)", "jp")]
-TURBO_CHOICES = [("off", 0), ("x2", 2), ("x3", 3), ("x4", 4), ("x6", 6), ("x10", 10)]
+TURBO_CHOICES = [("off", 0), ("x2", 2), ("x3", 3), ("x4", 4), ("x6", 6), ("x10", 10), ("x16", 16), ("x24", 24), ("x32", 32)]
 VSYNC_CHOICES = [("internal timer", 0), ("VSync", 1), ("VSync / 2", 2), ("VSync / 3", 3)]
 HZ_CHOICES = [("default", 0), ("60 (NTSC)", 60), ("50 (PAL)", 50)]
 SOUND_CHOICES = [("pre-rendered", "prerendered"), ("emulated chips", "emulated")]
