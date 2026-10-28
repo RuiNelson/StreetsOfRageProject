@@ -1426,7 +1426,10 @@ _LEVEL_END_BOSS: dict[int, type[Boss]] = {
 
 
 # How many of that boss close the round; the police waits for all of them.
+# Round 6 sends a pair; in a two-player game rounds 1-4 send two as well, the
+# second after the first (user).
 _LEVEL_END_BOSS_COUNT: dict[int, int] = {5: 2}
+_TWO_PLAYER_BOSS_LEVELS = frozenset({0, 1, 2, 3})
 
 
 def level_end_boss_is_up(context: Context) -> bool:
@@ -1452,6 +1455,8 @@ def level_end_boss_is_up(context: Context) -> bool:
     # second (user: calling at the first wastes the attack that could be for
     # both). A dead one still in context means the second is not coming.
     needed = _LEVEL_END_BOSS_COUNT.get(stage.level_index, 1)
+    if stage.level_index in _TWO_PLAYER_BOSS_LEVELS and find(context, Partner) is not None:
+        needed = 2
     dead = [boss for boss in find_all(context, boss_type) if boss.is_defeated]
     return len(up) + len(dead) >= needed
 

@@ -2661,6 +2661,7 @@ só nos de final de nível, não nos intermédios"). `decide.level_end_boss_is_u
 the round is alive and on screen: round 1 Antonio, 2 Souther, 3 Abadede, 4
 Bongo, 5 the twins (added on the user's second ask), 6 the Souther pair
 (called only once both are up, or one has fallen: one call sweeps both -- user;
+same wait in rounds 1-4 with two players, which send two bosses one after the other;
 round 6's Bongo and every boss of round 8's rush, Mr. X included, are out;
 round 7 has none; Mr. X because the police cannot be called on his level --
 user). Then `could_call_police`

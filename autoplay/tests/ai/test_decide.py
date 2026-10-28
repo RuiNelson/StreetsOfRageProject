@@ -1632,6 +1632,28 @@ class CouldCallPoliceAtTheLevelEndBossTests(unittest.TestCase):
         alone = {me, first, Stage(level_index=1, direction="right")}
         self.assertEqual(could_call_police(alone), call)
 
+    def test_two_players_wait_for_the_second_boss_of_rounds_1_to_4(self) -> None:
+        me = make_myself(specials=1, health_percent=100.0)
+        partner = make_partner(world_x=300)
+        call = {CallPolice(actor_slot="P1")}
+        for level_index, cls, type_id in (
+            (0, Antonio, 0x56),
+            (1, Souther, 0x55),
+            (2, Abadede, 0x30),
+            (3, Bongo, 0x57),
+        ):
+            with self.subTest(level_index=level_index, boss=cls.__name__):
+                stage = Stage(level_index=level_index, direction="right")
+                first = self._boss(cls, type_id, slot="obj11")
+                second = self._boss(cls, type_id, slot="obj12", world_x=200)
+                dead = self._boss(cls, type_id, slot="obj12", health=0)
+
+                self.assertEqual(could_call_police({me, partner, first, stage}), set())
+                self.assertEqual(could_call_police({me, partner, first, second, stage}), call)
+                self.assertEqual(could_call_police({me, partner, first, dead, stage}), call)
+                # One player: the one boss, called at once.
+                self.assertEqual(could_call_police({me, first, stage}), call)
+
     def test_the_twins_get_it_only_on_arrival(self) -> None:
         # Never the panic button against them, but the round-end call is theirs.
         low = {make_myself(specials=1, health_percent=5.0), self._boss(Onihime, 0x58)}
