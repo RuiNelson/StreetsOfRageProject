@@ -293,10 +293,9 @@ All three desktop platforms require:
 - Git, including submodule support;
 - CMake 3.24 or newer;
 - a compiler with C++23 support;
-- SDL3 development headers and libraries;
 - network access during the first configuration, because CMake downloads CLI11,
-  yaml-cpp, zlib, libpng, and SDL3_mixer (and, for the soundtrack renderer,
-  Genesis Plus GX and libFLAC);
+  yaml-cpp, zlib, libpng, SDL3_mixer, and SDL3 itself unless it is already
+  installed (and, for the soundtrack renderer, Genesis Plus GX and libFLAC);
 - Python 3 for the first C++ generation and the analysis tools;
 - a compatible local ROM for the mandatory first C++ generation.
 
@@ -383,30 +382,14 @@ cmake --version
 py --version
 ```
 
-Install SDL3 with [Microsoft's official vcpkg](https://github.com/microsoft/vcpkg):
-
-```powershell
-$VcpkgRoot = "C:\src\vcpkg"
-
-git clone https://github.com/microsoft/vcpkg.git $VcpkgRoot
-& "$VcpkgRoot\bootstrap-vcpkg.bat" -disableMetrics
-& "$VcpkgRoot\vcpkg.exe" install sdl3:x64-windows
-```
+SDL3 needs no installation: CMake downloads and builds it on the first
+configuration. To use an installed copy instead, add its prefix to
+`CMAKE_PREFIX_PATH`.
 
 #### Configure, compile, and run
 
 Run the following from the meta-repository root in the **Developer PowerShell
-for VS 2022**. First point CMake at vcpkg's toolchain, so it finds SDL3:
-
-```powershell
-$env:CMAKE_TOOLCHAIN_FILE = "C:\src\vcpkg\scripts\buildsystems\vcpkg.cmake"
-```
-
-The build script passes this variable to CMake whenever it configures a build
-tree, and `--release` always starts from a fresh one, so set it in every new
-session — or once for your user with `setx CMAKE_TOOLCHAIN_FILE
-"C:\src\vcpkg\scripts\buildsystems\vcpkg.cmake"`, which takes effect in the
-next terminal you open.
+for VS 2022**.
 
 After a fresh clone, generate the C++ port and create a Debug build:
 
@@ -437,7 +420,7 @@ py scripts\build.py --release
 
 CMake uses the Visual Studio generator by default on Windows, so the build
 lands in a per-configuration folder: `StreetsOfRageRecompilation\build\Debug\sor.exe`
-or `StreetsOfRageRecompilation\build\Release\sor.exe`, with the SDL3, yaml-cpp,
+or `StreetsOfRageRecompilation\build\Release\sor.exe`, with the SDL3, SDL3_mixer, yaml-cpp,
 zlib, and libpng DLLs copied next to it. The scripts select the configuration
 for you.
 
@@ -450,16 +433,9 @@ py scripts\run.py StreetsOfRageRecompilation\rom\SOR.bin --lang en
 The equivalent direct CMake workflow is:
 
 ```powershell
-cmake -S StreetsOfRageRecompilation `
-  -B StreetsOfRageRecompilation\build `
-  -DCMAKE_TOOLCHAIN_FILE="C:\src\vcpkg\scripts\buildsystems\vcpkg.cmake"
+cmake -S StreetsOfRageRecompilation -B StreetsOfRageRecompilation\build
 cmake --build StreetsOfRageRecompilation\build --config Release --parallel
 ```
-
-If CMake cannot find SDL3, confirm that the toolchain path and vcpkg triplet
-match the installed `sdl3:x64-windows` package. The toolchain is recorded when
-a build tree is first configured, so delete `StreetsOfRageRecompilation\build`
-(or build with `--release`) after correcting it.
 
 ### 6. Build on macOS
 
@@ -469,7 +445,7 @@ Install the Xcode command-line tools and Homebrew dependencies:
 
 ```bash
 xcode-select --install
-brew install cmake ninja sdl3 python
+brew install cmake ninja python
 ```
 
 Both Apple Silicon and Intel Macs are supported. Keep CMake, the compiler, and
@@ -524,11 +500,14 @@ sudo apt update
 sudo apt install build-essential cmake git ninja-build python3 pkg-config
 ```
 
-Confirm that `cmake --version` reports 3.24 or newer. On an Ubuntu release
-whose package repositories provide SDL3:
+Confirm that `cmake --version` reports 3.24 or newer. SDL3 is downloaded and
+built by CMake, which needs SDL's usual system development packages:
 
 ```bash
-sudo apt install libsdl3-dev
+sudo apt install libasound2-dev libpulse-dev libx11-dev libxext-dev \
+  libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+  libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev \
+  libdbus-1-dev libudev-dev libwayland-dev libdecor-0-dev
 ```
 
 #### Configure, compile, and run
@@ -556,7 +535,7 @@ cmake -S StreetsOfRageRecompilation \
 cmake --build StreetsOfRageRecompilation/build/ubuntu --parallel
 ```
 
-If SDL3 was installed to a custom prefix, add
+To use an SDL3 installed to a custom prefix instead, add
 `-DCMAKE_PREFIX_PATH=/path/to/prefix` during configuration.
 
 ### Configure and play

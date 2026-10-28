@@ -80,7 +80,7 @@ Requirements:
 
 - CMake 3.24 or newer;
 - a C++23 compiler;
-- SDL3 development files;
+- SDL3 (optional: CMake fetches `release-3.4.8` when `find_package(SDL3)` fails);
 - Git and network access for first-time CMake `FetchContent` dependencies;
 - Python 3 and a compatible local ROM for the mandatory first C++ generation,
   analysis scripts, and Python tests.
