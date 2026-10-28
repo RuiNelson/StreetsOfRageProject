@@ -369,6 +369,7 @@ class PlayWindow:
         self.combos: dict[str, Any] = {}
         self.extra_entry: Any = None
         self.loading = True
+        self.controls_process: Any = None
         root.title("Streets of Rage - play")
         root.minsize(860, 660)
         self.status = tk.StringVar(value=notice)
@@ -452,7 +453,7 @@ class PlayWindow:
         ttk.Label(bar, textvariable=self.status, foreground="#c0392b").grid(row=0, column=1, sticky="w", padx=10)
         for column, (text, mode) in enumerate(
                 [("Run both  ^R", "both"), ("Host only  ^S", "host"), ("Autoplay only  ^A", "autoplay"),
-                 ("Controls  ^O", "controls")], start=2):
+                 ("Configure Controls  ^O", "controls")], start=2):
             ttk.Button(bar, text=text, command=lambda m=mode: self.launch(m)).grid(row=0, column=column, padx=3)
         ttk.Button(bar, text="Quit  ^Q", command=lambda: self.finish("quit")).grid(row=0, column=6, padx=(12, 0))
         self.trace("build_first")
@@ -585,6 +586,17 @@ class PlayWindow:
 
     def launch(self, mode: str) -> None:
         settings = self.collect()
+        if mode == "controls":
+            # A side tool: it runs next to the window, which stays usable, instead of ending the window.
+            if self.controls_process is not None and self.controls_process.poll() is None:
+                self.status.set("The controls configuration is already open")
+                return
+            errors, _ = check({**settings, "build_first": False}, mode)
+            if errors:
+                self.status.set(errors[0])
+                return
+            self.controls_process = subprocess.Popen(script_command("run.py", *controls_arguments(settings)))
+            return
         errors, _ = check(settings, mode, probe=True)
         if errors:
             self.status.set(errors[0])
