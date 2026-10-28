@@ -606,7 +606,7 @@ mode, the OPTIONS menu does not expose the original control remap row.
 | C | Jump |
 | X | Special attack |
 | Y | Pick up nearby item or weapon |
-| Z | Unused |
+| Z | Throw knife |
 | Start | Pause |
 
 #### Configure keyboard and gamepad bindings
