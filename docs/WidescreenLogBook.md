@@ -129,6 +129,15 @@ its gate there: the camera-gated objects are the ones with `+$40` bit 7 **clear*
 `$A59C`'s widened edge (`cam+$164`) it never woke at the lock, and `$884` hit its unset tile word. Fixed: in round 8
 the bit 7 clear objects keep their X. Widescreen round 8 now plays through to Mr. X (4 of 4, no reset).
 
+Round 8 still reset in widescreen **with two players** (user, twice; reproduced with two AIs, P2 joining on round 1,
+12 s into round 8). The keep-X fix was not enough: `$A59C`'s widened edge itself can strand an object whose own X lies
+within `$20` of it at a lock. At the lock `cam` 4352 (`$1100`) a Garcia (`$22`, `+$40` `$00`) spawned at 4704
+(`$1260`, `cam+$160`): past the ROM's `cam+$144`, short of the widened `cam+$164`, so it never woke and `$884` reset the
+console as the next section was prepared (call log: `$810` then the boot). The 1P runs (4 of 4) never reset there, so
+the Garcia is probably one of the 2P-only spawns (type bit 7, `$CC0`); not checked against the stream. Fixed: while the camera is locked (`max - min < 4`, `$6A6`'s test) the round-8 gate uses the
+ROM's `cam+$144`, so at a lock it wakes exactly what plain mode wakes (an object there may start walking in from the
+right margin).
+
 Round 6 starts and runs in widescreen (live smoke test, no crash).
 
 Looked at and deliberately left alone:
