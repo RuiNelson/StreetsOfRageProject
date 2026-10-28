@@ -253,7 +253,7 @@ class PlanTests(unittest.TestCase):
         self.assertIsNotNone(plan)
         self.assertNotEqual(plan.outcome, "hit")
         # Walking straight in along his lane is his jab under every timing.
-        straight = [row for row in trace if row[0] == "(1, 0)x12"]
+        straight = [row for row in trace if row[0] == "(1, 0)x6"]
         self.assertTrue(straight and all(row[5] is not None for row in straight))
 
     def test_a_stunned_garcia_in_reach_is_taken(self) -> None:

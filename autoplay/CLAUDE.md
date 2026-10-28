@@ -2513,7 +2513,7 @@ The plan, `mr_x_plan`'s shape: programs (a punch or weapon swing on update
 0-5, standing or after a walk at a target; the rear attack in the facing the
 actor has, or turned onto a near enemy by 1-4 updates of walking away -- the
 user: "usar um back-attack, que é rápido e tem mais range"; a stick held
-2/6/12 updates then a tail policy), each played through every modelled enemy
+2/6 updates then a tail policy -- 2/6/12 until the cheaper search, below), each played through every modelled enemy
 within `RELEVANT_DX` (160 px) and every enemy knife in flight under six
 update timings -- `mr_x_plan`'s five plus the held stick carried two updates,
 for the live p99 of ~45 ms a tick, the last one *soft* (a hit under it costs
@@ -2525,7 +2525,8 @@ everything, a hold with no other blow reaching the holder before a knee is
 spent, a strike, then the end's distance to the tail's aim and whether
 anything lands on the actor standing there 10 updates on. A rollout costs
 ~150 us, so the search is two-staged: every program under one timing (the
-held stick one update on), then the best eight under the rest; before that
+held stick one update on), then the best four under the rest (eight until
+**Cheaper ticks for weaker machines**), over 18 updates (24 then); before that
 the budget cut the list and the strikes at its end were never played. The tail walks to
 the target's X at the walking box's reach from off his lane band, then steps
 in; a lying Garcia is woken from 70 px, 26 lanes off. An 8 ms budget per tick
@@ -2981,7 +2982,7 @@ socket.) What changed:
   actor steps share a prefix with an earlier rollout, so state snapshots could
   save at most that.
 
-**Still over the 2 ms budget: the street fight.** `grunt_plan.plan` plays
+**Still over the 2 ms budget: the street fight.** `grunt_plan.plan` played
 ~66 rollouts of up to 24 updates (median 4.5 ms with one enemy, 15-20 with
 five or six), and no further exact saving of any size is left in Python.
 `BUDGET_MS` (8 ms of wall clock, then 5 ms of `STAGE_2_GRACE`) is what a
@@ -2994,6 +2995,29 @@ live A/B first (`grunt_fight.py --family all`). Live sanity after the exact
 changes (`grunt_fight.py --family all --level 1`, Blaze, `--turbo 2`,
 `--poll-ms 16`): the boss reached at 86.8 s, 32/32 killed, 4 hits, no life
 lost; live tick median 0.5 ms, p95 7.9, max 20.9.
+
+**The cheaper search (user: A/B it, then ship the combined cut).** Offline,
+on the 5,905 captured calls (`grunt_plan_bench.py`'s cache, each variant
+against the full search; mean / median ms, share with the same first action):
+full 5.32 / 4.82; `FIRST_DURATIONS` (2, 6) 4.64 / 4.26, 93.8%; `HORIZON` 18
+4.71 / 4.21, 88.3%; `FINALISTS` 4 4.26 / 3.95, 96.7%; all three 3.04 / 2.73,
+86.5% -- no cut buys much time per decision it changes. Live A/B
+(`grunt_fight.py --family all`, Blaze, `--turbo 2`, rounds 1, 2, 3 and 5, two
+runs each, the three variants side by side on their own hosts; stopped there
+by the user, "too many runs"):
+
+| variant | hits | damage | lives lost | boss reached | mean time | `EngageGrunts` tick median / p95 |
+| --- | --- | --- | --- | --- | --- | --- |
+| full (24, 2/6/12, 8) | 63 | 436 | 1 | 8/8 | 107 s | 5.4 / 12.5 ms |
+| `FINALISTS` 4 | 69 | 501 | 0 | 8/8 | 104 s | 4.6 / 10.3 ms |
+| all three (18, 2/6, 4) | 55 | 372 | 0 | 8/8 | 110 s | 3.8 / 7.6 ms |
+
+All three shipped (`HORIZON` 18, `FIRST_DURATIONS` (2, 6), `FINALISTS` 4): no
+worse live, ~30% cheaper a street tick (p95 -40%). Noisy (the full search alone
+took 5 and 12 hits in its two round-5 runs); one round-2 run took 157 s against
+119-131 for the rest -- watch round-2 times. Still over 2 ms with enemies on
+screen. `test_no_walk_into_an_approaching_garcias_jab` now checks the
+`(1, 0)x6` walk (the x12 program is gone): it is his jab under every timing too.
 
 **Sealed corridors (user: a cheap check for "a wall, or a wall whose hole is
 too small to pass" between the actor and the goal).** `_free_arrivals` only

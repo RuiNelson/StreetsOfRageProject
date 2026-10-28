@@ -50,7 +50,10 @@ from .twins import actor_update as _walk
 
 __all__ = ["GruntPlan", "PlanMemory", "holder_blow", "plan", "tail_action", "relevant"]
 
-HORIZON = 24
+# 18 updates, 2- and 6-update sticks and 4 finalists (were 24, (2, 6, 12) and
+# 8): ~30% cheaper a tick for a weaker CPU, and no worse live (user, A/B
+# 2026-10-28, autoplay/CLAUDE.md, **Cheaper ticks for weaker machines**).
+HORIZON = 18
 # mr_x_plan's five update timings, and the stick held now carried two
 # updates: a tick that plans late (the live p99 is ~45 ms, three updates at
 # turbo 2) lands its stick that much later, and a lane step into a Garcia's
@@ -63,7 +66,7 @@ SCENARIOS = _MR_X_SCENARIOS + ((False, 2, False),)
 # inimigos ... podia ser mais eficiente em tempo").
 SOFT_SCENARIOS = frozenset({(False, 2, False)})
 SOFT_FLOOR = -30_000.0
-FIRST_DURATIONS = (2, 6, 12)
+FIRST_DURATIONS = (2, 6)
 STICKS = ((0, 0), (0, -1), (0, 1), (-1, 0), (1, 0), (-1, -1), (-1, 1), (1, -1), (1, 1))
 PUNCH_DELAYS = (0, 1, 2, 3, 5)
 CHORD_DELAYS = (0, 2, 4)
@@ -100,7 +103,7 @@ BUDGET_MS = 8.0
 # The screening timings (stage 1) and how many programs go on to the rest,
 # with a little past the budget for them.
 SCREEN_SCENARIOS = ((False, 1, False),)
-FINALISTS = 8
+FINALISTS = 4
 STAGE_2_GRACE = 0.005
 
 HIT_SCORE = -1_000_000.0
