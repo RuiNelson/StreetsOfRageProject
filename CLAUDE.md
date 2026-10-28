@@ -146,8 +146,11 @@ derived from the ROM and never committed:
 ./scripts/render_soundtrack.py
 ```
 
-`--silent` (every debug/autoplay preset) still disables all audio, so the
-measurement presets are unaffected. How the renders and their loop points are
+The user chooses the folder: `sor --soundtrack DIR` (default `soundtrack/`
+next to the ROM) and `render_soundtrack.py --out DIR`; `play.py` carries it as
+the `sound` (`prerendered`/`emulated`) and `soundtrack` settings, which presets
+do not touch. `--silent` (every debug/autoplay preset) still disables all
+audio, so the measurement presets are unaffected. How the renders and their loop points are
 made and how playback follows the ROM's engine: `StreetsOfRageRecompilation/CLAUDE.md`,
 **Pre-rendered soundtrack**.
 
@@ -244,7 +247,9 @@ gitignored) on every change and reads them back on the next launch. The port
 and the turbo factor are set once and feed both programs (`sor --port/--turbo`,
 `autoplay --port`, and `--poll-ms 16` under turbo); changing the start level
 under a street/Mr. X sweep also updates the sweep and `--no-food` for the
-round. Keys: `^R`/`^Return` run both, `^S` host only, `^A` autoplay only, `^B`
+round. The host panel's **Sound** (`--sound`, ignored when silent) and
+**Soundtrack folder** (`--soundtrack`, empty = next to the ROM, `...` opens a
+folder chooser) fields warn when the folder has no `manifest.tsv`. Keys: `^R`/`^Return` run both, `^S` host only, `^A` autoplay only, `^B`
 build first, `^1`-`^6` presets, `^N` silent, `^T` turbo, `^W` widescreen, `^X`
 6-button, `^7`/`^8` AI P1/P2, `^L` lockstep, `^G` character, `^K` sweep,
 `^=`/`^-` start level, `^E` extra args, `^0` reset, `^Q` quit. Command-line

@@ -722,9 +722,24 @@ sound effect and every PCM voice. Render it once, after cloning or when the
 renderer changes (about two minutes, ~180 MB):
 
 ```bash
-./scripts/render_soundtrack.py                 # writes StreetsOfRageRecompilation/rom/soundtrack/
-./scripts/render_soundtrack.py --chip ym2612   # Nuked's Model 1 YM2612 instead
+./scripts/render_soundtrack.py                    # writes StreetsOfRageRecompilation/rom/soundtrack/
+./scripts/render_soundtrack.py --chip ym2612      # Nuked's Model 1 YM2612 instead
+./scripts/render_soundtrack.py --out ~/sor-audio  # any other folder
 ```
+
+A soundtrack folder is the FLAC files plus their `manifest.tsv`. By default
+`sor` reads `soundtrack/` next to the ROM; point it at another folder with
+`--soundtrack DIR` (for example a second render with the other chip):
+
+```bash
+./build/sor --rom rom/SOR.bin --soundtrack ~/sor-audio
+./build/sor --rom rom/SOR.bin --sound emulated   # the real-time chips instead
+```
+
+In the `scripts/play.py` window the same choices are the **Sound** and
+**Soundtrack folder** fields of the host panel (empty folder = next to the
+ROM; the `...` button opens a folder chooser). The command line keeps a missing
+soundtrack as a warning: `sor` then emulates the chips.
 
 The renders come from the copyrighted ROM, so they stay next to it and are
 never versioned. The game's own sound engine still runs; only its chip output

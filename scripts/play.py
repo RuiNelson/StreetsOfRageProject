@@ -34,6 +34,7 @@ from _session import run_session
 
 SETTINGS_PATH = META_ROOT / "last_play_py_settings.yml"
 SOR_BUILD_DIR = META_ROOT / "StreetsOfRageRecompilation" / "build"
+DEFAULT_ROM = META_ROOT / "StreetsOfRageRecompilation" / "rom" / "SOR.bin"
 
 # Every setting, with its default. The type of the default is the type of the value.
 DEFAULTS: dict[str, Any] = {
@@ -44,6 +45,8 @@ DEFAULTS: dict[str, Any] = {
     "lang": "en",  # "" = the host's own default
     "hz": 0,  # 0 = the host's own default
     "silent": True,
+    "sound": "prerendered",  # or "emulated": sor --sound (ignored when silent)
+    "soundtrack": "",  # "" = sor's default, soundtrack/ next to the ROM
     "fullscreen": False,
     "widescreen": False,
     "alt_controls": False,  # --altControls, the 6-button layout
@@ -67,8 +70,8 @@ DEFAULTS: dict[str, Any] = {
     "build_first": False,
 }
 
-# Fields a preset sets. The rest (widescreen, 6-button, fullscreen, ROM, call log, extra...) is the
-# user's own and survives a preset.
+# Fields a preset sets. The rest (widescreen, 6-button, fullscreen, ROM, sound source, soundtrack
+# folder, call log, extra...) is the user's own and survives a preset.
 SESSION_FIELDS = (
     "port", "turbo", "vsync", "lang", "debug_utils", "silent", "agent_p1", "agent_p2", "reach",
     "lockstep", "poll_ms", "start_level", "sweep", "no_food", "no_police",
@@ -198,6 +201,11 @@ def host_arguments(s: dict[str, Any], *, with_autoplay: bool) -> list[str]:
     args += ["--port", str(s["port"])]
     if s["silent"]:
         args.append("--silent")
+    else:
+        if s["sound"] == "emulated":
+            args += ["--sound", "emulated"]
+        elif s["soundtrack"]:
+            args += ["--soundtrack", s["soundtrack"]]
     if s["call_log"]:
         args += ["--callLog", s["call_log"]]
     return args
@@ -237,6 +245,14 @@ def autoplay_arguments(s: dict[str, Any]) -> list[str]:
     return args
 
 
+def soundtrack_dir(s: dict[str, Any]) -> Path:
+    """The folder sor reads the pre-rendered soundtrack from (its default: soundtrack/ next to the ROM)."""
+    if s["soundtrack"]:
+        return Path(s["soundtrack"]).expanduser()
+    rom = Path(s["rom"]).expanduser() if s["rom"] else Path(os.environ.get("SOR_ROM", DEFAULT_ROM))
+    return rom.parent / "soundtrack"
+
+
 def port_in_use(port: int) -> bool:
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=0.2):
@@ -262,6 +278,9 @@ def check(s: dict[str, Any], mode: str, *, probe: bool = False) -> tuple[list[st
             errors.append("sor is not built: Ctrl+B builds it first")
         if s["rom"] and not Path(s["rom"]).expanduser().is_file():
             errors.append(f"ROM not found: {s['rom']}")
+        if not s["silent"] and s["sound"] == "prerendered" and not (soundtrack_dir(s) / "manifest.tsv").is_file():
+            warnings.append(f"no pre-rendered soundtrack in {soundtrack_dir(s)}: sor will emulate the sound chips "
+                            "(scripts/render_soundtrack.py renders it)")
         if probe and not errors and port_in_use(s["port"]):
             errors.append(f"port {s['port']} already has a listener (a host is running?): Ctrl+A attaches to it")
     elif probe and not errors and not port_in_use(s["port"]):
@@ -313,12 +332,13 @@ LANG_CHOICES = [("default", ""), ("en (overseas)", "en"), ("jp (Japan)", "jp")]
 TURBO_CHOICES = [("off", 0), ("x2", 2), ("x3", 3), ("x4", 4), ("x6", 6), ("x10", 10)]
 VSYNC_CHOICES = [("internal timer", 0), ("VSync", 1), ("VSync / 2", 2), ("VSync / 3", 3)]
 HZ_CHOICES = [("default", 0), ("60 (NTSC)", 60), ("50 (PAL)", 50)]
+SOUND_CHOICES = [("pre-rendered", "prerendered"), ("emulated chips", "emulated")]
 REACH_CHOICES = [("stay in the menus", ""), ("Axel", "axel"), ("Adam", "adam"), ("Blaze", "blaze")]
 SWEEP_CHOICES = [("none", ""), ("street enemies", "street"), ("until Mr. X (round 8)", "mrx")] + [
     (f"only {family}", f"only:{family}") for family in ENEMY_FAMILIES
 ]
 CHOICES = {
-    "lang": LANG_CHOICES, "turbo": TURBO_CHOICES, "vsync": VSYNC_CHOICES, "hz": HZ_CHOICES,
+    "lang": LANG_CHOICES, "turbo": TURBO_CHOICES, "vsync": VSYNC_CHOICES, "hz": HZ_CHOICES, "sound": SOUND_CHOICES,
     "reach": REACH_CHOICES, "sweep": SWEEP_CHOICES,
 }
 
@@ -341,7 +361,7 @@ class PlayWindow:
         self.extra_entry: Any = None
         self.loading = True
         root.title("Streets of Rage - play")
-        root.minsize(860, 600)
+        root.minsize(860, 660)
         self.status = tk.StringVar(value=notice)
         self.build()
         self.load(settings)
@@ -383,13 +403,15 @@ class PlayWindow:
         self.combo(host, 1, "Language", "lang")
         self.combo(host, 2, "Video Hz", "hz")
         self.check(host, 3, "Silent (^N)", "silent")
-        self.check(host, 4, "Fullscreen (^F)", "fullscreen")
-        self.check(host, 5, "Widescreen (^W)", "widescreen")
-        self.check(host, 6, "6-button layout, --altControls (^X)", "alt_controls")
-        self.check(host, 7, "debugUtils: remote access, hotkeys (^D)", "debug_utils")
-        self.check(host, 8, "Log CPU/VDP state, --debug", "debug")
-        self.entry(host, 9, "Call log file", "call_log")
-        self.entry(host, 10, "ROM file", "rom")
+        self.combo(host, 4, "Sound (ignored when silent)", "sound")
+        self.entry(host, 5, "Soundtrack folder (empty = next to the ROM)", "soundtrack", browse=True)
+        self.check(host, 6, "Fullscreen (^F)", "fullscreen")
+        self.check(host, 7, "Widescreen (^W)", "widescreen")
+        self.check(host, 8, "6-button layout, --altControls (^X)", "alt_controls")
+        self.check(host, 9, "debugUtils: remote access, hotkeys (^D)", "debug_utils")
+        self.check(host, 10, "Log CPU/VDP state, --debug", "debug")
+        self.entry(host, 11, "Call log file", "call_log")
+        self.entry(host, 12, "ROM file", "rom")
 
         self.check(autoplay, 0, "AI plays P1 (^7)", "agent_p1")
         self.check(autoplay, 1, "AI plays P2 (^8)", "agent_p2")
@@ -434,13 +456,33 @@ class PlayWindow:
             row=row, column=0, columnspan=2, sticky="w", padx=8, pady=1)
         self.trace(key)
 
-    def entry(self, parent: Any, row: int, label: str, key: str) -> Any:
+    def entry(self, parent: Any, row: int, label: str, key: str, browse: bool = False) -> Any:
         self.vars[key] = self.tk.StringVar()
         self.ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=8, pady=2)
-        widget = self.ttk.Entry(parent, textvariable=self.vars[key])
-        widget.grid(row=row, column=1, sticky="ew", padx=8, pady=2)
+        if browse:
+            # A folder: the entry plus a button that opens the system folder chooser.
+            field = self.ttk.Frame(parent)
+            field.grid(row=row, column=1, sticky="ew", padx=8, pady=2)
+            field.columnconfigure(0, weight=1)
+            widget = self.ttk.Entry(field, textvariable=self.vars[key])
+            widget.grid(row=0, column=0, sticky="ew")
+            self.ttk.Button(field, text="...", width=3, command=lambda: self.choose_folder(key)).grid(
+                row=0, column=1, padx=(4, 0))
+        else:
+            widget = self.ttk.Entry(parent, textvariable=self.vars[key])
+            widget.grid(row=row, column=1, sticky="ew", padx=8, pady=2)
         self.trace(key)
         return widget
+
+    def choose_folder(self, key: str) -> None:
+        from tkinter import filedialog
+
+        current = self.vars[key].get().strip()
+        initial = Path(current).expanduser() if current else soundtrack_dir(self.collect())
+        chosen = filedialog.askdirectory(parent=self.root, mustexist=True, title="Soundtrack folder",
+                                         initialdir=str(initial if initial.is_dir() else META_ROOT))
+        if chosen:
+            self.vars[key].set(chosen)
 
     def spin(self, parent: Any, row: int, label: str, key: str, low: int, high: int, column: int = 0) -> None:
         self.vars[key] = self.tk.StringVar()
