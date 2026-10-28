@@ -1147,7 +1147,8 @@ The plan (`twins_plan.plan`, every tick):
    start of the chord action with no twin losing health before the next.
 
 **Frame pacing** (user, above). Measured on the development machine: the
-host ran 120 fps at `--turbo 4` *and* at `--turbo 2`, a snapshot takes ~2.2
+host ran 120 fps at `--turbo 4` *and* at `--turbo 2` (a presentation cap,
+lifted on 2026-10-28: `--turbo 4` is now a true 240 fps), a snapshot takes ~2.2
 ms, and a tick with the plan ~20 ms -- about one player update a tick at 2x.
 So the stick a tick writes lands on the next player update or the one after,
 with either the player's or the objects' update next (`$AD8E` alternates
@@ -2696,10 +2697,15 @@ poll cadence so the agent still samples about two game frames per tick.
 ./scripts/autoplay.py --poll-ms 16 --port 7777 --agent-p1 --reach-gameplay blaze
 ```
 
-`--poll-ms 16` is ~2 frames at 120 Hz (`--turbo 2`). 2x is the ceiling on
+`--poll-ms 16` is ~2 frames at 120 Hz (`--turbo 2`). 2x was the ceiling on
 the development machine (user: "use turbo 2x at max, this PC can't handle
 turbo 4x at full speed"; measured, `--turbo 4` ran at 120 fps there too, so
-a 4x poll cadence sampled twice per frame and the wall clock lied). Leaving
+a 4x poll cadence sampled twice per frame and the wall clock lied). That cap
+was the host's presentation waiting on the 120 Hz display, not the CPU;
+since 2026-10-28 the host presents asynchronously and `--turbo 4` runs at a
+true 240 fps (ceiling ~600 fps). So every result below recorded "at turbo
+4" before that date ran at 2x, and moving the preset to 4x needs
+`--poll-ms 8` and a fresh live measurement. Leaving
 the default 33 ms under turbo makes the AI see every fourth frame. Keep
 the `turbo` preset of `scripts/play.py` (`PRESETS`) as the source of truth for these flags. Use `--silent`
 whenever the game is launched for debug. Only start a live session when

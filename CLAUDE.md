@@ -277,9 +277,15 @@ autoplay poll cadence. Use the preset:
 
 equivalent to `./scripts/run.py --turbo 2 --lang en --debugUtils --port 7777
 --silent &` plus `./scripts/autoplay.py --poll-ms 16 --port 7777 --agent-p1
---reach-gameplay blaze`. `--turbo 2` is the ceiling on the development
-machine (measured: `--turbo 4` also ran at 120 fps there, so anything paced
-by the wall clock was off by two). `--poll-ms 16` keeps sampling at ~2
+--reach-gameplay blaze`. Until 2026-10-28 every turbo was capped at the
+development machine's 120 Hz display: the host presented each frame
+synchronously and Metal waited for the display refresh, so `--turbo 4` ran at
+120 fps and anything paced by the wall clock was off by two (results
+recorded "at turbo 4" before then were really at 2x). `MegaDriveEnvironment`
+now presents asynchronously and drops the frames the display cannot show:
+`--turbo N` runs at 60·N fps up to about 600 fps (≈x10) there. The preset
+stays at 2; raising it needs `--poll-ms` scaled to match (8 ms at 4x) and a
+live measurement first. `--poll-ms 16` keeps sampling at ~2
 frames per tick under turbo — the 33 ms default would drop to one sample per
 four frames and miss holds, jumps, and incoming attacks. `--silent` is
 required whenever the game is launched for debug. Only start a live `sor`
