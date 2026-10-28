@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -370,6 +371,8 @@ class PlayWindow:
         self.extra_entry: Any = None
         self.loading = True
         self.controls_process: Any = None
+        self.session: Any = None  # the running launch (a child play.py), polled so Tk keeps serving events
+        self.session_mode = ""
         root.title("Streets of Rage - play")
         root.minsize(860, 660)
         self.status = tk.StringVar(value=notice)
@@ -601,9 +604,39 @@ class PlayWindow:
         if errors:
             self.status.set(errors[0])
             return
-        self.finish(mode)
+        if self.session is not None:
+            self.status.set(f"A session ({self.session_mode}) is still running")
+            return
+        # The session runs in a child process: blocking here would leave the Tk app unresponsive
+        # (the macOS beach ball) until the game ends.
+        save_settings(settings)
+        self.session_mode = mode
+        self.session = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--run-saved", mode])
+        self.status.set(f"Running ({mode})... Quit stops it")
+        self.root.after(300, self.poll_session)
+
+    def poll_session(self) -> None:
+        if self.session is None:
+            return
+        code = self.session.poll()
+        if code is None:
+            self.root.after(300, self.poll_session)
+            return
+        self.session = None
+        self.status.set(f"Last run ({self.session_mode}) exited with code {code}.")
+
+    def stop_session(self) -> None:
+        session, self.session = self.session, None
+        if session is None or session.poll() is not None:
+            return
+        try:
+            session.send_signal(signal.SIGINT) if os.name != "nt" else session.terminate()
+            session.wait(timeout=10)
+        except (subprocess.TimeoutExpired, OSError):
+            session.kill()
 
     def finish(self, action: str) -> None:
+        self.stop_session()
         self.action = action
         self.result = self.collect()
         self.root.quit()
@@ -671,7 +704,10 @@ def run_window(settings: dict[str, Any], notice: str) -> tuple[str, dict[str, An
 
     root = tk.Tk()
     window = PlayWindow(tk, ttk, root, settings, notice)
-    root.mainloop()
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        window.stop_session()
     action, result = window.action, window.result
     root.destroy()
     return action, result
@@ -692,14 +728,9 @@ def ensure_tk() -> None:
 def interactive() -> int:
     ensure_tk()
     settings = load_settings()
-    notice = ""
-    while True:
-        action, settings = run_window(settings, notice)
-        save_settings(settings)
-        if action == "quit":
-            return 0
-        code = execute(settings, action)
-        notice = f"Last run ({action}) exited with code {code}."
+    _, settings = run_window(settings, "")
+    save_settings(settings)
+    return 0
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -718,6 +749,8 @@ def parse_arguments(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--level", type=int, default=0, metavar="N", help="with --preset boss: the round (1-8)")
     parser.add_argument("--mode", choices=("both", "host", "autoplay"), default="both",
                         help="what to start (default: both)")
+    parser.add_argument("--run-saved", choices=("both", "host", "autoplay"), metavar="MODE",
+                        help="internal: run the saved settings in the foreground (the window starts this)")
     parser.add_argument("--dry-run", action="store_true", help="print the command lines and exit")
     return parser.parse_known_args(argv)
 
@@ -726,6 +759,8 @@ def main() -> int:
     if len(sys.argv) == 1:
         return interactive()
     arguments, extra = parse_arguments(sys.argv[1:])
+    if arguments.run_saved:
+        return execute(load_settings(), arguments.run_saved)
     if arguments.preset is None and not arguments.last:
         print("play.py: give --preset NAME or --last (no arguments opens the window)", file=sys.stderr)
         return 2
