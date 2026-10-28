@@ -211,6 +211,11 @@ def host_arguments(s: dict[str, Any], *, with_autoplay: bool) -> list[str]:
     return args
 
 
+def controls_arguments(s: dict[str, Any]) -> list[str]:
+    """Arguments for scripts/run.py that open the controller configuration UI instead of the game."""
+    return ([s["rom"]] if s["rom"] else []) + ["--configControls"]
+
+
 def autoplay_arguments(s: dict[str, Any]) -> list[str]:
     """Arguments for scripts/autoplay.py."""
     args: list[str] = []
@@ -262,7 +267,7 @@ def port_in_use(port: int) -> bool:
 
 
 def check(s: dict[str, Any], mode: str, *, probe: bool = False) -> tuple[list[str], list[str]]:
-    """Return (errors, warnings) for launching `mode` ("both", "host" or "autoplay")."""
+    """Return (errors, warnings) for launching `mode` ("both", "host", "autoplay" or "controls")."""
     errors: list[str] = []
     warnings: list[str] = []
     if not 1 <= s["port"] <= 65535:
@@ -281,11 +286,11 @@ def check(s: dict[str, Any], mode: str, *, probe: bool = False) -> tuple[list[st
         if not s["silent"] and s["sound"] == "prerendered" and not (soundtrack_dir(s) / "manifest.tsv").is_file():
             warnings.append(f"no pre-rendered soundtrack in {soundtrack_dir(s)}: sor will emulate the sound chips "
                             "(scripts/render_soundtrack.py renders it)")
-        if probe and not errors and port_in_use(s["port"]):
+        if probe and mode != "controls" and not errors and port_in_use(s["port"]):
             errors.append(f"port {s['port']} already has a listener (a host is running?): Ctrl+A attaches to it")
     elif probe and not errors and not port_in_use(s["port"]):
         warnings.append(f"nothing is listening on port {s['port']} yet")
-    if mode != "autoplay" and s["turbo"] > 0 and s["vsync"]:
+    if mode not in {"autoplay", "controls"} and s["turbo"] > 0 and s["vsync"]:
         warnings.append("turbo needs the internal timer: the vsync setting is ignored")
     if mode != "host" and s["lockstep"] and s["poll_ms"]:
         warnings.append("lockstep paces itself: --poll-ms is not passed")
@@ -298,9 +303,11 @@ def describe(s: dict[str, Any], mode: str) -> list[str]:
     lines: list[str] = []
     if s["build_first"] and mode != "autoplay":
         lines.append("build:     build.py")
-    if mode != "autoplay":
+    if mode == "controls":
+        lines.append("sor:       " + shlex.join(controls_arguments(s)))
+    elif mode != "autoplay":
         lines.append("sor:       " + shlex.join(host_arguments(s, with_autoplay=mode == "both")))
-    if mode != "host":
+    if mode not in {"host", "controls"}:
         try:
             lines.append("autoplay:  " + shlex.join(autoplay_arguments(s)))
         except ValueError:
@@ -318,6 +325,8 @@ def execute(s: dict[str, Any], mode: str) -> int:
     try:
         if mode == "both":
             return run_session(host_arguments(s, with_autoplay=True), autoplay_arguments(s), s["port"])
+        if mode == "controls":
+            return subprocess.run(script_command("run.py", *controls_arguments(s))).returncode
         if mode == "host":
             return subprocess.run(script_command("run.py", *host_arguments(s, with_autoplay=False))).returncode
         return subprocess.run(script_command("autoplay.py", *autoplay_arguments(s))).returncode
@@ -442,9 +451,10 @@ class PlayWindow:
         ttk.Checkbutton(bar, text="Build first (^B)", variable=self.vars["build_first"]).grid(row=0, column=0)
         ttk.Label(bar, textvariable=self.status, foreground="#c0392b").grid(row=0, column=1, sticky="w", padx=10)
         for column, (text, mode) in enumerate(
-                [("Run both  ^R", "both"), ("Host only  ^S", "host"), ("Autoplay only  ^A", "autoplay")], start=2):
+                [("Run both  ^R", "both"), ("Host only  ^S", "host"), ("Autoplay only  ^A", "autoplay"),
+                 ("Controls  ^O", "controls")], start=2):
             ttk.Button(bar, text=text, command=lambda m=mode: self.launch(m)).grid(row=0, column=column, padx=3)
-        ttk.Button(bar, text="Quit  ^Q", command=lambda: self.finish("quit")).grid(row=0, column=5, padx=(12, 0))
+        ttk.Button(bar, text="Quit  ^Q", command=lambda: self.finish("quit")).grid(row=0, column=6, padx=(12, 0))
         self.trace("build_first")
 
     def trace(self, key: str) -> None:
@@ -608,7 +618,7 @@ class PlayWindow:
     def bind_keys(self) -> None:
         actions: dict[str, Any] = {
             "r": lambda: self.launch("both"), "Return": lambda: self.launch("both"),
-            "s": lambda: self.launch("host"), "a": lambda: self.launch("autoplay"),
+            "s": lambda: self.launch("host"), "o": lambda: self.launch("controls"), "a": lambda: self.launch("autoplay"),
             "q": lambda: self.finish("quit"),
             "b": lambda: self.toggle("build_first"),
             "n": lambda: self.toggle("silent"), "f": lambda: self.toggle("fullscreen"),
