@@ -102,6 +102,30 @@ class MrXOffice(Essential):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class PlayerDuel(Essential):
+    """Mr. X's betrayal duel: the two players fight each other.
+
+    Observed while ``$FFDE00 (mr_x_offer_flag)`` is set and ``$FFFA43
+    (duel_damage_modifier)`` is nonzero. ``$11F74
+    (mr_x_offer_compare_2p_choices)`` sends two different answers to ``$11FA8
+    (mr_x_offer_start_duel)``, which sets the byte; ``$11E72
+    (mr_x_offer_wait_duel_end)`` clears it once one player is out
+    (story-mode-and-campaign-flow.md §7.4). For as long as it holds, the other
+    player is no ``Partner`` but a ``RivalPlayer``: ``$4478`` deals the attack
+    descriptor's damage (tripled) to them like to any enemy.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DebugMrXAccept(Essential):
+    """Harness switch: answer YES to Mr. X instead of NO.
+
+    Only for measuring the betrayal duel without a human: one AI accepts, the
+    other refuses, and ``$11F74`` starts the duel. Never on in play.
+    """
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class DebugNoFood(Essential):
     """Harness switch: leave every ``HealthPickup`` on the floor.
 

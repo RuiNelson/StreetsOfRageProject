@@ -25,6 +25,11 @@ from sor_autoplay.ai.tokens import (
     ThrowPepper,
 )
 from sor_autoplay.ai.tokens import Myself, Partner
+from sor_autoplay.ai.tokens import EngageMrX, MrXOffice, PlayerDuel, RivalPlayer
+from sor_autoplay.ai.decide import could_engage_mr_x
+from sor_autoplay.ai.partner import do_not_harm_partner
+from sor_autoplay.ai.priority import determine_priority_verb
+from sor_autoplay.ai.tokens import find_all
 from sor_autoplay import prop_solids
 from sor_autoplay.ai.decide import (
     BREAKABLE_PUNCH_X,
@@ -1978,6 +1983,106 @@ class CouldHoldActionsTests(unittest.TestCase):
             could_hold_actions({myself, make_enemy(world_x=110)}),
             {ReleasePartner(actor_slot="P1", target_slot="P2")},
         )
+
+
+
+def make_rival(**overrides) -> RivalPlayer:
+    fields = dict(
+        slot="P2",
+        player_index=2,
+        character_id=2,
+        type_id=0x01,
+        world_x=130,
+        world_y=100,
+        health=100,
+        combat_phase=CombatPhase.NORMAL,
+        targets_player=None,
+        facing_left=True,
+    )
+    fields.update(overrides)
+    return RivalPlayer(**fields)
+
+
+class PlayerDuelTests(unittest.TestCase):
+    """Mr. X's betrayal duel (user: "Neste momento a AI não luta contra o
+    humano"): the other player is a RivalPlayer, and the AI fights them."""
+
+    def _duel(self, *tokens: Token) -> set[Token]:
+        return {PlayerDuel(), MrXOffice(), Stage(level_index=7, direction="left"), *tokens}
+
+    def test_the_rival_is_punched(self) -> None:
+        context = self._duel(make_myself(world_x=100, world_y=100), make_rival())
+
+        self.assertEqual(could_punch(context), {Punch(actor_slot="P1", target_slot="P2")})
+
+    def test_the_office_stands_down_for_the_duel(self) -> None:
+        # Before Mr. X steps out, the office's Garcias get an EngageMrX with
+        # no target ("home, facing the wall"), which would stand the duel out.
+        context = self._duel(make_myself(world_x=100, world_y=100), make_rival(world_x=220))
+
+        self.assertEqual(could_engage_mr_x(context), set())
+
+    def test_a_hold_on_the_rival_is_a_hold_on_an_enemy(self) -> None:
+        myself = make_myself(
+            world_x=100, world_y=100, action_state=0x60, held_enemy_slot="P2"
+        )
+        verbs = could_hold_actions(self._duel(myself, make_rival(combat_phase=CombatPhase.GRABBED)))
+
+        self.assertTrue(verbs)
+        self.assertNotIn(ReleasePartner(actor_slot="P1", target_slot="P2"), verbs)
+        self.assertTrue(all(getattr(v, "target_slot", "P2") == "P2" for v in verbs))
+
+    def test_no_rear_attack_or_grounded_kick_at_the_rival(self) -> None:
+        # Measured live: the ROM lands almost none of either on a player.
+        behind = self._duel(make_myself(world_x=100, world_y=100), make_rival(world_x=80))
+        ahead = self._duel(make_myself(world_x=100, world_y=100), make_rival(world_x=160))
+
+        self.assertEqual(could_rear_attack(behind), set())
+        self.assertEqual(could_jump_attack(ahead), set())
+
+    def test_the_rival_is_punched_from_twenty_px(self) -> None:
+        # Measured: under 1% of punches landed from 12-19 px, 23% from 20.
+        myself = make_myself(world_x=100, world_y=100)
+
+        self.assertEqual(could_punch(self._duel(myself, make_rival(world_x=118))), set())
+        self.assertEqual(
+            could_punch(self._duel(myself, make_rival(world_x=120))),
+            {Punch(actor_slot="P1", target_slot="P2")},
+        )
+
+    def test_no_punch_at_a_rival_inside_the_punch_box_edge(self) -> None:
+        # Measured live: 9-15 px away the punch passes in front of a player's
+        # narrow body; the walk to a striking distance owns the tick instead.
+        context = self._duel(
+            make_myself(world_x=100, world_y=100),
+            make_rival(world_x=112, world_y=110),
+            CameraRange(left=0, right=400, top=0, bottom=200),
+        )
+
+        self.assertEqual(could_punch(context), set())
+        self.assertIn(
+            WalkToNearEnemy(actor_slot="P1", target_slot="P2"),
+            {type(v)(actor_slot=v.actor_slot, target_slot=v.target_slot) for v in could_walk_to_near_enemy(context)},
+        )
+
+    def test_no_police_against_the_rival(self) -> None:
+        # The special sweeps enemies only and $4478 returns while it runs.
+        myself = make_myself(world_x=100, world_y=100, health=5, health_percent=5.0)
+
+        self.assertEqual(could_call_police(self._duel(myself, make_rival())), set())
+
+    def test_the_whole_tick_strikes_the_rival(self) -> None:
+        context = self._duel(
+            make_myself(world_x=100, world_y=100),
+            make_rival(),
+            CameraRange(left=0, right=400, top=0, bottom=200),
+        )
+        context |= generate_verb_tokens(context)
+        context = do_not_harm_partner(context)
+        winner = find_all(determine_priority_verb(context), Verb)[0]
+
+        self.assertEqual(getattr(winner, "target_slot", None), "P2")
+        self.assertNotIsInstance(winner, EngageMrX)
 
 
 class CouldJumpAttackTests(unittest.TestCase):

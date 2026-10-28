@@ -68,6 +68,7 @@ from .enemy import (
     Nora,
     Onihime,
     PartnerFight,
+    RivalPlayer,
     Signal,
     Souther,
     Surrounded,
@@ -86,12 +87,14 @@ from .dialog_verbs import (
 from .essential import (
     AnimationInProgress,
     CameraRange,
+    DebugMrXAccept,
     DebugNoFood,
     DebugNoPolice,
     Essential,
     InContinueMenu,
     InMrXDialog,
     MrXOffice,
+    PlayerDuel,
     SixButtonLayout,
     Stage,
 )

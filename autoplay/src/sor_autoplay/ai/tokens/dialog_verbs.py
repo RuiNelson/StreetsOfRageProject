@@ -53,7 +53,16 @@ class HandleMrXDialog(Dialog):
     Produced by ``could_handle_mr_x_dialog`` whenever ``InMrXDialog`` is in
     context. ``$120EC`` reads *held* object+$54: Down sets +$59 bit 3 (NO),
     any remapped face bit registers the choice (story-mode-and-campaign-
-    flow.md §7.4). Accepting writes the bad ending; the AI never does.
+    flow.md §7.4). NO is the answer to both questions (user):
+
+    - the first one: NO goes on to the fight (``$12``), YES restarts the
+      campaign at round 6 (``$0B``); with two players, two different answers
+      start the betrayal duel (``PlayerDuel``);
+    - the survivor's question after the duel: NO is the bad ending --
+      ``$12074 (mr_x_offer_mark_bad_ending)`` ("Die, traitor!"), then the fight
+      with him -- and YES the round-6 restart.
+
+    ``DebugMrXAccept`` (the harness only) holds Up for YES instead.
 
     Raises emergency: (InMrXDialog)×99 -- control is locked to this prompt.
     """

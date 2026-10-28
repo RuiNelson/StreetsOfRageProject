@@ -62,6 +62,7 @@ from .tokens import (
     NAME_LETTER_A,
     NAME_LETTER_I,
     HandleContinueMenu,
+    DebugMrXAccept,
     HandleMrXDialog,
     InContinueMenu,
     InMrXDialog,
@@ -99,6 +100,7 @@ from .decide import (
     in_smash_range,
 )
 from .reach import (
+    punch_inner_for,
     B_PRESS_PICKUP_X,
     B_PRESS_PICKUP_Y,
     PIT_AVOID_MARGIN,
@@ -1130,7 +1132,7 @@ def state_machine_walk_to_near_enemy(
         _approach_lane_y(actor, target, context, alongside=alongside),
         stop_dx=stop_dx,
         lane_slack=PUNCH_RANGE_Y,
-        inner_dx=punch_usable_inner_x(actor.character_id),
+        inner_dx=punch_inner_for(actor, target),
         side=side,
     )
     # The target stops counting as a hazard only once the actor is alongside
@@ -2369,9 +2371,11 @@ def state_machine_handle_mr_x_dialog(
     if dialog is None:
         press_no_button(gamepad)
         return
-    # $120EC reads *held* +$54: Down sets bit 3 (NO), a face bit confirms.
-    if not dialog.selects_no:
-        gamepad.hold(DOWN_MASK)
+    # $120EC reads *held* +$54: Down sets bit 3 (NO), Up clears it (YES), a
+    # face bit confirms. YES only under the harness's DebugMrXAccept.
+    accept = find(context, DebugMrXAccept) is not None
+    if dialog.selects_no == accept:
+        gamepad.hold(UP_MASK if accept else DOWN_MASK)
         return
     _press(gamepad, PUNCH_MASK, frames=DIALOG_FRAMES)
 

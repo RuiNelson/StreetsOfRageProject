@@ -1200,6 +1200,24 @@ class DetermineEmergencyTokenConditionTests(unittest.TestCase):
         self.assertEqual(len(verbs), 1)
         self.assertIsInstance(verbs[0], OpenBreakable)
 
+    def test_a_round_8_table_outranks_a_punch_at_an_enemy(self) -> None:
+        # User: "Tens de fazer com que a AI destrua as mesas com alta
+        # prioridade!" -- even walking to it beats striking a grunt.
+        myself = _myself(world_x=0, world_y=64)
+        table = Breakable(slot="obj01", world_x=120, world_y=64, type_id=0x45)
+        enemy = _enemy("obj02", CombatPhase.NORMAL)
+        context = {
+            myself,
+            table,
+            enemy,
+            OpenBreakable(actor_slot="P1", target_slot="obj01"),
+            Punch(actor_slot="P1", target_slot="obj02"),
+        }
+
+        verbs = find_all(determine_priority_verb(context), Verb)
+
+        self.assertIsInstance(verbs[0], OpenBreakable)
+
     def test_open_breakable_picks_the_closer_of_two_candidates(self) -> None:
         # could_open_breakable (decide.py) does not pre-select the nearest
         # breakable -- this is determine_priority_verb's job, via

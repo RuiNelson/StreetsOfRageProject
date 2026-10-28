@@ -83,7 +83,7 @@ from .tokens import (
     is_weapon_type,
 )
 from .tokens import CallPolice
-from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDialog
+from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDialog, PlayerDuel, RivalPlayer
 from .tokens import Context, Token, find, find_all
 from .tokens import (
     CatchUpPartner,
@@ -368,6 +368,11 @@ def could_rear_attack(context: Context) -> Context:
             target = find(context, Enemy, slot=target_slot)
             if target is None or not reach.enemy_behind_actor(actor, target):
                 continue
+            if isinstance(target, RivalPlayer):
+                # Measured live in the betrayal duel: 11 hits from 340 chord
+                # ticks, and 2340 ticks of it with the rival 9 px behind for
+                # one hit. Turning and punching is the answer.
+                continue
             if isinstance(
                 target, (Souther, Antonio, Bongo, Abadede, Jack, Onihime, MrX)
             ) or is_office_helper(context, target):
@@ -512,7 +517,7 @@ def could_hold_actions(context: Context) -> Context:
         if base in ACTION_HOLD_CROSSOVER:
             continue
 
-        if actor.is_holding_player:
+        if actor.is_holding_player and find(context, PlayerDuel) is None:
             # The body in hand is the partner: walking into the other player
             # takes this same hold ($4478's grab contact, then $3266), and
             # every move below would land on them. The reported case was
@@ -1375,6 +1380,11 @@ def could_call_police(context: Context) -> Context:
     if find(context, DebugNoPolice) is not None:
         # The harness's --no-police (user: "just don't test with the police on").
         return verbs
+    if find(context, PlayerDuel) is not None:
+        # $4478 returns at once while a police special is active and the
+        # special sweeps enemies only: against the other player it is spent
+        # for nothing.
+        return verbs
     if live_twins(context) or live_mr_x(context):
         # Never against the twins, not even as the panic button (user: "Do
         # not call the police ... must not be used as fallback strategies"),
@@ -1563,6 +1573,11 @@ def could_jump_attack(context: Context) -> Context:
             # the air. EngageJack.
             for jack in find_all(context, Jack):
                 target_slots.discard(jack.slot)
+            # The other player in the betrayal duel neither: measured live,
+            # 5 hits from 3262 ticks of kicks at them, against a punch's 1 in
+            # 20.
+            for rival in find_all(context, RivalPlayer):
+                target_slots.discard(rival.slot)
             # The twins neither: a kick turns the actor at them and leaves it
             # in the air where the grab twin's jump-in lands. EngageTwins.
             for twin in find_all(context, Onihime):
@@ -1800,6 +1815,10 @@ def could_engage_mr_x(context: Context) -> Context:
     """
 
     verbs: set[Token] = set()
+    if find(context, PlayerDuel) is not None:
+        # The betrayal duel runs before he steps out: the other player is the
+        # one to fight, and "home, facing the wall" would stand it out.
+        return verbs
     targets = live_mr_x(context)
     if not targets and not office_helpers(context):
         return verbs

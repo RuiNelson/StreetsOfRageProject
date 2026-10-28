@@ -20,10 +20,11 @@ from sor_autoplay.state import GameSnapshot, PlayerSnapshot
 from sor_autoplay.world_map import MapEntity
 
 from .tokens import Myself, Partner
-from .tokens import Boss, Enemy, Grunt, Jack, Nora, enemy_class_for_type
-from .tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, MrXOffice, Stage
+from .tokens import Boss, Enemy, Grunt, Jack, Nora, RivalPlayer, enemy_class_for_type
+from .tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, MrXOffice, PlayerDuel, Stage
 from .tokens import Breakable, Pit, Press, Projectile, Wall
 from .press import PRESS_TYPE
+from .reach import TABLE_TYPE_ID
 from . import grunt as grunt_model
 from .tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
 from .tokens import Weapon, build_pickup_token
@@ -164,6 +165,54 @@ def _find_player_entity(snapshot: GameSnapshot, player_index: int) -> MapEntity 
         if entity.kind == "player" and entity.slot == slot:
             return entity
     return None
+
+
+# The other player's own phase, read as an enemy's: held by the actor is a
+# body in hand, a knockdown or a throw's flight a punish window, a strike a
+# committed attack. Holding a weapon or a body does not make them less of a
+# target, so it stays NORMAL.
+_RIVAL_PHASES = {
+    CombatPhase.HELD_BY_ENEMY: CombatPhase.GRABBED,
+    CombatPhase.HURT_PLAYER: CombatPhase.KNOCKDOWN,
+    CombatPhase.ATTACKING: CombatPhase.ATTACKING,
+}
+
+
+def _build_rival_player(*, player_snapshot: PlayerSnapshot, entity: MapEntity) -> RivalPlayer:
+    """The other player during the betrayal duel, as an enemy (``RivalPlayer``)."""
+
+    return RivalPlayer(
+        slot=f"P{player_snapshot.index}",
+        player_index=player_snapshot.index,
+        character_id=player_snapshot.character_id,
+        type_id=entity.type_id,
+        targets_player=None,
+        world_x=entity.world_x,
+        world_y=entity.world_y,
+        health=player_snapshot.health if player_snapshot.health is not None else 0,
+        combat_phase=_RIVAL_PHASES.get(entity.combat_phase, CombatPhase.NORMAL),
+        facing_left=entity.facing_left,
+        world_z=entity.world_z,
+        hitbox=entity.hitbox,
+        action_state=entity.action_state,
+        is_airborne=entity.is_airborne,
+        raw=entity.raw,
+    )
+
+
+def _table_at_rest(entity: MapEntity) -> bool:
+    """Round 8's table (type ``$45``) armed (``+$30`` nonzero) but standing
+    still: no X or lane velocity. Measured live in the corridor, tables at
+    ``+$30`` = 1 sit for seconds at a time with ``+$1C`` = 0 (the variant
+    ``$75DC`` never gives a throw velocity), and read as zero-velocity
+    projectiles they sent ``ProjectileSidestep`` round them forever. A thrown
+    one moves, and stays a ``Projectile`` for ``HitTable``/the sidestep."""
+
+    return (
+        entity.type_id == TABLE_TYPE_ID
+        and entity.vel_x == 0
+        and entity.boss_vel_lane == 0
+    )
 
 
 def _build_playable_character(
@@ -311,11 +360,18 @@ def generate_direct_observation_tokens(
         if animation is not None:
             context.add(animation)
 
+    duel = bool(snapshot.mr_x_offer_flag and snapshot.duel_damage_modifier)
+    if duel:
+        context.add(PlayerDuel())
     partner_index = 2 if player_index == 1 else 1
     partner_snapshot = snapshot.players[partner_index - 1]
     if partner_snapshot.is_playable:
         partner_entity = _find_player_entity(snapshot, partner_index)
-        if partner_entity is not None:
+        if partner_entity is not None and duel:
+            # Mr. X's betrayal duel: the other player is the enemy now, and
+            # without a Partner token no partner courtesy runs.
+            context.add(_build_rival_player(player_snapshot=partner_snapshot, entity=partner_entity))
+        elif partner_entity is not None:
             partner_slot = f"P{partner_index}"
             partner_hold_ticks = (
                 hold_tracker.update(
@@ -440,6 +496,19 @@ def generate_direct_observation_tokens(
                     held_weapon_type=entity.held_type,
                     raw=entity.raw,
                     **extra,
+                )
+            )
+        elif entity.kind == "projectile" and _table_at_rest(entity):
+            # Round 8's table standing on the floor: furniture to break, not a
+            # throw to dodge (user: "Estão encravados nas mesas! Tens de fazer
+            # com que a AI destrua as mesas com alta prioridade!").
+            context.add(
+                Breakable(
+                    slot=entity.slot,
+                    world_x=entity.world_x,
+                    world_y=entity.world_y,
+                    type_id=entity.type_id,
+                    hitbox=entity.hitbox,
                 )
             )
         elif entity.kind == "projectile":

@@ -66,6 +66,7 @@ from .tokens import (
     Pit,
     Projectile,
     PUNCH_RANGE_Y,
+    RivalPlayer,
     Souther,
     SixButtonLayout,
     Stage,
@@ -491,13 +492,17 @@ def held_enemy(actor: PlayableCharacter, enemies: list[Enemy]) -> Enemy | None:
     ``None`` too while (1) names the other player
     (``PlayableCharacter.is_holding_player``): no enemy is in hand then, and
     (2) and (3) would name a bystander for the hold family to knee and
-    suplex *through* the partner.
+    suplex *through* the partner -- unless the betrayal duel has made them a
+    ``RivalPlayer``, who is then the enemy in hand.
     """
 
     if not actor.is_holding_enemy:
         return None
     if actor.is_holding_player:
-        return None
+        # Mr. X's betrayal duel makes the other player an enemy
+        # (``RivalPlayer``, slot ``P1``/``P2``); outside it no enemy has
+        # that slot, and the partner in hand is nobody's to knee.
+        return next((e for e in enemies if e.slot == actor.held_enemy_slot), None)
     if actor.held_enemy_slot is not None:
         for enemy in enemies:
             if enemy.slot == actor.held_enemy_slot:
@@ -592,7 +597,28 @@ def in_punch_band(actor: PlayableCharacter, enemy: Character) -> bool:
     # The *usable* inner edge: a body centred just inside the box's own edge
     # still overlaps it, and treating it as unhittable had the AI dithering
     # in punching range (see tokens/character.py's BODY_OVERLAP_X).
-    return punch_usable_inner_x(actor.character_id) <= dx <= outer
+    return punch_inner_for(actor, enemy) <= dx <= outer
+
+
+def punch_inner_for(actor: PlayableCharacter, enemy: Character) -> int:
+    """The nearest on X ``enemy`` can stand and still be punched: the
+    usable inner edge, or for the other player the measured one
+    (``RIVAL_PUNCH_MIN_X``). The band and the walk's goal both read it, so
+    the walk never stops where the punch is not offered."""
+
+    if isinstance(enemy, RivalPlayer):
+        return max(punch_inner_x(actor.character_id), RIVAL_PUNCH_MIN_X)
+    return punch_usable_inner_x(actor.character_id)
+
+
+# The nearest a punch lands on the other player (Mr. X's betrayal duel),
+# measured, not decoded: over six live duels (29,000 punch ticks within 15
+# lanes), 12-19 px landed 125 hits in 17,150 ticks (under 1%), 20 px and more
+# 23%. An enemy's body is judged by BODY_OVERLAP_X either side of its origin;
+# a player's +$70 is narrow and sits on the side it faces, and testing the
+# punch box against that cached box still allowed 16-19 px (the box test was
+# tried live, cand6: 1026 punches from 16-23 px, none landed).
+RIVAL_PUNCH_MIN_X = 20
 
 
 def punch_would_connect(actor: PlayableCharacter, enemy: Character) -> bool:

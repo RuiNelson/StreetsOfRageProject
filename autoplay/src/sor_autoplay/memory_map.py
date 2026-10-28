@@ -70,6 +70,10 @@ PAUSE_FLAG_PAUSED = 0x03
 # Mr. X final offer (round 8); see story-mode-and-campaign-flow.md.
 ADDR_MR_X_OFFER_FLAG = 0xFFDE00
 ADDR_MR_X_OFFER_STATE = 0xFFDE04
+# Set by $11FA8 (mr_x_offer_start_duel) when the two players answer Mr. X
+# differently, cleared by $11E72 (mr_x_offer_wait_duel_end): nonzero for
+# exactly the P1-versus-P2 fight (story-mode-and-campaign-flow.md §7.4).
+ADDR_DUEL_DAMAGE_MODIFIER = 0xFFFA43
 ADDR_BAD_ENDING_SELECTED = 0xFFDE10
 
 # OPTIONS control layout (0 = standard A=special, B=attack, C=jump).

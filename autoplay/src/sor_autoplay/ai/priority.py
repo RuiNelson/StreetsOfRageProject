@@ -296,6 +296,13 @@ _EMERGENCY_THROW_PEPPER = 25
 # own scale rather than a different verb.
 _EMERGENCY_OPEN_BREAKABLE_IN_RANGE = 16
 _EMERGENCY_OPEN_BREAKABLE_APPROACH = 14
+# Round 8's tables at rest (user: "Tens de fazer com que a AI destrua as
+# mesas com alta prioridade!"): over every approach to an enemy (21 at most)
+# and the plain strikes (punch 20), under the bosses' engages and the
+# emergencies of a committed attack.
+_EMERGENCY_OPEN_TABLE_IN_RANGE = 40
+_EMERGENCY_OPEN_TABLE_APPROACH = 32
+_EMERGENCY_OPEN_TABLE_FLOOR = 24
 # WalkToNearEnemy's floor is 8 (see below), and an enemy is present on screen
 # almost continuously in this game, so any tier at or under 8 can *never* win
 # against it -- not "loses when an enemy is close", but mathematically
@@ -811,9 +818,17 @@ def _emergency_open_breakable(verb: OpenBreakable, context: Context) -> int:
     actor = _find_actor(context, verb.actor_slot)
     if target is None or actor is None:
         return _EMERGENCY_DEFAULT
+    table = target.type_id == reach.TABLE_TYPE_ID
     if in_smash_range(actor, target):
-        return _EMERGENCY_OPEN_BREAKABLE_IN_RANGE
+        return _EMERGENCY_OPEN_TABLE_IN_RANGE if table else _EMERGENCY_OPEN_BREAKABLE_IN_RANGE
     distance = math.hypot(target.world_x - actor.world_x, target.world_y - actor.world_y)
+    if table:
+        return _distance_emergency(
+            distance,
+            base=_EMERGENCY_OPEN_TABLE_APPROACH,
+            floor=_EMERGENCY_OPEN_TABLE_FLOOR,
+            step_px=15,
+        )
     return _distance_emergency(
         distance, base=_EMERGENCY_OPEN_BREAKABLE_APPROACH, floor=8, step_px=15
     )

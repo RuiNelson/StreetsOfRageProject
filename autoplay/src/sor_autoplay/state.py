@@ -125,6 +125,9 @@ class GameSnapshot:
     # the per-player choice bits live on ``PlayerSnapshot``.
     mr_x_offer_flag: int = 0
     mr_x_offer_state: int = 0
+    # $FFFA43 (duel_damage_modifier): nonzero while the two players fight
+    # each other after answering Mr. X differently.
+    duel_damage_modifier: int = 0
     raw: dict[str, int] = field(default_factory=dict, repr=False)
 
     @property
@@ -274,6 +277,7 @@ def snapshot_from_memory_blocks(
     blockmap_stride: int = 0,
     mr_x_offer_flag: int = 0,
     mr_x_offer_state: int = 0,
+    duel_damage_modifier: int = 0,
     uptime_frames: int = 0,
     connected: bool = True,
     error: str | None = None,
@@ -433,6 +437,7 @@ def snapshot_from_memory_blocks(
         error=error,
         mr_x_offer_flag=mr_x_offer_flag & 0xFF,
         mr_x_offer_state=mr_x_offer_state & 0xFFFF,
+        duel_damage_modifier=duel_damage_modifier & 0xFF,
         raw={
             "uptime_frames": uptime_frames,
             "game_state": game_state,
@@ -454,6 +459,7 @@ def snapshot_from_memory_blocks(
             "blockmap_stride": blockmap_stride,
             "mr_x_offer_flag": mr_x_offer_flag & 0xFF,
             "mr_x_offer_state": mr_x_offer_state & 0xFF,
+            "duel_damage_modifier": duel_damage_modifier & 0xFF,
             "p1_obj59": p1_obj59 & 0xFF,
             "p2_obj59": p2_obj59 & 0xFF,
             "p1_name_entry": int(p1.name_entry_active),
@@ -513,6 +519,7 @@ def read_snapshot(
     police_blob = client.read_memory(mm.ADDR_POLICE_SPECIAL_ACTIVE, 3)
     # DE00 flag (B), DE04 state (W big-endian). Need 6 bytes to include DE05.
     mr_x_blob = client.read_memory(mm.ADDR_MR_X_OFFER_FLAG, 6)
+    duel_damage_modifier = client.read_memory(mm.ADDR_DUEL_DAMAGE_MODIFIER, 1)[0]
     stride = int.from_bytes(
         client.read_memory(mm.ADDR_PRIMARY_BLOCKMAP_STRIDE, 2), "big"
     )
@@ -539,6 +546,7 @@ def read_snapshot(
         blockmap_stride=stride,
         mr_x_offer_flag=mr_x_blob[0],
         mr_x_offer_state=int.from_bytes(mr_x_blob[4:6], "big"),
+        duel_damage_modifier=duel_damage_modifier,
         uptime_frames=uptime_frames,
         connected=True,
         rom=rom,
@@ -582,6 +590,7 @@ def snapshot_from_work_ram(
     )
     police_blob = _window(mm.ADDR_POLICE_SPECIAL_ACTIVE, 3) or b"\0\0\0"
     mr_x_blob = _window(mm.ADDR_MR_X_OFFER_FLAG, 6) or bytes(6)
+    duel_damage_modifier = (_window(mm.ADDR_DUEL_DAMAGE_MODIFIER, 1) or b"\0")[0]
     actors = _window(mm.ADDR_P1_OBJECT, ACTORS_BYTES)
     collision_map = (
         _window(mm.ADDR_LEVEL_COLLISION_CLASS_MAP, stride * 0x18)
@@ -602,6 +611,7 @@ def snapshot_from_work_ram(
         blockmap_stride=stride if collision_map else 0,
         mr_x_offer_flag=mr_x_blob[0],
         mr_x_offer_state=int.from_bytes(mr_x_blob[4:6], "big"),
+        duel_damage_modifier=duel_damage_modifier,
         uptime_frames=uptime_frames,
         connected=True,
         rom=rom,

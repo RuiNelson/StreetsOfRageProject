@@ -252,6 +252,30 @@ class Jack(Grunt):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RivalPlayer(Enemy):
+    """The other player, during Mr. X's betrayal duel (``PlayerDuel``).
+
+    ``observe`` builds this instead of a ``Partner`` while the duel lasts, so
+    every generic verb fights them and every partner courtesy -- friendly
+    fire, the partner pad, the item rule, the catch-up -- is off without
+    asking: none of them runs without a ``Partner`` token. The ROM agrees:
+    ``$4478 (resolve_player_vs_player_collision)`` tests the attacker's
+    ``+$64`` against the other player's ``+$70`` the way ``$450C`` tests an
+    enemy's body, and a walking box with no damage out takes the same hold.
+
+    ``slot`` is ``P1``/``P2``, the name ``+$4C`` decodes to, so a hold on them
+    is a hold on this enemy (``reach.held_enemy``). ``hitbox`` is their own
+    cached body box. ``attack_ranges`` is empty: their strikes are not
+    modelled, so nothing reads them as incoming.
+    """
+
+    player_index: int
+    character_id: int | None = None
+    action_state: int = 0
+    is_airborne: bool = False
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Boss(Enemy, ABC):
     """A boss enemy with its own tactical state and behaviour fields."""
 

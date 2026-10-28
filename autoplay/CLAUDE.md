@@ -1686,6 +1686,112 @@ dead Garcia's replacement is not modelled; a whole-fight offline simulator
 (hold loop, hit reactions, respawns) was started from `$1353A`'s decode and
 not finished; Axel and Adam have not been run live against him.
 
+**Mr. X's betrayal duel** (user, in Portuguese: "Quando 2 jogadores chegam ao
+Mr. X, ele faz-lhes uma proposta, se um disser 'não' e o outro 'sim',
+significa que traíram um ao outro, e têm de lutar um contra o outro, a aí deve
+sempre dizer 'não' ao Mr. X, mas se estiver a jogar com um humano, o humano
+pode dizer 'sim', e terem de lutar os dois. Neste momento a AI não luta contra
+o humano"; and for the survivor's second question: the bad ending, which is
+**NO** -- see below). The ROM (`story-mode-and-campaign-flow.md` §7.3-7.4,
+every routine of `$11B94 (mr_x_offer_jt)` now named in `labels.csv`):
+
+- One player: YES is `$0B` -- "Here's your reward" and a restart at round 6
+  (`$FF36` then skips the question on the next visit) -- and NO is `$12`, the
+  fight. **One player never gets the bad ending.**
+- Two players: `$11F74 (mr_x_offer_compare_2p_choices)` sends two YES to the
+  round-6 restart, two NO to the fight, and two different answers to `$11FA8
+  (mr_x_offer_start_duel)`: `$FFFA43 (duel_damage_modifier)` set (damage
+  tripled), level music, control back. `$11E72 (mr_x_offer_wait_duel_end)`
+  waits for `p1/p2_out_or_continue_flag` and clears the byte; the survivor is
+  asked again (`$12028`): **YES** is the round-6 restart (`$1206C` -> `$0B`),
+  **NO** is the bad ending -- `$12074 (mr_x_offer_mark_bad_ending)`, "Die,
+  traitor!", then the fight with Mr. X, and `round_clear_select_ending` shows
+  the bad ending after it. The user asked for "sim" there to reach the bad
+  ending; shown the decode, they chose the bad ending, so `HandleMrXDialog`
+  keeps answering NO to both questions.
+
+What the AI does: while `$FFDE00` and `$FFFA43` are both set, `observe` adds
+`PlayerDuel` and builds the other player as a **`RivalPlayer`** (an `Enemy`,
+slot `P1`/`P2`, their own `+$70` body box, the player phase read as an
+enemy's: held -> `GRABBED`, knockdown/thrown -> `KNOCKDOWN`, strike ->
+`ATTACKING`) instead of a `Partner`. With no `Partner` token every partner
+courtesy is off at once -- `do_not_harm_partner`, the partner pad, the item
+rule, `CatchUpPartner`, `PartnerFightTracker` -- and the generic verbs fight
+the rival: `$4478 (resolve_player_vs_player_collision)` is `$450C`'s box test
+against the other player's body, and a walking box with no damage out takes
+the same hold. `reach.held_enemy` names the rival when `+$4C` does, so a hold
+on them runs the ordinary chain instead of `ReleasePartner`.
+`could_engage_mr_x` stands down (the office's targetless "home" engage would
+stand the duel out), and `could_call_police` too (`$4478` returns while a
+special runs, and the special sweeps enemies only). Not modelled: the rival's
+own strikes (`attack_ranges` is empty, so nothing reads them as incoming) and
+the tripled damage; no lookahead.
+
+What the live runs taught, each from the per-tick rows (hits credited to the
+attacker's last verb in the 12 ticks before the rival's health drops):
+
+- **Only the punch lands on a player.** Over the first duel, `Punch` landed
+  209 + 52 hits, `JumpAttack` 5 in 3262 ticks, `RearAttack` 11 in 340 -- and
+  one Axel spent 2340 ticks of chords on a Blaze 9 px behind him for a single
+  hit (user, watching: "axel is throwing punches hitting nobody and blaze is
+  standing still"). Why the ROM does not land them on a player is not
+  decoded (`$4478` gates on `$45D4`, which reads the chord `$20` and the jumps
+  as 2, eligible); `could_rear_attack` and the grounded `could_jump_attack`
+  skip a `RivalPlayer`, and turning to punch takes their place.
+- **A punch at a player is box against body** (user, with screenshots of the
+  two standing on each other: "many times it arrives at a point like this,
+  where they are basically at the same spot and trying to punch, but not
+  hitting any of them"; "A contecer de novo!"). 3321 punch ticks with the
+  rival 9-15 px away landed nothing, and so did 4889 from exactly 16 px --
+  Axel's inner edge. Over six duels (29,000 punch ticks within 15 lanes):
+
+  | X distance (px) | 12-15 | 16-19 | 20-23 | 28-31 | 44-51 |
+  | --- | --- | --- | --- | --- | --- |
+  | punch ticks | 3427 | 13721 | 1458 | 985 | 5350 |
+  | landed | 0.4% | 0.8% | 23% | 31% | 23% |
+
+  The band's usable inner edge assumes an enemy body reaching
+  `BODY_OVERLAP_X` either side of its origin; a player's `+$70` is narrow
+  and sits on the side it faces (Blaze idle -12..-2 facing left, +2..+12
+  right; Axel -13..0 / 0..+13). Testing the punch box against that cached box
+  was tried live and still allowed 16-19 px (1026 punches face to face, none
+  landed), so `reach.in_punch_band` takes the measured edge for a
+  `RivalPlayer`: `RIVAL_PUNCH_MIN_X` (20) or the punch's own inner edge,
+  whichever is larger. Closer, no punch is offered and `WalkToNearEnemy`
+  steps to its stop point, just inside the punch's outer edge. Why the ROM
+  misses there is not decoded.
+
+Measured with `tools/mr_x_duel_fight.py` (P1 and P2 both AIs, P2 joining on
+round 1 -- `$115CC` refuses a join on round 8 -- then the level cheat and
+`--kill-until-mr-x`; `--accept 2` gives P2 the harness's `DebugMrXAccept`
+(`autoplay --mr-x-accept PLAYER`, held Up), so the answers differ;
+`--blind 1` hides the duel from P1, which is the AI before this change; food
+and police off, a fresh `--turbo 2 --silent` host per fight):
+
+Blaze (P1, refuses) against Axel (P2, accepts), 150 s of duel per run (an AI
+continues at game over, so `$11E72` never sees a player out and a duel between
+two AIs does not end on its own -- the first ran 375 s, P1 continuing three
+times); damage dealt is the other seat's damage taken:
+
+| code | runs | P1 dealt | P2 dealt | notes |
+| --- | --- | --- | --- | --- |
+| before (`--blind 1`) | 2 | **0, 0** | 0 / 387 | P1 stood under `WalkToAdvanceStage` the whole duel |
+| `RivalPlayer` | 1 | 72 | 111 | Axel 2340 ticks of rear attacks on a Blaze 9 px behind (base1's P2) |
+| + no chord or grounded kick at the rival, tables | 2 | 60, 30 | 372, 147 | both 16 px apart, 9-15 lanes off, punching the air |
+| + the punch's box inner edge | 1 | 54 | 150 | Blaze walking 6819 ticks |
+| + the punch box against the cached `+$70` | 1 | 12 | 120 | face to face at 16-23 px, nothing lands |
+| + `RIVAL_PUNCH_MIN_X` (20) | 1 | 18 | 153 | **stalemate**: both 17 px apart under `WalkToNearEnemy`, standing still |
+| + the walk's goal at the same edge (`reach.punch_inner_for`) | 0 | -- | -- | **not measured live** (the user stopped the runs) |
+
+The stalemate in the last measured row was the walk's goal region
+(`nav.strike_goal`'s `inner_dx`) still using an enemy's usable inner edge, so
+at 17 px the walk had arrived while the punch was not offered; the goal now
+reads `reach.punch_inner_for`, the band's own edge, and
+`test_backs_off_a_rival_too_close_to_punch` pins the step back. Two AIs
+against each other may still circle each other; that is untested.
+
+**Not run against a human partner.**
+
 **Round 8's thrown tables** (user: "No nível 8, de vez em quando o jogo
 atira umas mesas contra o jogador, a IA deve detetar se estão em linha com
 ela, e se for o caso, fugir delas, ou se for estiver demasiado perto,
@@ -1736,6 +1842,26 @@ all. `ProjectileSidestep` needed no changes: once `$45` is a real
 gate already covers the flee half. A second live run against the fixed AI
 produced 36 `ProjectileSidestep`s and 13 `HitTable`s with no hit
 attributable to an armed, in-lane table.
+
+**Round 8's tables at rest** (user, watching a two-player walk to the office:
+"Estão encravados nas mesas! Tens de fazer com que a AI destrua as mesas com
+alta prioridade!"). Most `$45` tables in round 8's corridor never fly: armed
+(`+$30` = 1) with no velocity -- measured live, tables at (1360..1576, 40/104)
+sat for seconds with `+$1C` = 0, 64 px wide. Read as zero-velocity
+`Projectile`s, they sent `ProjectileSidestep` round them for as long as they
+were on screen, and nothing ever broke them. `observe._table_at_rest` (type
+`$45`, no X or lane velocity) now builds them as `Breakable`s -- `OpenBreakable`
+walks in and punches them, and the stage advance waits on them like on any prop
+on the path -- and `priority._emergency_open_breakable` gives a table its own
+tiers: 40 in smash range, 32 down to 24 on the approach, over every walk to an
+enemy and the plain strikes (punch 20), under the bosses' engages. A table that
+moves (thrown, or knocked away by the punch) stays a `Projectile` for
+`HitTable`/the sidestep. Live, on the same corridor: the four tables broken in
+about 3 s by both AIs, the camera moving on (it had stood at 1359-1362).
+Tests: `test_observe.Round8TableTests`, `test_priority`'s
+`test_a_round_8_table_outranks_a_punch_at_an_enemy`. Not measured: a 1P round-8
+walk, and whether a table has a push-back rectangle (`prop_solids` gives `$45`
+its default record).
 
 **Jack: the ROM model and the plan** (user: "A AI tem sérias dificuldades em
 lidar com o inimigo do tipo Jack ... É essencial construir uma estratégia para
@@ -2977,7 +3103,7 @@ entry points in this tree.
 
 | Piece | Role |
 | --- | --- |
-| `tokens/` | All token classes (including ABCs), split by kind; the package `__init__` re-exports everything. `tokens/tokens.py` (`Token`/`Information`/`Verb` base classes, `Context`, `find`/`find_all`; `Information` splits into `Observed` (directly read from RAM) and `Inferred` (derived from observed tokens)); `tokens/character.py` (`Character` common actor base (`slot`, position, health, facing, combat phase); `Myself`/`Partner` (`player_index`, `action_state`, `action_flags`, `is_airborne`, punch inner/outer helpers, `vel_x` from player `+$1C` -- the word Antonio's kick gate reads -- and their own `hitbox` -- read straight from the object's own cached box at `+$70`, never reconstructed, and carrying no `attack_ranges`: a player's reach is this module's punch/rear/jump-kick geometry, not a per-frame extraction)); `tokens/enemy.py` (`Enemy` (a `Character`; adds `type_id`, `targets_player`, the formal `hitbox`/`attack_ranges` value objects plus the `max_reach`/`min_reach` helpers derived from them, `is_defeated` (the ROM's lethal check is **signed**, so a health word of `$8000`-`$FFFF` is already a corpse while the object sits in its slot with a stale action family -- judging "still a target" from `combat_phase` alone kept the AI walking to, ranking and punching bodies, which is what "attacking enemies that are not there" looks like from the sofa; zero health is *not* defeated and still owes a finishing hit) -- value objects rather than tokens, since a token may never embed a token by value, `held_weapon_type` (pickup `$08-$0C` while this enemy is holding one, else 0 -- ordinary enemies do not store this at `+$60`; observe copies `MapEntity.held_type`, which `world_map` resolves from the held weapon's `+$52` holder pointer), `grunt_vel_x`/`grunt_vel_y` -- ordinary-enemy-only velocity, defaulted to 0 and unused by `Boss`, which keeps its own separately offset `vel_x`/`vel_z` -- and `predict_position_after_n_frames(n)`, the enemy's own constant-velocity extrapolation in **60 Hz game frames** (the unit `$17AB8` integrates `+$1C`/`+$20` in, *not* AI poll ticks, which are ~2 frames each at the 33ms default), which every lead time in `ai/kinematics.py` is built on and which a `Boss` answers with its current position since it never populates those fields) + subclasses: `Grunt` (ordinary types `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`; carries the ROM's own `stun_timer` at `+$50` plus `is_stunned`, an ordinary-enemy-only field since both stun handlers are ordinary state-table entries; `Nora` additionally carries `ticks_since_last_attack`, cross-tick memory maintained by `observe.NoraAttackTracker` -- not a RAM field, defaulted to `NORA_TICKS_SINCE_ATTACK_UNKNOWN` for any `Nora` built without going through the tracker), `Boss` → direct subclasses `Abadede`/`MrX`/`Souther`/`Antonio`/`Bongo`/`Onihime` (`Boss` also carries `primary_state`, the `+$30` byte Antonio's kick is); `enemy_class_for_type`; `Surrounded`, the one `Inferred` judgment left about enemies (three or more live enemies inside the close box around the actor, or a pincer with one on each side; produced by `inference.check_for_surrounded`, the only function `inference.py` still has); `GrabReason` -- `CLEAR_REAR`/`DEAD_ZONE`/`WHILE_SURROUNDED`/`DODGE_CHARGE` -- an `Enum`, not a token field: it is the return type of `reach.grab_reasons(context, actor, target, enemies) -> frozenset[GrabReason]`, why a hold beats a strike; most reasons are `Grunt`-only, and neither boss with a plan has one: `EngageAntonio` and `EngageSouther` walk into them themselves, so no `GrabEnemy` is ever produced for either. `WHILE_SURROUNDED` is the only reason keyed on the actor's own situation (`reach.actor_is_surrounded`) rather than on the candidate enemy -- see `AI.md`'s "Judging without a cache" for why this, and every other judgment formerly produced by `inference.py`'s `check_for_*` functions (`ClosingEnemy`, `TargetInReach`/`ReachKind`, `IncomingMelee`, `PunishWindow`, `IncomingProjectile`, `WeaponUpgrade`, `AntonioIsGoingToKick`, `SoutherIsGoingToSlash`, `SoutherPunishesJump`, `SafeSpot`), is now a direct `reach.py` (or, for `SafeSpot`, `execute.py`) function call at each site that needs the answer instead of a token written into the context once per tick; `tokens/essential.py` (`Essential` (scene-wide observations `Stage`/`CameraRange`/`AnimationInProgress`/`InContinueMenu`/`InMrXDialog`)); `tokens/dialog_verbs.py` (`Dialog` groups UI-prompt verbs `HandleContinueMenu`/`HandleMrXDialog` -- always Yes + initials `AI `, always No to Mr. X); `tokens/hazard_tokens.py` (`Projectile` -- Antonio's `$96` boomerang also carries the rest of its later-boss object, `vel_x` being its `+$1C`, for `antonio.BoomerangSim` --, `StageObjects` (`Breakable` -- carries its real `hitbox`, `Pit`)); `tokens/pickup_tokens.py` (`Weapon` (with its real `hitbox`) + consumable `Pickup` hierarchy + `weapon_rank`); `tokens/walk_verbs.py` (`WalkToNearEnemy`, `RetreatFromDanger` (give up ground to a dangerous enemy not yet actionable -- only while hurt or `Surrounded`, per `decide._retreat_is_worth_it`; danger alone is not enough), `ProjectileSidestep` (step off a projectile's own lane rather than block its path, once `reach.projectile_threatens` judges it a threat -- built for Jack's thrown axe/torch (type `$28`), but reacts to any projectile judged a threat), `EngageAntonio` (the whole approach to Antonio, planned by `antonio.plan_engage`'s lookahead over his own AI; the hold is the contact result of the walk, armed or not), `EngageSouther` (the whole approach to Souther -- corridor, lane escape, walk-in -- planned by `souther.plan_engage`; the hold is the contact result of the walk, armed or not), `WalkToAdvanceStage`, `CatchUpPartner` (follow a partner who is further along the stage, `WalkToAdvanceStage`'s replacement beside one -- see **Following a partner who is ahead**), `WalkToWeapon`, `WalkToPickup`); `tokens/attack_verbs.py` (`Punch` (unarmed only), `HitAntonioBoomerang` (timed B-punch that knocks his type-`$96` boomerang away the moment it would hit), `MeleeWeaponAttack` (armed melee -- same B input as `Punch`, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`/`ReleaseToRegrab`, and `ReleasePartner` -- the only one offered while the body in hand is the other player), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat (`Punch`/`JumpAttack`/`RearAttack`); `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`, the only two the ROM attack-throws)); `tokens/police_verb.py` (`CallPolice` — an `Attack` descendant, health-critical only and only with at least one live enemy); `tokens/recovery_verbs.py` (`Recovery` groups actions that escape/shorten a bad state rather than act on an enemy/prop/held body; `TechRecover` — the C+Up bounce-cancel landing tech, armed only by specific special/boss hold-throw choreography (`PlayableCharacter.throw_tech_ready`), not an ordinary street-enemy throw) |
+| `tokens/` | All token classes (including ABCs), split by kind; the package `__init__` re-exports everything. `tokens/tokens.py` (`Token`/`Information`/`Verb` base classes, `Context`, `find`/`find_all`; `Information` splits into `Observed` (directly read from RAM) and `Inferred` (derived from observed tokens)); `tokens/character.py` (`Character` common actor base (`slot`, position, health, facing, combat phase); `Myself`/`Partner` (`player_index`, `action_state`, `action_flags`, `is_airborne`, punch inner/outer helpers, `vel_x` from player `+$1C` -- the word Antonio's kick gate reads -- and their own `hitbox` -- read straight from the object's own cached box at `+$70`, never reconstructed, and carrying no `attack_ranges`: a player's reach is this module's punch/rear/jump-kick geometry, not a per-frame extraction)); `tokens/enemy.py` (`Enemy` (a `Character`; adds `type_id`, `targets_player`, the formal `hitbox`/`attack_ranges` value objects plus the `max_reach`/`min_reach` helpers derived from them, `is_defeated` (the ROM's lethal check is **signed**, so a health word of `$8000`-`$FFFF` is already a corpse while the object sits in its slot with a stale action family -- judging "still a target" from `combat_phase` alone kept the AI walking to, ranking and punching bodies, which is what "attacking enemies that are not there" looks like from the sofa; zero health is *not* defeated and still owes a finishing hit) -- value objects rather than tokens, since a token may never embed a token by value, `held_weapon_type` (pickup `$08-$0C` while this enemy is holding one, else 0 -- ordinary enemies do not store this at `+$60`; observe copies `MapEntity.held_type`, which `world_map` resolves from the held weapon's `+$52` holder pointer), `grunt_vel_x`/`grunt_vel_y` -- ordinary-enemy-only velocity, defaulted to 0 and unused by `Boss`, which keeps its own separately offset `vel_x`/`vel_z` -- and `predict_position_after_n_frames(n)`, the enemy's own constant-velocity extrapolation in **60 Hz game frames** (the unit `$17AB8` integrates `+$1C`/`+$20` in, *not* AI poll ticks, which are ~2 frames each at the 33ms default), which every lead time in `ai/kinematics.py` is built on and which a `Boss` answers with its current position since it never populates those fields) + subclasses: `Grunt` (ordinary types `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`; carries the ROM's own `stun_timer` at `+$50` plus `is_stunned`, an ordinary-enemy-only field since both stun handlers are ordinary state-table entries; `Nora` additionally carries `ticks_since_last_attack`, cross-tick memory maintained by `observe.NoraAttackTracker` -- not a RAM field, defaulted to `NORA_TICKS_SINCE_ATTACK_UNKNOWN` for any `Nora` built without going through the tracker), `RivalPlayer` (the other player during Mr. X's betrayal duel -- **Mr. X's betrayal duel**), `Boss` → direct subclasses `Abadede`/`MrX`/`Souther`/`Antonio`/`Bongo`/`Onihime` (`Boss` also carries `primary_state`, the `+$30` byte Antonio's kick is); `enemy_class_for_type`; `Surrounded`, the one `Inferred` judgment left about enemies (three or more live enemies inside the close box around the actor, or a pincer with one on each side; produced by `inference.check_for_surrounded`, the only function `inference.py` still has); `GrabReason` -- `CLEAR_REAR`/`DEAD_ZONE`/`WHILE_SURROUNDED`/`DODGE_CHARGE` -- an `Enum`, not a token field: it is the return type of `reach.grab_reasons(context, actor, target, enemies) -> frozenset[GrabReason]`, why a hold beats a strike; most reasons are `Grunt`-only, and neither boss with a plan has one: `EngageAntonio` and `EngageSouther` walk into them themselves, so no `GrabEnemy` is ever produced for either. `WHILE_SURROUNDED` is the only reason keyed on the actor's own situation (`reach.actor_is_surrounded`) rather than on the candidate enemy -- see `AI.md`'s "Judging without a cache" for why this, and every other judgment formerly produced by `inference.py`'s `check_for_*` functions (`ClosingEnemy`, `TargetInReach`/`ReachKind`, `IncomingMelee`, `PunishWindow`, `IncomingProjectile`, `WeaponUpgrade`, `AntonioIsGoingToKick`, `SoutherIsGoingToSlash`, `SoutherPunishesJump`, `SafeSpot`), is now a direct `reach.py` (or, for `SafeSpot`, `execute.py`) function call at each site that needs the answer instead of a token written into the context once per tick; `tokens/essential.py` (`Essential` (scene-wide observations `Stage`/`CameraRange`/`AnimationInProgress`/`InContinueMenu`/`InMrXDialog`/`PlayerDuel`, and the harness switches `DebugNoFood`/`DebugNoPolice`/`DebugMrXAccept`)); `tokens/dialog_verbs.py` (`Dialog` groups UI-prompt verbs `HandleContinueMenu`/`HandleMrXDialog` -- always Yes + initials `AI `, always No to Mr. X); `tokens/hazard_tokens.py` (`Projectile` -- Antonio's `$96` boomerang also carries the rest of its later-boss object, `vel_x` being its `+$1C`, for `antonio.BoomerangSim` --, `StageObjects` (`Breakable` -- carries its real `hitbox`, `Pit`)); `tokens/pickup_tokens.py` (`Weapon` (with its real `hitbox`) + consumable `Pickup` hierarchy + `weapon_rank`); `tokens/walk_verbs.py` (`WalkToNearEnemy`, `RetreatFromDanger` (give up ground to a dangerous enemy not yet actionable -- only while hurt or `Surrounded`, per `decide._retreat_is_worth_it`; danger alone is not enough), `ProjectileSidestep` (step off a projectile's own lane rather than block its path, once `reach.projectile_threatens` judges it a threat -- built for Jack's thrown axe/torch (type `$28`), but reacts to any projectile judged a threat), `EngageAntonio` (the whole approach to Antonio, planned by `antonio.plan_engage`'s lookahead over his own AI; the hold is the contact result of the walk, armed or not), `EngageSouther` (the whole approach to Souther -- corridor, lane escape, walk-in -- planned by `souther.plan_engage`; the hold is the contact result of the walk, armed or not), `WalkToAdvanceStage`, `CatchUpPartner` (follow a partner who is further along the stage, `WalkToAdvanceStage`'s replacement beside one -- see **Following a partner who is ahead**), `WalkToWeapon`, `WalkToPickup`); `tokens/attack_verbs.py` (`Punch` (unarmed only), `HitAntonioBoomerang` (timed B-punch that knocks his type-`$96` boomerang away the moment it would hit), `MeleeWeaponAttack` (armed melee -- same B input as `Punch`, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`/`ReleaseToRegrab`, and `ReleasePartner` -- the only one offered while the body in hand is the other player), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat (`Punch`/`JumpAttack`/`RearAttack`); `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`, the only two the ROM attack-throws)); `tokens/police_verb.py` (`CallPolice` — an `Attack` descendant, health-critical only and only with at least one live enemy); `tokens/recovery_verbs.py` (`Recovery` groups actions that escape/shorten a bad state rather than act on an enemy/prop/held body; `TechRecover` — the C+Up bounce-cancel landing tech, armed only by specific special/boss hold-throw choreography (`PlayableCharacter.throw_tech_ready`), not an ordinary street-enemy throw) |
 | `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM); free-to-act phases include `HOLDING` and `HELD_BY_ENEMY`. Fills `PlayableCharacter.held_enemy_slot` from `MapEntity.contact_slot` while the action byte is in the hold family (`$60-$6F` or the `$76`/`$80` crossover), and `HoldTracker` counts `hold_ticks` over that same family so a knee or a flip passing through an animation lock does not restart the knee budget. Also emits `InContinueMenu` from a type-`$0F` player object and `InMrXDialog` when `$FFDE00` is set and this player's `+$59` bit 4 is live. `NoraAttackTracker` is the one deliberate exception to `generate_direct_observation_tokens` otherwise being a pure function of its snapshot argument: cross-tick memory (keyed by enemy slot, one instance per `AgentLoop`) of ticks since each on-screen Nora last held a dangerous phase, reset to 0 while dangerous and incremented otherwise, feeding `Nora.ticks_since_last_attack`; `forget_missing` drops a slot the moment it stops being observed as a live Nora so a slot the game later reuses for a different enemy never inherits a stale count. `GrabStallTracker` (the old Souther walk-in timeout) is gone with the grab reason it guarded; the hold loop reads the holder's own bytes instead (`PlayableCharacter.knees_in_chain`/`hold_release_countdown`/`crossover_spent`, from `+$58`/`+$61`, `+$63` and `+$4B`) |
 | `inference.py` | `check_for_surrounded` (3+ enemies in the close box, or a pincer -- reusing `rear_attack_is_warranted`'s own box so the two judgments cannot disagree) and `generate_inference_tokens` (in practice, just `context | check_for_surrounded(context)`), the only two functions left here. Every other judgment this file used to compute once per tick and write into the context -- threat-filtered incoming projectiles, closing enemies, per-move reach bands, incoming melee, punish windows, grab opportunities, weapon upgrades, Antonio's kick gate, Souther's slash gate and jump counter, safe spots -- was removed and folded into a `reach.py` (or, for the safe-spot search, `execute.py`) function called directly by whichever `could_*`/`_emergency_*`/state machine needs the answer, several times a tick rather than once; see that row below and `AI.md`'s "Judging without a cache" for the reasoning and the full list of removed tokens |
 | `walk_verbs.py` | `WalkToNearEnemy`, `RetreatFromDanger`, `ProjectileSidestep`, `EngageAntonio`, `EngageSouther`, `EngageBongo`, `EngageAbadede`, `EngageJack`, `EngageGrunts`, `EngageTwins`, `WalkToAdvanceStage`, `CatchUpPartner`, `WalkToWeapon`, `WalkToPickup` |

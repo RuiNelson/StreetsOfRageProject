@@ -75,7 +75,10 @@ from sor_autoplay.ai.tokens import HealthPickup, Weapon
 from sor_autoplay.ai.tokens import CallPolice
 from sor_autoplay.ai.tokens import (
     HandleContinueMenu,
+    DebugMrXAccept,
     HandleMrXDialog,
+    PlayerDuel,
+    RivalPlayer,
     InContinueMenu,
     InMrXDialog,
 )
@@ -678,6 +681,27 @@ class ExecuteWalkToNearEnemyTests(unittest.TestCase):
         _settle(verb, context, gamepad)
 
         client.hold_buttons.assert_called_with(player1=DOWN, player2=0)
+
+    def test_backs_off_a_rival_too_close_to_punch(self) -> None:
+        # Mr. X's betrayal duel: 17 px from the other player no punch lands
+        # (reach.RIVAL_PUNCH_MIN_X), so the walk is not there yet -- it
+        # steps back, still facing them. Measured live: both AIs stood 17 px
+        # apart under WalkToNearEnemy for 6700 ticks while the goal region
+        # used an enemy's dead zone.
+        actor = _myself(world_x=100, world_y=60)
+        rival = RivalPlayer(
+            slot="P2", player_index=2, character_id=2, type_id=0x01, world_x=117,
+            world_y=60, health=80, combat_phase=CombatPhase.NORMAL,
+            targets_player=None, facing_left=True,
+        )
+        context = {actor, rival, PlayerDuel()}
+        verb = WalkToNearEnemy(actor_slot="P1", target_slot="P2")
+        gamepad, client = _gamepad()
+
+        _settle(verb, context, gamepad)
+
+        held = client.hold_buttons.call_args.kwargs["player1"]
+        self.assertTrue(held & LEFT, hex(held))
 
     def test_walks_toward_enemy_to_the_left_and_above(self) -> None:
         # dx=44 is inside Axel's stop_dx (46), so the walk has arrived on X
@@ -2067,6 +2091,25 @@ class ExecuteHandleMrXDialogTests(unittest.TestCase):
         gamepad, client = _gamepad()
 
         execute_verb(verb, {dialog}, gamepad)
+
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
+
+    def test_the_harness_accept_holds_up_until_yes_is_selected(self) -> None:
+        # $120EC: held Up clears +$59 bit 3, the YES the duel harness needs.
+        verb = HandleMrXDialog(actor_slot="P1")
+        dialog = InMrXDialog(slot="P1", selects_no=True)
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {dialog, DebugMrXAccept()}, gamepad)
+
+        client.hold_buttons.assert_called_with(player1=UP, player2=0)
+
+    def test_the_harness_accept_confirms_yes(self) -> None:
+        verb = HandleMrXDialog(actor_slot="P1")
+        dialog = InMrXDialog(slot="P1", selects_no=False)
+        gamepad, client = _gamepad()
+
+        execute_verb(verb, {dialog, DebugMrXAccept()}, gamepad)
 
         client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
 

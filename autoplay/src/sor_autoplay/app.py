@@ -382,6 +382,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--mr-x-accept",
+        type=int,
+        choices=(1, 2),
+        default=None,
+        metavar="PLAYER",
+        help=(
+            "Debug: this AI player answers YES to Mr. X instead of NO. Only "
+            "for measuring the betrayal duel without a human (the other AI "
+            "refuses, and two different answers start the duel). Never on in "
+            "play."
+        ),
+    )
+    parser.add_argument(
         "--no-police",
         action="store_true",
         help=(
@@ -494,6 +507,7 @@ class ObserverApp:
         scenario: DebugScenario | None = None,
         no_food: bool = False,
         no_police: bool = False,
+        mr_x_accept: int | None = None,
         lockstep: bool = False,
     ) -> None:
         self.host = host
@@ -554,8 +568,13 @@ class ObserverApp:
             2: VirtualGamepad(self._gamepad_state, player_index=2),
         }
         self._agent_loops = {
-            1: AgentLoop(self._gamepads[1], no_food=no_food, no_police=no_police),
-            2: AgentLoop(self._gamepads[2], no_food=no_food, no_police=no_police),
+            i: AgentLoop(
+                self._gamepads[i],
+                no_food=no_food,
+                no_police=no_police,
+                mr_x_accept=mr_x_accept == i,
+            )
+            for i in (1, 2)
         }
 
     def set_agent_enabled(self, player_index: int, enabled: bool) -> None:
@@ -1148,6 +1167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         agent_p2=args.agent_p2,
         no_food=args.no_food,
         no_police=args.no_police,
+        mr_x_accept=args.mr_x_accept,
         lockstep=args.lockstep,
         scenario=DebugScenario(
             start_level=args.start_level,

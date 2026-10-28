@@ -7,8 +7,9 @@ from sor_autoplay.ai.inference import generate_inference_tokens
 from sor_autoplay.ai.tokens import Myself, Partner
 from sor_autoplay.ai.tokens import Abadede, Enemy, Garcia, Jack, Nora, Souther
 from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, Stage
+from sor_autoplay.ai.tokens import PlayerDuel, RivalPlayer
 from sor_autoplay.ai.tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
-from sor_autoplay.ai.tokens import Pit, Press, Projectile, Wall
+from sor_autoplay.ai.tokens import Breakable, Pit, Press, Projectile, Wall
 from sor_autoplay.ai.observe import (
     HoldTracker,
     NoraAttackTracker,
@@ -266,6 +267,7 @@ def _snapshot(
     level_index: int = 0,
     floor_holes: tuple[FloorHole, ...] = (),
     mr_x_offer_flag: int = 0,
+    duel_damage_modifier: int = 0,
 ) -> GameSnapshot:
     return GameSnapshot(
         connected=True,
@@ -284,6 +286,7 @@ def _snapshot(
         world_map=_world_map(entities),
         floor_holes=floor_holes,
         mr_x_offer_flag=mr_x_offer_flag,
+        duel_damage_modifier=duel_damage_modifier,
     )
 
 
@@ -1209,6 +1212,102 @@ class ContinueAndMrXObservationTests(unittest.TestCase):
         context = generate_direct_observation_tokens(snapshot, player_index=1)
 
         self.assertIsNone(find(context, InMrXDialog))
+
+
+
+class PlayerDuelTests(unittest.TestCase):
+    """Mr. X's betrayal duel: two different answers start it ($11FA8 sets
+    $FFFA43), and while it lasts the other player is the enemy."""
+
+    def _context(self, *, offer: int = 1, duel: int = 1, p2_phase=CombatPhase.NORMAL):
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2)
+        snapshot = _snapshot(
+            players=(p1, p2),
+            entities=(
+                _player_entity(slot="P1"),
+                _player_entity(slot="P2", world_x=840, combat_phase=p2_phase),
+            ),
+            level_index=7,
+            mr_x_offer_flag=offer,
+            duel_damage_modifier=duel,
+        )
+        return generate_direct_observation_tokens(snapshot, player_index=1)
+
+    def test_the_other_player_is_a_rival_not_a_partner(self) -> None:
+        context = self._context()
+
+        self.assertIsNotNone(find(context, PlayerDuel))
+        self.assertIsNone(find(context, Partner))
+        rival = find(context, RivalPlayer)
+        self.assertEqual((rival.slot, rival.player_index, rival.world_x), ("P2", 2, 840))
+        self.assertIn(rival, find_all(context, Enemy))
+
+    def test_a_rival_in_the_actors_hands_reads_grabbed(self) -> None:
+        context = self._context(p2_phase=CombatPhase.HELD_BY_ENEMY)
+
+        self.assertIs(find(context, RivalPlayer).combat_phase, CombatPhase.GRABBED)
+
+    def test_a_knocked_down_rival_reads_knockdown(self) -> None:
+        context = self._context(p2_phase=CombatPhase.HURT_PLAYER)
+
+        self.assertIs(find(context, RivalPlayer).combat_phase, CombatPhase.KNOCKDOWN)
+
+    def test_no_duel_without_the_offer(self) -> None:
+        context = self._context(offer=0)
+
+        self.assertIsNone(find(context, PlayerDuel))
+        self.assertIsNone(find(context, RivalPlayer))
+        self.assertIsNotNone(find(context, Partner))
+
+    def test_the_offer_alone_keeps_the_partner(self) -> None:
+        context = self._context(duel=0)
+
+        self.assertIsNone(find(context, PlayerDuel))
+        self.assertIsNotNone(find(context, Partner))
+
+
+
+class Round8TableTests(unittest.TestCase):
+    """User: "Estão encravados nas mesas! Tens de fazer com que a AI destrua
+    as mesas com alta prioridade!" -- a table standing still is a prop."""
+
+    def _table(self, vel_x: float) -> MapEntity:
+        return MapEntity(
+            kind="projectile",
+            family="Round 8 table",
+            symbol="T",
+            color="#d97706",
+            label="Thrown table",
+            type_id=0x45,
+            world_x=900,
+            world_y=40,
+            world_z=168,
+            map_x=132.0,
+            map_y=40.0,
+            health=None,
+            slot="obj05",
+            action_state=0x01,
+            vel_x=vel_x,
+        )
+
+    def _context(self, table: MapEntity):
+        p1 = _player_snapshot(index=1)
+        p2 = _player_snapshot(index=2, is_playable=False)
+        snapshot = _snapshot(players=(p1, p2), entities=(_player_entity(slot="P1"), table), level_index=7)
+        return generate_direct_observation_tokens(snapshot, player_index=1)
+
+    def test_a_table_at_rest_is_a_breakable(self) -> None:
+        context = self._context(self._table(0.0))
+
+        self.assertEqual(find(context, Breakable).slot, "obj05")
+        self.assertIsNone(find(context, Projectile))
+
+    def test_a_thrown_table_is_a_projectile(self) -> None:
+        context = self._context(self._table(-5.0))
+
+        self.assertIsNone(find(context, Breakable))
+        self.assertEqual(find(context, Projectile).slot, "obj05")
 
 
 if __name__ == "__main__":

@@ -360,6 +360,10 @@ Score/tune commands and the ROM model + plan for each boss are documented in
   `autoplay/tools/twins_2p_fight.py` — **Two players against the twins**.
 - Mr. X (round 8, `$35`, via `--kill-until-mr-x`) — **Mr. X: the ROM model
   and the plan**.
+- Mr. X's betrayal duel (2P, one player says yes, the AI always no; P1 vs P2,
+  `$FFFA43`) — scored by `autoplay/tools/mr_x_duel_fight.py` (two AIs, one
+  given the harness's `--mr-x-accept`) — **Mr. X's betrayal duel**. The
+  survivor's second answer is NO, which is the bad ending (user).
 - Jack (`$27`, never in round 1; appears rounds 2, 4, 5, 6, 8) — **Jack: the
   ROM model and the plan**.
 - Round 6's Souther pair (two `$55`, via `play.py --preset boss --level 6` or `boss_fight.py

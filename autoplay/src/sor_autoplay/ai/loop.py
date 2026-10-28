@@ -36,6 +36,7 @@ from .priority import determine_priority_verb
 from .tokens import (
     Context,
     DebugNoFood,
+    DebugMrXAccept,
     DebugNoPolice,
     EnemyCluster,
     Myself,
@@ -78,7 +79,12 @@ class VerbState:
 
 class AgentLoop:
     def __init__(
-        self, gamepad: VirtualGamepad, *, no_food: bool = False, no_police: bool = False
+        self,
+        gamepad: VirtualGamepad,
+        *,
+        no_food: bool = False,
+        no_police: bool = False,
+        mr_x_accept: bool = False,
     ) -> None:
         self._gamepad = gamepad
         # Harness switches, off by default and never read from the game -- see
@@ -86,6 +92,7 @@ class AgentLoop:
         # tick() so a caller cannot set them for some ticks and not others.
         self._no_food = no_food
         self._no_police = no_police
+        self._mr_x_accept = mr_x_accept
         # The host's button layout (host_flags.py), set by ObserverApp when it
         # reads GET_FLAGS; False is the original three-button scheme.
         self.six_button = False
@@ -198,6 +205,8 @@ class AgentLoop:
             context = context | {DebugNoFood()}
         if self._no_police:
             context = context | {DebugNoPolice()}
+        if self._mr_x_accept:
+            context = context | {DebugMrXAccept()}
         context |= generate_verb_tokens(context)
         # AI.md's loop: the co-op courtesy filter runs between the could_*
         # generators and the ranking, so a verb that would land on the
