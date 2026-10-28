@@ -10,7 +10,10 @@ their own ``AgentLoop``; the ``--accept`` seat carries the harness's
 set). Food and the police are off.
 
 ``--blind P`` hides the duel from seat P (its snapshots read ``$FFFA43`` as
-0), which is the AI before ``PlayerDuel``: the baseline.
+0), which is the AI before ``PlayerDuel``: the baseline. ``--cold P`` (repeatable)
+turns seat P's duel style off (``AgentLoop(duel_style=False)``): the generic
+pipeline's efficient fight, the AI before ``duel.DuelStyle``. Each row also
+carries the seat's style tactic.
 
 The summary: whether the duel started, its wall time, the damage each seat
 dealt and took (hits and lives), who was out when ``$11E72
@@ -59,6 +62,7 @@ def main() -> None:
     ap.add_argument("--character", default="blaze")
     ap.add_argument("--accept", type=int, choices=(1, 2), default=2)
     ap.add_argument("--blind", type=int, choices=(1, 2), default=None)
+    ap.add_argument("--cold", type=int, choices=(1, 2), action="append", default=[])
     ap.add_argument(
         "--duel-seconds",
         type=float,
@@ -82,6 +86,7 @@ def main() -> None:
                 no_food=True,
                 no_police=True,
                 mr_x_accept=args.accept == i,
+                duel_style=i not in args.cold,
             )
             for i in (1, 2)
         }
@@ -173,6 +178,7 @@ def main() -> None:
                         verbs.get(i),
                         entity.facing_left if entity else None,
                         entity.action_state if entity else None,
+                        loops[i].duel_tactic,
                     )
                 sink.write(json.dumps(row) + "\n")
                 if duel and args.duel_seconds is not None and started - duel_t0 > args.duel_seconds:
@@ -196,6 +202,7 @@ def main() -> None:
                     "end": end,
                     "accept": args.accept,
                     "blind": args.blind,
+                    "cold": args.cold,
                     "duel_s": round((duel_t1 or time.monotonic()) - duel_t0, 1) if duel_t0 else None,
                     "hits_taken": hits,
                     "damage_taken": damage_taken,

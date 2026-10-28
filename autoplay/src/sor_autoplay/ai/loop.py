@@ -10,7 +10,9 @@ observer's existing single-poll-per-tick discipline.
 
 ``_nora_tracker`` and ``_hold_tracker`` are the pieces of state that
 survive across ticks besides the virtual gamepad's own sticky hold -- see
-``observe.NoraAttackTracker`` and ``observe.HoldTracker``.
+``observe.NoraAttackTracker`` and ``observe.HoldTracker`` -- and
+``_duel_style``, the betrayal duel's fighting style (``duel.DuelStyle``),
+which does nothing outside ``PlayerDuel``.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from dataclasses import dataclass
 from sor_autoplay.state import GameSnapshot
 
 from .decide import generate_verb_tokens
+from .duel import DuelStyle
 from .execute import execute_tick
 from .gamepad import VirtualGamepad
 from .inference import generate_inference_tokens
@@ -85,6 +88,7 @@ class AgentLoop:
         no_food: bool = False,
         no_police: bool = False,
         mr_x_accept: bool = False,
+        duel_style: bool = True,
     ) -> None:
         self._gamepad = gamepad
         # Harness switches, off by default and never read from the game -- see
@@ -112,6 +116,10 @@ class AgentLoop:
         # Cross-tick memory of which enemies are the partner's fight -- see
         # partner.PartnerFightTracker. Same per-AgentLoop granularity.
         self._partner_fight_tracker = PartnerFightTracker()
+        # Mr. X's betrayal duel fought for a person to enjoy rather than won
+        # (duel.DuelStyle); ``duel_style=False`` is the generic pipeline's
+        # cold fight, kept for tools/mr_x_duel_fight.py's baseline.
+        self._duel_style = DuelStyle() if duel_style else None
 
     def inform_hud(
         self,
@@ -146,6 +154,12 @@ class AgentLoop:
                 clusters=clusters,
                 partner_fights=partner_fights,
             )
+
+    @property
+    def duel_tactic(self) -> str | None:
+        """The betrayal duel style's current tactic, for the harness."""
+
+        return self._duel_style.tactic if self._duel_style is not None else None
 
     def verb_state(self) -> VerbState:
         with self._state_lock:
@@ -214,6 +228,10 @@ class AgentLoop:
         # either, since it was never a candidate this tick.
         context = do_not_harm_partner(context)
         pending = tuple(find_all(context, Verb))
+        if self._duel_style is not None:
+            # Only while PlayerDuel holds: the style replaces the candidates
+            # with its own pick against the other player (duel.py).
+            context = self._duel_style.steer(context)
         context = determine_priority_verb(context)
 
         verbs = find_all(context, Verb)

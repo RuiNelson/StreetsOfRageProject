@@ -431,3 +431,29 @@ class EngageJack(Walk):
     priority: int = 24
     actor_slot: str
     target_slot: str  # Jack.slot
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DuelStep(Walk):
+    """Walk to (or stand on) a point picked by the betrayal duel's style.
+
+    Only ``duel.DuelStyle`` produces it, and only while ``PlayerDuel`` holds:
+    the footwork of a fight against the other player that is meant to be
+    interesting rather than efficient (**Mr. X's betrayal duel: a fight, not
+    a solver** in ``autoplay/CLAUDE.md``) -- keeping a distance, circling to
+    another lane, backing off after a combo, waiting for the other player to
+    come, hesitating before a reaction. ``goal_x``/``goal_y`` are world
+    pixels; a goal on the actor's own position is standing still.
+    ``tactic`` names the style's current tactic, for the HUD and the
+    harness's rows.
+
+    Raises emergency: none (``DuelStyle`` replaces the tick's candidates with
+    the one verb it picked, so nothing ranks against it).
+    """
+
+    priority: int = 20
+    actor_slot: str
+    target_slot: str  # the RivalPlayer's slot
+    goal_x: int
+    goal_y: int
+    tactic: str

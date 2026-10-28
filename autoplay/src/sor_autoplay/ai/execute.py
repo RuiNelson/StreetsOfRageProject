@@ -70,6 +70,7 @@ from .tokens import (
 from .tokens import Context, Dialog, Verb, find, find_all
 from .tokens import (
     CatchUpPartner,
+    DuelStep,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -2546,6 +2547,26 @@ def state_machine_grab_enemy(verb: GrabEnemy, context: Context, gamepad: Virtual
     _hold_steered(gamepad, mask)
 
 
+def state_machine_duel_step(verb: DuelStep, context: Context, gamepad: VirtualGamepad) -> None:
+    """Walk to the duel style's point, or stand still once there.
+
+    Straight-line, like the grab's walk-in: the duel is fought in Mr. X's
+    office, open floor with no props or pits, and ``_movement_mask`` still
+    clamps the goal to the lane and the camera. Inside the deadband nothing
+    is held -- standing is half of what this verb is for.
+    """
+
+    actor = _find_actor(context, verb.actor_slot)
+    if actor is None:
+        gamepad.release()
+        return
+    mask = _movement_mask(context, actor.world_x, actor.world_y, verb.goal_x, verb.goal_y)
+    if mask == 0:
+        gamepad.hold(0)
+        return
+    _hold_steered(gamepad, mask)
+
+
 def state_machine_supplex(verb: Supplex, context: Context, gamepad: VirtualGamepad) -> None:
     actor = _find_actor(context, verb.actor_slot)
     if actor is None:
@@ -3064,6 +3085,7 @@ _HANDLERS = {
     HandleMrXDialog: state_machine_handle_mr_x_dialog,
     JumpAttack: state_machine_jump_attack,
     GrabEnemy: state_machine_grab_enemy,
+    DuelStep: state_machine_duel_step,
     Supplex: state_machine_supplex,
     AttackHeldEnemy: state_machine_attack_held_enemy,
     ThrowHeldEnemy: state_machine_throw_held_enemy,

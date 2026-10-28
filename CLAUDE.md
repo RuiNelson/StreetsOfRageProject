@@ -362,8 +362,13 @@ Score/tune commands and the ROM model + plan for each boss are documented in
   and the plan**.
 - Mr. X's betrayal duel (2P, one player says yes, the AI always no; P1 vs P2,
   `$FFFA43`) — scored by `autoplay/tools/mr_x_duel_fight.py` (two AIs, one
-  given the harness's `--mr-x-accept`) — **Mr. X's betrayal duel**. The
-  survivor's second answer is NO, which is the bad ending (user).
+  given the harness's `--mr-x-accept`; `--cold P` turns seat P's duel style
+  off) — **Mr. X's betrayal duel**. The survivor's second answer is NO, which
+  is the bad ending (user). Against the other player the AI fights for a
+  person to enjoy, not to win efficiently (user: "mais aleatória, com mais
+  movimentos diferentes. Menos eficiência fria"; enemies are never fought
+  differently) — `autoplay/src/sor_autoplay/ai/duel.py`, **Mr. X's betrayal
+  duel: a fight, not a solver**.
 - Jack (`$27`, never in round 1; appears rounds 2, 4, 5, 6, 8) — **Jack: the
   ROM model and the plan**.
 - Round 6's Souther pair (two `$55`, via `play.py --preset boss --level 6` or `boss_fight.py
