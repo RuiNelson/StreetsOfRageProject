@@ -295,7 +295,8 @@ All three desktop platforms require:
 - a compiler with C++23 support;
 - SDL3 development headers and libraries;
 - network access during the first configuration, because CMake downloads CLI11,
-  yaml-cpp, zlib, and libpng;
+  yaml-cpp, zlib, libpng, and SDL3_mixer (and, for the soundtrack renderer,
+  Genesis Plus GX and libFLAC);
 - Python 3 for the first C++ generation and the analysis tools;
 - a compatible local ROM for the mandatory first C++ generation.
 
@@ -313,7 +314,34 @@ Windows invoke them with `py scripts\NAME.py`; on macOS and Linux they are
 executable directly as `./scripts/NAME.py`. Run them from the meta-repository
 root.
 
-### 4. Build on Windows
+### 4. Extract the soundtrack
+
+The port plays a soundtrack pre-rendered from your ROM (see
+[Pre-rendered soundtrack](#pre-rendered-soundtrack)). Extract it once, before
+running the recompiler for the first time, and again whenever the renderer
+changes. It needs only CMake, a C++ compiler and network access (not SDL3 or
+the generated C++), takes about four minutes and writes ~265 MB to
+`StreetsOfRageRecompilation/rom/soundtrack/`, next to the ROM.
+
+On Windows, after installing the [prerequisites](#prerequisites) of step 5,
+in the Developer PowerShell for VS 2022:
+
+```powershell
+py scripts\render_soundtrack.py
+```
+
+On macOS and Linux:
+
+```bash
+./scripts/render_soundtrack.py                    # writes StreetsOfRageRecompilation/rom/soundtrack/
+./scripts/render_soundtrack.py --chip ym2612      # Nuked's Model 1 YM2612 instead
+./scripts/render_soundtrack.py --out ~/sor-audio  # any other folder
+```
+
+Without a soundtrack the game still runs and emulates the sound chips in real
+time instead.
+
+### 5. Build on Windows
 
 #### Prerequisites
 
@@ -433,7 +461,7 @@ match the installed `sdl3:x64-windows` package. The toolchain is recorded when
 a build tree is first configured, so delete `StreetsOfRageRecompilation\build`
 (or build with `--release`) after correcting it.
 
-### 5. Build on macOS
+### 6. Build on macOS
 
 #### Prerequisites
 
@@ -485,7 +513,7 @@ cmake -S StreetsOfRageRecompilation \
 cmake --build StreetsOfRageRecompilation/build/macos --parallel
 ```
 
-### 6. Build on Ubuntu
+### 7. Build on Ubuntu
 
 #### Prerequisites
 
@@ -718,14 +746,9 @@ plays a soundtrack pre-rendered from your ROM by
 [Genesis Plus GX](https://github.com/ekeeke/genesis-plus-gx) with the Nuked
 OPN2 core (YM3438, no low-pass filter, 48 kHz, lossless FLAC): every music
 track (looping forever from its own loop point, like on the console), every
-sound effect and every PCM voice. Render it once, after cloning or when the
-renderer changes (about four minutes, ~265 MB):
-
-```bash
-./scripts/render_soundtrack.py                    # writes StreetsOfRageRecompilation/rom/soundtrack/
-./scripts/render_soundtrack.py --chip ym2612      # Nuked's Model 1 YM2612 instead
-./scripts/render_soundtrack.py --out ~/sor-audio  # any other folder
-```
+sound effect and every PCM voice. It is extracted with
+`scripts/render_soundtrack.py`, step
+[4. Extract the soundtrack](#4-extract-the-soundtrack) of the build.
 
 A soundtrack folder is the FLAC files plus their `manifest.tsv`. By default
 `sor` reads `soundtrack/` next to the ROM; point it at another folder with

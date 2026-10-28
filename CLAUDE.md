@@ -142,7 +142,8 @@ effect-steals-a-music-channel behaviour is not reproduced, and each music
 track is two stems (FM, which the `$E0` fade attenuates, and DAC+PSG, which it
 cuts at once) so the fade plays as on hardware. Render once after cloning (or when the
 renderer changes) into `StreetsOfRageRecompilation/rom/soundtrack/`, which is
-derived from the ROM and never committed:
+derived from the ROM and never committed. In `README.md` the extraction is build
+step 4, right before the steps that run the recompiler (user request):
 
 ```bash
 ./scripts/render_soundtrack.py
