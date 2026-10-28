@@ -323,14 +323,14 @@ changes. It needs only CMake, a C++ compiler and network access (not SDL3 or
 the generated C++), takes about four minutes and writes ~265 MB to
 `StreetsOfRageRecompilation/rom/soundtrack/`, next to the ROM.
 
-On Windows, after installing the [prerequisites](#prerequisites) of step 5,
+On Windows, **AFTER** installing the prerequisites of step 5,
 in the Developer PowerShell for VS 2022:
 
 ```powershell
 py scripts\render_soundtrack.py
 ```
 
-On macOS and Linux:
+On macOS and Linux, **AFTER** installing their prerequisites:
 
 ```bash
 ./scripts/render_soundtrack.py                    # writes StreetsOfRageRecompilation/rom/soundtrack/
@@ -339,7 +339,7 @@ On macOS and Linux:
 ```
 
 Without a soundtrack the game still runs and emulates the sound chips in real
-time instead.
+time instead (not recommended, as the sound quality had to suffer to improve performance)
 
 ### 5. Build on Windows
 
