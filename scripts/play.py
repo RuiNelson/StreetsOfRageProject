@@ -40,12 +40,12 @@ DEFAULT_ROM = META_ROOT / "StreetsOfRageRecompilation" / "rom" / "SOR.bin"
 # Every setting, with its default. The type of the default is the type of the value.
 DEFAULTS: dict[str, Any] = {
     # host (sor)
-    "port": 7777,
-    "turbo": 2,  # 0 = off; needs the internal timer (vsync 0)
+    "port": 6969,
+    "turbo": 0,  # 0 = off; needs the internal timer (vsync 0)
     "vsync": 0,  # 0 internal timer, 1 VSync, 2 VSync/2, 3 VSync/3
     "lang": "en",  # "" = the host's own default
     "hz": 0,  # 0 = the host's own default
-    "silent": True,
+    "silent": False,
     "sound": "prerendered",  # or "emulated": sor --sound (ignored when silent)
     "soundtrack": "",  # "" = sor's default, soundtrack/ next to the ROM
     "fullscreen": False,
@@ -56,9 +56,9 @@ DEFAULTS: dict[str, Any] = {
     "call_log": "",
     "rom": "",
     # autoplay
-    "agent_p1": True,
+    "agent_p1": False,
     "agent_p2": False,
-    "reach": "blaze",  # "" = stay in the menus
+    "reach": "",  # "" = stay in the menus
     "lockstep": False,
     "poll_ms": 0,  # 0 = auto: 16 under turbo, autoplay's own default otherwise
     "hud_ms": 0,  # 0 = autoplay's own default
