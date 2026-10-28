@@ -368,13 +368,14 @@ class PlayWindow:
         self.vars: dict[str, Any] = {}
         self.options: dict[str, list[tuple[str, Any]]] = {key: list(values) for key, values in CHOICES.items()}
         self.combos: dict[str, Any] = {}
+        self.buttons: dict[str, Any] = {}
         self.extra_entry: Any = None
         self.loading = True
         self.controls_process: Any = None
         self.session: Any = None  # the running launch (a child play.py), polled so Tk keeps serving events
         self.session_mode = ""
         root.title("Streets of Rage - play")
-        root.minsize(860, 660)
+        root.minsize(980, 660)
         self.status = tk.StringVar(value=notice)
         self.build()
         self.load(settings)
@@ -455,10 +456,14 @@ class PlayWindow:
         ttk.Checkbutton(bar, text="Build first (^B)", variable=self.vars["build_first"]).grid(row=0, column=0)
         ttk.Label(bar, textvariable=self.status, foreground="#c0392b").grid(row=0, column=1, sticky="w", padx=10)
         for column, (text, mode) in enumerate(
-                [("Run both  ^R", "both"), ("Host only  ^S", "host"), ("Autoplay only  ^A", "autoplay"),
+                [("Run Game + AI Connected  ^R", "both"), ("Run Game  ^S", "host"), ("Run AI  ^A", "autoplay"),
                  ("Configure Controls  ^O", "controls")], start=2):
-            ttk.Button(bar, text=text, command=lambda m=mode: self.launch(m)).grid(row=0, column=column, padx=3)
+            self.buttons[mode] = ttk.Button(bar, text=text, command=lambda m=mode: self.launch(m))
+            self.buttons[mode].grid(row=0, column=column, padx=3)
         ttk.Button(bar, text="Quit  ^Q", command=lambda: self.finish("quit")).grid(row=0, column=6, padx=(12, 0))
+        # Run AI is the way in when the game was started outside this window.
+        ttk.Label(bar, text="If you already have the game running", foreground="#909090",
+                  font=("TkDefaultFont", 8)).grid(row=1, column=4, columnspan=3, sticky="w")
         self.trace("build_first")
 
     def trace(self, key: str) -> None:
@@ -577,6 +582,8 @@ class PlayWindow:
         for message in warnings:
             self.preview.insert("end", f"* {message}\n", "warning")
         self.preview.configure(state="disabled")
+        # The connected pair needs the host's remote server: without debugUtils it cannot start.
+        self.buttons["both"].configure(state="normal" if settings["debug_utils"] else "disabled")
         if self.status.get() and not self.loading:
             self.status.set("")
         save_settings(settings)
@@ -589,6 +596,10 @@ class PlayWindow:
 
     def launch(self, mode: str) -> None:
         settings = self.collect()
+        if mode == "both" and not settings["debug_utils"]:
+            # The button is disabled; the ^R shortcut goes through here too.
+            self.status.set("Run Game + AI Connected needs debugUtils on (^D)")
+            return
         if mode == "controls":
             # A side tool: it runs next to the window, which stays usable, instead of ending the window.
             if self.controls_process is not None and self.controls_process.poll() is None:
