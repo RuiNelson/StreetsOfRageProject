@@ -605,7 +605,7 @@ mode, the OPTIONS menu does not expose the original control remap row.
 | B | Attack |
 | C | Jump |
 | X | Special attack |
-| Y | Pick up nearby item or weapon |
+| Y | Pick up nearby item or weapon (a slightly wider reach than the original) |
 | Z | Throw knife |
 | Start | Pause |
 
