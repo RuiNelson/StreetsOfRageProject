@@ -679,7 +679,9 @@ version.
 | `--rom PATH` | ROM image to load; default: `rom/SOR.bin` |
 | `--lang jp\|en` | Console language pin: `jp` is Japanese/domestic; `en` is overseas; default: `jp` |
 | `--hz 50\|60` | Console video-standard pin: `60` is NTSC/low and `50` is PAL/high; default: `60` |
-| `--silent` | Disable audio output completely by dropping audio-chip writes |
+| `--silent` | Disable audio output completely by dropping audio-chip writes (no pre-rendered soundtrack either) |
+| `--sound prerendered\|emulated` | Audio source: `prerendered` plays the FLAC soundtrack rendered by `scripts/render_soundtrack.py` (default; falls back to `emulated` when it is missing), `emulated` runs the YM2612, PSG and Z80 DAC in real time; see [Pre-rendered soundtrack](#pre-rendered-soundtrack) |
+| `--soundtrack DIR` | Pre-rendered soundtrack directory; default: `soundtrack/` next to the ROM |
 | `--debug` | Log CPU and VDP state once per second |
 | `--debugUtils` | Enable debug hotkeys, host cheats, and remote access |
 | `--fullScreen` | Start in desktop fullscreen |
@@ -706,6 +708,30 @@ game already leaves in the planes and sprite table:
   down, so it clears the hidden first row.
 
 Remote-access framebuffer snapshots and debug PNGs are 384×216 too.
+
+### Pre-rendered soundtrack
+
+The game makes its music on the 68000 and spends a lot of CPU in bus
+handshakes with the Z80 that cost nothing on the console, so the host's
+real-time chip emulation sounds worse than an accurate emulator. Instead, `sor`
+plays a soundtrack pre-rendered from your ROM by
+[Genesis Plus GX](https://github.com/ekeeke/genesis-plus-gx) with the Nuked
+OPN2 core (YM3438, no low-pass filter, 48 kHz, lossless FLAC): every music
+track (looping forever from its own loop point, like on the console), every
+sound effect and every PCM voice. Render it once, after cloning or when the
+renderer changes (about two minutes, ~180 MB):
+
+```bash
+./scripts/render_soundtrack.py                 # writes StreetsOfRageRecompilation/rom/soundtrack/
+./scripts/render_soundtrack.py --chip ym2612   # Nuked's Model 1 YM2612 instead
+```
+
+The renders come from the copyrighted ROM, so they stay next to it and are
+never versioned. The game's own sound engine still runs; only its chip output
+is replaced, so music starts, fades, the pause jingle and the stop commands
+happen on the same frames as on hardware. One difference is deliberate: on the
+console a sound effect borrows a music channel while it plays, here the music
+keeps playing under it. Under `--turbo` the music stays at normal speed.
 
 Examples:
 

@@ -29,7 +29,10 @@ This public meta-repository pins the repositories that make up the workspace:
 `Genesis-Plus-GX` is reference material only. Do not modify files, create
 patches, reformat code, commit inside it, or update its gitlink. If comparison
 with it is useful, perform read-only inspection and keep the implementation in
-an owned repository.
+an owned repository. It is not currently checked out in this workspace (no
+gitlink); the soundtrack renderer (`StreetsOfRageRecompilation/tools/soundtrack`)
+fetches upstream at a pinned commit into its own build tree and compiles it
+unmodified, which is the one sanctioned use of its code.
 
 Unlike the other rows above, `autoplay/` is tracked directly in this
 meta-repository (no entry in `.gitmodules`, no separate remote) despite this
@@ -125,6 +128,28 @@ it whenever ROM analysis or recompiler inputs change:
 
 Do not commit ROMs, ignored generated C++, build trees, CMake download trees,
 caches, screenshots, or transient discovery output.
+
+## Pre-rendered soundtrack
+
+The host's real-time sound emulation is not good enough for this game (the
+68000 sequences the music and spends host CPU in BUSREQ/DAC-busy handshakes
+that hardware never pays), so by default `sor` plays FLAC renders made from the
+ROM by Genesis Plus GX instead (`sor --sound prerendered|emulated`). User
+decisions: Nuked OPN2 **YM3438**, **no low-pass filter** (post-process later),
+**48 kHz lossless**, music, sound effects and PCM voices all pre-rendered,
+music at normal speed under `--turbo`, and the hardware's
+effect-steals-a-music-channel behaviour is not reproduced. Render once after cloning (or when the
+renderer changes) into `StreetsOfRageRecompilation/rom/soundtrack/`, which is
+derived from the ROM and never committed:
+
+```bash
+./scripts/render_soundtrack.py
+```
+
+`--silent` (every debug/autoplay preset) still disables all audio, so the
+measurement presets are unaffected. How the renders and their loop points are
+made and how playback follows the ROM's engine: `StreetsOfRageRecompilation/CLAUDE.md`,
+**Pre-rendered soundtrack**.
 
 ## Hand-written C++ keeps the original memory layout
 
