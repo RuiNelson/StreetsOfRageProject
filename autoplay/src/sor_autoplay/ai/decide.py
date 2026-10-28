@@ -1425,8 +1425,13 @@ _LEVEL_END_BOSS: dict[int, type[Boss]] = {
 }
 
 
+# How many of that boss close the round; the police waits for all of them.
+_LEVEL_END_BOSS_COUNT: dict[int, int] = {5: 2}
+
+
 def level_end_boss_is_up(context: Context) -> bool:
-    """The round's closing boss is alive and on screen: call the police now.
+    """The round's closing boss is alive and on screen: call the police now
+    (round 6: once both Southers are, or one has already fallen).
 
     Not a panic threshold -- the special is spent on arrival, whatever the
     actor's health. Only the boss that ends this round counts
@@ -1440,7 +1445,15 @@ def level_end_boss_is_up(context: Context) -> bool:
     boss_type = _LEVEL_END_BOSS.get(stage.level_index)
     if boss_type is None:
         return False
-    return any(isinstance(enemy, boss_type) for enemy in reach.on_screen_enemies(context))
+    up = [enemy for enemy in reach.on_screen_enemies(context) if isinstance(enemy, boss_type)]
+    if not up:
+        return False
+    # Round 6 closes with two Southers, and one call sweeps both: wait for the
+    # second (user: calling at the first wastes the attack that could be for
+    # both). A dead one still in context means the second is not coming.
+    needed = _LEVEL_END_BOSS_COUNT.get(stage.level_index, 1)
+    dead = [boss for boss in find_all(context, boss_type) if boss.is_defeated]
+    return len(up) + len(dead) >= needed
 
 
 def _has_live_enemy(context: Context) -> bool:

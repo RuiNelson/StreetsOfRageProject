@@ -1598,7 +1598,6 @@ class CouldCallPoliceAtTheLevelEndBossTests(unittest.TestCase):
             (2, Abadede, 0x30),
             (3, Bongo, 0x57),
             (4, Onihime, 0x58),
-            (5, Souther, 0x55),
         ):
             with self.subTest(level_index=level_index, boss=cls.__name__):
                 self.assertTrue(self._calls(level_index, self._boss(cls, type_id)))
@@ -1616,6 +1615,22 @@ class CouldCallPoliceAtTheLevelEndBossTests(unittest.TestCase):
         ):
             with self.subTest(level_index=level_index, boss=cls.__name__):
                 self.assertFalse(self._calls(level_index, self._boss(cls, type_id)))
+
+    def test_round_6_waits_for_the_second_souther(self) -> None:
+        stage = Stage(level_index=5, direction="right")
+        me = make_myself(specials=1, health_percent=100.0)
+        first = self._boss(Souther, 0x55, slot="obj11")
+        second = self._boss(Souther, 0x55, slot="obj12", world_x=200)
+        call = {CallPolice(actor_slot="P1")}
+
+        self.assertEqual(could_call_police({me, first, stage}), set())
+        self.assertEqual(could_call_police({me, first, second, stage}), call)
+        # One already dead: the second is not coming, so the call goes now.
+        dead = self._boss(Souther, 0x55, slot="obj12", health=0)
+        self.assertEqual(could_call_police({me, first, dead, stage}), call)
+        # Round 2 has the one Souther, called at once.
+        alone = {me, first, Stage(level_index=1, direction="right")}
+        self.assertEqual(could_call_police(alone), call)
 
     def test_the_twins_get_it_only_on_arrival(self) -> None:
         # Never the panic button against them, but the round-end call is theirs.
