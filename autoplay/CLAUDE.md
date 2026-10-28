@@ -2659,13 +2659,20 @@ a um boss de final de nível, tente chamar a polícia logo que lá chegue. Mas
 só nos de final de nível, não nos intermédios"). `decide.level_end_boss_is_up`
 (`_LEVEL_END_BOSS`, by `Stage.level_index`) is true while the boss that closes
 the round is alive and on screen: round 1 Antonio, 2 Souther, 3 Abadede, 4
-Bongo, 6 the Souther pair (round 6's Bongo and every boss of round 8's rush
-but Mr. X are intermediate; round 7 has none). Then `could_call_police`
+Bongo, 5 the twins (added on the user's second ask), 6 the Souther pair
+(round 6's Bongo and every boss of round 8's rush, Mr. X included, are out;
+round 7 has none; Mr. X because the police cannot be called on his level --
+user). Then `could_call_police`
 produces `CallPolice` whatever the actor's health (needs a special and a free
 actor), and `priority._emergency_call_police` scores it 88, so it is the first
-thing done. The twins (round 5) and Mr. X stay excluded by their older rule
-(user: never the police against them), and `DebugNoPolice` still removes it,
-so scored fights are unchanged. Unit tests that score the engage plan
+thing done. Against the twins the arrival call is the only one (the panic call stays
+excluded: user, never the police as a fallback); Mr. X and the betrayal duel
+never get any (round 8 starts both players with zero specials -- `enemy-ai.md`).
+Measured live (`boss_fight.py --police`, Blaze/Axel, turbo 2): round 1 Antonio,
+`CallPolice` 3 ticks right at his arrival, killed in 7.7 s, no damage; round 5
+twins, the press is retried while `$3FCC` refuses it (161 ticks over ~6 s, then
+the flat 10 off a twin landed), killed in 22 s, no damage. `DebugNoPolice` still removes it, so scored fights are
+unchanged. Unit tests that score the engage plan
 (`tests/ai/test_stability.py`'s `_run_souther`) carry `DebugNoPolice` for the
 same reason. Stateless: a character holding a second special would call it
 again once the first sweep ends.

@@ -1385,13 +1385,13 @@ def could_call_police(context: Context) -> Context:
         # special sweeps enemies only: against the other player it is spent
         # for nothing.
         return verbs
-    if live_twins(context) or live_mr_x(context):
-        # Never against the twins, not even as the panic button (user: "Do
-        # not call the police ... must not be used as fallback strategies"),
-        # nor Mr. X, fought the same way ("fazer o mesmo tipo de
-        # optimização").
-        return verbs
     boss_up = level_end_boss_is_up(context)
+    if live_mr_x(context) or (live_twins(context) and not boss_up):
+        # Never against Mr. X (user: impossible to call the police on his
+        # level), nor the twins as the panic button (user: "Do not call the
+        # police ... must not be used as fallback strategies"). The twins'
+        # arrival call is the one exception: they close round 5.
+        return verbs
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -1412,12 +1412,15 @@ def could_call_police(context: Context) -> Context:
 # chegue. Mas só nos de final de nível, não nos intermédios"). Round 6's Bongo
 # opens the stretch the Souther pair closes, round 8's rush is all
 # intermediate bosses up to Mr. X, and round 7 has none; the twins (round 5)
-# and Mr. X stay out for the older rule in ``could_call_police``.
+# close round 5 and draw the call too (user, second ask), though never the
+# panic one (``could_call_police``). Mr. X is out: the police cannot be called
+# on his level (user).
 _LEVEL_END_BOSS: dict[int, type[Boss]] = {
     0: Antonio,
     1: Souther,
     2: Abadede,
     3: Bongo,
+    4: Onihime,
     5: Souther,
 }
 

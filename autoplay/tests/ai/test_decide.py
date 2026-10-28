@@ -67,6 +67,8 @@ from sor_autoplay.ai.tokens import (
     Abadede,
     Antonio,
     Bongo,
+    MrX,
+    Onihime,
     DebugNoPolice,
     AttackRange,
     EngageAntonio,
@@ -1595,6 +1597,7 @@ class CouldCallPoliceAtTheLevelEndBossTests(unittest.TestCase):
             (1, Souther, 0x55),
             (2, Abadede, 0x30),
             (3, Bongo, 0x57),
+            (4, Onihime, 0x58),
             (5, Souther, 0x55),
         ):
             with self.subTest(level_index=level_index, boss=cls.__name__):
@@ -1613,6 +1616,19 @@ class CouldCallPoliceAtTheLevelEndBossTests(unittest.TestCase):
         ):
             with self.subTest(level_index=level_index, boss=cls.__name__):
                 self.assertFalse(self._calls(level_index, self._boss(cls, type_id)))
+
+    def test_the_twins_get_it_only_on_arrival(self) -> None:
+        # Never the panic button against them, but the round-end call is theirs.
+        low = {make_myself(specials=1, health_percent=5.0), self._boss(Onihime, 0x58)}
+        self.assertEqual(could_call_police(low), set())
+
+    def test_never_against_mr_x(self) -> None:
+        # Impossible on his level (user): not on arrival, not as the panic call.
+        for level_index in (7, 0):
+            with self.subTest(level_index=level_index):
+                mr_x = self._boss(MrX, 0x35, raw=bytes(128))  # `raw` = he is fighting
+                self.assertFalse(self._calls(level_index, mr_x))
+                self.assertFalse(self._calls(level_index, mr_x, health_percent=5.0))
 
     def test_not_with_no_special_left(self) -> None:
         self.assertFalse(self._calls(0, self._boss(Antonio, 0x56), specials=0))

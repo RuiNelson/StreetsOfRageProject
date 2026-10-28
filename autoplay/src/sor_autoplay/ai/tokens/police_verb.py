@@ -24,7 +24,7 @@ class CallPolice(Attack):
     a KO risks a continue/game-over instead of a free respawn). Otherwise the
     last resort and nothing more (user: "A AI está a depender muito da chamada
     da polícia!"): being surrounded or facing a mid-round boss is no reason.
-    Never against the twins or Mr. X, nor under ``DebugNoPolice``.
+    The twins get the arrival call only, never the panic one; Mr. X none; none under ``DebugNoPolice``.
 
     Raises emergency: 88 in either case.
     """
