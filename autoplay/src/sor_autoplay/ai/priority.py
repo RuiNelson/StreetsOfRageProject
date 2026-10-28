@@ -25,6 +25,7 @@ from . import jack as jack_plan
 from .decide import (
     HEALTH_CRITICAL_PERCENT,
     in_smash_range,
+    level_end_boss_is_up,
     POLICE_HEALTH_PERCENT_THRESHOLD,
     POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE,
     thrown_weapon_impact_point,
@@ -569,10 +570,11 @@ def _emergency_handle_mr_x_dialog(verb: HandleMrXDialog, context: Context) -> in
 
 
 def _emergency_call_police(verb: CallPolice, context: Context) -> int:
-    """Mirrors ``decide._police_is_worth_it``: the panic threshold only.
+    """Mirrors ``decide.could_call_police``: the round's closing boss is up
+    (``decide.level_end_boss_is_up``), or the panic threshold.
 
-    The top tier (88) when it applies -- about to die is the one situation
-    the special is for -- and nothing otherwise. The laxer Surrounded and
+    The top tier (88) when either applies -- about to die, or the boss that
+    ends the round just arrived -- and nothing otherwise. The laxer Surrounded and
     live-boss tiers are gone with the reasons that produced them (user: "A
     AI está a depender muito da chamada da polícia!").
     """
@@ -580,6 +582,8 @@ def _emergency_call_police(verb: CallPolice, context: Context) -> int:
     actor = _find_actor(context, verb.actor_slot)
     if actor is None:
         return _EMERGENCY_DEFAULT
+    if level_end_boss_is_up(context):
+        return _EMERGENCY_CALL_POLICE
     threshold = (
         POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE
         if actor.lives <= 1

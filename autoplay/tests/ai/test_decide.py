@@ -64,7 +64,10 @@ from sor_autoplay.ai.decide import (
     could_walk_to_weapon,
 )
 from sor_autoplay.ai.tokens import (
+    Abadede,
     Antonio,
+    Bongo,
+    DebugNoPolice,
     AttackRange,
     EngageAntonio,
     EngageSouther,
@@ -1556,6 +1559,85 @@ class CouldCallPoliceTests(unittest.TestCase):
         myself = make_myself(specials=1, health_percent=50.0)
         souther = _souther(health=0xFFFF)
         context: set[Token] = {myself, souther}
+
+        self.assertEqual(could_call_police(context), set())
+
+
+class CouldCallPoliceAtTheLevelEndBossTests(unittest.TestCase):
+    """User: call the police as soon as the boss that ends the round is up,
+    but not for the mid-round ones."""
+
+    @staticmethod
+    def _boss(cls, type_id: int, **overrides):
+        fields = dict(
+            slot="obj11",
+            type_id=type_id,
+            world_x=160,
+            world_y=100,
+            health=32,
+            combat_phase=CombatPhase.NORMAL,
+            targets_player=1,
+            facing_left=True,
+            primary_state=1,
+        )
+        fields.update(overrides)
+        return cls(**fields)
+
+    def _calls(self, level_index: int, boss, **myself_fields) -> bool:
+        fields = dict(specials=1, health_percent=100.0)
+        fields.update(myself_fields)
+        stage = Stage(level_index=level_index, direction="right")
+        return could_call_police({make_myself(**fields), boss, stage}) == {CallPolice(actor_slot="P1")}
+
+    def test_fires_on_arrival_at_full_health_for_each_round_end_boss(self) -> None:
+        for level_index, cls, type_id in (
+            (0, Antonio, 0x56),
+            (1, Souther, 0x55),
+            (2, Abadede, 0x30),
+            (3, Bongo, 0x57),
+            (5, Souther, 0x55),
+        ):
+            with self.subTest(level_index=level_index, boss=cls.__name__):
+                self.assertTrue(self._calls(level_index, self._boss(cls, type_id)))
+
+    def test_not_for_a_mid_round_boss(self) -> None:
+        # Round 6 opens with Bongo, the rush in round 8 is all mid-round
+        # bosses before Mr. X.
+        for level_index, cls, type_id in (
+            (5, Bongo, 0x57),
+            (7, Antonio, 0x56),
+            (7, Souther, 0x55),
+            (7, Abadede, 0x30),
+            (7, Bongo, 0x57),
+            (0, Souther, 0x55),
+        ):
+            with self.subTest(level_index=level_index, boss=cls.__name__):
+                self.assertFalse(self._calls(level_index, self._boss(cls, type_id)))
+
+    def test_not_with_no_special_left(self) -> None:
+        self.assertFalse(self._calls(0, self._boss(Antonio, 0x56), specials=0))
+
+    def test_not_for_a_defeated_boss(self) -> None:
+        self.assertFalse(self._calls(0, self._boss(Antonio, 0x56, health=0)))
+
+    def test_not_while_the_boss_is_off_screen(self) -> None:
+        camera = CameraRange(left=0, right=320, top=0, bottom=240)
+        context: set[Token] = {
+            make_myself(specials=1, health_percent=100.0),
+            self._boss(Antonio, 0x56, world_x=900),
+            Stage(level_index=0, direction="right"),
+            camera,
+        }
+
+        self.assertEqual(could_call_police(context), set())
+
+    def test_the_harness_switch_still_wins(self) -> None:
+        context: set[Token] = {
+            make_myself(specials=1, health_percent=100.0),
+            self._boss(Antonio, 0x56),
+            Stage(level_index=0, direction="right"),
+            DebugNoPolice(),
+        }
 
         self.assertEqual(could_call_police(context), set())
 

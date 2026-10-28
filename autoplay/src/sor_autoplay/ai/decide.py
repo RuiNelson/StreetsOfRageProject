@@ -1391,6 +1391,7 @@ def could_call_police(context: Context) -> Context:
         # nor Mr. X, fought the same way ("fazer o mesmo tipo de
         # optimização").
         return verbs
+    boss_up = level_end_boss_is_up(context)
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
@@ -1400,10 +1401,43 @@ def could_call_police(context: Context) -> Context:
             continue
         if actor.specials <= 0:
             continue
-        if not _police_is_worth_it(context, actor):
+        if not (boss_up or _police_is_worth_it(context, actor)):
             continue
         verbs.add(CallPolice(actor_slot=actor.slot))
     return verbs
+
+
+# The boss that ends each round, by ``Stage.level_index`` (user: "sempre que
+# chegue a um boss de final de nível, tente chamar a polícia logo que lá
+# chegue. Mas só nos de final de nível, não nos intermédios"). Round 6's Bongo
+# opens the stretch the Souther pair closes, round 8's rush is all
+# intermediate bosses up to Mr. X, and round 7 has none; the twins (round 5)
+# and Mr. X stay out for the older rule in ``could_call_police``.
+_LEVEL_END_BOSS: dict[int, type[Boss]] = {
+    0: Antonio,
+    1: Souther,
+    2: Abadede,
+    3: Bongo,
+    5: Souther,
+}
+
+
+def level_end_boss_is_up(context: Context) -> bool:
+    """The round's closing boss is alive and on screen: call the police now.
+
+    Not a panic threshold -- the special is spent on arrival, whatever the
+    actor's health. Only the boss that ends this round counts
+    (``_LEVEL_END_BOSS``), never a mid-round one (round 6's Bongo, any boss
+    of round 8's rush). Mirrored by ``priority._emergency_call_police``.
+    """
+
+    stage = find(context, Stage)
+    if stage is None:
+        return False
+    boss_type = _LEVEL_END_BOSS.get(stage.level_index)
+    if boss_type is None:
+        return False
+    return any(isinstance(enemy, boss_type) for enemy in reach.on_screen_enemies(context))
 
 
 def _has_live_enemy(context: Context) -> bool:

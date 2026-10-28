@@ -260,6 +260,21 @@ class DetermineEmergencyWinnerTests(unittest.TestCase):
         self.assertEqual(len(verbs), 1)
         self.assertIsInstance(verbs[0], Punch)
 
+    def test_call_police_at_the_round_end_boss_beats_punch_at_full_health(self) -> None:
+        souther = _souther("obj11", CombatPhase.NORMAL, health=32)
+        context = {
+            souther,
+            _myself(health_percent=90.0),
+            Stage(level_index=1, direction="right"),
+            CallPolice(actor_slot="P1"),
+            Punch(actor_slot="P1", target_slot="obj11"),
+        }
+
+        verbs = find_all(determine_priority_verb(context), Verb)
+
+        self.assertEqual(len(verbs), 1)
+        self.assertIsInstance(verbs[0], CallPolice)
+
     def test_call_police_vs_boss_loses_above_the_boss_threshold(self) -> None:
         souther = _souther("obj11", CombatPhase.KNOCKDOWN, health=32)
         myself = _myself(health_percent=90.0)

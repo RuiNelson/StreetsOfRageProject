@@ -21,6 +21,7 @@ from sor_autoplay.ai.partner import do_not_harm_partner
 from sor_autoplay.ai import reach
 from sor_autoplay.ai.priority import determine_priority_verb
 from sor_autoplay.ai.tokens import (
+    DebugNoPolice,
     AttackHeldEnemy,
     Breakable,
     CameraRange,
@@ -614,6 +615,9 @@ def _run_souther(
             _souther(souther_x, souther_y, primary, tactical),
             CameraRange(left=-100, right=500, top=0, bottom=112),
             Stage(level_index=1, direction="right"),
+            # The harness's --no-police: this scores the engage, not the
+            # call a round's closing boss now draws on arrival.
+            DebugNoPolice(),
         }
         context |= generate_inference_tokens(context)
         context |= generate_verb_tokens(context)
