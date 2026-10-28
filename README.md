@@ -719,7 +719,7 @@ plays a soundtrack pre-rendered from your ROM by
 OPN2 core (YM3438, no low-pass filter, 48 kHz, lossless FLAC): every music
 track (looping forever from its own loop point, like on the console), every
 sound effect and every PCM voice. Render it once, after cloning or when the
-renderer changes (about two minutes, ~180 MB):
+renderer changes (about four minutes, ~265 MB):
 
 ```bash
 ./scripts/render_soundtrack.py                    # writes StreetsOfRageRecompilation/rom/soundtrack/
@@ -744,7 +744,10 @@ soundtrack as a warning: `sor` then emulates the chips.
 The renders come from the copyrighted ROM, so they stay next to it and are
 never versioned. The game's own sound engine still runs; only its chip output
 is replaced, so music starts, fades, the pause jingle and the stop commands
-happen on the same frames as on hardware. One difference is deliberate: on the
+happen on the same frames as on hardware. Each music track is stored as two
+stems that add up to the full mix, the FM channels and the drums (DAC) plus
+PSG, because the game's fade treats them differently: the drums and the PSG
+stop at once while the FM fades out over 1.3 seconds. One difference is deliberate: on the
 console a sound effect borrows a music channel while it plays, here the music
 keeps playing under it. Under `--turbo` the music stays at normal speed.
 

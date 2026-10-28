@@ -137,8 +137,10 @@ that hardware never pays), so by default `sor` plays FLAC renders made from the
 ROM by Genesis Plus GX instead (`sor --sound prerendered|emulated`). User
 decisions: Nuked OPN2 **YM3438**, **no low-pass filter** (post-process later),
 **48 kHz lossless**, music, sound effects and PCM voices all pre-rendered,
-music at normal speed under `--turbo`, and the hardware's
-effect-steals-a-music-channel behaviour is not reproduced. Render once after cloning (or when the
+music at normal speed under `--turbo`, the hardware's
+effect-steals-a-music-channel behaviour is not reproduced, and each music
+track is two stems (FM, which the `$E0` fade attenuates, and DAC+PSG, which it
+cuts at once) so the fade plays as on hardware. Render once after cloning (or when the
 renderer changes) into `StreetsOfRageRecompilation/rom/soundtrack/`, which is
 derived from the ROM and never committed:
 
