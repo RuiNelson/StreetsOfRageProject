@@ -2937,6 +2937,64 @@ killed, 0 hits, no life lost, the boss reached at 87 s.
 ticks (max 2.6 ms); every world update runs every Jack and every axe, and no
 exact shortcut for the Jacks other than the target was found.
 
+**Cheaper ticks for weaker machines (user, 2026-10-28: "tenho medo que não
+corra em CPUs mais fracos").** Measured on three `stage_walk_diag.py --raw`
+recordings with every enemy live (rounds 1, 3 and 5, Blaze, 23,131 ticks) by
+`tools/tick_bench.py`, before and after, all exact: **zero differences** in
+the winning verb and every pad command on every tick (`--no-budget
+--canonical`), zero in 5,905 `grunt_plan.plan` results
+(`tools/grunt_plan_bench.py`), and 1,015,296 hazard scans identical to the old
+scanner (every recorded map, all eight rounds' floor tables, several cameras).
+
+| this machine, budget on | before | after |
+| --- | --- | --- |
+| `read_snapshot` mean / max | 1.73 / 2.4 ms | 0.36 / 0.88 ms |
+| whole tick mean / median / p95 | 3.79 / 2.10 / 11.9 ms | 1.91 / 0.64 / 7.7 ms |
+| ticks over 2 ms | 14,881 of 23,131 | 5,746 |
+| `EngageGrunts` tick mean / median | 7.26 / 7.22 ms | 5.34 / 5.08 ms |
+| `grunt_plan.plan` unbudgeted mean (5,905 calls) | 7.19 ms | 4.93 ms |
+
+(`read_snapshot` here includes the replay's hex decoding; live it is the
+socket.) What changed:
+
+- **The hazard scans** (`hazards.holes_for_level`/`barriers_for_level`, both
+  every tick from `read_snapshot`) asked the round's floor table about every
+  8 px cell of a 1,344 px window, through four calls a cell: ~3.5 ms a tick.
+  A cell's class is a nibble, so the predicate is a 16-entry table, and the
+  map's cells are tabulated once per (map, question) (`_class_cells`,
+  cached). The cache keys only on the rows the scan reads (`_scanned_rows`):
+  `read_snapshot` reads 24 rows, and on a wide round their tail is the player
+  objects' RAM at `$FFB800`, which changes every frame -- keyed on the whole
+  buffer it missed on 95% of ticks.
+- **The street lookahead's simulation** (`grunt.py`, `grunt_plan.py`,
+  `twins.py`, `mr_x.py`, `jack.py`): `_hi` is `math.floor` itself; the
+  `Outcome` members are module aliases (`_NONE`, `_HIT`, ...); `GruntSim` and
+  `ActorSim` copy through a generated slot-by-slot `copy`
+  (`twins._slot_copier`, from `__slots__`); `getattr(a, ..., default)` on
+  `ActorSim` slots (always set) is a plain attribute read; `_vector_velocity`
+  (pure in three integers) is cached; the box lookups in `contact` and
+  `refresh_boxes`, `_render`, `_x_bounds`, `_clamp_word` and the blink are
+  inline; a plain walk step skips the three calls that only hand the stick
+  on; `_object_pass` allocates nothing when no knife flies.
+- Tried and dropped: a trie of rollouts that converge on the tail policy
+  (exact, but only 5% fewer object passes, eaten by its bookkeeping); 19% of
+  actor steps share a prefix with an earlier rollout, so state snapshots could
+  save at most that.
+
+**Still over the 2 ms budget: the street fight.** `grunt_plan.plan` plays
+~66 rollouts of up to 24 updates (median 4.5 ms with one enemy, 15-20 with
+five or six), and no further exact saving of any size is left in Python.
+`BUDGET_MS` (8 ms of wall clock, then 5 ms of `STAGE_2_GRACE`) is what a
+weaker CPU meets: the plan is not slower there so much as shorter -- the
+program list is cut from its end (the sticks), so the AI's street play
+depends on the machine. Making it cheaper still means playing fewer programs
+(fewer `FIRST_DURATIONS`, a shorter `HORIZON`, fewer `FINALISTS`) or a budget
+counted in rollouts instead of milliseconds: both change behaviour and need a
+live A/B first (`grunt_fight.py --family all`). Live sanity after the exact
+changes (`grunt_fight.py --family all --level 1`, Blaze, `--turbo 2`,
+`--poll-ms 16`): the boss reached at 86.8 s, 32/32 killed, 4 hits, no life
+lost; live tick median 0.5 ms, p95 7.9, max 20.9.
+
 **Sealed corridors (user: a cheap check for "a wall, or a wall whose hole is
 too small to pass" between the actor and the goal).** `_free_arrivals` only
 asks whether the goal's own cells are free; a goal that is free but cut off by
@@ -3089,6 +3147,8 @@ do not commit `.jsonl` runs.
 | `snapshot_replay.py` | **Records and replays** the reads `read_snapshot` makes: `RecordingSource` wraps the client, `SnapshotRecorder` writes the ROM tables once and each tick's changed reads as JSONL, and `ReplaySource`/`iter_ticks`/`load_rom` rebuild any tick's `GameSnapshot` offline -- the real `AgentLoop`, or any `decide`/`priority`/`execute` function, run again on a live stall as often as the question needs. Used by `stage_walk_diag.py --raw` and `jack_sim.py`; recordings run ~4 MB a second, local only |
 | `jack_sim.py` | **Plays the Jack engage offline**: every `--every`th tick with a Jack in a `--raw` recording (`--from`/`--to`) seeds `jack.plan_world` against `jack.py`'s model, update by update, until he is held, the actor is hit or `--updates` run out (a stalemate); `--timing ideal|fixed|jitter`. Found round 4's off-screen reset loop (**Round 4: the bridge, its props and its Jack**) |
 | `jack_plan_bench.py` | **Times and checks `jack.plan_engage`**: replays `--raw` recordings (`--raw A B ...`, or the `--cache` pickle of the captured contexts) through the real `AgentLoop`, keeps every tick whose winning verb is `EngageJack`, times `execute.engage_jack_plan` (best of `--passes`; median/p95/p99/max by Jack count) and `--save`s every `EngagePlan` field, or `--compare`s against a saved file (exit 1 on any plan diff) -- the proof that a speed-up is exact. Contexts are replayed in a canonical order (**Jack's plan inside the 2 ms budget**). `--profile` prints a cProfile. Recordings and caches stay out of the repo |
+| `tick_bench.py` | **Times and checks whole ticks**: replays `--raw` recordings through the real `read_snapshot` and `AgentLoop.tick` (a fresh loop per recording and pass), times both halves per tick (best of `--passes`; median/p95/p99/max, ticks over 2 ms, `--by-verb` per winning verb) and `--save`s every tick's winning verb and pad commands, or `--compare`s against a saved file (exit 1 on any diff). `--no-budget` plays every `grunt_plan` program and `--canonical` hands the street enemies over in slot order -- with both, two runs of the same code agree on every tick (**Cheaper ticks for weaker machines**). `--profile` prints a cProfile. Recordings stay out of the repo |
+| `grunt_plan_bench.py` | **Times and checks `grunt_plan.plan`** alone: captures every call's inputs (actor, enemies, knives, flags, a copy of the `PlanMemory`) from `--raw` replays into a `--cache` pickle, then times each call unbudgeted (best of `--passes`, by enemies relevant) and `--save`s/`--compare`s every `GruntPlan` and the program kept. The cache pickles the model objects: rebuild it when their slots change |
 | `breakable_diag.py` | Breakable stalls, per tick while a `Breakable` is in context. Round 1 by default, with **real** enemies (the sweep did not reproduce that stall); `--level N` jumps to a round first, `--sweep` keeps the ordinary families swept (the walk `scripts/play.py --preset boss` and the boss harnesses make -- how the round-4 stall was reproduced), `--heartbeat-s` logs a position row that often with no breakable around (so a stall anywhere shows), `--until-boss` stops at the boss |
 | `armed_combat_diag.py` | Held-weapon reach and swing timing |
 

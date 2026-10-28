@@ -41,11 +41,12 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from . import grunt as model
-from .grunt import GruntSim, KnifeSim, Outcome
+from .grunt import GruntSim, KnifeSim, Outcome, _GRAB, _HIT, _KNOCKED, _NONE, _SEIZED, _STRUCK
 from .mr_x import actor_step as _unarmed_step
 from .mr_x import blink_step, refresh_boxes
 from .mr_x_plan import SCENARIOS as _MR_X_SCENARIOS, PlanMemory as _MrXPlanMemory, _Program, _speeds, _target
 from .twins import ActorSim, overlaps
+from .twins import actor_update as _walk
 
 __all__ = ["GruntPlan", "PlanMemory", "holder_blow", "plan", "tail_action", "relevant"]
 
@@ -230,22 +231,22 @@ def _body_box(a: ActorSim, shape: tuple[int, int, int, int]) -> tuple[int, int, 
 def _striking_body(a: ActorSim) -> None:
     """The body box of the frame a punch or a swing stands on."""
 
-    if getattr(a, "invulnerable", False):
+    if a.invulnerable:
         return
-    swing = getattr(a, "swing", None)
+    swing = a.swing
     if swing is not None:
         bodies, durations = SWING_BODY[_weapon(a)]
         frames = bodies.get(a.character, bodies[BLAZE])
         a.body = _body_box(a, frames[min(_frame_at(durations, swing), len(frames) - 1)])
         return
-    punch = getattr(a, "punch", None)
+    punch = a.punch
     if punch is not None:
         frames, durations = PUNCH_BODY.get(a.character, PUNCH_BODY[BLAZE])
         a.body = _body_box(a, frames[_frame_at(durations, punch)])
 
 
 def _weapon(a: ActorSim) -> int:
-    return getattr(a, "weapon", 0) or 0
+    return a.weapon or 0
 
 
 def _swing_boxes(a: ActorSim) -> None:
@@ -276,20 +277,29 @@ def actor_step(a: ActorSim, dir_x: int, dir_y: int, punch: bool = False, chord: 
     undone whole, as ``$3B8A``/``$3C92`` undo it (a pit is a fall, which no
     plan takes)."""
 
-    if getattr(a, "solids", None) and (dir_x or dir_y):
+    solid = a.solids and (dir_x or dir_y)
+    if solid:
         x, y = a.x, a.y
-        _actor_step(a, dir_x, dir_y, punch, chord)
-        if (a.x != x or a.y != y) and _blocked(a):
-            a.x, a.y = x, y
-            refresh_boxes(a, a.x, a.y)
+    if not punch and not chord and a.swing is None and a.punch is None and a.chord is None:
+        # A plain walk -- most steps of every rollout: _actor_step and
+        # mr_x.actor_step would only run the blink and hand the stick on.
+        if a.blink:
+            a.blink -= 1
+            a.invulnerable = a.blink > 0
+        _walk(a, dir_x, dir_y)
     else:
         _actor_step(a, dir_x, dir_y, punch, chord)
-    _striking_body(a)
+    if solid and (a.x != x or a.y != y) and _blocked(a):
+        a.x, a.y = x, y
+        refresh_boxes(a, a.x, a.y)
+    # _striking_body only changes anything mid-punch or mid-swing.
+    if a.swing is not None or a.punch is not None:
+        _striking_body(a)
 
 
 def _actor_step(a: ActorSim, dir_x: int, dir_y: int, punch: bool, chord: bool) -> None:
 
-    if getattr(a, "swing", None) is not None:
+    if a.swing is not None:
         blink_step(a)
         a.swing += 1
         if a.swing >= SWING_TIMING[_weapon(a)][2]:
@@ -390,7 +400,7 @@ def pick_target(a: ActorSim, grunts: Sequence[GruntSim]) -> GruntSim | None:
 
     best = None
     best_d = math.inf
-    spared = getattr(a, "spared", None) or ()
+    spared = a.spared or ()
     for g in grunts:
         if g.slot in spared:
             continue
@@ -443,7 +453,11 @@ def tail_action(a: ActorSim, grunts: Sequence[GruntSim], target_slot: int | None
     """The stick the rollouts hand over to once their program runs out: toward
     the target's engage aim, facing him."""
 
-    g = next((t for t in grunts if t.slot == target_slot and (_engageable(t) or model.lying_in_wait(t))), None)
+    g = None
+    for t in grunts:
+        if t.slot == target_slot and (_engageable(t) or model.lying_in_wait(t)):
+            g = t
+            break
     if g is None:
         g = pick_target(a, grunts)
     if g is None:
@@ -475,28 +489,33 @@ class _Result:
     friendly_at: int | None = None  # a strike of the actor's met the partner
 
 
+_grunt_update = model.grunt_update
+
+
 def _object_pass(grunts: list[GruntSim], a: ActorSim, knives: list[KnifeSim] | None = None) -> list[tuple[int, Outcome]]:
     """One object pass: the enemies in slot order, then the knives in flight
     (a weapon's slot sits above theirs); a knife thrown this pass flies from
     the next."""
 
     events: list[tuple[int, Outcome]] = []
-    fresh: list[KnifeSim] = []
+    fresh: list[KnifeSim] | None = None
     for g in grunts:
         if not g.alive:
             continue
-        out = model.grunt_update(g, a)
-        if out is not Outcome.NONE:
+        out = _grunt_update(g, a)
+        if out is not _NONE:
             events.append((g.slot, out))
         if g.thrown is not None:
+            if fresh is None:
+                fresh = []
             fresh.append(g.thrown)
             g.thrown = None
-    if knives is not None:
+    if knives is not None and (knives or fresh):
         cam_x = grunts[0].cam_x if grunts else 0
         for k in knives:
-            if k.alive and model.knife_update(k, a, cam_x) is Outcome.HIT:
-                events.append((-1, Outcome.HIT))
-        knives[:] = [k for k in knives if k.alive] + fresh
+            if k.alive and model.knife_update(k, a, cam_x) is _HIT:
+                events.append((-1, _HIT))
+        knives[:] = [k for k in knives if k.alive] + (fresh or [])
     return events
 
 
@@ -527,7 +546,7 @@ def holder_blow(grunts: Sequence[GruntSim], a: ActorSim, updates: int, *, exclud
             blink_step(h)
             refresh_boxes(h, h.x, h.y)
         for _, out in _object_pass(others, h, flying):
-            if out in (Outcome.HIT, Outcome.SEIZED):
+            if out in (_HIT, _SEIZED):
                 return j
     return None
 
@@ -600,7 +619,7 @@ def _rollout(
             return
         if a.damage and a.attack is not None and overlaps(a.attack, partner):
             friendly.append(k)
-        elif getattr(a, "weapon_box", None) is not None and overlaps(a.weapon_box, partner):
+        elif a.weapon_box is not None and overlaps(a.weapon_box, partner):
             friendly.append(k)
 
     if player_first:
@@ -609,26 +628,29 @@ def _rollout(
     for k in range(horizon):
         events = _object_pass(grunts, a, knives)
         for slot, out in events:
-            if out in (Outcome.STRUCK, Outcome.KNOCKED) and struck_at is None and slot not in spared:
+            if (out is _STRUCK or out is _KNOCKED) and struck_at is None and slot not in spared:
                 struck_at = k
         for _, out in events:
-            if out in (Outcome.HIT, Outcome.SEIZED):
+            if out is _HIT or out is _SEIZED:
                 return result(hit_at=k, grab_at=None)
         for slot, out in events:
-            if out is Outcome.GRAB and not _held(grunts, slot):
+            if out is _GRAB and not _held(grunts, slot):
                 # $3266 refused it (the body behind the actor's origin): no hold.
                 continue
-            if out is Outcome.GRAB and slot in spared:
+            if out is _GRAB and slot in spared:
                 # The partner's fight: a hold on it is theirs to lose.
                 return result(hit_at=None, grab_at=None, burnt_at=k, held_slot=slot)
-            if out is Outcome.GRAB:
+            if out is _GRAB:
                 blow = holder_blow(grunts, a, HOLD_KNEE_SAFE_UPDATES, exclude=slot, knives=knives)
                 if blow is not None and blow < HOLD_ESCAPE_UPDATES:
                     return result(hit_at=k + blow, grab_at=None)
                 if blow is not None:
                     return result(hit_at=None, grab_at=None, burnt_at=k, held_slot=slot)
                 return result(hit_at=None, grab_at=k, held_slot=slot)
-        if not any(g.alive for g in grunts):
+        for g in grunts:
+            if g.alive:
+                break
+        else:
             return result(hit_at=None, grab_at=None)
         act()
         check_partner(k + 1)

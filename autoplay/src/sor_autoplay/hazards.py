@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+from functools import lru_cache
 
 from .world_map import LANE_Y_MAX_DEFAULT, lane_y_max_for_level
 
@@ -194,6 +195,42 @@ def collision_class_at(
     return raw & 0x0F
 
 
+@lru_cache(maxsize=8)
+def _class_cells(cmap: bytes, stride: int, table: tuple[bool, ...]) -> tuple[tuple[bool, ...], ...]:
+    """``table[class]`` for every 8 px cell of the map, one tuple per row.
+
+    The scanners below ask the same map the same question every tick, and the
+    map only changes with the stage: built once per (map, question). A cell's
+    class is a nibble (``collision_class_at``), so a 16-entry ``table`` is the
+    whole predicate. ``cmap`` must be ``bytes`` (hashable), cut to the rows the
+    caller reads (``_scanned_rows``): ``read_snapshot`` reads 24 rows, and on a
+    wide round the last of them are the player objects' RAM, which changes
+    every frame -- the whole buffer as the key would never hit.
+    """
+
+    hi = [table[b >> 4] for b in range(256)]
+    lo = [table[b & 0x0F] for b in range(256)]
+    rows = []
+    for row in range(len(cmap) // stride):
+        cells: list[bool] = []
+        for b in cmap[row * stride : (row + 1) * stride]:
+            cells.append(hi[b])
+            cells.append(lo[b])
+        rows.append(tuple(cells))
+    return tuple(rows)
+
+
+def _scanned_rows(cmap: bytes, stride: int, lane_max: int) -> bytes:
+    """The rows a scan with this ``lane_max`` reads, as the cache's key."""
+
+    rows = max(0, min(len(cmap) // stride, lane_max // CELL + 1))
+    return bytes(cmap[: rows * stride])
+
+
+def _class_table(match) -> tuple[bool, ...]:
+    return tuple(bool(match(klass)) for klass in range(16))
+
+
 def _find_class_regions(
     cmap: bytes,
     *,
@@ -223,17 +260,26 @@ def _find_class_regions(
     The scan starts on a cell edge: a window starting mid-cell (every
     ``camera_x - 512`` does) sampled each cell once but reported it up to 7 px
     off where it really starts.
+
+    ``match`` is only ever asked about a 4-bit class, so it is tabulated once
+    and the map's cells are read from ``_class_cells``.
     """
 
     if stride <= 0 or not cmap:
         return ()
 
     world_x_min -= world_x_min % CELL
-    map_width = stride * 16
     map_rows = len(cmap) // stride
     cols = max(1, (world_x_max - world_x_min + CELL - 1) // CELL)
     rows = max(1, (lane_max + CELL) // CELL)
+    cells = _class_cells(_scanned_rows(cmap, stride, lane_max), stride, _class_table(match))
+    map_cols = stride * 2
+    # Window column ``col`` is map cell ``c0 + col``; only on-map cells count.
+    c0 = world_x_min // CELL
+    lo = max(0, -c0)
+    hi = min(cols, map_cols - c0)
     grid = [[False] * cols for _ in range(rows)]
+    trues: list[list[int]] = [[] for _ in range(rows)]
 
     for row in range(rows):
         lane = row * CELL
@@ -241,20 +287,22 @@ def _find_class_regions(
             break
         if lane >> 3 >= map_rows:
             break
-        for col in range(cols):
-            wx = world_x_min + col * CELL
-            if wx < 0 or wx >= map_width:
-                continue
-            klass = collision_class_at(cmap, stride=stride, world_x=wx, lane_y=lane)
-            if match(klass):
-                grid[row][col] = True
+        if lo >= hi:
+            continue
+        source = cells[lane >> 3]
+        line = grid[row]
+        hits = trues[row]
+        for col in range(lo, hi):
+            if source[c0 + col]:
+                line[col] = True
+                hits.append(col)
 
     visited = [[False] * cols for _ in range(rows)]
     regions: list[FloorHole] = []
 
     for row in range(rows):
-        for col in range(cols):
-            if not grid[row][col] or visited[row][col]:
+        for col in trues[row]:
+            if visited[row][col]:
                 continue
             q: deque[tuple[int, int]] = deque([(row, col)])
             visited[row][col] = True
@@ -361,10 +409,12 @@ def find_collision_barriers(
     x_hi = min(world_x_max, map_width)
     rows = min(len(cmap) // stride, lane_max // CELL + 1)
 
-    def is_wall(x: int, lane: int) -> bool:
-        return is_wall_class(
-            level_index, collision_class_at(cmap, stride=stride, world_x=x, lane_y=lane)
-        )
+    cells = _class_cells(
+        _scanned_rows(cmap, stride, lane_max), stride, _class_table(lambda klass: is_wall_class(level_index, klass))
+    )
+    # Cells x_lo, x_lo + CELL, ... below x_hi, as map cell indices.
+    c_lo = x_lo // CELL
+    c_hi = -(-x_hi // CELL)
 
     regions: list[FloorHole] = []
     # Runs still growing down the rows: (x0, x1) -> the lane they started on.
@@ -372,15 +422,17 @@ def find_collision_barriers(
     for row in range(rows + 1):
         lane = row * CELL
         runs: list[tuple[int, int]] = []
-        x = x_lo
-        while row < rows and x < x_hi:
-            if not is_wall(x, lane):
-                x += CELL
-                continue
-            start = x
-            while x < x_hi and is_wall(x, lane):
-                x += CELL
-            runs.append((start, x))
+        if row < rows:
+            source = cells[lane >> 3]
+            c = c_lo
+            while c < c_hi:
+                if not source[c]:
+                    c += 1
+                    continue
+                start = c
+                while c < c_hi and source[c]:
+                    c += 1
+                runs.append((start * CELL, c * CELL))
         still_open = {run: open_runs.pop(run, lane) for run in runs}
         for (x0, x1), top in open_runs.items():
             regions.append(FloorHole(world_x=x0, lane_y=top, width=x1 - x0, height=lane - top))

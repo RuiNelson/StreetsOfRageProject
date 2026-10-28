@@ -966,11 +966,13 @@ def actor_step(a: ActorSim, dir_x: int, dir_y: int, punch: bool = False, chord: 
     knockdown), the punch on its frames (standing, the facing it had when
     pressed), or the stick."""
 
-    blink_step(a)
-    if a.chord is not None or (chord and getattr(a, "punch", None) is None):
+    if a.blink:  # blink_step, inline
+        a.blink -= 1
+        a.invulnerable = a.blink > 0
+    if a.chord is not None or (chord and a.punch is None):
         actor_update(a, 0, 0, chord=chord and a.chord is None)
         return
-    step = getattr(a, "punch", None)
+    step = a.punch
     if step is not None:
         step += 1
         if step >= PUNCH_LOCK:

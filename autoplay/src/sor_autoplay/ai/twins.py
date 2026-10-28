@@ -331,10 +331,9 @@ CODE_STRUCK = 2
 CODE_GRABBED_BOSS = 3
 
 
-def _hi(value: float) -> int:
-    """The high word of a 16.16 value, as ``move.w`` reads it."""
-
-    return math.floor(value)
+# The high word of a 16.16 value, as ``move.w`` reads it. An alias, not a
+# wrapper: the street lookahead calls it millions of times a minute.
+_hi = math.floor
 
 
 def _fixed(value: float) -> int:
@@ -364,6 +363,24 @@ def overlaps(a: tuple, b: tuple) -> bool:
     """``$AB88`` on all three axes: inclusive."""
 
     return a[0] <= b[1] and a[1] >= b[0] and a[2] <= b[3] and a[3] >= b[2] and a[4] <= b[5] and a[5] >= b[4]
+
+
+def _slot_copier(cls):
+    """A ``copy`` that assigns every slot of ``cls`` by name, written out.
+
+    The lookaheads copy their sims for every rollout; a ``getattr``/``setattr``
+    loop over ``__slots__`` costs about three times as much. Generated from
+    ``__slots__``, so a new slot is copied without anyone remembering to.
+    """
+
+    lines = [f"    other.{name} = self.{name}" for name in cls.__slots__]
+    source = "def copy(self):\n    other = _new(_cls)\n" + "\n".join(lines) + "\n    return other\n"
+    namespace = {"_new": object.__new__, "_cls": cls}
+    exec(source, namespace)
+    copy = namespace["copy"]
+    copy.__qualname__ = f"{cls.__name__}.copy"
+    copy.__doc__ = "A field-for-field copy (every slot)."
+    return copy
 
 
 # --- The actor ------------------------------------------------------------------
@@ -413,11 +430,7 @@ class ActorSim:
         for name in self.__slots__:
             setattr(self, name, fields.get(name))
 
-    def copy(self) -> ActorSim:
-        other = ActorSim.__new__(ActorSim)
-        for name in self.__slots__:
-            setattr(other, name, getattr(self, name))
-        return other
+    # ``copy`` is ``_slot_copier(ActorSim)``, assigned after the class.
 
     @classmethod
     def standing(
@@ -447,8 +460,14 @@ class ActorSim:
         return a
 
 
+ActorSim.copy = _slot_copier(ActorSim)
+
+
 def chord_damage(character: int) -> int:
     return max(step[5] for step in chord_schedule(character))
+
+
+_SHAPES_GET = SHAPES.get
 
 
 def refresh_boxes(a: ActorSim, box_x: float, box_y: float) -> None:
@@ -471,10 +490,18 @@ def refresh_boxes(a: ActorSim, box_x: float, box_y: float) -> None:
         a.damage = 0
         a.knockdown = False
     x, y = _hi(box_x), _hi(box_y)
-    a.attack = box(attack_id, x, y, z) if attack_id else None
+    shape = _SHAPES_GET(attack_id) if attack_id else None
+    a.attack = (
+        (x + shape[0], x + shape[1], y + shape[2], y + shape[3], z + shape[4], z + shape[5])
+        if shape is not None else None
+    )
     # $4140 caches no body at all while +$4B bit 1 is set (the blink after a
     # knockdown or a respawn): nothing lands on it.
-    a.body = box(body_id, x, y, z) if body_id and not a.invulnerable else None
+    shape = _SHAPES_GET(body_id) if body_id and not a.invulnerable else None
+    a.body = (
+        (x + shape[0], x + shape[1], y + shape[2], y + shape[3], z + shape[4], z + shape[5])
+        if shape is not None else None
+    )
 
 
 def actor_update(a: ActorSim, dir_x: int, dir_y: int, chord: bool = False) -> None:
@@ -512,8 +539,19 @@ def actor_update(a: ActorSim, dir_x: int, dir_y: int, chord: bool = False) -> No
     x = a.x + dir_x * step_x
     y = a.y + dir_y * step_y
     refresh_boxes(a, x, y)
-    a.x = _clamp_word(x, a.x_lo, a.x_hi)
-    a.y = _clamp_word(y, a.lane_lo, a.lane_hi)
+    # _clamp_word, inline (it runs twice an update of every rollout).
+    whole = _hi(x)
+    if whole < a.x_lo:
+        x = a.x_lo + (x - whole)
+    elif whole > a.x_hi:
+        x = a.x_hi + (x - whole)
+    a.x = x
+    whole = _hi(y)
+    if whole < a.lane_lo:
+        y = a.lane_lo + (y - whole)
+    elif whole > a.lane_hi:
+        y = a.lane_hi + (y - whole)
+    a.y = y
 
 
 def _clamp_word(value: float, lo: float, hi: float) -> float:

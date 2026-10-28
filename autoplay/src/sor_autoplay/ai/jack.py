@@ -73,6 +73,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 from enum import Enum, auto
 from typing import Sequence
 
@@ -384,8 +385,12 @@ def signed_health(jack: Jack) -> int:
 _hi = math.floor  # the integer part ($xxxx.xx's high word); an alias, not a wrapper: it runs ~8,000 times a plan
 
 
+@lru_cache(maxsize=1 << 16)
 def _vector_velocity(dx: int, dy: int, speed: int) -> tuple[float, float]:
-    """``$982C``: ``speed`` (8.8) along the vector, quantized like the ROM."""
+    """``$982C``: ``speed`` (8.8) along the vector, quantized like the ROM.
+
+    Pure in its three integers, and the street lookahead asks the same few
+    thousand of them over and over: cached."""
 
     major, minor = abs(dx), abs(dy)
     swapped = minor >= major

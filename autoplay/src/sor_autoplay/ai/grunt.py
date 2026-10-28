@@ -61,7 +61,7 @@ from enum import Enum, auto
 from ..hazards import base_floor_z
 from . import arena
 from .jack import _vector_velocity
-from .twins import ActorSim, overlaps
+from .twins import ActorSim, _slot_copier, overlaps
 
 GARCIA_KNIFE = 0x20
 GARCIA_GRABBER = 0x21
@@ -313,10 +313,15 @@ class Outcome(Enum):
     SLIPPED = auto()  # a grab contact the actor's own update refuses ($3266): he resets
 
 
-def _hi(value: float) -> int:
-    """The integer high word of a 16.16 value (a floor, like ``swap``)."""
+# The members by module name: an Enum class-attribute read costs ~30 ns, and
+# the street lookahead tests outcomes millions of times a minute.
+_NONE, _HIT, _STRUCK, _GRAB = Outcome.NONE, Outcome.HIT, Outcome.STRUCK, Outcome.GRAB
+_SEIZED, _KNOCKED, _SLIPPED = Outcome.SEIZED, Outcome.KNOCKED, Outcome.SLIPPED
 
-    return int(value) if value >= 0 else math.floor(value)
+
+# The integer high word of a 16.16 value (a floor, like ``swap``). An alias,
+# not a wrapper: it runs several times an update of every rollout.
+_hi = math.floor
 
 
 def _s16(data: bytes, offset: int) -> int:
@@ -329,6 +334,9 @@ def _u16(data: bytes, offset: int) -> int:
 
 def _s32(data: bytes, offset: int) -> float:
     return int.from_bytes(data[offset : offset + 4], "big", signed=True) / 65536.0
+
+
+_SHAPES_GET = SHAPES.get
 
 
 def box(box_id: int, x: int, y: int, z: int) -> tuple[int, int, int, int, int, int] | None:
@@ -356,11 +364,7 @@ class GruntSim:
         for name in self.__slots__:
             setattr(self, name, fields.get(name))
 
-    def copy(self) -> GruntSim:
-        other = GruntSim.__new__(GruntSim)
-        for name in self.__slots__:
-            setattr(other, name, getattr(self, name))
-        return other
+    # ``copy`` is ``twins._slot_copier(GruntSim)``, assigned after the class.
 
     @property
     def facing_left(self) -> bool:
@@ -422,6 +426,9 @@ class GruntSim:
             rng=5,
             thrown=None,
         )
+
+
+GruntSim.copy = _slot_copier(GruntSim)
 
 
 # --- The framework ----------------------------------------------------------------------------
@@ -544,9 +551,12 @@ def _x_bounds(g: GruntSim) -> tuple[float, float]:
 def _advance_x(g: GruntSim) -> bool:
     """``$9F96``; False when the bound refused the step."""
 
-    lo, hi = _x_bounds(g)
-    nx = g.x + g.vx
-    if g.vx < 0 and nx < lo or g.vx >= 0 and nx >= hi:
+    level = g.level  # _x_bounds, inline
+    lo = float(X_MIN_ROUND_7) if level == 6 else 0.0
+    hi = float(X_MAX_ROUND_8 if level == 7 else X_MAX)
+    vx = g.vx
+    nx = g.x + vx
+    if vx < 0 and nx < lo or vx >= 0 and nx >= hi:
         return False
     g.x = nx
     return True
@@ -598,28 +608,33 @@ def contact(g: GruntSim, a: ActorSim) -> Outcome:
     actor's body."""
 
     if a.unavailable or a.latch:
-        return Outcome.NONE
+        return _NONE
     x, y, z = int(g.x), int(g.y), _hi(g.z)
-    body = box(g.body_id, x, y, z)
-    weapon = getattr(a, "weapon_box", None)
+    # box(g.body_id, ...), inline: this is every update of every enemy.
+    shape = _SHAPES_GET(g.body_id) if g.body_id else None
+    body = (
+        (x + shape[0], x + shape[1], y + shape[2], y + shape[3], z + shape[4], z + shape[5])
+        if shape is not None else None
+    )
+    weapon = a.weapon_box
     if weapon is not None and body is not None and overlaps(weapon, body):
         # $AA34: the registered attackers ($FFFB22) first -- the swung weapon's
         # box on his body is $ABA4's code 5, $A9DC's knockdown.
         if _struck_window(g):
-            return Outcome.KNOCKED
-        return Outcome.NONE
+            return _KNOCKED
+        return _NONE
     if a.attack is not None and body is not None and overlaps(a.attack, body):
         if a.damage:
             if _struck_window(g):
-                return Outcome.STRUCK
-            return Outcome.NONE
+                return _STRUCK
+            return _NONE
         if not a.holding and abs(a.z - z) <= GRAB_Z:
-            return Outcome.GRAB
-        return Outcome.NONE
+            return _GRAB
+        return _NONE
     attack = box(g.attack_id, x, y, z)
     if attack is not None and a.body is not None and overlaps(attack, a.body):
-        return Outcome.HIT
-    return Outcome.NONE
+        return _HIT
+    return _NONE
 
 
 def takes_hold(a: ActorSim, g: GruntSim) -> bool:
@@ -638,25 +653,25 @@ def _react(g: GruntSim, a: ActorSim, out: Outcome) -> bool:
     """``$A9BA``'s table: what a contact does to him. True when it ended his
     update (his state changed)."""
 
-    if out is Outcome.HIT:
+    if out is _HIT:
         a.latch = 1
         return False
-    if out is Outcome.STRUCK:
+    if out is _STRUCK:
         a.latch = 2
-        if getattr(a, "knockdown", False):
+        if a.knockdown:
             _knock_down(g, a)
             return True
         _goto(g, 0x0200)
         return True
-    if out is Outcome.GRAB:
+    if out is _GRAB:
         a.latch = 3
         _goto(g, 0x0500)
         if not takes_hold(a, g):
             g.flags = 0x40  # $A04A with the holder's +$7D clear: state 1 next update
         return True
-    if out is Outcome.KNOCKED:
+    if out is _KNOCKED:
         _goto(g, 0x0300)
-        g.hp -= getattr(a, "weapon_damage", 0) or 4
+        g.hp -= a.weapon_damage or 4
         g.attack_id = g.body_id = 0
         if g.hp < 0:
             _goto(g, 0x0600)
@@ -682,12 +697,12 @@ def _contact_signal(g: GruntSim, a: ActorSim) -> Outcome:
     the actor holds nobody and the heights are within 8; otherwise nothing."""
 
     out = contact(g, a)
-    if out is Outcome.HIT:
+    if out is _HIT:
         if not a.holding and abs(a.z - _hi(g.z)) < GRAB_Z:
             a.latch = 1
             _goto(g, 0x0C00)
-            return Outcome.SEIZED
-        return Outcome.NONE
+            return _SEIZED
+        return _NONE
     _react(g, a, out)
     return out
 
@@ -698,9 +713,9 @@ def _contact(g: GruntSim, a: ActorSim) -> tuple[Outcome, bool]:
     if g.type == SIGNAL:
         if _action(a) == 0x5C:
             _goto(g, 0x0D00)
-            return Outcome.NONE, True
+            return _NONE, True
         out = _contact_signal(g, a)
-        return out, out in (Outcome.STRUCK, Outcome.GRAB, Outcome.SEIZED, Outcome.KNOCKED)
+        return out, out in (_STRUCK, _GRAB, _SEIZED, _KNOCKED)
     out = contact(g, a)
     return out, _react(g, a, out)
 
@@ -708,7 +723,7 @@ def _contact(g: GruntSim, a: ActorSim) -> tuple[Outcome, bool]:
 def _action(a: ActorSim) -> int:
     """The target's ``+$30`` with the facing bit off (idle when unknown)."""
 
-    action = getattr(a, "action", None)
+    action = a.action
     return (action or 0x02) & 0xFE
 
 
@@ -719,7 +734,7 @@ def _target_down(a: ActorSim) -> bool:
 
 
 def _target_anim_facing(a: ActorSim) -> int:
-    anim = getattr(a, "anim", None)
+    anim = a.anim
     if anim is None:
         return ANIM_MIRROR if a.facing_left else 0
     return anim & ANIM_MIRROR
@@ -737,10 +752,10 @@ def _rand(g: GruntSim, bits: int) -> int:
 def _st_reselect(g: GruntSim, a: ActorSim) -> Outcome:
     table = PERSONALITY.get(g.type)
     if table is None:
-        return Outcome.NONE
+        return _NONE
     index = g.param & 0x0F
     _goto(g, table[index] if index < len(table) else table[0])
-    return Outcome.NONE
+    return _NONE
 
 
 def _st_evade(g: GruntSim, a: ActorSim) -> Outcome:
@@ -817,14 +832,14 @@ def _st_hitstun(g: GruntSim, a: ActorSim) -> Outcome:
         if g.hp < 0:
             _goto(g, 0x0600)
             g.alive = False
-        return Outcome.NONE
+        return _NONE
     out = contact(g, a)
-    if out is Outcome.GRAB or out is Outcome.KNOCKED:
+    if out is _GRAB or out is _KNOCKED:
         _react(g, a, out)
         return out
-    if out is Outcome.STRUCK:
+    if out is _STRUCK:
         a.latch = 2
-        if getattr(a, "knockdown", False):
+        if a.knockdown:
             _knock_down(g, a)
             return out
         g.hp -= a.damage or 1
@@ -835,7 +850,7 @@ def _st_hitstun(g: GruntSim, a: ActorSim) -> Outcome:
     g.t50 -= 1
     if g.t50 <= 0:
         _goto(g, 0x0100)
-    return out if out is not Outcome.HIT else Outcome.NONE
+    return out if out is not _HIT else _NONE
 
 
 def _st_inert(g: GruntSim, a: ActorSim) -> Outcome:
@@ -843,11 +858,11 @@ def _st_inert(g: GruntSim, a: ActorSim) -> Outcome:
 
     if g.state == ST_HELD and g.flags & 0x40:
         _goto(g, 0x0100)
-        return Outcome.NONE
+        return _NONE
     if g.state == ST_DYING or g.hp < 0:
         g.alive = False
     g.attack_id = 0
-    return Outcome.NONE
+    return _NONE
 
 
 # --- Garcia $22 (and the $21/$22 approach and punch) -------------------------------------------
@@ -904,13 +919,13 @@ def _st_punch(g: GruntSim, a: ActorSim) -> Outcome:
     if not g.flags & 0x01:
         g.flags |= 0x01
         if _refused_off_screen(g):
-            return Outcome.NONE
+            return _NONE
         g.animating = True
         _set_anim(g, 0x14, a)
         if g.flags & 0x04:
             g.reload = g.countdown = 4
     out = contact(g, a)
-    if out is Outcome.HIT:
+    if out is _HIT:
         a.latch = 1
         return out
     if _react(g, a, out):
@@ -932,7 +947,7 @@ def _st_22_wait(g: GruntSim, a: ActorSim) -> Outcome:
     if not g.flags & 0x01:
         g.flags |= 0x01
         if _refused_off_screen(g):
-            return Outcome.NONE
+            return _NONE
         _set_anim(g, 0x00, a)
         g.frame = 1
         _latch(g)
@@ -1043,7 +1058,7 @@ def _st_22_lying(g: GruntSim, a: ActorSim) -> Outcome:
     if g.t50 == 0 or abs(int(a.x) - int(g.x)) < 0x50:
         _goto(g, 0x0100)
         g.param = 0
-    return Outcome.NONE
+    return _NONE
 
 
 def _st_22_corner(g: GruntSim, a: ActorSim) -> Outcome:
@@ -1112,12 +1127,12 @@ def _st_22_jabs(g: GruntSim, a: ActorSim) -> Outcome:
     if not g.flags & 0x01:
         g.flags |= 0x01
         if _refused_off_screen(g):
-            return Outcome.NONE
+            return _NONE
         _set_anim(g, 0x14, a)
         g.reload, g.countdown = 3, 3
         g.t50 = 3
     out = contact(g, a)
-    if out is Outcome.HIT:
+    if out is _HIT:
         a.latch = 1
         _goto(g, 0x0100)
         return out
@@ -1156,7 +1171,7 @@ def _st_21_approach(g: GruntSim, a: ActorSim) -> Outcome:
     g.t50 -= 1
     if g.t50 <= 0:
         _goto(g, 0x0C00)
-        return Outcome.NONE
+        return _NONE
     out, ended = _contact(g, a)
     if ended:
         return out
@@ -1205,14 +1220,14 @@ def _st_21_rush(g: GruntSim, a: ActorSim) -> Outcome:
         g.speed = 0x480
     if not _faced_by_target(g, a):
         _goto(g, 0x0100)
-        return Outcome.NONE
+        return _NONE
     g.attack_id = 0x1E
     out = contact(g, a)
-    if out is Outcome.HIT:
+    if out is _HIT:
         a.latch = 1
         if not a.holding:
             _goto(g, 0x0900)
-            return Outcome.SEIZED
+            return _SEIZED
         _goto(g, 0x0C00)
         return out
     if _react(g, a, out):
@@ -1239,7 +1254,7 @@ def _st_20_run(g: GruntSim, a: ActorSim) -> Outcome:
         _toward_target(g, a, 0x500)
         g.animating = True
         if _refused_off_screen(g):
-            return Outcome.NONE
+            return _NONE
     out, ended = _contact(g, a)
     if ended:
         return out
@@ -1481,7 +1496,7 @@ def _st_24_approach(g: GruntSim, a: ActorSim) -> Outcome:
     g.t50 -= 1
     if g.t50 <= 0:
         _goto(g, 0x0800)
-        return Outcome.NONE
+        return _NONE
     out, ended = _contact(g, a)
     if ended:
         return out
@@ -1529,7 +1544,7 @@ def _st_24_decide(g: GruntSim, a: ActorSim) -> Outcome:
         g.flags |= 0x01
         if not _on_screen_97ce(g):
             _goto(g, 0x0700)
-            return Outcome.NONE
+            return _NONE
         g.animating = False
         g.t50 = 0x18
     out, ended = _contact(g, a)
@@ -1588,7 +1603,7 @@ def _st_24_slide(g: GruntSim, a: ActorSim) -> Outcome:
         g.flags |= 0x01
         if not _on_screen_97ce(g):
             _goto(g, 0x0700)
-            return Outcome.NONE
+            return _NONE
         g.animating = True
         _set_anim(g, 0x18, a)
         g.t50 = 0x1A
@@ -1596,9 +1611,9 @@ def _st_24_slide(g: GruntSim, a: ActorSim) -> Outcome:
         g.t50 -= 1
         if g.t50 <= 0:
             _goto(g, 0x0100)
-        return Outcome.NONE
+        return _NONE
     out = contact(g, a)
-    if out is Outcome.HIT:
+    if out is _HIT:
         a.latch = 1
     elif _react(g, a, out):
         return out
@@ -1623,7 +1638,7 @@ def _st_24_slide(g: GruntSim, a: ActorSim) -> Outcome:
 def _st_24_holding(g: GruntSim, a: ActorSim) -> Outcome:
     """``$E6F2``: his hold on the actor -- the throw."""
 
-    return Outcome.SEIZED
+    return _SEIZED
 
 
 # --- HakuRo $25 -------------------------------------------------------------------------------
@@ -1704,7 +1719,7 @@ def _st_25_align(g: GruntSim, a: ActorSim) -> Outcome:
     if not g.flags & 0x01:
         g.flags |= 0x01
         if _refused_off_screen(g):
-            return Outcome.NONE
+            return _NONE
         g.animating = True
         g.countdown = 1
         g.vy = 4.0 if int(a.y) >= int(g.y) else -4.0
@@ -1732,7 +1747,7 @@ def _st_25_strike(g: GruntSim, a: ActorSim) -> Outcome:
     if not g.flags & 0x01:
         g.flags |= 0x01
         if _refused_off_screen(g):
-            return Outcome.NONE
+            return _NONE
         _set_anim(g, 0x14, a)
         g.animating = True
     out, ended = _contact(g, a)
@@ -1760,7 +1775,7 @@ def _st_25_dash(g: GruntSim, a: ActorSim) -> Outcome:
     g.t50 = (g.t50 - 1) & 0xFF
     if g.t50 == 0:
         _goto(g, 0x0100)
-        return Outcome.NONE
+        return _NONE
     out, ended = _contact(g, a)
     if ended:
         return out
@@ -1784,7 +1799,7 @@ def _st_25_jump_kick(g: GruntSim, a: ActorSim) -> Outcome:
     if not g.flags & 0x01:
         g.flags |= 0x01
         if _refused_off_screen(g):
-            return Outcome.NONE
+            return _NONE
         g.animating = False
         _set_anim(g, 0x14, a)
         g.vx = -7.0 if g.facing_left else 7.0
@@ -1828,13 +1843,13 @@ def _st_25_flying_kick(g: GruntSim, a: ActorSim) -> Outcome:
         g.vz = -10.0
         g.vx = -10.0 if g.facing_left else 10.0
     out = contact(g, a)
-    if out is Outcome.HIT:
+    if out is _HIT:
         a.latch = 1
-    elif out is Outcome.STRUCK:
+    elif out is _STRUCK:
         a.latch = 2
         _knock_down(g, a)
         return out
-    elif out is Outcome.KNOCKED:
+    elif out is _KNOCKED:
         _react(g, a, out)
         return out
     if g.animating and g.frame == 1:
@@ -1865,7 +1880,7 @@ def _st_25_backflip(g: GruntSim, a: ActorSim) -> Outcome:
     if _fall(g):
         g.vz = 0.0
         _goto(g, 0x0E00)
-    return Outcome.NONE
+    return _NONE
 
 
 def _st_25_rush(g: GruntSim, a: ActorSim) -> Outcome:
@@ -1903,7 +1918,7 @@ def _st_25_rush(g: GruntSim, a: ActorSim) -> Outcome:
 
 def _st_25_knockdown_hook(g: GruntSim, a: ActorSim) -> Outcome:
     g.attack_id = g.body_id = 0
-    return Outcome.NONE
+    return _NONE
 
 
 # --- HakuRo $2A: the trio ---------------------------------------------------------------------
@@ -1941,7 +1956,7 @@ def _st_2a_charge(g: GruntSim, a: ActorSim) -> Outcome:
         g.t50 -= 1
         if g.t50 <= 0:
             _goto(g, 0x0800)
-        return Outcome.NONE
+        return _NONE
     out, ended = _contact(g, a)
     if ended:
         return out
@@ -2003,7 +2018,7 @@ def _st_26_chase(g: GruntSim, a: ActorSim) -> Outcome:
     g.t52 = (g.t52 - 1) & 0xFF
     if g.t52 == 0:
         _goto(g, 0x0700)
-        return Outcome.NONE
+        return _NONE
     out, ended = _contact(g, a)
     if ended:
         return out
@@ -2042,7 +2057,7 @@ def _st_26_whip(g: GruntSim, a: ActorSim) -> Outcome:
     if not g.flags & 0x01:
         g.flags |= 0x01
         if _refused_off_screen(g):
-            return Outcome.NONE
+            return _NONE
         g.animating = True
         _set_anim(g, 0x00, a)
         g.t51 = 0x50
@@ -2050,7 +2065,7 @@ def _st_26_whip(g: GruntSim, a: ActorSim) -> Outcome:
             g.reload, g.countdown = 3, 3
             g.t50 = 3
     out = contact(g, a)
-    if out is Outcome.HIT:
+    if out is _HIT:
         a.latch = 1
     elif _react(g, a, out):
         return out
@@ -2090,7 +2105,7 @@ def _st_26_hitstun_entry(g: GruntSim, a: ActorSim) -> Outcome:
         _goto(g, 0x0C00)
         return _st_26_feint(g, a)
     g.state = 0x0B
-    return Outcome.NONE
+    return _NONE
 
 
 def _st_26_feint(g: GruntSim, a: ActorSim) -> Outcome:
@@ -2102,7 +2117,7 @@ def _st_26_feint(g: GruntSim, a: ActorSim) -> Outcome:
         g.hp -= a.damage or 1
         if g.hp < 0:
             _goto(g, 0x0300)
-            return Outcome.NONE
+            return _NONE
         _set_anim(g, 0x04, a)
         g.frame = 3
         _latch(g)
@@ -2112,7 +2127,7 @@ def _st_26_feint(g: GruntSim, a: ActorSim) -> Outcome:
     if g.t50 == 0 or abs(int(a.x) - int(g.x)) >= 0x50:
         _goto(g, 0x0800)
         g.flags |= 0x04
-    return Outcome.NONE
+    return _NONE
 
 
 # --- The thrown knife (weapon ``$08`` in flight, ``+$30`` = 3) --------------------------------
@@ -2157,18 +2172,18 @@ def knife_update(k: KnifeSim, a: ActorSim, cam_x: int) -> Outcome:
     screen_x = int(k.x) - cam_x + SCREEN_BIAS
     if not (0x40 <= screen_x < 0x200):
         k.alive = False
-        return Outcome.NONE
+        return _NONE
     if a.unavailable or a.latch:
-        return Outcome.NONE
+        return _NONE
     b = k.box()
     if a.attack is not None and a.damage and overlaps(a.attack, b):
         k.alive = False
-        return Outcome.NONE
+        return _NONE
     if a.body is not None and overlaps(b, a.body):
         k.alive = False
         a.latch = 1
-        return Outcome.HIT
-    return Outcome.NONE
+        return _HIT
+    return _NONE
 
 
 def is_enemy_knife_in_flight(data: bytes) -> bool:
@@ -2259,11 +2274,30 @@ def grunt_update(g: GruntSim, a: ActorSim, *, rng: int | None = None) -> Outcome
 
     if rng is not None:
         g.rng = rng
-    table = HANDLERS.get(g.type)
+    table = _HANDLERS_GET(g.type)
     handler = table.get(g.state) if table is not None else None
-    out = handler(g, a) if handler is not None else Outcome.NONE
-    _render(g)
+    out = handler(g, a) if handler is not None else _NONE
+    # _render(g), inline: this is every update of every enemy in a rollout.
+    g.screen_x = int(g.x) - g.cam_x + SCREEN_BIAS
+    state = g.state
+    if state == ST_KNOCKDOWN or state == ST_DYING or (state == 0x12 and g.type == HAKURO):
+        g.attack_id = g.body_id = 0
+        return out
+    frames = _ANIMS_FOR_TYPE_GET(g.type, GARCIA_ANIMS).get(g.anim, _NO_ANIM)[1]
+    frame = g.frame
+    count = len(frames)
+    g.attack_id, g.body_id = frames[frame if frame < count else count - 1]
+    if g.animating:
+        g.countdown -= 1
+        if g.countdown <= 0:
+            g.countdown = g.reload
+            frame += 1
+            g.frame = 0 if frame >= count else frame
     return out
+
+
+_HANDLERS_GET = HANDLERS.get
+_ANIMS_FOR_TYPE_GET = ANIMS_FOR_TYPE.get
 
 
 def _render(g: GruntSim) -> None:
@@ -2296,10 +2330,10 @@ def threat(g: GruntSim, a: ActorSim, *, updates: int, rng: int = 5) -> int | Non
     for k in range(updates):
         actor.latch = 0
         out = grunt_update(sim, actor, rng=rng)
-        if out in (Outcome.HIT, Outcome.SEIZED):
+        if out in (_HIT, _SEIZED):
             return k
         for knife in knives:
-            if knife.alive and knife_update(knife, actor, sim.cam_x) is Outcome.HIT:
+            if knife.alive and knife_update(knife, actor, sim.cam_x) is _HIT:
                 return k
         if sim.thrown is not None:
             knives.append(sim.thrown)
@@ -2370,7 +2404,7 @@ def check_recording(rows: Sequence[dict], *, verbose: bool = False, level: int =
             by_him = _u16(p1_after, 0x7E) == his
             code = p1_after[0x7C] if by_him else 0
             actual = {1: "HIT", 2: "STRUCK", 3: "GRAB"}.get(code, "NONE")
-            if out is not Outcome.NONE or actual != "NONE":
+            if out is not _NONE or actual != "NONE":
                 contacts[f"{g0.type:02x}:{out.name}->{actual}"] += 1
             diffs = [f for f in _FIELDS if not _same(getattr(sim, f), getattr(g1, f))]
             checked[key] += 1
