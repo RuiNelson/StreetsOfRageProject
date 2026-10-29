@@ -34,6 +34,9 @@ export function Dependencies({ setReady }: StepProps) {
 
   useEffect(() => {
     check();
+    // The installers run in a terminal: look again when the user comes back.
+    window.addEventListener("focus", check);
+    return () => window.removeEventListener("focus", check);
   }, [check]);
 
   const install = async (ids: string[]) => {

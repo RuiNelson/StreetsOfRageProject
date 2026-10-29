@@ -98,10 +98,3 @@ pub fn first_line(name: &str, args: &[&str]) -> Option<String> {
         .flat_map(|bytes| String::from_utf8_lossy(bytes).lines().map(|l| l.trim().to_owned()).collect::<Vec<_>>())
         .find(|line| !line.is_empty())
 }
-
-/// Last lines of a command's combined output, for error messages.
-pub fn tail(output: &Output) -> String {
-    let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-    lines[lines.len().saturating_sub(12)..].join("\n")
-}

@@ -14,7 +14,8 @@ Validate with `npm run lint`, `npm run build` (Frontend) and `cargo check` (Back
 `Backend/src/dependencies.rs` holds one `Spec` table per platform (check + install
 recipe: winget id, brew formulas or apt packages). `system.rs` resolves programs on
 a refreshed search path (Homebrew dirs on macOS, registry PATH on Windows) so a GUI
-launch and a just-finished install are both seen. Installs are verified by
-re-running the check, never by exit code. Keep the tables in step with the
+launch and a just-finished install are both seen. Installs open the system terminal (Terminal.app, cmd, or the first terminal emulator
+found on Linux) with a generated script, so the user sees the installers' own output and
+prompts; the app does not wait, and re-checks when its window regains focus or on Re-check. Keep the tables in step with the
 project README prerequisites. Only the macOS code path was compiled and run so
 far; the Windows and Linux tables are untested on those systems.

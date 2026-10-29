@@ -327,80 +327,138 @@ fn report() -> Report {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Installing
+// Installing: the commands run in the system terminal, so the user sees the installers'
+// own output and prompts (passwords, licence questions). We do not wait for them.
 
-/// Run `program args` and fail with the tail of its output.
-fn run_install(program: &str, args: &[&str]) -> Result<(), String> {
-    let path = find_program(program).ok_or_else(|| format!("{program} was not found"))?;
-    let output = system::command(&path).args(args).output().map_err(|e| format!("cannot run {program}: {e}"))?;
-    if output.status.success() { Ok(()) } else { Err(system::tail(&output)) }
+/// Shell-quote one word for sh.
+#[cfg(not(windows))]
+fn quote(word: &str) -> String {
+    format!("'{}'", word.replace('\'', "'\\''"))
 }
 
-fn install_apt(packages: &[&str]) -> Result<(), String> {
-    let script = format!("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y {}", packages.join(" "));
-    let is_root = first_line("id", &["-u"]).as_deref() == Some("0");
-    if is_root {
-        run_install("sh", &["-c", &script])
-    } else if find_program("pkexec").is_some() {
-        run_install("pkexec", &["sh", "-c", &script])
-    } else {
-        Err(format!("pkexec is not available. Run this in a terminal instead:\nsudo apt install {}", packages.join(" ")))
+#[cfg(windows)]
+fn install_line(spec: &Spec) -> Option<String> {
+    let Install::Winget { id, over } = &spec.install else { return None };
+    let over = over.map(|o| format!(" --override \"{o}\"")).unwrap_or_default();
+    Some(format!(
+        "winget install --exact --id {id} --source winget --accept-package-agreements --accept-source-agreements{over}"
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn install_line(spec: &Spec) -> Option<String> {
+    match &spec.install {
+        Install::Brew(formulas) => {
+            let brew = find_program("brew")?;
+            Some(format!("{} install {}", quote(&brew.to_string_lossy()), formulas.join(" ")))
+        }
+        _ => None,
     }
+}
+
+/// Everything apt needs, in one command so the password is asked once.
+#[cfg(not(any(windows, target_os = "macos")))]
+fn apt_line(requested: &[&Spec]) -> Option<String> {
+    let mut packages: Vec<&str> = requested
+        .iter()
+        .filter_map(|s| if let Install::Apt(p) = &s.install { Some(p.iter().copied()) } else { None })
+        .flatten()
+        .collect();
+    packages.dedup();
+    let is_root = first_line("id", &["-u"]).as_deref() == Some("0");
+    let sudo = if is_root { "" } else { "sudo " };
+    (!packages.is_empty())
+        .then(|| format!("{sudo}apt-get update && {sudo}apt-get install -y {}", packages.join(" ")))
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn terminal_lines(requested: &[&Spec]) -> Vec<String> {
+    apt_line(requested).into_iter().collect()
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn terminal_lines(requested: &[&Spec]) -> Vec<String> {
+    requested.iter().filter_map(|spec| install_line(spec)).collect()
+}
+
+#[cfg(windows)]
+fn open_terminal(lines: &[String]) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    let mut script = String::from("@echo off\r\ntitle Streets of Rage Builder\r\n");
+    for line in lines {
+        script += &format!("echo.\r\necho ^> {}\r\n{line}\r\n", line.replace('"', "'").replace(['&', '|', '<', '>'], ""));
+    }
+    script += "echo.\r\necho Finished. Close this window and press Re-check in the app.\r\npause\r\n";
+    let path = std::env::temp_dir().join("streets-of-rage-builder-install.bat");
+    std::fs::write(&path, script).map_err(|e| e.to_string())?;
+    let cmd = find_program("cmd").ok_or("cmd.exe not found")?;
+    system::command(&cmd)
+        .raw_arg(format!("/c start \"Streets of Rage Builder\" \"{}\"", path.display()))
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(windows))]
+fn write_script(lines: &[String], name: &str) -> Result<std::path::PathBuf, String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut script = String::from("#!/bin/sh\n");
+    if let Some(path) = std::env::var_os("PATH") {
+        script += &format!("PATH={}\nexport PATH\n", quote(&path.to_string_lossy()));
+    }
+    for line in lines {
+        script += &format!("echo\necho {}\n{line}\n", quote(&format!("$ {line}")));
+    }
+    script += "echo\necho 'Finished. Close this window and press Re-check in the app.'\nprintf 'Press Enter to close...'\nread _\n";
+    let path = std::env::temp_dir().join(name);
+    std::fs::write(&path, script).map_err(|e| e.to_string())?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+#[cfg(target_os = "macos")]
+fn open_terminal(lines: &[String]) -> Result<(), String> {
+    let script = write_script(lines, "streets-of-rage-builder-install.command")?;
+    let open = find_program("open").ok_or("open not found")?;
+    system::command(&open).args(["-a", "Terminal"]).arg(script).spawn().map(drop).map_err(|e| e.to_string())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn open_terminal(lines: &[String]) -> Result<(), String> {
+    // (program, arguments that precede the command to run)
+    const TERMINALS: &[(&str, &[&str])] = &[
+        ("x-terminal-emulator", &["-e"]),
+        ("gnome-terminal", &["--"]),
+        ("konsole", &["-e"]),
+        ("xfce4-terminal", &["-x"]),
+        ("kitty", &[]),
+        ("alacritty", &["-e"]),
+        ("xterm", &["-e"]),
+    ];
+    let script = write_script(lines, "streets-of-rage-builder-install.sh")?;
+    for (name, leading) in TERMINALS {
+        if let Some(program) = find_program(name) {
+            return system::command(&program).args(*leading).arg(&script).spawn().map(drop).map_err(|e| e.to_string());
+        }
+    }
+    Err(format!("No terminal emulator found. Run this in a terminal instead:\n{}", lines.join("\n")))
 }
 
 fn install(requested: &[&Spec]) -> Result<Vec<String>, String> {
     let mut notes = Vec::new();
-    let mut errors = Vec::new();
-    let mut apt: Vec<&str> = Vec::new();
-    let mut brew: Vec<&str> = Vec::new();
-    for spec in requested {
-        match &spec.install {
-            Install::Apt(packages) => apt.extend(packages.iter().copied()),
-            Install::Brew(formulas) => brew.extend(formulas.iter().copied()),
-            Install::XcodeTools => {
-                // Both macOS rows may ask for this; one dialog is enough.
-                if !notes.iter().any(|n: &String| n.contains("Command Line Tools")) {
-                    let _ = system::run("xcode-select", &["--install"]);
-                    notes.push("A system dialog opened to install the Command Line Tools. Finish it, then press Re-check.".to_owned());
-                }
-            }
-            Install::Winget { id, over } => {
-                let mut args = vec!["install", "--exact", "--id", id, "--source", "winget",
-                                    "--accept-package-agreements", "--accept-source-agreements"];
-                if let Some(over) = over {
-                    args.extend(["--override", over]);
-                }
-                if let Err(e) = run_install("winget", &args) {
-                    errors.push(format!("{}: {e}", spec.name));
-                }
-            }
-        }
+    if requested.iter().any(|s| matches!(s.install, Install::XcodeTools)) {
+        // The Command Line Tools have their own system dialog.
+        let _ = system::run("xcode-select", &["--install"]);
+        notes.push("A system dialog opened to install the Command Line Tools. Finish it, then press Re-check.".to_owned());
     }
-    apt.dedup();
-    if !apt.is_empty() {
-        if let Err(e) = install_apt(&apt) {
-            errors.push(e);
-        }
+    let lines = terminal_lines(requested);
+    if !lines.is_empty() {
+        open_terminal(&lines)?;
+        notes.push("A terminal window opened to run the installation. When it finishes, press Re-check.".to_owned());
     }
-    if !brew.is_empty() {
-        let mut args = vec!["install"];
-        args.extend(brew.iter());
-        if let Err(e) = run_install("brew", &args) {
-            errors.push(format!("brew: {e}"));
-        }
-    }
-    // Trust the checks, not exit codes: winget fails on "already installed".
-    refresh_path();
-    let still_missing: Vec<&str> = requested
-        .iter()
-        .filter(|s| !matches!(s.install, Install::XcodeTools) && (s.check)().0 != State::Ok)
-        .map(|s| s.name)
-        .collect();
-    if still_missing.is_empty() {
-        Ok(notes)
-    } else {
-        Err(format!("Still missing: {}.\n{}", still_missing.join(", "), errors.join("\n")).trim().to_owned())
-    }
+    Ok(notes)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -441,5 +499,17 @@ mod tests {
         assert_eq!(ids.len(), unique.len());
         assert!(!ids.is_empty());
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn install_script_is_valid_sh() {
+        let lines = vec!["echo 'it works'".to_owned(), "true".to_owned()];
+        let script = write_script(&lines, "streets-of-rage-builder-test.sh").unwrap();
+        let status = std::process::Command::new("sh").arg("-n").arg(&script).status().unwrap();
+        assert!(status.success());
+        let output = std::process::Command::new("sh").arg(&script).stdin(std::process::Stdio::null()).output().unwrap();
+        assert!(String::from_utf8_lossy(&output.stdout).contains("it works"));
+        let _ = std::fs::remove_file(script);
     }
 }
