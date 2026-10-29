@@ -68,7 +68,9 @@ user's `rom/soundtrack`).
 `Backend/src/compile.rs` runs `scripts/generate_cpp_and_build.py --release` through
 `script::run` (a player wants the optimized build; `--release` also cleans the build folder, so
 "Build again" is a full rebuild). The script does the platform work itself (Ninja and llvm-mingw
-on Windows). Success means `StreetsOfRageRecompilation/build/sor[.exe]` exists; `game_status`
+on Windows). Success means `sor[.exe]` exists in `StreetsOfRageRecompilation/build/` or, for a
+multi-configuration generator (a clone made before the Ninja change builds with Visual Studio),
+in its `Release`/`Debug`/… subfolder, the newest one winning; `game_status`
 recognises an earlier build when the user comes back. Long scripts show their last lines and a
 bar parsed from `[ 45%]` (Makefiles) or `[12/340]` (Ninja) lines (`components/Progress.tsx`).
 The end-to-end test is `#[ignore]`d (`SOR_TEST_FOLDER`, `SOR_TEST_ROM`; scratch clone).

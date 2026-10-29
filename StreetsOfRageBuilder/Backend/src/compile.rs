@@ -14,14 +14,21 @@ pub struct Game {
     pub executable: String,
 }
 
-fn executable(project: &Path) -> PathBuf {
+/// Where the build put `sor`: single-configuration generators (Makefiles, Ninja) use the build
+/// folder itself, multi-configuration ones (Visual Studio, Xcode) a folder per configuration.
+/// The newest wins, as in the scripts' `built_executable`.
+fn executable(project: &Path) -> Option<PathBuf> {
     let name = if cfg!(windows) { "sor.exe" } else { "sor" };
-    project.join("StreetsOfRageRecompilation").join("build").join(name)
+    let build = project.join("StreetsOfRageRecompilation").join("build");
+    ["", "Release", "RelWithDebInfo", "MinSizeRel", "Debug"]
+        .iter()
+        .map(|folder| build.join(folder).join(name))
+        .filter(|path| path.is_file())
+        .max_by_key(|path| path.metadata().and_then(|m| m.modified()).ok())
 }
 
 fn status(project: &Path) -> Option<Game> {
-    let path = executable(project);
-    path.is_file().then(|| Game { executable: path.to_string_lossy().into_owned() })
+    executable(project).map(|path| Game { executable: path.to_string_lossy().into_owned() })
 }
 
 fn compile(project: &Path, progress: &(dyn Fn(String) + Sync)) -> Result<Game, String> {
@@ -29,7 +36,7 @@ fn compile(project: &Path, progress: &(dyn Fn(String) + Sync)) -> Result<Game, S
         return Err("The ROM is not in the project yet; redo step 3.".into());
     }
     script::run(project, "generate_cpp_and_build.py", &["--release"], progress)?;
-    status(project).ok_or_else(|| format!("The build finished but {} was not produced.", executable(project).display()))
+    status(project).ok_or_else(|| "The build finished but the game (sor) was not found in its build folder.".to_string())
 }
 
 /// The game already built in the project, if any.
@@ -71,11 +78,27 @@ mod tests {
     fn status_needs_the_executable_and_the_build_needs_the_rom() {
         let project = std::env::temp_dir().join(format!("sor-builder-compile-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&project);
-        std::fs::create_dir_all(project.join("StreetsOfRageRecompilation/build")).unwrap();
+        let build = project.join("StreetsOfRageRecompilation/build");
+        std::fs::create_dir_all(&build).unwrap();
+        let name = if cfg!(windows) { "sor.exe" } else { "sor" };
         assert!(status(&project).is_none());
         assert!(compile(&project, &|_| {}).unwrap_err().contains("step 3"));
-        std::fs::write(executable(&project), b"").unwrap();
-        assert!(status(&project).is_some());
+        std::fs::write(build.join(name), b"").unwrap();
+        assert!(status(&project).unwrap().executable.ends_with(name));
+        std::fs::remove_dir_all(&project).unwrap();
+    }
+
+    /// Visual Studio and Xcode put the executable in a folder named after the configuration.
+    #[test]
+    fn finds_the_executable_of_a_multi_configuration_build() {
+        let project = std::env::temp_dir().join(format!("sor-builder-multiconfig-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&project);
+        let release = project.join("StreetsOfRageRecompilation/build/Release");
+        std::fs::create_dir_all(&release).unwrap();
+        let name = if cfg!(windows) { "sor.exe" } else { "sor" };
+        std::fs::write(release.join(name), b"").unwrap();
+        let found = status(&project).unwrap().executable;
+        assert!(found.contains("Release"), "{found}");
         std::fs::remove_dir_all(&project).unwrap();
     }
 }
