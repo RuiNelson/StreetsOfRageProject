@@ -334,8 +334,10 @@ The compiler is [llvm-mingw](https://github.com/mstorsjo/llvm-mingw): Clang,
 LLD and libc++ for Windows, about a gigabyte, with no Visual Studio and no
 Windows SDK. The game is built for the UCRT, so it runs on any current Windows.
 
-**Close** the Administrator terminal and open a **new** PowerShell (so that the new
-programs are on `PATH`). Confirm that the tools are available:
+> Important: close the terminal and open a new PowerShell (so that the new
+programs are on `PATH`)
+
+Confirm that the tools are available:
 
 ```powershell
 x86_64-w64-mingw32-clang --version   # aarch64-w64-mingw32-clang on Windows on ARM
