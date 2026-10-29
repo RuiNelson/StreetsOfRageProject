@@ -115,7 +115,7 @@ fn check_cmake() -> Check {
 }
 
 /// Python interpreters to try, as (program, leading arguments).
-fn python_candidates() -> Vec<(PathBuf, Vec<&'static str>)> {
+pub fn python_candidates() -> Vec<(PathBuf, Vec<&'static str>)> {
     let names: &[(&str, &[&str])] = if cfg!(windows) {
         // `python`/`python3` on Windows may be the Microsoft Store stub.
         &[("py", &["-3"])]

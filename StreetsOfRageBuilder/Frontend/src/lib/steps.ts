@@ -7,6 +7,13 @@ export interface StepDefinition {
 export interface StepProps {
   /** The step tells the wizard whether Next may be enabled. */
   setReady: (ready: boolean) => void;
+  /** A step that runs something long sets this, so Back and Next stay disabled meanwhile. */
+  setBusy: (busy: boolean) => void;
+  /** The wizard footer, left of Next: a step puts its action buttons there with a portal. */
+  actions: HTMLElement | null;
+  /** Where step 2 put the project; null until it has. */
+  projectPath: string | null;
+  setProjectPath: (path: string | null) => void;
 }
 
 export const STEPS: StepDefinition[] = [

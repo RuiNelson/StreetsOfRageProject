@@ -22,8 +22,9 @@
 html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
 
-.wizard { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
-.sidebar { background: var(--panel); border-right: 1px solid var(--border); padding: 24px 20px; display: flex; flex-direction: column; }
+html, body { overflow: hidden; }
+.wizard { display: grid; grid-template-columns: 260px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100vh; }
+.sidebar { background: var(--panel); border-right: 1px solid var(--border); padding: 24px 20px; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 .sidebar h1 { font-size: 17px; margin: 0 0 24px; }
 .sidebar ol { list-style: none; margin: 0; padding: 0; flex: 1; }
 .sidebar li { display: flex; align-items: center; gap: 10px; padding: 8px 0; color: var(--muted); }
@@ -33,16 +34,17 @@ body { background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans
 .done .badge { background: var(--muted); border-color: var(--muted); color: var(--bg); }
 .platform { color: var(--muted); font-size: 12px; margin: 0; }
 
-.content { padding: 32px 40px; display: flex; flex-direction: column; }
-.content h2 { margin: 0 0 4px; }
-.content > p { color: var(--muted); margin: 0 0 24px; }
+.content { padding: 32px 40px 24px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.content h2 { margin: 0 0 4px; flex-shrink: 0; }
+.content > p { color: var(--muted); margin: 0 0 24px; flex-shrink: 0; }
 .placeholder { flex: 1; border: 1px dashed var(--border); border-radius: 10px; display: grid; place-items: center; color: var(--muted); }
-footer { display: flex; justify-content: space-between; margin-top: 20px; }
+footer { display: flex; justify-content: space-between; flex-shrink: 0; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
 button { font: inherit; padding: 8px 20px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button:disabled { opacity: 0.4; cursor: default; }
 
-.step-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.step-body { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding-right: 8px; }
+.step-body > * { flex-shrink: 0; }
 .step-body > .placeholder { flex: 1; }
 .dependencies { display: flex; flex-direction: column; gap: 12px; }
 .deps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -59,3 +61,21 @@ button:disabled { opacity: 0.4; cursor: default; }
 .notice.warning { border-color: #d9a21f; }
 .notice.error { border-color: var(--accent); white-space: pre-wrap; margin: 0; font: 12px/1.4 ui-monospace, monospace; }
 .actions { display: flex; gap: 10px; }
+.download { display: flex; flex-direction: column; gap: 12px; }
+.notice.ok { border-color: #2e9e5b; }
+.notice.progress { font: 12px/1.4 ui-monospace, monospace; color: var(--muted); }
+.footer-right, .step-actions { display: flex; gap: 10px; }
+.rom { display: flex; flex-direction: column; gap: 12px; }
+.dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 160px; padding: 24px; border: 2px dashed var(--border); border-radius: 12px; text-align: center; color: var(--muted); }
+.dropzone p { margin: 0; color: var(--text); }
+.dropzone.over { border-color: var(--accent); background: var(--panel); }
+.dropzone.done { border-style: solid; border-color: #2e9e5b; }
+.legal { margin: 0; font-size: 12px; color: var(--muted); }
+.notice p code { display: inline; margin: 0; }
+.extract { display: flex; flex-direction: column; gap: 12px; }
+.chips { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; border: 0; }
+.chips legend { padding: 0; margin-bottom: 6px; font-weight: 600; }
+.chips label { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); cursor: pointer; }
+.chips label.selected { border-color: var(--accent); }
+.chips label span { display: flex; flex-direction: column; }
+.chips small { color: var(--muted); }

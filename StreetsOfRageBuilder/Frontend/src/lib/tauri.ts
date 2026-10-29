@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 export type Platform = "windows" | "macos" | "linux";
 
@@ -35,3 +35,52 @@ export const platformInfo = () => invoke<PlatformInfo>("platform_info");
 export const checkDependencies = () => invoke<DependenciesReport>("check_dependencies");
 /** Resolves with notes to show; rejects with the failure text. */
 export const installDependencies = (ids: string[]) => invoke<string[]>("install_dependencies", { ids });
+
+export interface Inspection {
+  /** The chosen folder. */
+  path: string;
+  state: "missing" | "empty" | "clone" | "occupied";
+}
+
+export interface Downloaded {
+  path: string;
+  updated: boolean;
+  commit: string;
+}
+
+export const inspectProject = (folder: string) => invoke<Inspection>("inspect_project", { folder });
+/** Clones (or updates) the project; `onProgress` gets git's progress lines. */
+export const downloadProject = (folder: string, onProgress: (line: string) => void) => {
+  const progress = new Channel<string>();
+  progress.onmessage = onProgress;
+  return invoke<Downloaded>("download_project", { folder, progress });
+};
+
+export interface RomReport {
+  fileName: string;
+  size: number;
+  /** Eight hex digits (empty when the file was too big to read). */
+  crc: string;
+  /** ok: right dump, copied into the project; smd: needs converting; mismatch: not the game or another version. */
+  state: "ok" | "smd" | "mismatch";
+}
+
+/** Verifies the ROM and, when it is the right one, copies it into the project. */
+export const verifyRom = (rom: string, project: string) => invoke<RomReport>("use_rom", { rom, project });
+/** The right ROM already in the project, or null. */
+export const installedRom = (project: string) => invoke<RomReport | null>("installed_rom", { project });
+
+export interface Soundtrack {
+  folder: string;
+  files: number;
+}
+
+/** The finished soundtrack already in the project, or null. */
+export const soundtrackStatus = (project: string) => invoke<Soundtrack | null>("soundtrack_status", { project });
+/** Renders the soundtrack from the ROM (minutes); `onProgress` gets the renderer's output lines. */
+export type Chip = "ym3438" | "ym2612";
+export const extractSound = (project: string, chip: Chip, onProgress: (line: string) => void) => {
+  const progress = new Channel<string>();
+  progress.onmessage = onProgress;
+  return invoke<Soundtrack>("extract_sound", { project, chip, progress });
+};

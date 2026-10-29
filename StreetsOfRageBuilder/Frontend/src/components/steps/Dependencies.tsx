@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { StepProps } from "@/lib/steps";
 import { checkDependencies, installDependencies, type DependenciesReport, type Dependency } from "@/lib/tauri";
@@ -11,7 +12,7 @@ function errorText(error: unknown) {
   return typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
 }
 
-export function Dependencies({ setReady }: StepProps) {
+export function Dependencies({ setReady, actions }: StepProps) {
   const [report, setReport] = useState<DependenciesReport | null>(null);
   const [checking, setChecking] = useState(true);
   const [installing, setInstalling] = useState<string[]>([]);
@@ -84,14 +85,18 @@ export function Dependencies({ setReady }: StepProps) {
       ))}
       {error && <pre className="notice error">{error}</pre>}
 
-      <div className="actions">
-        <button disabled={busy || checking} onClick={check}>{checking ? "Checking…" : "Re-check"}</button>
-        {missing.length > 1 && (
-          <button className="primary" disabled={busy || checking} onClick={() => install(missing.map((d) => d.id))}>
-            Install all missing
-          </button>
+      {actions &&
+        createPortal(
+          <>
+            <button disabled={busy || checking} onClick={check}>{checking ? "Checking…" : "Re-check"}</button>
+            {missing.length > 1 && (
+              <button className="primary" disabled={busy || checking} onClick={() => install(missing.map((d) => d.id))}>
+                Install all missing
+              </button>
+            )}
+          </>,
+          actions,
         )}
-      </div>
     </div>
   );
 }

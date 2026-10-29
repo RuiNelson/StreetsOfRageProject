@@ -3,6 +3,7 @@
 //! is not on the PATH this process started with.
 
 use std::ffi::OsString;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::RwLock;
@@ -97,4 +98,33 @@ pub fn first_line(name: &str, args: &[&str]) -> Option<String> {
         .into_iter()
         .flat_map(|bytes| String::from_utf8_lossy(bytes).lines().map(|l| l.trim().to_owned()).collect::<Vec<_>>())
         .find(|line| !line.is_empty())
+}
+
+/// Feed `on_line` every line of a child's output as it arrives; progress meters redraw with `\r`,
+/// so that ends a line too. Empty lines are skipped.
+pub fn read_lines(mut reader: impl Read, mut on_line: impl FnMut(String)) {
+    let mut pending = Vec::new();
+    let mut flush = |pending: &mut Vec<u8>| {
+        let line = String::from_utf8_lossy(pending).trim().to_owned();
+        pending.clear();
+        if !line.is_empty() {
+            on_line(line);
+        }
+    };
+    let mut buffer = [0u8; 4096];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(count) => {
+                for &byte in &buffer[..count] {
+                    if byte == b'\r' || byte == b'\n' {
+                        flush(&mut pending);
+                    } else {
+                        pending.push(byte);
+                    }
+                }
+            }
+        }
+    }
+    flush(&mut pending);
 }
