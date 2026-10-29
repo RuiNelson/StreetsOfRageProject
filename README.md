@@ -379,7 +379,7 @@ Install the Xcode command-line tools and [Homebrew](https://brew.sh) dependencie
 
 ```bash
 xcode-select --install
-brew install cmake ninja python
+brew install cmake ninja python python-tk
 ```
 
 Both Apple Silicon and Intel Macs are supported. Keep CMake, the compiler, and
@@ -415,7 +415,7 @@ Install the compiler and build tools:
 
 ```bash
 sudo apt update
-sudo apt install build-essential cmake git ninja-build python3 pkg-config
+sudo apt install build-essential cmake git ninja-build python3 python3-tk pkg-config
 ```
 
 Confirm that `cmake --version` reports 3.24 or newer. SDL3 is downloaded and
