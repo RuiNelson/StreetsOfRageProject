@@ -287,7 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--poll-ms",
-        type=int,
+        type=float,
         default=DEFAULT_POLL_MS,
         help=(
             "Wall-clock remote poll period in milliseconds "
@@ -500,7 +500,7 @@ class ObserverApp:
         host: str,
         port: int,
         *,
-        poll_ms: int = DEFAULT_POLL_MS,
+        poll_ms: float = DEFAULT_POLL_MS,
         hud_ms: int = HUD_PAINT_MS_DEFAULT,
         agent_p1: bool = False,
         agent_p2: bool = False,
@@ -512,7 +512,7 @@ class ObserverApp:
     ) -> None:
         self.host = host
         self.port = port
-        self.poll_ms = max(1, poll_ms)
+        self.poll_ms = max(0.1, poll_ms)
         self.hud_ms = max(16, hud_ms)
         self.scenario = scenario
         # --lockstep: while an AI is engaged and the game is playable, tick
@@ -954,7 +954,7 @@ class ObserverApp:
         if deltas:
             logger.debug(
                 "poll timing: %d ticks, frames/tick min=%d mean=%.2f max=%d, "
-                "poll work min=%.1fms mean=%.1fms max=%.1fms (poll_ms=%d)",
+                "poll work min=%.1fms mean=%.1fms max=%.1fms (poll_ms=%g)",
                 len(deltas),
                 min(deltas),
                 sum(deltas) / len(deltas),
@@ -1056,7 +1056,7 @@ class ObserverApp:
         subtitle = (
             f"lockstep {LOCKSTEP_FRAMES_PER_TICK}f/tick"
             if self.lockstep
-            else f"poll {self.poll_ms}ms (~{approx_frames:.1f}f)"
+            else f"poll {self.poll_ms:g}ms (~{approx_frames:.1f}f)"
         )
         self._hud = ObserverHud(
             on_close=self.stop,
@@ -1210,7 +1210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     scenario_text = f"; debug scenario: {', '.join(scenario_bits)}" if scenario_bits else ""
     print(
         f"Starting SoR Autoplay GUI → {args.host}:{args.port} "
-        f"({'lockstep 2f/tick' if args.lockstep else f'poll {args.poll_ms}ms'}"
+        f"({'lockstep 2f/tick' if args.lockstep else f'poll {args.poll_ms:g}ms'}"
         f"{agent_text}{reach_text}{scenario_text}; Esc/Q to quit)",
         file=sys.stderr,
     )

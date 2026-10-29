@@ -220,9 +220,9 @@ def controls_arguments(s: dict[str, Any]) -> list[str]:
     return ([s["rom"]] if s["rom"] else []) + ["--configControls"]
 
 
-def auto_poll_ms(turbo: int) -> int:
-    """Poll cadence that keeps ~2 game frames per tick: 16 ms at x2, 8 ms at x4... (0 = autoplay's default)."""
-    return max(1, round(32 / turbo)) if turbo > 0 else 0
+def auto_poll_ms(turbo: int) -> float:
+    """Poll cadence that keeps ~2 game frames per tick: 16 ms at x2, 8 at x4, 3.2 at x10 (0 = autoplay's default)."""
+    return round(32 / turbo, 2) if turbo > 0 else 0
 
 
 def autoplay_arguments(s: dict[str, Any]) -> list[str]:
@@ -232,7 +232,7 @@ def autoplay_arguments(s: dict[str, Any]) -> list[str]:
     if s["lockstep"]:
         args.append("--lockstep")
     elif poll:
-        args += ["--poll-ms", str(poll)]
+        args += ["--poll-ms", f"{poll:g}"]
     args += ["--port", str(s["port"])]
     if s["hud_ms"]:
         args += ["--hud-ms", str(s["hud_ms"])]
