@@ -1,0 +1,127 @@
+# Builds StreetsOfRageBuilder (the Tauri wizard) on demand: Actions > Builder > Run workflow.
+# Each selected platform uploads one artifact; nothing is signed.
+name: Builder
+
+on:
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: "macOS (universal: Apple silicon + Intel), .dmg"
+        type: boolean
+        default: true
+      windows_x64:
+        description: "Windows x64, .exe"
+        type: boolean
+        default: true
+      windows_arm64:
+        description: "Windows ARM64, .exe"
+        type: boolean
+        default: true
+      linux_x64:
+        description: "Linux x64, AppImage"
+        type: boolean
+        default: true
+      linux_arm64:
+        description: "Linux ARM64, AppImage"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Choose platforms
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - id: matrix
+        run: |
+          # kind: dmg = a macOS disk image, exe = the bare program, appimage = a Linux AppImage.
+          matrix=$(jq -c '[.[] | select(.enabled)]' <<'JSON'
+          [
+            {"enabled": ${{ inputs.macos }},         "name": "macos-universal", "os": "macos-latest",     "target": "universal-apple-darwin",   "rust_targets": "aarch64-apple-darwin,x86_64-apple-darwin", "kind": "dmg"},
+            {"enabled": ${{ inputs.windows_x64 }},   "name": "windows-x64",     "os": "windows-latest",   "target": "x86_64-pc-windows-msvc",   "rust_targets": "x86_64-pc-windows-msvc",                   "kind": "exe"},
+            {"enabled": ${{ inputs.windows_arm64 }}, "name": "windows-arm64",   "os": "windows-11-arm",   "target": "aarch64-pc-windows-msvc",  "rust_targets": "aarch64-pc-windows-msvc",                  "kind": "exe"},
+            {"enabled": ${{ inputs.linux_x64 }},     "name": "linux-x64",       "os": "ubuntu-22.04",     "target": "x86_64-unknown-linux-gnu", "rust_targets": "x86_64-unknown-linux-gnu",                 "kind": "appimage"},
+            {"enabled": ${{ inputs.linux_arm64 }},   "name": "linux-arm64",     "os": "ubuntu-22.04-arm", "target": "aarch64-unknown-linux-gnu","rust_targets": "aarch64-unknown-linux-gnu",                "kind": "appimage"}
+          ]
+          JSON
+          )
+          echo "matrix={\"include\":$matrix}" >> "$GITHUB_OUTPUT"
+          echo "$matrix" | jq -r '.[].name' | sed 's/^/will build: /'
+          [ "$matrix" != "[]" ] || { echo "::error::No platform selected"; exit 1; }
+
+  build:
+    name: ${{ matrix.name }}
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: StreetsOfRageBuilder/Frontend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: StreetsOfRageBuilder/Backend -> ../Intermediaries/cargo
+          key: ${{ matrix.name }}
+
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend packages
+        working-directory: StreetsOfRageBuilder/Frontend
+        run: npm ci
+
+      # The tauri script runs the Tauri CLI in Backend, which exports the frontend first
+      # (beforeBuildCommand) and builds into Intermediaries/cargo.
+      - name: Build
+        working-directory: StreetsOfRageBuilder/Frontend
+        env:
+          # AppImage tools: no FUSE on the runners, and the stripper of linuxdeploy trips on new binaries.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "true"
+        run: |
+          case "${{ matrix.kind }}" in
+            dmg)      bundle="--bundles dmg" ;;
+            appimage) bundle="--bundles appimage" ;;
+            exe)      bundle="--no-bundle" ;;
+          esac
+          npm run tauri -- build --target "${{ matrix.target }}" $bundle
+
+      - name: Collect the product
+        run: |
+          out="StreetsOfRageBuilder/Intermediaries/cargo/${{ matrix.target }}/release"
+          mkdir dist
+          case "${{ matrix.kind }}" in
+            dmg)      cp "$out"/bundle/dmg/*.dmg "dist/StreetsOfRageBuilder-${{ matrix.name }}.dmg" ;;
+            appimage) cp "$out"/bundle/appimage/*.AppImage "dist/StreetsOfRageBuilder-${{ matrix.name }}.AppImage" ;;
+            exe)      cp "$out/streets-of-rage-builder.exe" "dist/StreetsOfRageBuilder-${{ matrix.name }}.exe" ;;
+          esac
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StreetsOfRageBuilder-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14

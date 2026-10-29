@@ -89,3 +89,16 @@ running launcher on macOS stays Python's (Tk), not the punch. Only the macOS bun
 
 On the last step Next becomes **Finish** (always enabled: the shortcut is optional); it calls the
 `finish` command (`platform.rs`), which exits the app.
+
+## Release builds (GitHub Actions)
+
+`.github/workflows/builder.yml` (meta-repository root) builds the Builder on demand
+(`workflow_dispatch` only, never on push; user decision) with a checkbox per platform: macOS
+universal `.dmg`, Windows x64 and ARM64 as a **bare `.exe`** (no installer: `tauri build
+--no-bundle`; the user does not want one), Linux x64 and ARM64 as an **AppImage** only. Nothing is
+signed yet (macOS needs right-click > Open, Windows shows SmartScreen). Each platform uploads
+one artifact, `StreetsOfRageBuilder-<platform>`, kept 14 days. Linux builds on Ubuntu 22.04 (older
+glibc, so the AppImage runs on more systems). A `workflow_dispatch` workflow only appears in the
+Actions tab once its file is on the default branch (`main`). Only the macOS command
+(`tauri build --target aarch64-apple-darwin --bundles dmg`, with `CI=true`, 45 s) was run
+locally; the Windows, Linux and universal runs are untested.

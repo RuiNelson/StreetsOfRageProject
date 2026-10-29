@@ -14,6 +14,8 @@ npm run tauri build    # installers
 
 Requires Node 20.9+, Rust, and Tauri's [platform prerequisites](https://tauri.app/start/prerequisites/).
 
+Release builds for every platform come from the **Builder** GitHub Action (Actions > Builder > Run workflow, pick the platforms): a macOS universal `.dmg`, Windows x64 and ARM64 `.exe`, Linux x64 and ARM64 AppImage, as downloadable artifacts. They are not signed yet.
+
 ## Layout
 
 - `Frontend/` Next.js app (`output: "export"` → `Frontend/out`); `src/lib/steps.ts` defines the wizard steps.
