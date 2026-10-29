@@ -8,8 +8,6 @@ Welcome to my reverse-engineering and recompilation project for SEGA's
 celebrated Mega Drive classic (released as SEGA Genesis in the United States),
 *Streets of Rage*.
 
-
-
 This is a strictly academic, non-commercial project. If you are looking for a
 free copy of the game, this repository is not the place to find one: **it does
 not contain copyrighted game material**. The original ROM is deliberately
@@ -40,7 +38,7 @@ created by the meta-repository.
 
 ### Acknowledgments
 
-I would like to thank [ekeeke for the Genesis Plus GX](https://github.com/ekeeke/genesis-plus-gx), which served almost as a technical document for the Sega Mega Drive, and [gsaurus for its Streets of Rage](https://github.com/gsaurus/sor-disassemblies/) disassembly (and annotations), which provided an important starting point for the analysis of the game. And of course, my slaves: Claude, ChatGPT, and Grok 4.5. Without them, this work would be impossible for my meat brain to do as a side project!
+I would like to thank [ekeeke for the Genesis Plus GX](https://github.com/ekeeke/genesis-plus-gx), which served almost as technical documentation for the SEGA Mega Drive, and [gsaurus for the Streets of Rage](https://github.com/gsaurus/sor-disassemblies/) disassembly (and annotations), which provided an important starting point for the analysis of the game. And of course, my slaves: Claude, ChatGPT, and Grok 4.5. Without them, this work would be impossible for my meat brain to do as a side project!
 
 ### The `RageDecompiler` recompiler
 
@@ -120,10 +118,9 @@ The long-term roadmap is:
    by address, so moving that state into C++ objects or dynamic memory would
    blind it.
 3. Remove the dependency on the hardware emulated by `MegaDriveEnvironment`
-   and implement the graphics pipeline, audio, and input directly through SDL.
+   and implement the graphics pipeline, audio (already bypassed), and input directly through SDL.
    This replaces the emulated devices, not the work-RAM layout.
-4. Enable enhancements such as higher-resolution replacement assets and 16:9
-   support, and variable frame rates through rendering interpolation, so the
+4. Enable enhancements such as higher-resolution replacement assets and variable frame rates through rendering interpolation, so the
    game logic still advances one original frame at a time.
 
 ### The recompiled game in `StreetsOfRageRecompilation`
@@ -226,7 +223,6 @@ the ROM models, measurements, and test procedures are in
 
 <p align="center">
  <img src="docs/raineffect.webp" width="400">
- <br>Click to enlarge
 </p>
 
 ### 1. Clone the repository and submodules
@@ -322,14 +318,15 @@ changes. It needs only CMake, a C++ compiler and network access (not SDL3 or
 the generated C++), takes about four minutes and writes ~265 MB to
 `StreetsOfRageRecompilation/rom/soundtrack/`, next to the ROM.
 
-On Windows, **AFTER** installing the prerequisites of step 5,
-in the Developer PowerShell for VS 2022:
+On Windows, **after** installing the prerequisites for your platform
+(steps 5–7), in the Developer PowerShell for VS 2022:
 
 ```powershell
 py scripts\render_soundtrack.py
 ```
 
-On macOS and Linux, **AFTER** installing their prerequisites:
+On macOS and Linux, **after** installing the prerequisites for your platform
+(steps 5–7):
 
 ```bash
 ./scripts/render_soundtrack.py                    # writes StreetsOfRageRecompilation/rom/soundtrack/
@@ -338,7 +335,7 @@ On macOS and Linux, **AFTER** installing their prerequisites:
 ```
 
 Without a soundtrack the game still runs and emulates the sound chips in real
-time instead (not recommended, as the sound quality had to suffer to improve performance)
+time instead (**not recommended, because sound quality is reduced to improve performance**).
 
 ### 5. Build on Windows
 
@@ -375,32 +372,22 @@ Close the Administrator terminal and open **Developer PowerShell for VS 2022**.
 Confirm that the tools are available:
 
 ```powershell
-where.exe cl
 cl
 git --version
 cmake --version
 py --version
 ```
 
-SDL3 needs no installation: CMake downloads and builds it on the first
-configuration. To use an installed copy instead, add its prefix to
-`CMAKE_PREFIX_PATH`.
 
 #### Configure, compile, and run
 
 Run the following from the meta-repository root in the **Developer PowerShell
 for VS 2022**.
 
-After a fresh clone, generate the C++ port and create a Debug build:
+After a fresh clone, generate the C++ port and create an optimized build:
 
 ```powershell
-py scripts\generate_cpp_and_build.py
-```
-
-For the first optimized build:
-
-```powershell
-py scripts\generate_cpp_and_build.py --release
+py .\scripts\generate_cpp_and_build.py --release
 ```
 
 Generation is mandatory after a fresh clone because `generated/` is ignored by
@@ -411,37 +398,23 @@ source file. Regenerate them with `py scripts\generate_cpp.py` whenever the
 ROM, analysis data, labels, auxiliary addresses, manual-function inputs, or
 recompiler changes.
 
-Once the generated files exist locally, subsequent incremental builds can use:
-
-```powershell
-py scripts\build.py
-py scripts\build.py --release
-```
-
 CMake uses the Visual Studio generator by default on Windows, so the build
 lands in a per-configuration folder: `StreetsOfRageRecompilation\build\Debug\sor.exe`
 or `StreetsOfRageRecompilation\build\Release\sor.exe`, with the SDL3, SDL3_mixer, yaml-cpp,
 zlib, and libpng DLLs copied next to it. The scripts select the configuration
 for you.
 
-Run the port; `run.py` starts the most recently built configuration:
+Run the game. There is a handy `play.py` launcher that is easy to use:
 
 ```powershell
-py scripts\run.py StreetsOfRageRecompilation\rom\SOR.bin --lang en
-```
-
-The equivalent direct CMake workflow is:
-
-```powershell
-cmake -S StreetsOfRageRecompilation -B StreetsOfRageRecompilation\build
-cmake --build StreetsOfRageRecompilation\build --config Release --parallel
+py .\scripts\play.py
 ```
 
 ### 6. Build on macOS
 
 #### Prerequisites
 
-Install the Xcode command-line tools and Homebrew dependencies:
+Install the Xcode command-line tools and [Homebrew](https://brew.sh) dependencies:
 
 ```bash
 xcode-select --install
@@ -453,41 +426,19 @@ SDL3 on the same architecture.
 
 #### Configure, compile, and run
 
-After a fresh clone, generate the C++ port and create a Debug build:
-
-```bash
-./scripts/generate_cpp_and_build.py
-```
-
-For the first optimized build:
+After a fresh clone, generate the C++ port and create an optimized build:
 
 ```bash
 ./scripts/generate_cpp_and_build.py --release
 ```
 
-Once `generated/SoR.hpp`, `generated/SoR-common.hpp`, and the
-`generated/SoR-XXX.cpp` files exist locally, subsequent incremental builds can
-use:
-
-```bash
-./scripts/build.py
-```
 
 Run the port:
 
 ```bash
-./scripts/run.py StreetsOfRageRecompilation/rom/SOR.bin
+./scripts/play.py
 ```
 
-The equivalent direct CMake workflow is:
-
-```bash
-cmake -S StreetsOfRageRecompilation \
-  -B StreetsOfRageRecompilation/build/macos \
-  -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build StreetsOfRageRecompilation/build/macos --parallel
-```
 
 ### 7. Build on Ubuntu
 
@@ -518,44 +469,14 @@ Generate the C++ port and create the first optimized build:
 ./scripts/generate_cpp_and_build.py --release
 ```
 
-Once the generated files exist locally, subsequent builds can use
-`./scripts/build.py`.
+Run the port:
 
 ```bash
-./scripts/run.py StreetsOfRageRecompilation/rom/SOR.bin
+./scripts/play.py
 ```
 
-The equivalent direct CMake workflow is:
 
-```bash
-cmake -S StreetsOfRageRecompilation \
-  -B StreetsOfRageRecompilation/build/ubuntu \
-  -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build StreetsOfRageRecompilation/build/ubuntu --parallel
-```
-
-To use an SDL3 installed to a custom prefix instead, add
-`-DCMAKE_PREFIX_PATH=/path/to/prefix` during configuration.
-
-### Configure and play
-
-On macOS or Linux, run the executable from the recompilation directory:
-
-```bash
-cd StreetsOfRageRecompilation
-./build/sor --rom rom/SOR.bin
-```
-
-On Windows, run (use `Debug` in place of `Release` for a Debug build):
-
-```powershell
-cd StreetsOfRageRecompilation
-.\build\Release\sor.exe --rom rom\SOR.bin
-```
-
-Press `Ctrl+Q` to exit the game. The controls below are the default keyboard
-bindings shipped in `StreetsOfRageRecompilation/controls.yaml`.
+### Play
 
 #### Default controls
 
@@ -590,22 +511,8 @@ mode, the OPTIONS menu does not expose the original control remap row.
 
 #### Configure keyboard and gamepad bindings
 
-Start the executable with `--configControls`:
-
-On macOS or Linux:
-
-```bash
-./build/sor --configControls
-```
-
-On Windows:
-
-```powershell
-.\build\Release\sor.exe --configControls
-```
-
-From the meta-repository root, `scripts/configure_controls.py` does the same on
-every platform.
+Run `py scripts\play.py` (Windows) or `./scripts/play.py` (macOS and Linux) and
+click **Configure Controls**; you can use the keyboard, gamepads, or both.
 
 #### Host keyboard shortcuts
 
@@ -623,7 +530,7 @@ gamepad bindings:
 The capture files are written to the process's current working directory.
 `Ctrl+R`, `Ctrl+P`, and `Ctrl+S` are inactive unless `--debugUtils` is set.
 
-#### Debug utility hotkeys
+#### Debug utility hotkeys (Cheats)
 
 When started with `--debugUtils`, the host also exposes optional keyboard
 cheats. Hold **Alt** on Windows/Linux or **Option** on macOS and press the
@@ -653,25 +560,9 @@ rush before Mr. X). Each letter is the enemy's own initial where
 that was free — Signal takes `B` and Nora takes `U`, since `S` already adds a
 special attack and `N` is the ninja.
 
-> **The good/bad ending cheats are gone.** They were `Alt/Option+G` and
-> `Alt/Option+B`; those letters now kill Garcias and Signals.
-
 These are host debugging facilities, not part of the original cartridge input
 protocol. Use them only when investigating runtime behavior or exercising
 specific game paths.
-
-The remote debugging client can invoke the same cheats when the game is
-started with `--debugUtils`. Use `trigger_option_hotkey()` with the character
-from the table (without Alt/Option):
-
-```python
-from megadrive_remote import MegaDriveClient
-
-with MegaDriveClient("127.0.0.1", 6969) as game:
-    game.trigger_option_hotkey("l")  # add a P1 life
-    game.trigger_option_hotkey("p")  # toggle P1 punch power
-    game.trigger_option_hotkey("3")  # load level 3
-```
 
 #### Startup flags
 
@@ -704,9 +595,8 @@ version.
 ### Widescreen (Mode 48)
 
 `--widescreen` swaps Mode 40 (320×224) for Mode 48, a host-only VDP mode that
-real hardware does not have. The picture is 48×27 tiles (384×216, 16:9; 5× is
-1920×1080). The game logic is unchanged, so the extra columns show whatever the
-game already leaves in the planes and sprite table:
+real hardware does not have. The picture is 48×27 tiles (384×216, 16:9). The game logic is unchanged,
+so the extra columns show whatever the game already leaves in the planes and sprite table:
 
 - every layer shows 4 more tiles on each side: layers A and B, and the sprites
   (X 96-480), so sprites stay exactly where they are on their background;
