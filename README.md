@@ -31,6 +31,7 @@ study.
 | [`RageDecompiler/`](RageDecompiler/) | Python tools for disassembly, recompilation, label generation, and runtime discovery |
 | [`MegaDriveEnvironmentSampleGame/`](MegaDriveEnvironmentSampleGame/) | A small game targeting both the PC runtime and real Mega Drive hardware |
 | [`autoplay/`](autoplay/) | Python remote observer and symbolic AI player for a running `sor` host |
+| [`StreetsOfRageBuilder/`](StreetsOfRageBuilder/) | Guided installer that sets up the tools, builds the game from your ROM and adds a desktop shortcut |
 
 The playable host expects `MegaDriveEnvironment`, `RageDecompiler`, and
 `StreetsOfRageRecompilation` to remain sibling directories. This is the layout
@@ -219,7 +220,67 @@ instructions and CLI options are in [`autoplay/README.md`](autoplay/README.md);
 the ROM models, measurements, and test procedures are in
 [`autoplay/CLAUDE.md`](autoplay/CLAUDE.md).
 
+## Play with the Builder
+
+The easiest way to get the game running is **Streets of Rage Builder**, a guided
+installer for Windows, macOS and Debian-based Linux (Ubuntu and similar). It
+does the steps of [How to build](#how-to-build) for you; you only need a ROM you
+are legally entitled to use (see [Obtain a compatible ROM](#2-obtain-a-compatible-rom)).
+The ROM must be the **Rev. A** dump (CRC32 `4052E845`).
+
+### 1. Download and open the Builder
+
+Get the file for your system from the
+[latest release](https://github.com/RuiNelson/StreetsOfRageProject/releases/latest):
+
+| System | File |
+| --- | --- |
+| macOS (Apple silicon and Intel) | `StreetsOfRageBuilder-X.Y.Z-macos-universal.dmg` |
+| Windows (64-bit Intel/AMD) | `StreetsOfRageBuilder-X.Y.Z-windows-x64.exe` |
+| Windows on ARM | `StreetsOfRageBuilder-X.Y.Z-windows-arm64.exe` |
+| Linux x64 | `StreetsOfRageBuilder-X.Y.Z-linux-x64.AppImage` |
+| Linux ARM64 | `StreetsOfRageBuilder-X.Y.Z-linux-arm64.AppImage` |
+
+The apps are not signed yet, so macOS, Windows and your browser will warn you the
+first time; the release page explains how to open them.
+
+On macOS, install [Homebrew](https://brew.sh) first; the Builder uses it for the
+tools.
+
+### 2. Follow the six steps
+
+The window lists the steps on the left; **Back** and **Next** are at the bottom.
+**Next** is enabled when a step is done.
+
+1. **Install Tools**: checks Git, CMake, Ninja, Python (with Tk) and a C++
+   compiler, and installs what is missing with WinGet, Homebrew or apt. The
+   installers open in a terminal window and may ask for your password or
+   administrator approval. When they finish, the Builder checks again by itself
+   (or press **Re-check**).
+2. **Download Source**: choose an empty or new folder for the project. It is
+   downloaded from GitHub with its submodules and a single commit of history. To
+   update later, choose the same folder again.
+3. **Copy ROM**: drag your ROM onto the window or browse for it (`.bin`, `.md`,
+   `.gen`). Its CRC32 is checked, and it is copied into the project only if it
+   is the right dump. A Super Magic Drive (`.smd`) dump must first be converted
+   to a raw dump; any other version of the cartridge is not supported.
+4. **Pre-render Soundtrack**: renders the music and sound effects from your ROM
+   (about 4 minutes or more, ~265 MB). You can pick the sound chip: YM3438
+   (default) or YM2612. Keep the window open.
+5. **Build Executable**: generates the C++ from the ROM and compiles the game
+   and its dependencies; it takes several minutes, longer on slow computers.
+6. **Create Shortcut**: adds a **Streets of Rage** shortcut to your desktop. Click
+   **Finish** to close the Builder.
+
+Then double-click the shortcut to open the launcher window, and see
+[Play](#play) for the controls.
+
+If a step fails, the last lines of its output are shown; fix the cause (for
+example, a missing tool) and run the step again.
+
 ## How to build
+
+The steps below do by hand what the [Builder](#play-with-the-builder) does.
 
 <p align="center">
  <img src="docs/raineffect.webp" width="400">
