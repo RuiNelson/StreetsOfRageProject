@@ -106,3 +106,6 @@ glibc, so the AppImage runs on more systems). A `workflow_dispatch` workflow onl
 Actions tab once its file is on the default branch (`main`). Only the macOS command
 (`tauri build --target aarch64-apple-darwin --bundles dmg`, with `CI=true`, 45 s) was run
 locally; the Windows, Linux and universal runs are untested.
+
+Publishing a release (version bump, Action run, release notes format, `gh release create`):
+the `release-builder` skill, `.agents/skills/release-builder/SKILL.md`.
