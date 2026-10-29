@@ -1,4 +1,8 @@
-/** The last lines of a long-running script, with a bar when the lines carry a percentage. */
+"use client";
+
+import { useEffect, useRef } from "react";
+
+/** The last lines of a long-running script, with a bar when asked and the lines carry a percentage. */
 
 const KEPT = 6;
 
@@ -15,10 +19,15 @@ function percent(lines: string[]): number | null {
   return null;
 }
 
-export function Progress({ lines }: { lines: string[] }) {
-  const value = percent(lines);
+export function Progress({ lines, bar = true }: { lines: string[]; /** Off when the percentages describe something else than the step's work. */ bar?: boolean }) {
+  const value = bar ? percent(lines) : null;
+  const box = useRef<HTMLDivElement>(null);
+  // It appears below the fold in a small window: bring it into view when the work starts.
+  useEffect(() => {
+    box.current?.scrollIntoView({ block: "end" });
+  }, []);
   return (
-    <div className="notice progress">
+    <div className="notice progress" ref={box}>
       {value !== null && (
         <div className="bar" role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={100}>
           <div style={{ width: `${value}%` }} />

@@ -70,7 +70,7 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
           </label>
         ))}
       </fieldset>
-      {busy && <Progress lines={progress} />}
+      {busy && <Progress lines={progress} bar={false} />}
       {done && !busy && (
         <div className="notice ok">
           <p>Soundtrack ready: {done.files} sounds.</p>
