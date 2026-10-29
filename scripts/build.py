@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from _common import META_ROOT, absolute_path, executable_path, prepend_pythonpath
+from _common import META_ROOT, absolute_path, cmake_configure_arguments, executable_path, prepend_pythonpath
 
 
 def usage() -> None:
@@ -113,7 +113,8 @@ def main() -> int:
             shutil.rmtree(build_dir)
         if needs_configure(build_dir, [sor_root / "CMakeLists.txt", META_ROOT / "MegaDriveEnvironment" / "CMakeLists.txt"]):
             print(f"==> Configuring ({build_type})")
-            configure_command = ["cmake", "-S", str(sor_root), "-B", str(build_dir), f"-DCMAKE_BUILD_TYPE={build_type}"]
+            configure_command = ["cmake", "-S", str(sor_root), "-B", str(build_dir), f"-DCMAKE_BUILD_TYPE={build_type}",
+                                 *cmake_configure_arguments(build_dir)]
             toolchain = os.environ.get("CMAKE_TOOLCHAIN_FILE")
             if toolchain:
                 configure_command.append(f"-DCMAKE_TOOLCHAIN_FILE={toolchain}")

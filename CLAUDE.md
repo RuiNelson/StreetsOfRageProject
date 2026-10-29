@@ -106,10 +106,13 @@ cmake -S StreetsOfRageRecompilation \
 cmake --build StreetsOfRageRecompilation/build --parallel
 ```
 
-With the Visual Studio generator, select the configuration on both build and
-test commands (`--config Release` and `ctest -C Release`); `CMAKE_BUILD_TYPE`
-is for single-configuration generators. See `README.md` for platform-specific
-prerequisites and exact Windows, macOS, and Ubuntu commands.
+On Windows the toolchain is llvm-mingw (`MartinStorsjo.LLVM-MinGW.UCRT` from
+winget) with Ninja, not Visual Studio (user decision): `scripts/_common.py`
+(`cmake_configure_arguments`) adds `-G Ninja` and the
+`<arch>-w64-mingw32-clang(++)` compilers to every script-driven configure, and
+`MegaDriveEnvironment` is built static there. Direct CMake calls on Windows must
+pass the same. See `README.md` for platform-specific prerequisites and exact
+Windows, macOS, and Ubuntu commands.
 
 ## ROM and generated code
 

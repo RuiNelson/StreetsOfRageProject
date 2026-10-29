@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from _common import META_ROOT, absolute_path, built_executable
+from _common import META_ROOT, absolute_path, built_executable, cmake_configure_arguments
 
 
 def main() -> int:
@@ -42,7 +42,13 @@ def main() -> int:
     if arguments.clean and build_dir.exists():
         shutil.rmtree(build_dir)
     if not (build_dir / "CMakeCache.txt").is_file():
-        subprocess.run(["cmake", "-S", str(tool_root), "-B", str(build_dir), "-DCMAKE_BUILD_TYPE=Release"], check=True)
+        try:
+            configure_arguments = cmake_configure_arguments(build_dir)
+        except RuntimeError as error:
+            print(error, file=sys.stderr)
+            return 1
+        subprocess.run(["cmake", "-S", str(tool_root), "-B", str(build_dir), "-DCMAKE_BUILD_TYPE=Release",
+                        *configure_arguments], check=True)
     command = ["cmake", "--build", str(build_dir), "--parallel", arguments.jobs]
     if "CMAKE_CONFIGURATION_TYPES:" in (build_dir / "CMakeCache.txt").read_text(errors="replace"):
         command.extend(["--config", "Release"])

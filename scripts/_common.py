@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import glob
 import os
+import platform
 import shutil
 import socket
 import subprocess
@@ -44,13 +46,41 @@ def built_executable(build_dir: Path, name: str) -> Path:
     """Find the newest build of a host executable in a CMake build tree.
 
     Single-configuration generators (Makefiles, Ninja) put it in the build
-    directory itself; Visual Studio, CMake's default on Windows, puts it in a
+    directory itself; multi-configuration generators (Xcode, Visual Studio) put it in a
     per-configuration subdirectory such as Release.
     """
     directories = [build_dir, *(build_dir / config for config in ("Debug", "Release", "RelWithDebInfo", "MinSizeRel"))]
     candidates = [executable_path(directory, name) for directory in directories]
     existing = [path for path in candidates if path.is_file()]
     return max(existing, key=lambda path: path.stat().st_mtime) if existing else candidates[0]
+
+
+def mingw_compilers() -> tuple[str, str]:
+    """The llvm-mingw C and C++ compilers for this Windows machine (`winget install MartinStorsjo.LLVM-MinGW.UCRT`)."""
+    architecture = {"amd64": "x86_64", "x86_64": "x86_64", "arm64": "aarch64", "aarch64": "aarch64"}.get(platform.machine().lower())
+    if architecture is None:
+        raise RuntimeError(f"Unsupported Windows architecture: {platform.machine()}")
+    triple = f"{architecture}-w64-mingw32"
+    # winget adds the package to PATH only for new shells: fall back to its install folder.
+    winget_packages = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages"
+    fallback = sorted(glob.glob(str(winget_packages / "MartinStorsjo.LLVM-MinGW.UCRT_*" / "llvm-mingw-*" / "bin")))
+    search = os.pathsep.join([os.environ.get("PATH", ""), *fallback])
+    compilers = shutil.which(f"{triple}-clang", path=search), shutil.which(f"{triple}-clang++", path=search)
+    if not compilers[0] or not compilers[1]:
+        raise RuntimeError(f"{triple}-clang not found: install llvm-mingw "
+                           "(winget install --exact --id MartinStorsjo.LLVM-MinGW.UCRT) and open a new terminal.")
+    return compilers[0], compilers[1]
+
+
+def cmake_configure_arguments(build_dir: Path) -> list[str]:
+    """Extra `cmake` configure arguments for this platform: on Windows, Ninja and the llvm-mingw compilers."""
+    if os.name != "nt":
+        return []
+    cache = build_dir / "CMakeCache.txt"
+    if cache.is_file() and "CMAKE_GENERATOR:INTERNAL=Ninja\n" not in cache.read_text(errors="replace"):
+        raise RuntimeError(f"{build_dir} was configured with another generator or compiler; remove it and run again.")
+    cc, cxx = mingw_compilers()
+    return ["-G", "Ninja", f"-DCMAKE_C_COMPILER={cc}", f"-DCMAKE_CXX_COMPILER={cxx}"]
 
 
 def absolute_path(path: str | Path) -> Path:

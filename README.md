@@ -319,7 +319,7 @@ the generated C++), takes about four minutes and writes ~265 MB to
 `StreetsOfRageRecompilation/rom/soundtrack/`, next to the ROM.
 
 On Windows, **after** installing the prerequisites for your platform
-(steps 5–7), in the Developer PowerShell for VS 2022:
+(steps 5–7), in PowerShell:
 
 ```powershell
 py scripts\render_soundtrack.py
@@ -353,36 +353,35 @@ winget install --exact --id Git.Git --source winget `
 winget install --exact --id Kitware.CMake --source winget `
   --accept-package-agreements --accept-source-agreements
 
+winget install --exact --id Ninja-build.Ninja --source winget `
+  --accept-package-agreements --accept-source-agreements
+
 winget install --exact --id Python.Python.3.14 --source winget `
   --accept-package-agreements --accept-source-agreements
 
-winget install --exact --id Microsoft.VisualStudio.2022.BuildTools `
-  --source winget `
-  --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools;includeRecommended" `
+winget install --exact --id MartinStorsjo.LLVM-MinGW.UCRT --source winget `
   --accept-package-agreements --accept-source-agreements
 ```
 
-The `Microsoft.VisualStudio.Workload.VCTools` workload supplies MSVC, the
-Windows SDK, and the native x64/x86 build environment. See Microsoft's
-[Build Tools component list](https://learn.microsoft.com/visualstudio/install/workload-component-id-vs-build-tools?view=visualstudio)
-and [command-line installation parameter
-reference](https://learn.microsoft.com/visualstudio/install/use-command-line-parameters-to-install-visual-studio?view=visualstudio).
+The compiler is [llvm-mingw](https://github.com/mstorsjo/llvm-mingw): Clang,
+LLD and libc++ for Windows, about a gigabyte, with no Visual Studio and no
+Windows SDK. The game is built for the UCRT, so it runs on any current Windows.
 
-Close the Administrator terminal and open **Developer PowerShell for VS 2022**.
-Confirm that the tools are available:
+Close the Administrator terminal and open a **new** PowerShell (so that the new
+programs are on `PATH`). Confirm that the tools are available:
 
 ```powershell
-cl
+x86_64-w64-mingw32-clang --version   # aarch64-w64-mingw32-clang on Windows on ARM
 git --version
 cmake --version
+ninja --version
 py --version
 ```
 
 
 #### Configure, compile, and run
 
-Run the following from the meta-repository root in the **Developer PowerShell
-for VS 2022**.
+Run the following from the meta-repository root in PowerShell.
 
 After a fresh clone, generate the C++ port and create an optimized build:
 
@@ -398,11 +397,23 @@ source file. Regenerate them with `py scripts\generate_cpp.py` whenever the
 ROM, analysis data, labels, auxiliary addresses, manual-function inputs, or
 recompiler changes.
 
-CMake uses the Visual Studio generator by default on Windows, so the build
-lands in a per-configuration folder: `StreetsOfRageRecompilation\build\Debug\sor.exe`
-or `StreetsOfRageRecompilation\build\Release\sor.exe`, with the SDL3, SDL3_mixer, yaml-cpp,
-zlib, and libpng DLLs copied next to it. The scripts select the configuration
-for you.
+On Windows the scripts configure CMake with the Ninja generator and the
+llvm-mingw compilers, so the build is a single configuration and lands in
+`StreetsOfRageRecompilation\build\sor.exe`, with `SDL3.dll` and `SDL3_mixer.dll`
+copied next to it. The C++ runtime is linked into the executable. If you run
+CMake yourself, give it the same choices (use `aarch64-w64-mingw32-clang` on
+Windows on ARM):
+
+```powershell
+cmake -S StreetsOfRageRecompilation -B StreetsOfRageRecompilation\build -G Ninja `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_C_COMPILER=x86_64-w64-mingw32-clang `
+  -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-clang++
+cmake --build StreetsOfRageRecompilation\build --parallel
+```
+
+A `build` folder made earlier with the Visual Studio generator cannot be reused:
+delete it first.
 
 Run the game. There is a handy `play.py` launcher that is easy to use:
 
