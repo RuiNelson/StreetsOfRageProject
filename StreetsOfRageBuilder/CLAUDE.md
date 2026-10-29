@@ -17,8 +17,9 @@ a refreshed search path (Homebrew dirs on macOS, registry PATH on Windows) so a 
 launch and a just-finished install are both seen. Installs open the system terminal (Terminal.app, cmd, or the first terminal emulator
 found on Linux) with a generated script, so the user sees the installers' own output and
 prompts; the app does not wait, and re-checks when its window regains focus or on Re-check. Keep the tables in step with the
-project README prerequisites. Only the macOS code path was compiled and run so
-far; the Windows and Linux tables are untested on those systems.
+project README prerequisites. The macOS code path was compiled and run; on Windows (x64,
+real machine over SSH) the app compiles, the unit tests pass and the dependency report and the
+`.lnk` creation were checked; the GUI flows on Windows, and everything on Linux, are untested.
 
 ## Step 2: download the project
 
@@ -84,8 +85,9 @@ Linux `.desktop` (`Exec` quoted, `Path` the project, `gio` trusted flag). The ic
 project; Windows and Linux copy theirs to the app's local data folder. `punch-icon.png` is the
 source of those icons: regenerate with `npm run tauri -- icon ../punch-icon.png -o icons` from
 `Frontend/`, then delete the `android/` and `ios/` folders it makes. The Dock icon of the
-running launcher on macOS stays Python's (Tk), not the punch. Only the macOS bundle was built
-(by a test; the launcher was not run); the Windows and Linux code paths are untested.
+running launcher on macOS stays Python's (Tk), not the punch. The macOS bundle was built (by a
+test; the launcher was not run); the Windows `.lnk` was created and read back on a real Windows
+(target `pyw -3 play.py`, icon, working directory right); Linux is untested.
 
 On the last step Next becomes **Finish** (always enabled: the shortcut is optional); it calls the
 `finish` command (`platform.rs`), which exits the app.

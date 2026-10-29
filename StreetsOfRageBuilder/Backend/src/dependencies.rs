@@ -129,7 +129,8 @@ pub fn python_candidates() -> Vec<(PathBuf, Vec<&'static str>)> {
         .collect()
 }
 
-/// The first Python that has Tk: the one that can show play.py's window.
+/// The first Python that has Tk: the one that can show play.py's window (Windows uses pyw instead).
+#[cfg_attr(windows, allow(dead_code))]
 pub fn tk_python() -> Option<(PathBuf, Vec<&'static str>)> {
     python_candidates().into_iter().find(|(program, leading)| {
         system::command(program).args(leading).args(["-c", "import tkinter"]).output().is_ok_and(|o| o.status.success())

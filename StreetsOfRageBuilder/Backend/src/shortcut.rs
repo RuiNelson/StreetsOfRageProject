@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-use crate::{dependencies, system};
+#[cfg(not(windows))]
+use crate::dependencies;
+use crate::system;
 
 const NAME: &str = "Streets of Rage";
 #[allow(dead_code)]
