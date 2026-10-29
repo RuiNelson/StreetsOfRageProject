@@ -244,9 +244,6 @@ Get the file for your system from the
 The apps are not signed yet, so macOS, Windows and your browser will warn you the
 first time; the release page explains how to open them.
 
-On macOS, install [Homebrew](https://brew.sh) first; the Builder uses it for the
-tools.
-
 ### 2. Follow the six steps
 
 The window lists the steps on the left; **Back** and **Next** are at the bottom.
