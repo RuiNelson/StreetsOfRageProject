@@ -1,0 +1,32 @@
+/** The last lines of a long-running script, with a bar when the lines carry a percentage. */
+
+const KEPT = 6;
+
+export const appendLine = (lines: string[], line: string) => [...lines.slice(-(KEPT - 1)), line];
+
+/** `[ 45%]` (Makefiles) or `[12/340]` (Ninja), from the latest line that has one. */
+function percent(lines: string[]): number | null {
+  for (const line of [...lines].reverse()) {
+    const pct = /^\[\s*(\d+)%\]/.exec(line);
+    if (pct) return Number(pct[1]);
+    const count = /^\[(\d+)\/(\d+)\]/.exec(line);
+    if (count && Number(count[2]) > 0) return Math.round((100 * Number(count[1])) / Number(count[2]));
+  }
+  return null;
+}
+
+export function Progress({ lines }: { lines: string[] }) {
+  const value = percent(lines);
+  return (
+    <div className="notice progress">
+      {value !== null && (
+        <div className="bar" role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={100}>
+          <div style={{ width: `${value}%` }} />
+        </div>
+      )}
+      {lines.map((line, i) => (
+        <div key={i}>{line}</div>
+      ))}
+    </div>
+  );
+}

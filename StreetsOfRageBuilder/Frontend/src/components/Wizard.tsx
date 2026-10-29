@@ -6,6 +6,7 @@ import { platformInfo, type PlatformInfo } from "@/lib/tauri";
 import { Dependencies } from "./steps/Dependencies";
 import { Download } from "./steps/Download";
 import { Rom } from "./steps/Rom";
+import { Build } from "./steps/Build";
 import { ExtractSound } from "./steps/ExtractSound";
 import { Placeholder } from "./steps/Placeholder";
 
@@ -58,6 +59,8 @@ export function Wizard() {
             <Rom key={step.id} {...shared} />
           ) : step.id === "sound" ? (
             <ExtractSound key={step.id} {...shared} />
+          ) : step.id === "build" ? (
+            <Build key={step.id} {...shared} />
           ) : (
             <Placeholder key={step.id} id={step.id} {...shared} />
           )}

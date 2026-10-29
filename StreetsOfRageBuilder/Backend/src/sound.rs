@@ -2,13 +2,11 @@
 //! (it builds the renderer, then renders every track to FLAC under `rom/soundtrack/`).
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::ipc::Channel;
 
-use crate::{dependencies, system};
+use crate::script;
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -43,51 +41,13 @@ fn extract(project: &Path, chip: &str, progress: &(dyn Fn(String) + Sync)) -> Re
     if !CHIPS.contains(&chip) {
         return Err(format!("unknown chip {chip}"));
     }
-    system::refresh_path();
-    let script = project.join("scripts").join("render_soundtrack.py");
-    if !script.is_file() {
+    if !project.join("scripts").join("render_soundtrack.py").is_file() {
         return Err(format!("{} is not the project folder; redo step 2.", project.display()));
     }
     if !project.join("StreetsOfRageRecompilation").join("rom").join("SOR.bin").is_file() {
         return Err("The ROM is not in the project yet; redo step 3.".into());
     }
-    let (python, leading) = dependencies::python_candidates()
-        .into_iter()
-        .next()
-        .ok_or("Python was not found; finish step 1 first")?;
-    let mut child = system::command(&python)
-        .args(&leading)
-        .arg(&script)
-        .args(["--chip", chip])
-        .current_dir(project)
-        .env("PYTHONUNBUFFERED", "1")
-        .env("PYTHONIOENCODING", "utf-8")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("could not start Python: {e}"))?;
-    let stdout = child.stdout.take().expect("stdout is piped");
-    let stderr = child.stderr.take().expect("stderr is piped");
-
-    // Both streams feed the same progress line and the same tail kept for an error report.
-    let tail = Mutex::new(Vec::<String>::new());
-    let forward = |line: String| {
-        progress(line.clone());
-        let mut tail = tail.lock().unwrap();
-        tail.push(line);
-        if tail.len() > 12 {
-            tail.remove(0);
-        }
-    };
-    std::thread::scope(|scope| {
-        scope.spawn(|| system::read_lines(stdout, &forward));
-        system::read_lines(stderr, &forward);
-    });
-
-    let exit = child.wait().map_err(|e| e.to_string())?;
-    if !exit.success() {
-        return Err(format!("The soundtrack could not be rendered ({exit})\n{}", tail.lock().unwrap().join("\n")));
-    }
+    script::run(project, "render_soundtrack.py", &["--chip", chip], progress)?;
     status(project).ok_or_else(|| "The renderer finished but produced no soundtrack.".into())
 }
 

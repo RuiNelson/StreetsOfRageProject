@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { appendLine, Progress } from "@/components/Progress";
 import type { StepProps } from "@/lib/steps";
 import { extractSound, soundtrackStatus, type Chip, type Soundtrack } from "@/lib/tauri";
 
@@ -35,7 +36,7 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
     setError(null);
     setProgress(["Starting…"]);
     try {
-      setDone(await extractSound(projectPath, chip, (line) => setProgress((lines) => [...lines.slice(-5), line])));
+      setDone(await extractSound(projectPath, chip, (line) => setProgress((lines) => appendLine(lines, line))));
     } catch (e) {
       setDone(null);
       setError(errorText(e));
@@ -69,13 +70,7 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
           </label>
         ))}
       </fieldset>
-      {busy && (
-        <div className="notice progress">
-          {progress.map((line, i) => (
-            <div key={i}>{line}</div>
-          ))}
-        </div>
-      )}
+      {busy && <Progress lines={progress} />}
       {done && !busy && (
         <div className="notice ok">
           <p>Soundtrack ready: {done.files} sounds.</p>

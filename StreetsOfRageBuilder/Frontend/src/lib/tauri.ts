@@ -84,3 +84,16 @@ export const extractSound = (project: string, chip: Chip, onProgress: (line: str
   progress.onmessage = onProgress;
   return invoke<Soundtrack>("extract_sound", { project, chip, progress });
 };
+
+export interface Game {
+  executable: string;
+}
+
+/** The game already built in the project, or null. */
+export const gameStatus = (project: string) => invoke<Game | null>("game_status", { project });
+/** Generates the C++ and compiles the game (many minutes); `onProgress` gets the build output lines. */
+export const buildGame = (project: string, onProgress: (line: string) => void) => {
+  const progress = new Channel<string>();
+  progress.onmessage = onProgress;
+  return invoke<Game>("build_game", { project, progress });
+};

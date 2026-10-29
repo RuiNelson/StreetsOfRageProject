@@ -79,3 +79,6 @@ button:disabled { opacity: 0.4; cursor: default; }
 .chips label.selected { border-color: var(--accent); }
 .chips label span { display: flex; flex-direction: column; }
 .chips small { color: var(--muted); }
+.bar { height: 6px; margin-bottom: 8px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.bar > div { height: 100%; background: var(--accent); transition: width 0.3s; }
+.build { display: flex; flex-direction: column; gap: 12px; }

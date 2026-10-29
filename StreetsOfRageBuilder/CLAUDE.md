@@ -54,10 +54,20 @@ recognise a ROM already in the project when the user comes back to it.
 `Backend/src/sound.rs` runs the project's own `scripts/render_soundtrack.py` with the chip the
 user picked in the step (`--chip ym3438`, the default, or `ym2612`; user request; no `--out`)
 in the project folder with the first working Python
-(`dependencies::python_candidates`), streaming stdout and stderr line by line to the UI
-(`system::read_lines`). The first run builds the renderer, so it takes minutes: while it runs
+(`script::run`, shared with step 5: first working Python from `dependencies::python_candidates`,
+`PYTHONUNBUFFERED`), streaming stdout and stderr line by line to the UI (`system::read_lines`). The first run builds the renderer, so it takes minutes: while it runs
 the step sets `busy` (`StepProps.setBusy`) and the wizard disables Back/Next. The result is
 `rom/soundtrack/` with `manifest.tsv` written last; `soundtrack_status` recognises a finished
 render when the user comes back. Failure shows the last lines of output. The end-to-end test
 is `#[ignore]`d (`SOR_TEST_FOLDER`, `SOR_TEST_ROM`; it works in a scratch clone, never in the
 user's `rom/soundtrack`).
+
+## Step 5: build
+
+`Backend/src/compile.rs` runs `scripts/generate_cpp_and_build.py --release` through
+`script::run` (a player wants the optimized build; `--release` also cleans the build folder, so
+"Build again" is a full rebuild). The script does the platform work itself (Ninja and llvm-mingw
+on Windows). Success means `StreetsOfRageRecompilation/build/sor[.exe]` exists; `game_status`
+recognises an earlier build when the user comes back. Long scripts show their last lines and a
+bar parsed from `[ 45%]` (Makefiles) or `[12/340]` (Ninja) lines (`components/Progress.tsx`).
+The end-to-end test is `#[ignore]`d (`SOR_TEST_FOLDER`, `SOR_TEST_ROM`; scratch clone).

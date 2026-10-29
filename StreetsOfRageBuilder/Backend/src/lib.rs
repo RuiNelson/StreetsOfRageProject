@@ -1,7 +1,9 @@
+mod compile;
 mod dependencies;
 mod platform;
 mod project;
 mod rom;
+mod script;
 mod sound;
 mod system;
 
@@ -19,6 +21,8 @@ pub fn run() {
             rom::installed_rom,
             sound::soundtrack_status,
             sound::extract_sound,
+            compile::game_status,
+            compile::build_game,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Streets of Rage Builder");
