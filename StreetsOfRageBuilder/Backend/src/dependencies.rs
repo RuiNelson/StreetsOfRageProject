@@ -170,20 +170,22 @@ fn check_packages(packages: &[&str]) -> Check {
 
 #[cfg(target_os = "windows")]
 fn check_compiler() -> Check {
-    let vswhere = std::env::var_os("ProgramFiles(x86)")
-        .map(|dir| PathBuf::from(dir).join("Microsoft Visual Studio/Installer/vswhere.exe"))
-        .filter(|path| path.is_file());
-    let Some(vswhere) = vswhere else {
-        return (State::Missing, None);
-    };
-    let output = system::command(&vswhere)
-        .args(["-products", "*", "-latest", "-property", "installationPath", "-requires"])
-        .arg("Microsoft.VisualStudio.Component.VC.Tools.x86.x64")
-        .output()
-        .ok();
-    match output.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()).filter(|s| !s.is_empty()) {
-        Some(path) => (State::Ok, Some(path)),
-        None => (State::Missing, Some("Visual Studio C++ tools (MSVC) not found".into())),
+    let architecture = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
+    let name = format!("{architecture}-w64-mingw32-clang");
+    // winget adds llvm-mingw to PATH for new shells only; its install folder is the fallback.
+    let packages = std::env::var_os("LOCALAPPDATA")
+        .map(|dir| PathBuf::from(dir).join("Microsoft/WinGet/Packages"))
+        .and_then(|dir| std::fs::read_dir(dir).ok());
+    let installed = packages.into_iter().flatten().flatten().any(|package| {
+        package.file_name().to_string_lossy().starts_with("MartinStorsjo.LLVM-MinGW.UCRT")
+            && std::fs::read_dir(package.path()).into_iter().flatten().flatten().any(|release| {
+                release.path().join("bin").join(format!("{name}.exe")).is_file()
+            })
+    });
+    match first_line(&name, &["--version"]) {
+        Some(line) => (State::Ok, Some(line)),
+        None if installed => (State::Ok, Some("llvm-mingw installed (open a new terminal to use it)".into())),
+        None => (State::Missing, None),
     }
 }
 
@@ -231,12 +233,10 @@ fn specs() -> Vec<Spec> {
                install: Install::Winget { id: "Kitware.CMake", over: None } },
         Spec { id: "python", name: "Python 3 with Tk", description: "Runs the generator, the soundtrack renderer and the launcher.",
                check: check_python, install: Install::Winget { id: "Python.Python.3.14", over: None } },
-        Spec { id: "compiler", name: "Visual Studio Build Tools (C++)", description: "The MSVC compiler and Windows SDK.",
-               check: check_compiler,
-               install: Install::Winget {
-                   id: "Microsoft.VisualStudio.2022.BuildTools",
-                   over: Some("--wait --passive --add Microsoft.VisualStudio.Workload.VCTools;includeRecommended"),
-               } },
+        Spec { id: "ninja", name: "Ninja", description: "Builds quickly.", check: check_ninja,
+               install: Install::Winget { id: "Ninja-build.Ninja", over: None } },
+        Spec { id: "compiler", name: "llvm-mingw (Clang)", description: "The C++ compiler. No Visual Studio needed.",
+               check: check_compiler, install: Install::Winget { id: "MartinStorsjo.LLVM-MinGW.UCRT", over: None } },
     ]
 }
 
