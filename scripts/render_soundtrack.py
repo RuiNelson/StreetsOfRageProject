@@ -60,6 +60,7 @@ def main() -> int:
     shutil.rmtree(staging, ignore_errors=True)
     renderer = built_executable(build_dir, "sor_soundtrack")
     print(f"==> Rendering {rom} -> {out}", flush=True)
+    print("NOTICE: This can take a long time, specially if you have a slow CPU")
     status = subprocess.run([str(renderer), "--rom", str(rom), "--out", str(staging), "--chip", arguments.chip]).returncode
     if status != 0:
         print(f"Rendering failed ({status}); {out} left unchanged, partial output in {staging}", file=sys.stderr)
