@@ -101,7 +101,7 @@ On the last step Next becomes **Finish** (always enabled: the shortcut is option
 universal `.dmg`, Windows x64 and ARM64 as a **bare `.exe`** (no installer: `tauri build
 --no-bundle`; the user does not want one), Linux x64 and ARM64 as an **AppImage** only. Nothing is
 signed yet (macOS needs right-click > Open, Windows shows SmartScreen). Each platform uploads
-one artifact, `StreetsOfRageBuilder-<platform>`, kept 14 days. Linux builds on Ubuntu 22.04 (older
+one artifact, `StreetsOfRageBuilder-<platform>`, kept 14 days, holding the file already named for a release (`StreetsOfRageBuilder-<version>-<platform>.<ext>`, version from `tauri.conf.json`). Linux builds on Ubuntu 22.04 (older
 glibc, so the AppImage runs on more systems). A `workflow_dispatch` workflow only appears in the
 Actions tab once its file is on the default branch (`main`). Only the macOS command
 (`tauri build --target aarch64-apple-darwin --bundles dmg`, with `CI=true`, 45 s) was run

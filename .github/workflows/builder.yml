@@ -108,14 +108,17 @@ jobs:
           esac
           npm run tauri -- build --target "${{ matrix.target }}" $bundle
 
+      # Release file names: StreetsOfRageBuilder-<version>-<platform>.<ext>
       - name: Collect the product
         run: |
+          version=$(node -p "require('./StreetsOfRageBuilder/Backend/tauri.conf.json').version")
           out="StreetsOfRageBuilder/Intermediaries/cargo/${{ matrix.target }}/release"
+          name="StreetsOfRageBuilder-$version-${{ matrix.name }}"
           mkdir dist
           case "${{ matrix.kind }}" in
-            dmg)      cp "$out"/bundle/dmg/*.dmg "dist/StreetsOfRageBuilder-${{ matrix.name }}.dmg" ;;
-            appimage) cp "$out"/bundle/appimage/*.AppImage "dist/StreetsOfRageBuilder-${{ matrix.name }}.AppImage" ;;
-            exe)      cp "$out/streets-of-rage-builder.exe" "dist/StreetsOfRageBuilder-${{ matrix.name }}.exe" ;;
+            dmg)      cp "$out"/bundle/dmg/*.dmg "dist/$name.dmg" ;;
+            appimage) cp "$out"/bundle/appimage/*.AppImage "dist/$name.AppImage" ;;
+            exe)      cp "$out/streets-of-rage-builder.exe" "dist/$name.exe" ;;
           esac
           ls -l dist
 
