@@ -54,8 +54,13 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
       <div className="notice">
         <p>
           The game plays its music and sound effects from recordings made from your ROM, because the real-time sound
-          emulation is not good enough. Extract them once; it builds a small tool first, so the first run takes several
-          minutes. Keep this window open.
+          emulation is not good enough. Extract them once; it builds a small tool first, then renders every sound.
+        </p>
+      </div>
+      <div className="notice warning">
+        <p>
+          <strong>This step can take a long time</strong>: several minutes, and more on slower computers. If the lines
+          below pause for a while, it is still working. Keep this window open.
         </p>
       </div>
       <fieldset className="chips" disabled={busy}>
