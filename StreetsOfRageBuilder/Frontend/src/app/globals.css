@@ -82,3 +82,4 @@ button:disabled { opacity: 0.4; cursor: default; }
 .bar { height: 6px; margin-bottom: 8px; border-radius: 3px; background: var(--border); overflow: hidden; }
 .bar > div { height: 100%; background: var(--accent); transition: width 0.3s; }
 .build { display: flex; flex-direction: column; gap: 12px; }
+.shortcut { display: flex; flex-direction: column; gap: 12px; }

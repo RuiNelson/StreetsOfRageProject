@@ -71,3 +71,18 @@ on Windows). Success means `StreetsOfRageRecompilation/build/sor[.exe]` exists; 
 recognises an earlier build when the user comes back. Long scripts show their last lines and a
 bar parsed from `[ 45%]` (Makefiles) or `[12/340]` (Ninja) lines (`components/Progress.tsx`).
 The end-to-end test is `#[ignore]`d (`SOR_TEST_FOLDER`, `SOR_TEST_ROM`; scratch clone).
+
+## Step 6: the shortcut
+
+`Backend/src/shortcut.rs` puts a **Streets of Rage** shortcut on the desktop (user decisions:
+it opens the `play.py` window, not `--last`; desktop only; icon `punch-icon.png`). Native kind
+per platform: Windows `.lnk` (PowerShell `WScript.Shell`, target `pyw -3 play.py`, so no
+console window), macOS `.app` (a `sh` launcher that `exec`s the Tk-capable Python with its
+absolute path, since a Finder launch has no Homebrew on `PATH`; `Info.plist`, `icon.icns`),
+Linux `.desktop` (`Exec` quoted, `Path` the project, `gio` trusted flag). The icons are
+`include_bytes!`ed from `Backend/icons`, so the shortcut never depends on files in the
+project; Windows and Linux copy theirs to the app's local data folder. `punch-icon.png` is the
+source of those icons: regenerate with `npm run tauri -- icon ../punch-icon.png -o icons` from
+`Frontend/`, then delete the `android/` and `ios/` folders it makes. The Dock icon of the
+running launcher on macOS stays Python's (Tk), not the punch. Only the macOS bundle was built
+(by a test; the launcher was not run); the Windows and Linux code paths are untested.

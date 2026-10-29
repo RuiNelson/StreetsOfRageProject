@@ -97,3 +97,13 @@ export const buildGame = (project: string, onProgress: (line: string) => void) =
   progress.onmessage = onProgress;
   return invoke<Game>("build_game", { project, progress });
 };
+
+export interface Shortcut {
+  /** What the user sees on the desktop. */
+  path: string;
+}
+
+/** The desktop shortcut that opens scripts/play.py. */
+export const createShortcut = (project: string) => invoke<Shortcut>("create_shortcut", { project });
+/** The shortcut already on the desktop, or null. */
+export const shortcutStatus = () => invoke<Shortcut | null>("shortcut_status");

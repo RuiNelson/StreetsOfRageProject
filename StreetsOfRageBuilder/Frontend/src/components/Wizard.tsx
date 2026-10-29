@@ -1,14 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { STEPS } from "@/lib/steps";
+import { STEPS, type StepProps } from "@/lib/steps";
 import { platformInfo, type PlatformInfo } from "@/lib/tauri";
 import { Dependencies } from "./steps/Dependencies";
 import { Download } from "./steps/Download";
 import { Rom } from "./steps/Rom";
+import { ShortcutStep } from "./steps/ShortcutStep";
 import { Build } from "./steps/Build";
 import { ExtractSound } from "./steps/ExtractSound";
-import { Placeholder } from "./steps/Placeholder";
+
+const COMPONENTS: Record<string, (props: StepProps) => React.ReactNode> = {
+  dependencies: Dependencies,
+  clone: Download,
+  rom: Rom,
+  sound: ExtractSound,
+  build: Build,
+  shortcut: ShortcutStep,
+};
 
 export function Wizard() {
   const [index, setIndex] = useState(0);
@@ -18,6 +27,7 @@ export function Wizard() {
   const [actions, setActions] = useState<HTMLElement | null>(null);
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const step = STEPS[index];
+  const Step = COMPONENTS[step.id];
   // A step must report ready again every time it is shown.
   const setReady = useCallback((value: boolean) => setReadyState(value), []);
   const shared = { setReady, setBusy, actions, projectPath, setProjectPath };
@@ -51,19 +61,7 @@ export function Wizard() {
         <h2>{step.title}</h2>
         <p>{step.summary}</p>
         <div className="step-body">
-          {step.id === "dependencies" ? (
-            <Dependencies key={step.id} {...shared} />
-          ) : step.id === "clone" ? (
-            <Download key={step.id} {...shared} />
-          ) : step.id === "rom" ? (
-            <Rom key={step.id} {...shared} />
-          ) : step.id === "sound" ? (
-            <ExtractSound key={step.id} {...shared} />
-          ) : step.id === "build" ? (
-            <Build key={step.id} {...shared} />
-          ) : (
-            <Placeholder key={step.id} id={step.id} {...shared} />
-          )}
+          <Step key={step.id} {...shared} />
         </div>
         <footer>
           <button disabled={busy || index === 0} onClick={() => go(index - 1)}>

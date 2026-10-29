@@ -4,6 +4,7 @@ mod platform;
 mod project;
 mod rom;
 mod script;
+mod shortcut;
 mod sound;
 mod system;
 
@@ -23,6 +24,8 @@ pub fn run() {
             sound::extract_sound,
             compile::game_status,
             compile::build_game,
+            shortcut::create_shortcut,
+            shortcut::shortcut_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Streets of Rage Builder");
