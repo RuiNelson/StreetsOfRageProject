@@ -31,6 +31,8 @@ export interface DependenciesReport {
   ready: boolean;
 }
 
+/** Ends the wizard (the last step's Finish). */
+export const finish = () => invoke<void>("finish");
 export const platformInfo = () => invoke<PlatformInfo>("platform_info");
 export const checkDependencies = () => invoke<DependenciesReport>("check_dependencies");
 /** Resolves with notes to show; rejects with the failure text. */

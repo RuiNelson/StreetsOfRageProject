@@ -7,6 +7,12 @@ pub struct PlatformInfo {
     package_manager: &'static str,
 }
 
+/// The last step's Finish: end the wizard.
+#[tauri::command]
+pub fn finish(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 #[tauri::command]
 pub fn platform_info() -> PlatformInfo {
     if cfg!(target_os = "windows") {

@@ -3,7 +3,7 @@
 Tauri 2 (Rust) + Next.js (static export) desktop wizard that builds this project from a ROM.
 Windows (winget), macOS (Homebrew) and Debian-based Linux (apt).
 
-Steps: 1 dependencies · 2 clone · 3 ROM (CRC check) · 4 extract sound · 5 build · 6 shortcut to `scripts/play.py`.
+Steps: 1 Install Tools · 2 Download Source · 3 Copy ROM (CRC check) · 4 Pre-render Soundtrack · 5 Build Executable · 6 Create Shortcut (`scripts/play.py`).
 
 ```bash
 cd StreetsOfRageBuilder/Frontend

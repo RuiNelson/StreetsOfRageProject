@@ -14,6 +14,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             platform::platform_info,
+            platform::finish,
             dependencies::check_dependencies,
             dependencies::install_dependencies,
             project::inspect_project,

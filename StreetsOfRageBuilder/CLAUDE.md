@@ -86,3 +86,6 @@ source of those icons: regenerate with `npm run tauri -- icon ../punch-icon.png 
 `Frontend/`, then delete the `android/` and `ios/` folders it makes. The Dock icon of the
 running launcher on macOS stays Python's (Tk), not the punch. Only the macOS bundle was built
 (by a test; the launcher was not run); the Windows and Linux code paths are untested.
+
+On the last step Next becomes **Finish** (always enabled: the shortcut is optional); it calls the
+`finish` command (`platform.rs`), which exits the app.

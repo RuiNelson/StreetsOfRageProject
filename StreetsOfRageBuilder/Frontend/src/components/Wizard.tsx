@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { STEPS, type StepProps } from "@/lib/steps";
-import { platformInfo, type PlatformInfo } from "@/lib/tauri";
+import { finish, platformInfo, type PlatformInfo } from "@/lib/tauri";
 import { Dependencies } from "./steps/Dependencies";
 import { Download } from "./steps/Download";
 import { Rom } from "./steps/Rom";
@@ -69,8 +69,12 @@ export function Wizard() {
           </button>
           <div className="footer-right">
             <div className="step-actions" ref={setActions} />
-            <button className="primary" disabled={busy || !ready || index === STEPS.length - 1} onClick={() => go(index + 1)}>
-              Next
+            <button
+              className="primary"
+              disabled={busy || !ready}
+              onClick={() => (index === STEPS.length - 1 ? finish().catch(() => {}) : go(index + 1))}
+            >
+              {index === STEPS.length - 1 ? "Finish" : "Next"}
             </button>
           </div>
         </footer>

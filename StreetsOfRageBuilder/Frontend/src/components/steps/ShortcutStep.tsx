@@ -14,7 +14,7 @@ export function ShortcutStep({ setReady, actions, projectPath }: StepProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // The last step has no Next: nothing to hold back.
+  // The shortcut is optional: Finish is always available.
   useEffect(() => setReady(true), [setReady]);
 
   // Coming back to this step with the shortcut already on the desktop.
