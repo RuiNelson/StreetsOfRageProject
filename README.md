@@ -309,34 +309,6 @@ Windows invoke them with `py scripts\NAME.py`; on macOS and Linux they are
 executable directly as `./scripts/NAME.py`. Run them from the meta-repository
 root.
 
-### 4. Extract the soundtrack
-
-The port plays a soundtrack pre-rendered from your ROM (see
-[Pre-rendered soundtrack](#pre-rendered-soundtrack)). Extract it once, before
-running the recompiler for the first time, and again whenever the renderer
-changes. It needs only CMake, a C++ compiler and network access (not SDL3 or
-the generated C++), takes about four minutes and writes ~265 MB to
-`StreetsOfRageRecompilation/rom/soundtrack/`, next to the ROM.
-
-On Windows, **after** installing the prerequisites for your platform
-(steps 5–7), in PowerShell:
-
-```powershell
-py scripts\render_soundtrack.py
-```
-
-On macOS and Linux, **after** installing the prerequisites for your platform
-(steps 5–7):
-
-```bash
-./scripts/render_soundtrack.py                    # writes StreetsOfRageRecompilation/rom/soundtrack/
-./scripts/render_soundtrack.py --chip ym2612      # Nuked's Model 1 YM2612 instead
-./scripts/render_soundtrack.py --out ~/sor-audio  # any other folder
-```
-
-Without a soundtrack the game still runs and emulates the sound chips in real
-time instead (**not recommended, because sound quality is reduced to improve performance**).
-
 ### 5. Build on Windows
 
 #### Prerequisites
@@ -347,27 +319,22 @@ Open PowerShell as Administrator and install the command-line tools with
 ```powershell
 winget source update
 
-winget install --exact --id Git.Git --source winget `
-  --accept-package-agreements --accept-source-agreements
+winget install --exact --id Git.Git
 
-winget install --exact --id Kitware.CMake --source winget `
-  --accept-package-agreements --accept-source-agreements
+winget install --exact --id Kitware.CMake
 
-winget install --exact --id Ninja-build.Ninja --source winget `
-  --accept-package-agreements --accept-source-agreements
+winget install --exact --id Ninja-build.Ninja
 
-winget install --exact --id Python.Python.3.14 --source winget `
-  --accept-package-agreements --accept-source-agreements
+winget install --exact --id Python.Python.3.14
 
-winget install --exact --id MartinStorsjo.LLVM-MinGW.UCRT --source winget `
-  --accept-package-agreements --accept-source-agreements
+winget install --exact --id MartinStorsjo.LLVM-MinGW.UCRT
 ```
 
 The compiler is [llvm-mingw](https://github.com/mstorsjo/llvm-mingw): Clang,
 LLD and libc++ for Windows, about a gigabyte, with no Visual Studio and no
 Windows SDK. The game is built for the UCRT, so it runs on any current Windows.
 
-Close the Administrator terminal and open a **new** PowerShell (so that the new
+**Close** the Administrator terminal and open a **new** PowerShell (so that the new
 programs are on `PATH`). Confirm that the tools are available:
 
 ```powershell
@@ -389,33 +356,16 @@ After a fresh clone, generate the C++ port and create an optimized build:
 py .\scripts\generate_cpp_and_build.py --release
 ```
 
-Generation is mandatory after a fresh clone because `generated/` is ignored by
-Git. It creates `SoR.hpp`, `SoR-common.hpp`, and split `SoR-XXX.cpp` files
-under `StreetsOfRageRecompilation\generated`; each `XXX` is formed from the
-first three hexadecimal digits of the first subroutine entry address in that
-source file. Regenerate them with `py scripts\generate_cpp.py` whenever the
-ROM, analysis data, labels, auxiliary addresses, manual-function inputs, or
-recompiler changes.
+Generation is mandatory after a fresh clone.
 
-On Windows the scripts configure CMake with the Ninja generator and the
-llvm-mingw compilers, so the build is a single configuration and lands in
-`StreetsOfRageRecompilation\build\sor.exe`, with `SDL3.dll` and `SDL3_mixer.dll`
-copied next to it. The C++ runtime is linked into the executable. If you run
-CMake yourself, give it the same choices (use `aarch64-w64-mingw32-clang` on
-Windows on ARM):
+Extract the soundtrack from your ROM (about 4 minutes, ~265 MB). Without it the
+game still runs, but the sound is emulated in real time and is noticeably worse:
 
 ```powershell
-cmake -S StreetsOfRageRecompilation -B StreetsOfRageRecompilation\build -G Ninja `
-  -DCMAKE_BUILD_TYPE=Release `
-  -DCMAKE_C_COMPILER=x86_64-w64-mingw32-clang `
-  -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-clang++
-cmake --build StreetsOfRageRecompilation\build --parallel
+py .\scripts\render_soundtrack.py
 ```
 
-A `build` folder made earlier with the Visual Studio generator cannot be reused:
-delete it first.
-
-Run the game. There is a handy `play.py` launcher that is easy to use:
+Run the game. There is a handy `play.py` launcher that is easy to use (**this might take a while on the first run**):
 
 ```powershell
 py .\scripts\play.py
@@ -443,6 +393,12 @@ After a fresh clone, generate the C++ port and create an optimized build:
 ./scripts/generate_cpp_and_build.py --release
 ```
 
+Extract the soundtrack from your ROM (about 4 minutes, ~265 MB). Without it the
+game still runs, but the sound is emulated in real time and is noticeably worse:
+
+```bash
+./scripts/render_soundtrack.py
+```
 
 Run the port:
 
@@ -478,6 +434,13 @@ Generate the C++ port and create the first optimized build:
 
 ```bash
 ./scripts/generate_cpp_and_build.py --release
+```
+
+Extract the soundtrack from your ROM (about 4 minutes, ~265 MB). Without it the
+game still runs, but the sound is emulated in real time and is noticeably worse:
+
+```bash
+./scripts/render_soundtrack.py
 ```
 
 Run the port:
@@ -628,8 +591,10 @@ plays a soundtrack pre-rendered from your ROM by
 OPN2 core (YM3438, no low-pass filter, 48 kHz, lossless FLAC): every music
 track (looping forever from its own loop point, like on the console), every
 sound effect and every PCM voice. It is extracted with
-`scripts/render_soundtrack.py`, step
-[4. Extract the soundtrack](#4-extract-the-soundtrack) of the build.
+`scripts/render_soundtrack.py`, the last step of the build for your platform
+([Windows](#5-build-on-windows), [macOS](#6-build-on-macos),
+[Ubuntu](#7-build-on-ubuntu)); it takes about four minutes and writes ~265 MB to
+`StreetsOfRageRecompilation/rom/soundtrack/`, next to the ROM.
 
 A soundtrack folder is the FLAC files plus their `manifest.tsv`. By default
 `sor` reads `soundtrack/` next to the ROM; point it at another folder with
@@ -639,6 +604,10 @@ A soundtrack folder is the FLAC files plus their `manifest.tsv`. By default
 ./build/sor --rom rom/SOR.bin --soundtrack ~/sor-audio
 ./build/sor --rom rom/SOR.bin --sound emulated   # the real-time chips instead
 ```
+
+`render_soundtrack.py` takes two options for such a second render:
+`--chip ym2612` renders Nuked's Model 1 YM2612 instead of the default YM3438, and
+`--out DIR` writes to another folder.
 
 In the `scripts/play.py` window the same choices are the **Sound** and
 **Soundtrack folder** fields of the host panel (empty folder = next to the
