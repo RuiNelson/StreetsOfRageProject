@@ -24,6 +24,7 @@ This public meta-repository pins the repositories that make up the workspace:
 | `RageDecompiler/` | Python disassembly and recompilation tools | Project-owned; editable |
 | `StreetsOfRageRecompilation/` | Streets of Rage analysis, generated C++, native overrides, and host executable | Project-owned; editable |
 | `autoplay/` | Python remote SoR observer + symbolic AI (`megadrive_remote`) | Project-owned; editable; **not a submodule** |
+| `StreetsOfRageBuilder/` | Tauri + Next.js wizard that installs dependencies, clones, builds and adds a launcher shortcut | Project-owned; editable; **not a submodule** |
 | `Genesis-Plus-GX/` | Upstream emulator used only as a behavioral reference | Upstream; never edit |
 
 `Genesis-Plus-GX` is reference material only. Do not modify files, create
