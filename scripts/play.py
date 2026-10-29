@@ -61,7 +61,7 @@ DEFAULTS: dict[str, Any] = {
     "agent_p2": False,
     "reach": "",  # "" = stay in the menus
     "lockstep": False,
-    "poll_ms": 0,  # 0 = auto: 16 under turbo, autoplay's own default otherwise
+    "poll_ms": 0,  # 0 = auto: 32/turbo ms under turbo (16 at x2), autoplay's own default otherwise
     "hud_ms": 0,  # 0 = autoplay's own default
     "start_level": 0,  # 0 = none
     "sweep": "",  # "", "street", "mrx" or "only:<family>"
@@ -220,10 +220,15 @@ def controls_arguments(s: dict[str, Any]) -> list[str]:
     return ([s["rom"]] if s["rom"] else []) + ["--configControls"]
 
 
+def auto_poll_ms(turbo: int) -> int:
+    """Poll cadence that keeps ~2 game frames per tick: 16 ms at x2, 8 ms at x4... (0 = autoplay's default)."""
+    return max(1, round(32 / turbo)) if turbo > 0 else 0
+
+
 def autoplay_arguments(s: dict[str, Any]) -> list[str]:
     """Arguments for scripts/autoplay.py."""
     args: list[str] = []
-    poll = s["poll_ms"] or (16 if s["turbo"] > 0 else 0)
+    poll = s["poll_ms"] or auto_poll_ms(s["turbo"])
     if s["lockstep"]:
         args.append("--lockstep")
     elif poll:
@@ -407,7 +412,7 @@ class PlayWindow:
         shared.columnconfigure(1, weight=1)
         shared.columnconfigure(3, weight=1)
         self.spin(shared, 0, "Port: sor --port, autoplay --port", "port", 1, 65535)
-        self.combo(shared, 0, "Turbo (^T): sor --turbo, autoplay poll 16 ms", "turbo", column=2)
+        self.combo(shared, 0, "Turbo (^T): sor --turbo, autoplay poll 32/turbo ms", "turbo", column=2)
 
         host = ttk.LabelFrame(root, text="Host (sor)")
         host.grid(row=2, column=0, sticky="nsew", padx=(10, 5), pady=4)

@@ -254,7 +254,8 @@ One launcher for `sor` plus `autoplay`; it replaced the old `both_*.py` and
 The window (Tk) saves its settings to `last_play_py_settings.yml` (repo root,
 gitignored) on every change and reads them back on the next launch. The port
 and the turbo factor are set once and feed both programs (`sor --port/--turbo`,
-`autoplay --port`, and `--poll-ms 16` under turbo); changing the start level
+`autoplay --port`, and `--poll-ms` = 32/turbo under turbo: 16 at x2, 8 at x4,
+unless the Poll ms field is set); changing the start level
 under a street/Mr. X sweep also updates the sweep and `--no-food` for the
 round. The host panel's **Sound** (`--sound`, ignored when silent) and
 **Soundtrack folder** (`--soundtrack`, empty = next to the ROM, `...` opens a
