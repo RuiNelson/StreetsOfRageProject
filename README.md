@@ -220,15 +220,21 @@ instructions and CLI options are in [`autoplay/README.md`](autoplay/README.md);
 the ROM models, measurements, and test procedures are in
 [`autoplay/CLAUDE.md`](autoplay/CLAUDE.md).
 
-## Play with the Builder
+## How to build
+
+<p align="center">
+ <img src="docs/raineffect.webp" width="400">
+</p>
+
+### Using the Builder (recommended)
 
 The easiest way to get the game running is **Streets of Rage Builder**, a guided
 installer for Windows, macOS and Debian-based Linux (Ubuntu and similar). It
-does the steps of [How to build](#how-to-build) for you; you only need a ROM you
+does for you the steps of [building by hand](#building-by-hand); you only need a ROM you
 are legally entitled to use (see [Obtain a compatible ROM](#2-obtain-a-compatible-rom)).
 The ROM must be the **Rev. A** dump (CRC32 `4052E845`).
 
-### 1. Download and open the Builder
+#### Download and open the Builder
 
 Get the file for your system from the
 [latest release](https://github.com/RuiNelson/StreetsOfRageProject/releases/latest):
@@ -244,7 +250,7 @@ Get the file for your system from the
 The apps are not signed yet, so macOS, Windows and your browser will warn you the
 first time; the release page explains how to open them.
 
-### 2. Follow the six steps
+#### Follow the six steps
 
 The window lists the steps on the left; **Back** and **Next** are at the bottom.
 **Next** is enabled when a step is done.
@@ -275,13 +281,10 @@ Then double-click the shortcut to open the launcher window, and see
 If a step fails, the last lines of its output are shown; fix the cause (for
 example, a missing tool) and run the step again.
 
-## How to build
+### Building by hand
 
-The steps below do by hand what the [Builder](#play-with-the-builder) does.
-
-<p align="center">
- <img src="docs/raineffect.webp" width="400">
-</p>
+The steps below do by hand what the Builder does. Follow them if you prefer, or if
+your system is not supported by the Builder.
 
 ### 1. Clone the repository and submodules
 
