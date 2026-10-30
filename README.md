@@ -163,6 +163,8 @@ that use busy waiting.
 
 ### The `autoplay` observer and symbolic AI
 
+![AI autoplay in action](docs/ai_auto.webp)
+
 `autoplay` is a Python application that attaches to a running `sor` executable
 through the remote-access library shipped with `MegaDriveEnvironment`
 (`megadrive_remote`). The game process remains the host; autoplay reads live
@@ -222,11 +224,12 @@ the ROM models, measurements, and test procedures are in
 
 ## How to build
 
-<p align="center">
- <img src="docs/raineffect.webp" width="400">
-</p>
+
+![VDP Dump](docs/vdp_dump.webp)
 
 ### Using the Builder (recommended)
+
+![Streets of Rage Builder](docs/builder.webp)
 
 The easiest way to get the game running is **Streets of Rage Builder**, a guided
 installer for Windows, macOS and Debian-based Linux (Ubuntu and similar). It
@@ -705,15 +708,6 @@ PSG, because the game's fade treats them differently: the drums and the PSG
 stop at once while the FM fades out over 1.3 seconds. One difference is deliberate: on the
 console a sound effect borrows a music channel while it plays, here the music
 keeps playing under it. Under `--turbo` the music stays at normal speed.
-
-Examples:
-
-```bash
-./build/sor --rom rom/SOR.bin --lang en --hz 60 --vsync 1 --debugUtils --port 6970
-./build/sor --rom rom/SOR.bin --fullScreen
-./build/sor --rom rom/SOR.bin --turbo 2 --silent
-./build/sor --rom rom/SOR.bin --callLog calls.csv
-```
 
 ### Call-map database
 
