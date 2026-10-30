@@ -190,7 +190,7 @@ or without VRR, with no per-monitor setup and no tearing. SDL3 has no VRR API, s
 the internal timer is the game's clock and each frame is presented with vsync on, without
 the game waiting for it (`MegaDriveEnvironment/CLAUDE.md`). Measured on a 120 Hz
 MacBook, windowed: 60, 120, 240 and 600 fps at `--turbo` off, 2, 4 and 10, as with vsync off.
-Not tested: an external VRR monitor, Windows, Linux. `--vsync 1|2|3` remain, and tie the
+Not tested: an external VRR monitor (the user has none), Windows, Linux. `--vsync 1|2|3` remain, and tie the
 game's speed to the monitor.
 
 ## Controls: the game reads SDL and binds actions
