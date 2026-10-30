@@ -183,6 +183,16 @@ audio, so the measurement presets are unaffected. How the renders and their loop
 made and how playback follows the ROM's engine: `StreetsOfRageRecompilation/CLAUDE.md`,
 **Pre-rendered soundtrack**.
 
+## Frame sync: automatic by default
+
+User request (2026-10-30): the default (`--vsync 0`) works on macOS, Windows and Linux with
+or without VRR, with no per-monitor setup and no tearing. SDL3 has no VRR API, so
+the internal timer is the game's clock and each frame is presented with vsync on, without
+the game waiting for it (`MegaDriveEnvironment/CLAUDE.md`). Measured on a 120 Hz
+MacBook, windowed: 60, 120, 240 and 600 fps at `--turbo` off, 2, 4 and 10, as with vsync off.
+Not tested: an external VRR monitor, Windows, Linux. `--vsync 1|2|3` remain, and tie the
+game's speed to the monitor.
+
 ## Controls: the game reads SDL and binds actions
 
 User decision (2026-10-29): `sor` reads the keyboard and gamepads itself
