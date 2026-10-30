@@ -6,17 +6,27 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::ipc::Channel;
 
-use crate::script;
+use crate::{project, script, stamp};
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Soundtrack {
     pub folder: String,
     pub files: usize,
+    /// Rendered by another version of the renderer than the one on disk now.
+    pub outdated: bool,
 }
 
 fn soundtrack_folder(project: &Path) -> PathBuf {
     project.join("StreetsOfRageRecompilation").join("rom").join("soundtrack")
+}
+
+/// The renders come from the script and the renderer sources only (plus the ROM), so those two
+/// git object ids name the version; an update that leaves them alone keeps the soundtrack valid.
+fn version(project: &Path) -> Option<String> {
+    let script = project::revision(project, "HEAD:scripts/render_soundtrack.py")?;
+    let renderer = project::revision(&project.join("StreetsOfRageRecompilation"), "HEAD:tools/soundtrack")?;
+    Some(format!("{script}:{renderer}"))
 }
 
 /// The soundtrack in the project, when a finished render is there (`manifest.tsv` is written last).
@@ -31,7 +41,11 @@ fn status(project: &Path) -> Option<Soundtrack> {
         .filter_map(Result::ok)
         .filter(|entry| entry.path().extension().is_some_and(|extension| extension == "flac"))
         .count();
-    Some(Soundtrack { folder: folder.to_string_lossy().into_owned(), files })
+    Some(Soundtrack {
+        folder: folder.to_string_lossy().into_owned(),
+        files,
+        outdated: !stamp::is_current(&folder, version(project)),
+    })
 }
 
 /// The Nuked OPN2 chip models `render_soundtrack.py --chip` accepts.
@@ -47,10 +61,13 @@ fn extract(project: &Path, chip: &str, progress: &(dyn Fn(String) + Sync)) -> Re
     if !project.join("StreetsOfRageRecompilation").join("rom").join("SOR.bin").is_file() {
         return Err("The ROM is not in the project yet; redo step 3.".into());
     }
+    let rendered_from = version(project);
     script::run(project, "render_soundtrack.py", &["--chip", chip], progress)?;
+    stamp::write(&soundtrack_folder(project), rendered_from);
     status(project).ok_or_else(|| "The renderer finished but produced no soundtrack.".into())
 }
 
+/// The soundtrack already rendered in the project, if any (`outdated` when the renderer changed since).
 #[tauri::command]
 pub fn soundtrack_status(project: String) -> Option<Soundtrack> {
     status(Path::new(&project))

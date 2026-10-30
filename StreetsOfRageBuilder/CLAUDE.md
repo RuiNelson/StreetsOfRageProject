@@ -75,6 +75,18 @@ recognises an earlier build when the user comes back. Long scripts show their la
 bar parsed from `[ 45%]` (Makefiles) or `[12/340]` (Ninja) lines (`components/Progress.tsx`).
 The end-to-end test is `#[ignore]`d (`SOR_TEST_FOLDER`, `SOR_TEST_ROM`; scratch clone).
 
+## "Ready" means built from this version of the project
+
+`build/` and `rom/soundtrack/` are gitignored, so updating the project (step 2) leaves the old output
+behind. `Backend/src/stamp.rs` writes `.builder-version` next to the output after a successful run and
+`game_status` / `soundtrack_status` compare it with git's current version, returning `outdated: true`
+when it differs or is missing (so builds made before the stamps existed are rebuilt once). The game's
+version is the project's `HEAD` (it names every submodule); the soundtrack's is the object ids of
+`scripts/render_soundtrack.py` and `StreetsOfRageRecompilation/tools/soundtrack`, so an update that does
+not touch the renderer keeps the render (a choice of mine, not a user decision: widen it if the
+renders turn out to depend on more). Without git or a repository the output is accepted. The steps
+treat an outdated output as not done and say so.
+
 ## Step 6: the shortcut
 
 `Backend/src/shortcut.rs` puts a **Streets of Rage** shortcut on the desktop (user decisions:

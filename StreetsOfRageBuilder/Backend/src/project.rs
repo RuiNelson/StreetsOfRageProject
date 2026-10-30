@@ -100,6 +100,11 @@ fn git_output(directory: &Path, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+/// The object id git gives `spec` (`HEAD`, `HEAD:path`) in `directory`, or `None` without git or a repository.
+pub fn revision(directory: &Path, spec: &str) -> Option<String> {
+    git_output(directory, &["rev-parse", spec]).ok().filter(|id| !id.is_empty())
+}
+
 fn update_submodules(path: &Path, progress: &dyn Fn(String)) -> Result<(), String> {
     progress("Fetching submodules…".into());
     git_stream(Some(path), &["submodule", "sync", "--recursive"], progress)?;

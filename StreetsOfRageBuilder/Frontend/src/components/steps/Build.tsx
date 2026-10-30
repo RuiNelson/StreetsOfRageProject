@@ -15,19 +15,28 @@ export function Build({ setReady, setBusy, actions, projectPath }: StepProps) {
   const [busy, setBusyState] = useState(false);
   const [progress, setProgress] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [outdated, setOutdated] = useState(false);
 
   useEffect(() => setReady(done !== null), [done, setReady]);
   useEffect(() => setBusy(busy), [busy, setBusy]);
 
-  // Coming back to this step with the game already built.
+  // Coming back to this step with the game already built; a build of an older version does not count.
   useEffect(() => {
-    if (projectPath) gameStatus(projectPath).then((found) => found && setDone(found)).catch(() => {});
+    if (!projectPath) return;
+    gameStatus(projectPath)
+      .then((found) => {
+        if (!found) return;
+        if (found.outdated) setOutdated(true);
+        else setDone(found);
+      })
+      .catch(() => {});
   }, [projectPath]);
 
   const build = async () => {
     if (!projectPath) return;
     setBusyState(true);
     setError(null);
+    setOutdated(false);
     setProgress(["Starting…"]);
     try {
       setDone(await buildGame(projectPath, (line) => setProgress((lines) => appendLine(lines, line))));
@@ -52,6 +61,11 @@ export function Build({ setReady, setBusy, actions, projectPath }: StepProps) {
           processor cores. Keep this window open.
         </p>
       </div>
+      {outdated && !busy && !done && (
+        <div className="notice warning">
+          <p>The game in this folder was built from an older version of the project. Build it again.</p>
+        </div>
+      )}
       {busy && <Progress lines={progress} />}
       {done && !busy && (
         <div className="notice ok">

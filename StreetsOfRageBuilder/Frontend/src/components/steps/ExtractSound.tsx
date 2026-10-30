@@ -21,19 +21,28 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
   const [busy, setBusyState] = useState(false);
   const [progress, setProgress] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [outdated, setOutdated] = useState(false);
 
   useEffect(() => setReady(done !== null), [done, setReady]);
   useEffect(() => setBusy(busy), [busy, setBusy]);
 
-  // Coming back to this step with the soundtrack already rendered.
+  // Coming back to this step with the soundtrack already rendered; one from an older renderer does not count.
   useEffect(() => {
-    if (projectPath) soundtrackStatus(projectPath).then((found) => found && setDone(found)).catch(() => {});
+    if (!projectPath) return;
+    soundtrackStatus(projectPath)
+      .then((found) => {
+        if (!found) return;
+        if (found.outdated) setOutdated(true);
+        else setDone(found);
+      })
+      .catch(() => {});
   }, [projectPath]);
 
   const extract = async () => {
     if (!projectPath) return;
     setBusyState(true);
     setError(null);
+    setOutdated(false);
     setProgress(["Starting…"]);
     try {
       setDone(await extractSound(projectPath, chip, (line) => setProgress((lines) => appendLine(lines, line))));
@@ -75,6 +84,11 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
           </label>
         ))}
       </fieldset>
+      {outdated && !busy && !done && (
+        <div className="notice warning">
+          <p>The soundtrack in this folder was rendered by an older version of the project. Extract it again.</p>
+        </div>
+      )}
       {busy && <Progress lines={progress} bar={false} />}
       {done && !busy && (
         <div className="notice ok">

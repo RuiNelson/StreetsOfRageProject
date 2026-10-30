@@ -6,12 +6,23 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::ipc::Channel;
 
-use crate::script;
+use crate::{project, script, stamp};
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Game {
     pub executable: String,
+    /// Built from another version of the project than the one on disk now.
+    pub outdated: bool,
+}
+
+fn build_folder(project: &Path) -> PathBuf {
+    project.join("StreetsOfRageRecompilation").join("build")
+}
+
+/// The game is generated from the whole project, submodules included: its commit names them all.
+fn version(project: &Path) -> Option<String> {
+    project::revision(project, "HEAD")
 }
 
 /// Where the build put `sor`: single-configuration generators (Makefiles, Ninja) use the build
@@ -19,7 +30,7 @@ pub struct Game {
 /// The newest wins, as in the scripts' `built_executable`.
 fn executable(project: &Path) -> Option<PathBuf> {
     let name = if cfg!(windows) { "sor.exe" } else { "sor" };
-    let build = project.join("StreetsOfRageRecompilation").join("build");
+    let build = build_folder(project);
     ["", "Release", "RelWithDebInfo", "MinSizeRel", "Debug"]
         .iter()
         .map(|folder| build.join(folder).join(name))
@@ -28,18 +39,23 @@ fn executable(project: &Path) -> Option<PathBuf> {
 }
 
 fn status(project: &Path) -> Option<Game> {
-    executable(project).map(|path| Game { executable: path.to_string_lossy().into_owned() })
+    executable(project).map(|path| Game {
+        executable: path.to_string_lossy().into_owned(),
+        outdated: !stamp::is_current(&build_folder(project), version(project)),
+    })
 }
 
 fn compile(project: &Path, progress: &(dyn Fn(String) + Sync)) -> Result<Game, String> {
     if !project.join("StreetsOfRageRecompilation").join("rom").join("SOR.bin").is_file() {
         return Err("The ROM is not in the project yet; redo step 3.".into());
     }
+    let built_from = version(project);
     script::run(project, "generate_cpp_and_build.py", &["--release"], progress)?;
+    stamp::write(&build_folder(project), built_from);
     status(project).ok_or_else(|| "The build finished but the game (sor) was not found in its build folder.".to_string())
 }
 
-/// The game already built in the project, if any.
+/// The game already built in the project, if any (`outdated` when the project was updated since).
 #[tauri::command]
 pub fn game_status(project: String) -> Option<Game> {
     status(Path::new(&project))
@@ -85,6 +101,35 @@ mod tests {
         assert!(compile(&project, &|_| {}).unwrap_err().contains("step 3"));
         std::fs::write(build.join(name), b"").unwrap();
         assert!(status(&project).unwrap().executable.ends_with(name));
+        std::fs::remove_dir_all(&project).unwrap();
+    }
+
+    /// A build made before the project moved on (or before stamps existed) is out of date.
+    #[test]
+    fn a_build_of_an_older_commit_is_outdated() {
+        let project = std::env::temp_dir().join(format!("sor-builder-outdated-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&project);
+        let build = project.join("StreetsOfRageRecompilation/build");
+        std::fs::create_dir_all(&build).unwrap();
+        let name = if cfg!(windows) { "sor.exe" } else { "sor" };
+        std::fs::write(build.join(name), b"").unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .current_dir(&project)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "one"]);
+        assert!(status(&project).unwrap().outdated, "no stamp");
+        stamp::write(&build, version(&project));
+        assert!(!status(&project).unwrap().outdated);
+        git(&["commit", "-q", "--allow-empty", "-m", "two"]);
+        assert!(status(&project).unwrap().outdated, "project moved on");
         std::fs::remove_dir_all(&project).unwrap();
     }
 

@@ -75,9 +75,11 @@ export const installedRom = (project: string) => invoke<RomReport | null>("insta
 export interface Soundtrack {
   folder: string;
   files: number;
+  /** Rendered by an older version of the renderer: render it again. */
+  outdated: boolean;
 }
 
-/** The finished soundtrack already in the project, or null. */
+/** The finished soundtrack already in the project, or null (`outdated` when the renderer changed since). */
 export const soundtrackStatus = (project: string) => invoke<Soundtrack | null>("soundtrack_status", { project });
 /** Renders the soundtrack from the ROM (minutes); `onProgress` gets the renderer's output lines. */
 export type Chip = "ym3438" | "ym2612";
@@ -89,9 +91,11 @@ export const extractSound = (project: string, chip: Chip, onProgress: (line: str
 
 export interface Game {
   executable: string;
+  /** Built from an older version of the project: build it again. */
+  outdated: boolean;
 }
 
-/** The game already built in the project, or null. */
+/** The game already built in the project, or null (`outdated` when the project was updated since). */
 export const gameStatus = (project: string) => invoke<Game | null>("game_status", { project });
 /** Generates the C++ and compiles the game (many minutes); `onProgress` gets the build output lines. */
 export const buildGame = (project: string, onProgress: (line: string) => void) => {

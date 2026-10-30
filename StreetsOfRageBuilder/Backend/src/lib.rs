@@ -6,6 +6,7 @@ mod rom;
 mod script;
 mod shortcut;
 mod sound;
+mod stamp;
 mod system;
 
 pub fn run() {
