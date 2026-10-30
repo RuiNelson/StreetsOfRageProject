@@ -84,7 +84,9 @@ Requirements:
 - SDL3 (optional: CMake fetches `release-3.4.8` when `find_package(SDL3)` fails);
 - Git and network access for first-time CMake `FetchContent` dependencies;
 - Python 3 and a compatible local ROM for the mandatory first C++ generation,
-  analysis scripts, and Python tests.
+  analysis scripts, and Python tests;
+- `make` and network access for the first build of the CPython bundled with `sor`
+  (macOS, Linux; Windows comes after macOS).
 
 On macOS and Linux, the preferred wrappers are:
 
@@ -119,6 +121,16 @@ Cleaning the build folder (`--release`, `--clean`, the soundtrack renderer's `--
 denied" on read-only files (git objects under `build/_deps`) and files a scanner briefly held, and the user
 had to delete `build/` by hand (user report, 2026-10-30; cause inferred, not reproduced on Windows). It
 clears the read-only bit and retries a few times; a file still locked (e.g. a running `sor.exe`) still fails.
+
+## The Python AI inside `sor`
+
+The **1 PLAYER AI ASSIST** mode, in progress, is a 2-player game with the Python AI on
+P2 in the `sor` process, from the same code as the external `autoplay`
+(`autoplay/ai-code/sor_ai`; `sor --ai-path DIR`, default `ai-code` in the CWD). User
+decisions: `sor` embeds our own CPython as a shared library, through the C API, with no
+build variant without it; macOS first, Windows once macOS is finished. An external
+`autoplay` alongside observes and may drive P1; P2 stays the internal AI's. Details:
+`StreetsOfRageRecompilation/CLAUDE.md`, **The Python AI in the process**.
 
 ## ROM and generated code
 

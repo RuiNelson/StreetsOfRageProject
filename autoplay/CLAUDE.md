@@ -2613,7 +2613,8 @@ ASSIST** mode). So the code is two packages:
 
 - `ai-code/sor_ai/` is the **core**: `ai/`, the snapshot (`state`, `world_map`,
   `hazards`, `hitboxes`, ...), the addresses (`memory_map`) and the input documents
-  (`remote_input`, the transport-free half of the old `sor_remote`). It has no HUD, no
+  (`remote_input`, the transport-free half of the old `sor_remote`) and `embedded`, what the
+  host calls. It has no HUD, no
   sockets and no `megadrive_remote`; `tests/test_core_isolation.py` fails if any of
   them gets in. `ai-code` is what `sor --ai-path` will point at, and the directory
   goes on `sys.path` (the hyphen is why `sor_ai` is the package, not `ai-code`).
