@@ -215,11 +215,6 @@ def host_arguments(s: dict[str, Any], *, with_autoplay: bool) -> list[str]:
     return args
 
 
-def controls_arguments(s: dict[str, Any]) -> list[str]:
-    """Arguments for scripts/run.py that open the controller configuration UI instead of the game."""
-    return ([s["rom"]] if s["rom"] else []) + ["--configControls"]
-
-
 def auto_poll_ms(turbo: int) -> float:
     """Poll cadence that keeps ~2 game frames per tick: 16 ms at x2, 8 at x4, 3.2 at x10 (0 = autoplay's default)."""
     return round(32 / turbo, 2) if turbo > 0 else 0
@@ -276,7 +271,7 @@ def port_in_use(port: int) -> bool:
 
 
 def check(s: dict[str, Any], mode: str, *, probe: bool = False) -> tuple[list[str], list[str]]:
-    """Return (errors, warnings) for launching `mode` ("both", "host", "autoplay" or "controls")."""
+    """Return (errors, warnings) for launching `mode` ("both", "host" or "autoplay")."""
     errors: list[str] = []
     warnings: list[str] = []
     if not 1 <= s["port"] <= 65535:
@@ -295,11 +290,11 @@ def check(s: dict[str, Any], mode: str, *, probe: bool = False) -> tuple[list[st
         if not s["silent"] and s["sound"] == "prerendered" and not (soundtrack_dir(s) / "manifest.tsv").is_file():
             warnings.append(f"no pre-rendered soundtrack in {soundtrack_dir(s)}: sor will emulate the sound chips "
                             "(scripts/render_soundtrack.py renders it)")
-        if probe and mode != "controls" and not errors and port_in_use(s["port"]):
+        if probe and not errors and port_in_use(s["port"]):
             errors.append(f"port {s['port']} already has a listener (a host is running?): Ctrl+A attaches to it")
     elif probe and not errors and not port_in_use(s["port"]):
         warnings.append(f"nothing is listening on port {s['port']} yet")
-    if mode not in {"autoplay", "controls"} and s["turbo"] > 0 and s["vsync"]:
+    if mode != "autoplay" and s["turbo"] > 0 and s["vsync"]:
         warnings.append("turbo needs the internal timer: the vsync setting is ignored")
     if mode != "host" and s["lockstep"] and s["poll_ms"]:
         warnings.append("lockstep paces itself: --poll-ms is not passed")
@@ -312,11 +307,9 @@ def describe(s: dict[str, Any], mode: str) -> list[str]:
     lines: list[str] = []
     if s["build_first"] and mode != "autoplay":
         lines.append("build:     build.py")
-    if mode == "controls":
-        lines.append("sor:       " + shlex.join(controls_arguments(s)))
-    elif mode != "autoplay":
+    if mode != "autoplay":
         lines.append("sor:       " + shlex.join(host_arguments(s, with_autoplay=mode == "both")))
-    if mode not in {"host", "controls"}:
+    if mode != "host":
         try:
             lines.append("autoplay:  " + shlex.join(autoplay_arguments(s)))
         except ValueError:
@@ -334,8 +327,6 @@ def execute(s: dict[str, Any], mode: str) -> int:
     try:
         if mode == "both":
             return run_session(host_arguments(s, with_autoplay=True), autoplay_arguments(s), s["port"])
-        if mode == "controls":
-            return subprocess.run(script_command("run.py", *controls_arguments(s))).returncode
         if mode == "host":
             return subprocess.run(script_command("run.py", *host_arguments(s, with_autoplay=False))).returncode
         return subprocess.run(script_command("autoplay.py", *autoplay_arguments(s))).returncode
@@ -379,7 +370,6 @@ class PlayWindow:
         self.buttons: dict[str, Any] = {}
         self.extra_entry: Any = None
         self.loading = True
-        self.controls_process: Any = None
         self.session: Any = None  # the running launch (a child play.py), polled so Tk keeps serving events
         self.session_mode = ""
         root.title("Streets of Rage - play")
@@ -465,14 +455,14 @@ class PlayWindow:
         ttk.Checkbutton(bar, text="Build first (^B)", variable=self.vars["build_first"]).grid(row=0, column=0)
         ttk.Label(bar, textvariable=self.status, foreground="#c0392b").grid(row=0, column=1, sticky="w", padx=10)
         for column, (text, mode) in enumerate(
-                [("Run Game + AI Connected  ^R", "both"), ("Run Game  ^S", "host"), ("Run AI  ^A", "autoplay"),
-                 ("Configure Controls  ^O", "controls")], start=2):
+                [("Run Game + AI Connected  ^R", "both"), ("Run Game  ^S", "host"), ("Run AI  ^A", "autoplay")],
+                start=2):
             self.buttons[mode] = ttk.Button(bar, text=text, command=lambda m=mode: self.launch(m))
             self.buttons[mode].grid(row=0, column=column, padx=3)
-        ttk.Button(bar, text="Quit  ^Q", command=lambda: self.finish("quit")).grid(row=0, column=6, padx=(12, 0))
+        ttk.Button(bar, text="Quit  ^Q", command=lambda: self.finish("quit")).grid(row=0, column=5, padx=(12, 0))
         # Run AI is the way in when the game was started outside this window.
         ttk.Label(bar, text="If you already have the game running", foreground="#909090",
-                  font=("TkDefaultFont", 8)).grid(row=1, column=4, columnspan=3, sticky="w")
+                  font=("TkDefaultFont", 8)).grid(row=1, column=4, columnspan=2, sticky="w")
         self.trace("build_first")
 
     def trace(self, key: str) -> None:
@@ -609,17 +599,6 @@ class PlayWindow:
             # The button is disabled; the ^R shortcut goes through here too.
             self.status.set("Run Game + AI Connected needs debugUtils on (^D)")
             return
-        if mode == "controls":
-            # A side tool: it runs next to the window, which stays usable, instead of ending the window.
-            if self.controls_process is not None and self.controls_process.poll() is None:
-                self.status.set("The controls configuration is already open")
-                return
-            errors, _ = check({**settings, "build_first": False}, mode)
-            if errors:
-                self.status.set(errors[0])
-                return
-            self.controls_process = subprocess.Popen(script_command("run.py", *controls_arguments(settings)))
-            return
         errors, _ = check(settings, mode, probe=True)
         if errors:
             self.status.set(errors[0])
@@ -683,7 +662,7 @@ class PlayWindow:
     def bind_keys(self) -> None:
         actions: dict[str, Any] = {
             "r": lambda: self.launch("both"), "Return": lambda: self.launch("both"),
-            "s": lambda: self.launch("host"), "o": lambda: self.launch("controls"), "a": lambda: self.launch("autoplay"),
+            "s": lambda: self.launch("host"), "a": lambda: self.launch("autoplay"),
             "q": lambda: self.finish("quit"),
             "b": lambda: self.toggle("build_first"),
             "n": lambda: self.toggle("silent"), "f": lambda: self.toggle("fullscreen"),

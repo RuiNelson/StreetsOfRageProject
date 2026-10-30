@@ -179,14 +179,15 @@ the directions and SDL Start is always Start. Defaults: P1 arrows + Z X C V
 RT, West, South (+ LT, North, East). Details:
 `StreetsOfRageRecompilation/CLAUDE.md`, **Controls**.
 
-Planned, in order (user): (2) an in-game OPTIONS > CONTROLS menu (PLAYER 1/2:
-SCHEME, DEVICE, BIND GAMEPAD, BIND KEYBOARD, JOYSTICK DEADZONE, BACK; any
-device navigates; Start/Esc cancels a bind) replacing `--configControls`;
-(3) autoplay sending actions through the execution-data API in a binary
-`struct` format (not YAML: no PyYAML on the system Python), with a new
-game-written buffer in MDE for data sent back, and choosing each player's
-scheme for the session itself. Until (3), autoplay's Mega Drive buttons are
-mapped to actions and `--altControls` puts both players on ENHANCED 6.
+They are set in the game, in OPTIONS > CONTROLS (PLAYER 1/2: SCHEME, DEVICE,
+BIND GAMEPAD, BIND KEYBOARD, JOYSTICK DEADZONE, BACK; any device navigates;
+Start or Esc cancels a bind), which replaced `--configControls` (user,
+2026-10-30). Planned next (user): autoplay sending actions through the
+execution-data API in a binary `struct` format (not YAML: no PyYAML on the
+system Python), with a new game-written buffer in MDE for data sent back, and
+choosing each player's scheme for the session itself. Until then, autoplay's
+Mega Drive buttons are mapped to actions and `--altControls` puts both players
+on ENHANCED 6.
 
 ## Hand-written C++ keeps the original memory layout
 
@@ -284,7 +285,7 @@ unless the Poll ms field is set); changing the start level
 under a street/Mr. X sweep also updates the sweep and `--no-food` for the
 round. The host panel's **Sound** (`--sound`, ignored when silent) and
 **Soundtrack folder** (`--soundtrack`, empty = next to the ROM, `...` opens a
-folder chooser) fields warn when the folder has no `manifest.tsv`. The launches run in a child `play.py --run-saved MODE` (internal) so the window stays responsive (no macOS beach ball) and shows the run's status; Quit stops the child. Keys: `^R`/`^Return` run both, `^S` host only, `^O` Configure Controls (`sor --configControls`, runs beside the window), `^A` autoplay only, `^B`
+folder chooser) fields warn when the folder has no `manifest.tsv`. The launches run in a child `play.py --run-saved MODE` (internal) so the window stays responsive (no macOS beach ball) and shows the run's status; Quit stops the child. Keys: `^R`/`^Return` run both, `^S` host only, `^A` autoplay only, `^B`
 build first, `^1`-`^6` presets, `^N` silent, `^T` turbo, `^W` widescreen, `^U` integer scaling, `^X`
 6-button, `^7`/`^8` AI P1/P2, `^L` lockstep, `^G` character, `^K` sweep,
 `^=`/`^-` start level, `^E` extra args, `^0` reset, `^Q` quit. Command-line

@@ -541,15 +541,35 @@ Player 1 gets the first gamepad found and player 2 the next one.
 
 #### Configure keyboard and gamepad bindings
 
-The controls are kept in `~/.config/StreetsOfRageProject/controls.yaml`
+In the game, open **OPTIONS > CONTROLS** and choose **PLAYER 1** or
+**PLAYER 2**:
+
+| Entry | What it does |
+| --- | --- |
+| SCHEME | ORIGINAL 3 or ENHANCED 6 (Left/Right or confirm) |
+| DEVICE | AUTO (the first free gamepad), one of the detected gamepads, or NONE |
+| BIND GAMEPAD | Press a button for each action in turn (only with a gamepad) |
+| BIND KEYBOARD | Press a key for each direction, action and Start in turn (only with a keyboard) |
+| JOYSTICK DEADZONE | Shows the left stick and its tilt; Left/Right change the deadzone (only with a gamepad) |
+| BACK | Back to CONTROLS |
+
+Any keyboard or gamepad moves through these screens: the arrows or the D-pad
+(or either player's direction keys), Enter, the South button or any Punch,
+Jump or Special binding to confirm, and Start or Esc to go back. While
+binding, a key or button already given to an earlier action is refused, and
+Start (on any gamepad) or Esc cancels without changing anything.
+
+The controls are saved at once in
+`~/.config/StreetsOfRageProject/controls.yaml`
 (`%USERPROFILE%\.config\StreetsOfRageProject\controls.yaml` on Windows),
-created with the defaults above on the first run. Each player has a `scheme`
-(`original3` or `enhanced6`), a `gamepad` (`auto`, `none`, or `device` with
-`gamepad_guid`), a left-stick `deadzone` in percent, and keyboard and gamepad
-bindings for each scheme (SDL key names such as `Z` or `Left Shift`; gamepad
-inputs by position: `South`, `East`, `West`, `North`, `LeftShoulder`,
-`RightShoulder`, `LeftTrigger`, `RightTrigger`, ...). `--altControls` puts
-both players on ENHANCED 6 for one session without changing the file.
+which is created with the defaults above on the first run and can also be
+edited by hand: each player has a `scheme` (`original3` or `enhanced6`), a
+`gamepad` (`auto`, `none`, or `device` with `gamepad_guid`), a left-stick
+`deadzone` in percent, and keyboard and gamepad bindings for each scheme (SDL
+key names such as `Z` or `Left Shift`; gamepad inputs by position: `South`,
+`East`, `West`, `North`, `LeftShoulder`, `RightShoulder`, `LeftTrigger`,
+`RightTrigger`, ...). `--altControls` puts both players on ENHANCED 6 for one
+session without changing the file.
 
 #### Host keyboard shortcuts
 
@@ -609,8 +629,6 @@ version.
 
 | Flag | Meaning |
 | --- | --- |
-| `--configControls` | Open MegaDriveEnvironment's controller configuration UI; the game no longer reads it (see [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)) |
-| `--runSor` | Explicitly start Streets of Rage; this is already the default unless `--configControls` is used |
 | `--rom PATH` | ROM image to load; default: `rom/SOR.bin` |
 | `--lang jp\|en` | Console language pin: `jp` is Japanese/domestic; `en` is overseas; default: `jp` |
 | `--hz 50\|60` | Console video-standard pin: `60` is NTSC/low and `50` is PAL/high; default: `60` |
@@ -746,7 +764,3 @@ anonymous grouped C++ owners from the closest label; use
 `--trust-recorded-source` to disable that approximation. Since old logs cannot
 reliably reconstruct every non-contiguous entry, regenerate the log after
 recompiling when an expected routine such as `$019D16` is absent.
-
-The controls configurator can also be selected explicitly alongside the game
-with `--configControls --runSor`, although normal configuration sessions omit
-`--runSor` so that the game does not start after the UI closes.

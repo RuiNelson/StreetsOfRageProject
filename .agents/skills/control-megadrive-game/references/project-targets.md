@@ -11,7 +11,7 @@ python3 tools/reach_gameplay.py adam
 python3 tools/reach_gameplay.py blaze
 ```
 
-Run it from `StreetsOfRageRecompilation/` against an existing `--runSor`
+Run it from `StreetsOfRageRecompilation/` against an existing `sor`
 process. It supports `axel`, `adam`, and `blaze`, discovers the sibling Python
 client without `PYTHONPATH`, and uses only joypad presses plus RAM observations.
 It preserves the real menu, level, player, sound, and music initialization,
@@ -29,7 +29,7 @@ Run only with a kill grace period, using the local ROM:
 
 ```bash
 timeout -k 3 60 ./build/sor \
-  --runSor --silent --rom rom/SOR.bin
+  --silent --rom rom/SOR.bin
 ```
 
 Use a longer timeout than the experiment, retain the process/session handle,
