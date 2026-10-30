@@ -14,8 +14,8 @@ Validate with `npm run lint`, `npm run build` (Frontend) and `cargo check` (Back
 The game builds its own CPython (`StreetsOfRageRecompilation/cmake/CPythonRuntime.cmake`) during
 step 5's configure: about 2 minutes more the first time, no new entry in the tables below (`make`
 comes with the Xcode tools and `build-essential`; Windows downloads a prebuilt one). The shortcut
-opens `play.py`, whose `run.py` passes `--ai-path`, so the launcher has nothing to add. Untested on
-Windows and Linux.
+opens `play.py`, whose `run.py` passes `--ai-path`, so the launcher has nothing to add. The build and
+the mode were run on Windows by hand, not through the Builder; Linux is untested.
 
 ## Step 1: dependencies
 
