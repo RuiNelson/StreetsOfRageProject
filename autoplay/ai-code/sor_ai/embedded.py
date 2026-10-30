@@ -22,6 +22,8 @@ from .state import snapshot_from_work_ram
 
 AI_PLAYER = 2
 WAIT_FRAME_S = 0.25
+# The game only publishes while the mode is on.
+NEW_GAME_GAP_FRAMES = 60
 
 
 class InProcessClient:
@@ -129,7 +131,8 @@ def run(host) -> None:
             rom = _read_rom(client, host)
             rom_read = True
             host.log("AI on P2")
-        if last_frame is not None and frame < last_frame:
+        # A restart, or a game of this mode after other ones: nothing carries over.
+        if last_frame is not None and (frame < last_frame or frame - last_frame > NEW_GAME_GAP_FRAMES):
             client.reset()
             state.reset()
             loop = new_loop()

@@ -124,7 +124,8 @@ clears the read-only bit and retries a few times; a file still locked (e.g. a ru
 
 ## The Python AI inside `sor`
 
-The **1 PLAYER AI ASSIST** mode, in progress, is a 2-player game with the Python AI on
+The **1 PLAYER AI ASSIST** mode (mode screen, after 2 PLAYERS; the player picks their
+character, then the one over "COMPUTER") is a 2-player game with the Python AI on
 P2 in the `sor` process, from the same code as the external `autoplay`
 (`autoplay/ai-code/sor_ai`; `sor --ai-path DIR`, default `ai-code` in the CWD). User
 decisions: `sor` embeds our own CPython as a shared library, through the C API, with no
