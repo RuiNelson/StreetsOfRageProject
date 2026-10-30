@@ -176,8 +176,9 @@ gamepad bindings per scheme, a gamepad choice (first detected pads by
 default) and a left-stick deadzone; on a gamepad the D-pad and left stick are
 the directions and SDL Start is always Start. Defaults: P1 arrows + Z X C V
 (3) / Z X C V B N M (6), P2 W S A D + H J K L (3) / H J K Y U I L (6), gamepad
-ORIGINAL 3 Special/Punch/Jump = RT, West, South, ENHANCED 6 Special/Punch/Jump/
-Back Attack/Pick/Throw = East, West, South, LT, North, RT (user). Details:
+ORIGINAL 3 Special/Punch/Jump = RB, West, South, ENHANCED 6 Special/Punch/Jump/
+Back Attack/Pick/Throw = East, West, South, LB, North, RB (user; the shoulder
+buttons, L1/R1 on a DualSense, not the triggers). Details:
 `StreetsOfRageRecompilation/CLAUDE.md`, **Controls**.
 
 They are set in the game, in OPTIONS > CONTROLS (PLAYER 1/2: SCHEME, DEVICE,
