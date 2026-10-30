@@ -45,8 +45,8 @@ Python app that attaches to a running
   label of every candidate it was choosing between.
 - Automatically stands down (releases input) when the game is paused or
   outside active gameplay (menus, character select, round-clear, continues).
-- Either control scheme: `--scheme-p1/--scheme-p2 original3|enhanced6`
-  (default ORIGINAL 3 for an AI player). Two-player AI coordination and bespoke per-boss tactics are also future
+- Either control scheme, detected from the game (each player's own, set in
+  OPTIONS > CONTROLS). Two-player AI coordination and bespoke per-boss tactics are also future
   work (see `autoplay/CLAUDE.md`'s AI surface table).
 
 ## Requirements

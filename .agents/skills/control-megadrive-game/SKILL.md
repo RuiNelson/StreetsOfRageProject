@@ -77,8 +77,8 @@ input as actions through the execution data (`StreetsOfRageRecompilation`'s
 `SoRRemoteInput`). For it, use `autoplay`'s `SoRClient`
 (`autoplay/src/sor_autoplay/sor_remote.py`, on `PYTHONPATH` with
 `autoplay/src`): the same `press_buttons`/`hold_buttons`/`step_input` with Mega
-Drive masks, sent as actions, with each player on ORIGINAL 3 unless
-`schemes=` says otherwise.
+Drive masks, sent as actions by each player's scheme, which it queries from
+the game (the player's own `controls.yaml`; it never sets it).
 
 ## Host debug actions and cheats
 

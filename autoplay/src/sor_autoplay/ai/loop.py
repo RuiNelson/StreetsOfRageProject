@@ -97,8 +97,9 @@ class AgentLoop:
         self._no_food = no_food
         self._no_police = no_police
         self._mr_x_accept = mr_x_accept
-        # The host's button layout (host_flags.py), set by ObserverApp when it
-        # reads GET_FLAGS; False is the original three-button scheme.
+        # This player's scheme when the pad cannot say (a lockstep capture, a
+        # test double): ObserverApp sets it from the game data. With a
+        # SoRClient behind the pad, its live reading wins (``_six_button``).
         self.six_button = False
         self._verb_state = VerbState(winning=None, pending=())
         self._state_lock = threading.Lock()
@@ -165,6 +166,13 @@ class AgentLoop:
         with self._state_lock:
             return self._verb_state
 
+    def _six_button(self) -> bool:
+        """This player's scheme is ENHANCED 6: the game's own, queried by the
+        SoRClient behind the pad, else ``six_button``."""
+
+        live = getattr(self._gamepad, "enhanced", None)
+        return self.six_button if live is None else live
+
     def tick(self, snapshot: GameSnapshot, *, player_index: int) -> Verb | None:
         """Run one iteration and return the winning ``Verb``, if any.
 
@@ -213,7 +221,7 @@ class AgentLoop:
         # Which enemies are the partner's fight (PartnerFight): read here,
         # from the observed tokens, and remembered across ticks by the loop.
         context |= self._partner_fight_tracker.update(context)
-        if self.six_button:
+        if self._six_button():
             context = context | {SixButtonLayout()}
         if self._no_food:
             context = context | {DebugNoFood()}

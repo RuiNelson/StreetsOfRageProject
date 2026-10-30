@@ -156,6 +156,18 @@ class SharedGamepadState:
             self._client.press_buttons(player1=masks[1], player2=masks[2], frames=frames)
             self._client.hold_buttons(player1=self._held[1], player2=self._held[2])
 
+    def enhanced(self, player_index: int) -> bool | None:
+        """Whether the game has this player on ENHANCED 6, when the client
+        can say (``SoRClient.enhanced``, queried from the game); ``None``
+        otherwise."""
+
+        _validate_player_index(player_index)
+        query = getattr(self._client, "enhanced", None)
+        if query is None:
+            return None
+        answer = query(player_index)
+        return None if answer is None else bool(answer)
+
     def press_pending(self, player_index: int, uptime_frames: int) -> bool:
         """Whether this player's last queued press is still playing at
         ``uptime_frames`` (``GET_GAME_UPTIME_FRAMES``, as a snapshot reads it).
@@ -207,6 +219,13 @@ class VirtualGamepad:
     @property
     def held(self) -> int:
         return self._state.held(self._player_index)
+
+    @property
+    def enhanced(self) -> bool | None:
+        """The game's scheme for this player (ENHANCED 6), or ``None`` when
+        the link cannot tell."""
+
+        return self._state.enhanced(self._player_index)
 
     def hold(self, mask: "Buttons | int") -> None:
         self._state.hold(self._player_index, mask)

@@ -3624,16 +3624,20 @@ unknown tags skipped, so more can be sent either way later.
   per-frame masks, run-length) and one `STEP_INPUT` with no masks -- one round
   trip fewer than the old per-group `step_input` when a press edge fell
   mid-tick.
-- **Schemes**: `SoRClient(schemes={player: scheme})` puts a player on a scheme
-  for the connection (`SCHEME_OVERRIDE`, never saved); a player left out plays
-  the game's own (`controls.yaml`), read by `refresh_schemes()` from
-  `PLAYER_STATUS`. The default, `MEASUREMENT_SCHEMES`, is ORIGINAL 3 for both,
-  as every session before this, so the labs and harnesses stay comparable
-  (`boss_fight.py`/`grunt_fight.py --scheme enhanced6` for the other).
-  `ObserverApp` passes `--scheme-p1/-p2` (default ORIGINAL 3 for an AI player,
-  nothing for a human) and gives each `AgentLoop` its own player's scheme
-  (`six_button` per player; host flag 1 is gone). `scripts/play.py`'s 6-button
-  toggle is now "AI on ENHANCED 6" (`^X`, `ai_enhanced6`).
+- **Schemes are detected, never set** (user: "I wanted the autoplay to detect
+  the control scheme by querying the host"). Each player's scheme is the
+  game's (OPTIONS > CONTROLS, `controls.yaml`); `SoRClient` queries it from
+  `PLAYER_STATUS` on connecting, and again before mapping a mask once the
+  reading is `SCHEME_REFRESH_S` (1 s) old, so a scheme changed mid-session is
+  followed within a second. Each `AgentLoop` takes its player's from the
+  client behind its pad (`VirtualGamepad.enhanced`, `AgentLoop._six_button`),
+  so every lab and harness adapts with no code of its own; `six_button` is
+  only the fallback where the pad has no client (the lockstep capture, test
+  doubles), and `ObserverApp` refreshes it every second while an AI plays.
+  Host flag 1, `--altControls`, the `--scheme-p1/-p2` options and play.py's
+  6-button toggle are gone. **A measurement's scheme is therefore the host's
+  `controls.yaml`**: give the host a `HOME` whose file says what the run
+  should play (no file = defaults, ORIGINAL 3).
 - The game drops a client's input when it disconnects or the game restarts,
   until the buffer changes; every document carries a new serial and every
   client starts its serial and sequence numbers at random, so a new client
@@ -3645,8 +3649,10 @@ reads `~/.config/StreetsOfRageProject/controls.yaml` (SDL's home folder,
 last saved -- caught live (user): the baseline Blaze stood on a weapon
 punching, her player on ENHANCED 6 from the user's file (Punch never picks
 up there) while that build's autoplay pressed the 3-button buttons.
-`SoRClient` overrides the scheme, so the current build is immune; an older
-one is not. `HOME=<scratch>` on the host gives it the defaults (ORIGINAL 3).
+The current build reads the scheme from the game, so it follows the file
+either way; an older one does not. `HOME=<scratch>` on the host gives it the
+defaults (ORIGINAL 3); for a 6-button arm, a scratch file with that player on
+`enhanced6` (the old build: `--altControls`).
 
 Measured live before shipping: see **Execution-data input, measured** below.
 

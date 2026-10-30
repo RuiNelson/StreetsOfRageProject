@@ -257,19 +257,13 @@ def main() -> int:
             "is untouched."
         ),
     )
-    ap.add_argument(
-        "--scheme",
-        choices=("original3", "enhanced6"),
-        default="original3",
-        help="Control scheme the game puts P1 on for the run (SoRClient's SCHEME_OVERRIDE).",
-    )
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     poll_s = args.poll_ms / 1000.0
     level_index = args.level - 1
     pair = is_pair_fight(args.level, args.boss_type)
 
-    with SoRClient(host=args.host, port=args.port, schemes={1: args.scheme}) as menu:
+    with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
     # Round 8's Mr. X: every enemy and every boss of the rush dies on the way,
@@ -280,7 +274,7 @@ def main() -> int:
     else:
         scenario = DebugScenario(start_level=args.level, kill_street_enemies=True)
 
-    with SoRClient(host=args.host, port=args.port, schemes={1: args.scheme}) as client:
+    with SoRClient(host=args.host, port=args.port) as client:
         rom = RomData.read(client)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         loop = AgentLoop(gamepad, no_food=args.no_food, no_police=not args.police)

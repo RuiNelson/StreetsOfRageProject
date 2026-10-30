@@ -13,8 +13,7 @@ together:
 - container ``magic:4s, version:H, record count:H, serial:I``;
 - record ``tag:H, length:H`` and the payload;
 - client -> game, magic ``SORX``: ``PLAYER_INPUT`` (``player:B, flags:B,
-  held:H, seq:I, count:H`` then ``count`` x ``actions:H, frames:H``) and
-  ``SCHEME_OVERRIDE`` (``player:B, scheme:B``);
+  held:H, seq:I, count:H`` then ``count`` x ``actions:H, frames:H``);
 - game -> client, magic ``SORG``: ``PLAYER_STATUS`` (``player:B, scheme:B,
   seq:I, end frame:Q``).
 
@@ -22,7 +21,10 @@ together:
 ``queue_press_buttons``, ``press_buttons``, ``release_buttons``,
 ``step_input`` -- with the Mega Drive masks the AI already speaks, and turns
 each player's mask into actions with the mapping of that player's scheme
-(the one ``ai/execute.py`` picks its buttons by). Their timing is the old
+(the one ``ai/execute.py`` picks its buttons by). The scheme is the player's
+own, set in the game (OPTIONS > CONTROLS, ``controls.yaml``): the client
+queries it (``PLAYER_STATUS``) on connecting and again at most every
+``SCHEME_REFRESH_S``, and never sets it. Their timing is the old
 commands': a queued press starts on the next sampled frame, replaces the
 held mask while it plays, and one queued behind another waits for it and a
 released frame.
@@ -33,8 +35,9 @@ from __future__ import annotations
 import os
 import struct
 import threading
+import time
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Sequence
 
 from megadrive_remote import MegaDriveClient, StepResult
 
@@ -53,7 +56,10 @@ ACTION_THROW = 1 << 10
 
 SCHEME_ORIGINAL3 = 1
 SCHEME_ENHANCED6 = 2
-SCHEMES = {"original3": SCHEME_ORIGINAL3, "enhanced6": SCHEME_ENHANCED6}
+
+# How stale the queried schemes may get: a player who changes theirs in
+# OPTIONS > CONTROLS is followed within this long.
+SCHEME_REFRESH_S = 1.0
 
 INPUT_MAGIC = b"SORX"
 STATUS_MAGIC = b"SORG"
@@ -63,11 +69,9 @@ HEADER = struct.Struct(">4sHHI")
 RECORD = struct.Struct(">HH")
 PLAYER_INPUT = struct.Struct(">BBHIH")
 ENTRY = struct.Struct(">HH")
-SCHEME_OVERRIDE = struct.Struct(">BB")
 PLAYER_STATUS = struct.Struct(">BBIQ")
 
 TAG_PLAYER_INPUT = 0x0001
-TAG_SCHEME_OVERRIDE = 0x0002
 TAG_PLAYER_STATUS = 0x0101
 
 FLAG_QUEUE = 0x01
@@ -104,7 +108,6 @@ class PlayerStatus:
 @dataclass(frozen=True)
 class InputDocument:
     players: dict[int, PlayerInput] = field(default_factory=dict)
-    scheme_overrides: dict[int, int] = field(default_factory=dict)
     serial: int = 0
 
 
@@ -178,9 +181,6 @@ def pack_input(document: InputDocument) -> bytes:
             len(entries),
         ) + b"".join(ENTRY.pack(actions & 0xFFFF, frames) for actions, frames in entries)
         records.append(RECORD.pack(TAG_PLAYER_INPUT, len(payload)) + payload)
-    for player in sorted(document.scheme_overrides):
-        payload = SCHEME_OVERRIDE.pack(player, document.scheme_overrides[player])
-        records.append(RECORD.pack(TAG_SCHEME_OVERRIDE, len(payload)) + payload)
     header = HEADER.pack(INPUT_MAGIC, VERSION, len(records), document.serial & 0xFFFFFFFF)
     return header + b"".join(records)
 
@@ -203,7 +203,6 @@ def _records(data: bytes, magic: bytes) -> Iterable[tuple[int, bytes]]:
 
 def unpack_input(data: bytes) -> InputDocument:
     players: dict[int, PlayerInput] = {}
-    overrides: dict[int, int] = {}
     for tag, payload in _records(data, INPUT_MAGIC):
         if tag == TAG_PLAYER_INPUT:
             player, flags, held, seq, count = PLAYER_INPUT.unpack_from(payload)
@@ -211,11 +210,8 @@ def unpack_input(data: bytes) -> InputDocument:
                 ENTRY.unpack_from(payload, PLAYER_INPUT.size + i * ENTRY.size) for i in range(count)
             )
             players[player] = PlayerInput(held, seq, bool(flags & FLAG_QUEUE), schedule)
-        elif tag == TAG_SCHEME_OVERRIDE:
-            player, scheme = SCHEME_OVERRIDE.unpack_from(payload)
-            overrides[player] = scheme
     serial = HEADER.unpack_from(data)[3]
-    return InputDocument(players, overrides, serial)
+    return InputDocument(players, serial)
 
 
 def unpack_status(data: bytes) -> dict[int, PlayerStatus]:
@@ -231,49 +227,20 @@ def unpack_status(data: bytes) -> dict[int, PlayerStatus]:
     return status
 
 
-def _scheme_value(scheme: int | str | None) -> int | None:
-    if scheme is None:
-        return None
-    if isinstance(scheme, str):
-        return SCHEMES[scheme]
-    if scheme not in (SCHEME_ORIGINAL3, SCHEME_ENHANCED6):
-        raise ValueError(f"unknown scheme {scheme!r}")
-    return int(scheme)
-
-
-# A measurement default: both players on ORIGINAL 3, as every session played
-# before the game bound actions (the labs and fight harnesses rely on it).
-# The observer passes its own (``--scheme-p1/-p2``, only for AI players).
-MEASUREMENT_SCHEMES: Mapping[int, int] = {1: SCHEME_ORIGINAL3, 2: SCHEME_ORIGINAL3}
-
-
 class SoRClient(MegaDriveClient):
     """``MegaDriveClient`` whose gamepad commands go through the execution data.
 
-    ``schemes`` maps a player (1, 2) to the scheme the game puts them on for
-    this connection (``SCHEME_OVERRIDE``, never saved); a player left out uses
-    the game's own (``controls.yaml``), read from ``GET_GAME_DATA`` by
-    :meth:`refresh_schemes`.
+    Each player's scheme is queried from the game (``GET_GAME_DATA``'s
+    ``PLAYER_STATUS``): on connecting, whenever :meth:`refresh_schemes` is
+    called, and before a mask is mapped or :meth:`enhanced` answers once the
+    last reading is ``SCHEME_REFRESH_S`` old.
     """
 
-    def __init__(
-        self,
-        *args,
-        schemes: Mapping[int, int | str | None] | None = None,
-        **kwargs,
-    ) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        if schemes is None:
-            schemes = MEASUREMENT_SCHEMES
         self._input_lock = threading.RLock()
-        self._overrides = {
-            player: value
-            for player, value in ((p, _scheme_value(s)) for p, s in schemes.items())
-            if value is not None
-        }
-        self._enhanced = {
-            player: self._overrides.get(player) == SCHEME_ENHANCED6 for player in (1, 2)
-        }
+        self._enhanced = {1: False, 2: False}
+        self._schemes_read_at: float | None = None
         # A fresh client must never repeat the previous one's document or
         # sequence numbers byte for byte (the game drops left-over input
         # until the buffer changes, and a seq it has seen starts nothing).
@@ -303,33 +270,22 @@ class SoRClient(MegaDriveClient):
     # -- schemes
 
     def refresh_schemes(self) -> dict[int, PlayerStatus]:
-        """Read each player's scheme from the game (an override wins)."""
+        """Query each player's scheme from the game."""
 
         status = unpack_status(self.get_game_data())
         with self._input_lock:
             for player in (1, 2):
-                override = self._overrides.get(player)
-                if override is not None:
-                    self._enhanced[player] = override == SCHEME_ENHANCED6
-                elif player in status:
+                if player in status:
                     self._enhanced[player] = status[player].enhanced
+            self._schemes_read_at = time.monotonic()
         return status
 
     def enhanced(self, player: int) -> bool:
-        """Whether ``player`` is on ENHANCED 6 (as last read or overridden)."""
+        """Whether ``player`` is on ENHANCED 6 (re-queried once stale)."""
 
+        self._refresh_if_stale()
         with self._input_lock:
             return self._enhanced[player]
-
-    def set_scheme_override(self, player: int, scheme: int | str | None) -> None:
-        value = _scheme_value(scheme)
-        with self._input_lock:
-            if value is None:
-                self._overrides.pop(player, None)
-            else:
-                self._overrides[player] = value
-                self._enhanced[player] = value == SCHEME_ENHANCED6
-            self._send()
 
     def player_status(self) -> dict[int, PlayerStatus]:
         return unpack_status(self.get_game_data())
@@ -337,6 +293,7 @@ class SoRClient(MegaDriveClient):
     # -- the gamepad API, as actions
 
     def hold_buttons(self, *, player1: int = 0, player2: int = 0) -> None:
+        self._refresh_if_stale()
         with self._input_lock:
             for player, mask in ((1, player1), (2, player2)):
                 record = self._players[player]
@@ -350,6 +307,7 @@ class SoRClient(MegaDriveClient):
             raise ValueError("player must be 1 or 2")
         frames = self._positive(frames, "frames")
         now = self.get_game_uptime_frames()
+        self._refresh_if_stale()
         with self._input_lock:
             # From the next sampled frame, or after the running press and a
             # released frame.
@@ -379,6 +337,7 @@ class SoRClient(MegaDriveClient):
         players released (as ``PRESS_BUTTONS`` did); returns once played."""
 
         frames = self._positive(frames, "frames")
+        self._refresh_if_stale()
         with self._input_lock:
             for player, mask in ((1, player1), (2, player2)):
                 self._players[player] = PlayerInput(
@@ -420,6 +379,7 @@ class SoRClient(MegaDriveClient):
 
         if not masks:
             raise ValueError("step_frames needs at least one frame")
+        self._refresh_if_stale()
         with self._input_lock:
             for index, player in enumerate((1, 2)):
                 schedule = run_lengths(self._actions(player, pair[index]) for pair in masks)
@@ -432,6 +392,11 @@ class SoRClient(MegaDriveClient):
 
     # -- internals
 
+    def _refresh_if_stale(self) -> None:
+        read_at = self._schemes_read_at
+        if read_at is None or time.monotonic() - read_at >= SCHEME_REFRESH_S:
+            self.refresh_schemes()
+
     def _actions(self, player: int, mask: int) -> int:
         return md_buttons_to_actions(mask, enhanced=self._enhanced[player])
 
@@ -441,5 +406,5 @@ class SoRClient(MegaDriveClient):
 
     def _send(self) -> None:
         self._serial = (self._serial + 1) & 0xFFFFFFFF
-        document = InputDocument(dict(self._players), dict(self._overrides), self._serial)
+        document = InputDocument(dict(self._players), self._serial)
         self.set_execution_data(pack_input(document))
