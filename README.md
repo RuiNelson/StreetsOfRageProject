@@ -529,12 +529,12 @@ to Mega Drive buttons. Each player has a control scheme:
 | Action | Player 1 | Player 2 | Gamepad |
 | --- | --- | --- | --- |
 | Directions | Arrow keys | `W` `S` `A` `D` | D-pad and left stick |
-| Special (police call) | `Z` | `H` | Right trigger |
+| Special (police call) | `Z` | `H` | Right trigger (ORIGINAL 3), East button (ENHANCED 6) |
 | Punch | `X` | `J` | West button |
 | Jump | `C` | `K` | South button |
 | Back Attack (ENHANCED 6) | `V` | `Y` | Left trigger |
 | Pick Item (ENHANCED 6) | `B` | `U` | North button |
-| Throw Knife (ENHANCED 6) | `N` | `I` | East button |
+| Throw Knife (ENHANCED 6) | `N` | `I` | Right trigger |
 | Start | `V` (ORIGINAL 3), `M` (ENHANCED 6) | `L` | Start |
 
 Player 1 gets the first gamepad found and player 2 the next one.
