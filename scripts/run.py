@@ -27,6 +27,9 @@ def main() -> int:
     if not rom.is_file():
         print(f"ROM not found: {rom}", file=sys.stderr)
         return 1
+    # The Python AI of the 1 PLAYER AI ASSIST mode: the checkout's, unless told otherwise.
+    if not any(argument == "--ai-path" or argument.startswith("--ai-path=") for argument in arguments):
+        arguments[0:0] = ["--ai-path", str(META_ROOT / "autoplay" / "ai-code")]
     command = [str(executable), "--rom", str(rom), *arguments]
     if os.name == "nt":
         # Windows has no exec: os.execv would start sor as a separate process,

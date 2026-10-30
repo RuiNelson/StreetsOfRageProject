@@ -175,6 +175,15 @@ The app provides a live HUD that reports game mode, level, wave, timer, and
 per-player status, together with a 2D world map of on-screen and off-camera
 actors (including combat-phase outlines and hunt counts).
 
+#### 1 PLAYER AI ASSIST
+
+The game's menu has a mode of its own: a two-player game with the same AI on the second
+player, running inside the game instead of through a separate program. Choose your
+character, then the one for the `COMPUTER`. `autoplay` can still run alongside, and only
+the first player is then its to play. The Python code is in `autoplay/ai-code`;
+`sor --ai-path DIR` names another folder (the default is `ai-code` in the current folder,
+and `scripts/run.py` points at the repository's), and without one the option is not on the menu.
+
 #### The AI player
 
 The AI is symbolic, not learned: there is no training and no neural network.
@@ -355,7 +364,10 @@ All three desktop platforms require:
 - a compiler with C++23 support;
 - network access during the first configuration, because CMake downloads CLI11,
   yaml-cpp, zlib, libpng, SDL3_mixer, and SDL3 itself unless it is already
-  installed (and, for the soundtrack renderer, Genesis Plus GX and libFLAC);
+  installed (and, for the soundtrack renderer, Genesis Plus GX and libFLAC), and
+  the CPython that runs the AI in the **1 PLAYER AI ASSIST** mode: Windows downloads
+  the official build, macOS and Linux build it once, about two minutes with `make`.
+  It is independent of any Python installed on the machine;
 - Python 3 for the first C++ generation and the analysis tools;
 - a compatible local ROM for the mandatory first C++ generation.
 

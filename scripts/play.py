@@ -48,6 +48,7 @@ DEFAULTS: dict[str, Any] = {
     "silent": False,
     "sound": "prerendered",  # or "emulated": sor --sound (ignored when silent)
     "soundtrack": "",  # "" = sor's default, soundtrack/ next to the ROM
+    "ai_path": "",  # "" = the checkout's autoplay/ai-code (run.py)
     "fullscreen": False,
     "widescreen": False,
     "integer_scaling": False,  # --integerScaling, whole-number scale factors only
@@ -72,7 +73,7 @@ DEFAULTS: dict[str, Any] = {
 }
 
 # Fields a preset sets. The rest (widescreen, integer scaling, fullscreen, ROM, sound source, soundtrack
-# folder, call log, extra...) is the user's own and survives a preset.
+# folder, AI folder, call log, extra...) is the user's own and survives a preset.
 SESSION_FIELDS = (
     "port", "turbo", "vsync", "lang", "debug_utils", "silent", "agent_p1", "agent_p2", "reach",
     "lockstep", "poll_ms", "start_level", "sweep", "no_food", "no_police",
@@ -207,6 +208,8 @@ def host_arguments(s: dict[str, Any], *, with_autoplay: bool) -> list[str]:
             args += ["--sound", "emulated"]
         elif s["soundtrack"]:
             args += ["--soundtrack", s["soundtrack"]]
+    if s["ai_path"]:
+        args += ["--ai-path", s["ai_path"]]
     if s["call_log"]:
         args += ["--callLog", s["call_log"]]
     return args
@@ -421,6 +424,7 @@ class PlayWindow:
         self.check(host, 10, "Log CPU/VDP state, --debug", "debug")
         self.entry(host, 11, "Call log file", "call_log")
         self.entry(host, 12, "ROM file", "rom")
+        self.entry(host, 13, "AI folder, --ai-path (empty = autoplay/ai-code)", "ai_path", browse=True)
 
         self.check(autoplay, 0, "AI plays P1 (^7)", "agent_p1")
         self.check(autoplay, 1, "AI plays P2 (^8)", "agent_p2")

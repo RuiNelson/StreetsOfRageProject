@@ -86,7 +86,7 @@ Requirements:
 - Python 3 and a compatible local ROM for the mandatory first C++ generation,
   analysis scripts, and Python tests;
 - `make` and network access for the first build of the CPython bundled with `sor`
-  (macOS, Linux; Windows comes after macOS).
+  (on Windows, network access only: it downloads the official build).
 
 On macOS and Linux, the preferred wrappers are:
 
@@ -129,7 +129,8 @@ character, then the one over "COMPUTER") is a 2-player game with the Python AI o
 P2 in the `sor` process, from the same code as the external `autoplay`
 (`autoplay/ai-code/sor_ai`; `sor --ai-path DIR`, default `ai-code` in the CWD). User
 decisions: `sor` embeds our own CPython as a shared library, through the C API, with no
-build variant without it; macOS first, Windows once macOS is finished. An external
+build variant without it (runs on macOS; Windows and Linux written, untried). `run.py` passes
+`--ai-path` and `play.py` has the field (`ai_path`). An external
 `autoplay` alongside observes and may drive P1; P2 stays the internal AI's. Details:
 `StreetsOfRageRecompilation/CLAUDE.md`, **The Python AI in the process**.
 
