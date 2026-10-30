@@ -163,6 +163,31 @@ audio, so the measurement presets are unaffected. How the renders and their loop
 made and how playback follows the ROM's engine: `StreetsOfRageRecompilation/CLAUDE.md`,
 **Pre-rendered soundtrack**.
 
+## Controls: the game reads SDL and binds actions
+
+User decision (2026-10-29): `sor` reads the keyboard and gamepads itself
+(`StreetsOfRageRecompilation/SoRInput.*`) instead of MegaDriveEnvironment's
+`Controllers`, and binds game **actions** (Special, Punch, Jump, Back Attack,
+Pick Item, Throw Knife, plus directions and Start) per player, in
+`~/.config/StreetsOfRageProject/controls.yaml` (own format, no migration from
+MDE's `./controls.yaml`). Each player has a scheme, ORIGINAL 3 (Special,
+Punch, Jump) or ENHANCED 6 (the former `--altControls` rules), keyboard and
+gamepad bindings per scheme, a gamepad choice (first detected pads by
+default) and a left-stick deadzone; on a gamepad the D-pad and left stick are
+the directions and SDL Start is always Start. Defaults: P1 arrows + Z X C V
+(3) / Z X C V B N M (6), P2 W S A D + H J K L (3) / H J K Y U I L (6), gamepad
+RT, West, South (+ LT, North, East). Details:
+`StreetsOfRageRecompilation/CLAUDE.md`, **Controls**.
+
+Planned, in order (user): (2) an in-game OPTIONS > CONTROLS menu (PLAYER 1/2:
+SCHEME, DEVICE, BIND GAMEPAD, BIND KEYBOARD, JOYSTICK DEADZONE, BACK; any
+device navigates; Start/Esc cancels a bind) replacing `--configControls`;
+(3) autoplay sending actions through the execution-data API in a binary
+`struct` format (not YAML: no PyYAML on the system Python), with a new
+game-written buffer in MDE for data sent back, and choosing each player's
+scheme for the session itself. Until (3), autoplay's Mega Drive buttons are
+mapped to actions and `--altControls` puts both players on ENHANCED 6.
+
 ## Hand-written C++ keeps the original memory layout
 
 Reimplemented routines make the code readable; they never move game state.

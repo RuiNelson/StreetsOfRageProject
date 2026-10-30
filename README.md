@@ -517,39 +517,39 @@ Run the port:
 
 #### Default controls
 
-The game exposes the original three-button Mega Drive pad as A, B, C, and
-Start.
+The game reads the keyboard and gamepads itself and binds them to actions, not
+to Mega Drive buttons. Each player has a control scheme:
 
-| Mega Drive input | Player 1 |
-| --- | --- |
-| Up | Up Arrow |
-| Down | Down Arrow |
-| Left | Left Arrow |
-| Right | Right Arrow |
-| A — Special | `Z` |
-| B — Attack | `X` |
-| C — Jump | `C` |
-| Start | `V` |
+- **ORIGINAL 3** (the default): Special, Punch and Jump, the original
+  three-button game (Punch picks items up, Punch+Jump is the back attack);
+- **ENHANCED 6**: also Back Attack, Pick Item (a slightly wider reach than the
+  original) and Throw Knife; Punch never picks up, and Punch with a knife
+  stabs.
 
-#### Alternative 6-button controls
+| Action | Player 1 | Player 2 | Gamepad |
+| --- | --- | --- | --- |
+| Directions | Arrow keys | `W` `S` `A` `D` | D-pad and left stick |
+| Special (police call) | `Z` | `H` | Right trigger |
+| Punch | `X` | `J` | West button |
+| Jump | `C` | `K` | South button |
+| Back Attack (ENHANCED 6) | `V` | `Y` | Left trigger |
+| Pick Item (ENHANCED 6) | `B` | `U` | North button |
+| Throw Knife (ENHANCED 6) | `N` | `I` | East button |
+| Start | `V` (ORIGINAL 3), `M` (ENHANCED 6) | `L` | Start |
 
-Start the game with `--altControls` to use the native 6-button layout. In this
-mode, the OPTIONS menu does not expose the original control remap row.
-
-| Button | Effect |
-| --- | --- |
-| A | Rear attack, equivalent to B+C |
-| B | Attack |
-| C | Jump |
-| X | Special attack |
-| Y | Pick up nearby item or weapon (a slightly wider reach than the original) |
-| Z | Throw knife |
-| Start | Pause |
+Player 1 gets the first gamepad found and player 2 the next one.
 
 #### Configure keyboard and gamepad bindings
 
-Run `py scripts\play.py` (Windows) or `./scripts/play.py` (macOS and Linux) and
-click **Configure Controls**; you can use the keyboard, gamepads, or both.
+The controls are kept in `~/.config/StreetsOfRageProject/controls.yaml`
+(`%USERPROFILE%\.config\StreetsOfRageProject\controls.yaml` on Windows),
+created with the defaults above on the first run. Each player has a `scheme`
+(`original3` or `enhanced6`), a `gamepad` (`auto`, `none`, or `device` with
+`gamepad_guid`), a left-stick `deadzone` in percent, and keyboard and gamepad
+bindings for each scheme (SDL key names such as `Z` or `Left Shift`; gamepad
+inputs by position: `South`, `East`, `West`, `North`, `LeftShoulder`,
+`RightShoulder`, `LeftTrigger`, `RightTrigger`, ...). `--altControls` puts
+both players on ENHANCED 6 for one session without changing the file.
 
 #### Host keyboard shortcuts
 
@@ -609,7 +609,7 @@ version.
 
 | Flag | Meaning |
 | --- | --- |
-| `--configControls` | Open the controller configuration UI instead of starting the game |
+| `--configControls` | Open MegaDriveEnvironment's controller configuration UI; the game no longer reads it (see [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)) |
 | `--runSor` | Explicitly start Streets of Rage; this is already the default unless `--configControls` is used |
 | `--rom PATH` | ROM image to load; default: `rom/SOR.bin` |
 | `--lang jp\|en` | Console language pin: `jp` is Japanese/domestic; `en` is overseas; default: `jp` |
@@ -620,7 +620,7 @@ version.
 | `--debug` | Log CPU and VDP state once per second |
 | `--debugUtils` | Enable debug hotkeys, host cheats, and remote access |
 | `--fullScreen` | Start in desktop fullscreen |
-| `--altControls` | Use the alternative 6-button controls and hide the OPTIONS control remap |
+| `--altControls` | Put both players on the ENHANCED 6 control scheme for this session (not saved) |
 | `--vsync 0\|1\|2\|3` | Frame synchronization: `0` uses the internal timer (default), `1` uses display VSync, `2` uses half-rate VSync, and `3` uses third-rate VSync |
 | `--widescreen` | Use VDP Mode 48 (48×27 tiles, 384×216) instead of Mode 40; a host-only mode the hardware does not have, see [Widescreen](#widescreen-mode-48) |
 | `--integerScaling` | Scale the picture by whole multiples only, centred with borders (320×224 in a 1920×1080 window or monitor is drawn 4× at 1280×896 instead of filling the height), nearest-neighbour |
