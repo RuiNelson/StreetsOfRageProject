@@ -22,18 +22,23 @@ Work on `main` only; never force-push.
 
 ## 2. Bump the version
 
-Change `X.Y.Z` in all of these (the workflow names the files from
-`tauri.conf.json`):
+Run the script from the meta-repository root; it sets `X.Y.Z` in both
+StreetsOfRageRecompilation (`main.cpp`, `sor --version`) and
+StreetsOfRageBuilder (the workflow names the files from `tauri.conf.json`):
 
-- `StreetsOfRageBuilder/Backend/tauri.conf.json` (`version`)
-- `StreetsOfRageBuilder/Backend/Cargo.toml` (`version`) and the
-  `streets-of-rage-builder` entry in `Backend/Cargo.lock`
-- `StreetsOfRageBuilder/Frontend/package.json` and the two top entries of
-  `package-lock.json`
+```bash
+./scripts/update_version_everywhere.py X.Y.Z    # --dry-run lists the changes only
+```
+
+It edits `StreetsOfRageRecompilation/main.cpp`,
+`StreetsOfRageBuilder/Backend/{tauri.conf.json,Cargo.toml,Cargo.lock}` and
+`StreetsOfRageBuilder/Frontend/{package.json,package-lock.json}`; do not edit
+them by hand or with `sed`.
 
 Check with `cd StreetsOfRageBuilder/Backend && cargo check --offline`, then
 commit and push to `main` (inspect `git status` first; leave unrelated files
-out). macOS `sed -i` takes no `''` here: use `sed -i 's/…/…/'`.
+out). `StreetsOfRageRecompilation` is a submodule: commit and push it first,
+then include its gitlink in the meta-repository commit.
 
 ## 3. Build all platforms
 
