@@ -4,12 +4,11 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from _common import META_ROOT, absolute_path, cmake_configure_arguments, executable_path, prepend_pythonpath
+from _common import META_ROOT, absolute_path, cmake_configure_arguments, executable_path, prepend_pythonpath, remove_tree
 
 
 def usage() -> None:
@@ -110,7 +109,7 @@ def main() -> int:
             run_full_generation(sor_root, META_ROOT / "RageDecompiler", discover)
         if clean and build_dir.exists():
             print(f"==> Clean: removing {build_dir}")
-            shutil.rmtree(build_dir)
+            remove_tree(build_dir)
         if needs_configure(build_dir, [sor_root / "CMakeLists.txt", META_ROOT / "MegaDriveEnvironment" / "CMakeLists.txt"]):
             print(f"==> Configuring ({build_type})")
             configure_command = ["cmake", "-S", str(sor_root), "-B", str(build_dir), f"-DCMAKE_BUILD_TYPE={build_type}",
@@ -130,7 +129,8 @@ def main() -> int:
             if any(term in output.lower() for term in ("png_xy", "png_framework", "png_shared", "libpng-src")):
                 print("==> libpng dependency looks broken — re-fetching it and retrying once.")
                 for path in ("libpng-src", "libpng-build", "libpng-subbuild"):
-                    shutil.rmtree(build_dir / "_deps" / path, ignore_errors=True)
+                    if (build_dir / "_deps" / path).exists():
+                        remove_tree(build_dir / "_deps" / path)
                 status, _ = build(command, build_dir)
             if status:
                 return status

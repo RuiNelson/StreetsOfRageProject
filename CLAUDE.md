@@ -114,6 +114,12 @@ winget) with Ninja, not Visual Studio (user decision): `scripts/_common.py`
 pass the same. See `README.md` for platform-specific prerequisites and exact
 Windows, macOS, and Ubuntu commands.
 
+Cleaning the build folder (`--release`, `--clean`, the soundtrack renderer's `--clean`) goes through
+`remove_tree` in `scripts/_common.py`, not `shutil.rmtree`: on Windows the latter stopped with "access
+denied" on read-only files (git objects under `build/_deps`) and files a scanner briefly held, and the user
+had to delete `build/` by hand (user report, 2026-10-30; cause inferred, not reproduced on Windows). It
+clears the read-only bit and retries a few times; a file still locked (e.g. a running `sor.exe`) still fails.
+
 ## ROM and generated code
 
 The original ROM is copyrighted and is never versioned. A legally obtained

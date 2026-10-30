@@ -11,12 +11,11 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from _common import META_ROOT, absolute_path, built_executable, cmake_configure_arguments
+from _common import META_ROOT, absolute_path, built_executable, cmake_configure_arguments, remove_tree
 
 
 def main() -> int:
@@ -40,7 +39,7 @@ def main() -> int:
 
     build_dir = tool_root / "build"
     if arguments.clean and build_dir.exists():
-        shutil.rmtree(build_dir)
+        remove_tree(build_dir)
     if not (build_dir / "CMakeCache.txt").is_file():
         try:
             configure_arguments = cmake_configure_arguments(build_dir)
@@ -57,7 +56,8 @@ def main() -> int:
     # Render into a fresh directory and swap it in, so a failed run never
     # leaves a half-written soundtrack where sor would pick it up.
     staging = out.with_name(out.name + ".rendering")
-    shutil.rmtree(staging, ignore_errors=True)
+    if staging.exists():
+        remove_tree(staging)
     renderer = built_executable(build_dir, "sor_soundtrack")
     print(f"==> Rendering {rom} -> {out}", flush=True)
     print("NOTICE: This can take a long time, specially if you have a slow CPU")
@@ -65,7 +65,8 @@ def main() -> int:
     if status != 0:
         print(f"Rendering failed ({status}); {out} left unchanged, partial output in {staging}", file=sys.stderr)
         return status
-    shutil.rmtree(out, ignore_errors=True)
+    if out.exists():
+        remove_tree(out)
     staging.rename(out)
     print(f"==> Done: {out}")
     return 0

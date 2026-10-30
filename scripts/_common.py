@@ -87,6 +87,31 @@ def absolute_path(path: str | Path) -> Path:
     return Path(path).expanduser().resolve()
 
 
+def remove_tree(path: Path) -> None:
+    """Delete a directory tree, also on Windows, where `shutil.rmtree` stops with "access denied" on
+    read-only files (the git objects of the FetchContent checkouts in `build/_deps`) and on files a
+    virus scanner or indexer holds open for a moment."""
+
+    def retry(function: object, failed: str, *_: object) -> None:
+        for attempt in range(5):
+            try:
+                os.chmod(os.path.dirname(failed), 0o700)
+                os.chmod(failed, 0o700)
+                function(failed)  # type: ignore[operator]
+                return
+            except FileNotFoundError:
+                return
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.5)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=retry)
+    else:
+        shutil.rmtree(path, onerror=retry)
+
+
 def prepend_pythonpath(environment: dict[str, str], *paths: Path) -> None:
     existing = environment.get("PYTHONPATH")
     entries = [str(path) for path in paths]
