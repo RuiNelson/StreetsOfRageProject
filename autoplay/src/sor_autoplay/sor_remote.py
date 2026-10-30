@@ -74,6 +74,7 @@ from sor_ai.remote_input import (  # noqa: F401 -- also this module's public nam
     pack_input,
     _records,
     unpack_input,
+    unpack_ai_assist,
     unpack_status,
 )
 
@@ -140,6 +141,11 @@ class SoRClient(MegaDriveClient):
         self._refresh_if_stale()
         with self._input_lock:
             return self._enhanced[player]
+
+    def ai_assist(self) -> bool:
+        """Whether the game's own AI plays P2: this client's P2 input is ignored."""
+
+        return unpack_ai_assist(self.get_game_data())
 
     def player_status(self) -> dict[int, PlayerStatus]:
         return unpack_status(self.get_game_data())

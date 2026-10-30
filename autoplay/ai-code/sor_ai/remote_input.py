@@ -12,7 +12,8 @@ container, then tagged records, an unknown tag skipped. The layout is
 - client -> game, magic ``SORX``: ``PLAYER_INPUT`` (``player:B, flags:B,
   held:H, seq:I, count:H`` then ``count`` x ``actions:H, frames:H``);
 - game -> client, magic ``SORG``: ``PLAYER_STATUS`` (``player:B, scheme:B,
-  seq:I, end frame:Q``).
+  seq:I, end frame:Q``) and ``HOST_MODE`` (``flags:B``, bit 0 = AI ASSIST: P2 is the
+  AI inside the game, and a client's P2 records are ignored).
 """
 
 from __future__ import annotations
@@ -49,8 +50,11 @@ PLAYER_STATUS = struct.Struct(">BBIQ")
 
 TAG_PLAYER_INPUT = 0x0001
 TAG_PLAYER_STATUS = 0x0101
+TAG_HOST_MODE = 0x0102
 
 FLAG_QUEUE = 0x01
+
+HOST_MODE_AI_ASSIST = 0x01
 
 MAX_ENTRY_FRAMES = 0xFFFF
 
@@ -201,3 +205,12 @@ def unpack_status(data: bytes) -> dict[int, PlayerStatus]:
             player, scheme, seq, end_frame = PLAYER_STATUS.unpack_from(payload)
             status[player] = PlayerStatus(scheme, seq, end_frame)
     return status
+
+
+def unpack_ai_assist(data: bytes) -> bool:
+    """Whether the game's own AI plays P2 (``HOST_MODE``'s AI ASSIST bit)."""
+
+    for tag, payload in _records(data, STATUS_MAGIC):
+        if tag == TAG_HOST_MODE:
+            return bool(payload[0] & HOST_MODE_AI_ASSIST)
+    return False

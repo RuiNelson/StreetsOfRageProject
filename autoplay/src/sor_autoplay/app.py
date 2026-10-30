@@ -515,6 +515,7 @@ class ObserverApp:
         # asks the poller, which owns the client, for that read.
         self.widescreen = False
         self.six_button = {1: False, 2: False}
+        self._warned_ai_assist = False
         self._schemes_read_at = 0.0
         self._button_mode_stale = threading.Event()
         self._button_mode_stale.set()
@@ -602,6 +603,9 @@ class ObserverApp:
         self._schemes_read_at = time.monotonic()
         before = dict(self.six_button)
         client.refresh_schemes()
+        if self.agent_p2_enabled.is_set() and not self._warned_ai_assist and client.ai_assist():
+            self._warned_ai_assist = True
+            logger.warning("the game's own AI plays P2 (AI ASSIST): this AI's P2 input is ignored")
         for index, loop in self._agent_loops.items():
             self.six_button[index] = client.enhanced(index)
             loop.six_button = self.six_button[index]

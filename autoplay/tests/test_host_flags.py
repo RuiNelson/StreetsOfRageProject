@@ -28,6 +28,9 @@ def _flags(*indices: int) -> bytes:
 class _Client:
     """GET_FLAGS plus SoRClient's scheme reads."""
 
+    def ai_assist(self):
+        return False
+
     def __init__(self, flags: bytes | Exception, enhanced: dict[int, bool] | None = None) -> None:
         self.flags = flags
         self.enhanced_by_player = dict(enhanced or {1: False, 2: False})
