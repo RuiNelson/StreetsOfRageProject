@@ -182,12 +182,13 @@ RT, West, South (+ LT, North, East). Details:
 They are set in the game, in OPTIONS > CONTROLS (PLAYER 1/2: SCHEME, DEVICE,
 BIND GAMEPAD, BIND KEYBOARD, JOYSTICK DEADZONE, BACK; any device navigates;
 Start or Esc cancels a bind), which replaced `--configControls` (user,
-2026-10-30). Planned next (user): autoplay sending actions through the
-execution-data API in a binary `struct` format (not YAML: no PyYAML on the
-system Python), with a new game-written buffer in MDE for data sent back, and
-choosing each player's scheme for the session itself. Until then, autoplay's
-Mega Drive buttons are mapped to actions and `--altControls` puts both players
-on ENHANCED 6.
+2026-10-30). Autoplay sends actions through the execution-data API in a
+binary `struct` format (user: not YAML -- no PyYAML on the system Python),
+reads each player's state from MDE's game-written `GET_GAME_DATA` buffer, and
+chooses each AI player's scheme for the session (`--scheme-p1/-p2`, default
+ORIGINAL 3); MDE's gamepad commands no longer reach the game, and
+`--altControls` is gone (`StreetsOfRageRecompilation/CLAUDE.md`, **Remote
+input**; `autoplay/CLAUDE.md`, **Input through the execution data**).
 
 ## Hand-written C++ keeps the original memory layout
 
@@ -287,7 +288,7 @@ round. The host panel's **Sound** (`--sound`, ignored when silent) and
 **Soundtrack folder** (`--soundtrack`, empty = next to the ROM, `...` opens a
 folder chooser) fields warn when the folder has no `manifest.tsv`. The launches run in a child `play.py --run-saved MODE` (internal) so the window stays responsive (no macOS beach ball) and shows the run's status; Quit stops the child. Keys: `^R`/`^Return` run both, `^S` host only, `^A` autoplay only, `^B`
 build first, `^1`-`^6` presets, `^N` silent, `^T` turbo, `^W` widescreen, `^U` integer scaling, `^X`
-6-button, `^7`/`^8` AI P1/P2, `^L` lockstep, `^G` character, `^K` sweep,
+AI on ENHANCED 6 (`--scheme-pN enhanced6` for AI players, else original3), `^7`/`^8` AI P1/P2, `^L` lockstep, `^G` character, `^K` sweep,
 `^=`/`^-` start level, `^E` extra args, `^0` reset, `^Q` quit. Command-line
 runs start from the defaults plus the preset (never the saved file), do not
 overwrite it, and pass unknown options on to autoplay. Agents use the
@@ -310,7 +311,7 @@ autoplay poll cadence. Use the preset:
 
 equivalent to `./scripts/run.py --turbo 2 --lang en --debugUtils --port 7777
 --silent &` plus `./scripts/autoplay.py --poll-ms 16 --port 7777 --agent-p1
---reach-gameplay blaze`. Until 2026-10-28 every turbo was capped at the
+--scheme-p1 original3 --reach-gameplay blaze`. Until 2026-10-28 every turbo was capped at the
 development machine's 120 Hz display: the host presented each frame
 synchronously and Metal waited for the display refresh, so `--turbo 4` ran at
 120 fps and anything paced by the wall clock was off by two (results
@@ -341,8 +342,8 @@ tick — no poll pacing), use the preset:
 ```
 
 equivalent to `./scripts/run.py --lang en --debugUtils --port 6767 --silent &`
-plus `./scripts/autoplay.py --lockstep --port 6767 --agent-p1 --reach-gameplay
-blaze`. Own port (6767) so it runs next to the turbo sessions. Extra args
+plus `./scripts/autoplay.py --lockstep --port 6767 --agent-p1 --scheme-p1
+original3 --reach-gameplay blaze`. Own port (6767) so it runs next to the turbo sessions. Extra args
 pass through to autoplay (`--start-level`, `--kill-street-enemies`,
 `--no-food`, `--no-police`).
 

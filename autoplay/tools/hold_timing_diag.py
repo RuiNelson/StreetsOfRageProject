@@ -42,7 +42,8 @@ import json
 import sys
 import time
 
-from megadrive_remote import Buttons, MegaDriveClient
+from megadrive_remote import Buttons
+from sor_autoplay.sor_remote import SoRClient
 
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.loop import AgentLoop
@@ -87,7 +88,7 @@ def word_at(work_ram: bytes, address: int, offset: int) -> int:
     return int.from_bytes(work_ram[index : index + 2], "big")
 
 
-def reach_a_hold(client: MegaDriveClient, *, character: str, seconds: float) -> bool:
+def reach_a_hold(client: SoRClient, *, character: str, seconds: float) -> bool:
     """Let the AI play until it is actually holding a body.
 
     Deliberately the real ``AgentLoop`` rather than a scripted walk-in: the
@@ -118,7 +119,7 @@ def reach_a_hold(client: MegaDriveClient, *, character: str, seconds: float) -> 
     return False
 
 
-def settle_to_stable_hold(client: MegaDriveClient, *, limit: int = 120) -> int | None:
+def settle_to_stable_hold(client: SoRClient, *, limit: int = 120) -> int | None:
     """Step with no input until the actor is in a stable hold, or give up."""
 
     for _ in range(limit):
@@ -132,7 +133,7 @@ def settle_to_stable_hold(client: MegaDriveClient, *, limit: int = 120) -> int |
 
 
 def time_move(
-    client: MegaDriveClient, *, buttons: int, press_frames: int, label: str
+    client: SoRClient, *, buttons: int, press_frames: int, label: str
 ) -> dict | None:
     """Issue one hold move and count the frames until the action settles.
 
@@ -202,7 +203,7 @@ def time_move(
     }
 
 
-def enter_lockstep(client: MegaDriveClient, *, attempts: int = 3) -> bool:
+def enter_lockstep(client: SoRClient, *, attempts: int = 3) -> bool:
     """Stop at a frame boundary, retrying a host that is briefly busy."""
 
     for attempt in range(attempts):
@@ -215,7 +216,7 @@ def enter_lockstep(client: MegaDriveClient, *, attempts: int = 3) -> bool:
     return False
 
 
-def facing_left(client: MegaDriveClient) -> bool:
+def facing_left(client: SoRClient) -> bool:
     return bool(client.read_value(ADDR_P1_OBJECT + OBJ_ACTION, width=1) & 0x01)
 
 
@@ -229,10 +230,10 @@ def main() -> int:
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    with MegaDriveClient(host=args.host, port=args.port) as menu:
+    with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
-    with MegaDriveClient(host=args.host, port=args.port) as client:
+    with SoRClient(host=args.host, port=args.port) as client:
         rows = []
         # One fresh hold per *session*, not per run: a throw and a suplex both
         # end the hold, so anything after one of them has nothing to measure

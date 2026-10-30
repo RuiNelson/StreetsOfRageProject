@@ -39,7 +39,8 @@ import json
 import sys
 import time
 
-from megadrive_remote import Buttons, MegaDriveClient
+from megadrive_remote import Buttons
+from sor_autoplay.sor_remote import SoRClient
 
 from sor_autoplay.debug_scenario import ENEMY_FAMILY_HOTKEYS
 from sor_autoplay.memory_map import ADDR_P1_OBJECT
@@ -107,12 +108,12 @@ def sample(work_ram: bytes, *, frame: int, mask: int) -> dict:
     }
 
 
-def step(client: MegaDriveClient, mask: int, frame: int) -> dict:
+def step(client: SoRClient, mask: int, frame: int) -> dict:
     result = client.step_input(player1=mask, held_frames=1 if mask else 0, total_frames=1)
     return sample(result.work_ram, frame=frame, mask=mask)
 
 
-def settle(client: MegaDriveClient) -> dict:
+def settle(client: SoRClient) -> dict:
     """Step with no input until the player has stood idle for a while."""
 
     still = 0
@@ -125,7 +126,7 @@ def settle(client: MegaDriveClient) -> dict:
     raise RuntimeError(f"player never settled idle (action ${row['action']:02X})")
 
 
-def walk_to(client: MegaDriveClient, target_x: int) -> dict:
+def walk_to(client: SoRClient, target_x: int) -> dict:
     """Walk (in lockstep) until the player stands within 2 px of ``target_x``,
     then settle and face right with a one-frame tap."""
 
@@ -143,13 +144,13 @@ def walk_to(client: MegaDriveClient, target_x: int) -> dict:
     return row
 
 
-def sweep(client: MegaDriveClient) -> None:
+def sweep(client: SoRClient) -> None:
     for key in ENEMY_FAMILY_HOTKEYS.values():
         client.trigger_option_hotkey(key)
 
 
 def run_variant(
-    client: MegaDriveClient,
+    client: SoRClient,
     *,
     direction: int,
     kick_on: int | None,
@@ -208,7 +209,7 @@ def main() -> int:
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    with MegaDriveClient(host=args.host, port=args.port) as menu:
+    with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
     right = int(Buttons.RIGHT)
@@ -222,7 +223,7 @@ def main() -> int:
         "vertical_kick": dict(direction=0, kick_on=1, hold_after_launch=False),
     }
 
-    with MegaDriveClient(host=args.host, port=args.port) as client:
+    with SoRClient(host=args.host, port=args.port) as client:
         client.release_buttons()
         sweep(client)
         time.sleep(0.3)

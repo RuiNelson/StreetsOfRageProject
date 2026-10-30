@@ -23,7 +23,7 @@ import json
 import sys
 import time
 
-from megadrive_remote import MegaDriveClient
+from sor_autoplay.sor_remote import SoRClient
 
 from sor_autoplay.ai.execute import execute_tick
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
@@ -48,10 +48,10 @@ def main() -> int:
     args = ap.parse_args()
     poll_s = args.poll_ms / 1000.0
 
-    with MegaDriveClient(host=args.host, port=args.port) as menu:
+    with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
-    with MegaDriveClient(host=args.host, port=args.port) as client:
+    with SoRClient(host=args.host, port=args.port) as client:
         rom = RomData.read(client)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         nora_tracker = NoraAttackTracker()

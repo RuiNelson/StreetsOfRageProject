@@ -24,8 +24,9 @@ Python app that attaches to a running
 - Token/Information/Verb pipeline per [`AI.md`](AI.md): observes the same
   snapshot the HUD already reads, infers danger/incoming-projectile tokens,
   proposes walk/attack/police verbs, ranks them by emergency, and issues
-  the winner through a virtual gamepad (`hold_buttons`/`press_buttons` only —
-  never writes RAM).
+  the winner through a virtual gamepad (`hold_buttons`/`press_buttons` only,
+  sent to the game as actions through the execution data by
+  `sor_remote.SoRClient` — never writes RAM).
 - Per-enemy-type/boss subclassing (`Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`;
   bosses split into a bespoke family — `Abadede`/`Mr. X` — and a later-boss
   family — `Souther`/`Antonio`/`Bongo`/`Onihime`-`Yasha` — matching which RAM
@@ -44,8 +45,8 @@ Python app that attaches to a running
   label of every candidate it was choosing between.
 - Automatically stands down (releases input) when the game is paused or
   outside active gameplay (menus, character select, round-clear, continues).
-- Original A/B/C control scheme only; `--altControls` is not yet supported.
-  Two-player AI coordination and bespoke per-boss tactics are also future
+- Either control scheme: `--scheme-p1/--scheme-p2 original3|enhanced6`
+  (default ORIGINAL 3 for an AI player). Two-player AI coordination and bespoke per-boss tactics are also future
   work (see `autoplay/CLAUDE.md`'s AI surface table).
 
 ## Requirements

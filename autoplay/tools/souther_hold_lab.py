@@ -53,7 +53,8 @@ import json
 import sys
 import time
 
-from megadrive_remote import Buttons, MegaDriveClient
+from megadrive_remote import Buttons
+from sor_autoplay.sor_remote import SoRClient
 
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.loop import AgentLoop
@@ -193,7 +194,7 @@ class Lab:
 
     def __init__(
         self,
-        client: MegaDriveClient,
+        client: SoRClient,
         sink,
         *,
         experiment: str,
@@ -424,7 +425,7 @@ def run_suplex(lab: Lab) -> dict:
     return watched
 
 
-def _holding_souther_now(client: MegaDriveClient) -> bool:
+def _holding_souther_now(client: SoRClient) -> bool:
     ram_p = client.read_memory(ADDR_P1_OBJECT, OBJECT_SLOT_SIZE)
     action, hold = ram_p[0x30], int.from_bytes(ram_p[0x4C:0x4E], "big")
     if action not in STABLE_FRONT or not hold:
@@ -433,7 +434,7 @@ def _holding_souther_now(client: MegaDriveClient) -> bool:
 
 
 def reach_souther_hold(
-    client: MegaDriveClient,
+    client: SoRClient,
     loop: AgentLoop,
     rom: RomData,
     scenario: DebugScenario,
@@ -481,12 +482,12 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
-    with MegaDriveClient(host=args.host, port=args.port) as menu:
+    with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
     scenario = DebugScenario(start_level=2, kill_street_enemies=True)
     summaries = []
-    with MegaDriveClient(host=args.host, port=args.port) as client, open(
+    with SoRClient(host=args.host, port=args.port) as client, open(
         args.out, "w", encoding="utf-8"
     ) as sink:
         rom = RomData.read(client)

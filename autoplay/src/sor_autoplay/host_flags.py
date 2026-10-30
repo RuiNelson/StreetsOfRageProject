@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 FLAG_WIDESCREEN = 0  # --widescreen: Mode 48, 384 px wide
-FLAG_SIX_BUTTON = 1  # --altControls: the 6-button layout
+# Flag 1 was --altControls; each player's scheme is now in the game data
+# (sor_remote.SoRClient.refresh_schemes).
 
 FLAG_BYTES = 128
 
@@ -18,7 +19,6 @@ FLAG_BYTES = 128
 @dataclass(frozen=True)
 class HostModes:
     widescreen: bool = False
-    six_button: bool = False
 
 
 def flag_set(flags: bytes, index: int) -> bool:
@@ -28,7 +28,4 @@ def flag_set(flags: bytes, index: int) -> bool:
 def decode_host_modes(flags: bytes) -> HostModes:
     if len(flags) != FLAG_BYTES:
         raise ValueError(f"flags must be {FLAG_BYTES} bytes, got {len(flags)}")
-    return HostModes(
-        widescreen=flag_set(flags, FLAG_WIDESCREEN),
-        six_button=flag_set(flags, FLAG_SIX_BUTTON),
-    )
+    return HostModes(widescreen=flag_set(flags, FLAG_WIDESCREEN))

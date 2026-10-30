@@ -42,7 +42,7 @@ import sys
 import time
 from collections import Counter, deque
 
-from megadrive_remote import MegaDriveClient
+from sor_autoplay.sor_remote import SoRClient
 
 from sor_autoplay import memory_map as mm
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
@@ -171,12 +171,12 @@ def main() -> int:
     poll_s = args.poll_ms / 1000.0
     level_index = args.level - 1
 
-    with MegaDriveClient(host=args.host, port=args.port) as menu:
+    with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
     scenario = DebugScenario(start_level=args.level, only_enemy="jack")
 
-    with MegaDriveClient(host=args.host, port=args.port) as client:
+    with SoRClient(host=args.host, port=args.port) as client:
         rom = RomData.read(client)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         loop = AgentLoop(gamepad, no_food=not args.food, no_police=True)

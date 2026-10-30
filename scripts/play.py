@@ -51,7 +51,6 @@ DEFAULTS: dict[str, Any] = {
     "fullscreen": False,
     "widescreen": False,
     "integer_scaling": False,  # --integerScaling, whole-number scale factors only
-    "alt_controls": False,  # --altControls, the 6-button layout
     "debug_utils": True,  # remote access, hotkeys and cheats: always on when autoplay runs
     "debug": False,
     "call_log": "",
@@ -59,6 +58,7 @@ DEFAULTS: dict[str, Any] = {
     # autoplay
     "agent_p1": False,
     "agent_p2": False,
+    "ai_enhanced6": False,  # autoplay --scheme-pN enhanced6 for each AI player (else original3)
     "reach": "",  # "" = stay in the menus
     "lockstep": False,
     "poll_ms": 0,  # 0 = auto: 32/turbo ms under turbo (16 at x2), autoplay's own default otherwise
@@ -72,7 +72,7 @@ DEFAULTS: dict[str, Any] = {
     "build_first": False,
 }
 
-# Fields a preset sets. The rest (widescreen, integer scaling, 6-button, fullscreen, ROM, sound source, soundtrack
+# Fields a preset sets. The rest (widescreen, integer scaling, the AI's scheme, fullscreen, ROM, sound source, soundtrack
 # folder, call log, extra...) is the user's own and survives a preset.
 SESSION_FIELDS = (
     "port", "turbo", "vsync", "lang", "debug_utils", "silent", "agent_p1", "agent_p2", "reach",
@@ -200,8 +200,6 @@ def host_arguments(s: dict[str, Any], *, with_autoplay: bool) -> list[str]:
         args.append("--widescreen")
     if s["integer_scaling"]:
         args.append("--integerScaling")
-    if s["alt_controls"]:
-        args.append("--altControls")
     args += ["--port", str(s["port"])]
     if s["silent"]:
         args.append("--silent")
@@ -235,6 +233,11 @@ def autoplay_arguments(s: dict[str, Any]) -> list[str]:
         args.append("--agent-p1")
     if s["agent_p2"]:
         args.append("--agent-p2")
+    # Each AI player's scheme (the game's own controls are a human's).
+    scheme = "enhanced6" if s["ai_enhanced6"] else "original3"
+    for player in (1, 2):
+        if s[f"agent_p{player}"]:
+            args += [f"--scheme-p{player}", scheme]
     if s["reach"]:
         args += ["--reach-gameplay", s["reach"]]
     if s["start_level"]:
@@ -420,23 +423,23 @@ class PlayWindow:
         self.check(host, 6, "Fullscreen (^F)", "fullscreen")
         self.check(host, 7, "Widescreen (^W)", "widescreen")
         self.check(host, 8, "Integer scaling (^U)", "integer_scaling")
-        self.check(host, 9, "6-button layout, --altControls (^X)", "alt_controls")
-        self.check(host, 10, "debugUtils: remote access, hotkeys (^D)", "debug_utils")
-        self.check(host, 11, "Log CPU/VDP state, --debug", "debug")
-        self.entry(host, 12, "Call log file", "call_log")
-        self.entry(host, 13, "ROM file", "rom")
+        self.check(host, 9, "debugUtils: remote access, hotkeys (^D)", "debug_utils")
+        self.check(host, 10, "Log CPU/VDP state, --debug", "debug")
+        self.entry(host, 11, "Call log file", "call_log")
+        self.entry(host, 12, "ROM file", "rom")
 
         self.check(autoplay, 0, "AI plays P1 (^7)", "agent_p1")
         self.check(autoplay, 1, "AI plays P2 (^8)", "agent_p2")
-        self.combo(autoplay, 2, "Reach gameplay as (^G)", "reach")
-        self.check(autoplay, 3, "Lockstep, frame-exact (^L)", "lockstep")
-        self.spin(autoplay, 4, "Poll ms (0 = auto)", "poll_ms", 0, 1000)
-        self.spin(autoplay, 5, "HUD ms (0 = default)", "hud_ms", 0, 1000)
-        self.spin(autoplay, 6, "Start level (^= / ^-, 0 = none)", "start_level", 0, 8)
-        self.combo(autoplay, 7, "Sweep enemies (^K)", "sweep")
-        self.check(autoplay, 8, "No food (scoring a fight)", "no_food")
-        self.check(autoplay, 9, "No police special", "no_police")
-        self.extra_entry = self.entry(autoplay, 10, "Extra arguments (^E)", "extra")
+        self.check(autoplay, 2, "AI on ENHANCED 6, else ORIGINAL 3 (^X)", "ai_enhanced6")
+        self.combo(autoplay, 3, "Reach gameplay as (^G)", "reach")
+        self.check(autoplay, 4, "Lockstep, frame-exact (^L)", "lockstep")
+        self.spin(autoplay, 5, "Poll ms (0 = auto)", "poll_ms", 0, 1000)
+        self.spin(autoplay, 6, "HUD ms (0 = default)", "hud_ms", 0, 1000)
+        self.spin(autoplay, 7, "Start level (^= / ^-, 0 = none)", "start_level", 0, 8)
+        self.combo(autoplay, 8, "Sweep enemies (^K)", "sweep")
+        self.check(autoplay, 9, "No food (scoring a fight)", "no_food")
+        self.check(autoplay, 10, "No police special", "no_police")
+        self.extra_entry = self.entry(autoplay, 11, "Extra arguments (^E)", "extra")
 
         preview = ttk.LabelFrame(root, text="Command lines")
         preview.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=10, pady=4)
@@ -666,7 +669,7 @@ class PlayWindow:
             "q": lambda: self.finish("quit"),
             "b": lambda: self.toggle("build_first"),
             "n": lambda: self.toggle("silent"), "f": lambda: self.toggle("fullscreen"),
-            "w": lambda: self.toggle("widescreen"), "u": lambda: self.toggle("integer_scaling"), "x": lambda: self.toggle("alt_controls"),
+            "w": lambda: self.toggle("widescreen"), "u": lambda: self.toggle("integer_scaling"), "x": lambda: self.toggle("ai_enhanced6"),
             "d": lambda: self.toggle("debug_utils"), "l": lambda: self.toggle("lockstep"),
             "7": lambda: self.toggle("agent_p1"), "8": lambda: self.toggle("agent_p2"),
             "t": lambda: self.cycle("turbo"), "g": lambda: self.cycle("reach"), "k": lambda: self.cycle("sweep"),

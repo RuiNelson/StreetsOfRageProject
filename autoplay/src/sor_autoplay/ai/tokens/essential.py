@@ -158,10 +158,10 @@ class DebugNoPolice(Essential):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SixButtonLayout(Essential):
-    """The host runs ``--altControls``: the 6-button layout.
+    """The player is on ENHANCED 6: the 6-button layout.
 
-    Added by ``AgentLoop`` from the host's ``GET_FLAGS`` (``host_flags``), not
-    read from RAM: its presence swaps the buttons that differ -- the rear
+    Added by ``AgentLoop`` from that player's scheme in the game data
+    (``sor_remote.SoRClient.refresh_schemes``), not read from RAM: its presence swaps the buttons that differ -- the rear
     attack is A, the police special X, a pickup Y and the knife throw Z -- and
     B stops picking things up (``execute.rear_attack_mask`` and the other
     mask helpers, ``reach.item_a_b_press_takes``). Without it every mask is

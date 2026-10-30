@@ -30,7 +30,7 @@ import json
 import sys
 import time
 
-from megadrive_remote import MegaDriveClient
+from sor_autoplay.sor_remote import SoRClient
 
 from sor_autoplay import memory_map as mm
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
@@ -102,7 +102,7 @@ def main() -> int:
     poll_s = args.poll_ms / 1000.0
     level_index = args.level - 1
 
-    with MegaDriveClient(host=args.host, port=args.port) as menu:
+    with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
     scenario = DebugScenario(
@@ -111,7 +111,7 @@ def main() -> int:
         kill_street_enemies=args.kill_street_enemies,
     )
 
-    with MegaDriveClient(host=args.host, port=args.port) as live:
+    with SoRClient(host=args.host, port=args.port) as live:
         client = RecordingSource(live)
         recorder = SnapshotRecorder(args.raw) if args.raw else None
         client.start()

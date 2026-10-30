@@ -34,7 +34,7 @@ import dataclasses
 import json
 import time
 
-from megadrive_remote import MegaDriveClient
+from sor_autoplay.sor_remote import SoRClient
 
 from sor_autoplay import memory_map as mm
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
@@ -73,11 +73,11 @@ def main() -> None:
     args = ap.parse_args()
     poll_s = args.poll_ms / 1000.0
 
-    with MegaDriveClient(host=args.host, port=args.port) as menu:
+    with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
     scenario = DebugScenario(start_level=8, kill_until_mr_x=True)
-    with MegaDriveClient(host=args.host, port=args.port) as client:
+    with SoRClient(host=args.host, port=args.port) as client:
         rom = RomData.read(client)
         state = SharedGamepadState(client)
         loops = {

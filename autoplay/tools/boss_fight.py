@@ -32,7 +32,7 @@ import sys
 import time
 from collections import Counter, deque
 
-from megadrive_remote import MegaDriveClient
+from sor_autoplay.sor_remote import SoRClient
 
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_autoplay.ai.loop import AgentLoop
@@ -257,13 +257,19 @@ def main() -> int:
             "is untouched."
         ),
     )
+    ap.add_argument(
+        "--scheme",
+        choices=("original3", "enhanced6"),
+        default="original3",
+        help="Control scheme the game puts P1 on for the run (SoRClient's SCHEME_OVERRIDE).",
+    )
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     poll_s = args.poll_ms / 1000.0
     level_index = args.level - 1
     pair = is_pair_fight(args.level, args.boss_type)
 
-    with MegaDriveClient(host=args.host, port=args.port) as menu:
+    with SoRClient(host=args.host, port=args.port, schemes={1: args.scheme}) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
     # Round 8's Mr. X: every enemy and every boss of the rush dies on the way,
@@ -274,12 +280,13 @@ def main() -> int:
     else:
         scenario = DebugScenario(start_level=args.level, kill_street_enemies=True)
 
-    with MegaDriveClient(host=args.host, port=args.port) as client:
+    with SoRClient(host=args.host, port=args.port, schemes={1: args.scheme}) as client:
         rom = RomData.read(client)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         loop = AgentLoop(gamepad, no_food=args.no_food, no_police=not args.police)
         modes = decode_host_modes(client.get_flags())
-        loop.six_button = modes.six_button
+        client.refresh_schemes()
+        loop.six_button = client.enhanced(1)
 
         boss_seen = False
         start_hp = start_lives = None

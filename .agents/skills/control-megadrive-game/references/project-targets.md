@@ -102,6 +102,8 @@ Read these files before asserting entity order, positions, or input semantics:
 
 The game initially displays a consent banner. A or Start is edge-triggered for
 session reset, and Start also toggles the selected screen on a rising edge.
+(`tools/reach_gameplay.py` presses through autoplay's `SoRClient`: the game
+reads remote input from the execution data, not the gamepad commands.)
 Release between logical presses by using separate one-frame `press_buttons`
 calls with intervening frame waits when the intended edge matters.
 

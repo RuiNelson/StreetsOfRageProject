@@ -35,7 +35,7 @@ import sys
 import time
 from collections import Counter, deque
 
-from megadrive_remote import MegaDriveClient
+from sor_autoplay.sor_remote import SoRClient
 
 from sor_autoplay import memory_map as mm
 from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
@@ -179,6 +179,12 @@ def main() -> int:
     ap.add_argument("--no-reach", action="store_true", help="Already in gameplay: skip the menus.")
     ap.add_argument("--profile-ms", type=float, default=0.0,
                     help="Profile every tick; print the stats of any tick slower than this.")
+    ap.add_argument(
+        "--scheme",
+        choices=("original3", "enhanced6"),
+        default="original3",
+        help="Control scheme the game puts P1 on for the run (SoRClient's SCHEME_OVERRIDE).",
+    )
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     poll_s = args.poll_ms / 1000.0
@@ -186,19 +192,20 @@ def main() -> int:
     kept = ORDINARY_TYPES if args.family == "all" else FAMILY_TYPES[args.family]
 
     if not args.no_reach:
-        with MegaDriveClient(host=args.host, port=args.port) as menu:
+        with SoRClient(host=args.host, port=args.port, schemes={1: args.scheme}) as menu:
             reach_gameplay(menu, args.character, timeout_ms=90_000)
 
     scenario = DebugScenario(
         start_level=args.level, only_enemy=None if args.family == "all" else args.family
     )
 
-    with MegaDriveClient(host=args.host, port=args.port) as client:
+    with SoRClient(host=args.host, port=args.port, schemes={1: args.scheme}) as client:
         rom = RomData.read(client)
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
         loop = AgentLoop(gamepad, no_food=not args.food, no_police=True)
         modes = decode_host_modes(client.get_flags())
-        loop.six_button = modes.six_button
+        client.refresh_schemes()
+        loop.six_button = client.enhanced(1)
 
         on_level = False
         started_at = None

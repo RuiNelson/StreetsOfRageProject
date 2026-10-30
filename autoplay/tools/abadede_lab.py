@@ -49,7 +49,7 @@ import sys
 import time
 from collections import Counter, deque
 
-from megadrive_remote import MegaDriveClient
+from sor_autoplay.sor_remote import SoRClient
 from megadrive_remote.exceptions import RemoteTimeoutError
 
 from sor_autoplay import memory_map as mm
@@ -279,7 +279,7 @@ def check_update(before_ctx, before_me, before_boss, after_boss, before_ram, aft
     return result
 
 
-def enter_lockstep(client: MegaDriveClient, *, attempts: int = 5) -> bool:
+def enter_lockstep(client: SoRClient, *, attempts: int = 5) -> bool:
     for attempt in range(attempts):
         try:
             client.set_lockstep(True, timeout_ms=10_000)
@@ -336,11 +336,11 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
-    with MegaDriveClient(host=args.host, port=args.port) as menu:
+    with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
     scenario = DebugScenario(start_level=LEVEL, kill_street_enemies=True)
-    with MegaDriveClient(host=args.host, port=args.port) as client, open(
+    with SoRClient(host=args.host, port=args.port) as client, open(
         args.out, "w", encoding="utf-8"
     ) as sink:
         rom = RomData.read(client)

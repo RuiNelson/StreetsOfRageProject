@@ -568,8 +568,7 @@ edited by hand: each player has a `scheme` (`original3` or `enhanced6`), a
 `deadzone` in percent, and keyboard and gamepad bindings for each scheme (SDL
 key names such as `Z` or `Left Shift`; gamepad inputs by position: `South`,
 `East`, `West`, `North`, `LeftShoulder`, `RightShoulder`, `LeftTrigger`,
-`RightTrigger`, ...). `--altControls` puts both players on ENHANCED 6 for one
-session without changing the file.
+`RightTrigger`, ...).
 
 #### Host keyboard shortcuts
 
@@ -638,7 +637,6 @@ version.
 | `--debug` | Log CPU and VDP state once per second |
 | `--debugUtils` | Enable debug hotkeys, host cheats, and remote access |
 | `--fullScreen` | Start in desktop fullscreen |
-| `--altControls` | Put both players on the ENHANCED 6 control scheme for this session (not saved) |
 | `--vsync 0\|1\|2\|3` | Frame synchronization: `0` uses the internal timer (default), `1` uses display VSync, `2` uses half-rate VSync, and `3` uses third-rate VSync |
 | `--widescreen` | Use VDP Mode 48 (48×27 tiles, 384×216) instead of Mode 40; a host-only mode the hardware does not have, see [Widescreen](#widescreen-mode-48) |
 | `--integerScaling` | Scale the picture by whole multiples only, centred with borders (320×224 in a 1920×1080 window or monitor is drawn 4× at 1280×896 instead of filling the height), nearest-neighbour |
@@ -710,7 +708,6 @@ Examples:
 ```bash
 ./build/sor --rom rom/SOR.bin --lang en --hz 60 --vsync 1 --debugUtils --port 6970
 ./build/sor --rom rom/SOR.bin --fullScreen
-./build/sor --rom rom/SOR.bin --altControls
 ./build/sor --rom rom/SOR.bin --turbo 2 --silent
 ./build/sor --rom rom/SOR.bin --callLog calls.csv
 ```

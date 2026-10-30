@@ -132,31 +132,6 @@ class _LockstepCapture:
             return (out[1], out[2])
 
 
-def _group_step_masks(
-    masks: list[tuple[int, int]],
-) -> list[tuple[int, int, int, int]]:
-    """Group consecutive equal per-frame masks into ``step_input`` calls.
-
-    Returns ``(player1, player2, held_frames, total_frames)`` tuples:
-    ``held_frames`` covers the whole group when any button is down, else the
-    group plays released. Grouping keeps the common case -- one tick, one
-    mask -- to a single round trip while staying frame-exact when a press
-    edge falls mid-tick.
-    """
-
-    groups: list[list[int]] = []
-    for player1, player2 in masks:
-        if groups and groups[-1][0] == player1 and groups[-1][1] == player2:
-            groups[-1][3] += 1
-        else:
-            groups.append([player1, player2, 0, 1])
-    result = []
-    for player1, player2, _, total in groups:
-        held = total if (player1 or player2) else 0
-        result.append((player1, player2, held, total))
-    return result
-
-
 def _default_megadrive_python_src() -> Path | None:
     """Locate sibling MegaDriveEnvironment/python/src when run from the workspace."""
 
@@ -188,14 +163,20 @@ def _ensure_megadrive_remote_on_path() -> None:
     import megadrive_remote  # noqa: F401
 
 
-def _reach_gameplay(host: str, port: int, character: str, *, timeout_ms: int) -> None:
+def _reach_gameplay(
+    host: str,
+    port: int,
+    character: str,
+    *,
+    timeout_ms: int,
+    schemes: dict[int, int] | None = None,
+) -> None:
     """Navigate the real menus to playable gameplay (exclusive remote client)."""
 
-    from megadrive_remote import MegaDriveClient
-
     from .reach_gameplay import reach_gameplay
+    from .sor_remote import SoRClient
 
-    with MegaDriveClient(host, port, connect_timeout=5.0, io_timeout=5.0) as client:
+    with SoRClient(host, port, connect_timeout=5.0, io_timeout=5.0, schemes=schemes) as client:
         reach_gameplay(client, character, timeout_ms=timeout_ms)
 
 
@@ -208,6 +189,7 @@ def _try_reach_gameplay(
     connect_attempts: int = 8,
     connect_retry_s: float = 0.75,
     should_abort: Callable[[], bool] | None = None,
+    schemes: dict[int, int] | None = None,
 ) -> bool:
     """Run menu navigation; retry while the host is not listening yet.
 
@@ -226,7 +208,7 @@ def _try_reach_gameplay(
                 f"(attempt {attempt}/{connect_attempts})…",
                 file=sys.stderr,
             )
-            _reach_gameplay(host, port, character, timeout_ms=timeout_ms)
+            _reach_gameplay(host, port, character, timeout_ms=timeout_ms, schemes=schemes)
             print("--reach-gameplay: reached playable gameplay", file=sys.stderr)
             return True
         except Exception as exc:  # noqa: BLE001 - surface any navigation failure
@@ -424,6 +406,17 @@ def build_parser() -> argparse.ArgumentParser:
             "are the fight. Cannot be combined with another sweep."
         ),
     )
+    for player in (1, 2):
+        parser.add_argument(
+            f"--scheme-p{player}",
+            choices=("original3", "enhanced6"),
+            default=None,
+            help=(
+                f"Control scheme the game puts P{player} on for this session "
+                "(never saved). Default for an AI player: original3; a human "
+                "player keeps the scheme set in the game's OPTIONS > CONTROLS."
+            ),
+        )
     parser.add_argument(
         "--version",
         action="version",
@@ -509,9 +502,13 @@ class ObserverApp:
         no_police: bool = False,
         mr_x_accept: int | None = None,
         lockstep: bool = False,
+        schemes: dict[int, int] | None = None,
     ) -> None:
         self.host = host
         self.port = port
+        # The scheme each player is put on through SoRClient (SCHEME_OVERRIDE);
+        # a player left out plays the game's own (controls.yaml).
+        self.schemes = dict(schemes or {})
         self.poll_ms = max(0.1, poll_ms)
         self.hud_ms = max(16, hud_ms)
         self.scenario = scenario
@@ -528,12 +525,13 @@ class ObserverApp:
         self._rom: RomData | None = None
         self._hud: ObserverHud | None = None
 
-        # Host modes from GET_FLAGS (host_flags.py). Widescreen is read once
-        # per connection; the button layout whenever an AI is turned on (and
-        # on a fresh connection while one is) -- ``_button_mode_stale`` asks
-        # the poller, which owns the client, for that read.
+        # Widescreen from GET_FLAGS (host_flags.py), read once per
+        # connection; each player's scheme from the game data (SoRClient) whenever an
+        # AI is turned on (and on a fresh connection while one is) --
+        # ``_button_mode_stale`` asks the poller, which owns the client, for
+        # that read.
         self.widescreen = False
-        self.six_button = False
+        self.six_button = {1: False, 2: False}
         self._button_mode_stale = threading.Event()
         self._button_mode_stale.set()
 
@@ -614,12 +612,16 @@ class ObserverApp:
         if not (self.agent_p1_enabled.is_set() or self.agent_p2_enabled.is_set()):
             return
         self._button_mode_stale.clear()
-        modes = self._read_host_flags(client)
-        if modes is not None:
-            self.six_button = modes.six_button
-            for loop in self._agent_loops.values():
-                loop.six_button = modes.six_button
-            logger.info("host buttons: %s", "6-button" if modes.six_button else "3-button")
+        client.refresh_schemes()
+        for index, loop in self._agent_loops.items():
+            self.six_button[index] = client.enhanced(index)
+            loop.six_button = self.six_button[index]
+        logger.info(
+            "schemes: %s",
+            ", ".join(
+                f"P{index} {'ENHANCED 6' if self.six_button[index] else 'ORIGINAL 3'}" for index in (1, 2)
+            ),
+        )
 
     def start_poller(self) -> None:
         target = self._lockstep_loop if self.lockstep else self._poll_loop
@@ -633,7 +635,7 @@ class ObserverApp:
             self._stop.wait(remaining)
 
     def _poll_loop(self) -> None:
-        from megadrive_remote import MegaDriveClient
+        from .sor_remote import SoRClient
 
         backoff_s = 0.25
         poll_s = self.poll_ms / 1000.0
@@ -642,11 +644,12 @@ class ObserverApp:
             started = time.monotonic()
             try:
                 if self._client is None:
-                    client = MegaDriveClient(
+                    client = SoRClient(
                         self.host,
                         self.port,
                         connect_timeout=1.5,
                         io_timeout=1.5,
+                        schemes=self.schemes,
                     )
                     client.connect()
                     client.ping()
@@ -767,7 +770,7 @@ class ObserverApp:
         realtime and play resumes in lockstep.
         """
 
-        from megadrive_remote import MegaDriveClient
+        from .sor_remote import SoRClient
 
         backoff_s = 0.25
         poll_s = self.poll_ms / 1000.0
@@ -785,11 +788,12 @@ class ObserverApp:
             started = time.monotonic()
             try:
                 if self._client is None:
-                    client = MegaDriveClient(
+                    client = SoRClient(
                         self.host,
                         self.port,
                         connect_timeout=1.5,
                         io_timeout=1.5,
+                        schemes=self.schemes,
                     )
                     client.connect()
                     client.ping()
@@ -885,11 +889,8 @@ class ObserverApp:
                     self._capture.next_frame_masks()
                     for _ in range(LOCKSTEP_FRAMES_PER_TICK)
                 ]
-                for player1, player2, held, total in _group_step_masks(masks):
-                    result = client.step_input(
-                        player1=player1, player2=player2,
-                        held_frames=held, total_frames=total,
-                    )
+                # One input document and one STEP_INPUT for the tick's frames.
+                result = client.step_frames(masks)
                 step_ms = (time.monotonic() - tick_started) * 1000.0 - tick_ms
                 lockstep_tick_ms.append(tick_ms)
                 lockstep_step_ms.append(step_ms)
@@ -1123,6 +1124,7 @@ class ObserverApp:
                     character,
                     timeout_ms=timeout_ms,
                     should_abort=self._stop.is_set,
+                    schemes=self.schemes,
                 )
         finally:
             if resume_p1:
@@ -1158,6 +1160,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     _ensure_megadrive_remote_on_path()
 
+    from .sor_remote import SCHEMES
+
+    # An AI player is on ORIGINAL 3 unless told otherwise; a human keeps
+    # their own scheme.
+    schemes: dict[int, int] = {}
+    for index, agent, choice in ((1, args.agent_p1, args.scheme_p1), (2, args.agent_p2, args.scheme_p2)):
+        if choice is not None:
+            schemes[index] = SCHEMES[choice]
+        elif agent:
+            schemes[index] = SCHEMES["original3"]
+
     app = ObserverApp(
         host=args.host,
         port=args.port,
@@ -1169,6 +1182,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         no_police=args.no_police,
         mr_x_accept=args.mr_x_accept,
         lockstep=args.lockstep,
+        schemes=schemes,
         scenario=DebugScenario(
             start_level=args.start_level,
             only_enemy=args.only_enemy,
@@ -1184,6 +1198,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.port,
                 args.reach_gameplay,
                 timeout_ms=args.reach_gameplay_timeout_ms,
+                schemes=schemes,
             )
         return app.run_once()
 

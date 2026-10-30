@@ -78,7 +78,7 @@ def fighting(ram: bytes, kept) -> bool:
 
 
 def record(args) -> int:
-    from megadrive_remote import MegaDriveClient
+    from megadrive_remote import SoRClient
     from megadrive_remote.exceptions import RemoteTimeoutError
 
     from bongo_lab import snapshot_from_ram
@@ -90,13 +90,13 @@ def record(args) -> int:
     from sor_autoplay.state import read_snapshot
 
     kept = FAMILY_TYPES[args.family]
-    with MegaDriveClient(host=args.host, port=args.port) as menu:
+    with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
     scenario = DebugScenario(start_level=args.level, only_enemy=args.family)
     total_frames = 0
     hits = 0
-    with MegaDriveClient(host=args.host, port=args.port) as client, open(
+    with SoRClient(host=args.host, port=args.port) as client, open(
         args.out, "w", encoding="utf-8"
     ) as sink:
         rom = RomData.read(client)

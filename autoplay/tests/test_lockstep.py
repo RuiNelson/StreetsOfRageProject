@@ -1,7 +1,7 @@
-"""Lockstep mode (``--lockstep``): capture, step grouping, RAM snapshots.
+"""Lockstep mode (``--lockstep``): capture, RAM snapshots.
 
 The AI-driven clock: while an AI is engaged the host is frozen and each
-pipeline tick is replayed through ``step_input`` for exactly
+pipeline tick is replayed through ``SoRClient.step_frames`` for exactly
 ``LOCKSTEP_FRAMES_PER_TICK`` frames, instead of wall-clock polling. These
 tests pin the plumbing -- what the tick commanded is what gets stepped --
 without needing a live host.
@@ -12,7 +12,6 @@ import unittest
 from sor_autoplay.app import (
     LOCKSTEP_FRAMES_PER_TICK,
     ObserverApp,
-    _group_step_masks,
     _LockstepCapture,
     build_parser,
 )
@@ -69,38 +68,6 @@ class LockstepCaptureTests(unittest.TestCase):
         capture.reset()
         self.assertEqual(capture.next_frame_masks(), (0, 0))
         self.assertFalse(capture.press_pending(1))
-
-
-class GroupStepMasksTests(unittest.TestCase):
-    def test_stable_tick_is_one_step_call(self):
-        self.assertEqual(
-            _group_step_masks([(0x0008, 0), (0x0008, 0)]),
-            [(0x0008, 0, 2, 2)],
-        )
-
-    def test_press_edge_mid_tick_splits_into_two_calls(self):
-        self.assertEqual(
-            _group_step_masks([(0x0010, 0), (0x0008, 0)]),
-            [(0x0010, 0, 1, 1), (0x0008, 0, 1, 1)],
-        )
-
-    def test_released_frames_step_as_released(self):
-        self.assertEqual(
-            _group_step_masks([(0, 0), (0, 0)]),
-            [(0, 0, 0, 2)],
-        )
-
-    def test_every_group_is_a_valid_step_input_call(self):
-        for masks in (
-            [(0x0008, 0), (0x0008, 0)],
-            [(0x0010, 0x0020), (0, 0)],
-            [(0, 0), (0x0008, 0)],
-        ):
-            groups = _group_step_masks(masks)
-            covered = sum(total for _, _, _, total in groups)
-            self.assertEqual(covered, len(masks))
-            for _, _, held, total in groups:
-                self.assertLessEqual(held, total)
 
 
 class SnapshotFromWorkRamTests(unittest.TestCase):

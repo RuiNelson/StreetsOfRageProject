@@ -249,7 +249,7 @@ class RecordingClient:
 
 
 def record(args) -> int:
-    from megadrive_remote import MegaDriveClient
+    from megadrive_remote import SoRClient
     from megadrive_remote.exceptions import RemoteTimeoutError
 
     from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
@@ -258,11 +258,11 @@ def record(args) -> int:
     from sor_autoplay.reach_gameplay import reach_gameplay
     from sor_autoplay.rom_data import RomData
 
-    with MegaDriveClient(host=args.host, port=args.port) as menu:
+    with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
 
     scenario = DebugScenario(start_level=LEVEL, kill_until_mr_x=True)
-    with MegaDriveClient(host=args.host, port=args.port) as client, open(
+    with SoRClient(host=args.host, port=args.port) as client, open(
         args.out, "w", encoding="utf-8"
     ) as sink:
         rom = RomData.read(client)

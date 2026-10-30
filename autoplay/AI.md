@@ -10,9 +10,10 @@ implemented as a component of the "autoplay" Python application.
 The AI is required to be both effective and performant. It is permitted to
 read RAM directly to obtain information not otherwise observable, but it is
 not permitted to write to RAM; all actions must be issued through the
-standard game controller inputs, as a human player would. At present, only
-the original control scheme is supported (buttons A, B, and C); support for
-the six-button `--altControls` scheme is planned for a future iteration.
+standard game controller inputs, as a human player would. Both control
+schemes are supported: ORIGINAL 3 (Special, Punch, Jump) and ENHANCED 6 (also
+Back Attack, Pick Item and Throw Knife), sent to the game as actions through
+the execution data (`sor_remote.py`).
 
 ## Approach
 

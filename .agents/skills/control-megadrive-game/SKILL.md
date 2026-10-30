@@ -72,6 +72,14 @@ Treat `press_buttons(..., frames=N)` as a blocking hold for exactly `N` complete
 frame intervals starting at the next VSync. Use a fresh call for each input
 phase; the server releases the remote buttons before replying.
 
+**Streets of Rage does not read these gamepad commands.** It takes its remote
+input as actions through the execution data (`StreetsOfRageRecompilation`'s
+`SoRRemoteInput`). For it, use `autoplay`'s `SoRClient`
+(`autoplay/src/sor_autoplay/sor_remote.py`, on `PYTHONPATH` with
+`autoplay/src`): the same `press_buttons`/`hold_buttons`/`step_input` with Mega
+Drive masks, sent as actions, with each player on ORIGINAL 3 unless
+`schemes=` says otherwise.
+
 ## Host debug actions and cheats
 
 `trigger_option_hotkey(key)` sends one printable ASCII key to the same

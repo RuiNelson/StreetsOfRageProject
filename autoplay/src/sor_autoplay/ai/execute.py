@@ -137,8 +137,9 @@ START_MASK = 0x0080
 # stuck on the first initial forever. Yes/No still accepts any $F0 face
 # bit ($52AE); name-entry does not.
 NAME_CONFIRM_MASK = JUMP_MASK
-# The 6-button layout (--altControls, SixButtonLayout): A is the rear attack
-# (logical B+C), X the police special, Y a pickup and Z the knife throw.
+# The 6-button layout (ENHANCED 6, SixButtonLayout): A is the rear attack
+# (logical B+C), X the police special, Y a pickup and Z the knife throw --
+# sor_remote.SoRClient sends them as Back Attack, Special, Pick Item, Throw.
 SIX_BUTTON_REAR_ATTACK_MASK = 0x0010  # physical A
 SIX_BUTTON_POLICE_MASK = 0x0100  # physical X
 SIX_BUTTON_PICKUP_MASK = 0x0200  # physical Y
