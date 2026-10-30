@@ -517,14 +517,13 @@ Run the port:
 
 #### Default controls
 
-The game reads the keyboard and gamepads itself and binds them to actions, not
-to Mega Drive buttons. Each player has a control scheme:
+The game reads the keyboard and gamepads itself and binds them to actions+. Each player has a control scheme:
 
 - **ORIGINAL 3** (the default): Special, Punch and Jump, the original
   three-button game (Punch picks items up, Punch+Jump is the back attack);
-- **ENHANCED 6**: also Back Attack, Pick Item (a slightly wider reach than the
-  original) and Throw Knife; Punch never picks up, and Punch with a knife
-  stabs.
+- **ENHANCED 6**: also Back Attack, Pick Item and Throw Knife; Punch never picks up, and Punch with a knife always stabs and never throws.
+
+**Default bindings for keyboard**
 
 | Action | Player 1 | Player 2 |
 | --- | --- | --- |
@@ -537,11 +536,17 @@ to Mega Drive buttons. Each player has a control scheme:
 | Throw Knife (ENHANCED 6) | `N` | `I` |
 | Start | `V` (ORIGINAL 3), `M` (ENHANCED 6) | `L` |
 
+**Default bindings for gamepad**  
+  
+ENHANCED 6:
+
 <p align="center">
  <img src="docs/6buttons.webp" alt="ENHANCED 6 gamepad layout">
 </p>
 
-Player 1 gets the first gamepad found and player 2 the next one.
+For the ORIGINAL 3, the Special attack moves to R1/RB button.
+
+Player 1 gets the first gamepad found and player 2 the next one, if not configured to a specific gamepad.
 
 #### Configure keyboard and gamepad bindings
 
@@ -566,13 +571,7 @@ Start (on any gamepad) or Esc cancels without changing anything.
 The controls are saved at once in
 `~/.config/StreetsOfRageProject/controls.yaml`
 (`%USERPROFILE%\.config\StreetsOfRageProject\controls.yaml` on Windows),
-which is created with the defaults above on the first run and can also be
-edited by hand: each player has a `scheme` (`original3` or `enhanced6`), a
-`gamepad` (`auto`, `none`, or `device` with `gamepad_guid`), a left-stick
-`deadzone` in percent, and keyboard and gamepad bindings for each scheme (SDL
-key names such as `Z` or `Left Shift`; gamepad inputs by position: `South`,
-`East`, `West`, `North`, `LeftShoulder`, `RightShoulder`, `LeftTrigger`,
-`RightTrigger`, ...).
+which is created with the defaults above on the first run.
 
 #### Host keyboard shortcuts
 
