@@ -31,7 +31,7 @@ question with ticks where no choice was on offer.
 Run (host already up with ``--debugUtils``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/hold_threat_diag.py --out /tmp/holds.jsonl --seconds 150
 """
 
@@ -45,15 +45,15 @@ from collections import Counter
 
 from sor_autoplay.sor_remote import SoRClient
 
-from sor_autoplay.ai import reach
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
-from sor_autoplay.ai.observe import HoldTracker, NoraAttackTracker
-from sor_autoplay.ai.observe import generate_direct_observation_tokens
-from sor_autoplay.ai.tokens import Myself, find
+from sor_ai.ai import reach
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
+from sor_ai.ai.observe import HoldTracker, NoraAttackTracker
+from sor_ai.ai.observe import generate_direct_observation_tokens
+from sor_ai.ai.tokens import Myself, find
 from sor_autoplay.reach_gameplay import reach_gameplay
-from sor_autoplay.rom_data import RomData
-from sor_autoplay.state import read_snapshot
+from sor_ai.rom_data import RomData
+from sor_ai.state import read_snapshot
 
 # The two stable holds, facing bit cleared: the only bases at which
 # could_hold_actions offers anything at all. Everything else in $60-$6F is an

@@ -28,9 +28,9 @@ commit it.
 Run (host already up with ``--debugUtils``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/twins_lab.py --actor edge --out /tmp/twins.jsonl
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/twins_lab.py --check /tmp/twins.jsonl
 """
 
@@ -43,7 +43,7 @@ import sys
 import time
 from collections import Counter, deque
 
-from sor_autoplay import memory_map as mm
+from sor_ai import memory_map as mm
 
 WORK_RAM = 0xFF0000
 LEVEL = 5
@@ -149,7 +149,7 @@ class Edge:
 
 
 def reach_twins(client, loop, rom, scenario, *, seconds: float, settle_seconds: float) -> bool:
-    from sor_autoplay.state import read_snapshot
+    from sor_ai.state import read_snapshot
 
     deadline = time.monotonic() + seconds
     last_report = 0.0
@@ -207,12 +207,12 @@ class RecordingClient:
 def record(args) -> int:
     from megadrive_remote import SoRClient
 
-    from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-    from sor_autoplay.ai.loop import AgentLoop
+    from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+    from sor_ai.ai.loop import AgentLoop
     from sor_autoplay.debug_scenario import DebugScenario
     from sor_autoplay.reach_gameplay import reach_gameplay
-    from sor_autoplay.rom_data import RomData
-    from sor_autoplay.state import snapshot_from_memory_blocks  # noqa: F401 -- engage below
+    from sor_ai.rom_data import RomData
+    from sor_ai.state import snapshot_from_memory_blocks  # noqa: F401 -- engage below
 
     with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
@@ -313,7 +313,7 @@ def _snapshot(ram: bytes, rom):
 
 
 def check(args) -> int:
-    from sor_autoplay.ai import twins as model
+    from sor_ai.ai import twins as model
 
     rows = []
     with open(args.check, encoding="utf-8") as source:

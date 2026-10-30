@@ -3,10 +3,10 @@ import unittest
 from dataclasses import replace
 from unittest.mock import MagicMock
 
-from sor_autoplay.ai import execute as execute_module
-from sor_autoplay.ai import loop as loop_module
-from sor_autoplay.ai import priority as priority_module
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai import execute as execute_module
+from sor_ai.ai import loop as loop_module
+from sor_ai.ai import priority as priority_module
+from sor_ai.ai.tokens import (
     Antonio,
     CounterGrab,
     EngageAntonio,
@@ -27,9 +27,9 @@ from sor_autoplay.ai.tokens import (
     ThrowKnife,
     ThrowPepper,
 )
-from sor_autoplay.ai.tokens import PUNCH_RANGE_Y
-from sor_autoplay.ai.tokens import Myself, Partner
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import PUNCH_RANGE_Y
+from sor_ai.ai.tokens import Myself, Partner
+from sor_ai.ai.tokens import (
     AttackRange,
     Enemy,
     Nora,
@@ -37,8 +37,8 @@ from sor_autoplay.ai.tokens import (
     punch_outer_x,
     punch_usable_inner_x,
 )
-from sor_autoplay.ai.tokens import CameraRange, Stage
-from sor_autoplay.ai.execute import (
+from sor_ai.ai.tokens import CameraRange, Stage
+from sor_ai.ai.execute import (
     BREAKABLE_STOP_BUFFER,
     MOVE_DEADBAND_X,
     PICKUP_RANGE_X,
@@ -55,25 +55,25 @@ from sor_autoplay.ai.execute import (
     execute_verb,
     press_no_button,
 )
-from sor_autoplay.ai.decide import (
+from sor_ai.ai.decide import (
     CATCH_UP_DISTANCE_X,
     BREAKABLE_PUNCH_X,
     breakable_smash_outer_x,
     in_smash_range,
 )
-from sor_autoplay.ai.pathfind import Rect
-from sor_autoplay.ai.reach import (
+from sor_ai.ai.pathfind import Rect
+from sor_ai.ai.reach import (
     PIT_AVOID_MARGIN,
     pit_endangers,
     walking_box_would_grab,
 )
-from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.tokens import Breakable, Pit, Projectile
-from sor_autoplay.hitboxes import Hitbox
-from sor_autoplay import prop_solids
-from sor_autoplay.ai.tokens import HealthPickup, Weapon
-from sor_autoplay.ai.tokens import CallPolice
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
+from sor_ai.ai.tokens import Breakable, Pit, Projectile
+from sor_ai.hitboxes import Hitbox
+from sor_ai import prop_solids
+from sor_ai.ai.tokens import HealthPickup, Weapon
+from sor_ai.ai.tokens import CallPolice
+from sor_ai.ai.tokens import (
     HandleContinueMenu,
     DebugMrXAccept,
     HandleMrXDialog,
@@ -82,7 +82,7 @@ from sor_autoplay.ai.tokens import (
     InContinueMenu,
     InMrXDialog,
 )
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import (
     CatchUpPartner,
     ProjectileSidestep,
     RetreatFromDanger,
@@ -91,8 +91,8 @@ from sor_autoplay.ai.tokens import (
     WalkToPickup,
     WalkToWeapon,
 )
-from sor_autoplay.phases import CombatPhase
-from sor_autoplay.world_map import LANE_Y_MIN
+from sor_ai.phases import CombatPhase
+from sor_ai.world_map import LANE_Y_MIN
 
 UP = 0x0001
 DOWN = 0x0002
@@ -355,7 +355,7 @@ def _walk(verb, actor, others, *, ticks: int = 80):
 
 
 def _body_of(actor) -> Rect:
-    from sor_autoplay.ai import navigation as nav
+    from sor_ai.ai import navigation as nav
 
     return nav.body_rect(actor)
 
@@ -469,7 +469,7 @@ class BreakableApproachSideTests(unittest.TestCase):
     anything the AI itself flips every tick."""
 
     def _prop(self, x: int, y: int = 100):
-        from sor_autoplay.ai.tokens import Breakable
+        from sor_ai.ai.tokens import Breakable
 
         return Breakable(slot="prop", world_x=x, world_y=y, type_id=0x11)
 
@@ -1241,7 +1241,7 @@ class ExecuteRetreatFromDangerTests(unittest.TestCase):
         started.
         """
 
-        from sor_autoplay.ai import navigation as nav
+        from sor_ai.ai import navigation as nav
 
         actor = _myself(world_x=100, world_y=50)
         threat = replace(_enemy(world_x=150, world_y=50), combat_phase=CombatPhase.ATTACKING)

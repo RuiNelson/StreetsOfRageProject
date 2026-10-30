@@ -1,7 +1,7 @@
 import unittest
 
-from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
-from sor_autoplay.ai.tokens import Information
+from sor_ai.ai.tokens import AnimationInProgress, CameraRange, Stage
+from sor_ai.ai.tokens import Information
 
 
 class EssentialTokenTests(unittest.TestCase):

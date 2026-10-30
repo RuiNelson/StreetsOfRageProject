@@ -13,13 +13,13 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from . import __version__
-from .ai.gamepad import SharedGamepadState, VirtualGamepad
-from .ai.loop import AgentLoop
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
 from .debug_scenario import ENEMY_FAMILY_HOTKEYS, DebugScenario
 from .host_flags import HostModes, decode_host_modes
 from .hud import HUD_PAINT_MS_DEFAULT, ObserverHud
-from .rom_data import RomData
-from .state import (
+from sor_ai.rom_data import RomData
+from sor_ai.state import (
     GameSnapshot,
     disconnected_snapshot,
     read_snapshot,

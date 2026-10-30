@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay import prop_solids
+from sor_ai import prop_solids
 
 
 class RecordSelectionTests(unittest.TestCase):

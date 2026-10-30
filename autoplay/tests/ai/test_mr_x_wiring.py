@@ -10,8 +10,8 @@ engage, the hold loop's verbs, and what ``execute`` presses.
 import unittest
 from unittest.mock import MagicMock
 
-from sor_autoplay.ai import mr_x as model
-from sor_autoplay.ai.decide import (
+from sor_ai.ai import mr_x as model
+from sor_ai.ai.decide import (
     could_call_police,
     could_engage_mr_x,
     could_grab_enemy,
@@ -24,11 +24,11 @@ from sor_autoplay.ai.decide import (
     could_walk_to_pickup,
     live_mr_x,
 )
-from sor_autoplay.ai.execute import execute_verb
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai.priority import determine_priority_verb
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.execute import execute_verb
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai.priority import determine_priority_verb
+from sor_ai.ai.tokens import (
     AttackHeldEnemy,
     CameraRange,
     EngageMrX,
@@ -43,7 +43,7 @@ from sor_autoplay.ai.tokens import (
     Verb,
     find_all,
 )
-from sor_autoplay.phases import CombatPhase
+from sor_ai.phases import CombatPhase
 
 CAM_X = 128
 CAMERA = CameraRange(left=CAM_X + 0x20, right=CAM_X + 0x120, top=0, bottom=112)
@@ -178,7 +178,7 @@ class OwnershipTests(unittest.TestCase):
 
 class RankingTests(unittest.TestCase):
     def test_the_engage_wins_the_tick(self) -> None:
-        from sor_autoplay.ai.decide import generate_verb_tokens
+        from sor_ai.ai.decide import generate_verb_tokens
 
         context = generate_verb_tokens(generate_inference_tokens({_myself(), _mr_x(420.0), CAMERA}))
         verbs = find_all(determine_priority_verb(set(context)), Verb)

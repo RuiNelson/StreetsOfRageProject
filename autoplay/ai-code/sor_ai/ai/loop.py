@@ -1,7 +1,7 @@
 """``AgentLoop`` — one player's iteration of ``AI.md``'s process loop.
 
 ``tick`` never fetches RAM itself; it consumes an already-polled
-``GameSnapshot`` (see ``sor_autoplay.state.read_snapshot``), matching the
+``GameSnapshot`` (see ``sor_ai.state.read_snapshot``), matching the
 observer's existing single-poll-per-tick discipline.
 
 ``inform_hud`` implements AI.md's UI step: it copies the surviving
@@ -20,7 +20,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
-from sor_autoplay.state import GameSnapshot
+from sor_ai.state import GameSnapshot
 
 from .decide import generate_verb_tokens
 from .duel import DuelStyle

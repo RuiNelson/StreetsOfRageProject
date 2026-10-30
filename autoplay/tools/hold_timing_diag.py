@@ -27,7 +27,7 @@ lockstep. What comes out is one row per move:
 Run (host already up with ``--debugUtils``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/hold_timing_diag.py --character axel
 
 ``--character`` matters: the three characters do **not** share these numbers
@@ -45,13 +45,13 @@ import time
 from megadrive_remote import Buttons
 from sor_autoplay.sor_remote import SoRClient
 
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
-from sor_autoplay.memory_map import ACTION_HOLDING, ADDR_P1_OBJECT
-from sor_autoplay.phases import CombatPhase, player_phase
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
+from sor_ai.memory_map import ACTION_HOLDING, ADDR_P1_OBJECT
+from sor_ai.phases import CombatPhase, player_phase
 from sor_autoplay.reach_gameplay import reach_gameplay
-from sor_autoplay.rom_data import RomData
-from sor_autoplay.state import read_snapshot
+from sor_ai.rom_data import RomData
+from sor_ai.state import read_snapshot
 
 # Work RAM is $FF0000-$FFFFFF and ``step_input`` hands back all 64 KiB of it,
 # so an absolute address is read at its low 16 bits.

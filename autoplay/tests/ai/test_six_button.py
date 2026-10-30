@@ -8,10 +8,10 @@ up. Without the token every press is the original three-button scheme's.
 import unittest
 from unittest.mock import MagicMock
 
-from sor_autoplay.ai.execute import execute_verb
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.reach import item_a_b_press_takes
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.execute import execute_verb
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.reach import item_a_b_press_takes
+from sor_ai.ai.tokens import (
     CallPolice,
     HealthPickup,
     RearAttack,

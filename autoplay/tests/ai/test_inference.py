@@ -1,16 +1,16 @@
 import unittest
 
-from sor_autoplay.ai.tokens import Myself
-from sor_autoplay.ai.tokens import Enemy
-from sor_autoplay.ai.tokens import EnemyCluster, Surrounded
-from sor_autoplay.ai.inference import (
+from sor_ai.ai.tokens import Myself
+from sor_ai.ai.tokens import Enemy
+from sor_ai.ai.tokens import EnemyCluster, Surrounded
+from sor_ai.ai.inference import (
     check_for_clusters,
     check_for_surrounded,
     generate_inference_tokens,
 )
-from sor_autoplay.ai import reach
-from sor_autoplay.ai.tokens import Token
-from sor_autoplay.phases import CombatPhase
+from sor_ai.ai import reach
+from sor_ai.ai.tokens import Token
+from sor_ai.phases import CombatPhase
 
 
 def make_myself(**overrides) -> Myself:

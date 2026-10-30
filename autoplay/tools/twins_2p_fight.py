@@ -18,7 +18,7 @@ against the twins**).
 Run against a fresh host per fight (``--turbo 2 --silent --debugUtils``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/twins_2p_fight.py --out /tmp/twins_2p.jsonl
 """
 
@@ -30,12 +30,12 @@ import time
 
 from sor_autoplay.sor_remote import SoRClient
 
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
 from sor_autoplay.debug_scenario import DebugScenario
 from sor_autoplay.reach_gameplay import reach_gameplay
-from sor_autoplay.rom_data import RomData
-from sor_autoplay.state import read_snapshot
+from sor_ai.rom_data import RomData
+from sor_ai.state import read_snapshot
 
 START_MASK = 0x0080
 TWIN_TYPE = 0x58

@@ -40,7 +40,7 @@ Avoid (or keep generated until proven):
 
 Reimplementation makes the code readable; it never changes the data model.
 `autoplay` reads the running game by address over `megadrive_remote`
-(`autoplay/src/sor_autoplay/memory_map.py`, `rom_data.py`), and its enemy
+(`autoplay/ai-code/sor_ai/memory_map.py`, `rom_data.py`), and its enemy
 models are frame-exact. A manual body must therefore:
 
 - keep every piece of game state in 68000 work RAM at its original address,
@@ -295,7 +295,7 @@ unit tests:
 
 ```bash
 cd autoplay
-PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m unittest discover -s tests -q
+PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 -m unittest discover -s tests -q
 ```
 
 If gameplay could change, follow up with a short live session through

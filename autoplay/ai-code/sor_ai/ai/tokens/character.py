@@ -12,13 +12,13 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
-from sor_autoplay.hitboxes import Hitbox
-from sor_autoplay.memory_map import (
+from sor_ai.hitboxes import Hitbox
+from sor_ai.memory_map import (
     ACTION_HOLD_BASES,
     ACTION_THROW_AIR_TECHABLE,
     PLAYER_KNEE_CHAIN_BIT,
 )
-from sor_autoplay.phases import CombatPhase
+from sor_ai.phases import CombatPhase
 
 from .pickup_tokens import is_weapon_type
 from .tokens import Observed

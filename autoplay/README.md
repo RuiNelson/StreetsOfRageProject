@@ -82,7 +82,7 @@ Or directly:
 
 ```bash
 cd autoplay
-PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay
+PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay
 ```
 
 Options:
@@ -107,7 +107,7 @@ The window starts maximized (title bar kept; not exclusive fullscreen). Layout:
 ## Run the path-finding viewer
 
 A separate, standalone Tk window for the AI's path finder
-(`sor_autoplay/ai/pathfind/`). It connects to nothing: no host, no port, no
+(`sor_ai/ai/pathfind/`). It connects to nothing: no host, no port, no
 running `sor`. Draw a body, draw obstacles, pick a destination, and look at
 the vectors the planner returns.
 
@@ -131,7 +131,7 @@ destination kind — point, segment, or rectangle — and, for the last two,
 
 ```bash
 cd autoplay
-PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 -m unittest discover -s tests -q
+PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 -m unittest discover -s tests -q
 ```
 
 ## Layout
@@ -141,9 +141,7 @@ autoplay/
   pyproject.toml
   README.md
   CLAUDE.md
-  src/sor_autoplay/
-    app.py              # CLI + poll loop
-    hud.py              # maximized Tk: status + map
+  ai-code/sor_ai/       # the AI's core: no HUD, no sockets, no remote client
     state.py            # RAM → snapshot
     world_map.py        # camera + actors → map entities
     object_catalog.py   # type → symbol/color/family
@@ -151,6 +149,11 @@ autoplay/
     hazards.py          # pause, police, floor holes
     bcd.py              # packed-BCD helpers
     phases.py           # ordinary/boss/player combat phase decode
+    remote_input.py     # actions and the binary input documents
     ai/                 # symbolic AI (Token/Information/Verb pipeline)
+  src/sor_autoplay/     # the observer
+    app.py              # CLI + poll loop
+    hud.py              # maximized Tk: status + map
+    sor_remote.py       # SoRClient: the input documents over the remote link
   tests/
 ```

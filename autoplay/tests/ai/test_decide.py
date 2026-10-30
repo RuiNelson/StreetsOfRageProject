@@ -1,9 +1,9 @@
 import unittest
 from dataclasses import replace
 
-from sor_autoplay.ai import reach
+from sor_ai.ai import reach
 
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import (
     Attack,
     CounterGrab,
     FlipHold,
@@ -24,14 +24,14 @@ from sor_autoplay.ai.tokens import (
     ThrowKnife,
     ThrowPepper,
 )
-from sor_autoplay.ai.tokens import Myself, Partner
-from sor_autoplay.ai.tokens import EngageMrX, MrXOffice, PlayerDuel, RivalPlayer
-from sor_autoplay.ai.decide import could_engage_mr_x
-from sor_autoplay.ai.partner import do_not_harm_partner
-from sor_autoplay.ai.priority import determine_priority_verb
-from sor_autoplay.ai.tokens import find_all
-from sor_autoplay import prop_solids
-from sor_autoplay.ai.decide import (
+from sor_ai.ai.tokens import Myself, Partner
+from sor_ai.ai.tokens import EngageMrX, MrXOffice, PlayerDuel, RivalPlayer
+from sor_ai.ai.decide import could_engage_mr_x
+from sor_ai.ai.partner import do_not_harm_partner
+from sor_ai.ai.priority import determine_priority_verb
+from sor_ai.ai.tokens import find_all
+from sor_ai import prop_solids
+from sor_ai.ai.decide import (
     BREAKABLE_PUNCH_X,
     CATCH_UP_DISTANCE_X,
     breakable_smash_outer_x,
@@ -63,7 +63,7 @@ from sor_autoplay.ai.decide import (
     could_walk_to_pickup,
     could_walk_to_weapon,
 )
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import (
     Abadede,
     Antonio,
     Bongo,
@@ -80,18 +80,18 @@ from sor_autoplay.ai.tokens import (
     Nora,
     Souther,
 )
-from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, Stage
-from sor_autoplay.ai.tokens import Breakable, Pit, Projectile
-from sor_autoplay.ai.tokens import HealthPickup, LifePickup, Weapon
-from sor_autoplay.ai.tokens import CallPolice
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import AnimationInProgress, CameraRange, Stage
+from sor_ai.ai.tokens import Breakable, Pit, Projectile
+from sor_ai.ai.tokens import HealthPickup, LifePickup, Weapon
+from sor_ai.ai.tokens import CallPolice
+from sor_ai.ai.tokens import (
     HandleContinueMenu,
     HandleMrXDialog,
     InContinueMenu,
     InMrXDialog,
 )
-from sor_autoplay.ai.tokens import Verb, Token
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import Verb, Token
+from sor_ai.ai.tokens import (
     CatchUpPartner,
     ProjectileSidestep,
     RetreatFromDanger,
@@ -101,8 +101,8 @@ from sor_autoplay.ai.tokens import (
     WalkToPickup,
     WalkToWeapon,
 )
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.phases import CombatPhase
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.phases import CombatPhase
 
 
 def _with_inference(generator):
@@ -2567,7 +2567,7 @@ class InSmashRangeTests(unittest.TestCase):
         self.assertTrue(in_smash_range(actor, self._prop(dx=24, dy=8)))
 
     def test_a_prop_body_behind_the_origin_is_judged_by_its_box(self) -> None:
-        from sor_autoplay.hitboxes import Hitbox
+        from sor_ai.hitboxes import Hitbox
 
         actor = make_myself(world_x=100, world_y=48)
         # Origin at 32, body only behind the feet (the ROM solid's shape).
@@ -2605,7 +2605,7 @@ class InSmashRangeTests(unittest.TestCase):
         self.assertTrue(in_smash_range(actor, prop))
 
     def _booth(self, dx: int):
-        from sor_autoplay.hitboxes import Hitbox
+        from sor_ai.hitboxes import Hitbox
 
         x = 100 + dx
         return Breakable(

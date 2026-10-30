@@ -7,11 +7,11 @@ the target died); these pin the facts ``mr_x_plan`` rests on.
 
 import unittest
 
-from sor_autoplay.ai import garcia as model
-from sor_autoplay.ai import mr_x
-from sor_autoplay.ai import mr_x_plan
-from sor_autoplay.ai.garcia import GarciaSim, Outcome
-from sor_autoplay.ai.twins import BLAZE, ActorSim
+from sor_ai.ai import garcia as model
+from sor_ai.ai import mr_x
+from sor_ai.ai import mr_x_plan
+from sor_ai.ai.garcia import GarciaSim, Outcome
+from sor_ai.ai.twins import BLAZE, ActorSim
 
 CAM = 128
 FLOOR = mr_x.FLOOR_ROUND_8

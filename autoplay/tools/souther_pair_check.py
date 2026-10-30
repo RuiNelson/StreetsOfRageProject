@@ -16,7 +16,7 @@ in the ROM (``$17B52``'s contact test runs before the gate); that is the held
 one, not the one the plan asks about.
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/souther_pair_check.py /tmp/fight.jsonl [...]
 """
 
@@ -26,7 +26,7 @@ import argparse
 import json
 from collections import Counter
 
-from sor_autoplay.ai import souther_pair as pair
+from sor_ai.ai import souther_pair as pair
 
 SOUTHER_TYPE = 0x55
 

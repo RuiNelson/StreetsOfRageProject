@@ -12,8 +12,8 @@ import sys
 import unittest
 from abc import ABC
 
-from sor_autoplay.ai import kinematics
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai import kinematics
+from sor_ai.ai.tokens import (
     Abadede,
     Attack,
     Garcia,
@@ -25,7 +25,7 @@ from sor_autoplay.ai.tokens import (
     ThrowKnife,
     ThrowPepper,
 )
-from sor_autoplay.phases import CombatPhase
+from sor_ai.phases import CombatPhase
 
 AXEL, ADAM, BLAZE = 0, 1, 2
 

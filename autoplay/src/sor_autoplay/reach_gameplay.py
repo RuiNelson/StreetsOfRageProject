@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from . import memory_map as mm
+from sor_ai import memory_map as mm
 
 START_MASK = 0x0080
 A_MASK = 0x0010

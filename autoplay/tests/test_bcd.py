@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.bcd import bcd_long_digits, bcd_nibble_byte, bcd_word, format_score
+from sor_ai.bcd import bcd_long_digits, bcd_nibble_byte, bcd_word, format_score
 
 
 class BcdTests(unittest.TestCase):

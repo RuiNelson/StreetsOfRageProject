@@ -30,7 +30,7 @@ Run (host already up with ``--debugUtils``, e.g.
 ``./scripts/run.py --turbo 4 --lang en --debugUtils --port 7777 --silent``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/jack_fight.py --level 2 --out /tmp/jack.jsonl
 """
 
@@ -44,13 +44,13 @@ from collections import Counter, deque
 
 from sor_autoplay.sor_remote import SoRClient
 
-from sor_autoplay import memory_map as mm
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
+from sor_ai import memory_map as mm
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
 from sor_autoplay.debug_scenario import DebugScenario
 from sor_autoplay.reach_gameplay import reach_gameplay
-from sor_autoplay.rom_data import RomData
-from sor_autoplay.state import read_snapshot
+from sor_ai.rom_data import RomData
+from sor_ai.state import read_snapshot
 
 JACK_TYPE = 0x27
 AXE_TYPE = 0x28

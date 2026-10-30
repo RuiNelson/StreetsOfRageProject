@@ -14,7 +14,7 @@ its props and its Jack**): the sim showed the loop -- ``$07`` resetting off
 screen, ``$0A`` backing off it -- that the live traces only hinted at.
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/jack_sim.py --raw /tmp/r4.raw --from 56 --to 82 --every 60
 """
 
@@ -27,15 +27,15 @@ from collections import Counter
 
 from snapshot_replay import ReplaySource, iter_ticks, load_rom
 
-from sor_autoplay.ai import jack as J
-from sor_autoplay.ai.abadede import punch_spec
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
-from sor_autoplay.ai.reach import PIT_AVOID_MARGIN
-from sor_autoplay.ai.tokens import CameraRange, Jack, Myself, Pit, Projectile, Stage, find, find_all
-from sor_autoplay.state import read_snapshot
-from sor_autoplay.world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN
-import sor_autoplay.ai.loop as loop_module
+from sor_ai.ai import jack as J
+from sor_ai.ai.abadede import punch_spec
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
+from sor_ai.ai.reach import PIT_AVOID_MARGIN
+from sor_ai.ai.tokens import CameraRange, Jack, Myself, Pit, Projectile, Stage, find, find_all
+from sor_ai.state import read_snapshot
+from sor_ai.world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN
+import sor_ai.ai.loop as loop_module
 
 
 class _NoPad:

@@ -13,6 +13,7 @@ from _common import META_ROOT, find_tk_python, prepend_pythonpath
 
 def main() -> int:
     autoplay_src = META_ROOT / "autoplay" / "src"
+    ai_code = META_ROOT / "autoplay" / "ai-code"
     remote_src = META_ROOT / "MegaDriveEnvironment" / "python" / "src"
     if not (autoplay_src / "sor_autoplay").is_dir():
         print(f"autoplay package not found: {autoplay_src / 'sor_autoplay'}", file=sys.stderr)
@@ -36,7 +37,7 @@ def main() -> int:
 
     environment = os.environ.copy()
     environment["SOR_AUTOPLAY_PROG"] = Path(sys.argv[0]).name
-    prepend_pythonpath(environment, autoplay_src, remote_src)
+    prepend_pythonpath(environment, autoplay_src, ai_code, remote_src)
 
     command = [python, "-m", "sor_autoplay", *arguments]
     if os.name == "nt":

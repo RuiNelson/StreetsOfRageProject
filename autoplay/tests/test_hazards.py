@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.hazards import (
+from sor_ai.hazards import (
     FLOOR_CONVEYOR_LEFT,
     FLOOR_CONVEYOR_RIGHT,
     FLOOR_NONE,

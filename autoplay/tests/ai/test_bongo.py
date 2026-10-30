@@ -11,12 +11,12 @@ holder, and the lookahead built on all of it. The verb wiring is
 
 import unittest
 
-from sor_autoplay.ai import bongo as plan
-from sor_autoplay.ai import kinematics
-from sor_autoplay.ai.antonio import ActorSim, actor_update
-from sor_autoplay.ai.reach import PLAYER_BODY_REACH_X, walk_box_reach_x
-from sor_autoplay.ai.tokens import Bongo, CameraRange, Myself, Projectile
-from sor_autoplay.phases import CombatPhase
+from sor_ai.ai import bongo as plan
+from sor_ai.ai import kinematics
+from sor_ai.ai.antonio import ActorSim, actor_update
+from sor_ai.ai.reach import PLAYER_BODY_REACH_X, walk_box_reach_x
+from sor_ai.ai.tokens import Bongo, CameraRange, Myself, Projectile
+from sor_ai.phases import CombatPhase
 
 # Camera at world X 0: the walk clamp is 32..288 and his screen X is his
 # world X plus the $80 bias.

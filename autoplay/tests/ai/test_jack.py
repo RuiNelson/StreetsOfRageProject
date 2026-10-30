@@ -10,13 +10,13 @@ px an update, 48 px above his feet.
 
 import unittest
 
-from sor_autoplay.ai import jack as J
-from sor_autoplay.ai import kinematics
-from sor_autoplay.ai.antonio import ActorSim
-from sor_autoplay.ai.souther import HoldStep
-from sor_autoplay.ai.tokens import CameraRange, Jack, Myself, Projectile
-from sor_autoplay.memory_map import PLAYER_KNEE_CHAIN_BIT
-from sor_autoplay.phases import CombatPhase
+from sor_ai.ai import jack as J
+from sor_ai.ai import kinematics
+from sor_ai.ai.antonio import ActorSim
+from sor_ai.ai.souther import HoldStep
+from sor_ai.ai.tokens import CameraRange, Jack, Myself, Projectile
+from sor_ai.memory_map import PLAYER_KNEE_CHAIN_BIT
+from sor_ai.phases import CombatPhase
 
 FLOOR = 160.0
 BLAZE_BODY = (2, 12, -8, 8, -48, 0)
@@ -796,7 +796,7 @@ class ExactPlanTests(unittest.TestCase):
     )
 
     def test_it_agrees_with_the_exhaustive_search(self) -> None:
-        from sor_autoplay.ai.abadede import punch_spec
+        from sor_ai.ai.abadede import punch_spec
 
         spec = punch_spec(2)
         checked = 0

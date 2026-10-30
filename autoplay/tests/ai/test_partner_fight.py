@@ -13,17 +13,17 @@ perto de atacar, estuda bem o assunto e evita isso!". Four pieces:
 
 import unittest
 
-from sor_autoplay.ai import reach
-from sor_autoplay.ai.decide import generate_verb_tokens
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai.partner import (
+from sor_ai.ai import reach
+from sor_ai.ai.decide import generate_verb_tokens
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai.partner import (
     PARTNER_FIGHT_MEMORY_FRAMES,
     PartnerFightTracker,
     do_not_harm_partner,
 )
-from sor_autoplay.ai.priority import determine_priority_verb
-from sor_autoplay.ai.kinematics import FRAMES_PER_TICK
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.priority import determine_priority_verb
+from sor_ai.ai.kinematics import FRAMES_PER_TICK
+from sor_ai.ai.tokens import (
     CameraRange,
     Garcia,
     GrabEnemy,
@@ -36,7 +36,7 @@ from sor_autoplay.ai.tokens import (
     WalkToNearEnemy,
     find_all,
 )
-from sor_autoplay.phases import CombatPhase
+from sor_ai.phases import CombatPhase
 
 CAMERA = CameraRange(left=0, right=400, top=0, bottom=200)
 

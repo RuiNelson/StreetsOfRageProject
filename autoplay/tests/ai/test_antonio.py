@@ -9,14 +9,14 @@ a grab beat his kick, and the lookahead built on all of it. The verb wiring is
 
 import unittest
 
-from sor_autoplay.ai import antonio as plan
-from sor_autoplay.ai.tokens import Antonio, CameraRange, Myself, Projectile
-from sor_autoplay.memory_map import (
+from sor_ai.ai import antonio as plan
+from sor_ai.ai.tokens import Antonio, CameraRange, Myself, Projectile
+from sor_ai.memory_map import (
     PLAYER_CROSSOVER_SPENT_BIT,
     PLAYER_HIT_REACTION_BIT,
     PLAYER_KNEE_CHAIN_BIT,
 )
-from sor_autoplay.phases import CombatPhase
+from sor_ai.phases import CombatPhase
 
 # Camera at world X 0: the walk clamp is 32..288 and his screen X is his
 # world X plus the $80 bias.

@@ -12,7 +12,7 @@ and the nearest on-screen enemy's health (to eyeball whether swings land).
 Run (host already up with ``--debugUtils``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/armed_combat_diag.py --out /tmp/armed.jsonl --seconds 90
 """
 
@@ -25,16 +25,16 @@ import time
 
 from sor_autoplay.sor_remote import SoRClient
 
-from sor_autoplay.ai.execute import execute_tick
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai.decide import generate_verb_tokens
-from sor_autoplay.ai.observe import HoldTracker, NoraAttackTracker, generate_direct_observation_tokens
-from sor_autoplay.ai.priority import determine_priority_verb
-from sor_autoplay.ai.tokens import Myself, Verb, find, find_all
+from sor_ai.ai.execute import execute_tick
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai.decide import generate_verb_tokens
+from sor_ai.ai.observe import HoldTracker, NoraAttackTracker, generate_direct_observation_tokens
+from sor_ai.ai.priority import determine_priority_verb
+from sor_ai.ai.tokens import Myself, Verb, find, find_all
 from sor_autoplay.reach_gameplay import reach_gameplay
-from sor_autoplay.rom_data import RomData
-from sor_autoplay.state import read_snapshot
+from sor_ai.rom_data import RomData
+from sor_ai.state import read_snapshot
 
 
 def main() -> int:

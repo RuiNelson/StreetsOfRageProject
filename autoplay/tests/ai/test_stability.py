@@ -13,14 +13,14 @@ output back in the way the game would, and assert on the resulting sequence.
 import unittest
 from dataclasses import replace
 
-from sor_autoplay.ai.decide import CATCH_UP_DISTANCE_X, generate_verb_tokens, in_smash_range
-from sor_autoplay.ai.execute import execute_tick, execute_verb
-from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai.partner import do_not_harm_partner
-from sor_autoplay.ai import reach
-from sor_autoplay.ai.priority import determine_priority_verb
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.decide import CATCH_UP_DISTANCE_X, generate_verb_tokens, in_smash_range
+from sor_ai.ai.execute import execute_tick, execute_verb
+from sor_ai.ai.gamepad import AXIS_RAMP_TICKS, SharedGamepadState, VirtualGamepad
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai.partner import do_not_harm_partner
+from sor_ai.ai import reach
+from sor_ai.ai.priority import determine_priority_verb
+from sor_ai.ai.tokens import (
     DebugNoPolice,
     AttackHeldEnemy,
     Breakable,
@@ -44,8 +44,8 @@ from sor_autoplay.ai.tokens import (
     find,
     find_all,
 )
-from sor_autoplay.phases import CombatPhase
-from sor_autoplay import prop_solids
+from sor_ai.phases import CombatPhase
+from sor_ai import prop_solids
 
 UP = 0x0001
 DOWN = 0x0002
@@ -649,7 +649,7 @@ class SoutherChaseTests(unittest.TestCase):
     """The engage, end to end over the real pipeline (souther.plan_engage)."""
 
     def _positions(self, *, actor_x, actor_y, souther_x, souther_y, ticks):
-        from sor_autoplay.ai import souther as plan
+        from sor_ai.ai import souther as plan
 
         masks, winners = _run_souther(
             ticks=ticks,
@@ -895,7 +895,7 @@ class HoldSequenceStabilityTests(unittest.TestCase):
         # many ticks as fit inside it, not a tick constant. Pinned as a
         # length rather than "some knees": the bug this whole sequence test
         # exists for was a run of *zero*.
-        from sor_autoplay.ai.kinematics import (
+        from sor_ai.ai.kinematics import (
             frames_for_ticks,
             hold_knee_budget_frames,
         )
@@ -971,8 +971,8 @@ class HoldUnderThreatStabilityTests(unittest.TestCase):
         # reach.CLOSING_ENEMY_THREAT_FRAMES, and a knee takes longer than
         # that, so a threat the AI can see at all is a threat there is no
         # time to knee through.
-        from sor_autoplay.ai import kinematics
-        from sor_autoplay.ai.reach import CLOSING_ENEMY_THREAT_FRAMES
+        from sor_ai.ai import kinematics
+        from sor_ai.ai.reach import CLOSING_ENEMY_THREAT_FRAMES
 
         for character_id in (0, 1, 2):
             with self.subTest(character_id=character_id):

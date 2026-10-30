@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import (
     Abadede,
     Antonio,
     Bongo,
@@ -17,9 +17,9 @@ from sor_autoplay.ai.tokens import (
     Souther,
     enemy_class_for_type,
 )
-from sor_autoplay.ai.tokens import Surrounded
-from sor_autoplay.ai.tokens import Inferred, Information
-from sor_autoplay.phases import CombatPhase
+from sor_ai.ai.tokens import Surrounded
+from sor_ai.ai.tokens import Inferred, Information
+from sor_ai.phases import CombatPhase
 
 
 class EnemyTests(unittest.TestCase):

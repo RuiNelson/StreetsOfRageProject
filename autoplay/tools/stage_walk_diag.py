@@ -19,7 +19,7 @@ Run (host already up with ``--debugUtils``, e.g.
 ``./scripts/run.py --turbo 4 --lang en --debugUtils --port 7777 --silent``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/stage_walk_diag.py --level 6 --only-enemy jack --out /tmp/walk6.jsonl
 """
 
@@ -32,14 +32,14 @@ import time
 
 from sor_autoplay.sor_remote import SoRClient
 
-from sor_autoplay import memory_map as mm
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
+from sor_ai import memory_map as mm
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
 from sor_autoplay.debug_scenario import DebugScenario
-from sor_autoplay.hazards import collision_class_at
+from sor_ai.hazards import collision_class_at
 from sor_autoplay.reach_gameplay import reach_gameplay
-from sor_autoplay.rom_data import RomData
-from sor_autoplay.state import read_snapshot
+from sor_ai.rom_data import RomData
+from sor_ai.state import read_snapshot
 
 from snapshot_replay import RecordingSource, SnapshotRecorder
 

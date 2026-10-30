@@ -20,7 +20,7 @@ Run (host already up with ``--debugUtils``, e.g.
 ``./scripts/run.py --turbo 2 --lang en --debugUtils --port 7777 --silent``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/boss_fight.py --out /tmp/fight.jsonl
 """
 
@@ -34,16 +34,16 @@ from collections import Counter, deque
 
 from sor_autoplay.sor_remote import SoRClient
 
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
 from sor_autoplay.debug_scenario import DebugScenario
 from sor_autoplay.host_flags import decode_host_modes
-from sor_autoplay.memory_map import ACTION_HOLDING
-from sor_autoplay.phases import player_phase
+from sor_ai.memory_map import ACTION_HOLDING
+from sor_ai.phases import player_phase
 from sor_autoplay.reach_gameplay import reach_gameplay
-from sor_autoplay.rom_data import RomData
-from sor_autoplay.state import read_snapshot
-from sor_autoplay.world_map import MapEntity
+from sor_ai.rom_data import RomData
+from sor_ai.state import read_snapshot
+from sor_ai.world_map import MapEntity
 
 PLAYER_MAX_HEALTH = 80
 

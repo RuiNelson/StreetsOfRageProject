@@ -3,7 +3,7 @@
 Mirrors the former flat ``ai/`` module layout: base tokens, character and
 enemy observations, essential scene tokens, hazards, pickups, and the
 ``Verb`` branches. Pipeline modules and tests may import everything
-from this package, e.g. ``from sor_autoplay.ai.tokens import Myself``.
+from this package, e.g. ``from sor_ai.ai.tokens import Myself``.
 """
 
 from __future__ import annotations

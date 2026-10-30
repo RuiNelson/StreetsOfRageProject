@@ -93,7 +93,7 @@ class Breakable(StageObjects):
     # The prop's animation body box, rebuilt from the ROM shape tables.
     # This is what the prop *draws*, and it is not what stops a walking
     # actor: the wall is the per-type push-back rectangle in
-    # ``sor_autoplay.prop_solids``, which navigation/execute route against
+    # ``sor_ai.prop_solids``, which navigation/execute route against
     # and which needs only ``type_id``. Kept for display and for anything
     # that wants the sprite's own extent.
     hitbox: Hitbox | None = None

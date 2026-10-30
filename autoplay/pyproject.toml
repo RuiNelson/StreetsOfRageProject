@@ -19,8 +19,8 @@ dev = ["pytest>=7.0"]
 sor-autoplay = "sor_autoplay.app:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "ai-code"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "ai-code"]

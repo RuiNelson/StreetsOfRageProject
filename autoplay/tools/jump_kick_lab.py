@@ -28,7 +28,7 @@ screen to collide with.
 Run (host already up with ``--debugUtils``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/jump_kick_lab.py --character blaze --out /tmp/blaze.json
 """
 
@@ -43,7 +43,7 @@ from megadrive_remote import Buttons
 from sor_autoplay.sor_remote import SoRClient
 
 from sor_autoplay.debug_scenario import ENEMY_FAMILY_HOTKEYS
-from sor_autoplay.memory_map import ADDR_P1_OBJECT
+from sor_ai.memory_map import ADDR_P1_OBJECT
 from sor_autoplay.reach_gameplay import reach_gameplay
 
 # Work RAM is $FF0000-$FFFFFF and ``step_input`` hands back all 64 KiB of it.

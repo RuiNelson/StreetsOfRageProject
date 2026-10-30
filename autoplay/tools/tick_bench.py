@@ -19,10 +19,10 @@ each recording from its first tick with a fresh ``AgentLoop``. Exit status is
 1 on any outcome diff.
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src:tools python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src:tools python3.11 \\
         tools/tick_bench.py --raw r1.raw r3.raw --no-budget --canonical --save before.json
     # ... optimise ...
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src:tools python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src:tools python3.11 \\
         tools/tick_bench.py --raw r1.raw r3.raw --no-budget --canonical --compare before.json
 
 Two things make a plain replay differ from run to run, and an exactness check
@@ -50,10 +50,10 @@ from collections import defaultdict
 
 from snapshot_replay import ReplaySource, iter_ticks, load_rom
 
-from sor_autoplay.ai import decide, grunt_plan
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
-from sor_autoplay.state import read_snapshot
+from sor_ai.ai import decide, grunt_plan
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
+from sor_ai.state import read_snapshot
 
 
 class _RecordingPad:

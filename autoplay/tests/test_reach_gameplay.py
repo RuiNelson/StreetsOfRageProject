@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay import memory_map as mm
+from sor_ai import memory_map as mm
 from sor_autoplay.reach_gameplay import (
     A_MASK,
     CHARACTER_CONFIRM_SETTLE_VSYNCS,

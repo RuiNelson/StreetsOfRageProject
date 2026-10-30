@@ -23,7 +23,7 @@ This public meta-repository pins the repositories that make up the workspace:
 | `MegaDriveEnvironmentSampleGame/` | Dual-target sample for PC and real Mega Drive hardware | Project-owned; editable |
 | `RageDecompiler/` | Python disassembly and recompilation tools | Project-owned; editable |
 | `StreetsOfRageRecompilation/` | Streets of Rage analysis, generated C++, native overrides, and host executable | Project-owned; editable |
-| `autoplay/` | Python remote SoR observer + symbolic AI (`megadrive_remote`) | Project-owned; editable; **not a submodule** |
+| `autoplay/` | Python remote SoR observer (`src/sor_autoplay`, `megadrive_remote`) + the symbolic AI's core (`ai-code/sor_ai`) | Project-owned; editable; **not a submodule** |
 | `StreetsOfRageBuilder/` | Tauri + Next.js wizard that installs dependencies, clones, builds and adds a launcher shortcut | Project-owned; editable; **not a submodule** |
 | `Genesis-Plus-GX/` | Upstream emulator used only as a behavioral reference | Upstream; never edit |
 
@@ -205,7 +205,7 @@ Reimplemented routines make the code readable; they never move game state.
 Every field stays in 68000 work RAM at its original address, width, and
 encoding, updated on the same frame as the ROM, and data tables are still read
 from the ROM. `autoplay` reads the game by address
-(`autoplay/src/sor_autoplay/memory_map.py`, `rom_data.py`), so relocating
+(`autoplay/ai-code/sor_ai/memory_map.py`, `rom_data.py`), so relocating
 state into C++ objects or dynamic memory — the old roadmap's plan — is ruled
 out. Details: `StreetsOfRageRecompilation/CLAUDE.md` (**Manual subroutines**)
 and the `reimplement-subroutine` skill.
@@ -415,7 +415,7 @@ Score/tune commands and the ROM model + plan for each boss are documented in
   is the bad ending (user). Against the other player the AI fights for a
   person to enjoy, not to win efficiently (user: "mais aleatória, com mais
   movimentos diferentes. Menos eficiência fria"; enemies are never fought
-  differently) — `autoplay/src/sor_autoplay/ai/duel.py`, **Mr. X's betrayal
+  differently) — `autoplay/ai-code/sor_ai/ai/duel.py`, **Mr. X's betrayal
   duel: a fight, not a solver**.
 - Jack (`$27`, never in round 1; appears rounds 2, 4, 5, 6, 8) — **Jack: the
   ROM model and the plan**.
@@ -426,7 +426,7 @@ Score/tune commands and the ROM model + plan for each boss are documented in
 ### Testing against the street enemies
 
 Garcia (`$20`-`$23`), Signal, HakuRo and Nora are fought by one lookahead
-(`autoplay/src/sor_autoplay/ai/grunt.py`, `grunt_plan.py`, the verb
+(`autoplay/ai-code/sor_ai/ai/grunt.py`, `grunt_plan.py`, the verb
 `EngageGrunts`). Score it with `autoplay/tools/grunt_fight.py` (`--family
 garcia|signal|hakuro|nora|jack|all`, `--level N`; food and police off, a
 fresh host per run at `--turbo 2` with `--silent`), and check the models in

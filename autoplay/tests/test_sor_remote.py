@@ -230,8 +230,8 @@ class SoRClientTests(unittest.TestCase):
         self.assertEqual(client.last.players[1].schedule, ((sr.ACTION_PUNCH, 1), (0, 2)))
 
     def test_the_gamepad_and_the_loop_take_the_games_scheme(self):
-        from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-        from sor_autoplay.ai.loop import AgentLoop
+        from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+        from sor_ai.ai.loop import AgentLoop
 
         client = FakeClient(enhanced={1: True, 2: False})
         state = SharedGamepadState(client)

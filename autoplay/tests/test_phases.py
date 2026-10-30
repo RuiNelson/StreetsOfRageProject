@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import unittest
 
-from sor_autoplay.memory_map import (
+from sor_ai.memory_map import (
     ENEMY_ST_BLOCKED,
     ENEMY_ST_DEATH,
     ENEMY_ST_GRABBED,
     ENEMY_ST_KNOCKDOWN,
     ENEMY_ST_NORMAL,
 )
-from sor_autoplay.phases import (
+from sor_ai.phases import (
     CombatPhase,
     boss_phase,
     decode_target_seat,
@@ -19,7 +19,7 @@ from sor_autoplay.phases import (
     player_phase,
     should_ignore_as_target,
 )
-from sor_autoplay.world_map import MapEntity
+from sor_ai.world_map import MapEntity
 
 
 def _e(**kwargs) -> MapEntity:

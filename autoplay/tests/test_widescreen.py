@@ -9,13 +9,13 @@ import dataclasses
 import unittest
 from types import SimpleNamespace
 
-from sor_autoplay.ai import abadede, arena, grunt, jack, mr_x
+from sor_ai.ai import abadede, arena, grunt, jack, mr_x
 
-from sor_autoplay.ai.mr_x import actor_from_bytes as mr_x_actor
-from sor_autoplay.ai.observe import generate_direct_observation_tokens
-from sor_autoplay.ai.tokens import CameraRange, find
-from sor_autoplay.ai.twins import player_x_clamp
-from sor_autoplay.world_map import (
+from sor_ai.ai.mr_x import actor_from_bytes as mr_x_actor
+from sor_ai.ai.observe import generate_direct_observation_tokens
+from sor_ai.ai.tokens import CameraRange, find
+from sor_ai.ai.twins import player_x_clamp
+from sor_ai.world_map import (
     ACTORS_BYTES,
     CAMERA_BYTES,
     WIDESCREEN_EXTRA_X,

@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.attack_ranges import (
+from sor_ai.attack_ranges import (
     CONFIRMED_TYPE_SHAPES,
     MELEE_WEAPON_REACH_X,
     MIN_REACH_GAIN,
@@ -10,7 +10,7 @@ from sor_autoplay.attack_ranges import (
     attack_ranges_for_set,
     held_weapon_range,
 )
-from sor_autoplay.hitboxes import ShapeTables
+from sor_ai.hitboxes import ShapeTables
 
 SET_BASE = 0x1FC70  # garcia_animation_set, so ANIMATION_SET_FOR_TYPE resolves
 

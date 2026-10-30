@@ -12,8 +12,9 @@ from _common import META_ROOT, find_tk_python, prepend_pythonpath
 
 def main() -> int:
     autoplay_src = META_ROOT / "autoplay" / "src"
-    if not (autoplay_src / "sor_autoplay" / "ai" / "pathfind").is_dir():
-        print(f"pathfind package not found: {autoplay_src / 'sor_autoplay' / 'ai' / 'pathfind'}", file=sys.stderr)
+    ai_code = META_ROOT / "autoplay" / "ai-code"
+    if not (ai_code / "sor_ai" / "ai" / "pathfind").is_dir():
+        print(f"pathfind package not found: {ai_code / 'sor_ai' / 'ai' / 'pathfind'}", file=sys.stderr)
         return 1
     python = find_tk_python()
     if python is None:
@@ -22,8 +23,8 @@ def main() -> int:
         return 1
     environment = os.environ.copy()
     environment["SOR_PATHFIND_PROG"] = Path(sys.argv[0]).name
-    prepend_pythonpath(environment, autoplay_src)
-    os.execve(python, [python, "-m", "sor_autoplay.ai.pathfind.viewer", *sys.argv[1:]], environment)
+    prepend_pythonpath(environment, autoplay_src, ai_code)
+    os.execve(python, [python, "-m", "sor_autoplay.pathfind_viewer", *sys.argv[1:]], environment)
     return 1
 
 

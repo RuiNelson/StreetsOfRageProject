@@ -12,16 +12,16 @@ import unittest
 from dataclasses import replace
 from unittest.mock import MagicMock
 
-from sor_autoplay.ai import navigation as nav
-from sor_autoplay.ai import press as press_model
-from sor_autoplay.ai.decide import could_hold_actions
-from sor_autoplay.ai.execute import execute_tick
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai.kinematics import walk_speeds
-from sor_autoplay.ai.pathfind import Rect
-from sor_autoplay.hitboxes import Hitbox
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai import navigation as nav
+from sor_ai.ai import press as press_model
+from sor_ai.ai.decide import could_hold_actions
+from sor_ai.ai.execute import execute_tick
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai.kinematics import walk_speeds
+from sor_ai.ai.pathfind import Rect
+from sor_ai.hitboxes import Hitbox
+from sor_ai.ai.tokens import (
     AttackHeldEnemy,
     CameraRange,
     FlipHold,
@@ -32,7 +32,7 @@ from sor_autoplay.ai.tokens import (
     Wall,
     WalkToAdvanceStage,
 )
-from sor_autoplay.phases import CombatPhase
+from sor_ai.phases import CombatPhase
 
 UP = 0x0001
 DOWN = 0x0002
@@ -246,7 +246,7 @@ class PressObstacleTests(unittest.TestCase):
         self.assertEqual(len(shaking), 2)
 
     def test_the_press_is_no_projectile(self) -> None:
-        from sor_autoplay.ai.decide import could_projectile_sidestep
+        from sor_ai.ai.decide import could_projectile_sidestep
 
         self.assertEqual(
             could_projectile_sidestep({_blaze(1811, 71), _press(state=press_model.STATE_FALLING)}),
@@ -552,7 +552,7 @@ class PressEnvelopeTests(unittest.TestCase):
         # window, the street plan held DOWN-RIGHT at x 4576 lane 93 (camera
         # edge), the escape held UP the tick after, and so on until it landed.
         # The pad the verb drives keeps the step that stays clear.
-        import sor_autoplay.ai.execute as execute_module
+        import sor_ai.ai.execute as execute_module
 
         actor = _blaze(4576, 93)
         press = _press(x=4520, state=press_model.STATE_FALLING)

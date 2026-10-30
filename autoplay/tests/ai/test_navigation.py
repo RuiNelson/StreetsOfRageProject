@@ -6,10 +6,10 @@ import unittest
 from dataclasses import replace
 from unittest import mock
 
-from sor_autoplay.ai import navigation as nav
-from sor_autoplay.ai.pathfind import PointGoal, Rect, RegionGoal
-from sor_autoplay.ai.pathfind.search import SEALED_MAX_NODES
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai import navigation as nav
+from sor_ai.ai.pathfind import PointGoal, Rect, RegionGoal
+from sor_ai.ai.pathfind.search import SEALED_MAX_NODES
+from sor_ai.ai.tokens import (
     AttackRange,
     Breakable,
     CameraRange,
@@ -19,11 +19,11 @@ from sor_autoplay.ai.tokens import (
     Pit,
     Stage,
 )
-from sor_autoplay.ai.reach import PIT_AVOID_MARGIN
-from sor_autoplay.phases import CombatPhase
-from sor_autoplay.hitboxes import Hitbox
-from sor_autoplay.world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN
-from sor_autoplay import prop_solids
+from sor_ai.ai.reach import PIT_AVOID_MARGIN
+from sor_ai.phases import CombatPhase
+from sor_ai.hitboxes import Hitbox
+from sor_ai.world_map import LANE_Y_MAX_DEFAULT, LANE_Y_MIN
+from sor_ai import prop_solids
 
 
 def _myself(*, world_x=0, world_y=0, hitbox=None) -> Myself:
@@ -271,7 +271,7 @@ class ObstacleTests(unittest.TestCase):
         # in front -- that must stay a graze. If the lattice treats it as
         # "already inside" the wall vanishes and the route walks UP into
         # the real solid.
-        from sor_autoplay.ai.pathfind.grid import Lattice
+        from sor_ai.ai.pathfind.grid import Lattice
 
         prop = Breakable(slot="obj09", world_x=280, world_y=40, type_id=0x11)
         origin = (280.0, 44.0)

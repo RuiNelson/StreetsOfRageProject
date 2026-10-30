@@ -9,9 +9,9 @@ fractions here, so equality is the right test, not closeness.
 
 import unittest
 
-from sor_autoplay.ai import jump_kick
-from sor_autoplay.ai.tokens import Enemy, Myself, Partner
-from sor_autoplay.phases import CombatPhase
+from sor_ai.ai import jump_kick
+from sor_ai.ai.tokens import Enemy, Myself, Partner
+from sor_ai.phases import CombatPhase
 
 AXEL, ADAM, BLAZE = 0, 1, 2
 
@@ -212,9 +212,9 @@ class PartnerPadKickTests(unittest.TestCase):
     def _tick(self, partner_x: int):
         from unittest.mock import MagicMock
 
-        from sor_autoplay.ai.execute import execute_tick
-        from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-        from sor_autoplay.ai.tokens import JumpAttack
+        from sor_ai.ai.execute import execute_tick
+        from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+        from sor_ai.ai.tokens import JumpAttack
 
         client = MagicMock()
         gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)

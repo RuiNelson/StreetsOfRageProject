@@ -29,7 +29,7 @@ launched, whether he died).
 Run (host already up with ``--debugUtils``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/bongo_lab.py --out /tmp/bongo_lab.jsonl
 """
 
@@ -44,18 +44,18 @@ from collections import Counter, deque
 
 from sor_autoplay.sor_remote import SoRClient
 
-from sor_autoplay import memory_map as mm
-from sor_autoplay.ai import bongo as plan
-from sor_autoplay.ai.antonio import ActorSim
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
-from sor_autoplay.ai.observe import generate_direct_observation_tokens
-from sor_autoplay.ai.tokens import Bongo, CameraRange, Myself, Projectile, find, find_all
+from sor_ai import memory_map as mm
+from sor_ai.ai import bongo as plan
+from sor_ai.ai.antonio import ActorSim
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
+from sor_ai.ai.observe import generate_direct_observation_tokens
+from sor_ai.ai.tokens import Bongo, CameraRange, Myself, Projectile, find, find_all
 from sor_autoplay.debug_scenario import DebugScenario
 from sor_autoplay.reach_gameplay import reach_gameplay
-from sor_autoplay.rom_data import RomData
-from sor_autoplay.state import read_snapshot, snapshot_from_memory_blocks
-from sor_autoplay.world_map import ACTORS_BYTES, CAMERA_BYTES
+from sor_ai.rom_data import RomData
+from sor_ai.state import read_snapshot, snapshot_from_memory_blocks
+from sor_ai.world_map import ACTORS_BYTES, CAMERA_BYTES
 
 WORK_RAM = 0xFF0000
 LEVEL = 4

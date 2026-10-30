@@ -5,8 +5,8 @@ from __future__ import annotations
 import math
 import unittest
 
-from sor_autoplay.ai.pathfind import Direction, Edge, Point, Rect, Segment
-from sor_autoplay.ai.pathfind.geometry import direction_from_offset, octile_distance
+from sor_ai.ai.pathfind import Direction, Edge, Point, Rect, Segment
+from sor_ai.ai.pathfind.geometry import direction_from_offset, octile_distance
 
 
 class RectTests(unittest.TestCase):

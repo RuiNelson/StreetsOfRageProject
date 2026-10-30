@@ -8,10 +8,10 @@ replay); these pin the facts the plan rests on, each as the ROM plays it.
 
 import unittest
 
-from sor_autoplay.ai import mr_x as model
-from sor_autoplay.ai import mr_x_plan
-from sor_autoplay.ai.mr_x import BulletSim, MrXSim, Outcome
-from sor_autoplay.ai.twins import BLAZE, ActorSim
+from sor_ai.ai import mr_x as model
+from sor_ai.ai import mr_x_plan
+from sor_ai.ai.mr_x import BulletSim, MrXSim, Outcome
+from sor_ai.ai.twins import BLAZE, ActorSim
 
 CAM = 128
 FLOOR = model.FLOOR_ROUND_8

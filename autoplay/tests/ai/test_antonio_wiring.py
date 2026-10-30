@@ -9,17 +9,17 @@ chamada da polícia!").
 import unittest
 from unittest.mock import MagicMock
 
-from sor_autoplay.ai.decide import (
+from sor_ai.ai.decide import (
     could_call_police,
     could_engage_antonio,
     could_hold_actions,
     generate_verb_tokens,
 )
-from sor_autoplay.ai.execute import execute_verb
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai.priority import determine_priority_verb
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.execute import execute_verb
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai.priority import determine_priority_verb
+from sor_ai.ai.tokens import (
     Antonio,
     AttackHeldEnemy,
     Bongo,
@@ -41,8 +41,8 @@ from sor_autoplay.ai.tokens import (
     WalkToPickup,
     find_all,
 )
-from sor_autoplay.memory_map import PLAYER_KNEE_CHAIN_BIT
-from sor_autoplay.phases import CombatPhase, boss_phase
+from sor_ai.memory_map import PLAYER_KNEE_CHAIN_BIT
+from sor_ai.phases import CombatPhase, boss_phase
 
 CAMERA = CameraRange(left=32, right=288, top=0, bottom=112)
 UP, DOWN, LEFT, RIGHT = 0x0001, 0x0002, 0x0004, 0x0008

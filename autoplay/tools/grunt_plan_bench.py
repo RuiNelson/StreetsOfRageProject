@@ -16,10 +16,10 @@ the ``PlanMemory`` as it was -- and then
 Capture once, then iterate against the cached inputs (``--cache FILE``)::
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src:tools python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src:tools python3.11 \\
         tools/grunt_plan_bench.py --raw r1.raw r3.raw --cache calls.pkl --save before.json
     # ... optimise ...
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src:tools python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src:tools python3.11 \\
         tools/grunt_plan_bench.py --cache calls.pkl --compare before.json
 
 The cache pickles the model objects, so it is only good while their fields
@@ -43,10 +43,10 @@ from collections import defaultdict
 
 from snapshot_replay import ReplaySource, iter_ticks, load_rom
 
-from sor_autoplay.ai import grunt_plan
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
-from sor_autoplay.state import read_snapshot
+from sor_ai.ai import grunt_plan
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
+from sor_ai.state import read_snapshot
 
 
 class _NoPad:

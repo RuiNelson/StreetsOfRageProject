@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest import mock
 
-from sor_autoplay.ai.pathfind import (
+from sor_ai.ai.pathfind import (
     Direction,
     Edge,
     Lattice,
@@ -21,7 +21,7 @@ from sor_autoplay.ai.pathfind import (
     SegmentGoal,
     find_path,
 )
-from sor_autoplay.ai.pathfind import search as search_module
+from sor_ai.ai.pathfind import search as search_module
 
 WORLD = Rect(0, 0, 320, 112)
 BODY = Rect(0, 0, 16, 16)
@@ -383,7 +383,7 @@ class ObstacleTests(unittest.TestCase):
         # A body whose edge merely clips a 1px-tall floor is not "already
         # inside" it. Dropping that wall is how a first-level phone booth
         # vanished from the search while the actor stood legally in front.
-        from sor_autoplay.ai.pathfind.grid import Lattice
+        from sor_ai.ai.pathfind.grid import Lattice
 
         wall = Rect(80, 36.5, 40, 1.0)
         start = Rect(92, 36, 16, 16)  # overlaps the 1px, centre at y=44

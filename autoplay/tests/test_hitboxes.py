@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock
 
-from sor_autoplay.hitboxes import (
+from sor_ai.hitboxes import (
     CACHED_BOX_BYTES,
     LANE_EXTENT_COUNT,
     OBJ_ATTACK_BOX_ID,

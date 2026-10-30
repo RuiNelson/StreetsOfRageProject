@@ -1,13 +1,13 @@
 import os
 import unittest
 
-from sor_autoplay.ai.reach import CLOSING_ENEMY_THREAT_FRAMES
-from sor_autoplay.ai.tokens import CounterGrab, EnemyCluster, PartnerFight, Punch
-from sor_autoplay.ai.loop import VerbState
-from sor_autoplay.ai.tokens import CallPolice
-from sor_autoplay.ai.tokens import CatchUpPartner, WalkToAdvanceStage
-from sor_autoplay.ai.tokens.character import PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
-from sor_autoplay.hitboxes import Hitbox
+from sor_ai.ai.reach import CLOSING_ENEMY_THREAT_FRAMES
+from sor_ai.ai.tokens import CounterGrab, EnemyCluster, PartnerFight, Punch
+from sor_ai.ai.loop import VerbState
+from sor_ai.ai.tokens import CallPolice
+from sor_ai.ai.tokens import CatchUpPartner, WalkToAdvanceStage
+from sor_ai.ai.tokens.character import PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
+from sor_ai.hitboxes import Hitbox
 from sor_autoplay.hud import ObserverHud, _window_config_path
 from sor_autoplay.hud import _describe_verb, _describe_pending
 from sor_autoplay.hud import (
@@ -22,8 +22,8 @@ from sor_autoplay.hud import (
     _hitbox_to_canvas,
 )
 from sor_autoplay.hud import _CLUSTER_PAD_X, _CLUSTER_PAD_Y
-from sor_autoplay.phases import CombatPhase
-from sor_autoplay.world_map import MapEntity, WorldMap
+from sor_ai.phases import CombatPhase
+from sor_ai.world_map import MapEntity, WorldMap
 
 
 class DescribeVerbTests(unittest.TestCase):

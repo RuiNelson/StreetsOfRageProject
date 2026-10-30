@@ -1,28 +1,28 @@
 import unittest
 from dataclasses import replace
 
-from sor_autoplay.ai import decide as decide_module
-from sor_autoplay.ai import reach as reach_module
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai.tokens import Myself, Partner
-from sor_autoplay.ai.tokens import Abadede, Enemy, Garcia, Jack, Nora, Souther
-from sor_autoplay.ai.tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, Stage
-from sor_autoplay.ai.tokens import PlayerDuel, RivalPlayer
-from sor_autoplay.ai.tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
-from sor_autoplay.ai.tokens import Breakable, Pit, Press, Projectile, Wall
-from sor_autoplay.ai.observe import (
+from sor_ai.ai import decide as decide_module
+from sor_ai.ai import reach as reach_module
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai.tokens import Myself, Partner
+from sor_ai.ai.tokens import Abadede, Enemy, Garcia, Jack, Nora, Souther
+from sor_ai.ai.tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, Stage
+from sor_ai.ai.tokens import PlayerDuel, RivalPlayer
+from sor_ai.ai.tokens import NORA_TICKS_SINCE_ATTACK_UNKNOWN
+from sor_ai.ai.tokens import Breakable, Pit, Press, Projectile, Wall
+from sor_ai.ai.observe import (
     HoldTracker,
     NoraAttackTracker,
     generate_direct_observation_tokens,
 )
-from sor_autoplay.ai.tokens import HealthPickup, Weapon
-from sor_autoplay.ai.tokens import WalkToNearEnemy
-from sor_autoplay.ai.tokens import find, find_all
-from sor_autoplay.hazards import FloorHole
-from sor_autoplay.hitboxes import Hitbox
-from sor_autoplay.phases import CombatPhase
-from sor_autoplay.state import GameSnapshot, PlayerSnapshot
-from sor_autoplay.world_map import MapEntity, WorldMap
+from sor_ai.ai.tokens import HealthPickup, Weapon
+from sor_ai.ai.tokens import WalkToNearEnemy
+from sor_ai.ai.tokens import find, find_all
+from sor_ai.hazards import FloorHole
+from sor_ai.hitboxes import Hitbox
+from sor_ai.phases import CombatPhase
+from sor_ai.state import GameSnapshot, PlayerSnapshot
+from sor_ai.world_map import MapEntity, WorldMap
 
 
 def _player_snapshot(

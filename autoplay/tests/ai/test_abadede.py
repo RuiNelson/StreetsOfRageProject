@@ -10,13 +10,13 @@ and his box misses. The verb wiring is ``test_abadede_wiring``'s.
 
 import unittest
 
-from sor_autoplay.ai import abadede as plan
-from sor_autoplay.ai import kinematics
-from sor_autoplay.ai.antonio import ActorSim, actor_update
-from sor_autoplay.ai.reach import PLAYER_BODY_REACH_X, walk_box_reach_x
-from sor_autoplay.ai.tokens import Abadede, Myself
-from sor_autoplay.memory_map import PLAYER_KNEE_CHAIN_BIT
-from sor_autoplay.phases import CombatPhase
+from sor_ai.ai import abadede as plan
+from sor_ai.ai import kinematics
+from sor_ai.ai.antonio import ActorSim, actor_update
+from sor_ai.ai.reach import PLAYER_BODY_REACH_X, walk_box_reach_x
+from sor_ai.ai.tokens import Abadede, Myself
+from sor_ai.memory_map import PLAYER_KNEE_CHAIN_BIT
+from sor_ai.phases import CombatPhase
 
 # Camera at world X 0: his screen X is his world X plus the $80 bias.
 CAM_X = 0

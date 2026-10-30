@@ -15,7 +15,7 @@ from sor_autoplay.app import (
     _LockstepCapture,
     build_parser,
 )
-from sor_autoplay.state import WORK_RAM_SIZE, snapshot_from_work_ram
+from sor_ai.state import WORK_RAM_SIZE, snapshot_from_work_ram
 
 
 class LockstepCaptureTests(unittest.TestCase):

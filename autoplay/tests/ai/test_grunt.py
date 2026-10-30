@@ -9,10 +9,10 @@ these pin the facts the plan rests on.
 
 import unittest
 
-from sor_autoplay.ai import grunt as model
-from sor_autoplay.ai import grunt_plan
-from sor_autoplay.ai.grunt import GruntSim, Outcome
-from sor_autoplay.ai.twins import BLAZE, ActorSim
+from sor_ai.ai import grunt as model
+from sor_ai.ai import grunt_plan
+from sor_ai.ai.grunt import GruntSim, Outcome
+from sor_ai.ai.twins import BLAZE, ActorSim
 
 CAM = 128
 FLOOR = 160
@@ -215,7 +215,7 @@ class ObservationTests(unittest.TestCase):
     def test_every_modelled_type_keeps_its_raw_slot(self) -> None:
         # Without it the plan never saw a Signal, a HakuRo or a Nora live: the
         # map kept raw bytes for Mr. X and the Garcias alone.
-        from sor_autoplay.world_map import RAW_SLOT_TYPES
+        from sor_ai.world_map import RAW_SLOT_TYPES
 
         self.assertLessEqual(model.MODELLED_TYPES, RAW_SLOT_TYPES)
         self.assertIn(model.KNIFE_TYPE, RAW_SLOT_TYPES)

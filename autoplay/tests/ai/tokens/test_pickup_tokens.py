@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import (
     HealthPickup,
     LifePickup,
     Pickup,
@@ -10,7 +10,7 @@ from sor_autoplay.ai.tokens import (
     build_pickup_token,
     weapon_rank,
 )
-from sor_autoplay.ai.tokens import Information
+from sor_ai.ai.tokens import Information
 
 
 class WeaponTests(unittest.TestCase):

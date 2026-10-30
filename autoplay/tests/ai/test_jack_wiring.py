@@ -7,17 +7,17 @@
 import unittest
 from unittest.mock import MagicMock
 
-from sor_autoplay.ai import jack as jack_plan
-from sor_autoplay.ai.decide import (
+from sor_ai.ai import jack as jack_plan
+from sor_ai.ai.decide import (
     could_engage_jack,
     could_hold_actions,
     could_projectile_sidestep,
 )
-from sor_autoplay.ai.execute import execute_verb
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai.priority import determine_priority_verb
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.execute import execute_verb
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai.priority import determine_priority_verb
+from sor_ai.ai.tokens import (
     AttackHeldEnemy,
     CameraRange,
     EngageJack,
@@ -31,7 +31,7 @@ from sor_autoplay.ai.tokens import (
     WalkToNearEnemy,
     find_all,
 )
-from sor_autoplay.phases import CombatPhase
+from sor_ai.phases import CombatPhase
 
 CAM_X = 2700
 CAMERA = CameraRange(left=CAM_X + 0x20, right=CAM_X + 0x120, top=0, bottom=112)

@@ -14,11 +14,11 @@ para armas [...] (no caso de empate, tentar pegar)". Three pieces meet here:
 import unittest
 from unittest.mock import MagicMock
 
-from sor_autoplay.ai import reach
-from sor_autoplay.ai.execute import execute_tick
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.partner import item_is_the_partners
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai import reach
+from sor_ai.ai.execute import execute_tick
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.partner import item_is_the_partners
+from sor_ai.ai.tokens import (
     CameraRange,
     Garcia,
     HealthPickup,
@@ -31,7 +31,7 @@ from sor_autoplay.ai.tokens import (
     Stage,
     Weapon,
 )
-from sor_autoplay.phases import CombatPhase
+from sor_ai.phases import CombatPhase
 
 UP = 0x0001
 DOWN = 0x0002

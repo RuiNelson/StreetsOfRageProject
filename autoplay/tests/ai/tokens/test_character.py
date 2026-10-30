@@ -1,13 +1,13 @@
 import unittest
 
-from sor_autoplay.ai.tokens import Character, Hitbox, Myself, Partner, PlayableCharacter
-from sor_autoplay.ai.tokens import Information, Token
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import Character, Hitbox, Myself, Partner, PlayableCharacter
+from sor_ai.ai.tokens import Information, Token
+from sor_ai.ai.tokens import (
     punch_outer_x,
     rear_attack_behind_max_x,
     rear_attack_front_max_x,
 )
-from sor_autoplay.phases import CombatPhase
+from sor_ai.phases import CombatPhase
 
 
 def _myself(**overrides) -> Myself:

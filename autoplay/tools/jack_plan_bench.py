@@ -19,11 +19,11 @@ Capture once, then iterate on the code against the cached contexts
 recordings when missing):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/jack_plan_bench.py --raw /tmp/j/r4.raw /tmp/j/r5.raw \\
         --cache /tmp/j/ctx.pkl --save /tmp/j/plans_before.json
     # ... optimise ...
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/jack_plan_bench.py --cache /tmp/j/ctx.pkl --compare /tmp/j/plans_before.json
 
 ``--profile`` prints a cProfile of one pass. Exit status is 1 on any plan diff.
@@ -53,12 +53,12 @@ from collections import defaultdict
 
 from snapshot_replay import ReplaySource, iter_ticks, load_rom
 
-import sor_autoplay.ai.loop as loop_module
-from sor_autoplay.ai import execute
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
-from sor_autoplay.ai.tokens import EngageJack, Jack, find_all
-from sor_autoplay.state import read_snapshot
+import sor_ai.ai.loop as loop_module
+from sor_ai.ai import execute
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
+from sor_ai.ai.tokens import EngageJack, Jack, find_all
+from sor_ai.state import read_snapshot
 
 
 class _NoPad:

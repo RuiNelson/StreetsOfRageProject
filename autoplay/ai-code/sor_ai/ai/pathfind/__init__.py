@@ -34,10 +34,10 @@ That last property is the reason the search exists at all. A beat-em-up AI
 does not steer with a continuous heading; it holds a direction on a d-pad for
 a while. Planning in units of "hold this way for at least N px" produces
 movement the game can actually execute, and the merging in
-:func:`~sor_autoplay.ai.pathfind.search.find_path` means a long straight run
+:func:`~sor_ai.ai.pathfind.search.find_path` means a long straight run
 comes back as one vector instead of a stutter of single cells.
 
-    >>> from sor_autoplay.ai.pathfind import Rect, PointGoal, Point, find_path
+    >>> from sor_ai.ai.pathfind import Rect, PointGoal, Point, find_path
     >>> path = find_path(
     ...     start=Rect(0, 0, 16, 16),
     ...     goal=PointGoal(Point(60, 4)),
@@ -48,9 +48,9 @@ comes back as one vector instead of a stutter of single cells.
     >>> path.reached
     True
 
-See :mod:`~sor_autoplay.ai.pathfind.grid` for the collision rules (swept
+See :mod:`~sor_ai.ai.pathfind.grid` for the collision rules (swept
 moves, no corner cutting, and how an already-overlapping start escapes) and
-:mod:`~sor_autoplay.ai.pathfind.search` for what a failed search returns.
+:mod:`~sor_ai.ai.pathfind.search` for what a failed search returns.
 """
 
 from __future__ import annotations

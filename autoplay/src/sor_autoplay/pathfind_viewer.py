@@ -21,7 +21,7 @@ default ``python3`` on this machine has none)::
 or directly::
 
     cd autoplay
-    PYTHONPATH=src python3.11 -m sor_autoplay.ai.pathfind.viewer
+    PYTHONPATH=src:ai-code python3.11 -m sor_autoplay.pathfind_viewer
 
 Everything on screen is computed through the package's public API --
 ``find_path``, ``Path.positions``, the three goal classes -- so what the
@@ -36,10 +36,10 @@ import os
 import tkinter as tk
 from dataclasses import dataclass
 
-from .geometry import Edge, Point, Rect, Segment
-from .goals import Goal, PointGoal, RectGoal, SegmentGoal
-from .grid import Lattice
-from .search import DEFAULT_MAX_NODES, Path, find_path
+from sor_ai.ai.pathfind.geometry import Edge, Point, Rect, Segment
+from sor_ai.ai.pathfind.goals import Goal, PointGoal, RectGoal, SegmentGoal
+from sor_ai.ai.pathfind.grid import Lattice
+from sor_ai.ai.pathfind.search import DEFAULT_MAX_NODES, Path, find_path
 
 # The SoR walkable band, as a familiar default rather than a dependency --
 # nothing here reads the game's real bounds.

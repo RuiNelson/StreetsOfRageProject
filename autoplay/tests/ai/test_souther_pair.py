@@ -3,12 +3,12 @@ the plan built on it for the one who is not in the actor's hands."""
 
 import unittest
 
-from sor_autoplay.ai import souther as single
-from sor_autoplay.ai import souther_pair as pair
-from sor_autoplay.ai.decide import could_engage_souther, generate_verb_tokens
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai.tokens import EngageSouther, Myself, Souther, ThrowHeldEnemy, AttackHeldEnemy, Verb
-from sor_autoplay.phases import CombatPhase
+from sor_ai.ai import souther as single
+from sor_ai.ai import souther_pair as pair
+from sor_ai.ai.decide import could_engage_souther, generate_verb_tokens
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai.tokens import EngageSouther, Myself, Souther, ThrowHeldEnemy, AttackHeldEnemy, Verb
+from sor_ai.phases import CombatPhase
 
 CAM_X = 5056
 

@@ -22,7 +22,7 @@ Run (host already up with ``--debugUtils``, e.g.
 ``./scripts/run.py --turbo 4 --lang en --debugUtils --port 7777 --silent``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/antonio_diag.py --out /tmp/antonio.jsonl
 """
 
@@ -35,12 +35,12 @@ import time
 
 from sor_autoplay.sor_remote import SoRClient
 
-from sor_autoplay.ai import antonio as antonio_plan
-from sor_autoplay.ai.decide import _blocked, _is_holding_enemy, generate_verb_tokens
-from sor_autoplay.ai.execute import engage_antonio_plan, execute_tick
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai.observe import (
+from sor_ai.ai import antonio as antonio_plan
+from sor_ai.ai.decide import _blocked, _is_holding_enemy, generate_verb_tokens
+from sor_ai.ai.execute import engage_antonio_plan, execute_tick
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai.observe import (
     HoldTracker,
     NoraAttackTracker,
     generate_direct_observation_tokens,
@@ -48,8 +48,8 @@ from sor_autoplay.ai.observe import (
 
 # Private on purpose: the per-verb score is exactly what this tool exists to
 # show, and re-deriving it here would risk disagreeing with the pipeline.
-from sor_autoplay.ai.priority import _emergency, determine_priority_verb
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.priority import _emergency, determine_priority_verb
+from sor_ai.ai.tokens import (
     Antonio,
     Boss,
     DebugNoPolice,
@@ -62,8 +62,8 @@ from sor_autoplay.ai.tokens import (
 )
 from sor_autoplay.debug_scenario import DebugScenario
 from sor_autoplay.reach_gameplay import reach_gameplay
-from sor_autoplay.rom_data import RomData
-from sor_autoplay.state import read_snapshot
+from sor_ai.rom_data import RomData
+from sor_ai.state import read_snapshot
 
 ANTONIO_TYPE = 0x56
 

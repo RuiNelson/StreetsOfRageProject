@@ -31,9 +31,9 @@ ordinary enemy (hex), so the model can be checked offline update by update
 Run (host already up with ``--debugUtils``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/mr_x_lab.py --actor wander --out /tmp/mr_x.jsonl
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/mr_x_lab.py --check /tmp/mr_x.jsonl
 """
 
@@ -46,7 +46,7 @@ import sys
 import time
 from collections import deque
 
-from sor_autoplay import memory_map as mm
+from sor_ai import memory_map as mm
 
 WORK_RAM = 0xFF0000
 LEVEL = 8
@@ -169,7 +169,7 @@ class HoldLoop:
 
 
 def reach_mr_x(client, loop, rom, scenario, sink, *, seconds: float, settle_seconds: float) -> bool:
-    from sor_autoplay.state import read_snapshot
+    from sor_ai.state import read_snapshot
 
     deadline = time.monotonic() + seconds
     last_report = 0.0
@@ -252,11 +252,11 @@ def record(args) -> int:
     from megadrive_remote import SoRClient
     from megadrive_remote.exceptions import RemoteTimeoutError
 
-    from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-    from sor_autoplay.ai.loop import AgentLoop
+    from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+    from sor_ai.ai.loop import AgentLoop
     from sor_autoplay.debug_scenario import DebugScenario
     from sor_autoplay.reach_gameplay import reach_gameplay
-    from sor_autoplay.rom_data import RomData
+    from sor_ai.rom_data import RomData
 
     with SoRClient(host=args.host, port=args.port) as menu:
         reach_gameplay(menu, args.character, timeout_ms=90_000)
@@ -366,7 +366,7 @@ def _snapshot(ram: bytes, rom):
 
 
 def check(args) -> int:
-    from sor_autoplay.ai import mr_x as model
+    from sor_ai.ai import mr_x as model
 
     rows = []
     with open(args.check, encoding="utf-8") as source:

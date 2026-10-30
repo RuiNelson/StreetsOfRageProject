@@ -8,9 +8,9 @@ the verb wiring ``test_decide``/``test_priority``/``test_execute``'s.
 import unittest
 from dataclasses import replace
 
-from sor_autoplay.ai import souther as plan
-from sor_autoplay.ai.tokens import Myself, Souther
-from sor_autoplay.phases import CombatPhase
+from sor_ai.ai import souther as plan
+from sor_ai.ai.tokens import Myself, Souther
+from sor_ai.phases import CombatPhase
 
 LANE_LO, LANE_HI = 8.0, 106.0
 

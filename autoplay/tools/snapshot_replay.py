@@ -26,7 +26,7 @@ import json
 from collections.abc import Iterator
 from typing import Any
 
-from sor_autoplay.rom_data import RomData
+from sor_ai.rom_data import RomData
 
 
 def _key(address: int, length: int) -> str:

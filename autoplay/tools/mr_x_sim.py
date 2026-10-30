@@ -17,7 +17,7 @@ there -- a grab a Garcia's blow reaches before a knee is spent is marked
 hold taken on one ends the start (``held a Garcia``).
 
     cd autoplay
-    PYTHONPATH=src python3.11 tools/mr_x_sim.py --recording /tmp/mr_x.jsonl --starts 30
+    PYTHONPATH=src:ai-code python3.11 tools/mr_x_sim.py --recording /tmp/mr_x.jsonl --starts 30
 """
 
 from __future__ import annotations
@@ -28,9 +28,9 @@ import random
 import sys
 import time
 
-from sor_autoplay.ai import garcia as garcia_model
-from sor_autoplay.ai import mr_x as model
-from sor_autoplay.ai import mr_x_plan
+from sor_ai.ai import garcia as garcia_model
+from sor_ai.ai import mr_x as model
+from sor_ai.ai import mr_x_plan
 
 UPDATES_PER_SECOND = 30.0
 TICK_GAPS = (2, 2, 2, 2, 2, 3, 3, 4)

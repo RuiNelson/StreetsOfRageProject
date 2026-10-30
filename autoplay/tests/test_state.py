@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from sor_autoplay.memory_map import (
+from sor_ai.memory_map import (
     MAX_HEALTH,
     OBJ_CHARACTER_ID,
     OBJ_CONTINUE_CHOICE,
@@ -13,8 +13,8 @@ from sor_autoplay.memory_map import (
     OBJ_TYPE,
     OBJECT_SLOT_SIZE,
 )
-from sor_autoplay.state import snapshot_from_memory_blocks
-from sor_autoplay.world_map import CAMERA_BYTES
+from sor_ai.state import snapshot_from_memory_blocks
+from sor_ai.world_map import CAMERA_BYTES
 
 
 def _put_u8(buf: bytearray, offset: int, value: int) -> None:
@@ -254,8 +254,8 @@ class ElevatorStageHazardTests(unittest.TestCase):
     def test_holes_and_barriers_skipped_on_the_elevator_stage(self) -> None:
         globals_block, timer_block, objects, camera_block = self._ingame_blocks(level_index=6)
 
-        with patch("sor_autoplay.state.holes_for_level") as holes_mock, patch(
-            "sor_autoplay.state.barriers_for_level"
+        with patch("sor_ai.state.holes_for_level") as holes_mock, patch(
+            "sor_ai.state.barriers_for_level"
         ) as barriers_mock:
             snap = snapshot_from_memory_blocks(
                 globals_block=globals_block,
@@ -274,8 +274,8 @@ class ElevatorStageHazardTests(unittest.TestCase):
     def test_holes_and_barriers_computed_on_an_ordinary_stage(self) -> None:
         globals_block, timer_block, objects, camera_block = self._ingame_blocks(level_index=0)
 
-        with patch("sor_autoplay.state.holes_for_level") as holes_mock, patch(
-            "sor_autoplay.state.barriers_for_level"
+        with patch("sor_ai.state.holes_for_level") as holes_mock, patch(
+            "sor_ai.state.barriers_for_level"
         ) as barriers_mock:
             holes_mock.return_value = ("a-hole",)
             barriers_mock.return_value = ("a-barrier",)

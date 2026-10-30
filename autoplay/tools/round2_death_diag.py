@@ -26,7 +26,7 @@ cannot spin the way the run it is diagnosing did.
 Run (host already up with ``--debugUtils``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/round2_death_diag.py --out /tmp/r2.json
 """
 
@@ -40,20 +40,20 @@ from collections import deque
 
 from sor_autoplay.sor_remote import SoRClient
 
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop
-from sor_autoplay.ai.observe import (
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop
+from sor_ai.ai.observe import (
     HoldTracker,
     NoraAttackTracker,
     generate_direct_observation_tokens,
 )
-from sor_autoplay.ai.reach import pit_endangers
-from sor_autoplay.ai.tokens import Myself, Pit, find, find_all
+from sor_ai.ai.reach import pit_endangers
+from sor_ai.ai.tokens import Myself, Pit, find, find_all
 from sor_autoplay.debug_scenario import DebugScenario
-from sor_autoplay.phases import player_phase
+from sor_ai.phases import player_phase
 from sor_autoplay.reach_gameplay import reach_gameplay
-from sor_autoplay.rom_data import RomData
-from sor_autoplay.state import read_snapshot
+from sor_ai.rom_data import RomData
+from sor_ai.state import read_snapshot
 
 # Ticks of context to keep for each death. At ~2 frames a tick under turbo
 # this is about a second and a half -- long enough to show the approach that

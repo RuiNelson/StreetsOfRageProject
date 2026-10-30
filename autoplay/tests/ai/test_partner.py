@@ -8,11 +8,11 @@ would only make the assertions depend on unrelated production gates.
 
 import unittest
 
-from sor_autoplay.ai.decide import generate_verb_tokens
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai.partner import do_not_harm_partner
-from sor_autoplay.ai.priority import determine_priority_verb
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.decide import generate_verb_tokens
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai.partner import do_not_harm_partner
+from sor_ai.ai.priority import determine_priority_verb
+from sor_ai.ai.tokens import (
     AttackHeldEnemy,
     Breakable,
     CallPolice,
@@ -43,7 +43,7 @@ from sor_autoplay.ai.tokens import (
     Weapon,
     find_all,
 )
-from sor_autoplay.phases import CombatPhase
+from sor_ai.phases import CombatPhase
 
 
 def make_myself(**overrides) -> Myself:

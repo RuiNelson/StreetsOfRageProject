@@ -2,7 +2,7 @@ import unittest
 
 from tests.test_attack_ranges import _animation_set, _shape_tables
 
-from sor_autoplay.memory_map import (
+from sor_ai.memory_map import (
     OBJ_CHARACTER_ID,
     OBJ_FLAGS,
     OBJ_HEALTH,
@@ -25,10 +25,10 @@ from sor_autoplay.memory_map import (
     OBJ_VEL_Z,
     OBJECT_SLOT_SIZE,
 )
-from sor_autoplay.hitboxes import OBJ_CACHED_BODY_BOX
-from sor_autoplay.object_catalog import player_style, style_for_object, style_for_type
-from sor_autoplay.phases import CombatPhase
-from sor_autoplay.world_map import (
+from sor_ai.hitboxes import OBJ_CACHED_BODY_BOX
+from sor_ai.object_catalog import player_style, style_for_object, style_for_type
+from sor_ai.phases import CombatPhase
+from sor_ai.world_map import (
     ACTORS_BYTES,
     CAMERA_BYTES,
     CAMERA_X_MIN,
@@ -776,7 +776,7 @@ class RomGeometryTests(unittest.TestCase):
     """
 
     def _rom(self):
-        from sor_autoplay.rom_data import RomData
+        from sor_ai.rom_data import RomData
 
         tables = _shape_tables(
             {
@@ -784,7 +784,7 @@ class RomGeometryTests(unittest.TestCase):
                 2: (-9, 18, 0, -60, 60),  # body
             }
         )
-        from sor_autoplay.attack_ranges import ANIMATION_SET_FOR_TYPE, AnimationSets
+        from sor_ai.attack_ranges import ANIMATION_SET_FOR_TYPE, AnimationSets
 
         return RomData(
             shapes=tables,

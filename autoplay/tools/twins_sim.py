@@ -11,7 +11,7 @@ Reports per start: strikes per twin, the first hit taken (the model does not
 play a hit reaction, so a start ends there), and how long both twins took.
 
     cd autoplay
-    PYTHONPATH=src python3.11 tools/twins_sim.py --recording /tmp/twins.jsonl --starts 20
+    PYTHONPATH=src:ai-code python3.11 tools/twins_sim.py --recording /tmp/twins.jsonl --starts 20
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ import random
 import sys
 import time
 
-from sor_autoplay.ai import twins as model
-from sor_autoplay.ai import twins_plan
+from sor_ai.ai import twins as model
+from sor_ai.ai import twins_plan
 
 UPDATES_PER_SECOND = 30.0
 SCENARIOS = twins_plan.SCENARIOS

@@ -10,8 +10,8 @@ assumed margin to the ROM's own geometry.
 import unittest
 from dataclasses import replace
 
-from sor_autoplay.ai import kinematics, reach
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai import kinematics, reach
+from sor_ai.ai.tokens import (
     Abadede,
     Antonio,
     AttackRange,
@@ -34,8 +34,8 @@ from sor_autoplay.ai.tokens import (
     Surrounded,
     Weapon,
 )
-from sor_autoplay.hitboxes import Hitbox
-from sor_autoplay.phases import CombatPhase
+from sor_ai.hitboxes import Hitbox
+from sor_ai.phases import CombatPhase
 
 # Nora's whip and Garcia's straight punch, exactly as attack_ranges.py pulls
 # them out of $242F8 and $1FC70 (shapes $22 and $12).

@@ -21,7 +21,7 @@ class Token(ABC):
     """Common base for every ``Information`` and ``Verb``.
 
     ``priority`` only breaks ties between ``Verb`` tokens that
-    :func:`determine_priority_verb <sor_autoplay.ai.priority.determine_priority_verb>`
+    :func:`determine_priority_verb <sor_ai.ai.priority.determine_priority_verb>`
     ranks as equally emergent; it plays no role in emergency ranking itself.
     """
 

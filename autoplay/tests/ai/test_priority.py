@@ -1,6 +1,6 @@
 import unittest
 
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import (
     Antonio,
     Onihime,
     AttackHeldEnemy,
@@ -31,9 +31,9 @@ from sor_autoplay.ai.tokens import (
     ThrowPepper,
     Weapon,
 )
-from sor_autoplay.ai.tokens import Myself, Partner
+from sor_ai.ai.tokens import Myself, Partner
 from dataclasses import replace
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import (
     AttackRange,
     Enemy,
     Garcia,
@@ -41,24 +41,24 @@ from sor_autoplay.ai.tokens import (
     Nora,
     Souther,
 )
-from sor_autoplay.ai.tokens import CallPolice
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import CallPolice
+from sor_ai.ai.tokens import (
     HandleContinueMenu,
     HandleMrXDialog,
     InContinueMenu,
     InMrXDialog,
 )
-from sor_autoplay.ai.tokens import CameraRange, Stage
-from sor_autoplay.ai.tokens import Projectile
-from sor_autoplay.ai.inference import generate_inference_tokens
-from sor_autoplay.ai import priority
-from sor_autoplay.ai.priority import determine_priority_verb as _rank_verbs
-from sor_autoplay.ai.kinematics import (
+from sor_ai.ai.tokens import CameraRange, Stage
+from sor_ai.ai.tokens import Projectile
+from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai import priority
+from sor_ai.ai.priority import determine_priority_verb as _rank_verbs
+from sor_ai.ai.kinematics import (
     frames_for_ticks,
     hold_knee_budget_frames,
 )
-from sor_autoplay.ai.tokens import Verb, find_all
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai.tokens import Verb, find_all
+from sor_ai.ai.tokens import (
     CatchUpPartner,
     ProjectileSidestep,
     RetreatFromDanger,
@@ -67,7 +67,7 @@ from sor_autoplay.ai.tokens import (
     WalkToPickup,
     WalkToWeapon,
 )
-from sor_autoplay.phases import HITSTUN_FRAMES, PEPPER_STUN_FRAMES, CombatPhase
+from sor_ai.phases import HITSTUN_FRAMES, PEPPER_STUN_FRAMES, CombatPhase
 
 
 def determine_priority_verb(context):

@@ -1,7 +1,7 @@
 import unittest
 from dataclasses import dataclass
 
-from sor_autoplay.ai.tokens import Verb, Information, Token, find, find_all
+from sor_ai.ai.tokens import Verb, Information, Token, find, find_all
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

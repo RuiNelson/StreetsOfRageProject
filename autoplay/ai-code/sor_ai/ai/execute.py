@@ -3565,7 +3565,7 @@ def execute_tick(
     hand back nothing.
 
     ``route_trace``, keyed by actor slot, is filled with the planner's most
-    recent :class:`~sor_autoplay.ai.pathfind.Path` whenever a routed handler
+    recent :class:`~sor_ai.ai.pathfind.Path` whenever a routed handler
     (``WalkToNearEnemy``, ``OpenBreakable`` today) actually plans one --
     HUD-only, never read back into the pipeline. Omitted (the default),
     nothing records anything and this call is exactly as before.

@@ -14,10 +14,10 @@ the harness completely; this test pins the fix in ``app.py`` itself, which
 
 import unittest
 
-from sor_autoplay import memory_map as mm
+from sor_ai import memory_map as mm
 from sor_autoplay.app import ObserverApp
 from sor_autoplay.debug_scenario import DebugScenario
-from sor_autoplay.state import GameSnapshot, PlayerSnapshot
+from sor_ai.state import GameSnapshot, PlayerSnapshot
 
 
 def _player(*, object_type: int, is_playable: bool) -> PlayerSnapshot:

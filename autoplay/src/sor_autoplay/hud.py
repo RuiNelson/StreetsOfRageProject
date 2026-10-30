@@ -14,16 +14,16 @@ from pathlib import Path
 from tkinter import font as tkfont
 from typing import Callable
 
-from .ai.loop import VerbState
-from .ai.pathfind import Path as RoutePath
-from .ai.reach import CLOSING_ENEMY_THREAT_FRAMES
-from .ai.tokens import Verb
-from .ai.tokens.character import PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
-from .attack_ranges import AttackRange
-from .hitboxes import Hitbox
-from .phases import CombatPhase, is_dangerous, phase_color
-from .state import GameSnapshot, PlayerSnapshot
-from .world_map import MAP_ASPECT, MapEntity, WorldMap
+from sor_ai.ai.loop import VerbState
+from sor_ai.ai.pathfind import Path as RoutePath
+from sor_ai.ai.reach import CLOSING_ENEMY_THREAT_FRAMES
+from sor_ai.ai.tokens import Verb
+from sor_ai.ai.tokens.character import PUNCH_RANGE_Y, punch_inner_x, punch_outer_x
+from sor_ai.attack_ranges import AttackRange
+from sor_ai.hitboxes import Hitbox
+from sor_ai.phases import CombatPhase, is_dangerous, phase_color
+from sor_ai.state import GameSnapshot, PlayerSnapshot
+from sor_ai.world_map import MAP_ASPECT, MapEntity, WorldMap
 
 OUTER_PAD = 12
 STATUS_GAP = 10

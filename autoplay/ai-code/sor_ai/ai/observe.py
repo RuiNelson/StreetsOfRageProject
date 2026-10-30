@@ -3,7 +3,7 @@
 
 Per ``AI.md``, this reuses the HUD's own RAM poll/analysis rather than
 duplicating it: callers must pass in a ``GameSnapshot`` already produced by
-``sor_autoplay.state.read_snapshot`` (or an equivalent fixture in tests).
+``sor_ai.state.read_snapshot`` (or an equivalent fixture in tests).
 This module never reads RAM and never calls ``read_snapshot`` itself.
 
 ``NoraAttackTracker`` is the one exception to ``generate_direct_observation_
@@ -14,10 +14,10 @@ tick memory that a single snapshot cannot supply.
 
 from __future__ import annotations
 
-from sor_autoplay.memory_map import ACTION_HOLDING
-from sor_autoplay.phases import CombatPhase, is_dangerous, player_phase
-from sor_autoplay.state import GameSnapshot, PlayerSnapshot
-from sor_autoplay.world_map import MapEntity
+from sor_ai.memory_map import ACTION_HOLDING
+from sor_ai.phases import CombatPhase, is_dangerous, player_phase
+from sor_ai.state import GameSnapshot, PlayerSnapshot
+from sor_ai.world_map import MapEntity
 
 from .tokens import Myself, Partner
 from .tokens import Boss, Enemy, Grunt, Jack, Nora, RivalPlayer, enemy_class_for_type

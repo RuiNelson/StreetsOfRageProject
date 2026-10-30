@@ -26,9 +26,9 @@ A recording is local analysis output: do not commit it.
 Run (host already up with ``--debugUtils``):
 
     cd autoplay
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/grunt_lab.py --family garcia --level 1 --actor wander --out /tmp/garcia.jsonl
-    PYTHONPATH=src:../MegaDriveEnvironment/python/src python3.11 \\
+    PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
         tools/grunt_lab.py --check /tmp/garcia.jsonl
 """
 
@@ -40,7 +40,7 @@ import sys
 import time
 from collections import deque
 
-from sor_autoplay import memory_map as mm
+from sor_ai import memory_map as mm
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 
@@ -82,12 +82,12 @@ def record(args) -> int:
     from megadrive_remote.exceptions import RemoteTimeoutError
 
     from bongo_lab import snapshot_from_ram
-    from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-    from sor_autoplay.ai.loop import AgentLoop
+    from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+    from sor_ai.ai.loop import AgentLoop
     from sor_autoplay.debug_scenario import DebugScenario
     from sor_autoplay.reach_gameplay import reach_gameplay
-    from sor_autoplay.rom_data import RomData
-    from sor_autoplay.state import read_snapshot
+    from sor_ai.rom_data import RomData
+    from sor_ai.state import read_snapshot
 
     kept = FAMILY_TYPES[args.family]
     with SoRClient(host=args.host, port=args.port) as menu:
@@ -205,7 +205,7 @@ def record(args) -> int:
 
 
 def check(args) -> int:
-    from sor_autoplay.ai import grunt
+    from sor_ai.ai import grunt
 
     rows = []
     with open(args.check, encoding="utf-8") as source:

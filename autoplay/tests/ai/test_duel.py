@@ -7,11 +7,11 @@ import random
 import unittest
 from collections import Counter
 
-from sor_autoplay.ai import duel
-from sor_autoplay.ai.decide import generate_verb_tokens
-from sor_autoplay.ai.duel import DuelStyle
-from sor_autoplay.ai.priority import determine_priority_verb
-from sor_autoplay.ai.tokens import (
+from sor_ai.ai import duel
+from sor_ai.ai.decide import generate_verb_tokens
+from sor_ai.ai.duel import DuelStyle
+from sor_ai.ai.priority import determine_priority_verb
+from sor_ai.ai.tokens import (
     AttackHeldEnemy,
     CameraRange,
     CounterGrab,
@@ -29,7 +29,7 @@ from sor_autoplay.ai.tokens import (
     WalkToNearEnemy,
     find_all,
 )
-from sor_autoplay.phases import CombatPhase
+from sor_ai.phases import CombatPhase
 
 from .test_decide import make_enemy, make_myself, make_rival
 

@@ -1,7 +1,7 @@
 """Streets of Rage remote observer."""
 
-from .state import GameSnapshot, PlayerSnapshot, read_snapshot
-from .world_map import MapEntity, WorldMap
+from sor_ai.state import GameSnapshot, PlayerSnapshot, read_snapshot
+from sor_ai.world_map import MapEntity, WorldMap
 
 __all__ = [
     "GameSnapshot",

@@ -1,7 +1,7 @@
 import unittest
 
-from sor_autoplay.ai.tokens import Breakable, Pit, Projectile
-from sor_autoplay.ai.tokens import Information, Observed, StageObjects
+from sor_ai.ai.tokens import Breakable, Pit, Projectile
+from sor_ai.ai.tokens import Information, Observed, StageObjects
 
 
 class HazardTokenTests(unittest.TestCase):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from sor_autoplay.ai.pathfind import (
+from sor_ai.ai.pathfind import (
     HORIZONTAL_EDGES,
     Edge,
     Point,

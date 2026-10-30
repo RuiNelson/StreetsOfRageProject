@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, call
 
-from sor_autoplay.ai.gamepad import AXIS_RAMP_TICKS, NONE_MASK, SharedGamepadState, VirtualGamepad
+from sor_ai.ai.gamepad import AXIS_RAMP_TICKS, NONE_MASK, SharedGamepadState, VirtualGamepad
 
 RIGHT = 0x0008
 LEFT = 0x0004

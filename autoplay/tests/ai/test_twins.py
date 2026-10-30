@@ -9,9 +9,9 @@ the facts the plan rests on, each as the ROM plays it.
 
 import unittest
 
-from sor_autoplay.ai import twins as model
-from sor_autoplay.ai import twins_plan
-from sor_autoplay.ai.twins import ActorSim, Outcome, TwinSim
+from sor_ai.ai import twins as model
+from sor_ai.ai import twins_plan
+from sor_ai.ai.twins import ActorSim, Outcome, TwinSim
 
 CAM = 5056
 EDGE = CAM + model.PLAYER_X_MAX_OFFSET  # the right edge: 5344

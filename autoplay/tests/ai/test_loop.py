@@ -2,13 +2,13 @@ import unittest
 from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
-from sor_autoplay.ai.tokens import Punch
-from sor_autoplay.ai.tokens import Enemy, EnemyCluster, PartnerFight
-from sor_autoplay.ai.gamepad import SharedGamepadState, VirtualGamepad
-from sor_autoplay.ai.loop import AgentLoop, VerbState
-from sor_autoplay.ai.tokens import WalkToAdvanceStage
-from sor_autoplay.phases import CombatPhase
-from sor_autoplay.state import GameSnapshot, PlayerSnapshot
+from sor_ai.ai.tokens import Punch
+from sor_ai.ai.tokens import Enemy, EnemyCluster, PartnerFight
+from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
+from sor_ai.ai.loop import AgentLoop, VerbState
+from sor_ai.ai.tokens import WalkToAdvanceStage
+from sor_ai.phases import CombatPhase
+from sor_ai.state import GameSnapshot, PlayerSnapshot
 
 
 def _player(*, is_playable: bool, is_continue_ui: bool = False) -> PlayerSnapshot:
@@ -69,7 +69,7 @@ class AgentLoopGatingTests(unittest.TestCase):
         client.reset_mock()
         loop = AgentLoop(gamepad)
 
-        with patch("sor_autoplay.ai.loop.generate_direct_observation_tokens") as observe:
+        with patch("sor_ai.ai.loop.generate_direct_observation_tokens") as observe:
             loop.tick(replace(_snapshot(), raw={"uptime_frames": 104}), player_index=1)
             observe.assert_not_called()
             self.assertEqual(client.mock_calls, [])
@@ -92,7 +92,7 @@ class AgentLoopGatingTests(unittest.TestCase):
         loop = AgentLoop(gamepad)
         snapshot = _snapshot(paused=True)
 
-        with patch("sor_autoplay.ai.loop.generate_direct_observation_tokens") as observe:
+        with patch("sor_ai.ai.loop.generate_direct_observation_tokens") as observe:
             result = loop.tick(snapshot, player_index=1)
             observe.assert_not_called()
 
@@ -104,7 +104,7 @@ class AgentLoopGatingTests(unittest.TestCase):
         loop = AgentLoop(gamepad)
         snapshot = _snapshot(timer_valid=False)
 
-        with patch("sor_autoplay.ai.loop.generate_direct_observation_tokens") as observe:
+        with patch("sor_ai.ai.loop.generate_direct_observation_tokens") as observe:
             result = loop.tick(snapshot, player_index=1)
             observe.assert_not_called()
 
@@ -116,7 +116,7 @@ class AgentLoopGatingTests(unittest.TestCase):
         loop = AgentLoop(gamepad)
         snapshot = _snapshot(is_playable=False)
 
-        with patch("sor_autoplay.ai.loop.generate_direct_observation_tokens") as observe:
+        with patch("sor_ai.ai.loop.generate_direct_observation_tokens") as observe:
             result = loop.tick(snapshot, player_index=1)
             observe.assert_not_called()
 
@@ -145,7 +145,7 @@ class AgentLoopGatingTests(unittest.TestCase):
         )
 
         with patch(
-            "sor_autoplay.ai.loop.generate_direct_observation_tokens",
+            "sor_ai.ai.loop.generate_direct_observation_tokens",
             return_value=set(),
         ) as observe:
             loop.tick(snapshot, player_index=1)
@@ -174,15 +174,15 @@ class AgentLoopPipelineTests(unittest.TestCase):
 
         with (
             patch(
-                "sor_autoplay.ai.loop.generate_direct_observation_tokens",
+                "sor_ai.ai.loop.generate_direct_observation_tokens",
                 return_value=observed_context,
             ) as observe,
             patch(
-                "sor_autoplay.ai.loop.generate_inference_tokens",
+                "sor_ai.ai.loop.generate_inference_tokens",
                 return_value=set(),
             ) as inference,
             patch(
-                "sor_autoplay.ai.loop.generate_verb_tokens",
+                "sor_ai.ai.loop.generate_verb_tokens",
                 return_value=verb_context,
             ) as decide,
         ):
@@ -215,11 +215,11 @@ class AgentLoopPipelineTests(unittest.TestCase):
 
         with (
             patch(
-                "sor_autoplay.ai.loop.generate_direct_observation_tokens",
+                "sor_ai.ai.loop.generate_direct_observation_tokens",
                 return_value=set(),
             ),
-            patch("sor_autoplay.ai.loop.generate_inference_tokens", return_value=set()),
-            patch("sor_autoplay.ai.loop.generate_verb_tokens", return_value=set()),
+            patch("sor_ai.ai.loop.generate_inference_tokens", return_value=set()),
+            patch("sor_ai.ai.loop.generate_verb_tokens", return_value=set()),
         ):
             result = loop.tick(snapshot, player_index=1)
 
@@ -276,12 +276,12 @@ class VerbStateHudTests(unittest.TestCase):
 
         with (
             patch(
-                "sor_autoplay.ai.loop.generate_direct_observation_tokens",
+                "sor_ai.ai.loop.generate_direct_observation_tokens",
                 return_value={enemy},
             ),
-            patch("sor_autoplay.ai.loop.generate_inference_tokens", return_value=set()),
+            patch("sor_ai.ai.loop.generate_inference_tokens", return_value=set()),
             patch(
-                "sor_autoplay.ai.loop.generate_verb_tokens",
+                "sor_ai.ai.loop.generate_verb_tokens",
                 return_value={enemy, punch, walk},
             ),
         ):
@@ -299,19 +299,19 @@ class VerbStateHudTests(unittest.TestCase):
         punch = Punch(actor_slot="P1", target_slot="obj01")
         with (
             patch(
-                "sor_autoplay.ai.loop.generate_direct_observation_tokens",
+                "sor_ai.ai.loop.generate_direct_observation_tokens",
                 return_value={enemy},
             ),
-            patch("sor_autoplay.ai.loop.generate_inference_tokens", return_value=set()),
+            patch("sor_ai.ai.loop.generate_inference_tokens", return_value=set()),
             patch(
-                "sor_autoplay.ai.loop.generate_verb_tokens",
+                "sor_ai.ai.loop.generate_verb_tokens",
                 return_value={enemy, punch},
             ),
         ):
             loop.tick(_snapshot(), player_index=1)
         self.assertIs(loop.verb_state().winning, punch)
 
-        with patch("sor_autoplay.ai.loop.generate_direct_observation_tokens") as observe:
+        with patch("sor_ai.ai.loop.generate_direct_observation_tokens") as observe:
             loop.tick(_snapshot(paused=True), player_index=1)
             observe.assert_not_called()
 
