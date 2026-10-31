@@ -192,7 +192,8 @@ old names. They are kebab-case and `--help` groups them (Game, Video, Audio, AI,
 `--fullscreen`, `--integer-scaling`, `--debug-utils`, `--debug-log` (was `--debug`), `--call-log`,
 `--aux-addr-file`, `--ai-assist`, and `--frame-sync auto|vsync|vsync-half|vsync-third` (was `--vsync 0|1|2|3`).
 `play.py`'s saved `vsync` setting became `frame_sync`; an old file's value is ignored, so it starts at `auto`.
-`MegaDriveEnvironmentSampleGame` keeps its own `--debug`.
+`MegaDriveEnvironmentSampleGame` keeps its own `--debug`. `--lang` defaults to `en`, the English version (user,
+2026-10-31; it was `jp`); `MegaDriveEnvironment`'s own default pin stays Japanese.
 
 ## OPTIONS > VIDEO and `video.yaml`
 

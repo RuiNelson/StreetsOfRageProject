@@ -701,7 +701,7 @@ version.
 | Flag | Meaning |
 | --- | --- |
 | `--rom PATH` | ROM image to load; default: `rom/SOR.bin` |
-| `--lang jp\|en` | Console language pin: `jp` is Japanese/domestic; `en` is overseas; default: `jp` |
+| `--lang jp\|en` | Console language pin: `jp` is Japanese/domestic; `en` is overseas (English); default: `en` |
 | `--hz 50\|60` | Console video-standard pin: `60` is NTSC/low and `50` is PAL/high; default: `60` |
 | `--silent` | Disable audio output completely by dropping audio-chip writes (no pre-rendered soundtrack either) |
 | `--sound prerendered\|emulated` | Audio source: `prerendered` plays the FLAC soundtrack rendered by `scripts/render_soundtrack.py` (default; falls back to `emulated` when it is missing), `emulated` runs the YM2612, PSG and Z80 DAC in real time; see [Pre-rendered soundtrack](#pre-rendered-soundtrack) |
