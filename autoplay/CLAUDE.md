@@ -188,9 +188,9 @@ desse inimigo que do inimigo mais longe que estava nas costas do Partner e de si
 partner beat the one behind both. `partner._walks_to_the_partners_nearer_enemy`
 withdraws the walk to an enemy the partner has nearer by `PARTNER_NEARER_MARGIN` (24 px)
 while another walk's enemy is nearer the actor than the partner; with no such other
-enemy the near one is still walked to, and self-defence is never withdrawn. **Validated
-offline only** (`test_partner_fight.PipelineTests`), not measured live with a partner,
-so it stays on `development`.
+enemy the near one is still walked to, and self-defence is never withdrawn. Pinned by
+`test_partner_fight.PipelineTests`; the user played it live with a partner and
+confirmed it works (2026-10-31).
 
 **Following a partner who is ahead** (user, in Portuguese: "Quero que a IA
 deixe de emitir `WalkToAdvanceStage` quando tiver um `Partner`, e esse partner
