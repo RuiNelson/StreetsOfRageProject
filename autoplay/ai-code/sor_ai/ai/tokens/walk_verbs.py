@@ -112,12 +112,14 @@ class CatchUpPartner(Walk):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Centering(Walk):
-    """Walk to the centre of the visible playfield, on the actor's own lane.
+    """Walk to the centre of the visible playfield, on the actor's own lane,
+    or with a ``Partner`` to a third of it from the back
+    (``decide.centering_point_x``).
 
     User: "Create a new token `Centering` which centers the controlled
     character in the center of the viewed playfield". Produced by
     ``decide.could_centering`` for an idle actor more than
-    ``decide.CENTERING_ARRIVED_X`` off ``CameraRange.center_x`` that is neither
+    ``decide.CENTERING_ARRIVED_X`` off that point that is neither
     advancing the stage nor following a partner ahead of it.
 
     Raises emergency: (idle)×1 -- the tier of ``WalkToAdvanceStage``, which it

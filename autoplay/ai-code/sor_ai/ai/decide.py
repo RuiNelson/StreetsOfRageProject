@@ -1333,12 +1333,29 @@ def could_walk_to_advance_stage(context: Context) -> Context:
 CENTERING_ARRIVED_X = 16
 
 
+def centering_point_x(context: Context, camera: CameraRange) -> float:
+    """The X ``Centering`` walks to: the visible playfield's centre, or with a
+    ``Partner`` a third of it from the edge the stage is coming from (user:
+    "go to 1/3 of the screen (further back) ... in case if there's a
+    `Partener`"). The left third on the rightward rounds, the right third on
+    round 8's leftward one. The elevator has no back, so it keeps the centre.
+    """
+
+    stage = find(context, Stage)
+    if find(context, Partner) is None or stage is None or stage.direction == "none":
+        return camera.center_x
+    left = camera.left - reach.SCREEN_STRIP_X
+    right = camera.right + reach.SCREEN_STRIP_X
+    third = (right - left) / 3
+    return right - third if stage.direction == "left" else left + third
+
+
 def could_centering(context: Context) -> Context:
-    """Walk to the centre of the visible playfield when nothing else needs doing.
+    """Walk to ``centering_point_x`` when nothing else needs doing.
 
     User: "Create a new token `Centering` which centers the controlled
     character in the center of the viewed playfield". On X only, on the
-    actor's own lane (user), for any actor free to walk that is off centre,
+    actor's own lane (user), for any actor free to walk that is off that point,
     with three exceptions:
 
     - it would be advancing instead: the same condition as
@@ -1364,10 +1381,11 @@ def could_centering(context: Context) -> Context:
         if scroll_is_open(context)
         else set()
     )
+    point_x = centering_point_x(context, camera)
     for actor in _actors_free_to_walk(context):
         if actor.slot in advancing or _partner_ahead_of(context, actor) is not None:
             continue
-        if abs(actor.world_x - camera.center_x) <= CENTERING_ARRIVED_X:
+        if abs(actor.world_x - point_x) <= CENTERING_ARRIVED_X:
             continue
         verbs.add(Centering(actor_slot=actor.slot))
     return verbs

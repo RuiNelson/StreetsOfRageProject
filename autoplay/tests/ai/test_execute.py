@@ -1594,6 +1594,22 @@ class ExecuteCenteringTests(unittest.TestCase):
         self.assertEqual({actor.world_y for actor in trail}, {64})
         self.assertEqual(trail[-1].world_x, trail[-2].world_x)
 
+    def test_with_a_partner_it_stops_at_the_third_from_the_back(self) -> None:
+        partner = _partner_token(world_x=40, world_y=20)
+        trail = _walk(self.VERB, _myself(world_x=270, world_y=64), {partner, self.STAGE, self.CAMERA}, ticks=80)
+
+        self.assertLessEqual(abs(trail[-1].world_x - 320 / 3), 16)
+        self.assertEqual(trail[-1].world_x, trail[-2].world_x)
+
+    def test_on_round_8_the_third_is_on_the_right(self) -> None:
+        # The walking there is to the left, so the back is the right.
+        partner = _partner_token(world_x=300, world_y=20)
+        stage = Stage(level_index=7, direction="left")
+        trail = _walk(self.VERB, _myself(world_x=60, world_y=64), {partner, stage, self.CAMERA}, ticks=80)
+
+        self.assertLessEqual(abs(trail[-1].world_x - (320 - 320 / 3)), 16)
+        self.assertEqual(trail[-1].world_x, trail[-2].world_x)
+
     def test_never_hops_a_pit_on_the_way(self) -> None:
         pit = Pit(world_x=170, lane_y=0, width=60, height=112)
         trail = _walk(self.VERB, _myself(world_x=270, world_y=64), {pit, self.STAGE, self.CAMERA}, ticks=80)

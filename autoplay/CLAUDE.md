@@ -298,8 +298,15 @@ player stands (`$FFFA0D`, set around `$DF4`, consumed by `$19570`).
   the locked gate (an enemy off screen is lured out from there), the elevator, an
   arena before its boss walks in. Not while it would be advancing,
   and not while a partner is ahead (`_partner_ahead_of`): that actor is
-  following. **X only**, on its own lane, to `CameraRange.center_x` (the
-  camera's X + `$A0` in both walk clamps), within `CENTERING_ARRIVED_X` (16 px).
+  following. **X only**, on its own lane, within `CENTERING_ARRIVED_X` (16 px) of
+  `decide.centering_point_x`: `CameraRange.center_x` (the camera's X + `$A0` in both
+  walk clamps), or **with a `Partner` a third of the visible screen from the back**
+  (user: "go to 1/3 of the screen (further back) ... in case if there's a
+  `Partener`"): camera + 107 on the rightward rounds, + 213 on round 8, + 96 / + 224
+  in widescreen. The elevator has no back and keeps the centre. A rear AI at the
+  third holds the camera (`$18F5C`, below; round 8 mirrors it, the rear at camera +
+  `$B0` or less and the lead under + `$90`) until the person ahead is about 64 px on
+  and `CatchUpPartner` moves it.
   Lowest tier (`priority._EMERGENCY_CENTERING` = 1), so anything else that
   scores wins; a live enemy on screen does not withhold it, so the wait beside
   a partner's fight (**Leave the partner's fight to them**) now centres. The

@@ -103,7 +103,7 @@ from sor_ai.ai.tokens import (
     WalkToPickup,
     WalkToWeapon,
 )
-from sor_ai.ai.decide import CENTERING_ARRIVED_X
+from sor_ai.ai.decide import CENTERING_ARRIVED_X, centering_point_x
 from sor_ai.ai.inference import generate_inference_tokens
 from sor_ai.phases import CombatPhase
 
@@ -1083,6 +1083,29 @@ class CenteringTests(unittest.TestCase):
             {WalkToAdvanceStage(actor_slot="P1", direction="right")},
         )
         self.assertEqual(could_centering(context), set())
+
+    def test_with_a_partner_it_is_a_third_of_the_screen_from_the_back(self) -> None:
+        # The walk clamp 32..288 is on a 320 px screen.
+        left = Stage(level_index=7, direction="left")
+        for stage, x in ((self.RIGHT, 320 / 3), (left, 320 - 320 / 3), (self.ELEVATOR, 160)):
+            with self.subTest(direction=stage.direction):
+                context = {make_partner(world_x=300), stage, self.LOCKED}
+                self.assertEqual(centering_point_x(context, self.LOCKED), x)
+
+    def test_without_a_partner_it_is_the_centre(self) -> None:
+        self.assertEqual(centering_point_x({self.RIGHT, self.LOCKED}, self.LOCKED), 160)
+
+    def test_widescreen_has_its_own_third(self) -> None:
+        camera = CameraRange(left=1000, right=1320, top=0, bottom=112, scroll_x=1000, widescreen=True)
+        context = {make_partner(world_x=1000), self.RIGHT, camera}
+
+        self.assertEqual(centering_point_x(context, camera), 968 + 384 / 3)
+
+    def test_the_leader_walks_back_to_the_third_and_stops_there(self) -> None:
+        for x, expected in ((270, {self.CENTRED}), (160, {self.CENTRED}), (110, set())):
+            with self.subTest(x=x):
+                context = {make_myself(world_x=x), make_partner(world_x=60), self.RIGHT, self.LOCKED}
+                self.assertEqual(could_centering(context), expected)
 
     def test_the_elevator_centres(self) -> None:
         context = {make_myself(world_x=270), self.ELEVATOR, self.OPEN}

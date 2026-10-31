@@ -99,6 +99,7 @@ from .decide import (
     breakable_smash_outer_x,
     breakable_strike_inner_x,
     catch_up_point_x,
+    centering_point_x,
     in_smash_range,
 )
 from .reach import (
@@ -2262,12 +2263,12 @@ def state_machine_catch_up_partner(
 def state_machine_centering(
     verb: Centering, context: Context, gamepad: VirtualGamepad
 ) -> None:
-    """Walk to the camera's centre on X and stand there.
+    """Walk to ``decide.centering_point_x`` and stand there.
 
     See ``Centering`` and ``decide.could_centering``. Routed as
     ``state_machine_catch_up_partner`` is, to a strip across the lane band, so
     the actor keeps its lane unless a solid is in the way. Unlike it, this
-    never hops: a pit between the actor and the centre is not worth the jump
+    never hops: a pit between the actor and that point is not worth the jump
     when nothing is waiting there, so the best-effort route stops at its wall.
     """
 
@@ -2276,14 +2277,14 @@ def state_machine_centering(
     if actor is None or camera is None:
         gamepad.release()
         return
-    center_x = camera.center_x
+    point_x = centering_point_x(context, camera)
     if actor.is_airborne or actor.action_base in JUMP_CROUCH_ACTIONS:
         # Finish a jump another verb launched last tick (as WalkToAdvanceStage).
-        direction = "right" if center_x >= actor.world_x else "left"
+        direction = "right" if point_x >= actor.world_x else "left"
         landing = nav.hop_landing_x(context, actor, direction)
-        _jump_toward(actor, landing if landing is not None else center_x, gamepad)
+        _jump_toward(actor, landing if landing is not None else point_x, gamepad)
         return
-    goal = nav.advance_goal(context, center_x)
+    goal = nav.advance_goal(context, point_x)
     body, origin = nav.actor_footprint(actor)
     solids = nav.solid_obstacles(context, body=body, origin=origin)
     path = nav.plan_route(
@@ -2296,7 +2297,7 @@ def state_machine_centering(
     if path.reached and not mask and not goal.is_reached(nav.body_rect(actor)):
         # Boxed in on every side without having arrived: the straight line is
         # all there is (the same fallback _routed_mask makes).
-        mask = _movement_mask(context, actor.world_x, actor.world_y, center_x, actor.world_y)
+        mask = _movement_mask(context, actor.world_x, actor.world_y, point_x, actor.world_y)
     _hold_steered(gamepad, _clamp_mask(context, actor.world_x, actor.world_y, mask))
 
 
