@@ -63,7 +63,9 @@ gh run download RUN_ID --repo RuiNelson/StreetsOfRageProject -D DIR
 ```
 
 Each artifact `StreetsOfRageBuilder-<platform>/` holds one file already named
-`StreetsOfRageBuilder-X.Y.Z-<platform>.<dmg|exe|AppImage>`. Check the five
+`StreetsOfRageBuilder-X.Y.Z-<platform>.<dmg|exe>` (Linux:
+`StreetsOfRageBuilder-X.Y.Z-<x86_64|aarch64>.AppImage`, plus its `.AppImage.zsync`, which must be
+attached too: AppImageUpdate reads it). Check the
 names carry the new version, and `file` them (Windows `PE32+ … x86-64` /
 `Aarch64`, Linux `ELF … x86-64` / `aarch64`; the dmg can be mounted and
 `lipo -archs` on its app must show `x86_64 arm64`). The binaries are unsigned
@@ -103,11 +105,11 @@ Open the `.dmg`, drag **Streets of Rage Builder** to Applications, run the comma
 
 ### Linux
 
-Download the AppImage for your CPU (`x64` or `arm64`), then make it executable and run it:
+Download the AppImage for your CPU (`x86_64` or `aarch64`), then make it executable and run it:
 
 ```
-chmod +x StreetsOfRageBuilder-X.Y.Z-linux-x64.AppImage
-./StreetsOfRageBuilder-X.Y.Z-linux-x64.AppImage
+chmod +x StreetsOfRageBuilder-X.Y.Z-x86_64.AppImage
+./StreetsOfRageBuilder-X.Y.Z-x86_64.AppImage
 ```
 
 Or right-click the file, open **Properties** > **Permissions** and tick **Allow executing file as program**, then double-click it. If it fails with a FUSE error, install `libfuse2` (`sudo apt install libfuse2`; on Ubuntu 24.04 `libfuse2t64`) or run it with `--appimage-extract-and-run`.

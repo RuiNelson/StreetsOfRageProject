@@ -294,8 +294,8 @@ Get the file for your system from the
 | macOS (Apple silicon and Intel) | `StreetsOfRageBuilder-X.Y.Z-macos-universal.dmg` |
 | Windows (64-bit Intel/AMD) | `StreetsOfRageBuilder-X.Y.Z-windows-x64.exe` |
 | Windows on ARM | `StreetsOfRageBuilder-X.Y.Z-windows-arm64.exe` |
-| Linux x64 | `StreetsOfRageBuilder-X.Y.Z-linux-x64.AppImage` |
-| Linux ARM64 | `StreetsOfRageBuilder-X.Y.Z-linux-arm64.AppImage` |
+| Linux x64 | `StreetsOfRageBuilder-X.Y.Z-x86_64.AppImage` |
+| Linux ARM64 | `StreetsOfRageBuilder-X.Y.Z-aarch64.AppImage` |
 
 The apps are not signed yet, so macOS, Windows and your browser will warn you the
 first time; the release page explains how to open them.

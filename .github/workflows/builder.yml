@@ -38,14 +38,15 @@ jobs:
     steps:
       - id: matrix
         run: |
-          # kind: dmg = a macOS disk image, exe = the bare program, appimage = a Linux AppImage.
+          # kind: dmg = a macOS disk image, exe = the bare program, appimage = a Linux AppImage
+          # (arch: its file-name suffix, as the AppImage catalogue wants it: no "linux" in the name).
           matrix=$(jq -c '[.[] | select(.enabled)]' <<'JSON'
           [
             {"enabled": ${{ inputs.macos }},         "name": "macos-universal", "os": "macos-latest",     "target": "universal-apple-darwin",   "rust_targets": "aarch64-apple-darwin,x86_64-apple-darwin", "kind": "dmg"},
             {"enabled": ${{ inputs.windows_x64 }},   "name": "windows-x64",     "os": "windows-latest",   "target": "x86_64-pc-windows-msvc",   "rust_targets": "x86_64-pc-windows-msvc",                   "kind": "exe"},
             {"enabled": ${{ inputs.windows_arm64 }}, "name": "windows-arm64",   "os": "windows-11-arm",   "target": "aarch64-pc-windows-msvc",  "rust_targets": "aarch64-pc-windows-msvc",                  "kind": "exe"},
-            {"enabled": ${{ inputs.linux_x64 }},     "name": "linux-x64",       "os": "ubuntu-22.04",     "target": "x86_64-unknown-linux-gnu", "rust_targets": "x86_64-unknown-linux-gnu",                 "kind": "appimage"},
-            {"enabled": ${{ inputs.linux_arm64 }},   "name": "linux-arm64",     "os": "ubuntu-22.04-arm", "target": "aarch64-unknown-linux-gnu","rust_targets": "aarch64-unknown-linux-gnu",                "kind": "appimage"}
+            {"enabled": ${{ inputs.linux_x64 }},     "name": "linux-x64",       "os": "ubuntu-22.04",     "target": "x86_64-unknown-linux-gnu", "rust_targets": "x86_64-unknown-linux-gnu",                 "kind": "appimage", "arch": "x86_64"},
+            {"enabled": ${{ inputs.linux_arm64 }},   "name": "linux-arm64",     "os": "ubuntu-22.04-arm", "target": "aarch64-unknown-linux-gnu","rust_targets": "aarch64-unknown-linux-gnu",                "kind": "appimage", "arch": "aarch64"}
           ]
           JSON
           )
@@ -86,7 +87,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev \
-            libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf zsync
 
       - name: Install frontend packages
         working-directory: StreetsOfRageBuilder/Frontend
@@ -100,6 +101,8 @@ jobs:
           # AppImage tools: no FUSE on the runners, and the stripper of linuxdeploy trips on new binaries.
           APPIMAGE_EXTRACT_AND_RUN: "1"
           NO_STRIP: "true"
+          # Update information embedded in the AppImage (AppImageUpdate); the .zsync is made below.
+          LDAI_UPDATE_INFORMATION: gh-releases-zsync|RuiNelson|StreetsOfRageProject|latest|StreetsOfRageBuilder-*-${{ matrix.arch }}.AppImage.zsync
         run: |
           case "${{ matrix.kind }}" in
             dmg)      bundle="--bundles dmg" ;;
@@ -109,6 +112,7 @@ jobs:
           npm run tauri -- build --target "${{ matrix.target }}" $bundle
 
       # Release file names: StreetsOfRageBuilder-<version>-<platform>.<ext>
+      # (Linux: -<x86_64|aarch64>.AppImage plus a .AppImage.zsync for updates)
       - name: Collect the product
         run: |
           version=$(node -p "require('./StreetsOfRageBuilder/Backend/tauri.conf.json').version")
@@ -117,7 +121,10 @@ jobs:
           mkdir dist
           case "${{ matrix.kind }}" in
             dmg)      cp "$out"/bundle/dmg/*.dmg "dist/$name.dmg" ;;
-            appimage) cp "$out"/bundle/appimage/*.AppImage "dist/$name.AppImage" ;;
+            appimage)
+              name="StreetsOfRageBuilder-$version-${{ matrix.arch }}"
+              cp "$out"/bundle/appimage/*.AppImage "dist/$name.AppImage"
+              (cd dist && zsyncmake -u "$name.AppImage" "$name.AppImage") ;;
             exe)      cp "$out/streets-of-rage-builder.exe" "dist/$name.exe" ;;
           esac
           ls -l dist
