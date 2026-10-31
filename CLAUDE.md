@@ -265,6 +265,13 @@ game, and
 `--altControls` is gone (`StreetsOfRageRecompilation/CLAUDE.md`, **Remote
 input**; `autoplay/CLAUDE.md`, **Input through the execution data**).
 
+## No console window on Windows
+
+User request (2026-10-31): the Windows `sor` showed a text window. It is now a GUI-subsystem program
+(`WIN32_EXECUTABLE`), with no console unless `--debug-utils`, `--debug-log`, `--call-log`, `--aux-addr-file` or
+`--help`/`--version` is given: `openConsoleIfWanted` in `StreetsOfRageRecompilation/main.cpp` then attaches the
+parent terminal's console, or opens a new one. Not tested on Windows (written on macOS, which only built).
+
 ## QUIT on the mode menu
 
 User request (2026-10-31): a **QUIT** row after OPTIONS ends the game, the way closing the window does
