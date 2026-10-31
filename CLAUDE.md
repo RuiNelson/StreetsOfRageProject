@@ -234,6 +234,11 @@ game, and
 `--altControls` is gone (`StreetsOfRageRecompilation/CLAUDE.md`, **Remote
 input**; `autoplay/CLAUDE.md`, **Input through the execution data**).
 
+## QUIT on the mode menu
+
+User request (2026-10-31): a **QUIT** row after OPTIONS ends the game, the way closing the window does
+(`StreetsOfRageRecompilation/CLAUDE.md`, **The Python AI in the process**, the mode's screens).
+
 ## Hand-written C++ keeps the original memory layout
 
 Reimplemented routines make the code readable; they never move game state.
