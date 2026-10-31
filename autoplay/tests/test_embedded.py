@@ -32,8 +32,11 @@ class FakeHost:
     def stop_requested(self) -> bool:
         return not self.frames
 
-    def wait_frame(self, timeout: float):
+    def request_frame(self, timeout: float):
         return self.frames.pop(0)
+
+    def tick_seconds(self) -> float:
+        return 0.0
 
     def current_frame(self) -> int:
         return self.now

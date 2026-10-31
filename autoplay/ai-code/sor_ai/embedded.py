@@ -3,8 +3,9 @@
 ``host`` is the ``sor_host`` module the game provides. It is handed in rather
 than imported so that this package still loads anywhere else.
 
-Every image of the work RAM the game publishes goes through the same
-``snapshot_from_work_ram`` + ``AgentLoop.tick`` as ``autoplay``'s lockstep loop.
+The thread keeps its own time, as ``autoplay``'s poll loop does over its socket:
+on its timer it asks the game for the work RAM, waits for it, runs the same
+``snapshot_from_work_ram`` + ``AgentLoop.tick`` and sleeps what is left of the tick.
 The AI's commands reach the game as the same binary input documents a remote
 client sends, without the socket.
 """
@@ -22,7 +23,7 @@ from .state import snapshot_from_work_ram
 
 AI_PLAYER = 2
 WAIT_FRAME_S = 0.25
-# The game only publishes while the mode is on.
+# With --ai-assist the thread outlives a game: the game only answers while one runs.
 NEW_GAME_GAP_FRAMES = 60
 
 
@@ -121,12 +122,14 @@ def run(host) -> None:
     frames_per_tick = 2
     stats = _Stats()
 
+    tick_s = host.tick_seconds()
     while not host.stop_requested():
-        published = host.wait_frame(WAIT_FRAME_S)
-        if published is None:
+        tick_started = time.monotonic()
+        answered = host.request_frame(WAIT_FRAME_S)
+        if answered is None:
             continue
-        frame, ram, enhanced = published
-        # The ROM is loaded by the first frame the game publishes.
+        frame, ram, enhanced = answered
+        # The ROM is loaded by the first frame the game answers.
         if not rom_read:
             rom = _read_rom(client, host)
             rom_read = True
@@ -156,5 +159,8 @@ def run(host) -> None:
         stats.ticks += 1
         stats.total_s += elapsed
         stats.worst_s = max(stats.worst_s, elapsed)
+        remaining = tick_s - (time.monotonic() - tick_started)
+        if remaining > 0:
+            time.sleep(remaining)
 
     host.log(f"ended: {stats.summary()}")

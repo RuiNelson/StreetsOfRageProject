@@ -131,7 +131,9 @@ P2 in the `sor` process, from the same code as the external `autoplay`
 decisions: `sor` embeds our own CPython as a shared library, through the C API, with no
 build variant without it (runs on macOS and Windows; Linux written, untried). `run.py` passes
 `--ai-path` and `play.py` has the field (`ai_path`). An external
-`autoplay` alongside observes and may drive P1; P2 stays the internal AI's. Details:
+`autoplay` alongside observes and may drive P1; P2 stays the internal AI's. The AI's thread keeps its
+own time (timer, ask for the memory, wait, tick, sleep; user: not woken by the game) and lives from choosing
+the mode until the mode menu is back (user). Details:
 `StreetsOfRageRecompilation/CLAUDE.md`, **The Python AI in the process**.
 
 ## ROM and generated code
