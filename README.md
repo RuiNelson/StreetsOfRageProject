@@ -48,6 +48,7 @@ study.
 - [Play](#play)
   - [Default controls](#default-controls)
   - [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)
+  - [Pausing](#pausing)
   - [Video settings](#video-settings)
   - [Host keyboard shortcuts](#host-keyboard-shortcuts)
   - [Debug utility hotkeys (Cheats)](#debug-utility-hotkeys-cheats)
@@ -623,6 +624,13 @@ The controls are saved at once in
 `~/.config/StreetsOfRageProject/controls.yaml`
 (`%USERPROFILE%\.config\StreetsOfRageProject\controls.yaml` on Windows),
 which is created with the defaults above on the first run.
+
+### Pausing
+
+Start pauses the game and opens a menu. **RESUME**, or Start again, goes back to the game. **FORFEIT** asks "ARE YOU
+SURE PLAYER N?", with the cursor on NO. Saying YES takes away that player's continues and lives, and they die at once:
+GAME OVER. With two players each is asked in turn and answers only for themself, so one can give up while the other
+plays on. In 1 PLAYER AI ASSIST the first player answers for both.
 
 ### Video settings
 
