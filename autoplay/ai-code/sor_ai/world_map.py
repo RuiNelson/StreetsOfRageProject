@@ -132,6 +132,9 @@ ACTORS_BYTES = 0x100 + OBJECT_TABLE_BYTES
 ADDR_CAMERA_BASE = 0xFFE000
 CAMERA_BYTES = 0x20
 CAM_X_OFF = 0x02
+CAM_X_MAX_OFF = 0x1A
+CAM_X_MIN_OFF = 0x1E
+CAMERA_LOCKED_GAP = 4
 CAM_Y_OFF = 0x0E
 
 
@@ -476,6 +479,8 @@ class WorldMap:
     entities: tuple[MapEntity, ...]
     # The host runs `--widescreen`: camera_left/right are the wider walk clamp.
     widescreen: bool = False
+    # Whether walking can scroll the camera; see camera_scroll_is_open.
+    scroll_open: bool = True
 
     @property
     def view_width(self) -> float:
@@ -1327,7 +1332,20 @@ def parse_world_map(
         view_bottom=v_b,
         entities=tuple(entities),
         widescreen=widescreen,
+        scroll_open=camera_scroll_is_open(camera_block),
     )
+
+
+def camera_scroll_is_open(camera_block: bytes) -> bool:
+    """``$6A6 (update_camera_scroll_if_needed)``'s own test: the bounds at
+    ``$FFE01A``/``$FFE01E``, as unsigned words, at least 4 px apart. Under
+    that the camera is locked: a wave gate or a boss arena. ``True`` for a
+    block too short to hold them."""
+
+    if len(camera_block) < CAM_X_MIN_OFF + 2:
+        return True
+    gap = (_u16(camera_block, CAM_X_MAX_OFF) - _u16(camera_block, CAM_X_MIN_OFF)) & 0xFFFF
+    return gap >= CAMERA_LOCKED_GAP
 
 
 def empty_world_map() -> WorldMap:

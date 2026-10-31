@@ -138,6 +138,7 @@ from .tokens import (
 )
 from .walk_verbs import (
     CatchUpPartner,
+    Centering,
     DuelStep,
     EngageAbadede,
     EngageMrX,

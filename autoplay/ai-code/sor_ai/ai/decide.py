@@ -98,6 +98,7 @@ from .tokens import (
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
+    Centering,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
@@ -854,42 +855,21 @@ def _retreat_is_worth_it(context: Context, actor: PlayableCharacter) -> bool:
     return actor.health_percent < RETREAT_HEALTH_PERCENT_THRESHOLD
 
 
-def _ahead_in_stage_direction(actor_world_x: int, enemy_world_x: int, direction: str) -> bool:
-    if direction == "right":
-        return enemy_world_x >= actor_world_x
-    if direction == "left":
-        return enemy_world_x <= actor_world_x
-    return False
-
-
 def could_walk_to_near_enemy(context: Context) -> Context:
     verbs: set[Token] = set()
-    on_screen = reach.on_screen_enemies(context)
-    stage = find(context, Stage)
+    # On screen only. For an enemy off screen, could_walk_to_advance_stage walks
+    # on while the scroll is open, and could_centering lures it out while it is
+    # locked (user: "if the enemy is off-screen, do Centering, to lure him/her
+    # out"); a walk after it only pinned the actor to the screen's edge.
+    enemies = reach.on_screen_enemies(context)
+    if not enemies:
+        return verbs
     for actor in _actors(context):
         if _blocked(context, actor):
             continue
         if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
             continue
         if _is_holding_enemy(actor):
-            continue
-        enemies = on_screen
-        if not enemies and stage is not None:
-            # Nothing on-screen to chase: fall back to the nearest live
-            # enemy ahead in the stage's own scroll direction (e.g. the
-            # next wave, tracked on the world map but not yet in camera).
-            # Never chase one that's behind -- that's the "off-screen
-            # leftover" this verb must not walk backward for. Without
-            # this fallback, a live off-screen enemy still correctly holds
-            # back could_walk_to_advance_stage, but nothing ever moves the
-            # camera to bring it into view, and the AI is stuck producing no
-            # verb at all.
-            enemies = [
-                e
-                for e in reach.live_enemies(context)
-                if _ahead_in_stage_direction(actor.world_x, e.world_x, stage.direction)
-            ]
-        if not enemies:
             continue
         actionable = _actionable_targets(context, actor)
         # One candidate per reachable enemy -- determine_priority_verb
@@ -1172,37 +1152,17 @@ def _advance_blocking_breakables(context: Context) -> list[Breakable]:
 
 
 def _advance_blocking_enemies(context: Context) -> list[Enemy]:
-    """Live enemies that should hold back stage advance.
+    """Live enemies that should hold back stage advance: the ones on screen.
 
-    Almost every live enemy counts, on-screen or not (see
-    ``could_walk_to_advance_stage``) -- except an off-screen enemy already
-    at exactly 0 health. Per ``world_map.MapEntity.is_defeated``'s own note,
-    zero health is not yet ``is_defeated`` -- the ROM still counts it alive
-    and wants one more "finishing" hit -- but ``could_walk_to_near_enemy``
-    never chases an off-screen target, so nothing in this pipeline will ever
-    deliver that hit. Without this carve-out such a straggler blocks stage
-    advance forever, which contradicts ``could_walk_to_near_enemy``'s own
-    on-screen-only design intent ("so off-screen leftovers don't block
-    stage advance forever").
-
-    "Off-screen" here has to mean the same thing it means there, which is
-    ``reach.in_visible_screen`` -- the CRT -- and not ``in_camera``'s walk
-    clamp. A body in the 32px strip down either side of the clamp *is*
-    chased now, so carving it out would hand the advance a target the
-    approach is still walking toward.
+    An enemy off screen does not. With the scroll open only walking moves the
+    camera, and the next wave waits on the camera: holding the advance for it
+    left the actor at the centre and the round stuck (user, 2026-10-31: the AI
+    "got the game stuck because it's 'Centering' and the level asks for a little
+    advance"). With the scroll locked the advance is withheld anyway and
+    ``could_centering`` lures it out (user).
     """
 
-    camera = find(context, CameraRange)
-    blocking = []
-    for enemy in reach.live_enemies(context):
-        if (
-            camera is not None
-            and not reach.in_visible_screen(camera, enemy.world_x, enemy.world_y)
-            and enemy.health == 0
-        ):
-            continue
-        blocking.append(enemy)
-    return blocking
+    return reach.on_screen_enemies(context)
 
 
 # How far behind a partner who is further along the stage CatchUpPartner
@@ -1303,6 +1263,12 @@ def _actors_free_to_advance(context: Context) -> list[PlayableCharacter]:
         return []
     if _advance_blocking_breakables(context):
         return []
+    return _actors_free_to_walk(context)
+
+
+def _actors_free_to_walk(context: Context) -> list[PlayableCharacter]:
+    """Actors that are not mid-animation, held by an enemy, or holding one."""
+
     return [
         actor
         for actor in _actors(context)
@@ -1312,14 +1278,28 @@ def _actors_free_to_advance(context: Context) -> list[PlayableCharacter]:
     ]
 
 
-def could_walk_to_advance_stage(context: Context) -> Context:
-    """Scroll the stage only once every spawned enemy is gone.
+def scroll_is_open(context: Context) -> bool:
+    """Whether walking can scroll the camera: ``CameraRange.scroll_open``.
 
-    Gated on every live Enemy token, not just on-screen ones: an enemy that
-    has already spawned off-screen (about to walk/scroll into view) is still
-    a reason to hold position, not a "next wave cue" to push past. The one
-    exception is an off-screen enemy already at 0 health -- see
-    ``_advance_blocking_enemies``.
+    ``True`` with no ``CameraRange``, the same assumption the token's default
+    makes for a hand-built one.
+    """
+
+    camera = find(context, CameraRange)
+    return camera is None or camera.scroll_open
+
+
+def could_walk_to_advance_stage(context: Context) -> Context:
+    """Scroll the stage once no enemy is on screen, and only while it can
+    scroll.
+
+    Gated on the camera (``scroll_is_open``; user: only "when it really needs
+    to walk to advance stage"): at a locked wave gate or in a boss arena no
+    walk moves the camera, and the ROM's walk clamp stops the actor at the
+    screen's edge. ``could_centering`` answers those ticks.
+
+    Gated on every live Enemy on screen (``_advance_blocking_enemies``); one
+    off screen is the next wave to walk to, since only the walk scrolls to it.
 
     Also gated on an on-camera Breakable sitting on the stage path: a crate
     blocks lateral progress until smashed, and producing this verb next to
@@ -1336,11 +1316,60 @@ def could_walk_to_advance_stage(context: Context) -> Context:
     """
 
     verbs: set[Token] = set()
+    if not scroll_is_open(context):
+        return verbs
     stage = find(context, Stage)
     for actor in _actors_free_to_advance(context):
         if _partner_ahead_of(context, actor) is not None:
             continue
         verbs.add(WalkToAdvanceStage(actor_slot=actor.slot, direction=stage.direction))
+    return verbs
+
+
+# How close to the camera's centre counts as centred. Within a body's width of
+# it, the router's own arrival (the body overlapping the 1 px goal strip, up to
+# 13 px off) has been reached or nearly so, and the pipeline being memoryless,
+# this production gate is also where the actor stops.
+CENTERING_ARRIVED_X = 16
+
+
+def could_centering(context: Context) -> Context:
+    """Walk to the centre of the visible playfield when nothing else needs doing.
+
+    User: "Create a new token `Centering` which centers the controlled
+    character in the center of the viewed playfield". On X only, on the
+    actor's own lane (user), for any actor free to walk that is off centre,
+    with three exceptions:
+
+    - it would be advancing instead: the same condition as
+      ``could_walk_to_advance_stage``, so the two are never produced together
+      and every tick the scroll is locked falls here;
+    - a partner is further along the stage (``_partner_ahead_of``): that
+      actor is following them, and its centre is wherever they are (user:
+      idle, "unless following");
+    - no ``Stage`` or ``CameraRange`` to read.
+
+    Ranked under everything else that scores
+    (``priority._EMERGENCY_CENTERING``), it takes the elevator, an arena
+    before its boss walks in, and the wait at a locked gate, where an enemy off
+    screen is lured out from here rather than walked to.
+    """
+
+    verbs: set[Token] = set()
+    camera = find(context, CameraRange)
+    if camera is None or find(context, Stage) is None:
+        return verbs
+    advancing = (
+        {actor.slot for actor in _actors_free_to_advance(context)}
+        if scroll_is_open(context)
+        else set()
+    )
+    for actor in _actors_free_to_walk(context):
+        if actor.slot in advancing or _partner_ahead_of(context, actor) is not None:
+            continue
+        if abs(actor.world_x - camera.center_x) <= CENTERING_ARRIVED_X:
+            continue
+        verbs.add(Centering(actor_slot=actor.slot))
     return verbs
 
 
@@ -2642,6 +2671,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_hit_table(context)
         | could_walk_to_advance_stage(context)
         | could_catch_up_partner(context)
+        | could_centering(context)
         | could_punch(context)
         | could_melee_weapon_attack(context)
         | could_rear_attack(context)

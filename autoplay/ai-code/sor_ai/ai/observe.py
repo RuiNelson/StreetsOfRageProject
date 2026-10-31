@@ -649,6 +649,7 @@ def generate_direct_observation_tokens(
             bottom=snapshot.world_map.camera_bottom,
             scroll_x=snapshot.world_map.camera_x,
             widescreen=snapshot.world_map.widescreen,
+            scroll_open=snapshot.world_map.scroll_open,
         )
     )
     context.add(

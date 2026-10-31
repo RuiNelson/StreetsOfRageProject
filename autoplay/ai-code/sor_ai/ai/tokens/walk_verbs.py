@@ -56,12 +56,11 @@ class WalkToNearEnemy(Walk):
 class WalkToAdvanceStage(Walk):
     """Walk in the stage's progress direction to scroll it.
 
-    Produced by ``could_walk_to_advance_stage`` when no live Enemy token
-    remains anywhere -- except an off-screen enemy already at 0 health,
-    which nothing in this pipeline will ever chase down to finish off (see
-    ``decide._advance_blocking_enemies``) -- no on-camera Breakable sits
-    on the stage path (``decide._advance_blocking_breakables``), and the
-    stage has a progress direction.
+    Produced by ``could_walk_to_advance_stage`` when no live Enemy is on
+    screen (``decide._advance_blocking_enemies``), no on-camera Breakable sits
+    on the stage path (``decide._advance_blocking_breakables``), the stage
+    has a progress direction, and the camera can scroll
+    (``CameraRange.scroll_open``).
 
     Raises emergency: (no blocking Enemy or ahead Breakable)×1.
 
@@ -109,6 +108,24 @@ class CatchUpPartner(Walk):
     actor_slot: str
     target_slot: str  # the Partner's slot ("P1" | "P2")
     direction: str  # the stage's progress direction: "left" | "right"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Centering(Walk):
+    """Walk to the centre of the visible playfield, on the actor's own lane.
+
+    User: "Create a new token `Centering` which centers the controlled
+    character in the center of the viewed playfield". Produced by
+    ``decide.could_centering`` for an idle actor more than
+    ``decide.CENTERING_ARRIVED_X`` off ``CameraRange.center_x`` that is neither
+    advancing the stage nor following a partner ahead of it.
+
+    Raises emergency: (idle)×1 -- the tier of ``WalkToAdvanceStage``, which it
+    is never produced beside, so it loses to every other live candidate.
+    """
+
+    priority: int = 5
+    actor_slot: str
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

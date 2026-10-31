@@ -30,6 +30,7 @@ from sor_ai.object_catalog import player_style, style_for_object, style_for_type
 from sor_ai.phases import CombatPhase
 from sor_ai.world_map import (
     ACTORS_BYTES,
+    camera_scroll_is_open,
     CAMERA_BYTES,
     CAMERA_X_MIN,
     CAMERA_X_SPAN,
@@ -759,6 +760,30 @@ class WorldMapParseTests(unittest.TestCase):
         world = parse_world_map(actors_block=bytes(actors), camera_block=bytes(camera))
 
         self.assertTrue(any(e.kind == "enemy" for e in world.entities))
+
+
+class CameraScrollTests(unittest.TestCase):
+    """``$6A6``'s own test, on the bounds at ``$FFE01A``/``$FFE01E``."""
+
+    def _block(self, maximum: int, minimum: int) -> bytes:
+        block = bytearray(0x20)
+        block[0x1A:0x1C] = maximum.to_bytes(2, "big")
+        block[0x1E:0x20] = minimum.to_bytes(2, "big")
+        return bytes(block)
+
+    def test_bounds_under_4_px_apart_are_locked(self) -> None:
+        self.assertFalse(camera_scroll_is_open(self._block(0x04C0, 0x04C0)))
+        self.assertFalse(camera_scroll_is_open(self._block(0x04C3, 0x04C0)))
+
+    def test_bounds_4_px_apart_or_more_are_open(self) -> None:
+        self.assertTrue(camera_scroll_is_open(self._block(0x04C4, 0x04C0)))
+        self.assertTrue(camera_scroll_is_open(self._block(0x07C0, 0x04C0)))
+
+    def test_the_gap_is_an_unsigned_word(self) -> None:
+        self.assertTrue(camera_scroll_is_open(self._block(0x0000, 0x0001)))
+
+    def test_a_short_block_reads_open(self) -> None:
+        self.assertTrue(camera_scroll_is_open(bytes(0x10)))
 
 
 if __name__ == "__main__":

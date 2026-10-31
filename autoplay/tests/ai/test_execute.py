@@ -84,6 +84,7 @@ from sor_ai.ai.tokens import (
 )
 from sor_ai.ai.tokens import (
     CatchUpPartner,
+    Centering,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -1570,6 +1571,35 @@ class ExecuteWalkToAdvanceStageTests(unittest.TestCase):
         _settle(verb, {actor, camera, Stage(level_index=0, direction="right")}, gamepad)
 
         client.hold_buttons.assert_called_with(player1=RIGHT, player2=0)
+
+
+class ExecuteCenteringTests(unittest.TestCase):
+    """See ``Centering``: to the camera's centre on X, on the actor's lane."""
+
+    VERB = Centering(actor_slot="P1")
+    STAGE = Stage(level_index=0, direction="right")
+    CAMERA = CameraRange(left=32, right=288, top=0, bottom=112, scroll_open=False)
+
+    def test_walks_toward_the_centre_from_either_side(self) -> None:
+        for x, button in ((60, RIGHT), (270, LEFT)):
+            with self.subTest(x=x):
+                gamepad, client = _gamepad()
+                _settle(self.VERB, {_myself(world_x=x, world_y=64), self.STAGE, self.CAMERA}, gamepad)
+                client.hold_buttons.assert_called_with(player1=button, player2=0)
+
+    def test_reaches_the_centre_on_its_own_lane_and_stands(self) -> None:
+        trail = _walk(self.VERB, _myself(world_x=270, world_y=64), {self.STAGE, self.CAMERA}, ticks=80)
+
+        self.assertLessEqual(abs(trail[-1].world_x - 160), 16)
+        self.assertEqual({actor.world_y for actor in trail}, {64})
+        self.assertEqual(trail[-1].world_x, trail[-2].world_x)
+
+    def test_never_hops_a_pit_on_the_way(self) -> None:
+        pit = Pit(world_x=170, lane_y=0, width=60, height=112)
+        trail = _walk(self.VERB, _myself(world_x=270, world_y=64), {pit, self.STAGE, self.CAMERA}, ticks=80)
+
+        self.assertFalse(any(actor.is_airborne for actor in trail))
+        self.assertGreater(trail[-1].world_x, 230)
 
 
 class ExecuteCatchUpPartnerTests(unittest.TestCase):

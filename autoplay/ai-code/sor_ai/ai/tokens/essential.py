@@ -35,6 +35,8 @@ class CameraRange(Essential):
     X plus ``$20`` .. ``$120``, or plus ``0`` .. ``$140`` under ``--widescreen``
     (``widescreen``). ``scroll_x`` is the camera's own X, which a hand-built
     token may leave out (``origin_x`` then assumes the plain clamp).
+    ``scroll_open`` is whether walking can scroll the camera, false at a locked
+    wave gate or in a boss arena (``world_map.camera_scroll_is_open``).
     """
 
     left: float
@@ -43,12 +45,20 @@ class CameraRange(Essential):
     bottom: float
     scroll_x: float | None = None
     widescreen: bool = False
+    scroll_open: bool = True
 
     @property
     def origin_x(self) -> float:
         """The camera's X (sprite space 0): what ``cam_x`` means in the ROM."""
 
         return self.scroll_x if self.scroll_x is not None else self.left - 0x20
+
+    @property
+    def center_x(self) -> float:
+        """The middle of the visible playfield: the camera's X plus ``$A0``,
+        which both walk clamps are centred on."""
+
+        return (self.left + self.right) / 2
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

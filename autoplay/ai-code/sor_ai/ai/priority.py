@@ -88,6 +88,7 @@ from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDi
 from .tokens import Context, Verb, find, find_all
 from .tokens import (
     CatchUpPartner,
+    Centering,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -459,6 +460,9 @@ _EMERGENCY_WALK_TO_ADVANCE_STAGE = 1
 # the actor does when nothing else asks for it. The two are never produced
 # for one actor together, so the tie never has to be broken.
 _EMERGENCY_CATCH_UP_PARTNER = 1
+# Centering is what an actor does with nothing to do (decide.could_centering),
+# the same lowest tier, and never produced beside either verb above.
+_EMERGENCY_CENTERING = 1
 # Added to an engagement verb (walk-in, strike, grab, throw) whose target
 # is an armed ordinary enemy or a Boss. Sized to dominate WalkToNearEnemy's
 # 6-point distance span (base 14, floor 8) so a far armed foe still beats a
@@ -934,6 +938,10 @@ def _emergency_catch_up_partner(verb: CatchUpPartner, context: Context) -> int:
     return _EMERGENCY_CATCH_UP_PARTNER
 
 
+def _emergency_centering(verb: Centering, context: Context) -> int:
+    return _EMERGENCY_CENTERING
+
+
 def _emergency_thrown_weapon(verb: Verb, context: Context, weight: int) -> int:
     """Shared range check for the two attack-thrown weapons (knife, pepper —
     items-and-weapons.md's ``$21E6``): beyond melee, within throw range.
@@ -1160,6 +1168,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     HitTable: _emergency_hit_table,
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
     CatchUpPartner: _emergency_catch_up_partner,
+    Centering: _emergency_centering,
 }
 
 

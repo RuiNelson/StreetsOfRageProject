@@ -255,8 +255,8 @@ necessidade."). Read literally, and built as a swap:
   (the user's rule names only the partner being ahead), so with an idle human
   behind it the AI runs on to the camera's clamp; with an enemy alive the
   fight verbs own the tick and the AI does not follow (the advance's gate);
-  `WalkToNearEnemy`'s off-screen fallback, which walks toward enemies ahead in
-  the stage's direction, is untouched. **Not run live against a human
+  `WalkToNearEnemy` no longer walks to enemies off screen at all (**`Centering`**,
+  below). **Not run live against a human
   partner** -- the unit tests pin the behaviour: `CouldCatchUpPartnerTests`
   (production, both directions, the elevator, every gate),
   `ExecuteCatchUpPartnerTests` (stop distance, lane, pit hop, clamp, the
@@ -264,6 +264,58 @@ necessidade."). Read literally, and built as a swap:
   real loop, `PartnerFollowStabilityTests` (catches up and waits, trails a
   partner who keeps walking, leads one behind, mirrors on round 8, hands over
   to the advance exactly once when the partner falls behind).
+
+**`WalkToAdvanceStage` only when walking can scroll, and `Centering`** (user,
+2026-10-31: "I want the AI to only produce `WalkToAdvanceStage` token when it
+really needs to walk to advance stage. Create a new token `Centering` which
+centers the controlled character in the center of the viewed playfield"; the
+choices below are theirs). The scroll test is the ROM's own, `$6A6
+(update_camera_scroll_if_needed)`: `$FFE01A` max minus `$FFE01E` min, unsigned
+words, under 4 is locked -- a wave gate or a boss arena
+(`world_map.camera_scroll_is_open`, `CameraRange.scroll_open`,
+`decide.scroll_is_open`). What opens a gate is the wave flow, not where the
+player stands (`$FFFA0D`, set around `$DF4`, consumed by `$19570`).
+
+- `could_walk_to_advance_stage` stands down while the scroll is locked.
+- `could_walk_to_near_enemy` takes on-screen enemies only (user: "if the enemy
+  is off-screen, do Centering, to lure him/her out"). Its old fallback, a walk
+  to the nearest off-screen enemy ahead, is gone: it pinned the actor to the edge.
+- **An enemy off screen no longer holds the advance back**
+  (`_advance_blocking_enemies` is `reach.on_screen_enemies`), which also frees
+  `CatchUpPartner`. So the lure is for a locked scroll; an open one walks. User,
+  1P + AI Assist in widescreen, on the first cut, where off-screen enemies held
+  an open scroll: "the AI got the game stuck because it's 'Centering' and the
+  level asks for a little advance". **`$18F5C`, two players**: on biased screen X
+  (`+$28`, `$80` = left edge), the camera scrolls forward only with the lead past
+  `$130` (camera + `$B0`) and the rear at `$110` (camera + `$90`) or more, at
+  `min(lead - $130, rear - $110)`; one player only needs the lead. The widescreen
+  ports leave this routine alone. So `Centering`'s stop, camera + `$90`..`$B0`, is
+  exactly the dead zone: a centred leader never scrolls, and a rear AI that came
+  from the left and stopped at + `$90` holds the camera at velocity 0 for a person
+  walking ahead. Read from the code, not reproduced; the user's own session was
+  not traced.
+- `decide.could_centering` is for an actor free to walk, on **any idle tick**:
+  the locked gate (an enemy off screen is lured out from there), the elevator, an
+  arena before its boss walks in. Not while it would be advancing,
+  and not while a partner is ahead (`_partner_ahead_of`): that actor is
+  following. **X only**, on its own lane, to `CameraRange.center_x` (the
+  camera's X + `$A0` in both walk clamps), within `CENTERING_ARRIVED_X` (16 px).
+  Lowest tier (`priority._EMERGENCY_CENTERING` = 1), so anything else that
+  scores wins; a live enemy on screen does not withhold it, so the wait beside
+  a partner's fight (**Leave the partner's fight to them**) now centres. The
+  executor routes like `CatchUpPartner` but never hops: a pit in the way stops
+  it at the wall.
+
+Pinned by `test_decide.CenteringTests`, `test_execute.ExecuteCenteringTests`,
+`test_priority.CenteringPriorityTests` and `test_world_map.CameraScrollTests`.
+The user played it live, 1P + AI Assist in widescreen, confirmed the stall gone and
+accepted it (2026-10-31); **no scored A/B was run**. An earlier version on round 3, real waves (damage /
+hits at locked gates per run / lives): waiting at the edge 54.0 / 3.0 / 0 over 10
+runs, gate + centre 60.0 / 4.5 / 1 over 6, an A/A gap of 13.6 damage -- so
+noise, except the locked-gate hits trend. To watch: those hits, and a stall if
+an enemy waits off screen at a locked gate for the player to come closer (the
+walk that used to go after it is gone). `tools/stage_walk_diag.py` has no
+two-player mode, so that session's case is only pinned by unit tests.
 
 **The off-screen-enemy corner stall -- and `WalkToScreenCenter`, removed**
 (user, in Portuguese, when it was asked for: "Por vezes a IA fica presa a um
@@ -276,21 +328,9 @@ porque é inútil"). The verb is gone -- `could_walk_to_screen_center`,
 `execute.state_machine_walk_to_screen_center`, the `priority` tier and the
 ceiling that held a stalled `WalkToNearEnemy` under it, and their tests all
 went with it -- and `WalkToNearEnemy` scores by distance alone again. The stall
-it answered is **not answered any more**, so the diagnosis stays here for
-whoever meets it again: `could_walk_to_near_enemy`'s off-screen fallback
-(`decide.py`, its own docstring: "the next wave, tracked on the world map but
-not yet in camera") aims a `WalkToNearEnemy` straight at a target's `world_x`
-past `navigation.world_rect`'s bound -- deliberately just the camera plus
-`navigation.WORLD_MARGIN_X` (96 px), since "planning across all of that would
-route around things that are not on screen". Once the actor reaches
-`CameraRange`'s walk-clamp edge (the ROM's `$43AA`, `camera_x+$20..+$120`)
-`plan_route` has no further lattice position toward an off-screen target, and
-the straight-line fallback (`execute._walk_to_near_enemy_target`) is zeroed the
-same tick by `execute._clamp_mask_to_camera`, which strips the blocked
-direction within `MOVE_DEADBAND_X` (5 px) of the clamp; nothing else proposes
-heading back toward the middle of the screen, so `determine_priority_verb`
-keeps picking that stalled verb and the AI holds its corner. A different
-answer should start from that, not from the removed verb.
+it answered, a `WalkToNearEnemy` held against the walk clamp toward an off-screen
+target that nothing else overrode, went with `could_walk_to_near_enemy`'s
+off-screen fallback: `Centering`, above, is the answer now.
 
 **Holding a boss (user: "a IA não consegue lidar bem com o boss de
 primeiro nível"; "os jogadores profissionais são bem fãs de agarrar e fazer
@@ -3329,7 +3369,7 @@ entry points in this tree.
 | `tokens/` | All token classes (including ABCs), split by kind; the package `__init__` re-exports everything. `tokens/tokens.py` (`Token`/`Information`/`Verb` base classes, `Context`, `find`/`find_all`; `Information` splits into `Observed` (directly read from RAM) and `Inferred` (derived from observed tokens)); `tokens/character.py` (`Character` common actor base (`slot`, position, health, facing, combat phase); `Myself`/`Partner` (`player_index`, `action_state`, `action_flags`, `is_airborne`, punch inner/outer helpers, `vel_x` from player `+$1C` -- the word Antonio's kick gate reads -- and their own `hitbox` -- read straight from the object's own cached box at `+$70`, never reconstructed, and carrying no `attack_ranges`: a player's reach is this module's punch/rear/jump-kick geometry, not a per-frame extraction)); `tokens/enemy.py` (`Enemy` (a `Character`; adds `type_id`, `targets_player`, the formal `hitbox`/`attack_ranges` value objects plus the `max_reach`/`min_reach` helpers derived from them, `is_defeated` (the ROM's lethal check is **signed**, so a health word of `$8000`-`$FFFF` is already a corpse while the object sits in its slot with a stale action family -- judging "still a target" from `combat_phase` alone kept the AI walking to, ranking and punching bodies, which is what "attacking enemies that are not there" looks like from the sofa; zero health is *not* defeated and still owes a finishing hit) -- value objects rather than tokens, since a token may never embed a token by value, `held_weapon_type` (pickup `$08-$0C` while this enemy is holding one, else 0 -- ordinary enemies do not store this at `+$60`; observe copies `MapEntity.held_type`, which `world_map` resolves from the held weapon's `+$52` holder pointer), `grunt_vel_x`/`grunt_vel_y` -- ordinary-enemy-only velocity, defaulted to 0 and unused by `Boss`, which keeps its own separately offset `vel_x`/`vel_z` -- and `predict_position_after_n_frames(n)`, the enemy's own constant-velocity extrapolation in **60 Hz game frames** (the unit `$17AB8` integrates `+$1C`/`+$20` in, *not* AI poll ticks, which are ~2 frames each at the 33ms default), which every lead time in `ai/kinematics.py` is built on and which a `Boss` answers with its current position since it never populates those fields) + subclasses: `Grunt` (ordinary types `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`; carries the ROM's own `stun_timer` at `+$50` plus `is_stunned`, an ordinary-enemy-only field since both stun handlers are ordinary state-table entries; `Nora` additionally carries `ticks_since_last_attack`, cross-tick memory maintained by `observe.NoraAttackTracker` -- not a RAM field, defaulted to `NORA_TICKS_SINCE_ATTACK_UNKNOWN` for any `Nora` built without going through the tracker), `RivalPlayer` (the other player during Mr. X's betrayal duel -- **Mr. X's betrayal duel**), `Boss` → direct subclasses `Abadede`/`MrX`/`Souther`/`Antonio`/`Bongo`/`Onihime` (`Boss` also carries `primary_state`, the `+$30` byte Antonio's kick is); `enemy_class_for_type`; `Surrounded`, the one `Inferred` judgment left about enemies (three or more live enemies inside the close box around the actor, or a pincer with one on each side; produced by `inference.check_for_surrounded`, the only function `inference.py` still has); `GrabReason` -- `CLEAR_REAR`/`DEAD_ZONE`/`WHILE_SURROUNDED`/`DODGE_CHARGE` -- an `Enum`, not a token field: it is the return type of `reach.grab_reasons(context, actor, target, enemies) -> frozenset[GrabReason]`, why a hold beats a strike; most reasons are `Grunt`-only, and neither boss with a plan has one: `EngageAntonio` and `EngageSouther` walk into them themselves, so no `GrabEnemy` is ever produced for either. `WHILE_SURROUNDED` is the only reason keyed on the actor's own situation (`reach.actor_is_surrounded`) rather than on the candidate enemy -- see `AI.md`'s "Judging without a cache" for why this, and every other judgment formerly produced by `inference.py`'s `check_for_*` functions (`ClosingEnemy`, `TargetInReach`/`ReachKind`, `IncomingMelee`, `PunishWindow`, `IncomingProjectile`, `WeaponUpgrade`, `AntonioIsGoingToKick`, `SoutherIsGoingToSlash`, `SoutherPunishesJump`, `SafeSpot`), is now a direct `reach.py` (or, for `SafeSpot`, `execute.py`) function call at each site that needs the answer instead of a token written into the context once per tick; `tokens/essential.py` (`Essential` (scene-wide observations `Stage`/`CameraRange`/`AnimationInProgress`/`InContinueMenu`/`InMrXDialog`/`PlayerDuel`, and the harness switches `DebugNoFood`/`DebugNoPolice`/`DebugMrXAccept`)); `tokens/dialog_verbs.py` (`Dialog` groups UI-prompt verbs `HandleContinueMenu`/`HandleMrXDialog` -- always Yes + initials `AI `, always No to Mr. X); `tokens/hazard_tokens.py` (`Projectile` -- Antonio's `$96` boomerang also carries the rest of its later-boss object, `vel_x` being its `+$1C`, for `antonio.BoomerangSim` --, `StageObjects` (`Breakable` -- carries its real `hitbox`, `Pit`)); `tokens/pickup_tokens.py` (`Weapon` (with its real `hitbox`) + consumable `Pickup` hierarchy + `weapon_rank`); `tokens/walk_verbs.py` (`WalkToNearEnemy`, `RetreatFromDanger` (give up ground to a dangerous enemy not yet actionable -- only while hurt or `Surrounded`, per `decide._retreat_is_worth_it`; danger alone is not enough), `ProjectileSidestep` (step off a projectile's own lane rather than block its path, once `reach.projectile_threatens` judges it a threat -- built for Jack's thrown axe/torch (type `$28`), but reacts to any projectile judged a threat), `EngageAntonio` (the whole approach to Antonio, planned by `antonio.plan_engage`'s lookahead over his own AI; the hold is the contact result of the walk, armed or not), `EngageSouther` (the whole approach to Souther -- corridor, lane escape, walk-in -- planned by `souther.plan_engage`; the hold is the contact result of the walk, armed or not), `WalkToAdvanceStage`, `CatchUpPartner` (follow a partner who is further along the stage, `WalkToAdvanceStage`'s replacement beside one -- see **Following a partner who is ahead**), `WalkToWeapon`, `WalkToPickup`); `tokens/attack_verbs.py` (`Punch` (unarmed only), `HitAntonioBoomerang` (timed B-punch that knocks his type-`$96` boomerang away the moment it would hit), `MeleeWeaponAttack` (armed melee -- same B input as `Punch`, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`/`ReleaseToRegrab`, and `ReleasePartner` -- the only one offered while the body in hand is the other player), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat (`Punch`/`JumpAttack`/`RearAttack`); `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`, the only two the ROM attack-throws)); `tokens/police_verb.py` (`CallPolice` — an `Attack` descendant, health-critical only and only with at least one live enemy); `tokens/recovery_verbs.py` (`Recovery` groups actions that escape/shorten a bad state rather than act on an enemy/prop/held body; `TechRecover` — the C+Up bounce-cancel landing tech, armed only by specific special/boss hold-throw choreography (`PlayableCharacter.throw_tech_ready`), not an ordinary street-enemy throw) |
 | `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM); free-to-act phases include `HOLDING` and `HELD_BY_ENEMY`. Fills `PlayableCharacter.held_enemy_slot` from `MapEntity.contact_slot` while the action byte is in the hold family (`$60-$6F` or the `$76`/`$80` crossover), and `HoldTracker` counts `hold_ticks` over that same family so a knee or a flip passing through an animation lock does not restart the knee budget. Also emits `InContinueMenu` from a type-`$0F` player object and `InMrXDialog` when `$FFDE00` is set and this player's `+$59` bit 4 is live. `NoraAttackTracker` is the one deliberate exception to `generate_direct_observation_tokens` otherwise being a pure function of its snapshot argument: cross-tick memory (keyed by enemy slot, one instance per `AgentLoop`) of ticks since each on-screen Nora last held a dangerous phase, reset to 0 while dangerous and incremented otherwise, feeding `Nora.ticks_since_last_attack`; `forget_missing` drops a slot the moment it stops being observed as a live Nora so a slot the game later reuses for a different enemy never inherits a stale count. `GrabStallTracker` (the old Souther walk-in timeout) is gone with the grab reason it guarded; the hold loop reads the holder's own bytes instead (`PlayableCharacter.knees_in_chain`/`hold_release_countdown`/`crossover_spent`, from `+$58`/`+$61`, `+$63` and `+$4B`) |
 | `inference.py` | `check_for_surrounded` (3+ enemies in the close box, or a pincer -- reusing `rear_attack_is_warranted`'s own box so the two judgments cannot disagree) and `generate_inference_tokens` (in practice, just `context | check_for_surrounded(context)`), the only two functions left here. Every other judgment this file used to compute once per tick and write into the context -- threat-filtered incoming projectiles, closing enemies, per-move reach bands, incoming melee, punish windows, grab opportunities, weapon upgrades, Antonio's kick gate, Souther's slash gate and jump counter, safe spots -- was removed and folded into a `reach.py` (or, for the safe-spot search, `execute.py`) function called directly by whichever `could_*`/`_emergency_*`/state machine needs the answer, several times a tick rather than once; see that row below and `AI.md`'s "Judging without a cache" for the reasoning and the full list of removed tokens |
-| `walk_verbs.py` | `WalkToNearEnemy`, `RetreatFromDanger`, `ProjectileSidestep`, `EngageAntonio`, `EngageSouther`, `EngageBongo`, `EngageAbadede`, `EngageJack`, `EngageGrunts`, `EngageTwins`, `WalkToAdvanceStage`, `CatchUpPartner`, `WalkToWeapon`, `WalkToPickup` |
+| `walk_verbs.py` | `WalkToNearEnemy`, `RetreatFromDanger`, `ProjectileSidestep`, `EngageAntonio`, `EngageSouther`, `EngageBongo`, `EngageAbadede`, `EngageJack`, `EngageGrunts`, `EngageTwins`, `WalkToAdvanceStage`, `Centering`, `CatchUpPartner`, `WalkToWeapon`, `WalkToPickup` |
 | `attack_verbs.py` | `Punch` (unarmed), `HitAntonioBoomerang` (timed punch of Antonio's type-`$96` boomerang), `MeleeWeaponAttack` (armed melee, same B input, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`/`ReleaseToRegrab`, and `ReleasePartner` -- the only one offered while the body in hand is the other player), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat; `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`) |
 | `police_verb.py` | `CallPolice` — an `Attack` descendant (health-critical only; below `POLICE_HEALTH_PERCENT_THRESHOLD`; also requires at least one live enemy) |
 | `dialog_verbs.py` | `HandleContinueMenu` / `HandleMrXDialog` — UI-prompt verbs (always Yes + initials `AI `; always No to Mr. X). Name-entry confirm is C (or A): `$57D2` accepts `+$55` bits 5+6 and treats bit 4 (B) as backspace, a no-op on the first slot -- pressing B to "type A" left the AI stuck on the first initial |

@@ -153,7 +153,10 @@ parametrized intent that precedes any concrete action.
   past them; it walks up to `decide.CATCH_UP_DISTANCE_X` behind them and
   waits there. See `decide.could_catch_up_partner`,
   `decide._partner_ahead_of` and `autoplay/CLAUDE.md`'s **Following a
-  partner who is ahead**.
+  partner who is ahead**. `WalkToAdvanceStage` is produced only while the
+  camera can scroll; `Centering` is what an idle actor does instead, walking
+  to the centre of the visible playfield on its own lane
+  (`decide.could_centering`).
 - `Attack` — for example, `Punch`, `JumpAttack`, `GrabEnemy`, `Supplex`,
   `ThrowKnife`, `RearAttack` (simultaneous B+C rear/escape chord), and
   `CounterGrab` (enemy-held C then B sequence), each parametrized with the
@@ -1194,7 +1197,7 @@ priority than advancing to the next stage. `WalkToAdvanceStage` itself
 always has the lowest emergency of any verb that still scores, so a
 pickup, a walk-in, or an attack will beat it whenever one is available.
 `CatchUpPartner`, which takes its place beside a partner who is further
-along the stage, ranks at the same tier.
+along the stage, ranks at the same tier, as does `Centering`.
 
 Among enemy targets, a `Boss` outranks an armed ordinary enemy, and an
 armed ordinary enemy (pickup `$08-$0C`, or Jack still juggling his axe)

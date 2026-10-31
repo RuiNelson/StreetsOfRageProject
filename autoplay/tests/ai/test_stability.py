@@ -41,6 +41,7 @@ from sor_ai.ai.tokens import (
     ThrowHeldEnemy,
     Verb,
     WalkToAdvanceStage,
+    Centering,
     find,
     find_all,
 )
@@ -1309,8 +1310,9 @@ class PartnerFollowStabilityTests(unittest.TestCase):
             ticks=20, actor_x=100, partner_x=500, direction="none", level_index=6
         )
 
-        self.assertEqual(set(names), {""}, names)
-        self.assertEqual(set(xs), {100})
+        # Nobody leads on the elevator: the actor is idle, so it centres.
+        self.assertEqual(set(names), {Centering.__name__}, names)
+        self.assertGreater(xs[-1], 100)
 
     def test_hands_over_to_the_advance_once_when_the_partner_falls_behind(self) -> None:
         # The partner walks back through the actor. From that tick the actor

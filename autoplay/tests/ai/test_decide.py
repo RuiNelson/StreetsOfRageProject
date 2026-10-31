@@ -57,6 +57,7 @@ from sor_ai.ai.decide import (
     could_throw_knife,
     could_throw_pepper,
     could_catch_up_partner,
+    could_centering,
     could_walk_to_advance_stage,
     could_open_breakable,
     could_walk_to_near_enemy,
@@ -97,10 +98,12 @@ from sor_ai.ai.tokens import (
     RetreatFromDanger,
     Walk,
     WalkToAdvanceStage,
+    Centering,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
 )
+from sor_ai.ai.decide import CENTERING_ARRIVED_X
 from sor_ai.ai.inference import generate_inference_tokens
 from sor_ai.phases import CombatPhase
 
@@ -731,49 +734,22 @@ class CouldWalkToNearEnemyTests(unittest.TestCase):
         context: set[Token] = {myself, enemy, AnimationInProgress(slot="P1")}
         self.assertEqual(could_walk_to_near_enemy(context), set())
 
-    def test_falls_back_to_an_off_screen_enemy_ahead_in_the_stage_direction(self) -> None:
-        # Regression: with nothing on-screen, an off-screen enemy still
-        # correctly holds back could_walk_to_advance_stage, but nothing
-        # ever chased it, so the AI produced no verb at all and the
-        # camera never moved to bring it into view.
-        myself = make_myself(world_x=100, world_y=100)
-        camera = CameraRange(left=0, right=200, top=0, bottom=200)
-        ahead = make_enemy(world_x=500, world_y=100)  # off-screen, ahead
+    def test_never_walks_to_an_off_screen_enemy(self) -> None:
+        # Ahead or behind, scroll open or locked: Centering lures it out
+        # (user: "if the enemy is off-screen, do Centering").
         stage = Stage(level_index=0, direction="right")
-        context: set[Token] = {myself, camera, ahead, stage}
+        for enemy_x in (500, -300):
+            for scroll_open in (True, False):
+                with self.subTest(enemy_x=enemy_x, scroll_open=scroll_open):
+                    context: set[Token] = {
+                        make_myself(world_x=100, world_y=100),
+                        CameraRange(left=0, right=200, top=0, bottom=200, scroll_open=scroll_open),
+                        make_enemy(world_x=enemy_x, world_y=100),
+                        stage,
+                    }
+                    self.assertEqual(could_walk_to_near_enemy(context), set())
 
-        result = could_walk_to_near_enemy(context)
-
-        self.assertEqual(result, {WalkToNearEnemy(actor_slot="P1", target_slot="obj01")})
-
-    def test_does_not_chase_an_off_screen_enemy_behind(self) -> None:
-        # Must never walk backward for an abandoned off-screen leftover.
-        myself = make_myself(world_x=500, world_y=100)
-        camera = CameraRange(left=400, right=600, top=0, bottom=200)
-        behind = make_enemy(world_x=50, world_y=100)  # off-screen, behind
-        stage = Stage(level_index=0, direction="right")
-        context: set[Token] = {myself, camera, behind, stage}
-
-        self.assertEqual(could_walk_to_near_enemy(context), set())
-
-    def test_off_screen_fallback_needs_a_stage_token(self) -> None:
-        myself = make_myself(world_x=100, world_y=100)
-        camera = CameraRange(left=0, right=200, top=0, bottom=200)
-        ahead = make_enemy(world_x=500, world_y=100)
-        context: set[Token] = {myself, camera, ahead}
-
-        self.assertEqual(could_walk_to_near_enemy(context), set())
-
-    def test_off_screen_fallback_inert_when_stage_direction_is_none(self) -> None:
-        myself = make_myself(world_x=100, world_y=100)
-        camera = CameraRange(left=0, right=200, top=0, bottom=200)
-        ahead = make_enemy(world_x=500, world_y=100)
-        stage = Stage(level_index=6, direction="none")
-        context: set[Token] = {myself, camera, ahead, stage}
-
-        self.assertEqual(could_walk_to_near_enemy(context), set())
-
-    def test_on_screen_enemy_still_takes_priority_over_the_fallback(self) -> None:
+    def test_walks_only_to_the_on_screen_enemy(self) -> None:
         myself = make_myself(world_x=100, world_y=100)
         camera = CameraRange(left=0, right=200, top=0, bottom=200)
         on_screen = make_enemy(slot="near", world_x=150, world_y=10, health=10)
@@ -1036,6 +1012,103 @@ class CouldRetreatFromDangerTests(unittest.TestCase):
         self.assertEqual(could_retreat_from_danger({myself}), set())
 
 
+class CenteringTests(unittest.TestCase):
+    """``WalkToAdvanceStage`` only when walking can scroll the camera, and
+    ``Centering`` when the actor has nothing else to do (user: "only produce
+    `WalkToAdvanceStage` token when it really needs to walk to advance
+    stage"; "centers the controlled character in the center of the viewed
+    playfield")."""
+
+    RIGHT = Stage(level_index=0, direction="right")
+    ELEVATOR = Stage(level_index=6, direction="none")
+    LOCKED = CameraRange(left=32, right=288, top=0, bottom=112, scroll_open=False)
+    OPEN = CameraRange(left=32, right=288, top=0, bottom=112)
+    CENTRED = Centering(actor_slot="P1")
+
+    def test_a_locked_scroll_centres_instead_of_advancing(self) -> None:
+        context = {make_myself(world_x=270), self.RIGHT, self.LOCKED}
+
+        self.assertEqual(could_walk_to_advance_stage(context), set())
+        self.assertEqual(could_centering(context), {self.CENTRED})
+
+    def test_an_open_scroll_advances_instead_of_centring(self) -> None:
+        context = {make_myself(world_x=270), self.RIGHT, self.OPEN}
+
+        self.assertEqual(
+            could_walk_to_advance_stage(context),
+            {WalkToAdvanceStage(actor_slot="P1", direction="right")},
+        )
+        self.assertEqual(could_centering(context), set())
+
+    def test_centres_from_either_side_and_stops_near_the_middle(self) -> None:
+        for x, expected in (
+            (100, {self.CENTRED}),
+            (220, {self.CENTRED}),
+            (160 - CENTERING_ARRIVED_X, set()),
+            (160 + CENTERING_ARRIVED_X, set()),
+        ):
+            with self.subTest(x=x):
+                self.assertEqual(
+                    could_centering({make_myself(world_x=x), self.RIGHT, self.LOCKED}), expected
+                )
+
+    def test_a_locked_scroll_lures_an_enemy_off_screen_from_the_centre(self) -> None:
+        context = {make_myself(world_x=270), make_enemy(world_x=500), self.RIGHT, self.LOCKED}
+
+        self.assertEqual(could_walk_to_near_enemy(context), set())
+        self.assertEqual(could_walk_to_advance_stage(context), set())
+        self.assertEqual(could_centering(context), {self.CENTRED})
+
+    def test_widescreen_has_the_same_centre(self) -> None:
+        # $43AA widened $20 a side: the camera's X + 0..$140, centre still + $A0.
+        camera = CameraRange(left=1000, right=1320, top=0, bottom=112, scroll_x=1000, widescreen=True)
+
+        self.assertEqual(camera.center_x, 1160)
+
+    def test_two_players_advance_for_an_enemy_off_screen(self) -> None:
+        # User, 1P + AI Assist in widescreen: the AI stood "Centering" and the
+        # level "asks for a little advance". $18F5C needs the lead past camera
+        # + $B0 and the rear past + $90, so a centred AI holds the camera.
+        camera = CameraRange(left=1000, right=1320, top=0, bottom=112, scroll_x=1000, widescreen=True)
+        context = {
+            make_myself(world_x=1160),
+            make_partner(world_x=1100),
+            make_enemy(world_x=1600),
+            self.RIGHT,
+            camera,
+        }
+
+        self.assertEqual(
+            could_walk_to_advance_stage(context),
+            {WalkToAdvanceStage(actor_slot="P1", direction="right")},
+        )
+        self.assertEqual(could_centering(context), set())
+
+    def test_the_elevator_centres(self) -> None:
+        context = {make_myself(world_x=270), self.ELEVATOR, self.OPEN}
+
+        self.assertEqual(could_centering(context), {self.CENTRED})
+
+    def test_following_a_partner_ahead_is_not_idle(self) -> None:
+        context = {
+            make_myself(world_x=60),
+            make_partner(world_x=100),
+            self.RIGHT,
+            self.LOCKED,
+        }
+
+        self.assertEqual(could_centering(context), set())
+
+    def test_an_actor_held_by_an_enemy_does_not_centre(self) -> None:
+        context = {
+            make_myself(world_x=270, combat_phase=CombatPhase.HELD_BY_ENEMY),
+            self.RIGHT,
+            self.LOCKED,
+        }
+
+        self.assertEqual(could_centering(context), set())
+
+
 class CouldWalkToAdvanceStageTests(unittest.TestCase):
     def test_fires_when_no_enemies_present(self) -> None:
         myself = make_myself()
@@ -1054,17 +1127,33 @@ class CouldWalkToAdvanceStageTests(unittest.TestCase):
 
         self.assertEqual(could_walk_to_advance_stage(context), set())
 
-    def test_does_not_fire_when_the_only_enemy_is_off_screen(self) -> None:
-        """A spawned-but-not-yet-visible enemy must hold the stage just like
-        an on-screen one -- it is a reason to hold position, not a "next
-        wave cue" to push past (see could_walk_to_advance_stage's
-        docstring)."""
+    def test_an_enemy_off_screen_does_not_hold_an_open_scroll(self) -> None:
+        """Only the walk scrolls to the next wave: holding the advance for it
+        left the actor centred and the round stuck (user: "the level asks for
+        a little advance"). Ahead or behind."""
 
-        myself = make_myself(world_x=100, world_y=100)
-        camera = CameraRange(left=0, right=200, top=0, bottom=200)
-        off_screen_enemy = make_enemy(world_x=500, world_y=100)
         stage = Stage(level_index=0, direction="right")
-        context: set[Token] = {myself, camera, off_screen_enemy, stage}
+        for enemy_x in (500, -300):
+            with self.subTest(enemy_x=enemy_x):
+                context: set[Token] = {
+                    make_myself(world_x=100, world_y=100),
+                    CameraRange(left=0, right=200, top=0, bottom=200),
+                    make_enemy(world_x=enemy_x, world_y=100),
+                    stage,
+                }
+                self.assertEqual(
+                    could_walk_to_advance_stage(context),
+                    {WalkToAdvanceStage(actor_slot="P1", direction="right")},
+                )
+                self.assertEqual(could_centering(context), set())
+
+    def test_an_enemy_on_screen_holds_an_open_scroll(self) -> None:
+        context: set[Token] = {
+            make_myself(world_x=100, world_y=100),
+            CameraRange(left=0, right=200, top=0, bottom=200),
+            make_enemy(world_x=150, world_y=100),
+            Stage(level_index=0, direction="right"),
+        }
 
         self.assertEqual(could_walk_to_advance_stage(context), set())
 
@@ -1108,18 +1197,6 @@ class CouldWalkToAdvanceStageTests(unittest.TestCase):
         on_screen_zero_hp = make_enemy(world_x=150, world_y=100, health=0)
         stage = Stage(level_index=0, direction="right")
         context: set[Token] = {myself, camera, on_screen_zero_hp, stage}
-
-        self.assertEqual(could_walk_to_advance_stage(context), set())
-
-    def test_off_screen_enemy_with_nonzero_health_still_blocks(self) -> None:
-        # Only exactly-zero health is exempted -- a still-damageable
-        # off-screen enemy is a genuine "about to scroll into view" reason
-        # to hold position, per the original docstring rationale.
-        myself = make_myself(world_x=100, world_y=100)
-        camera = CameraRange(left=0, right=200, top=0, bottom=200)
-        off_screen_alive = make_enemy(world_x=500, world_y=100, health=1)
-        stage = Stage(level_index=0, direction="right")
-        context: set[Token] = {myself, camera, off_screen_alive, stage}
 
         self.assertEqual(could_walk_to_advance_stage(context), set())
 
@@ -1378,7 +1455,9 @@ class CouldCatchUpPartnerTests(unittest.TestCase):
         self.assertEqual(advance, set())
         self.assertEqual(catch_up, set())
 
-    def test_an_off_screen_enemy_holds_it_back_too(self) -> None:
+    def test_an_off_screen_enemy_does_not_hold_it_back(self) -> None:
+        # The rear player holds the camera back ($18F5C), so a follower that
+        # stood for it could stop the scroll as the advance itself would.
         context = {
             make_myself(world_x=100),
             make_partner(world_x=180),
@@ -1387,7 +1466,10 @@ class CouldCatchUpPartnerTests(unittest.TestCase):
             self.RIGHT_STAGE,
         }
 
-        self.assertEqual(could_catch_up_partner(context), set())
+        self.assertEqual(
+            could_catch_up_partner(context),
+            {CatchUpPartner(actor_slot="P1", target_slot="P2", direction="right")},
+        )
 
     def test_an_off_screen_straggler_at_zero_health_does_not(self) -> None:
         # The advance's own carve-out (`_advance_blocking_enemies`): nothing

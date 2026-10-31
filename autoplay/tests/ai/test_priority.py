@@ -60,6 +60,7 @@ from sor_ai.ai.kinematics import (
 from sor_ai.ai.tokens import Verb, find_all
 from sor_ai.ai.tokens import (
     CatchUpPartner,
+    Centering,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -2498,6 +2499,18 @@ class ReleasePartnerPriorityTests(unittest.TestCase):
         }
         winner = find_all(determine_priority_verb(context), Verb)[0]
         self.assertIsInstance(winner, AttackHeldEnemy)
+
+
+class CenteringPriorityTests(unittest.TestCase):
+    """What an actor does with nothing to do: under every other live verb."""
+
+    def test_scores_the_lowest_tier_and_loses_to_a_score_pickup(self) -> None:
+        verb = Centering(actor_slot="P1")
+        pickup = ScorePickup(slot="obj01", world_x=0, world_y=64, pickup_type=0x3F, points=3000)
+        context = {_myself(world_x=100), pickup, verb, WalkToPickup(actor_slot="P1", target_slot="obj01")}
+
+        self.assertEqual(priority._emergency(verb, set(context)), priority._EMERGENCY_WALK_TO_ADVANCE_STAGE)
+        self.assertNotIsInstance(find_all(determine_priority_verb(context), Verb)[0], Centering)
 
 
 class CatchUpPartnerPriorityTests(unittest.TestCase):

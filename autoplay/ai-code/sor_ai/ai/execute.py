@@ -70,6 +70,7 @@ from .tokens import (
 from .tokens import Context, Dialog, Verb, find, find_all
 from .tokens import (
     CatchUpPartner,
+    Centering,
     DuelStep,
     ProjectileSidestep,
     RetreatFromDanger,
@@ -2258,6 +2259,47 @@ def state_machine_catch_up_partner(
     _hold_steered(gamepad, _clamp_mask(context, actor.world_x, actor.world_y, mask))
 
 
+def state_machine_centering(
+    verb: Centering, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Walk to the camera's centre on X and stand there.
+
+    See ``Centering`` and ``decide.could_centering``. Routed as
+    ``state_machine_catch_up_partner`` is, to a strip across the lane band, so
+    the actor keeps its lane unless a solid is in the way. Unlike it, this
+    never hops: a pit between the actor and the centre is not worth the jump
+    when nothing is waiting there, so the best-effort route stops at its wall.
+    """
+
+    actor = _find_actor(context, verb.actor_slot)
+    camera = find(context, CameraRange)
+    if actor is None or camera is None:
+        gamepad.release()
+        return
+    center_x = camera.center_x
+    if actor.is_airborne or actor.action_base in JUMP_CROUCH_ACTIONS:
+        # Finish a jump another verb launched last tick (as WalkToAdvanceStage).
+        direction = "right" if center_x >= actor.world_x else "left"
+        landing = nav.hop_landing_x(context, actor, direction)
+        _jump_toward(actor, landing if landing is not None else center_x, gamepad)
+        return
+    goal = nav.advance_goal(context, center_x)
+    body, origin = nav.actor_footprint(actor)
+    solids = nav.solid_obstacles(context, body=body, origin=origin)
+    path = nav.plan_route(
+        context, actor, goal, solids=solids, dangers=nav.partner_obstacles(context)
+    )
+    sink = _ROUTE_TRACE.get()
+    if sink is not None:
+        sink[actor.slot] = path
+    mask = nav.first_vector_mask(path)
+    if path.reached and not mask and not goal.is_reached(nav.body_rect(actor)):
+        # Boxed in on every side without having arrived: the straight line is
+        # all there is (the same fallback _routed_mask makes).
+        mask = _movement_mask(context, actor.world_x, actor.world_y, center_x, actor.world_y)
+    _hold_steered(gamepad, _clamp_mask(context, actor.world_x, actor.world_y, mask))
+
+
 def state_machine_melee_strike(verb: Verb, context: Context, gamepad: VirtualGamepad) -> None:
     """Shared handler for ``Punch`` / ``MeleeWeaponAttack`` -- identical
     B-button press regardless of which (if any) weapon is held; only the
@@ -3076,6 +3118,7 @@ _HANDLERS = {
     HitTable: state_machine_hit_table,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,
     CatchUpPartner: state_machine_catch_up_partner,
+    Centering: state_machine_centering,
     Punch: state_machine_melee_strike,
     MeleeWeaponAttack: state_machine_melee_strike,
     RearAttack: state_machine_rear_attack,

@@ -67,6 +67,7 @@ classDiagram
     Walk <|-- WalkToNearEnemy
     Walk <|-- WalkToAdvanceStage
     Walk <|-- CatchUpPartner
+    Walk <|-- Centering
     Walk <|-- WalkToWeapon
     Walk <|-- WalkToPickup
     Walk <|-- RetreatFromDanger
