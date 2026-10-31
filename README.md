@@ -630,7 +630,8 @@ which is created with the defaults above on the first run.
 Start pauses the game and opens a menu. **RESUME**, or Start again, goes back to the game. **FORFEIT** asks "ARE YOU
 SURE PLAYER N?", with the cursor on NO. Saying YES takes away that player's continues and lives, and they die at once:
 GAME OVER. With two players each is asked in turn and answers only for themself, so one can give up while the other
-plays on. In 1 PLAYER AI ASSIST the first player answers for both.
+plays on. In 1 PLAYER AI ASSIST the first player answers for both. With the pre-rendered soundtrack the music keeps
+playing, a little quieter, while the game is paused.
 
 ### Video settings
 
