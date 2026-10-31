@@ -22,5 +22,5 @@ export const STEPS: StepDefinition[] = [
   { id: "rom", title: "Copy ROM", summary: "Choose your ROM file; its CRC is verified before continuing." },
   { id: "sound", title: "Pre-render Soundtrack", summary: "Render the soundtrack from the ROM." },
   { id: "build", title: "Build Executable", summary: "Generate the C++ and compile the game and its dependencies." },
-  { id: "shortcut", title: "Create Shortcut", summary: "Add a shortcut that launches scripts/play.py." },
+  { id: "shortcut", title: "Create Shortcut", summary: "Add the game and its launcher (scripts/play.py)." },
 ];

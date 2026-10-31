@@ -104,12 +104,17 @@ export const buildGame = (project: string, onProgress: (line: string) => void) =
   return invoke<Game>("build_game", { project, progress });
 };
 
+export type ShortcutLocation = "applications" | "desktop";
+
 export interface Shortcut {
-  /** What the user sees on the desktop. */
-  path: string;
+  /** What the user finds: the game, then the Launcher. */
+  paths: string[];
+  /** macOS only. */
+  location: ShortcutLocation | null;
 }
 
-/** The desktop shortcut that opens scripts/play.py. */
-export const createShortcut = (project: string) => invoke<Shortcut>("create_shortcut", { project });
-/** The shortcut already on the desktop, or null. */
+/** The game's and the Launcher's shortcuts; on macOS, the two bundles in `location`. */
+export const createShortcut = (project: string, location: ShortcutLocation | null) =>
+  invoke<Shortcut>("create_shortcut", { project, location });
+/** The shortcuts already made, or null. */
 export const shortcutStatus = () => invoke<Shortcut | null>("shortcut_status");

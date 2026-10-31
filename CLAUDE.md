@@ -24,7 +24,7 @@ This public meta-repository pins the repositories that make up the workspace:
 | `RageDecompiler/` | Python disassembly and recompilation tools | Project-owned; editable |
 | `StreetsOfRageRecompilation/` | Streets of Rage analysis, generated C++, native overrides, and host executable | Project-owned; editable |
 | `autoplay/` | Python remote SoR observer (`src/sor_autoplay`, `megadrive_remote`) + the symbolic AI's core (`ai-code/sor_ai`) | Project-owned; editable; **not a submodule** |
-| `StreetsOfRageBuilder/` | Tauri + Next.js wizard that installs dependencies, clones, builds and adds a launcher shortcut | Project-owned; editable; **not a submodule** |
+| `StreetsOfRageBuilder/` | Tauri + Next.js wizard that installs dependencies, clones, builds and adds the game's and the launcher's shortcuts | Project-owned; editable; **not a submodule** |
 | `Genesis-Plus-GX/` | Upstream emulator used only as a behavioral reference | Upstream; never edit |
 
 `Genesis-Plus-GX` is reference material only. Do not modify files, create
@@ -375,7 +375,9 @@ round. The host panel's **Sound** (`--sound`, ignored when silent) and
 **Soundtrack folder** (`--soundtrack`, empty = next to the ROM, `...` opens a
 folder chooser) fields warn when the folder has no `manifest.tsv`. The launches run in a child `play.py --run-saved MODE` (internal) so the window stays responsive (no macOS beach ball) and shows the run's status; Quit stops the child. Keys: `^R`/`^Return` run both, `^S` host only, `^A` autoplay only, `^B`
 build first, `^1`-`^6` presets, `^N` silent, `^T` turbo, `^F` display, `^W` picture, `^U` integer scaling, `^7`/`^8` AI P1/P2, `^L` lockstep, `^G` character, `^K` sweep,
-`^=`/`^-` start level, `^E` extra args, `^0` reset, `^Q` quit. Command-line
+`^=`/`^-` start level, `^E` extra args, `^0` reset, `^Q` quit. A copy without
+the sources (the Builder's macOS bundle, `StreetsOfRageBuilder/CLAUDE.md`, **Step 6**) saves them in
+`~/.config/StreetsOfRageProject/` and disables Build first. Command-line
 runs start from the defaults plus the preset (never the saved file), do not
 overwrite it, ignore the game's `video.yaml` (`--default-video`), and pass unknown options on to autoplay. Agents use the
 command-line form (it needs no Tk); `PRESETS` in `play.py` is the source of

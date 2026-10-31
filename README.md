@@ -71,7 +71,7 @@ study.
 | [`RageDecompiler/`](RageDecompiler/) | Python tools for disassembly, recompilation, label generation, and runtime discovery |
 | [`MegaDriveEnvironmentSampleGame/`](MegaDriveEnvironmentSampleGame/) | A small game targeting both the PC runtime and real Mega Drive hardware |
 | [`autoplay/`](autoplay/) | Python remote observer and symbolic AI player for a running `sor` host |
-| [`StreetsOfRageBuilder/`](StreetsOfRageBuilder/) | Guided installer that sets up the tools, builds the game from your ROM and adds a desktop shortcut |
+| [`StreetsOfRageBuilder/`](StreetsOfRageBuilder/) | Guided installer that sets up the tools, builds the game from your ROM and adds shortcuts to the game and its launcher |
 
 The playable host expects `MegaDriveEnvironment`, `RageDecompiler`, and
 `StreetsOfRageRecompilation` to remain sibling directories. This is the layout
@@ -324,10 +324,14 @@ The window lists the steps on the left; **Back** and **Next** are at the bottom.
    (default) or YM2612. Keep the window open.
 5. **Build Executable**: generates the C++ from the ROM and compiles the game
    and its dependencies; it takes several minutes, longer on slow computers.
-6. **Create Shortcut**: adds a **Streets of Rage** shortcut to your desktop. Click
-   **Finish** to close the Builder.
+6. **Create Shortcut**: adds **StreetsOfRageRecompilation**, which starts the game,
+   and **StreetsOfRageRecompilation Launcher**, which opens the launcher window. On
+   Windows and Linux they are shortcuts on your desktop. On macOS they are two apps
+   in a `StreetsOfRageProject` folder, in Applications or on your desktop as you
+   choose; the game app holds a copy of everything it needs, including your ROM.
+   Click **Finish** to close the Builder.
 
-Then double-click the shortcut to open the launcher window, and see
+Then double-click **StreetsOfRageRecompilation** to play, and see
 [Play](#play) for the controls.
 
 If a step fails, the last lines of its output are shown; fix the cause (for

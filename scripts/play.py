@@ -33,7 +33,10 @@ from _common import META_ROOT, built_executable, find_tk_python, script_command
 from _session import run_session
 
 
-SETTINGS_PATH = META_ROOT / "last_play_py_settings.yml"
+# The Builder's macOS bundle copies these scripts without the sources: nothing to build there, and
+# the settings must survive the bundle being made again.
+HAS_SOURCES = (META_ROOT / "StreetsOfRageRecompilation" / "CMakeLists.txt").is_file()
+SETTINGS_PATH = (META_ROOT if HAS_SOURCES else Path.home() / ".config" / "StreetsOfRageProject") / "last_play_py_settings.yml"
 SOR_BUILD_DIR = META_ROOT / "StreetsOfRageRecompilation" / "build"
 DEFAULT_ROM = META_ROOT / "StreetsOfRageRecompilation" / "rom" / "SOR.bin"
 
@@ -188,6 +191,7 @@ def save_settings(settings: dict[str, Any], path: Path = SETTINGS_PATH) -> None:
     lines = ["# Written by scripts/play.py and read back on its next launch. Gitignored; safe to edit."]
     lines += [f"{key}: {format_value(settings[key])}" for key in DEFAULTS]
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     except OSError as error:
         print(f"play.py: cannot save {path.name}: {error}", file=sys.stderr)
@@ -300,7 +304,7 @@ def check(s: dict[str, Any], mode: str, *, probe: bool = False) -> tuple[list[st
     except ValueError as error:
         errors.append(f"extra arguments: {error}")
     if mode != "autoplay":
-        if not s["build_first"] and not built_executable(SOR_BUILD_DIR, "sor").is_file():
+        if not builds_first(s) and not built_executable(SOR_BUILD_DIR, "sor").is_file():
             errors.append("sor is not built: Ctrl+B builds it first")
         if s["rom"] and not Path(s["rom"]).expanduser().is_file():
             errors.append(f"ROM not found: {s['rom']}")
@@ -320,9 +324,13 @@ def check(s: dict[str, Any], mode: str, *, probe: bool = False) -> tuple[list[st
     return errors, warnings
 
 
+def builds_first(s: dict[str, Any]) -> bool:
+    return s["build_first"] and HAS_SOURCES
+
+
 def describe(s: dict[str, Any], mode: str) -> list[str]:
     lines: list[str] = []
-    if s["build_first"] and mode != "autoplay":
+    if builds_first(s) and mode != "autoplay":
         lines.append("build:     build.py")
     if mode != "autoplay":
         lines.append("sor:       " + shlex.join(host_arguments(s, with_autoplay=mode == "both")))
@@ -337,7 +345,7 @@ def describe(s: dict[str, Any], mode: str) -> list[str]:
 def execute(s: dict[str, Any], mode: str) -> int:
     """Run the session in the foreground; Ctrl+C ends it. Returns the exit code."""
     print("\n".join(describe(s, mode)), flush=True)
-    if s["build_first"] and mode != "autoplay":
+    if builds_first(s) and mode != "autoplay":
         if subprocess.run(script_command("build.py")).returncode != 0:
             print("play.py: build failed", file=sys.stderr)
             return 1
@@ -476,7 +484,8 @@ class PlayWindow:
         bar.grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=(4, 10))
         bar.columnconfigure(1, weight=1)
         self.vars["build_first"] = tk.BooleanVar()
-        ttk.Checkbutton(bar, text="Build first (^B)", variable=self.vars["build_first"]).grid(row=0, column=0)
+        ttk.Checkbutton(bar, text="Build first (^B)", variable=self.vars["build_first"],
+                        state="normal" if HAS_SOURCES else "disabled").grid(row=0, column=0)
         ttk.Label(bar, textvariable=self.status, foreground="#c0392b").grid(row=0, column=1, sticky="w", padx=10)
         for column, (text, mode) in enumerate(
                 [("Run Game + AI Connected  ^R", "both"), ("Run Game  ^S", "host"), ("Run AI  ^A", "autoplay")],
@@ -688,7 +697,7 @@ class PlayWindow:
             "r": lambda: self.launch("both"), "Return": lambda: self.launch("both"),
             "s": lambda: self.launch("host"), "a": lambda: self.launch("autoplay"),
             "q": lambda: self.finish("quit"),
-            "b": lambda: self.toggle("build_first"),
+            "b": lambda: self.toggle("build_first") if HAS_SOURCES else None,
             "n": lambda: self.toggle("silent"), "f": lambda: self.cycle("fullscreen"),
             "w": lambda: self.cycle("widescreen"), "u": lambda: self.cycle("integer_scaling"),
             "d": lambda: self.toggle("debug_utils"), "l": lambda: self.toggle("lockstep"),

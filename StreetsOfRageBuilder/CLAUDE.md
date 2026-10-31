@@ -13,8 +13,8 @@ Validate with `npm run lint`, `npm run build` (Frontend) and `cargo check` (Back
 
 The game builds its own CPython (`StreetsOfRageRecompilation/cmake/CPythonRuntime.cmake`) during
 step 5's configure: about 2 minutes more the first time, no new entry in the tables below (`make`
-comes with the Xcode tools and `build-essential`; Windows downloads a prebuilt one). The shortcut
-opens `play.py`, whose `run.py` passes `--ai-path`, so the launcher has nothing to add. The build and
+comes with the Xcode tools and `build-essential`; Windows downloads a prebuilt one). The game's
+shortcut passes `--ai-path`, and the Launcher's `play.py` gets it from `run.py`. The build and
 the mode were run on Windows by hand, not through the Builder; Linux is untested.
 
 ## Step 1: dependencies
@@ -97,19 +97,42 @@ treat an outdated output as not done and say so.
 
 ## Step 6: the shortcut
 
-`Backend/src/shortcut.rs` puts a **Streets of Rage** shortcut on the desktop (user decisions:
-it opens the `play.py` window, not `--last`; desktop only; icon `punch-icon.png`). Native kind
-per platform: Windows `.lnk` (PowerShell `WScript.Shell`, target `pyw -3 play.py`, so no
-console window), macOS `.app` (a `sh` launcher that `exec`s the Tk-capable Python with its
-absolute path, since a Finder launch has no Homebrew on `PATH`; `Info.plist`, `icon.icns`),
-Linux `.desktop` (`Exec` quoted, `Path` the project, `gio` trusted flag). The icons are
-`include_bytes!`ed from `Backend/icons`, so the shortcut never depends on files in the
+`Backend/src/shortcut.rs` makes two entries (user request, 2026-10-31; icon `punch-icon.png`):
+**StreetsOfRageRecompilation** starts the game, **StreetsOfRageRecompilation Launcher** opens the
+`play.py` window (not `--last`). The step needs the ROM, soundtrack and build, and says which step to finish.
+A **Streets of Rage** shortcut made by an older Builder is left where it is, and still works.
+
+- **Windows**: two `.lnk` on the desktop (PowerShell `WScript.Shell`), pointing into the project: `sor.exe` with
+  `--rom`, `--soundtrack` and `--ai-path`, and `pyw -3 play.py`, so no console window.
+- **Linux** (user: like Windows, no copy): two `.desktop` files on the desktop, pointing into the project
+  (`Exec` quoted, `Path` the project, `gio` trusted flag).
+- **macOS**: a `StreetsOfRageProject` folder with two bundles, in `/Applications` or `~/Desktop` (a radio button
+  in the step, user decision). The game's bundle is self-contained (about 330 MB, `APFS` clones it), including a copy of the
+  ROM (user decision), and is made aside, so a failure leaves the old one:
+  - `Contents/MacOS`: `launcher` (the `sh` script Finder starts, which passes the three options) and `sor`.
+  - `Contents/Frameworks`: every non-system library `sor` loads, walked with `otool` (MegaDriveEnvironment, SDL3 from
+    Homebrew, SDL3_mixer, yaml-cpp, libpng, zlib, libpython). `install_name_tool` makes them `@rpath/...`, removes the
+    build tree's rpaths and leaves `@executable_path/../Frameworks`; `codesign --sign -` then re-signs each, which
+    Apple Silicon requires. The bundle itself is not signed, and so can write `__pycache__`.
+  - `Contents/Resources`: the checkout's layout, so the scripts work unchanged: `scripts`, `autoplay`,
+    `MegaDriveEnvironment/python/src`, `StreetsOfRageRecompilation/rom` (ROM, soundtrack) and `python/`, which
+    is where SoRPython looks, since `SDL_GetBasePath` is `Resources` in a bundle. `StreetsOfRageRecompilation/build/sor`,
+    where `run.py` looks, is a script that `exec`s `Contents/MacOS/sor`, not a symlink: through a link `sor`
+    does not find `python/` (`[ai] cannot start Python`).
+  - The Launcher's bundle holds only a script that `exec`s the Tk-capable Python (absolute path, since a Finder launch has no
+    Homebrew on `PATH`) on the other bundle's `play.py`, by relative path. Without sources `play.py` keeps its settings in
+    `~/.config/StreetsOfRageProject/`, so they survive the bundle being made again, and disables **Build first**.
+  - A project update does not reach the bundle until the step is run again.
+
+The icons are `include_bytes!`ed from `Backend/icons`, so the shortcuts never depend on files in the
 project; Windows and Linux copy theirs to the app's local data folder. `punch-icon.png` is the
 source of those icons: regenerate with `npm run tauri -- icon ../punch-icon.png -o icons` from
-`Frontend/`, then delete the `android/` and `ios/` folders it makes. The Dock icon of the
-running launcher on macOS stays Python's (Tk), not the punch. The macOS bundle was built (by a
-test; the launcher was not run); the Windows `.lnk` was created and read back on a real Windows
-(target `pyw -3 play.py`, icon, working directory right); Linux is untested.
+`Frontend/`, then delete the `android/` and `ios/` folders it makes.
+
+Tested on macOS by the `#[ignore]`d `creates_the_real_shortcut` and by running the bundles from a scratch folder: `open` on both,
+`launcher`, and `run.py` through `build/sor`, with the AI on P2, the soundtrack playing (`SDL_AUDIO_DRIVER=dummy`) and no library
+loaded from outside the bundle. Not checked: the Dock icons, the step's window, a machine without Homebrew's SDL3.
+Windows: only `cargo check --target x86_64-pc-windows-gnu`, and the shortcuts were not created. Linux: not even compiled.
 
 On the last step Next becomes **Finish** (always enabled: the shortcut is optional); it calls the
 `finish` command (`platform.rs`), which exits the app.

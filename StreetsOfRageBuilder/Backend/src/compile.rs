@@ -28,7 +28,7 @@ fn version(project: &Path) -> Option<String> {
 /// Where the build put `sor`: single-configuration generators (Makefiles, Ninja) use the build
 /// folder itself, multi-configuration ones (Visual Studio, Xcode) a folder per configuration.
 /// The newest wins, as in the scripts' `built_executable`.
-fn executable(project: &Path) -> Option<PathBuf> {
+pub(crate) fn executable(project: &Path) -> Option<PathBuf> {
     let name = if cfg!(windows) { "sor.exe" } else { "sor" };
     let build = build_folder(project);
     ["", "Release", "RelWithDebInfo", "MinSizeRel", "Debug"]
