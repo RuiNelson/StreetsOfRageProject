@@ -284,7 +284,15 @@ fn write_bundles(folder: &Path, inputs: &Inputs, python: &Path) -> Result<(), St
     let _ = std::fs::remove_dir_all(&game);
     std::fs::rename(&staging, &game).map_err(io)?;
     let _ = std::fs::remove_dir_all(&launcher);
-    write_bundle(&launcher, LAUNCHER, "com.ruinelson.streetsofrage.launcher", &launcher_script(python))
+    write_bundle(&launcher, LAUNCHER, "com.ruinelson.streetsofrage.launcher", &launcher_script(python))?;
+    remove_quarantine(&game)?;
+    remove_quarantine(&launcher)
+}
+
+/// The Builder itself is downloaded and unsigned, and what it writes can come out quarantined.
+fn remove_quarantine(bundle: &Path) -> Result<(), String> {
+    tool("xattr", &["-dr", "com.apple.quarantine"], bundle)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -294,6 +302,28 @@ mod tests {
     #[test]
     fn the_bundle_is_not_made_under_a_dot_name() {
         assert_eq!(staging(Path::new("/d")), Path::new("/d/StreetsOfRageRecompilation.staging"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn takes_the_quarantine_off_all_of_a_bundle() {
+        let root = std::env::temp_dir().join(format!("sor-builder-quarantine-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let bundle = root.join("x.app");
+        write_bundle(&bundle, LAUNCHER, "com.example.x", "#!/bin/sh\n").unwrap();
+        let attributes = |file: &Path| tool("xattr", &[], file).unwrap();
+        let launcher = bundle.join("Contents/MacOS/launcher");
+        for file in [&bundle, &launcher] {
+            tool("xattr", &["-w", "com.apple.quarantine", "0081;00000000;;"], file).unwrap();
+            assert!(attributes(file).contains("com.apple.quarantine"));
+        }
+        remove_quarantine(&bundle).unwrap();
+        for file in [&bundle, &launcher] {
+            assert!(!attributes(file).contains("com.apple.quarantine"));
+        }
+        // Nothing left to remove is not a failure.
+        remove_quarantine(&bundle).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

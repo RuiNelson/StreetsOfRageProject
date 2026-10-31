@@ -126,6 +126,7 @@ A **Streets of Rage** shortcut made by an older Builder is left where it is, and
     Homebrew on `PATH`) on the other bundle's `play.py`, by relative path. Without sources `play.py` keeps its settings in
     `~/.config/StreetsOfRageProject/`, so they survive the bundle being made again, and disables **Build first**.
   - A project update does not reach the bundle until the step is run again.
+  - Once both are made, `xattr -dr com.apple.quarantine` runs on each (user request, 2026-10-31): the unsigned Builder's output can come out quarantined (the game's bundle did, `0081;00000000;;`). A failure there fails the step.
 
 The icons are `include_bytes!`ed from `Backend/icons`, so the shortcuts never depend on files in the
 project; Windows and Linux copy theirs to the app's local data folder. `punch-icon.png` is the
