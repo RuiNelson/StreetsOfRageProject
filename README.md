@@ -18,6 +18,43 @@ The project brings together several components whose primary purpose is to
 recompile Streets of Rage faithfully and make its internals available for
 study.
 
+## Contents
+
+- [Project structure](#project-structure)
+  - [Acknowledgments](#acknowledgments)
+  - [The `RageDecompiler` recompiler](#the-ragedecompiler-recompiler)
+  - [The `MegaDriveEnvironment` development and runtime library](#the-megadriveenvironment-development-and-runtime-library)
+  - [The recompiled game in `StreetsOfRageRecompilation`](#the-recompiled-game-in-streetsofragerecompilation)
+    - [`output`](#output)
+    - [`ai-analysis`](#ai-analysis)
+    - [`code-analysis`](#code-analysis)
+    - [`generated`](#generated)
+    - [Hand-written code](#hand-written-code)
+  - [The `autoplay` observer and symbolic AI](#the-autoplay-observer-and-symbolic-ai)
+    - [1 PLAYER AI ASSIST](#1-player-ai-assist)
+    - [The AI player](#the-ai-player)
+- [How to build](#how-to-build)
+  - [Using the Builder (recommended)](#using-the-builder-recommended)
+    - [Download and open the Builder](#download-and-open-the-builder)
+    - [Follow the six steps](#follow-the-six-steps)
+  - [Building by hand](#building-by-hand)
+  - [1. Clone the repository and submodules](#1-clone-the-repository-and-submodules)
+  - [2. Obtain a compatible ROM](#2-obtain-a-compatible-rom)
+    - [Legal and preservation considerations](#legal-and-preservation-considerations)
+  - [3. Common prerequisites](#3-common-prerequisites)
+  - [5. Build on Windows](#5-build-on-windows)
+  - [6. Build on macOS](#6-build-on-macos)
+  - [7. Build on Ubuntu](#7-build-on-ubuntu)
+  - [Play](#play)
+    - [Default controls](#default-controls)
+    - [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)
+    - [Host keyboard shortcuts](#host-keyboard-shortcuts)
+    - [Debug utility hotkeys (Cheats)](#debug-utility-hotkeys-cheats)
+    - [Startup flags](#startup-flags)
+  - [Widescreen (Mode 48)](#widescreen-mode-48)
+  - [Pre-rendered soundtrack](#pre-rendered-soundtrack)
+  - [Call-map database](#call-map-database)
+
 ## Project structure
 
 <p align="center">
