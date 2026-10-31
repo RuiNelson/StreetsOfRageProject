@@ -104,7 +104,7 @@ export const buildGame = (project: string, onProgress: (line: string) => void) =
   return invoke<Game>("build_game", { project, progress });
 };
 
-export type ShortcutLocation = "applications" | "desktop";
+export type ShortcutLocation = "applications" | "home";
 
 export interface Shortcut {
   /** What the user finds: the game, then the Launcher. */

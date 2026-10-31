@@ -1,4 +1,4 @@
-//! macOS: two `.app` bundles in a `StreetsOfRageProject` folder, in Applications or on the desktop.
+//! macOS: two `.app` bundles in a `StreetsOfRageProject` folder, in Applications or the home folder.
 //! The game's holds a copy of everything it needs, and the Launcher opens the `play.py` inside it.
 
 use std::path::{Path, PathBuf};
@@ -8,18 +8,17 @@ use crate::{dependencies, system};
 
 pub const EXTENSION: &str = "app";
 /// Where the step can put the folder, the first one found being what it shows on coming back.
-pub const LOCATIONS: &[Option<&str>] = &[Some("applications"), Some("desktop")];
+pub const LOCATIONS: &[Option<&str>] = &[Some("applications"), Some("home")];
 const ICON_ICNS: &[u8] = include_bytes!("../../icons/icon.icns");
 
-pub fn desktop() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or("cannot find the desktop folder")?;
-    Ok(PathBuf::from(home).join("Desktop"))
-}
-
 /// The folder holding the two bundles.
-pub fn destination(location: Option<&str>, desktop: &Path) -> PathBuf {
-    let parent = if location == Some("desktop") { desktop } else { Path::new("/Applications") };
-    parent.join("StreetsOfRageProject")
+pub fn destination(location: Option<&str>) -> Result<PathBuf, String> {
+    let parent = if location == Some("home") {
+        PathBuf::from(std::env::var_os("HOME").ok_or("cannot find the home folder")?)
+    } else {
+        PathBuf::from("/Applications")
+    };
+    Ok(parent.join("StreetsOfRageProject"))
 }
 
 pub fn create(folder: &Path, _data: &Path, inputs: &Inputs) -> Result<(), String> {

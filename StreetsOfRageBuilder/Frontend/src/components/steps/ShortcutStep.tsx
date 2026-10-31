@@ -7,7 +7,7 @@ import { createShortcut, platformInfo, shortcutStatus, type Platform, type Short
 
 const LOCATIONS: { id: ShortcutLocation; name: string; description: string }[] = [
   { id: "applications", name: "/Applications", description: "With your other apps, in Launchpad and Spotlight." },
-  { id: "desktop", name: "~/Desktop", description: "On your desktop." },
+  { id: "home", name: "~", description: "In your home folder." },
 ];
 
 function errorText(error: unknown) {

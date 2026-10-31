@@ -9,7 +9,7 @@ pub const EXTENSION: &str = "desktop";
 pub const LOCATIONS: &[Option<&str>] = &[None];
 const ICON_PNG: &[u8] = include_bytes!("../../icons/icon.png");
 
-pub fn desktop() -> Result<PathBuf, String> {
+pub fn destination(_location: Option<&str>) -> Result<PathBuf, String> {
     if let Some(output) = system::run("xdg-user-dir", &["DESKTOP"]) {
         let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
         if !path.is_empty() && Path::new(&path).is_dir() {
@@ -18,10 +18,6 @@ pub fn desktop() -> Result<PathBuf, String> {
     }
     let home = std::env::var_os("HOME").ok_or("cannot find the desktop folder")?;
     Ok(PathBuf::from(home).join("Desktop"))
-}
-
-pub fn destination(_location: Option<&str>, desktop: &Path) -> PathBuf {
-    desktop.to_owned()
 }
 
 /// Quote a value for the `Exec` key of a desktop entry.

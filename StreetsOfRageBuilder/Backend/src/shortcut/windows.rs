@@ -10,7 +10,7 @@ pub const LOCATIONS: &[Option<&str>] = &[None];
 const ICON_ICO: &[u8] = include_bytes!("../../icons/icon.ico");
 
 /// The desktop folder (it may be redirected, for example to OneDrive).
-pub fn desktop() -> Result<PathBuf, String> {
+pub fn destination(_location: Option<&str>) -> Result<PathBuf, String> {
     let output = system::run("powershell", &["-NoProfile", "-NonInteractive", "-Command", "[Environment]::GetFolderPath('Desktop')"])
         .ok_or("PowerShell was not found")?;
     let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
@@ -18,10 +18,6 @@ pub fn desktop() -> Result<PathBuf, String> {
         return Err("cannot find the desktop folder".into());
     }
     Ok(PathBuf::from(path))
-}
-
-pub fn destination(_location: Option<&str>, desktop: &Path) -> PathBuf {
-    desktop.to_owned()
 }
 
 fn write_lnk(file: &Path, target: &Path, arguments: &str, project: &Path, icon: &Path, description: &str) -> Result<(), String> {

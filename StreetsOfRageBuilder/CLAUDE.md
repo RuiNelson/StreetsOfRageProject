@@ -109,8 +109,8 @@ A **Streets of Rage** shortcut made by an older Builder is left where it is, and
   `--rom`, `--soundtrack` and `--ai-path`, and `pyw -3 play.py`, so no console window.
 - **Linux** (user: like Windows, no copy): two `.desktop` files on the desktop, pointing into the project
   (`Exec` quoted, `Path` the project, `gio` trusted flag).
-- **macOS**: a `StreetsOfRageProject` folder with two bundles, in `/Applications` or `~/Desktop` (a radio button
-  in the step, user decision). The game's bundle is self-contained (about 330 MB, `APFS` clones it), including a copy of the
+- **macOS**: a `StreetsOfRageProject` folder with two bundles, in `/Applications` or `~` (a radio button
+  in the step, user decision; `~/Desktop` was the second option until the user dropped it, 2026-10-31). The game's bundle is self-contained (about 330 MB, `APFS` clones it), including a copy of the
   ROM (user decision), and is made aside (`StreetsOfRageRecompilation.staging`), so a failure leaves the old one. That name must not start with a dot: under `.StreetsOfRageRecompilation.staging`, on a desktop synced with iCloud, the bundle came out with the `hidden` flag on everything and only the Launcher showed in Finder (user report, 2026-10-31, in the Builder 0.3.0; a short test did not reproduce the flag, and the iCloud case of the fix was not run):
   - `Contents/MacOS`: `launcher` (the `sh` script Finder starts, which passes the three options) and `sor`.
   - `Contents/Frameworks`: every non-system library `sor` loads, walked with `otool` (MegaDriveEnvironment, SDL3 from

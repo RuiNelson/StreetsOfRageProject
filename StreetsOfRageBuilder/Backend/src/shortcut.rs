@@ -35,7 +35,7 @@ const LAUNCHER: &str = "StreetsOfRageRecompilation Launcher";
 pub struct Shortcut {
     /// What the user will find, the game's first.
     pub paths: Vec<String>,
-    /// macOS only: "applications" or "desktop".
+    /// macOS only: "applications" or "home".
     pub location: Option<String>,
 }
 
@@ -101,16 +101,15 @@ fn shortcut(files: &[PathBuf; 2], location: Option<&str>) -> Shortcut {
 pub fn create_shortcut(app: AppHandle, project: String, location: Option<String>) -> Result<Shortcut, String> {
     let data = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     let location = location.as_deref();
-    let files = create(&platform::destination(location, &platform::desktop()?), &data, Path::new(&project))?;
+    let files = create(&platform::destination(location)?, &data, Path::new(&project))?;
     Ok(shortcut(&files, location.filter(|_| platform::LOCATIONS[0].is_some())))
 }
 
 /// The entries already made, if any.
 #[tauri::command]
 pub fn shortcut_status() -> Option<Shortcut> {
-    let desktop = platform::desktop().ok()?;
     platform::LOCATIONS.iter().find_map(|location| {
-        let files = entries(&platform::destination(*location, &desktop), platform::EXTENSION);
+        let files = entries(&platform::destination(*location).ok()?, platform::EXTENSION);
         files.iter().all(|file| file.exists()).then(|| shortcut(&files, *location))
     })
 }
@@ -125,7 +124,7 @@ mod tests {
     fn creates_the_real_shortcut() {
         let project = std::env::var("SOR_TEST_FOLDER").expect("SOR_TEST_FOLDER");
         let desktop = PathBuf::from(std::env::var("SOR_TEST_DESKTOP").expect("SOR_TEST_DESKTOP"));
-        let files = create(&platform::destination(Some("desktop"), &desktop), &desktop.join("data"), Path::new(&project)).unwrap();
+        let files = create(&desktop.join("StreetsOfRageProject"), &desktop.join("data"), Path::new(&project)).unwrap();
         for file in &files {
             println!("{}", file.display());
             assert!(file.exists());

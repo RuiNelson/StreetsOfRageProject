@@ -327,7 +327,7 @@ The window lists the steps on the left; **Back** and **Next** are at the bottom.
 6. **Create Shortcut**: adds **StreetsOfRageRecompilation**, which starts the game,
    and **StreetsOfRageRecompilation Launcher**, which opens the launcher window. On
    Windows and Linux they are shortcuts on your desktop. On macOS they are two apps
-   in a `StreetsOfRageProject` folder, in Applications or on your desktop as you
+   in a `StreetsOfRageProject` folder, in Applications or your home folder as you
    choose; the game app holds a copy of everything it needs, including your ROM.
    Click **Finish** to close the Builder.
 
