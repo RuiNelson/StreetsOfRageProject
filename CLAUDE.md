@@ -67,6 +67,7 @@ User decisions. Implementation details are in `StreetsOfRageRecompilation/CLAUDE
 - **Controls:** `sor` reads SDL itself (`SoRInput.*`) and binds per-player **actions** in `~/.config/StreetsOfRageProject/controls.yaml`, set in OPTIONS > CONTROLS. Schemes are ORIGINAL 3 and ENHANCED 6; defaults are in `StreetsOfRageRecompilation/CLAUDE.md`, **Controls**. Autoplay sends actions in a binary `struct` format (no PyYAML on the system Python) and **detects** each player's scheme by querying the host, never sets it.
 - **Windows console:** `sor` is a GUI-subsystem program; `openConsoleIfWanted` (`main.cpp`) gives it a console only for `--debug-utils`, `--debug-log`, `--call-log`, `--aux-addr-file`, `--help` or `--version`. Without them stdout and stderr go to the null device on every platform. Not tested on Windows.
 - **Mode menu:** a **QUIT** row after OPTIONS ends the game.
+- **PS5 menus:** `SoRPlatform::consoleMenus()`, on under `__PROSPERO__` or with `--console-menus` on the desktop for testing, hides BIND KEYBOARD and the DISPLAY row and forces fullscreen. DEVICE stays, to choose between signed-in users' pads. The PS5 port is in progress on the `prospero` branches.
 
 ## Hand-written C++ keeps the original memory layout
 
