@@ -83,6 +83,7 @@ player is actually playable.
 
 from __future__ import annotations
 
+import math
 from typing import Callable
 
 from . import jump_kick, kinematics, reach
@@ -317,6 +318,46 @@ def _targets_the_partners_fight(
     return enemy is None or not reach.is_incoming_melee(actor, enemy)
 
 
+# How much nearer to an enemy the partner must be than the actor for the walk
+# to it to be the partner's to make (px, hypot over X and lane).
+PARTNER_NEARER_MARGIN = 24
+
+
+def _gap(player: Myself | Partner, enemy: Enemy) -> float:
+    return math.hypot(enemy.world_x - player.world_x, enemy.world_y - player.world_y)
+
+
+def _walks_to_the_partners_nearer_enemy(
+    context: Context, actor: Myself, partner: Partner, verb: Verb
+) -> bool:
+    """The walk to an enemy the partner has clearly nearer, while another
+    enemy the actor has nearer than the partner is on screen.
+
+    User: "tinha o Partner à sua frente, e um inimigo que estava perto dos
+    dois, a IA preferiu ir atrás desse inimigo que do inimigo mais longe que
+    estava nas costas do Partner e de si." ``WalkToNearEnemy`` is ranked by
+    the actor's distance alone, so the enemy beside the partner beat the one
+    nobody was dealing with. ``PartnerFight`` only claims an enemy once the
+    partner is engaging it; this is the step before, and only for the walk
+    (a body already in reach is struck, as before). It needs the other
+    enemy: with none, the actor still goes for the near one rather than
+    stand about. Self-defence is never withdrawn.
+    """
+
+    enemy = find(context, Enemy, slot=getattr(verb, "target_slot", None))
+    if enemy is None or reach.is_incoming_melee(actor, enemy):
+        return False
+    if _gap(partner, enemy) + PARTNER_NEARER_MARGIN > _gap(actor, enemy):
+        return False
+    for other in find_all(context, WalkToNearEnemy):
+        if other.actor_slot != actor.slot or other.target_slot == enemy.slot:
+            continue
+        candidate = find(context, Enemy, slot=other.target_slot)
+        if candidate is not None and _gap(actor, candidate) < _gap(partner, candidate):
+            return True
+    return False
+
+
 # Verbs whose own attack box can land on the partner ($4478).
 _HARM_TESTS: dict[type[Verb], WithdrawTest] = {
     Punch: _forward_strike_hits_partner,
@@ -349,6 +390,10 @@ _FIGHT_TESTS: dict[type[Verb], WithdrawTest] = {
     )
 }
 
+_NEARER_TESTS: dict[type[Verb], WithdrawTest] = {
+    WalkToNearEnemy: _walks_to_the_partners_nearer_enemy,
+}
+
 # Verbs that act on the body in the actor's hands, or on whoever holds the
 # actor -- the partner, once the two players have grabbed each other.
 _HOLD_TESTS: dict[type[Verb], WithdrawTest] = {
@@ -377,7 +422,7 @@ def _merged(*tables: dict[type[Verb], WithdrawTest]) -> dict[type[Verb], tuple[W
     return merged
 
 
-_WITHDRAW_TESTS = _merged(_HARM_TESTS, _HOLD_TESTS, _FIGHT_TESTS, _CLAIM_TESTS)
+_WITHDRAW_TESTS = _merged(_HARM_TESTS, _HOLD_TESTS, _FIGHT_TESTS, _NEARER_TESTS, _CLAIM_TESTS)
 
 
 def withdrawn_verbs(context: Context) -> set[Verb]:

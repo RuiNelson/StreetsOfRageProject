@@ -237,6 +237,23 @@ class PipelineTests(unittest.TestCase):
         winner = self._run(make_enemy("obj01", world_x=270))
         self.assertFalse(any(getattr(v, "target_slot", None) == "obj01" for v in winner))
 
+    def test_the_enemy_beside_the_partner_yields_to_the_one_behind_both(self) -> None:
+        # Partner ahead at 300; one enemy beside them, one behind the actor.
+        beside = make_enemy("obj01", world_x=330, targets_player=2)
+        behind = make_enemy("obj02", world_x=-20, targets_player=1, facing_left=False)
+        winner = self._run(beside, behind)
+        self.assertEqual([v.target_slot for v in winner], ["obj02"])
+
+    def test_the_enemy_beside_the_partner_is_still_walked_to_with_no_other(self) -> None:
+        winner = self._run(make_enemy("obj01", world_x=330, targets_player=2))
+        self.assertEqual([v.target_slot for v in winner], ["obj01"])
+
+    def test_an_enemy_nearer_the_actor_is_not_yielded(self) -> None:
+        near = make_enemy("obj01", world_x=160, targets_player=1)
+        far = make_enemy("obj02", world_x=-20, targets_player=1)
+        winner = self._run(near, far)
+        self.assertEqual([v.target_slot for v in winner], ["obj01"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -180,6 +180,18 @@ rather than joins. Two AIs on one enemy would each yield to the other until
 the memory lapses -- the AI does not know whether its partner is a human, and
 the human is the case this is for.
 
+**The enemy beside the partner is theirs to walk to** (user, in Portuguese: "tinha o
+Partner à sua frente, e um inimigo que estava perto dos dois, a IA preferiu ir atrás
+desse inimigo que do inimigo mais longe que estava nas costas do Partner e de si").
+`PartnerFight` only claims an enemy once the partner is engaging it, and
+`WalkToNearEnemy` is ranked by the actor's distance alone, so the enemy beside the
+partner beat the one behind both. `partner._walks_to_the_partners_nearer_enemy`
+withdraws the walk to an enemy the partner has nearer by `PARTNER_NEARER_MARGIN` (24 px)
+while another walk's enemy is nearer the actor than the partner; with no such other
+enemy the near one is still walked to, and self-defence is never withdrawn. **Validated
+offline only** (`test_partner_fight.PipelineTests`), not measured live with a partner,
+so it stays on `development`.
+
 **Following a partner who is ahead** (user, in Portuguese: "Quero que a IA
 deixe de emitir `WalkToAdvanceStage` quando tiver um `Partner`, e esse partner
 estiver mais avançado que a personagem controlada. Quero que, em vez desse
