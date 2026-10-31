@@ -270,7 +270,7 @@ input**; `autoplay/CLAUDE.md`, **Input through the execution data**).
 User request (2026-10-31): the Windows `sor` showed a text window. It is now a GUI-subsystem program
 (`WIN32_EXECUTABLE`), with no console unless `--debug-utils`, `--debug-log`, `--call-log`, `--aux-addr-file` or
 `--help`/`--version` is given: `openConsoleIfWanted` in `StreetsOfRageRecompilation/main.cpp` then attaches the
-parent terminal's console, or opens a new one. Not tested on Windows (written on macOS, which only built).
+parent terminal's console, or opens a new one. Without those options `sor` also points stdout and stderr at the null device after parsing (every platform; user: "continuo a ver logs"). Not tested on Windows (written on macOS, which only built).
 
 ## QUIT on the mode menu
 
