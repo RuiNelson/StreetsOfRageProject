@@ -42,9 +42,9 @@ study.
   - [2. Obtain a compatible ROM](#2-obtain-a-compatible-rom)
     - [Legal and preservation considerations](#legal-and-preservation-considerations)
   - [3. Common prerequisites](#3-common-prerequisites)
-  - [5. Build on Windows](#5-build-on-windows)
-  - [6. Build on macOS](#6-build-on-macos)
-  - [7. Build on Ubuntu](#7-build-on-ubuntu)
+  - [4. Build on Windows](#4-build-on-windows)
+  - [5. Build on macOS](#5-build-on-macos)
+  - [6. Build on Ubuntu](#6-build-on-ubuntu)
   - [Play](#play)
     - [Default controls](#default-controls)
     - [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)
@@ -422,7 +422,7 @@ Windows invoke them with `py scripts\NAME.py`; on macOS and Linux they are
 executable directly as `./scripts/NAME.py`. Run them from the meta-repository
 root.
 
-### 5. Build on Windows
+### 4. Build on Windows
 
 #### Prerequisites
 
@@ -486,7 +486,7 @@ Run the game. There is a handy `play.py` launcher that is easy to use (**this mi
 py .\scripts\play.py
 ```
 
-### 6. Build on macOS
+### 5. Build on macOS
 
 #### Prerequisites
 
@@ -522,7 +522,7 @@ Run the port:
 ```
 
 
-### 7. Build on Ubuntu
+### 6. Build on Ubuntu
 
 #### Prerequisites
 
@@ -726,8 +726,8 @@ OPN2 core (YM3438, no low-pass filter, 48 kHz, lossless FLAC): every music
 track (looping forever from its own loop point, like on the console), every
 sound effect and every PCM voice. It is extracted with
 `scripts/render_soundtrack.py`, the last step of the build for your platform
-([Windows](#5-build-on-windows), [macOS](#6-build-on-macos),
-[Ubuntu](#7-build-on-ubuntu)); it takes about four minutes and writes ~265 MB to
+([Windows](#4-build-on-windows), [macOS](#5-build-on-macos),
+[Ubuntu](#6-build-on-ubuntu)); it takes about four minutes and writes ~265 MB to
 `StreetsOfRageRecompilation/rom/soundtrack/`, next to the ROM.
 
 A soundtrack folder is the FLAC files plus their `manifest.tsv`. By default
