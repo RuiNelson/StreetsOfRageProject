@@ -47,7 +47,7 @@ Python app that attaches to a running
   outside active gameplay (menus, character select, round-clear, continues).
 - Either control scheme, detected from the game (each player's own, set in
   OPTIONS > CONTROLS). Two-player AI coordination and bespoke per-boss tactics are also future
-  work (see `autoplay/CLAUDE.md`'s AI surface table).
+  work (see `autoplay/CLAUDE.md`).
 
 ## Requirements
 

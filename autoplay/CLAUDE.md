@@ -1,2592 +1,336 @@
 # SoR Autoplay — agent notes
 
-## Role
-
-`autoplay/` is a Python project that attaches to a running
-`StreetsOfRageRecompilation` (`sor`) process via
-`MegaDriveEnvironment`'s `megadrive_remote` client.
-
-**Current scope:** window **observer** (mode, characters, health,
-lives, specials, timer, level, scores, 2D world map, floor holes, police-special
-flags), plus an opt-in **symbolic AI** (`ai/` — Phase A of the design in
-[`AI.md`](AI.md)) that can control P1 and/or P2 through controller input only
-(never RAM writes). The AI is off by default and enabled per player via
-`--agent-p1`/`--agent-p2` or the HUD's click-to-toggle label. See `ai/`'s
-module docstrings and [`AI.md`](AI.md) for the Token/Information/Verb
-pipeline and manuscript-grounded combat facts already wired in. Still future
-work: two-player coordination and per-boss
-tactics beyond Antonio, Souther, Abadede, Bongo, the twins (Onihime and
-Yasha: rear attacks from an edge, **Onihime and Yasha: the ROM model and the
-plan**) and Mr. X with his Garcias (**Mr. X: the ROM model and the plan**).
-One ordinary enemy has a
-plan of its own, Jack (`ai/jack.py`, **Jack: the ROM model and the plan**). Antonio is **a lookahead over his own
-AI, then knee, knee, release, re-grab until he dies**: `ai/antonio.py`
-replays his state-1 code update by update -- gates, tacticals, the kick's
-frame-by-frame boxes -- and `EngageAntonio` holds the stick that takes the
-hold soonest without his kick box ever meeting the actor (see **Antonio: the
-ROM model and the plan**).
-Souther is **engage once, then knee, knee, release, re-grab until he dies**:
-close X in a corridor his side-dependent commit gate cannot use (15px above
-him, or 38px below), walk into him from the grab's lane -- contact is the
-hold, and `$AAA0` tests the grab before his claw -- then two knees, a release
-by holding back, and straight back into him. Armed or not; the police special
-and life-gaining items are never used while he lives (user) -- except the
-round-end police call on his arrival (**And without the police**). See **Souther:
-the ROM model and the plan**). Round 6 sends two of him: `ai/souther_pair.py`
-replays the free one's state 1 and throws the body in hand when he would
-claw the rooted holder first (**Round 6: the Souther pair**).
-
-**Never hurt the partner** (user, playing P1 with the AI on P2: "The AI
-grabbed me and supplexed me, it shouldn't, because it should never hurt it's
-partner!"). This covers holds, not only strikes. Walking into the other
-player takes a hold on them exactly as walking into an enemy does -- with no
-damage out, `$4478 (resolve_player_vs_player_collision)` negotiates grab
-contact, and `$3266` takes the front `$60` / back `$66` hold and links `+$4C`
-to the partner's object -- and the hold family's nearest-enemy fallback then
-aimed knee, `FlipHold` and `Supplex` at a bystander while the ROM delivered
-them to the partner. A hold on the partner
-(`PlayableCharacter.is_holding_player`) now offers only `ReleasePartner`
-(hold back, never B or C, until `loc_235A` lets go), and
-`partner.do_not_harm_partner` withdraws every hold move while `+$4C` names
-the partner, plus `CounterGrab` while the partner is the one holding the AI
-(`$34EA`/`$34E6` put the held player in `$78`/`$7A`, which reads
-`HELD_BY_ENEMY`, and the counter's C then B throws the holder).
-
-The AI no longer walks into the partner in the first place. While a
-`Partner` is on screen `execute_tick` hands the winning verb's handler a
-wrapped pad (`_partner_safe_gamepad`), and every D-pad mask it holds or
-presses loses any walk whose walking box would reach the partner's body
-within the tick (`reach.walking_box_would_grab`) *before* it reaches the
-link -- stripping it after the handler's own `hold_buttons` would already
-have sent a vblank's worth of it. First the X step toward them goes (the
-press that turns the box onto them: after `ReleasePartner` the ROM leaves
-the AI facing away, and the next walk back toward an enemy beyond them used
-to re-grab), then the lane step toward their lane, then -- while still
-inside their contact band -- a lane step out of it; otherwise nothing, the
-one input that can never grab. `navigation.partner_obstacles` puts the same
-zone in the router's danger set (and in `WalkToAdvanceStage`'s otherwise
-danger-free plan), so a partner on the AI's lane is gone round rather than
-waited behind. Deliberately not filtered: the pit escape (a fall costs a
-life, a grab a moment), anything with A/B/C in it (strikes, jumps, hold
-moves -- friendly fire stays `do_not_harm_partner`'s), a hold's own
-directions (`ReleasePartner`'s back press *is* the release), airborne
-ticks, and `Dialog` verbs.
-
-The ROM facts behind it were decoded, not measured. `$4478` grabs only when
-the `$45D4` table (indexed by action >> 1) reads 1 for *both* players --
-idle `$02`, every walk `$06`-`$0F`, the armed ground family `$30`-`$3B`;
-jumps read 2 (they hit, they never grab). `$450C`'s compares are inclusive,
-so lanes 16 apart still touch. The walking box is the walk animation's own
-(`$1F20` holds each character's set, `$2F2C` maps walks to animations 4/5,
-armed 24/25): Axel 0..16, Adam 0..20, Blaze 0..19 -- the Souther lab's
-measured 19. Idle plays animation 0, which has no attack box, so standing
-still never grabs. **A lane walk grabs too**: `$2D00` sends Up alone to
-`$0A` and Down alone to `$0E` through `$2EE8`, which keeps the facing bit,
-and both play the same walk animation -- an Up/Down step into the partner's
-lane while facing them within reach is a hold just as an X press is. Not
-yet run live against a human partner; the unit tests pin the geometry.
-
-**Items the partner needs more** (user: "a IA a usar um item de recuperação
-de vida quando o partner precisa mais dele. A IA só deve usar items de
-recuperação se estiver sem partner, ou se tiver partner, a personagem dela
-precisar mais do item que o partner. O mesmo para armas, só apanhar uma arma
-se tiver na mão nenhuma ou uma pior, e se o partner não tiver uma melhor (no
-caso de empate, tentar pegar)"). Read as "who needs it more", in one place,
-`partner.item_is_the_partners`: food only while the AI is *strictly* the
-hurter (equal health leaves it); a weapon unless the partner is strictly the
-worse armed, so a tie -- both unarmed included -- is the AI's to try (the old
-rule left every weapon to an unarmed partner even with the AI unarmed too);
-a 1UP to the one with fewer lives. The walks to such items are withdrawn, and
-so is the pickup nobody asked for: **any grounded B press is a pickup when an
-item lies within ±20 px on X and ±16 on the lane** (`$3136`, first in slot
-order -- `reach.item_a_b_press_takes`), so a punch thrown beside the
-partner's food ate it. The partner pad now turns that press into a step that
-clears the box (`execute._redirect_b_press` / `_step_off_item`). Without a
-partner, nothing changes.
-
-**The jump kick, measured** (user: "a IA não tem bem ideia do ataque de
-pontapé no ar, estudar bem esse ataque para ser previsível para a IA, não só
-para quando tem um partner, mas também para ser usado no resto para calcular
-os ataques"). `ai/jump_kick.py` is the ROM's flight (`$1FC0` crouch, `$1FDC`
-free flight, `$2000` kick, `$21B4` hit freeze, `$3E78` landing), and it
-reproduces `tools/jump_kick_lab.py`'s lockstep traces **bit for bit** -- every
-16.16 position and every `+$64` box, all variants, all three characters. What
-the lab found that nothing here knew:
-
-- **every object moves at 30 Hz**: `$AD8E` waits a VBlank itself between the
-  players and the object slots. The crouch is 5 updates = 10 frames (not 5),
-  and every ROM rate is per update;
-- launch v_z -7.5 / -8.5 / -9.5, v_x +-3.0; free flight: gravity +0.90625,
-  then air steer +-0.375 (cap 3.5, turns the facing), then the B edge; the
-  kick: no steering, gravity +0.53125 once v_z >= 0; a hit freezes the flight
-  4 updates; kicked flights land 67.1 / 77.3 / 84.0 px on (19 / 23 / ~24
-  updates), apex -34.9 / -44.2 / -54.7;
-- kick box x 14..42 / 17..72 / 3..49, z -46..-19 / -43..-14 / -38..-6, lane
-  +-8; Axel/Adam from the edge's own update, **Blaze 6 updates later**;
-  standing bodies z -51 / -53 / -48 .. 0;
-- so the box clears a standing body near the apex, and reaches it as far as
-  ~110 px out on the way down -- the old 60/69/75 band under-stated the kick
-  by half, which is how kicks aimed at an enemy landed on the partner.
-
-Wired into: `reach.in_jump_attack_band` (policy gates + the simulated hit,
-max dx the kicked landing), `do_not_harm_partner`'s launch test (any update,
-`$450C` inclusive, partner carried at their velocity + 8/4 px), the partner
-pad's airborne B hold-back (`execute._hold_back_kick`, `JumpAttack` only --
-the pit hop keeps its kick), `navigation.partner_obstacles` (a kick the
-partner is flying is danger), `reach.partner_is_engaging`, and a small
-multi-hit bonus (+2 per extra body, up to +4). New token fields: `world_z`,
-`vel_z` (`+$24`), `ground_z` (`observe.GroundTracker`, the floor a flight
-lands on); `kinematics.enemy_projected` now carries the hitbox with the body.
-**The 30 Hz time axis: fixed, measured, not kept.** `kinematics` treats
-the ROM's per-update velocities (walk tables, enemy `+$1C`/`+$20`, thrown
-weapons, Souther's dash, Antonio's boomerang) as per 60 Hz frame, so every
-projection and intercept runs 2x fast, and `JUMP_CROUCH_FRAMES = 5` is
-really 10 frames (`ai/jump_kick.py` already simulates it correctly). A root
-fix -- one `OBJECT_UPDATE_FRAMES = 2` dividing every ROM rate, each horizon
-keeping its meaning in frames -- was scored with `tools/boss_fight.py`
-(Blaze, turbo 4, 8 fights a side, a fresh host per fight):
-
-| Batch | Antonio hits/fight, mean (median) | lives lost | Souther hits, `--no-food` |
-| --- | --- | --- | --- |
-| HEAD, then the fix | 2.50 (2) vs 4.25 (4.5) | 2 vs 6 | 1 in 8 vs 0 |
-| paired, lane-edge fix in both | 3.38 (3.5) vs 3.88 (3.5) | 4 vs 3 | 0 vs 0 |
-
-Pooled over 16 Antonio fights, the fix took 65 hits to HEAD's 47 and never
-came out ahead. For Antonio the only projection it changes is his
-boomerang's (a `Boss` has no `grunt_vel`), and the extra hits come neither
-from the entrance (20 vs 23 in the first 4 s) nor from the boomerang (11 vs
-9 with `HitAntonioBoomerang` in the last 30 verbs). They sit in three long
-fights (73-82 s), two confirmed with Antonio in tactical 9 on lane 0 --
-HEAD's longest was 29 s. The first batch was also skewed by the lane-edge
-freeze below (walk stalls in 3 candidate runs of 8, 1 of 8 for HEAD).
-Under "keep it only if it is not worse" it was reverted. For a retry: the
-horizons are tuned to the 2x-fast projection, so the unit fix has to be
-retuned as a whole against these numbers, not dropped in.
-
-**Leave the partner's fight to them** (user: "a IA a tentar atacar o mesmo
-inimigo que o partner já está a atacar ou perto de atacar, estuda bem o
-assunto e evita isso!"). `reach.partner_is_engaging` reads it off the
-partner: holding the enemy, a kick in flight that lands on it, a strike of
-theirs that reaches it, or facing it on their lane within 24 px of that reach
-("perto de atacar"). `partner.PartnerFightTracker` (owned by the loop) turns
-that into `PartnerFight` tokens, remembered 45 frames past the last tick it
-held so a body knocked back between two hits stays theirs; `do_not_harm_partner`
-withdraws the AI's attacks and walks at it (`WalkToNearEnemy`, `Punch`,
-`MeleeWeaponAttack`, grounded `JumpAttack`, `GrabEnemy`, `RearAttack`, the two
-throws, `EngageSouther`). Exceptions: **self-defence** (the enemy's committed
-attack is about to land on the AI, `reach.is_incoming_melee`) and a kick
-already in the air. With only the partner's enemies left, the AI waits
-rather than joins. Two AIs on one enemy would each yield to the other until
-the memory lapses -- the AI does not know whether its partner is a human, and
-the human is the case this is for.
-
-**The enemy beside the partner is theirs to walk to** (user, in Portuguese: "tinha o
-Partner à sua frente, e um inimigo que estava perto dos dois, a IA preferiu ir atrás
-desse inimigo que do inimigo mais longe que estava nas costas do Partner e de si").
-`PartnerFight` only claims an enemy once the partner is engaging it, and
-`WalkToNearEnemy` is ranked by the actor's distance alone, so the enemy beside the
-partner beat the one behind both. `partner._walks_to_the_partners_nearer_enemy`
-withdraws the walk to an enemy the partner has nearer by `PARTNER_NEARER_MARGIN` (24 px)
-while another walk's enemy is nearer the actor than the partner; with no such other
-enemy the near one is still walked to, and self-defence is never withdrawn. Pinned by
-`test_partner_fight.PipelineTests`; the user played it live with a partner and
-confirmed it works (2026-10-31).
-
-**Following a partner who is ahead** (user, in Portuguese: "Quero que a IA
-deixe de emitir `WalkToAdvanceStage` quando tiver um `Partner`, e esse partner
-estiver mais avançado que a personagem controlada. Quero que, em vez desse
-token, a IA emita antes um novo token: `CatchUpPartner` que segue o `Partner`
-a uma distância razoável dele. O objetivo é que se tiver em modo de 2
-jogadores, por exemplo, um humano e uma IA, a IA não tente sempre avançar o
-estágio. Obviamente que em certos níveis o mais avançado é o mais à direita,
-noutros nível é o mais à esquerda, no nível do elevador, não há
-necessidade."). Read literally, and built as a swap:
-
-- **More advanced is the round's** (`Stage.direction`, from
-  `observe._stage_direction`): the larger `world_x` on rounds 1-6 (`"right"`),
-  the smaller on round 8 (`"left"`), and on the elevator (stage 7, `"none"`)
-  nobody -- neither verb is produced there, as before. Equal X is not ahead.
-  `decide.partner_lead_x` is the one signed measure, `decide._partner_ahead_of`
-  the one predicate; both `could_*` below and `priority` read them, so the verb
-  withdrawn and the verb produced cannot disagree about who is in front.
-- **`could_walk_to_advance_stage` skips an actor whose partner is ahead**, by
-  any margin. `decide.could_catch_up_partner` produces `CatchUpPartner`
-  (`actor_slot`, `target_slot` = the partner's slot, `direction` = the stage's)
-  in its place, under exactly the advance's gates
-  (`decide._actors_free_to_advance`: a stage with a lateral direction, no
-  blocking enemy -- `_advance_blocking_enemies`, so an off-screen straggler at
-  0 health does not hold it back -- no blocking breakable, an actor that is free
-  to walk) and only while the partner is more than `decide.CATCH_UP_DISTANCE_X`
-  (64 px) ahead (`_partner_to_catch_up`). Closer than that neither verb is
-  produced and the actor **waits**: advancing would carry it past them. With
-  no `Partner` -- every one-player session, or a partner who is dead or not yet
-  playable -- nothing changes, and a partner level with the AI or behind it
-  changes nothing either: the AI is then the one in front and advances as it
-  always did. Two AIs (each the other's partner) settle into leader and
-  follower the same way.
-- **Why 64.** The walking box reaches 16-20 px and the other player's body
-  7-13 (`reach.walk_box_reach_x`, `reach.player_body_span_x`), so 33 px is the
-  closest the follow may come without taking a hold on them (`$4478`) -- 64
-  clears it with room, is a fifth of the 320 px screen and a quarter of the
-  256 px walk clamp (`$43AA`), and the ROM's two-player camera "tries to
-  contain both" players (`$18F5C`, `game-engine-and-levels.md` §6.2), so no
-  gap can be much wider than that clamp. A unit test
-  (`test_the_follow_distance_clears_the_partners_grab_reach`) keeps it above
-  the grab reach if either table changes. The pipeline is memoryless, so the
-  production gate is also where the actor stops; the router's own arrival --
-  the body overlapping the 1 px goal strip -- puts the real stop a few px
-  outside it: **70 px behind on the rightward rounds, 73 on round 8**
-  (`_walk` traces through the executor, Axel, Adam and Blaze alike).
-- **The executor** (`execute.state_machine_catch_up_partner`) is the advance's
-  routing with a real destination: `nav.advance_goal` at
-  `decide.catch_up_point_x` (a strip across the lane band, so a pit or a crate
-  on the actor's lane cannot make it unreachable, and the AI keeps its own lane
-  instead of chasing the partner's), solids plus the partner's grab zone
-  (`nav.partner_obstacles`) as the one danger, the pit hop
-  (`nav.hop_landing_x` + `_jump_toward`) when no walk reaches, the camera
-  clamp. Unlike the advance it never forces a direction bit back on: an empty
-  route with the goal reached is "arrived", and standing still is the answer.
-  `execute_tick`'s partner pad still refuses any step that would grab them.
-- **Ranking**: `priority._EMERGENCY_CATCH_UP_PARTNER` = 1, the advance's tier
-  -- the lowest of any verb that still scores, under a ScorePickup and every
-  approach -- zeroed by the advance's own gates and by `_partner_to_catch_up`
-  no longer holding. The HUD label reads `CatchUpPartner  (right →P2)`.
-- **Not done, on purpose.** An AI that is *ahead* of a partner still advances
-  (the user's rule names only the partner being ahead), so with an idle human
-  behind it the AI runs on to the camera's clamp; with an enemy alive the
-  fight verbs own the tick and the AI does not follow (the advance's gate);
-  `WalkToNearEnemy` no longer walks to enemies off screen at all (**`Centering`**,
-  below). **Not run live against a human
-  partner** -- the unit tests pin the behaviour: `CouldCatchUpPartnerTests`
-  (production, both directions, the elevator, every gate),
-  `ExecuteCatchUpPartnerTests` (stop distance, lane, pit hop, clamp, the
-  partner pad), `CatchUpPartnerPriorityTests` and, over whole runs through the
-  real loop, `PartnerFollowStabilityTests` (catches up and waits, trails a
-  partner who keeps walking, leads one behind, mirrors on round 8, hands over
-  to the advance exactly once when the partner falls behind).
-
-**`WalkToAdvanceStage` only when walking can scroll, and `Centering`** (user,
-2026-10-31: "I want the AI to only produce `WalkToAdvanceStage` token when it
-really needs to walk to advance stage. Create a new token `Centering` which
-centers the controlled character in the center of the viewed playfield"; the
-choices below are theirs). The scroll test is the ROM's own, `$6A6
-(update_camera_scroll_if_needed)`: `$FFE01A` max minus `$FFE01E` min, unsigned
-words, under 4 is locked -- a wave gate or a boss arena
-(`world_map.camera_scroll_is_open`, `CameraRange.scroll_open`,
-`decide.scroll_is_open`). What opens a gate is the wave flow, not where the
-player stands (`$FFFA0D`, set around `$DF4`, consumed by `$19570`).
-
-- `could_walk_to_advance_stage` stands down while the scroll is locked.
-- `could_walk_to_near_enemy` takes on-screen enemies only (user: "if the enemy
-  is off-screen, do Centering, to lure him/her out"). Its old fallback, a walk
-  to the nearest off-screen enemy ahead, is gone: it pinned the actor to the edge.
-- **An enemy off screen no longer holds the advance back**
-  (`_advance_blocking_enemies` is `reach.on_screen_enemies`), which also frees
-  `CatchUpPartner`. So the lure is for a locked scroll; an open one walks. User,
-  1P + AI Assist in widescreen, on the first cut, where off-screen enemies held
-  an open scroll: "the AI got the game stuck because it's 'Centering' and the
-  level asks for a little advance". **`$18F5C`, two players**: on biased screen X
-  (`+$28`, `$80` = left edge), the camera scrolls forward only with the lead past
-  `$130` (camera + `$B0`) and the rear at `$110` (camera + `$90`) or more, at
-  `min(lead - $130, rear - $110)`; one player only needs the lead. The widescreen
-  ports leave this routine alone. So `Centering`'s stop, camera + `$90`..`$B0`, is
-  exactly the dead zone: a centred leader never scrolls, and a rear AI that came
-  from the left and stopped at + `$90` holds the camera at velocity 0 for a person
-  walking ahead. Read from the code, not reproduced; the user's own session was
-  not traced.
-- `decide.could_centering` is for an actor free to walk, on **any idle tick**:
-  the locked gate (an enemy off screen is lured out from there), the elevator, an
-  arena before its boss walks in. Not while it would be advancing,
-  and not while a partner is ahead (`_partner_ahead_of`): that actor is
-  following. **X only**, on its own lane, within `CENTERING_ARRIVED_X` (16 px) of
-  `decide.centering_point_x`: `CameraRange.center_x` (the camera's X + `$A0` in both
-  walk clamps), or **with a `Partner` a third of the visible screen from the back**
-  (user: "go to 1/3 of the screen (further back) ... in case if there's a
-  `Partener`"): camera + 107 on the rightward rounds, + 213 on round 8, + 96 / + 224
-  in widescreen. The elevator has no back and keeps the centre. A rear AI at the
-  third holds the camera (`$18F5C`, below; round 8 mirrors it, the rear at camera +
-  `$B0` or less and the lead under + `$90`) until the person ahead is about 64 px on
-  and `CatchUpPartner` moves it.
-  Lowest tier (`priority._EMERGENCY_CENTERING` = 1), so anything else that
-  scores wins; a live enemy on screen does not withhold it, so the wait beside
-  a partner's fight (**Leave the partner's fight to them**) now centres. **Never in
-  Mr. X's office** (`MrXOffice`; user: "keeps centering instead of fighting the
-  grunts"): `EngageMrX`'s home is the right clamp, and each gap between his Garcias
-  walked the actor out of it. (The report itself was the stale duel byte, **Mr. X's
-  betrayal duel**, below.) The
-  executor routes like `CatchUpPartner` but never hops: a pit in the way stops
-  it at the wall.
-
-Pinned by `test_decide.CenteringTests`, `test_execute.ExecuteCenteringTests`,
-`test_priority.CenteringPriorityTests` and `test_world_map.CameraScrollTests`.
-The user played it live, 1P + AI Assist in widescreen, confirmed the stall gone and
-accepted it (2026-10-31); **no scored A/B was run**. An earlier version on round 3, real waves (damage /
-hits at locked gates per run / lives): waiting at the edge 54.0 / 3.0 / 0 over 10
-runs, gate + centre 60.0 / 4.5 / 1 over 6, an A/A gap of 13.6 damage -- so
-noise, except the locked-gate hits trend. To watch: those hits, and a stall if
-an enemy waits off screen at a locked gate for the player to come closer (the
-walk that used to go after it is gone). `tools/stage_walk_diag.py` has no
-two-player mode, so that session's case is only pinned by unit tests.
-
-**The off-screen-enemy corner stall -- and `WalkToScreenCenter`, removed**
-(user, in Portuguese, when it was asked for: "Por vezes a IA fica presa a um
-canto do ecrã a tentar chegar a inimigos que estão fora do campo visível no
-ecrã, a IA nesse caso deve-se andar para o centro do ecrã para os 'chamar'
-(ter um comportamento mais humano), cria um token para essa ação, mas não dês
-muita prioridade"; and when it was taken out: "Remover o `WalkToCenterScreen`,
-porque é inútil"). The verb is gone -- `could_walk_to_screen_center`,
-`decide._actor_pinned_for_screen_center`, `PINNED_AT_CAMERA_EDGE_MARGIN`,
-`execute.state_machine_walk_to_screen_center`, the `priority` tier and the
-ceiling that held a stalled `WalkToNearEnemy` under it, and their tests all
-went with it -- and `WalkToNearEnemy` scores by distance alone again. The stall
-it answered, a `WalkToNearEnemy` held against the walk clamp toward an off-screen
-target that nothing else overrode, went with `could_walk_to_near_enemy`'s
-off-screen fallback: `Centering`, above, is the answer now.
-
-**Holding a boss (user: "a IA não consegue lidar bem com o boss de
-primeiro nível"; "os jogadores profissionais são bem fãs de agarrar e fazer
-supplex, é muito importante evitar o ataque de pontapé" -- the grab-and-
-suplex chain is the *intended* answer to Antonio, and taking his kick is the
-thing to design against):** the round-1 fight was *unwinnable*, and not for any
-tactical reason. The AI reached Antonio, walked in, and took a real front
-hold `$60`/`$61` — then issued **no verb at all** for the rest of the round,
-because `_is_holding_enemy` asked `+$60` (`OBJ_HELD_TYPE`). `+$60` is the
-*weapon* link (`$3136`); the grab path leaves it reading `$00`, or the pipe
-the actor is still carrying, and nothing times a boss hold out. Measured
-twice: 70 s and 90 s of a completely static hold, Antonio on full health,
-ending with the stage timer killing the player.
-
-The fix reads the ROM's own hold link instead — player `+$4C`
-(`world_map.MapEntity.contact_slot`, the field `$AAA0` requires to be zero
-before it will issue a fresh grab), plus the `$60-$6F` action family, plus
-the C crossover `$76`/`$80` (`PlayableCharacter.is_holding_enemy`).
-`reach.held_enemy` names *which* body is in hand for the whole pipeline, and
-`priority._target_is_in_hand` replaces the `CombatPhase.GRABBED`-only gate
-that collapsed every hold move to emergency 0 against a boss: a **held later
-boss reads primary `$04`**, the same byte as his ordinary hit reaction
-(`ai-analysis/enemy-ai.md`, "Being held by a player"). Three further
-consequences, each measured:
-
-- the C crossover is 28 ticks long and ignores fresh edges, and the AI used
-  to spend them on `WalkToNearEnemy` and the `$322A` chord *between its own
-  `FlipHold` and the `Supplex` it was setting up* — `could_hold_actions` now
-  skips that family like the other animation locks;
-- `reach.grab_reasons` returns nothing at all while the actor is already
-  holding, which is `$AAA0`'s own rule rather than a heuristic;
-- item detours are refused while Antonio's kick gate covers the actor
-  (`priority._boss_attack_gate_is_live`, health pickups excepted): four of
-  the eight hits he landed across three fights arrived while `WalkToPickup`
-  or `WalkToWeapon` held the tick, and a pipe is worth nothing against him
-  anyway since `_could_melee_strike` refuses every grounded B on him.
-
-Measured with `tools/boss_fight.py --level 1 --boss-type 0x56`, Blaze,
-turbo 4, three fights per configuration (five for the shipped one):
-
-| | boss killed | damage taken | fight length |
-| --- | --- | --- | --- |
-| before | 0/1 (stalled, timer death) | a whole life | 70 s+ |
-| hold link | 3/3 | 40 / 160 / 40 | 29 / 80 / 28 s |
-| + crossover | 3/3 | 60 / 40 / 40 | 30 / 29 / 21 s |
-| + item gate (shipped) | 5/5, no deaths | 20 / 40 / 40 / 60 / 40 | 13-29 s |
-
-The suplex chain carried the fight from there (2-3 suplexes plus knees per
-fight, against 0 before) until the hold loop replaced it: knee, knee,
-release, re-grab (**Antonio: the ROM model and the plan** below).
-`tools/antonio_diag.py` is the per-tick diagnostic that found all of this:
-it runs the real pipeline and logs every candidate verb with its emergency
-next to Antonio's own bytes.
-
-The hold link and the three consequences above are all still in place under
-that plan. The item gate reads the ROM's own kick gate now
-(`antonio.kick_gate_open`), and the one open item this section ended on --
-hits landing in the armed hop `$3C`-`$42` -- went with the jump-kick plan:
-the engage never jumps at him.
-
-**The arena's food is left where it is while he is alive (user):** "não
-comer a comida, a maioria dos jogadores precisa dela depois de enfrentar os
-inimigos do 1º stage". `decide._food_is_spoken_for` drops every
-`HealthPickup` from `could_walk_to_pickup`'s candidates while a live Antonio
-is on screen -- food only (a `LifePickup` is still taken) and only until he
-dies. It also overrides `_boss_attack_gate_is_live`'s old "health is the one
-thing worth a kick" exemption for him.
-
-This was worth checking rather than assuming, because the AI had been
-leaning on that pickup: over ten fights of the lane-offset plan (**What the
-earlier Antonio plans taught**, below), the one that took four hits survived
-only by eating at 20 HP. Five fights with the food left alone:
-killed 5/5, **no deaths**, hits taken `[1,2,2,2,3]` (mean 2.0, max 3)
-against the ten-fight `[3,1,1,1,2,1,2,2,2,4]` (mean 1.9, max 4), and 19.6 s
-mean against 22.8. So the crutch cost nothing to remove -- and the rule
-holds cleanly: the only heal in the five landed at `t=12.6` with
-`boss_hp=0`, after he was already dead.
-
-**Antonio: the ROM model and the plan** (user: "We need to significantly
-upgrade the AI to deal with the Antonio enemy (first level boss) ... You need
-first to think and devise a sound strategy to deal the enemy, then update the
-AI code"; during the work: "A AI está a depender muito da chamada da
-polícia!" and "The police is allowed for Souther/Antonio, just don't test with
-the police on"). Everything the AI does against him is `ai/antonio.py`, and
-the plan is Souther's: **take one hold, and never give him back a turn.**
-What is new is how the hold is reached. Every earlier Antonio plan was a
-hand-written approach -- hop, lane offset, dodge -- tuned against a model of
-him that was wrong where it mattered: his kick's lane gate is `< 8` above his
-lane and `< 16` level or below (not 16 both ways), its X window depends on
-the target's own `+$1C` and side, everything runs at 30 Hz, and his tactical
-0 parks a target 18-21 px *below* him while rushing one above. This one is a
-**lookahead over his own AI**, read from the disassembly
-(`ai-analysis/enemy-ai.md`, "Antonio"):
-
-- `antonio.boss_update` replays one update of his state-1/state-2 code from
-  the object's own bytes: the screen test (off-screen, tactical 9 walks him
-  back on with both gates skipped), the `$16E74` dash gate, the `$16EAE`
-  kick gate, every handler of the `$16F42` tactical table with its lane
-  keeping (`$179AC`, `$1797E`) and integration, the kick's attack and body
-  boxes frame by frame (latched by the renderer before the frame steps, so
-  the frame on screen is the one that collides), `$179F8`'s "target
-  unavailable" re-read off the target every update, `$17CF2`'s pending hold,
-  and `$AAA0`'s contact order: the walking box against his body first, so a
-  walk into his leaning body takes the hold even through a kick already on
-  its frames. `antonio.actor_update` walks the actor by `$3614`'s tables
-  (`kinematics.walk_speeds`), with its boxes where `$4140` caches them --
-  before `$43AA`'s camera clamp;
-- **his boomerang** (`BoomerangSim`, `$17262`'s four states): frame 2 of his
-  throw launches it 64 px in front of him at 14 px an update; out, it slows
-  and dives down the street for 32 updates, then comes back homing on the
-  top of the street -- the turn means to aim it at the target's lane, but its
-  `lea $64(a0),a1` reads the boomerang's own `+$78` -- while tactical 7 walks
-  him toward that lane and catches it at his hand. Back below tactical 6
-  with it still out, he takes a fresh one (`$17206`) and the old one flies
-  on unlinked, still able to hit. Every one of them flies in every rollout,
-  and `_boomerang_path` follows them past the horizon for the end state;
-- `antonio.plan_engage` tries the nine stick positions, each either held for
-  two updates and then handed to a tail policy that walks at `engage_aim`, or
-  held for the whole horizon, 14 updates ahead -- and each **twice**, with
-  his update reaching the actor before the stick does and after, since a
-  snapshot can land on either side of `$AD8E`'s VBlank wait. A candidate
-  scores by the worse of the two: a grab by how soon, a hit below everything
-  else by how soon, the rest by distance to the aim, the aim's mode and
-  whether his gate or kick is live where it ends. The simulated hit is 2 px
-  wider and a lane deeper than the ROM's, the grab is exact, and a hit
-  reaction's immunity is assumed to be over already;
-- `EngageAntonio` holds the winning stick every tick, and the hold loop is
-  Souther's: two knees, `ReleaseToRegrab` (he lands 40 px in front of the
-  actor, `$17D76`), straight back in, and a finisher only when it kills
-  (`antonio.hold_step` is `souther.hold_step`).
-
-Nothing hard-codes the geometry the lookahead keeps finding: **8-16 px above
-his lane** is kick-proof (the gate needs `< 8` there) and grab-ready (the
-contact reaches 16), and the engage walks in along it.
-
-Scored with `tools/boss_fight.py --level 1 --boss-type 0x56 --no-food`,
-turbo 4, a fresh host per fight (a hit is 20 damage; four kill from full
-health):
-
-| | fights | killed | hits taken | lives lost | holds | fight length |
-| --- | --- | --- | --- | --- | --- | --- |
-| previous plan (hop, lane offset, walk-in grab), Blaze | 8 | 8 | 2, 2, 6, 2, 2, 3, 3, 6 (mean 3.25) | 2 | 1-3 | 13.0-32.3 s |
-| lookahead, executor clamped to the camera, Blaze | 8 | 8 | 2, 2, 0, 0, 2, 2, 3, 3 (mean 1.75) | 0 | 5 | 4.2-6.1 s |
-| lookahead, Blaze | 8 | 8 | **0 in every fight** | 0 | 5 | 2.4-4.4 s |
-| lookahead + model fixes, Blaze | 5 | 5 | **0 in every fight** | 0 | 5 | 2.4-4.2 s |
-| lookahead + model fixes, Axel | 5 | 5 | **0 in every fight** | 0 | 5 | 2.2-4.3 s |
-| lookahead + model fixes, Adam | 5 | 5 | 0, 0, 0, 1, 0 (mean 0.20) | 0 | 5 | 2.2-3.8 s |
-| + the boomerang model, Blaze | 5 | 5 | **0 in every fight** | 0 | 5 | 2.4-4.4 s |
-| + the boomerang model, Axel | 5 | 5 | **0 in every fight** | 0 | 5 | 2.5-9.0 s |
-| + the boomerang model, Adam | 5 | 5 | 0, 0, 0, 1, 0 (mean 0.20) | 0 | 5 | 2.4-30.5 s |
-
-The previous plan's batch ran with the police allowed, and its old 60% boss
-gate called it ten times in eight fights -- in every fight, right after his
-second kick; no lookahead fight called it. The second row is the one bug
-worth remembering: `execute._clamp_mask_to_camera` stripped the RIGHT press
-at the camera's right edge, which is both the direction that walks into him
-as he walks back on screen (tactical 9) and the walking box a re-grab needs
-at the moment of contact -- every hit of that batch landed there.
-`state_machine_engage_antonio` holds the plan's stick unclamped.
-
-**The first Adam hit was the boomerang, not the kick.** One from an earlier
-throw, coming back up the street, landed on an armed Adam standing 130 px
-out and 5 px below his lane. Two things let it through: the lookahead did
-not model the boomerang at all, so standing there looked fine; and
-`HitAntonioBoomerang`, which punches it away, pressed B with a weapon in
-hand -- the swing, ~26 frames committed and only live near its peak -- on
-the punch's 3-5 frame timing, projecting the boomerang with the wrong
-velocity besides (`Projectile.vel_x` read `+$20`, which for this object is
-its lane). The swing went out early and the boomerang landed during its
-recovery. Now the boomerang is modelled from the ROM (the bullet above), the
-counter is offered unarmed only, and a `$96`'s `vel_x` is its `+$1C`.
-
-**Still open: the corner.** The last Adam batch took one hit in five fights,
-and it is a different failure: a 30-second fight whose first hold came at
-28 s. He sat a lane or two above the actor near the top of the street,
-where the pocket 12 px above him runs out of street, and pushed it right
-with dash-kick cycles -- the dash closing 4 px, the kick at 117 px landing
-nowhere, again -- until the actor was pinned at the camera's right edge and
-the top lane, 7 px above his lane, and a kick from 70 px landed. Adam climbs
-lanes at 1.25-1.5 px an update against the 4 px rush a target above him
-gets, so he is the one it catches (Blaze and Axel took none in 18 and 10
-fights since the camera-edge fix). The lookahead's 14 updates cannot see a
-trap that forms over seconds; what should fix it is a term for being boxed
-in against the camera and the street's edge with him between the actor and
-the open side. Not written yet.
-
-`tools/antonio_lab.py` checks the model against the ROM in lockstep, one of
-his updates at a time. With a seeded walk that never attacks (`--actor
-wander`, which takes him through every state he has) the first run compared
-702 updates field by field and turned up four things the model did not do:
-`$179F8`'s re-read of `+$77`, `$AA34` skipping a player in a hit reaction
-(`+$59` bit 1) or with a contact code still latched in `+$7C` (23 kicks
-"landing" on a player lying on the floor), the `$17CF2` hold, and the boxes
-cached before the camera clamp. With them in, two more wander runs (578 and
-648 updates) left nothing on the side that matters. The model predicts kick
-hits the ROM does not land -- 7 and 10: kicks from behind, where it takes the
-actor's body at its widest reach on both sides; a player already in the air
-or down in a hit reaction, since it has no height axis; frame 1's short box
-at its very edge -- and it never missed a kick that landed.
-
-The boomerang went through the same lab once it was modelled. The first
-comparison ran into a second boomerang -- the fresh one he takes while an
-old one is still out, which the lab had been confusing with it -- and, once
-both were told apart by his `+$6E` link, a launch read one update early
-(it reads his frame before the renderer steps it). Since those two, two
-runs -- 461 and 449 of his updates with a boomerang in flight, launches
-among them -- have matched position, velocity, box, turn, homing and state
-exactly, and tactical 7's walk toward its lane with them. What the model still over-predicts is
-height, which it does not have: the boomerang flies 48 px up and its box
-reaches down to exactly Blaze's head (-48), 3 px into Axel's and 5 into
-Adam's -- 11 boomerang "hits" on the lab's Blaze landed nowhere, while
-Adam's live one did -- so the plan treats a boomerang in reach as a hit
-for everyone. The same lab showed the camera edge's box rule holds on the
-lane: four grabs the model predicted at the top of the street -- a walk held
-up into lane 2, sixteen lanes above him -- never happened, because `$43AA`
-clamps the lane too, after `$4140` cached the box a step higher. The
-player's `+$20` lane velocity now moves the box past the lane clamp as
-`+$1C` does past the camera's (added after the last scored batch; a unit
-test and the final wander run cover it). Left besides: the mirror bit of his animation
-(twice a run, cause not found). With the real pipeline playing (`--actor
-engage`) he died in 165 frames: 0 hits, 4 holds, and not one kick started.
-
-**What the earlier Antonio plans taught**, each paid for in runs:
-
-- **The jump kick as the plan** (user: "os jump-kicks são seguros, mas é
-  lento e perigoso atacar dessa maneira... ainda dominam a maneira da IA
-  lutar"): 45 committed airborne frames for about 2 damage, and the place
-  every hit landed. The hold replaced it at contact range first; now the
-  engage never jumps at him.
-- **A lane offset is not safety** (user, after a lost life: not
-  acceptable). The offset's side came from the band's midpoint, so the
-  approach crossed his lane to reach it; fixed, it still took a mean 1.9
-  hits over ten fights, max 4. Every one of the 19 hits in those fights
-  arrived within two agent ticks of primary `$02`, and a hop needs ~45
-  frames: **his kick cannot be answered reactively**, only by never
-  standing where it can start -- which is what the lookahead plans.
-- **The entrance** (user: "a IA começa logo por levar dois pontapés
-  evitáveis. Enquanto espera pelo Boss, devia ficar no meio da camara
-  visível e estar aware de inimigos fora da camara visível"): 7 of those 19
-  hits came in the first three seconds. Three ways of waiting for him all
-  measured worse -- exempting a boss from the lane filter froze the pipeline
-  with no verb at all, a "hold the arena centre" verb read `CameraRange` (the
-  walk clamp) as the visible screen, and waiting as a standing preference
-  was passivity. What removed those hits was the lookahead treating his walk
-  back on screen as the grab it is, and the camera-edge bug above.
-- **Measured no better and reverted**, under the old plan: refusing the
-  weapon detour whenever he is on screen, lifting the grab's armed
-  exclusion for him alone, and widening the hop's withdrawal to its whole
-  band. Armed, the engage now simply walks in (`$AAA0` never reads the
-  weapon; one of the eight shipped Blaze fights started armed) and the
-  detour stays refused while he lives
-  (`decide._a_weapon_would_disarm_the_plan`).
-- **The police** (user: "A AI está a depender muito da chamada da
-  polícia!"): the panic threshold only, and never on in a test -- see **And
-  without the police**.
-
-Not measured yet: two players, the round-8 boss rush's Antonio, and Antonio
-with the street waves alive (deliberately -- see **Testing the AI against a
-boss**).
-
-**Souther: the ROM model and the plan** (user: "We need to substantially
-improve the AI's performance against the Level 2 boss, Souther ... It is
-already understood that grabbing Souther and repeatedly dealing damage to him
-is an effective strategy"; "do not use police attacks or life-gaining items";
-prefer deterministic behaviour; do not preserve old behaviour for its own
-sake). Every attempt before this one tuned lane margins against a model of him
-that was wrong in three places. The rewrite started from the disassembly and a
-lockstep lab, and the whole plan now lives in one module, `ai/souther.py`.
-
-What the ROM says (full decode in `ai-analysis/enemy-ai.md`, "The claw box,
-the side-dependent gate, and holding him", and `ai-analysis/controls-and-
-input.md`, "The knee chain, the release, and the one crossover"):
-
-- **The commit lane gate is side-dependent**: `+$52 < $0A` when the target is
-  above him and `< $1C` otherwise (`+$61`, from `$17B2C`). Every earlier
-  attempt used 28px for both sides. 11-15px above him is outside the gate and
-  inside grab range at once.
-- **The claw is his own attack box** (set `$2E44A`, animation 4): 0..86px
-  forward over lane -10..+24, with his body leaning 36-42px forward while it
-  swings. The type-`$98` object has no box, and the old dodge's clearances
-  were computed from it. An ordinary claw swings in place; the lane-blind
-  8px/frame dash only follows the jump counter.
-- **Grab beats hit**: `$AAA0` tests the player's attack box against his body
-  before his attack box against the player, and never reads the carried
-  weapon. Walking into him with the walking box out is a hold, even through a
-  swinging claw, whenever that box reaches his leaning body first. A strike
-  (`+$34` set) is a hit instead, and his hitstun `$03` cannot be grabbed.
-- **He never escapes a hold, and a release is the best move in it.** Holding
-  back counts `+$63` down from 3 and drops the hold on the ~8th frame; he goes
-  straight to primary 1, 32px in front of the actor on its lane -- in reach of
-  an immediate re-grab. The third knee (`$6E`), the throw and the suplex all
-  put him 90-165px away, which is the re-approach every earlier plan paid for.
-  One crossover per hold (`+$4B` bit 7); a second one drops him free next to
-  the actor, measured as a claw three frames later.
-- He updates at 30Hz, so every per-frame rate in the old notes is per update.
-
-The plan (`souther.plan_engage`, `souther.hold_step`):
-
-1. **Engage** (`EngageSouther`, emergency 62 plus the boss 14): close X in a
-   corridor 15px above him (inside the grab lane, outside the 10px gate) or
-   38px below (past the 28px gate and the claw's 32px deep side), on the side
-   the actor is already on; converge from below only inside `$18`; leave a
-   live claw's band by lane only; and once in the grab lane within 48px, walk
-   into him with the toward bit held every frame.
-2. **Hold loop**: knee, knee (4 damage), then `ReleaseToRegrab` presses back
-   for exactly the countdown's frames and holds toward him, and the engage
-   walks straight back in. A back hold crosses over once, then releases. A
-   finisher is used only when it kills (third knee at 3 health or less, suplex
-   at 5).
-3. **Nothing else aims at him**: `Punch`/`MeleeWeaponAttack`, `GrabEnemy`,
-   `RearAttack`, `WalkToNearEnemy`, `RetreatFromDanger` and the jump all stand
-   down for him; `HealthPickup`/`LifePickup` are refused while he lives, and
-   the police is only ever the panic button (tests run with `--no-police`).
-
-Measured with `tools/souther_hold_lab.py` in lockstep (Blaze): the re-grab
-lands 4-6 frames after each release, six cycles running, no damage; with two
-frames of injected input delay he commits 3 frames after the release and the
-lean-contact grab still takes him at frame 6. Then `tools/boss_fight.py
---level 2 --boss-type 0x55 --no-food`, turbo 4, a fresh host per fight:
-
-| | fights | killed | lives lost | hits taken | fight length |
-| --- | --- | --- | --- | --- | --- |
-| previous plan (the n=20 baseline in the lessons below) | 20 | 20 | 2 | median 2, mean 2.15, worst 7 | clean fights 16.8-26.7 s |
-| engage + hold loop, Blaze | 16 | 16 | 0 | 0 in every fight | 2.1-4.1 s |
-| engage + hold loop, Axel / Adam | 2 / 2 | 4 | 0 | 0, 0 / 0, 1 | 2.4-6.7 s |
-| + the engage armed too, Axel / Adam | 3 / 3 | 6 | 0 | 0 in every fight | 4.2-4.5 s, 7 holds each |
-
-The one hit in that table: Adam walked into the arena armed,
-`could_engage_souther` still excluded an armed actor, and the generic armed
-approach walked his lane 31px below him inside `[$18, $68)` -- exactly the
-ground the corridor avoids. The engage now runs armed too. None of the six
-fights after that change happened to start armed, so the armed path rests on
-the ROM read (`$AAA0` never consults the weapon) and the unit tests, not yet
-on a live fight.
-
-Axel's and Adam's walking-box reach is no longer unknown: the ROM's walk
-animations give 16 and 20 (`reach.WALK_BOX_REACH_X`, decoded for **Never
-hurt the partner** above). `souther.WALK_BOX_REACH_X` still carries Blaze's
-19 alone, with the narrower 14 for the other two, because adopting the wider
-figures widens their walk-in and no fight has measured that yet. Not
-measured yet: that, and two players. The round-6 pair has its own section,
-**Round 6: the Souther pair**, below.
-
-**What the earlier attempts taught**, kept because each one was paid for in
-runs:
-
-- **Measure in hits, over many fights.** Identical code spread 0-12 hits a
-  fight, so nothing here was decided on fewer than five runs a side, and the
-  baseline took twenty. `damage_pct` counts a death as +100 points, which made
-  the baseline look bimodal; one life is four hits.
-- **Aligned on his lane anywhere in 24-104px lost the whole game in every
-  fight**, three variants of it (the chase with every protection cut, the
-  lane alone, the lane plus a nearest-edge dodge; 15-17 hits a fight). That
-  range is his commit band. The user asked for the alignment repeatedly ("eu
-  quero que o Y do inimigo e do jogador se alinhem"); the plan aligns inside
-  the grab band, which is outside his gate on the upper side.
-- **Measured worse and reverted**: refusing the strike from outside the
-  pocket (and demoting it), holding the lane offset while a claw is out, three
-  more lane aims, and holding him until the suplex would kill -- the `$6E`
-  stage alone took ~160 ticks, which is what the release now avoids.
-- **Four arrival bugs** made the old corridor look like a stalemate, and
-  their fixes are still in place: the enemy-side lane band
-  (`reach.in_targetable_lane` -- he fights from lanes 0-1, below the player's
-  floor), the visible-screen band (`reach.in_visible_screen`), and
-  `phases.boss_phase` reading `$05` (the lethal gate, visited on every hit) as
-  death and a walking primary `$01` as attacking.
-- **The police special freezes the caller** for the shared `$16AEC` delay
-  (~5 s) and was most of the damage in one batch (user: "a maioria do dano
-  deve-se a ataques de polícia, não usar ataques de polícia"). Since then the
-  rule is: allowed in play as the panic button, never on in a test (user:
-  "The police is allowed for Souther/Antonio, just don't test with the police
-  on") -- see **Scoring a fight without the food**.
-- The user's other asks over those sessions -- "e essencial agarrar o boss",
-  "tem muita precaução, simplesmente tem de ir atrás do boss e tentar
-  agarrá-lo", "deve evitar o seu ataque, mas só apenas o suficiente para não
-  apanhar dano" -- are what the plan above does in the form the ROM allows:
-  the hold is the plan, the approach is direct, and the only evasion is
-  staying out of the claw's own box.
-
-**Round 6: the Souther pair** (user, in Portuguese: "A IA tem problemas em
-enfrentar dois Souther ao mesmo tempo (por exemplo, boss nível 6)"). Round 6
-sends two `$55` records after Bongo; in a 1P game both target P1. The plan
-above never looked at the second one, and scored with `tools/boss_fight.py
---level 6 --boss-type 0x55 --no-food` (Blaze, police off, a fresh host per
-fight) it took **7.6 hits and two lives a fight, and lost the whole game in
-three fights of nine**. `ai/souther_pair.py` is the pair's part; round 2 and
-round 8 (one Souther) do not reach it.
-
-What the ROM and the traces say:
-
-- **A holding actor is a target.** `$179F8 (later_boss_target_unavailable)`
-  rules a player out only on `+$59` bit 1, `+$4B` bit 1 (the post-knockdown
-  grace, `$4F62`) or an action in `$5A`-`$5F`; the holds (`$60`-`$6F`) are
-  none of them. The hold roots the actor, so the free Souther walks up and
-  claws a body that cannot move -- most of the baseline's hits.
-- **Which way the actor faces decides what he does** (`$15F98`, replayed in
-  `souther_pair.update`): a target facing *away* from him is **rushed** at 4 px
-  an update (4.5 for pair role 2) while `$179AC` settles him 18-21 lanes above
-  it, inside his below-side gate (`$1C`) -- that ends in a claw; a target
-  facing him gets the **band-restore** -- 1 px an update away inside `$78`
-  (`$88` role 2), the lane *mirroring* the target's own `+$20`, 1 px up while
-  it walks level, and half a pixel down for role 2 (`addi.w #$8000` on the
-  fraction, no carry) -- and claws only from inside his gate. Every `$78`
-  updates of `+$7B` with the target's lane at `$10` or more he makes an
-  **attack run** (tactical 1: 4 px an update at it with the same lane homing,
-  until its lane is under `$14`). A hold faces the actor at the body in its
-  hands, so a second Souther behind it rushes.
-- **A dead Souther lay in the target set.** The kill is usually a knee from 2
-  health, leaving exactly 0, which `$17C36` treats as lethal (`bgt` to the
-  living path); the body then sat ~1.7 s in the lethal gate `$05` at health 0.
-  `Enemy.is_defeated` counted 0 as alive (right for ordinary enemies, whose
-  checks are signed), both Southers tied in the ranking, and the stable
-  tie-break took the lower slot -- the corpse. The actor stood against it while
-  the live one clawed it (20 points, measured). `Boss.is_defeated` now reads 0
-  as dead for every boss: the `$55`-`$58` family, Abadede and Mr. X all test
-  `<= 0` (`decide.live_twins`/`live_mr_x` already applied it by hand).
-
-The plan (`souther_pair.pick_target`, `souther_pair.hold_step`,
-`souther_pair.plan_engage`):
-
-1. **One engage for the pair**, on the Souther the actor can walk into this
-   instant (after a release, the one it just let go, 32 px in front on its
-   lane -- so the loop stays on one body), else one that can be grabbed at all
-   over one knocked down, else the nearest. Left to the ranking the two tied
-   and the stable tie-break walked the actor past one to reach the other.
-2. **The hold loop asks the other one first.** Before each knee (or the
-   release after two), the free Souther is replayed update by update
-   (`souther_pair.update`: the commit gate, the standoff, the rush, the attack
-   run, the off-screen dash) against the actor rooted where it stands, facing
-   the body in its hands. If he commits inside a knee plus a throw (plus two
-   updates of slack, `hold_safe_updates`), the actor **throws** the body in
-   hand (B+back, 41-46 frames; he lands 100-165 px off, knocked down) -- the
-   one way out of a hold that fits: a release lands the body 32 px in front
-   inside its own gate, which commits at once unless walked straight back
-   into. A knee that kills is never traded for the throw.
-3. **Out of the other one's live claw** by lane, X held: when his claw is
-   swinging and the actor stands in its reach, the engage aims at the nearer
-   lane out of his band instead of his partner's corridor.
-
-Scored, Blaze, `--no-food`, police off, two hosts at a time (120 fps each):
-
-| | fights | hits a fight, mean (median) | lives lost | whole game lost | fight length, median |
-| --- | --- | --- | --- | --- | --- |
-| before | 9 | 7.6 (8) | 18 | 3 | -- |
-| **the plan above** | 12 | **1.75 (0)** | **5** | **0** | 7.6 s |
-| + a lookahead over both for the whole approach | 6 | 2.0 (1.5) | 3 | 0 | -- |
-| + a safety filter on the approach's stick | 6 | 3.2 (3.5) | 6 | 0 | -- |
-
-Both rejected variants replayed both Southers (`souther_pair.update`) over
-every stick. The **lookahead** (`antonio.plan_engage`'s shape: 17 sticks x 14
-updates x both update orders, a grab scored only if the other one could not
-reach the rooted actor for a knee and a throw) fled an attack run it could not
-out-walk -- 3.25 px an update against his 4.5, its back to him -- and turned
-into his gate. The **filter** (the measured single plan's stick, swapped for
-the nearest one nobody commits on within 8 updates) delayed the first hold
-from 0.95 s to 2.4 s, and the exposure cost more than the swaps saved: in this
-fight, the hold taken early is the protection. Neither is kept.
-
-What is left (the plan's 21 hits over 12 fights, each traced to the commit
-that landed it): 12 from a Souther the actor *faces*, through his gate, as the
-engage converges on the other from 20-28 lanes below them -- the opening (the
-pair arrives stacked at the top of the street, lanes 0-10) and the re-approach
-after a knockdown; 5 rushes from behind, 2 of them into a hold; 2 attack runs;
-2 off-screen dashes. Of the throws, 4 in 11 were followed by a hit, all in one
-fight: a Souther already rushing when the throw ends. The round-6 arena has no
-walls (`boss_fight.py` prints them when the pair is up), so lanes `$02`-`$0D`
-above the AI's own `_lane_bounds` are open, and a target under lane `$10` is
-never given an attack run -- untried.
-
-The replay is checked against the fights themselves:
-`tools/souther_pair_check.py` rebuilds every Souther in primary 1 from
-`boss_fight.py`'s raw rows (logged for the pair with the game frame), runs one
-update and compares primary, tactical, `+$1C` and `+$20` with the next row
-one update later. Over 26 fights: ~90% of standoff updates, ~92% of attack
-run updates and 99.6% of dash updates exact; the misses are the actor turning
-or stopping between two polls, and a body walked back into (`$17B52`'s contact
-test runs before the gate, so it is re-held instead of committing). The claw's
-reach per frame, read off the same raw rows (`+$0A` against the latched
-`+$02`): `$6D` 0..48 px on frames 0-3, 8-12 and 17-18, `$6F` 46..86 on 4-7,
-`$71` 40..80 on 13-16.
-
-**Bongo: the ROM model and the plan** (user: "Neste momento a IA lida muito mal
-com o inimigo Bongo, o boss do stage 4 ... Deves primeiro pensar bem para chegar
-a uma estratégia para o derrotar de forma eficiente em termos de tempo decorrido
-e vida perdida"; "Nos testes, não te esqueças de não usar o ataque especial
-(chamar a polícia), e de não consumir items de recuperação de vida"). Everything
-the AI does against him is `ai/bongo.py`, and the plan is Antonio's shape:
-**take one hold, and never give him back a turn.** Before it, a scored fight
-(Blaze, `--no-food`, police off) lost two lives in 19 s and took him from 30 to
-23: the generic walk-in ate seven 32-point flames, every one of them in his
-charge.
-
-What the ROM says (full decode in `ai-analysis/enemy-ai.md`, "Bongo"):
-
-- **He never touches anyone himself.** No animation he fights in (set
-  `$2EF62`) has an attack box, and `$174E0` clears his `+$34` every update.
-  His one weapon is the **flame**, type `$97` (`$1781E`): born the update his
-  charge launches, placed 20 px ahead of him on his lane + 4 at head height
-  (`$178D0`), carrying his `+$4A` -- **32 on Normal: three kill from full
-  health**. Its box grows through the ignition (`$9D`/`$9F`/`$A1`, four updates
-  each) to `$A3`: x +4..+76 ahead of him, lane -6..+28 of his -- against a +-8
-  body, **every lane from 14 above him to 36 below**. No body box.
-- **State 1** (`$175BA`): a target on his back side costs a 10-update turn
-  standing still; otherwise he walks at it 0.5 px an update and keeps the lane
-  gap in `[$50, $60)`, stepping away when closer (a level target counts as below
-  him: he steps up). Inside `$B0` (176 px) on X he winds up.
-- **State 2** (`$17682`): the wind-up is tacticals 0-2 (5, 5, 10 updates on
-  `+$68`), drifting at state 1's last velocities -- 21 updates from the gate to
-  the launch. The launch: X 2 px an update on his facing, lane `+$52 / (+$50 /
-  2)` toward the target's lane (he would reach it as he reaches the target),
-  capped at 6. Tactical 3 adds 0.125 to both every update (to 6), the lane only
-  while `+$52 >= 8`, and **never re-aims**. Past the target by `$50`, tactical 4
-  runs 20 more updates or until his screen X leaves `[$50, $1F0)`, then state 1
-  facing away: a turn. So every charge ends at a screen edge on a lane clamp.
-- **Grab first, flame after** (`$AAA0`): his update tests the walking box
-  against his body before the flame -- in a later slot -- tests its box on the
-  player's body. But the flame has **no body box**, so `$AAA0` never enters the
-  grab path that shields a holder from Antonio's kick: **a holding player is
-  not spared.** An igniting flame stays placed on him whatever he does
-  (`$17858` retires it only from anim `$3C`), and a front hold stands him 32 px
-  out facing the holder -- so a front grab in the first 12 updates after a
-  launch is the flame's hit. A back hold (`$17E22`) stands him facing away.
-
-Out of that, two safe places during a charge: **15-16 lanes above him** (the
-flame's top edge is 14, the grab reaches 16 -- exact, so the flame is simulated
-with no lane margin: a margin of one leaves only 16, which Blaze's 1.625 px lane
-step does not always land on) and **behind him** once his origin has run 9 px
-past the actor. And one set-up before a charge: with him on the bottom clamp,
-level with him at the launch (lane velocity 0), so the charge runs along the
-clamp and the pocket above it holds still.
-
-The plan (`bongo.plan_engage`, `EngageBongo`,
-`execute.state_machine_engage_bongo`):
-
-1. **A lookahead over his AI and the flame** (`boss_update`, 2.4 us an update):
-   the nine sticks, each held for 2, 8, 16 updates or the whole 44-update
-   horizon and then a phase-aware tail (`_Tail`), each under both update orders
-   and scored by the worse -- a hold by how soon, a hit below everything, and a
-   burnt grab (`_grab_is_burnt`: the hold's first passes played out) as the hit
-   it is. About 5-7 ms a tick.
-2. **The tail's phases** (`engage_mode`): WALK_IN whenever contact comes before
-   his launch -- the entrance (he spawns 40 px off, facing away: turn plus
-   wind-up is 31 updates) and every release; STALK while he walks in (a few
-   lanes above him, beyond his gate, his X taken where the edge nudge `$17744`
-   will put him); LEVEL/DIVE through a wind-up; POCKET/BEHIND through a charge,
-   with the dodge lane worked out once from his predicted path -- above him
-   first when it is reachable before the flame, else below.
-3. **The hold loop is Souther's** (`souther.hold_step`): knee, knee,
-   `ReleaseToRegrab` -- he lands 32 px out facing the actor and goes straight
-   into a wind-up, 21 updates in which the walking box, already touching his
-   body, takes him again. Nothing about the flame belongs in the hold: the
-   answer to a burnt grab is not to take it.
-4. **The round's grunt** (user: "no stage 4, existe sempre um inimigo Grunt que
-   pode atacar a IA pelas costas, se esse inimigo for derrotado, o jogo instancia
-   um novo inimigo idêntico. Portanto, não se focar nesse inimigo, mas prevenir
-   ataques iminentes"): Garcia-family types `$20`-`$22` keep arriving through the
-   fight (`bongo_lab.py`'s rows; the harness sweep kills each and the next
-   comes). `EngageBongo` drops from 76 to 19 -- just under a punch on it (20),
-   above walking to it (8-14) -- while its committed strike is about to land
-   (`reach.is_incoming_melee`) and his charge is not pressing
-   (`bongo.charge_is_pressing`: running, or its launch 6 updates away or less).
-   Nothing ever walks to it. In a hold, a strike landing from **behind**
-   sooner than a knee finishes (`reach.frames_until_any_melee_lands` against
-   `kinematics.hold_knee_frames`, with `reach.rear_threats`) gets Bongo thrown
-   back into it (`ThrowHeldEnemy`) -- Bongo only; Souther's and Antonio's
-   rounds are swept clean and their loops were measured without it. What the
-   live runs actually met was the other side: a type-`$22` Garcia walking in
-   from the camera's right edge (its approach `$09`, `$E124`) and punching
-   (`$0A`, `$E190`: two stages, forward 0..+40 then +16..+51) from 57-62 px
-   *in front* of the holder, over the held Bongo, for 8. Nothing a hold has
-   answers that one: the throw goes backward and locks the actor 41-46 frames
-   against a punch that lands in 5-12, and letting go gives up the 21-update
-   wind-up that makes the re-grab safe for a flame worth 32. So it is taken;
-   the entrance fights end before any grunt arrives.
-5. The rest stands down for him: `Punch`/`MeleeWeaponAttack`, `RearAttack`,
-   `GrabEnemy`, `WalkToNearEnemy`, `RetreatFromDanger`, the grounded
-   `JumpAttack`, the weapon detour, and `ProjectileSidestep` on the flame.
-
-The model was checked in lockstep before anything was built on it
-(`tools/bongo_lab.py --actor wander`, two seeds): 2253 of his updates, ten
-charges, every field of states 1 and 2 and of the flame matching the ROM, bar
-two updates where the player's respawn knocked him back. On contact it missed
-no hit; it over-predicts on a player lying down (a low body box) or at the
-+-12 edge of the body -- the safe side. With the real pipeline playing
-(`--actor engage`) he died in 389 frames: no hit, seven holds, not one charge
-launched, and the 29 of his updates spent outside a hold all matched.
-
-**What the live runs taught.** The first scored fight on the plan killed him in
-9.4 s with nine holds and took three hits, all with him *held* -- each a front
-grab 2-8 updates after a launch, the flame still igniting on him. That is how
-"a holder is not spared" was found; `_grab_is_burnt` came out of it, and
-offline (40 randomized sim-vs-sim fights: entrance, far, turn, wind-up and
-mid-charge starts, all three characters) the planner went from 19 hits to 2
-with the longer stick holds and the predicted dodge, then to none with the
-burnt grab.
-
-Scored with `tools/boss_fight.py --level 4 --boss-type 0x57 --no-food`, turbo
-4, police off, a fresh host per fight (a hit is 32 damage; three kill):
-
-| | fights | killed | hits taken | lives lost | first hold | fight length |
-| --- | --- | --- | --- | --- | --- | --- |
-| before (generic approach), Blaze | 1 | 0 (two lives lost) | 7 | 2 | 0.47 s | 19.1 s |
-| plan, grab not yet checked for the flame, Blaze | 1 | 1 | 3 | 1 | 0.63 s | 9.4 s |
-| plan, Blaze | 4 | 4 | **0 in every fight** | 0 | 0.44-0.46 s | 3.3 s |
-| plan, Axel | 4 | 4 | **0 in every fight** | 0 | 0.47-0.48 s | 3.3 s |
-| plan, Adam | 4 | 4 | **0 in every fight** | 0 | 0.53-0.83 s | 3.3-4.0 s |
-| plan, hands off for the first 3 s (`--idle-seconds 3`), Blaze | 4 | 4 | no flame; one 8-point grunt punch in 3 fights | 0 | 0.99-1.01 s | 3.9-4.4 s |
-| plan, hands off for the first 3 s, Axel | 4 | 4 | no flame; one 8-point grunt punch in each | 0 | 1.00-1.01 s | 4.3-4.4 s |
-| plan, hands off for the first 3 s, Adam | 4 | 4 | **none** | 0 | 0.92-0.94 s | 3.7-3.8 s |
-
-Every scored fight on the plan is decided at the entrance: the hold comes
-before his first launch and the loop never lets him go. The idle rows are the
-same fight joined after the AI stood still through his first charge -- the
-start that exercises the pocket, the dodge and the burnt-grab refusal live --
-and every one of their holds was taken from his charge without a flame: all
-seven hits in them are the round's grunt, the type-`$22` punch from in front
-of the holder over the held Bongo (4 above), 8 points each, at 1.5-2.0 s. An
-earlier idle batch handed the pad over mid-charge and took two unavoidable
-flames within 0.04 s, which is why `--idle-seconds` now waits him out of it.
-
-**Abadede: the ROM model and the plan** (user: "Neste momento a IA lida muito
-mal com o inimigo Abaded, o boss do stage 3 ... Deves primeiro pensar bem para
-chegar a uma estratégia para o derrotar de forma eficiente em termos de tempo
-decorrido e vida perdida"; and for the tests, as for Bongo: no police, no
-life-giving items). Everything the AI does against him is `ai/abadede.py`,
-and the plan is the other bosses' shape: **take one hold, and never give him
-back a turn.** Before it, a scored fight (Blaze, `--no-food`, police off)
-killed him in 31 s but took seven 32-point hits and two lives, every one of
-them in his run (state 7), 27-52 px out and within 13 lanes of him.
-
-The user proposed a *sweet area* against his run: he backs off, runs, and
-ends the run with a punch nothing touches -- so stand where the run arrives
-and punch him while he runs, when he can be hit. The ROM agrees about the
-run and about the sweet spot, and adds three things that change what to do
-in it (`ai-analysis/enemy-ai.md`, "Abadede", decoded for this):
-
-- **Only the run hurts.** His contact code 1 is his hit in the run and his
-  grab-and-throw in the approach and the pause (a lane +-2 walk box: 10
-  lanes), is dropped in the retreat, and in the punch that ends the run
-  `$14CDC` clears the target's `+$7C` in the same update: the punch is
-  untouchable (no body box) and lands on nobody.
-- **The sweet area is a lane, and it is a grab.** His body is lane +-10 and
-  the run's box lane +-8: against a player's +-8 the walking box meets his
-  body up to 18 lanes away while his box reaches 16. **17-18 lanes off the
-  lane his run keeps (it never re-aims), walking at him, the run delivers him
-  into a hold.** On his lane the run's box is met 13 px before any walking
-  box can reach his body; only a punch (Blaze's box ends 68 px out) gets
-  there first.
-- **A punch is 1 point; a knee is 2.** A punch he runs into buys 11 updates
-  of shake and then a retreat -- and his run again a second later -- while a
-  hold runs the loop below: 4 points a cycle, and no turn of his.
-
-The plan (`abadede.plan_engage`, `EngageAbadede`,
-`execute.state_machine_engage_abadede`):
-
-1. **A lookahead over his AI** (`boss_update`: states 1, 2, 3 and 7, the
-   shake, getting up and a released hold, update by update, from `+$5B` and
-   `+$54` as well as his usual bytes): the nine sticks, each held for 2, 6
-   or 14 updates or the whole 40-update horizon and then a phase-aware tail
-   (`engage_mode`), plus a punch pressed on one of the next seven updates,
-   standing or after walking toward him (below, 3), each under both update
-   orders and scored by the worse -- a hold by how soon, a punch landing on
-   his run next, a hit below everything. 2-5 ms a tick.
-2. **The tail's phases**: SWEET while his run is coming (17-18 lanes off its
-   lane by whichever step lands in the band, straight or diagonal, and the
-   walking box at him); WALK_IN while he walks in or pauses (into him from
-   11-15 lanes: outside his walk box, inside his gate); READY while he cannot
-   collide and is grabbable next (the brake, the punch, the shake, a released
-   hold: in front of him, walking in lane with the box on his body); SET_UP
-   while he backs off (13-15 lanes off, so the pause decides a run with the
-   band a step or two away); WAIT through a knockdown.
-3. **The punch is the user's move, as the fallback**: pressed only when no
-   rollout reaches a hold and one reaches his run with it -- caught on his
-   lane with the run too close to leave. `can_punch` is off armed (B swings)
-   and with an item underfoot (B picks it up -- food, in a fight scored
-   without it). **It is thrown in the facing the actor already has**: the
-   ROM samples the facing a punch starts with, so B and a turn on one press
-   is thrown the old way -- a committed miss facing away (`execute.
-   _facing_prop`; traced live against Jack, five punches whiffed). The first
-   plan turned the rollout's actor to him on the punch and `execute` pressed
-   B with the turn; now the rollout keeps the facing, six more candidates
-   walk toward him (`antonio.actor_update` turns the actor on a walk) before
-   a punch on updates 1-6 -- the plan's stick is that walk until then -- and
-   `execute` presses B alone. Found in the code, by Jack's trace; no Abadede
-   fight has been scored since.
-4. **The hold loop** (`abadede.hold_step`) is Souther's -- knee, knee,
-   release, walk straight back in -- with one ROM rule of his own: he reads
-   the holder's `+$7D` only in state `$B` substate 1, and a knee's damage is
-   the holder's `+$34` on that read, while each knee costs him 12 updates of
-   shake in which he reads nothing. So every knee and the release wait for
-   that substate (`reads_the_hold`). The release leaves him in state 3 on his
-   feet where he stood, and that state's first contact test is the re-grab;
-   the finisher only when it kills (third knee at 3, suplex at 5). A back
-   hold crosses over (he reads 9 as "held on") -- except in state `$D`, where
-   a crossover frees him.
-5. **The round's grunt** (user: "existe sempre um Grunt atrás da personagem
-   controlada, mesmo que seja derrotado, aparece outro, a AI deve-se proteger
-   desse inimigo, sem se desviar o objetivo principal, o boss"): Bongo's rule
-   -- `EngageAbadede` drops to 19 while a grunt's committed strike is about
-   to land and his run is not pressing (`abadede.charge_is_pressing`), so the
-   punch on the grunt wins, and nothing walks to it. In a hold nothing
-   changes: throwing him carries him into nobody (his thrown state tests no
-   contact), and a holder hit while holding him sends him on the throw's
-   flight -- 4 points to him.
-6. The rest stands down for him: `Punch`/`MeleeWeaponAttack`, `RearAttack`,
-   `GrabEnemy`, `WalkToNearEnemy`, `RetreatFromDanger`, the grounded
-   `JumpAttack` and the weapon detour. `phases.boss_phase` reads his real
-   table: `$0C` is his death and `$0E` a throw's flight (the old decode had
-   `$0E` as the death, so every throw read as a kill), `$07` the run, `+$67`
-   his one-update police latch.
-7. Round 8's Abadede is a variant (a non-zero low nibble of his `+$40`, the
-   ELC spawn parameter, now carried on every `Boss` token as
-   `script_param`): his pause decides on a `$18` lane gap and never backs
-   off first (`$146C4`). The model plays that branch; no round-8 fight has
-   been run.
-
-Scored with `tools/boss_fight.py --level 3 --boss-type 0x30 --no-food`, turbo
-4, police off, a fresh host per fight (a hit is 32 damage; three kill from
-full health):
-
-| | fights | killed | hits taken | lives lost | first hold | fight length |
-| --- | --- | --- | --- | --- | --- | --- |
-| before (generic approach), Blaze | 1 | 1 | 7 | 2 | 0.15 s | 31.0 s |
-| plan, Blaze | 4 | 4 | **0 in every fight** | 0 | 0.07-0.13 s | 2.4-4.4 s |
-| plan, hands off for the first 3 s (`--idle-seconds 3`), Blaze | 3 | 3 | **0 in every fight** | 0 | 0.36-0.99 s | 4.6-5.6 s |
-| plan, Axel | 3 | 3 | **0 in every fight** | 0 | 0.09-0.12 s | 4.3 s |
-| plan, Adam | 3 | 3 | **0 in every fight** | 0 | 0.12-0.13 s | 4.3-4.4 s |
-| plan, hands off for the first 3 s, Axel | 1 | 1 | **0** | 0 | 1.00 s | 5.2 s |
-| plan, hands off for the first 3 s, Adam | 1 | 1 | **0** | 0 | 0.64 s | 2.9 s |
-
-A fight on the plan from the entrance is decided there: he walks in, pauses
-13 lanes off, the walk-in takes him, and the loop never lets go -- 7 holds,
-16 knees of 2 points, each release re-held two updates later. The idle rows
-are the fight joined wherever he had got to while the actor stood still (he
-had run into it, or the respawn's landing had knocked him down), and they
-exercise the rest of the plan live: three times (Blaze twice, Adam) the pad
-came back in his brake or punch, and READY stood in front of him and took
-him on his retreat's first contact test; twice (Blaze, Axel) he got up from
-the respawn's knockdown, walked in, paused and ran -- once from 150 px -- and
-the actor climbed to 18 lanes off the run's lane and took him **in the run**
-(state 7 straight to `$B`): the sweet area, as a hold. (One more Axel idle
-fight lost its host before the boss appeared -- the connection closed
-mid-round -- and was run again; it is not in the table.)
-
-Offline, the planner against the model (80 randomized starts in every state
-he fights in, all three characters, from any lane): 80 holds, no hit, a
-median of 12 updates to contact; the plan takes 2.3 ms a tick (4.4 at p95,
-5.4 worst). An earlier sweep of 60 put the punch to work twice -- starts on
-his lane with the run already close -- and took no hit either.
-
-`tools/abadede_lab.py --actor wander` checked the model in lockstep: two
-3000-frame runs (seeds 2 and 3) checked 2036 of his updates outside state 8
-(his hold and throw of the player, which the model does not replay), and
-2026 matched field by field -- every state it replays, all four charge
-substates, the hold, the knockdown, getting up. Seven of the other ten are
-run updates the model called a hit that the ROM did not land: the model
-takes the actor's body at its widest (`PLAYER_BODY_REACH_X`, +-12 for
-Blaze), and the `+$70` the lab logs put a walking Blaze's at 10 px wide
-(-2..+8 facing right, -5..+5 facing left) -- the model errs toward the hit.
-The other three are knockdowns the player's respawn landing gave him.
-
-The first idle fight showed the one grab rule the first model lacked:
-`$3266` refuses a hold with him *behind* an actor facing his way -- the code
-lands, he stands up 24 px in front of the actor and backs off, which cost
-four updates there. The model now plays it (`Outcome.REFUSED`, a contact the
-rollout goes on through).
-The host itself stops completing lockstep frames now and then in round 3
-(three runs of five, never on the same frame); the lab ends such a run as
-`host_timeout` and keeps its checks.
-
-**Onihime and Yasha: the ROM model and the plan** (user: "Improve the Stage 5
-boss AI ... Move the controlled character toward either the far left or far
-right side of the screen ... Keep the sisters behind the controlled character
-... When the positioning and timing are correct -- close enough for
-`RearAttack` to connect, but far enough to avoid being hit -- execute
-`RearAttack` ... Optimize the entire encounter for: 1. Minimum elapsed combat
-time. 2. Minimum damage received. 3. Reliable and repeatable execution";
-"Do not call the police. Do not use recovery items ... must not be used as
-fallback strategies"; and on testing: "take care with the game running
-speed, the AI pooling speed, and the 'emulated' game frame pacing!", "use
-turbo 2x at max, this PC can't handle turbo 4x at full speed"). The model is
-`ai/twins.py`, the plan `ai/twins_plan.py`, the verb `EngageTwins`. Before
-it the generic verbs lost the whole game in 74 s (three lives, one twin at
-17 of 32).
-
-What the ROM says (`ai-analysis/enemy-ai.md`, "Onihime and Yasha", rewritten
-for this -- the earlier decode had the approach twin's jump and the grab
-twin's "leap" backwards):
-
-- **Two AIs.** The twin that links second (role 2) starts on the grab path
-  (`+$7B` bit 1), the other on the approach path; they spawn on either side
-  of the arena (grab twin at `cam+52`, approach twin at `cam+412`,
-  off-screen).
-- **The approach twin never walks into anyone.** Its chase (4 px an update)
-  keeps the lane gap at the edge of 32 -- toward the target's lane from 32
-  out, *away* inside it -- and inside 96 px it **backflips away** (84 px;
-  `$15ABA` sets `+$1C` with `$17942`, the negation of `$1792C`). Its box in
-  state 1 is cancelled on contact. Its one attack is the **flying kick**:
-  committed 16-31 lanes off inside 112 px, 28 updates of flight at 2.667 px,
-  1/16 of the lane gap an update (it crosses the launch lane on update 16 and
-  goes on to 1.75x), the kick box from update 19, low enough to land from 23.
-- **The grab twin walks into a turned back** at 2 px an update, homing the
-  lane; its walking box on the body is the grab (the throw is 32). It jumps
-  in only at a target that *faces* it, and backflips away from a staggered
-  one.
-- **The rear attack** (update by update: `ai-analysis/controls-and-input.md`,
-  "The chord update by update"): Blaze's box 3-10 updates after the press,
-  5-53 px behind, 64..24 up, 2 damage; Axel's 1-5, 8-40 px, 72..40 up, 3;
-  Adam's is a hop -- box 10-18 updates after the press, 42 px behind to 14 in
-  front, 3. Every live frame knocks down: **90 px and 39 updates** on the
-  floor, applied on the twin's next update. The strike is tested before the
-  twin's box. Blaze's body box moves *behind* her during the chord.
-- The twins are Blaze's sprites and use the player shape table (`$1ABA8`);
-  a backflip and a jump-in have no body box at all.
-
-The model (`ai/twins.py`: both twins' states 1/2/3/5 and the renderer tail,
-the actor walking and chording, `$AAA0`'s contact order) was checked field
-by field against lockstep recordings with `tools/twins_lab.py --check`:
-2,744 (Blaze, the plan), 2,494 (Axel), 1,912 (Adam) and 3,941 (a wander)
-twin updates, no field off outside the held throw, a respawn's knock-back
-(`$9494` sets `$FFFA53`) and a dead twin's frame timer, none of which the
-plan needs. The actor's side was checked the same way (positions, cached
-boxes, damage, the chord's frames, Adam's hop height for height).
-
-The plan (`twins_plan.plan`, every tick):
-
-1. **The edge and the back.** `choose_wall` makes home the camera edge on
-   the side away from the grab twin, and the actor faces that wall: the
-   grab twin is never given its jump-in. Standing is preferred to walking
-   into the wall (Blaze's idle body sits 7 px further from a twin behind her
-   than her walking one).
-2. **The approach twin by the lane.** While the grab twin is coming, the
-   tail holds the approach twin's lane (gap under 10), which denies its kick;
-   with the grab twin down or far, it is let commit, and the kick is met by
-   the rear attack on its way down or stepped off by the lane (`kick_threats`
-   reads its ballistic path). The lane band's edges are kept free (24 lanes)
-   for the step.
-3. **The rear attack on the update it lands.** The lookahead plays a
-   handful of programs -- the tail from now (first, so it wins ties), the
-   chord now, a stick held 1/5/12 updates, a chord after 2/4/6 -- through
-   both twins' own AI for 30 updates (40 while a kick is in the air), and
-   scores each by its worst of five timings (below): a hit or grab below
-   everything, a strike by how soon, a chord that lands on nothing -300.
-4. **Continuity** (`PlanMemory`): the last tick's program, advanced a tick,
-   is scored again with +150. Without it a receding horizon picked a
-   different near-tie every tick and walked a trajectory none of them had
-   predicted -- an intercept that lost a tick three times over. A chord still
-   to come is never carried (a tick is not exactly an update: a kept "chord
-   in 4" fired three ticks later as a whiff into a flying kick).
-5. **A kick in the air belongs to the tail.** While one is flying, the
-   programs are only the tail and the chord (now or after 2/4/6, standing):
-   a held stick that steps toward the kick's path "for now" was chosen again
-   every tick and the step off never came.
-6. **No rear attack that can miss** (user, watching a live fight: "Vi que a
-   IA dá vários `BackAttack` em falso, não quero que dê ataques em falso").
-   A program whose first update presses B+C -- the chord now, or the tail
-   pressing it -- is kept only if the rollout shows that press striking a
-   twin under every one of the five timings; otherwise it is dropped, not
-   scored down (with nothing left, the actor stands). The -300 a whiff cost
-   was not enough: a chord pressed at a grab twin still 92 px out (Blaze's
-   box ends at 53) missed under every timing and still won, because the
-   tail's next chord struck one update sooner than waiting did
-   (`test_a_chord_that_can_miss_is_never_pressed`). Offline, with the rule
-   switched off, 9 of 38 chords whiffed in one start; with it, none in 390
-   (below). `tools/boss_fight.py` counts `chords` and `chord_whiffs` live: a
-   start of the chord action with no twin losing health before the next.
-
-**Frame pacing** (user, above). Measured on the development machine: the
-host ran 120 fps at `--turbo 4` *and* at `--turbo 2` (a presentation cap,
-lifted on 2026-10-28: `--turbo 4` is now a true 240 fps), a snapshot takes ~2.2
-ms, and a tick with the plan ~20 ms -- about one player update a tick at 2x.
-So the stick a tick writes lands on the next player update or the one after,
-with either the player's or the objects' update next (`$AD8E` alternates
-them), and a late tick holds the last stick an update longer. The plan
-scores every program under all five (`SCENARIOS`), the held stick playing
-the lead (`committed`). The offline simulator
-(`tools/twins_sim.py`) plays the same: a tick about every update, one in
-four half an update or a whole one late, and the stick landing 0-1 updates
-late. The scripts now run `--turbo 2 --poll-ms 16` (`play.py --preset turbo`, `--preset boss`).
-
-Measured, round 5, Normal, police and food off:
-
-| | Blaze | Axel | Adam |
-| --- | --- | --- | --- |
-| before (generic verbs), real time | game over in 74 s, one twin at 17 | -- | -- |
-| lockstep lab, `--actor engage` | 46.2 s, no damage, 32 strikes from 33 chords | 47.4 s, no damage | 32.1 s, no damage, 22 strikes from 26 chords |
-| real time 2x, first batches (15 fights) | 5 of 5 without damage, 46.6-70.4 s | 3 of 5 (a flying kick in each other) | 3 of 5 (the two bugs below) |
-| real time 2x, final code | 46.6 s, no damage | 44.6 s, no damage | 32.6 s, no damage |
-| offline, 36 starts, harsh timing | 34-35 of 36 clean, ~47-50 s | 33 of 36, ~49-55 s | 33 of 36, ~36 s |
-
-The offline figure plays the worst of the timing: half its ticks' sticks land
-an update late and a quarter of its ticks come late; with the lab's exact
-timing (`--lockstep`) the same planner is clean in 12 of 12 (Blaze, Axel) and
-11 of 12 (Adam). Every remaining offline miss is a flying kick.
-
-With the no-whiff rule (6, above), offline: lockstep timing, Blaze 4 of 4
-and Adam 4 of 4 clean, **no whiff in 118 and 84 chords**; harsh timing, six
-starts each, Blaze, Axel and Adam 5 of 6 clean (47.9, 50.3 and 37.4 s),
-**no whiff in 156, 121 and 113 chords**. Live, real time at 2x (Blaze,
-armed -- the chord is `$4A`): both twins killed, no damage, **29 rear
-attacks and not one whiff**, 27 s of wall clock (~54 s of game time).
-
-The floor this strategy has: a knockdown throws a twin 90 px and keeps it 39
-updates, and it comes back to the distance it was met at, so each twin's
-cycle is ~85 updates whatever the actor does at the edge; Blaze needs 16
-strikes a twin (2 damage), Axel and Adam 11 (3). Both twins struck every
-cycle is ~45 s for Blaze and ~31 s for Axel and Adam -- Blaze and Adam fight
-at it. Axel loses time to the approach twin: his box (8-40 px, 72..40 up)
-cannot meet a kick launched from the chase before it lands (it reaches from
-49 px on the update his box can first reach 45), so it is stepped off and
-the approach twin is struck less often while the grab twin lives.
-
-What the live runs taught, each found in a trace:
-
-- **Adam's rear attack is a hop**, so he reads as airborne: the generic
-  airborne jump-kick follow-through pressed B at the twins through 135 ticks
-  of his chords. `could_jump_attack` now skips the chord actions and the
-  twins.
-- **Armed, his chord is `$4C` -> `$4E` -> `$40`** (the action table gives
-  them the same animations): the model knew only `$4C` and read him free in
-  the hop. `twins.chord_step_from` maps all six.
-- **The hop lifts his body into a kick's higher path**: the tail's "a kick
-  lands during my chord" test only counted the kick's low updates; for a
-  hopping chord it counts its whole box-out path now.
-- **A corner is a trap**: a dodge into the band's edge came back up into the
-  kick as a late tick held the stick an extra update. The fifth timing
-  (`SCENARIOS`: the first decision held one update longer) and a softer
-  corner term fixed it (Axel offline 19 of 36 clean -> 27, then 33 with the
-  kick-in-the-air rule).
-
-Wiring: `could_engage_twins` offers one `EngageTwins` while any twin lives
-(armed or not: the armed chord `$4A` is the same move); Punch/weapon swing,
-`RearAttack`, `GrabEnemy`, `WalkToNearEnemy`, `RetreatFromDanger` and the
-jump (grounded and airborne -- Adam's chord is a hop, and the airborne
-follow-through pressed at the twins through 135 ticks of it) stand down for
-them; `CallPolice`, food, 1UPs and the weapon detour are refused while they
-live. `EngageTwins` ranks 62 plus the boss raise.
-
-Not built: the round-8 boss rush's pair, and a start with the approach twin
-*in front* (between the actor and the wall) is only waited out: its kicks
-are stepped off until it crosses over. Two players: below.
-
-**Two players against the twins** (user, in Portuguese: "na luta contra as
-gémeas quando existem dois jogadores ... um jogador deve ficar de um lado do
-ecrã e o outro do outro lado. A AI tem de se adaptar a isso quando está a
-jogar com um humano ou com outra IA como `Partner`"; the rule, verbatim: "Se
-estivemos os dois na mesma coordenada X -> se eu for o primeiro jogador, vou
-para a esquerda, se for o segundo, vou para a direita. Senão: O jogador que
-estiver mais perto da extremidade direita, vai para extremidade direita, o
-jogador que estiver mais perto da extremidade esquerda, vai para a
-extremidade esquerda"; and "Se não tiver `Partner`, então continuar o código
-como está, porque está bom"). Built as two changes, both only while a
-`Partner` token exists (`execute.engage_twins_plan`); without one the plan
-is byte-for-byte the one-player plan above.
-
-- **The edge is the players' order, not the grab twin's side.**
-  `twins_plan.partner_wall(x, partner_x, player_index)`: both players share
-  the camera, so the larger `world_x` is the one nearer the right edge and
-  takes it, the other the left; equal X sends P1 left and P2 right. It is
-  handed to `plan` as `wall` in place of `choose_wall`'s, every tick. Both
-  AIs read the same two positions, so two AIs never pick the same edge, and
-  neither ever walks toward the other. It adapts to a human the same way: a
-  human who crosses over swaps the edges on the next tick.
-- **A twin whose target is the partner is theirs.** The model plays every
-  twin at the actor; a twin walking to the far edge would be read as coming
-  here (and paid for in lane guards and chord timings). The ROM's target
-  (`+$72`, `Onihime.targets_player`; `$15946` picks the nearer player by X
-  and keeps it until the approach path's idle clears `+$74`) filters the
-  twins handed to `plan`; with both on the partner the plan still runs, on
-  no twins -- the walk to the actor's own edge.
-- **Tried and not kept:** turning the back to a grab twin standing between
-  the actor and its edge (which `choose_wall` never allows alone). On the
-  model, 12 starts each with the grab twin on the edge's side: no hit either
-  way, but with both twins at the actor 4 of 12 starts had not killed them
-  in 1,500 updates, none with the plain wall -- the lookahead gets past it as
-  it is.
-
-Measured live, two AIs (`tools/twins_2p_fight.py`: P1 Blaze, P2 joins with
-Start, round 5, food and police off, a fresh `--turbo 2 --silent` host per
-fight), HEAD against the change:
-
-| | fights | fight (wall s) | hits taken (P1+P2) | lives lost | ≥160 px apart | median gap |
-| --- | --- | --- | --- | --- | --- | --- |
-| HEAD | 6 | 27.8-38.8 (mean 31.9) | 17 | 3 | 0-57% (mean 18%) | 0 px in 4 of 6 |
-| the change | 5 | 23.1-29.4 (mean 26.5) | 1 | 0 | 98-99% | 256 px in all 5 |
-
-On HEAD both AIs went to the same edge (each picked the one away from the
-grab twin) and stood on top of each other; with the change each was at its
-own edge 93-97% of the fight, P1 there within 1.8 s. Every live fight began
-with P2 on the right, so the equal-X tie-break and a crossing are pinned by
-the unit tests only (`PartnerWallTests`, `TwoPlayerTests`). **Not run against
-a human partner.** The host crashed (`reportUnhandledDispatch`, an indirect
-target the recompilation does not cover) before the fight in 3 of the
-14 two-player sessions, in both arms -- not the AI. It was round 5's clock
-running out with both players in: the time-over penalty jumps through a
-`player_mode` table at `$109D4`, and the two-player entry `$109DC` (and the
-P2-only `$109EA`) were missing from `code-analysis/aux_addresses.txt`. Fixed
-there; a two-player time-over now takes a life from each player.
-
-**First-level breakables (user):** Round-1 phone booths (`$11`) and the
-type-`$19` family share the shallowest ROM solid (14px on lane vs a 16px
-body, walkable in front of the feet). The 1px conversion of that rule
-overlaps a body standing legally just in front -- that is a graze, not
-"already inside". The path finder may only ignore an obstacle whose
-interior contains the body's centre. Dropping any overlapping wall made
-the actor lose the booth, hold UP into the real solid, and freeze.
-
-The *first* thing the AI meets on round 1 is not a smashable object. The
-yellow sidewalk trash can at the first wave gate is background art (never
-in the object table). The actor stops at world x=1504 because `$43AA`
-clamps the player to `camera_x+$20..+$120` until the wave clears;
-`WalkToAdvanceStage` used to keep holding RIGHT into that edge. The first
-real breakable is a type-`$11` booth at (2016, 32). Never hold into the
-camera walk clamp. `in_smash_range` must use the punch box's own ±8 lane
-extent -- 16 fired B from a corner the box cannot reach, so the booth
-never broke.
-
-**Frozen on the edge of the lane band (user):** "in round 1 the AI stops
-in the middle of the level, no enemies, and will not walk on until I touch
-the pad". Traced at round 1's third wave gate (camera `$0AC0`, the player
-clamped at x=3036): the actor follows a type-`$26` that enters at y=0 up to
-`LANE_Y_MIN`, the sweep kills it, the camera scrolls on -- and
-`WalkToAdvanceStage` held `0x0` on every tick. 5 traced walks of 6 froze
-there for the 25 s the trace allowed; scored runs lost a life to the round
-clock. The lane band bounds the *origin* (`$43AA`), but `pathfind` keeps
-the whole *body* inside `world_rect`, so a body reaching 8 px past an
-origin on either edge of the band started outside the world and the search
-could not take one step (`steps=()`, `reached=False`).
-`world_rect(body=, origin=)` now restates the band for the body, the
-conversion `partner_obstacles` and `strike_goal` already make. After it,
-the 3 traced walks of 6 that reached y=2-3 (115-205 ticks there) never got
-an empty route and all walked on. Two executor tests that expected a
-diagonal had encoded the bug: their goal, at y=0, lay outside the old world.
-The wait *before* that gate opens is the ROM, not the AI: the player is
-held at `camera_x+$120` until the wave's six spawns -- swept, so never on
-screen -- are dead, about 5-7 s at turbo 4.
-
-**Swinging a bat over a booth from too close (user, same report):** the
-other cause of "stops in the middle of round 1". Blaze's `OpenBreakable` B
-landed on the bat at her feet (`$3136` picks an item up instead of
-striking), swapping out her pipe, and she then swung 93 times in 25 s from
-x=2903 at the type-`$11` booth at 2920 without touching it; a scored run
-stalled on the same spot and lost a life to the round clock. The swing
-(`$48`) only connects near its peak: the held weapon's origin runs from
-w_x-p_x = 6 out to 53 for Blaze (36 for Axel, weapons-range-and-damage.md
-§5), and its box reaches about 18 px back from there. The booth (box ±16)
-broke from 19 px, and from 27-36 px in every other walk, but never from
-17 px -- yet `in_smash_range` used the punch's inner edge (12 px for Blaze).
-`decide.breakable_strike_inner_x` is now the swing's inner edge (peak - 18
-- the prop's box past its origin; the punch's own with no bat or pipe),
-shared by `in_smash_range`, the approach's `inner_dx` and the facing
-nudge's headroom. After it, 6 traced walks of 6 broke every booth with
-swings from 22-35 px, the bat included. Not measured: the same peak puts a
-±6 px enemy under Blaze's swing closer than ~29 px, and `MeleeWeaponAttack`
-still uses the punch's inner edge.
-
-**Target ranking (user):** `WalkToAdvanceStage` always has the lowest
-emergency of any verb that still scores. Among enemy targets, a `Boss`
-outranks an armed ordinary enemy, and an armed ordinary enemy (pickup
-`$08-$0C`, or Jack still juggling his axe) outranks every other grunt.
-
-**Being surrounded (user):** a crowd is answered by *taking a hold*, not by
-trading strikes with it and **not by backing away** -- `_retreat_is_worth_it`
-is now gated on health alone; being surrounded used to be a second reason to
-retreat ("the only fix is space") and that clause is gone. `Surrounded` is
-judged with `reach.SURROUNDED_NEAR_X`/`_Y` (96 x 32), *not* the chord's
-`REAR_THREAT_X`/`_Y` (56 x 24) it used to share: the tight box collapsed after
-about a dozen px of the actor's own walking, which killed the grab mid-walk-in
-and is why the first attempt at this had no visible effect. A committed charge
-coming in from *behind* a grabbable body -- the user's "an enemy in front, and
-behind it, a Signal" -- is `reach.grab_reasons`' `DODGE_CHARGE`; Signal's slide is velocity
-with no attack shape (enemy-ai.md), so there is nothing to sidestep, and the
-answer is to hold the body in front and suplex it. Otherwise, a crowd is
-answered by trading strikes with it — grab an enemy and suplex or throw it. The throw is
-especially good when the thrown body hits other enemies. So the
-`WHILE_SURROUNDED` grab reason outranks the `$322A` escape chord
-(`_EMERGENCY_GRAB_WHILE_SURROUNDED` 61 vs `_EMERGENCY_REAR_ATTACK_DANGEROUS`
-60), which reverses an earlier assumption that a committed enemy behind was
-"not something to turn your back on": in that exact pincer,
-`could_hold_actions` answers with `ThrowHeldEnemy` (B+back), which throws the
-held enemy backwards into the very enemy the chord was aimed at. The hold
-*chain itself* already did the right thing before this — front hold `$60`
-with a rear threat → `ThrowHeldEnemy` (70), without one → `FlipHold` (66) →
-back hold `$66` → `Supplex` (68) — the missing piece was only ever taking the
-hold in the first place.
-
-**Cluster inference for JumpAttack/Supplex/ThrowHeldEnemy (user: "quero que
-a IA saiba inferir clusters de inimigos que estão perto uns dos outros e
-podem ser atacados com ataques como JumpAttack, Supplex ... e
-ThrowHeldEnemy"):** the paragraph above already banked on "the throw is
-especially good when the thrown body hits other enemies" as a fixed
-constant (`_EMERGENCY_HOLD_THROW` 70, `_EMERGENCY_HOLD_SUPPLEX` 68) with
-nothing actually reading whether a cluster was there. `JumpAttack` was the
-one move with a real answer already: `jump_kick.enemies_hit` sweeps its
-*actual* flight box against every on-screen enemy (**The jump kick,
-measured**, above), and `priority._jump_attack_extra_hits_bonus` scores +2
-per extra body it lands on, up to +4 -- so `could_jump_attack`'s one verb
-per in-band target already ranks a kick into a cluster above an otherwise
-identical kick at a lone target. `Supplex` and `ThrowHeldEnemy` had no
-equivalent: neither move's landing spot is modelled the way the kick's
-flight is (that would need the same per-boss/per-character ROM decode and
-lab work the jump kick, Bongo's flame, etc. each took), so
-`reach.nearby_enemies` is a deliberately shallower proximity estimate
-instead -- other live enemies within `Surrounded`'s own "part of this
-fight" box (`SURROUNDED_NEAR_X`/`_Y`, 96 x 32), centred on the *held body*
-rather than the actor. `priority._hold_cluster_bonus` counts them (capped
-at 2, `_EMERGENCY_HOLD_CLUSTER_EXTRA_HIT` x2 = up to +4, the same shape as
-the kick's bonus) and `_held_enemy_emergency`'s new `cluster_bonus` flag
-adds it only for `ThrowHeldEnemy`/`Supplex` -- not `FlipHold`,
-`AttackHeldEnemy`, `ReleaseGrab` or `ReleaseToRegrab`, none of which send
-the body anywhere near anyone. The ROM fact behind counting it at all is
-`$FFFB24`, already decoded for Mr. X's Garcias ("Thrown bodies knock
-Garcias and Mr. X down") and generic to any thrown/slammed body, not just
-his office. Since decide.py's own branches never offer `Supplex` and
-`ThrowHeldEnemy` for the same held body on the same tick (back hold vs.
-front hold, or Bongo's/Mr. X's mutually exclusive `step` chains), the bonus
-can only ever raise the one move already chosen -- it does not change
-which finisher `souther.hold_step`/`abadede.hold_step`/`mr_x_plan.
-garcia_hold_step` pick, only how urgently the winning one outranks
-everything else on the board. Covered by `tests/ai/test_reach.py`'s
-`NearbyEnemiesTests` and `tests/ai/test_priority.py`'s cluster-bonus cases
-under `DetermineEmergencyWinnerTests`.
-
-**...as an `Inferred` token (user: "Eu queria um token Inferred"):** the
-cluster judgment above shipped as a private `priority._hold_cluster_bonus`
-calling `reach.nearby_enemies` directly -- exactly the shape every other
-`reach.py` judgment in this project takes, per **Judging without a
-cache**'s own rule. The user wanted it as a token instead, so it is now
-`EnemyCluster` (`tokens/enemy.py`, next to `Surrounded`), produced by
-`inference.check_for_clusters` and unioned into the context by
-`generate_inference_tokens` the same way `Surrounded` is; `priority.
-_hold_cluster_bonus` reads `find(context, EnemyCluster, slot=held_slot)`
-rather than rescanning enemies itself. `reach.nearby_enemies` did not go
-away -- it is still the one shared geometry `check_for_clusters` calls
-once per on-screen enemy to build the token, the same relationship
-`check_for_surrounded` has with `reach.SURROUNDED_NEAR_X`/`_Y`. `AI.md`'s
-**Judging without a cache** section now documents `EnemyCluster` as the
-second (and only other) exception, with its own reasoning: several
-call sites a tick and a same-cost-class scan as `Surrounded`'s, per that
-section's own bar for keeping a token rather than a bare function. A test
-(`test_priority.py`'s `test_no_bonus_without_running_inference_first`)
-pins the one behaviour change this caused: a context that skips
-`generate_inference_tokens`
-before scoring now scores the bare tier, since the token, not a live
-recomputation, is what the bonus reads -- true of every other `Inferred`
-consumer already (`Surrounded`), never true of the ordinary `reach.py`
-functions this rule is otherwise an exception to.
-
-**Stage-4 pits (user):** The AI walked/jumped into a pit on the bridge
-(round 4). `JumpAttack` was blind to holes -- a kick toward an enemy
-across a gap flew in -- and `execute_tick`'s pit override then froze X
-mid-air (`pit_endangers` is lane-plane, so overlapping the hole in X/Y
-looked like "already in"). `WalkToAdvanceStage`'s `or RIGHT` fallback
-did the same when the pathfinder could not walk around a full-width
-gap. The pathfinder is now the authority: `navigation.jump_landing_is_safe`
-gates grounded launches (walk around if a 2D route exists; hop over only
-if the landing is solid and no walk reaches); `WalkToAdvanceStage` hops
-via `hop_landing_x` when `plan_route` fails and the far side is in kick
-range, otherwise stalls at the wall; the pit override does not run
-while airborne.
-
-**Stage-4 breakable (user: "Vi a IA a ficar presa num breakable desse stage e
-a não conseguir progredir!"):** reproduced in both swept walks of round 4
-(`tools/breakable_diag.py --level 4 --sweep`, Blaze and Axel): 61 s at x=1617
-beside a type-`$1B` prop at (1656, 96), facing away, `OpenBreakable` winning
-7000 ticks, until the round clock took a life. Round-4 props take `$3C6A`'s
-default record, so the wall runs x 1620..1692 over lanes 76..100 -- 28 px
-nearer than the sprite box -- and the facing nudge's 16 px toward-step sat
-inside it. Routed around that wall the nudge went UP (lane 80 -> 78, out of
-the punch's lane), the approach came back DOWN, and so on. The nudge's route
-now leaves the target prop out of its own obstacle set: a step into the
-prop's wall is exactly what turns the actor (`$3BAE` undoes the displacement
-and keeps the facing), and the next tick punches. After it the same swept
-walk reached Bongo in 55 s with no life lost (115 s and one or two lives
-before). `tests/ai/test_execute.py`'s `_walk` now undoes a step into a prop's
-wall the way `$3BAE` does -- the facing kept -- which is what a trail
-through that nudge has to look like.
-
-**Round 4: the bridge, its props and its Jack** (user: "The [AI] doesn't
-handle well the stage 4": it "gets stuck on obstacles", "ignores many
-breakables (should not ignore them)", and "often (not always) gets stuck with
-a `Jack` enemy, in a stalemate situation where the enemy can't attack the AI,
-and the AI doesn't attack the enemy. Normally leading to a Timeout"; then,
-watching both live runs: "both Axel and Blaze are stuck"). Reproduced with
-`tools/stage_walk_diag.py --level 4` and **no sweep** (real waves -- every
-earlier round-4 measurement swept them), Blaze and Axel, and replayed offline
-from `--raw` recordings (`tools/snapshot_replay.py`). Five causes:
-
-- **Props beside a hole were dropped, or chased into it.** The bridge's
-  first hole runs x 1664-1800 (lanes 72-120) with a `$1B` prop 8 px left of
-  it at (1656, 96) and a `$1D` 16 px right of it at (1816, 96); the second
-  hole (2240-2344) has a `$1B` 24 px right of it at (2368, 104).
-  `could_open_breakable` asked `any_pit_endangers` of the prop's *origin*, so
-  the first two were never targeted, and the "ahead on the stage path" filter
-  wrote off every prop a fight had drifted the actor past while it was still
-  on screen: 6 of 9 opened. Both filters are now one question,
-  `decide._strike_stand_is_open`: is there a pocket either side -- the
-  strike's inner to outer edge, the punch's +-8 on the prop's body -- inside
-  the camera's walk clamp, outside every pit's danger zone **and every prop's
-  wall**, behind the actor or ahead of it (the camera never scrolls back; the
-  old limit cycle with `WalkToAdvanceStage` cannot return because advance is
-  withheld while such a prop is up). The wall clause matters at (2368, 104):
-  the hole's danger zone ends at 2352 and the prop's own wall starts at 2332.
-- **The approach could not walk round the prop.** With the near pocket in
-  the hole and the prop's wall over the lanes between, every Y-then-X finish a
-  10-node search reaches walks into the wall; the route never arrived and the
-  straight-line fallback pushed into the hole's margin, the pit escape pushed
-  back, and the actor rocked at x 1750-1810 until the round clock took a life
-  -- Blaze and Axel alike, three lives and the game. `pathfind/search.py`
-  now asks the X-then-Y finish (`_best_xy_around`: along the own lane, then
-  onto an arrival) from every expanded node, **only once a search has ended
-  without arriving**, so every route Y-then-X finds is unchanged.
-- **Standing on the prop, the tie-break picked the side in the hole.**
-  `OpenBreakable` within `DIRECTION_HYSTERESIS_X` of a prop routes to the side
-  the stage direction names (fixed, so it cannot oscillate);
-  `execute._breakable_tie_side` keeps that unless the path finder cannot
-  arrive there and can on the other side -- also fixed while the prop and
-  hole are.
-- **The pit escape ignored a hole whose centre was past the walk clamp.**
-  `_movement_mask`'s pit dodge filtered pits by their *centre* in the camera
-  range; with the clamp ending at 2272 the second hole's centre (2292) was
-  out, so the escape's walk to the far side came back as plain RIGHT and
-  `EngageJack`'s stick walked Axel into the hole. It tests the footprint now.
-  And the Jack lookahead itself steps round holes (`jack._step_clear_of_holes`,
-  `World.holes`: a rollout step into a hole's danger zone is undone, as
-  `grunt_plan` already undoes one into a prop, wall or pit), fed only the
-  holes within `JACK_HOLE_REACH_X` of the actor so the tick cost stays put.
-- **The Jack stalemate was his `$07` resetting off screen.** Round 4's `$07`
-  always dodges up (lane <= 24), the camera sits held at the wave gate, and
-  the actor waits below his band (from below the pocket is out -- see the Jack
-  section). His reset comes 80 px past the actor; standing at the screen's
-  edge put it off screen, `$0C`'s entry test failed and he went straight back
-  into `$07` -- 30-35 s of it at lane 22, twice, until the round clock took a
-  life (Axel, live). Two leaks let the actor drift there: `_evade_exit`'s
-  "out of reach, walking on: stand" stood wherever it was, and a rollout ending
-  past his reset scored the edge as free. Both now hold it inside
-  `EVADE_CENTRE` (`_evade_wait_x`, `_evade_window_cost`). That moved the loop
-  one leg on: `$0C` -> `$08` (to lane 8 or 56) -> `$0A`, whose back-off walks
-  away from the actor until within 8 lanes of its lane, ran off screen too
-  with the actor 40-60 lanes from his set-up lane. So in `$08`-`$0A`, 64+ px
-  away on X, the actor waits on the lane out of his juggle next to his
-  set-up lane (the pocket 13 above it, or 30 below): the back-off is short and
-  ends on screen in the aligned throw the plan already answers.
-
-The Jack changes were chosen offline: `tools/jack_sim.py` plays
-`jack.plan_world` (the plan, split from `plan_engage` for this) against the
-model from every 60th tick of the recorded stalemate, 1500 updates each (52
-seeds):
-
-| aim in his `$07`/`$08`-`$0A` | ideal timing: hold / hit / stalemate | one update late |
-| --- | --- | --- |
-| before | 37 / 3 / 12 | 24 / 12 / 16 |
-| climb to the pocket from below when 72+ px off (live too: a 30 s stalemate; reverted) | 32 / 11 / 9 | 16 / 27 / 9 |
-| mid-screen window only | 31 / 3 / 18 | 13 / 1 / 38 |
-| **+ the lane next to his set-up lane (shipped)** | 34 / 14 / 4 | 32 / 18 / 2 |
-
-More hits in the sim, far fewer stalemates: a stalemate costs a life to the
-round clock (80), a hit 12. Live, below, the shipped plan took no axe hit.
-
-Live, `stage_walk_diag.py --level 4` with the waves alive (turbo 2, no food,
-no police):
-
-| code | runs | Bongo | lives lost | props opened | notes |
-| --- | --- | --- | --- | --- | --- |
-| before | Blaze x2, Axel | 1 of 3, 125 s | 1 each in the two others, still frozen when stopped | 6/9 | frozen at (1816, 96) |
-| prop filters + X-then-Y finish | Blaze, Axel | 0 of 2 | 3 each, game over | -- | the tie-break's side in the hole |
-| + tie-break | Blaze, Axel | 2 of 2, 138 / 182 s | 0 / 1 | 9 | Axel: Jack stalemate, the clock; a 30 s stall at a Signal behind the (2592, 48) props |
-| + Jack aim | Axel x2, Blaze x2 | 4 of 4, 118-137 s | 0, 0, 1 (damage), 1 (the pit) | 9/9 each | Axel walked into the second hole under `EngageJack` |
-| + pit escape footprint, Jack rollouts round holes | Axel x3, Blaze x2 | 5 of 5, 121-133 s | **0** | 8-9 | Jack dead 12-22 s after he appeared, no axe hit; a prop left only when a fight scrolled the camera past it |
-
-Elsewhere, with the Jack aim in: `jack_fight.py --level 2` 82 s, one hit, no
-life (the table above: 81-112 s); `--level 5` 111 s, one hit (not his), no
-life (93-132 s); `--level 4` (swept) Bongo in 70 s, no hit -- the prop
-filters alone had stalled this run two round clocks at (2368, 104). Swept
-walks: round 1 Antonio in 49 s, 7/7 booths; round 3 Abadede in 58 s, 4/4
-props; round 6 unchanged against the baseline worktree run beside it (six
-press hits each, all under `WalkToAdvanceStage`, and the same Souther-pair
-losses -- not this change's; **Round 6: the factory floor**'s one run had
-none). Not measured: the Signal-behind-props stall (once, 30 s, recording
-lost; `grunt.py` does not model an enemy blocked by a prop wall). The Jack
-plan's tick was ~2.5 ms median on these recordings (2.4), over the 2 ms
-budget; **Jack's plan inside the 2 ms budget** brought it to ~1.0.
-
-**Mr. X: the ROM model and the plan** (user: "Agora fazer o mesmo tipo de
-optimização, mas para o boss Mr. X (o último nível). A estratégia das Twins já
-não serve, é claro. O Mr X está no fim do último nível, um nível bastante
-longo, com muitos inimigos e muitos bosses, é melhor haver uma flag para
-automaticamente eliminar todos os inimigos e bosses que aparecem até o Mr X
-estar no ar. No combate com o Mr X, tem vários Glasia que aparecem para o
-ajudar, ter em atenção para essa flag não automaticamente matar esses
-ajudantes nem o Mr X"; then "The AI seems to fight mr x better than the
-garcias..."; and, closing the session, "a performance da luta é
-suficientemente boa por hoje"). The twins' goals and rules carry over:
-minimum time, minimum damage, reliability; no police and no recovery items,
-not even as a fallback; no attack that can miss. The model is `ai/mr_x.py`
-and `ai/garcia.py` (the user's "Glasia" are the office's type-`$22` Garcias),
-the plan `ai/mr_x_plan.py`, the verb `EngageMrX`.
-
-The flag: `--kill-until-mr-x` (`DebugScenario(kill_until_mr_x=True)`, the
-host's `Alt/Option+X`, `StreetsOfRage.cpp`'s `killEnemiesUntilMrX`) kills every
-ordinary enemy and every boss of the rush -- Abadede through his police latch,
-`$55`-`$58` through their lethal path -- and returns without touching anything
-once a type `$33`-`$35` object exists; the scenario stops sending it for good
-once the offer flag (`$FFDE00`) or Mr. X has been seen (`note_snapshot`).
-`scripts/play.py --preset boss --level 8` passes it with `--no-food`.
-
-What the ROM says (`ai-analysis/enemy-ai.md`, "Mr. X, state by state" and
-"The office's helpers"):
-
-- **Him**: the bespoke-boss frame, 30 Hz. Decide (3): under `$80` on X he
-  walks in (6: 8 px an update on the far axes) and lunges (2: a 52 px dash,
-  box 64 px ahead and only 8 lanes either side, 34 on Normal); from further
-  he goes to the gun (7: up to lane 2.5, a 21-update wait, eight bullets --
-  20 each -- and **no box of his own out**). The retreat's first update (5,
-  substate 0) tests contact where he stands, before he moves.
-- **His hold** (`$A`): he reads the holder's `+$7D` on substate 1 only; a knee
-  there is 2 and 10 updates of shake, a release sends him to the retreat,
-  whose first update is the re-grab. Knee, knee, release: 4 points about
-  every 30 updates, and he never acts. 40 updates in substate 1 without a
-  move free him (`$13598`). A body thrown into him while held knocks him
-  down out of the hold.
-- **The Garcias**: two with him, replaced as they die; 9 health, 8 a hit. They
-  walk at a point 32 px short of the target at 4.5 px an update (faster than
-  any player), jab when box `$12` (0-40 ahead) meets the target's cached body,
-  and their punch has four live stages -- once caught inside it, a player
-  takes two to four in a row. **Off screen the punch is refused** (`$92AC`),
-  which makes the camera's right clamp a pocket: a Garcia coming from the
-  right aims at screen X `$1C0` and turns to `$DBCC` instead. Thrown bodies
-  (`$FFFB24`) knock Garcias and Mr. X down.
-- **The player's blink**: after getting up from a knockdown and on a respawn,
-  48 updates with no body (`$4F62`, `+$4B` bit 1, `+$49`): nothing lands, and
-  no Garcia's jab triggers on it.
-
-The plan (`mr_x_plan.plan`, every tick; `hold_step`, `garcia_hold_step`):
-
-1. **A lookahead over him, every bullet and every Garcia**: the nine sticks
-   held 1/3/6/12 updates then a tail, a punch on update 0-5 (standing or
-   walking toward a target first -- the walk is the turn), the rear attack on
-   update 0-5, each under the twins' five timings and scored by the worst
-   (the mean in the re-grab window). A punch or rear attack pressed now must
-   strike under every timing. A hold on him is scored by what lands on the
-   holder standing there (`holder_blow`): a blow before a knee and the release
-   after it are spent (`HOLD_KNEE_SAFE_UPDATES`, 18) makes it a burnt grab, one
-   before the release could free the actor a hit; a hold on a Garcia by what
-   lands through a knee and a release, his lunge included.
-2. **The tail**: in his decision, stand `$80`+16 away so he goes to the gun
-   -- on the right clamp when he is that far to its left, facing the wall, so
-   the Garcias that can strike all come into the rear attack; walk into the
-   gun and into the retreat's first update; 17 lanes off the lunge; the
-   street's edges avoided (a Garcia corners an actor there). Before he
-   appears (the office's first waves, `MrXOffice`, `EngageMrX` with no
-   target): home, facing the wall.
-3. **The hold**: knee, knee, release on his read (`hold_step`); a Garcia whose
-   blow reaches the holder before `HOLD_KNEE_SAFE_UPDATES` (`garcia_threat`,
-   played through `garcia.py`) gets the hold let go at once -- never the
-   throw: it locks the holder 41-46 frames, and his flight hops 48 px at its
-   apex, over a Garcia close behind. A Garcia in hand while he lives is thrown
-   only when nothing lands through the throw's lock, else kneed if a knee
-   fits, else let go (`garcia_hold_step`).
-4. **Ownership**: every generic verb stands down for him and his Garcias; his
-   bullets are the engage's; police, food, 1UPs and weapons are refused while
-   he lives, and weapons from the offer on (armed, B is a swing the plan does
-   not time, and the punch is gone).
-
-The model was checked in lockstep (`tools/mr_x_lab.py --check`): every one of
-his updates in two runs outside the states it does not replay, every bullet
-step, grab and hit; the Garcias 3,488 updates, three off. Offline
-(`tools/mr_x_sim.py`, 30 shifted starts from a wander recording, harsh
-timing): 23 holds, one real hit; the other six end in a Garcia held on the
-way, which the sim does not play on.
-
-Live, round 8, Blaze, `--turbo 2`, `--poll-ms 16`, police and food off, one
-fight each (so a direction, not a score -- the Garcias' `$DBCC` legs are
-random and the office's first waves set the health he is fought on):
-
-| | office waves (HP) | Mr. X killed in | hits in his fight | lives lost |
-| --- | --- | --- | --- | --- |
-| the plan without the Garcias | -- | 25.8 s | three of his lunges (34) after generic punches at Garcias | 2 |
-| + the Garcias in the lookahead | 61 → 45 | 14.7 s, 14 holds | 5, all Garcias (40) | 0 |
-| + burnt grabs, a held Garcia thrown at once | 65 → 65 | 28.8 s | 8, three of them his lunge during a Garcia throw | 1 |
-| + the throw only when nothing lands, no weapon in the office | 65 → 41 | 33.5 s | 19 | 3 |
-| + the blink, home on the right clamp, the rear attack | 65 → 41 | 24.1 s, 21 holds | 8, 8 rear attacks and no whiff | 1 |
-
-What the runs taught, each found in a trace (`boss_fight.py`'s raw rows
-through `mr_x_sim.py --replay`):
-
-- **The rollout stopped at the grab**, so a hold a Garcia walked in on scored
-  as a hold: the burnt grab.
-- **The hold let go too late**: a jab 9 updates away left no time to be free
-  and strike first; the threat horizon is now a knee, the release and a step.
-- **Throwing a held Garcia with him walking in was his lunge**, three times in
-  one fight: the throw is taken only when nothing lands through its lock.
-- **A pipe picked up in the office's first waves** switched the punch off
-  for the whole fight; weapons are refused there now.
-- **The blink**: the plan rebuilt a body on the first update of every
-  rollout, so it saw a Garcia jab at a blinking actor on the wrong update and
-  walked away -- into the jab when the blink ended.
-- **Most hits are pincers**: both Garcias arriving from opposite sides at
-  once, after a release in the middle of the room or at the street's top or
-  bottom edge, where nothing any program does avoids the jab. That is what
-  the right-clamp home is for.
-
-Still open, measured on: the pincer after a release away from the clamp (a
-release is taken where he stands); the knockdowns of the Garcias are held
-still in the model rather than played (flight, floor, getting up), and a
-dead Garcia's replacement is not modelled; a whole-fight offline simulator
-(hold loop, hit reactions, respawns) was started from `$1353A`'s decode and
-not finished; Axel and Adam have not been run live against him.
-
-**Mr. X's betrayal duel** (user, in Portuguese: "Quando 2 jogadores chegam ao
-Mr. X, ele faz-lhes uma proposta, se um disser 'não' e o outro 'sim',
-significa que traíram um ao outro, e têm de lutar um contra o outro, a aí deve
-sempre dizer 'não' ao Mr. X, mas se estiver a jogar com um humano, o humano
-pode dizer 'sim', e terem de lutar os dois. Neste momento a AI não luta contra
-o humano"; and for the survivor's second question: the bad ending, which is
-**NO** -- see below). The ROM (`story-mode-and-campaign-flow.md` §7.3-7.4,
-every routine of `$11B94 (mr_x_offer_jt)` now named in `labels.csv`):
-
-- One player: YES is `$0B` -- "Here's your reward" and a restart at round 6
-  (`$FF36` then skips the question on the next visit) -- and NO is `$12`, the
-  fight. **One player never gets the bad ending.**
-- Two players: `$11F74 (mr_x_offer_compare_2p_choices)` sends two YES to the
-  round-6 restart, two NO to the fight, and two different answers to `$11FA8
-  (mr_x_offer_start_duel)`: `$FFFA43 (duel_damage_modifier)` set (damage
-  tripled), level music, control back. `$11E72 (mr_x_offer_wait_duel_end)`
-  waits for `p1/p2_out_or_continue_flag` and clears the byte; the survivor is
-  asked again (`$12028`): **YES** is the round-6 restart (`$1206C` -> `$0B`),
-  **NO** is the bad ending -- `$12074 (mr_x_offer_mark_bad_ending)`, "Die,
-  traitor!", then the fight with Mr. X, and `round_clear_select_ending` shows
-  the bad ending after it. The user asked for "sim" there to reach the bad
-  ending; shown the decode, they chose the bad ending, so `HandleMrXDialog`
-  keeps answering NO to both questions.
-
-What the AI does: while `$FFDE00` and `$FFFA43` are both set, `observe` adds
-`PlayerDuel` and builds the other player as a **`RivalPlayer`** (an `Enemy`,
-slot `P1`/`P2`, their own `+$70` body box, the player phase read as an
-enemy's: held -> `GRABBED`, knockdown/thrown -> `KNOCKDOWN`, strike ->
-`ATTACKING`) instead of a `Partner`. With no `Partner` token every partner
-courtesy is off at once -- `do_not_harm_partner`, the partner pad, the item
-rule, `CatchUpPartner`, `PartnerFightTracker` -- and the generic verbs fight
-the rival: `$4478 (resolve_player_vs_player_collision)` is `$450C`'s box test
-against the other player's body, and a walking box with no damage out takes
-the same hold. `reach.held_enemy` names the rival when `+$4C` does, so a hold
-on them runs the ordinary chain instead of `ReleasePartner`.
-`could_engage_mr_x` stands down (the office's targetless "home" engage would
-stand the duel out), and `could_call_police` too (`$4478` returns while a
-special runs, and the special sweeps enemies only). Not modelled: the rival's
-own strikes (`attack_ranges` is empty, so nothing reads them as incoming) and
-the tripled damage; no lookahead.
-
-What the live runs taught, each from the per-tick rows (hits credited to the
-attacker's last verb in the 12 ticks before the rival's health drops):
-
-- **Only the punch lands on a player.** Over the first duel, `Punch` landed
-  209 + 52 hits, `JumpAttack` 5 in 3262 ticks, `RearAttack` 11 in 340 -- and
-  one Axel spent 2340 ticks of chords on a Blaze 9 px behind him for a single
-  hit (user, watching: "axel is throwing punches hitting nobody and blaze is
-  standing still"). Why the ROM does not land them on a player is not
-  decoded (`$4478` gates on `$45D4`, which reads the chord `$20` and the jumps
-  as 2, eligible); `could_rear_attack` and the grounded `could_jump_attack`
-  skip a `RivalPlayer`, and turning to punch takes their place.
-- **A punch at a player is box against body** (user, with screenshots of the
-  two standing on each other: "many times it arrives at a point like this,
-  where they are basically at the same spot and trying to punch, but not
-  hitting any of them"; "A contecer de novo!"). 3321 punch ticks with the
-  rival 9-15 px away landed nothing, and so did 4889 from exactly 16 px --
-  Axel's inner edge. Over six duels (29,000 punch ticks within 15 lanes):
-
-  | X distance (px) | 12-15 | 16-19 | 20-23 | 28-31 | 44-51 |
-  | --- | --- | --- | --- | --- | --- |
-  | punch ticks | 3427 | 13721 | 1458 | 985 | 5350 |
-  | landed | 0.4% | 0.8% | 23% | 31% | 23% |
-
-  The band's usable inner edge assumes an enemy body reaching
-  `BODY_OVERLAP_X` either side of its origin; a player's `+$70` is narrow
-  and sits on the side it faces (Blaze idle -12..-2 facing left, +2..+12
-  right; Axel -13..0 / 0..+13). Testing the punch box against that cached box
-  was tried live and still allowed 16-19 px (1026 punches face to face, none
-  landed), so `reach.in_punch_band` takes the measured edge for a
-  `RivalPlayer`: `RIVAL_PUNCH_MIN_X` (20) or the punch's own inner edge,
-  whichever is larger. Closer, no punch is offered and `WalkToNearEnemy`
-  steps to its stop point, just inside the punch's outer edge. Why the ROM
-  misses there is not decoded.
-
-Measured with `tools/mr_x_duel_fight.py` (P1 and P2 both AIs, P2 joining on
-round 1 -- `$115CC` refuses a join on round 8 -- then the level cheat and
-`--kill-until-mr-x`; `--accept 2` gives P2 the harness's `DebugMrXAccept`
-(`autoplay --mr-x-accept PLAYER`, held Up), so the answers differ;
-`--blind 1` hides the duel from P1, which is the AI before this change; food
-and police off, a fresh `--turbo 2 --silent` host per fight):
-
-Blaze (P1, refuses) against Axel (P2, accepts), 150 s of duel per run (an AI
-continues at game over, so `$11E72` never sees a player out and a duel between
-two AIs does not end on its own -- the first ran 375 s, P1 continuing three
-times); damage dealt is the other seat's damage taken:
-
-| code | runs | P1 dealt | P2 dealt | notes |
-| --- | --- | --- | --- | --- |
-| before (`--blind 1`) | 2 | **0, 0** | 0 / 387 | P1 stood under `WalkToAdvanceStage` the whole duel |
-| `RivalPlayer` | 1 | 72 | 111 | Axel 2340 ticks of rear attacks on a Blaze 9 px behind (base1's P2) |
-| + no chord or grounded kick at the rival, tables | 2 | 60, 30 | 372, 147 | both 16 px apart, 9-15 lanes off, punching the air |
-| + the punch's box inner edge | 1 | 54 | 150 | Blaze walking 6819 ticks |
-| + the punch box against the cached `+$70` | 1 | 12 | 120 | face to face at 16-23 px, nothing lands |
-| + `RIVAL_PUNCH_MIN_X` (20) | 1 | 18 | 153 | **stalemate**: both 17 px apart under `WalkToNearEnemy`, standing still |
-| + the walk's goal at the same edge (`reach.punch_inner_for`) | 0 | -- | -- | **not measured live** (the user stopped the runs) |
-
-The stalemate in the last measured row was the walk's goal region
-(`nav.strike_goal`'s `inner_dx`) still using an enemy's usable inner edge, so
-at 17 px the walk had arrived while the punch was not offered; the goal now
-reads `reach.punch_inner_for`, the band's own edge, and
-`test_backs_off_a_rival_too_close_to_punch` pins the step back. Two AIs
-against each other may still circle each other; that is untested.
-
-**Not run against a human partner.**
-
-**After the duel: the byte `$11E72` leaves set** (user, playing P1 with the AI on P2:
-the AI "keeps centering instead of fighting the grunts ... after the other player died
-because he betrayed the AI and the AI won"). `$11E72` clears `$FFFA43` only on the
-branch where P2 is out; with P1 out it moves on and leaves it set, for the whole fight
-with Mr. X. `PlayerDuel` read the byte, so `could_engage_mr_x` stood down while
-`MrXOffice` kept every generic verb off his Garcias: `Centering` was all that was left.
-`PlayerDuel` now also needs the offer's state in `$22`-`$29`
-(`observe.MR_X_OFFER_DUEL_START`/`_WAIT`). Read from the disassembly and pinned by
-`test_observe`; the user then played it and accepted it (2026-10-31).
-`tools/mr_x_duel_fight.py` cannot reach this, since its two AIs continue at game over and
-never end a duel. The stale byte also keeps the ROM's duel damage on
-(`story-mode-and-campaign-flow.md` §7.4 says `$11E72` clears it, which holds only for
-P2 out); the fight's model does not read it.
-
-**Mr. X's betrayal duel: a fight, not a solver** (user, in Portuguese: "Quando
-a IA luta contra um humano (quando há traição do parceiro em frente ao Mr. X),
-é extremamente eficiente, mas não é uma luta interessante para um humano. Faz
-uma luta mais interessante, mais aleatória, com mais movimentos diferentes.
-Menos eficiência fria." -- "Sem modificar o comportamento que a IA terá com os
-inimigos."). `ai/duel.py`'s `DuelStyle`, one per `AgentLoop`, runs between
-`do_not_harm_partner` and the ranking and, **only while `PlayerDuel` holds**,
-replaces the tick's candidates with one verb of its own; with no `PlayerDuel`
-`steer` returns the context object untouched (`test_enemies_are_never_restyled`),
-so no enemy is fought differently. It keeps a **tactic** for a while, drawn by
-weight:
-
-- `press` -- the generic walk in, then a burst of 1-4 presses with 0-2 ticks
-  between them; a rival behind in the chord's reach gets `RearAttack` 30% of
-  the time; with no walk offered it steps to 26 px itself;
-- `grab` -- `GrabEnemy` into the body, then a **hold script** drawn per hold
-  (knee-knee-throw, knee-flip-suplex, flip-suplex, three knees, a straight
-  throw, a knee and let go) after a 0-5 tick hesitation; a front hold is given
-  the scripted move even where `could_hold_actions` would not offer it (it
-  offers the throw only under a threat, the release never), a back hold only
-  suplexes; a rival swinging in reach turns the walk-in into a trade;
-- `jump_in` -- step back to the punch's outer edge + 10-22 px and kick in when
-  `reach.in_jump_attack_band` blesses the launch, or after 25 ticks there
-  anyway; a jump under way is always `JumpAttack` (the generic pipeline offers
-  none at the rival on the ground, crouch included, and a dropped direction in
-  the crouch launches straight up);
-- `footsie` -- hold 36-64 px off, the lane re-drawn every 15-30 ticks;
-  `circle` -- round to another lane, 40% of the time on to the far side, then
-  press; `wait` -- stand 12-40 ticks; `back_off` -- give 36-56 px; `item` --
-  the generic `WalkToWeapon`/`WalkToPickup` when one is offered;
-- `let_up` -- not drawn: while the rival is down, stand 40-60 px off rather
-  than meet the wake-up.
-
-Reactions: the rival stepping into reach unasked (during `footsie`/`wait`) is
-answered after a 4-10 tick reaction, punished 55% of the time and backed away
-from otherwise; a swing started within 48 px is backed away from 20% of the
-time (at most once per 40 ticks); a rival swinging from inside reach is hit back
-after 1-3 ticks whatever the tactic -- a person under pressure presses. A press
-that walked in itself settles only 0-2 ticks on arrival. The **health lead**
-leans everything: at half a bar ahead the aggressive weights halve, the patient
-ones gain 70%, reactions are 4 ticks slower and bursts shorter; behind, the
-other way. Left to the pipeline: the dialogs, `CounterGrab`, `TechRecover`, and
-every hit reaction of the actor's own. The HUD and the harness see the tactic
-(`DuelStep.tactic`, `AgentLoop.duel_tactic`, the 8th field of each seat in a
-`mr_x_duel_fight.py` row); `AgentLoop(duel_style=False)` and the harness's
-repeatable `--cold P` give the generic pipeline back.
-
-Measured with `tools/mr_x_duel_fight.py --duel-seconds 150` (two AIs, food and
-police off, `--turbo 2 --silent`, two hosts at a time), Blaze P1 against Axel
-P2, damage dealt per seat (an AI continues at game over, so lives are lost
-freely):
-
-| P1 | P2 | P1 dealt | P2 dealt | notes |
-| --- | --- | --- | --- | --- |
-| cold | cold | 39 | 196 | 6503 of ~8700 rows within 20 px: the old stand-off |
-| style, first cut | cold | 48 | 849 | `back_off` 41% of the ticks; P1 half the duel in hit reactions |
-| + the pressure answer, rarer and shorter dodges | cold | 108, 174 | 799, 762 | most hits taken standing in reach waiting out a reaction |
-| + arrival is not a reaction | cold | 103, 81 | 838, 882 | |
-| cold | **style** | 822, 849 | 241, 342 | the same code, seats swapped |
-
-So against the cold pipeline -- a perfect, every-tick presser, no human -- the
-style loses about 3:1 from either seat, at 100-140 damage a minute where the
-cold Blaze managed 16, and it uses 11-15 different verbs (the cold side 5-10):
-punches, rear chords, jump kicks, grabs, knees, flips, suplexes, throws,
-weapons; tactics ran press 34-55%, footsie 8-16%, let-up 4-16%, jump-in
-5-13%, back-off 6-11%, wait, circle and grab 3-10% each. Two AIs never
-end a duel on their own (both continue), so the runs are cut at 150 s.
-**Not yet played against a human**, which is what it is for: whether 3:1
-against a machine is the right strength against a person is the user's call,
-and the knobs are the module constants (`REACTION_TICKS`, `PRESSURE_REACTION_TICKS`,
-the weights and `LEAD_SCALE`).
-
-**A prop's stand no walk reaches** (user, a screenshot of two AIs in widescreen,
-round 4's second wave: "The AI got stuck here"). Adam held `OpenBreakable` LEFT into
-the camera's clamp at a `$1B` at about (2472, 104), read off the HUD, while Blaze at
-the right clamp held `WalkToAdvanceStage`. The prop's wall is x 2444..2516 over lanes
-84..108, with a hole from x 2488 and the clamp at 2473. Adam's punch reaches in to 2 px
-(Blaze's 12, Axel's 10), so to him a sliver under the wall, lanes 110-112, read as an
-open stand; offline, the same state gives Adam `OpenBreakable` and the other two
-`CatchUpPartner`. No walk leads there, but the router's world runs 96 px past the clamp,
-so it planned round the wall off camera, and the executor's clamp zeroed the stick. As
-the rear player, Adam also held the camera (`$18F5C`), so neither AI could move.
-`decide._strike_stand_is_open` now also asks `_walks_to_any`: a best-first flood from
-the actor, inside the clamp and the lane band, round prop walls, holes and `Wall`s, on
-an 8 x 4 px grid, so a wall thinner than 8 px could be stepped over. Each call took
-about 0.3 ms with an open stand and 1 ms walled off (one measured state), and a tick
-makes several, so a walled-off prop can pass the 2 ms tick budget while it is on
-screen. Reproduced offline from the screenshot's numbers; the user then played it and
-accepted it (2026-10-31). Pinned by `test_decide.WalledOffBreakableTests`.
-
-**Round 8's thrown tables** (user: "No nível 8, de vez em quando o jogo
-atira umas mesas contra o jogador, a IA deve detetar se estão em linha com
-ela, e se for o caso, fugir delas, ou se for estiver demasiado perto,
-dar-lhes um murro para que elas não atinjam a IA"; confirmed right at the
-level's start: "as mesas são atiradas logo de início"; and, on the ROM
-family: "as mesas do nível 8 também são um 'breakable'" -- true of its
-*idle* state only, below). Full decode in `ai-analysis/enemy-ai.md`, "Round
-8's thrown office table (`$45`)".
-
-`object_type_update_jt` (`$B236`) confirms type `$45` is one real object,
-dispatched at `$7534 (round8_table_dispatcher)` through a 3-entry
-per-`+$30`-state table: **state 0** (`$7546
-(round8_table_state0_wait_and_arm)`) sits hidden at its spawn point until a
-camera-relative proximity threshold trips, then arms -- an X velocity from a
-per-variant (`+$40`) table at `$75DC` (variants 1-4 measured `+5`, `+6`,
-`-5`, `-6` px/tick; variant 0 never arms and never flies, so not every `$45`
-is a real throw) and a lane (`+$14`) copied from whichever player is the
-current target *at that instant* (a straight shot down that lane, not a
-homer). **State 1** (`$75E6 (round8_table_state1_flight)`) integrates
-velocity and runs a hit-check shared with other props (`sub_00007392`) that
-explicitly special-cases type `$45` for a stronger vertical recoil when
-punched -- the ROM's own "punch it away" mechanic, found in the
-disassembly independent of any live run. **State 2** (`$75EE
-(round8_table_state2_bounce)`) is the gravity arc, rise then fall, on its
-own after launch or after a punch. Live-captured (`autoplay/tools/table_
-throw_diag.py`, new, `hakuro_emerge_diag.py`'s shape, `DebugScenario(start_
-level=8)`, no sweep needed -- the very first live sample already had an
-armed table): ~5-6 world px/tick, lane-locked to the player at arm time, a
-168->117->166 `z` arc. Reproduced the report exactly: `p1_hp` 80 -> 77 with
-no answer for it, because `object_catalog.py` tagged every `$45` a
-`Breakable` regardless of state -- invisible to `reach.projectile_
-threatens`/`ProjectileSidestep` for its whole flight, and for the one tick
-its state read 1, misread as an *intact* one (`_INTACT_BREAKABLE_STATE`'s
-same numeric value, unrelated reason).
-
-Fixed: `object_catalog.TABLE_TYPE_ID`/`style_for_object` now classify `$45`
-by its own `+$30` -- `None` at state 0 (unchanged), a `"projectile"`-kind
-`EntityStyle` at any other state -- and `world_map.py` gives it the same
-`+$1C`/`+$20` ordinary-layout velocity correction Jack's axe already needed
-(the projectile-kind default `+$20`/`+$24` reads a straight throw's real
-speed as 0). `reach.table_in_punch_band` mirrors `decide._boomerang_in_
-punch_band`; `HitTable` (`ai/tokens/attack_verbs.py`, wired through
-`decide.py`/`priority.py`/`execute.py`/`kinematics.py`/`ai/partner.py`) is
-`HitAntonioBoomerang`'s exact shape with no attach-phase filter -- the
-table has none, it is already in real flight by the time it is observed at
-all. `ProjectileSidestep` needed no changes: once `$45` is a real
-`Projectile` with a real `vel_x`, its existing `reach.projectile_threatens`
-gate already covers the flee half. A second live run against the fixed AI
-produced 36 `ProjectileSidestep`s and 13 `HitTable`s with no hit
-attributable to an armed, in-lane table.
-
-**Round 8's tables at rest** (user, watching a two-player walk to the office:
-"Estão encravados nas mesas! Tens de fazer com que a AI destrua as mesas com
-alta prioridade!"). Most `$45` tables in round 8's corridor never fly: armed
-(`+$30` = 1) with no velocity -- measured live, tables at (1360..1576, 40/104)
-sat for seconds with `+$1C` = 0, 64 px wide. Read as zero-velocity
-`Projectile`s, they sent `ProjectileSidestep` round them for as long as they
-were on screen, and nothing ever broke them. `observe._table_at_rest` (type
-`$45`, no X or lane velocity) now builds them as `Breakable`s -- `OpenBreakable`
-walks in and punches them, and the stage advance waits on them like on any prop
-on the path -- and `priority._emergency_open_breakable` gives a table its own
-tiers: 40 in smash range, 32 down to 24 on the approach, over every walk to an
-enemy and the plain strikes (punch 20), under the bosses' engages. A table that
-moves (thrown, or knocked away by the punch) stays a `Projectile` for
-`HitTable`/the sidestep. Live, on the same corridor: the four tables broken in
-about 3 s by both AIs, the camera moving on (it had stood at 1359-1362).
-Tests: `test_observe.Round8TableTests`, `test_priority`'s
-`test_a_round_8_table_outranks_a_punch_at_an_enemy`. Not measured: a 1P round-8
-walk, and whether a table has a push-back rectangle (`prop_solids` gives `$45`
-its default record).
-
-**Jack: the ROM model and the plan** (user: "A AI tem sérias dificuldades em
-lidar com o inimigo do tipo Jack ... É essencial construir uma estratégia para
-lidar com este inimigo ... O objetivo é lidar com este inimigo de forma
-eficiente, no menor tempo possível, com o menor dano sofrido. A IA deve lidar
-com todos os ataques, estados, etc. que este inimigo pode ter"; "o inimigo não
-aparece no Stage 1"). Everything the AI does against him is `ai/jack.py`, and
-the plan is the bosses' shape: **take the hold from where no axe of his
-reaches, keep it until his axes are gone, then spend it.** The earlier rules
-(grab him from behind through `GrabReason.JACK_FROM_BEHIND`, the rear chord
-when he faces the actor, the armed swing and the jump kick at him, no unarmed
-punch while he juggled) are gone: they were written without the ROM model,
-and they took 13 of his hits in the baseline below.
-
-What the ROM says (full decode in `ai-analysis/enemy-ai.md`, "Jack"):
-
-- **His body never strikes.** No animation of his carries a strike box and no
-  state tests one: every hit is a type-`$28` axe. His extracted "reach" was a
-  thrown-body box (`attack_ranges.CONFIRMED_TYPE_SHAPES[0x27]` is now empty)
-  and his `$08`-`$0A` were read as a lunge; `phases.py` reads all his states
-  NORMAL but the knockdown.
-- **The juggle**: two axes, 8 updates apart, riding 8 lanes below him and
-  8-24 px in front, each arc pinned to absolute z 128 (apex 96, 15 updates,
-  then 4 px an update back to his hand; ~20 a cycle). On a floor at 160 (round
-  2) the box meets a standing body only near the bottom of the arc and on the
-  way back. An arc that *ends* with his pose off the juggle stance drops the
-  axe; the walk back to his hand never looks, and restarts a whole arc.
-- **The throws**: waiting 64 px over his head, then 10 px an update from 32 px
-  in front of him along his lane - 1, at head height. `$0E` throws three, 12
-  updates apart (the actor within 64 px on X aborts it into `$07`); `$0B`
-  throws both juggled axes after `$0A`'s diagonal back-off onto the actor's
-  lane.
-- **Personalities**: `+$40`'s low nibble picks the state every reset lands in
-  (`$F2DE`): 0 juggle approach + aligned throw (rounds 2, 4, 6, 8), 1 retreat +
-  ranged throw (6, 8), 2 jumps (5), 3 juggle walk (5).
-- **`$07` faces the target every update** (`$9E4C`): there is no "behind him"
-  there -- walk past him and he turns, and the next arcs start on the actor's
-  side. `$DBCC` takes him to lane `$58`/`$18` away from the target's half
-  (round 4 always up, round 6 always down), then walks legs of 2.5-5 px an
-  update toward and past the target and resets only 80 px beyond it -- and a
-  reset off screen fails `$0C`'s entry test and lands straight back in `$07`.
-  The level's X bound (`$9F96`: below `$1510`) refuses the step and does
-  nothing else, so a Jack walking into it waits there until the target is 80
-  px behind him.
-- **The hold**: he is placed 32 px in front of the holder (28 from behind) and
-  his flying axes follow him, so a *front* hold on a juggling Jack is itself a
-  hit, and a back hold keeps them on the far side. The grab only writes his
-  state -- `$A04A` places and poses him on his next update -- so an arc ending
-  on the grab's own pass walks back through a front holder. No escape from a
-  hold; knees 2, 2, 3, suplex 5, throw 4; **only a negative health word
-  kills** (0 is alive). The third knee and the crossover's suplex land him the
-  way the front holder faced, the B+back throw behind it.
-- **A dropped axe still hurts**: `$FED6` (an arc cut short when his pose
-  leaves the juggle stance, a toss he does not catch) only moves it and drops
-  it at 1.125 an update to the floor, but its box stays in the player's hit
-  test and keeps its damage; only a strike's knocked-off copy carries none.
-
-The plan (`jack.plan_engage`, `EngageJack`, `execute.state_machine_engage_jack`,
-`jack.hold_step`):
-
-1. **A lookahead over him and every axe on screen** (`world_update`: his
-   states `$01`-`$12` with their approach points, gates and re-facings, the
-   juggle, the toss, the throws and their release frames), the nine sticks
-   held 2 updates then a tail policy, or held all 16, each under both update
-   orders and scored by the worse: a hold by how soon -- unless
-   `hold_is_burnt` (the axes still up, played over the hold's first 22
-   updates with the one-update pose lag) says an axe meets the holder, which
-   scores as the hit it is; a hit below everything else; the rest by the time
-   to `engage_aim`'s point and whether the end sits in a live juggle's band or
-   a throw's lane. 1.0 ms a tick (p95 1.1-1.5, max 1.8) with one Jack, up to 2.6 with
-   two to four; was 2.5 and 4.2-7 before **Jack's plan inside the 2 ms budget**. **The punch**
-   (when `abadede_can_punch`): thirteen more candidates stand, or walk toward
-   him -- the walk is the turn: B with a turn on one press is sampled
-   pre-turn, a committed miss -- and punch on update 0-6; a strike (`$9B88`: 1 damage, 24 updates of stun, his
-   juggle off so its axes drop, a 2 px push) scores under a hold and over the
-   rest, and the rollout plays on from it -- an axe on the locked actor still
-   counts; at 0 health it kills. No second punch while the stun has more than
-   8 updates to run (`REPUNCH_T50`). The round (`Stage.level_index`) goes in
-   as `level`: his `$07` lane direction and X bound depend on it.
-2. **The aim** (`engage_aim`): out of a throw's lane band first; out of the
-   juggle's band by the nearer lane (9+ above his lane, 25+ below); past him on
-   that side; back to his lane only 16+ px behind his origin, and into his
-   back. In `$07`: mid-screen (`EVADE_CENTRE`, so his reset lands on screen),
-   `POCKET_DY` (13) lanes above him -- out of the juggle, in the punch's reach;
-   only from above his band, from below the actor waits below it -- with no
-   tie-break drift toward him; out of reach and pinned at the level's bound,
-   88 px behind his walk, where `$DBCC` resets him at once; out of reach and
-   walking on, stand -- his walk makes the 80 px, and going after him keeps it
-   short (`_evade_exit`). With no axe of his out, straight in from
-   the front. Down, looking about or held: stand off behind him.
-3. **The hold** (`jack.hold_step`): a back hold waits while a juggled axe is
-   still up (they drop at the end of their arcs); a front hold crosses over
-   out of one about to land (lets go when the crossover is spent). Then knee,
-   knee, cross over, suplex -- 9, which leaves a round-2 Jack (9) alive at 0,
-   so the punch before it makes one hold a kill; from a back hold the suplex
-   when it kills, else the crossover and the knees. Near a camera bound,
-   whichever finisher leaves him less far out of the actor's reach: the
-   crossover's suplex lands him 136 px on the way the actor faced (58 of
-   flight, 78 of slide), the B+back throw 270-278 px behind it. Another
-   enemy's blow landing sooner than a knee finishes gets the throw, as for
-   any grunt.
-4. **Ownership**: `could_engage_jack` for every live Jack in the camera,
-   armed or not, at 0 health too. `Punch`/`MeleeWeaponAttack`, `GrabEnemy`,
-   `RearAttack`, `WalkToNearEnemy` and the grounded `JumpAttack` stand down for
-   him, and `ProjectileSidestep` for a live Jack's axes (`reach.jack_still_juggling`
-   now reads the axe's own `+$30`/`+$31`: the old distance guess called a throw
-   released point-blank "still juggling"). `EngageJack` ranks 30 less a point
-   per 40 px plus the armed raise, 72 while an axe of his is out at the actor
-   (`jack.axe_threatens`), 5 under another enemy's committed strike;
-   `partner.do_not_harm_partner` withdraws it on the partner's Jack.
-5. **Observation**: `world_map` reads Jack's `+$31`, animation, approach point
-   and speed, timers and fine position, and the axe's own state, flags, `+$54`
-   offset, owner (`+$42` -> `owner_slot`), fine z and its real X velocity
-   (`+$1C` -- `vel_x` used to read `+$20`, the lane, so a thrown axe looked
-   motionless).
-
-The model was checked against the ROM before anything was built on it: the
-baseline's per-tick trace replayed offline, axe by axe, update by update --
-3,939 of 3,950 single-update steps exact (the arc, the drift, the walk back,
-the restart, the thrown flight); the 11 misses are 1-3 px while he walks, the
-object pass reading his position before or after his own update.
-
-Scored with `tools/jack_fight.py --level 2` (Blaze, turbo 4, no food, no
-police, every other ordinary family swept; round 2 has three personality-0
-Jacks):
-
-| | Jack hits (damage) | lives lost | round | notes |
-| --- | --- | --- | --- | --- |
-| before (generic verbs) | 13 (156) | 1 | 105 s | 11 juggled-axe hits; `JumpAttack` 1839 ticks at him |
-| plan, first run | 28 (320) | 4, game over | -- | a Jack at 0 health was dropped as dead: no verb for 90 s |
-| + 0 health is alive | 2 (24) | 0 | 81 s | both in `$07`: he turned as the actor walked past |
-| + `$07` faces every update | 2 (24) | 0 | 85 s | one aim through the juggle's band, one front hold burnt by the pose lag |
-| + band exit, hold pose lag, wait for axes in flight | 1 (12) | 2, both the round clock | 210 s | a `$07` stalemate: the actor walked along with him and he reset off screen |
-| + `$07` waits mid-screen | 0 (0) | 0 | 112 s | kills took 34, 31 and 21 s |
-| + the punch | 0 (0) | 1, the round clock | 162 s | in `$07` the actor kept to lane 2 while he walked lane 91 for 50 s |
-| + `$07` pocket, exit and X bound | 3 (36) | 0 | 81 s | kills 10, 17, 30 s; a punch thrown facing away, one from below his band, one unexplained |
-| + punch turns by walking, pocket from above | 1 (12) | 0 | 92 s | kills 12, 31, 20 s; a dropped axe on a front holder |
-| + dropped axes fall, camera-bound throw | 1 (12) | 0 | 87 s | kills 14, 26, 15 s; the hit came from an axe 47 px off, which the `$2B` box cannot reach |
-| + stand while he walks on out of reach | 0 (0) | 0 | 97 s | kills 16, 33, 26 s |
-
-The harness logs the round clock from the "punch turns by walking" runs on.
-Before that, "the round clock" in these tables is read off a full-health,
-no-attacker loss at the end of a long stalemate; a pit looks the same. The
-clock's own reading cannot name one either: the time-over writes 55 on the
-frame it takes the life, so `jack_fight.py` now reads the time-over byte
-(`$FFFA49`) and files such a loss as `round_clock` (**Round 6: the factory
-floor**).
-
-Round 5 (`--level 5`: four personality-2 Jacks at once, one with 14 health,
-then a personality-3 one near the level's right X bound):
-
-| | Jack hits (damage) | lives lost | to the boss | notes |
-| --- | --- | --- | --- | --- |
-| the punch | 1 (12) | 1, the round clock | 161 s | the p3 Jack stood 65 s at X 5390 in `$07`, pinned by `$1510` |
-| + `$07` pocket, exit and X bound | 0 (0) | 0 | 93 s | p2 Jacks 10-19 s each, the p3 Jack 6 s |
-| + punch turns by walking, pocket from above | 0 (0) | 0 | 132 s | a p2 Jack suplexed past the camera's right bound took 45 s |
-| + dropped axes fall, camera-bound throw | 0 (0) | 0 | 94 s | p2 Jacks 8-15 s each, the p3 Jack 12 s; three camera-bound throws |
-
-Round 4 (`--level 4`: one personality-0 Jack, whose `$07` always goes up),
-with everything above: no hit, no life lost, Bongo reached in 65 s, the Jack
-dead 8 s after he appeared.
-
-Round 6 (`--level 6`: one personality-1 Jack, the retreat and ranged throw,
-whose `$07` always goes down): no hit from him, dead 10 s after he appeared
--- each time his retreat aborted into `$07` with the actor inside 64 px, and
-the hold followed. The round's losses were not his: four 20-point hits from
-the round's drop presses (type `$42`), and a life to the round clock after
-the stage walk had stood 70 s at X 2557 against a machine housing the router
-could not see. Not a pit -- round 6 has none -- and the clock read 55 because
-the time-over writes 55 on the frame it takes the life (**Round 6: the factory
-floor**, below).
-
-**What the live runs taught**, each found in a trace (`jack_fight.py` logs
-every Jack and axe byte per tick, and a hit names the axe from the player's
-`+$7E`):
-
-- a Jack at 0 health is alive and still throwing (`$A13A`'s `bmi`): the first
-  run dropped him and stood still for 90 s;
-- in `$07` he turns every update: two "back" grabs became front holds;
-- the held pose lags the grab by one update: an axe whose arc ends then walks
-  back to his hand -- through a front holder -- and restarts a whole arc;
-- the pocket above his lane is not the way out from below it: 17 lanes below
-  him the aim climbed through the juggle while 8 lanes down cleared it;
-- his `$07` must be waited out mid-screen: an actor that walked along with him
-  let him reset off screen, straight back into `$07`, until the round clock
-  ran out;
-- keeping out of his band is not enough either: an actor that did only that
-  sat at lane 2 while he walked lane 91 to and fro for 50 s. The pocket above
-  him is where the punch ends it;
-- the level's X bound holds his walk and nothing else: pinned at X 5390 with
-  the actor held by the camera at 5344, a round-5 Jack stood 65 s; 88 px
-  behind his walk resets him;
-- a punch pressed with a turn is thrown the old way: facing away in the
-  pocket, five punches whiffed while he walked into the actor, and his walk
-  through it took a front hold with both axes up;
-- the pocket is only reachable from above: from below, a punch on the way,
-  15 lanes under him, landed, and an axe finishing its arc hit the locked
-  actor;
-- a dropped axe still hurts: the arc a front hold cut short fell 128, 137,
-  147, 158 onto the holder 22 px away -- the model had deleted it, so
-  `hold_is_burnt` called that hold clean;
-- at a camera bound the finisher's landing side matters: cross over and
-  suplex threw a round-5 Jack past the right bound, and his jumps kept him
-  out of reach for 30 s;
-- a `$07` reset or a `$0A` back-off that ends off screen puts him straight
-  back in `$07`: with the waves alive in round 4 the actor drifted to the
-  screen's edge and waited 40-60 lanes from his set-up lane, and he cycled
-  for 30 s until the round clock ran out. The wait now stays inside
-  `EVADE_CENTRE`, and in `$08`-`$0A` it takes the lane next to his set-up lane
-  (**Round 4: the bridge, its props and its Jack**).
-
-**EngageJack ignored closer, more imminent enemies** (user, in Portuguese:
-"A IA dá muita prioridade ao EngageJack, mesmo quando tem muitos mais outros
-inimigos mais iminentes que o Jack"). All the measurements above (the table
-and every `jack_fight.py` run) isolate Jack with `--only-enemy jack`, which
-is why this went unmeasured: `_emergency_engage_jack`'s floor (22, or 29
-while he juggles, from the armed raise) sat above `WalkToNearEnemy`'s own
-ceiling (21 armed, 14 unarmed) unconditionally, so once a live Jack was in
-camera and not mid-throw, no other approaching enemy could ever outrank him
-by proximity alone -- the only escape was `grunt_incoming`
-(`reach.is_incoming_melee`), which only fires in the brief window right
-before another grunt's own committed strike actually lands. In a real level
-(Jack sharing the screen with a wave of street enemies, unlike every scored
-fight above) that meant the AI kept walking at/holding Jack while closer
-grunts went unanswered until the instant one of them swung.
-
-The fix is a second condition in `_emergency_engage_jack` (`priority.py`):
-alongside `grunt_incoming`, `nearer_grunt` compares Jack's own distance
-against every other on-screen `Grunt`'s (Jack himself excluded, since a
-second Jack already competes on the same distance-based formula). A grunt
-closer than Jack by more than
-`_EMERGENCY_ENGAGE_JACK_NEARER_ENEMY_MARGIN_PX` (40 px, the same granularity
-as Jack's own per-px falloff) drops `EngageJack` to the existing
-`_EMERGENCY_ENGAGE_JACK_UNDER_GRUNT` tier (5, plus the armed raise if he is
-juggling), the same tier a committed strike already used -- proximity is now
-judged the same way emergency, not just the swing itself. Both checks share
-one pass over `other_grunts` rather than iterating `on_screen_enemies` twice.
-`tests/ai/test_jack_wiring.py`'s `RankingTests` pins it:
-`test_he_outranks_walking_to_a_plain_grunt_no_closer_than_him` (a grunt
-110 px out against a 90 px Jack still loses to the engage) and
-`test_yields_to_a_meaningfully_closer_grunt` (a grunt 20 px out against the
-same 90 px Jack wins). Not yet measured live or with `jack_fight.py`, which
-has no mixed-enemy mode to measure it with (**Testing the AI against a
-boss**'s own "no 'real waves' mode" rule is about isolating a *boss* fight
-from the street sweep, but the same isolation is why this exact regression
-was invisible to every number in the table above) -- a live run with street
-enemies left alive alongside Jack would confirm the fix the way every other
-change in this section was confirmed.
-
-**Round 6: the factory floor** (user, after a live `jack_fight.py --level 6`
-run: from t≈40 s to 109 s "the actor stood at world x=2557 with the verb
-`WalkToAdvanceStage` every tick and no enemy on screen", then lost a life with
-no attacker at x≈2474 while the logged clock read 55, and took four 20-point
-hits from a type-`$42` object; "Find out why ..., fix it in autoplay with unit
-tests, and document the causes"). Three causes, and none of them a pit:
-round 6 has no hole at all.
-
-- **What a collision class is, is the round's.** The class map holds a
-  nibble per 8x8 cell; `sub_00019BD8` points `$FFFC34`/`$FFFC38` at the
-  round's own kind and surface tables (`$19C04`), and `sub_0000AD30` reads a
-  point as `kinds[class]` when the probe's z is at or below
-  `surfaces[class]`, else as nothing (z grows downward; a standing player's z
-  is its floor's surface, `$3E78`). Under the feet (`$3D34`) kind 0 is no
-  floor -- a fall until `$358C` takes a life at z `$1C0` -- 1 floor, 2 and 3
-  floor carrying the player +1/-1 px an update (`$3E4A`/`$3E52`). Ahead of
-  the mover (`$3C92`: 8 px along its X velocity, on its own lane, 8 px above
-  its feet) any floor that high undoes the whole step: a wall. Round 6:
-  class 0 no floor, 1 the street (z 160), **2 floor at z 0 -- 160 px of
-  machine housing**, 3 and 4 the belts. Rounds 1-5 share one table, in which
-  0, 3 and 4 are all holes; in round 7's, 2 and 3 are walls. `hazards.py`
-  took class 0 for the hole and every class from 2 up for a "barrier" in
-  every round -- round 6's belts were barriers, rounds 1-5's classes 3-4
-  floor. It reads the transcribed tables now (`hazards.FLOOR_TABLES`,
-  `floor_kind`, `is_hole_class`, `is_wall_class`), and its scans start on a
-  cell edge (a window starting mid-cell reported each region up to 7 px off).
-- **The stall was a housing the router could not see.** `floor_barriers` was
-  built on every snapshot and read by nothing in `ai/`. The first housing past
-  Bongo's arena covers lanes 0-63, its left edge at x 2512 on lanes 0-7 and 8
-  px further right per row down to 2568 on lanes 56-63, its right edge at 2680:
-  on lanes 56-63 the probe meets it from x 2560 -- the report's 2557, one row
-  above free floor. `WalkToAdvanceStage` planned straight RIGHT (the route
-  "reached", nothing in its way) and `$3C92` undid every step until the clock
-  ran out. Not a scroll lock: after Bongo the camera scrolls to 2752, and the
-  reproduction, which happened to take lane 87 there, walked straight on.
-  Walls are `Wall` tokens now (`observe`, from `floor_barriers`) and solids for
-  every routed verb (`navigation.wall_obstacles`: the cells grown by the
-  probe's 8 px on X, restated for the body like a prop's point rule).
-  `find_collision_barriers` reports them exactly -- one rectangle per run of
-  cells along a row, merged down the rows while the run keeps its extent --
-  because the housing's bounding box covers the floor its steps leave free,
-  and an actor standing there, centre inside the box, has the whole obstacle
-  dropped by the path finder. `tests/ai/test_round6.py` walks Blaze from
-  (2530, 60) under the ROM's own probe: blind to the housing she stops at
-  2557 with over 100 steps undone; with it she goes under.
-- **The life was the round clock, and the harness could not tell.** Each
-  section resets the clock to 50 (`reset_wave_timer`, `$195F6`), a unit every
-  90 frames -- about 55 s of a turbo-4 run. At 00 the time-over (`$10976`)
-  freezes every object for 255 frames, then writes **55** to the clock and
-  takes 80 from the player (`$109DE`) on the same frame; the respawn
-  (`player_spawn_or_respawn`, `$1E0E`) puts the player at `cam_x` (lane 104 in
-  round 6) and drops it in. So the loss is logged with the clock at 55 and,
-  once respawned, at the camera's left edge -- 2474, 83 px behind where the
-  actor stood. `jack_fight.py` now watches the time-over byte (`$FFFA49`,
-  `mm.ADDR_TIME_OVER_SEQUENCE`) and files a loss within 15 s of it as
-  `round_clock`, with the tick before it (`clock_before`, `p1_before`): "the
-  clock only if it reads 00" could never fire.
-- **The `$42` object is a drop press** (`ai/press.py`, from `sub_00007A6C`):
-  six on lane 112, the bottom of the street, at x 1832, 2632, 3688, 4520, 4776
-  and 4904, 96 px up. Armed until a player's X is in `(x - 48, x + 96]` (any
-  lane), it shakes 11 updates and falls -- 2 px an update, half a pixel more
-  every update -- and every update of the fall tests two boxes against both
-  players, 20 damage and a knockdown: `$F4`, 16..56 px ahead and 8 lanes above
-  to 40 below it, and `$EA`, 48 px behind and **12 to 48 lanes above** it.
-  Each is 16 px tall at the press's own height, so only the last ~6 of the
-  fall's 16 updates reach a standing body; then four bounces, 50 updates
-  down, the climb, 50 up, armed again, and none of that tests contact.
-  Catalogued as a projectile, it came through `projectile_threatens`'
-  zero-velocity branch -- within 24 lanes of its own lane -- while `$EA`
-  reaches 48 lanes up: both hits in the reproduction (x 1811 lane 71 under
-  the press at 1832, x 4503 lane 87 under 4520) were `$EA`, from 25-41 lanes
-  above. It is its own kind now (`"hazard"`, a `Press` token, `ATTACKING` on
-  the map while it shakes and falls): a committed press's zone -- shaking,
-  falling, or armed with a player already in its window -- is a solid to the
-  router (`navigation.press_obstacles`), and an actor already in one walks out
-  the soonest way (`execute._press_escape_mask`, after the pit escape: every
-  direction played at the character's walk, with the lane band, the camera
-  clamp, walls and pits refusing steps). Armed with nobody in its window it
-  stays walkable on purpose: the window starts where `$EA` does, so a walk
-  kept out of the zone would never set it off and would wait on it forever.
-- Not modelled: the belts. At +-1 px an update they slow a walk (Blaze's is
-  3.25) and carry a standing actor, and nothing measured has needed more.
-
-Live, `tools/jack_fight.py --level 6` (Blaze, turbo 4, no food, no police,
-only Jack kept; one run each, so a direction, not a score):
-
-| | press hits | lives lost | notes |
-| --- | --- | --- | --- |
-| before (the report) | 4 (80) | 1, the round clock | 70 s at X 2557 against the housing |
-| before, `stage_walk_diag.py` | 2 (40) | 0 | took lane 87 under the housing; both hits `$EA`, 25-41 lanes above the press |
-| walls, press zones, the escape | 1 (20) | 0 | Souther pair in 88 s; a crossover in a hold on the Jack landed under the press at 4520 and the back hold kept the actor there |
-| + no crossover or jump landing in a live press's reach | **0** | 0 | Souther pair in 92 s, no hit of any kind; the Jack dead 11 s after he appeared |
-
-`tools/stage_walk_diag.py` is the trace that found all this: every tick's
-position, held mask, verb, route, camera bounds, class under the actor,
-time-over byte and object census, plus the class map whenever it changes.
-
-**The press hits under `WalkToAdvanceStage`** (user, 2026-10-07: a swept
-`stage_walk_diag.py --level 6 --kill-street-enemies` took six 20-point press
-hits before the Souther pair, at dca92bf and at 05c3993 alike, every one with
-`WalkToAdvanceStage` winning and the actor 50-60 px left of the press, 7-30
-lanes above its lane). The zero in the table above was one run's luck; the
-zones were right all along -- the ROM's `$F4`/`$EA` records at `$1A68E` read
-x 16..56 / -48..0 and lanes -8..40 / -48..-12 (`$1AB8E`), both 16 px tall,
-exactly `press.DROP_BOXES` -- and `sub_0000AB24`/`$AB88` overlap them,
-inclusive, with the player's cached body box (`+$70`, `player_cache_boxes`).
-Replayed offline (`--raw` + `snapshot_replay.py`, the real `AgentLoop`), all
-three hits of the reproduction were one sequence:
-
-1. The walk crosses the trigger on `$EA`'s lanes and the press commits with
-   the body in the zone -- by design (the window starts where `$EA` does).
-2. `_press_escape_mask` backs the actor out left -- after six ticks holding
-   nothing: it went through `_hold_steered`, whose axis ramp takes
-   `2 * AXIS_RAMP_TICKS` ticks from one edge to the other.
-3. Clear by *this frame's* box. But the body box is the frame's: Blaze idle
-   facing right spans +2..+12 of her origin, idle facing left -12..-2,
-   walking -5..+5 (Axel's idle 0..+13, Adam's -5..+7, mirrored facing left;
-   `controls-and-input.md`). Stopped facing left at 2573, her box ended at
-   2571, 9 px short of the zone from 2580; the router, planning with that
-   box, sent her RIGHT, and the turn put the box at 2572..2582 as the press
-   came down (hits at x 2574, 3630, 4462 by the presses at 2632, 3688, 4520).
-
-The zone is now tested against the **standing envelope** --
-`press.standing_envelope`: the current box and `STANDING_REACH_X` (Axel 13,
-Adam 7, Blaze 12) either side of the origin -- everywhere a press is asked
-about: the router (`navigation.press_obstacles` grows each zone by what the
-envelope adds to the moving body, `press.zones_for_body`, so body-vs-grown is
-exactly envelope-vs-zone wherever the route goes), the escape (out means the
-envelope out), and `lands_in_reach` (the jump landing and the crossover pass
-the origin they set down at). The escape holds its direction **at once**
-(`VirtualGamepad.snap_x` + `hold`, not the ramp).
-
-That left the verbs that do not route. Live, after the first two fixes, the
-press at 4520 re-armed with the actor in its window at the camera's right
-edge, a Garcia came on, and `EngageGrunts` held DOWN-RIGHT toward him: the
-body went into `$F4` (from lane 101), the escape held UP the tick after, the
-plan DOWN-RIGHT again, and the box landed on the third round of that (x 4576,
-twice in four runs). `grunt_plan`'s rollout takes a solid as a wall that
-*undoes* the step, so a step into a press's zone cost it nothing -- the same
-as standing still -- while the ROM lets the body walk in. Two changes:
-
-- **The pad every verb drives keeps off a committed zone**
-  (`execute._press_safe_gamepad`, wrapped around the partner guard): a held
-  or pressed mask whose walk, `PRESS_GUARD_UPDATES` (2) updates on, would put
-  the envelope in a zone loses its lane bit or its X bit, whichever leaves a
-  clear step, or every direction (buttons pass). Not airborne, not holding a
-  body, not for a `Dialog`, like the partner guard.
-- **A planner that tests the origin alone gets the zones in point form**:
-  `nav.solid_obstacles(context)` with no body (`grunt_plan`'s solids) used to
-  hand over the raw body zones; `press_obstacles` now returns
-  `press.zones_for_origin` -- each zone grown by the X reach and the body's
-  +-8 lanes, so the origin strictly inside is exactly the envelope over it.
-
-Tests: `tests/ai/test_round6.py`'s `PressEnvelopeTests` and the `_Walker`
-carrying Blaze's ROM boxes (`test_standing_where_the_escape_left_her` hits on
-the old code).
-
-Live, `stage_walk_diag.py --level 6 --kill-street-enemies --seconds 300
---poll-ms 16` (Blaze, `--turbo 2 --silent`, food and police off; the press
-`$42` is the attacker's type on the hit tick):
-
-| run | code | presses set off | press hits | other hits | lives lost | round |
-| --- | --- | --- | --- | --- | --- | --- |
-| the report | dca92bf / 05c3993 | -- | 6 (120) | -- | -- | -- |
-| before 1 | 05c3993 | 6/6 | 3 (60): x 2574, 3630, 4462 | 0 | 0 | 113 s |
-| before 2 | 05c3993 | 6/6 | 1 (20): x 1774 | 2, the Souther pair | 0 | 120 s |
-| envelope + snapped escape | | 6/6 | 1 (20): x 4576, `EngageGrunts` | 3, the Souther pair | 1, the pair | 121 s |
-| + point form (3 runs) | | 6/6 | 0, 1 (x 4576 again), 0 | 2 / 0 / 3, the pair and a Garcia | 0 | 110-118 s |
-| **+ the press guard (final, 3 runs)** | | 6/6 | **0, 0, 0** | 1 (8, a Garcia) / 0 / 0 | 0 | 107-113 s |
-
-Not measured: Axel or Adam (their reaches are the ROM's idle boxes, not a
-live trace), two players, and round 6 with its street enemies left alive
-(`EngageGrunts` under a committed press is covered only by the swept runs'
-stragglers and the unit test). The pair's hits come and go run to run; no
-press is armed near it (x 5160+, the last press's window ends at 5000).
-
-**HakuRo: rising from below deck (user, in Portuguese): "No nível 5 há um
-bug que a AI fica presa num inimigo que é detetado (e bem), mas está por
-debaixo do chão do estágio (o estágio é num barco e o inimigo sai a
-saltar), a IA fica presa a tentar dar murros no inimigo, mas este ainda não
-está disponível."** Reproduced at round 5, wave 3 (0-indexed, the 4th
-wave). The enemy is **HakuRo, type `$25`** -- an earlier attempt at this
-bug misidentified it as Nora (type `$26`, symbol `"N"`; HakuRo is `"H"`,
-`ai/tokens/enemy.py`'s `HakuRo(Grunt)`, types `$25`/`$2A`), the numerically
-adjacent slot in `object_catalog.py`. This capture confirmed HakuRo on
-every row (`type: "0x25"`).
-
-The ROM fact (full decode, `StreetsOfRageRecompilation/ai-analysis
-/enemy-ai.md`, "HakuRo: rising from below deck"): `haku_ro_type25
-_dispatcher`'s state `$13` handler (`$0000E952`) makes the object visible
-and adds a fixed `$34` (52px) to its elevation (`+$18`) the moment the wave
-activates it, then **does not touch elevation again on any subsequent
-update** until `cam_x+$80` (or `+$100`) reaches the object's own X -- a
-literal early return every tick until then. Nothing else in the ROM scrolls
-the camera except stage-forward player progress, so an AI that parks itself
-in front of the (fully visible, fully ordinary-looking) frozen HakuRo and
-keeps attacking it never advances the stage, the camera never scrolls, the
-gate never clears, and the enemy never actually rises: a genuine ROM-native
-deadlock, not merely a slow animation. Live capture
-(`tools/hakuro_emerge_diag.py`, round 5 jumped to directly with every other
-ordinary family swept, `--turbo 2`) measured three of five wave-3 HakuRo
-frozen at exactly `world_z=212` -- bit-exact, zero jitter -- for the entire
-33+ second capture window, while the real pipeline repeatedly issued
-`WalkToNearEnemy`/`MeleeWeaponAttack` at them; 212 is precisely 160 (the
-round's own base street surface) + 52, confirming the decode against the
-running game. `phases.py` has no per-type table entry for HakuRo at all, so
-state `$13` decodes as `CombatPhase.UNKNOWN` -- not one of
-`should_ignore_as_target`'s phases -- so nothing already in the pipeline
-excluded it from targeting.
-
-The fix does not touch `phases.py`: `Enemy.world_z` (`tokens/enemy.py`,
-+$18, now threaded onto every ordinary enemy and boss the same way
-`observe.py` already threaded it for Jack alone) is read by a new
-`reach.enemy_still_emerging` predicate against `hazards.base_floor_z`
-(`hazards.py`, the same round's-own-street-surface reference
-`is_wall_class` already measures a raised class against) and wired into
-`reach.live_enemies` as a fourth exclusion alongside
-`should_ignore_as_target`/`is_defeated`/`in_targetable_lane`. Deliberately
-**generic**, not HakuRo- or round-5-specific: the ROM fact behind it (a
-body's `world_z` *is* its floor's surface once landed) holds for any
-ordinary enemy in any round, and a `Boss` never populates `world_z` (it
-tracks its own elevation as `ground_z`/`vel_z`), so the predicate is always
-false for one. Once excluded from `live_enemies`, the frozen HakuRo also
-stops blocking `could_walk_to_advance_stage` (`decide._advance_blocking
-_enemies` iterates the same list), so the AI naturally resumes walking the
-stage forward -- which is exactly what satisfies the camera gate and lets
-the ROM's own handler finish the rise. No extra plumbing was needed for
-that half: it falls out of the existing stage-advance gate reusing
-`live_enemies`.
-
-Verified live, before and after, on the same wave-3 scenario
-(`--turbo 2 --poll-ms 16`, `--kill-street-enemies`-equivalent
-`--only-enemy hakuro`, a hard wall-clock backstop and an instant
-`level_index` stop on every tick): before the fix, wave 3 never progressed
-in over 33s of capture (hakuro count held at 5 the whole time); after, the
-same wave completed cleanly in ~27.5s (hakuro count 5 -> 3 -> 0, wave
-advancing to 4), with `WalkToAdvanceStage` appearing prominently in the
-verb log and the previously-frozen slots' later `JumpAttack`/
-`MeleeWeaponAttack` verbs landing only once their own `world_z` read back
-at the floor -- confirming the gate does not over-suppress a HakuRo that
-has actually landed. Unit coverage:
-`tests/ai/test_reach.py`'s `EnemyStillEmergingTests`.
-
-**The street enemies: Garcia, Signal, HakuRo and Nora** (user, in Portuguese:
-"os inimigos Garcia, Nora, Signal e HakuRo, podem ser melhorados, os maiores
-problemas da AI neste momento são com estes inimigos"; then "a IA não é muito
-inteligente quando os inimigos Garcia têm uma faca na mão. Um inimigo com uma
-faca na mão pode atacar a personagem controlada simplesmente 'tocando' dela";
-and mid-work: "um dos problemas é que a IA desloca-se para o alcance de um
-inimigo sem 'pensar' que o inimigo vai lhe dar um murro logo que estiver ao
-alcance"). The bosses' recipe, applied to the ordinary enemies: a ROM model
-of every street type (`ai/grunt.py`), checked in lockstep, and a lookahead
-over all of them (`ai/grunt_plan.py`) that owns the fight while one is near
-(`EngageGrunts`). The full decode is in
-`StreetsOfRageRecompilation/ai-analysis/enemy-ai.md`, "The street enemies,
-state by state"; what the AI rests on:
-
-- **Contact order.** `$AA34` tests the registered attackers first (a swung
-  weapon: a knockdown), then per player `$AAA0`: the player's box on the
-  enemy's body -- a strike, or with no damage the *hold* -- and only when
-  that box misses, the enemy's box on the player's body. A walking box
-  already on his body takes the hold through his own attack.
-- **The jab trigger** (the user's "sem pensar que o inimigo vai lhe dar um
-  murro"): Garcia `$22`/`$21` test box `$12` (0-40 px ahead, +-16 lanes) on the
-  target's body after every approach, wander and stand update, and the
-  punch's first frame is already the jab. Walking in along his lane is his
-  jab, never the actor's hold (the walking box reaches 19 px). A Garcia
-  *lying in wait* (`$22` state `$12`) gets up the moment the target is within
-  80 px, and his first approach update is that test.
-- **The knife** (the user's "tocando"): Garcia `$20`'s entry run (state `$0C`,
-  personality 1 -- rounds 4-7 only, see the census below) carries his
-  whole body as its attack box at 5 px an update; the stab opens with it too.
-  The held knife itself never tests contact. Beyond 96 px on his lane he
-  *throws* it: 16 px an update, and its box spans +-20 lanes -- far too wide to
-  step off in its flight. The flying knife used to reach the AI as a free
-  `Weapon` on the floor (`WalkToWeapon` could chase it, `ProjectileSidestep`
-  never saw it); an enemy's is a `Projectile` now (`observe`,
-  `grunt.is_enemy_knife_in_flight`) and a `KnifeSim` in the plan, the
-  actor's own is nothing at all.
-- **The bat/pipe** Garcia `$23` swings box `$18`, 24-72 px ahead, from 64 px
-  away after a 9-update wind-up. **Signal**'s touch is *his* hold on the actor
-  (`$E7B0`), his slide has no body. **HakuRo** dashes to 56 px short at 4.5 and
-  strikes 0-44 px ahead at full height; he walks to a point kept off the
-  actor's spot, so chasing him keeps him away (a round-1 run lost a life to
-  the clock after 43 s of it). **Nora**'s whip is box `$22`, 32-80 px ahead,
-  frame 2 of its animation -- nothing inside 32.
-- **The player's swung weapon**: `$5FC8` places the weapon per character and
-  frame, its box (`$FC`/`$FE`: +-24/+-20 lanes) out on a live frame --
-  Blaze's pipe reaches 34-88 px ahead on updates 4-6 after B (frame times
-  from `$3A30`, rows 9/10).
-- **The actor's own body moves when it strikes.** `$4140` caches the frame's
-  body (`+$70`): Blaze's punch stands it 14-29 px ahead of her origin (idle:
-  2-12), a knife stab 11-23, the pipe 10-31 (`grunt_plan.PUNCH_BODY`,
-  `SWING_BODY`, from the sets at `$1F20` and the player shape table). A punch
-  thrown at a Garcia 60-70 px out walks her body into his jab trigger -- the
-  round-2 hits after a knife stab were exactly that, jabs "from 59 px".
-- **A grab contact is the player's to accept** (`$3266`): facing each other
-  it is the front hold, facing the same way only with the enemy ahead -- the
-  walking box still meets a body a few px *behind* the actor's origin, the
-  enemy goes to state 5 and `$A04A` resets him the next update. The plan once
-  "grabbed" a Nora like that every other update for 60 s (the round clock took
-  a life); `grunt.takes_hold` now tells a hold from a slip.
-
-Where they are (the one-player records of each round's ELC stream, decoded
-with `StreetsOfRageRecompilation/tools/decompress.py nemesis` from
-`$1B036 (level_elc_offset_table)` and parsed as `game-engine-and-levels.md`
-§5 frames it; knife personality 1 is the body-box run):
+Python project attached to a running `sor` through `MegaDriveEnvironment`'s `megadrive_remote`: a window **observer** plus an opt-in **symbolic AI** that controls P1 and/or P2 through controller input only, **never RAM writes**. Off by default; enabled with `--agent-p1`/`--agent-p2` or the HUD's label.
+
+This file holds rules, user decisions and what the code does not say. Architecture: [`AI.md`](AI.md). Module details: docstrings. ROM decodes: `StreetsOfRageRecompilation/ai-analysis/`. Old run-by-run measurements were removed; rerun the named tool for a current number.
+
+## Layout
+
+User decision (2026-10-30): the AI runs in two places from one copy of the code, the external `autoplay` and inside `sor` (**1 PLAYER AI ASSIST**).
+
+- `ai-code/sor_ai/` is the **core**: `ai/`, the snapshot (`state`, `world_map`, `hazards`, `hitboxes`), `memory_map`, `remote_input`, and `embedded` (P2 as the host runs it, `InProcessClient`). No HUD, sockets or `megadrive_remote`: `tests/test_core_isolation.py` enforces it. `sor --ai-path` points at `ai-code`.
+- `src/sor_autoplay/` is the **observer**: `app`, `hud`, `SoRClient` (`sor_remote`), `reach_gameplay`, `debug_scenario`, `host_flags`, `pathfind_viewer`. It imports `sor_ai`, never the reverse.
+
+Consume `MegaDriveEnvironment/python` as a library; do not copy or fork the wire protocol.
+
+## Commands
+
+```bash
+# From the meta-repo root
+./scripts/run.py StreetsOfRageRecompilation/rom/SOR.bin --debug-utils --port 6969
+./scripts/autoplay.py                 # defaults to 127.0.0.1:6969; --once, --poll-ms 33
+./scripts/play.py --preset turbo      # live AI testing
+./scripts/play.py --preset lockstep   # AI-driven clock
+./scripts/pathfind_viewer.py          # standalone Tk, no host
+
+# Direct
+cd autoplay
+PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay
+```
+
+Use Python 3.11+ with Tk (`_tkinter`); Homebrew 3.13/3.14 here may lack it. Debug scenario options need the host's `--debug-utils`: `--start-level N`, `--only-enemy FAMILY`, `--kill-street-enemies`, `--kill-until-mr-x`.
+
+HUD: **Esc**/**Q** quit (and shut the host down); click "AI: OFF/ON" to toggle. Geometry is saved in `~/.config/sor-autoplay/window.json`; apply it after the UI is built, or the window drops to its minimum size. Translucent squares use `hud._blend_hex`, not `stipple`, which renders opaque on Aqua Tk. A player's range square reuses `ai/reach.py`'s numbers via `hud._display_attack_ranges`; never invent a second set for display.
+
+## Testing
+
+### Live AI testing
+
+**No AI behaviour change ships unmeasured (user's no-regression rule):** measure it live before it goes to `main`. Unit tests and offline sims are evidence, not the measurement; a change measurable only offline goes to a branch and says so.
+
+Never use 1x with the default 33 ms poll: `./scripts/play.py --preset turbo` (`--turbo 2`, `--poll-ms 16`, ~2 frames a tick; `PRESETS` in `play.py` is the source of truth). 4x needs `--poll-ms 8` and a fresh measurement. Results "at turbo 4" recorded before 2026-10-28 ran at 2x (a presentation cap, since lifted). Use `--silent`. Start a live session only when necessary; prefer unit tests for logic.
+
+**Lockstep** (`--lockstep`, `app.py`'s `_lockstep_loop`, `play.py --preset lockstep`, port 6767): the host is frozen while an AI is engaged in play and each tick steps exactly 2 frames, so the stick lands exactly. ~174 fps on the dev machine. Entry cannot latch during a run-to-completion ROM load: a 2 s engage timeout plus retry rides those out.
+
+**Poll timing:** `GameSnapshot.raw["uptime_frames"]` gives `poll timing:` DEBUG lines (`_record_frame_timing`). `kinematics.FRAMES_PER_TICK` deliberately stays the nominal 2: the lookaheads' constants were tuned to it (**The 30 Hz time axis**).
+
+**Testing the AI against a boss (user).** `play.py --preset boss --level LEVEL`, or `tools/boss_fight.py`. Always sweep every other enemy family (`DebugScenario(kill_street_enemies=True)`): a boss measured with waves alive mixes two questions. Do not add a "real waves" mode; it was tried and rejected.
+
+### Scoring a fight without the food
+
+`--no-food` (`tokens.DebugNoFood`) whenever a fight is *scored*: `damage_taken` is a running minimum, and a plan that survives only because it ate is not a plan (user).
+
+**And without the police** (user: "The police is allowed for Souther/Antonio, just don't test with the police on"). `--no-police` (`tokens.DebugNoPolice`) removes `CallPolice`; `boss_fight.py` defaults to it unless `--police`, labs and diags always do. In play it is the last resort: only below `POLICE_HEALTH_PERCENT_THRESHOLD` (or `_LAST_LIFE`), never for a crowd or a boss alone, with one exception:
+
+**The round-end boss draws the police on arrival** (user: only for end-of-level bosses, not intermediate ones). `decide.level_end_boss_is_up`: round 1 Antonio, 2 Souther, 3 Abadede, 4 Bongo, 5 the twins, 6 the Souther pair (once both are up or one has fallen, since one call sweeps both; same wait in rounds 1-4 with two players). Out: round 6's Bongo, all of round 8's rush, Mr. X (the police cannot be called on his level), the duel. Scored 88, whatever the health. Against the twins this is the only call (never a fallback). Stateless: a second special would be called again after the sweep.
+
+### Tick budget
+
+**User: no tick over 2 ms; a slower tick is blindness on a weaker machine.** `app.py` warns on a `slow lockstep tick` (>= 8 ms) with the winning verb, `route_nodes` and `reached`. `tick_bench.py`, `jack_plan_bench.py`, `grunt_plan_bench.py` replay `--raw` recordings.
+
+- `plan_route` tries solids first; a failed proof cannot be avoided by exact means, since it costs the reachable lattice. `NAV_MAX_NODES` and `DANGER_MAX_NODES` are both 10 (user: "para o jogo que é, é mais que suficiente"). At 10 the danger pass finds no detour round a committed reach except a lane change then X.
+- **Replay contexts in a fixed order:** a context is a set, and tie-breaks depend on hash order across processes (`PYTHONHASHSEED=0` is not enough on 3.11), so the tools sort by `repr`.
+- **Presses do not block the tick.** Presses use `QUEUE_PRESS_BUTTONS`, replying at once with the release frame. Two rules: the press **replaces** the latch while it plays, and `AgentLoop.tick` **skips** while `VirtualGamepad.press_pending` (a decision mid-press is about a body the press has not acted on). `_in_scripted_entry` exempts a scripted entry from `_crossing_would_walk_into_the_swing`.
+- **Jack's plan inside the 2 ms budget (user).** ~1.0 ms with one Jack, exact (`plan_world` bounds the second update order; `ExactPlanTests`). Two to four Jacks still reach 2.6 ms.
+- **Cheaper ticks for weaker machines (user: "tenho medo que não corra em CPUs mais fracos").** Exact: `hazards._class_cells` cached on `_scanned_rows` (the buffer's tail is live player RAM), and simulation hot paths inlined (`_hi` is `math.floor`, `Outcome` aliases, `twins._slot_copier`).
+- **The cheaper search (user: A/B it, then ship the combined cut).** `HORIZON` 18, `FIRST_DURATIONS` (2, 6), `FINALISTS` 4: no worse live, ~30% cheaper. `BUDGET_MS` 8 + `STAGE_2_GRACE` 5 means a weaker CPU plays a shorter plan. Still over 2 ms with enemies on screen. Watch round 2 times.
+- **Sealed corridors (user).** `Lattice.sealed_between` proves a wall between start and goal; the search then keeps `SEALED_MAX_NODES` (100). No in-game effect at 10 nodes. An empty route was rejected: the advance walks its best-effort vector to a pit's edge before hopping. If `NAV_MAX_NODES` is raised, re-run `stage_walk_diag.py --level 4`.
+- **What 10 nodes needed: a finish that aims at every arrival.** `search._best_yx_by_rows` gives the cheapest Y-then-X finish over every arrival (`FinishAimTests`). `jump_landing_is_safe` asks for `advance_goal`'s strip at the landing X. Effect: an open-space `WalkToNearEnemy` closes the lane, then X. Measured offline only at the time. Open: the planner's lane band and the executor's (`LANE_EDGE_MARGIN`) differ, so a pit leaving room only in that margin gets an unwalkable route; the fix moves every routed verb.
+
+## Diagnostic tools (`tools/`)
+
+Not part of the AI and never imported by it. Each drives the **real** pipeline; `--help` has the options. They write RAM only through the host's documented `--debug-utils` hotkeys (`DebugScenario`). **Mandatory stop conditions:** do not run it, or any tool that drives a live host, without a real stop condition. Do not commit `.jsonl` runs or recordings (~4 MB a second).
+
+| Kind | Tools |
+| --- | --- |
+| Score a fight | `boss_fight.py`, `jack_fight.py`, `grunt_fight.py`, `twins_2p_fight.py`, `mr_x_duel_fight.py`, `ai_assist_fight.py` (P2 `embedded` or `socket`) |
+| Lockstep model check | `antonio_lab.py`, `bongo_lab.py`, `abadede_lab.py`, `twins_lab.py`, `mr_x_lab.py`, `grunt_lab.py`, `jump_kick_lab.py`, `souther_hold_lab.py`, `souther_pair_check.py` |
+| Offline play | `twins_sim.py`, `mr_x_sim.py`, `jack_sim.py`, `snapshot_replay.py` (rebuilds a `--raw` tick) |
+| Benchmarks | `tick_bench.py`, `jack_plan_bench.py`, `grunt_plan_bench.py` |
+| Traces | `stage_walk_diag.py` (`--raw`), `antonio_diag.py`, `souther_diag.py`, `breakable_diag.py`, `hakuro_emerge_diag.py`, `table_throw_diag.py`, `round2_death_diag.py`, `armed_combat_diag.py`, `hold_timing_diag.py`, `hold_threat_diag.py` |
+
+`round2_death_diag.py` exists because four "lost" runs were the **console resetting**, the debug sweep writing a death into a spawning slot (fixed host-side).
+
+## The AI pipeline
+
+`AgentLoop.tick` (`loop.py`): gates on pause and non-gameplay, then `observe` -> `inference` -> `decide` (`could_*` verbs) -> `partner.do_not_harm_partner` (the only stage that removes verbs) -> `priority` -> `execute`. Only `gamepad.py` may call the pad commands. `reach.py` is the geometry, `kinematics.py` the time axis, `navigation.py` + `pathfind/` the routes (`pathfind/` imports nothing else from the project). `tokens/` holds the classes.
+
+ORIGINAL 3 buttons: **B** attack (also the supplex's finish, throws, `CounterGrab`'s edge), **C** jump, **A** police, **B+C** rear attack (`$322A`); not the naive "A = attack". `HandleMrXDialog` always answers No; `HandleContinueMenu` answers Yes, initials `AI ` (confirm is C or A: `$57D2` treats B as backspace).
+
+Plans follow one shape: a ROM model replayed update by update, checked in a lockstep lab, then a lookahead that owns the fight while generic verbs stand down.
+
+### The hold ends when something is about to land
+
+User: suplex or throw if the enemy is about to attack; calculate exactly how long each animation takes and decide on that. Every hold move locks and ignores fresh edges. Lengths measured with `hold_timing_diag.py`, in frames; **do not re-derive them from animation data**:
+
+| move | Axel | Adam | Blaze | ends in |
+| --- | ---: | ---: | ---: | --- |
+| knee (B) | 17 | 18 | 18 | front hold |
+| crossover (C) | 37 | 37 | 39 | back hold `$66` |
+| suplex (B from `$66`) | 78 | 77 | 78 | free |
+| throw (B+back) | 41 | 42 | 46 | free |
+
+So under a clock the throw is the only ending that fits, and a knee is not started if the attack lands within its 17-18 frames. `reach.frames_until_melee_lands` is the clock, built from `is_incoming_melee`'s predicates so they cannot disagree. Measured with waves alive (`hold_threat_diag.py`): every grace was 5-12 frames, 8 of 8 threatened decisions threw, 0 knees.
+
+## Behaviour: rules, ROM facts and open items
+
+`Enemy`/`Boss` details not here are in the module and `ai-analysis/enemy-ai.md`. Unless stated, "scored" means Blaze, food and police off, a fresh `--turbo 2 --silent` host per fight.
+
+### Playing with a partner
+
+**Never hurt the partner** (user: "it should never hurt it's partner!"). Covers holds, not only strikes: walking into the other player takes
+a hold (`$4478`, `$3266`, `+$4C`). A hold on the partner offers only `ReleasePartner`; `partner.do_not_harm_partner` withdraws hold moves and
+`CounterGrab` on them. `execute._partner_safe_gamepad` strips any walk whose box would reach the partner within the tick, **before** it reaches the
+link; `navigation.partner_obstacles` routes round them. Not filtered: the pit escape, A/B/C presses, a hold's own directions, airborne ticks, `Dialog`.
+`$4478` grabs only when `$45D4` reads 1 for both players (idle, walks, armed ground; jumps hit, never grab). Walking box: Axel 0..16, Adam 0..20, Blaze
+0..19; idle has none, so standing never grabs. **A lane walk grabs too.** Not run against a human.
+
+**Items the partner needs more** (user). `partner.item_is_the_partners`: food only while the AI is strictly the hurter; a weapon unless the partner is
+strictly worse armed (a tie is the AI's to try); a 1UP to whoever has fewer lives. **Any grounded B within ±20 px X, ±16 lanes of an item is a pickup**
+(`$3136`, `reach.item_a_b_press_takes`), so the partner pad turns it into a step off (`execute._redirect_b_press`).
+
+**Leave the partner's fight to them** (user). `reach.partner_is_engaging` + `partner.PartnerFightTracker` (`PartnerFight` tokens, remembered 45 frames);
+`do_not_harm_partner` withdraws attacks and walks at that enemy, except **self-defence** (`reach.is_incoming_melee`) and a kick already airborne.
+With only their enemies left, the AI waits.
+
+**The enemy beside the partner is theirs to walk to** (user; confirmed live 2026-10-31). `partner._walks_to_the_partners_nearer_enemy` withdraws
+that walk (`PARTNER_NEARER_MARGIN` 24 px) while another walk's enemy is nearer the actor than the partner.
+
+**Following a partner who is ahead** (user). With a partner ahead, `CatchUpPartner` replaces `WalkToAdvanceStage`, at a reasonable distance. "Ahead" is the
+round's (`Stage.direction`: right on 1-6, left on 8, none on the elevator; `decide.partner_lead_x`, `_partner_ahead_of`). Produced under the advance's gates
+while the partner is more than `CATCH_UP_DISTANCE_X` (64 px, clears the grab reach of 33) ahead; closer, the AI waits. An AI ahead of its partner still
+advances (the user's rule names only the partner being ahead). Not run live against a human.
+
+### `WalkToAdvanceStage` only when walking can scroll, and `Centering`
+
+User (2026-10-31): produce `WalkToAdvanceStage` only when it really must walk; `Centering` otherwise. Scroll test, ROM `$6A6`: `$FFE01A` - `$FFE01E` under 4 is
+locked (wave gate or arena; `CameraRange.scroll_open`, `decide.scroll_is_open`). The wave flow opens a gate, not the player's position.
+
+- The advance stands down while the scroll is locked. Never walk to the screen edge at a locked gate.
+- `could_walk_to_near_enemy` takes on-screen enemies only (user: if off screen, Centering to lure them out). Off-screen enemies do not hold an open scroll back (user: the AI got stuck Centering when the level asked for a little advance).
+- `decide.could_centering`: free to walk, any idle tick, not while advancing or with a partner ahead; X only, own lane, within 16 px of `centering_point_x`: camera centre, or with a `Partner` **a third of the screen from the back** (user). Lowest tier. **Never in Mr. X's office** (user).
+- `$18F5C` (two players): the camera scrolls with the lead past camera + `$B0` and the rear at camera + `$90` or more, so a centred leader never scrolls and a rear AI at the third holds the camera until `CatchUpPartner` moves it. Round 8 mirrors this.
+
+User accepted it live in AI Assist (2026-10-31); no scored A/B. `WalkToScreenCenter` was removed (user: "é inútil"). Watch: hits at locked gates.
+
+### The jump kick, measured
+
+User: must be predictable, and used everywhere. `ai/jump_kick.py` reproduces `tools/jump_kick_lab.py`'s lockstep traces bit for bit. **Every object moves at 30 Hz** (`$AD8E`
+waits a VBlank): crouch 5 updates = 10 frames, every ROM rate is per update. Kicked flights land 67.1 / 77.3 / 84.0 px on (Axel, Adam, Blaze); Blaze's box opens 6 updates late.
+The box clears a standing body near the apex and reaches it up to ~110 px out coming down. Used by `reach.in_jump_attack_band`, `do_not_harm_partner`, `execute._hold_back_kick`,
+`partner_obstacles`, and a multi-hit bonus.
+
+**The 30 Hz time axis: fixed, measured, not kept.** `kinematics` treats ROM per-update velocities as per 60 Hz frame, so projections run 2x fast. A root fix (`OBJECT_UPDATE_FRAMES = 2`)
+was worse in 16 Antonio fights (65 hits vs 47) and reverted. Horizons are tuned to the 2x projection, so a retry must retune them as a whole.
+
+### Holding a boss
+
+User: the pros grab and suplex; avoid the kick. **A hold's link is `+$4C`** (`MapEntity.contact_slot`), with the `$60-$6F` family and the C crossover `$76`/`$80`
+(`is_holding_enemy`), not `+$60`, which is the weapon link. `reach.held_enemy` names the body. **A held later boss reads primary `$04`**, as his hit reaction, so
+`priority._target_is_in_hand` replaced a `GRABBED` gate. The crossover is 28 ticks, ignoring edges. `reach.grab_reasons` returns nothing while holding (`$AAA0`'s rule).
+Item detours are refused while his kick gate covers the actor (`antonio.kick_gate_open`). `tools/antonio_diag.py` logs each candidate per tick.
+
+### Antonio: the ROM model and the plan
+
+User: think of a sound strategy first; "A AI está a depender muito da chamada da polícia!"; do not eat the arena's food (players need it later), so `decide._food_is_spoken_for` drops
+`HealthPickup` while he lives. `ai/antonio.py`, `EngageAntonio`, decode in `ai-analysis/enemy-ai.md`, "Antonio". **Take one hold, and never give him back a turn**, reached by a **lookahead over his own AI**:
+
+- Kick gate `< 8` above his lane, `< 16` level or below; so **8-16 px above his lane** is kick-proof and grab-ready. `$AAA0`: the walking box on his body comes first, so a walk in takes the hold even through a kick.
+- `plan_engage`: nine sticks, held 2 updates then a tail, or the whole horizon (14 updates), each under both update orders, scored by the worse. His kick cannot be answered reactively (every hit within two ticks of primary `$02`; a hop needs ~45 frames).
+- `BoomerangSim`: launched 64 px ahead at 14 px/update, dives, homes back on the street's top; a fresh one leaves the old one flying. `HitAntonioBoomerang` is unarmed only (a swing is ~26 committed frames).
+- Hold: two knees, `ReleaseToRegrab` (lands 40 px ahead), back in, a finisher only if it kills.
+- `state_machine_engage_antonio` holds the stick **unclamped**: clamping at the camera edge removed the walk into him.
+
+Scored with `boss_fight.py --level 1 --boss-type 0x56 --no-food`: 0 hits for Blaze and Axel, 0.2 for Adam, 2.2-9 s (previously 3.25 hits, 13-32 s). Checked by `antonio_lab.py`.
+Open: the corner: Adam pinned at the camera edge over seconds, beyond the 14-update horizon. Unmeasured: two players, the boss rush, waves alive.
+Taught: the jump kick as a plan is slow (45 frames) and is where hits land; lane offset alone is not safety.
+
+### Souther: the ROM model and the plan
+
+User: grabbing him and dealing damage repeatedly is the strategy; prefer deterministic behaviour; no police or life items in tests. `ai/souther.py`, `EngageSouther`, decode in `ai-analysis/enemy-ai.md` and `controls-and-input.md`.
+
+- **Commit gate is side-dependent:** `+$52 < $0A` above him, `< $1C` otherwise. So 11-15 px above is out of the gate and in grab range.
+- The claw is his own attack box (0..86 px forward, lane -10..+24); type `$98` has none. **Grab beats hit** (`$AAA0`, never reads the weapon).
+- **He never escapes a hold, and a release is the best move.** Holding back counts `+$63` from 3, dropping on the ~8th frame, 32 px in front: an immediate re-grab. One crossover per hold (`+$4B` bit 7).
+- Plan: corridor 15 px above or 38 below, walk in. Knee, knee, `ReleaseToRegrab`, back in; finisher only if it kills (third knee at 3, suplex at 5). Generic verbs and items stand down; police is panic only.
+
+`boss_fight.py --level 2 --boss-type 0x55 --no-food`, lab `souther_hold_lab.py`: 0 hits in 16 Blaze fights, 2-4 s (old plan: 2.15 hits, 17-27 s). `souther.WALK_BOX_REACH_X` keeps 14 for Axel and Adam (ROM: 16, 20) until a wider walk-in is measured.
+
+Taught: measure in **hits over many fights** (identical code spread 0-12; a death counts +100 in `damage_pct`). Aligned on his lane at 24-104 px lost the game every fight. The police special freezes the caller ~5 s (`$16AEC`). `reach.in_targetable_lane`, `in_visible_screen`, `phases.boss_phase` (`$05` is the lethal gate, visited on every hit).
+
+### Round 6: the Souther pair
+
+User: two Southers at once are a problem. `ai/souther_pair.py`; rounds 2 and 8 do not reach it. Facts: **a holding actor is a target** (`$179F8`), and the hold roots it; a target facing away is **rushed** at 4 px/update, one facing him gets the band-restore; every `$78` updates an attack run. **`Boss.is_defeated` reads 0 as dead** for bosses, which test `<= 0` (ordinary enemies are signed).
+
+Plan: one engage (`pick_target`); before each knee, replay the free one (`update`), and if he commits within a knee plus a throw (`commits_within`), **throw** the body (a release lands it inside its gate); a knee that kills is never traded; leave his live claw by lane. Rejected, measured worse: a lookahead over both, and a safety filter on the stick. The hold taken early is the protection.
+
+Scored: 1.75 hits a fight, 0 games lost in 12 (before: 7.6, 3 of 9). Checked by `souther_pair_check.py`. Left: hits through the gate on the converge and at the opening; lanes `$02`-`$0D` untried.
+
+### Bongo: the ROM model and the plan
+
+User: efficient in time and life; no police or recovery items in tests. `ai/bongo.py`, `EngageBongo`, decode `ai-analysis/enemy-ai.md`, "Bongo".
+
+- **He never touches anyone.** Only the flame, type `$97`: 32 on Normal, grows over 12 updates to x +4..+76, every lane from 14 above him to 36 below. It has no body box, so **a holder is not spared**: a front grab within 12 updates of a launch is the flame's hit (`_grab_is_burnt`). A back hold faces him away.
+- Wind-up 21 updates from `$B0` (176 px) on X, the charge never re-aims and ends at a screen edge.
+- Safe during a charge: **15-16 lanes above him** (exact, no lane margin), and behind once 9 px past. Before it: level on the bottom clamp.
+- Plan: lookahead over his AI and the flame (44 updates, 5-7 ms); tail phases (`engage_mode`); hold is `souther.hold_step`.
+- **The round's grunt** (user: do not focus on it, prevent imminent attacks; it respawns): `EngageBongo` falls from 76 to 19 under its committed strike unless `bongo.charge_is_pressing`. Nothing walks to it. A blow from behind during a hold gets Bongo thrown into it (Bongo only). A Garcia punching over the held Bongo from in front is taken.
+
+`boss_fight.py --level 4 --boss-type 0x57 --no-food`, `--idle-seconds 3` exercises the rest; lab `bongo_lab.py`. 0 flame hits for all three, 3.3-4.4 s (before: 7 hits, 2 lives).
+
+### Abadede: the ROM model and the plan
+
+User: efficient; same test rules; proposed a *sweet area* against his run. `ai/abadede.py`, `EngageAbadede`, decode `ai-analysis/enemy-ai.md`, "Abadede".
+
+- **Only the run hurts.** His closing punch is untouchable and lands on nobody.
+- **The sweet area is a lane, and it is a grab:** 17-18 lanes off the run's lane (it never re-aims), walking at him, delivers him into a hold. On his lane only a punch gets there first.
+- A punch is 1 point, a knee 2. Plan: lookahead (40 updates, 2-5 ms), tails SWEET/WALK_IN/READY/SET_UP/WAIT. **The punch is the user's move, as a fallback**, only when no rollout holds; thrown in the facing the actor has (**B with a turn on one press is thrown the old way**; the walk is the turn).
+- Hold: knee, knee, release, but only on `reads_the_hold` (state `$B` substate 1). A back hold crosses over, except in state `$D`, where it frees him. `$3266` refuses a hold with him behind an actor facing his way (`Outcome.REFUSED`).
+- The round's grunt (user): Bongo's rule. `phases.boss_phase`: `$0C` death, `$0E` a throw's flight, `$07` the run. Round 8's variant (`script_param`, `$146C4`) is modelled but never run.
+
+`boss_fight.py --level 3 --boss-type 0x30 --no-food`, lab `abadede_lab.py`: 0 hits for all three, 2.4-5.6 s (before: 7 hits, 31 s). The host sometimes stops completing lockstep frames in round 3: `host_timeout`.
+
+### Onihime and Yasha: the ROM model and the plan
+
+User: go to an edge, keep the sisters behind, `RearAttack` when positioned; minimum time, then damage, then reliable; no police or recovery items, even as fallback; "não quero que dê ataques em falso"; "use turbo 2x at max". `ai/twins.py`, `ai/twins_plan.py`, `EngageTwins`; decode `ai-analysis/enemy-ai.md`, and `controls-and-input.md` for the chord.
+
+- Two AIs. The approach twin keeps a lane gap of 32, backflips inside 96 px, and only flying-kicks (16-31 lanes off, inside 112 px, 28 updates). The grab twin walks into a turned back; jumps in only at one facing it.
+- Rear attack per character: Blaze 5-53 px behind, 2 damage; Axel 8-40, 3; Adam a hop, 3. Every live frame knocks down 90 px, 39 updates. Twins have no body box in a backflip or jump-in.
+- Plan: `choose_wall` is the edge away from the grab twin, facing the wall. Hold the approach twin's lane while the grab twin comes. Lookahead scored by the worst of five timings (`SCENARIOS`, because a tick is not an update). `PlanMemory` adds +150 to the last program (a chord to come is never carried). With a kick in the air, only the tail and chord. **A chord that can miss under any timing is dropped, not scored down.**
+- Adam's chord: `could_jump_attack` skips it; armed `$4C` -> `$4E` -> `$40`.
+
+Live, 2x: Blaze 46.6 s, Axel 44.6 s, Adam 32.6 s, no damage; 29 rear attacks, no whiff. The floor is the ~85-update knockdown cycle. `twins_lab.py --check`, `twins_sim.py`, `boss_fight.py` counts `chord_whiffs`. Not built: the boss rush's pair.
+
+**Two players against the twins** (user, verbatim: "Se estivemos os dois na mesma coordenada X -> se eu for o primeiro jogador, vou para a esquerda, se for o segundo, vou para a direita. Senão: O jogador que estiver mais perto da extremidade direita, vai para extremidade direita, o jogador que estiver mais perto da extremidade esquerda, vai para a extremidade esquerda"; without a `Partner` nothing changes). `twins_plan.partner_wall`; a twin targeting the partner (`+$72`) is theirs and is filtered out. `twins_2p_fight.py`: 1 hit vs 17, 26.5 s vs 31.9. Not run against a human.
+
+### Souther's counter to jump attacks
+
+`$162A4` arms `+$79` from the player's jump-attack actions and `$16234` answers inside lane `$12` and X `$78` with the claw, bypassing every gate. So `could_jump_attack` refuses the launch **per actor, not per target**: a hop at an unrelated grunt in that box is countered too.
+
+### Stage walking and props
+
+**Target ranking (user).** `WalkToAdvanceStage` always has the lowest emergency of any verb that still scores.
+Among enemies, a `Boss` outranks an armed ordinary enemy (pickup `$08-$0C`, or Jack juggling), which outranks
+every other grunt.
+
+**First-level breakables (user).** The yellow sidewalk trash can at round 1's first gate is background art, not an
+object; the actor stops there because `$43AA` clamps the player to `camera_x+$20..+$120` until the wave clears.
+Never hold into the camera's walk clamp. `in_smash_range` uses the punch box's own ±8 lane extent.
+
+**Frozen on the edge of the lane band (user).** The lane band bounds the *origin*, the router the whole *body*:
+`world_rect(body=, origin=)` restates the band for the body, or a body at the band's edge starts outside the world
+and gets no route. The wait before a gate opens is the ROM's: the player is held until the wave's spawns are dead.
+
+**Swinging a bat over a booth from too close (user).** A B press beside an item picks it up (`$3136`), and the swing
+`$48` only connects near its peak. `decide.breakable_strike_inner_x` is the swing's inner edge (punch's with no bat or
+pipe). Unmeasured: `MeleeWeaponAttack` at enemies still uses the punch's inner edge.
+
+**Stage-4 pits (user).** The pathfinder is the authority: `navigation.jump_landing_is_safe` gates grounded launches
+(walk round if a route exists; hop only if the landing is solid and no walk reaches), `WalkToAdvanceStage` hops via
+`hop_landing_x` when `plan_route` fails, and the pit override does not run airborne.
+
+**Stage-4 breakable (user).** Props take `$3C6A`'s record, so the wall is nearer than the sprite. A step into the
+prop's wall is what turns the actor (`$3BAE` undoes the displacement and keeps the facing), so the facing nudge's route
+leaves the target prop out of its obstacles.
+
+**Round 4: the bridge, its props and its Jack (user).** Found with `stage_walk_diag.py --level 4`, **no sweep**, replayed
+from `--raw`. Holes x 1664-1800 and 2240-2344 with props beside them. `decide._strike_stand_is_open` asks whether a
+pocket either side lies inside the camera clamp, outside every pit's danger zone and every prop's wall (advance is
+withheld while such a prop is up). `pathfind/search.py` tries an X-then-Y finish (`_best_xy_around`) only once a search
+ended without arriving, so Y-then-X routes are unchanged. `execute._breakable_tie_side` picks the arrivable side. The pit
+escape tests a hole's footprint, not its centre, against the clamp. Round-4 Jack stalemate: his `$07` reset off screen
+loops him back into `$07`, so the wait stays inside `EVADE_CENTRE`, and in `$08`-`$0A` takes the lane next to his set-up
+lane. Live: 5 of 5 reach Bongo in 121-133 s, 0 lives lost. Unmeasured: a Signal stalled behind props.
+
+**A prop's stand no walk reaches (user).** The router's world runs 96 px past the clamp, so it planned round a wall off
+camera and the clamp zeroed the stick, while the rear player also held the camera (`$18F5C`). `_strike_stand_is_open` also
+asks `_walks_to_any`, a flood inside the clamp and band (0.3-1 ms a call, so a walled-off prop can pass the tick budget).
+User accepted it live (2026-10-31).
+
+**Round 8's thrown tables (user).** Type `$45`: state 0 hidden until a camera threshold, then a straight shot down the
+target's lane at 5-6 px/tick (variant 0 never flies); state 1 flight; state 2 the arc. Decode: `ai-analysis/enemy-ai.md`.
+`object_catalog` classifies it by `+$30`; a moving table is a `Projectile` (`ProjectileSidestep` flees, `HitTable` punches
+when too close). `world_map` gives it `+$1C`/`+$20` velocity.
+
+**Round 8's tables at rest (user: destroy them with high priority).** Most never fly. `observe._table_at_rest` builds them
+as `Breakable`s and `priority._emergency_open_breakable` ranks them over enemy walks and plain strikes, under bosses.
+
+**HakuRo rising from below deck (user).** Round 5: state `$13` adds 52 to `+$18` and waits until `cam_x+$80` reaches him, so
+attacking him while he is frozen deadlocks the camera. `reach.enemy_still_emerging` (`world_z` vs `hazards.base_floor_z`,
+generic) excludes him from `live_enemies`, so the stage walk resumes and the ROM finishes the rise.
+
+**Round 6: the factory floor (user).** No holes in round 6. What a collision class means is the round's:
+`hazards.FLOOR_TABLES`, `floor_kind`, `is_hole_class`, `is_wall_class` (class 2 is 160 px of machine housing, 3 and 4 belts;
+rounds 1-5 share a table where 0, 3, 4 are holes; in round 7, 2 and 3 are walls). Walls are `Wall` tokens and router solids
+(`navigation.wall_obstacles`), reported as exact rectangles, not a bounding box. Belts are not modelled.
+**The round clock:** each section resets it to 50 (`$195F6`), a unit per 90 frames; at 00 the time-over (`$10976`) freezes
+255 frames, writes **55** and takes 80 on the same frame, and the respawn puts the player at `cam_x`. So detect it with
+the time-over byte `$FFFA49` (`round_clock` in `jack_fight.py`), never "the clock reads 00".
+
+**The press hits under `WalkToAdvanceStage` (user).** `$42` is a drop press (`ai/press.py`): six on lane 112 at x 1832, 2632,
+3688, 4520, 4776, 4904. Armed until a player's X is in `(x-48, x+96]`, shakes 11 updates, falls; 20 damage and a knockdown
+from boxes `$F4` and `$EA`. Armed with nobody in the window stays walkable on purpose (else the walk waits forever). A body box
+depends on the frame's facing, so zones are tested against `press.standing_envelope`; the escape holds at once (`snap_x`, not
+the ramp); every verb's pad is wrapped by `execute._press_safe_gamepad`; planners testing only the origin get
+`press.zones_for_origin`. Live: 0 press hits in 3 of 3, 107-113 s. Unmeasured: Axel, Adam, two players, waves alive.
+
+### The street enemies: Garcia, Signal, HakuRo and Nora
+
+User: these were the AI's biggest problems; a knife Garcia hits by touching; the AI walked into reach without "thinking" the enemy
+would punch; "A IA tende a fugir muito dos inimigos ... podia ser mais eficiente em tempo". ROM model `ai/grunt.py`, lookahead
+`ai/grunt_plan.py`, verb `EngageGrunts`; decode in `ai-analysis/enemy-ai.md`, "The street enemies, state by state".
+
+- **Contact order:** `$AA34` registered attackers first, then per player `$AAA0`: the player's box on the enemy's body (a strike, or
+  with no damage the hold), and only if that misses the enemy's box on the player.
+- **Jab trigger:** Garcia `$22`/`$21` test box `$12` (0-40 px ahead, ±16 lanes) after every approach, wander and stand update.
+  Walking in along his lane is his jab, never the actor's hold. A lying `$22` gets up within 80 px.
+- **Knife:** `$20`'s entry run (personality 1, rounds 4-7) has his whole body as attack box; beyond 96 px on his lane he throws. A
+  flying enemy knife is a `Projectile`, never a floor `Weapon`.
+- **Others:** `$23` swings box `$18` (24-72 px) after 9 updates. Signal's touch is his hold (`$E7B0`). HakuRo walks to a point off the
+  actor's spot, so chasing keeps him away. Nora's whip reaches 32-80 px, nothing inside 32.
+- **The actor's own body moves when it strikes** (`grunt_plan.PUNCH_BODY`, `SWING_BODY`): a punch can walk it into a jab trigger.
+- **A grab contact is the player's to accept** (`$3266`); `grunt.takes_hold` tells a hold from a slip.
+
+Plan: programs (punch or swing on update 0-5, rear attack, stick held 2/6 updates then a tail) played through every modelled enemy in
+`RELEVANT_DX` (160 px) and every flying knife, under six timings, the last soft (user's "fugir muito"); scored worst + mean/100. Two-staged
+search within an 8 ms budget. `grunt_plan._kept` ends a kept program that has arrived or stopped moving (`$43AA` keeps the fraction, so a
+walk at the clamp never arrives). `generate_verb_tokens` withdraws generic verbs at modelled enemies. Scripted entries (`grunt.ENTRY_STATES`)
+are left to the stage walk.
+
+Scored with `grunt_fight.py`, ten runs: street hits 131 -> 70. Models checked with `grunt_lab.py --check`. `--profile-ms N` prints slow ticks.
+Open: `$20` and `$23` barely recorded; round 4's Jack `$07` stall under real waves.
+
+Census from each round's ELC stream (one-player records):
 
 | Round | Garcia `$22`/`$21` | knife `$20` (pers. 1) | bat `$23` | Signal | HakuRo `$25` (+`$2A`) | Nora | Jack |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -2599,1258 +343,71 @@ with `StreetsOfRageRecompilation/tools/decompress.py nemesis` from
 | 7 | 9/4 | 3 (1) | 1 | 15 | 15 | 5 | 0 |
 | 8 | 6/8 | 3 (0) | 2 | 20 | 12 (+1) | 5 | 2 |
 
-The models replay the recordings update for update (`tools/grunt_lab.py
---check`: Garcia `$21`/`$22` 21,258 updates, Signal 5,164, HakuRo 4,727, Nora
-3,790; every hit, strike and grab predicted). `$20` and `$23` are decoded but
-barely recorded (few in rounds 1-3).
+### Jack: the ROM model and the plan
 
-The plan, `mr_x_plan`'s shape: programs (a punch or weapon swing on update
-0-5, standing or after a walk at a target; the rear attack in the facing the
-actor has, or turned onto a near enemy by 1-4 updates of walking away -- the
-user: "usar um back-attack, que é rápido e tem mais range"; a stick held
-2/6 updates then a tail policy -- 2/6/12 until the cheaper search, below), each played through every modelled enemy
-within `RELEVANT_DX` (160 px) and every enemy knife in flight under six
-update timings -- `mr_x_plan`'s five plus the held stick carried two updates,
-for the live p99 of ~45 ms a tick, the last one *soft* (a hit under it costs
-30,000, not a veto: the user, "A IA tende a fugir muito dos inimigos ...
-podia ser mais eficiente em tempo") -- and scored by the worst plus a
-hundredth of the mean (when every program is a hit under the harshest timing,
-the one that is a hold under the other five wins): a hit (sooner worse) below
-everything, a hold with no other blow reaching the holder before a knee is
-spent, a strike, then the end's distance to the tail's aim and whether
-anything lands on the actor standing there 10 updates on. A rollout costs
-~150 us, so the search is two-staged: every program under one timing (the
-held stick one update on), then the best four under the rest (eight until
-**Cheaper ticks for weaker machines**), over 18 updates (24 then); before that
-the budget cut the list and the strikes at its end were never played. The tail walks to
-the target's X at the walking box's reach from off his lane band, then steps
-in; a lying Garcia is woken from 70 px, 26 lanes off. An 8 ms budget per tick
-(the kept program and the tail first). The kept program (`mr_x_plan`'s
-continuity, +150) ends once its walk is within a pixel of its point, walks
-into the camera clamp or the lane band, or has not moved for two ticks
-(`grunt_plan._kept`): `$43AA` clamps the origin's whole pixel and keeps the
-fraction, so a walk toward a point computed at the clamp never arrived -- a
-(-1, +1) was kept 50 s in round 2's bottom-left corner, 110 px from a knife
-Garcia, until the round clock nearly ran out. Also in: props, walls and pits as the
-ROM tests the actor's own position (`ActorSim.solids`: a planned escape up a
-lane that a phone booth blocked was a hit), the partner (no strike box of the
-plan's may meet their body, their fight is nobody's target) and the scripted
-entries (`grunt.ENTRY_STATES`: the ride in, rising from below deck) left to
-the stage walk -- waiting on one was a 50 s deadlock. HakuRo `$2A` (the
-trio, rounds 3/5/8) is modelled through `$25`'s shared attacks and its own
-charge (`$FB40`); the generic verbs aimed at anything unmodelled (Jack, the
-bosses) are left in place.
+User: handle every state he has, in the least time with the least damage; he does not appear in Stage 1. `ai/jack.py`, `EngageJack`,
+decode in `ai-analysis/enemy-ai.md`, "Jack". The plan: **take the hold from where no axe reaches, keep it until his axes are gone, then spend it.**
 
-`EngageGrunts` (×40) is produced while the actor is free, unarmed or holding a
-weapon it swings (not the pepper), and some modelled enemy in `RELEVANT_DX` is
-on screen or within 96 px; `generate_verb_tokens` then withdraws the generic
-`Punch`, `MeleeWeaponAttack`, `GrabEnemy`, `RearAttack`, `WalkToNearEnemy`,
-`JumpAttack` and `RetreatFromDanger` aimed at a modelled enemy. In a hold on
-one, `could_hold_actions`' grace (knee or throw) comes from the models
-(`decide._grunt_hold_grace`: the first blow on the holder where it stands,
-60 updates out) instead of the 12-frame velocity projection, which a jab
-trigger outruns.
+- His body never strikes: every hit is a type-`$28` axe. Two axes juggled 8 lanes below him, 8-24 px in front. Dropped axes still hurt (`$FED6`).
+- Throws: `$0E` three, `$0B` both juggled after `$0A`'s back-off. Personality (`+$40` low nibble): 0 juggle + aligned throw (rounds 2, 4, 6, 8), 1 retreat + ranged throw (6, 8), 2 jumps (5), 3 juggle walk (5).
+- `$07` faces the target every update, so no "behind him" there. It resets only 80 px past the target; a reset off screen loops back to `$07`. The level's X bound (`$1510`) refuses his step and nothing else, so 88 px behind his walk resets him.
+- Hold: he is placed 32 px in front of the holder (28 from behind) and his axes follow, so a front hold on a juggling Jack is a hit. The pose lags the grab by one update. Knees 2, 2, 3, suplex 5, throw 4. **Only a negative health word kills**: 0 is alive and still throwing.
+- Plan: lookahead over him and every axe (nine sticks, both update orders); punch candidates (the walk is the turn; `$9B88` stuns 24 updates). Aim: out of the throw lane, out of the juggle band (9+ above, 25+ below), into his back; in `$07` wait mid-screen (`EVADE_CENTRE`) in the pocket `POCKET_DY` (13) above him, reachable only from above. `jack.hold_step`: back hold waits for axes; knee, knee, cross over, suplex; near a camera bound the finisher that leaves him closer.
+- Ownership: `could_engage_jack` for every live Jack, 0 health included; generic verbs stand down. `EngageJack` ranks 30 less a point per 40 px plus the armed raise, 72 with an axe at the actor, 5 under another's committed strike **or a grunt >40 px closer** (user: too much priority over more imminent enemies; not measured live, `jack_fight.py` has no mixed mode).
 
-Two infrastructure faults it found on the way. `world_map.RAW_SLOT_TYPES` kept
-raw bytes for Mr. X and the Garcias only, so Signal, HakuRo and Nora never
-reached any model (they do now, with the weapons). And the path finder held
-the tick for up to a second: an unreachable goal explored the whole lattice
-twice (`NAV_MAX_NODES` 4000 against a ~3,600-position lattice), each step's
-sweep re-testing what its two ends already had. `pathfind/grid.py` skips a
-sweep a body at least a step long covers, `search.py` enumerates the goal's
-free arrivals once (none: the search stops at 600 nodes) and memoises its
-Y-then-X legs; the worst tick went from ~1,000 ms to ~40, routes unchanged.
+Scored with `jack_fight.py --level N`. Round 2: 0 hits, 97 s (generic verbs: 13 hits, 105 s). Rounds 4, 5, 6: no life lost to him.
 
-Scored with `tools/grunt_fight.py` (new: `jack_fight.py`'s harness for any
-family, `--family all` for the mixed waves; Blaze, turbo 2, poll 16 ms, no
-food, no police, a fresh host per run; baseline = the code before this work):
+### Mr. X: the ROM model and the plan
 
-| Round | baseline: street hits (lives lost), time | this plan: street hits (lives lost), time |
-| --- | --- | --- |
-| 1 | 8, 12 (0, 0), 94 / 97 s | 6, 6 (0, 0), 87 / 91 s |
-| 2 | 9, 12 (0, 0), 134 / 120 s | 7, 3 (0, 0), 131 / 123 s |
-| 3 | 14, 14 (1, 1), 130 / 133 s | 9, 3 (0, 0), 101 / 97 s |
-| 4 | 7, 17 (0, 0), 135 / 155 s | 5, 11 (1, 2), 168 / 197 s |
-| 7 | 15, 23 (2, 2 -- one a game over), 145 / 189 s | 11, 9 (1, 1), 131 / 129 s |
+User: minimum time and damage, reliably; no police, no recovery items even as a fallback, no attack that can miss; the flag must not kill him or his helpers. `ai/mr_x.py`, `ai/garcia.py` (the user's "Glasia" are type-`$22` Garcias), `ai/mr_x_plan.py`, `EngageMrX`. Decode: `ai-analysis/enemy-ai.md`.
 
-Street hits are the Garcias', Signal's, HakuRo's and Nora's (not Jack's axes,
-not the round clock). Over the ten runs: Garcia 70 -> 57, Nora 37 -> 2,
-HakuRo 20 -> 9, Signal 4 -> 2, the knife 6 -> 2; 131 hits -> 70. Round 4's
-lives were not the street's: in both runs a round-4 Jack (`$27`, whose `$07`
-always goes up) held `EngageJack` in his `$07` legs for 54 and 80 s and the
-round clock took a life (the second run also lost one to his axes). The Jack
-plan is unchanged and runs alone then (nothing modelled on screen); it was
-scored only with `--only-enemy jack`, which is why this was not seen before.
-In the four runs before these (the baseline and an earlier version of this
-plan) he died 5-13 s after he appeared, and one more earlier version stalled
-38 s. Still open.
+`--kill-until-mr-x` (`DebugScenario`, host `Alt+X`) kills ordinary enemies and the boss rush, and stops once a type `$33`-`$35` exists or the offer flag `$FFDE00` was seen.
 
-Found along the way in the same harness's traces: a plan whose kept program
-could outlive its walk (`_kept`, above) stood 50 s in a corner, and the
-versions without the actor's striking body (`PUNCH_BODY`) threw punches into
-jabs from 59 px.
+- Him: under `$80` on X he walks in and lunges (52 px, 8 lanes); further he goes to the gun (eight bullets, 20 each, no body box). Hold: knee, knee, release, about 4 points per 30 updates, and he never acts; 40 idle updates free him.
+- Garcias: two, replaced as they die; 9 health, 8 a hit; four live punch stages. **Off screen the punch is refused** (`$92AC`), so the right clamp is a pocket. Thrown bodies (`$FFFB24`) knock them and him down.
+- Blink: after a knockdown or respawn, 48 updates with no body (`$4F62`); nothing lands.
+- Plan: lookahead over him, every bullet and Garcia; a hold is judged by what lands on the holder (`HOLD_KNEE_SAFE_UPDATES` 18). Home on the right clamp, facing the wall, so Garcias come into the rear attack. Never throw him (41-46 frame lock). A held Garcia is thrown only if nothing lands through the lock. Generic verbs stand down; police, food, 1UPs, weapons refused (armed, B is an untimed swing).
 
-`tools/grunt_lab.py` is the lockstep recorder and checker; `tools/grunt_fight.py
---profile-ms N` prints the profile of every tick slower than N ms.
+Checked with `mr_x_lab.py --check`, `mr_x_sim.py`. One live direction: 24.1 s, 21 holds, 8 hits, 1 life. Open: pincers after a release away from the clamp; Garcia knockdowns and replacements not modelled; Axel and Adam not run.
 
-## Ownership
+### Mr. X's betrayal duel
 
-- Project-owned directory in the StreetsOfRageProject workspace.
-- Prefer keeping implementation here; do not fork the remote protocol.
-- Consume `MegaDriveEnvironment/python` (`megadrive_remote`) as a library
-  (`PYTHONPATH` or install). Do not copy wire-protocol code.
+User: the AI always says NO; a human may say YES and then they must fight, and the survivor's second answer is **NO**, the bad ending (`story-mode-and-campaign-flow.md` §7.3-7.4). One player never gets it: YES is the round-6 restart, NO the fight.
 
-## Layout: the core and the observer
+While `$FFDE00` and `$FFFA43` are set and the offer's state is `$22`-`$29`, `observe` adds `PlayerDuel` and builds the other player as `RivalPlayer` instead of `Partner`, which turns every partner courtesy off. The state check matters: `$11E72` clears `$FFFA43` only if P2 is out, and the stale byte left the AI `Centering` (user-accepted 2026-10-31).
 
-The AI runs in two places from one copy of the code (user decision, 2026-10-30):
-the external `autoplay` and, next, inside the `sor` host (the **1 PLAYER AI
-ASSIST** mode). So the code is two packages:
+Measured with `mr_x_duel_fight.py`: only the punch lands on a player (chords and grounded kicks skip a `RivalPlayer`), and only from `RIVAL_PUNCH_MIN_X` (20) out (why is not decoded); `reach.punch_inner_for` is the shared edge. Two AIs continue at game over, so a duel between them never ends.
 
-- `ai-code/sor_ai/` is the **core**: `ai/`, the snapshot (`state`, `world_map`,
-  `hazards`, `hitboxes`, ...), the addresses (`memory_map`) and the input documents
-  (`remote_input`, the transport-free half of the old `sor_remote`) and `embedded`, P2's AI as
-  the host runs it (`InProcessClient`, the pad's client over `sor_host`). It has no HUD, no
-  sockets and no `megadrive_remote`; `tests/test_core_isolation.py` fails if any of
-  them gets in. `ai-code` is what `sor --ai-path` will point at, and the directory
-  goes on `sys.path` (the hyphen is why `sor_ai` is the package, not `ai-code`).
-- `src/sor_autoplay/` is the **observer**: `app`, `hud`, `SoRClient` (`sor_remote`),
-  `reach_gameplay`, `debug_scenario`, `host_flags` and the Tk `pathfind_viewer`. It
-  imports `sor_ai`; `sor_ai` never imports it.
+**Mr. X's betrayal duel: a fight, not a solver.** User: "mais aleatória, com mais movimentos diferentes. Menos eficiência fria"; "Sem modificar o comportamento que a IA terá com os inimigos". `ai/duel.py`'s `DuelStyle` replaces the tick's candidates only while `PlayerDuel` holds. Tactics, reactions and health-lead scaling are its module constants (`REACTION_TICKS`, `PRESSURE_REACTION_TICKS`, weights, `LEAD_SCALE`). `AgentLoop(duel_style=False)` / `--cold P` restore the pipeline. Loses about 3:1 to the cold pipeline, 11-15 verbs. Not played against a human; strength is the user's call.
 
-Both go on `PYTHONPATH` (`src:ai-code`). Moved with zero behaviour change:
-`tools/tick_bench.py --no-budget --canonical`, 0 outcome diffs of 23,131 ticks on
-three recordings.
+### Crowds
 
-## Commands
+**Being surrounded (user).** Answer a crowd by *taking a hold*, not trading strikes and **not by backing away**. `_retreat_is_worth_it` is health-only. `Surrounded` uses `SURROUNDED_NEAR_X`/`_Y` (96 x 32). `WHILE_SURROUNDED` outranks the `$322A` chord: the hold's throw sends the body into the enemy behind. Chain: front `$60` + rear threat -> `ThrowHeldEnemy`; else `FlipHold` -> `$66` -> `Supplex`.
 
-```bash
-# Host (meta-repo root)
-./scripts/run.py StreetsOfRageRecompilation/rom/SOR.bin --debug-utils --port 6969
-
-# Observer (meta-repo wrapper; defaults host 127.0.0.1 port 6969)
-./scripts/autoplay.py
-./scripts/autoplay.py --once
-./scripts/autoplay.py --poll-ms 33
-
-# Live AI testing (turbo host + matching poll cadence; see below)
-./scripts/play.py --preset turbo
-
-# Live AI testing, AI-driven clock (no turbo, no poll pacing; see below)
-./scripts/play.py --preset lockstep
-
-# Path-finding viewer (standalone Tk; connects to nothing, so no host/port)
-./scripts/pathfind_viewer.py
-./scripts/pathfind_viewer.py --width 480 --height 200 --step 4 --body 24
-
-# Or direct module invoke
-cd autoplay
-PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 -m sor_autoplay
-PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 -m unittest discover -s tests -q
-```
-
-Use Python 3.11+ with Tk (`_tkinter`). System/Homebrew 3.13/3.14 builds on this
-machine may lack Tk.
-
-### Scoring a fight without the food
-
-`--no-food` (autoplay and `tools/boss_fight.py`; `scripts/play.py --preset boss` for
-levels 2-5 and 8) leaves every `HealthPickup` on the floor for the whole session.
-Use it whenever a fight is being *scored*: `boss_fight.py`'s `damage_taken`
-is a running minimum, so every hit landed after a heal costs nothing on
-paper, and a plan that survives only because it ate is not a plan (user).
-It arrives as `tokens.DebugNoFood`, a harness token that can only ever
-remove an option -- a session without it behaves exactly as before.
-
-**And without the police** (user: "The police is allowed for Souther/Antonio,
-just don't test with the police on"). `--no-police` (autoplay; passed by
-`scripts/play.py --preset boss` for every round) arrives as `tokens.DebugNoPolice`,
-which removes `CallPolice` outright; `tools/boss_fight.py` runs with it on
-unless `--police` is given, and the labs and diags always do. In play the
-special is the last resort and nothing more: only below
-`POLICE_HEALTH_PERCENT_THRESHOLD` (or `_LAST_LIFE`), never for a crowd or a
-boss on its own (user: "A AI está a depender muito da chamada da polícia!" --
-the old live-boss gate, under 60% health, fired in all eight baseline
-Antonio fights, right after his second kick) -- with one exception, below.
-
-**The round-end boss draws the police on arrival** (user: "sempre que chegue
-a um boss de final de nível, tente chamar a polícia logo que lá chegue. Mas
-só nos de final de nível, não nos intermédios"). `decide.level_end_boss_is_up`
-(`_LEVEL_END_BOSS`, by `Stage.level_index`) is true while the boss that closes
-the round is alive and on screen: round 1 Antonio, 2 Souther, 3 Abadede, 4
-Bongo, 5 the twins (added on the user's second ask), 6 the Souther pair
-(called only once both are up, or one has fallen: one call sweeps both -- user;
-same wait in rounds 1-4 with two players, which send two bosses one after the other;
-round 6's Bongo and every boss of round 8's rush, Mr. X included, are out;
-round 7 has none; Mr. X because the police cannot be called on his level --
-user). Then `could_call_police`
-produces `CallPolice` whatever the actor's health (needs a special and a free
-actor), and `priority._emergency_call_police` scores it 88, so it is the first
-thing done. Against the twins the arrival call is the only one (the panic call stays
-excluded: user, never the police as a fallback); Mr. X and the betrayal duel
-never get any (round 8 starts both players with zero specials -- `enemy-ai.md`).
-Measured live (`boss_fight.py --police`, Blaze/Axel, turbo 2): round 1 Antonio,
-`CallPolice` 3 ticks right at his arrival, killed in 7.7 s, no damage; round 5
-twins, the press is retried while `$3FCC` refuses it (161 ticks over ~6 s, then
-the flat 10 off a twin landed), killed in 22 s, no damage. `DebugNoPolice` still removes it, so scored fights are
-unchanged. Unit tests that score the engage plan
-(`tests/ai/test_stability.py`'s `_run_souther`) carry `DebugNoPolice` for the
-same reason. Stateless: a character holding a second special would call it
-again once the first sweep ends.
-
-### Live AI testing
-
-**No AI behaviour change ships unmeasured (user's no-regression rule):**
-measure it live before it goes to `main`. Unit tests and offline sims are
-evidence, not the measurement; a change that could only be measured offline
-goes to a branch and says so.
-
-When exercising the symbolic AI against a running host (not unit tests), do
-not use 1× speed with the default 33 ms poll. Turbo the host and raise the
-poll cadence so the agent still samples about two game frames per tick.
-`./scripts/play.py --preset turbo` is the canonical recipe (meta-repo root):
-
-```bash
-./scripts/run.py --default-video --turbo 2 --lang en --debug-utils --port 7777 --silent &
-./scripts/autoplay.py --poll-ms 16 --port 7777 --agent-p1 --reach-gameplay blaze
-```
-
-`--poll-ms 16` is ~2 frames at 120 Hz (`--turbo 2`). 2x was the ceiling on
-the development machine (user: "use turbo 2x at max, this PC can't handle
-turbo 4x at full speed"; measured, `--turbo 4` ran at 120 fps there too, so
-a 4x poll cadence sampled twice per frame and the wall clock lied). That cap
-was the host's presentation waiting on the 120 Hz display, not the CPU;
-since 2026-10-28 the host presents asynchronously and `--turbo 4` runs at a
-true 240 fps (ceiling ~600 fps). So every result below recorded "at turbo
-4" before that date ran at 2x, and moving the preset to 4x needs
-`--poll-ms 8` and a fresh live measurement. Leaving
-the default 33 ms under turbo makes the AI see every fourth frame. Keep
-the `turbo` preset of `scripts/play.py` (`PRESETS`) as the source of truth for these flags. Use `--silent`
-whenever the game is launched for debug. Only start a live session when
-necessary; prefer the `autoplay` unit tests for logic changes.
-
-**Testing the AI against a boss (user):** the meta-repo's
-`scripts/play.py --preset boss --level LEVEL` is the intended entry point — turbo host,
-matching poll cadence, `--start-level LEVEL` and `--kill-street-enemies` in
-one command (or `--kill-until-mr-x` for level 8). Always run with the debug flags
-that kill every enemy family except the boss -- `tools/boss_fight.py` and
-`tools/antonio_diag.py` already do this through
-`DebugScenario(kill_street_enemies=True)`, and it is not optional. A boss
-fight measured with the street waves still alive mixes two different
-questions (how the AI fights the boss, and how much health the level left
-it) and neither answer comes out of the run. Do not add a "real waves" mode
-to these tools; that was tried and rejected.
-
-**Poll timing is now measured, not just assumed (user: "sugestões para
-melhorar o timing do autoplay, mais preciso com as atualizações da host
-application sem tornar a host application lenta para jogadores reais?").**
-`ObserverApp._poll_loop` (`app.py`) already re-bases its sleep off elapsed
-work time each iteration, so one slow tick does not stack onto the next, but
-it had no visibility into how many emulated frames a poll actually covered
--- only the wall-clock `--poll-ms` it asked for. `state.read_snapshot` now
-also calls the remote protocol's existing `get_game_uptime_frames()` (already
-used by every offline lockstep lab, just never by live play) and carries it
-in `GameSnapshot.raw["uptime_frames"]`; `ObserverApp._record_frame_timing`
-diffs it against the previous poll and logs a rolling `frames/tick
-min/mean/max` + `poll work min/mean/max` line at DEBUG every few seconds --
-purely diagnostic, read by nothing else. This does not touch the host's own
-`--turbo`/`--frame-sync` pacing (`VDP::renderLoop`'s `nextFrameDeadline`
-accumulator in `MegaDriveEnvironment`), which stays a real-time loop for
-human players regardless of `--poll-ms`.
-
-Deliberately **not** done yet: swapping `kinematics.FRAMES_PER_TICK`'s
-nominal 2 for this measured, per-tick value inside the prediction math
-itself. That module's own docstring calls `FRAMES_PER_TICK` "the nominal
-figures every measured constant below was taken at," and this codebase has
-already paid once to learn that lesson the hard way -- see **The 30 Hz time
-axis: fixed, measured, not kept** above (`OBJECT_UPDATE_FRAMES`): a
-dynamically-correct time axis was built, scored with `boss_fight.py`, and
-reverted because it came out worse, not better, against Antonio and Souther.
-Wiring live jitter into every boss lookahead's tuned lead time needs the same
-measure-first discipline before it touches combat, not a guess. The frame
-counter above is step one -- watch `poll timing:` lines under real load
-before deciding whether `--poll-ms 16` at `--turbo 2` is actually drifting
-enough to be worth it. The further, larger option that investigation
-surfaced -- the remote protocol's `SET_LOCKSTEP`/`STEP_INPUT` primitive
-(`MegaDriveEnvironment`, used by every `*_lab.py` tool) driving live
-AI-controlled play frame-exactly (poll → decide → step N frames → poll)
-instead of wall-clock sleeping -- is now built, as `--lockstep`
-(`app.py`'s `_lockstep_loop`, exercised live through
-`scripts/play.py --preset lockstep`):
-
-```bash
-./scripts/play.py --preset lockstep
-./scripts/play.py --preset lockstep --start-level 2 --kill-street-enemies --no-food --no-police
-```
-
-While an AI is engaged and the game is playable the host is frozen and each
-tick steps exactly 2 game frames as fast as they run -- no `--poll-ms`
-sleeping, so the plan's stick lands exactly instead of 0-1 updates late
-(which is what the twins' five `SCENARIOS` exist to absorb). `--turbo 10`
-in the wrapper speeds only the realtime phases (menus, reach-gameplay, any
-stretch with the AI off): lockstep stepping never waits on the frame clock
-to begin with (`VDP::advanceRemoteLockstepFrame` is purely
-condition-variable driven). With no AI engaged, before the level jump, or
-on a level mismatch the host runs realtime and the loop only observes. Own
-port (6767), debug sweeps and extra args pass through to autoplay. It has
-zero effect on the human-player `--frame-sync` path since lockstep is a separate
-protocol call the AI alone uses.
-
-Measured on the development machine (Blaze, round 1, log level normal):
-~174 game fps wall-clock (~3x realtime) with the game window visible --
-tick ~0.6 ms (the pipeline is not the bottleneck), step ~14 ms per 2
-frames (host-bound: frame emulation plus an SDL present per frame, which
-stays because watching the game matters). `frames/tick` reads exactly 2 on
-every timing line. Entry cannot latch while the host CPU is inside a
-run-to-completion ROM load (no interrupt dispatch, so no checkpoint), at
-any turbo -- the 2 s engage timeout plus retry rides those windows out;
-entry in settled gameplay is instant (1-7 ms).
-
-**Presses do not block the tick.** Every press used to be `PRESS_BUTTONS`,
-which replies only once the press has been released: a hold move's 4-frame
-press held its tick ~37 ms at `--turbo 2` (measured with `grunt_fight.py
---profile-ms`: the decision itself under 1 ms, the rest `recv`), and every
-`Punch`/`MeleeWeaponAttack` tick the same. Presses now go out as
-`QUEUE_PRESS_BUTTONS` (MegaDriveEnvironment, `docs/remote-access-protocol.md`),
-which replies at once with the frame the press is released on; hold ticks went
-from ~38 ms to ~0.5 ms and round 1's street p95 tick from ~38 to ~10 ms (the
-rest is `EngageGrunts`' own budget). Two rules carry the old behaviour over,
-both learnt from a live run without them (Souther, 65.7 s and a life lost to a
-60-point hit, against 4.1-4.8 s and none): the press **replaces** the player's
-latch while it plays rather than ORing with it -- `ReleaseToRegrab` presses
-back and then holds the walk back in, and ORed the two were held together --
-and `AgentLoop.tick` **skips** while the player's own press is still playing
-(`VirtualGamepad.press_pending`, against the snapshot's `uptime_frames`), as
-the lockstep loop does with its capture's `press_pending`: a decision made
-mid-press is about a body the press has not acted on yet, and a
-`ReleaseToRegrab` chosen then was pressed again after the release. A release
-frame further off than the press could reach is a restart's and is dropped.
-Measured live after both, five round-1 street runs a side (`--family all`):
-old 85-97 s, 2-6 hits, no life lost; new 92-96 s, 2-6 hits, and one run
-stalled 73 s at x=3204 on `WalkToNearEnemy` toward a Nora still in her
-scripted entry (`$0A`, lane 0, off-screen right) until the round clock took a
-life -- real ticks (0.2 ms each, the decision code untouched by this change),
-not the skip. Souther, `--no-food`: new 4.1/4.1 s, no damage; old 4.8/4.2 s.
-
-That stall was caught again with `stage_walk_diag.py --raw` and replayed
-offline: the same decision with the old code, so not the press. `$0A` is
-Nora's scripted entry (`grunt.ENTRY_STATES`, frozen until the camera reaches
-her) and also what `phases` reads as her damaging special, so she was
-`ATTACKING`, and `execute._crossing_would_walk_into_the_swing` waited for the
-swing to end before crossing her 32-80 px band -- holding nothing, while the
-camera only moves when the actor walks on. Her lane is 0, so it caught only
-an actor on the top lanes (14-19) near x~3290. `_in_scripted_entry` now
-exempts an enemy in a scripted entry from that wait; on the recorded tick the
-walk holds Up+Right instead of nothing. Measured after: round 1 street x5,
-86-95 s, 1-6 hits, no life lost (none of the five crossed the top lanes
-there, so the replay is what covers the fix); Nora-only round 1 x3 a side,
-4/4 kills and no hit either way (52-56 s old, 55-56 s new).
-
-**Tick budget (user: no tick over 2 ms -- a slower tick is blindness on a
-weaker machine).** Measured live in lockstep on round-1 street (Blaze,
-`--lockstep`, this machine): routed street ticks average 0.1-0.9 ms, the
-3 s `lockstep timing` max usually under 3.5 ms, with 17 slow ticks in ~9000
-(0.2%), every one of them a `WalkToNearEnemy` route through a dense crowd
-(25-30 ms bursts, three at 110-148 ms). A `slow lockstep tick` WARNING
-(`app.py`, >= 8 ms) names the winning verb, which is how those were
-attributed. Two exact fixes shipped for this, both validated with zero
-winner diffs (1670 unit tests green, 200 full-tick sweep, 300 first-vector
-sweep): `pathfind/` internals now run on plain coordinate tuples (slots on
-the value objects, cached direction data, fused arrival+contact+misalignment
-in one region pass, no `_yx_aims` re-sort -- a worst-case street route went
-13 ms to 2.5 ms with bit-identical paths), and `plan_route` tries solids
-first (a failed solids search proves the danger one is doomed; a solids
-route replayed clear of every danger rect is already a cheapest danger-free
-arrival, so the danger pass runs only when the solids route actually
-crosses danger). The danger pass itself is now capped at `DANGER_MAX_NODES`
-(measured at 100: 0 winner diffs over 200 full ticks; long safe detours take
-the direct path instead -- and 10 now, like `NAV_MAX_NODES`: user, "para o
-jogo que é, é mais que suficiente"; not measured live). At 10 the danger
-pass no longer finds a detour round an enemy's committed reach (one needs
-11-100 expansions), so the AI walks straight through it to a pickup, a weapon
-or a projectile sidestep; the three tests that pinned the detour in
-`test_execute.py` (`test_steps_off_the_lane_through_a_committed_enemys_reach`,
-`test_walks_through_a_dangerous_enemys_swing_to_the_weapon` and `..._pickup`)
-now pin the straight walk, and `PlanRouteTests` still covers the danger pass
-where a detour is short. A detour that is a lane change and then X -- the
-approach leaving a committed swing's lane -- is found from the first node
-since **What 10 nodes needed**; one that has to come back to the lane past the
-swing, as those three walks do, is not. What remains is the solids fail-proof: with the cap
-in, every remaining slow tick is a `WalkToNearEnemy` solids proof of ~3000
-nodes (`reached=False`, 25-30 ms bursts, spikes to ~59 ms live) while
-chasing a target past the plannable world -- and the slow-tick log now
-carries `route_nodes`/`reached` for attribution. Replacing those
-best-effort first steps with the straight-line fallback was measured and
-rejected: they agree on only 69 of 162 failed ticks, and the fallback
-drifts lanes toward an unreachable target where the proof holds its lane
-and pushes right. Proving no route exists costs the whole reachable
-lattice, and no exact method avoids that work in general -- so a hard 2 ms
-max is incompatible with identical motion here, bar the one class the next
-paragraph proves cheaply. In lockstep the bursts only slow wall-clock
-(`frames/tick` stays exactly 2); in turbo they miss frames.
-
-**Jack's plan inside the 2 ms budget (user: no AI tick over 2 ms).**
-`jack.plan_engage` (`EngageJack`, via `execute.engage_jack_plan`) rolled 17
-stick candidates (+13 punch candidates) x 2 update orders x 16 updates of
-`world_update`/`actor_update`: 2.5-2.6 ms median and 2.8-3.6 p95 with one Jack
-(max 4.5-5), 4.2 median with two, 7.3 at most with four. It now takes 1.0 ms
-median, 1.05-1.4 p95 and 1.8 max with one Jack, with **zero plan differences**
-(`dir_x`, `dir_y`, `punch`, `mode`, `outcome`, `at_update`, `score`) over every
-`EngageJack` tick of three live recordings -- round 4 (412 ticks, Axel), round 2
-(13,953, Axel, including a long stalemate with two Jacks) and round 5 (725, one
-to four Jacks) -- measured by `tools/jack_plan_bench.py` (this machine,
-`engage_jack_plan` alone, the best of 2-5 passes per tick):
-
-| recording | Jacks | ticks | before: median / p95 / max | after: median / p95 / max |
-| --- | --- | --- | --- | --- |
-| round 4 | 1 | 412 | 2.62 / 2.95 / 4.5 ms | 1.02 / 1.12 / 1.74 ms |
-| round 2 | 1 | 12,759 | 2.62 / 2.9 / 4.5 | 0.99 / 1.06 / 1.64 |
-| round 2 | 2 | 1,194 | 4.18 / 4.5 / 7.1 | 1.51 / 1.73 / 2.47 (41 over 2 ms) |
-| round 5 | 1 | 247 | 2.55 / 3.58 / 3.7 | 0.93 / 1.36 / 1.46 |
-| round 5 | 2-3 | 148 | 1.7-2.3 / 2.6-3.6 / 4.1 | 0.64-0.75 / 0.9-1.15 / 1.35 |
-| round 5 | 4 | 330 | 2.91 / 4.86 / 7.4 | 0.97 / 1.67 / 2.64 (7 over 2 ms) |
-
-What changed, all exact:
-
-- **A bound on the second update order** (`plan_world`; the biggest share,
-  2.5 -> 1.4 ms). A candidate's score is the worse of its two update orders,
-  so the first order's score (with the tie-break bonuses applied -- float `+`
-  and `-` of constants never decrease when their operand does) is an upper
-  bound on the candidate's final score. Every candidate is now rolled out under
-  one order; the second order only runs for candidates, in descending bound,
-  whose bound can still beat the best final score so far (`>` with the lowest
-  index among equals, exactly the old sequential rule), and it stops at the
-  first that cannot. A hit under the first order is final, as before. ~19
-  rollouts a tick instead of ~33.
-- `_hi` is `math.floor` itself (no wrapper: ~8,000 calls a plan); `Outcome`
-  members are read through module aliases (`_NONE`, `_GRAB`, `_HIT`,
-  `_STRUCK`: a class-attribute lookup costs 30 ns on 3.11);
-  `JackSim`/`AxeSim`/`ActorSim.copy` are written out slot by slot instead of a
-  `getattr`/`setattr` loop (`CopyTests` pins that every slot is there);
-  `axe_hits` rejects on X before it floors Y and Z; `axe_update` tests a
-  juggled axe (the commonest) first; `_touch` and `jack_update` skip the calls
-  whose first test is false (`a.walking`, `j.animating`).
-- Not done, because it is not exact or not worth it: a shorter horizon, fewer
-  candidates, sharing the identical first two updates of the held and
-  tail-policy candidates (~6% of the work).
-
-**Method and a trap.** `tools/jack_plan_bench.py` replays `--raw` recordings
-through the real `AgentLoop`, keeps every tick whose winning verb is
-`EngageJack`, times `engage_jack_plan` and writes (`--save`) or checks
-(`--compare`) every plan. `ExactPlanTests` (`tests/ai/test_jack.py`) also holds
-the pre-optimisation search as `_reference_plan_world` and checks the plan
-against it on 960 swept scenes (eight Jack states, 30 actor offsets, both
-facings, with and without the punch). **The contexts must be replayed in a
-fixed order:** a context is a set, `find_all` walks it, and the order of the
-Jacks and axes it hands the plan -- a tie between two equally scored sticks --
-depends on the set's hash order, which varies between processes (string hash
-seeds, and `hash(None)` is an address on 3.11, so `PYTHONHASHSEED=0` is not
-enough). The unmodified code gave a different stick on 2 of 13,953 round-2
-ticks between two runs; the tool sorts each context by `repr`. (In play that
-is an arbitrary tie-break; nothing relies on it.) A live sanity run
-(`jack_fight.py --level 2`, Blaze, `--turbo 2`, `--poll-ms 16`): three Jacks
-killed, 0 hits, no life lost, the boss reached at 87 s.
-
-**Still over 2 ms:** with two to four Jacks on screen 41 of 1,194 and 7 of 330
-ticks (max 2.6 ms); every world update runs every Jack and every axe, and no
-exact shortcut for the Jacks other than the target was found.
-
-**Cheaper ticks for weaker machines (user, 2026-10-28: "tenho medo que não
-corra em CPUs mais fracos").** Measured on three `stage_walk_diag.py --raw`
-recordings with every enemy live (rounds 1, 3 and 5, Blaze, 23,131 ticks) by
-`tools/tick_bench.py`, before and after, all exact: **zero differences** in
-the winning verb and every pad command on every tick (`--no-budget
---canonical`), zero in 5,905 `grunt_plan.plan` results
-(`tools/grunt_plan_bench.py`), and 1,015,296 hazard scans identical to the old
-scanner (every recorded map, all eight rounds' floor tables, several cameras).
-
-| this machine, budget on | before | after |
-| --- | --- | --- |
-| `read_snapshot` mean / max | 1.73 / 2.4 ms | 0.36 / 0.88 ms |
-| whole tick mean / median / p95 | 3.79 / 2.10 / 11.9 ms | 1.91 / 0.64 / 7.7 ms |
-| ticks over 2 ms | 14,881 of 23,131 | 5,746 |
-| `EngageGrunts` tick mean / median | 7.26 / 7.22 ms | 5.34 / 5.08 ms |
-| `grunt_plan.plan` unbudgeted mean (5,905 calls) | 7.19 ms | 4.93 ms |
-
-(`read_snapshot` here includes the replay's hex decoding; live it is the
-socket.) What changed:
-
-- **The hazard scans** (`hazards.holes_for_level`/`barriers_for_level`, both
-  every tick from `read_snapshot`) asked the round's floor table about every
-  8 px cell of a 1,344 px window, through four calls a cell: ~3.5 ms a tick.
-  A cell's class is a nibble, so the predicate is a 16-entry table, and the
-  map's cells are tabulated once per (map, question) (`_class_cells`,
-  cached). The cache keys only on the rows the scan reads (`_scanned_rows`):
-  `read_snapshot` reads 24 rows, and on a wide round their tail is the player
-  objects' RAM at `$FFB800`, which changes every frame -- keyed on the whole
-  buffer it missed on 95% of ticks.
-- **The street lookahead's simulation** (`grunt.py`, `grunt_plan.py`,
-  `twins.py`, `mr_x.py`, `jack.py`): `_hi` is `math.floor` itself; the
-  `Outcome` members are module aliases (`_NONE`, `_HIT`, ...); `GruntSim` and
-  `ActorSim` copy through a generated slot-by-slot `copy`
-  (`twins._slot_copier`, from `__slots__`); `getattr(a, ..., default)` on
-  `ActorSim` slots (always set) is a plain attribute read; `_vector_velocity`
-  (pure in three integers) is cached; the box lookups in `contact` and
-  `refresh_boxes`, `_render`, `_x_bounds`, `_clamp_word` and the blink are
-  inline; a plain walk step skips the three calls that only hand the stick
-  on; `_object_pass` allocates nothing when no knife flies.
-- Tried and dropped: a trie of rollouts that converge on the tail policy
-  (exact, but only 5% fewer object passes, eaten by its bookkeeping); 19% of
-  actor steps share a prefix with an earlier rollout, so state snapshots could
-  save at most that.
-
-**Still over the 2 ms budget: the street fight.** `grunt_plan.plan` played
-~66 rollouts of up to 24 updates (median 4.5 ms with one enemy, 15-20 with
-five or six), and no further exact saving of any size is left in Python.
-`BUDGET_MS` (8 ms of wall clock, then 5 ms of `STAGE_2_GRACE`) is what a
-weaker CPU meets: the plan is not slower there so much as shorter -- the
-program list is cut from its end (the sticks), so the AI's street play
-depends on the machine. Making it cheaper still means playing fewer programs
-(fewer `FIRST_DURATIONS`, a shorter `HORIZON`, fewer `FINALISTS`) or a budget
-counted in rollouts instead of milliseconds: both change behaviour and need a
-live A/B first (`grunt_fight.py --family all`). Live sanity after the exact
-changes (`grunt_fight.py --family all --level 1`, Blaze, `--turbo 2`,
-`--poll-ms 16`): the boss reached at 86.8 s, 32/32 killed, 4 hits, no life
-lost; live tick median 0.5 ms, p95 7.9, max 20.9.
-
-**The cheaper search (user: A/B it, then ship the combined cut).** Offline,
-on the 5,905 captured calls (`grunt_plan_bench.py`'s cache, each variant
-against the full search; mean / median ms, share with the same first action):
-full 5.32 / 4.82; `FIRST_DURATIONS` (2, 6) 4.64 / 4.26, 93.8%; `HORIZON` 18
-4.71 / 4.21, 88.3%; `FINALISTS` 4 4.26 / 3.95, 96.7%; all three 3.04 / 2.73,
-86.5% -- no cut buys much time per decision it changes. Live A/B
-(`grunt_fight.py --family all`, Blaze, `--turbo 2`, rounds 1, 2, 3 and 5, two
-runs each, the three variants side by side on their own hosts; stopped there
-by the user, "too many runs"):
-
-| variant | hits | damage | lives lost | boss reached | mean time | `EngageGrunts` tick median / p95 |
-| --- | --- | --- | --- | --- | --- | --- |
-| full (24, 2/6/12, 8) | 63 | 436 | 1 | 8/8 | 107 s | 5.4 / 12.5 ms |
-| `FINALISTS` 4 | 69 | 501 | 0 | 8/8 | 104 s | 4.6 / 10.3 ms |
-| all three (18, 2/6, 4) | 55 | 372 | 0 | 8/8 | 110 s | 3.8 / 7.6 ms |
-
-All three shipped (`HORIZON` 18, `FIRST_DURATIONS` (2, 6), `FINALISTS` 4): no
-worse live, ~30% cheaper a street tick (p95 -40%). Noisy (the full search alone
-took 5 and 12 hits in its two round-5 runs); one round-2 run took 157 s against
-119-131 for the rest -- watch round-2 times. Still over 2 ms with enemies on
-screen. `test_no_walk_into_an_approaching_garcias_jab` now checks the
-`(1, 0)x6` walk (the x12 program is gone): it is his jab under every timing too.
-
-**Sealed corridors (user: a cheap check for "a wall, or a wall whose hole is
-too small to pass" between the actor and the goal).** `_free_arrivals` only
-asks whether the goal's own cells are free; a goal that is free but cut off by
-an obstacle line still cost the whole proof. `Lattice.sealed_between`
-(`pathfind/grid.py`) reads `_is_free_coords` as intervals -- an obstacle
-blocks the body's top-left corner on the open box `(ox0-bw, ox1) x (oy0-bh,
-oy1)`, the corner is valid in the closed band `[wt, wb-bh]`, all narrowed or
-widened by `EPS` -- and asks whether, at some vertical line strictly between
-the start and the goal's hull (`search._route_is_sealed`: the bounding box
-widened by the body, which every arrival must touch), those intervals cover
-the whole band. A continuous route must cross every x between its ends, so
-that is a proof for any move set (diagonals, step, the Y-then-X finish);
-`False` only means "not proven" and A* answers as before. When it holds and
-the budget is above `SEALED_MAX_NODES` (100), the search keeps 100 nodes: the
-best-effort walk towards the wall is still answered.
-
-Measured on 400 sealed scenes (a 512x112 world at step 4, full walls and holes
-under one body, a 20,000-node budget), against the uncapped search: median
-25.5 ms, p90 42.5 ms, 1,615 nodes; cap 100: median 1.9 ms, p90 2.8 ms, 110
-nodes, the same first step in 99.2%. Other caps (median / p90 / same first
-step): 50 1.0 / 1.7 ms 99.0%; 300 5.4 / 7.0 ms 99.5%; 600 10.3 / 13.6 ms
-100%. The first vector is all `execute` reads and it is re-planned every tick,
-so the first step is the figure that matters; the same final position was
-83% at 100. The check itself costs 0.3-135 us (0-66 obstacles).
-
-**No in-game effect from the sealed check, on purpose.** `NAV_MAX_NODES` and
-`DANGER_MAX_NODES` are both 10 (user: for this game it is more than enough),
-neither above the gate, so `plan_route` is exactly what it was; the check protects larger budgets (the viewer's 20,000 default, any
-future raise). An empty route for a sealed goal (0 nodes) was rejected:
-`WalkToAdvanceStage` walks its best-effort first vector up to a full-width
-pit's edge before `hop_landing_x` can jump, so an empty one stops it ~40 px
-short. If `NAV_MAX_NODES` is ever raised, re-run `stage_walk_diag.py --level 4`.
-Five tests had been failing since `NAV_MAX_NODES` went to 10 (the pit and
-danger routing tests in `test_navigation.py` and `test_execute.py`); the cause
-and the fix are **What 10 nodes needed**, below. Not seen, still a full proof: a staircase wall (holes
-that step from one side to the other, so no single line is sealed) and a ring
-around the goal. A start clipping an obstacle without being buried in it
-judges its first move by where it lands alone (`Lattice.can_move_from`), so
-that step is left out of the range. `SealedRouteTests`
-(`tests/ai/pathfind/test_search.py`) pin it, above all a seeded differential
-test -- 1,500 random scenes, never sealed *and* reachable -- which is what
-caught three bugs in the first design (a sliver-tolerant cover test that
-called a corridor exactly one body tall along the world's edge sealed, the
-hanging start, and a special case for a one-row world).
-
-**What 10 nodes needed: a finish that aims at every arrival** (user: five
-unit tests failing on `main` since the bound went to 10 -- the pit walk-arounds,
-the approach off a committed swing, the jump over a pit the walk goes round --
-"find whether the tests or the code are wrong, fix the right side"). The code
-was. The tests pin live-reported behaviour (**Stage-4 pits**, the pit-dodge
-oscillation, the approach off a swing) and each passed at a larger bound; at 10
-all five fell to one defect in `pathfind/search.py`:
-
-- The Y-then-X finish is how a 10-node search arrives anywhere that is not
-  next to it, and for a goal window over 64 cells it aimed at two cells only:
-  the one nearest the node and the window's middle. Those are routinely the
-  cells that are out -- the strip's cells on the actor's own lane sit in the
-  pit, a strike band's `enough_contact` rows are further up than the nearest
-  row, the middle of an annulus is its gap -- and then no finish fired from any
-  node. A* alone needs ~100 expansions round a pit and 219 for a 170 px
-  approach in open space, so at 10 the route came back best effort:
-  `WalkToAdvanceStage` stalled at the pit's wall or hopped it, the approach
-  drifted into a swing's corner, and `jump_landing_is_safe` found no walk round
-  and allowed the jump.
-- `search._best_yx_by_rows` now answers the exact cheapest finish over every
-  enumerated arrival (`_free_arrivals`, windows up to `MAX_ARRIVAL_WINDOW`) for
-  a few sweeps a row: blocking is monotonic along a run, so in a row only the
-  nearest arrival on each side of the node's column can win, and a column run
-  blocked at one row is blocked past it. `FinishAimTests`
-  (`tests/ai/pathfind/test_search.py`) checks it against brute force over
-  seeded scenes; on small windows it answers exactly what the old full
-  enumeration did. A window too large to enumerate still aims at the two cells.
-- `jump_landing_is_safe` asks for the walk round as `advance_goal`'s strip at
-  the landing X (any lane), not as the landing point on the actor's own lane:
-  past a pit on that lane the point is three legs away (off the lane, past,
-  back), which no Y-then-X finish expresses.
-
-Three single-tick tests were pinned to the failure and were changed:
-`test_walks_toward_enemy_to_the_right_and_below` expected the best-effort
-diagonal RIGHT|DOWN (now DOWN, lane first, as its left-and-above sibling already
-explained), and the two `VirtualAxisSmoothingTests` stood the actor at y=0,
-under `LANE_Y_MIN`, where the route's first vector is the DOWN step back into
-the band (moved to lane 50; at y=0 the reversal test requested no side at all).
-
-Measured **offline only**: the session that made it ran in a cloud container
-with no ROM and no SDL3, so it went to a branch, not `main`, pending a live run.
-
-- `find_path` on 1,500 lane-band scenes at 10 nodes: 901 arrived, now 1,142,
-  none lost; 0.27 → 0.23 ms mean, worst 1.4 ms. At the viewer's 20,000 on the
-  test suite's random scenes: the same arrivals, p99 12.9 → 9.2 ms.
-- `WalkToAdvanceStage` through `execute_tick` past 200 random pits (Blaze's
-  walk speeds): got past 48 → 183, hops 47 → 0, stalls 105 → 17 -- the same
-  183/17 the old search gave at 4,000 nodes.
-- `jump_landing_is_safe`, 400 pits across the lane: the 312 jumps the old
-  answer allowed through a pit a walk goes round are refused; the 46 with no
-  walk round still hop.
-- **The live change to watch**: an open-space `WalkToNearEnemy` with a lane to
-  make up now closes the lane first and then walks X, as the finish always
-  meant to, instead of the best-effort diagonal. Ticks to punch range over 120
-  approaches (the ROM's walk speeds, diagonals included): Blaze 42.1 → 45.2
-  (lane gap over 40 px: 51.3 → 59.5), Axel 44.6 → 46.5, Adam unchanged --
-  Blaze and Axel keep more speed on a diagonal than the L gives back.
-  `EngageGrunts` owns the modelled street enemies, so this is the unmodelled
-  and far approaches. Measure it with `scripts/play.py --preset turbo`,
-  `tools/grunt_fight.py --family all` and `tools/stage_walk_diag.py --level 4`.
-
-Still open, and not new: the 17 pit walks that stall at 4,000 nodes too. The
-planner's lane band is `LANE_Y_MIN`..`lane_y_max_for_level`
-(`navigation.world_rect`); the executor's is 6 px inside it and ends at
-`CameraRange.bottom` (`execute._lane_bounds`, `LANE_EDGE_MARGIN`), and
-`_clamp_mask_to_lane` will not hold into that margin. A pit that leaves room
-only there gets a route the executor will not walk: 10 of the 17 hold nothing
-(the route's only vector stripped) and 7 flip UP/DOWN (a corridor at the band's
-very edge that only every other lattice anchor lands on). Against the 10-node
-`main` before this, 8 of those had hopped and 1 had got past. The fix is one
-band for both, which moves every routed verb -- a change of its own.
-
-## Diagnostic tools (`tools/`)
-
-Not part of the AI and never imported by it: each one drives the **real**
-pipeline (the same functions `AgentLoop.tick` calls, in the same order)
-against a live host and writes JSONL for offline analysis. None of them
-writes RAM beyond the host's own documented `--debug-utils` hotkeys through
-`debug_scenario.DebugScenario`. Their output is local analysis material --
-do not commit `.jsonl` runs.
-
-| Tool | Role |
-| --- | --- |
-| `boss_fight.py` | **Scores** one boss fight: plays the level for real, then reports killed/died, damage taken, fight length and the verb histogram. `--level`/`--boss-type` select the fight (`--level 1 --boss-type 0x56` is Antonio, `--level 2 --boss-type 0x55` Souther, the default; `--level 3 --boss-type 0x30` Abadede, `--level 4 --boss-type 0x57` Bongo, `--level 5 --boss-type 0x58` the twins -- a pair: killed when every twin seen is dead, and the summary counts the rear attacks, `chords`, and those no boss lost health to, `chord_whiffs`; `--level 6 --boss-type 0x55` round 6's Souther pair, scored the same way, a hit's `dx`/`dy` taken to the nearest live one and its partner's position and state in `others`, and every row carrying both Southers (`bosses`), the raw slots of the player and every object with one (`tools/souther_pair_check.py`) and the game frame they were read on; the arena's walls are printed when the pair is up). `--idle-seconds N` keeps the pad released -- no tick, nothing scored -- for N s after the boss appears, and past that until a Bongo is out of his charge (handed the pad with a flame already on the actor, no plan has a move left) or an Abadede out of his run's set-up and run: a start other than the entrance. Each row also carries the nearest ordinary enemy (`grunt`: type, x, lane, state), which is how round 4's grunt was caught punching over a held Bongo. `--level 8 --boss-type 0x35` is Mr. X: the walk runs `--kill-until-mr-x`, and every row -- the office's waves before him too, as `pre` rows -- carries the raw slots of the player, him, his bullets and every Garcia (`tools/mr_x_sim.py --replay`). Boss death is the raw signed health word only (zero counts for the later bosses `$55`-`$58`, whose `$17C36` lethal test is `<= 0`, and for Abadede, whose own damage paths branch the same way) -- both `phases.boss_phase`'s `DEATH` decode and `MapEntity.is_defeated` false-positive on the transient `$164FC` lethality test, twice confirmed live |
-| `jack_fight.py` | **Scores** the Jacks of one round (`--level`, 2 by default): jumps to it, keeps every other ordinary family swept (`DebugScenario(only_enemy="jack")`), food and police off, and plays it through with the real pipeline until a boss appears, the level changes or the game is over. Every tick with a Jack or an axe on screen logs both objects' bytes (state, flags, position and fine height, velocities, `+$54` offset, owner, approach point, timers); a hit is attributed through the player's `+$7E` to the axe that landed it -- read from the previous tick when the axe has already removed itself -- with its state and its owner's. The summary gives hits by source and by Jack state, each Jack's life span and personality, and the verb mix while a Jack lived. A loss with no attacker within 15 s of a time-over (`$FFFA49`) is filed as `round_clock`, with the tick before it (`clock_before`, `p1_before`): the time-over writes 55 to the clock on the frame it takes the life, and a respawn moves the player to `cam_x` |
-| `grunt_fight.py` | **Scores** a round against the street enemies (`--family garcia|signal|hakuro|nora|jack`, or `all` for the mixed waves; `--level`, 1 by default): jumps to it, keeps every other ordinary family swept unless `all` (`DebugScenario(only_enemy=...)`), food (unless `--food`) and police off, and plays it with the real pipeline until the round's boss appears (or on through it with `--through-bosses`), the level changes or the game is over. Every tick logs the player's raw slot, every modelled enemy's and every weapon's bytes, the verb, its target and the pending list, and the tick's own cost (`tick_ms`; `--profile-ms N` prints the profile of every tick slower than N ms). A hit is attributed through the player's `+$7E`, named by family and state (`garcia_s0a`, `garcia_s0c_knife`); a loss with no attacker near a time-over is `round_clock`, as in `jack_fight.py`. The summary gives hits by source and verb, each enemy's life span and states, and the verb mix |
-| `grunt_lab.py` | **Records, and checks the models against,** the street enemies in lockstep (`--family`, `--level`): the real pipeline walks to the family's waves, then one of three actors plays a frame at a time -- `engage` (the real pipeline), `wander` (a seeded walk that never attacks) or `stand` -- for `--frames` a wave over `--waves` waves, every frame's row carrying the input, the camera and the raw bytes of the player and every enemy. `--check FILE` replays a recording through `grunt.check_recording`, update by update, and reports every field and contact outcome that differs |
-| `twins_lab.py` | **Records, and checks the model against,** Onihime and Yasha in lockstep: the real pipeline plays to round 5's pair, then one of four actors plays a frame at a time -- `engage` (the real pipeline, ticked every two frames), `edge` (a scripted edge-and-chord actor), `wander` (a seeded walk that never attacks) or `stand` -- and every frame's row carries the input, the camera and the raw bytes of the player and both twins. `--check FILE` replays a recording through `twins.twin_update`, update by update in slot order, and reports every field that differs (`twins.check_recording`). `--character` picks who plays |
-| `twins_2p_fight.py` | **Scores round 5's twins with two AI players**: P1 reaches gameplay, the level cheat jumps to round 5 with the street families swept, P2 joins with Start on pad 2 (`$115CC`), and both seats run their own `AgentLoop`. Summary: killed or not, fight time, hits and lives lost per player, each one's side and the share of ticks 160 px or more apart; every row carries both players and both twins (position, health, target). See **Two players against the twins** |
-| `twins_sim.py` | **Plays whole twin fights offline**, `twins_plan.plan` against `twins.py`, from a recording's frame with the actor's start shifted around (`--starts N`, seeded): events alternate as `$AD8E` runs them, a tick about every player update (sometimes half an update or a whole one late), the stick landing 0-1 updates after the tick. Per start: strikes per twin, the first hit (the model plays no hit reaction), the time to kill both, ms a plan; `--trace U` prints every program's score per timing at update U |
-| `mr_x_lab.py` | **Records, and checks the model against,** Mr. X in lockstep: the real pipeline walks round 8 with `--kill-until-mr-x`, then one of four actors plays a frame at a time -- `engage` (the real pipeline), `hold` (a scripted knee/release loop), `wander` or `stand` -- and every frame's row carries the input, the camera, a census, and the raw bytes of the player, him, his bullets and every Garcia. `--check FILE` replays it through `mr_x.check_recording` (and the Garcias through `garcia.check_recording`) |
-| `mr_x_sim.py` | **Plays the approach to Mr. X offline**, `mr_x_plan.plan` against `mr_x.py` and `garcia.py`, from a lab recording's frame with the actor shifted around (`--starts N`, seeded), `twins_sim.py`'s timing; per start the first hold (marked `burnt` when a Garcia's blow reaches the holder before a knee is spent), the first hit, a Garcia held, punches and chords. `--replay FILE --at T` runs the plan on one row of a `boss_fight.py` recording (its raw slots) and prints every program's worst and mean -- why the live pipeline did what it did |
-| `hakuro_emerge_diag.py` | **Traces** round 5's wave-3 HakuRo group tick by tick while the real pipeline plays, with every other ordinary family swept (`--only-enemy hakuro`): every HakuRo's raw type/position/elevation/state/health/animation, the winning verb and its target, and the wave counter, all to JSONL; stops the instant `level_index` leaves round 5, on a wave past the target, on a wall-clock backstop past the target wave, or a hard overall backstop -- see **HakuRo: rising from below deck**. Found the camera-gated freeze (`world_z` pinned bit-exact for 30+s) that `reach.enemy_still_emerging` now excludes from targeting |
-| `stage_walk_diag.py` | **Traces** a round's stage walk tick by tick (`--level`, 6 by default; `--only-enemy FAMILY` or `--kill-street-enemies`), for stalls with nothing on screen: the actor's position, height, action and velocities, the mask the pad holds, the winning verb and whether its route arrived, the camera and its scroll bounds (`$FFE01A`/`$FFE01E`), the class under the actor, pits and walls, the round clock, the time-over byte and a census of every object slot; the class map (lane-band rows only -- more runs into `$FFB800`) is written as its own row whenever it changes. Runs past a mid-round boss unless `--stop-at-boss`. `--raw FILE` also records every tick's snapshot reads (`snapshot_replay.py`), and each row names the winning verb's `target`. Found round 6's housings, belts and presses (**Round 6: the factory floor**) and round 4's props, hole and Jack loop (**Round 4: the bridge, its props and its Jack**) |
-| `antonio_diag.py` | **Explains** a round-1 fight tick by tick: every candidate `Verb` with its own emergency, the actor's hold state (`+$4C` link and the action byte behind it), every byte of Antonio's AI state that `ai/antonio.py` replays (primary, tactical, `+$78`, `+$5C`, screen X, animation frame, countdown and latched box ids, velocities, 16.16 position), `antonio.kick_gate_open`, and `antonio.plan_engage`'s stick, mode and predicted outcome. First written for, and found, the front-hold stall in **Holding a boss** above |
-| `antonio_lab.py` | **Lockstep lab** for round 1: plays to Antonio in real time, then steps the host one frame at a time with the real `AgentLoop` ticking every two frames (its pad recorded and replayed through `step_input`), and on every frame his object updates replays `antonio.boss_update` from the previous frame's work RAM and compares every field -- position, lane, primary, tactical, both timers, both velocities, animation, countdown, latched boxes, screen X -- the same for every boomerang of his while it flies (his linked one by his `+$6E`, older ones by slot), plus the contact outcome against the player's own `+$7C`. `--actor wander` swaps the pipeline for a seeded walk that never attacks, to run the model through all of his states; `--input-delay` adds latency. Scores the fight too (hits, holds, kicks started) |
-| `bongo_lab.py` | **Lockstep lab** for round 4, `antonio_lab.py`'s shape: the real pipeline plays to Bongo, then every frame his object updates is checked against `bongo.boss_update` field by field -- position, lane, primary, tactical, `+$68`, `+$79`, both velocities, the animation, its countdown, the latched boxes, screen X -- and his flame (`$97`) the same while it exists, plus the contact outcome against the player's `+$7C` (3 grab, 1 flame hit). `--actor wander` walks a seeded path that never attacks, to run the model through every state; rows also carry the other enemies alive (how the round's grunt was identified) |
-| `abadede_lab.py` | **Lockstep lab** for round 3, `bongo_lab.py`'s shape: the real pipeline plays to Abadede, then every one of his updates is checked against `abadede.boss_update` field by field -- position, lane, primary, substate `+$5B`, `+$54`, both velocities, the animation, the latched boxes, screen X -- in the states the model replays, plus the contact outcome against the player's `+$7C` (3 grab, 1 his hit, 2 a strike on him; not while the actor's own strike is live). His updates are the frames his own fields change on: the object pass keeps no fixed frame parity (a first version locked one, and a third of its checks landed on frames he had not updated on). `--actor wander` walks a seeded path that never attacks; every row carries the player's action, `+$7D` and `+$34` and his health, which is how the hold's reads were timed. Steps wait up to 15 s: the client's 1.05 s default ran out twice on a frame his run landed on |
-| `hold_timing_diag.py` | **Measures** how long each hold move commits the actor for, in 60 Hz frames: the AI plays until it holds a body, then the host enters **lockstep** and the move is issued on frame 0 with the player's `+$30` sampled every frame until it settles. One fresh hold per session -- a throw and a suplex both end the hold, and re-entering lockstep on one that is already ending measures the ending. Feeds `kinematics.HOLD_*_FRAMES`; a lockstep step is one game frame regardless of `--turbo` |
-| `hold_threat_diag.py` | **Checks** the other half live: plays an ordinary level with the waves left **alive** (no sweep, deliberately) and logs every tick the actor is holding a body -- action base, the winning verb, live enemy count, and `reach.frames_until_any_melee_lands` with the held body excluded. Summarises the decision ticks only ($60/$66; the animation locks in between ignore fresh edges, so counting them would dilute the question), and reports `knees_while_threatened`, which must be 0 |
-| `souther_diag.py` | The round-2 equivalent: `dx`/`dy`, `souther.plan_engage`'s mode, `souther.can_commit_on`, the holder's knee chain and release countdown, and whether he is untouchable, per tick. Stops on the boss's own death (raw signed health, like `boss_fight.py`) or a level reset after the boss was seen, with a `--fight-seconds` backstop -- do not run it, or any tool that drives a live host, without a real stop condition. |
-| `souther_pair_check.py` | **Checks** `souther_pair.update`, the replay of Souther's state 1 the pair plan asks about the free one, against `boss_fight.py --level 6` recordings: every Souther in primary 1 rebuilt from a row's raw slot, one update run against P1 (taken from that row and from the next, since a poll can land on either side of the player's update), and primary, tactical, `+$1C` and `+$20` compared with the row one object update (two frames) later -- see **Round 6: the Souther pair** |
-| `souther_hold_lab.py` | **Lockstep lab** for the Souther hold loop: the AI plays to its first hold, then the host steps one frame at a time through scripted experiments (`--experiments`, comma-separated, one fresh hold each: `release_regrab`, `release_loop`, `second_crossover`, `throw`, `suplex`), logging both bodies' bytes every frame; `--regrab-delay` injects input latency into the walk back in. Sweeps the street families itself every 30 frames, since lockstep stops the ordinary sweep. It measured the release countdown, the one-crossover rule and the re-grab timing `souther.py` is built on |
-| `round2_death_diag.py` | **Traces** a whole round-2 run tick by tick (`--trace`) and stops the moment the game leaves the level for the title, which is what four lost measurement runs actually were: not the AI dying but the **console resetting**, caused by the debug sweep writing a death into an object slot that was still spawning (fixed host-side -- see `StreetsOfRageRecompilation/CLAUDE.md`). Records every `Pit` with `reach.pit_endangers` per tick, which is how the pit theory was ruled out: round 2 has none |
-| `snapshot_replay.py` | **Records and replays** the reads `read_snapshot` makes: `RecordingSource` wraps the client, `SnapshotRecorder` writes the ROM tables once and each tick's changed reads as JSONL, and `ReplaySource`/`iter_ticks`/`load_rom` rebuild any tick's `GameSnapshot` offline -- the real `AgentLoop`, or any `decide`/`priority`/`execute` function, run again on a live stall as often as the question needs. Used by `stage_walk_diag.py --raw` and `jack_sim.py`; recordings run ~4 MB a second, local only |
-| `jack_sim.py` | **Plays the Jack engage offline**: every `--every`th tick with a Jack in a `--raw` recording (`--from`/`--to`) seeds `jack.plan_world` against `jack.py`'s model, update by update, until he is held, the actor is hit or `--updates` run out (a stalemate); `--timing ideal|fixed|jitter`. Found round 4's off-screen reset loop (**Round 4: the bridge, its props and its Jack**) |
-| `jack_plan_bench.py` | **Times and checks `jack.plan_engage`**: replays `--raw` recordings (`--raw A B ...`, or the `--cache` pickle of the captured contexts) through the real `AgentLoop`, keeps every tick whose winning verb is `EngageJack`, times `execute.engage_jack_plan` (best of `--passes`; median/p95/p99/max by Jack count) and `--save`s every `EngagePlan` field, or `--compare`s against a saved file (exit 1 on any plan diff) -- the proof that a speed-up is exact. Contexts are replayed in a canonical order (**Jack's plan inside the 2 ms budget**). `--profile` prints a cProfile. Recordings and caches stay out of the repo |
-| `ai_assist_fight.py` | **Runs round 1 with P2 inside the host or over the socket** (`--p2 embedded\|socket`, an external AI on P1, a fresh `--turbo 2 --silent` host per run): frames, scores and lives lost, plus the host's `[ai]` lines. Under `--ai-assist` a client's P2 Start is ignored, so it pokes `p2_button_held` to join |
-| `tick_bench.py` | **Times and checks whole ticks**: replays `--raw` recordings through the real `read_snapshot` and `AgentLoop.tick` (a fresh loop per recording and pass), times both halves per tick (best of `--passes`; median/p95/p99/max, ticks over 2 ms, `--by-verb` per winning verb) and `--save`s every tick's winning verb and pad commands, or `--compare`s against a saved file (exit 1 on any diff). `--no-budget` plays every `grunt_plan` program and `--canonical` hands the street enemies over in slot order -- with both, two runs of the same code agree on every tick (**Cheaper ticks for weaker machines**). `--profile` prints a cProfile. Recordings stay out of the repo |
-| `grunt_plan_bench.py` | **Times and checks `grunt_plan.plan`** alone: captures every call's inputs (actor, enemies, knives, flags, a copy of the `PlanMemory`) from `--raw` replays into a `--cache` pickle, then times each call unbudgeted (best of `--passes`, by enemies relevant) and `--save`s/`--compare`s every `GruntPlan` and the program kept. The cache pickles the model objects: rebuild it when their slots change |
-| `breakable_diag.py` | Breakable stalls, per tick while a `Breakable` is in context. Round 1 by default, with **real** enemies (the sweep did not reproduce that stall); `--level N` jumps to a round first, `--sweep` keeps the ordinary families swept (the walk `scripts/play.py --preset boss` and the boss harnesses make -- how the round-4 stall was reproduced), `--heartbeat-s` logs a position row that often with no breakable around (so a stall anywhere shows), `--until-boss` stops at the boss |
-| `armed_combat_diag.py` | Held-weapon reach and swing timing |
-
-## Observer surface
-
-| Piece | Role |
-| --- | --- |
-| `app.py` | CLI (`--host`, `--port`, `--poll-ms`, `--hud-ms`, `--once`, `--agent-p1`, `--agent-p2`, `--lockstep`), realtime poll loop or lockstep loop (AI-driven clock: tick, then 2 stepped frames), AI dispatch. ``_record_frame_timing` logs measured frames/tick at DEBUG (**Poll timing is now measured, not just assumed**, above) -- diagnostic only, never read by the AI |
-| `sor_remote.py` | `SoRClient` and the execution-data input document (**Input through the execution data**) |
-| `host_flags.py` | The host's `GET_FLAGS` modes (`MegaDriveEnvironment`: 1024 game-defined flags in 128 bytes, flag *n* = bit *n* % 8 of byte *n* // 8). `FLAG_WIDESCREEN` 0 (`sor --widescreen`) mirrors `StreetsOfRageRecompilation/main.cpp` (flag 1, `--altControls`, is gone: each player's scheme comes from the game data, `sor_remote.py`). `ObserverApp.widescreen` is read on connecting and every `HOST_FLAGS_REFRESH_S` (1 s), since OPTIONS > VIDEO can change it under a running host; `ObserverApp.six_button` (per player, `SoRClient.refresh_schemes`) whenever an AI is turned on (`set_agent_enabled`, or a fresh connection with one already on) -- the poller does the read, since it owns the client (`_button_mode_stale`). A host without `GET_FLAGS` (NAK) leaves widescreen off. Each `AgentLoop.six_button` follows its own player's and adds the `SixButtonLayout` token (below); nothing consumes `widescreen` yet |
-| `state.py` | Work-RAM / remote reads → `GameSnapshot`. `snapshot_from_work_ram` builds one from a lockstep step's 64 KiB image (the same windows `read_snapshot` fetches, sliced locally -- shared with the labs' shape). `snapshot_from_memory_blocks` skips both `hazards.holes_for_level` and `hazards.barriers_for_level` on the elevator stage (`level_index == 6`, stage 7): its moving platform is not represented by the class-0/2 collision map the same way ordinary terrain is, so both reads would be class-map noise rather than real hazards. Barrier solids were skipped first ("class map noise cannot invent walls on the lift"); holes got the identical carve-out once a phantom `Pit` reached the AI pipeline (`ai/observe.py` builds one per `snapshot.floor_holes` entry, unconditionally) and the HUD drew a hole that was never there. `snapshot.floor_holes`/`floor_barriers` are therefore always `()` on stage 7, which is the one place both the HUD and the token pipeline need to change to make pits disappear there — everything downstream already just reads the snapshot |
-| `world_map.py` | Camera + actors → map entities (incl. hunt targets); `MapEntity.stun_timer` is the ordinary-enemy `+$50` stun countdown, read only in the `kind=="enemy"` branch (the same offset is weapon wear / boss distance / player character id for other kinds) and only meaningful while `combat_phase` is `STUNNED`; `MapEntity.held_type` on an ordinary enemy is the pickup weapon `$08-$0C` it is carrying, resolved from a held weapon object's `+$52` holder pointer (`interaction==1`) -- enemies do not store the type at `+$60` (that word is their scripted approach X); `parse_world_map` takes `police_special_active` purely to disambiguate enemy state `$0400`; `MapEntity.hitbox` is the object's real body AABB -- for a player, `_object_geometry` reads it straight from the cached box at `+$70` and needs no `RomData` at all; for everything else it is rebuilt per tick from the ROM shape tables and `None` without `RomData` (*unknown*, never *no body*) -- and `MapEntity.attack_ranges` is every reach its type has (empty for a player, whose reach lives in `tokens/character.py` instead, and for bosses, whose animation sets are not labelled); `MapEntity.character_id` (0/1/2 = Axel/Adam/Blaze, `None` for non-players) is threaded through from `parse_world_map`'s own resolved `char_id` purely so a display-side consumer (today, `hud.py`'s `_display_attack_ranges`) can look up a player's per-character punch reach -- it is not read anywhere in `world_map.py` itself; `_is_dormant_combatant` drops a combatant whose **primary state is still `$0000`** whether or not the SAT-hidden bit is set: a wave's object slots are populated before `$937A` runs, so for one frame they hold a complete, *visible*, uninitialised entity -- recorded live, five of them appearing for a single tick at state `$00` with zero health and zero velocity, spread across the level ahead, and the AI punched at the nearest of them (48px away, at nothing) before they vanished. The hidden bit is a symptom `$937A` sets while testing eligibility, not the definition of dormancy. `MapEntity.enemy_vel_x`/`enemy_vel_y` carry ordinary-enemy velocity (+$1C/+$20), read only in the `kind=="enemy"` branch -- distinct fields/offsets from the boss-only `vel_x`/`vel_z` (+$20/+$24) already on the same dataclass, left untouched. `MapEntity.contact_slot` resolves the player's `+$4C` hold link to a slot name -- the ROM's own "which body am I holding", and the only field that answers it for a later boss (see **Holding a boss**); meaningful only while the action byte is in a grab/hold family, which is why `observe.py` and `is_grabbing` both gate on that |
-| `object_catalog.py` | Type → symbol / color / family. Antonio's boomerang (`$96`), Bongo's flame (`$97`) and Souther's claw/afterimage (`$98`/`$99`) are catalogued so the linked boss attack objects become map entities at all (the flame reads the later-boss layout like the boomerang: animation, countdown, latched box, `+$6E`); the claw pair is then withheld **unconditionally** from being a projectile threat (`reach.is_souther_claw`), unlike the boomerang, which is only withheld while attached (`reach.antonio_still_holding_boomerang`) -- they are animation-synchronized visuals re-created from Souther's own position every tick, with no flight to intercept and no box of their own (the claw's hit is his own attack box; `ai-analysis/enemy-ai.md`) |
-| `memory_map.py` | Known addresses; `OBJ_VEL_X_ORDINARY`/`OBJ_VEL_LANE_ORDINARY` (+$1C/+$20) are ordinary-enemy velocity per enemy-ai.md's object-layout table, corroborated live (a moving Garcia's +$1C tracked its actual displacement direction while +$20 stayed 0) -- distinct from the pre-existing boss-only `OBJ_VEL_X = 0x20`, which is in fact the lane velocity for the later-boss object family (`$17AB8` adds `+$1C` to X and `+$20` to the lane) -- still what `vel_x` reads for a boss and for most projectiles, while Antonio's `$96` boomerang reads its X velocity from `+$1C` (`OBJ_BOSS_VEL_X`) |
-| `hitboxes.py` | Real collision AABBs, as the formal `Hitbox` value object. **Players cache theirs** at `+$64` (attack) / `+$70` (body) -- six absolute words `[x0,x1,y0,y1,z0,z1]`, written by `$4140`, whose only call site (`$1CC6` in `sub_001bdc`) is player code. **Enemies cache nothing**: `$AAA0` passes the enemy's per-frame box id (`+$2` attack / `+$3` body) to `$AB24`, which rebuilds the AABB from ROM tables on every test and discards it -- so an enemy hitbox must be *reconstructed*, not read (this is also why `enemy-ai.md` can list `+$64`/`+$70` as pointers for enemies without contradicting the player layout). Tables: `$1A68E` object shapes (5-byte records), `$1AB8E` lane extents (2-byte), `$1ABA8` player shapes; type `$58` is the one non-player that uses the player table. Both record bytes are sign-extended (`ext.w` in `$AB88`), box id 0 means no box, and mirroring is *not* applied here -- the shape table carries separate forward/backward records and the animation data picks one, so a rebuilt box is already oriented |
-| `prop_solids.py` | The rectangle a **solid prop** stands behind, which is not the box `hitboxes.py` rebuilds. `sub_00003B8A` walks the object table per moving object (skipping any slot without bit 0 of `+$3A`, the solid flag -- set on every intact breakable sampled live) and `sub_00003BAE` tests the mover's **own position** -- a point, never its body box -- against `prop.x + rec[0] .. + rec[1]` on x and `prop.lane + rec[2] .. + rec[3]` on lane, strictly on all four edges (two `bcc` exits per axis), undoing that frame's whole displacement (`+$1C`/`+$20`) on a hit. `rec` is one of five records at `$3C6A`, picked by the type compare chain at `$3BC4`-`$3C00`, which ends in `nop` rather than a branch -- so every type it does not name (the round-4 props among them) uses the last record. Every record ends 4px *past* the prop's lane origin: a prop is solid behind its feet and walkable in front of them. The distinction is not academic -- a round-5 prop (`$1F`) at lane 96 draws its body box at lane 86..106, in front of its origin, while the wall that stops a player runs 76..100, twenty px behind it, so routing off the sprite plans straight through solid ground. Verified live on stage 5's 2x2 fence: from the corridor between the rows, UP stops at lane 60 (`56 + 4`, exact) and DOWN at 75, one walk step short of the predicted 76 |
-| `attack_ranges.py` | Every enemy type's real reach, extracted from the ROM's own animation sets (graphics-engine.md §8.3). Walks set → animation → frame record collecting each frame's attack box id, resolves it through `hitboxes`' shape table, and keeps only boxes that out-reach that same frame's *body* box by `MIN_REACH_GAIN` -- Garcia's and Signal's idle animations both present a body-sized contact box for `$AA22`'s grab path, which is not a strike. Even (right-facing) animations only, so every `AttackRange` is already forward-oriented and mirrors via `projected`. Held-weapon reach is **not** extracted (a weapon is its own object with its own attach table); `held_weapon_range` supplies the one measured value, bat/pipe 36px, and `None` for everything unmeasured |
-| `rom_data.py` | `RomData` — shape tables + animation sets, read **once per connection** (ROM cannot change) and threaded through `read_snapshot` into `parse_world_map`. A read failure degrades to `None`: the observer keeps working without hitboxes or attack ranges rather than failing |
-| `hazards.py` | Pause, police special active, floor holes and walls. **What a class is, is the round's**: `FLOOR_TABLES` transcribes `$19C04`'s per-round kind and surface tables (`sub_0000AD30`), so a hole is a class with no floor (`is_hole_class`: 0, 3 and 4 in rounds 1-5, 0 in round 6) and a wall one whose floor stands 8+ px above the street's (`is_wall_class`: round 6's class 2, 160 px of machine housing; round 6's 3/4 are belts). `find_collision_barriers` reports walls exactly, one rectangle per run of cells along a row -- a housing's bounding box covers floor its stepped edge leaves free (see **Round 6: the factory floor**) -- and every scan starts on a cell edge. The collision map is **exactly `stride * 16` px wide and `len(cmap) // stride` rows tall**, and both scanners deliberately sweep wider than that (`holes_for_level`/`barriers_for_level` cover `camera_x - 512 .. camera_x + 832`), so the off-map bound must be applied in `_find_class_regions` -- it cannot be left to the class value, because `collision_class_at` reports 0 off the map and 0 is *also* the pit class. Before that bound existed, `row * stride + col` with `col >= stride` silently read the **next lane row**'s terrain, so the tail past a level's own width scanned as one enormous hole and reached the AI as a phantom `Pit` (rerouting, `_pit_escape_mask` shoves) and the HUD as a hole that was never there |
-| `phases.py` | Combat-phase decode for map outlines and AI danger checks. `CombatPhase.STUNNED` is the ordinary-enemy *timed* stun -- state `$0200` hitstun (handler `$9B88` seeds `+$50` with `$18` and only counts it down before restoring `$0100`) and state `$0400` pepper-spray immobilization (shared handler `$A43E`, `+$50 = $A0`). `$0400` is also the police-special sweep removal, which forces health `$FFFF` while the global flag is up -- that case stays `SCRIPTED`, which is why `ordinary_enemy_phase` takes `health`/`police_special_active`. Distinct from `RECOVERY`, the tail of a move the enemy itself chose. `_TYPE_SPECIFIC_MOVE_PHASES` (formerly `_GARCIA_MOVE_PHASES` -- renamed once it grew a non-Garcia entry) covers states outside the generic `$00`-`$07` table per ordinary type; Nora (`$26`) was previously entirely absent from it, so every one of her own states (whip engage-and-swing at `$08`, the shared "damaging special" entry `$0A`, post-hit recovery `$0B`/`$0C`/`$0F`, knockdown-trigger `$10`, blocked-delegate `$12`, lunge windup `$13`/`$14`, and the lunge itself at `$15`) fell through to `UNKNOWN` and the AI could not tell she was dangerous, closing, or genuinely stunned at all -- confirmed by dumping her primary-state dispatch table directly from the ROM (word table at `$10362`, referenced by `nora_type26_dispatcher` `$F038`; table entry *N* is state byte *N*, the same alignment `$991A`/`ordinary_enemy_begin_knockdown` at entry 3 already confirms for every ordinary type). State `$15` (`$F6BC`) writes `+$1C`/`+$20` (`grunt_vel_x`/`grunt_vel_y`) directly to ~2.75/2.125 px per 60 Hz frame toward the target on entry -- a scripted lunge with no attack shape of its own, the same pattern as Signal's slide but faster on both axes, and now visible to `reach.enemy_will_close_soon`'s velocity projection the same way. Jack (`$27`) shares that identical lunge toolkit (enemy-ai.md "A second scripted lunge, shared with Jack": his own table at `$1037C` reuses the same `$F5F2`/`$F64A`/`$F6BC` addresses) but at his own state numbers `$08`/`$09`/`$0A` rather than Nora's `$13`/`$14`/`$15` -- was previously absent from `_TYPE_SPECIFIC_MOVE_PHASES` entirely, so his lunge fell through to `UNKNOWN` (invisible to `is_dangerous`/`enemy_will_close_soon`) the same way every one of Nora's own states did before she got a table |
-| `hud.py` | Tk window: State / P1 / P2 + world map + AI toggle labels; restores last window size/position. Also draws the path finder's own plan for whichever agent is on -- green arrows through `Path.positions()`'s merged vectors, red when `Path.reached` is false, a ring at the final planned position. Sourced from `VerbState.route` (`ai/loop.py`), filled from `execute_tick`'s `route_trace` param -- a `ContextVar` set only for the duration of that call, since the routed handlers are reached through `_HANDLERS`' generic `(verb, context, gamepad)` dispatch and cannot carry an extra parameter without widening every other handler to match. `route=None` means "nothing to route" (drawn as nothing); an *empty* `Path` (arrived already) is a real, different value and is not confused with it |
-| `bcd.py` | Packed-BCD helpers |
-| `AI.md` | Architecture for the symbolic AI (Token / Information / Verb) |
-| `TokenMap.md` | Mermaid class diagram of the token hierarchy (classes and inheritance only); keep in sync with the `ai/` sources |
-| `ai/` | Symbolic AI implementation — see "AI surface" below and [`AI.md`](AI.md) |
-
-### CLI
-
-- `--host` / `--port` — remote endpoint
-- `--poll-ms` — wall-clock remote sample period (default 33 ms)
-- `--hud-ms` — GUI paint period only
-- `--once` — one snapshot to stdout, no GUI
-- `--agent-p1` / `--agent-p2` — start with the AI controlling that player
-  (off by default; also toggleable at runtime from the HUD)
-- `--start-level N` / `--only-enemy FAMILY` / `--kill-street-enemies` —
-  debug scenario (requires the host `--debug-utils`). The last kills every
-  ordinary family so a boss fight can be isolated.
-- `--kill-until-mr-x` — round 8: every enemy and every boss dies (the host's
-  `Alt/Option+X`) until Mr. X's office scene is up, and nothing after; not
-  combinable with the other sweeps (`DebugScenario(kill_until_mr_x=True)`).
-
-There are no hold-frame knobs, police-special suppress flags, or evaluation
-entry points in this tree.
-
-### HUD
-
-- Keys: **Esc** / **Q** quit
-- Columns: State · P1 · P2 (health, lives, specials, score, hunt count,
-  winning-`Verb` label, one extra pending-verb label, AI toggle label)
-- Map outlines use `phases.py` combat-phase colours
-- Each marker square is sized from `MapEntity.hitbox` when present (projected
-  through `hud._hitbox_to_canvas`, then floored to `MIN_MARKER_PX` so a tiny
-  or zoomed-out box never disappears) rather than the old fixed per-kind
-  radius, which is kept only as the fallback for an entity with no hitbox
-  this tick (no `RomData`, or a frame whose body box id is 0). A translucent
-  red square is drawn per `AttackRange` on an on-screen entity (`AttackRange.
-  projected`, one square per range rather than a merged bounding box, so a
-  dead zone like Nora's shows as a real gap between her body and where the
-  square starts) — pooled and z-ordered under the entity markers the same
-  way floor holes are pooled and raised above the camera plate. Translucency
-  is `hud._blend_hex` (fill pre-mixed with the plot background at
-  `_RANGE_FILL_ALPHA`, drawn as an opaque solid), not Tk's `stipple` option:
-  `stipple` is this HUD's idiom for floor holes, but it silently renders as
-  flat opaque fill on Aqua Tk (macOS) instead of dithering, and since
-  `_blend_hex` produces one fixed opaque colour, two overlapping range
-  squares do not compound into a darker shade — whichever draws last simply
-  covers the other. `hud._display_attack_ranges` is what actually feeds this
-  loop (both the pool-sizing pass and the draw pass), not `entity.
-  attack_ranges` directly: `world_map.MapEntity.attack_ranges` is, by design,
-  always empty for a `kind=="player"` entity (that reach lives in
-  `tokens/character.py`'s punch geometry, not a per-frame ROM extraction), so
-  without this the HUD drew a player's real body-AABB hitbox outline but
-  never its hit-range square, which visually read as "the HUD shows the
-  hitbox as if it were the hit-range" -- a live-reported symptom. The helper
-  appends one synthesized `AttackRange` (unarmed punch, or the same
-  `MELEE_WEAPON_PUNCH_OUTER_X` reach an enemy's own held bat/pipe gets, when
-  `MapEntity.held_type` is a melee weapon) built from `tokens.character.
-  punch_inner_x`/`punch_outer_x`/`PUNCH_RANGE_Y` keyed by `MapEntity.
-  character_id` -- the exact numbers `ai/reach.py`'s own band tests already
-  use, never a second set invented for display -- for `kind=="player"` only;
-  every other kind is returned unchanged
-- A closing-threat arrow (`hud._closing_projection`, orange `_CLOSING_COLOR`,
-  same as `phases.phase_color`'s `CHARGE`) is drawn from an on-screen
-  ordinary enemy's current position to where its own `enemy_vel_x`/
-  `enemy_vel_y` projects it `ai.reach.CLOSING_ENEMY_THREAT_FRAMES` ahead
-  (60 Hz frames, the unit those velocity fields are in),
-  whenever that enemy is in a committed phase (`phases.is_dangerous`) and
-  actually moving — deliberately distinct from the `AttackRange` squares:
-  Signal's slide (enemy-ai.md "Signal's slide is velocity, not a hitbox")
-  has no attack shape anywhere in its animation set, so nothing would ever
-  paint a range square for it without this. Gated on the committed phase
-  (not velocity alone) so a routine approach, which has real velocity too,
-  does not bury the one case this exists to surface; `kind == "enemy"` is
-  belt-and-braces on top of that, since `world_map.py` never populates
-  `enemy_vel_x`/`enemy_vel_y` for a `boss` entity in the first place
-- Inferred-token overlays (only while that player's AI is ON): an amber
-  dashed square per `EnemyCluster` (`hud._cluster_member_groups` deduplicates
-  reciprocal A-names-B/B-names-A pairs by full slot set and drops groups with
-  fewer than two members still on the map; `hud._cluster_canvas_rect` grows
-  the member box by `_CLUSTER_PAD_X`/`_Y` so the square sits clear of the
-  markers) and a small light "P" badge above each `PartnerFight` enemy slot.
-  Both ride the enabled agents' `VerbState` (`ai/loop.py`: `clusters`/
-  `partner_fights`, filled by `inform_hud` from the post-collapse context and
-  cleared with it), unioned across P1/P2 when both are on via
-  `hud._collect_clusters`/`_collect_partner_slots` -- the snapshot itself has
-  no notion of what the AI inferred, so nothing draws when the AI is off
-- Click a player's "AI: OFF/ON" label to toggle that player's AI at runtime
-- Window size/position is persisted to `~/.config/sor-autoplay/window.json`
-  (`$XDG_CONFIG_HOME` when set): each launch restores the last geometry
-  instead of maximizing. Maximize only happens on first run (no saved file).
-  A maximized (zoomed) close never overwrites the saved normal geometry.
-  Apply geometry after the UI is built — scheduling it with `after_idle` at
-  construction time makes the first deiconify/focus flush the idle callback
-  before the layout exists, so the window drops to its minimum size.
-
-### AI surface (`ai/` — see [`AI.md`](AI.md))
-
-| Piece | Role |
-| --- | --- |
-| `tokens/` | All token classes (including ABCs), split by kind; the package `__init__` re-exports everything. `tokens/tokens.py` (`Token`/`Information`/`Verb` base classes, `Context`, `find`/`find_all`; `Information` splits into `Observed` (directly read from RAM) and `Inferred` (derived from observed tokens)); `tokens/character.py` (`Character` common actor base (`slot`, position, health, facing, combat phase); `Myself`/`Partner` (`player_index`, `action_state`, `action_flags`, `is_airborne`, punch inner/outer helpers, `vel_x` from player `+$1C` -- the word Antonio's kick gate reads -- and their own `hitbox` -- read straight from the object's own cached box at `+$70`, never reconstructed, and carrying no `attack_ranges`: a player's reach is this module's punch/rear/jump-kick geometry, not a per-frame extraction)); `tokens/enemy.py` (`Enemy` (a `Character`; adds `type_id`, `targets_player`, the formal `hitbox`/`attack_ranges` value objects plus the `max_reach`/`min_reach` helpers derived from them, `is_defeated` (the ROM's lethal check is **signed**, so a health word of `$8000`-`$FFFF` is already a corpse while the object sits in its slot with a stale action family -- judging "still a target" from `combat_phase` alone kept the AI walking to, ranking and punching bodies, which is what "attacking enemies that are not there" looks like from the sofa; zero health is *not* defeated and still owes a finishing hit) -- value objects rather than tokens, since a token may never embed a token by value, `held_weapon_type` (pickup `$08-$0C` while this enemy is holding one, else 0 -- ordinary enemies do not store this at `+$60`; observe copies `MapEntity.held_type`, which `world_map` resolves from the held weapon's `+$52` holder pointer), `grunt_vel_x`/`grunt_vel_y` -- ordinary-enemy-only velocity, defaulted to 0 and unused by `Boss`, which keeps its own separately offset `vel_x`/`vel_z` -- and `predict_position_after_n_frames(n)`, the enemy's own constant-velocity extrapolation in **60 Hz game frames** (the unit `$17AB8` integrates `+$1C`/`+$20` in, *not* AI poll ticks, which are ~2 frames each at the 33ms default), which every lead time in `ai/kinematics.py` is built on and which a `Boss` answers with its current position since it never populates those fields) + subclasses: `Grunt` (ordinary types `Garcia`/`Signal`/`HakuRo`/`Nora`/`Jack`; carries the ROM's own `stun_timer` at `+$50` plus `is_stunned`, an ordinary-enemy-only field since both stun handlers are ordinary state-table entries; `Nora` additionally carries `ticks_since_last_attack`, cross-tick memory maintained by `observe.NoraAttackTracker` -- not a RAM field, defaulted to `NORA_TICKS_SINCE_ATTACK_UNKNOWN` for any `Nora` built without going through the tracker), `RivalPlayer` (the other player during Mr. X's betrayal duel -- **Mr. X's betrayal duel**), `Boss` → direct subclasses `Abadede`/`MrX`/`Souther`/`Antonio`/`Bongo`/`Onihime` (`Boss` also carries `primary_state`, the `+$30` byte Antonio's kick is); `enemy_class_for_type`; `Surrounded`, the one `Inferred` judgment left about enemies (three or more live enemies inside the close box around the actor, or a pincer with one on each side; produced by `inference.check_for_surrounded`, the only function `inference.py` still has); `GrabReason` -- `CLEAR_REAR`/`DEAD_ZONE`/`WHILE_SURROUNDED`/`DODGE_CHARGE` -- an `Enum`, not a token field: it is the return type of `reach.grab_reasons(context, actor, target, enemies) -> frozenset[GrabReason]`, why a hold beats a strike; most reasons are `Grunt`-only, and neither boss with a plan has one: `EngageAntonio` and `EngageSouther` walk into them themselves, so no `GrabEnemy` is ever produced for either. `WHILE_SURROUNDED` is the only reason keyed on the actor's own situation (`reach.actor_is_surrounded`) rather than on the candidate enemy -- see `AI.md`'s "Judging without a cache" for why this, and every other judgment formerly produced by `inference.py`'s `check_for_*` functions (`ClosingEnemy`, `TargetInReach`/`ReachKind`, `IncomingMelee`, `PunishWindow`, `IncomingProjectile`, `WeaponUpgrade`, `AntonioIsGoingToKick`, `SoutherIsGoingToSlash`, `SoutherPunishesJump`, `SafeSpot`), is now a direct `reach.py` (or, for `SafeSpot`, `execute.py`) function call at each site that needs the answer instead of a token written into the context once per tick; `tokens/essential.py` (`Essential` (scene-wide observations `Stage`/`CameraRange`/`AnimationInProgress`/`InContinueMenu`/`InMrXDialog`/`PlayerDuel`, and the harness switches `DebugNoFood`/`DebugNoPolice`/`DebugMrXAccept`)); `tokens/dialog_verbs.py` (`Dialog` groups UI-prompt verbs `HandleContinueMenu`/`HandleMrXDialog` -- always Yes + initials `AI `, always No to Mr. X); `tokens/hazard_tokens.py` (`Projectile` -- Antonio's `$96` boomerang also carries the rest of its later-boss object, `vel_x` being its `+$1C`, for `antonio.BoomerangSim` --, `StageObjects` (`Breakable` -- carries its real `hitbox`, `Pit`)); `tokens/pickup_tokens.py` (`Weapon` (with its real `hitbox`) + consumable `Pickup` hierarchy + `weapon_rank`); `tokens/walk_verbs.py` (`WalkToNearEnemy`, `RetreatFromDanger` (give up ground to a dangerous enemy not yet actionable -- only while hurt or `Surrounded`, per `decide._retreat_is_worth_it`; danger alone is not enough), `ProjectileSidestep` (step off a projectile's own lane rather than block its path, once `reach.projectile_threatens` judges it a threat -- built for Jack's thrown axe/torch (type `$28`), but reacts to any projectile judged a threat), `EngageAntonio` (the whole approach to Antonio, planned by `antonio.plan_engage`'s lookahead over his own AI; the hold is the contact result of the walk, armed or not), `EngageSouther` (the whole approach to Souther -- corridor, lane escape, walk-in -- planned by `souther.plan_engage`; the hold is the contact result of the walk, armed or not), `WalkToAdvanceStage`, `CatchUpPartner` (follow a partner who is further along the stage, `WalkToAdvanceStage`'s replacement beside one -- see **Following a partner who is ahead**), `WalkToWeapon`, `WalkToPickup`); `tokens/attack_verbs.py` (`Punch` (unarmed only), `HitAntonioBoomerang` (timed B-punch that knocks his type-`$96` boomerang away the moment it would hit), `MeleeWeaponAttack` (armed melee -- same B input as `Punch`, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`/`ReleaseToRegrab`, and `ReleasePartner` -- the only one offered while the body in hand is the other player), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat (`Punch`/`JumpAttack`/`RearAttack`); `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`, the only two the ROM attack-throws)); `tokens/police_verb.py` (`CallPolice` — an `Attack` descendant, health-critical only and only with at least one live enemy); `tokens/recovery_verbs.py` (`Recovery` groups actions that escape/shorten a bad state rather than act on an enemy/prop/held body; `TechRecover` — the C+Up bounce-cancel landing tech, armed only by specific special/boss hold-throw choreography (`PlayableCharacter.throw_tech_ready`), not an ordinary street-enemy throw) |
-| `observe.py` | Direct observation from an already-fetched `GameSnapshot` (never re-polls RAM); free-to-act phases include `HOLDING` and `HELD_BY_ENEMY`. Fills `PlayableCharacter.held_enemy_slot` from `MapEntity.contact_slot` while the action byte is in the hold family (`$60-$6F` or the `$76`/`$80` crossover), and `HoldTracker` counts `hold_ticks` over that same family so a knee or a flip passing through an animation lock does not restart the knee budget. Also emits `InContinueMenu` from a type-`$0F` player object and `InMrXDialog` when `$FFDE00` is set and this player's `+$59` bit 4 is live. `NoraAttackTracker` is the one deliberate exception to `generate_direct_observation_tokens` otherwise being a pure function of its snapshot argument: cross-tick memory (keyed by enemy slot, one instance per `AgentLoop`) of ticks since each on-screen Nora last held a dangerous phase, reset to 0 while dangerous and incremented otherwise, feeding `Nora.ticks_since_last_attack`; `forget_missing` drops a slot the moment it stops being observed as a live Nora so a slot the game later reuses for a different enemy never inherits a stale count. `GrabStallTracker` (the old Souther walk-in timeout) is gone with the grab reason it guarded; the hold loop reads the holder's own bytes instead (`PlayableCharacter.knees_in_chain`/`hold_release_countdown`/`crossover_spent`, from `+$58`/`+$61`, `+$63` and `+$4B`) |
-| `inference.py` | `check_for_surrounded` (3+ enemies in the close box, or a pincer -- reusing `rear_attack_is_warranted`'s own box so the two judgments cannot disagree) and `generate_inference_tokens` (in practice, just `context | check_for_surrounded(context)`), the only two functions left here. Every other judgment this file used to compute once per tick and write into the context -- threat-filtered incoming projectiles, closing enemies, per-move reach bands, incoming melee, punish windows, grab opportunities, weapon upgrades, Antonio's kick gate, Souther's slash gate and jump counter, safe spots -- was removed and folded into a `reach.py` (or, for the safe-spot search, `execute.py`) function called directly by whichever `could_*`/`_emergency_*`/state machine needs the answer, several times a tick rather than once; see that row below and `AI.md`'s "Judging without a cache" for the reasoning and the full list of removed tokens |
-| `walk_verbs.py` | `WalkToNearEnemy`, `RetreatFromDanger`, `ProjectileSidestep`, `EngageAntonio`, `EngageSouther`, `EngageBongo`, `EngageAbadede`, `EngageJack`, `EngageGrunts`, `EngageTwins`, `WalkToAdvanceStage`, `Centering`, `CatchUpPartner`, `WalkToWeapon`, `WalkToPickup` |
-| `attack_verbs.py` | `Punch` (unarmed), `HitAntonioBoomerang` (timed punch of Antonio's type-`$96` boomerang), `MeleeWeaponAttack` (armed melee, same B input, different ROM move/reach per held weapon), `OpenBreakable` (one verb for the whole prop interaction -- approach *and* strike, switching on `decide.in_smash_range`; replaced the former `WalkToBreakable`+`SmashBreakable` pair, which split one intent across two verbs that had to hand over to each other between ticks), `GrabEnemy` (walk into an enemy, unarmed and without attacking, to take the hold -- a grab is a *contact* result, not an input), hold moves (`AttackHeldEnemy`/`ThrowHeldEnemy`/`FlipHold`/`Supplex`/`ReleaseGrab`/`ReleaseToRegrab`, and `ReleasePartner` -- the only one offered while the body in hand is the other player), `JumpAttack` (horizontal only), `RearAttack`, `CounterGrab`; `MeleeAttacks` groups unarmed close combat; `MeleeWeaponAttack` is the armed melee sibling; `GrabMechanics` groups all grab/anti-grab moves (taking the hold included); `WeaponAttacks` groups the *thrown* weapon attacks (`ThrowKnife`/`ThrowPepper`) |
-| `police_verb.py` | `CallPolice` — an `Attack` descendant (health-critical only; below `POLICE_HEALTH_PERCENT_THRESHOLD`; also requires at least one live enemy) |
-| `dialog_verbs.py` | `HandleContinueMenu` / `HandleMrXDialog` — UI-prompt verbs (always Yes + initials `AI `; always No to Mr. X). Name-entry confirm is C (or A): `$57D2` accepts `+$55` bits 5+6 and treats bit 4 (B) as backspace, a no-op on the first slot -- pressing B to "type A" left the AI stuck on the first initial |
-| `recovery_verbs.py` | `TechRecover` — fires while `PlayableCharacter.throw_tech_ready` (armed `+$45` on a techable action `$5C`/`$72`/`$88`); `could_tech_recover` bypasses the generic `_blocked` gate like `could_counter_grab`, since the actor is airborne/hurt for the whole window |
-| `kinematics.py` | The AI's **time** axis, next to `reach.py`'s geometry: where a target will be when a move actually *arrives*, so no attack is aimed at a position its own startup has already invalidated. Built on `Enemy.predict_position_after_n_frames` plus measured ROM timings -- punch startup 3/3/5 and `$322A` chord startup 3/21/7 frames (controls-and-input.md's two "Measured" tables), the jump's fixed 5-frame crouch and 3.0 px/frame launch velocity, thrown knife 16 px/frame and pepper 6 px/frame (weapons-range-and-damage.md section 4), and ground walk speeds **read from the ROM's own tables** at `$3670`/`$3706`/`$379C` (3.0/2.5/3.25 px/frame on X, 2.375/1.5/1.625 on lane): `$3614` indexes them by the character id at `+$50` and the action with its facing bit cleared, one signed byte per axis scaled by /16, entry `$06` being the straight horizontal walk -- not currently in any manuscript, extracted here. `intercept_frames` is the shared one-dimensional pursuit solve (gap over approach speed *minus* the target's own velocity along it), reporting `MAX_LEAD_FRAMES` for a target that would never be caught so the projection simply fails the band check instead of returning infinity. **A prediction may only ever add an attack, never remove one**, which is why `connect_frames` always includes frame 0 -- the observed position, the answer the pipeline gave before any of this existed -- and why a stationary move leads only by its own startup, not by its damaging span. Both rules are scar tissue, measured by sweeping the pipeline against the previous commit: judging the punch at a single future instant projected an enemy walking into Axel from 20px straight into the punch's *inner dead zone*, deleting the `Punch`, handing the tick to `WalkToNearEnemy` and having the actor walk into enemies it should have hit -- while promoting the point-blank `RearAttack` chord, since a target inside the dead zone is exactly what makes that chord "warranted"; and sweeping the whole 10-frame damaging span instead had Axel punching at a target 74px away because it would arrive by the last frame, flailing in place rather than closing. `enemy_projected_without_crossing` is the third: straight-line extrapolation walks an approaching body through the actor and out the other side, which no enemy does (`$AAA0` resolves the contact first), so an approach is clamped at `BODY_CONTACT_GAP_X` -- clamping to the actor's exact X was not enough, since dx=0 sits inside the degenerate zero-width front band Axel and Blaze have and produced the same phantom chord a different way. Everything is in **60 Hz frames**, never poll ticks (`FRAMES_PER_TICK` is the one conversion point), and `AI_LATENCY_FRAMES` is the pipeline's own one-poll delay on top of every startup. `ATTACK_CONNECT_FRAMES` maps every concrete `Attack` to the frames its band should be tested at (`inference` takes the union) and `tests/ai/test_kinematics.py` fails if one is missing -- several are legitimately just `(0,)` and say why (`held_target_lead_frames`: a held body travels with the actor, so the relative velocity is zero; `static_target_lead_frames`: a `Breakable` does not move; `no_aim_point_lead_frames`: `CallPolice` sweeps the whole screen and `CounterGrab` is resolved by input timing, not geometry). A jump kick leads by its 5-frame crouch and **not** by its flight: how far the flight reaches is already what `reach.in_jump_attack_band` measures, and solving the full interception there launched kicks from over 100px on the assumption the target kept closing for all 25 frames. It also owns the **hold move** durations -- `HOLD_KNEE_FRAMES`/`HOLD_CROSSOVER_FRAMES`/`HOLD_SUPLEX_FRAMES`/`HOLD_THROW_FRAMES` (17-18 / 37-39 / 77-78 / 41-46 per character), measured by `tools/hold_timing_diag.py` under lockstep rather than derived from the animation records, whose `frames x delay` product is not an action's length -- plus `hold_finisher_frames` (a suplex costs the crossover too from a front hold, ~115 against a throw's 41-46) and `hold_knee_budget_frames` (three knees, the unthreatened budget that replaced a six-*tick* one). Imports only `tokens`, so `reach.py`/`inference.py`/`decide.py`/`priority.py`/`execute.py` can all share it |
-| `reach.py` | **Walking into the other player** (`walking_box_would_grab`, with `walk_box_reach_x` / `player_body_span_x`): `$4478` makes a walking box on the other player's body a hold on them, so this answers whether one tick of a walk would make that contact -- the walk animation's box decoded from the ROM (`WALK_BOX_REACH_X`: Axel 16, Adam 20, Blaze 19, the longest when unknown), the body's widest ground reach (`PLAYER_BODY_REACH_X`) widened by the live `+$70` box, `PLAYER_CONTACT_LANE_Y` 16 (inclusive), a lane walk keeping the current facing, all swept over `WALK_SWEEP_FRAMES` at the ROM walk speed and the other player's own `+$1C`. The one definition of every band and target filter, shared by `inference.py`, `decide.py`, `priority.py` and `execute.py`: `live_enemies` (three independent ways to stop being a target, all needed: the phase says so, `Enemy.is_defeated` says so -- the health word, which the phase can lag far behind -- or the lane is unreachable)/`on_screen_enemies`/`in_playable_lane`/`in_camera`, `enemy_behind_actor`, `in_punch_band` vs `punch_would_connect` (the raw box ignores facing; a forward strike cannot hit backwards). The band predicates and the two facing helpers take a `Character` rather than an `Enemy` (their parameter keeps the name `enemy` for every caller that has one), because `$4478 (resolve_player_vs_player_collision)` runs the identical box-against-body test against the *other player* -- so `partner.py` asks these about the `Partner` instead of restating the geometry. Both now judge **box against body**, the way `$450C` does: `punch_usable_inner_x` is the measured inner edge less `tokens.character.BODY_OVERLAP_X`, because a ~13px-wide body centred just inside the box still overlaps it. Treating that as a dead zone was a measured disaster -- the AI refused to punch a foe 10px in front of Axel, `could_walk_to_near_enemy` took the tick and aimed 46px away to re-establish "proper" range, walking away turned the actor around, the enemy then read as *behind* it, the turn-around branch aimed back, and the actor shuffled between two points forever in punching range of an enemy it never hit. The same false dead zone is `rear_attack_is_warranted`'s first clause, so it also promoted the point-blank B+C chord as the "escape" from a situation a plain punch answers. `punch_behind_tolerance_x` is likewise **derived** rather than chosen (and evaluates to 0 for all three characters): the box starts 8-18px in front, so no body centred behind can reach it -- the old flat 4px of slack had Adam, who lands 4px past an enemy after a jump kick, standing there punching forward into empty air indefinitely. The grab keeps its own `GRAB_BEHIND_TOLERANCE_X`, since its contact test reads a walking frame's box, which starts at the actor's own origin, `in_rear_band` (side-specific, never the union; `rear_attack_behind_min_x` is the chord's *inner* edge -- Axel's box is X -40..**-8**, Blaze's -53..**-5** -- body-corrected like the punch, and a zero-width **front** band now refuses to match at all: `<=` against Axel's and Blaze's 0px forward reach still matched `dx == 0`, which is exactly where a jump kick landing on its target leaves the actor, so the AI answered "nothing can hit this" with a backfist aimed the other way), `in_jump_attack_band` (its min-dx launch gate -- no point hopping somewhere a punch already reaches -- applies only while grounded; once the actor is already airborne and committed to its free-flight trajectory, that gate is dropped so the follow-through B edge still lands even after the flight has carried the actor closer than that edge), `grab_would_connect` (forward-only like the punch test, since the ROM's contact test reads the actor's own forward-pointing attack box; ranged by the actor's unarmed punch outer edge, and by the punch band's own `GRAB_RANGE_Y == PUNCH_RANGE_Y` lane tolerance -- `$AAA0` reads that same box, and the two pixels the grab band used to give up sat exactly where `_actionable_targets` stops the approach, so the hold was unreachable from the position the AI itself chose to stop at), `rear_threats`, `rear_attack_is_warranted`, `enemy_actionable` (answered about the observed position only, unlike `connects`, which sweeps a move's own timeline -- see `kinematics.connect_frames`), `enemy_forward_dx`/`enemy_can_reach`/`in_enemy_dead_zone` (the enemy's *own* reach, answered exactly from its extracted `AttackRange`s -- `enemy_can_reach` returns `None` for "unknown", which callers must not read as "harmless"), `too_close_to_keep_approaching` (now the enemy's real reach when known, falling back to the old `punch_outer_x + RETREAT_CAUTION_MARGIN` caution box only when it is not -- that box was always an approximation built from the *actor's* punch range, which has nothing to do with how far the enemy can hit; its optional `extra_margin` widens whichever of the two the caller lands on, and exists solely for the hysteresis band below), `APPROACH_RELEASE_MARGIN` (the approach half of the retreat/approach decision suppresses itself until this far *beyond* the caution zone, instead of resuming the instant the retreat trigger clears -- approach and retreat used to switch on one shared boundary, which is a textbook limit cycle and reproduced as a one-tick direction reversal when the pipeline was driven over synthetic ticks; between the two thresholds the actor holds its ground, and the whole suppression lifts by itself once the enemy leaves its dangerous phase), `CLOSING_ENEMY_THREAT_FRAMES` (the shared "how far ahead is a committed velocity trusted" horizon -- in 60 Hz frames; it was a *tick* count multiplied straight into a per-frame velocity, i.e. half the ~200ms its own comment described), `enemy_projected` (re-exported from `kinematics.py`, which owns it now: an `Enemy` rebuilt at `predict_position_after_n_frames` via `dataclasses.replace`; a stationary enemy, and every `Boss`, projects to itself), `enemy_will_close_soon` (re-tests `too_close_to_keep_approaching` at that projected position -- the predictive half of `is_incoming_melee`, built specifically for a committed attack with no static reach to test at all: Signal's slide, per enemy-ai.md's "Signal's slide is velocity, not a hitbox") and `souther_dash_arrives_soon` (the third path into `is_incoming_melee`, for the one enemy invisible to the other two: a `Boss` populates neither `attack_ranges` nor `grunt_vel_*`, so his committed claw dash, `$161C6` at 8px/frame, would otherwise go undetected), `is_incoming_melee` (the union of all three, plus the dangerous-phase gate, shared by `grab_reasons`' own `DODGE_CHARGE` charging check, `decide.py`'s approach/retreat/grab gates, and `priority._other_enemy_is_incoming`/`_emergency_retreat_from_danger`) and `incoming_melee_targets` (the per-actor convenience: slots of on-screen enemies `is_incoming_melee` judges a threat, replacing the old `IncomingMelee` token's presence/absence lookup), `pit_endangers` (the one definition of "standing in a `Pit`'s danger zone", shared by `execute._find_safe_spot`'s candidate filter and `execute._pit_escape_mask`'s own standalone override), `any_pit_endangers` (the same check against every `Pit` in context at once, used by `decide.py`'s `could_walk_to_near_enemy`/`could_walk_to_weapon`/`could_walk_to_pickup`/`could_open_breakable` to refuse a target sitting in one), `projectile_threatens`/`projectile_ticks_to_impact` (an observed `Projectile` heading toward the actor, in lane, within the impact window -- the latter shared by `decide.could_projectile_sidestep`'s gate and `priority._emergency_projectile_sidestep`'s score so neither recomputes the other's number), `antonio_still_holding_boomerang`/`is_souther_claw`/`jack_still_juggling` (withhold an attached/unthrowable object from `projectile_threatens`'s callers), `souther_would_punish_jump` (the boss-specific gate `decide.py` reacts to directly -- Antonio's live gate is `antonio.kick_gate_open`, and the rest of him is `antonio.py`'s lookahead), `weapon_upgrade_rank` (a ground `Weapon`'s rank if it is a genuine upgrade for `actor` right now, else `None` -- the rank itself, not a bare bool, since `priority._emergency_walk_to_weapon` scores by how much of an upgrade it is), `actor_is_surrounded` (a live `Surrounded` judgment for one actor slot) and `grab_reasons` (`context, actor, target, enemies) -> frozenset[GrabReason]`, every reason a hold on `target` beats a strike right now -- `CLEAR_REAR`/`DEAD_ZONE`/`JACK_FROM_BEHIND`/`WHILE_SURROUNDED`/`DODGE_CHARGE`, shared by `decide.could_grab_enemy`/`could_rear_attack`'s `on_jacks_back` check and `priority._emergency_grab_enemy`'s `max` over the returned reasons). These were private helpers in `decide.py`, imported across modules and duplicated in `inference.py`; nothing here reads RAM or produces tokens. `held_enemy`/`in_held_contact` name the body already in the actor's hands -- the ROM's `+$4C` link first, then a `GRABBED` phase, then contact -- and `grab_reasons` returns nothing at all while the actor is holding, which is `$AAA0`'s own rule (it refuses a grab code unless `+$4C` is clear) |
-
-| `navigation.py` | **Walls and a committed press are solids** (`wall_obstacles`, `press_obstacles`, both in `solid_obstacles`): a `Wall` is `$3C92`'s point rule -- the cells grown by the probe's 8 px on X, restated for the body -- and `wall_probe_blocks` is the probe itself; a committed press's drop zone is a body test, grown by what the actor's standing envelope (`press.standing_envelope`: either facing's box) adds to the moving body, or in point form for a planner with no body (`grunt_plan`), only while committed (armed with nobody in its window it must stay walkable, or nothing sets it off). `jump_landing_is_safe` also refuses a landing in a live press's reach (see **Round 6: the factory floor**). **The partner's grab zone is danger** (`partner_obstacles`): every actor origin from which the walking box would touch the partner's body, one pixel past `$450C`'s inclusive contact, expressed for the actor's own body rectangle -- part of `danger_obstacles`, and the one danger `WalkToAdvanceStage`'s plan takes, so a partner on the lane is gone round rather than waited behind (see **Never hurt the partner**). **Jumps use this planner too**: `pit_obstacles` (holes only, no crates), `plan_lane_route` (Y-locked corridor -- a jump has no mid-air lane control), `jump_landing_is_safe` (clear lane / walk around -- asked as `advance_goal`'s strip at the landing X, since the landing point past a pit on its own lane is three legs away / hop over), `hop_landing_x` (far side of the nearest blocking pit if it is in kick range). The **only** place that turns this game into `pathfind/`'s vocabulary: tokens in, rectangles out, a route back. Reads no RAM, touches no gamepad, emits no tokens. Decides three things. **What is solid**: breakables and pits are geometry, enemies and their reaches are *danger*, and the two are planned in separate passes (`plan_route` tries solids first: a doomed solids search proves the danger one is doomed too, and a solids route replayed clear of every danger rect is already a cheapest danger-free arrival, so the danger pass runs only for a solids route that actually crosses danger -- because a busy screen can have no danger-free route and an AI that stops moving when the room is busy is worse than one that accepts risk). Both a crate and a pit are **origin** rules -- the ROM tests the moving object's own position against them, never its box (`prop_solids`, `reach.pit_endangers`) -- so both are restated through `_OriginRule` into the rectangle a *body* may not overlap, and a crate's rectangle comes from `prop_solids`, not from `Breakable.hitbox`. The restatement is exact and uses the body's real offsets from the origin, not half its width: a cached player box is not centred on the actor (Axel's spans -7..+3 facing left), and assuming it was left a 2px sliver of wall the route stepped into and the ROM refused -- recorded live as 42 seconds held against a round-5 prop, the same symptom this model was written to remove. A rule shallower than the body is deep (the phone booth's is 14px) cannot be restated exactly at all and gets a one-px floor, which over-states it slightly rather than letting the lattice drop it as no wall at all. The pit rect also grows by one px because that predicate is inclusive and collision is not. Measured on the sweep: without the inset an actor standing safely beside a pit read as inside it, left the lane to escape a hole it was never in, and lost every attack in the run. An idle enemy's *reach* is **not** an obstacle (`is_dangerous` gates it): every enemy could swing, and routing around that potential turned a 20-tick approach into a 60-tick detour. **Where arrived is**: `strike_goal` builds a `RegionGoal` inset by half the body on each axis, so "the body overlaps it" means "my origin is within `stop_dx`/`lane_slack` of the target's" -- the same sentence `in_punch_band`/`in_smash_range` already say -- and its lane-overlap *contact* is the alignment the blow depends on, which is what makes `enough_contact` read as "px of lane margin to spare" and `maximize_contact` as "line up square". With an `inner_dx` the ground is an annulus (two bands, a hole between), so standing on top of a target is correctly not "in range"; `side` narrows it to one band when a caller must insist. When the band is thinner than the body is wide -- `stop_dx` inside the strike's own dead zone plus a body, which is exactly the Souther pocket -- there is no region left, and the fallback aims at the **stand point** (`stop_dx` out, on the side the approach comes from) as a one-px-wide region that keeps the lane band. It used to be a `PointGoal` at the *target's own position* with `tolerance=max(stop_dx, lane_slack)`, which is "be within 16px per axis of the boss" -- satisfied standing 24px out and 24px off-lane, holding no button, which is most of what round 2's stalemate was. A `PointGoal`'s `contact` is also `inf`, so that fallback silently disabled `enough_contact` and let the approach settle on the loose edge of its own band. `NAV_STEP` is 4px, finer than the executor's deadbands on purpose: the pockets to land in are ~10px deep and a coarser lattice reports them unreachable rather than steering badly. **`world_rect`'s `WORLD_MARGIN_X` must exceed every goal offset a routed verb can place beyond the actor's own position** -- `WalkToAdvanceStage`'s fixed 40px lookahead, a strike goal's `stop_dx` up to ~56px -- or the goal itself can fall outside the plannable world with no lattice position ever able to satisfy it, so `plan_route` reports `reached=False` forever rather than merely a worse route. Live-diagnosed at 32px: an actor at the camera's own trailing edge got a lookahead point 8px past `world_rect`'s right bound and stalled dead there -- not badly routed, unable to progress at all, since advancing is exactly what would have scrolled the camera and made the goal reachable again. Now 96px, comfortably past every such offset and still well inside what `world_map` already tracks past each camera edge (two screens). **Nothing tactical** -- which side, how far to stop short, whether to wait out a swing all stay in `execute.py` |
-| `pathfind/` | **Standalone** rectangle path finding on a bounded cartesian plane — imports nothing from the rest of `sor_autoplay` (no tokens, no snapshot, no RAM) so it can be tested exhaustively without a running `sor`, and so the caller that turns a route into d-pad input stays the only code that knows about the game. `geometry.py` (`Rect`/`Segment`/`Point`/`Edge`/`Direction`, y grows **downwards** like the lane axis, so `UP` is towards smaller y; **touching is not overlapping**, so a body may stop flush against a crate), `goals.py` (`RegionGoal`, an *area* rather than a boundary — reached by overlapping it, contact measured on a named axis, and several regions may be alternatives so an annulus "close enough to reach, far enough not to be standing on it" is expressible. It exists because the other three are measure-zero targets: on a lattice of whole steps an exact touch is essentially never achievable, so anything meaning "close enough to act" aimed at one got best-effort routes forever. `PointGoal`, reached by *covering* the point, with an optional `tolerance` — a body cannot land its centre on an arbitrary point when every move is a multiple of the step; `SegmentGoal`, reached only by the **named** edges of the body, since touching a threshold with your right edge and having walked through it until your left edge touches are opposite outcomes of the same line; `RectGoal`, a whole rectangle as destination, defined by `(own_edge, target_edge)` **pairs** rather than by distance — `RectGoal.horizontal(crate)` is "arrive stacked above or below it" (my bottom on its top, or my top on its bottom), `RectGoal.vertical` the side-by-side pairing, a single-pair `RectGoal` forces one approach side, and `RectGoal.of` builds the full cross product, which deliberately *also* includes the aligned pairings two same-height boxes satisfy just by standing side by side. A rect goal says nothing about not overlapping the target: pass the same rectangle in `obstacles` too and the body stops flush, which is exactly where the edges meet), `grid.py` (the lattice of body positions, **anchored at the start rect** so every move is a whole multiple of the step with no ragged first hop; whole-body collision, swept moves so a step cannot tunnel through an obstacle thinner than itself, no diagonal corner cutting, and obstacles the body *already* stands in dropped for the whole search so a body inside a crate is not planned as permanently stuck), How *well* the edges meet is a separate, opt-in question, because by default any contact counts — including corner to corner, which satisfies a goal and is useless in practice (a body clipping the top corner of a crate cannot act on it). Two parameters, deliberately different tools: `enough_contact` is a **requirement** that raises the bar for arrival itself (at least N px of shared edge, else the position does not count and an unmeetable bar returns the usual best effort with `reached=False`), while `maximize_contact` is a **preference** that leaves arrival alone and makes the search prefer the flushest arrival, scoring each one `cost + alignment_weight * misalignment` and stopping only when no unexplored node can beat it (`f` is a lower bound on any route through a node, and every arrival has `h == 0`, so arrivals are popped in cost order and the test is exact). `alignment_weight` must exceed 1 to do anything at all — a px of extra overlap costs at least a px of walking, so at exactly 1 they cancel — hence the default of 2. Contact is measured **along the shared edge**: for a side-by-side pairing it is the boxes' *heights* that cap it, not their widths. `Path.contact`/`Path.misalignment` report the achieved values whether or not the search was told to care; both are `inf`/0 for goals with nothing to measure (a point, an oblique segment), so a contact requirement can never silently make those unreachable. `search.py` (ordinary A*, but **mid-search a Y-then-X finish**: after a node is expanded, if the goal is reachable from there by one axis-aligned run or by walking the lane (Y) and then the street (X), the route is the A* prefix plus those legs and the search stops; this is how a beat-em-up body actually closes, and a free-space diagonal is rejected even though it is shorter. The finish aims at every free arrival of the goal's window -- the exact cheapest one, a few sweeps a row (`_best_yx_by_rows`) -- not only at its nearest cell and its middle, which a pit or a lane margin routinely rules out (see **What 10 nodes needed**). A start boxed in still walks around with A* and only straightens once a node can see the goal that way. `maximize_contact` still requires the two legs to arrive flush, otherwise a corner clip would hide the around-the-crate walk the rest of A* is there to find. The search itself is A* with the octile heuristic — exactly the free-space optimum for these move costs, so admissible *and* consistent; consecutive cells in one direction merge into a single vector, because a d-pad wants "hold right for 88px", not eleven 8px hops; a failed search returns the **best-effort** route to the closest position reached with `reached=False`, since an AI that must act every tick is better served by walking part-way and re-planning; a goal walled off by an obstacle line that leaves no row for the body (`Lattice.sealed_between`) keeps only `SEALED_MAX_NODES` (100) nodes of that search when its budget is larger (see **Tick budget**); open-list ties are broken by insertion order, not at random, so the same world always plans the same route — and since neighbours are pushed in `geometry.ALL_DIRECTIONS`' order, that order is also which move wins an equal-`f` tie. `ALL_DIRECTIONS` is `CARDINALS + DIAGONALS`, so a straight step wins a tie over a diagonal one, keeping routes on the lattice's own axes and reserving diagonals for a move that genuinely needs one — a `DIAGONALS + CARDINALS` ordering was tried and reverted the same session: on a viewer example routing past a stacked pair of obstacles with a gap between them, diagonal-first took a longer up-and-over route (`RIGHT 48, UP_RIGHT 16, RIGHT 88, DOWN_RIGHT 24`) instead of threading the gap and using one diagonal only to line up with the target's own row at the end). `src/sor_autoplay/pathfind_viewer.py` is a **standalone Tk window** for looking at the result — draw a body, draw obstacles, pick a destination and see the vectors, with the lattice, the merged step lengths, the arriving body edges and the best-effort route all drawable. It is not connected to anything: no remote, no RAM, no import of `hud.py` or any other `sor_autoplay` module, so the package stays dependency-free. Needs Tk, hence `python3.11`; launch it with the meta-repo wrapper `./scripts/pathfind_viewer` (which finds a Tk-capable Python the same way `./scripts/autoplay` does and sets `SOR_PATHFIND_PROG` so `--help` names the script), or directly with `cd autoplay && PYTHONPATH=src:ai-code python3.11 -m sor_autoplay.pathfind_viewer`; optional `--width/--height/--step/--body`; no test imports it, so the suite still runs on any Python. Not wired into `decide.py`/`execute.py` — the AI still steers as it did |
-| `decide.py` | **No crossover under a live press**: `could_hold_actions` refuses a `FlipHold` whose landing -- the mirror of the actor across the body in hand -- stands in a press's reach (`press.lands_in_reach`), in Jack's loop, the bosses' and a grunt's; the hold keeps to B, which leaves the actor where it is (see **Round 6: the factory floor**). Grounded `could_jump_attack` also requires `navigation.jump_landing_is_safe` (pathfinder: do not launch through a pit the 2D walk can go around; hop over only when the landing is solid and no walk reaches); airborne follow-through skips that gate. Every reach question is answered directly against `reach.py`'s band predicates -- `punch_would_connect` for the four melee-strike siblings, `in_rear_band` for the chord, `in_jump_attack_band` for the kick, `enemy_actionable` for "already hittable, stop walking" -- and the same goes for `reach.is_incoming_melee` (retreat / don't-approach / don't-hop-into-it), `reach.weapon_upgrade_rank` (`could_walk_to_weapon`), while `could_call_police` has a single gate left -- the panic threshold, with at least one live enemy, and nothing at all under `DebugNoPolice`; `could_handle_continue_menu` / `could_handle_mr_x_dialog` fire from their Observed tokens without needing `Myself`; `_actors` yields **only `Myself`**, never `Partner` -- one `AgentLoop` runs per AI-controlled player and executes the surviving verb on *that* player's own `VirtualGamepad`, so a `Partner`-parametrized verb would be carried out on the wrong pad (and out-rank `Myself`'s own candidates while doing it); `Partner` stays in the context as `Information` only; `could_*` generators never pre-select a single "best" candidate (per AI.md: that ranking is `determine_priority_verb`'s job alone) -- `could_walk_to_near_enemy`/`could_throw_knife`/`could_throw_pepper`/`could_walk_to_weapon`/`could_walk_to_pickup`/`could_open_breakable` each produce one Verb per valid possibility, not just the nearest/best; `could_walk_to_near_enemy`/`could_walk_to_weapon`/`could_walk_to_pickup`/`could_open_breakable` all skip a target whose own position is inside a `Pit`'s danger zone (`reach.any_pit_endangers`) -- live-diagnosed: without this, a target sitting in a pit produced a walk verb aimed squarely at it every tick, which `execute._pit_escape_mask` fought right back out of the moment the actor arrived, reading as the actor turning left then right forever at the pit's own edge; the fix is refusing to generate that verb at all rather than patching the tug-of-war after the fact; `_live_enemies` excludes any enemy outside the level's playable Y lane (`lane_y_max_for_level`) -- e.g. stage 1's scripted "behind a door" placeholder, a real tracked Enemy the player can never reach -- so it can't be targeted or block stage advance; `could_walk_to_near_enemy` prefers an on-screen chase but falls back to every live enemy ahead in the stage's own scroll direction when nothing is on-screen (never one behind, per `_ahead_in_stage_direction`) -- otherwise a live off-screen enemy holds back stage advance while nothing ever moves the camera toward it; stage advance stands down for a partner who is further along the stage (`_partner_ahead_of`) -- `could_catch_up_partner` produces `CatchUpPartner` in its place once the partner is more than `CATCH_UP_DISTANCE_X` ahead, under the same gates (`_actors_free_to_advance`; see **Following a partner who is ahead**); stage advance gated on *every* live enemy (on-screen or not), not just on-screen ones -- except an off-screen enemy already at exactly 0 health (`_advance_blocking_enemies`), which nothing here will ever chase down to finish off -- and on an on-camera `Breakable` sitting on the stage path (`_advance_blocking_breakables`, same ahead/camera/pit filters as `could_open_breakable`): producing `WalkToAdvanceStage` next to `OpenBreakable` was a limit cycle, the HUD flipping between them (the old name WalkToBreakable still shows up in reports) because the approach score (14 down to 8) used to cross the advance's then-flat 12 around 30-45px, and the around-path walking off a same-X crate made that hypot grow until advance won, walked back in, and handed it over again -- advance is now 1 (and 0 while a blocking crate exists), so the cycle cannot return from ranking alone; `could_open_breakable` no longer falls back to behind-only crates (walking back to one, then advancing past it, is the same cycle); `could_rear_attack` deliberately does *not* fire early on an enemy merely closing toward the rear band, only on one already inside it (a live-diagnosed regression: `$322A` only hits by current position, so an early commit while the enemy is still outside `in_rear_band` is a guaranteed whiff that locks the actor in recovery frames exactly when the enemy arrives and lands its own hit for free); `could_rear_attack` still produces on rear-band membership alone (a `could_*` answers "possible?", not "best?") -- the de-preferring lives in `priority._emergency_rear_attack` via `_rear_attack_is_warranted`; `could_walk_to_near_enemy` offers the turn-around for a behind enemy (`execute._walk_to_near_enemy_target` aims past it so the D-pad flips facing); both its threat skips and `could_retreat_from_danger` are deliberately **side-agnostic**, so a dangerous close enemy is owned by exactly one of them no matter which way the actor faces. An earlier version paired a front-only skip here with a behind-skip in the retreat ("fleeing something at your back means running blind"), and that pairing is a *facing-feedback limit cycle*: retreating holds the D-pad away from the threat, holding a direction sets facing, `reach.enemy_behind_actor` reads facing, so the same enemy re-classified as "behind" every other tick and was handed back and forth between the retreat and the turn-around -- the commanded direction reversed on **every single tick** (19 reversals in 20, measured) for as long as one enemy stayed committed nearby, with the walk verb's lane sidestep riding on top so it read as darting up/down too. Covered end-to-end by `tests/ai/test_stability.py`; `could_walk_to_near_enemy`'s "already in range, don't walk closer" skip is **per-enemy**, not global. It used to be `if any(enemy is actionable): continue`, which suppressed the approach for *every* enemy the moment one was in range -- live-reported as "ataca o outro inimigo": with a grunt in punch range and Souther two steps behind it, **no verb was produced for Souther at all**, so the grunt's punch won by default and the AI hit the sideshow while the boss walked in. Ranking is what should settle that contest (the walk-in carries `_EMERGENCY_BOSS_TARGET`), and it cannot settle one it is never shown. The skip's *predicate* uses `_enemy_actionable` (real rear band, or punch band *and* actually in front) rather than raw `_in_punch_band`/`_in_rear_band` -- live-diagnosed fix: `_in_punch_band` ignores facing, so an enemy sitting behind the actor but still inside the punch box by raw distance (beyond both the real rear band and `could_punch`'s 4px behind tolerance) used to make this skip producing any verb at all, leaving the actor standing still and undefended; `could_retreat_from_danger` is gated on `_retreat_is_worth_it` -- **hurt** (below `RETREAT_HEALTH_PERCENT_THRESHOLD`, i.e. `HEALTH_CRITICAL_PERCENT`) or **`Surrounded`** -- because backing off is a concession, not a reflex: no enemy can be defeated without standing in the range it hits back from, so treating "a committed enemy is within caution distance" as a reason to flee refuses the only exchange that ever wins the fight (the AI backs off, the enemy follows, the round goes nowhere) *and* supplied both limit cycles above with the verb they oscillated against. Healthy and one-on-one, `could_walk_to_near_enemy` owns that same enemy and walks in; the attack tiers (jump 18, punch 20) outrank the walk (14) so it strikes the moment it is in range. That one predicate is also the **single owner test**: when it holds, retreat claims the enemy and the walk stands off; when it does not, the walk claims it and retreat produces nothing -- exactly one of the two ever holds a given enemy, which is structurally what stops them handing it back and forth. Otherwise it produces `RetreatFromDanger` for a dangerous (ATTACKING/CHARGE), not-yet-`_enemy_actionable` on-screen enemy once it's inside `_too_close_to_keep_approaching`'s caution zone -- a **box** (`punch_outer_x` + `RETREAT_CAUTION_MARGIN` on X, `RETREAT_CAUTION_MARGIN_Y` on the lane axis), not an X-only band: an X-only zone made the AI back away from a committed enemy several lanes away that could never connect, and since `could_walk_to_near_enemy` skips proposing a candidate for that same enemy, it neither approached nor retreated; the Y margin stays below `execute.WALK_TO_ENEMY_LANE_SAFETY_Y` so that verb's own sidestep actually leaves the zone; `could_grab_enemy` needs both halves -- `reach.grab_would_connect` (possible) *and* a non-empty `reach.grab_reasons` (worth it) for the same pair -- plus `reach.is_incoming_melee` not holding for it, since walking into a committed attack is how the actor takes the hit instead of the hold; it declines while armed (every held weapon's own melee move beats a bare hold, and closing to contact spends that advantage) and while airborne (`$AAA0` needs both bodies within 8px of elevation); `could_hold_actions` targets the enemy actually in `CombatPhase.GRABBED` (falling back to the nearest) rather than whichever live enemy is nearest, since every hold move's emergency is gated on its target being GRABBED; hold always acts; `could_jump_attack` splits the grounded and airborne questions: from the ground it needs `reach.in_jump_attack_band` (and the "never launch into a committed attack" `reach.is_incoming_melee` gate), but **once airborne it is committed** and keeps producing a `JumpAttack` for the nearest *live* enemy -- on screen or not -- even when no band target remains. Depending on the band mid-flight was a measured failure: the target walks out of it, drifts a lane, or the flight carries the actor past it, and a tick with no verb reaches `press_no_button`, which *releases the directional hold* -- so the jump both lands without ever pressing B and (when it happens during the 5-frame crouch) goes straight up, since `$384E` reads no direction at launch. On the flight harness that was **211 of 587 launched jumps producing no kick at all**, now 0. `_could_melee_strike` refuses to fire while airborne for the mirror-image reason: mid-air B *is* the kick (`$3914`), so a `Punch` there outranked `JumpAttack` (20 vs 18) and pressed B straight through its state machine, firing the kick by accident of timing rather than by design. `could_jump_attack` also declines **while holding a weapon**, like every other `MeleeAttacks` sibling: an armed jump runs the ROM's *parallel* `$3C-$43` family, a different move with a different reach, whose kick edge nothing here models -- the band is the unarmed free-flight range and `execute`'s state machine names the unarmed states. Recorded live with a bat in hand: 246 of 4859 ticks sat in `$42`, the armed jump attack, while the pipeline believed it was performing an ordinary jump kick. Armed, the answer is the weapon's own swing, reached by walking in. The two thrown weapons are the one attack family whose reach question `decide` still answers itself, and it answers it at the **interception point** as well as the current one: `thrown_weapon_impact_point`/`thrown_weapon_would_connect` (shared with `priority._emergency_thrown_weapon`, so the verb that gets produced and the score it is ranked by cannot be measured about different instants) solve the flight at the weapon's own speed -- pepper's 6 px/frame lets a target walk a real distance mid-flight where a knife's 16 px/frame does not -- and take the union with the observed position, the same additive rule the bands follow; `_could_melee_strike` (the shared body behind `could_punch`/`could_swing_bat_or_pipe`/`could_stab_with_knife_or_bottle`/`could_spray_pepper`) additionally refuses a `Jack` currently juggling his axe/torch (`Jack.has_projectile`) as a target for all four -- closing in on him mid-juggle trades hits with the spinning weapon instead of landing cleanly, so only `could_jump_attack`'s kick (arrives from above) and `could_rear_attack`'s from-behind chord (he isn't juggling toward his own back) stay live answers on him until he lets the weapon go; `could_projectile_sidestep` produces one `ProjectileSidestep` per observed `Projectile` `reach.projectile_threatens` judges a threat (gated like `could_retreat_from_danger`: not mid-animation, not held by an enemy, not itself holding one) -- once Jack actually throws the axe/torch it is a fast in-lane `Projectile` with no melee answer at all, only getting out of its lane; a threat judgment is itself withheld for Jack's axe/torch specifically while he is still juggling it -- live-diagnosed regression: the weapon's own object exists (and is judged as a `Projectile`) for the whole juggle, not only once thrown, so its spin's instantaneous velocity can momentarily point straight at the actor and satisfy the same in-lane/heading/impact-window test a genuine throw would, making the AI sidestep an axe that never left Jack's hand. `reach.jack_still_juggling` (`Projectile.type_id == $28`, matched to a live `Jack` with `has_projectile` true within `JACK_JUGGLE_ATTACH_RADIUS`) filters those out, so only a released throw ever produces a sidestep |
-| `jump_kick.py` | The unarmed jump kick's flight, update by update: `launch_arc` (a jump launched now, direction held, kick edge on a given free-flight update) and `airborne_arc` (the rest of a flight already in the air, from `world_z`/`vel_x`/`vel_z`/`ground_z`), each a list of `KickStep`s (frame from now, origin, the kick box out on that update); `landing_distance` (67.1/77.3/84.0, cached per character); `launch_hits`/`airborne_hits` against an enemy (`$AB88` strict) and `launch_hits_player`/`airborne_hits_player` against the other player (`$450C` inclusive, their body carried at `vel_x` plus `PARTNER_MARGIN_X`/`_Y`); `enemies_hit` (every body on the flight path); `swept_area`. Reproduces `tools/jump_kick_lab.py`'s lockstep traces bit for bit. Objects move at 30 Hz (`UPDATE_FRAMES = 2`): see **The jump kick, measured** |
-| `twins.py` | Onihime and Yasha's ROM model: both twins' states 1 (approach and grab paths, every tactical), 2 (the flying kick), 3 (hitstun, knockdown flight and bounce) and 5 (getting up), the renderer's tail (`+$28`, the latched box ids, the frame timer reloading from `+$0C`), `$17AB8`'s integration, `boss_apply_pending_damage`; the actor walking (`$3614`'s speeds, `$43AA`'s word-only clamp) and throwing the rear attack from `CHORD_SCHEDULES` (per character, per update); `$AAA0`'s contact order in one object pass. `twin_from_token` / `actor_from_token` build it from the context; `check_recording` replays a `tools/twins_lab.py` recording |
-| `twins_plan.py` | The plan against the twins: `choose_wall` (home is the edge away from the grab twin; with a partner, `partner_wall`'s instead -- see **Two players against the twins**), the reactive `tail_action` (the chord when a twin's body will be in its box, the approach twin's lane held while the grab twin comes, a step off a flying kick's path, the wall faced), the programs played through both twins' AI under five timings (`SCENARIOS`), a chord pressed only when it strikes under all five, `PlanMemory`. See **Onihime and Yasha: the ROM model and the plan** |
-| `mr_x.py` | Mr. X's ROM model (`$13F9A`'s bespoke-boss frame: states 0-9 and the released hold, 30 Hz), his gun's bullets (`$36`, set up a pass late below his slot), `$AAA0`'s contact order, the actor walking, punching and throwing the rear attack (`twins.CHORD_SCHEDULES`), and the blink (`+$4B` bit 1, `+$49`: no body). `check_recording` replays a `tools/mr_x_lab.py` recording |
-| `garcia.py` | The office's type-`$22` Garcia (`$DD78`): the approach to a point 32 px short, the jab trigger, the four-stage punch refused off screen, `$DBCC`'s evade and legs, hitstun, a knockdown on a knockdown strike. `check_recording` checks it against a lab recording |
-| `duel.py` | `DuelStyle`, the betrayal duel's fighting style: cross-tick tactics (`press`/`grab`/`jump_in`/`footsie`/`circle`/`wait`/`back_off`/`item`, plus `let_up` while the rival is down) drawn with a health-difference lean, reaction delays, short bursts, random hold scripts; replaces the tick's candidates with one verb, only while `PlayerDuel` holds (`steer`). See **Mr. X's betrayal duel: a fight, not a solver** |
-| `mr_x_plan.py` | The plan against Mr. X and his Garcias: the lookahead (`plan`: sticks, punches and rear attacks under five timings, the no-whiff rule, a grab scored by what lands on the holder before a knee is spent), the tail (keep away so he goes to the gun, walk into the gun and the retreat's first update, 17 lanes off the lunge, home on the right clamp), `hold_step` (knee, knee, release on his read), `garcia_threat` and `garcia_hold_step`. See **Mr. X: the ROM model and the plan** |
-| `grunt.py` | The street enemies' ROM model: Garcia `$20`-`$23` (the knife's run and throw, the grabber, the jab trigger and four-stage punch, lying in wait, the bat's swing), Signal `$24`, HakuRo `$25` and the `$2A` trio, Nora `$26` -- every state the plan meets, update by update from the object's bytes (`GruntSim.from_bytes`), the renderer's latch, a thrown knife in flight (`KnifeSim`), `$AAA0`'s contact order with the swung weapon first and `$3266`'s hold acceptance (`takes_hold`: a slip is not a hold), the scripted entries (`ENTRY_STATES`). `check_recording` replays a `tools/grunt_lab.py` recording. See **The street enemies: Garcia, Signal, HakuRo and Nora** |
-| `grunt_plan.py` | The plan against them: programs (strikes and swings on update 0-5, the rear attack in the actor's facing or turned onto a near enemy, sticks held 2/6/12 updates then the tail) played through every modelled enemy near enough and every enemy knife in flight under six timings (the sixth soft), a two-stage search in an 8 ms budget, the actor's striking body (`PUNCH_BODY`, `SWING_BODY`) and swung weapon, props and walls (`ActorSim.solids`), the partner, `PlanMemory`/`_kept` (a kept walk ends at its point, the clamps, or two ticks without moving), `hold_threat` for the hold family's grace |
-| `press.py` | Round 6's drop press (type `$42`, `sub_00007A6C`), from the disassembly: its states (1 armed, 2 shaking 11 updates, 3 falling, 4-8 down and back up), its trigger window `(x - $30, x + $60]` on either player's X, and the fall's two boxes (`$F4` ahead and below it, `$EA` behind and 12-48 lanes *above* it; 20 damage). `is_committed` (shaking, falling, or armed with a player in its window), `drop_zones` (the boxes plus a walk's margin -- a body test, as `$AB88`'s), `committed_zones` (what `navigation.press_obstacles` makes solid), `lands_in_reach` (a live press under where a jump or a crossover sets the actor down -- `navigation.jump_landing_is_safe` and `decide.could_hold_actions` refuse it) and `escape_step` (the direction out of a zone soonest, every one played at the character's walk with the ROM's refusals, for `execute._press_escape_mask`). See **Round 6: the factory floor** |
-| `partner.py` | `do_not_harm_partner` -- the only stage of the loop that **removes** verbs, between `generate_verb_tokens` and `determine_priority_verb` (so a withdrawn verb is never ranked, never executed, and never listed as a pending candidate on the HUD). A no-op without a `Partner` token, which is every one-player session. Two halves. **Friendly fire**: `$4478 (resolve_player_vs_player_collision)` tests the attacker's attack box `+$64` against the *other player's* body box `+$70` exactly as `$450C` does for an enemy, whenever the attacker's `+$34` is nonzero (player-health-lives-and-combat.md), so the same `reach.punch_would_connect`/`in_rear_band`/`in_jump_attack_band` the rest of the pipeline uses are asked about the `Partner` rather than the geometry being measured a second time -- withdrawing `Punch`/`MeleeWeaponAttack`/`HitAntonioBoomerang` in the punch box, `RearAttack` in the chord's band, `OpenBreakable` **only** on the ticks `decide.in_smash_range` says it actually strikes (withdrawing the approach too would park the actor in front of a prop for as long as the partner stood near it), and `JumpAttack` **only** on the grounded launch (airborne is committed -- a tick with no verb releases the pad and loses the kick *and* the launch direction). Also withdrawn: the hold moves (`AttackHeldEnemy`/`Supplex`/`ThrowHeldEnemy`/`FlipHold`/`ReleaseToRegrab`) while `+$4C` names the partner -- walking into the other player takes the same hold `$3266` takes on an enemy, and those moves act on whatever body is in hand; `decide.could_hold_actions` offers `ReleasePartner` alone there -- and `CounterGrab` while the partner's own `+$4C` names the actor (the held player reads `HELD_BY_ENEMY`, and the counter throws the holder). `GrabEnemy` (presses nothing, so `+$34` stays zero), `CallPolice` (`$4478` returns outright while a police special is active), the hold moves on an *enemy* and the two attack-thrown weapons are deliberately never withdrawn -- the throw filter existed briefly (partner sharing the flight lane in front, nearer than the target) and was **removed on the user's call**: "it's almost impossible to hit the partner", so the lane test only cost real throws. **Item courtesy** (the user's rule, `item_is_the_partners`): `WalkToWeapon` unless the partner is strictly worse armed than the actor (`weapon_rank`; a tie, both unarmed included, is the actor's), `WalkToPickup` on a `HealthPickup` unless the actor is strictly the hurter, and on a `LifePickup` while the partner has fewer lives -- `SpecialPickup`/`ScorePickup` are claimed by neither; the same rule keeps a grounded B from picking such an item up (`$3136`, the partner pad's `_redirect_b_press`). **The partner's fight** (`PartnerFightTracker` → `PartnerFight`): the actor's attacks and walks at an enemy the partner is fighting or about to are withdrawn, bar self-defence (`reach.is_incoming_melee`) and a kick already airborne. `JumpAttack`'s friendly-fire test is the flight itself (`jump_kick.launch_hits_player`), not a band |
-| `priority.py` | Emergency is computed per concrete `Verb` class from the `Information` tokens present in `Context` (never from the verb's type alone), including judgments answered directly against `reach.py`: `phases.is_punishable` decides the punishable tier for melee strikes and jump kicks, `reach.is_incoming_melee` gates `RetreatFromDanger` (its threat is over → 0), `reach.weapon_upgrade_rank` carries the rank `WalkToWeapon` scores with, `CallPolice` scores 88 below the panic threshold and nothing otherwise (a crowd and a live boss used to raise it too -- see **And without the police**), and any `Attack` on a **stunned** `Grunt` is capped by how much stun is left (`_stunned_target_ceiling`, applied branch-wide in `_emergency` as a ceiling that can only lower a score, reading the stunned `Grunt`'s own `stun_timer`): hitstun (<= `phases.HITSTUN_FRAMES`) caps at 21, just above a plain strike, so the ROM's 3-hit chain -- whose third hit is the knockdown -- is not abandoned for an equally punchable fresh enemy; anything longer is the `$A0` pepper stun and caps at 19, *below* a plain strike, since that body is parked for nearly three seconds. Both stay far below the `RearAttack` escape (55/60), which they beat at the punishable tier (60) before this, and above every `Walk` tier so the actor never walks off mid-stun. A `KNOCKDOWN` keeps 60 **while nothing is incoming**, since that window ends in a wake-up with invulnerability and really does have to be used now -- but while `reach.is_incoming_melee` holds for another enemy it is capped by `_EMERGENCY_ATTACK_PARKED_UNDER_THREAT` like a stun, and for a sharper version of the same reason: a body on the floor that is about to become invulnerable anyway is the worst thing on screen to trade a hit for. Live-reported against Souther -- with the claw committed two steps away, punching a knocked-down grunt scored 60 against the (since retired) claw dodge's 46 and won the tick. A third ceiling, `_EMERGENCY_ATTACK_PARKED_UNDER_THREAT` (10), applies to a stunned target while `reach.is_incoming_melee` holds for **another** enemy against the same actor (`_other_enemy_is_incoming`): the two above are both over `WalkToNearEnemy`'s realistic 11..14, so nothing ever interrupted a combo on a parked body and the AI took punches in the back -- user-reported, and exactly the situation the whole ceiling exists for ("a stunned enemy cannot act, cannot retaliate, and will still be standing there in a moment"). Sitting just under the walk's own base hands the tick to the turn-and-face while the threat is genuinely close (inside ~60px) and leaves the punish winning over a distant one. Measured over six 90s recordings against a running host: hits taken fell from 5.2 to 3.1 per minute at an unchanged attack rate (157 attacks started on each side) — one `_emergency_*` function per class (or a shared function for the four melee-strike siblings, or a `_held_enemy_emergency` factory for the five hold moves), dispatched by a `type(verb) → function` table; module constants are named contributions, not static outcomes. Scores: counter-grab 100 (Myself held by enemy), tech-recover 90 (Myself throw_tech_ready), call-police 88 (the round-end boss up on screen, or Myself health below a lives-aware threshold: POLICE_HEALTH_PERCENT_THRESHOLD, raised to POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE on the last life), rear 60/55 (target dangerous / not) only while `decide._rear_attack_is_warranted` -- boxed in between two enemies, or target inside the punch dead zone -- and 11/9 otherwise, since `$322A` costs up to 21 frames of startup and hits only by current position, so the `WalkToNearEnemy` turn-around (12..14 in the rear band) reaches the same enemy faster and outranks it; the chord stays produced on band membership alone and still wins when nothing better is on the table, grab-enemy 58 (reason `CLEAR_REAR` for the pair -- above every strike on an enemy that can still act and above the warranted chord against a *calm* rear enemy, below the 60 chord against one already committed) / 30 (`DEAD_ZONE`, an improvement on an ordinary fight rather than an escape from a bad one), 0 with no opportunity left, supplex 68 / throw-held 70 / flip 66 / release 50 (target `Enemy` actually `GRABBED`) / knee -- `_emergency_attack_held_enemy`, not the generic `_held_enemy_emergency` factory the other four hold moves share -- 67 while `actor.hold_ticks <= HOLD_KNEE_TICKS` (6, `observe.HoldTracker`'s cross-tick count of ticks since this actor's current hold began; no ROM escape counter is decoded, so this is a heuristic in the same category NoraAttackTracker already is) and `_EMERGENCY_DEFAULT` once past it, so a fresh hold mils a few knees (67 clears FlipHold's fixed 66) before FlipHold's own constant tier finishes it -- live-reported as the AI grabbing and flipping straight to Supplex with zero knees landed, since the old fixed 64 never cleared 66. Pinned as a sequence, not a single tick, by `tests/ai/test_stability.py`'s `HoldSequenceStabilityTests` (a lone-tick test cannot distinguish "grab then finish" from "grab, knee, knee, finish"), verified to reproduce the exact reported symptom (`['FlipHold', 'Supplex']`) against the old scoring, knife/pepper 25 down to a floor of 21 (target beyond melee, within throw range, 1 point per 15px closer), jump 28/24/18 (target punishable / a `Nora` not currently dangerous within `NORA_RECOVERY_PUNISH_TICKS` (10) of her own `ticks_since_last_attack` -- see `observe.NoraAttackTracker` -- / neither) and melee-strike (punch/swing/stab/spray, shared formula) 60/20 (target punishable / not), open-breakable 16 in smash range, else 14 down to a floor of 8 (1 point per 15px closer) -- the two tiers the former SmashBreakable/WalkToBreakable pair carried, so the merge changed no ranking, weapon 12+rank (14..17, every rank clearing walk-to-near-enemy's own floor of 8 outright rather than merely tying it, floor `Weapon` outranks the held one, better upgrade scoring higher), walk-to-near-enemy 14 down to a floor of 8 (1 point per 15px closer), retreat-from-danger 17 down to a floor of 15 (1 point per 25px closer -- above walk-to-near-enemy's base 14 so backing off an imminent threat outranks still approaching a different target, and below the *lowest* real attack tier, jump-attack's 18, so attacking always wins once actually possible; the earlier 30/20 band broke that invariant by beating punch 20, jump 18/28 and knife-throw 21..25. This ranking only ever comes up when `decide._retreat_is_worth_it` already let the verb be produced -- hurt or surrounded -- so it means "while conceding, backing off beats approaching", not "danger outranks engaging"), projectile-sidestep 45 down to a floor of 30 (1 point per 2 ticks-to-impact closer, `_emergency_projectile_sidestep` reusing `_distance_emergency` with a tick count standing in for its usual pixel distance -- above every ordinary approach/retreat tier so a confirmed incoming throw is answered before it lands, below a guaranteed punishable strike (60) and the rear/grab-clear-rear escapes (55/58/60), which stay right even with a projectile also in flight), engage-souther 62 (plus the boss raise, 76: above every strike and grab tier on anything else -- a stray grunt's `RearAttack` chord once locked the actor mid-engage -- and below `CounterGrab`/`TechRecover`; the hold family never coexists with it), engage-antonio the same 62 (76) for the same reasons, with `HitAntonioBoomerang` at a flat 78 above it, release-to-regrab 69 (the Souther hold loop's hand-back; his knees are exempt from the knee budget, since `souther.hold_step` counts them itself), release-partner 72 (only while `PlayableCharacter.is_holding_player` -- the body in hand is the other player; it tops the whole hold family so no move that would land on the partner can outrank it), stage-advance 1 and catch-up-partner 1 (its replacement beside a partner who is ahead, zeroed once `decide._partner_to_catch_up` no longer holds; both the lowest of any verb that still scores -- must lose to every other live candidate, including a ScorePickup at 9; no *blocking* `Enemy` anywhere -- `_advance_blocking_enemies` excludes an off-screen straggler stuck at 0 health -- and no on-camera ahead `Breakable`, `_advance_blocking_breakables`; either gate scores the verb 0 so an injected candidate cannot outrank `OpenBreakable`), engagement verbs (walk-in / strike / grab / throw) add `_EMERGENCY_ARMED_TARGET` (7) when the target is an ordinary enemy holding a pickup weapon `$08-$0C` or a Jack still juggling his axe, and `_EMERGENCY_BOSS_TARGET` (14) when the target is a `Boss` -- sized to dominate WalkToNearEnemy's 6-point distance span so a far armed foe still beats a close unarmed one and a far boss still beats a close armed one; bosses are excepted from the armed raise, pickup tiers 50/15/12/11/9 (health-critical/health/life/special/score -- special and score both raised from their original 9/3 to clear walk-to-near-enemy's floor of 8, which they could not otherwise ever beat while any enemy existed anywhere on screen) — the max wins, with the `priority` field breaking ties; hold throws outrank knees. `could_*` generators never pre-select a single "best" candidate themselves (per AI.md's own principle) -- `_distance_emergency` is what lets several same-type candidates (near-enemy, thrown-weapon, breakable) rank against each other here instead; a first coarse-bucketed version was discarded after a live run showed clustered enemies tying every tick and the AI flip-flopping targets, so this scores near-continuously instead. **Remaining exact ties are broken deterministically and stably (`min(tied, key=repr)`), never at random.** `random.choice` was defensible per tick -- equally scored candidates really are equally good -- and disastrous over a run of them: the whole decision is remade every poll, so re-rolling turned "either target is fine" into swapping between them ~15 times a second, and since tied candidates are overwhelmingly the *same verb class aimed at different targets* (one per enemy, by the no-pre-selection rule above) whose targets lie in different directions, each swap re-aimed the D-pad. Near-continuous scoring made ties rarer but they stay routine at any distance-band floor and at every flat tier, so rarer was never enough on its own; `repr` gives a total order over frozen dataclasses that depends only on field values, so the same candidate set yields the same winner every tick. Covered by `tests/ai/test_stability.py`. `_emergency_thrown_weapon` scores the knife/pepper candidates by their **flight** distance through `decide.thrown_weapon_impact_point`, not by the current gap, so a target running away ranks below one standing still at the same instantaneous distance -- and never scores 0 for being outside a range `decide` never measured it against `_target_is_in_hand` is the gate every hold move scores through -- `CombatPhase.GRABBED`, or `reach.held_enemy` naming this target, which is the only thing that works for a boss; `_boss_attack_gate_is_live` drops a non-health item detour to 0 while Antonio's kick gate covers the actor |
-| `gamepad.py` | `VirtualGamepad`/`SharedGamepadState` — the only code allowed to call `hold_buttons`/`queue_press_buttons`/`press_buttons`/`release_buttons`; never `write_memory`/`write_value`. A press goes out as `QUEUE_PRESS_BUTTONS` (see **Presses do not block the tick**), falling back to the blocking `press_buttons` only for a client without the queue (the labs' recording clients). `VirtualGamepad` also owns the virtual left/right **axis** (`steer_x`, `AXIS_RAMP_TICKS`): callers no longer assert a D-pad direction directly for walking -- they request "more left"/"more right"/"center" every tick, and the axis only reports an edge (which `execute._hold_steered` then turns into an actual `LEFT_MASK`/`RIGHT_MASK` press) once that request has held for `AXIS_RAMP_TICKS` (3) consecutive ticks. Reversing all the way from one edge to the other therefore takes `2 * AXIS_RAMP_TICKS` ticks (it has to cross center), while a single contrary or neutral tick only steps the axis one place back rather than resetting it. This exists because immediately translating each tick's raw direction decision into a press is itself an oscillation source once `decide.py`'s target/side picks flip even occasionally (a target swap, a facing re-read, ordinary jitter): the axis is a deliberate low-pass filter in front of the D-pad, on top of (not a replacement for) `execute.py`'s existing deadbands/hysteresis, which still decide *what* direction is wanted each tick. `release()` resets the axis to 0 immediately, rather than letting it ramp down. Per-tick state, so it depends on one `VirtualGamepad` persisting across ticks the way `AgentLoop`/`app.py` already do; `tests/ai/test_stability.py`'s multi-tick harness has to build its `VirtualGamepad` once per run for the same reason (a fresh one every tick can never reach an edge) |
-| `execute.py` | **The press escape** (`_press_escape_mask`, in `execute_tick` right after the pit escape): an actor whose body is in a committed press's drop zone walks out by `press.escape_step`'s direction -- the soonest way out at its own walk, with the lane band, the camera clamp, walls and pits refusing steps -- whatever verb won; grounded only, and not filtered by the partner pad (see **Round 6: the factory floor**). **The partner guard** (`_partner_safe_gamepad` / `_keep_off_partner`): while a `Partner` is on screen `execute_tick` hands the winning handler a wrapped pad that filters every D-pad-only mask *before* it reaches the link whenever `reach.walking_box_would_grab` says the walk would take hold of them -- drop the X step toward them, then the lane step toward their lane, then (still inside their contact band) take a lane step out of it, else hold nothing; skipped for the pit escape, masks carrying A/B/C, holds (`ReleasePartner`'s back press is the release), airborne ticks and `Dialog` verbs (see **Never hurt the partner**). **`CatchUpPartner` is routed the same way** (`state_machine_catch_up_partner`: the strip is fixed to the partner at `decide.catch_up_point_x`, so an empty route with the goal reached stands still and no direction bit is forced back on; same pit hop). **`WalkToAdvanceStage` hops when `plan_route` cannot walk the lookahead** (`hop_landing_x` + `_jump_toward`); if the gap is wider than the kick it stalls at the wall and never injects raw RIGHT/LEFT into the hole. `execute_tick`'s pit override does **not** run while airborne (lane-plane `pit_endangers` would freeze a hop mid-gap). **`WalkToNearEnemy` and `OpenBreakable` steer by planned route** (`_routed_mask` -> `navigation`): the whole path is rebuilt every tick and only its **first vector** used, because the world moves under a plan (enemies walk, crates break, phases flip) while a typical search of this playfield costs well under a millisecond against a 33 ms tick (measured live: routed street ticks average well under 1 ms; a danger-dense failed proof can still cost tens of ms -- see **Tick budget** below). An empty mask means either "arrived, stand still" or "boxed in", and only the second falls back to `_movement_mask`'s straight line. The enemy approach uses `enough_contact` (a floor -- a moving target is not worth perfecting an alignment for) and closes on X in the actor's *own* lane, converging only once `alongside`, because the enemy being approached is exempt from its own danger set; the crate approach uses `maximize_contact` (it does not move, so lining up square with its face is free) and keeps the crate in its own obstacle set, since dropping it routes the actor straight down through it. Facing a crate to hit it is `_face_prop_mask`, a raw sign test with the stage direction as the dead-centre tie-break, *not* `_face_toward_mask`: the hysteresis there exists because two bodies in melee sit on top of each other and jitter flips the sign every tick, which a target that cannot move does not do -- and answering 0 inside the band is a stall, measured live as 2,300 punches thrown into empty air over 76 seconds from exactly `DIRECTION_HYSTERESIS_X` away, facing the wrong way, on a prop the same run had already broken from 11px while facing it. Ties on which side to stand are still broken by the measured anchors (facing within `DIRECTION_HYSTERESIS_X`, the stage direction for a crate) -- a cost tie picked arbitrarily put the actor *past* a crate, where `could_open_breakable` stops calling it "ahead" and hands the tick to WalkToAdvanceStage, back into the crate. **`RetreatFromDanger`, `ProjectileSidestep`, `WalkToWeapon`/`WalkToPickup` and `WalkToAdvanceStage` route too**, each reusing `_routed_mask` with the destination logic in `_retreat_from_danger_target`/`_projectile_sidestep_target`/etc. left untouched -- only *how* the actor gets there changed, never *where* or *which side*. Three things differ per verb and are worth knowing before touching any of them: `RetreatFromDanger` and `ProjectileSidestep` treat **every** live enemy as danger (no target exemption -- fleeing is never trying to stand in anyone's reach, unlike an approach); `WalkToWeapon`/`WalkToPickup` use `nav.strike_goal(..., inner_dx=0)` rather than a `PointGoal` with a scalar tolerance, because a tolerance wide enough to satisfy `PICKUP_RANGE_X` let the goal read "reached" up to 4px short on the narrower `PICKUP_RANGE_Y`, freezing the actor there forever (`_routed_mask` never falls back once `goal.is_reached` is true) -- `strike_goal`'s region is built from the same asymmetric `abs(dx) <= stop_dx and abs(dy) <= lane_slack` sentence the arrival check already states, so the two cannot disagree; `WalkToAdvanceStage` routes **solids only, never danger** -- its goal is a vertical strip 40px ahead spanning the lane (Y is free -- a point on the actor's own Y that landed in or behind a pit made every covering cell sit in the hole, so best-effort walked straight in on a lane that had room above or below) that slides forward with the actor every tick rather than a real destination, and once a nearby dangerous enemy's own reach box is wide enough to contain that strip, `nav.plan_route`'s danger-aware pass can never "reach" it (arriving there means standing inside the thing being avoided) and silently falls through to the danger-blind solids-only pass, walking the actor straight at the enemy -- confirmed on a synthetic sweep before reverting to solids-only, which is exactly the obstacle set the pre-routing ad-hoc dodge already covered here. `WalkToAdvanceStage` also keeps its `routed_mask or mask` short-circuit (not a bitwise merge): the router's own vector wins whenever it produces one -- including a pure Y-only pit dodge with no lateral bit, which `PitDodgeSideStabilityTests` explicitly requires -- and `mask` (the raw `RIGHT_MASK`/`LEFT_MASK`) only substitutes on total router failure, preserving the one guarantee this verb cannot give up: the D-pad always carries `verb.direction`'s bit unless the router legitimately needed the tick for a pure dodge. `_find_safe_spot` (this file) gates its own candidates the same way -- see that function's own docstring above. Everything else still steers straight-line; that is future work. `execute_tick(verb, context, gamepad)` is the actual per-tick entry point `loop.py` calls -- it runs the pit-escape override (below) before choosing between `press_no_button` and `execute_verb`, so `execute_verb`'s own dispatch to controller input is reached only once that override declines. Every press-only handler goes through `_press`, which drops the sticky directional hold first -- `hold_buttons` latches until changed and `SharedGamepadState.press` re-arms it, so a walk tick followed by an attack tick used to leave the actor walking through its own strike (past the enemy and out of its punch band, or over the pickup it had just pressed B to collect); a walk handler whose actor/target vanished from the context releases instead of coasting on the stale hold; `_movement_mask` steers every walk verb around on-screen `Breakable`s and `Pit`s (falling in a pit costs a full life — player-health-lives-and-combat.md), but only *incidentally*, while some other walk verb's path happens to cross one. The `Breakable` dodge nudges `to_y` around the prop while still closing `to_x` in the same tick (a fixed point margin is enough to clear with a diagonal step); the `Pit` dodge cannot do that — a pit is a rectangle wide/tall enough that a diagonal command can still cut through the footprint before Y finishes moving, live-diagnosed — so instead it freezes `to_x` at the actor's own current X (no L/R bit at all) for as long as `from_y` still sits inside the pit's own band (`reach.PIT_AVOID_MARGIN` past its `lane_y`/height), and only lets X resume once `from_y` has actually cleared it, not merely been asked to; recomputed fresh every tick from the live position, so a drift back in self-corrects. The Y dodge target itself overshoots that same boundary by `PIT_DODGE_OVERSHOOT` rather than landing exactly on it -- live-diagnosed: aiming precisely at the boundary meant that once `from_y` drifted to within `MOVE_DEADBAND_Y` of it (well before actually crossing it, since both the deadband check and the "not cleared" check share that one point), the Y mask bits went quiet on a `from_y` the danger check still called "not cleared" while X stayed frozen -- a 0 mask, the actor frozen a few pixels short of escaping while `pit_endangers` still read true. **Which** side that Y target aims for is `_pit_dodge_target_y`, and it comes from the pit's own danger edges -- the nearer one that still clears inside the lane -- never from the lane midpoint. The dodge freezes X, so nothing else is moving to break a tie and an unstable side pick here is *permanent*, unlike the Breakable dodge above which keeps closing X and walks past the prop regardless. The old rule read `from_y < (lo + hi) / 2`, a midpoint that has nothing to do with the pit, routinely falls **inside** its danger band, and which the rule then steered the actor *toward* (upper half aimed below, lower half above) -- so the actor crossed it, the pick flipped, and it crossed back forever. Reproduced on the tick harness with a 96x40 pit at lane 40..80 (danger 32..88, midpoint 57, inside it): the actor stopped dead at the pit's edge alternating UP/DOWN between y=56 and y=60, X frozen at 394, never advancing the stage -- 120 of 288 swept pit/lane/direction configurations failed that way, now 0. The nearer danger edge is stable because it is *self-reinforcing*: its flip point is the band's own centre and the chosen direction always moves the actor **away** from it, so a pick cannot undo itself; it is also the shortest way out. A side only counts when its aim point survives the lane clamp still clear of the band, since otherwise `_clamp_target_y` drags it back inside and the mask collapses to 0 -- which for `state_machine_walk_to_advance_stage` is worse than a stall, its `or mask` fallback then commanding the raw lateral direction straight into the pit. The dodge's own "already clear on Y" test is **strict** (`<`/`>`) so it means exactly what `reach.pit_endangers`' inclusive band means: with `<=`/`>=` the two disagreed about the single boundary pixel, the escape stopped there, and `_pit_escape_mask` -- still reading `pit_endangers` as true -- shoved the actor laterally back off the pit's centre. `_pit_escape_mask`'s own last-resort fallback now derives its direction from that same `_pit_dodge_target_y` (it previously pushed *toward* the pit's centre, the exact opposite of its documented job). `execute_tick`'s own pit override (`_pit_escape_mask`, `reach.pit_endangers`) is the standalone reaction to the actor's own current position already sitting inside a pit's danger zone with no walk verb underway to steer it -- knocked there, or having simply drifted in — and takes over the controller before either `press_no_button` or `execute_verb` runs, regardless of which `Verb` (if any) won the tick; it hands `_movement_mask` a point on the far side of the pit along X purely to make that same dodge logic recognise and take over — the actual escape (freeze X, clear Y toward whichever half of the lane is nearer) is entirely `_movement_mask`'s own, so both paths agree by construction — and never returns 0 while `pit_endangers` holds regardless: on the rare chance `_movement_mask` still resolves to an empty mask, it falls back to a direct, deadband-free push away from the pit's own center on Y, since this is the one place in the pipeline "the actor believes it is in a pit" is known for certain, and refusing to hand back "do nothing" for that belief is a categorical guarantee, not just a consequence of the current margin/deadband numbers; `state_machine_engage_souther` holds `souther.plan_engage`'s mask directly (no axis ramp: the walk-in needs the walking box out every frame, and the plan never presses away from him); `state_machine_engage_antonio` holds `antonio.plan_engage`'s stick the same way and deliberately not through `_clamp_mask_to_camera` (see **Antonio: the ROM model and the plan**); `state_machine_release_to_regrab` presses *back* for `souther.release_press_frames(countdown)` frames and then holds toward him, so the re-grab walk starts on the release frame. `_walk_to_near_enemy_target` stops *inside* an enemy's own dead zone when it has one (`_dead_zone_stop_dx`, from the extracted `Enemy.min_reach`): some enemies cannot hit what is pressed against them, and today the ROM picks out exactly one -- Nora, whose whip (shape `$22`) covers 32..80px. Stopping at the actor's own punch edge instead, 46px for Axel, parks it squarely inside that band; measured against a real Nora in her attacking phase, the AI settled at 51px, spent 108 of 120 ticks inside her reach and threw **zero** attacks, which is what "the AI cannot deal with Noras" looks like in play. Aiming for `min_reach - REACH_SAFETY_MARGIN` instead (floored at the punch's own usable inner edge, since closer than that is the grab's business) takes it to the pocket she has no answer to: 9px, 22 of 120 ticks in the band, and it attacks throughout. Enemies with no dead zone -- every other type -- are unaffected. `_crossing_would_walk_into_the_swing` is the other half: with the approach aiming for the pocket, a live recording had Nora land **9 of her 10 hits at ~80px**, the far edge of her reach, catching the actor as it set off across the band. So the crossing waits out a live swing -- but only from outside her whole reach, only for an enemy that *has* a dead zone, and only while the actor is in the lane her attacks actually sweep (`reach.enemy_lane_covers`). Each of those three conditions was paid for: holding ground against an ordinary enemy is passivity (measured: -20% damage dealt, more taken), and gating on the X gap alone made the AI sit out swings it was never in the line of, costing half its stage progress (1487px against 2579-3674). `_walk_to_near_enemy_target`'s **lane aim never depends on the enemy's combat phase**, which is what stopped the approach darting up and down. It has three branches: arrived on X (`dx <= stop_dx`) converges onto the enemy's lane, the one place that aims at it, since the punch needs `dy` inside `PUNCH_RANGE_Y`; still approaching *and* standing inside a committed enemy's line (`dy < WALK_TO_ENEMY_LANE_SAFETY_Y`) aims at a **fixed** offset lane, so repeated ticks converge on one point instead of stepping away forever; otherwise it holds the actor's current lane. The old version converged onto the enemy's lane from any distance and sidestepped off it while the enemy was committed, so every crossing of `is_dangerous` -- every few ticks in a real fight -- flipped the lane aim by a full `2 * WALK_TO_ENEMY_LANE_SAFETY_Y` (56px) and the whole walk-in alternated UP/DOWN. Holding the lane serves the original "never walk down its line of attack" intent more directly than the sidestep did, by not converging onto that line in the first place; `_retreat_from_danger_target` steers to `_find_safe_spot`'s result when it finds one (computed lazily, right here, rather than for every actor every tick: it weighs the sidesteps against the straight retreat by clearance, lane/camera bounds and pits) and otherwise steps straight away from the target on X, holding the actor's current lane; `_projectile_sidestep_target` is a pure lateral step -- holds X at the actor's current position (the danger is entirely about sharing the projectile's Y column, not its X) and steps `PROJECTILE_SIDESTEP_DISTANCE` (40, comfortably past `inference.PROJECTILE_LANE_SLACK`'s 24) off whichever lane edge is nearer, the same "away from the nearer edge" pick `_movement_mask`'s own prop/pit dodges use -- deliberately not "away from the projectile's Y", since the actor already shares that Y (that's what made it a threat) and stepping away from it is not a stable direction, it would flip on ordinary walk jitter; `decide.in_smash_range` has an **inner** edge as well as an outer one (`punch_usable_inner_x`): a punch box starts 16px in front of Axel, so a prop the actor is standing on top of cannot be hit at all. Its outer edge is `breakable_smash_outer_x`, not `BREAKABLE_PUNCH_X` flat: that constant is an origin-to-origin distance, meaningful only while the prop is narrower than the punch reaches, and a round-6 prop's wall already reaches exactly 36px from its own origin -- so a flat 36 would call every position the ROM allows out of range and the verb would approach a prop it could never report arriving at, the same stall from the other side. The reach therefore grows with the wall and only with the wall (`SMASH_WALL_CLEARANCE_X` past it, clearing both `NAV_STEP` and `MOVE_DEADBAND_X` so a lattice or deadband stop just outside still counts as arrived); every prop whose wall is already inside `BREAKABLE_PUNCH_X` keeps exactly the reach it always had. Without it the executor pressed B instead of repositioning, and the attack animation then blocked every verb on the next tick -- which reaches `press_no_button`, releasing the controller and resetting the steering axis, so the actor never walked away either. Recorded live: **94 seconds** of a 7-minute run spent punching one type-$11 prop from 1px away, ~430 presses, ending in a lost life, plus 22 shorter stalls in the same run; afterwards the longest stall in a comparable run was 10.8s. `_walk_to_breakable_target` picks which side of a prop to stop on from the **stage's own progress direction** when the actor is standing essentially on it, not from `actor.facing_left`: a prop, unlike an enemy, never moves to break the symmetry, so reading the side off facing is a feedback loop -- press left, facing goes left, the stop point jumps to the far side, press right, and back. Measured live: 107 seconds of a 200s run at one prop with LEFT held on 244 ticks and RIGHT on 240, the virtual steering axis cancelling almost all of it (2242 ticks with nothing on the pad) while the actor never moved a pixel on X. The stage direction is fixed for the whole level, so it cannot oscillate, and it leaves the actor already lined up to carry on. Stage 7 (`AI.md`: no lateral progress required) reports `Stage.direction == "none"`, which used to fall through to that same `actor.facing_left` read and reproduce the identical 107s oscillation for every stage-7 breakable approached near dead-center on X; fixed by giving `"none"` the same fixed, non-input-derived side as `"right"` rather than a live facing compare -- stable matters more than which side, and either one reaches smash range equally well from directly on top of the prop. Smash range is only a *side* pocket (`decide.in_smash_range`: same lane, X offset); a straight line from above or below the crate to that pocket cuts through the solid, so while the actor still shares the prop's blocking X column (`_breakable_block_x`, read from `prop_solids` -- origin-space, which is exactly what the caller compares `actor.world_x` against) the Y target is held at the actor's own lane and only X walks out to the smash pocket. The next tick, now beside it, converges on Y. Without that around-path the actor pinned itself against the body and never arrived at a point that could punch -- reported from play as not knowing how to handle a breakable sitting on a different lane. `at_smash_x` is the escape for a stop point that still lands inside the column plus its slack: once X has arrived, Y must be allowed to move or the actor freezes off-lane. The stop point itself is clamped outside the prop's own wall (`BREAKABLE_WALL_GAP_X`), because `breakable_smash_outer_x` minus the deadband buffer alone lands *inside* it for every prop whose wall is wider than that, leaving the actor to arrive by bumping into it. The incidental prop dodge in `_movement_mask` aims at the wall's real edges too (`BREAKABLE_AVOID_Y` is now a clearance measured from them, not a margin around the origin): the ROM's boxes reach up to 28px behind an origin and only 4px in front, and stage 5 stacks two rows of props with a 16px corridor between them, so a symmetric margin aimed one prop's dodge straight into the next one down. `state_machine_open_breakable` also passes the target's slot as `_movement_mask(..., ignore_slots=...)` so the incidental prop dodge -- which treats any breakable on the walk's X span as an obstacle on the way to something else -- does not push Y off the smash lane while the walk-in closes X. `WalkToNearEnemy`/`RetreatFromDanger`/`ProjectileSidestep` share one `_walk_toward_target` lookup/guard/steer shell (actor+target lookup, release on either missing, then `_hold_steered`/`_movement_mask` on a `compute_target` callback) instead of repeating it three times; `WalkToWeapon`/`WalkToPickup` likewise share `_walk_to_item` (identical PICKUP_RANGE arrival test, differing only in the target token type) and `ThrowKnife`/`ThrowPepper` share `_throw_ranged_weapon` (differing only in the frame count). `state_machine_open_breakable` switches on that same `decide.in_smash_range` its emergency scores with, so the tier it won on and the action it takes can never describe different situations -- out of range it walks to `_walk_to_breakable_target`, which stops just inside smash range on whichever side the actor already occupies, since a Breakable is itself a solid obstacle and its exact center is unreachable; `state_machine_grab_enemy` is the one walk handler that aims at the target's *exact* position with no stop buffer (overlapping is the point) and never presses a button -- a strike would make `+$34` nonzero and turn the grab contact code into a plain hit -- and falls back to the facing direction when the movement deadband would otherwise release, because `$AAA0` first requires a non-empty attack box, i.e. a *walking* frame; `_hold_steered` is the one place every walk handler's final `gamepad.hold(mask)` goes through -- it reads the mask's L/R bits as this tick's axis request, replaces them with whatever `gamepad.steer_x` reports, and holds the result, so the deadband/hysteresis logic above is unchanged and only the very last step is smoothed. Deliberately **not** applied anywhere in `state_machine_jump_attack`, which holds directions through `gamepad.hold` directly: that handler is now a four-state machine over the ROM's own jump family (`JUMP_CROUCH_ACTIONS` / `JUMP_ATTACK_ACTIONS`) because the four states take four different inputs. **Grounded** presses C plus the travel direction; **crouch (`$10`)** holds the direction and *presses nothing*; **free flight (`$12`)** presses B alone and re-holds the direction; **already kicking (`$16`)** and **landing (`$14`)** press nothing, since the kick stays active until touchdown and a B read on the landing frame comes out as an ordinary punch aimed where the kick was heading -- a swing at empty air 100px from anything, recorded live. Each state is matched by its own action id rather than by `is_airborne`, which spans all of them. Two ROM facts force that shape, and both were measured as failures first: `$384E` reads the held direction once, at the end of the 5-frame crouch, and the virtual X axis needs `AXIS_RAMP_TICKS` (3 ticks ≈ 6 frames) to reach an edge while `_press` clears the hold before every press -- so anything routed through `_hold_steered` arrives too late and the *first* jump of an encounter goes straight up and kicks the air where it stood; and `$3914` needs a **rising edge** of B in free flight, which a B pressed during the crouch cannot give, since `_press` holds each button 4 frames while the AI re-decides every 2, leaving it still held when free flight begins -- nor to any `_press`-based facing bit (`_face_toward_mask` inside an attack press), which is a one-shot instant press, not a continuous walking hold. The grab walk-in and the two throws aim through `_aim_point` (`kinematics.target_at_impact` for that verb's own class) rather than at the raw token -- a walk-in is a pursuit and a thrown weapon has a real flight time, so both lead their target. The melee strike and the jump kick deliberately do **not**: facing is set by holding a direction, and turning toward where a body *will* be is how the actor swings past one standing next to it; their movement is already covered by the damaging span that keeps frame 0 in `kinematics.connect_frames`. A stationary target aims at itself either way |
-| `loop.py` | `AgentLoop.tick` — gates on pause/non-gameplay/not-playable first, then runs the full pipeline (`do_not_harm_partner` between the verb generators and the ranking, so the HUD's pending list never shows a withdrawn verb either); the not-playable gate **does not** fire while the player's object is the type-`$0F` continue UI (`InContinueMenu` / `HandleContinueMenu` still have to answer Yes and type the initials). Fills a thread-safe `VerbState` (winning + every pending candidate + the tick's `EnemyCluster`/`PartnerFight` tokens for the HUD overlays) via `inform_hud` every tick and clears it on gate; hands the winning `Verb` (or `None`) to `execute.execute_tick` rather than choosing between `press_no_button`/`execute_verb` itself, and returns it for informational use only -- the actual controller output may differ if `execute_tick`'s pit override took over. Owns one `duel.DuelStyle` per instance (`duel_style=False` turns it off; `steer` runs between `do_not_harm_partner` and the ranking and returns the context untouched outside `PlayerDuel`), and one `observe.NoraAttackTracker` per instance, passed into `generate_direct_observation_tokens` every tick -- the same per-player granularity as its own `VirtualGamepad` |
-
-Verified button mapping for the ORIGINAL 3 scheme (see
-`execute.py`'s module docstring): **Attack/Punch is physical B** (also
-`MeleeWeaponAttack` via the shared
-`state_machine_melee_strike`, `Supplex`'s finishing press, `ThrowKnife`/`ThrowPepper`,
-and `CounterGrab`'s B edge),
-**Jump is physical C** (`JumpAttack` launch, `Supplex` front→back crossover,
-`CounterGrab` crossover, half of `RearAttack`, half of `TechRecover`'s C+Up chord), **Police special is physical
-A** — the reverse of the naive "A=attack" assumption. **RearAttack** is the
-simultaneous B+C chord (`$322A`).
-
-Out of scope, per [`AI.md`](AI.md)'s own text: two-player coordination rules
-beyond `partner.py`'s harm/courtesy filter above
-("low priority... not an expected scenario"). The six-button scheme, once
-out of scope, is ENHANCED 6 (**Six-button layout (ENHANCED 6)**).
-
-**Antonio (`$56`, round 1)** is the first later boss with a plan of his own,
-and everything the AI does against him is `ai/antonio.py` (the ROM model and
-the measurements are in **Antonio: the ROM model and the plan** above):
-
-- `could_engage_antonio` produces one `EngageAntonio` per live Antonio while
-  the actor is free (not held, not holding, not airborne, not mid-animation),
-  armed or not. Every generic verb aimed at a body stands down for him -- the
-  melee strikes (a strike turns the grab contact into a hit, and a punch
-  standing still is his widest kick window), the `RearAttack` chord,
-  `GrabEnemy`, `WalkToNearEnemy`, `RetreatFromDanger` and the jump -- so the
-  engage is the only verb aimed at him: 62, plus the boss raise, 76.
-- `state_machine_engage_antonio` holds `antonio.plan_engage`'s stick
-  directly: no axis ramp, and **not** through `_clamp_mask_to_camera` (the
-  bug in the table above).
-- In a hold on him `could_hold_actions` asks `antonio.hold_step` -- the same
-  knee, knee, release as Souther's, from the holder's own bytes.
-- `HitAntonioBoomerang` (a flat 78) still punches the boomerang out of the
-  air, above the engage -- unarmed only: armed, B is a swing nothing here
-  times, and that was the one boomerang hit measured; `phases.boss_phase` decodes his primary 1 as
-  `CHARGE` only in tactical 8 (the dash) and `NORMAL` otherwise; item detours
-  are refused while `antonio.kick_gate_open` covers the actor, the food while
-  he lives, and the police is the panic button only.
-
-**Souther (`$55`, round 2)** is the second, and everything the AI does against
-him is `ai/souther.py`: pure functions of the context that `decide`,
-`priority` and `execute` all call, so the three cannot disagree (the ROM model
-and the measurements are in **Souther: the ROM model and the plan** above).
-
-- `could_engage_souther` produces one `EngageSouther` per live, on-screen
-  Souther while the actor is free (not held, not holding, not airborne, not
-  mid-animation), armed or not. Every generic verb stands down for him --
-  `Punch`/`MeleeWeaponAttack` (a strike turns the grab contact into a hit),
-  `GrabEnemy`, `RearAttack`, `WalkToNearEnemy`, `RetreatFromDanger` -- so the
-  engage is the only verb aimed at him. `state_machine_engage_souther` holds
-  `souther.plan_engage`'s mask directly, without the axis ramp: the walk-in
-  needs the walking box out every frame, and the plan never presses away from
-  him.
-- `could_hold_actions` asks `souther.hold_step` in a hold on him:
-  `AttackHeldEnemy` for the first two knees of a chain (`PlayableCharacter.
-  knees_in_chain`, from the player's `+$58` bit 6 and `+$61`),
-  `ReleaseToRegrab` after them, `FlipHold` from a back hold while the one
-  crossover is unspent (`crossover_spent`, `+$4B` bit 7), and a finisher only
-  when it kills. `state_machine_release_to_regrab` presses back for
-  `souther.release_press_frames(hold_release_countdown)` frames (`+$63`) and
-  then holds toward him.
-- `HealthPickup`/`LifePickup` are refused while he lives, the police is the
-  panic button only (as everywhere; tests run with `--no-police`), and the
-  weapon detour stays refused (`_a_weapon_would_disarm_the_plan`).
-- **Two of him** (round 6, `ai/souther_pair.py`; **Round 6: the Souther
-  pair** above): `could_engage_souther` offers one `EngageSouther`, on
-  `souther_pair.pick_target`'s choice; `could_hold_actions` asks
-  `souther_pair.hold_step`, which is `souther.hold_step` until the free one
-  would commit before a knee and a throw fit, and then `ThrowHeldEnemy`;
-  `state_machine_engage_souther` takes `souther_pair.plan_engage` (his plan,
-  out of the free one's live claw first). With only one live Souther -- round
-  2, round 8, or the pair's survivor -- none of it runs.
-- **He counters jump attacks.** `$162A4 (souther_flag_target_jump_attack)`
-  arms `+$79` from the *player's* own action state — `$16`/`$17`/`$42`/`$43`,
-  the unarmed and armed jump attacks — and `$16234
-  (souther_counter_jump_attack)` answers it, inside lane `$12` and X `$78`, by
-  forcing him straight to primary `$02` with the `$98` claw already spawned,
-  bypassing every distance band, the `$18` inner abort and the `+$66`/`+$77`
-  gates. So `could_jump_attack` refuses the whole launch for that actor —
-  **per actor, not per target**, since a hop aimed at an unrelated grunt in the
-  box is countered identically — with the X half of the box widened by the
-  character's free-flight reach, because `+$79` stays set for the whole kick
-  action and he re-tests every frame of the flight. Only the launch is refused;
-  an airborne actor is still committed.
-
-  **Two gates the ROM has here are deliberately not reproduced, and both were
-  paid for live** (reported as "a IA salta diretamente para as gadanhas dele").
-  The first version gated on `$16234` being armed (primary `$01`, or `$02` with
-  tactical `$00`) and on the `$12` lane window, and both let the jump through:
-
-    - `$1619E`/`$161C6` skip `$16234` *because he is already attacking*, with
-      the claw swing live (his own attack box; the `$98` object is only its
-      visual). Not being countered is not the same as not being hit — that
-      window is the most dangerous one, not the safe one. The only genuinely
-      safe Souther is one who cannot act (`is_punishable`), and there the
-      engage owns him anyway.
-    - The lane window is real for the *flight* (a `JumpAttack` is horizontal, so
-      it cannot leave its lane) but not for **him**: he closes lane at up to
-      4px per update, erasing 18px in about nine of the flight's ~25 frames.
-      Off-lane launches were countered on arrival.
-
-  Reproduced before fixing by sweeping `generate_inference_tokens` →
-  `generate_verb_tokens` → `determine_priority_verb` over every
-  (primary, tactical) × distance × lane combination: airborne, `JumpAttack` won
-  in **every** Souther state, because the (since retired) `could_dodge_souther_slash` was
-  suppressed in flight. Keep that sweep in mind when touching this — the ground cases all
-  looked correct.
-
-**The hold ends when something is about to land, and the decision is made in
-frames** (user: "a IA deve fazer supplex ou atirar o inimigo se ele estiver
-para atacar na IA... calcula exatamente o tempo que leva a fazer cada
-animação para prever o futuro e decide com base nisso"). Every hold move is
-an animation lock that ignores fresh edges for its whole length, so starting
-one is a commitment, and the lengths are now **measured** rather than
-guessed.
-
-`tools/hold_timing_diag.py` measures them: the AI plays until it has a real
-hold, then the host goes into **lockstep**, the move is issued on frame 0 and
-the player's own `+$30` is sampled every frame until it settles. Same method
-as `ai-analysis/controls-and-input.md`'s "Measured chord timing" table.
-
-| move | Axel | Adam | Blaze | ends in |
-| --- | ---: | ---: | ---: | --- |
-| knee (B) | 17 | 18 | 18 | back at the front hold |
-| crossover (C) | 37 | 37 | 39 | back hold `$66` |
-| suplex (B from `$66`) | 78 | 77 | 78 | free |
-| throw (B+back) | 41 | 42 | 46 | free |
-
-Two things follow directly, and are the whole rule:
-
-- **finishing from a front hold costs 41-46 as a throw and ~115 as a
-  flip-into-suplex.** So under a clock they are not alternatives: the throw is
-  the only ending that fits, and it puts the body between the actor and
-  whatever is arriving;
-- **another knee costs 17-18 frames of being unable to answer anything.** If
-  the incoming attack lands sooner than that, the knee is not started at all.
-
-`reach.frames_until_melee_lands` is the clock. It is deliberately built out
-of the same predicates `is_incoming_melee` already uses -- inside its own
-reach is 0, a committed Souther dash divides the gap by `$161C6`'s 8px/frame,
-anything else walks the enemy's own ROM velocity forward a frame at a time
-until the caution box is satisfied -- so "is it coming" and "when" cannot
-disagree. Past `CLOSING_ENEMY_THREAT_FRAMES` the answer is "not coming".
-
-Do **not** re-derive these numbers from the animation data: an animation
-record's `frames x per-frame delay` is not an action's length, because the
-ROM's action handlers advance on specific animation frames (`$23D6`'s
-`cmpi.b #$0004,$a(a0)` is the shape of it). That product over-states Axel's
-chord by 2x and Blaze's by 3.5x against the manuscript's own measured table.
-
-Do **not** distrust these numbers because they were taken under `--turbo 4`
-either (user: "cuidado com a medição de frames no modo turbo"): a lockstep
-step is exactly one game frame at `--turbo 1` and `--turbo 4` alike, verified
-against `get_game_uptime_frames` at both. Turbo scales wall clock, so
-anything timed by wall clock or by *agent ticks* is turbo-dependent -- which
-is precisely why the knee budget stopped being a tick count.
-
-That budget (`priority.HOLD_KNEE_TICKS`, 6) was the last thing here decided
-in ticks, and the arithmetic was wrong in a way only the measurement shows: 6
-ticks is ~12 frames against a knee's 17, so it expired before the first knee
-could finish and the flip won the very next tick. It is
-`kinematics.hold_knee_budget_frames` now -- three knees' worth -- compared
-against `kinematics.frames_for_ticks(hold_ticks)`.
-
-One consequence worth stating, because it looks like dead code and is not:
-with the horizon at 12 frames and a knee at 17-18, **every threat the AI can
-see at all is too soon to knee through**, so the "throw instead" branch is
-the only one that ever fires while something is coming. The comparison is
-still written against the frame counts rather than folded away to "any
-threat": widen the horizon and a knee becomes available inside it again,
-which is the right answer rather than a regression.
-`test_stability.HoldUnderThreatStabilityTests` pins the relationship so
-moving either number is visible.
-
-Three scored round-2 fights after the change: 25%, 200%, 75% damage and 0, 1,
-0 lives, against the four before it at 50/200/200/75% and 0/1/1/0 -- no
-regression (and no claim of an improvement: that is the same noise floor),
-with the boss dead in all three and the fastest round-2 kill recorded here,
-24 s. Those fights only exercise the *unthreatened* path, though: round 2 is
-1v1, and the only enemy on screen is the body already in the actor's hands,
-which is excluded from its own clock.
-
-**The threatened branch is measured separately, with the waves left alive**
-(`tools/hold_threat_diag.py`, no `DebugScenario` sweep -- the point is a hold
-taken in a crowd). Two runs, Axel 150 s and Blaze 220 s, 877 hold ticks and
-66 decision ticks between them:
-
-| | Axel | Blaze |
-| --- | --- | --- |
-| decisions with a threat on the clock | 5 | 3 |
-| of those, `ThrowHeldEnemy` | **5** | **3** |
-| of those, a knee started | **0** | **0** |
-| grace observed, in frames | 5, 7, 7, 8, 12 | 7, 9, 11 |
-| decisions with nothing coming | 27 (21 knees, 3 flips, 1 suplex, 2 rear-throws) | 31 (24 knees, 5 flips, 1 suplex, 1 rear-throw) |
-
-Two things in that table are the actual confirmation. Every observed grace is
-**5-12 frames**, all of them under the knee's 17-18 -- which is the horizon
-argument above, seen in real play rather than derived. And the throw is not
-merely *offered*: the action byte goes `$60` -> `$62` (Axel) / `$64` (Blaze)
-and stays there ~24 ticks, which at ~2 frames a tick is the 41-46 frames the
-lockstep harness measured for that same move.
-
-The samples are small (8 threatened decisions) because a hold taken *while
-something else is already committed* is not a common tick -- but the rule is
-an invariant rather than a rate, and the invariant held on every one of them. The
-threatened path is covered by `tests/ai/test_decide.py` and the sequence
-tests only.
-
-Mr. X (`$35`) and his Garcias have their plan (**Mr. X: the ROM model and the
-plan**); Onihime/Yasha
-(`$58`) have their plan (**Onihime and Yasha: the ROM model and the plan**); Bongo (`$57`) and Abadede (`$30`) have their plans
-(**Bongo: the ROM model and the plan**, **Abadede: the ROM model and the
-plan**).
-
-## TokenMap (keep updated)
-
-`TokenMap.md` holds the Mermaid `classDiagram` of the full token hierarchy
-under `ai/`: the token classes and their inheritance only (no notes, no
-members). It is a living reference, not a historical snapshot. Any change
-to the token classes — adding, renaming, removing a class — must update
-`TokenMap.md` (class name and inheritance edges) in the same delivery.
-Likewise, editing the diagram alone should only happen together with the
-corresponding source change.
-
-Add concrete tokens as subclasses rather than generic discriminator fields,
-per [`AI.md`](AI.md), so the diagram and the class tree stay aligned.
-
-## Token docstring convention
-
-Every token class docstring follows the same normalized shape.
-
-1. **First line:** a short, concise, human-readable description of the token.
-   It may include technical details.
-2. **Inferred descendants add a second line** describing clearly and shortly
-   under what conditions they are generated and which function generates
-   them (e.g. "Built by ``inference.check_for_surrounded`` when at least
-   ``SURROUNDED_MIN_ENEMIES`` live enemies are inside the close box around
-   the actor"). ``Surrounded`` and ``EnemyCluster`` are the only ``Inferred``
-   tokens left — see [Judging without a cache](AI.md#judging-without-a-cache)
-   in `AI.md` for why every other judgment this convention used to describe
-   as a token is now a direct `reach.py`/`execute.py` function call instead,
-   documented per its own function docstring rather than a token docstring,
-   and for why these two earn the exception.
-3. **Verb descendants add a second line describing when they are
-   produced** — the ``could_*`` generator that creates them and the
-   conditions under which it fires (e.g. "Produced by ``could_punch`` when
-   an enemy sits within the actor's punch band").
-4. **Verb descendants add a third line** describing how they can be
-   ranked **in emergency**. This is *not* a static number: the static
-   ``priority`` field only breaks ties between verbs that rank as
-   equally emergent. Emergency is calculated from the *presence of other
-   tokens*, from a `reach.py` predicate's result, or from either *under
-   certain conditions*. Format:
-
-   ```text
-   Raises emergency: Surrounded×80, (reach.is_incoming_melee for this target)×17, (Weapon when distance is less than 32)×150
-   ```
-
-   ``Surrounded`` and ``EnemyCluster`` are the only `Information` tokens
-   available to reference this way; every other condition is named as the
-   `reach.py`/`phases.py` function (or `GrabReason` member returned by
-   `reach.grab_reasons`) that answers it, e.g. ``reach.is_incoming_melee``,
-   ``reach.projectile_threatens``, ``phases.is_punishable``,
-   ``(reach.grab_reasons includes DEAD_ZONE)``.
-
-## Snapshot cadence
-
-- **Snapshot cadence is wall-clock polling**, not VSync waits.
-- The poller reconnects with backoff on link failure and surfaces errors in the
-  HUD / offline snapshot.
+**Cluster inference (user: an `Inferred` token).** `EnemyCluster` (`tokens/enemy.py`, `inference.check_for_clusters`) feeds `priority._hold_cluster_bonus` for `ThrowHeldEnemy`/`Supplex` only (+2 per body, up to +4), the same shape as `JumpAttack`'s `jump_kick.enemies_hit` bonus. It is a proximity estimate, not a landing model.
 
 ## Input through the execution data (`sor_remote.py`)
 
-User decision (2026-10-30): the game reads the keyboard and gamepads itself
-and binds them to **actions** (`StreetsOfRageRecompilation/SoRInput`), so it no
-longer reads the Mega Drive buttons of `MegaDriveClient`'s gamepad commands
-(`HOLD_BUTTONS`, `QUEUE_PRESS_BUTTONS`, `PRESS_BUTTONS`, `STEP_INPUT`'s masks).
-Autoplay sends its input through the execution-data buffer instead, as a binary
-document packed with `struct` (user: not YAML -- no PyYAML on the system
-Python), and reads each player's state back from the game-data buffer
-(`GET_GAME_DATA`, MegaDriveEnvironment), which only the game writes. The layout
-is `SoRRemoteInput.hpp`'s, mirrored in `sor_remote.py`; change both together:
-a container (`magic, version, record count, serial`), then tagged records,
-unknown tags skipped, so more can be sent either way later.
+User decision (2026-10-30): the game binds **actions**, so it no longer reads the Mega Drive buttons of `MegaDriveClient`'s gamepad commands. Autoplay sends a binary `struct` document through the execution-data buffer (user: not YAML, no PyYAML on the system Python) and reads each player's state from the game-data buffer (`GET_GAME_DATA`), which only the game writes. The layout is `SoRRemoteInput.hpp`'s, mirrored in `sor_remote.py`: **change both together**.
 
-- **`SoRClient`** (a `MegaDriveClient`) keeps the old gamepad API --
-  `hold_buttons`, `queue_press_buttons`, `press_buttons`, `release_buttons`,
-  `step_input` -- with the Mega Drive masks the AI speaks, and turns each
-  player's mask into actions by that player's scheme (`md_buttons_to_actions`:
-  ORIGINAL 3 A Special, B Punch, C Jump; ENHANCED 6 B Punch, C Jump, A Back
-  Attack, X Special, Y Pick Item, Z Throw Knife). So nothing in `ai/` changed:
-  `execute.py`'s buttons and `SixButtonLayout` are as they were, and the labs
-  and fight harnesses only swapped the class.
-- **Timing is the old commands'**: a held mask is the player's steady state; a
-  queued press (`PLAYER_INPUT` with a new `seq` and the QUEUE flag) starts on
-  the next sampled frame in place of it, and one queued behind another waits
-  for it and one frame of the steady state; `queue_press_buttons` still returns
-  the release frame (computed from `GET_GAME_UPTIME_FRAMES`, one extra round
-  trip a press); `press_buttons` plays both masks then releases both and waits
-  them out. Lockstep sends one schedule per tick (`step_frames`: the tick's
-  per-frame masks, run-length) and one `STEP_INPUT` with no masks -- one round
-  trip fewer than the old per-group `step_input` when a press edge fell
-  mid-tick.
-- **Schemes are detected, never set** (user: "I wanted the autoplay to detect
-  the control scheme by querying the host"). Each player's scheme is the
-  game's (OPTIONS > CONTROLS, `controls.yaml`); `SoRClient` queries it from
-  `PLAYER_STATUS` on connecting, and again before mapping a mask once the
-  reading is `SCHEME_REFRESH_S` (1 s) old, so a scheme changed mid-session is
-  followed within a second. Each `AgentLoop` takes its player's from the
-  client behind its pad (`VirtualGamepad.enhanced`, `AgentLoop._six_button`),
-  so every lab and harness adapts with no code of its own; `six_button` is
-  only the fallback where the pad has no client (the lockstep capture, test
-  doubles), and `ObserverApp` refreshes it every second while an AI plays.
-  Host flag 1, `--altControls`, the `--scheme-p1/-p2` options and play.py's
-  6-button toggle are gone. **A measurement's scheme is therefore the host's
-  `controls.yaml`**: give the host a `HOME` whose file says what the run
-  should play (no file = defaults, ORIGINAL 3).
-- The game drops a client's input when it disconnects or the game restarts,
-  until the buffer changes; every document carries a new serial and every
-  client starts its serial and sequence numbers at random, so a new client
-  never repeats the last one's bytes.
-
-**A/B against an older build: give its host a scratch `HOME`.** The game
-reads `~/.config/StreetsOfRageProject/controls.yaml` (SDL's home folder,
-`$HOME`), so a host built before this change plays whatever scheme the user
-last saved -- caught live (user): the baseline Blaze stood on a weapon
-punching, her player on ENHANCED 6 from the user's file (Punch never picks
-up there) while that build's autoplay pressed the 3-button buttons.
-The current build reads the scheme from the game, so it follows the file
-either way; an older one does not. `HOME=<scratch>` on the host gives it the
-defaults (ORIGINAL 3); for a 6-button arm, a scratch file with that player on
-`enhanced6` (the old build: `--altControls`).
-
-Measured live before shipping: see **Execution-data input, measured** below.
-
-### Execution-data input, measured
-
-Live, before shipping (the no-regression rule): `boss_fight.py` (Blaze,
-`--no-food`, police off, `--turbo 2 --silent`, a fresh host per fight), the
-step-2 build (gamepad commands, `--altControls` for 6-button) against this one,
-two hosts at a time, both with a scratch `HOME`:
-
-| fight | old: killed / hits / holds / fight s | new: killed / hits / holds / fight s |
-| --- | --- | --- |
-| Antonio, ORIGINAL 3, 4 pairs | 4/4, 0, 5, 2.4 | 4/4, 0, 5, 2.4-2.8 |
-| Souther, ORIGINAL 3, 3 pairs | 3/3, 0, 7, 4.0-4.1 | 3/3, 0, 7, 4.0-4.4 |
-| Antonio, ENHANCED 6, 3 pairs | 3/3, 0, 5, 2.4 | 3/3, 0, 5, 2.5-2.7 |
-
-The new fights ran 0.1-0.4 s longer in wall time in 6 of 10 pairs (the first
-hold at 0.05-0.11 s both ways); not traced -- the extra
-`GET_GAME_UPTIME_FRAMES` round trip a press costs is a candidate. Also run: a
-turbo session (round 1, wave 3, full health) and a lockstep one. Not run: the
-other bosses, two players, the twins' and Mr. X's harnesses.
+- `SoRClient` keeps the old gamepad API and Mega Drive masks, mapping them by scheme (`md_buttons_to_actions`), so `ai/` is unchanged.
+- **Schemes are detected, never set** (user). `SoRClient` queries `PLAYER_STATUS` on connect and when the reading is `SCHEME_REFRESH_S` (1 s) old. **A measurement's scheme is therefore the host's `controls.yaml`**: give the host a `HOME` whose file says what the run should play (no file = ORIGINAL 3).
+- **A/B against an older build:** give its host a scratch `HOME`, or it plays the user's saved scheme.
+- The game drops a client's input on disconnect or restart until the buffer changes, so every document has a new serial and clients start theirs at random.
 
 ## Six-button layout (ENHANCED 6)
 
-`SixButtonLayout` (an `Essential` token `AgentLoop` adds while `six_button`,
-that player's scheme from the game data) swaps the presses that differ on
-ENHANCED 6 (`StreetsOfRageRecompilation/ai-analysis/controls-and-input.md`):
-the rear attack is **A** alone (`execute.rear_attack_mask`, user: press A, not
-B+C), the police special **X**, a pickup **Y** and the knife throw **Z**
-(`police_mask`/`pickup_mask`/`knife_throw_mask`; B with a knife stabs, the
-pepper throw stays B); `SoRClient` turns them into Back Attack, Special, Pick
-Item and Throw Knife. B never picks anything up there, so
-`reach.item_a_b_press_takes` returns `None` and the partner pad's B redirect
-and `abadede_can_punch`'s item test fall silent. Tech and name entry stay on
-C. Without the token every mask is the three-button scheme's, unchanged.
-`tests/ai/test_six_button.py` pins each press in both layouts.
+`SixButtonLayout` (an `Essential` token, from that player's scheme) swaps presses (`controls-and-input.md`): rear attack **A** alone (user: not B+C), police **X**, pickup **Y**, knife throw **Z** (`execute.rear_attack_mask`, `police_mask`, `pickup_mask`, `knife_throw_mask`). B never picks up there, so `reach.item_a_b_press_takes` returns `None`. Pinned by `tests/ai/test_six_button.py`.
 
 ## Widescreen (`--widescreen`)
 
-`ObserverApp.widescreen` (host flag 0, read per connection) goes into
-`read_snapshot`/`snapshot_from_work_ram` and `parse_world_map(widescreen=)`:
-the walk clamp the HUD draws and `CameraRange` carries is `[0, 320]` of the
-camera instead of `[32, 288]` (`world_map.WIDESCREEN_EXTRA_X`, the `$20` per
-side `SoRWidescreenArena.cpp` adds to `$43AA`). Everything routed, clamped or
-"in camera" follows from it. `CameraRange` also carries `scroll_x` (the
-camera's own X, `origin_x`) and `widescreen`: models used to take `cam_x` as
-`camera.left - 0x20`, which is wrong there. The twins' and Mr. X's actor
-clamp is `twins.player_x_clamp`.
+`ObserverApp.widescreen` (host flag 0) makes the walk clamp `[0, 320]` of the camera rather than `[32, 288]`. `CameraRange` carries `scroll_x` and `widescreen`. Sims in `ai/arena.py` widen **exactly the ROM tests `SoRWidescreenArena.cpp` ported** (`$AAA0`/`$ABA4`, `$97CE`, `$97E6`, `$14C38`, `$F4A6`); inline compares the ports left alone (`$92AC`, the bosses' own screen tests, Mr. X's `SCREEN_BAND_*`, the knife cull, Jack's `EVADE_CENTRE`) stay at 320 px. Widening those would be wrong.
 
-**The models' own edges** (`ai/arena.py`): each sim (`GruntSim`, `GarciaSim`,
-`MrXSim`, `BulletSim`, `AbadedeSim`, `TwinSim`, Jack's `World`) carries
-`widescreen` (from `CameraRange.widescreen`, passed by `decide`/`execute`) and
-widens **exactly the ROM tests `SoRWidescreenArena.cpp` ported**, `$20` per
-side: the hit window `$AAA0`/`$ABA4` (`[$78,$1C8)`, every model that has one),
-`$97CE` (Signal's decide and slide, Mr. X's states 2/3 and bullets,
-Abadede's, Jack's `$F55E`/`$F64A`/`$F6BC`), `$97E6` (Nora's chase, the
-activation gate, Jack's axe cleanup), Abadede's charge `$14C38` and Jack's
-retreat `$F4A6`. Checked against the generated code, not assumed: `$92AC`
-(Garcia/Signal/HakuRo "refused off screen"), Antonio's, Souther's, the twins'
-and Bongo's own screen tests, Mr. X's band (`SCREEN_BAND_*`) and the thrown
-knife's cull are inline compares the ports left alone, so the models keep
-them at 320 px too -- widening them would be wrong. Jack's `$0C`-entry test
-(`EVADE_CENTRE`) has no ported call either and is untouched.
+## Observation notes
 
-Live, widescreen host, Blaze, turbo 2 (single runs, not a comparison): round 1
-`grunt_fight.py --family all` 32/32 killed, 4 hits, boss at 94 s; Abadede
-(`boss_fight.py --level 3 --boss-type 0x30 --no-food`) 2/2 killed in 4.4 s,
-no damage, 7 holds. Round 2 in widescreen used to reset the console at ~110-120 s (a
-camera-gated Jack moved past the camera's lock by the `$CC0` port, then the ROM's art
-check in `$810`); fixed in `StreetsOfRageRecompilation` (its `CLAUDE.md`), and widescreen
-round 2 now reaches Souther.
-
-## Observation notes (keep these)
-
-- Lives / specials: packed-BCD bytes at `$FFFF20+`
-- Pause / police special: `$FFFA1A` nonzero (+ caller `$FFFA1C`)
-- Elevation `world_z` (`+$18`) is stored on map entities but **not** used on the
-  map plot
-- Dormant ordinary enemies and police-special sweep controllers are filtered by
-  `object_catalog` / map build rules as documented in those modules
-- Combat phase decode lives in `phases.py` for HUD outline colours
+- Lives and specials: packed-BCD bytes at `$FFFF20+`. Pause or police special: `$FFFA1A` nonzero (+ caller `$FFFA1C`).
+- Snapshots are wall-clock polling, not VSync waits; the poller reconnects with backoff.
+- `world_z` (`+$18`) is on map entities but not used on the map plot. Dormant enemies and police sweep controllers are filtered by `object_catalog` and the map rules. `phases.py` decodes combat phases.
 
 ## Validation
 
@@ -3859,79 +416,28 @@ cd autoplay
 PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 -m unittest discover -s tests -q
 ```
 
-Unit tests cover snapshot decoding, BCD, hazards, phases, world map,
-attack-range extraction (`tests/test_attack_ranges.py`, over synthetic
-animation blocks -- the ROM is not versioned, so nothing may depend on it),
-the enemy-reach predicates (`tests/ai/test_reach.py`), the co-op courtesy
-filter (`tests/ai/test_partner.py`, which builds the post-`generate_verb_
-tokens` half of a context by hand -- the filter's contract is what it
-removes, not how the verbs were produced),
-`ObserverApp.stop()` client handoff, and the full `ai/` pipeline (tokens,
-observation, inference, verbs, priority ranking, execution, the
-pause/non-gameplay gate). The token-class tests live in
-`tests/ai/tokens/` (`test_tokens.py`, `test_character.py`, `test_enemy.py`,
-`test_essential.py`, `test_hazard_tokens.py`, `test_pickup_tokens.py`),
-mirroring the `ai/` module split; pipeline tests stay in `tests/ai/`.
-There is no live host requirement for the unit suite, and no pytest
-requirement either: every module under `tests/` is plain `unittest`, so the
-canonical command above must run clean on an interpreter that has never
-installed the `dev` extra. `tests/ai/pathfind/`'s three modules were the one
-exception until they were converted -- written for pytest, they failed to
-*load* rather than to assert, and the suite reported `FAILED (errors=3)`
-while 75 real tests silently never ran. Do not reintroduce a pytest-only
-test file for that reason.
+No live host and no pytest needed: **every test module is plain `unittest`** (a pytest-only module once failed to load and 75 tests silently never ran). Nothing may depend on the ROM, which is not versioned.
 
-`tests/ai/test_stability.py` is the one **multi-tick** suite and exists for
-a reason worth preserving: every other test checks a single tick in
-isolation, but the pipeline is a closed loop -- what it commands this tick
-becomes part of what it observes next tick (position, and through the held
-D-pad, *facing*) -- so it can oscillate while every individual tick remains
-defensible. Two such limit cycles shipped undetected and were only ever
-visible live, as the AI rapidly reversing direction against a single enemy;
-both are now pinned here by driving the real pipeline over a run of ticks,
-feeding each tick's output back the way the game would, and asserting on the
-resulting sequence. It also covers the two *multi-enemy* sources found the
-same way -- the random tie-break in `determine_priority_verb`, and the lane
-aim following the enemy's combat phase -- via `_run_multi`, which staggers
-each enemy's phase cycle the way a real group behaves.
+`tests/ai/test_stability.py` is the **multi-tick** suite: the pipeline is a closed loop and can oscillate while every tick is defensible. Add there, asserting direction reversals and target switches, when a change touches which verb or target *owns* a situation across ticks. `JumpKickFlightTests` does the same for the jump: `$3914` accepts only an edge in free flight, so a B held from the crouch never kicks.
 
-`JumpKickFlightTests` is the same idea applied to the one move that spans
-several ROM *states* as well as several ticks. `_run_jump` drives a whole
-jump through the unarmed family (`$10` crouch → `$12` free flight → `$16`
-kick → `$14` land), feeding each tick's output back in, over an
-`_EdgeTrackingClient` that expires timed presses so a **held** button and a
-fresh **edge** are distinguishable -- which is the whole point, since
-`$3914` accepts only an edge and only in free flight. It pins the two
-reported failures: a B issued during the crouch is still held when flight
-begins (no edge, no kick ever), and a verb that evaporates mid-flight
-reaches `press_no_button`, which releases the hold and costs both the kick
-and the launch direction `$384E` samples at the end of the crouch. Measured
-before the fix: 211 of 587 launched jumps produced no kick at all. Add to this file,
-rather than a single-tick test, when a change touches which verb or target
-*owns* a situation across ticks; the useful assertions here are counts of
-direction reversals and target switches, not any single tick's output.
-
-After changing `TokenMap.md`, validate the Mermaid syntax by rendering it
-(requires Chrome + `mmdc` from `@mermaid-js/mermaid-cli`):
+After changing `TokenMap.md`, render it to validate the Mermaid:
 
 ```bash
 awk '/^```mermaid/{f=1;next} /^```/{if(f){f=0;exit}} f' TokenMap.md > /tmp/tokenmap.mmd
-PUPPETEER_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  mmdc -i /tmp/tokenmap.mmd -o /tmp/tokenmap.svg
+PUPPETEER_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" mmdc -i /tmp/tokenmap.mmd -o /tmp/tokenmap.svg
 ```
 
-## History: the old agent stack, and the new one in `ai/`
+## TokenMap (keep updated)
 
-An earlier, ad-hoc scripted AI stack (`src/sor_autoplay/agent/`, `evaluation.py`,
-`scenarios.py`, the `sor-autoplay-eval` entry point, HUD key-1/2 toggles,
-`--agent-hold-frames`/`--no-police-special` flags) was deliberately removed
-from this branch because it predated and did not follow the Token/Information/
-Verb architecture in [`AI.md`](AI.md). Observation (RAM → snapshot →
-HUD/map) was unchanged by that removal.
+`TokenMap.md` is the Mermaid `classDiagram` of the token hierarchy (classes and inheritance only). Any change to the token classes updates it in the same delivery. Add concrete tokens as subclasses rather than discriminator fields ([`AI.md`](AI.md)).
 
-`ai/` (see "AI surface" above) is a **fresh implementation** against that
-architecture, not a revival of the removed stack — the CLI flag names
-(`--agent-p1`/`--agent-p2`) are reused because they're the obvious names, not
-because any removed code came back. Do not look to the old stack (it no
-longer exists) for how the new one should work; follow [`AI.md`](AI.md) and
-the module docstrings under `ai/` instead.
+## Token docstring convention
+
+1. **First line:** a short human-readable description.
+2. **Inferred descendants, second line:** when generated and by what function. `Surrounded` and `EnemyCluster` are the only `Inferred` tokens left ([Judging without a cache](AI.md#judging-without-a-cache)); other judgments are direct `reach.py`/`execute.py` functions.
+3. **Verb descendants, second line:** the `could_*` generator and its conditions.
+4. **Verb descendants, third line:** how it ranks in emergency, which is computed from tokens or `reach.py`/`phases.py` predicates, not the static `priority` (a tie-break only):
+
+   ```text
+   Raises emergency: Surrounded×80, (reach.is_incoming_melee for this target)×17, (Weapon when distance is less than 32)×150
+   ```
