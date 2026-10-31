@@ -28,7 +28,7 @@ Only *decision* ticks are counted for those three: the ROM's animation locks
 deliberately produces nothing there, so counting them would dilute the
 question with ticks where no choice was on offer.
 
-Run (host already up with ``--debugUtils``):
+Run (host already up with ``--debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

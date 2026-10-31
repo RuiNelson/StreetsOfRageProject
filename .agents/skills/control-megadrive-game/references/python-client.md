@@ -74,7 +74,7 @@ target's host-only debug-hotkey callback, normalizing letters to lowercase. It
 does not emulate a joypad button. The method returns after the callback runs;
 unsupported keys are harmless. Games may ignore it when their debug utilities
 are disabled. Streets of Rage exposes its documented host cheats through this
-method when launched with `--debugUtils`.
+method when launched with `--debug-utils`.
 
 ## Lockstep
 

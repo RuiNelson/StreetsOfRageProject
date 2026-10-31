@@ -86,7 +86,7 @@ the game (the player's own `controls.yaml`; it never sets it).
 game-defined host callback as an Alt/Option keyboard chord. It is appropriate
 for host debugging actions such as Streets of Rage cheats, not emulated joypad
 input. The target must have debug utilities enabled; for Streets of Rage, start
-`sor` with `--debugUtils` and a non-zero `--port`.
+`sor` with `--debug-utils` and a non-zero `--port`.
 
 ```python
 with MegaDriveClient() as game:

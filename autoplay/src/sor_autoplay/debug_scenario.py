@@ -4,7 +4,7 @@
 ``ai/gamepad.py``'s controller input and never writes RAM; nothing here is
 visible to the token pipeline. This module drives the *host's own* debug
 hotkeys -- the ones a human presses with Alt/Option while ``sor`` runs with
-``--debugUtils`` -- through ``MegaDriveClient.trigger_option_hotkey``, so the
+``--debug-utils`` -- through ``MegaDriveClient.trigger_option_hotkey``, so the
 cheat logic itself stays in the C++ host where it already lives
 (``StreetsOfRage::handleOptionHotkey``).
 

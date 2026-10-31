@@ -597,16 +597,16 @@ gamepad bindings:
 | --- | --- | --- |
 | `Ctrl+F` | Always | Toggle desktop fullscreen |
 | `Ctrl+Q` | Always | Request an orderly shutdown |
-| `Ctrl+R` | `--debugUtils` | Cold-restart the game while preserving the process and remote TCP connection |
-| `Ctrl+P` | `--debugUtils` | Save the composited frame as `screenshot_NNN.png` |
-| `Ctrl+S` | `--debugUtils` | Save a complete VDP diagnostic view as `vdp_NNN.png`, including the frame, tile sheets, nametables, and registers |
+| `Ctrl+R` | `--debug-utils` | Cold-restart the game while preserving the process and remote TCP connection |
+| `Ctrl+P` | `--debug-utils` | Save the composited frame as `screenshot_NNN.png` |
+| `Ctrl+S` | `--debug-utils` | Save a complete VDP diagnostic view as `vdp_NNN.png`, including the frame, tile sheets, nametables, and registers |
 
 The capture files are written to the process's current working directory.
-`Ctrl+R`, `Ctrl+P`, and `Ctrl+S` are inactive unless `--debugUtils` is set.
+`Ctrl+R`, `Ctrl+P`, and `Ctrl+S` are inactive unless `--debug-utils` is set.
 
 #### Debug utility hotkeys (Cheats)
 
-When started with `--debugUtils`, the host also exposes optional keyboard
+When started with `--debug-utils`, the host also exposes optional keyboard
 cheats. Hold **Alt** on Windows/Linux or **Option** on macOS and press the
 corresponding key. The unmodified key alone has no effect; gamepad modifier
 chords are not handled by these host-side cheats.
@@ -652,16 +652,16 @@ version.
 | `--silent` | Disable audio output completely by dropping audio-chip writes (no pre-rendered soundtrack either) |
 | `--sound prerendered\|emulated` | Audio source: `prerendered` plays the FLAC soundtrack rendered by `scripts/render_soundtrack.py` (default; falls back to `emulated` when it is missing), `emulated` runs the YM2612, PSG and Z80 DAC in real time; see [Pre-rendered soundtrack](#pre-rendered-soundtrack) |
 | `--soundtrack DIR` | Pre-rendered soundtrack directory; default: `soundtrack/` next to the ROM |
-| `--debug` | Log CPU and VDP state once per second |
-| `--debugUtils` | Enable debug hotkeys, host cheats, and remote access |
-| `--fullScreen` | Start in desktop fullscreen |
-| `--vsync 0\|1\|2\|3` | Frame synchronization: `0` is automatic (default): the internal timer sets the game's speed on any monitor, without tearing, and VRR monitors can follow it (use fullscreen for VRR); `1` uses display VSync, so the game's speed follows the monitor's refresh rate, `2` uses half-rate VSync, and `3` uses third-rate VSync |
+| `--debug-log` | Log CPU and VDP state once per second |
+| `--debug-utils` | Enable debug hotkeys, host cheats, and remote access |
+| `--fullscreen` | Start in desktop fullscreen |
+| `--frame-sync auto\|vsync\|vsync-half\|vsync-third` | What sets the game's speed: `auto` (default) is the internal timer, on any monitor, without tearing, and VRR monitors can follow it (use fullscreen for VRR); `vsync`, `vsync-half` and `vsync-third` follow the monitor, every 1, 2 or 3 refreshes |
 | `--widescreen` | Use VDP Mode 48 (48×27 tiles, 384×216) instead of Mode 40; a host-only mode the hardware does not have, see [Widescreen](#widescreen-mode-48) |
-| `--integerScaling` | Scale the picture by whole multiples only, centred with borders (320×224 in a 1920×1080 window or monitor is drawn 4× at 1280×896 instead of filling the height), nearest-neighbour |
-| `--turbo N` | With `--vsync 0`, run the internal VDP at `60 × N` Hz; `N` must be a positive integer |
-| `--port PORT` | With `--debugUtils`, select the remote-access TCP port; default: `6969`; `0` disables remote access |
-| `--auxAddrFile PATH` | Discovery mode: append an unknown indirect-dispatch address to this file and exit with status `42` instead of aborting |
-| `--callLog PATH` | Write every 68000 subroutine entry and call to a typed CSV log (six-digit hexadecimal ROM addresses); the file is replaced on startup |
+| `--integer-scaling` | Scale the picture by whole multiples only, centred with borders (320×224 in a 1920×1080 window or monitor is drawn 4× at 1280×896 instead of filling the height), nearest-neighbour |
+| `--turbo N` | With `--frame-sync auto`, run the internal VDP at `60 × N` Hz; `N` must be a positive integer |
+| `--port PORT` | With `--debug-utils`, select the remote-access TCP port; default: `6969`; `0` disables remote access |
+| `--aux-addr-file PATH` | Discovery mode: append an unknown indirect-dispatch address to this file and exit with status `42` instead of aborting |
+| `--call-log PATH` | Write every 68000 subroutine entry and call to a typed CSV log (six-digit hexadecimal ROM addresses); the file is replaced on startup |
 
 ### Widescreen (Mode 48)
 

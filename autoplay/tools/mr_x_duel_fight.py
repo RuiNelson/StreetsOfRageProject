@@ -20,7 +20,7 @@ dealt and took (hits and lives), who was out when ``$11E72
 (mr_x_offer_wait_duel_end)`` cleared the byte, and the survivor's answer --
 ``$FFDE10 (bad_ending_selected)`` set is the post-duel NO, round 6 the YES.
 
-Run against a fresh host per fight (``--turbo 2 --silent --debugUtils``):
+Run against a fresh host per fight (``--turbo 2 --silent --debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

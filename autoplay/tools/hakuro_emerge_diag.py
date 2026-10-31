@@ -33,7 +33,7 @@ has been seen, an independent shorter backstop (``--after-wave-seconds``,
 default 40) ends the run once enough of it has been captured, so this does
 not idle indefinitely on wave 3 either.
 
-Run (host already up with ``--debugUtils``, ``--turbo 2 --silent``):
+Run (host already up with ``--debug-utils``, ``--turbo 2 --silent``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

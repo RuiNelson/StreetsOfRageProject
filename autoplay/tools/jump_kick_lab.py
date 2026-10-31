@@ -25,7 +25,7 @@ that row. Every variant starts back at the same X (walked to in lockstep) with
 the street swept by the host's own debug hotkeys first, so nothing else is on
 screen to collide with.
 
-Run (host already up with ``--debugUtils``):
+Run (host already up with ``--debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

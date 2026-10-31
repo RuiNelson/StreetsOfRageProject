@@ -42,7 +42,7 @@ def main() -> int:
             return 1
         executable = built_executable(sor_root / "build", "sor")
         print(f"==> [discover {iteration}] run")
-        code = subprocess.run([str(executable), "--auxAddrFile", str(auxiliary), "--rom", str(rom), *sys.argv[1:]]).returncode
+        code = subprocess.run([str(executable), "--aux-addr-file", str(auxiliary), "--rom", str(rom), *sys.argv[1:]]).returncode
         sort_aux_addresses(auxiliary)
         if code == 42:
             print(f"==> [discover {iteration}] recorded a new address; re-seeding")

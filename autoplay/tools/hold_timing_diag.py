@@ -24,7 +24,7 @@ lockstep. What comes out is one row per move:
     knee      $60   $60   17      $60 -> $6a -> $6c -> $60
     ...
 
-Run (host already up with ``--debugUtils``):
+Run (host already up with ``--debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

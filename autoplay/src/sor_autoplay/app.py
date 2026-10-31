@@ -226,7 +226,7 @@ def _try_reach_gameplay(
     print(
         f"--reach-gameplay failed after {connect_attempts} attempts: {last_exc}\n"
         f"  Is the game host running with remote access on {host}:{port}?\n"
-        f"  Example: ./scripts/run.py --debugUtils --port {port}\n"
+        f"  Example: ./scripts/run.py --debug-utils --port {port}\n"
         f"  Observer will keep polling; AI flags still apply once connected.",
         file=sys.stderr,
     )
@@ -245,7 +245,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         epilog=(
             "Start the game host first (same --port), for example:\n"
-            "  ./scripts/run.py --debugUtils --port 7777\n"
+            "  ./scripts/run.py --debug-utils --port 7777\n"
             "  ./scripts/autoplay.py --port 7777 --reach-gameplay axel --agent-p1\n"
             "\n"
             "AI is off by default; enable with --agent-p1 / --agent-p2 or the "
@@ -298,7 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
             f"{LOCKSTEP_FRAMES_PER_TICK} game frames as fast as the host runs "
             "them (no --poll-ms pacing, no --turbo). Falls back to realtime "
             "polling with no AI engaged or while the game is not playable. "
-            "Requires the host's --debugUtils."
+            "Requires the host's --debug-utils."
         ),
     )
     parser.add_argument(
@@ -337,7 +337,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Debug: jump to level N (1-8) as soon as gameplay is reached, using "
             "the host's own level hotkey. Requires the host to run with "
-            "--debugUtils. The AI is held off until the jump has been made."
+            "--debug-utils. The AI is held off until the jump has been made."
         ),
     )
     parser.add_argument(
@@ -347,7 +347,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Debug: keep only this enemy family alive, killing every other "
             "family repeatedly through the host's per-family kill hotkeys "
-            "(requires --debugUtils). Waves respawn, so the sweep runs for the "
+            "(requires --debug-utils). Waves respawn, so the sweep runs for the "
             "whole session."
         ),
     )
@@ -358,7 +358,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Debug: never walk to a health pickup, for the whole session. "
             "Use when *scoring* a fight: a heal hides the damage taken after "
             "it (damage is a running minimum), and a plan that survives only "
-            "because it ate is not a plan. Does not need --debugUtils."
+            "because it ate is not a plan. Does not need --debug-utils."
         ),
     )
     parser.add_argument(
@@ -390,7 +390,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Debug: kill every ordinary (non-boss) enemy family repeatedly "
-            "through the host's per-family kill hotkeys (requires --debugUtils). "
+            "through the host's per-family kill hotkeys (requires --debug-utils). "
             "Use to isolate a boss fight. Cannot be combined with --only-enemy."
         ),
     )
@@ -399,7 +399,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Debug, for round 8: kill every enemy and every boss of the rush "
-            "repeatedly through the host's X hotkey (requires --debugUtils), "
+            "repeatedly through the host's X hotkey (requires --debug-utils), "
             "until Mr. X's scene is up -- then nothing, so his helpers and he "
             "are the fight. Cannot be combined with another sweep."
         ),

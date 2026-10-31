@@ -183,14 +183,23 @@ audio, so the measurement presets are unaffected. How the renders and their loop
 made and how playback follows the ROM's engine: `StreetsOfRageRecompilation/CLAUDE.md`,
 **Pre-rendered soundtrack**.
 
+## `sor`'s command line
+
+User request (2026-10-31): the options were confusing, so they were renamed with no aliases for the
+old names. They are kebab-case and `--help` groups them (Game, Video, Audio, AI, Development):
+`--fullscreen`, `--integer-scaling`, `--debug-utils`, `--debug-log` (was `--debug`), `--call-log`,
+`--aux-addr-file`, `--ai-assist`, and `--frame-sync auto|vsync|vsync-half|vsync-third` (was `--vsync 0|1|2|3`).
+`play.py`'s saved `vsync` setting became `frame_sync`; an old file's value is ignored, so it starts at `auto`.
+`MegaDriveEnvironmentSampleGame` keeps its own `--debug`.
+
 ## Frame sync: automatic by default
 
-User request (2026-10-30): the default (`--vsync 0`) works on macOS, Windows and Linux with
+User request (2026-10-30): the default (`--frame-sync auto`) works on macOS, Windows and Linux with
 or without VRR, with no per-monitor setup and no tearing. SDL3 has no VRR API, so
 the internal timer is the game's clock and each frame is presented with vsync on, without
 the game waiting for it (`MegaDriveEnvironment/CLAUDE.md`). Measured on a 120 Hz
 MacBook, windowed: 60, 120, 240 and 600 fps at `--turbo` off, 2, 4 and 10, as with vsync off.
-Not tested: an external VRR monitor (the user has none), Windows, Linux. `--vsync 1|2|3` remain, and tie the
+Not tested: an external VRR monitor (the user has none), Windows, Linux. `--frame-sync vsync|vsync-half|vsync-third` remain, and tie the
 game's speed to the monitor.
 
 ## Controls: the game reads SDL and binds actions
@@ -273,7 +282,7 @@ rules live in `StreetsOfRageRecompilation/CLAUDE.md` and the
 ```bash
 StreetsOfRageRecompilation/build/sor \
   --rom StreetsOfRageRecompilation/rom/SOR.bin \
-  --callLog calls.csv
+  --call-log calls.csv
 ```
 
 2. **Collapse** one or more logs into a deduplicated SQLite call map. The
@@ -341,7 +350,7 @@ autoplay poll cadence. Use the preset:
 ./scripts/play.py --preset turbo
 ```
 
-equivalent to `./scripts/run.py --turbo 2 --lang en --debugUtils --port 7777
+equivalent to `./scripts/run.py --turbo 2 --lang en --debug-utils --port 7777
 --silent &` plus `./scripts/autoplay.py --poll-ms 16 --port 7777 --agent-p1
 --reach-gameplay blaze`. Until 2026-10-28 every turbo was capped at the
 development machine's 120 Hz display: the host presented each frame
@@ -373,7 +382,7 @@ tick — no poll pacing), use the preset:
 ./scripts/play.py --preset lockstep
 ```
 
-equivalent to `./scripts/run.py --lang en --debugUtils --port 6767 --silent &`
+equivalent to `./scripts/run.py --lang en --debug-utils --port 6767 --silent &`
 plus `./scripts/autoplay.py --lockstep --port 6767 --agent-p1 --reach-gameplay
 blaze`. Own port (6767) so it runs next to the turbo sessions. Extra args
 pass through to autoplay (`--start-level`, `--kill-street-enemies`,

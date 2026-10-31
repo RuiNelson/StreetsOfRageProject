@@ -26,7 +26,7 @@ wind-up, the launch, the whole charge and its run-out -- not only the few
 the engage lets him reach. The fight is scored too (hits, holds, charges
 launched, whether he died).
 
-Run (host already up with ``--debugUtils``):
+Run (host already up with ``--debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

@@ -9,7 +9,7 @@ just breakables. Logs one row per tick while the actor holds a weapon
 (``held_weapon_type`` in ``$08-$0C``): action_state, combat_phase, verb,
 and the nearest on-screen enemy's health (to eyeball whether swings land).
 
-Run (host already up with ``--debugUtils``):
+Run (host already up with ``--debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

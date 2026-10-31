@@ -62,10 +62,10 @@ From the meta-repository, with a legal ROM at
 `StreetsOfRageRecompilation/rom/SOR.bin`:
 
 ```bash
-./scripts/run.py StreetsOfRageRecompilation/rom/SOR.bin --debugUtils --port 6969
+./scripts/run.py StreetsOfRageRecompilation/rom/SOR.bin --debug-utils --port 6969
 ```
 
-`--debugUtils` enables the remote server. Default port is `6969`.
+`--debug-utils` enables the remote server. Default port is `6969`.
 
 ## Run the observer
 

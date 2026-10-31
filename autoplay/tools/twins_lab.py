@@ -25,7 +25,7 @@ checked against the ROM offline, update by update, as often as it changes
 every field that differs). A recording is local analysis output: do not
 commit it.
 
-Run (host already up with ``--debugUtils``):
+Run (host already up with ``--debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

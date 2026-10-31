@@ -2630,7 +2630,7 @@ three recordings.
 
 ```bash
 # Host (meta-repo root)
-./scripts/run.py StreetsOfRageRecompilation/rom/SOR.bin --debugUtils --port 6969
+./scripts/run.py StreetsOfRageRecompilation/rom/SOR.bin --debug-utils --port 6969
 
 # Observer (meta-repo wrapper; defaults host 127.0.0.1 port 6969)
 ./scripts/autoplay.py
@@ -2715,7 +2715,7 @@ poll cadence so the agent still samples about two game frames per tick.
 `./scripts/play.py --preset turbo` is the canonical recipe (meta-repo root):
 
 ```bash
-./scripts/run.py --turbo 2 --lang en --debugUtils --port 7777 --silent &
+./scripts/run.py --turbo 2 --lang en --debug-utils --port 7777 --silent &
 ./scripts/autoplay.py --poll-ms 16 --port 7777 --agent-p1 --reach-gameplay blaze
 ```
 
@@ -2758,7 +2758,7 @@ in `GameSnapshot.raw["uptime_frames"]`; `ObserverApp._record_frame_timing`
 diffs it against the previous poll and logs a rolling `frames/tick
 min/mean/max` + `poll work min/mean/max` line at DEBUG every few seconds --
 purely diagnostic, read by nothing else. This does not touch the host's own
-`--turbo`/`--vsync` pacing (`VDP::renderLoop`'s `nextFrameDeadline`
+`--turbo`/`--frame-sync` pacing (`VDP::renderLoop`'s `nextFrameDeadline`
 accumulator in `MegaDriveEnvironment`), which stays a real-time loop for
 human players regardless of `--poll-ms`.
 
@@ -2797,7 +2797,7 @@ to begin with (`VDP::advanceRemoteLockstepFrame` is purely
 condition-variable driven). With no AI engaged, before the level jump, or
 on a level mismatch the host runs realtime and the loop only observes. Own
 port (6767), debug sweeps and extra args pass through to autoplay. It has
-zero effect on the human-player `--vsync` path since lockstep is a separate
+zero effect on the human-player `--frame-sync` path since lockstep is a separate
 protocol call the AI alone uses.
 
 Measured on the development machine (Blaze, round 1, log level normal):
@@ -3162,7 +3162,7 @@ band for both, which moves every routed verb -- a change of its own.
 Not part of the AI and never imported by it: each one drives the **real**
 pipeline (the same functions `AgentLoop.tick` calls, in the same order)
 against a live host and writes JSONL for offline analysis. None of them
-writes RAM beyond the host's own documented `--debugUtils` hotkeys through
+writes RAM beyond the host's own documented `--debug-utils` hotkeys through
 `debug_scenario.DebugScenario`. Their output is local analysis material --
 do not commit `.jsonl` runs.
 
@@ -3192,7 +3192,7 @@ do not commit `.jsonl` runs.
 | `snapshot_replay.py` | **Records and replays** the reads `read_snapshot` makes: `RecordingSource` wraps the client, `SnapshotRecorder` writes the ROM tables once and each tick's changed reads as JSONL, and `ReplaySource`/`iter_ticks`/`load_rom` rebuild any tick's `GameSnapshot` offline -- the real `AgentLoop`, or any `decide`/`priority`/`execute` function, run again on a live stall as often as the question needs. Used by `stage_walk_diag.py --raw` and `jack_sim.py`; recordings run ~4 MB a second, local only |
 | `jack_sim.py` | **Plays the Jack engage offline**: every `--every`th tick with a Jack in a `--raw` recording (`--from`/`--to`) seeds `jack.plan_world` against `jack.py`'s model, update by update, until he is held, the actor is hit or `--updates` run out (a stalemate); `--timing ideal|fixed|jitter`. Found round 4's off-screen reset loop (**Round 4: the bridge, its props and its Jack**) |
 | `jack_plan_bench.py` | **Times and checks `jack.plan_engage`**: replays `--raw` recordings (`--raw A B ...`, or the `--cache` pickle of the captured contexts) through the real `AgentLoop`, keeps every tick whose winning verb is `EngageJack`, times `execute.engage_jack_plan` (best of `--passes`; median/p95/p99/max by Jack count) and `--save`s every `EngagePlan` field, or `--compare`s against a saved file (exit 1 on any plan diff) -- the proof that a speed-up is exact. Contexts are replayed in a canonical order (**Jack's plan inside the 2 ms budget**). `--profile` prints a cProfile. Recordings and caches stay out of the repo |
-| `ai_assist_fight.py` | **Runs round 1 with P2 inside the host or over the socket** (`--p2 embedded\|socket`, an external AI on P1, a fresh `--turbo 2 --silent` host per run): frames, scores and lives lost, plus the host's `[ai]` lines. Under `--aiAssist` a client's P2 Start is ignored, so it pokes `p2_button_held` to join |
+| `ai_assist_fight.py` | **Runs round 1 with P2 inside the host or over the socket** (`--p2 embedded\|socket`, an external AI on P1, a fresh `--turbo 2 --silent` host per run): frames, scores and lives lost, plus the host's `[ai]` lines. Under `--ai-assist` a client's P2 Start is ignored, so it pokes `p2_button_held` to join |
 | `tick_bench.py` | **Times and checks whole ticks**: replays `--raw` recordings through the real `read_snapshot` and `AgentLoop.tick` (a fresh loop per recording and pass), times both halves per tick (best of `--passes`; median/p95/p99/max, ticks over 2 ms, `--by-verb` per winning verb) and `--save`s every tick's winning verb and pad commands, or `--compare`s against a saved file (exit 1 on any diff). `--no-budget` plays every `grunt_plan` program and `--canonical` hands the street enemies over in slot order -- with both, two runs of the same code agree on every tick (**Cheaper ticks for weaker machines**). `--profile` prints a cProfile. Recordings stay out of the repo |
 | `grunt_plan_bench.py` | **Times and checks `grunt_plan.plan`** alone: captures every call's inputs (actor, enemies, knives, flags, a copy of the `PlanMemory`) from `--raw` replays into a `--cache` pickle, then times each call unbudgeted (best of `--passes`, by enemies relevant) and `--save`s/`--compare`s every `GruntPlan` and the program kept. The cache pickles the model objects: rebuild it when their slots change |
 | `breakable_diag.py` | Breakable stalls, per tick while a `Breakable` is in context. Round 1 by default, with **real** enemies (the sweep did not reproduce that stall); `--level N` jumps to a round first, `--sweep` keeps the ordinary families swept (the walk `scripts/play.py --preset boss` and the boss harnesses make -- how the round-4 stall was reproduced), `--heartbeat-s` logs a position row that often with no breakable around (so a stall anywhere shows), `--until-boss` stops at the boss |
@@ -3230,7 +3230,7 @@ do not commit `.jsonl` runs.
 - `--agent-p1` / `--agent-p2` — start with the AI controlling that player
   (off by default; also toggleable at runtime from the HUD)
 - `--start-level N` / `--only-enemy FAMILY` / `--kill-street-enemies` —
-  debug scenario (requires the host `--debugUtils`). The last kills every
+  debug scenario (requires the host `--debug-utils`). The last kills every
   ordinary family so a boss fight can be isolated.
 - `--kill-until-mr-x` — round 8: every enemy and every boss dies (the host's
   `Alt/Option+X`) until Mr. X's office scene is up, and nothing after; not

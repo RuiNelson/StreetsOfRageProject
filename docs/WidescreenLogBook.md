@@ -70,7 +70,7 @@ The HUD is the window plane, rows 0-3 at VRAM `$D000`. Wanted: no yellow frame, 
 
 ## Verifying
 
-Live check (bounded, silent): start `sor --widescreen --debugUtils --silent --port N`, press Start with
+Live check (bounded, silent): start `sor --widescreen --debug-utils --silent --port N`, press Start with
 `megadrive_remote` until round 1, `read_framebuffer()` (384×216), view the PNG. Compare against a plain run to prove
 the default path is unchanged.
 

@@ -163,7 +163,7 @@ If no call log exists, explain that the game can create one with:
 ```bash
 StreetsOfRageRecompilation/build/sor \
   --rom StreetsOfRageRecompilation/rom/SOR.bin \
-  --callLog calls.csv
+  --call-log calls.csv
 ```
 
 Do not launch or automate the game unless the user asks. If they do, use the

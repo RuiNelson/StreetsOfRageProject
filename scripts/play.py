@@ -41,8 +41,8 @@ DEFAULT_ROM = META_ROOT / "StreetsOfRageRecompilation" / "rom" / "SOR.bin"
 DEFAULTS: dict[str, Any] = {
     # host (sor)
     "port": 6969,
-    "turbo": 0,  # 0 = off; needs the internal timer (vsync 0)
-    "vsync": 0,  # 0 internal timer, 1 VSync, 2 VSync/2, 3 VSync/3
+    "turbo": 0,  # 0 = off; needs frame_sync "auto"
+    "frame_sync": "auto",  # or "vsync", "vsync-half", "vsync-third": sor --frame-sync
     "lang": "en",  # "" = the host's own default
     "hz": 0,  # 0 = the host's own default
     "silent": False,
@@ -51,7 +51,7 @@ DEFAULTS: dict[str, Any] = {
     "ai_path": "",  # "" = the checkout's autoplay/ai-code (run.py)
     "fullscreen": False,
     "widescreen": False,
-    "integer_scaling": False,  # --integerScaling, whole-number scale factors only
+    "integer_scaling": False,  # --integer-scaling, whole-number scale factors only
     "debug_utils": True,  # remote access, hotkeys and cheats: always on when autoplay runs
     "debug": False,
     "call_log": "",
@@ -75,11 +75,11 @@ DEFAULTS: dict[str, Any] = {
 # Fields a preset sets. The rest (widescreen, integer scaling, fullscreen, ROM, sound source, soundtrack
 # folder, AI folder, call log, extra...) is the user's own and survives a preset.
 SESSION_FIELDS = (
-    "port", "turbo", "vsync", "lang", "debug_utils", "silent", "agent_p1", "agent_p2", "reach",
+    "port", "turbo", "frame_sync", "lang", "debug_utils", "silent", "agent_p1", "agent_p2", "reach",
     "lockstep", "poll_ms", "start_level", "sweep", "no_food", "no_police",
 )
 _QUIET = dict(
-    port=7777, turbo=0, vsync=0, lang="en", debug_utils=True, silent=True, agent_p1=True, agent_p2=False,
+    port=7777, turbo=0, frame_sync="auto", lang="en", debug_utils=True, silent=True, agent_p1=True, agent_p2=False,
     reach="blaze", lockstep=False, poll_ms=0, start_level=0, sweep="", no_food=False, no_police=False,
 )
 PRESETS: dict[str, tuple[str, dict[str, Any]]] = {
@@ -89,7 +89,7 @@ PRESETS: dict[str, tuple[str, dict[str, Any]]] = {
     "lockstep": ("AI-clocked, frame-exact (was both_lockstep_speed)",
                  {**_QUIET, "port": 6767, "turbo": 10, "lockstep": True}),
     "p2": ("Second player AI, VSync/2 (was both_second_player_ai)",
-           {**_QUIET, "agent_p1": False, "agent_p2": True, "vsync": 2, "reach": ""}),
+           {**_QUIET, "agent_p1": False, "agent_p2": True, "frame_sync": "vsync-half", "reach": ""}),
     "boss": ("Straight to a round's boss, others swept (was go_to_boss; use --level)",
              {**_QUIET, "turbo": 2, "no_police": True}),
 }
@@ -184,22 +184,22 @@ def host_arguments(s: dict[str, Any], *, with_autoplay: bool) -> list[str]:
     args: list[str] = [s["rom"]] if s["rom"] else []
     if s["turbo"] > 0:
         args += ["--turbo", str(s["turbo"])]
-    elif s["vsync"]:
-        args += ["--vsync", str(s["vsync"])]
+    elif s["frame_sync"] != "auto":
+        args += ["--frame-sync", s["frame_sync"]]
     if s["lang"]:
         args += ["--lang", s["lang"]]
     if s["hz"]:
         args += ["--hz", str(s["hz"])]
     if s["debug_utils"] or with_autoplay:
-        args.append("--debugUtils")
+        args.append("--debug-utils")
     if s["debug"]:
-        args.append("--debug")
+        args.append("--debug-log")
     if s["fullscreen"]:
-        args.append("--fullScreen")
+        args.append("--fullscreen")
     if s["widescreen"]:
         args.append("--widescreen")
     if s["integer_scaling"]:
-        args.append("--integerScaling")
+        args.append("--integer-scaling")
     args += ["--port", str(s["port"])]
     if s["silent"]:
         args.append("--silent")
@@ -211,7 +211,7 @@ def host_arguments(s: dict[str, Any], *, with_autoplay: bool) -> list[str]:
     if s["ai_path"]:
         args += ["--ai-path", s["ai_path"]]
     if s["call_log"]:
-        args += ["--callLog", s["call_log"]]
+        args += ["--call-log", s["call_log"]]
     return args
 
 
@@ -294,12 +294,12 @@ def check(s: dict[str, Any], mode: str, *, probe: bool = False) -> tuple[list[st
             errors.append(f"port {s['port']} already has a listener (a host is running?): Ctrl+A attaches to it")
     elif probe and not errors and not port_in_use(s["port"]):
         warnings.append(f"nothing is listening on port {s['port']} yet")
-    if mode != "autoplay" and s["turbo"] > 0 and s["vsync"]:
-        warnings.append("turbo needs the internal timer: the vsync setting is ignored")
+    if mode != "autoplay" and s["turbo"] > 0 and s["frame_sync"] != "auto":
+        warnings.append("turbo needs frame sync auto: the frame sync setting is ignored")
     if mode != "host" and s["lockstep"] and s["poll_ms"]:
         warnings.append("lockstep paces itself: --poll-ms is not passed")
     if mode == "host" and not s["debug_utils"]:
-        warnings.append("without debugUtils there is no remote access for autoplay")
+        warnings.append("without debug-utils there is no remote access for autoplay")
     return errors, warnings
 
 
@@ -339,7 +339,7 @@ def execute(s: dict[str, Any], mode: str) -> int:
 
 LANG_CHOICES = [("default", ""), ("en (overseas)", "en"), ("jp (Japan)", "jp")]
 TURBO_CHOICES = [("off", 0), ("x2", 2), ("x3", 3), ("x4", 4), ("x6", 6), ("x10", 10), ("x16", 16), ("x24", 24), ("x32", 32)]
-VSYNC_CHOICES = [("automatic", 0), ("VSync", 1), ("VSync / 2", 2), ("VSync / 3", 3)]
+FRAME_SYNC_CHOICES = [("auto", "auto"), ("VSync", "vsync"), ("VSync / 2", "vsync-half"), ("VSync / 3", "vsync-third")]
 HZ_CHOICES = [("default", 0), ("60 (NTSC)", 60), ("50 (PAL)", 50)]
 SOUND_CHOICES = [("pre-rendered", "prerendered"), ("emulated chips", "emulated")]
 REACH_CHOICES = [("stay in the menus", ""), ("Axel", "axel"), ("Adam", "adam"), ("Blaze", "blaze")]
@@ -347,7 +347,7 @@ SWEEP_CHOICES = [("none", ""), ("street enemies", "street"), ("until Mr. X (roun
     (f"only {family}", f"only:{family}") for family in ENEMY_FAMILIES
 ]
 CHOICES = {
-    "lang": LANG_CHOICES, "turbo": TURBO_CHOICES, "vsync": VSYNC_CHOICES, "hz": HZ_CHOICES, "sound": SOUND_CHOICES,
+    "lang": LANG_CHOICES, "turbo": TURBO_CHOICES, "frame_sync": FRAME_SYNC_CHOICES, "hz": HZ_CHOICES, "sound": SOUND_CHOICES,
     "reach": REACH_CHOICES, "sweep": SWEEP_CHOICES,
 }
 
@@ -411,7 +411,7 @@ class PlayWindow:
         autoplay.grid(row=2, column=1, sticky="nsew", padx=(5, 10), pady=4)
         autoplay.columnconfigure(1, weight=1)
 
-        self.combo(host, 0, "Frame sync (ignored under turbo)", "vsync")
+        self.combo(host, 0, "Frame sync (ignored under turbo)", "frame_sync")
         self.combo(host, 1, "Language", "lang")
         self.combo(host, 2, "Video Hz", "hz")
         self.check(host, 3, "Silent (^N)", "silent")
@@ -420,8 +420,8 @@ class PlayWindow:
         self.check(host, 6, "Fullscreen (^F)", "fullscreen")
         self.check(host, 7, "Widescreen (^W)", "widescreen")
         self.check(host, 8, "Integer scaling (^U)", "integer_scaling")
-        self.check(host, 9, "debugUtils: remote access, hotkeys (^D)", "debug_utils")
-        self.check(host, 10, "Log CPU/VDP state, --debug", "debug")
+        self.check(host, 9, "Debug utils: remote access, hotkeys (^D)", "debug_utils")
+        self.check(host, 10, "Log CPU/VDP state, --debug-log", "debug")
         self.entry(host, 11, "Call log file", "call_log")
         self.entry(host, 12, "ROM file", "rom")
         self.entry(host, 13, "AI folder, --ai-path (empty = autoplay/ai-code)", "ai_path", browse=True)
@@ -581,7 +581,7 @@ class PlayWindow:
         for message in warnings:
             self.preview.insert("end", f"* {message}\n", "warning")
         self.preview.configure(state="disabled")
-        # The connected pair needs the host's remote server: without debugUtils it cannot start.
+        # The connected pair needs the host's remote server: without debug-utils it cannot start.
         self.buttons["both"].configure(state="normal" if settings["debug_utils"] else "disabled")
         if self.status.get() and not self.loading:
             self.status.set("")
@@ -597,7 +597,7 @@ class PlayWindow:
         settings = self.collect()
         if mode == "both" and not settings["debug_utils"]:
             # The button is disabled; the ^R shortcut goes through here too.
-            self.status.set("Run Game + AI Connected needs debugUtils on (^D)")
+            self.status.set("Run Game + AI Connected needs debug utils on (^D)")
             return
         errors, _ = check(settings, mode, probe=True)
         if errors:

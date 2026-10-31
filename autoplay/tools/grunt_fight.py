@@ -19,8 +19,8 @@ A loss with no attacker within 15 s of a time-over (``$FFFA49``) is filed as
 (``--through-bosses`` plays on), the level changes, the game is over, or
 ``--seconds`` runs out.
 
-Run (host already up with ``--debugUtils``, e.g.
-``./scripts/run.py --turbo 2 --lang en --debugUtils --port 7777 --silent``):
+Run (host already up with ``--debug-utils``, e.g.
+``./scripts/run.py --turbo 2 --lang en --debug-utils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

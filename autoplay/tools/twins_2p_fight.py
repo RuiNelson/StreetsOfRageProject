@@ -15,7 +15,7 @@ left or the right one, and the share of ticks they were 160 px or more apart
 one player per edge (user, see ``autoplay/CLAUDE.md``, **Two players
 against the twins**).
 
-Run against a fresh host per fight (``--turbo 2 --silent --debugUtils``):
+Run against a fresh host per fight (``--turbo 2 --silent --debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

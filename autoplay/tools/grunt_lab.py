@@ -23,7 +23,7 @@ weapon (hex), so the model can be checked offline update by update
 back to real time and the pipeline walks on to the next wave (``--waves``).
 A recording is local analysis output: do not commit it.
 
-Run (host already up with ``--debugUtils``):
+Run (host already up with ``--debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

@@ -9,8 +9,8 @@ while any ``Breakable`` is in context, with enough of the actor/target
 geometry to tell a facing miss, a positional miss, and a genuine repeat
 punch apart.
 
-Run (host already up with ``--debugUtils``, e.g.
-``./scripts/run.py --turbo 4 --lang en --debugUtils --port 7777 --silent``):
+Run (host already up with ``--debug-utils``, e.g.
+``./scripts/run.py --turbo 4 --lang en --debug-utils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

@@ -38,7 +38,7 @@ observed, and an independent shorter backstop (``--after-seen-seconds``,
 default 30) once at least one type-$45 object has been seen, so this does
 not idle indefinitely once the opening throw has been captured.
 
-Run (host already up with ``--debugUtils``, ``--turbo 2 --silent``):
+Run (host already up with ``--debug-utils``, ``--turbo 2 --silent``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

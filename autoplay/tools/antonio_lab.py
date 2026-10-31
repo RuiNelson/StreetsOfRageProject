@@ -25,7 +25,7 @@ died), so the same run answers "does the model hold" and "does the plan built
 on it work frame for frame". ``--input-delay`` applies the recorded pad that
 many frames late, to measure how much latency the plan survives.
 
-Run (host already up with ``--debugUtils``):
+Run (host already up with ``--debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

@@ -26,8 +26,8 @@ Rounds with Jack (the ELC census in ``autoplay/CLAUDE.md``): 2 and 4
 (personality 0), 5 (2 and 3), 6 and 8 (0 and 1). The run ends when a boss
 appears, the level changes, or ``--seconds`` runs out.
 
-Run (host already up with ``--debugUtils``, e.g.
-``./scripts/run.py --turbo 4 --lang en --debugUtils --port 7777 --silent``):
+Run (host already up with ``--debug-utils``, e.g.
+``./scripts/run.py --turbo 4 --lang en --debug-utils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

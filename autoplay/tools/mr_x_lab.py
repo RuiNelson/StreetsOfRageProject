@@ -28,7 +28,7 @@ the player's object, of Mr. X's slot, of every bullet (``$36``) and of every
 ordinary enemy (hex), so the model can be checked offline update by update
 (``--check``). A recording is local analysis output: do not commit it.
 
-Run (host already up with ``--debugUtils``):
+Run (host already up with ``--debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

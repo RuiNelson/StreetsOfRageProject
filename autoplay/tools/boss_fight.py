@@ -2,7 +2,7 @@
 
 Deliberately **no RAM writes** beyond the host's own documented debug
 hotkeys (``debug_scenario.DebugScenario``'s level-select and per-family kill
-cheats -- the same buttons a human presses with ``--debugUtils``). An
+cheats -- the same buttons a human presses with ``--debug-utils``). An
 earlier version of this harness poked the player's own X and health every
 tick to fast-forward to the boss; that corrupted wave progression and left
 the game visibly broken. This one lets the real ``AgentLoop`` walk the
@@ -16,8 +16,8 @@ signed health check) -- never "the tracked object disappeared", which is
 also what a level reset looks like and produced a false "boss defeated"
 report once already.
 
-Run (host already up with ``--debugUtils``, e.g.
-``./scripts/run.py --turbo 2 --lang en --debugUtils --port 7777 --silent``):
+Run (host already up with ``--debug-utils``, e.g.
+``./scripts/run.py --turbo 2 --lang en --debug-utils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

@@ -23,7 +23,7 @@ rectangle, and whether ``reach.pit_endangers`` called the actor's own
 position dangerous. Stops on the second death or its own deadline, so it
 cannot spin the way the run it is diagnosing did.
 
-Run (host already up with ``--debugUtils``):
+Run (host already up with ``--debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

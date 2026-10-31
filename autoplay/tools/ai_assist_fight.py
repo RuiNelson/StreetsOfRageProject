@@ -1,9 +1,9 @@
 """Compare P2's AI inside the ``sor`` host with the same AI over the socket.
 
-Each run starts its own host (``--turbo 2 --silent --debugUtils``), reaches
+Each run starts its own host (``--turbo 2 --silent --debug-utils``), reaches
 round 1 as P1 with an external ``AgentLoop`` on P1, and has P2 join:
 
-- ``--p2 embedded``: the host runs with ``--aiAssist``, so P2 is the AI in its
+- ``--p2 embedded``: the host runs with ``--ai-assist``, so P2 is the AI in its
   process (``sor_ai.embedded``). A client's Start on pad 2 is ignored there, so
   the join pokes ``p2_button_held`` until ``$115CC`` sees it.
 - ``--p2 socket``: a second ``AgentLoop`` on the same link, as ``--agent-p2``.
@@ -127,10 +127,10 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
-    command = [args.sor, "--rom", args.rom, "--turbo", "2", "--lang", "en", "--silent", "--debugUtils",
+    command = [args.sor, "--rom", args.rom, "--turbo", "2", "--lang", "en", "--silent", "--debug-utils",
                "--port", str(args.port), "--ai-path", args.ai_path]
     if args.p2 == "embedded":
-        command.append("--aiAssist")
+        command.append("--ai-assist")
     with tempfile.NamedTemporaryFile("w+", suffix=".log") as log:
         host = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
         try:

@@ -33,7 +33,7 @@ him reach. Every row also carries the player's action, ``+$7D`` and ``+$34``
 and his health, which is how the hold's reads were timed. The fight is scored
 too (hits, holds, runs started, whether he died).
 
-Run (host already up with ``--debugUtils``):
+Run (host already up with ``--debug-utils``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\
