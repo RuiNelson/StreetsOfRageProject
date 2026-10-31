@@ -97,7 +97,7 @@ treat an outdated output as not done and say so.
 
 ## Step 6: the shortcut
 
-`Backend/src/shortcut.rs` makes two entries (user request, 2026-10-31; icon `punch-icon.png`):
+`Backend/src/shortcut.rs` holds what is common, and `shortcut/windows.rs`, `macos.rs` and `linux.rs` one file per system (user request). It makes two entries (user request, 2026-10-31; icon `punch-icon.png`):
 **StreetsOfRageRecompilation** starts the game, **StreetsOfRageRecompilation Launcher** opens the
 `play.py` window (not `--last`). The step needs the ROM, soundtrack and build, and says which step to finish.
 A **Streets of Rage** shortcut made by an older Builder is left where it is, and still works.
@@ -132,7 +132,7 @@ source of those icons: regenerate with `npm run tauri -- icon ../punch-icon.png 
 Tested on macOS by the `#[ignore]`d `creates_the_real_shortcut` and by running the bundles from a scratch folder: `open` on both,
 `launcher`, and `run.py` through `build/sor`, with the AI on P2, the soundtrack playing (`SDL_AUDIO_DRIVER=dummy`) and no library
 loaded from outside the bundle. Not checked: the Dock icons, the step's window, a machine without Homebrew's SDL3.
-Windows: only `cargo check --target x86_64-pc-windows-gnu`, and the shortcuts were not created. Linux: not even compiled.
+Windows: only `cargo check --target x86_64-pc-windows-gnu`, and the shortcuts were not created. Linux: never run; `cargo test` on macOS compiles `linux.rs` and runs its tests, and the same the other way round.
 
 On the last step Next becomes **Finish** (always enabled: the shortcut is optional); it calls the
 `finish` command (`platform.rs`), which exits the app.
