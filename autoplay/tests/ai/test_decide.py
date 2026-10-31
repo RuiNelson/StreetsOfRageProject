@@ -1012,6 +1012,56 @@ class CouldRetreatFromDangerTests(unittest.TestCase):
         self.assertEqual(could_retreat_from_danger({myself}), set())
 
 
+class WalledOffBreakableTests(unittest.TestCase):
+    """A prop at the camera's edge whose only stand no walk reaches (user, a
+    screenshot of two AIs in round 4's second wave, widescreen: "The AI got
+    stuck here"). Adam, above its wall: the stand under the wall is cut off by
+    the wall, the hole to its right and the clamp to its left."""
+
+    ADAM, BLAZE = 1, 2
+    CAMERA = CameraRange(left=2473, right=2793, top=0, bottom=112, scroll_x=2473, widescreen=True)
+    STAGE = Stage(level_index=3, direction="right")
+    PROP = Breakable(slot="obj07", world_x=2472, world_y=104, type_id=0x1B)
+    HOLE = Pit(world_x=2488, lane_y=72, width=120, height=48)
+
+    def _context(self, **actor):
+        actor = {"world_x": 2477, "world_y": 81, "character_id": self.ADAM, **actor}
+        return {
+            make_myself(**actor),
+            make_partner(world_x=2798, world_y=55),
+            self.CAMERA,
+            self.STAGE,
+            self.PROP,
+            self.HOLE,
+        }
+
+    def test_a_stand_no_walk_reaches_is_not_opened_and_does_not_hold_the_advance(self) -> None:
+        context = self._context()
+
+        self.assertEqual(could_open_breakable(context), set())
+        self.assertEqual(
+            could_catch_up_partner(context),
+            {CatchUpPartner(actor_slot="P1", target_slot="P2", direction="right")},
+        )
+
+    def test_the_stand_is_still_opened_from_the_sliver_itself(self) -> None:
+        context = self._context(world_x=2476, world_y=111)
+
+        self.assertEqual(
+            could_open_breakable(context),
+            {OpenBreakable(actor_slot="P1", target_slot="obj07")},
+        )
+
+    def test_a_prop_with_a_stand_in_the_open_is_still_opened(self) -> None:
+        prop = replace(self.PROP, world_x=2700, world_y=40)
+        context = (self._context() - {self.PROP}) | {prop}
+
+        self.assertEqual(
+            could_open_breakable(context),
+            {OpenBreakable(actor_slot="P1", target_slot="obj07")},
+        )
+
+
 class CenteringTests(unittest.TestCase):
     """``WalkToAdvanceStage`` only when walking can scroll the camera, and
     ``Centering`` when the actor has nothing else to do (user: "only produce

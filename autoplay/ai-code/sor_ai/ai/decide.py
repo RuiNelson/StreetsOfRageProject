@@ -12,6 +12,7 @@ agree on one definition of every band -- called through ``_targets_in_reach``/
 
 from __future__ import annotations
 
+import heapq
 import math
 from typing import Callable
 
@@ -70,6 +71,7 @@ from .tokens import (
     Surrounded,
 )
 from .tokens import AnimationInProgress, CameraRange, DebugNoFood, DebugNoPolice, Stage
+from .tokens import Pit, Wall
 from .tokens import Breakable, Projectile
 from .tokens import PUNCH_RANGE_Y, punch_outer_x
 from .tokens import (
@@ -1050,6 +1052,59 @@ def could_projectile_sidestep(context: Context) -> Context:
     return verbs
 
 
+# _walks_to_any's grid: a prop's wall and a hole are far wider than a step on X,
+# and the narrowest corridor between walls, round 5's fence, is 16 lanes.
+_WALK_FLOOD_STEP_X = 8
+_WALK_FLOOD_STEP_Y = 4
+
+
+def _walks_to_any(
+    actor: PlayableCharacter,
+    camera: CameraRange,
+    stands: set[tuple[int, int]],
+    is_blocked: Callable[[int, int], bool],
+    lane_max: int,
+) -> bool:
+    """Can ``actor`` walk to one of ``stands``, staying inside the walk clamp?
+
+    A flood from the actor round everything ``is_blocked``, nearest the stands
+    first so an open floor costs a few cells. The router cannot answer this:
+    its world runs ``navigation.WORLD_MARGIN_X`` past the clamp, so it reports a
+    way round a wall that ``$43AA`` never lets the actor take. Recorded in round
+    4's second wave (user, two AIs in widescreen): a prop at the camera's left
+    edge beside a hole, with Adam above its wall. Adam's punch reaches in so
+    close that a sliver under the wall counted as a stand, while no way led to
+    it; Adam held LEFT into the clamp for good, and as the rear player held the
+    camera back from the other AI too (``$18F5C``).
+    """
+
+    aim_x, aim_y = next(iter(stands))
+    goals = {(x // _WALK_FLOOD_STEP_X, y // _WALK_FLOOD_STEP_Y) for x, y in stands}
+    start = (actor.world_x, actor.world_y)
+    seen = {start}
+    frontier = [(0, start)]
+    while frontier:
+        _, (x, y) = heapq.heappop(frontier)
+        if (x // _WALK_FLOOD_STEP_X, y // _WALK_FLOOD_STEP_Y) in goals:
+            return True
+        for cell in (
+            (x + _WALK_FLOOD_STEP_X, y),
+            (x - _WALK_FLOOD_STEP_X, y),
+            (x, y + _WALK_FLOOD_STEP_Y),
+            (x, y - _WALK_FLOOD_STEP_Y),
+        ):
+            if (
+                cell in seen
+                or not camera.left <= cell[0] <= camera.right
+                or not LANE_Y_MIN <= cell[1] <= lane_max
+                or is_blocked(*cell)
+            ):
+                continue
+            seen.add(cell)
+            heapq.heappush(frontier, (abs(cell[0] - aim_x) + abs(cell[1] - aim_y), cell))
+    return False
+
+
 def _strike_stand_is_open(
     context: Context, actor: PlayableCharacter, prop: Breakable, camera: CameraRange | None
 ) -> bool:
@@ -1066,7 +1121,8 @@ def _strike_stand_is_open(
     run. A prop whose every pocket is in a hole, or past the clamp, is the
     one that is really out of reach -- and since a reachable prop holds back
     stage advance (``_advance_blocking_breakables``), saying "reachable" of
-    one that is not would be a stall.
+    one that is not would be a stall. So the pocket must also be one the actor
+    can walk to (``_walks_to_any``).
     """
 
     inner = breakable_strike_inner_x(actor, prop)
@@ -1089,17 +1145,31 @@ def _strike_stand_is_open(
         prop_solids.solid_box(other.type_id, other.world_x, other.world_y)
         for other in find_all(context, Breakable)
     ]
-    for sign in (-1, 1):
-        for dx in range(inner, outer + 1, 2):
-            x = prop.world_x + sign * dx
-            if camera is not None and not (camera.left <= x <= camera.right):
-                continue
-            for y in lanes:
-                if any(wall.blocks(x, y) for wall in walls):
-                    continue
-                if not reach.any_pit_endangers(context, x, y):
-                    return True
-    return False
+    pits = find_all(context, Pit)
+    terrain = find_all(context, Wall)
+
+    def is_blocked(x: int, y: int) -> bool:
+        return (
+            any(wall.blocks(x, y) for wall in walls)
+            or any(reach.pit_endangers(pit, x, y) for pit in pits)
+            or any(
+                wall.world_x - nav.WALL_PROBE_X <= x <= wall.world_x + wall.width + nav.WALL_PROBE_X
+                and wall.lane_y <= y < wall.lane_y + wall.height
+                for wall in terrain
+            )
+        )
+
+    stands = {
+        (x, y)
+        for sign in (-1, 1)
+        for x in (prop.world_x + sign * dx for dx in range(inner, outer + 1, 2))
+        if camera is None or camera.left <= x <= camera.right
+        for y in lanes
+        if not is_blocked(x, y)
+    }
+    if not stands:
+        return False
+    return camera is None or _walks_to_any(actor, camera, stands, is_blocked, lane_max)
 
 
 def _openable_breakables(context: Context, actor: PlayableCharacter) -> list[Breakable]:

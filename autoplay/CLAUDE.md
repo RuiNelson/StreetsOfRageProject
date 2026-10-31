@@ -1925,6 +1925,24 @@ against a machine is the right strength against a person is the user's call,
 and the knobs are the module constants (`REACTION_TICKS`, `PRESSURE_REACTION_TICKS`,
 the weights and `LEAD_SCALE`).
 
+**A prop's stand no walk reaches** (user, a screenshot of two AIs in widescreen,
+round 4's second wave: "The AI got stuck here"). Adam held `OpenBreakable` LEFT into
+the camera's clamp at a `$1B` at about (2472, 104), read off the HUD, while Blaze at
+the right clamp held `WalkToAdvanceStage`. The prop's wall is x 2444..2516 over lanes
+84..108, with a hole from x 2488 and the clamp at 2473. Adam's punch reaches in to 2 px
+(Blaze's 12, Axel's 10), so to him a sliver under the wall, lanes 110-112, read as an
+open stand; offline, the same state gives Adam `OpenBreakable` and the other two
+`CatchUpPartner`. No walk leads there, but the router's world runs 96 px past the clamp,
+so it planned round the wall off camera, and the executor's clamp zeroed the stick. As
+the rear player, Adam also held the camera (`$18F5C`), so neither AI could move.
+`decide._strike_stand_is_open` now also asks `_walks_to_any`: a best-first flood from
+the actor, inside the clamp and the lane band, round prop walls, holes and `Wall`s, on
+an 8 x 4 px grid, so a wall thinner than 8 px could be stepped over. Each call took
+about 0.3 ms with an open stand and 1 ms walled off (one measured state), and a tick
+makes several, so a walled-off prop can pass the 2 ms tick budget while it is on
+screen. Reproduced offline from the screenshot's numbers; the user then played it and
+accepted it (2026-10-31). Pinned by `test_decide.WalledOffBreakableTests`.
+
 **Round 8's thrown tables** (user: "No nível 8, de vez em quando o jogo
 atira umas mesas contra o jogador, a IA deve detetar se estão em linha com
 ela, e se for o caso, fugir delas, ou se for estiver demasiado perto,
