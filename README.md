@@ -38,13 +38,13 @@ study.
     - [Download and open the Builder](#download-and-open-the-builder)
     - [Follow the six steps](#follow-the-six-steps)
   - [Building by hand](#building-by-hand)
-  - [1. Common prerequisites](#1-common-prerequisites)
-  - [2. Clone the repository and submodules](#2-clone-the-repository-and-submodules)
-  - [3. Obtain a compatible ROM](#3-obtain-a-compatible-rom)
-    - [Legal and preservation considerations](#legal-and-preservation-considerations)
-  - [4. Build on Windows](#4-build-on-windows)
-  - [5. Build on macOS](#5-build-on-macos)
-  - [6. Build on Ubuntu](#6-build-on-ubuntu)
+    - [1. Common prerequisites](#1-common-prerequisites)
+    - [2. Clone the repository and submodules](#2-clone-the-repository-and-submodules)
+    - [3. Obtain a compatible ROM](#3-obtain-a-compatible-rom)
+      - [Legal and preservation considerations](#legal-and-preservation-considerations)
+    - [4. Build on Windows](#4-build-on-windows)
+    - [5. Build on macOS](#5-build-on-macos)
+    - [6. Build on Ubuntu](#6-build-on-ubuntu)
 - [Play](#play)
   - [Default controls](#default-controls)
   - [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)
@@ -336,7 +336,7 @@ example, a missing tool) and run the step again.
 The steps below do by hand what the Builder does. Follow them if you prefer, or if
 your system is not supported by the Builder.
 
-### 1. Common prerequisites
+#### 1. Common prerequisites
 
 All three desktop platforms require:
 
@@ -366,7 +366,7 @@ Windows invoke them with `py scripts\NAME.py`; on macOS and Linux they are
 executable directly as `./scripts/NAME.py`. Run them from the meta-repository
 root.
 
-### 2. Clone the repository and submodules
+#### 2. Clone the repository and submodules
 
 ```bash
 git clone --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
@@ -385,7 +385,7 @@ To restore all submodules to the commits recorded by the meta-repository:
 git submodule update --init --recursive --checkout
 ```
 
-### 3. Obtain a compatible ROM
+#### 3. Obtain a compatible ROM
 
 The generated C++ under `StreetsOfRageRecompilation/generated/` is ignored by
 Git and is not included in a fresh clone. Before the first build, generate it
@@ -395,7 +395,7 @@ from a compatible 512 KiB Streets of Rage / Bare Knuckle ROM image at:
 StreetsOfRageRecompilation/rom/SOR.bin
 ```
 
-#### Legal and preservation considerations
+##### Legal and preservation considerations
 
 The preferred way to obtain this image is to make a private dump of a physical
 cartridge that you own, or that you are otherwise explicitly authorized to
@@ -423,9 +423,9 @@ The project is developed against the `JUE` cartridge, with these hashes:
 
 ROM images are ignored by Git. Do not commit or redistribute them.
 
-### 4. Build on Windows
+#### 4. Build on Windows
 
-#### Prerequisites
+##### Prerequisites
 
 Open PowerShell as Administrator and install the command-line tools with
 [WinGet](https://learn.microsoft.com/windows/package-manager/winget/):
@@ -461,7 +461,7 @@ ninja --version
 py --version
 ```
 
-#### Configure, compile, and run
+##### Configure, compile, and run
 
 Run the following from the meta-repository root in PowerShell.
 
@@ -486,9 +486,9 @@ Run the game. There is a handy `play.py` launcher that is easy to use (**this mi
 py .\scripts\play.py
 ```
 
-### 5. Build on macOS
+#### 5. Build on macOS
 
-#### Prerequisites
+##### Prerequisites
 
 Install the Xcode command-line tools and [Homebrew](https://brew.sh) dependencies:
 
@@ -500,7 +500,7 @@ brew install cmake ninja python python-tk
 Both Apple Silicon and Intel Macs are supported. Keep CMake, the compiler, and
 SDL3 on the same architecture.
 
-#### Configure, compile, and run
+##### Configure, compile, and run
 
 After a fresh clone, generate the C++ port and create an optimized build:
 
@@ -521,9 +521,9 @@ Run the port:
 ./scripts/play.py
 ```
 
-### 6. Build on Ubuntu
+#### 6. Build on Ubuntu
 
-#### Prerequisites
+##### Prerequisites
 
 Install the compiler and build tools:
 
@@ -542,7 +542,7 @@ sudo apt install libasound2-dev libpulse-dev libx11-dev libxext-dev \
   libdbus-1-dev libudev-dev libwayland-dev libdecor-0-dev
 ```
 
-#### Configure, compile, and run
+##### Configure, compile, and run
 
 Generate the C++ port and create the first optimized build:
 
