@@ -52,7 +52,7 @@ cmake -S StreetsOfRageRecompilation -B StreetsOfRageRecompilation/build -DCMAKE_
 cmake --build StreetsOfRageRecompilation/build --parallel
 ```
 
-**PS5** builds in Docker only (user decision): `./scripts/build_ps5.py` makes the image `sor-ps5-toolchain` from `StreetsOfRageRecompilation/prospero/docker/` (payload SDK, RADV, title converter, all pinned there) and checks it; `--shell` opens it. Work in progress on the `prospero` branches.
+**PS5** builds in Docker only (user decision): `./scripts/build_ps5.py` makes the image `sor-ps5-toolchain` from `StreetsOfRageRecompilation/prospero/docker/` (payload SDK, RADV, title converter, all pinned there), checks it, and builds the title into `StreetsOfRageRecompilation/dist-ps5/`; `--shell` opens the image. `./scripts/deploy_ps5.py --host ADDRESS` copies it, the ROM and the soundtrack to a console over FTP. Work in progress on the `prospero` branches.
 
 **Windows** uses llvm-mingw with Ninja, not Visual Studio (user decision). `scripts/_common.py` (`cmake_configure_arguments`) adds `-G Ninja` and the compilers; direct CMake calls must pass the same. `MegaDriveEnvironment` is static there. Cleaning goes through `remove_tree` in `scripts/_common.py`, never `shutil.rmtree`, which failed on read-only git objects (user report).
 
