@@ -263,10 +263,17 @@ fn write_game_bundle(bundle: &Path, inputs: &Inputs) -> Result<(), String> {
     write_executable(&linked, "#!/bin/sh\nexec \"$(dirname \"$0\")/../../../MacOS/sor\" \"$@\"\n")
 }
 
+/// Where the game's bundle is made. Not a dot name: made under one on a desktop synced with iCloud,
+/// the bundle and all it held ended up with the `hidden` flag, which the rename keeps, so Finder did
+/// not show it (user report, 2026-10-31).
+fn staging(folder: &Path) -> PathBuf {
+    folder.join(format!("{GAME}.staging"))
+}
+
 /// Make the two bundles in `folder`. The game's is made aside, so a failure leaves the old one.
 fn write_bundles(folder: &Path, inputs: &Inputs, python: &Path) -> Result<(), String> {
     let [game, launcher] = entries(folder, EXTENSION);
-    let staging = folder.join(format!(".{GAME}.staging"));
+    let staging = staging(folder);
     let io = |e: std::io::Error| format!("cannot write in {}: {e}", folder.display());
     std::fs::create_dir_all(folder).map_err(io)?;
     let _ = std::fs::remove_dir_all(&staging);
@@ -283,6 +290,11 @@ fn write_bundles(folder: &Path, inputs: &Inputs, python: &Path) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bundle_is_not_made_under_a_dot_name() {
+        assert_eq!(staging(Path::new("/d")), Path::new("/d/StreetsOfRageRecompilation.staging"));
+    }
 
     #[test]
     fn quotes_for_the_shell() {
