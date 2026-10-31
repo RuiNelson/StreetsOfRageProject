@@ -53,6 +53,7 @@ study.
   - [Startup flags](#startup-flags)
   - [Widescreen (Mode 48)](#widescreen-mode-48)
   - [Pre-rendered soundtrack](#pre-rendered-soundtrack)
+- [Research](#research)
   - [Call-map database](#call-map-database)
 
 ## Project structure
@@ -754,6 +755,8 @@ PSG, because the game's fade treats them differently: the drums and the PSG
 stop at once while the FM fades out over 1.3 seconds. One difference is deliberate: on the
 console a sound effect borrows a music channel while it plays, here the music
 keeps playing under it. Under `--turbo` the music stays at normal speed.
+
+## Research
 
 ### Call-map database
 
