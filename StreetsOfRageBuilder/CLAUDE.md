@@ -32,12 +32,15 @@ real machine over SSH) the app compiles, the unit tests pass and the dependency 
 ## Step 2: download the project
 
 `Backend/src/project.rs` puts the project in the exact folder the user chooses (user
-decision, so the same folder is chosen again to update it); branch `main`; a player, not a
-developer, so `git clone --depth 1 --recurse-submodules --shallow-submodules`, one commit
+decision, so the same folder is chosen again to update it). It downloads the commit tagged with
+the Builder's own version (`CARGO_PKG_VERSION`: Builder 0.3.1, tag `0.3.1`), neither older nor newer
+(user decision, 2026-10-31), so a version of the Builder only works once its tag exists: a draft or
+artifacts-only build reports that the version has not been released. A player, not a
+developer, so `git clone --depth 1 --branch TAG --recurse-submodules --shallow-submodules`, one commit
 of history everywhere. A folder that is a copy (a `.git` whose origin names
-StreetsOfRageProject) is updated: `fetch --depth 1`, `checkout --force -B main FETCH_HEAD`
-and a submodule update, replacing local changes (ROM and soundtrack are gitignored, so they
-survive). A missing or empty folder is cloned into; anything else is refused. git's
+StreetsOfRageProject) is moved to the tag, forwards or backwards: `fetch --depth 1` of the tag,
+`checkout --force --detach` and a submodule update, replacing local changes (ROM and soundtrack are
+gitignored, so they survive). A missing or empty folder is cloned into; anything else is refused. git's
 `\r`-redrawn progress reaches the UI as lines through a Tauri `Channel`;
 `GIT_TERMINAL_PROMPT=0` keeps git from waiting on a hidden prompt. The chosen path lives in
 `Wizard` (`projectPath`) for the later steps.

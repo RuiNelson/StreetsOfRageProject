@@ -13,7 +13,7 @@ function errorText(error: unknown) {
 const HINT: Record<Inspection["state"], string> = {
   missing: "The project will be downloaded into this new folder.",
   empty: "The project will be downloaded into this empty folder.",
-  clone: "The project is already here: it will be updated to the latest version. Local changes to its files are replaced.",
+  clone: "The project is already here: it will be updated to this Builder's version. Local changes to its files are replaced.",
   occupied: "This folder is not empty and is not a copy of the project. Choose an empty folder.",
 };
 
@@ -66,8 +66,8 @@ export function Download({ setReady, setBusy, actions, projectPath, setProjectPa
       <div className="notice">
         <p>
           Choose an empty folder to download the project into, or the folder of a previous download to update it. Only
-          the latest version is downloaded (a single commit of history, submodules included), so it is small and quick
-          to get.
+          the version matching this Builder is downloaded (a single commit of history, submodules included), so it is
+          small and quick to get.
         </p>
       </div>
 

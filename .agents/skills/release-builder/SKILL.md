@@ -121,7 +121,9 @@ If the app name, step list or platforms changed, update the text to match.
 
 ## 6. Create the release
 
-Pin the tag to the commit that was built:
+Pin the tag to the commit that was built. Step 2 of the Builder downloads the commit tagged with its
+own version, so the binaries report "not released" until this tag exists (a draft creates no tag until
+it is published):
 
 ```bash
 gh release create X.Y.Z --target "$(git rev-parse HEAD)" \

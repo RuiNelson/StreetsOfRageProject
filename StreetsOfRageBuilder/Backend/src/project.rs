@@ -1,6 +1,7 @@
 //! Step 2: get the project onto disk with git, into the exact folder the user chose (so the
-//! same folder is picked again to update it). Players only build and play, so the clone carries
-//! a single commit of history, submodules included; an existing clone is brought up to date.
+//! same folder is picked again to update it). It is always the commit tagged with this Builder's
+//! version (user decision), neither older nor newer. Players only build and play, so the clone
+//! carries a single commit of history, submodules included.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -11,7 +12,8 @@ use tauri::ipc::Channel;
 use crate::system;
 
 const REPOSITORY: &str = "https://github.com/RuiNelson/StreetsOfRageProject.git";
-const BRANCH: &str = "main";
+/// The project's tag for this Builder: releases tag the commit they build, `0.3.1` with no `v`.
+const TAG: &str = env!("CARGO_PKG_VERSION");
 /// The origin of a copy of the project names this.
 const PROJECT_NAME: &str = "StreetsOfRageProject";
 /// Files a usable checkout has; a clone missing them is incomplete.
@@ -115,22 +117,37 @@ fn update_submodules(path: &Path, progress: &dyn Fn(String)) -> Result<(), Strin
     )
 }
 
-fn download(folder: &Path, repository: &str, branch: &str, progress: &dyn Fn(String)) -> Result<Downloaded, String> {
-    system::refresh_path();
-    let updated = match inspect(folder).state {
-        State::Occupied => {
-            return Err(format!("{} is not empty and is not a copy of the project.", folder.display()));
+/// `git ls-remote --exit-code` fails silently when the tag is missing, and with a message when it
+/// cannot reach the repository, which the clone or fetch then reports.
+fn check_tag(repository: &str, tag: &str) -> Result<(), String> {
+    let reference = format!("refs/tags/{tag}");
+    match git_output(&std::env::temp_dir(), &["ls-remote", "--exit-code", "--tags", repository, &reference]) {
+        Err(error) if error.is_empty() => {
+            Err(format!("The project has no version {tag} to download: this Builder's version has not been released."))
         }
+        _ => Ok(()),
+    }
+}
+
+fn download(folder: &Path, repository: &str, tag: &str, progress: &dyn Fn(String)) -> Result<Downloaded, String> {
+    system::refresh_path();
+    let state = inspect(folder).state;
+    if state == State::Occupied {
+        return Err(format!("{} is not empty and is not a copy of the project.", folder.display()));
+    }
+    check_tag(repository, tag)?;
+    let updated = match state {
+        State::Occupied => unreachable!("refused above"),
         State::Missing | State::Empty => {
             if let Some(parent) = folder.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
             }
-            progress("Cloning the project…".into());
+            progress(format!("Cloning version {tag} of the project…"));
             let target = folder.to_string_lossy().into_owned();
             git_stream(
                 None,
                 &[
-                    "clone", "--progress", "--depth", "1", "--branch", branch,
+                    "clone", "--progress", "--depth", "1", "--branch", tag,
                     "--recurse-submodules", "--shallow-submodules", "--jobs", "4",
                     repository, &target,
                 ],
@@ -139,10 +156,12 @@ fn download(folder: &Path, repository: &str, branch: &str, progress: &dyn Fn(Str
             false
         }
         State::Clone => {
-            progress("Updating the project…".into());
-            git_stream(Some(folder), &["fetch", "--progress", "--depth", "1", "origin", branch], progress)?;
+            progress(format!("Updating the project to version {tag}…"));
+            let reference = format!("refs/tags/{tag}");
+            let refspec = format!("+{reference}:{reference}");
+            git_stream(Some(folder), &["fetch", "--progress", "--depth", "1", "origin", &refspec], progress)?;
             // Players do not edit the project: the update replaces local changes.
-            git_stream(Some(folder), &["checkout", "--force", "-B", branch, "FETCH_HEAD"], progress)?;
+            git_stream(Some(folder), &["checkout", "--force", "--detach", &reference], progress)?;
             update_submodules(folder, progress)?;
             true
         }
@@ -157,7 +176,7 @@ fn download(folder: &Path, repository: &str, branch: &str, progress: &dyn Fn(Str
 /// Clone or update the real repository into `folder` (for the ignored end-to-end tests).
 #[cfg(test)]
 pub fn download_project_for_test(folder: &Path) -> String {
-    download(folder, REPOSITORY, BRANCH, &|_| {}).unwrap().path
+    download(folder, REPOSITORY, TAG, &|_| {}).unwrap().path
 }
 
 #[tauri::command]
@@ -169,7 +188,7 @@ pub fn inspect_project(folder: String) -> Inspection {
 #[tauri::command]
 pub async fn download_project(folder: String, progress: Channel<String>) -> Result<Downloaded, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        download(Path::new(&folder), REPOSITORY, BRANCH, &|line| {
+        download(Path::new(&folder), REPOSITORY, TAG, &|line| {
             let _ = progress.send(line);
         })
     })
@@ -199,9 +218,9 @@ mod tests {
         std::fs::write(path, text).unwrap();
     }
 
-    /// Clone a local repository with a submodule and several commits, then update it.
+    /// Clone a tag of a local repository with a submodule and several commits, then update to another.
     #[test]
-    fn clones_shallow_with_submodules_then_updates() {
+    fn clones_a_tag_shallow_with_submodules_then_updates_to_another() {
         let root = std::env::temp_dir().join(format!("sor-builder-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let sub = root.join("sub");
@@ -222,6 +241,9 @@ mod tests {
         git(&source, &["commit", "-q", "-m", "v1"]);
         write(&source, "scripts/play.py", "v2");
         git(&source, &["commit", "-q", "-am", "v2"]);
+        git(&source, &["tag", "1.0.0"]);
+        write(&source, "scripts/play.py", "after 1.0.0");
+        git(&source, &["commit", "-q", "-am", "after 1.0.0"]);
 
         // The code under test spawns git itself: let it use the local submodule too.
         unsafe {
@@ -235,9 +257,15 @@ mod tests {
         let url = url.as_str();
         assert_eq!(inspect(&folder).state, State::Missing);
 
-        let first = download(&folder, url, "main", &|_| {}).unwrap();
+        let missing = download(&folder, url, "9.9.9", &|_| {}).err().unwrap();
+        assert!(missing.contains("no version 9.9.9"), "{missing}");
+        assert_eq!(inspect(&folder).state, State::Missing);
+
+        let first = download(&folder, url, "1.0.0", &|_| {}).unwrap();
         assert!(!first.updated);
         let project = PathBuf::from(&first.path);
+        // The tag's commit, not the newer tip of the branch.
+        assert_eq!(std::fs::read_to_string(project.join("scripts/play.py")).unwrap(), "v2");
         assert_eq!(git_output(&project, &["rev-list", "--count", "HEAD"]).unwrap(), "1");
         assert_eq!(
             git_output(&project.join("StreetsOfRageRecompilation"), &["rev-list", "--count", "HEAD"]).unwrap(),
@@ -245,13 +273,21 @@ mod tests {
         );
         assert_eq!(inspect(&folder).state, State::Clone);
 
-        // Upstream moves on; a local edit must not survive the update.
+        // A new tag, and the branch moves past it; a local edit must not survive the update.
         write(&source, "scripts/play.py", "v3");
         git(&source, &["commit", "-q", "-am", "v3"]);
+        git(&source, &["tag", "2.0.0"]);
+        write(&source, "scripts/play.py", "after 2.0.0");
+        git(&source, &["commit", "-q", "-am", "after 2.0.0"]);
         write(&project, "scripts/play.py", "edited");
-        let second = download(&folder, url, "main", &|_| {}).unwrap();
+        let second = download(&folder, url, "2.0.0", &|_| {}).unwrap();
         assert!(second.updated);
         assert_eq!(std::fs::read_to_string(project.join("scripts/play.py")).unwrap(), "v3");
+
+        // An older Builder takes the folder back to its own version.
+        let third = download(&folder, url, "1.0.0", &|_| {}).unwrap();
+        assert!(third.updated);
+        assert_eq!(std::fs::read_to_string(project.join("scripts/play.py")).unwrap(), "v2");
 
         std::fs::remove_dir_all(&root).unwrap();
     }
@@ -261,10 +297,12 @@ mod tests {
     #[ignore]
     fn downloads_the_real_project() {
         let folder = PathBuf::from(std::env::var("SOR_TEST_FOLDER").expect("SOR_TEST_FOLDER"));
-        let first = download(&folder, REPOSITORY, BRANCH, &|line| println!("{line}")).unwrap();
+        let first = download(&folder, REPOSITORY, "0.2.0", &|line| println!("{line}")).unwrap();
         println!("{} {}", first.updated, first.commit);
-        let second = download(&folder, REPOSITORY, BRANCH, &|_| {}).unwrap();
+        let second = download(&folder, REPOSITORY, TAG, &|_| {}).unwrap();
         assert!(second.updated);
+        let tagged = format!("refs/tags/{TAG}^{{commit}}");
+        assert_eq!(git_output(&folder, &["rev-parse", "HEAD"]).unwrap(), git_output(&folder, &["rev-parse", &tagged]).unwrap());
     }
 
     #[test]
