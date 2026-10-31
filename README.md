@@ -38,10 +38,10 @@ study.
     - [Download and open the Builder](#download-and-open-the-builder)
     - [Follow the six steps](#follow-the-six-steps)
   - [Building by hand](#building-by-hand)
-  - [1. Clone the repository and submodules](#1-clone-the-repository-and-submodules)
-  - [2. Obtain a compatible ROM](#2-obtain-a-compatible-rom)
+  - [1. Common prerequisites](#1-common-prerequisites)
+  - [2. Clone the repository and submodules](#2-clone-the-repository-and-submodules)
+  - [3. Obtain a compatible ROM](#3-obtain-a-compatible-rom)
     - [Legal and preservation considerations](#legal-and-preservation-considerations)
-  - [3. Common prerequisites](#3-common-prerequisites)
   - [4. Build on Windows](#4-build-on-windows)
   - [5. Build on macOS](#5-build-on-macos)
   - [6. Build on Ubuntu](#6-build-on-ubuntu)
@@ -280,7 +280,7 @@ the ROM models, measurements, and test procedures are in
 The easiest way to get the game running is **Streets of Rage Builder**, a guided
 installer for Windows, macOS and Debian-based Linux (Ubuntu and similar). It
 does for you the steps of [building by hand](#building-by-hand); you only need a ROM you
-are legally entitled to use (see [Obtain a compatible ROM](#2-obtain-a-compatible-rom)).
+are legally entitled to use (see [Obtain a compatible ROM](#3-obtain-a-compatible-rom)).
 The ROM must be the **Rev. A** dump (CRC32 `4052E845`).
 
 #### Download and open the Builder
@@ -335,7 +335,37 @@ example, a missing tool) and run the step again.
 The steps below do by hand what the Builder does. Follow them if you prefer, or if
 your system is not supported by the Builder.
 
-### 1. Clone the repository and submodules
+### 1. Common prerequisites
+
+All three desktop platforms require:
+
+- Git, including submodule support;
+- CMake 3.24 or newer;
+- a compiler with C++23 support;
+- network access during the first configuration, because CMake downloads CLI11,
+  yaml-cpp, zlib, libpng, SDL3_mixer, and SDL3 itself unless it is already
+  installed (and, for the soundtrack renderer, Genesis Plus GX and libFLAC), and
+  the CPython that runs the AI in the **1 PLAYER AI ASSIST** mode: Windows downloads
+  the official build, macOS and Linux build it once, about two minutes with `make`.
+  It is independent of any Python installed on the machine;
+- Python 3 for the first C++ generation and the analysis tools;
+- a compatible local ROM for the mandatory first C++ generation.
+
+Check the main tools before configuring:
+
+```bash
+git --version
+cmake --version
+python3 --version
+```
+
+The repository's `scripts/*.py` launchers generate, build, and run the port on
+all three desktop platforms, and use only the Python standard library. On
+Windows invoke them with `py scripts\NAME.py`; on macOS and Linux they are
+executable directly as `./scripts/NAME.py`. Run them from the meta-repository
+root.
+
+### 2. Clone the repository and submodules
 
 ```bash
 git clone --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
@@ -354,7 +384,7 @@ To restore all submodules to the commits recorded by the meta-repository:
 git submodule update --init --recursive --checkout
 ```
 
-### 2. Obtain a compatible ROM
+### 3. Obtain a compatible ROM
 
 The generated C++ under `StreetsOfRageRecompilation/generated/` is ignored by
 Git and is not included in a fresh clone. Before the first build, generate it
@@ -391,36 +421,6 @@ The project is developed against the `JUE` cartridge, with these hashes:
 | SHA-256 | `95d7efb98e97f4ffffe68257aef9a855034a36a41b86cf9d332d129f30cb2d4b` |
 
 ROM images are ignored by Git. Do not commit or redistribute them.
-
-### 3. Common prerequisites
-
-All three desktop platforms require:
-
-- Git, including submodule support;
-- CMake 3.24 or newer;
-- a compiler with C++23 support;
-- network access during the first configuration, because CMake downloads CLI11,
-  yaml-cpp, zlib, libpng, SDL3_mixer, and SDL3 itself unless it is already
-  installed (and, for the soundtrack renderer, Genesis Plus GX and libFLAC), and
-  the CPython that runs the AI in the **1 PLAYER AI ASSIST** mode: Windows downloads
-  the official build, macOS and Linux build it once, about two minutes with `make`.
-  It is independent of any Python installed on the machine;
-- Python 3 for the first C++ generation and the analysis tools;
-- a compatible local ROM for the mandatory first C++ generation.
-
-Check the main tools before configuring:
-
-```bash
-git --version
-cmake --version
-python3 --version
-```
-
-The repository's `scripts/*.py` launchers generate, build, and run the port on
-all three desktop platforms, and use only the Python standard library. On
-Windows invoke them with `py scripts\NAME.py`; on macOS and Linux they are
-executable directly as `./scripts/NAME.py`. Run them from the meta-repository
-root.
 
 ### 4. Build on Windows
 
