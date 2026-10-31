@@ -45,12 +45,12 @@ study.
   - [4. Build on Windows](#4-build-on-windows)
   - [5. Build on macOS](#5-build-on-macos)
   - [6. Build on Ubuntu](#6-build-on-ubuntu)
-  - [Play](#play)
-    - [Default controls](#default-controls)
-    - [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)
-    - [Host keyboard shortcuts](#host-keyboard-shortcuts)
-    - [Debug utility hotkeys (Cheats)](#debug-utility-hotkeys-cheats)
-    - [Startup flags](#startup-flags)
+- [Play](#play)
+  - [Default controls](#default-controls)
+  - [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)
+  - [Host keyboard shortcuts](#host-keyboard-shortcuts)
+  - [Debug utility hotkeys (Cheats)](#debug-utility-hotkeys-cheats)
+  - [Startup flags](#startup-flags)
   - [Widescreen (Mode 48)](#widescreen-mode-48)
   - [Pre-rendered soundtrack](#pre-rendered-soundtrack)
   - [Call-map database](#call-map-database)
@@ -460,7 +460,6 @@ ninja --version
 py --version
 ```
 
-
 #### Configure, compile, and run
 
 Run the following from the meta-repository root in PowerShell.
@@ -521,7 +520,6 @@ Run the port:
 ./scripts/play.py
 ```
 
-
 ### 6. Build on Ubuntu
 
 #### Prerequisites
@@ -564,10 +562,9 @@ Run the port:
 ./scripts/play.py
 ```
 
+## Play
 
-### Play
-
-#### Default controls
+### Default controls
 
 The game reads the keyboard and gamepads itself and binds them to actions+. Each player has a control scheme:
 
@@ -600,7 +597,7 @@ For the ORIGINAL 3, the Special attack moves to R1/RB button.
 
 Player 1 gets the first gamepad found and player 2 the next one, if not configured to a specific gamepad.
 
-#### Configure keyboard and gamepad bindings
+### Configure keyboard and gamepad bindings
 
 In the game, open **OPTIONS > CONTROLS** and choose **PLAYER 1** or
 **PLAYER 2**:
@@ -625,7 +622,7 @@ The controls are saved at once in
 (`%USERPROFILE%\.config\StreetsOfRageProject\controls.yaml` on Windows),
 which is created with the defaults above on the first run.
 
-#### Host keyboard shortcuts
+### Host keyboard shortcuts
 
 These shortcuts operate at the host-runtime level and are independent of the
 gamepad bindings:
@@ -641,7 +638,7 @@ gamepad bindings:
 The capture files are written to the process's current working directory.
 `Ctrl+R`, `Ctrl+P`, and `Ctrl+S` are inactive unless `--debug-utils` is set.
 
-#### Debug utility hotkeys (Cheats)
+### Debug utility hotkeys (Cheats)
 
 When started with `--debug-utils`, the host also exposes optional keyboard
 cheats. Hold **Alt** on Windows/Linux or **Option** on macOS and press the
@@ -675,7 +672,7 @@ These are host debugging facilities, not part of the original cartridge input
 protocol. Use them only when investigating runtime behavior or exercising
 specific game paths.
 
-#### Startup flags
+### Startup flags
 
 The `sor` executable accepts the following command-line options. `--help`
 prints the CLI11-generated help screen, and `--version` prints the executable
