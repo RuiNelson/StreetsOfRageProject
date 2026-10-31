@@ -309,7 +309,11 @@ player stands (`$FFFA0D`, set around `$DF4`, consumed by `$19570`).
   and `CatchUpPartner` moves it.
   Lowest tier (`priority._EMERGENCY_CENTERING` = 1), so anything else that
   scores wins; a live enemy on screen does not withhold it, so the wait beside
-  a partner's fight (**Leave the partner's fight to them**) now centres. The
+  a partner's fight (**Leave the partner's fight to them**) now centres. **Never in
+  Mr. X's office** (`MrXOffice`; user: "keeps centering instead of fighting the
+  grunts"): `EngageMrX`'s home is the right clamp, and each gap between his Garcias
+  walked the actor out of it. (The report itself was the stale duel byte, **Mr. X's
+  betrayal duel**, below.) The
   executor routes like `CatchUpPartner` but never hops: a pit in the way stops
   it at the wall.
 
@@ -1852,6 +1856,20 @@ reads `reach.punch_inner_for`, the band's own edge, and
 against each other may still circle each other; that is untested.
 
 **Not run against a human partner.**
+
+**After the duel: the byte `$11E72` leaves set** (user, playing P1 with the AI on P2:
+the AI "keeps centering instead of fighting the grunts ... after the other player died
+because he betrayed the AI and the AI won"). `$11E72` clears `$FFFA43` only on the
+branch where P2 is out; with P1 out it moves on and leaves it set, for the whole fight
+with Mr. X. `PlayerDuel` read the byte, so `could_engage_mr_x` stood down while
+`MrXOffice` kept every generic verb off his Garcias: `Centering` was all that was left.
+`PlayerDuel` now also needs the offer's state in `$22`-`$29`
+(`observe.MR_X_OFFER_DUEL_START`/`_WAIT`). Read from the disassembly and pinned by
+`test_observe`; the user then played it and accepted it (2026-10-31).
+`tools/mr_x_duel_fight.py` cannot reach this, since its two AIs continue at game over and
+never end a duel. The stale byte also keeps the ROM's duel damage on
+(`story-mode-and-campaign-flow.md` §7.4 says `$11E72` clears it, which holds only for
+P2 out); the fight's model does not read it.
 
 **Mr. X's betrayal duel: a fight, not a solver** (user, in Portuguese: "Quando
 a IA luta contra um humano (quando há traição do parceiro em frente ao Mr. X),

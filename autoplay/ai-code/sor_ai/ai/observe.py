@@ -151,6 +151,12 @@ class GroundTracker:
 HOLD_ACTION_BASES = ACTION_HOLDING
 
 
+# $11FA8 (mr_x_offer_start_duel) sets $FFFA43 at state $22; state $29 is
+# $11E72 (mr_x_offer_wait_duel_end), which moves on once one player is out.
+MR_X_OFFER_DUEL_START = 0x22
+MR_X_OFFER_DUEL_WAIT = 0x29
+
+
 def _stage_direction(level_index: int) -> str:
     if level_index == 6:
         return "none"
@@ -360,7 +366,13 @@ def generate_direct_observation_tokens(
         if animation is not None:
             context.add(animation)
 
-    duel = bool(snapshot.mr_x_offer_flag and snapshot.duel_damage_modifier)
+    # The offer's state as well as the byte: $11E72 clears the byte only when P2
+    # is the one out, so with P1 out it stays set through the fight with Mr. X.
+    duel = bool(
+        snapshot.mr_x_offer_flag
+        and snapshot.duel_damage_modifier
+        and MR_X_OFFER_DUEL_START <= snapshot.mr_x_offer_state <= MR_X_OFFER_DUEL_WAIT
+    )
     if duel:
         context.add(PlayerDuel())
     partner_index = 2 if player_index == 1 else 1

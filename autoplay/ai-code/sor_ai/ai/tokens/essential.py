@@ -115,12 +115,13 @@ class MrXOffice(Essential):
 class PlayerDuel(Essential):
     """Mr. X's betrayal duel: the two players fight each other.
 
-    Observed while ``$FFDE00 (mr_x_offer_flag)`` is set and ``$FFFA43
-    (duel_damage_modifier)`` is nonzero. ``$11F74
-    (mr_x_offer_compare_2p_choices)`` sends two different answers to ``$11FA8
-    (mr_x_offer_start_duel)``, which sets the byte; ``$11E72
-    (mr_x_offer_wait_duel_end)`` clears it once one player is out
-    (story-mode-and-campaign-flow.md §7.4). For as long as it holds, the other
+    Observed while ``$FFDE00 (mr_x_offer_flag)`` is set, ``$FFFA43
+    (duel_damage_modifier)`` is nonzero and the offer's state is ``$22``-``$29``.
+    ``$11F74 (mr_x_offer_compare_2p_choices)`` sends two different answers to
+    ``$11FA8 (mr_x_offer_start_duel)``, which sets the byte; ``$11E72
+    (mr_x_offer_wait_duel_end)`` moves the state on once one player is out, and
+    clears the byte only if that player is P2, so the byte alone would read as a
+    duel through the survivor's fight with Mr. X. For as long as it holds, the other
     player is no ``Partner`` but a ``RivalPlayer``: ``$4478`` deals the attack
     descriptor's damage (tripled) to them like to any enemy.
     """

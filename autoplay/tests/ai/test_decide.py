@@ -1157,6 +1157,15 @@ class CenteringTests(unittest.TestCase):
                 context = {make_myself(world_x=x), make_partner(world_x=60), self.RIGHT, self.LOCKED}
                 self.assertEqual(could_centering(context), expected)
 
+    def test_mr_x_office_never_centres(self) -> None:
+        # EngageMrX's home is the camera's clamp: a gap between his Garcias
+        # is no reason to walk out of it.
+        dead_garcia = make_garcia(world_x=270, health=-1)
+        for others in (set(), {dead_garcia}):
+            with self.subTest(others=others):
+                context = {make_myself(world_x=270), MrXOffice(), self.LOCKED, self.RIGHT} | others
+                self.assertEqual(could_centering(context), set())
+
     def test_the_elevator_centres(self) -> None:
         context = {make_myself(world_x=270), self.ELEVATOR, self.OPEN}
 

@@ -4,6 +4,7 @@ from dataclasses import replace
 from sor_ai.ai import decide as decide_module
 from sor_ai.ai import reach as reach_module
 from sor_ai.ai.inference import generate_inference_tokens
+from sor_ai.ai.tokens import MrXOffice
 from sor_ai.ai.tokens import Myself, Partner
 from sor_ai.ai.tokens import Abadede, Enemy, Garcia, Jack, Nora, Souther
 from sor_ai.ai.tokens import AnimationInProgress, CameraRange, InContinueMenu, InMrXDialog, Stage
@@ -268,6 +269,7 @@ def _snapshot(
     floor_holes: tuple[FloorHole, ...] = (),
     mr_x_offer_flag: int = 0,
     duel_damage_modifier: int = 0,
+    mr_x_offer_state: int = 0,
 ) -> GameSnapshot:
     return GameSnapshot(
         connected=True,
@@ -287,6 +289,7 @@ def _snapshot(
         floor_holes=floor_holes,
         mr_x_offer_flag=mr_x_offer_flag,
         duel_damage_modifier=duel_damage_modifier,
+        mr_x_offer_state=mr_x_offer_state,
     )
 
 
@@ -1219,7 +1222,7 @@ class PlayerDuelTests(unittest.TestCase):
     """Mr. X's betrayal duel: two different answers start it ($11FA8 sets
     $FFFA43), and while it lasts the other player is the enemy."""
 
-    def _context(self, *, offer: int = 1, duel: int = 1, p2_phase=CombatPhase.NORMAL):
+    def _context(self, *, offer: int = 1, duel: int = 1, state: int = 0x29, p2_phase=CombatPhase.NORMAL):
         p1 = _player_snapshot(index=1)
         p2 = _player_snapshot(index=2)
         snapshot = _snapshot(
@@ -1231,6 +1234,7 @@ class PlayerDuelTests(unittest.TestCase):
             level_index=7,
             mr_x_offer_flag=offer,
             duel_damage_modifier=duel,
+            mr_x_offer_state=state,
         )
         return generate_direct_observation_tokens(snapshot, player_index=1)
 
@@ -1259,6 +1263,18 @@ class PlayerDuelTests(unittest.TestCase):
         self.assertIsNone(find(context, PlayerDuel))
         self.assertIsNone(find(context, RivalPlayer))
         self.assertIsNotNone(find(context, Partner))
+
+    def test_the_stale_byte_is_no_duel_once_it_has_ended(self) -> None:
+        # User: the other player betrayed the AI and died, and the AI then stood
+        # "centering instead of fighting the grunts". With P1 out, $11E72 leaves
+        # $FFFA43 set, and PlayerDuel stood EngageMrX down for the whole fight.
+        for state in (0x2A, 0x2D, 0x40, 0x41, 0x12):
+            with self.subTest(state=state):
+                context = self._context(state=state)
+
+                self.assertIsNone(find(context, PlayerDuel))
+                self.assertIsNone(find(context, RivalPlayer))
+                self.assertIsNotNone(find(context, MrXOffice))
 
     def test_the_offer_alone_keeps_the_partner(self) -> None:
         context = self._context(duel=0)

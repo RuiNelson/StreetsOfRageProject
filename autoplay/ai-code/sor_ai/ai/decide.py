@@ -1426,7 +1426,7 @@ def could_centering(context: Context) -> Context:
     User: "Create a new token `Centering` which centers the controlled
     character in the center of the viewed playfield". On X only, on the
     actor's own lane (user), for any actor free to walk that is off that point,
-    with three exceptions:
+    with these exceptions:
 
     - it would be advancing instead: the same condition as
       ``could_walk_to_advance_stage``, so the two are never produced together
@@ -1434,7 +1434,11 @@ def could_centering(context: Context) -> Context:
     - a partner is further along the stage (``_partner_ahead_of``): that
       actor is following them, and its centre is wherever they are (user:
       idle, "unless following");
-    - no ``Stage`` or ``CameraRange`` to read.
+    - no ``Stage`` or ``CameraRange`` to read;
+    - Mr. X's office (``MrXOffice``), where ``EngageMrX`` owns the positioning:
+      home is the camera's clamp, not its middle, and each gap between his
+      Garcias walked the actor out of it (user: it "keeps centering instead of
+      fighting the grunts").
 
     Ranked under everything else that scores
     (``priority._EMERGENCY_CENTERING``), it takes the elevator, an arena
@@ -1444,7 +1448,7 @@ def could_centering(context: Context) -> Context:
 
     verbs: set[Token] = set()
     camera = find(context, CameraRange)
-    if camera is None or find(context, Stage) is None:
+    if camera is None or find(context, Stage) is None or find(context, MrXOffice) is not None:
         return verbs
     advancing = (
         {actor.slot for actor in _actors_free_to_advance(context)}
