@@ -70,6 +70,7 @@ User decisions. Implementation details are in `StreetsOfRageRecompilation/CLAUDE
 - **Windows console:** `sor` is a GUI-subsystem program; `openConsoleIfWanted` (`main.cpp`) gives it a console only for `--debug-utils`, `--debug-log`, `--call-log`, `--aux-addr-file`, `--help` or `--version`. Without them stdout and stderr go to the null device on every platform. Not tested on Windows.
 - **Mode menu:** a **QUIT** row after OPTIONS ends the game.
 - **PS5 menus:** `SoRPlatform::consoleMenus()`, on under `__PROSPERO__` or with `--console-menus` on the desktop for testing, hides BIND KEYBOARD and the DISPLAY row and forces fullscreen. DEVICE stays, to choose between signed-in users' pads. The PS5 port is in progress on the `prospero` branches.
+- **PS5 files:** ROM, pre-rendered soundtrack and Python live in `/data/sor`. The soundtrack and the AI are obligatory there: without them the title says what to copy and closes, with no fallback.
 
 ## Hand-written C++ keeps the original memory layout
 
