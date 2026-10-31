@@ -16,7 +16,7 @@ Written for round 6's stall at X 2557 and the life lost at X 2474
 (``autoplay/CLAUDE.md``, **Round 6: the factory floor**).
 
 Run (host already up with ``--debug-utils``, e.g.
-``./scripts/run.py --turbo 4 --lang en --debug-utils --port 7777 --silent``):
+``./scripts/run.py --default-video --turbo 4 --lang en --debug-utils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

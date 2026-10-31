@@ -34,6 +34,8 @@ ASSUMED_HZ = 60
 # FRAMES_PER_TICK and kinematics.FRAMES_PER_TICK's nominal 2 -- one tick per
 # object update (objects run at 30 Hz), so the plan's stick lands exactly.
 LOCKSTEP_FRAMES_PER_TICK = 2
+# OPTIONS > VIDEO can change the picture under a running host.
+HOST_FLAGS_REFRESH_S = 1.0
 
 
 class _RemoteClientProxy:
@@ -508,12 +510,13 @@ class ObserverApp:
         self._rom: RomData | None = None
         self._hud: ObserverHud | None = None
 
-        # Widescreen from GET_FLAGS (host_flags.py), read once per
-        # connection; each player's scheme queried from the game (SoRClient)
+        # Widescreen from GET_FLAGS (host_flags.py), read on connecting and
+        # every HOST_FLAGS_REFRESH_S; each player's scheme queried from the game (SoRClient)
         # whenever an AI is turned on, on a fresh connection while one is, and
         # every SCHEME_REFRESH_S while one plays -- ``_button_mode_stale``
         # asks the poller, which owns the client, for that read.
         self.widescreen = False
+        self._host_flags_read_at = 0.0
         self.six_button = {1: False, 2: False}
         self._warned_ai_assist = False
         self._schemes_read_at = 0.0
@@ -582,7 +585,18 @@ class ObserverApp:
             logger.warning("GET_FLAGS unavailable (%s); keeping the default modes", exc)
             return None
 
+    def _refresh_widescreen(self, client) -> None:
+        now = time.monotonic()
+        if now - self._host_flags_read_at < HOST_FLAGS_REFRESH_S:
+            return
+        self._host_flags_read_at = now
+        modes = self._read_host_flags(client)
+        if modes is not None and modes.widescreen != self.widescreen:
+            self.widescreen = modes.widescreen
+            logger.info("host widescreen: %s", "on" if modes.widescreen else "off")
+
     def _read_widescreen(self, client) -> None:
+        self._host_flags_read_at = time.monotonic()
         modes = self._read_host_flags(client)
         if modes is not None:
             self.widescreen = modes.widescreen
@@ -667,6 +681,7 @@ class ObserverApp:
                     backoff_s = 0.25
 
                 assert self._client is not None
+                self._refresh_widescreen(self._client)
                 snapshot = read_snapshot(
                     self._client, rom=self._rom, widescreen=self.widescreen
                 )
@@ -803,6 +818,7 @@ class ObserverApp:
 
                 assert self._client is not None
                 client = self._client
+                self._refresh_widescreen(client)
                 if ram is None:
                     snapshot = read_snapshot(client, rom=self._rom, widescreen=self.widescreen)
                 else:

@@ -6,7 +6,7 @@ the grab chain (``GrabEnemy`` at or near zero ticks) can be traced to the
 actual dx/dy/verb sequence rather than guessed at from a summary.
 
 Run (host already up with ``--debug-utils``, e.g.
-``./scripts/run.py --turbo 4 --lang en --debug-utils --port 7777 --silent``):
+``./scripts/run.py --default-video --turbo 4 --lang en --debug-utils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

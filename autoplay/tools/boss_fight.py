@@ -17,7 +17,7 @@ also what a level reset looks like and produced a false "boss defeated"
 report once already.
 
 Run (host already up with ``--debug-utils``, e.g.
-``./scripts/run.py --turbo 2 --lang en --debug-utils --port 7777 --silent``):
+``./scripts/run.py --default-video --turbo 2 --lang en --debug-utils --port 7777 --silent``):
 
     cd autoplay
     PYTHONPATH=src:ai-code:../MegaDriveEnvironment/python/src python3.11 \\

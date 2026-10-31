@@ -57,7 +57,7 @@ def main() -> int:
     for iteration in range(1, maximum + 1):
         executable = built_executable(sor_root / "build", "sor")
         print(f"==> [smart {iteration}] run")
-        code = subprocess.run([str(executable), "--rom", str(rom), "--aux-addr-file", str(auxiliary), *sys.argv[1:], "--debug-utils", "--lang", "en", "--turbo", "4"]).returncode
+        code = subprocess.run([str(executable), "--rom", str(rom), "--aux-addr-file", str(auxiliary), *sys.argv[1:], "--debug-utils", "--default-video", "--lang", "en", "--turbo", "4"]).returncode
         sort_aux_addresses(auxiliary)
         if code == 42:
             print(f"==> [smart {iteration}] new unknown address recorded; rebuilding")

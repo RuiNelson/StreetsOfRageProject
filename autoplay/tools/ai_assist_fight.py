@@ -127,7 +127,7 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
-    command = [args.sor, "--rom", args.rom, "--turbo", "2", "--lang", "en", "--silent", "--debug-utils",
+    command = [args.sor, "--rom", args.rom, "--default-video", "--turbo", "2", "--lang", "en", "--silent", "--debug-utils",
                "--port", str(args.port), "--ai-path", args.ai_path]
     if args.p2 == "embedded":
         command.append("--ai-assist")

@@ -48,6 +48,7 @@ study.
 - [Play](#play)
   - [Default controls](#default-controls)
   - [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)
+  - [Video settings](#video-settings)
   - [Host keyboard shortcuts](#host-keyboard-shortcuts)
   - [Debug utility hotkeys (Cheats)](#debug-utility-hotkeys-cheats)
   - [Startup flags](#startup-flags)
@@ -623,6 +624,24 @@ The controls are saved at once in
 (`%USERPROFILE%\.config\StreetsOfRageProject\controls.yaml` on Windows),
 which is created with the defaults above on the first run.
 
+### Video settings
+
+In the game, open **OPTIONS > VIDEO**:
+
+| Entry | What it does |
+| --- | --- |
+| VSYNC | `AUTO` keeps the game's own speed on any screen, with no tearing, and is the one to use unless you have a reason not to. `VSYNC`, `VSYNC HALF` and `VSYNC THIRD` tie the speed to the screen, every 1, 2 or 3 refreshes; the screen tells you your refresh rate and the speed that gives |
+| PICTURE | `ORIGINAL 4:3`, or `WIDESCREEN 16:9` for a wider view of the game |
+| DISPLAY | `WINDOW` or `FULLSCREEN` |
+| INTEGER SCALING | Sharp, even pixels, with borders around the picture |
+| RESET TO DEFAULTS | Puts the defaults back on the screen; they count only after SAVE AND APPLY |
+| SAVE AND APPLY | Uses the settings at once and keeps them for next time |
+| CANCEL | Leaves without changing anything (Start or Esc do the same) |
+
+They are saved in `video.yaml`, next to `controls.yaml`. An option given on the command line
+wins over the file for that run; the screen still shows it and can change it, and SAVE AND APPLY saves what it shows.
+`Ctrl+F` switches between window and fullscreen for the current session only.
+
 ### Host keyboard shortcuts
 
 These shortcuts operate at the host-runtime level and are independent of the
@@ -689,11 +708,12 @@ version.
 | `--soundtrack DIR` | Pre-rendered soundtrack directory; default: `soundtrack/` next to the ROM |
 | `--debug-log` | Log CPU and VDP state once per second |
 | `--debug-utils` | Enable debug hotkeys, host cheats, and remote access |
-| `--fullscreen` | Start in desktop fullscreen |
-| `--frame-sync auto\|vsync\|vsync-half\|vsync-third` | What sets the game's speed: `auto` (default) is the internal timer, on any monitor, without tearing, and VRR monitors can follow it (use fullscreen for VRR); `vsync`, `vsync-half` and `vsync-third` follow the monitor, every 1, 2 or 3 refreshes |
-| `--widescreen` | Use VDP Mode 48 (48×27 tiles, 384×216) instead of Mode 40; a host-only mode the hardware does not have, see [Widescreen](#widescreen-mode-48) |
-| `--integer-scaling` | Scale the picture by whole multiples only, centred with borders (320×224 in a 1920×1080 window or monitor is drawn 4× at 1280×896 instead of filling the height), nearest-neighbour |
-| `--turbo N` | With `--frame-sync auto`, run the internal VDP at `60 × N` Hz; `N` must be a positive integer |
+| `--fullscreen`, `--windowed` | Start in desktop fullscreen, or in a window; default: as in `video.yaml`, see [Video settings](#video-settings) |
+| `--frame-sync auto\|vsync\|vsync-half\|vsync-third` | What sets the game's speed: `auto` (the default in `video.yaml`) is the internal timer, on any monitor, without tearing, and VRR monitors can follow it (use fullscreen for VRR); `vsync`, `vsync-half` and `vsync-third` follow the monitor, every 1, 2 or 3 refreshes |
+| `--widescreen`, `--no-widescreen` | Use VDP Mode 48 (48×27 tiles, 384×216) instead of Mode 40; a host-only mode the hardware does not have, see [Widescreen](#widescreen-mode-48) |
+| `--integer-scaling`, `--no-integer-scaling` | Scale the picture by whole multiples only, centred with borders (320×224 in a 1920×1080 window or monitor is drawn 4× at 1280×896 instead of filling the height), nearest-neighbour |
+| `--default-video` | Ignore `video.yaml` for this run: the defaults, plus any other video option given. For scripts and measurements |
+| `--turbo N` | Run the internal VDP at `60 × N` Hz, on the timer unless `--frame-sync` says otherwise; `N` must be a positive integer |
 | `--port PORT` | With `--debug-utils`, select the remote-access TCP port; default: `6969`; `0` disables remote access |
 | `--aux-addr-file PATH` | Discovery mode: append an unknown indirect-dispatch address to this file and exit with status `42` instead of aborting |
 | `--call-log PATH` | Write every 68000 subroutine entry and call to a typed CSV log (six-digit hexadecimal ROM addresses); the file is replaced on startup |

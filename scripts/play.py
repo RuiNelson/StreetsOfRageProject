@@ -8,9 +8,9 @@
 
 The window remembers its settings in last_play_py_settings.yml (meta-repository
 root, gitignored) and reads it back on the next launch. Presets given on the
-command line start from the defaults, never from the saved file, and do not
-overwrite it, so a scripted run is reproducible. Unknown options are handed to
-autoplay as they are.
+command line start from the defaults, never from the saved file, do not
+overwrite it and ignore the game's video.yaml, so a scripted run is reproducible.
+Unknown options are handed to autoplay as they are.
 
 Standard library only; the window needs a Python with Tk (_tkinter).
 """
@@ -42,16 +42,18 @@ DEFAULTS: dict[str, Any] = {
     # host (sor)
     "port": 6969,
     "turbo": 0,  # 0 = off; needs frame_sync "auto"
-    "frame_sync": "auto",  # or "vsync", "vsync-half", "vsync-third": sor --frame-sync
+    "frame_sync": "",  # "" = the game's video.yaml; "auto", "vsync", "vsync-half", "vsync-third": sor --frame-sync
     "lang": "en",  # "" = the host's own default
     "hz": 0,  # 0 = the host's own default
     "silent": False,
     "sound": "prerendered",  # or "emulated": sor --sound (ignored when silent)
     "soundtrack": "",  # "" = sor's default, soundtrack/ next to the ROM
     "ai_path": "",  # "" = the checkout's autoplay/ai-code (run.py)
-    "fullscreen": False,
-    "widescreen": False,
-    "integer_scaling": False,  # --integer-scaling, whole-number scale factors only
+    # "" = the game's video.yaml (OPTIONS > VIDEO), "on" or "off" win over it for the run
+    "fullscreen": "",  # --fullscreen / --windowed
+    "widescreen": "",  # --widescreen / --no-widescreen
+    "integer_scaling": "",  # --integer-scaling / --no-integer-scaling, whole-number scale factors only
+    "default_video": False,  # --default-video, ignore video.yaml altogether
     "debug_utils": True,  # remote access, hotkeys and cheats: always on when autoplay runs
     "debug": False,
     "call_log": "",
@@ -70,6 +72,12 @@ DEFAULTS: dict[str, Any] = {
     "extra": "",  # more autoplay arguments, as typed
     # launcher
     "build_first": False,
+}
+
+VIDEO_SWITCHES = {
+    "fullscreen": ("--fullscreen", "--windowed"),
+    "widescreen": ("--widescreen", "--no-widescreen"),
+    "integer_scaling": ("--integer-scaling", "--no-integer-scaling"),
 }
 
 # Fields a preset sets. The rest (widescreen, integer scaling, fullscreen, ROM, sound source, soundtrack
@@ -145,6 +153,7 @@ def format_value(value: Any) -> str:
 
 def load_settings(path: Path = SETTINGS_PATH) -> dict[str, Any]:
     settings = dict(DEFAULTS)
+    old_format = False
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -158,11 +167,20 @@ def load_settings(path: Path = SETTINGS_PATH) -> dict[str, Any]:
         if key not in DEFAULTS:
             continue
         value = parse_value(rest)
+        if key in VIDEO_SWITCHES:
+            # A file from before video.yaml held true or false, and false meant no option at all.
+            if isinstance(value, bool):
+                old_format = True
+                value = "on" if value else ""
+            elif value not in {"", "on", "off"}:
+                value = ""
         default = DEFAULTS[key]
         if isinstance(value, bool) == isinstance(default, bool) and isinstance(value, type(default)):
             settings[key] = value
         elif isinstance(default, str):
             settings[key] = str(value)
+    if old_format and settings["frame_sync"] == "auto":
+        settings["frame_sync"] = ""  # that file's default, which would now hide video.yaml's choice
     return settings
 
 
@@ -182,9 +200,11 @@ def save_settings(settings: dict[str, Any], path: Path = SETTINGS_PATH) -> None:
 def host_arguments(s: dict[str, Any], *, with_autoplay: bool) -> list[str]:
     """Arguments for scripts/run.py (the optional ROM comes first, as run.py expects)."""
     args: list[str] = [s["rom"]] if s["rom"] else []
+    if s["default_video"]:
+        args.append("--default-video")
     if s["turbo"] > 0:
-        args += ["--turbo", str(s["turbo"])]
-    elif s["frame_sync"] != "auto":
+        args += ["--turbo", str(s["turbo"])]  # sor then runs on its timer, whatever video.yaml says
+    elif s["frame_sync"]:
         args += ["--frame-sync", s["frame_sync"]]
     if s["lang"]:
         args += ["--lang", s["lang"]]
@@ -194,12 +214,9 @@ def host_arguments(s: dict[str, Any], *, with_autoplay: bool) -> list[str]:
         args.append("--debug-utils")
     if s["debug"]:
         args.append("--debug-log")
-    if s["fullscreen"]:
-        args.append("--fullscreen")
-    if s["widescreen"]:
-        args.append("--widescreen")
-    if s["integer_scaling"]:
-        args.append("--integer-scaling")
+    for key, (on, off) in VIDEO_SWITCHES.items():
+        if s[key]:
+            args.append(on if s[key] == "on" else off)
     args += ["--port", str(s["port"])]
     if s["silent"]:
         args.append("--silent")
@@ -294,7 +311,7 @@ def check(s: dict[str, Any], mode: str, *, probe: bool = False) -> tuple[list[st
             errors.append(f"port {s['port']} already has a listener (a host is running?): Ctrl+A attaches to it")
     elif probe and not errors and not port_in_use(s["port"]):
         warnings.append(f"nothing is listening on port {s['port']} yet")
-    if mode != "autoplay" and s["turbo"] > 0 and s["frame_sync"] != "auto":
+    if mode != "autoplay" and s["turbo"] > 0 and s["frame_sync"] not in {"", "auto"}:
         warnings.append("turbo needs frame sync auto: the frame sync setting is ignored")
     if mode != "host" and s["lockstep"] and s["poll_ms"]:
         warnings.append("lockstep paces itself: --poll-ms is not passed")
@@ -339,7 +356,12 @@ def execute(s: dict[str, Any], mode: str) -> int:
 
 LANG_CHOICES = [("default", ""), ("en (overseas)", "en"), ("jp (Japan)", "jp")]
 TURBO_CHOICES = [("off", 0), ("x2", 2), ("x3", 3), ("x4", 4), ("x6", 6), ("x10", 10), ("x16", 16), ("x24", 24), ("x32", 32)]
-FRAME_SYNC_CHOICES = [("auto", "auto"), ("VSync", "vsync"), ("VSync / 2", "vsync-half"), ("VSync / 3", "vsync-third")]
+FROM_GAME = "as set in the game"
+FRAME_SYNC_CHOICES = [(FROM_GAME, ""), ("auto", "auto"), ("VSync", "vsync"), ("VSync / 2", "vsync-half"),
+                      ("VSync / 3", "vsync-third")]
+FULLSCREEN_CHOICES = [(FROM_GAME, ""), ("window", "off"), ("fullscreen", "on")]
+WIDESCREEN_CHOICES = [(FROM_GAME, ""), ("original 4:3", "off"), ("widescreen 16:9", "on")]
+INTEGER_SCALING_CHOICES = [(FROM_GAME, ""), ("off", "off"), ("on", "on")]
 HZ_CHOICES = [("default", 0), ("60 (NTSC)", 60), ("50 (PAL)", 50)]
 SOUND_CHOICES = [("pre-rendered", "prerendered"), ("emulated chips", "emulated")]
 REACH_CHOICES = [("stay in the menus", ""), ("Axel", "axel"), ("Adam", "adam"), ("Blaze", "blaze")]
@@ -348,6 +370,7 @@ SWEEP_CHOICES = [("none", ""), ("street enemies", "street"), ("until Mr. X (roun
 ]
 CHOICES = {
     "lang": LANG_CHOICES, "turbo": TURBO_CHOICES, "frame_sync": FRAME_SYNC_CHOICES, "hz": HZ_CHOICES, "sound": SOUND_CHOICES,
+    "fullscreen": FULLSCREEN_CHOICES, "widescreen": WIDESCREEN_CHOICES, "integer_scaling": INTEGER_SCALING_CHOICES,
     "reach": REACH_CHOICES, "sweep": SWEEP_CHOICES,
 }
 
@@ -417,14 +440,15 @@ class PlayWindow:
         self.check(host, 3, "Silent (^N)", "silent")
         self.combo(host, 4, "Sound (ignored when silent)", "sound")
         self.entry(host, 5, "Soundtrack folder (empty = next to the ROM)", "soundtrack", browse=True)
-        self.check(host, 6, "Fullscreen (^F)", "fullscreen")
-        self.check(host, 7, "Widescreen (^W)", "widescreen")
-        self.check(host, 8, "Integer scaling (^U)", "integer_scaling")
-        self.check(host, 9, "Debug utils: remote access, hotkeys (^D)", "debug_utils")
-        self.check(host, 10, "Log CPU/VDP state, --debug-log", "debug")
-        self.entry(host, 11, "Call log file", "call_log")
-        self.entry(host, 12, "ROM file", "rom")
-        self.entry(host, 13, "AI folder, --ai-path (empty = autoplay/ai-code)", "ai_path", browse=True)
+        self.combo(host, 6, "Display (^F)", "fullscreen")
+        self.combo(host, 7, "Picture (^W)", "widescreen")
+        self.combo(host, 8, "Integer scaling (^U)", "integer_scaling")
+        self.check(host, 9, "Ignore the game's video.yaml, --default-video", "default_video")
+        self.check(host, 10, "Debug utils: remote access, hotkeys (^D)", "debug_utils")
+        self.check(host, 11, "Log CPU/VDP state, --debug-log", "debug")
+        self.entry(host, 12, "Call log file", "call_log")
+        self.entry(host, 13, "ROM file", "rom")
+        self.entry(host, 14, "AI folder, --ai-path (empty = autoplay/ai-code)", "ai_path", browse=True)
 
         self.check(autoplay, 0, "AI plays P1 (^7)", "agent_p1")
         self.check(autoplay, 1, "AI plays P2 (^8)", "agent_p2")
@@ -665,8 +689,8 @@ class PlayWindow:
             "s": lambda: self.launch("host"), "a": lambda: self.launch("autoplay"),
             "q": lambda: self.finish("quit"),
             "b": lambda: self.toggle("build_first"),
-            "n": lambda: self.toggle("silent"), "f": lambda: self.toggle("fullscreen"),
-            "w": lambda: self.toggle("widescreen"), "u": lambda: self.toggle("integer_scaling"),
+            "n": lambda: self.toggle("silent"), "f": lambda: self.cycle("fullscreen"),
+            "w": lambda: self.cycle("widescreen"), "u": lambda: self.cycle("integer_scaling"),
             "d": lambda: self.toggle("debug_utils"), "l": lambda: self.toggle("lockstep"),
             "7": lambda: self.toggle("agent_p1"), "8": lambda: self.toggle("agent_p2"),
             "t": lambda: self.cycle("turbo"), "g": lambda: self.cycle("reach"), "k": lambda: self.cycle("sweep"),
@@ -770,7 +794,7 @@ def main() -> int:
         print("play.py: --level must be 1-8", file=sys.stderr)
         return 2
     if arguments.preset:
-        settings = preset_settings(dict(DEFAULTS), arguments.preset, arguments.level)
+        settings = preset_settings({**DEFAULTS, "default_video": True}, arguments.preset, arguments.level)
     else:
         settings = load_settings()
     if extra:

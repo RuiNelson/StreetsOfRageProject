@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "MegaDriveEnvironme
 from megadrive_remote import ServerError  # noqa: E402
 from megadrive_remote.exceptions import ErrorCode  # noqa: E402
 
-from sor_autoplay.app import ObserverApp  # noqa: E402
+from sor_autoplay.app import HOST_FLAGS_REFRESH_S, ObserverApp  # noqa: E402
 from sor_autoplay.host_flags import (  # noqa: E402
     FLAG_WIDESCREEN,
     HostModes,
@@ -74,6 +74,22 @@ class ObserverAppModeTests(unittest.TestCase):
         app._read_widescreen(client)
         self.assertTrue(app.widescreen)
         self.assertEqual(app.six_button, {1: False, 2: False})
+
+    def test_widescreen_follows_the_host_while_connected(self):
+        # OPTIONS > VIDEO can change it under a running host.
+        app = self._app()
+        client = _Client(_flags())
+        app._read_widescreen(client)
+        self.assertFalse(app.widescreen)
+        client.flags = _flags(FLAG_WIDESCREEN)
+        app._refresh_widescreen(client)
+        self.assertFalse(app.widescreen)  # not due yet
+        self.assertEqual(client.reads, 1)
+        app._host_flags_read_at -= HOST_FLAGS_REFRESH_S
+        app._refresh_widescreen(client)
+        self.assertTrue(app.widescreen)
+        self.assertEqual(client.reads, 2)
+        self.assertEqual(client.scheme_reads, 0)
 
     def test_schemes_wait_for_the_ai(self):
         app = self._app()

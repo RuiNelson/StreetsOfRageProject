@@ -194,6 +194,25 @@ old names. They are kebab-case and `--help` groups them (Game, Video, Audio, AI,
 `play.py`'s saved `vsync` setting became `frame_sync`; an old file's value is ignored, so it starts at `auto`.
 `MegaDriveEnvironmentSampleGame` keeps its own `--debug`.
 
+## OPTIONS > VIDEO and `video.yaml`
+
+User request (2026-10-31): a **VIDEO** row after CONTROLS on the OPTIONS screen opens a screen with VSYNC
+(AUTO, VSYNC, VSYNC HALF, VSYNC THIRD), PICTURE (ORIGINAL 4:3, WIDESCREEN 16:9), DISPLAY (WINDOW, FULLSCREEN) and
+INTEGER SCALING, then RESET TO DEFAULTS (fills the screen only), SAVE AND APPLY (at once, no restart) and CANCEL,
+with two lines of plain help per row. Saved in `video.yaml`, next to `controls.yaml`. User decisions:
+
+- the command line wins over the file for that run (`--fullscreen`/`--windowed`, `--widescreen`/`--no-widescreen`,
+  `--integer-scaling`/`--no-integer-scaling`, `--frame-sync`), but stays editable on the screen, and SAVE AND
+  APPLY saves what the screen shows;
+- the VSYNC names are the technical ones, with a help line giving the screen's Hz and the speed that results;
+- Ctrl+F changes the current session only; it is saved only through SAVE AND APPLY.
+
+`--turbo` without `--frame-sync` runs on the timer whatever the file says. **Measurements must not depend on the
+player's file**: `--default-video` ignores it (other video options still apply), `play.py --preset` passes it,
+as should any host started by hand for a measurement. In `play.py`'s window the four fields default to
+"as set in the game", which passes no option, and **Ignore the game's video.yaml** is `--default-video`.
+Details: `StreetsOfRageRecompilation/CLAUDE.md`, **OPTIONS > VIDEO**.
+
 ## Frame sync: automatic by default
 
 User request (2026-10-30): the default (`--frame-sync auto`) works on macOS, Windows and Linux with
@@ -336,10 +355,10 @@ under a street/Mr. X sweep also updates the sweep and `--no-food` for the
 round. The host panel's **Sound** (`--sound`, ignored when silent) and
 **Soundtrack folder** (`--soundtrack`, empty = next to the ROM, `...` opens a
 folder chooser) fields warn when the folder has no `manifest.tsv`. The launches run in a child `play.py --run-saved MODE` (internal) so the window stays responsive (no macOS beach ball) and shows the run's status; Quit stops the child. Keys: `^R`/`^Return` run both, `^S` host only, `^A` autoplay only, `^B`
-build first, `^1`-`^6` presets, `^N` silent, `^T` turbo, `^W` widescreen, `^U` integer scaling, `^7`/`^8` AI P1/P2, `^L` lockstep, `^G` character, `^K` sweep,
+build first, `^1`-`^6` presets, `^N` silent, `^T` turbo, `^F` display, `^W` picture, `^U` integer scaling, `^7`/`^8` AI P1/P2, `^L` lockstep, `^G` character, `^K` sweep,
 `^=`/`^-` start level, `^E` extra args, `^0` reset, `^Q` quit. Command-line
 runs start from the defaults plus the preset (never the saved file), do not
-overwrite it, and pass unknown options on to autoplay. Agents use the
+overwrite it, ignore the game's `video.yaml` (`--default-video`), and pass unknown options on to autoplay. Agents use the
 command-line form (it needs no Tk); `PRESETS` in `play.py` is the source of
 truth for the session flags. Add a setting in `DEFAULTS` and the two argument
 builders.
@@ -357,7 +376,7 @@ autoplay poll cadence. Use the preset:
 ./scripts/play.py --preset turbo
 ```
 
-equivalent to `./scripts/run.py --turbo 2 --lang en --debug-utils --port 7777
+equivalent to `./scripts/run.py --default-video --turbo 2 --lang en --debug-utils --port 7777
 --silent &` plus `./scripts/autoplay.py --poll-ms 16 --port 7777 --agent-p1
 --reach-gameplay blaze`. Until 2026-10-28 every turbo was capped at the
 development machine's 120 Hz display: the host presented each frame
@@ -389,7 +408,7 @@ tick — no poll pacing), use the preset:
 ./scripts/play.py --preset lockstep
 ```
 
-equivalent to `./scripts/run.py --lang en --debug-utils --port 6767 --silent &`
+equivalent to `./scripts/run.py --default-video --lang en --debug-utils --port 6767 --silent &`
 plus `./scripts/autoplay.py --lockstep --port 6767 --agent-p1 --reach-gameplay
 blaze`. Own port (6767) so it runs next to the turbo sessions. Extra args
 pass through to autoplay (`--start-level`, `--kill-street-enemies`,
