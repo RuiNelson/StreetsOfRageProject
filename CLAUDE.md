@@ -221,7 +221,7 @@ which stays. Start opens **RESUME** and **FORFEIT**. FORFEIT asks "ARE YOU SURE 
 cursor on NO: player 1 in a 1-player or AI Assist game, each human in turn in a 2-player game, each answering only for
 themself. A player who says YES loses all continues, goes to one life and dies at once, and the game over is the
 natural one; in 2 players the other plays on. In AI Assist the one answer forfeits both, since the AI left alone
-would keep playing with the person out (my decision, not the user's). Details:
+would keep playing with the person out (user decision). Details:
 `StreetsOfRageRecompilation/CLAUDE.md`, **The pause menu**.
 
 ## Frame sync: automatic by default
