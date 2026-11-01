@@ -92,13 +92,19 @@ function Invoke-Task([string]$Message, [string]$File, [string[]]$Arguments, [str
     Write-TaskResult $Message $success $elapsed
     if (-not $success) {
         Blank
-        $errLines = @(Get-Content -LiteralPath $err -Tail 25 -ErrorAction SilentlyContinue)
-        $outLines = @(Get-Content -LiteralPath $out -Tail 25 -ErrorAction SilentlyContinue)
-        $shown = if ($errLines.Count -ge 8) { $errLines } else { $outLines + $errLines }
-        foreach ($line in ($shown | Select-Object -Last 25)) { Out-Line "    $line" }
+        Say-Muted "Exit code $($process.ExitCode). The end of what it printed:"
+        Blank
+        # Two logs, because the program's two streams cannot share one file: show both, labelled.
+        foreach ($log in @(@('output', $out), @('errors', $err))) {
+            $lines = @(Get-Content -LiteralPath $log[1] -Tail 12 -ErrorAction SilentlyContinue | Where-Object { $_.Trim() })
+            if ($lines.Count -eq 0) { continue }
+            Out-Line "  $($script:Muted)-- $($log[0]) --$($script:Rst)"
+            foreach ($line in $lines) { Out-Line "    $line" }
+        }
         Blank
         $script:KeepLogs = $true
-        Say-Muted "Full log: $err"
+        Say-Muted "Full logs: $out"
+        Say-Muted "          $err"
     }
     return $success
 }

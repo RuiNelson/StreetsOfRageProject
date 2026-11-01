@@ -267,6 +267,8 @@ run_task() {
     else
         printf '  %s%s%s %s %s(failed after %s)%s\n' "$ERR" "$G_FAIL" "$RST" "$message" "$MUTED" "$(format_elapsed "$elapsed")" "$RST"
         blank
+        muted "Exit status $status. The end of what it printed:"
+        blank
         tail -n 25 "$log" | sed 's/^/    /'
         blank
         TUI_KEEP_LOGS=1
