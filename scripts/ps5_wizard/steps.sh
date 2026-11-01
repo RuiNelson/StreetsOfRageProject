@@ -297,7 +297,7 @@ EOF
 
 step_soundtrack() {
     step_begin 3 "Pre-rendering the soundtrack"
-    say "The music, sound effects and voices are rendered from your ROM into FLAC files, because the console's real-time sound is not good enough. This is done inside the container."
+    say "The music, sound effects and voices are rendered from your ROM into FLAC files. This is done inside the container."
     blank
     ensure_image
 

@@ -59,7 +59,7 @@ mv "$out.rendering" "$out"
 
 function Step-Soundtrack {
     Start-Step 3 'Pre-rendering the soundtrack'
-    Say "The music, sound effects and voices are rendered from your ROM into FLAC files, because the console's real-time sound is not good enough. This is done inside the container."
+    Say "The music, sound effects and voices are rendered from your ROM into FLAC files. This is done inside the container."
     Blank
     Initialize-Image
 
