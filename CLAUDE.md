@@ -76,7 +76,7 @@ User decisions. Implementation details are in `StreetsOfRageRecompilation/CLAUDE
 
 ## Hand-written C++ keeps the original memory layout
 
-Reimplemented routines never move game state. Every field stays in 68000 work RAM at its original address, width and encoding, updated on the same frame as the ROM, and tables are read from the ROM, because `autoplay` reads the game by address (`memory_map.py`, `rom_data.py`). See **Manual subroutines** and the `reimplement-subroutine` skill.
+Reimplemented routines never move game state. Every field stays in 68000 work RAM at its original address, width and encoding, updated on the same frame as the ROM, and tables are read from the ROM, because `autoplay` reads the game by address (`memory_map.py`, `rom_data.py`). A reimplemented routine calls only reimplemented routines (user, 2026-11-01): reimplement the callee instead of calling generated code. See **Manual subroutines** and the `reimplement-subroutine` skill.
 
 ## Reverse-engineering tools
 
