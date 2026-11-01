@@ -83,6 +83,10 @@ fn game_options(inputs: &Inputs) -> [(&'static str, &Path); 3] {
 fn create(folder: &Path, data: &Path, project: &Path) -> Result<[PathBuf; 2], String> {
     system::refresh_path();
     let inputs = inputs(project)?;
+    // The Windows desktop already exists: a wrong path must fail, not leave a new folder behind.
+    if cfg!(windows) && !folder.is_dir() {
+        return Err(format!("the desktop folder {} does not exist", folder.display()));
+    }
     std::fs::create_dir_all(folder).map_err(|e| format!("cannot create {}: {e}", folder.display()))?;
     std::fs::create_dir_all(data).map_err(|e| format!("cannot create {}: {e}", data.display()))?;
     platform::create(folder, data, &inputs)?;
@@ -124,7 +128,9 @@ mod tests {
     fn creates_the_real_shortcut() {
         let project = std::env::var("SOR_TEST_FOLDER").expect("SOR_TEST_FOLDER");
         let desktop = PathBuf::from(std::env::var("SOR_TEST_DESKTOP").expect("SOR_TEST_DESKTOP"));
-        let files = create(&desktop.join("StreetsOfRageProject"), &desktop.join("data"), Path::new(&project)).unwrap();
+        let folder = desktop.join("StreetsOfRageProject");
+        std::fs::create_dir_all(&folder).unwrap();
+        let files = create(&folder, &desktop.join("data"), Path::new(&project)).unwrap();
         for file in &files {
             println!("{}", file.display());
             assert!(file.exists());
