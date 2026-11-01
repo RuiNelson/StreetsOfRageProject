@@ -13,14 +13,22 @@ use std::os::windows::process::CommandExt;
 
 static SEARCH_PATH: RwLock<Option<OsString>> = RwLock::new(None);
 
+/// PowerShell running `script`, writing UTF-8: its default is the console code page of the system's
+/// language (850 in Portuguese), which turned the `Á` of `Área de Trabalho` into U+FFFD.
+#[cfg(windows)]
+pub fn powershell(script: &str) -> Command {
+    let script = format!("[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); {script}");
+    let mut command = Command::new("powershell");
+    command.args(["-NoProfile", "-NonInteractive", "-Command", &script]).stdin(Stdio::null());
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    command
+}
+
 #[cfg(windows)]
 fn extra_directories() -> Vec<PathBuf> {
     // Machine and user PATH as stored in the registry, expanded.
     let script = "[Environment]::ExpandEnvironmentVariables([Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User'))";
-    let mut command = Command::new("powershell");
-    command.args(["-NoProfile", "-NonInteractive", "-Command", script]).stdin(Stdio::null());
-    command.creation_flags(0x0800_0000);
-    command
+    powershell(script)
         .output()
         .map(|out| std::env::split_paths(String::from_utf8_lossy(&out.stdout).trim()).collect())
         .unwrap_or_default()
