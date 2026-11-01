@@ -425,7 +425,7 @@ upload_files() {
     done <"$list"
 
     blank
-    say "Sending $total_files files ($(human_size "$total_bytes")). Close the game on the console first."
+    say "Sending $total_files files ($(human_size "$total_bytes")). The first small files will take the most time."
     blank
     tui_cursor_hide
     local attempt

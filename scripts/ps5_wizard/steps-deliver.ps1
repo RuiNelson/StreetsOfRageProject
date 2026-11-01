@@ -92,7 +92,7 @@ function Send-Files {
     $totalBytes = 0
     foreach ($item in $list) { $item.Size = (Get-Item -LiteralPath $item.Local).Length; $totalBytes += $item.Size }
     Blank
-    Say "Sending $totalFiles files ($(Format-Size $totalBytes)). Close the game on the console first."
+    Say "Sending $totalFiles files ($(Format-Size $totalBytes)). The first small files will take the most time."
     Blank
     Hide-Cursor
     $sent = 0
