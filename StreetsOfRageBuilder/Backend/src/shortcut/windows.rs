@@ -11,8 +11,7 @@ const ICON_ICO: &[u8] = include_bytes!("../../icons/icon.ico");
 
 /// The desktop folder (it may be redirected, for example to OneDrive).
 pub fn destination(_location: Option<&str>) -> Result<PathBuf, String> {
-    let output = system::run("powershell", &["-NoProfile", "-NonInteractive", "-Command", "[Environment]::GetFolderPath('Desktop')"])
-        .ok_or("PowerShell was not found")?;
+    let output = system::powershell("[Environment]::GetFolderPath('Desktop')").output().map_err(|e| format!("cannot run PowerShell: {e}"))?;
     let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     if path.is_empty() {
         return Err("cannot find the desktop folder".into());
@@ -24,8 +23,7 @@ fn write_lnk(file: &Path, target: &Path, arguments: &str, project: &Path, icon: 
     let script = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:SOR_LNK); \
                   $s.TargetPath = $env:SOR_TARGET; $s.Arguments = $env:SOR_ARGS; $s.WorkingDirectory = $env:SOR_DIR; \
                   $s.IconLocation = $env:SOR_ICON; $s.Description = $env:SOR_DESCRIPTION; $s.Save()";
-    let output = system::command(Path::new("powershell"))
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+    let output = system::powershell(script)
         .env("SOR_LNK", file)
         .env("SOR_TARGET", target)
         .env("SOR_ARGS", arguments)

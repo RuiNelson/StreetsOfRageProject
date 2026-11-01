@@ -109,7 +109,10 @@ treat an outdated output as not done and say so.
 A **Streets of Rage** shortcut made by an older Builder is left where it is, and still works.
 
 - **Windows**: two `.lnk` on the desktop (PowerShell `WScript.Shell`), pointing into the project: `sor.exe` with
-  `--rom`, `--soundtrack` and `--ai-path`, and `pyw -3 play.py`, so no console window.
+  `--rom`, `--soundtrack` and `--ai-path`, and `pyw -3 play.py`, so no console window. PowerShell goes through
+  `system::powershell`, which asks for UTF-8: a Portuguese Windows answers in code page 850, the `Á` of a redirected
+  `OneDrive\Área de Trabalho` was lost and the `.lnk` could not be saved (user report, 2026-11-01; fix not run on Windows).
+  A desktop folder that does not exist is an error, never created, or a wrong path leaves a stray folder behind.
 - **Linux** (user: like Windows, no copy): two `.desktop` files on the desktop, pointing into the project
   (`Exec` quoted, `Path` the project, `gio` trusted flag).
 - **macOS**: a `StreetsOfRageProject` folder with two bundles, in `/Applications` or `~` (a radio button
