@@ -6,10 +6,13 @@
 # Git on Windows usually checks files out with CRLF line endings, which the shell scripts and the
 # patch of the PS5 build cannot take inside a Linux container. Returns how many files it changed.
 function ConvertTo-LineFeeds {
-    $root = Join-Path $script:SorDir 'prospero'
     $changed = 0
-    $files = Get-ChildItem -LiteralPath $root -Recurse -File -Force | Where-Object {
-        $_.Extension -in @('.sh', '.site', '.patch') -or $_.Name -eq 'Dockerfile'
+    # cmake/ too: build-cpython.sh reads the CPython version out of CPythonRuntime.cmake with sed,
+    # which finds nothing when the line ends in CRLF.
+    $files = @(Get-ChildItem -LiteralPath (Join-Path $script:SorDir 'prospero') -Recurse -File -Force) +
+        @(Get-ChildItem -LiteralPath (Join-Path $script:SorDir 'cmake') -File -Force)
+    $files = $files | Where-Object {
+        $_.Extension -in @('.sh', '.site', '.patch', '.cmake') -or $_.Name -eq 'Dockerfile'
     }
     foreach ($file in $files) {
         $bytes = [IO.File]::ReadAllBytes($file.FullName)
