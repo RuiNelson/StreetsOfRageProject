@@ -774,6 +774,7 @@ Changes to the original game, all off by default. In the game, open **OPTIONS > 
 | Entry | `--qol` | What it does |
 | --- | --- | --- |
 | ROLL CAMERA EARLIER | `cam` | The camera rolls with the player at 30% of the screen instead of past the middle (55%), so more of the street is ahead. On round 8, which scrolls left, at 70% instead of 45% |
+| FRIEND GRAB KEEPS WEAPON | `grab` | A friend who grabs you no longer makes you drop your weapon: it is hidden during the hold and back in your hand after it. An enemy's grab, and any hit (a friend's throw too), still drop it |
 
 They are saved in `qol.yaml`, next to `controls.yaml`, with SAVE AND APPLY. `--qol a,b,c` turns those options on for that run,
 over the file; the screen still shows them and can change them, and SAVE AND APPLY saves what it shows.
@@ -849,7 +850,7 @@ version.
 | `--widescreen`, `--no-widescreen` | Use VDP Mode 48 (48×27 tiles, 384×216) instead of Mode 40; a host-only mode the hardware does not have, see [Widescreen](#widescreen-mode-48) |
 | `--integer-scaling`, `--no-integer-scaling` | Scale the picture by whole multiples only, centred with borders (320×224 in a 1920×1080 window or monitor is drawn 4× at 1280×896 instead of filling the height), nearest-neighbour |
 | `--default-video` | Ignore `video.yaml` for this run: the defaults, plus any other video option given. For scripts and measurements |
-| `--qol A,B` | Turn on quality-of-life options for this run, separated by commas: `cam`; see [Quality-of-life settings](#quality-of-life-settings) |
+| `--qol A,B` | Turn on quality-of-life options for this run, separated by commas: `cam`, `grab`; see [Quality-of-life settings](#quality-of-life-settings) |
 | `--default-qol` | Ignore `qol.yaml` for this run: the defaults, plus anything `--qol` turns on. For scripts and measurements |
 | `--turbo N` | Run the internal VDP at `60 × N` Hz, on the timer unless `--frame-sync` says otherwise; `N` must be a positive integer |
 | `--port PORT` | With `--debug-utils`, select the remote-access TCP port; default: `6969`; `0` disables remote access |
