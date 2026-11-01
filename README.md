@@ -577,7 +577,7 @@ This builds an installed homebrew title with its own home-screen tile, drawn thr
 jailbroken PS5 that you own, and it needs the same ROM as the desktop builds: nothing
 copyrighted is in the title.
 
-##### The wizard (macOS and Linux)
+##### The wizard (macOS, Linux and Windows)
 
 If you only want the game on your console, one script does everything below in a container,
 with a container engine ([OrbStack](https://orbstack.dev/),
@@ -588,6 +588,14 @@ sends the files to the console over FTP, and cleans up after itself:
 
 ```bash
 ./scripts/ps5_wizzard.sh
+```
+
+On Windows 11, run it from a terminal, for the same result with
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) or
+[Podman Desktop](https://podman-desktop.io/) and nothing else installed:
+
+```powershell
+.\scripts\ps5_wizzard.cmd
 ```
 
 The steps below are the manual route.
