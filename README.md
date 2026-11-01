@@ -584,7 +584,7 @@ with a container engine ([OrbStack](https://orbstack.dev/),
 [Docker](https://www.docker.com/products/docker-desktop/) or
 [Podman](https://podman-desktop.io/)) as the only thing to install. It checks your ROM,
 renders the soundtrack, builds the title, then makes two ZIP files in the current folder or
-sends the files to the console over FTP, and cleans up after itself:
+sends the files to the console over FTP:
 
 ```bash
 ./scripts/ps5_wizzard.sh
@@ -604,15 +604,12 @@ The steps below are the manual route.
 
 On the console:
 
-- a homebrew enabler such as [etaHEN](https://github.com/etaHEN/etaHEN);
-- [ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus) 1.7beta4 or newer, which shows
-  the title on the home screen and lets it reach `/data`;
-- an FTP server on port 2121, such as [ftpsrv](https://github.com/ps5-payload-dev/ftpsrv).
+- [ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus) 1.7beta4 or newer
+- an FTP server, such as [my ftpsrv](https://github.com/RuiNelson/ftpsrv-streamextract), [drakmor's ftpsrv](https://github.com/drakmor/ftpsrv), [John Törnblom's ftpsrv](https://github.com/ps5-payload-dev/ftpsrv), etc.
 
-On your computer: [Docker](https://www.docker.com) with about 10 GB free, plus the desktop
-prerequisites, because the C++ generation and the soundtrack run there. The toolchain itself
-is built inside Docker, and the first build takes a while. So far it has been built only on an
-Arm Mac.
+On your computer: [Docker](https://www.docker.com) or any Docker-compatible software,
+with about 10 GB free, plus the desktop prerequisites, because the C++ generation and the soundtrack run there.
+The toolchain itself is built inside Docker, and the first build takes a while.
 
 ##### Configure, compile, and run
 
@@ -637,25 +634,24 @@ Extract the soundtrack from your ROM (about 4 minutes, ~265 MB). On the PS5 it i
 Close the title if it is running, then copy everything to the console, using its address:
 
 ```bash
-./scripts/deploy_ps5.py --host 192.168.1.100
+./scripts/deploy_ps5.py --host your.ps5.address
 ```
 
 The tile appears on the home screen after a few seconds. The console then holds:
 
 | Folder | What is in it |
 | --- | --- |
-| `/data/homebrew/PPSA99872/` | The program and its home-screen files |
+| `/data/homebrew/PPSA99872/` | The app |
 | `/data/sor/` | The ROM, `soundtrack/`, the AI in `ai-code/`, Python in `python/`, `controls.yaml`, `video.yaml` and `ai.log` |
 
 If the ROM, the soundtrack, the AI or Python is missing, the title says what to copy in a
-notification and closes. There is no fallback to emulated sound, or to a game without the AI.
+notification and closes.
 
 Good to know:
 
 - The console pairs each controller with a signed-in user, so a second player needs a second
   user signed in. **1 PLAYER AI ASSIST** needs only one.
-- The menus leave out what a console has no use for: BIND KEYBOARD, and fullscreen or window.
-- The title has no command line. Options go in `/data/sor/args.txt`, one per line.
+- The title has no command line. If you need run-time arguments, write one per line in `/data/sor/args.txt`.
 - If the AI does not play, `/data/sor/ai.log` says why.
 - A built title links GPL-3.0 parts of the PS5 stack; see
   [`prospero/LICENSING.md`](StreetsOfRageRecompilation/prospero/LICENSING.md).
