@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { appendLine, Progress } from "@/components/Progress";
+import { playResult } from "@/lib/sounds";
 import type { StepProps } from "@/lib/steps";
 import { extractSound, soundtrackStatus, type Chip, type Soundtrack } from "@/lib/tauri";
 
@@ -46,9 +47,11 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
     setProgress(["Starting…"]);
     try {
       setDone(await extractSound(projectPath, chip, (line) => setProgress((lines) => appendLine(lines, line))));
+      playResult(true);
     } catch (e) {
       setDone(null);
       setError(errorText(e));
+      playResult(false);
     } finally {
       setBusyState(false);
     }
@@ -62,8 +65,7 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
     <div className="extract">
       <div className="notice">
         <p>
-          The game plays its music and sound effects from recordings made from your ROM, because the real-time sound
-          emulation is not good enough. Extract them once; it builds a small tool first, then renders every sound.
+          The game plays its music and sound effects from recordings made from your ROM. Extract them once; it builds a small tool first, then renders every sound.
         </p>
       </div>
       <div className="notice warning">

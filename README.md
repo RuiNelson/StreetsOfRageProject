@@ -45,6 +45,7 @@ study.
     - [4. Build on Windows](#4-build-on-windows)
     - [5. Build on macOS](#5-build-on-macos)
     - [6. Build on Ubuntu](#6-build-on-ubuntu)
+    - [7. Build for PlayStation 5](#7-build-for-playstation-5)
 - [Play](#play)
   - [Default controls](#default-controls)
   - [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)
@@ -568,6 +569,92 @@ Run the port:
 ```bash
 ./scripts/play.py
 ```
+
+#### 7. Build for PlayStation 5
+
+This builds an installed homebrew title with its own home-screen tile, drawn through
+[Mesa's RADV on the console](https://github.com/mihawk-99/PS5_Vulkan). It runs only on a
+jailbroken PS5 that you own, and it needs the same ROM as the desktop builds: nothing
+copyrighted is in the title.
+
+##### The wizard (macOS, Linux and Windows)
+
+If you only want the game on your console, one script does everything below in a container,
+with a container engine ([OrbStack](https://orbstack.dev/),
+[Docker](https://www.docker.com/products/docker-desktop/) or
+[Podman](https://podman-desktop.io/)) as the only thing to install. It checks your ROM,
+renders the soundtrack, builds the title, then makes two ZIP files in the current folder or
+sends the files to the console over FTP:
+
+```bash
+./scripts/ps5_wizzard.sh
+```
+
+On Windows 11, run it from a terminal, for the same result with
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) or
+[Podman Desktop](https://podman-desktop.io/) and nothing else installed:
+
+```powershell
+.\scripts\ps5_wizzard.cmd
+```
+
+The steps below are the manual route.
+
+##### Prerequisites
+
+On the console:
+
+- [ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus) 1.7beta4 or newer
+- an FTP server, such as [my ftpsrv](https://github.com/RuiNelson/ftpsrv-streamextract), [drakmor's ftpsrv](https://github.com/drakmor/ftpsrv), [John Törnblom's ftpsrv](https://github.com/ps5-payload-dev/ftpsrv), etc.
+
+On your computer: [Docker](https://www.docker.com) or any Docker-compatible software,
+with about 10 GB free, plus the desktop prerequisites, because the C++ generation and the soundtrack run there.
+The toolchain itself is built inside Docker, and the first build takes a while.
+
+##### Configure, compile, and run
+
+Generate the C++ port:
+
+```bash
+./scripts/generate_cpp.py
+```
+
+Build the title into `StreetsOfRageRecompilation/dist-ps5/`:
+
+```bash
+./scripts/build_ps5.py
+```
+
+Extract the soundtrack from your ROM (about 4 minutes, ~265 MB). On the PS5 it is required:
+
+```bash
+./scripts/render_soundtrack.py
+```
+
+Close the title if it is running, then copy everything to the console, using its address:
+
+```bash
+./scripts/deploy_ps5.py --host your.ps5.address
+```
+
+The tile appears on the home screen after a few seconds. The console then holds:
+
+| Folder | What is in it |
+| --- | --- |
+| `/data/homebrew/PPSA99872/` | The app |
+| `/data/sor/` | The ROM, `soundtrack/`, the AI in `ai-code/`, Python in `python/`, `controls.yaml`, `video.yaml` and `ai.log` |
+
+If the ROM, the soundtrack, the AI or Python is missing, the title says what to copy in a
+notification and closes.
+
+Good to know:
+
+- The console pairs each controller with a signed-in user, so a second player needs a second
+  user signed in. **1 PLAYER AI ASSIST** needs only one.
+- The title has no command line. If you need run-time arguments, write one per line in `/data/sor/args.txt`.
+- If the AI does not play, `/data/sor/ai.log` says why.
+- A built title links GPL-3.0 parts of the PS5 stack; see
+  [`prospero/LICENSING.md`](StreetsOfRageRecompilation/prospero/LICENSING.md).
 
 ## Play
 

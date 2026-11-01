@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { appendLine, Progress } from "@/components/Progress";
+import { playResult } from "@/lib/sounds";
 import type { StepProps } from "@/lib/steps";
 import { buildGame, gameStatus, type Game } from "@/lib/tauri";
 
@@ -40,9 +41,11 @@ export function Build({ setReady, setBusy, actions, projectPath }: StepProps) {
     setProgress(["Starting…"]);
     try {
       setDone(await buildGame(projectPath, (line) => setProgress((lines) => appendLine(lines, line))));
+      playResult(true);
     } catch (e) {
       setDone(null);
       setError(errorText(e));
+      playResult(false);
     } finally {
       setBusyState(false);
     }

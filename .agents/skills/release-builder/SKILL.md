@@ -85,7 +85,7 @@ release describe the whole wizard.
 
 ## Run Instructions
 
-The apps are not signed yet, so your system will warn you the first time. It is safe to continue.
+The apps are not signed, so your system will warn you the first time. It is safe to continue.
 
 ### macOS
 

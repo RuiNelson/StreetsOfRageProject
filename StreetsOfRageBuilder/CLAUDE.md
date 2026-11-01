@@ -74,6 +74,9 @@ render when the user comes back. Failure shows the last lines of output. The end
 is `#[ignore]`d (`SOR_TEST_FOLDER`, `SOR_TEST_ROM`; it works in a scratch clone, never in the
 user's `rom/soundtrack`).
 
+Steps 4 and 5 play `public/success.mp3` or `public/failure.mp3` when the run ends (user request;
+`Frontend/src/lib/sounds.ts`). Compiled and exported, but not listened to inside the Tauri window on any platform.
+
 ## Step 5: build
 
 `Backend/src/compile.rs` runs `scripts/generate_cpp_and_build.py --release` through
