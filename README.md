@@ -1,5 +1,10 @@
 # Streets of Rage Project
 
+![macOS](https://img.shields.io/badge/macOS-Supported-000000?logo=apple)
+![Windows](https://img.shields.io/badge/Windows-Supported-0078D4?logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTAgMGgxMS4ydjExLjJIMHpNMTIuOCAwSDI0djExLjJIMTIuOHpNMCAxMi44aDExLjJWMjRIMHpNMTIuOCAxMi44SDI0VjI0SDEyLjh6Ii8%2BPC9zdmc%2B)
+![Linux](https://img.shields.io/badge/Linux-Supported-E95420?logo=linux&logoColor=white)
+![PS5](https://img.shields.io/badge/PS5-Supported-003791?logo=playstation)
+
 <p align="center">
  <img src="docs/charselect.webp" width="400">
 </p>
@@ -20,44 +25,55 @@ study.
 
 ## Contents
 
-- [Project structure](#project-structure)
-  - [Acknowledgments](#acknowledgments)
-  - [The `RageDecompiler` recompiler](#the-ragedecompiler-recompiler)
-  - [The `MegaDriveEnvironment` development and runtime library](#the-megadriveenvironment-development-and-runtime-library)
-  - [The recompiled game in `StreetsOfRageRecompilation`](#the-recompiled-game-in-streetsofragerecompilation)
-    - [`output`](#output)
-    - [`ai-analysis`](#ai-analysis)
-    - [`code-analysis`](#code-analysis)
-    - [`generated`](#generated)
-    - [Hand-written code](#hand-written-code)
-  - [The `autoplay` observer and symbolic AI](#the-autoplay-observer-and-symbolic-ai)
-    - [1 PLAYER AI ASSIST](#1-player-ai-assist)
-    - [The AI player](#the-ai-player)
-- [How to build](#how-to-build)
-  - [Using the Builder (recommended)](#using-the-builder-recommended)
-    - [Download and open the Builder](#download-and-open-the-builder)
-    - [Follow the six steps](#follow-the-six-steps)
-  - [Building by hand](#building-by-hand)
-    - [1. Common prerequisites](#1-common-prerequisites)
-    - [2. Clone the repository and submodules](#2-clone-the-repository-and-submodules)
-    - [3. Obtain a compatible ROM](#3-obtain-a-compatible-rom)
-      - [Legal and preservation considerations](#legal-and-preservation-considerations)
-    - [4. Build on Windows](#4-build-on-windows)
-    - [5. Build on macOS](#5-build-on-macos)
-    - [6. Build on Ubuntu](#6-build-on-ubuntu)
-    - [7. Build for PlayStation 5](#7-build-for-playstation-5)
-- [Play](#play)
-  - [Default controls](#default-controls)
-  - [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)
-  - [Pausing](#pausing)
-  - [Video settings](#video-settings)
-  - [Host keyboard shortcuts](#host-keyboard-shortcuts)
-  - [Debug utility hotkeys (Cheats)](#debug-utility-hotkeys-cheats)
-  - [Startup flags](#startup-flags)
-  - [Widescreen (Mode 48)](#widescreen-mode-48)
-  - [Pre-rendered soundtrack](#pre-rendered-soundtrack)
-- [Research](#research)
-  - [Call-map database](#call-map-database)
+- [Streets of Rage Project](#streets-of-rage-project)
+  - [Contents](#contents)
+  - [Project structure](#project-structure)
+    - [Acknowledgments](#acknowledgments)
+    - [The `RageDecompiler` recompiler](#the-ragedecompiler-recompiler)
+    - [The `MegaDriveEnvironment` development and runtime library](#the-megadriveenvironment-development-and-runtime-library)
+    - [The recompiled game in `StreetsOfRageRecompilation`](#the-recompiled-game-in-streetsofragerecompilation)
+      - [`output`](#output)
+      - [`ai-analysis`](#ai-analysis)
+      - [`code-analysis`](#code-analysis)
+      - [`generated`](#generated)
+      - [Hand-written code](#hand-written-code)
+    - [The `autoplay` observer and symbolic AI](#the-autoplay-observer-and-symbolic-ai)
+      - [1 PLAYER AI ASSIST](#1-player-ai-assist)
+      - [The AI player](#the-ai-player)
+  - [How to build](#how-to-build)
+    - [Using the Builder for Windows, Mac or Linux (recommended)](#using-the-builder-for-windows-mac-or-linux-recommended)
+      - [Download and open the Builder](#download-and-open-the-builder)
+      - [Follow the six steps](#follow-the-six-steps)
+    - [Building by hand](#building-by-hand)
+      - [1. Common prerequisites](#1-common-prerequisites)
+      - [2. Clone the repository and submodules](#2-clone-the-repository-and-submodules)
+      - [3. Obtain a compatible ROM](#3-obtain-a-compatible-rom)
+        - [Legal and preservation considerations](#legal-and-preservation-considerations)
+      - [4. Build on Windows](#4-build-on-windows)
+        - [Prerequisites](#prerequisites)
+        - [Configure, compile, and run](#configure-compile-and-run)
+      - [5. Build on macOS](#5-build-on-macos)
+        - [Prerequisites](#prerequisites-1)
+        - [Configure, compile, and run](#configure-compile-and-run-1)
+      - [6. Build on Ubuntu](#6-build-on-ubuntu)
+        - [Prerequisites](#prerequisites-2)
+        - [Configure, compile, and run](#configure-compile-and-run-2)
+      - [7. Build for PlayStation 5](#7-build-for-playstation-5)
+        - [The wizard (macOS, Linux and Windows)](#the-wizard-macos-linux-and-windows)
+        - [Prerequisites](#prerequisites-3)
+        - [Configure, compile, and run](#configure-compile-and-run-3)
+  - [Play](#play)
+    - [Default controls](#default-controls)
+    - [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)
+    - [Pausing](#pausing)
+    - [Video settings](#video-settings)
+    - [Host keyboard shortcuts](#host-keyboard-shortcuts)
+    - [Debug utility hotkeys (Cheats)](#debug-utility-hotkeys-cheats)
+    - [Startup flags](#startup-flags)
+    - [Widescreen (Mode 48)](#widescreen-mode-48)
+    - [Pre-rendered soundtrack](#pre-rendered-soundtrack)
+  - [Research](#research)
+    - [Call-map database](#call-map-database)
 
 ## Project structure
 
@@ -277,7 +293,7 @@ the ROM models, measurements, and test procedures are in
 
 ![VDP Dump](docs/vdp_dump.webp)
 
-### Using the Builder (recommended)
+### Using the Builder for Windows, Mac or Linux (recommended)
 
 ![Streets of Rage Builder](docs/builder.webp)
 
@@ -338,7 +354,7 @@ Then double-click **StreetsOfRageRecompilation** to play, and see
 If a step fails, the last lines of its output are shown; fix the cause (for
 example, a missing tool) and run the step again.
 
-### Building by hand
+### Building by hand for Windows, Mac, Linux o PS5
 
 The steps below do by hand what the Builder does. Follow them if you prefer, or if
 your system is not supported by the Builder.
@@ -375,21 +391,25 @@ root.
 
 #### 2. Clone the repository and submodules
 
+A build needs one commit of history and the commits of the submodules, not the
+whole history, so clone shallow: `--depth 1` fetches a single commit of the
+meta-repository and `--shallow-submodules` one commit of each submodule.
+
 ```bash
-git clone --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
+git clone --depth 1 --shallow-submodules --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
 cd StreetsOfRageProject
 ```
 
 If the repository was cloned without submodules:
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init --recursive --depth 1
 ```
 
 To restore all submodules to the commits recorded by the meta-repository:
 
 ```bash
-git submodule update --init --recursive --checkout
+git submodule update --init --recursive --checkout --depth 1
 ```
 
 #### 3. Obtain a compatible ROM
@@ -587,6 +607,8 @@ renders the soundtrack, builds the title, then makes two ZIP files in the curren
 sends the files to the console over FTP:
 
 ```bash
+git clone --depth 1 --shallow-submodules --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
+cd StreetsOfRageProject
 ./scripts/ps5_wizzard.sh
 ```
 
@@ -595,6 +617,8 @@ On Windows 11, run it from a terminal, for the same result with
 [Podman Desktop](https://podman-desktop.io/) and nothing else installed:
 
 ```powershell
+git clone --depth 1 --shallow-submodules --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
+cd StreetsOfRageProject
 .\scripts\ps5_wizzard.cmd
 ```
 
