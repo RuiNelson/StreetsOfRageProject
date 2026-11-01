@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { appendLine, Progress } from "@/components/Progress";
+import { playResult } from "@/lib/sounds";
 import type { StepProps } from "@/lib/steps";
 import { extractSound, soundtrackStatus, type Chip, type Soundtrack } from "@/lib/tauri";
 
@@ -46,9 +47,11 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
     setProgress(["Starting…"]);
     try {
       setDone(await extractSound(projectPath, chip, (line) => setProgress((lines) => appendLine(lines, line))));
+      playResult(true);
     } catch (e) {
       setDone(null);
       setError(errorText(e));
+      playResult(false);
     } finally {
       setBusyState(false);
     }
