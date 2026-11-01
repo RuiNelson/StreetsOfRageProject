@@ -67,6 +67,7 @@ study.
     - [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)
     - [Pausing](#pausing)
     - [Video settings](#video-settings)
+    - [Quality-of-life settings](#quality-of-life-settings)
     - [Host keyboard shortcuts](#host-keyboard-shortcuts)
     - [Debug utility hotkeys (Cheats)](#debug-utility-hotkeys-cheats)
     - [Startup flags](#startup-flags)
@@ -666,7 +667,7 @@ The tile appears on the home screen after a few seconds. The console then holds:
 | Folder | What is in it |
 | --- | --- |
 | `/data/homebrew/PPSA99872/` | The app |
-| `/data/sor/` | The ROM, `soundtrack/`, the AI in `ai-code/`, Python in `python/`, `controls.yaml`, `video.yaml` and `ai.log` |
+| `/data/sor/` | The ROM, `soundtrack/`, the AI in `ai-code/`, Python in `python/`, `controls.yaml`, `video.yaml`, `qol.yaml` and `ai.log` |
 
 If the ROM, the soundtrack, the AI or Python is missing, the title says what to copy in a
 notification and closes.
@@ -766,6 +767,17 @@ They are saved in `video.yaml`, next to `controls.yaml`. An option given on the 
 wins over the file for that run; the screen still shows it and can change it, and SAVE AND APPLY saves what it shows.
 `Ctrl+F` switches between window and fullscreen for the current session only.
 
+### Quality-of-life settings
+
+Changes to the original game, all off by default. In the game, open **OPTIONS > QUALITY-OF-LIFE**:
+
+| Entry | `--qol` | What it does |
+| --- | --- | --- |
+| ROLL CAMERA EARLIER | `cam` | The camera rolls with the player at 30% of the screen instead of past the middle (55%), so more of the street is ahead. On round 8, which scrolls left, at 70% instead of 45% |
+
+They are saved in `qol.yaml`, next to `controls.yaml`, with SAVE AND APPLY. `--qol a,b,c` turns those options on for that run,
+over the file; the screen still shows them and can change them, and SAVE AND APPLY saves what it shows.
+
 ### Host keyboard shortcuts
 
 These shortcuts operate at the host-runtime level and are independent of the
@@ -837,6 +849,8 @@ version.
 | `--widescreen`, `--no-widescreen` | Use VDP Mode 48 (48×27 tiles, 384×216) instead of Mode 40; a host-only mode the hardware does not have, see [Widescreen](#widescreen-mode-48) |
 | `--integer-scaling`, `--no-integer-scaling` | Scale the picture by whole multiples only, centred with borders (320×224 in a 1920×1080 window or monitor is drawn 4× at 1280×896 instead of filling the height), nearest-neighbour |
 | `--default-video` | Ignore `video.yaml` for this run: the defaults, plus any other video option given. For scripts and measurements |
+| `--qol A,B` | Turn on quality-of-life options for this run, separated by commas: `cam`; see [Quality-of-life settings](#quality-of-life-settings) |
+| `--default-qol` | Ignore `qol.yaml` for this run: the defaults, plus anything `--qol` turns on. For scripts and measurements |
 | `--turbo N` | Run the internal VDP at `60 × N` Hz, on the timer unless `--frame-sync` says otherwise; `N` must be a positive integer |
 | `--port PORT` | With `--debug-utils`, select the remote-access TCP port; default: `6969`; `0` disables remote access |
 | `--aux-addr-file PATH` | Discovery mode: append an unknown indirect-dispatch address to this file and exit with status `42` instead of aborting |

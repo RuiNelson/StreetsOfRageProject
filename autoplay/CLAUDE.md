@@ -139,7 +139,7 @@ locked (wave gate or arena; `CameraRange.scroll_open`, `decide.scroll_is_open`).
 - The advance stands down while the scroll is locked. Never walk to the screen edge at a locked gate.
 - `could_walk_to_near_enemy` takes on-screen enemies only (user: if off screen, Centering to lure them out). Off-screen enemies do not hold an open scroll back (user: the AI got stuck Centering when the level asked for a little advance).
 - `decide.could_centering`: free to walk, any idle tick, not while advancing or with a partner ahead; X only, own lane, within 16 px of `centering_point_x`: camera centre, or with a `Partner` **a third of the screen from the back** (user). Lowest tier. **Never in Mr. X's office** (user).
-- `$18F5C` (two players): the camera scrolls with the lead past camera + `$B0` and the rear at camera + `$90` or more, so a centred leader never scrolls and a rear AI at the third holds the camera until `CatchUpPartner` moves it. Round 8 mirrors this.
+- `$18F5C` (two players): the camera scrolls with the lead past camera + `$B0` and the rear at camera + `$90` or more, so a centred leader never scrolls and a rear AI at the third holds the camera until `CatchUpPartner` moves it. Round 8 mirrors this. Under `sor --qol cam` the zone is earlier and this does not hold; unmeasured.
 
 User accepted it live in AI Assist (2026-10-31); no scored A/B. `WalkToScreenCenter` was removed (user: "é inútil"). Watch: hits at locked gates.
 
