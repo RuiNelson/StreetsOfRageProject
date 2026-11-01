@@ -6,6 +6,7 @@ Usage: update_version_everywhere.py X.Y.Z [--dry-run]
 Edits the files in place as text (formatting and line endings are kept):
 
 - StreetsOfRageRecompilation/main.cpp (`sor --version`)
+- StreetsOfRageRecompilation/prospero/sce_sys/param.json (the PS5 title, as NN.NNN.NNN)
 - StreetsOfRageBuilder/Backend/tauri.conf.json
 - StreetsOfRageBuilder/Backend/Cargo.toml and the `streets-of-rage-builder`
   entry of Backend/Cargo.lock
@@ -20,6 +21,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from _common import META_ROOT
 
@@ -29,6 +31,14 @@ BUILDER = META_ROOT / "StreetsOfRageBuilder"
 VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
 
 
+def console_version(version: str) -> str:
+    """X.Y.Z as a PS5 title's contentVersion wants it: 0.3.1 is 00.003.001. A suffix has no place there."""
+    major, minor, patch = (int(part) for part in re.match(r"\d+\.\d+\.\d+", version).group().split("."))
+    if major > 99 or minor > 999 or patch > 999:
+        raise SystemExit(f"{version} does not fit a PS5 title's NN.NNN.NNN")
+    return f"{major:02d}.{minor:03d}.{patch:03d}"
+
+
 @dataclass(frozen=True)
 class Edit:
     path: Path
@@ -36,12 +46,18 @@ class Edit:
     pattern: str
     count: int = 1
     flags: int = re.MULTILINE
+    written_as: Callable[[str], str] = str
 
 
 EDITS = (
     Edit(
         RECOMPILATION / "main.cpp",
         r'(set_version_flag\("-V,--version",\s*")([^"]+)(")',
+    ),
+    Edit(
+        RECOMPILATION / "prospero" / "sce_sys" / "param.json",
+        r'(^  "contentVersion":\s*")([^"]+)(")',
+        written_as=console_version,
     ),
     Edit(
         BUILDER / "Backend" / "tauri.conf.json",
@@ -81,7 +97,7 @@ def apply(edit: Edit, version: str) -> tuple[str, str, str]:
     new_text = text
     for match in reversed(chosen):
         start, end = match.span(2)
-        new_text = new_text[:start] + version + new_text[end:]
+        new_text = new_text[:start] + edit.written_as(version) + new_text[end:]
     return text, new_text, previous
 
 
@@ -97,7 +113,7 @@ def main() -> int:
     results = [(edit, *apply(edit, args.version)) for edit in EDITS]
     for edit, old, new, previous in results:
         relative = edit.path.relative_to(META_ROOT)
-        print(f"{relative}: {previous} -> {args.version}")
+        print(f"{relative}: {previous} -> {edit.written_as(args.version)}")
         if not args.dry_run and new != old:
             edit.path.write_text(new, encoding="utf-8", newline="")
     return 0

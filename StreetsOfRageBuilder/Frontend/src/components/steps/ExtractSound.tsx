@@ -65,8 +65,7 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
     <div className="extract">
       <div className="notice">
         <p>
-          The game plays its music and sound effects from recordings made from your ROM, because the real-time sound
-          emulation is not good enough. Extract them once; it builds a small tool first, then renders every sound.
+          The game plays its music and sound effects from recordings made from your ROM. Extract them once; it builds a small tool first, then renders every sound.
         </p>
       </div>
       <div className="notice warning">
