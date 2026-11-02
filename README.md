@@ -6,7 +6,7 @@
 ![PS5](https://img.shields.io/badge/PS5-Supported-003791?logo=playstation)
 
 <p align="center">
- <img src="docs/charselect.webp" width="400">
+ <video src="https://github.com/RuiNelson/StreetsOfRageProject/raw/main/docs/sor.mp4" width="640" autoplay loop muted playsinline controls></video>
 </p>
 
 Welcome to my reverse-engineering and recompilation project for SEGA's
