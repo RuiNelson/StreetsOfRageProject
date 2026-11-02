@@ -6,7 +6,7 @@
 ![PS5](https://img.shields.io/badge/PS5-Supported-003791?logo=playstation)
 
 <p align="center">
- <video src="https://github.com/user-attachments/assets/577a4bc3-bc4e-4014-9c3a-4440b38ac203" width="640" autoplay loop muted playsinline controls></video>
+ <video src="https://github.com/user-attachments/assets/84983bde-22ba-4627-94a7-a1f49b7dac3b" width="640" autoplay loop muted playsinline controls></video>
 </p>
 
 Welcome to my reverse-engineering and recompilation project for SEGA's
