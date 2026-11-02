@@ -1,4 +1,4 @@
-//! Step 4: render the soundtrack from the ROM with the project's own `scripts/render_soundtrack.py`
+//! Step 5: render the soundtrack from the ROM with the project's own `scripts/render_soundtrack.py`
 //! (it builds the renderer, then renders every track to FLAC under `rom/soundtrack/`).
 
 use std::path::{Path, PathBuf};
@@ -17,20 +17,20 @@ pub struct Soundtrack {
     pub outdated: bool,
 }
 
-fn soundtrack_folder(project: &Path) -> PathBuf {
+pub(crate) fn soundtrack_folder(project: &Path) -> PathBuf {
     project.join("StreetsOfRageRecompilation").join("rom").join("soundtrack")
 }
 
 /// The renders come from the script and the renderer sources only (plus the ROM), so those two
 /// git object ids name the version; an update that leaves them alone keeps the soundtrack valid.
-fn version(project: &Path) -> Option<String> {
+pub(crate) fn version(project: &Path) -> Option<String> {
     let script = project::revision(project, "HEAD:scripts/render_soundtrack.py")?;
     let renderer = project::revision(&project.join("StreetsOfRageRecompilation"), "HEAD:tools/soundtrack")?;
     Some(format!("{script}:{renderer}"))
 }
 
 /// The soundtrack in the project, when a finished render is there (`manifest.tsv` is written last).
-fn status(project: &Path) -> Option<Soundtrack> {
+pub(crate) fn status(project: &Path) -> Option<Soundtrack> {
     let folder = soundtrack_folder(project);
     if !folder.join("manifest.tsv").is_file() {
         return None;
@@ -49,17 +49,17 @@ fn status(project: &Path) -> Option<Soundtrack> {
 }
 
 /// The Nuked OPN2 chip models `render_soundtrack.py --chip` accepts.
-const CHIPS: [&str; 2] = ["ym3438", "ym2612"];
+pub(crate) const CHIPS: [&str; 2] = ["ym3438", "ym2612"];
 
 fn extract(project: &Path, chip: &str, progress: &(dyn Fn(String) + Sync)) -> Result<Soundtrack, String> {
     if !CHIPS.contains(&chip) {
         return Err(format!("unknown chip {chip}"));
     }
     if !project.join("scripts").join("render_soundtrack.py").is_file() {
-        return Err(format!("{} is not the project folder; redo step 2.", project.display()));
+        return Err(format!("{} is not the project folder; redo step 3.", project.display()));
     }
     if !project.join("StreetsOfRageRecompilation").join("rom").join("SOR.bin").is_file() {
-        return Err("The ROM is not in the project yet; redo step 3.".into());
+        return Err("The ROM is not in the project yet; redo step 4.".into());
     }
     let rendered_from = version(project);
     script::run(project, "render_soundtrack.py", &["--chip", chip], progress)?;
@@ -122,7 +122,7 @@ mod tests {
         std::fs::create_dir_all(project.join("scripts")).unwrap();
         assert!(extract(&project, "ym3438", &|_| {}).is_err());
         std::fs::write(project.join("scripts/render_soundtrack.py"), "").unwrap();
-        assert!(extract(&project, "ym3438", &|_| {}).unwrap_err().contains("step 3"));
+        assert!(extract(&project, "ym3438", &|_| {}).unwrap_err().contains("step 4"));
         assert!(extract(&project, "sid", &|_| {}).unwrap_err().contains("unknown chip"));
         std::fs::remove_dir_all(&project).unwrap();
     }

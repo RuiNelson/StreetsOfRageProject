@@ -157,32 +157,22 @@ function Step-Deliver {
 function Step-Cleanup {
     Start-Step 6 'Cleaning up'
     $remove = @(@{ Label = 'The container image and build volume'; Detail = 'about 5 GB and the compiled objects' })
-    if (-not $script:HadGenerated -and (Test-Path -LiteralPath $script:GeneratedDir)) { $remove += @{ Label = 'The generated C++'; Detail = (Get-RelativeToRepo $script:GeneratedDir) } }
-    if (-not $script:HadDist -and (Test-Path -LiteralPath $script:DistDir)) { $remove += @{ Label = 'The built title'; Detail = (Get-RelativeToRepo $script:DistDir) } }
-    if (-not $script:HadSoundtrack -and (Test-Path -LiteralPath $script:SoundtrackDir)) { $remove += @{ Label = 'The rendered soundtrack'; Detail = (Get-RelativeToRepo $script:SoundtrackDir) } }
-    if (-not $script:HadRom -and (Test-Path -LiteralPath $script:RomDest)) { $remove += @{ Label = 'The copy of your ROM'; Detail = (Get-RelativeToRepo $script:RomDest) } }
+    if (Test-Path -LiteralPath $script:DistDir) { $remove += @{ Label = 'The built title'; Detail = (Get-RelativeToRepo $script:DistDir) } }
 
-    Say 'Everything the wizard made can be removed now. Your ZIP files and your own ROM file stay.'
+    Say 'The container and the built title can be removed now. Your ZIP files, the ROM and the rendered soundtrack stay.'
     Blank
     foreach ($item in $remove) { Out-Line "    $($script:Accent)-$($script:Rst) $($item.Label)  $($script:Muted)$($item.Detail)$($script:Rst)" }
     Blank
-    $choice = Show-Menu @('Clean up everything|free the disk space', 'Keep it all|faster the next time')
+    $choice = Show-Menu @('Clean up|free the disk space', 'Keep it all|faster the next time')
     Blank
     if ($choice -eq 0) {
         & $script:EnginePath image rm -f $Image *> $null
         if ($LASTEXITCODE -eq 0) { Say-Ok 'Removed the container image' }
         & $script:EnginePath volume rm -f $BuildVolume *> $null
         if ($LASTEXITCODE -eq 0) { Say-Ok 'Removed the build volume' }
-        $targets = @(
-            @($script:HadGenerated, $script:GeneratedDir, 'the generated C++'),
-            @($script:HadDist, $script:DistDir, 'the built title'),
-            @($script:HadSoundtrack, $script:SoundtrackDir, 'the rendered soundtrack'),
-            @($script:HadRom, $script:RomDest, 'the copy of your ROM'))
-        foreach ($target in $targets) {
-            if (-not $target[0] -and (Test-Path -LiteralPath $target[1])) {
-                Remove-Item -LiteralPath $target[1] -Recurse -Force
-                Say-Ok "Removed $($target[2])"
-            }
+        if (Test-Path -LiteralPath $script:DistDir) {
+            Remove-Item -LiteralPath $script:DistDir -Recurse -Force
+            Say-Ok 'Removed the built title'
         }
     } else {
         Say-Muted 'Nothing removed.'

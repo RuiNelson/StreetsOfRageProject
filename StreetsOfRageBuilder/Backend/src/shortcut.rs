@@ -1,4 +1,4 @@
-//! Step 6: how the player starts the game (user decisions). Two entries everywhere, the game itself
+//! Step 7: how the player starts the game (user decisions). Two entries everywhere, the game itself
 //! and a Launcher that opens the `scripts/play.py` window, made by the module of each system. The
 //! icons are embedded in this program, so they do not depend on files inside the project.
 
@@ -58,18 +58,18 @@ struct Inputs {
 fn inputs(project: &Path) -> Result<Inputs, String> {
     let play = project.join("scripts").join("play.py");
     if !play.is_file() {
-        return Err(format!("{} is not the project folder; redo step 2.", project.display()));
+        return Err(format!("{} is not the project folder; redo step 3.", project.display()));
     }
     let rom_folder = project.join("StreetsOfRageRecompilation").join("rom");
     let rom = rom_folder.join("SOR.bin");
     if !rom.is_file() {
-        return Err("The ROM is not in the project; finish step 3 first.".into());
+        return Err("The ROM is not in the project; finish step 4 first.".into());
     }
     let soundtrack = rom_folder.join("soundtrack");
     if !soundtrack.join("manifest.tsv").is_file() {
-        return Err("The soundtrack is not rendered; finish step 4 first.".into());
+        return Err("The soundtrack is not rendered; finish step 5 first.".into());
     }
-    let sor = compile::executable(project).ok_or("The game is not built; finish step 5 first.")?;
+    let sor = compile::executable(project).ok_or("The game is not built; finish step 6 first.")?;
     let ai = project.join("autoplay").join("ai-code");
     Ok(Inputs { root: project.to_owned(), sor, rom, soundtrack, ai, play })
 }

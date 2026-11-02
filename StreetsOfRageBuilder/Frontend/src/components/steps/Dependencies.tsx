@@ -12,7 +12,7 @@ function errorText(error: unknown) {
   return typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
 }
 
-export function Dependencies({ setReady, actions }: StepProps) {
+export function Dependencies({ target, setReady, actions }: StepProps) {
   const [report, setReport] = useState<DependenciesReport | null>(null);
   const [checking, setChecking] = useState(true);
   const [installing, setInstalling] = useState<string[]>([]);
@@ -22,7 +22,7 @@ export function Dependencies({ setReady, actions }: StepProps) {
   const check = useCallback(async () => {
     setChecking(true);
     try {
-      const next = await checkDependencies();
+      const next = await checkDependencies(target);
       setReport(next);
       setReady(next.ready);
     } catch (e) {
@@ -31,7 +31,7 @@ export function Dependencies({ setReady, actions }: StepProps) {
     } finally {
       setChecking(false);
     }
-  }, [setReady]);
+  }, [target, setReady]);
 
   useEffect(() => {
     check();
@@ -118,6 +118,12 @@ function DependencyRow({ dependency: d, installing, disabled, onInstall }: {
       {d.state !== "ok" && d.installable && (
         <button disabled={disabled} onClick={onInstall}>{installing ? "Installing…" : "Install"}</button>
       )}
+      {d.state !== "ok" &&
+        d.links.map((link) => (
+          <button key={link.url} title={link.note} onClick={() => openUrl(link.url)}>
+            {link.name}
+          </button>
+        ))}
     </li>
   );
 }

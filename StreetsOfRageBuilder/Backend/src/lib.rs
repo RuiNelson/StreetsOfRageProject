@@ -2,6 +2,7 @@ mod compile;
 mod dependencies;
 mod platform;
 mod project;
+mod ps5;
 mod rom;
 mod script;
 mod shortcut;
@@ -28,6 +29,13 @@ pub fn run() {
             compile::build_game,
             shortcut::create_shortcut,
             shortcut::shortcut_status,
+            ps5::ps5_title_status,
+            ps5::ps5_render_soundtrack,
+            ps5::ps5_build,
+            ps5::ps5_make_zips,
+            ps5::ps5_probe_console,
+            ps5::ps5_upload,
+            ps5::ps5_clean_up,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Streets of Rage Builder");

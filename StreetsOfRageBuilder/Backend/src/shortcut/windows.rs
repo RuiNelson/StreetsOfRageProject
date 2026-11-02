@@ -41,7 +41,7 @@ fn write_lnk(file: &Path, target: &Path, arguments: &str, project: &Path, icon: 
 
 pub fn create(desktop: &Path, data: &Path, inputs: &Inputs) -> Result<(), String> {
     // pyw runs Python without a console window.
-    let pyw = system::find_program("pyw").ok_or("Python's pyw launcher was not found; finish step 1 first")?;
+    let pyw = system::find_program("pyw").ok_or("Python's pyw launcher was not found; finish step 2 first")?;
     let icon = data.join("icon.ico");
     std::fs::write(&icon, ICON_ICO).map_err(|e| format!("cannot write {}: {e}", icon.display()))?;
     let [game, launcher] = entries(desktop, EXTENSION);

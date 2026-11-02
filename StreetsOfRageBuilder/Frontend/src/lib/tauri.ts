@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import type { Target } from "./steps";
 
 export type Platform = "windows" | "macos" | "linux";
 
@@ -14,6 +15,8 @@ export interface Dependency {
   state: "ok" | "missing" | "unknown";
   detail: string | null;
   installable: boolean;
+  /** Pages to get it from, when the app cannot install it. */
+  links: { name: string; url: string; note: string }[];
 }
 
 export interface Manager {
@@ -34,7 +37,7 @@ export interface DependenciesReport {
 /** Ends the wizard (the last step's Finish). */
 export const finish = () => invoke<void>("finish");
 export const platformInfo = () => invoke<PlatformInfo>("platform_info");
-export const checkDependencies = () => invoke<DependenciesReport>("check_dependencies");
+export const checkDependencies = (target: Target) => invoke<DependenciesReport>("check_dependencies", { target });
 /** Resolves with notes to show; rejects with the failure text. */
 export const installDependencies = (ids: string[]) => invoke<string[]>("install_dependencies", { ids });
 
@@ -118,3 +121,41 @@ export const createShortcut = (project: string, location: ShortcutLocation | nul
   invoke<Shortcut>("create_shortcut", { project, location });
 /** The shortcuts already made, or null. */
 export const shortcutStatus = () => invoke<Shortcut | null>("shortcut_status");
+
+// The PS5 target: the same project built for the console inside a container.
+
+export interface Title {
+  folder: string;
+  /** Built from an older version of the project: build it again. */
+  outdated: boolean;
+}
+
+export interface ZipFile {
+  path: string;
+  size: number;
+}
+
+const withProgress = <T>(command: string, args: Record<string, unknown>, onProgress: (line: string) => void) => {
+  const progress = new Channel<string>();
+  progress.onmessage = onProgress;
+  return invoke<T>(command, { ...args, progress });
+};
+
+/** The PS5 title already built in the project, or null. */
+export const ps5TitleStatus = (project: string) => invoke<Title | null>("ps5_title_status", { project });
+/** Renders the soundtrack inside the container (minutes). */
+export const ps5RenderSoundtrack = (project: string, chip: Chip, onProgress: (line: string) => void) =>
+  withProgress<Soundtrack>("ps5_render_soundtrack", { project, chip }, onProgress);
+/** Generates the C++ and compiles the PS5 title inside the container (a long time). */
+export const ps5Build = (project: string, onProgress: (line: string) => void) =>
+  withProgress<Title>("ps5_build", { project }, onProgress);
+/** Writes the two ZIP files into `folder`. */
+export const ps5MakeZips = (project: string, folder: string, onProgress: (line: string) => void) =>
+  withProgress<ZipFile[]>("ps5_make_zips", { project, folder }, onProgress);
+/** Resolves when the console's FTP server answers; rejects with why not. */
+export const ps5ProbeConsole = (host: string, port: string) => invoke<void>("ps5_probe_console", { host, port });
+/** Sends everything to the console; resolves with the number of files. */
+export const ps5Upload = (project: string, host: string, port: string, onProgress: (line: string) => void) =>
+  withProgress<number>("ps5_upload", { project, host, port }, onProgress);
+/** Removes the container image, the build volume and the built title; resolves with what went. */
+export const ps5CleanUp = (project: string) => invoke<string[]>("ps5_clean_up", { project });

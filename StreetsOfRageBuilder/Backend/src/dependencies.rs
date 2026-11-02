@@ -1,10 +1,11 @@
-//! Step 1: which build tools are present, and installing the missing ones with the
+//! Step 2: which build tools are present, and installing the missing ones with the
 //! platform's package manager (winget, Homebrew or apt).
 
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
+use crate::ps5;
 use crate::system::{self, find_program, first_line, refresh_path};
 
 const WINGET_URL: &str = "https://winget.run";
@@ -16,6 +17,14 @@ const SDL_LIBRARIES: &[&str] = &[
     "libxfixes-dev", "libxi-dev", "libxss-dev", "libxkbcommon-dev", "libdrm-dev", "libgbm-dev",
     "libgl1-mesa-dev", "libegl1-mesa-dev", "libdbus-1-dev", "libudev-dev", "libwayland-dev", "libdecor-0-dev",
 ];
+
+/// What is being built: the game for this computer, or the title for the PS5 (inside a container).
+#[derive(Deserialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Target {
+    Local,
+    Ps5,
+}
 
 #[derive(Serialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -54,6 +63,15 @@ pub struct Dependency {
     state: State,
     detail: Option<String>,
     installable: bool,
+    /// Pages to get it from, when the app cannot install it.
+    links: Vec<Link>,
+}
+
+#[derive(Serialize)]
+pub struct Link {
+    name: &'static str,
+    url: &'static str,
+    note: &'static str,
 }
 
 #[derive(Serialize)]
@@ -292,7 +310,11 @@ fn debian_package_names() -> Vec<&'static str> {
     names
 }
 
-fn manager() -> Manager {
+fn manager(target: Target) -> Manager {
+    // The PS5 target needs only git, which the Command Line Tools bring: no Homebrew.
+    if target == Target::Ps5 && cfg!(target_os = "macos") {
+        return Manager { name: "Homebrew", available: true, help_url: None, message: None, manual_packages: vec![] };
+    }
     let (name, program, help_url, message) = if cfg!(windows) {
         ("winget", "winget", Some(WINGET_URL),
          "winget is not installed. Install it from the page below, then press Re-check.".to_owned())
@@ -323,13 +345,66 @@ fn evaluate(spec: &Spec, manager_available: bool) -> Dependency {
         state,
         detail,
         installable: state != State::Ok && manager_available,
+        links: vec![],
     }
 }
 
-fn report() -> Report {
+#[cfg(target_os = "macos")]
+const ENGINE_LINKS: &[Link] = &[
+    Link { name: "Docker Desktop", url: "https://www.docker.com/products/docker-desktop/", note: "Free, with paid plans." },
+    Link { name: "OrbStack", url: "https://orbstack.dev/", note: "Free for personal use. Recommended for macOS users." },
+    Link { name: "Podman Desktop", url: "https://podman-desktop.io/", note: "Free." },
+];
+
+#[cfg(windows)]
+const ENGINE_LINKS: &[Link] = &[
+    Link { name: "Docker Desktop", url: "https://www.docker.com/products/docker-desktop/", note: "Free, with paid plans. Uses WSL 2, which it offers to set up." },
+    Link { name: "Podman Desktop", url: "https://podman-desktop.io/", note: "Free." },
+];
+
+#[cfg(not(any(windows, target_os = "macos")))]
+const ENGINE_LINKS: &[Link] = &[
+    Link { name: "Docker Engine", url: "https://docs.docker.com/engine/install/", note: "Free. Packages for Ubuntu, Debian, Fedora and others." },
+    Link { name: "Podman", url: "https://podman.io/docs/installation", note: "Free. Install podman-docker for the docker command." },
+];
+
+#[cfg(target_os = "macos")]
+const ENGINE_START: &str = "Open Docker Desktop or OrbStack and wait until it says it is running. With Podman Desktop, start the Podman machine.";
+#[cfg(windows)]
+const ENGINE_START: &str = "Open Docker Desktop and wait until it says the engine is running. With Podman Desktop, start the Podman machine (in Resources).";
+#[cfg(not(any(windows, target_os = "macos")))]
+const ENGINE_START: &str = "Start the service (sudo systemctl enable --now docker), and if it says permission denied, add yourself to the docker group (sudo usermod -aG docker $USER) and log in again.";
+
+/// The container engine the PS5 build runs in: installed by the user, so only links.
+fn engine_dependency() -> Dependency {
+    let (state, detail, links) = match ps5::engine() {
+        ps5::Engine::Running { version, .. } => (State::Ok, Some(version), vec![]),
+        ps5::Engine::Stopped => (State::Missing, Some(format!("installed, but not running. {ENGINE_START}")), vec![]),
+        ps5::Engine::Missing => (State::Missing, None, ENGINE_LINKS.iter().map(|l| Link { ..*l }).collect()),
+    };
+    Dependency {
+        id: "engine",
+        name: "Container engine",
+        description: "The whole PS5 build runs in a container. Any one of these works; open it once so it can finish its setup.",
+        state,
+        detail,
+        installable: false,
+        links,
+    }
+}
+
+fn report(target: Target) -> Report {
     refresh_path();
-    let manager = manager();
-    let dependencies: Vec<Dependency> = specs().iter().map(|spec| evaluate(spec, manager.available)).collect();
+    let manager = manager(target);
+    // The PS5 build needs git to download the project, and the engine for everything else.
+    let mut dependencies: Vec<Dependency> = specs()
+        .iter()
+        .filter(|spec| target == Target::Local || spec.id == "git")
+        .map(|spec| evaluate(spec, manager.available))
+        .collect();
+    if target == Target::Ps5 {
+        dependencies.insert(0, engine_dependency());
+    }
     let ready = dependencies.iter().all(|d| d.state == State::Ok);
     Report { manager, dependencies, ready }
 }
@@ -473,8 +548,8 @@ fn install(requested: &[&Spec]) -> Result<Vec<String>, String> {
 // Commands
 
 #[tauri::command]
-pub async fn check_dependencies() -> Result<Report, String> {
-    tauri::async_runtime::spawn_blocking(report).await.map_err(|e| e.to_string())
+pub async fn check_dependencies(target: Target) -> Result<Report, String> {
+    tauri::async_runtime::spawn_blocking(move || report(target)).await.map_err(|e| e.to_string())
 }
 
 /// Install the given dependencies together (one apt or brew call, one password prompt).
@@ -499,7 +574,7 @@ mod tests {
 
     #[test]
     fn report_lists_every_spec_once() {
-        let report = report();
+        let report = report(Target::Local);
         let ids: Vec<&str> = report.dependencies.iter().map(|d| d.id).collect();
         let mut unique = ids.clone();
         unique.sort();
@@ -507,6 +582,14 @@ mod tests {
         assert_eq!(ids.len(), unique.len());
         assert!(!ids.is_empty());
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    }
+
+    #[test]
+    fn the_ps5_target_needs_git_and_an_engine_only() {
+        let report = report(Target::Ps5);
+        let ids: Vec<&str> = report.dependencies.iter().map(|d| d.id).collect();
+        assert_eq!(ids, ["engine", "git"]);
+        assert!(!report.dependencies[0].installable);
     }
 
     #[cfg(not(windows))]

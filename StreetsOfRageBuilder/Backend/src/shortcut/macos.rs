@@ -22,7 +22,7 @@ pub fn destination(location: Option<&str>) -> Result<PathBuf, String> {
 }
 
 pub fn create(folder: &Path, _data: &Path, inputs: &Inputs) -> Result<(), String> {
-    let (python, _) = dependencies::tk_python().ok_or("Python with Tk was not found; finish step 1 first")?;
+    let (python, _) = dependencies::tk_python().ok_or("Python with Tk was not found; finish step 2 first")?;
     write_bundles(folder, inputs, &python)
 }
 
@@ -148,7 +148,7 @@ fn is_system_library(name: &str) -> bool {
 
 /// Run a developer tool on a bundle's file, reporting what it says on failure.
 fn tool(program: &str, args: &[&str], file: &Path) -> Result<String, String> {
-    let path = system::find_program(program).ok_or_else(|| format!("{program} was not found; install the Xcode command line tools (step 1)"))?;
+    let path = system::find_program(program).ok_or_else(|| format!("{program} was not found; install the Xcode command line tools (step 2)"))?;
     let output = system::command(&path).args(args).arg(file).output().map_err(|e| format!("{program}: {e}"))?;
     if !output.status.success() {
         return Err(format!("{program} failed on {}: {}", file.display(), String::from_utf8_lossy(&output.stderr).trim()));

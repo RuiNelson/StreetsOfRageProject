@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { appendLine, Progress } from "@/components/Progress";
 import { playResult } from "@/lib/sounds";
 import type { StepProps } from "@/lib/steps";
-import { extractSound, soundtrackStatus, type Chip, type Soundtrack } from "@/lib/tauri";
+import { extractSound, ps5RenderSoundtrack, soundtrackStatus, type Chip, type Soundtrack } from "@/lib/tauri";
 
 function errorText(error: unknown) {
   return typeof error === "string" ? error : error instanceof Error ? error.message : String(error);
@@ -16,7 +16,7 @@ const CHIPS: { id: Chip; name: string; description: string }[] = [
   { id: "ym2612", name: "YM2612", description: "The original chip of the first Mega Drive models, with its characteristic rougher sound." },
 ];
 
-export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepProps) {
+export function ExtractSound({ target, setReady, setBusy, actions, projectPath }: StepProps) {
   const [chip, setChip] = useState<Chip>("ym3438");
   const [done, setDone] = useState<Soundtrack | null>(null);
   const [busy, setBusyState] = useState(false);
@@ -46,7 +46,8 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
     setOutdated(false);
     setProgress(["Starting…"]);
     try {
-      setDone(await extractSound(projectPath, chip, (line) => setProgress((lines) => appendLine(lines, line))));
+      const onLine = (line: string) => setProgress((lines) => appendLine(lines, line));
+      setDone(await (target === "ps5" ? ps5RenderSoundtrack : extractSound)(projectPath, chip, onLine));
       playResult(true);
     } catch (e) {
       setDone(null);
@@ -58,7 +59,7 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
   };
 
   if (!projectPath) {
-    return <div className="notice warning">Download the project first (step 2).</div>;
+    return <div className="notice warning">Download the project first (step 3).</div>;
   }
 
   return (
@@ -66,6 +67,7 @@ export function ExtractSound({ setReady, setBusy, actions, projectPath }: StepPr
       <div className="notice">
         <p>
           The game plays its music and sound effects from recordings made from your ROM. Extract them once; it builds a small tool first, then renders every sound.
+          {target === "ps5" && " It all happens inside the container; the first time it also builds the PS5 toolchain image (about 5 GB)."}
         </p>
       </div>
       <div className="notice warning">
