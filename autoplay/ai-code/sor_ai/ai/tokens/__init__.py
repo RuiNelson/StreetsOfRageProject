@@ -148,6 +148,7 @@ from .walk_verbs import (
     EngageGrunts,
     EngageJack,
     EngageSouther,
+    MoveAwayFromPartner,
     ProjectileSidestep,
     RetreatFromDanger,
     Walk,

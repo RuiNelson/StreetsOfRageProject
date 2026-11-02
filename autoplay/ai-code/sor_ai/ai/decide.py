@@ -101,6 +101,7 @@ from .tokens import (
     RetreatFromDanger,
     WalkToAdvanceStage,
     Centering,
+    MoveAwayFromPartner,
     WalkToNearEnemy,
     WalkToPickup,
     WalkToWeapon,
@@ -1465,6 +1466,52 @@ def could_centering(context: Context) -> Context:
     return verbs
 
 
+# How close the partner may be, on X and on Y at once, before MoveAwayFromPartner
+# takes over (user: "if it's deltaX or deltaY to the Partner is less than 10
+# pixels"). Read as both axes under the limit -- the partner on top of the
+# actor -- since either axis alone would fire at any distance along a shared
+# lane or a shared column, and stop the AI fighting beside its partner.
+MOVE_AWAY_DISTANCE = 10
+
+
+def partner_is_on_top(actor: PlayableCharacter, partner: PlayableCharacter) -> bool:
+    """Are the two bodies within ``MOVE_AWAY_DISTANCE`` of each other on both
+    axes? The one predicate ``could_move_away_from_partner`` produces the verb
+    on and ``priority._emergency_move_away_from_partner`` scores it on."""
+
+    return (
+        abs(actor.world_x - partner.world_x) < MOVE_AWAY_DISTANCE
+        and abs(actor.world_y - partner.world_y) < MOVE_AWAY_DISTANCE
+    )
+
+
+def could_move_away_from_partner(context: Context) -> Context:
+    """Step away from a partner standing on top of the actor.
+
+    User: a verb of its own, ``MoveAwayFromPartner``, with the top priority --
+    away along the lane (``execute.state_machine_move_away_from_partner``
+    owns the direction and its fall-backs at a lane edge). Produced for any
+    actor free to walk -- on the ground, outside a menu, not in the
+    tech-recovery window -- while ``partner_is_on_top``. Nothing here asks whether
+    the move is worthwhile beyond that: it is a courtesy that outranks the
+    fight, and it ends by itself the moment one axis clears 10 px.
+    """
+
+    verbs: set[Token] = set()
+    partner = find(context, Partner)
+    if partner is None:
+        return verbs
+    if find(context, InContinueMenu) is not None or find(context, InMrXDialog) is not None:
+        # Up and Down move a menu cursor there, not a body.
+        return verbs
+    for actor in _actors_free_to_walk(context):
+        if actor.is_airborne or actor.throw_tech_ready:
+            continue
+        if partner_is_on_top(actor, partner):
+            verbs.add(MoveAwayFromPartner(actor_slot=actor.slot, target_slot=partner.slot))
+    return verbs
+
+
 def could_catch_up_partner(context: Context) -> Context:
     """Follow a partner who is further along the stage, in place of advancing.
 
@@ -2763,6 +2810,7 @@ def generate_verb_tokens(context: Context) -> Context:
         | could_hit_table(context)
         | could_walk_to_advance_stage(context)
         | could_catch_up_partner(context)
+        | could_move_away_from_partner(context)
         | could_centering(context)
         | could_punch(context)
         | could_melee_weapon_attack(context)

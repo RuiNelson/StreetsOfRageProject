@@ -156,11 +156,24 @@ class ForwardStrikeTests(unittest.TestCase):
         }
         self.assertEqual(verbs(do_not_harm_partner(context)), set())
 
-    def test_grab_is_never_withdrawn(self):
-        """``GrabEnemy`` presses nothing, so ``+$34`` stays zero."""
+    def test_grab_is_kept_when_it_hurts_nobody(self):
+        """``GrabEnemy`` presses nothing, so ``+$34`` stays zero: the partner is
+        out of its walk-in's box here."""
 
         grab = GrabEnemy(actor_slot="P1", target_slot="obj01")
-        kept = do_not_harm_partner(self._context(grab, partner_x=130))
+        kept = do_not_harm_partner(self._context(grab, partner_x=220))
+        self.assertEqual(verbs(kept), {grab})
+
+    def test_grab_withdrawn_when_its_walk_in_takes_the_partner(self):
+        """The partner stands in the box the walk toward the enemy puts out."""
+
+        grab = GrabEnemy(actor_slot="P1", target_slot="obj01")
+        kept = do_not_harm_partner(self._context(grab, partner_x=110))
+        self.assertEqual(verbs(kept), set())
+
+    def test_grab_kept_with_the_partner_behind_the_walk(self):
+        grab = GrabEnemy(actor_slot="P1", target_slot="obj01")
+        kept = do_not_harm_partner(self._context(grab, partner_x=40))
         self.assertEqual(verbs(kept), {grab})
 
     def test_a_throw_is_never_withdrawn(self):

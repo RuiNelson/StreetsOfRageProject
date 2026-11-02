@@ -153,7 +153,11 @@ parametrized intent that precedes any concrete action.
   past them; it walks up to `decide.CATCH_UP_DISTANCE_X` behind them and
   waits there. See `decide.could_catch_up_partner`,
   `decide._partner_ahead_of` and `autoplay/CLAUDE.md`'s **Following a
-  partner who is ahead**. `WalkToAdvanceStage` is produced only while the
+  partner who is ahead**. `MoveAwayFromPartner` (user) is the top-priority
+  walk: while the `Partner` is under 10 px away on X and on Y
+  (`decide.partner_is_on_top`), the actor steps along the lane away from
+  them along the lane, on the side it already stands (level: P1 up, P2 down) -- so two bodies never stay stacked.
+  `WalkToAdvanceStage` is produced only while the
   camera can scroll; `Centering` is what an idle actor does instead, walking
   to the centre of the visible playfield on its own lane
   (`decide.could_centering`).
@@ -1091,13 +1095,17 @@ the way `priority.py` and `execute.py` already dispatch:
   reads `HELD_BY_ENEMY`, and the counter's C then B would throw the partner.
   Nothing replaces it: the hold is the partner's to end.
 
-Three families are deliberately *not* filtered. `GrabEnemy` presses nothing
-— that is what makes it a hold rather than a hit (see [Grabbing an
-enemy](#grabbing-an-enemy)) — so its `+$34` is zero and `$4478` has no hit
-to convert. What a walk *can* do to the partner is take hold of them, and
-that is a rule about how the actor moves rather than which verb it runs:
+`GrabEnemy` presses nothing — that is what makes it a hold rather than a
+hit (see [Grabbing an enemy](#grabbing-an-enemy)) — so its `+$34` is zero and
+`$4478` has no hit to convert; it is withdrawn only while its walk-in toward the
+enemy would put the walking box on the partner
+(`partner._grab_walk_takes_partner`), because that walk keeps pressing into a
+body. What a walk *can* do to the partner is take hold of them, and that is
+mostly a rule about how the actor moves rather than which verb it runs:
 [`execute_tick`](#execute_tick) keeps every walk's box off the partner,
-whichever verb is walking. `CallPolice` cannot be
+whichever verb is walking, with one exception, `MoveAwayFromPartner` (below).
+
+Two families are deliberately *not* filtered. `CallPolice` cannot be
 friendly fire at all: `$4478` returns immediately while a police special is
 active. Neither are the two attack-thrown
 weapons (`$21E6 (player_release_thrown_weapon)` issues its throw command for

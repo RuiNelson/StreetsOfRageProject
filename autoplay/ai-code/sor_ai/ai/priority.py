@@ -25,6 +25,7 @@ from . import jack as jack_plan
 from .decide import (
     HEALTH_CRITICAL_PERCENT,
     in_smash_range,
+    partner_is_on_top,
     level_end_boss_is_up,
     POLICE_HEALTH_PERCENT_THRESHOLD,
     POLICE_HEALTH_PERCENT_THRESHOLD_LAST_LIFE,
@@ -89,6 +90,7 @@ from .tokens import Context, Verb, find, find_all
 from .tokens import (
     CatchUpPartner,
     Centering,
+    MoveAwayFromPartner,
     ProjectileSidestep,
     RetreatFromDanger,
     WalkToAdvanceStage,
@@ -106,6 +108,10 @@ _EMERGENCY_COUNTER_GRAB = 100  # already held — only useful action
 # during the Mr. X offer because Myself is still playable).
 _EMERGENCY_HANDLE_CONTINUE = 99
 _EMERGENCY_HANDLE_MR_X = 99
+# MoveAwayFromPartner is the user's top-priority verb (decide.could_move_away_
+# from_partner): above every combat and pickup verb, under only the menu
+# answers and CounterGrab, which it is never produced beside.
+_EMERGENCY_MOVE_AWAY_FROM_PARTNER = 95
 _EMERGENCY_TECH_RECOVER = 90  # narrow window, free to act at nothing else
 _EMERGENCY_CALL_POLICE = 88  # about to die: the special's one reason left
 _EMERGENCY_REAR_ATTACK = 55  # escape when boxed in / punch dead-zone
@@ -938,6 +944,18 @@ def _emergency_catch_up_partner(verb: CatchUpPartner, context: Context) -> int:
     return _EMERGENCY_CATCH_UP_PARTNER
 
 
+def _emergency_move_away_from_partner(verb: MoveAwayFromPartner, context: Context) -> int:
+    """Top tier while the partner is still inside ``decide.MOVE_AWAY_DISTANCE``
+    (``decide.partner_is_on_top``, the predicate that produced the verb); a
+    candidate whose condition lapsed this tick scores nothing."""
+
+    actor = _find_actor(context, verb.actor_slot)
+    partner = find(context, Partner)
+    if actor is None or partner is None or not partner_is_on_top(actor, partner):
+        return _EMERGENCY_DEFAULT
+    return _EMERGENCY_MOVE_AWAY_FROM_PARTNER
+
+
 def _emergency_centering(verb: Centering, context: Context) -> int:
     return _EMERGENCY_CENTERING
 
@@ -1169,6 +1187,7 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     WalkToAdvanceStage: _emergency_walk_to_advance_stage,
     CatchUpPartner: _emergency_catch_up_partner,
     Centering: _emergency_centering,
+    MoveAwayFromPartner: _emergency_move_away_from_partner,
 }
 
 

@@ -71,6 +71,7 @@ from .tokens import Context, Dialog, Verb, find, find_all
 from .tokens import (
     CatchUpPartner,
     Centering,
+    MoveAwayFromPartner,
     DuelStep,
     ProjectileSidestep,
     RetreatFromDanger,
@@ -2260,6 +2261,57 @@ def state_machine_catch_up_partner(
     _hold_steered(gamepad, _clamp_mask(context, actor.world_x, actor.world_y, mask))
 
 
+def state_machine_move_away_from_partner(
+    verb: MoveAwayFromPartner, context: Context, gamepad: VirtualGamepad
+) -> None:
+    """Walk away from the partner along the lane, on the side the actor is
+    already on.
+
+    See ``MoveAwayFromPartner`` and ``decide.could_move_away_from_partner``.
+    Below the partner is down, above is up (user: a fixed "up for P1, down for
+    P2" walked the two *toward* each other whenever P1 stood below P2); only
+    level on the lane does the player decide, P1 up and P2 down, so two AIs
+    split instead of mirroring. Where the lane step is blocked (the lane band's
+    edge, or a pit's danger zone) the actor steps away on X instead, P1 to the
+    left and P2 to the right when level. It ends on its own once either axis
+    reaches ``decide.MOVE_AWAY_DISTANCE``.
+
+    The one walk the partner pad does not judge (``_partner_safe_gamepad``):
+    inside the partner's contact band every walk reads as a grab on them
+    (``reach.walking_box_would_grab``), so the pad would strip this one to
+    nothing and the two would stand on each other for good. Of the walkable
+    directions the first that leaves the box off them is preferred; with all
+    of them taking hold, the first stands.
+    """
+
+    actor = _find_actor(context, verb.actor_slot)
+    partner = find(context, Partner, slot=verb.target_slot)
+    if actor is None or partner is None:
+        gamepad.release()
+        return
+    p1 = actor.slot == "P1"
+    dy = actor.world_y - partner.world_y
+    dx = actor.world_x - partner.world_x
+    lane_mask, lane_sign = (
+        (DOWN_MASK, 1) if dy > 0 else (UP_MASK, -1) if dy < 0 else
+        (UP_MASK, -1) if p1 else (DOWN_MASK, 1)
+    )
+    x_mask = RIGHT_MASK if dx > 0 else LEFT_MASK if dx < 0 else (LEFT_MASK if p1 else RIGHT_MASK)
+    lo, hi = _lane_bounds(context)
+    target_y = actor.world_y + lane_sign * nav.NAV_STEP
+    walkable = []
+    if lo <= target_y <= hi and not _inside_pit(context, actor.world_x, target_y):
+        walkable.append(lane_mask)
+    clamped = _clamp_mask(context, actor.world_x, actor.world_y, x_mask)
+    if clamped:
+        walkable.append(clamped)
+    if not walkable:
+        gamepad.hold(0)
+        return
+    safe = [mask for mask in walkable if not _walk_grabs(actor, partner, mask)]
+    _hold_steered(gamepad, (safe or walkable)[0])
+
+
 def state_machine_centering(
     verb: Centering, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -3120,6 +3172,7 @@ _HANDLERS = {
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,
     CatchUpPartner: state_machine_catch_up_partner,
     Centering: state_machine_centering,
+    MoveAwayFromPartner: state_machine_move_away_from_partner,
     Punch: state_machine_melee_strike,
     MeleeWeaponAttack: state_machine_melee_strike,
     RearAttack: state_machine_rear_attack,
@@ -3507,7 +3560,8 @@ def _partner_safe_gamepad(
     grab, and its launch direction is committed. Not while the actor holds a
     body: in a hold the pad's directions are the release and throw inputs,
     and ``ReleasePartner``'s back press is exactly one of them (the walk that
-    follows a release is judged on the next tick). Not for a ``Dialog`` verb,
+    follows a release is judged on the next tick). Not for ``MoveAwayFromPartner``,
+    which judges its own lane step. Not for a ``Dialog`` verb,
     whose Up/Down move a menu cursor rather than a body.
     """
 
@@ -3528,7 +3582,7 @@ def _partner_safe_gamepad(
                 lambda mask: _hold_back_kick(actor, partner, mask),
             )
         return gamepad
-    if actor.is_holding_enemy or isinstance(verb, Dialog):
+    if actor.is_holding_enemy or isinstance(verb, (Dialog, MoveAwayFromPartner)):
         return gamepad
     return _PartnerSafeGamepad(
         gamepad,

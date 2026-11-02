@@ -23,11 +23,12 @@ two stages need the same judgment, both call the same function.
 Four consequences of that same ROM routine bound what is filtered here:
 
 - ``+$34`` must be nonzero, so ``GrabEnemy`` — a walk-in that deliberately
-  presses nothing (see ``AI.md``'s "Grabbing an enemy") — cannot hurt the
-  partner and is left alone. What any walk *can* do to them is take hold of
-  them (the next point), and that is a rule about how the actor moves rather
-  than which verb it runs: ``execute.execute_tick`` keeps every walk's box
-  off the partner, whatever verb is walking;
+  presses nothing (see ``AI.md``'s "Grabbing an enemy") — cannot *hurt* the
+  partner. What any walk *can* do to them is take hold of them (the next
+  point): ``execute.execute_tick`` keeps every walk's box off the partner,
+  whatever verb is walking, and ``GrabEnemy``, whose walk-in is the one that
+  keeps pressing into a body, is also withdrawn while that walk would put
+  the box on the partner (``_grab_walk_takes_partner``);
 - the routine returns immediately while a police special is active, so
   ``CallPolice`` is not friendly fire and is never withdrawn;
 - with no damage out, the same contact is a **grab** between the players,
@@ -358,6 +359,30 @@ def _walks_to_the_partners_nearer_enemy(
     return False
 
 
+def _grab_walk_takes_partner(context: Context, actor: Myself, partner: Partner, verb: Verb) -> bool:
+    """Would the walk-in ``GrabEnemy`` makes put the walking box on the partner?
+
+    ``GrabEnemy`` presses nothing, so it deals no damage -- but its whole job
+    is contact: it walks into a body and keeps the D-pad pressed once they
+    overlap, and with the partner standing in the same box ``$4478`` hands the
+    hold to whichever body it reads first. The pad would strip that walk
+    (``execute._keep_off_partner``), but a stripped walk leaves the verb
+    standing there winning every tick; withdrawn here, the next-best verb
+    plays instead. The step is the one ``execute.state_machine_grab_enemy``
+    takes: toward the enemy on X (the facing when level) and on the lane.
+    Not asked in the duel, which has no ``Partner`` token.
+    """
+
+    enemy = find(context, Enemy, slot=verb.target_slot)
+    if enemy is None:
+        return False
+    dx = enemy.world_x - actor.world_x
+    dy = enemy.world_y - actor.world_y
+    step_x = 1 if dx > 0 else -1 if dx < 0 else (-1 if actor.facing_left else 1)
+    step_y = 1 if dy > 0 else -1 if dy < 0 else 0
+    return reach.walking_box_would_grab(actor, partner, step_x=step_x, step_y=step_y)
+
+
 # Verbs whose own attack box can land on the partner ($4478).
 _HARM_TESTS: dict[type[Verb], WithdrawTest] = {
     Punch: _forward_strike_hits_partner,
@@ -367,6 +392,7 @@ _HARM_TESTS: dict[type[Verb], WithdrawTest] = {
     OpenBreakable: _open_breakable_hits_partner,
     JumpAttack: _jump_attack_hits_partner,
     RearAttack: _rear_attack_hits_partner,
+    GrabEnemy: _grab_walk_takes_partner,
 }
 
 # Verbs that attack an enemy, or walk to attack one -- left alone while the

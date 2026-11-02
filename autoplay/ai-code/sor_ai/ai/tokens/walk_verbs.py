@@ -111,6 +111,32 @@ class CatchUpPartner(Walk):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class MoveAwayFromPartner(Walk):
+    """Step out of the partner's way when the two bodies are on top of each
+    other.
+
+    User: when the ``Partner`` is less than ``decide.MOVE_AWAY_DISTANCE``
+    (10 px) away on X *and* on Y, move away from them as a verb of its own
+    with the top priority. Away is the side the actor is already on, along
+    the lane; level on the lane, P1 goes up and P2 down so two AIs split
+    rather than mirror each other. (The first wording, a fixed up for P1 and
+    down for P2, walked the two toward each other whenever P1 stood below P2.)
+
+    Produced by ``decide.could_move_away_from_partner`` for an actor free to
+    walk (not mid-animation, held by an enemy or holding one). ``target_slot``
+    is the partner's slot.
+
+    Raises emergency: (partner inside the box)×``priority._EMERGENCY_MOVE_AWAY_
+    FROM_PARTNER`` (95) -- above every combat, pickup and walk verb; under only
+    the menu answers and ``CounterGrab``, which it is never produced beside.
+    """
+
+    priority: int = 100
+    actor_slot: str
+    target_slot: str  # the Partner's slot ("P1" | "P2")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Centering(Walk):
     """Walk to the centre of the visible playfield, on the actor's own lane,
     or with a ``Partner`` to a third of it from the back
