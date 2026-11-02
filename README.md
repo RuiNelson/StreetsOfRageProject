@@ -5,9 +5,7 @@
 ![Linux](https://img.shields.io/badge/Linux-Supported-E95420?logo=linux&logoColor=white)
 ![PS5](https://img.shields.io/badge/PS5-Supported-003791?logo=playstation)
 
-<p align="center">
- <video src="https://github.com/user-attachments/assets/84983bde-22ba-4627-94a7-a1f49b7dac3b" width="640" autoplay loop muted playsinline controls></video>
-</p>
+https://github.com/user-attachments/assets/84983bde-22ba-4627-94a7-a1f49b7dac3b
 
 Welcome to my reverse-engineering and recompilation project for SEGA's
 celebrated Mega Drive classic (released as SEGA Genesis in the United States),
