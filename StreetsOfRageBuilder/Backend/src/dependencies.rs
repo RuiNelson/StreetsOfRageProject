@@ -11,7 +11,7 @@ use crate::system::{self, find_program, first_line, refresh_path};
 const WINGET_URL: &str = "https://winget.run";
 const HOMEBREW_URL: &str = "https://github.com/Homebrew/brew/releases/";
 
-/// The Debian/Ubuntu packages SDL3 needs to build from source (README, "Build on Ubuntu").
+/// The Debian/Ubuntu packages SDL3 needs to build from source (docs/BuildingDesktop.md, "Build on Linux").
 const SDL_LIBRARIES: &[&str] = &[
     "libasound2-dev", "libpulse-dev", "libx11-dev", "libxext-dev", "libxrandr-dev", "libxcursor-dev",
     "libxfixes-dev", "libxi-dev", "libxss-dev", "libxkbcommon-dev", "libdrm-dev", "libgbm-dev",

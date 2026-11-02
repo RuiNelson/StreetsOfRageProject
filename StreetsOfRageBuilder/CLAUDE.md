@@ -53,7 +53,7 @@ a refreshed search path (Homebrew dirs on macOS, registry PATH on Windows) so a 
 launch and a just-finished install are both seen. Installs open the system terminal (Terminal.app, cmd, or the first terminal emulator
 found on Linux) with a generated script, so the user sees the installers' own output and
 prompts; the app does not wait, and re-checks when its window regains focus or on Re-check. Keep the tables in step with the
-project README prerequisites. The macOS code path was compiled and run; on Windows (x64,
+prerequisites in `docs/BuildingDesktop.md`. The macOS code path was compiled and run; on Windows (x64,
 real machine over SSH) the app compiles, the unit tests pass and the dependency report and the
 `.lnk` creation were checked; the GUI flows on Windows, and everything on Linux, are untested.
 
