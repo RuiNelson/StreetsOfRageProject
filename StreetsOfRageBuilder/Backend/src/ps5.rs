@@ -92,7 +92,10 @@ fn workspace_options() -> &'static str {
 fn container(engine: &Path, project: &Path, args: &[&str]) -> Command {
     let mut command = system::command(engine);
     command
-        .args(["run", "--rm", "-v"])
+        .args(["run", "--rm"])
+        // CMake's FetchContent checks tags out detached; git's long advice about it is only noise here.
+        .args(["-e", "GIT_CONFIG_COUNT=1", "-e", "GIT_CONFIG_KEY_0=advice.detachedHead", "-e", "GIT_CONFIG_VALUE_0=false"])
+        .arg("-v")
         .arg(format!("{}:/workspace{}", project.display(), workspace_options()))
         .args(["-v", &format!("{BUILD_VOLUME}:/build"), IMAGE])
         .args(args);

@@ -69,7 +69,7 @@ fn git_stream(directory: Option<&Path>, args: &[&str], progress: &dyn Fn(String)
     command
         // Never wait for a username on a terminal the user cannot see.
         .env("GIT_TERMINAL_PROMPT", "0")
-        .args(["-c", "core.longpaths=true"])
+        .args(["-c", "core.longpaths=true", "-c", "advice.detachedHead=false"])
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
