@@ -18,11 +18,6 @@ function Initialize-Paths {
     # Started by a double click, the current folder is scripts\: put the ZIP files in the project folder.
     if ($here.TrimEnd('\', '/') -eq $script:ScriptsDir.TrimEnd('\', '/')) { $here = $script:RepoRoot }
     $script:OutputDir = $here
-
-    $script:HadRom = Test-Path -LiteralPath $script:RomDest
-    $script:HadSoundtrack = Test-Path -LiteralPath $script:SoundtrackDir
-    $script:HadGenerated = Test-Path -LiteralPath $script:GeneratedDir
-    $script:HadDist = Test-Path -LiteralPath $script:DistDir
 }
 
 function Get-RelativeToRepo([string]$path) {

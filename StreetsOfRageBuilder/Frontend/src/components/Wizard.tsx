@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { STEPS, type StepProps } from "@/lib/steps";
+import { stepsFor, type StepProps, type Target } from "@/lib/steps";
 import { finish, platformInfo, type PlatformInfo } from "@/lib/tauri";
 import { Dependencies } from "./steps/Dependencies";
 import { Download } from "./steps/Download";
@@ -9,8 +9,14 @@ import { Rom } from "./steps/Rom";
 import { ShortcutStep } from "./steps/ShortcutStep";
 import { Build } from "./steps/Build";
 import { ExtractSound } from "./steps/ExtractSound";
+import { TargetStep } from "./steps/TargetStep";
+import { Ps5Deliver } from "./steps/Ps5Deliver";
+import { Ps5CleanUp } from "./steps/Ps5CleanUp";
 
 const COMPONENTS: Record<string, (props: StepProps) => React.ReactNode> = {
+  target: TargetStep,
+  deliver: Ps5Deliver,
+  cleanup: Ps5CleanUp,
   dependencies: Dependencies,
   clone: Download,
   rom: Rom,
@@ -26,11 +32,13 @@ export function Wizard() {
   const [busy, setBusy] = useState(false);
   const [actions, setActions] = useState<HTMLElement | null>(null);
   const [projectPath, setProjectPath] = useState<string | null>(null);
+  const [target, setTarget] = useState<Target>("local");
+  const STEPS = stepsFor(target);
   const step = STEPS[index];
   const Step = COMPONENTS[step.id];
   // A step must report ready again every time it is shown.
   const setReady = useCallback((value: boolean) => setReadyState(value), []);
-  const shared = { setReady, setBusy, actions, projectPath, setProjectPath };
+  const shared = { target, setTarget, setReady, setBusy, actions, projectPath, setProjectPath };
   const go = (to: number) => {
     setReadyState(false);
     setBusy(false);

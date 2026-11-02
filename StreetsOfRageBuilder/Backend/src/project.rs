@@ -1,4 +1,4 @@
-//! Step 2: get the project onto disk with git, into the exact folder the user chose (so the
+//! Step 3: get the project onto disk with git, into the exact folder the user chose (so the
 //! same folder is picked again to update it). It is always the commit tagged with this Builder's
 //! version (user decision), neither older nor newer. Players only build and play, so the clone
 //! carries a single commit of history, submodules included.
@@ -64,12 +64,12 @@ fn inspect(folder: &Path) -> Inspection {
 
 /// Run git with its progress streamed line by line (git redraws progress with `\r`).
 fn git_stream(directory: Option<&Path>, args: &[&str], progress: &dyn Fn(String)) -> Result<(), String> {
-    let git = system::find_program("git").ok_or("git was not found; finish step 1 first")?;
+    let git = system::find_program("git").ok_or("git was not found; finish step 2 first")?;
     let mut command = system::command(&git);
     command
         // Never wait for a username on a terminal the user cannot see.
         .env("GIT_TERMINAL_PROMPT", "0")
-        .args(["-c", "core.longpaths=true"])
+        .args(["-c", "core.longpaths=true", "-c", "advice.detachedHead=false"])
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
@@ -94,7 +94,7 @@ fn git_stream(directory: Option<&Path>, args: &[&str], progress: &dyn Fn(String)
 }
 
 fn git_output(directory: &Path, args: &[&str]) -> Result<String, String> {
-    let git = system::find_program("git").ok_or("git was not found; finish step 1 first")?;
+    let git = system::find_program("git").ok_or("git was not found; finish step 2 first")?;
     let output = system::command(&git).current_dir(directory).args(args).output().map_err(|e| e.to_string())?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());

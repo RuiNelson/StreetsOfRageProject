@@ -44,7 +44,7 @@ study.
     - [Using the Builder for Windows, Mac or Linux (recommended)](#using-the-builder-for-windows-mac-or-linux-recommended)
       - [Download and open the Builder](#download-and-open-the-builder)
       - [Follow the six steps](#follow-the-six-steps)
-    - [Building by hand](#building-by-hand)
+    - [Building by hand for Windows, Mac, Linux o PS5](#building-by-hand-for-windows-mac-linux-o-ps5)
       - [1. Common prerequisites](#1-common-prerequisites)
       - [2. Clone the repository and submodules](#2-clone-the-repository-and-submodules)
       - [3. Obtain a compatible ROM](#3-obtain-a-compatible-rom)
@@ -67,6 +67,7 @@ study.
     - [Configure keyboard and gamepad bindings](#configure-keyboard-and-gamepad-bindings)
     - [Pausing](#pausing)
     - [Video settings](#video-settings)
+    - [Quality-of-life settings](#quality-of-life-settings)
     - [Host keyboard shortcuts](#host-keyboard-shortcuts)
     - [Debug utility hotkeys (Cheats)](#debug-utility-hotkeys-cheats)
     - [Startup flags](#startup-flags)
@@ -81,14 +82,14 @@ study.
  <img src="docs/firstlevel.webp" width="400">
 </p>
 
-| Submodule / directory | Purpose |
-| --- | --- |
-| [`MegaDriveEnvironment/`](MegaDriveEnvironment/) | SDL3-based Mega Drive host runtime and reusable C++ library |
-| [`StreetsOfRageRecompilation/`](StreetsOfRageRecompilation/) | Generated and hand-written C++, analysis data, build scripts, and the `sor` executable |
-| [`RageDecompiler/`](RageDecompiler/) | Python tools for disassembly, recompilation, label generation, and runtime discovery |
-| [`MegaDriveEnvironmentSampleGame/`](MegaDriveEnvironmentSampleGame/) | A small game targeting both the PC runtime and real Mega Drive hardware |
-| [`autoplay/`](autoplay/) | Python remote observer and symbolic AI player for a running `sor` host |
-| [`StreetsOfRageBuilder/`](StreetsOfRageBuilder/) | Guided installer that sets up the tools, builds the game from your ROM and adds shortcuts to the game and its launcher |
+| Submodule / directory                                                | Purpose                                                                                                                |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| [`MegaDriveEnvironment/`](MegaDriveEnvironment/)                     | SDL3-based Mega Drive host runtime and reusable C++ library                                                            |
+| [`StreetsOfRageRecompilation/`](StreetsOfRageRecompilation/)         | Generated and hand-written C++, analysis data, build scripts, and the `sor` executable                                 |
+| [`RageDecompiler/`](RageDecompiler/)                                 | Python tools for disassembly, recompilation, label generation, and runtime discovery                                   |
+| [`MegaDriveEnvironmentSampleGame/`](MegaDriveEnvironmentSampleGame/) | A small game targeting both the PC runtime and real Mega Drive hardware                                                |
+| [`autoplay/`](autoplay/)                                             | Python remote observer and symbolic AI player for a running `sor` host                                                 |
+| [`StreetsOfRageBuilder/`](StreetsOfRageBuilder/)                     | Guided installer that sets up the tools, builds the game from your ROM and adds shortcuts to the game and its launcher |
 
 The playable host expects `MegaDriveEnvironment`, `RageDecompiler`, and
 `StreetsOfRageRecompilation` to remain sibling directories. This is the layout
@@ -176,7 +177,8 @@ The long-term roadmap is:
    by address, so moving that state into C++ objects or dynamic memory would
    blind it.
 3. Remove the dependency on the hardware emulated by `MegaDriveEnvironment`
-   and implement the graphics pipeline, audio (already bypassed), and input directly through SDL.
+   and implement the graphics pipeline, audio (already bypassed),
+   and input (already reimplemented) directly through SDL.
    This replaces the emulated devices, not the work-RAM layout.
 4. Enable enhancements such as higher-resolution replacement assets and variable frame rates through rendering interpolation, so the
    game logic still advances one original frame at a time.
@@ -308,13 +310,13 @@ The ROM must be the **Rev. A** dump (CRC32 `4052E845`).
 Get the file for your system from the
 [latest release](https://github.com/RuiNelson/StreetsOfRageProject/releases/latest):
 
-| System | File |
-| --- | --- |
+| System                          | File                                             |
+| ------------------------------- | ------------------------------------------------ |
 | macOS (Apple silicon and Intel) | `StreetsOfRageBuilder-X.Y.Z-macos-universal.dmg` |
-| Windows (64-bit Intel/AMD) | `StreetsOfRageBuilder-X.Y.Z-windows-x64.exe` |
-| Windows on ARM | `StreetsOfRageBuilder-X.Y.Z-windows-arm64.exe` |
-| Linux x64 | `StreetsOfRageBuilder-X.Y.Z-x86_64.AppImage` |
-| Linux ARM64 | `StreetsOfRageBuilder-X.Y.Z-aarch64.AppImage` |
+| Windows (64-bit Intel/AMD)      | `StreetsOfRageBuilder-X.Y.Z-windows-x64.exe`     |
+| Windows on ARM                  | `StreetsOfRageBuilder-X.Y.Z-windows-arm64.exe`   |
+| Linux x64                       | `StreetsOfRageBuilder-X.Y.Z-x86_64.AppImage`     |
+| Linux ARM64                     | `StreetsOfRageBuilder-X.Y.Z-aarch64.AppImage`    |
 
 The apps are not signed yet, so macOS, Windows and your browser will warn you the
 first time; the release page explains how to open them.
@@ -441,12 +443,12 @@ by the applicable law, and do not share it with the project or its community.
 
 The project is developed against the `JUE` cartridge, with these hashes:
 
-| Property | Value |
-| --- | --- |
-| Size | `524288` bytes |
-| CRC32 | `4052E845` |
-| MD5 | `59a3b22a1899461dceba50d1ade88d3a` |
-| SHA-256 | `95d7efb98e97f4ffffe68257aef9a855034a36a41b86cf9d332d129f30cb2d4b` |
+| Property | Value                                                              |
+| -------- | ------------------------------------------------------------------ |
+| Size     | `524288` bytes                                                     |
+| CRC32    | `4052E845`                                                         |
+| MD5      | `59a3b22a1899461dceba50d1ade88d3a`                                 |
+| SHA-256  | `95d7efb98e97f4ffffe68257aef9a855034a36a41b86cf9d332d129f30cb2d4b` |
 
 ROM images are ignored by Git. Do not commit or redistribute them.
 
@@ -663,10 +665,10 @@ Close the title if it is running, then copy everything to the console, using its
 
 The tile appears on the home screen after a few seconds. The console then holds:
 
-| Folder | What is in it |
-| --- | --- |
-| `/data/homebrew/PPSA99872/` | The app |
-| `/data/sor/` | The ROM, `soundtrack/`, the AI in `ai-code/`, Python in `python/`, `controls.yaml`, `video.yaml` and `ai.log` |
+| Folder                      | What is in it                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `/data/homebrew/PPSA99872/` | The app                                                                                                                   |
+| `/data/sor/`                | The ROM, `soundtrack/`, the AI in `ai-code/`, Python in `python/`, `controls.yaml`, `video.yaml`, `qol.yaml` and `ai.log` |
 
 If the ROM, the soundtrack, the AI or Python is missing, the title says what to copy in a
 notification and closes.
@@ -692,16 +694,16 @@ The game reads the keyboard and gamepads itself and binds them to actions+. Each
 
 **Default bindings for keyboard**
 
-| Action | Player 1 | Player 2 |
-| --- | --- | --- |
-| Directions | Arrow keys | `W` `S` `A` `D` |
-| Special (police call) | `Z` | `H` |
-| Punch | `X` | `J` |
-| Jump | `C` | `K` |
-| Back Attack (ENHANCED 6) | `V` | `Y` |
-| Pick Item (ENHANCED 6) | `B` | `U` |
-| Throw Knife (ENHANCED 6) | `N` | `I` |
-| Start | `V` (ORIGINAL 3), `M` (ENHANCED 6) | `L` |
+| Action                   | Player 1                           | Player 2        |
+| ------------------------ | ---------------------------------- | --------------- |
+| Directions               | Arrow keys                         | `W` `S` `A` `D` |
+| Special (police call)    | `Z`                                | `H`             |
+| Punch                    | `X`                                | `J`             |
+| Jump                     | `C`                                | `K`             |
+| Back Attack (ENHANCED 6) | `V`                                | `Y`             |
+| Pick Item (ENHANCED 6)   | `B`                                | `U`             |
+| Throw Knife (ENHANCED 6) | `N`                                | `I`             |
+| Start                    | `V` (ORIGINAL 3), `M` (ENHANCED 6) | `L`             |
 
 **Default bindings for gamepad**  
   
@@ -720,14 +722,14 @@ Player 1 gets the first gamepad found and player 2 the next one, if not configur
 In the game, open **OPTIONS > CONTROLS** and choose **PLAYER 1** or
 **PLAYER 2**:
 
-| Entry | What it does |
-| --- | --- |
-| SCHEME | ORIGINAL 3 or ENHANCED 6 (Left/Right or confirm) |
-| DEVICE | AUTO (the first free gamepad), one of the detected gamepads, or NONE |
-| BIND GAMEPAD | Press a button for each action in turn (only with a gamepad) |
-| BIND KEYBOARD | Press a key for each direction, action and Start in turn (only with a keyboard) |
+| Entry             | What it does                                                                            |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| SCHEME            | ORIGINAL 3 or ENHANCED 6 (Left/Right or confirm)                                        |
+| DEVICE            | AUTO (the first free gamepad), one of the detected gamepads, or NONE                    |
+| BIND GAMEPAD      | Press a button for each action in turn (only with a gamepad)                            |
+| BIND KEYBOARD     | Press a key for each direction, action and Start in turn (only with a keyboard)         |
 | JOYSTICK DEADZONE | Shows the left stick and its tilt; Left/Right change the deadzone (only with a gamepad) |
-| BACK | Back to CONTROLS |
+| BACK              | Back to CONTROLS                                                                        |
 
 Any keyboard or gamepad moves through these screens: the arrows or the D-pad
 (or either player's direction keys), Enter, the South button or any Punch,
@@ -752,31 +754,44 @@ playing, a little quieter, while the game is paused.
 
 In the game, open **OPTIONS > VIDEO**:
 
-| Entry | What it does |
-| --- | --- |
-| VSYNC | `AUTO` keeps the game's own speed on any screen, with no tearing, and is the one to use unless you have a reason not to. `VSYNC`, `VSYNC HALF` and `VSYNC THIRD` tie the speed to the screen, every 1, 2 or 3 refreshes; the screen tells you your refresh rate and the speed that gives |
-| PICTURE | `ORIGINAL 4:3`, or `WIDESCREEN 16:9` for a wider view of the game |
-| DISPLAY | `WINDOW` or `FULLSCREEN` |
-| INTEGER SCALING | Sharp, even pixels, with borders around the picture |
-| RESET TO DEFAULTS | Puts the defaults back on the screen; they count only after SAVE AND APPLY |
-| SAVE AND APPLY | Uses the settings at once and keeps them for next time |
-| CANCEL | Leaves without changing anything (Start or Esc do the same) |
+| Entry             | What it does                                                                                                                                                                                                                                                                             |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VSYNC             | `AUTO` keeps the game's own speed on any screen, with no tearing, and is the one to use unless you have a reason not to. `VSYNC`, `VSYNC HALF` and `VSYNC THIRD` tie the speed to the screen, every 1, 2 or 3 refreshes; the screen tells you your refresh rate and the speed that gives |
+| PICTURE           | `ORIGINAL 4:3`, or `WIDESCREEN 16:9` for a wider view of the game                                                                                                                                                                                                                        |
+| DISPLAY           | `WINDOW` or `FULLSCREEN`                                                                                                                                                                                                                                                                 |
+| INTEGER SCALING   | Sharp, even pixels, with borders around the picture                                                                                                                                                                                                                                      |
+| RESET TO DEFAULTS | Puts the defaults back on the screen; they count only after SAVE AND APPLY                                                                                                                                                                                                               |
+| SAVE AND APPLY    | Uses the settings at once and keeps them for next time                                                                                                                                                                                                                                   |
+| CANCEL            | Leaves without changing anything (Start or Esc do the same)                                                                                                                                                                                                                              |
 
 They are saved in `video.yaml`, next to `controls.yaml`. An option given on the command line
 wins over the file for that run; the screen still shows it and can change it, and SAVE AND APPLY saves what it shows.
 `Ctrl+F` switches between window and fullscreen for the current session only.
+
+### Quality-of-life settings
+
+Changes to the original game, all off by default. In the game, open **OPTIONS > QUALITY-OF-LIFE**:
+
+| Entry                    | `--qol`  | What it does                                                                                                                                                                                                                                                                                                              |
+| ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ROLL CAMERA EARLIER      | `cam`    | The camera rolls with the player at 30% of the screen instead of past the middle (55%), so more of the street is ahead. On round 8, which scrolls left, at 70% instead of 45%                                                                                                                                             |
+| FRIEND GRAB KEEPS WEAPON | `grab`   | A friend who grabs you no longer makes you drop your weapon: it is hidden during the hold and back in your hand after it. An enemy's grab, and any hit (a friend's throw too), still drop it                                                                                                                              |
+| ENEMY DAMAGE CIRCLES     | `damage` | A regular enemy that has taken damage shows a see-through ring over it, in a colour for each kind of enemy (Garcia blue, Nora red, Signal yellow, Haku-Ro purple, Jack dark grey), with a disc inside that grows with the damage and fills the ring when the enemy dies. Bosses keep the bar the original game gives them |
+
+They are saved in `qol.yaml`, next to `controls.yaml`, with SAVE AND APPLY. `--qol a,b,c` turns those options on for that run,
+over the file; the screen still shows them and can change them, and SAVE AND APPLY saves what it shows.
 
 ### Host keyboard shortcuts
 
 These shortcuts operate at the host-runtime level and are independent of the
 gamepad bindings:
 
-| Shortcut | Availability | Effect |
-| --- | --- | --- |
-| `Ctrl+F` | Always | Toggle desktop fullscreen |
-| `Ctrl+Q` | Always | Request an orderly shutdown |
-| `Ctrl+R` | `--debug-utils` | Cold-restart the game while preserving the process and remote TCP connection |
-| `Ctrl+P` | `--debug-utils` | Save the composited frame as `screenshot_NNN.png` |
+| Shortcut | Availability    | Effect                                                                                                            |
+| -------- | --------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `Ctrl+F` | Always          | Toggle desktop fullscreen                                                                                         |
+| `Ctrl+Q` | Always          | Request an orderly shutdown                                                                                       |
+| `Ctrl+R` | `--debug-utils` | Cold-restart the game while preserving the process and remote TCP connection                                      |
+| `Ctrl+P` | `--debug-utils` | Save the composited frame as `screenshot_NNN.png`                                                                 |
 | `Ctrl+S` | `--debug-utils` | Save a complete VDP diagnostic view as `vdp_NNN.png`, including the frame, tile sheets, nametables, and registers |
 
 The capture files are written to the process's current working directory.
@@ -789,20 +804,20 @@ cheats. Hold **Alt** on Windows/Linux or **Option** on macOS and press the
 corresponding key. The unmodified key alone has no effect; gamepad modifier
 chords are not handled by these host-side cheats.
 
-| Shortcut | Effect |
-| --- | --- |
-| `Alt/Option+L` | Add one Player 1 life, capped at `0xFF` |
-| `Alt/Option+S` | Add one Player 1 special attack, capped at `0xFF` |
-| `Alt/Option+P` | Toggle Player 1 punch damage ×12, capped at the cartridge's maximum damage nibble |
-| `Alt/Option+K` | Kill all instantiated enemies, including bosses, through their normal lethal states |
-| `Alt/Option+W` | Call the police for the active player without consuming a special attack |
-| `Alt/Option+1`–`8` | Jump to levels 1–8 and enter the corresponding level-intro state |
-| `Alt/Option+G` | Kill every instantiated **Garcia** (types `$20`–`$23`) |
-| `Alt/Option+N` | Kill every instantiated **Haku-Ro** — the ninja (types `$25`, `$2A`) |
-| `Alt/Option+B` | Kill every instantiated **Signal** (type `$24`) |
-| `Alt/Option+J` | Kill every instantiated **Jack** (type `$27`) |
-| `Alt/Option+U` | Kill every instantiated **Nora** (type `$26`) |
-| `Alt/Option+X` | Round 8: kill every enemy and boss instantiated on the way to **Mr. X** -- does nothing once his office scene is up (types `$33`-`$35`), so his Garcias and he are left to fight |
+| Shortcut           | Effect                                                                                                                                                                           |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Alt/Option+L`     | Add one Player 1 life, capped at `0xFF`                                                                                                                                          |
+| `Alt/Option+S`     | Add one Player 1 special attack, capped at `0xFF`                                                                                                                                |
+| `Alt/Option+P`     | Toggle Player 1 punch damage ×12, capped at the cartridge's maximum damage nibble                                                                                                |
+| `Alt/Option+K`     | Kill all instantiated enemies, including bosses, through their normal lethal states                                                                                              |
+| `Alt/Option+W`     | Call the police for the active player without consuming a special attack                                                                                                         |
+| `Alt/Option+1`–`8` | Jump to levels 1–8 and enter the corresponding level-intro state                                                                                                                 |
+| `Alt/Option+G`     | Kill every instantiated **Garcia** (types `$20`–`$23`)                                                                                                                           |
+| `Alt/Option+N`     | Kill every instantiated **Haku-Ro** — the ninja (types `$25`, `$2A`)                                                                                                             |
+| `Alt/Option+B`     | Kill every instantiated **Signal** (type `$24`)                                                                                                                                  |
+| `Alt/Option+J`     | Kill every instantiated **Jack** (type `$27`)                                                                                                                                    |
+| `Alt/Option+U`     | Kill every instantiated **Nora** (type `$26`)                                                                                                                                    |
+| `Alt/Option+X`     | Round 8: kill every enemy and boss instantiated on the way to **Mr. X** -- does nothing once his office scene is up (types `$33`-`$35`), so his Garcias and he are left to fight |
 
 The per-family kills put each enemy through the same forced-death sweep as
 `Alt/Option+K`, so score, HUD, and cleanup run exactly as they do for a normal
@@ -822,25 +837,27 @@ The `sor` executable accepts the following command-line options. `--help`
 prints the CLI11-generated help screen, and `--version` prints the executable
 version.
 
-| Flag | Meaning |
-| --- | --- |
-| `--rom PATH` | ROM image to load; default: `rom/SOR.bin` |
-| `--lang jp\|en` | Console language pin: `jp` is Japanese/domestic; `en` is overseas (English); default: `en` |
-| `--hz 50\|60` | Console video-standard pin: `60` is NTSC/low and `50` is PAL/high; default: `60` |
-| `--silent` | Disable audio output completely by dropping audio-chip writes (no pre-rendered soundtrack either) |
-| `--sound prerendered\|emulated` | Audio source: `prerendered` plays the FLAC soundtrack rendered by `scripts/render_soundtrack.py` (default; falls back to `emulated` when it is missing), `emulated` runs the YM2612, PSG and Z80 DAC in real time; see [Pre-rendered soundtrack](#pre-rendered-soundtrack) |
-| `--soundtrack DIR` | Pre-rendered soundtrack directory; default: `soundtrack/` next to the ROM |
-| `--debug-log` | Log CPU and VDP state once per second |
-| `--debug-utils` | Enable debug hotkeys, host cheats, and remote access |
-| `--fullscreen`, `--windowed` | Start in desktop fullscreen, or in a window; default: as in `video.yaml`, see [Video settings](#video-settings) |
-| `--frame-sync auto\|vsync\|vsync-half\|vsync-third` | What sets the game's speed: `auto` (the default in `video.yaml`) is the internal timer, on any monitor, without tearing, and VRR monitors can follow it (use fullscreen for VRR); `vsync`, `vsync-half` and `vsync-third` follow the monitor, every 1, 2 or 3 refreshes |
-| `--widescreen`, `--no-widescreen` | Use VDP Mode 48 (48×27 tiles, 384×216) instead of Mode 40; a host-only mode the hardware does not have, see [Widescreen](#widescreen-mode-48) |
-| `--integer-scaling`, `--no-integer-scaling` | Scale the picture by whole multiples only, centred with borders (320×224 in a 1920×1080 window or monitor is drawn 4× at 1280×896 instead of filling the height), nearest-neighbour |
-| `--default-video` | Ignore `video.yaml` for this run: the defaults, plus any other video option given. For scripts and measurements |
-| `--turbo N` | Run the internal VDP at `60 × N` Hz, on the timer unless `--frame-sync` says otherwise; `N` must be a positive integer |
-| `--port PORT` | With `--debug-utils`, select the remote-access TCP port; default: `6969`; `0` disables remote access |
-| `--aux-addr-file PATH` | Discovery mode: append an unknown indirect-dispatch address to this file and exit with status `42` instead of aborting |
-| `--call-log PATH` | Write every 68000 subroutine entry and call to a typed CSV log (six-digit hexadecimal ROM addresses); the file is replaced on startup |
+| Flag                                                | Meaning                                                                                                                                                                                                                                                                    |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--rom PATH`                                        | ROM image to load; default: `rom/SOR.bin`                                                                                                                                                                                                                                  |
+| `--lang jp\|en`                                     | Console language pin: `jp` is Japanese/domestic; `en` is overseas (English); default: `en`                                                                                                                                                                                 |
+| `--hz 50\|60`                                       | Console video-standard pin: `60` is NTSC/low and `50` is PAL/high; default: `60`                                                                                                                                                                                           |
+| `--silent`                                          | Disable audio output completely by dropping audio-chip writes (no pre-rendered soundtrack either)                                                                                                                                                                          |
+| `--sound prerendered\|emulated`                     | Audio source: `prerendered` plays the FLAC soundtrack rendered by `scripts/render_soundtrack.py` (default; falls back to `emulated` when it is missing), `emulated` runs the YM2612, PSG and Z80 DAC in real time; see [Pre-rendered soundtrack](#pre-rendered-soundtrack) |
+| `--soundtrack DIR`                                  | Pre-rendered soundtrack directory; default: `soundtrack/` next to the ROM                                                                                                                                                                                                  |
+| `--debug-log`                                       | Log CPU and VDP state once per second                                                                                                                                                                                                                                      |
+| `--debug-utils`                                     | Enable debug hotkeys, host cheats, and remote access                                                                                                                                                                                                                       |
+| `--fullscreen`, `--windowed`                        | Start in desktop fullscreen, or in a window; default: as in `video.yaml`, see [Video settings](#video-settings)                                                                                                                                                            |
+| `--frame-sync auto\|vsync\|vsync-half\|vsync-third` | What sets the game's speed: `auto` (the default in `video.yaml`) is the internal timer, on any monitor, without tearing, and VRR monitors can follow it (use fullscreen for VRR); `vsync`, `vsync-half` and `vsync-third` follow the monitor, every 1, 2 or 3 refreshes    |
+| `--widescreen`, `--no-widescreen`                   | Use VDP Mode 48 (48×27 tiles, 384×216) instead of Mode 40; a host-only mode the hardware does not have, see [Widescreen](#widescreen-mode-48)                                                                                                                              |
+| `--integer-scaling`, `--no-integer-scaling`         | Scale the picture by whole multiples only, centred with borders (320×224 in a 1920×1080 window or monitor is drawn 4× at 1280×896 instead of filling the height), nearest-neighbour                                                                                        |
+| `--default-video`                                   | Ignore `video.yaml` for this run: the defaults, plus any other video option given. For scripts and measurements                                                                                                                                                            |
+| `--qol A,B`                                         | Turn on quality-of-life options for this run, separated by commas: `cam`, `grab`, `damage`; see [Quality-of-life settings](#quality-of-life-settings)                                                                                                                                |
+| `--default-qol`                                     | Ignore `qol.yaml` for this run: the defaults, plus anything `--qol` turns on. For scripts and measurements                                                                                                                                                                 |
+| `--turbo N`                                         | Run the internal VDP at `60 × N` Hz, on the timer unless `--frame-sync` says otherwise; `N` must be a positive integer                                                                                                                                                     |
+| `--port PORT`                                       | With `--debug-utils`, select the remote-access TCP port; default: `6969`; `0` disables remote access                                                                                                                                                                       |
+| `--aux-addr-file PATH`                              | Discovery mode: append an unknown indirect-dispatch address to this file and exit with status `42` instead of aborting                                                                                                                                                     |
+| `--call-log PATH`                                   | Write every 68000 subroutine entry and call to a typed CSV log (six-digit hexadecimal ROM addresses); the file is replaced on startup                                                                                                                                      |
 
 ### Widescreen (Mode 48)
 

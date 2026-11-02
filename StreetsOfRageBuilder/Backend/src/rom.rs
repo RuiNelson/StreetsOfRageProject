@@ -1,4 +1,4 @@
-//! Step 3: the user's own ROM. It is verified by CRC32 against the dump the project was
+//! Step 4: the user's own ROM. It is verified by CRC32 against the dump the project was
 //! recompiled from, then copied to where the project's scripts look for it
 //! (`StreetsOfRageRecompilation/rom/SOR.bin`).
 
@@ -80,7 +80,7 @@ fn use_rom_in(rom: &Path, project: &Path) -> Result<RomReport, String> {
         let target = installed_path(project);
         let folder = target.parent().expect("the target has a folder");
         if !project.join("StreetsOfRageRecompilation").is_dir() {
-            return Err(format!("{} is not the project folder; redo step 2.", project.display()));
+            return Err(format!("{} is not the project folder; redo step 3.", project.display()));
         }
         std::fs::create_dir_all(folder).map_err(|e| format!("cannot create {}: {e}", folder.display()))?;
         std::fs::write(&target, data).map_err(|e| format!("cannot write {}: {e}", target.display()))?;

@@ -83,7 +83,7 @@ export function Rom({ setReady, actions, projectPath }: StepProps) {
   };
 
   if (!projectPath) {
-    return <div className="notice warning">Download the project first (step 2).</div>;
+    return <div className="notice warning">Download the project first (step 3).</div>;
   }
 
   return (

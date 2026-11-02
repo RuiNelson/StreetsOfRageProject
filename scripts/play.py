@@ -9,7 +9,7 @@
 The window remembers its settings in last_play_py_settings.yml (meta-repository
 root, gitignored) and reads it back on the next launch. Presets given on the
 command line start from the defaults, never from the saved file, do not
-overwrite it and ignore the game's video.yaml, so a scripted run is reproducible.
+overwrite it and ignore the game's video.yaml and qol.yaml, so a scripted run is reproducible.
 Unknown options are handed to autoplay as they are.
 
 Standard library only; the window needs a Python with Tk (_tkinter).
@@ -57,6 +57,8 @@ DEFAULTS: dict[str, Any] = {
     "widescreen": "",  # --widescreen / --no-widescreen
     "integer_scaling": "",  # --integer-scaling / --no-integer-scaling, whole-number scale factors only
     "default_video": False,  # --default-video, ignore video.yaml altogether
+    "qol": "",  # --qol, comma-separated options to turn on over qol.yaml (OPTIONS > QUALITY-OF-LIFE)
+    "default_qol": False,  # --default-qol, ignore qol.yaml altogether
     "debug_utils": True,  # remote access, hotkeys and cheats: always on when autoplay runs
     "debug": False,
     "call_log": "",
@@ -83,7 +85,9 @@ VIDEO_SWITCHES = {
     "integer_scaling": ("--integer-scaling", "--no-integer-scaling"),
 }
 
-# Fields a preset sets. The rest (widescreen, integer scaling, fullscreen, ROM, sound source, soundtrack
+QOL_OPTIONS = ("cam", "grab", "damage")  # sor --qol choices
+
+# Fields a preset sets. The rest (widescreen, integer scaling, fullscreen, quality-of-life, ROM, sound source, soundtrack
 # folder, AI folder, call log, extra...) is the user's own and survives a preset.
 SESSION_FIELDS = (
     "port", "turbo", "frame_sync", "lang", "debug_utils", "silent", "agent_p1", "agent_p2", "reach",
@@ -206,6 +210,10 @@ def host_arguments(s: dict[str, Any], *, with_autoplay: bool) -> list[str]:
     args: list[str] = [s["rom"]] if s["rom"] else []
     if s["default_video"]:
         args.append("--default-video")
+    if s["default_qol"]:
+        args.append("--default-qol")
+    if s["qol"]:
+        args += ["--qol", s["qol"]]
     if s["turbo"] > 0:
         args += ["--turbo", str(s["turbo"])]  # sor then runs on its timer, whatever video.yaml says
     elif s["frame_sync"]:
@@ -304,6 +312,9 @@ def check(s: dict[str, Any], mode: str, *, probe: bool = False) -> tuple[list[st
     except ValueError as error:
         errors.append(f"extra arguments: {error}")
     if mode != "autoplay":
+        for name in filter(None, s["qol"].split(",")):
+            if name not in QOL_OPTIONS:
+                errors.append(f"unknown --qol option {name!r}: choose from {', '.join(QOL_OPTIONS)}")
         if not builds_first(s) and not built_executable(SOR_BUILD_DIR, "sor").is_file():
             errors.append("sor is not built: Ctrl+B builds it first")
         if s["rom"] and not Path(s["rom"]).expanduser().is_file():
@@ -452,11 +463,13 @@ class PlayWindow:
         self.combo(host, 7, "Picture (^W)", "widescreen")
         self.combo(host, 8, "Integer scaling (^U)", "integer_scaling")
         self.check(host, 9, "Ignore the game's video.yaml, --default-video", "default_video")
-        self.check(host, 10, "Debug utils: remote access, hotkeys (^D)", "debug_utils")
-        self.check(host, 11, "Log CPU/VDP state, --debug-log", "debug")
-        self.entry(host, 12, "Call log file", "call_log")
-        self.entry(host, 13, "ROM file", "rom")
-        self.entry(host, 14, "AI folder, --ai-path (empty = autoplay/ai-code)", "ai_path", browse=True)
+        self.entry(host, 10, f"Quality-of-life, --qol ({', '.join(QOL_OPTIONS)})", "qol")
+        self.check(host, 11, "Ignore the game's qol.yaml, --default-qol", "default_qol")
+        self.check(host, 12, "Debug utils: remote access, hotkeys (^D)", "debug_utils")
+        self.check(host, 13, "Log CPU/VDP state, --debug-log", "debug")
+        self.entry(host, 14, "Call log file", "call_log")
+        self.entry(host, 15, "ROM file", "rom")
+        self.entry(host, 16, "AI folder, --ai-path (empty = autoplay/ai-code)", "ai_path", browse=True)
 
         self.check(autoplay, 0, "AI plays P1 (^7)", "agent_p1")
         self.check(autoplay, 1, "AI plays P2 (^8)", "agent_p2")
@@ -783,6 +796,7 @@ def parse_arguments(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
                         help="what to start (default: both)")
     parser.add_argument("--run-saved", choices=("both", "host", "autoplay"), metavar="MODE",
                         help="internal: run the saved settings in the foreground (the window starts this)")
+    parser.add_argument("--qol", metavar="A,B", help=f"sor's quality-of-life options to turn on ({', '.join(QOL_OPTIONS)})")
     parser.add_argument("--dry-run", action="store_true", help="print the command lines and exit")
     return parser.parse_known_args(argv)
 
@@ -803,9 +817,11 @@ def main() -> int:
         print("play.py: --level must be 1-8", file=sys.stderr)
         return 2
     if arguments.preset:
-        settings = preset_settings({**DEFAULTS, "default_video": True}, arguments.preset, arguments.level)
+        settings = preset_settings({**DEFAULTS, "default_video": True, "default_qol": True}, arguments.preset, arguments.level)
     else:
         settings = load_settings()
+    if arguments.qol is not None:
+        settings["qol"] = arguments.qol
     if extra:
         settings["extra"] = shlex.join([*shlex.split(settings["extra"]), *extra])
     errors, warnings = check(settings, arguments.mode, probe=not arguments.dry_run)

@@ -54,7 +54,7 @@ fn game_desktop_entry(inputs: &Inputs, icon: &Path) -> String {
 
 pub fn create(desktop: &Path, data: &Path, inputs: &Inputs) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    let (python, _) = dependencies::tk_python().ok_or("Python with Tk was not found; finish step 1 first")?;
+    let (python, _) = dependencies::tk_python().ok_or("Python with Tk was not found; finish step 2 first")?;
     let icon = data.join("icon.png");
     std::fs::write(&icon, ICON_PNG).map_err(|e| format!("cannot write {}: {e}", icon.display()))?;
     let [game, launcher] = entries(desktop, EXTENSION);

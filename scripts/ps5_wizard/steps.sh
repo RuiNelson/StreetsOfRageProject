@@ -34,12 +34,6 @@ wizard_paths() {
     GENERATED_DIR=$SOR_DIR/generated
     DIST_DIR=$SOR_DIR/dist-ps5
     OUTPUT_DIR=$(pwd)
-
-    # What was there before the wizard: cleaning up removes only what it made.
-    HAD_ROM=0; [ -f "$ROM_DEST" ] && HAD_ROM=1
-    HAD_SOUNDTRACK=0; [ -e "$SOUNDTRACK_DIR" ] && HAD_SOUNDTRACK=1
-    HAD_GENERATED=0; [ -e "$GENERATED_DIR" ] && HAD_GENERATED=1
-    HAD_DIST=0; [ -e "$DIST_DIR" ] && HAD_DIST=1
     ZIPS_MADE=()
 }
 
@@ -490,28 +484,24 @@ step_cleanup() {
     step_begin 6 "Cleaning up"
     local remove=()
     remove+=("The container image and build volume|about 5 GB and the compiled objects")
-    [ "$HAD_GENERATED" -eq 0 ] && [ -e "$GENERATED_DIR" ] && remove+=("The generated C++|${GENERATED_DIR#"$REPO_ROOT"/}")
-    [ "$HAD_DIST" -eq 0 ] && [ -e "$DIST_DIR" ] && remove+=("The built title|${DIST_DIR#"$REPO_ROOT"/}")
-    [ "$HAD_SOUNDTRACK" -eq 0 ] && [ -e "$SOUNDTRACK_DIR" ] && remove+=("The rendered soundtrack|${SOUNDTRACK_DIR#"$REPO_ROOT"/}")
-    [ "$HAD_ROM" -eq 0 ] && [ -f "$ROM_DEST" ] && remove+=("The copy of your ROM|${ROM_DEST#"$REPO_ROOT"/}")
+    [ -e "$GENERATED_DIR" ] && remove+=("The generated C++|${GENERATED_DIR#"$REPO_ROOT"/}")
+    [ -e "$DIST_DIR" ] && remove+=("The built title|${DIST_DIR#"$REPO_ROOT"/}")
 
-    say "Everything the wizard made can be removed now. Your ZIP files and your own ROM file stay."
+    say "The container and everything it generated can be removed now. Your ZIP files, the ROM and the rendered soundtrack stay, because they can be reused."
     blank
     local item
     for item in "${remove[@]}"; do
         printf '    %s-%s %s  %s%s%s\n' "$ACCENT" "$RST" "${item%%|*}" "$MUTED" "${item#*|}" "$RST"
     done
     blank
-    menu "Clean up everything|free the disk space" "Keep it all|faster the next time"
+    menu "Clean up|free the disk space" "Keep it all|faster the next time"
     local choice=$MENU_CHOICE
     blank
     if [ "$choice" -eq 0 ]; then
         docker image rm -f "$IMAGE" >/dev/null 2>&1 && ok "Removed the container image"
         docker volume rm -f "$BUILD_VOLUME" >/dev/null 2>&1 && ok "Removed the build volume"
-        [ "$HAD_GENERATED" -eq 0 ] && rm -rf "$GENERATED_DIR" && ok "Removed the generated C++"
-        [ "$HAD_DIST" -eq 0 ] && rm -rf "$DIST_DIR" && ok "Removed the built title"
-        [ "$HAD_SOUNDTRACK" -eq 0 ] && rm -rf "$SOUNDTRACK_DIR" && ok "Removed the rendered soundtrack"
-        [ "$HAD_ROM" -eq 0 ] && rm -f "$ROM_DEST" && ok "Removed the copy of your ROM"
+        [ -e "$GENERATED_DIR" ] && rm -rf "$GENERATED_DIR" && ok "Removed the generated C++"
+        [ -e "$DIST_DIR" ] && rm -rf "$DIST_DIR" && ok "Removed the built title"
     else
         muted "Nothing removed."
     fi

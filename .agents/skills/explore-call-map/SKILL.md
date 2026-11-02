@@ -61,9 +61,9 @@ Pass multiple log paths to merge observations from several runs.
 
 New logs contain `call` events with all address fields and `entry` events whose
 `source` is the entered routine and whose other address fields are empty. The
-tool preserves source addresses already present in `labels.csv`. For older
-logs it approximates anonymous grouped C++ owners from the closest preceding
-label; use `--trust-recorded-source` to disable that approximation. Legacy logs
+tool preserves source addresses already present in `labels.csv`. A typed log's
+source is exact. For legacy logs it approximates anonymous grouped C++ owners from
+the closest preceding label; use `--trust-recorded-source` to disable that approximation. Legacy logs
 have no entry events, so they cannot prove whether a routine executed.
 
 ## Start the web viewer

@@ -5,19 +5,47 @@ Tauri 2 + Next.js static-export wizard that builds Streets of Rage from a ROM
 The frontend (`Frontend/`) must stay statically exportable: no runtime server,
 no API routes. All system work (installing dependencies, git clone, CRC check,
 running the project's scripts) belongs in Rust commands under `Backend/src/`,
-called through `Frontend/src/lib/tauri.ts`. Steps and order: `Frontend/src/lib/steps.ts`.
+called through `Frontend/src/lib/tauri.ts`. Steps and order: `Frontend/src/lib/steps.ts` (`stepsFor(target)`).
 Run npm scripts from `Frontend/` (`npm run tauri dev` does `cd ../Backend`).
 Validate with `npm run lint`, `npm run build` (Frontend) and `cargo check` (Backend).
 
 ## The Python AI inside `sor`
 
 The game builds its own CPython (`StreetsOfRageRecompilation/cmake/CPythonRuntime.cmake`) during
-step 5's configure: about 2 minutes more the first time, no new entry in the tables below (`make`
+step 6's configure: about 2 minutes more the first time, no new entry in the tables below (`make`
 comes with the Xcode tools and `build-essential`; Windows downloads a prebuilt one). The game's
 shortcut passes `--ai-path`, and the Launcher's `play.py` gets it from `run.py`. The build and
 the mode were run on Windows by hand, not through the Builder; Linux is untested.
 
-## Step 1: dependencies
+## Step 1: the target (user request)
+
+The first step chooses what to build: the game for this computer (the steps below) or the title for the
+**PS5 (Prospero)**, cross-compiled inside a container. `Wizard.tsx` holds `target` and swaps the sidebar's
+steps (`stepsFor`); the shared steps (dependencies, download, ROM, soundtrack, build) keep their positions
+and take `target` in `StepProps`, so one component serves both. The PS5 path is `scripts/ps5_wizzard.sh` /
+`.ps1` in `Backend/src/ps5.rs`, with the same image (`sor-ps5-toolchain`) and volume (`sor-ps5-build`),
+`generate_cpp.py` and `prospero/tools/build.sh` unchanged. It needs neither Python, CMake nor a compiler
+on the computer: step 2 checks **git** (installable, as for the local target; on macOS no Homebrew needed)
+and a **container engine** (`docker`, else `podman`, the first one whose `info` answers; user decision: only
+detected, with links per system, never installed by the app).
+
+- **Soundtrack** (step 5) and **build** (step 6) run in the container (`ps5_render_soundtrack`, `ps5_build`),
+  each preparing the image first (docker build is cached; a toolchain check follows). The chip choice is kept.
+  Stamps (`stamp.rs`) are the same as locally, in `rom/soundtrack` and `dist-ps5`. Windows: build files get
+  LF before the image is built (`unix_line_endings`; Git checks them out as CRLF). Linux: SELinux gets `:z`,
+  and a non-rootless engine's root-owned output is chowned back. Written from the scripts, not run on Linux.
+- **Send** (step 7): ZIP files (`StreetsOfRage-PS5-homebrew.zip` and `-data.zip`, written with the `zip` crate,
+  `/` entry names, FLAC stored) into a folder chosen in a dialog (default Downloads; user decision, the
+  scripts use the CWD), and/or anonymous FTP with `curl` (port 2121 default; the console is probed first;
+  the program, `eboot.bin`, goes last; three attempts a file). Progress lines are `[n/N] name`, so the bar works.
+- **Clean up** (step 8, optional): removes the container image, the build volume, `generated/` and `dist-ps5/` (user
+  decision, the scripts do the same); the ROM and `rom/soundtrack` stay, being reusable.
+- Closing the window mid-build leaves the container running (the scripts remove theirs on Ctrl-C; the app does not).
+- Tested: unit tests (CRLF, ZIP contents, FTP addresses and URLs, dependency report for `ps5`), `cargo check`,
+  `npm run lint` and `build`. Not run: a real image build, container run, ZIP to a console or FTP upload from
+  the app; Windows and Linux.
+
+## Step 2: dependencies
 
 `Backend/src/dependencies.rs` holds one `Spec` table per platform (check + install
 recipe: winget id, brew formulas or apt packages). `system.rs` resolves programs on
@@ -29,7 +57,7 @@ project README prerequisites. The macOS code path was compiled and run; on Windo
 real machine over SSH) the app compiles, the unit tests pass and the dependency report and the
 `.lnk` creation were checked; the GUI flows on Windows, and everything on Linux, are untested.
 
-## Step 2: download the project
+## Step 3: download the project
 
 `Backend/src/project.rs` puts the project in the exact folder the user chooses (user
 decision, so the same folder is chosen again to update it). It downloads the commit tagged with
@@ -48,7 +76,7 @@ Unit tests clone a local repo through `file://` (a plain path ignores `--depth`)
 network test against the real repository is `#[ignore]`d (`SOR_TEST_FOLDER=dir cargo test
 real_project -- --ignored`).
 
-## Step 3: the ROM
+## Step 4: the ROM
 
 `Backend/src/rom.rs` verifies the user's ROM by CRC32 (the `crc` crate, `CRC_32_ISO_HDLC`)
 against the project's `SOR.bin` (`4052E845`, 512 KiB raw dump, the "Rev. A" version of the game, which the step tells the user to obtain) and, only when it matches,
@@ -61,12 +89,12 @@ cartridge version the project does not support: the user is told to get a copy o
 original). The UI warns to use only a legally obtained ROM. `installed_rom` lets the step
 recognise a ROM already in the project when the user comes back to it.
 
-## Step 4: extract the sound
+## Step 5: extract the sound
 
 `Backend/src/sound.rs` runs the project's own `scripts/render_soundtrack.py` with the chip the
 user picked in the step (`--chip ym3438`, the default, or `ym2612`; user request; no `--out`)
 in the project folder with the first working Python
-(`script::run`, shared with step 5: first working Python from `dependencies::python_candidates`,
+(`script::run`, shared with step 6: first working Python from `dependencies::python_candidates`,
 `PYTHONUNBUFFERED`), streaming stdout and stderr line by line to the UI (`system::read_lines`). The first run builds the renderer, so it takes minutes: while it runs
 the step sets `busy` (`StepProps.setBusy`) and the wizard disables Back/Next. The result is
 `rom/soundtrack/` with `manifest.tsv` written last; `soundtrack_status` recognises a finished
@@ -74,10 +102,10 @@ render when the user comes back. Failure shows the last lines of output. The end
 is `#[ignore]`d (`SOR_TEST_FOLDER`, `SOR_TEST_ROM`; it works in a scratch clone, never in the
 user's `rom/soundtrack`).
 
-Steps 4 and 5 play `public/success.mp3` or `public/failure.mp3` when the run ends (user request;
+Steps 5 and 6 play `public/success.mp3` or `public/failure.mp3` when the run ends (user request;
 `Frontend/src/lib/sounds.ts`). Compiled and exported, but not listened to inside the Tauri window on any platform.
 
-## Step 5: build
+## Step 6: build
 
 `Backend/src/compile.rs` runs `scripts/generate_cpp_and_build.py --release` through
 `script::run` (a player wants the optimized build; `--release` also cleans the build folder, so
@@ -91,7 +119,7 @@ The end-to-end test is `#[ignore]`d (`SOR_TEST_FOLDER`, `SOR_TEST_ROM`; scratch 
 
 ## "Ready" means built from this version of the project
 
-`build/` and `rom/soundtrack/` are gitignored, so updating the project (step 2) leaves the old output
+`build/` and `rom/soundtrack/` are gitignored, so updating the project (step 3) leaves the old output
 behind. `Backend/src/stamp.rs` writes `.builder-version` next to the output after a successful run and
 `game_status` / `soundtrack_status` compare it with git's current version, returning `outdated: true`
 when it differs or is missing (so builds made before the stamps existed are rebuilt once). The game's
@@ -101,7 +129,7 @@ not touch the renderer keeps the render (a choice of mine, not a user decision: 
 renders turn out to depend on more). Without git or a repository the output is accepted. The steps
 treat an outdated output as not done and say so.
 
-## Step 6: the shortcut
+## Step 7: the shortcut
 
 `Backend/src/shortcut.rs` holds what is common, and `shortcut/windows.rs`, `macos.rs` and `linux.rs` one file per system (user request). It makes two entries (user request, 2026-10-31; icon `punch-icon.png`):
 **StreetsOfRageRecompilation** starts the game, **StreetsOfRageRecompilation Launcher** opens the

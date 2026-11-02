@@ -1,4 +1,4 @@
-//! Step 5: generate the C++ from the ROM and compile the game with the project's own
+//! Step 6: generate the C++ from the ROM and compile the game with the project's own
 //! `scripts/generate_cpp_and_build.py --release` (a player wants the optimized build).
 
 use std::path::{Path, PathBuf};
@@ -21,7 +21,7 @@ fn build_folder(project: &Path) -> PathBuf {
 }
 
 /// The game is generated from the whole project, submodules included: its commit names them all.
-fn version(project: &Path) -> Option<String> {
+pub(crate) fn version(project: &Path) -> Option<String> {
     project::revision(project, "HEAD")
 }
 
@@ -47,7 +47,7 @@ fn status(project: &Path) -> Option<Game> {
 
 fn compile(project: &Path, progress: &(dyn Fn(String) + Sync)) -> Result<Game, String> {
     if !project.join("StreetsOfRageRecompilation").join("rom").join("SOR.bin").is_file() {
-        return Err("The ROM is not in the project yet; redo step 3.".into());
+        return Err("The ROM is not in the project yet; redo step 4.".into());
     }
     let built_from = version(project);
     script::run(project, "generate_cpp_and_build.py", &["--release"], progress)?;
@@ -98,7 +98,7 @@ mod tests {
         std::fs::create_dir_all(&build).unwrap();
         let name = if cfg!(windows) { "sor.exe" } else { "sor" };
         assert!(status(&project).is_none());
-        assert!(compile(&project, &|_| {}).unwrap_err().contains("step 3"));
+        assert!(compile(&project, &|_| {}).unwrap_err().contains("step 4"));
         std::fs::write(build.join(name), b"").unwrap();
         assert!(status(&project).unwrap().executable.ends_with(name));
         std::fs::remove_dir_all(&project).unwrap();
