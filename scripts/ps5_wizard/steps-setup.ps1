@@ -12,6 +12,7 @@ function Initialize-Paths {
     $script:DockerContext = Join-Normal $script:SorDir 'prospero/docker'
     $script:RomDest = Join-Normal $script:SorDir 'rom/SOR.bin'
     $script:SoundtrackDir = Join-Normal $script:SorDir 'rom/soundtrack'
+    $script:GeneratedDir = Join-Normal $script:SorDir 'generated'
     $script:DistDir = Join-Normal $script:SorDir 'dist-ps5'
     $here = (Get-Location).ProviderPath
     # Started by a double click, the current folder is scripts\: put the ZIP files in the project folder.

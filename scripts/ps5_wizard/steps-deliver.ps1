@@ -157,9 +157,10 @@ function Step-Deliver {
 function Step-Cleanup {
     Start-Step 6 'Cleaning up'
     $remove = @(@{ Label = 'The container image and build volume'; Detail = 'about 5 GB and the compiled objects' })
+    if (Test-Path -LiteralPath $script:GeneratedDir) { $remove += @{ Label = 'The generated C++'; Detail = (Get-RelativeToRepo $script:GeneratedDir) } }
     if (Test-Path -LiteralPath $script:DistDir) { $remove += @{ Label = 'The built title'; Detail = (Get-RelativeToRepo $script:DistDir) } }
 
-    Say 'The container and the built title can be removed now. Your ZIP files, the ROM and the rendered soundtrack stay.'
+    Say 'The container and everything it generated can be removed now. Your ZIP files, the ROM and the rendered soundtrack stay, because they can be reused.'
     Blank
     foreach ($item in $remove) { Out-Line "    $($script:Accent)-$($script:Rst) $($item.Label)  $($script:Muted)$($item.Detail)$($script:Rst)" }
     Blank
@@ -170,9 +171,11 @@ function Step-Cleanup {
         if ($LASTEXITCODE -eq 0) { Say-Ok 'Removed the container image' }
         & $script:EnginePath volume rm -f $BuildVolume *> $null
         if ($LASTEXITCODE -eq 0) { Say-Ok 'Removed the build volume' }
-        if (Test-Path -LiteralPath $script:DistDir) {
-            Remove-Item -LiteralPath $script:DistDir -Recurse -Force
-            Say-Ok 'Removed the built title'
+        foreach ($target in @(@($script:GeneratedDir, 'the generated C++'), @($script:DistDir, 'the built title'))) {
+            if (Test-Path -LiteralPath $target[0]) {
+                Remove-Item -LiteralPath $target[0] -Recurse -Force
+                Say-Ok "Removed $($target[1])"
+            }
         }
     } else {
         Say-Muted 'Nothing removed.'

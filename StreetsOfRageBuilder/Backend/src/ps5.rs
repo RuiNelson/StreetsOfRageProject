@@ -458,8 +458,8 @@ fn upload(project: &Path, host: &str, port: &str, progress: &dyn Fn(String)) -> 
 }
 
 // ---------------------------------------------------------------------------------------------
-// Clean up: the container image, the build volume and `dist-ps5/`; the ROM, `generated/` and the
-// soundtrack stay.
+// Clean up: the container image, the build volume, `generated/` and `dist-ps5/`; the ROM and the
+// soundtrack stay, because they can be reused.
 
 fn clean_up(project: &Path) -> Result<Vec<String>, String> {
     let engine = running_engine()?;
@@ -471,10 +471,11 @@ fn clean_up(project: &Path) -> Result<Vec<String>, String> {
     if engine_run(&["volume", "rm", "-f", BUILD_VOLUME]) {
         removed.push("The build volume".to_owned());
     }
-    let dist = dist_folder(project);
-    if dist.exists() {
-        std::fs::remove_dir_all(&dist).map_err(|e| format!("could not remove {}: {e}", dist.display()))?;
-        removed.push("The built title".to_owned());
+    for (folder, label) in [(sor_folder(project).join("generated"), "The generated C++"), (dist_folder(project), "The built title")] {
+        if folder.exists() {
+            std::fs::remove_dir_all(&folder).map_err(|e| format!("could not remove {}: {e}", folder.display()))?;
+            removed.push(label.to_owned());
+        }
     }
     Ok(removed)
 }

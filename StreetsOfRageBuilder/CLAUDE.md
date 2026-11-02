@@ -38,8 +38,8 @@ detected, with links per system, never installed by the app).
   `/` entry names, FLAC stored) into a folder chosen in a dialog (default Downloads; user decision, the
   scripts use the CWD), and/or anonymous FTP with `curl` (port 2121 default; the console is probed first;
   the program, `eboot.bin`, goes last; three attempts a file). Progress lines are `[n/N] name`, so the bar works.
-- **Clean up** (step 8, optional): removes only the container image, the build volume and `dist-ps5/` (user
-  decision, the scripts do the same); the ROM, `generated/` and `rom/soundtrack` stay.
+- **Clean up** (step 8, optional): removes the container image, the build volume, `generated/` and `dist-ps5/` (user
+  decision, the scripts do the same); the ROM and `rom/soundtrack` stay, being reusable.
 - Closing the window mid-build leaves the container running (the scripts remove theirs on Ctrl-C; the app does not).
 - Tested: unit tests (CRLF, ZIP contents, FTP addresses and URLs, dependency report for `ps5`), `cargo check`,
   `npm run lint` and `build`. Not run: a real image build, container run, ZIP to a console or FTP upload from

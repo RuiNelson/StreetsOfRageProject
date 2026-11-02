@@ -5,7 +5,7 @@ Windows (winget), macOS (Homebrew) and Debian-based Linux (apt).
 
 Steps: 1 Choose Target (this computer, or PlayStation 5) · 2 Install Tools · 3 Download Source · 4 Copy ROM (CRC check) · 5 Pre-render Soundtrack · 6 Build Executable · 7 Create Shortcut (the game, and a Launcher with `scripts/play.py`).
 
-For the **PlayStation 5** the build runs in a container, so only git and a container engine (Docker, OrbStack or Podman) are needed; steps 7 and 8 then make the ZIP files or send the files to the console over FTP, and offer to clean up.
+For the **PlayStation 5** the build runs in a container, so only git and a container engine (Docker, OrbStack or Podman) are needed; steps 7 and 8 then make the ZIP files or send the files to the console over FTP, and offer to clean up (the container, the generated C++ and the built title; the ROM and the soundtrack stay).
 
 ```bash
 cd StreetsOfRageBuilder/Frontend

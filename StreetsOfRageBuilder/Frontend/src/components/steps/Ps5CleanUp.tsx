@@ -39,15 +39,18 @@ export function Ps5CleanUp({ setReady, setBusy: setWizardBusy, actions, projectP
   return (
     <div className="cleanup">
       <div className="notice">
-        <p>The container and the built title can be removed now to free the disk space:</p>
+        <p>The container and everything it generated can be removed now to free the disk space:</p>
         <ul>
           <li>the container image and the build volume (about 5 GB and the compiled objects)</li>
+          <li>
+            the generated C++, <code>StreetsOfRageRecompilation/generated</code>
+          </li>
           <li>
             the built title, <code>StreetsOfRageRecompilation/dist-ps5</code>
           </li>
         </ul>
         <p>
-          Your ZIP files, your ROM and the rendered soundtrack stay. Keeping everything makes the next build faster:
+          Your ZIP files, your ROM and the rendered soundtrack stay, because they can be reused. Keeping everything makes the next build faster:
           press Finish to keep it all.
         </p>
       </div>

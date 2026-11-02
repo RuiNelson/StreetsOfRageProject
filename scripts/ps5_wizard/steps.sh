@@ -31,6 +31,7 @@ wizard_paths() {
     DOCKER_CONTEXT=$SOR_DIR/prospero/docker
     ROM_DEST=$SOR_DIR/rom/SOR.bin
     SOUNDTRACK_DIR=$SOR_DIR/rom/soundtrack
+    GENERATED_DIR=$SOR_DIR/generated
     DIST_DIR=$SOR_DIR/dist-ps5
     OUTPUT_DIR=$(pwd)
     ZIPS_MADE=()
@@ -483,9 +484,10 @@ step_cleanup() {
     step_begin 6 "Cleaning up"
     local remove=()
     remove+=("The container image and build volume|about 5 GB and the compiled objects")
+    [ -e "$GENERATED_DIR" ] && remove+=("The generated C++|${GENERATED_DIR#"$REPO_ROOT"/}")
     [ -e "$DIST_DIR" ] && remove+=("The built title|${DIST_DIR#"$REPO_ROOT"/}")
 
-    say "The container and the built title can be removed now. Your ZIP files, the ROM and the rendered soundtrack stay."
+    say "The container and everything it generated can be removed now. Your ZIP files, the ROM and the rendered soundtrack stay, because they can be reused."
     blank
     local item
     for item in "${remove[@]}"; do
@@ -498,6 +500,7 @@ step_cleanup() {
     if [ "$choice" -eq 0 ]; then
         docker image rm -f "$IMAGE" >/dev/null 2>&1 && ok "Removed the container image"
         docker volume rm -f "$BUILD_VOLUME" >/dev/null 2>&1 && ok "Removed the build volume"
+        [ -e "$GENERATED_DIR" ] && rm -rf "$GENERATED_DIR" && ok "Removed the generated C++"
         [ -e "$DIST_DIR" ] && rm -rf "$DIST_DIR" && ok "Removed the built title"
     else
         muted "Nothing removed."
