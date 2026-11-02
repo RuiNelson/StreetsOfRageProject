@@ -23,12 +23,15 @@ The project brings together several components whose primary purpose is to
 recompile Streets of Rage faithfully and make its internals available for
 study.
 
-## Documentation
+## Where to go next
 
-| Document                                                                     | What is in it                                                                                     |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [Developer Journey and Project Structure](docs/DeveloperJourney.md)          | The components, how the recompiler, the runtime and the game came together, the roadmap, the AI   |
-| [Building for Windows, macOS and Linux](docs/BuildingDesktop.md)             | The Builder (the easiest way), building by hand, and how to obtain a compatible ROM               |
-| [Building for PlayStation 5](docs/BuildingPS5.md)                            | The Builder, the wizard, building by hand, and what ends up on the console                        |
-| [Playing](docs/Playing.md)                                                   | Controls, options, the soundtrack, keyboard shortcuts and command-line flags                      |
-| [Researching](docs/Researching.md)                                           | Disassembly, entry-point discovery, the call-map database, and observing the running game         |
+- **I want to play it.** [Build it for Windows, macOS or Linux](docs/BuildingDesktop.md), or
+  [for PlayStation 5](docs/BuildingPS5.md). The Builder does all the work on either route; you bring
+  the ROM.
+- **I have it running.** [Playing](docs/Playing.md) covers the controls, the options, the soundtrack,
+  the AI partner and the command line.
+- **I want to know how it was done.** The
+  [Developer Journey and Project Structure](docs/DeveloperJourney.md) tells the story, from reading
+  the machine code to teaching an AI to play.
+- **I want to study the game.** [Researching](docs/Researching.md) shows how to read the code, map
+  who calls whom and observe the running game.

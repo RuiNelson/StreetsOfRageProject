@@ -4,14 +4,13 @@
 
 ![VDP Dump](vdp_dump.webp)
 
-- [Using the Builder (recommended)](#using-the-builder-recommended)
-- [Building by hand](#building-by-hand)
-  - [Common prerequisites](#common-prerequisites)
-  - [Clone the repository and submodules](#clone-the-repository-and-submodules)
-  - [Obtain a compatible ROM](#obtain-a-compatible-rom)
-  - [Build on Windows](#build-on-windows)
-  - [Build on macOS](#build-on-macos)
-  - [Build on Linux](#build-on-linux)
+There are two ways to get the game running, and both need
+[a ROM you are entitled to use](#step-3-obtain-a-compatible-rom):
+
+- **[The Builder](#using-the-builder-recommended)** is a guided window that does everything for you.
+  Use it unless you have a reason not to.
+- **[By hand](#building-by-hand)** gives you the same result from a terminal, and it is the route to
+  take if you want to change the code or your system is not one the Builder supports.
 
 For the console, see [Building for PlayStation 5](BuildingPS5.md).
 
@@ -19,13 +18,9 @@ For the console, see [Building for PlayStation 5](BuildingPS5.md).
 
 ![Streets of Rage Builder](builder.webp)
 
-The easiest way to get the game running is **Streets of Rage Builder**, a guided
-installer for Windows, macOS and Debian-based Linux (Ubuntu and similar). It
-does for you the steps of [building by hand](#building-by-hand); you only need a ROM you
-are legally entitled to use (see [Obtain a compatible ROM](#obtain-a-compatible-rom)).
-The ROM must be the **Rev. A** dump (CRC32 `4052E845`).
+**Streets of Rage Builder** runs on Windows, macOS and Debian-based Linux (Ubuntu and similar).
 
-### Download and open the Builder
+### 1. Download it
 
 Get the file for your system from the
 [latest release](https://github.com/RuiNelson/StreetsOfRageProject/releases/latest):
@@ -38,212 +33,103 @@ Get the file for your system from the
 | Linux x64                       | `StreetsOfRageBuilder-X.Y.Z-x86_64.AppImage`     |
 | Linux ARM64                     | `StreetsOfRageBuilder-X.Y.Z-aarch64.AppImage`    |
 
-The apps are not signed yet, so macOS, Windows and your browser will warn you the
-first time; the release page explains how to open them.
+The apps are not signed yet, so macOS, Windows and your browser will warn you the first time. The
+release page explains how to open them.
 
-### Follow the steps
+### 2. Follow the steps
 
-The window lists the steps on the left; **Back** and **Next** are at the bottom.
-**Next** is enabled when a step is done.
+The steps are listed on the left of the window. **Next** becomes available when a step is done.
 
-1. **Choose Target**: this computer. (For the other choice, see
-   [Building for PlayStation 5](BuildingPS5.md#using-the-builder).)
-2. **Install Tools**: checks Git, CMake, Ninja, Python (with Tk) and a C++
-   compiler, and installs what is missing with WinGet, Homebrew or apt. The
-   installers open in a terminal window and may ask for your password or
-   administrator approval. When they finish, the Builder checks again by itself
-   (or press **Re-check**).
-3. **Download Source**: choose an empty or new folder for the project. The version
-   that matches this Builder is downloaded from GitHub with its submodules and a
-   single commit of history. To update later, choose the same folder in a newer
-   Builder.
-4. **Copy ROM**: drag your ROM onto the window or browse for it (`.bin`, `.md`,
-   `.gen`). Its CRC32 is checked, and it is copied into the project only if it
-   is the right dump. A Super Magic Drive (`.smd`) dump must first be converted
-   to a raw dump; any other version of the cartridge is not supported.
-5. **Pre-render Soundtrack**: renders the music and sound effects from your ROM
-   (about 4 minutes or more, ~265 MB). You can pick the sound chip: YM3438
-   (default) or YM2612. Keep the window open.
-6. **Build Executable**: generates the C++ from the ROM and compiles the game
-   and its dependencies; it takes several minutes, longer on slow computers.
-7. **Create Shortcut**: adds **StreetsOfRageRecompilation**, which starts the game,
-   and **StreetsOfRageRecompilation Launcher**, which opens the launcher window. On
-   Windows and Linux they are shortcuts on your desktop. On macOS they are two apps
-   in a `StreetsOfRageProject` folder, in Applications or your home folder as you
-   choose; the game app holds a copy of everything it needs, including your ROM.
-   Click **Finish** to close the Builder.
+1. **Choose Target:** this computer. The other choice is the
+   [PlayStation 5](BuildingPS5.md#using-the-builder).
+2. **Install Tools:** the Builder checks for Git, CMake, Ninja, Python (with Tk) and a C++ compiler,
+   and installs what is missing with WinGet, Homebrew or apt. The installers open in a terminal
+   window and may ask for your password or an administrator's approval. The Builder checks again
+   when they finish, or when you press **Re-check**.
+3. **Download Source:** choose an empty or new folder. The Builder downloads the version of the
+   project that matches it. To update later, choose the same folder in a newer Builder.
+4. **Copy ROM:** drag your ROM onto the window or browse for it (`.bin`, `.md` or `.gen`). It is
+   copied into the project only if it is the right dump.
+5. **Pre-render Soundtrack:** renders the music and sound effects from your ROM, which takes about 4
+   minutes or more and about 265 MB. You can pick the sound chip: YM3438 (the default) or YM2612.
+   Keep the window open.
+6. **Build Executable:** generates the C++ and compiles the game. This takes several minutes, longer
+   on a slow computer.
+7. **Create Shortcut:** adds **StreetsOfRageRecompilation**, which starts the game, and
+   **StreetsOfRageRecompilation Launcher**, which opens a window with all the options. On Windows and
+   Linux they go on your desktop. On macOS they are two apps in a `StreetsOfRageProject` folder, in
+   Applications or your home folder as you choose, and the game's app holds a copy of everything it
+   needs, including your ROM.
 
-Then double-click **StreetsOfRageRecompilation** to play, and see
-[Playing](Playing.md) for the controls.
+Click **Finish**, then double-click **StreetsOfRageRecompilation** to play. [Playing](Playing.md)
+has the controls.
 
-If a step fails, the last lines of its output are shown; fix the cause (for
-example, a missing tool) and run the step again.
+If a step fails, the Builder shows the last lines of its output. Fix the cause (a missing tool, for
+example) and run the step again.
 
 ## Building by hand
 
-The steps below do by hand what the Builder does. Follow them if you prefer, or if
-your system is not supported by the Builder.
+Run every command from the root of the repository. The `scripts/*.py` launchers work the same on all
+three systems and use only the Python standard library: on Windows call them as
+`py .\scripts\NAME.py`, and on macOS and Linux as `./scripts/NAME.py`.
 
-### Common prerequisites
+### Step 1: Install the tools
 
-All three desktop platforms require:
+You need Git, CMake 3.24 or newer, Ninja, a compiler with C++23 support, and Python 3 with Tk.
 
-- Git, including submodule support;
-- CMake 3.24 or newer;
-- a compiler with C++23 support;
-- network access during the first configuration, because CMake downloads CLI11,
-  yaml-cpp, zlib, libpng, SDL3_mixer, and SDL3 itself unless it is already
-  installed (and, for the soundtrack renderer, Genesis Plus GX and libFLAC), and
-  the CPython that runs the AI in the **1 PLAYER AI ASSIST** mode: Windows downloads
-  the official build, macOS and Linux build it once, about two minutes with `make`.
-  It is independent of any Python installed on the machine;
-- Python 3 for the first C++ generation and the analysis tools, with Tk for the
-  `play.py` window;
-- a compatible local ROM for the mandatory first C++ generation.
+The first build also needs network access. CMake downloads CLI11, yaml-cpp, zlib, libpng, SDL3_mixer
+and SDL3 (unless already installed), plus Genesis Plus GX and libFLAC for the soundtrack renderer. It
+also fetches the CPython that runs the AI in **1 PLAYER AI ASSIST**: Windows downloads the official
+build, while macOS and Linux compile it once, in about two minutes. That Python is independent of
+any other on your machine.
 
-Check the main tools before configuring:
+#### Windows
 
-```bash
-git --version
-cmake --version
-python3 --version
-```
-
-The repository's `scripts/*.py` launchers generate, build, and run the port on
-all three desktop platforms, and use only the Python standard library. On
-Windows invoke them with `py scripts\NAME.py`; on macOS and Linux they are
-executable directly as `./scripts/NAME.py`. Run them from the meta-repository
-root.
-
-### Clone the repository and submodules
-
-A build needs one commit of history and the commits of the submodules, not the
-whole history, so clone shallow: `--depth 1` fetches a single commit of the
-meta-repository and `--shallow-submodules` one commit of each submodule.
-
-```bash
-git clone --depth 1 --shallow-submodules --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
-cd StreetsOfRageProject
-```
-
-If the repository was cloned without submodules:
-
-```bash
-git submodule update --init --recursive --depth 1
-```
-
-To restore all submodules to the commits recorded by the meta-repository:
-
-```bash
-git submodule update --init --recursive --checkout --depth 1
-```
-
-### Obtain a compatible ROM
-
-The generated C++ under `StreetsOfRageRecompilation/generated/` is ignored by
-Git and is not included in a fresh clone. Before the first build, generate it
-from a compatible 512 KiB Streets of Rage / Bare Knuckle ROM image at:
-
-```text
-StreetsOfRageRecompilation/rom/SOR.bin
-```
-
-#### Legal and preservation considerations
-
-The preferred way to obtain this image is to make a private dump of a physical
-cartridge that you own, or that you are otherwise explicitly authorized to
-access, using a compatible Mega Drive cartridge dumper. Follow the dumper's
-documentation and verify the resulting file against the reference hashes
-below. This approach also contributes to responsible preservation: it keeps the
-source of the image clear and avoids relying on unverified downloads.
-
-Copyright, archival-copy, reverse-engineering, and anti-circumvention rules
-differ substantially between jurisdictions. Owning a cartridge does not
-necessarily grant permission to redistribute its ROM, upload it, include it in
-this repository, or bypass technical protection measures. Check the law that
-applies to you before making or using a dump; this project provides technical
-documentation, not legal advice. Keep the ROM private, use it only as permitted
-by the applicable law, and do not share it with the project or its community.
-
-The project is developed against the `JUE` Rev. A cartridge, with these hashes:
-
-| Property | Value                                                              |
-| -------- | ------------------------------------------------------------------ |
-| Size     | `524288` bytes                                                     |
-| CRC32    | `4052E845`                                                         |
-| MD5      | `59a3b22a1899461dceba50d1ade88d3a`                                 |
-| SHA-256  | `95d7efb98e97f4ffffe68257aef9a855034a36a41b86cf9d332d129f30cb2d4b` |
-
-ROM images are ignored by Git. Do not commit or redistribute them.
-
-### Build on Windows
-
-#### Prerequisites
-
-Open PowerShell as Administrator and install the command-line tools with
+Open PowerShell as Administrator and install everything with
 [WinGet](https://learn.microsoft.com/windows/package-manager/winget/):
 
 ```powershell
 winget source update
+```
 
+```powershell
 winget install --exact --id Git.Git
+```
 
+```powershell
 winget install --exact --id Kitware.CMake
+```
 
+```powershell
 winget install --exact --id Ninja-build.Ninja
+```
 
+```powershell
 winget install --exact --id Python.Python.3.14
+```
 
+```powershell
 winget install --exact --id MartinStorsjo.LLVM-MinGW.UCRT
 ```
 
-The compiler is [llvm-mingw](https://github.com/mstorsjo/llvm-mingw): Clang,
-LLD and libc++ for Windows, about a gigabyte, with no Visual Studio and no
-Windows SDK. The game is built for the UCRT, so it runs on any current Windows.
+The compiler is [llvm-mingw](https://github.com/mstorsjo/llvm-mingw): Clang, LLD and libc++ for
+Windows, about a gigabyte, with no Visual Studio and no Windows SDK. The game is built for the UCRT,
+so it runs on any current Windows.
 
-> Important: close the terminal and open a new PowerShell (so that the new
-> programs are on `PATH`)
-
-Confirm that the tools are available:
+**Close the terminal and open a new PowerShell**, so that the new programs are on `PATH`. Then check
+that they are all there:
 
 ```powershell
 x86_64-w64-mingw32-clang --version   # aarch64-w64-mingw32-clang on Windows on ARM
-git --version
-cmake --version
-ninja --version
-py --version
 ```
-
-#### Configure, compile, and run
-
-Run the following from the meta-repository root in PowerShell.
-
-After a fresh clone, generate the C++ port and create an optimized build:
 
 ```powershell
-py .\scripts\generate_cpp_and_build.py --release
+git --version; cmake --version; ninja --version; py --version
 ```
 
-Generation is mandatory after a fresh clone.
+#### macOS
 
-Extract the soundtrack from your ROM (about 4 minutes, ~265 MB). Without it the
-game still runs, but the sound is emulated in real time and is noticeably worse:
-
-```powershell
-py .\scripts\render_soundtrack.py
-```
-
-Run the game. There is a handy `play.py` launcher that is easy to use (**this might take a while on the first run**):
-
-```powershell
-py .\scripts\play.py
-```
-
-### Build on macOS
-
-#### Prerequisites
-
-Install the Xcode command-line tools and [Homebrew](https://brew.sh) dependencies:
+Install the Xcode command-line tools, then the rest with [Homebrew](https://brew.sh):
 
 ```bash
 xcode-select --install
@@ -253,38 +139,12 @@ xcode-select --install
 brew install cmake ninja python python-tk
 ```
 
-Both Apple Silicon and Intel Macs are supported. Keep CMake, the compiler, and
-SDL3 on the same architecture.
+Both Apple silicon and Intel Macs are supported. Keep CMake, the compiler and SDL3 on the same
+architecture.
 
-#### Configure, compile, and run
+#### Linux
 
-After a fresh clone, generate the C++ port and create an optimized build:
-
-```bash
-./scripts/generate_cpp_and_build.py --release
-```
-
-Extract the soundtrack from your ROM (about 4 minutes, ~265 MB). Without it the
-game still runs, but the sound is emulated in real time and is noticeably worse:
-
-```bash
-./scripts/render_soundtrack.py
-```
-
-Run the port:
-
-```bash
-./scripts/play.py
-```
-
-### Build on Linux
-
-These are the commands for Ubuntu and other Debian-based systems; elsewhere,
-install the same packages under your distribution's names.
-
-#### Prerequisites
-
-Install the compiler and build tools:
+These commands are for Ubuntu and other Debian-based systems. First the compiler and build tools:
 
 ```bash
 sudo apt update
@@ -294,8 +154,8 @@ sudo apt update
 sudo apt install build-essential cmake git ninja-build python3 python3-tk pkg-config
 ```
 
-Confirm that `cmake --version` reports 3.24 or newer. SDL3 is downloaded and
-built by CMake, which needs SDL's usual system development packages:
+Check that `cmake --version` reports 3.24 or newer. CMake also builds SDL3, which needs the usual
+system development packages:
 
 ```bash
 sudo apt install libasound2-dev libpulse-dev libx11-dev libxext-dev \
@@ -304,23 +164,115 @@ sudo apt install libasound2-dev libpulse-dev libx11-dev libxext-dev \
   libdbus-1-dev libudev-dev libwayland-dev libdecor-0-dev
 ```
 
-#### Configure, compile, and run
+### Step 2: Get the source
 
-Generate the C++ port and create the first optimized build:
+A build needs only the current commit of the repository and of each submodule, so clone shallow:
+
+```bash
+git clone --depth 1 --shallow-submodules --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
+```
+
+```bash
+cd StreetsOfRageProject
+```
+
+If you already cloned it without the submodules, or want to put them back on the commits this
+repository records:
+
+```bash
+git submodule update --init --recursive --checkout --depth 1
+```
+
+### Step 3: Obtain a compatible ROM
+
+Git does not hold the game's C++, because it is generated from your ROM. Put a 512 KiB Streets of
+Rage / Bare Knuckle image, the `JUE` Rev. A cartridge, at:
+
+```text
+StreetsOfRageRecompilation/rom/SOR.bin
+```
+
+It must match these values:
+
+| Property | Value                                                              |
+| -------- | ------------------------------------------------------------------ |
+| Size     | `524288` bytes                                                     |
+| CRC32    | `4052E845`                                                         |
+| MD5      | `59a3b22a1899461dceba50d1ade88d3a`                                 |
+| SHA-256  | `95d7efb98e97f4ffffe68257aef9a855034a36a41b86cf9d332d129f30cb2d4b` |
+
+Any other version of the cartridge is not supported. A Super Magic Drive (`.smd`) dump must first be
+converted to a raw dump.
+
+#### Legal and preservation considerations
+
+The best source for this image is a private dump of a physical cartridge that you own, or are
+explicitly authorized to access, made with a compatible Mega Drive cartridge dumper. Follow the
+dumper's documentation and compare the result with the values above. It also serves preservation:
+the image's origin is clear, and you are not relying on an unverified download.
+
+Copyright, archival-copy, reverse-engineering and anti-circumvention rules differ substantially
+between jurisdictions. Owning a cartridge does not necessarily allow you to redistribute its ROM,
+upload it, include it in this repository or bypass technical protection measures. Check the law that
+applies to you before making or using a dump; this project provides technical documentation, not
+legal advice.
+
+Keep the ROM private, use it only as the law allows, and do not share it with the project or its
+community. Git ignores ROM images: do not commit or redistribute them.
+
+### Step 4: Build and run
+
+The first command generates the C++ and compiles an optimized build; generation is mandatory after a
+fresh clone. The second extracts the soundtrack from your ROM (about 4 minutes, ~265 MB). You can
+skip it and the game still runs, but with sound emulated in real time, which is noticeably worse. The
+third opens the launcher; **the first run might take a while**.
+
+#### Windows
+
+```powershell
+py .\scripts\generate_cpp_and_build.py --release
+```
+
+```powershell
+py .\scripts\render_soundtrack.py
+```
+
+```powershell
+py .\scripts\play.py
+```
+
+#### macOS
 
 ```bash
 ./scripts/generate_cpp_and_build.py --release
 ```
 
-Extract the soundtrack from your ROM (about 4 minutes, ~265 MB). Without it the
-game still runs, but the sound is emulated in real time and is noticeably worse:
+```bash
+./scripts/render_soundtrack.py
+```
+
+```bash
+./scripts/play.py
+```
+
+#### Linux
+
+```bash
+./scripts/generate_cpp_and_build.py --release
+```
 
 ```bash
 ./scripts/render_soundtrack.py
 ```
 
-Run the port:
-
 ```bash
 ./scripts/play.py
 ```
+
+[Playing](Playing.md) has the controls and everything else the game can do.
+
+### Building again
+
+Generate the C++ again whenever the ROM, the analysis data or the recompiler changes, with the same
+command. Leave out `--release` for a debug build, which is the one to use when working on the code.
+The soundtrack needs extracting again only when the renderer changes.

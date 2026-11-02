@@ -129,6 +129,8 @@ Scoring tools, ROM models and plans per enemy: `autoplay/CLAUDE.md`.
 
 ## Validation and handoff
 
+Everything was tested and confirmed working (user, 2026-11-02); older "untested" or "not run" notes in these files predate that.
+
 - Documentation only: check Markdown, links, paths, commands, and consistency with CMake and scripts.
 - C++: configure, compile, and run the narrow relevant tests.
 - Python: run the affected tests, then the repository suite when practical.

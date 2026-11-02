@@ -2,74 +2,97 @@
 
 [Back to the README](../README.md)
 
-This builds an installed homebrew title with its own home-screen tile, drawn through
-[Mesa's RADV on the console](https://github.com/mihawk-99/PS5_Vulkan). It runs only on a
-jailbroken PS5 that you own, and it needs the same
-[ROM as the desktop builds](BuildingDesktop.md#obtain-a-compatible-rom): nothing
-copyrighted is in the title.
+The result is an installed homebrew title with its own tile on the home screen, drawn through
+[Mesa's RADV on the console](https://github.com/mihawk-99/PS5_Vulkan). It runs only on a jailbroken
+PS5 that you own, and it needs [the same ROM as the desktop builds](BuildingDesktop.md#step-3-obtain-a-compatible-rom),
+because nothing copyrighted is in the title.
 
-There are three routes to the same result. The first two need only Git and a container engine
-([OrbStack](https://orbstack.dev/),
-[Docker](https://www.docker.com/products/docker-desktop/) or
-[Podman](https://podman-desktop.io/)), and all need about 12 GB of free disk.
+## Before you start
 
-## On the console
-
-Whichever route you take, the console needs:
+**On the console:**
 
 - [ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus) 1.7beta4 or newer
-- an FTP server, such as [my ftpsrv](https://github.com/RuiNelson/ftpsrv-streamextract), [drakmor's ftpsrv](https://github.com/drakmor/ftpsrv), [John Törnblom's ftpsrv](https://github.com/ps5-payload-dev/ftpsrv), etc., if you send the files over the network
+- an FTP server, if you want to send the files over the network, such as
+  [my ftpsrv](https://github.com/RuiNelson/ftpsrv-streamextract),
+  [drakmor's ftpsrv](https://github.com/drakmor/ftpsrv) or
+  [John Törnblom's ftpsrv](https://github.com/ps5-payload-dev/ftpsrv)
+
+**On your computer:** about 12 GB of free disk and a container engine:
+[OrbStack](https://orbstack.dev/), [Docker](https://www.docker.com/products/docker-desktop/) or
+[Podman](https://podman-desktop.io/). The toolchain is built inside it once, which takes a while, and
+later builds reuse it.
+
+## Choose a route
+
+| Route                                   | Runs on                 | You also need                                                       |
+| --------------------------------------- | ----------------------- | ------------------------------------------------------------------- |
+| [The Builder](#using-the-builder)       | Windows, macOS, Linux   | Git, which it can install                                           |
+| [The wizard](#using-the-wizard)         | Windows 11, macOS, Linux | Git, to get the repository                                          |
+| [By hand](#building-by-hand)            | macOS, Linux            | The [desktop tools](BuildingDesktop.md#step-1-install-the-tools)    |
 
 ## Using the Builder
 
-[Streets of Rage Builder](BuildingDesktop.md#download-and-open-the-builder) runs on Windows,
-macOS and Debian-based Linux. Choose **PlayStation 5 (Prospero)** in its first step, and it
-guides you through checking Git and the container engine, downloading the source, copying the
-ROM, rendering the soundtrack and building the title. **Send to PS5** then makes the ZIP files
-or sends the files over FTP, and **Clean Up** offers to remove the container image and the built
-title.
+![Streets of Rage Builder, choosing the PlayStation 5](ps5builder.webp)
 
-## The wizard (macOS, Linux and Windows)
+Open [Streets of Rage Builder](BuildingDesktop.md#1-download-it) and choose
+**PlayStation 5 (Prospero)** in the first step. It checks Git and the container engine, downloads the
+source, verifies your ROM, renders the soundtrack and builds the title. **Send to PS5** then makes the
+[ZIP files](#installing-the-zip-files) or sends everything over FTP, and **Clean Up** offers to remove
+what is no longer needed.
 
-One script does everything in a container. It checks your ROM, renders the soundtrack, builds
-the title, then makes two ZIP files in the current folder or sends the files to the console over
-FTP:
+## Using the wizard
+
+One script does the same in a terminal. On macOS and Linux:
 
 ```bash
 git clone --depth 1 --shallow-submodules --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
+```
+
+```bash
 cd StreetsOfRageProject
+```
+
+```bash
 ./scripts/ps5_wizzard.sh
 ```
 
-On Windows 11, run it from a terminal, for the same result with
-[Docker Desktop](https://www.docker.com/products/docker-desktop/) or
-[Podman Desktop](https://podman-desktop.io/) and nothing else installed:
+On Windows 11, with [Docker Desktop](https://www.docker.com/products/docker-desktop/) or
+[Podman Desktop](https://podman-desktop.io/):
 
 ```powershell
 git clone --depth 1 --shallow-submodules --recurse-submodules https://github.com/RuiNelson/StreetsOfRageProject.git
+```
+
+```powershell
 cd StreetsOfRageProject
+```
+
+```powershell
 .\scripts\ps5_wizzard.cmd
 ```
 
-The ZIP files go on the console as follows:
+It checks your ROM, renders the soundtrack and builds the title, then makes the
+[ZIP files](#installing-the-zip-files) in the current folder or sends everything over FTP, and finally
+offers to clean up. The ROM and the soundtrack are kept, since they can be reused.
+
+## Installing the ZIP files
+
+Unpack each one on the console, then check [what the console should hold](#on-the-console-afterwards):
 
 | File                             | Contains     | Unpack into       |
 | -------------------------------- | ------------ | ----------------- |
 | `StreetsOfRage-PS5-homebrew.zip` | `PPSA99872/` | `/data/homebrew/` |
 | `StreetsOfRage-PS5-data.zip`     | `sor/`       | `/data/`          |
 
-## By hand (macOS and Linux)
+## Building by hand
 
-On your computer: [Docker](https://www.docker.com) or any Docker-compatible software, plus the
-[desktop prerequisites](BuildingDesktop.md#common-prerequisites), because the C++ generation and
-the soundtrack run there. The toolchain itself is built inside Docker, and the first build takes
-a while. On Windows, use one of the routes above: they correct the line endings that Git gives
-the build files there, and `build_ps5.py` does not.
+Use this route on macOS or Linux if you want to work on the port. The C++ generation and the soundtrack
+run on your computer, so you need the [desktop tools](BuildingDesktop.md#step-1-install-the-tools) as
+well as a Docker-compatible engine. On Windows use one of the other routes: they correct the line
+endings Git gives the build files there, and `build_ps5.py` does not.
 
-[Clone the repository](BuildingDesktop.md#clone-the-repository-and-submodules) and put your ROM at
-`StreetsOfRageRecompilation/rom/SOR.bin`.
-
-Generate the C++ port:
+[Get the source](BuildingDesktop.md#step-2-get-the-source) and put your ROM at
+`StreetsOfRageRecompilation/rom/SOR.bin`. Then generate the C++:
 
 ```bash
 ./scripts/generate_cpp.py
@@ -87,8 +110,8 @@ Extract the soundtrack from your ROM (about 4 minutes, ~265 MB). On the PS5 it i
 ./scripts/render_soundtrack.py
 ```
 
-Close the title if it is running, then copy everything to the console, using its address (the
-FTP port is 2121 unless you pass `--port`):
+Close the title if it is running, then copy everything to the console, using its address. The FTP port
+is 2121 unless you pass `--port`:
 
 ```bash
 ./scripts/deploy_ps5.py --host your.ps5.address
@@ -103,16 +126,23 @@ The tile appears on the home screen after a few seconds. The console then holds:
 | `/data/homebrew/PPSA99872/` | The app                                                                                                                   |
 | `/data/sor/`                | The ROM, `soundtrack/`, the AI in `ai-code/`, Python in `python/`, `controls.yaml`, `video.yaml`, `qol.yaml` and `ai.log` |
 
-If the ROM, the soundtrack, the AI or Python is missing, the title says what to copy in a
-notification and closes.
+## Playing on the console
 
-Good to know:
+[Playing](Playing.md) applies here too, with these differences:
 
-- The console pairs each controller with a signed-in user, so a second player needs a second
-  user signed in. **1 PLAYER AI ASSIST** needs only one.
-- The game always runs fullscreen, and the menus have no BIND KEYBOARD or DISPLAY row. See
-  [Playing](Playing.md) for the rest of the controls and options.
-- The title has no command line. If you need run-time arguments, write one per line in `/data/sor/args.txt`.
-- If the AI does not play, `/data/sor/ai.log` says why.
-- A built title links GPL-3.0 parts of the PS5 stack; see
-  [`prospero/LICENSING.md`](../StreetsOfRageRecompilation/prospero/LICENSING.md).
+- The console pairs each controller with a signed-in user, so a second player needs a second user
+  signed in. **1 PLAYER AI ASSIST** needs only one.
+- The game is always fullscreen, and the menus have no BIND KEYBOARD or DISPLAY row.
+- The title has no command line. To pass [startup flags](Playing.md#startup-flags), write them one per
+  line in `/data/sor/args.txt`.
+
+## If something goes wrong
+
+- **A notification says what to copy, and the title closes.** The ROM, the soundtrack, the AI or Python
+  is missing. There is no fallback on the console: all four are required.
+- **The AI does not play.** `/data/sor/ai.log` says why.
+
+## Licensing
+
+A built title links GPL-3.0 parts of the PS5 stack; see
+[`prospero/LICENSING.md`](../StreetsOfRageRecompilation/prospero/LICENSING.md).
