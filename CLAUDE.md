@@ -88,7 +88,7 @@ cd StreetsOfRageRecompilation
 PYTHONPATH=../RageDecompiler python3 -m tools --help
 ```
 
-Common entry points: `./scripts/disassemble_to_asm.py`, `./scripts/discover_aux_smart.py`. `code-analysis/aux_addresses.txt` adds entry points for indirect jumps and calls.
+Common entry points: `./scripts/disassemble_to_asm.py`, `./scripts/discover_aux_smart.py`. `code-analysis/aux_addresses.txt` adds entry points for indirect jumps and calls. The cartridge has dead code, which stays out of the recompilation (user decision): add only addresses the game can reach.
 
 For who calls whom at runtime, record with `sor --call-log calls.csv`, collapse with `tools/call_map.py`, and query the SQLite views (`subroutine_activity`, `subroutine_flow`, `callsite_flow`), not the web viewer. Counts are observations, not proof of every path. See the `explore-call-map` skill.
 

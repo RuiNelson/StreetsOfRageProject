@@ -141,7 +141,8 @@ A few other things help you get to the moment you want to study:
 
 The recompiler can't see routines reached only through jump tables and other indirect calls, as
 [the journey explains](DeveloperJourney.md#from-68000-code-to-c-ragedecompiler). Two scripts find them, adding what
-they confirm to `code-analysis/aux_addresses.txt`.
+they confirm to `code-analysis/aux_addresses.txt`. Add only code the game can reach: the cartridge's dead code stays out
+of the recompilation.
 
 The conservative one rebuilds and runs the game again for each address it discovers:
 

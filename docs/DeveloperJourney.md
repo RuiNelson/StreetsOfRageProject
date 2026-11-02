@@ -82,9 +82,10 @@ What the project learned on top of them is kept in `StreetsOfRageRecompilation`,
 ## From 68000 code to C++: `RageDecompiler`
 
 `RageDecompiler` disassembles the ROM and transpiles the routines it needs into C++. It is
-deliberately frugal: it should emit no more code than the game needs to run. The hard part of
-translating an assembly-language program is knowing where the code *is*, because patterns such as
-jump tables hide it.
+deliberately frugal: it should emit no more code than the game needs to run. The cartridge contains
+dead code that the game never reaches, and I want to keep it out of the recompilation, so translating
+the whole ROM was never the goal. The hard part is knowing where the live code *is*, because patterns
+such as jump tables hide it.
 
 The recompiler starts from what it can prove: the routines reachable from address `0x200` and from
 the interrupt autovectors, and everything those reach by direct calls. Routines reached only
@@ -98,7 +99,8 @@ to almost everything else. The control flow turned out to be far more tangled th
 same subroutine referenced from many call sites. Hence the speculative mode: the recompiler searches
 the ROM for anything that looks like code, emits it, and prepares for the calls that might reach it.
 Running the game then confirms which guesses were right and adds them to `aux_addresses.txt`, dozens
-or hundreds of addresses in a single compilation, without restarting the game.
+or hundreds of addresses in a single compilation, without restarting the game. Only confirmed
+addresses are kept, which is what keeps the dead code out.
 
 So discovery became a loop:
 
