@@ -85,7 +85,7 @@ VIDEO_SWITCHES = {
     "integer_scaling": ("--integer-scaling", "--no-integer-scaling"),
 }
 
-QOL_OPTIONS = ("cam", "grab")  # sor --qol choices
+QOL_OPTIONS = ("cam", "grab", "bars")  # sor --qol choices
 
 # Fields a preset sets. The rest (widescreen, integer scaling, fullscreen, quality-of-life, ROM, sound source, soundtrack
 # folder, AI folder, call log, extra...) is the user's own and survives a preset.
