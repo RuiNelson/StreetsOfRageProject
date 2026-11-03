@@ -110,8 +110,7 @@ For who calls whom at runtime, record with `sor --call-log calls.csv`, collapse 
 
 | Preset | Use |
 | --- | --- |
-| `turbo` | Measurement: `--turbo 2`, `--poll-ms 16` (about 2 frames a tick; 4x needs `--poll-ms 8` and a fresh measurement) |
-| `lockstep` | Frame-exact, AI drives the clock, port 6767 |
+| `turbo` | Measurement: `--turbo 6`, `--poll-ms 5.5` (about 2 frames a tick; 10x needs `--poll-ms 3.3` and a fresh measurement) |
 | `boss --level N` | One round's boss, street enemies swept, `--no-police`, plus `--no-food` on rounds 2-5 and 8; never test bosses without the sweep |
 | `watch` / `quiet` | Normal speed, with or without sound; not for measurement |
 
