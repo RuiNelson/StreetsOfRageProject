@@ -2122,7 +2122,9 @@ class ExecuteHandleContinueMenuTests(unittest.TestCase):
 
 
 class ExecuteHandleMrXDialogTests(unittest.TestCase):
-    def test_holds_down_until_no_is_selected(self) -> None:
+    # $120EC applies held Up/Down before the face bit in the same read, so
+    # the side rides with B whatever +$59 bit 3 reads.
+    def test_confirms_no_with_down_held_when_yes_is_selected(self) -> None:
         verb = HandleMrXDialog(actor_slot="P1")
         dialog = InMrXDialog(slot="P1", selects_no=False)
         gamepad, client = _gamepad()
@@ -2130,18 +2132,21 @@ class ExecuteHandleMrXDialogTests(unittest.TestCase):
         execute_verb(verb, {dialog}, gamepad)
 
         client.hold_buttons.assert_called_with(player1=DOWN, player2=0)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=DOWN | B, frames=4)
 
-    def test_confirms_no_with_a_face_button(self) -> None:
+    def test_a_stale_no_still_confirms_with_down(self) -> None:
+        # The post-duel offer opens ($31) with the first answer's bit 3 still
+        # set and resets the cursor to YES a frame later ($32): a plain B sent
+        # on that stale NO confirmed YES at $33.
         verb = HandleMrXDialog(actor_slot="P1")
         dialog = InMrXDialog(slot="P1", selects_no=True)
         gamepad, client = _gamepad()
 
         execute_verb(verb, {dialog}, gamepad)
 
-        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=DOWN | B, frames=4)
 
-    def test_the_harness_accept_holds_up_until_yes_is_selected(self) -> None:
-        # $120EC: held Up clears +$59 bit 3, the YES the duel harness needs.
+    def test_the_harness_accept_confirms_yes_with_up(self) -> None:
         verb = HandleMrXDialog(actor_slot="P1")
         dialog = InMrXDialog(slot="P1", selects_no=True)
         gamepad, client = _gamepad()
@@ -2149,15 +2154,7 @@ class ExecuteHandleMrXDialogTests(unittest.TestCase):
         execute_verb(verb, {dialog, DebugMrXAccept()}, gamepad)
 
         client.hold_buttons.assert_called_with(player1=UP, player2=0)
-
-    def test_the_harness_accept_confirms_yes(self) -> None:
-        verb = HandleMrXDialog(actor_slot="P1")
-        dialog = InMrXDialog(slot="P1", selects_no=False)
-        gamepad, client = _gamepad()
-
-        execute_verb(verb, {dialog, DebugMrXAccept()}, gamepad)
-
-        client.queue_press_buttons.assert_called_once_with(player=1, buttons=B, frames=4)
+        client.queue_press_buttons.assert_called_once_with(player=1, buttons=UP | B, frames=4)
 
 
 class ExecuteJumpAttackTests(unittest.TestCase):

@@ -2468,13 +2468,16 @@ def state_machine_handle_mr_x_dialog(
     if dialog is None:
         press_no_button(gamepad)
         return
-    # $120EC reads *held* +$54: Down sets bit 3 (NO), Up clears it (YES), a
-    # face bit confirms. YES only under the harness's DebugMrXAccept.
-    accept = find(context, DebugMrXAccept) is not None
-    if dialog.selects_no == accept:
-        gamepad.hold(UP_MASK if accept else DOWN_MASK)
-        return
-    _press(gamepad, PUNCH_MASK, frames=DIALOG_FRAMES)
+    # $120EC reads *held* +$54: Down sets bit 3 (NO), Up clears it (YES), and
+    # a face bit in the same read then confirms the side just set. So the
+    # side always rides with the face button, whatever bit 3 reads: the
+    # post-duel offer opens ($31) with the first answer's bits 3 and 5 still
+    # set, clears them a frame later ($32, cursor on YES) and takes input from
+    # $33, so a plain B sent on a stale NO confirmed YES (user report). YES
+    # only under the harness's DebugMrXAccept.
+    side = UP_MASK if find(context, DebugMrXAccept) is not None else DOWN_MASK
+    gamepad.hold(side)
+    gamepad.press(side | PUNCH_MASK, frames=DIALOG_FRAMES)
 
 
 # The jump, state by state (controls-and-input.md "Action state machine"),

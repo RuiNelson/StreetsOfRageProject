@@ -9,6 +9,10 @@ their own ``AgentLoop``; the ``--accept`` seat carries the harness's
 (mr_x_offer_compare_2p_choices)`` starts the duel (``$11FA8``, ``$FFFA43``
 set). Food and the police are off.
 
+``--yield-duel P`` stops seat P once the duel starts: its pad released, no
+continue, so the other seat survives and answers the post-duel offer (the
+user's report: P1 betrays, the AI on P2 wins and must still say NO).
+
 ``--blind P`` hides the duel from seat P (its snapshots read ``$FFFA43`` as
 0), which is the AI before ``PlayerDuel``: the baseline. ``--cold P`` (repeatable)
 turns seat P's duel style off (``AgentLoop(duel_style=False)``): the generic
@@ -63,6 +67,7 @@ def main() -> None:
     ap.add_argument("--accept", type=int, choices=(1, 2), default=2)
     ap.add_argument("--blind", type=int, choices=(1, 2), default=None)
     ap.add_argument("--cold", type=int, choices=(1, 2), action="append", default=[])
+    ap.add_argument("--yield-duel", type=int, choices=(1, 2), default=None)
     ap.add_argument(
         "--duel-seconds",
         type=float,
@@ -118,6 +123,9 @@ def main() -> None:
                 verbs: dict[int, str | None] = {}
                 for i in (1, 2):
                     player = snap.players[i - 1]
+                    if args.yield_duel == i and duel_t0 is not None:
+                        state.release(i)
+                        continue
                     if player.is_playable or player.is_continue_ui:
                         seen = snap
                         if args.blind == i:
@@ -203,6 +211,7 @@ def main() -> None:
                     "accept": args.accept,
                     "blind": args.blind,
                     "cold": args.cold,
+                    "yield_duel": args.yield_duel,
                     "duel_s": round((duel_t1 or time.monotonic()) - duel_t0, 1) if duel_t0 else None,
                     "hits_taken": hits,
                     "damage_taken": damage_taken,

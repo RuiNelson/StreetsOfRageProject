@@ -380,6 +380,8 @@ While `$FFDE00` and `$FFFA43` are set and the offer's state is `$22`-`$29`, `obs
 
 Measured with `mr_x_duel_fight.py`: only the punch lands on a player (chords and grounded kicks skip a `RivalPlayer`), and only from `RIVAL_PUNCH_MIN_X` (20) out (why is not decoded); `reach.punch_inner_for` is the shared edge. Two AIs continue at game over, so a duel between them never ends.
 
+**The answer rides with B** (user report: the AI on P2 won the duel and said YES). `$120EC` applies held Up/Down before the face bit in the same read, so `HandleMrXDialog` holds Down and presses Down+B whatever bit 3 reads: the post-duel offer opens (`$31`) with the first answer's bits 3 and 5 still set and puts the cursor on YES a frame later (`$32`), so a plain B sent on that stale NO confirmed YES at `$33`. `mr_x_duel_fight.py --accept 1 --yield-duel 1` is that case: P1 betrays and stops playing. Turbo 6, `--poll-ms 5`: NO (`bad_ending_selected`) in 2 of 2.
+
 **Mr. X's betrayal duel: a fight, not a solver.** User: "mais aleatória, com mais movimentos diferentes. Menos eficiência fria"; "Sem modificar o comportamento que a IA terá com os inimigos". `ai/duel.py`'s `DuelStyle` replaces the tick's candidates only while `PlayerDuel` holds. Tactics, reactions and health-lead scaling are its module constants (`REACTION_TICKS`, `PRESSURE_REACTION_TICKS`, weights, `LEAD_SCALE`). `AgentLoop(duel_style=False)` / `--cold P` restore the pipeline. Loses about 3:1 to the cold pipeline, 11-15 verbs. Not played against a human; strength is the user's call.
 
 ### Crowds
