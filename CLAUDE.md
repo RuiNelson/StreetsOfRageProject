@@ -73,6 +73,7 @@ User decisions. Implementation details are in `StreetsOfRageRecompilation/CLAUDE
 - **Frame sync:** `--frame-sync auto` must work on macOS, Windows and Linux, with or without VRR, with no per-monitor setup and no tearing: the timer is the clock and frames are presented with vsync without the game waiting. Not tested on an external VRR monitor, Windows or Linux. `vsync|vsync-half|vsync-third` tie the speed to the monitor.
 - **Controls:** `sor` reads SDL itself (`SoRInput.*`) and binds per-player **actions** in `~/.config/StreetsOfRageProject/controls.yaml`, set in OPTIONS > CONTROLS. Schemes are ORIGINAL 3 and ENHANCED 6; defaults are in `StreetsOfRageRecompilation/CLAUDE.md`, **Controls**. Autoplay sends actions in a binary `struct` format (no PyYAML on the system Python) and **detects** each player's scheme by querying the host, never sets it.
 - **Windows console:** `sor` is a GUI-subsystem program; `openConsoleIfWanted` (`main.cpp`) gives it a console only for `--debug-utils`, `--debug-log`, `--call-log`, `--aux-addr-file`, `--help` or `--version`. Without them stdout and stderr go to the null device on every platform. Not tested on Windows.
+- **Light bar** (user): each player's pad shows their character while they play, Axel blue, Adam yellow, Blaze red, and white everywhere else (menus, character select, the demo); always on, no option. On the PS5 and on a DualSense or DualShock 4 on the desktop.
 - **Mode menu:** a **QUIT** row after OPTIONS ends the game.
 - **PS5 menus:** `SoRPlatform::consoleMenus()`, on under `__PROSPERO__` or with `--console-menus` on the desktop for testing, hides BIND KEYBOARD and the DISPLAY row and forces fullscreen. DEVICE stays, to choose between signed-in users' pads.
 - **PS5 files:** ROM, pre-rendered soundtrack and Python live in `/data/sor`. The soundtrack and the AI are obligatory there: without them the title says what to copy and closes, with no fallback.
@@ -109,8 +110,7 @@ For who calls whom at runtime, record with `sor --call-log calls.csv`, collapse 
 
 | Preset | Use |
 | --- | --- |
-| `turbo` | Measurement: `--turbo 2`, `--poll-ms 16` (about 2 frames a tick; 4x needs `--poll-ms 8` and a fresh measurement) |
-| `lockstep` | Frame-exact, AI drives the clock, port 6767 |
+| `turbo` | Measurement: `--turbo 6`, `--poll-ms 5.5` (about 2 frames a tick; 10x needs `--poll-ms 3.3` and a fresh measurement) |
 | `boss --level N` | One round's boss, street enemies swept, `--no-police`, plus `--no-food` on rounds 2-5 and 8; never test bosses without the sweep |
 | `watch` / `quiet` | Normal speed, with or without sound; not for measurement |
 
