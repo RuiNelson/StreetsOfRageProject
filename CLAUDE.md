@@ -141,5 +141,4 @@ Finish by summarizing changed files, validation, and anything not tested on the 
 
 ## Other rules
 
-- Do not consult git history.
 - Keep the `CLAUDE.md` files updated as you work, and record in them what you learn from the user about the project. Keep them short: rules, decisions and what the code does not say, not run logs or per-function narration.
