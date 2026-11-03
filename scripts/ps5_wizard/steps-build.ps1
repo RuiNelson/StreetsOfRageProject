@@ -92,7 +92,7 @@ function Step-Build {
     Start-Step 4 'Compiling the title for the PS5'
     Say 'Your ROM is translated to C++, then compiled for the console with the PS5 toolchain. The first build is the long one.'
     Blank
-    if (-not (Invoke-EngineTask 'Generating the C++ port from your ROM' @('env', 'PYTHONDONTWRITEBYTECODE=1', 'python3', '/workspace/scripts/generate_cpp.py'))) { $script:Failed = $true; exit 1 }
+    if (-not (Invoke-EngineTask 'Generating the C++ port from your ROM' @('env', 'PYTHONDONTWRITEBYTECODE=1', 'python3', '/workspace/scripts/generate_cpp.py', '--speculative'))) { $script:Failed = $true; exit 1 }
     if (-not (Invoke-EngineTask 'Compiling the PS5 title' @('bash', '/workspace/StreetsOfRageRecompilation/prospero/tools/build.sh'))) { $script:Failed = $true; exit 1 }
     if (-not ((Test-Path -LiteralPath (Join-Path $script:DistDir "$TitleId/eboot.bin")) -and (Test-Path -LiteralPath (Join-Path $script:DistDir 'data-sor/ai-code')))) {
         Stop-Wizard "The build finished but its files are not in $(Get-RelativeToRepo $script:DistDir)"

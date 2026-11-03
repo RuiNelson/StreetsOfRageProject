@@ -95,8 +95,10 @@ endings Git gives the build files there, and `build_ps5.py` does not.
 `StreetsOfRageRecompilation/rom/SOR.bin`. Then generate the C++:
 
 ```bash
-./scripts/generate_cpp.py
+./scripts/generate_cpp.py --speculative
 ```
+
+`--speculative` also compiles the speculative entry points. While you play, the title appends each one the game reaches to `/data/sor/confirmed.txt` (no discovery loop, no exit).
 
 Build the title into `StreetsOfRageRecompilation/dist-ps5/`:
 

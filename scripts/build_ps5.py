@@ -34,7 +34,7 @@ def main() -> int:
     arguments = parser.parse_args()
 
     if not arguments.image_only and not (RECOMPILATION / "generated" / "SoR.hpp").exists():
-        print("generated/ is missing: run scripts/generate_cpp.py first", file=sys.stderr)
+        print("generated/ is missing: run scripts/generate_cpp.py --speculative first", file=sys.stderr)
         return 1
 
     build = ["docker", "build", "-t", IMAGE, str(DOCKER_CONTEXT)]

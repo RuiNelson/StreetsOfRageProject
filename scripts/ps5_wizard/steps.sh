@@ -322,7 +322,7 @@ step_build() {
     say "Your ROM is translated to C++, then compiled for the console with the PS5 toolchain. The first build is the long one."
     blank
     run_task "Generating the C++ port from your ROM" \
-        docker_run env PYTHONDONTWRITEBYTECODE=1 python3 /workspace/scripts/generate_cpp.py || exit 1
+        docker_run env PYTHONDONTWRITEBYTECODE=1 python3 /workspace/scripts/generate_cpp.py --speculative || exit 1
     run_task "Compiling the PS5 title" \
         docker_run bash /workspace/StreetsOfRageRecompilation/prospero/tools/build.sh || exit 1
     fix_ownership
