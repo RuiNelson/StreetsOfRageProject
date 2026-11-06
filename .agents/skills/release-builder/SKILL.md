@@ -89,13 +89,7 @@ The apps are not signed, so your system will warn you the first time. It is safe
 
 ### macOS
 
-You'll need to remove the quarantine attribute so Gatekeeper allows execution, use [I Am Sure I Want To Open This App](https://github.com/RuiNelson/IAmSureIWantToOpenThisApp) (drag the app onto it, or right-click ▸ Quick Actions) or the command line:
-
-```
-xattr -dr com.apple.quarantine "/Applications/Streets of Rage Builder.app"
-```
-
-Open the `.dmg`, drag **Streets of Rage Builder** to Applications, run the command above, then open the app.
+Open the `.dmg` as usual, no need to prepare it first, and drag **Streets of Rage Builder** to Applications. Then, to let macOS open it, use [I Am Sure I Want To Open This App](https://github.com/RuiNelson/IAmSureIWantToOpenThisApp): drag **Streets of Rage Builder** from Applications onto it (or right-click the app in Finder and choose **Quick Actions ▸ Let me open this App**), then open the app.
 
 ### Windows
 
