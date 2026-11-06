@@ -89,7 +89,7 @@ The apps are not signed, so your system will warn you the first time. It is safe
 
 ### macOS
 
-You'll need to remove the quarantine attribute so Gatekeeper allows execution, use [Xattr-remove by perez987](https://github.com/perez987/Xattr-remove) or the command line:
+You'll need to remove the quarantine attribute so Gatekeeper allows execution, use [I Am Sure I Want To Open This App](https://github.com/RuiNelson/IAmSureIWantToOpenThisApp) (drag the app onto it, or right-click ▸ Quick Actions) or the command line:
 
 ```
 xattr -dr com.apple.quarantine "/Applications/Streets of Rage Builder.app"
