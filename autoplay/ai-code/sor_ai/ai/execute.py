@@ -103,6 +103,7 @@ from .decide import (
     in_smash_range,
 )
 from .reach import (
+    in_rear_band,
     punch_inner_for,
     B_PRESS_PICKUP_X,
     B_PRESS_PICKUP_Y,
@@ -1665,12 +1666,16 @@ def engage_abadede_plan(
     target = find(context, Abadede, slot=verb.target_slot)
     if actor is None or target is None:
         return None
+    partner = find(context, Partner) if isinstance(actor, Myself) else find(context, Myself)
+    can_punch = abadede_can_punch(actor, context)
     return abadede_plan.plan_engage(
         actor,
         target,
         camera=find(context, CameraRange),
-        partner=find(context, Partner) if isinstance(actor, Myself) else find(context, Myself),
-        can_punch=abadede_can_punch(actor, context),
+        partner=partner,
+        can_punch=can_punch,
+        # The rear attack would also hit a partner standing behind the actor.
+        can_chord=can_punch and not (partner is not None and in_rear_band(actor, partner)),
     )
 
 
@@ -1698,6 +1703,10 @@ def state_machine_engage_abadede(
         # (``_facing_prop``; traced live against Jack, five punches whiffed
         # facing away) -- so the plan turns by walking.
         _press(gamepad, PUNCH_MASK, frames=PUNCH_FRAMES)
+        return
+    if plan.chord:
+        # The rear attack into his run, the back already turned to him.
+        _press(gamepad, rear_attack_mask(context), frames=REAR_ATTACK_FRAMES)
         return
     mask = 0
     if plan.dir_x > 0:

@@ -340,6 +340,28 @@ class PlanTests(unittest.TestCase):
         p = plan.plan_from_sims(_run(200, 60), _actor(100, 60), punch=None)
         self.assertFalse(p.punch)
 
+    def test_axel_with_his_back_to_a_run_it_cannot_dodge_throws_the_rear_attack(self) -> None:
+        # Back turned (facing right, he comes from the right... facing away
+        # from him), run from 62 px on the actor's lane: no stick or punch
+        # beats it; the chord does.
+        spec = plan.chord_spec(AXEL)
+        self.assertIsNotNone(spec)
+        found = False
+        for gap in range(54, 90, 4):
+            p = plan.plan_from_sims(
+                _run(100 + gap, 60), _actor(100, 60, char=AXEL, left=True),
+                punch=plan.punch_spec(AXEL), chord=spec,
+            )
+            found = found or p.chord
+            if p.chord:
+                self.assertFalse(p.punch)
+        self.assertTrue(found)
+
+    def test_only_axel_has_a_chord(self) -> None:
+        self.assertIsNone(plan.chord_spec(BLAZE))
+        self.assertIsNone(plan.chord_spec(ADAM))
+        self.assertIsNone(plan.chord_spec(None))
+
     def test_the_pause_is_walked_into_from_his_side_band(self) -> None:
         b = _sim(150, 50, primary=plan.PRIMARY_PAUSE, t54=4, vx=-6.0)
         p = plan.plan_from_sims(b, _actor(110, 63), punch=plan.punch_spec(BLAZE))

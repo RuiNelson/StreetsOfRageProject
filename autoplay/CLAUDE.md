@@ -222,6 +222,7 @@ User: efficient; same test rules; proposed a *sweet area* against his run. `ai/a
 - The round's grunt (user): Bongo's rule. `phases.boss_phase`: `$0C` death, `$0E` a throw's flight, `$07` the run. Round 8's variant (`script_param`, `$146C4`) is modelled but never run.
 
 `boss_fight.py --level 3 --boss-type 0x30 --no-food`, lab `abadede_lab.py`: 0 hits for all three, 2.4-5.6 s (before: 7 hits, 31 s). The host sometimes stops completing lockstep frames in round 3: `host_timeout`.
+**Rear attack (B+C) into his run, Axel only** (user, 2026-11-06; `abadede.chord_spec`, `EngagePlan.chord`): when the lookahead's best is still a hit and he is running or pausing, the actor turns its back (a walk away) and throws the chord, which knocks him down. Blaze's saved no hit and Adam's is too slow. Not with a partner in the rear band, an item underfoot or a weapon. Live, turbo 4, Axel, 10 fights each: hits in 3 against 6, damage 128 against 192 (small sample). What really causes the hits is the suplex finisher landing him ~125 px off on the actor's lane, so he gets up and runs at once; using the get-up time to reach 17 lanes off is the open fix for all three.
 
 ### Onihime and Yasha: the ROM model and the plan
 

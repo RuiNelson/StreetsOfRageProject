@@ -256,6 +256,29 @@ class PunchSpec:
     lock: int = PUNCH_LOCK_UPDATES
 
 
+# --- The actor's rear attack ($322A), from twins.CHORD_SCHEDULES --------------------
+#
+# Box X about the actor's origin in its own facing (negative: behind it), the
+# live updates after the one that took the B+C edge, and the lock until the
+# ground control takes it back. Every live update is a knockdown (hit
+# property 1): state 6 for him ($15504 code 2 with +$37 set).
+_CHORD_BOX_X: dict[int, tuple[int, int]] = {0: (-40, -8), 1: (-42, 14), 2: (-53, -5)}
+_CHORD_LIVE: dict[int, tuple[int, int]] = {0: (1, 5), 1: (10, 18), 2: (3, 10)}
+_CHORD_LOCK: dict[int, int] = {0: 8, 1: 24, 2: 14}
+# How many updates the actor may walk away from him (the turn) or stand
+# before the chord.
+CHORD_WAITS = (0, 1, 2, 3)
+
+
+def chord_spec(character_id: int | None) -> PunchSpec | None:
+    """Axel only: measured live, Blaze's chord saved no hit and Adam's is too
+    slow to reach a run (abadede study, 2026-11-06)."""
+
+    if character_id != 0:
+        return None
+    return PunchSpec(_CHORD_BOX_X[character_id], _CHORD_LIVE[character_id], _CHORD_LOCK[character_id])
+
+
 def punch_spec(character_id: int | None) -> PunchSpec:
     if character_id is None:
         return PunchSpec(DEFAULT_PUNCH_BOX_X, DEFAULT_PUNCH_LIVE)
@@ -803,6 +826,7 @@ class EngagePlan:
     outcome: str | None  # "grab" / "struck" / "hit" / None within the horizon
     at_update: int | None
     score: float
+    chord: bool = False
 
 
 def _toward(a: ActorSim, b: AbadedeSim) -> int:
@@ -1076,6 +1100,7 @@ def plan_engage(
     camera: CameraRange | None = None,
     partner: PlayableCharacter | None = None,
     can_punch: bool = True,
+    can_chord: bool = True,
 ) -> EngagePlan:
     """The stick (or the punch) for this tick: every candidate played against
     his AI. ``can_punch`` is False when a B press would not be a punch (a
@@ -1097,6 +1122,7 @@ def plan_engage(
         target=target0,
         moving_x=moving_x,
         punch=punch_spec(actor.character_id) if can_punch else None,
+        chord=chord_spec(actor.character_id) if can_chord else None,
     )
 
 
@@ -1116,6 +1142,7 @@ def plan_from_sims(
     moving_x: int = 0,
     punch: PunchSpec | None = None,
     horizon: int = HORIZON_UPDATES,
+    chord: PunchSpec | None = None,
 ) -> EngagePlan:
     """``plan_engage`` on bodies already built -- the planner itself, for the
     tools and the offline tests that drive the model directly."""
@@ -1128,13 +1155,14 @@ def plan_from_sims(
     mode_now = engage_mode(a0, b0)
     best: EngagePlan | None = None
 
-    def consider(first, hold, punch_at) -> None:
+    def consider(first, hold, punch_at, strike=None, is_chord=False) -> None:
         nonlocal best
+        strike = punch if strike is None else strike
         worst: tuple[float, Outcome, int | None] | None = None
         for actor_first in (False, True):
             outcome, at, b, a = _rollout(
                 b0.copy(), a0.copy(), target, first, hold, _Tail(),
-                actor_first=actor_first, horizon=horizon, punch=punch, punch_at=punch_at,
+                actor_first=actor_first, horizon=horizon, punch=strike, punch_at=punch_at,
             )
             score = _score(outcome, at, b, a)
             if worst is None or score < worst[0]:
@@ -1155,11 +1183,12 @@ def plan_from_sims(
             best = EngagePlan(
                 dir_x=now[0],
                 dir_y=now[1],
-                punch=punch_at == 0,
+                punch=punch_at == 0 and not is_chord,
                 mode=mode_now,
                 outcome=None if outcome is Outcome.NONE else outcome.name.lower(),
                 at_update=at,
                 score=score,
+                chord=punch_at == 0 and is_chord,
             )
 
     for hold in HOLD_CANDIDATES:
@@ -1174,6 +1203,13 @@ def plan_from_sims(
                 # Walking toward him first is how the actor turns to him.
                 consider((toward_x, 0), None, wait)
     assert best is not None
+    if chord is not None and best.outcome == "hit" and b0.primary in (PRIMARY_CHARGE, PRIMARY_PAUSE):
+        # No stick and no punch escapes his run: turn the back to him (a walk
+        # away is the turn) and throw the rear attack into it.
+        for wait in CHORD_WAITS:
+            consider((0, 0), None, wait, chord, True)
+            if wait:
+                consider((-toward_x, 0), None, wait, chord, True)
     return best
 
 
