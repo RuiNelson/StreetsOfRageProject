@@ -777,19 +777,13 @@ def could_hold_actions(context: Context) -> Context:
             # answer rather than a regression. ``test_stability`` pins the
             # relationship so a change to either number is visible.
             has_time_to_suplex = grace is None or grace >= suplex_frames
-            clear_the_twin = isinstance(nearest, Onihime) and another_enemy_to_fight(
-                actor, nearest, enemies
-            )
-            if rear or clear_the_twin:
-                # Throw the held body into the rear threat (B+back) -- or,
-                # with the other twin to fight, out of the way.
+            if rear:
+                # Throw the held body into the rear threat (B+back).
                 verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
             else:
                 # Standard: knee damage, or flip for a suplex finish.
                 verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
-            if clear_the_twin:
-                pass
-            elif has_time_to_suplex and not (
+            if has_time_to_suplex and not (
                 nearest is not None and crossover_lands_under_a_press(nearest)
             ):
                 verbs.add(FlipHold(actor_slot=actor.slot, target_slot=target_slot))
