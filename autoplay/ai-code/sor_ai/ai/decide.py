@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import heapq
 import math
-from typing import Callable
+from typing import Callable, Sequence
 
 from . import press as press_model
 from .. import prop_solids
@@ -469,6 +469,22 @@ def could_grab_enemy(context: Context) -> Context:
     return verbs
 
 
+# Another enemy -- boss or not -- the actor could go and fight if the body in
+# its hands were out of the way (user: with a pair, throw the boss then).
+FIGHT_ANOTHER_DISTANCE_X = 192
+
+
+def another_enemy_to_fight(actor: PlayableCharacter, held: Enemy, enemies: Sequence[Enemy]) -> bool:
+    """A live enemy besides ``held``, near enough to be fought next."""
+
+    return any(
+        e.slot != held.slot
+        and e.combat_phase is not CombatPhase.GRABBED
+        and abs(e.world_x - actor.world_x) <= FIGHT_ANOTHER_DISTANCE_X
+        for e in enemies
+    )
+
+
 def could_hold_actions(context: Context) -> Context:
     """While grabbing an enemy: knee, throw-back, flip→suplex, or release.
 
@@ -636,6 +652,17 @@ def could_hold_actions(context: Context) -> Context:
                 step = souther_plan.hold_step(actor, held)
             if step is souther_plan.HoldStep.CROSS and crossover_lands_under_a_press(held):
                 step = souther_plan.HoldStep.KNEE
+            if (
+                not isinstance(held, Bongo)
+                and base == 0x60
+                and step in (souther_plan.HoldStep.KNEE, souther_plan.HoldStep.CROSS)
+                and souther_plan.signed_health(held) > (2 if actor.knees_in_chain < 2 else 3)
+                and another_enemy_to_fight(actor, held, enemies)
+            ):
+                # Another enemy to go and fight (user: with a pair, throw the
+                # boss): the throw (B+back) lays this one down far off for
+                # ~30 updates, unless the knee in hand kills him.
+                step = souther_plan.HoldStep.THROW
             if step is souther_plan.HoldStep.KNEE:
                 verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
             elif step is souther_plan.HoldStep.RELEASE:
@@ -750,13 +777,19 @@ def could_hold_actions(context: Context) -> Context:
             # answer rather than a regression. ``test_stability`` pins the
             # relationship so a change to either number is visible.
             has_time_to_suplex = grace is None or grace >= suplex_frames
-            if rear:
-                # Throw the held body into the rear threat (B+back).
+            clear_the_twin = isinstance(nearest, Onihime) and another_enemy_to_fight(
+                actor, nearest, enemies
+            )
+            if rear or clear_the_twin:
+                # Throw the held body into the rear threat (B+back) -- or,
+                # with the other twin to fight, out of the way.
                 verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
             else:
                 # Standard: knee damage, or flip for a suplex finish.
                 verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=target_slot))
-            if has_time_to_suplex and not (
+            if clear_the_twin:
+                pass
+            elif has_time_to_suplex and not (
                 nearest is not None and crossover_lands_under_a_press(nearest)
             ):
                 verbs.add(FlipHold(actor_slot=actor.slot, target_slot=target_slot))

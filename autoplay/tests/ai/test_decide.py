@@ -3507,7 +3507,7 @@ class CouldEngageSoutherTests(unittest.TestCase):
 
 
 class SoutherHoldLoopTests(unittest.TestCase):
-    """Knee, knee, release, walk back in -- souther.hold_step, wired."""
+    """Knee, knee, crossover, suplex -- souther.hold_step, wired."""
 
     def _holding(self, action_state: int, *, knees: int = 0, crossover_spent: bool = False):
         return make_myself(
@@ -3562,6 +3562,29 @@ class SoutherHoldLoopTests(unittest.TestCase):
                 self.assertFalse(
                     any(isinstance(v, (ThrowHeldEnemy, FlipHold, Supplex)) for v in verbs)
                 )
+
+    def test_with_another_enemy_to_fight_the_held_boss_is_thrown(self) -> None:
+        other = _souther(slot="obj12", world_x=230)
+        for knees in (0, 1, 2):
+            with self.subTest(knees=knees):
+                self.assertEqual(
+                    could_hold_actions({self._holding(0x60, knees=knees), self._held(), other}),
+                    {ThrowHeldEnemy(actor_slot="P1", target_slot="obj11")},
+                )
+
+    def test_a_far_off_enemy_is_not_worth_a_throw(self) -> None:
+        far = _souther(slot="obj12", world_x=600)
+        self.assertEqual(
+            could_hold_actions({self._holding(0x60), self._held(), far}),
+            {AttackHeldEnemy(actor_slot="P1", target_slot="obj11")},
+        )
+
+    def test_the_knee_that_kills_is_kept_even_with_another_enemy(self) -> None:
+        other = _souther(slot="obj12", world_x=230)
+        self.assertEqual(
+            could_hold_actions({self._holding(0x60), self._held(health=2), other}),
+            {AttackHeldEnemy(actor_slot="P1", target_slot="obj11")},
+        )
 
     def test_a_back_hold_suplexes_at_once(self) -> None:
         for spent in (False, True):

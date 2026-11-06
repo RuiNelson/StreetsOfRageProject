@@ -184,6 +184,7 @@ User: grabbing him and dealing damage repeatedly is the strategy; prefer determi
 - **Commit gate is side-dependent:** `+$52 < $0A` above him, `< $1C` otherwise. So 11-15 px above is out of the gate and in grab range.
 - The claw is his own attack box (0..86 px forward, lane -10..+24); type `$98` has none. **Grab beats hit** (`$AAA0`, never reads the weapon).
 - **He never escapes a hold.** One crossover per hold (`+$4B` bit 7). A release (holding back counts `+$63` from 3, dropping on the ~8th frame, 32 px in front) allows an instant re-grab, but the AI no longer uses it (user: cheating, impossible by hand).
+- **Pairs** (user, 2026-11-06): in a front hold with another live enemy within 192 px (boss or not), the held boss is thrown (B+back) rather than kneed or crossed over, unless the knee kills; not Bongo (`decide.another_enemy_to_fight`; Onihime/Yasha too). Not measured live.
 - Plan: corridor 15 px above or 38 below, walk in. Knee, knee, crossover, suplex (third knee only if it kills at 3 or the crossover is spent). Generic verbs and items stand down; police is panic only.
 
 `boss_fight.py --level 2 --boss-type 0x55 --no-food`, lab `souther_hold_lab.py`: 0 hits in 16 Blaze fights, 2-4 s (old plan: 2.15 hits, 17-27 s). `souther.WALK_BOX_REACH_X` keeps 14 for Axel and Adam (ROM: 16, 20) until a wider walk-in is measured.

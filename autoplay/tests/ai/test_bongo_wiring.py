@@ -161,6 +161,11 @@ class HoldLoopTests(unittest.TestCase):
         verbs = _infer(could_hold_actions)({holder, self._held(), grunt})
         self.assertEqual({type(v) for v in verbs}, {AttackHeldEnemy})
 
+    def test_another_enemy_never_gets_him_thrown(self) -> None:
+        grunt = _grunt(230, 60, facing_left=False)
+        verbs = _infer(could_hold_actions)({self._holding(0), self._held(), grunt})
+        self.assertEqual({type(v) for v in verbs}, {AttackHeldEnemy})
+
     def test_a_quiet_grunt_leaves_the_loop_alone(self) -> None:
         holder = self._holding(0)
         grunt = _grunt(100, 60, facing_left=False)
