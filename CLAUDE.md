@@ -33,6 +33,8 @@ git submodule update --init --recursive --depth 1   # an existing plain clone
 
 Submodule commits are part of the reproducible workspace; do not advance them casually. For a change in an owned submodule: validate it there, commit and push it, update the gitlink in the same delivery, and report both repositories. `autoplay/` and `StreetsOfRageBuilder/` are committed directly here.
 
+**Never tag or release with an unpushed gitlink** (0.7.0 shipped with one: the Builder's clone failed with `not our ref`). Before any commit that moves a gitlink, and again before any tag or release, for each submodule run `git -C SUB fetch origin && git -C SUB branch -r --contains $(git ls-tree HEAD SUB | awk '{print $3}')`: it must list `origin/main`. If it prints nothing, push the submodule first. Push submodules before the meta-repository, always, and end a release with a shallow `git clone --depth 1 --shallow-submodules --recurse-submodules` of the tag into a scratch folder.
+
 After validating requested changes, commit and push to `main` automatically unless the user asks not to publish. Never include unrelated dirty files. Do not force-push, rewrite history, or open a pull request unless asked.
 
 Do not commit ROMs, generated C++, build trees, CMake download trees, caches, screenshots, call logs, `call-map.sqlite`, recordings, or transient discovery output.
