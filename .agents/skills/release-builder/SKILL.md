@@ -89,7 +89,7 @@ The apps are not signed, so your system will warn you the first time. It is safe
 
 ### macOS
 
-Open the `.dmg` as usual, no need to prepare it first, and drag **Streets of Rage Builder** to Applications. Then, to let macOS open it, use [I Am Sure I Want To Open This App](https://github.com/RuiNelson/IAmSureIWantToOpenThisApp): drag **Streets of Rage Builder** from Applications onto it (or right-click the app in Finder and choose **Quick Actions ▸ Let me open this App**), then open the app.
+Before opening the `.dmg`, drag it onto [I Am Sure I Want To Open This App](https://github.com/RuiNelson/IAmSureIWantToOpenThisApp) (or right-click it in Finder and choose **Quick Actions ▸ Let me open this App**). Then open the `.dmg` and run **Streets of Rage Builder** straight from it, or drag it to Applications if you prefer to keep it.
 
 ### Windows
 
