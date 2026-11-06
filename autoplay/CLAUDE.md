@@ -170,7 +170,7 @@ User: think of a sound strategy first; "A AI está a depender muito da chamada d
 - Kick gate `< 8` above his lane, `< 16` level or below; so **8-16 px above his lane** is kick-proof and grab-ready. `$AAA0`: the walking box on his body comes first, so a walk in takes the hold even through a kick.
 - `plan_engage`: nine sticks, held 2 updates then a tail, or the whole horizon (14 updates), each under both update orders, scored by the worse. His kick cannot be answered reactively (every hit within two ticks of primary `$02`; a hop needs ~45 frames).
 - `BoomerangSim`: launched 64 px ahead at 14 px/update, dives, homes back on the street's top; a fresh one leaves the old one flying. `HitAntonioBoomerang` is unarmed only (a swing is ~26 committed frames).
-- Hold: two knees, `ReleaseToRegrab` (lands 40 px ahead), back in, a finisher only if it kills.
+- Hold: two knees, crossover (`FlipHold`), suplex. No release-and-regrab (user: a frame-perfect input no hand can do).
 - `state_machine_engage_antonio` holds the stick **unclamped**: clamping at the camera edge removed the walk into him.
 
 Scored with `boss_fight.py --level 1 --boss-type 0x56 --no-food`: 0 hits for Blaze and Axel, 0.2 for Adam, 2.2-9 s (previously 3.25 hits, 13-32 s). Checked by `antonio_lab.py`.
@@ -183,8 +183,8 @@ User: grabbing him and dealing damage repeatedly is the strategy; prefer determi
 
 - **Commit gate is side-dependent:** `+$52 < $0A` above him, `< $1C` otherwise. So 11-15 px above is out of the gate and in grab range.
 - The claw is his own attack box (0..86 px forward, lane -10..+24); type `$98` has none. **Grab beats hit** (`$AAA0`, never reads the weapon).
-- **He never escapes a hold, and a release is the best move.** Holding back counts `+$63` from 3, dropping on the ~8th frame, 32 px in front: an immediate re-grab. One crossover per hold (`+$4B` bit 7).
-- Plan: corridor 15 px above or 38 below, walk in. Knee, knee, `ReleaseToRegrab`, back in; finisher only if it kills (third knee at 3, suplex at 5). Generic verbs and items stand down; police is panic only.
+- **He never escapes a hold.** One crossover per hold (`+$4B` bit 7). A release (holding back counts `+$63` from 3, dropping on the ~8th frame, 32 px in front) allows an instant re-grab, but the AI no longer uses it (user: cheating, impossible by hand).
+- Plan: corridor 15 px above or 38 below, walk in. Knee, knee, crossover, suplex (third knee only if it kills at 3 or the crossover is spent). Generic verbs and items stand down; police is panic only.
 
 `boss_fight.py --level 2 --boss-type 0x55 --no-food`, lab `souther_hold_lab.py`: 0 hits in 16 Blaze fights, 2-4 s (old plan: 2.15 hits, 17-27 s). `souther.WALK_BOX_REACH_X` keeps 14 for Axel and Adam (ROM: 16, 20) until a wider walk-in is measured.
 
@@ -206,7 +206,7 @@ User: efficient in time and life; no police or recovery items in tests. `ai/bong
 - Wind-up 21 updates from `$B0` (176 px) on X, the charge never re-aims and ends at a screen edge.
 - Safe during a charge: **15-16 lanes above him** (exact, no lane margin), and behind once 9 px past. Before it: level on the bottom clamp.
 - Plan: lookahead over his AI and the flame (44 updates, 5-7 ms); tail phases (`engage_mode`); hold is `souther.hold_step`.
-- **The round's grunt** (user: do not focus on it, prevent imminent attacks; it respawns): `EngageBongo` falls from 76 to 19 under its committed strike unless `bongo.charge_is_pressing`. Nothing walks to it. A blow from behind during a hold gets Bongo thrown into it (Bongo only). A Garcia punching over the held Bongo from in front is taken.
+- **The round's grunt** (user: do not focus on it, prevent imminent attacks; it respawns): `EngageBongo` falls from 76 to 19 under its committed strike unless `bongo.charge_is_pressing`. Nothing walks to it. Bongo's hold is knees only (user, 2026-11-06: his suplex or throw loses the fight): the third knee ends it; a back hold crosses over once, else lets go. A Garcia punching over the held Bongo from in front is taken.
 
 `boss_fight.py --level 4 --boss-type 0x57 --no-food`, `--idle-seconds 3` exercises the rest; lab `bongo_lab.py`. 0 flame hits for all three, 3.3-4.4 s (before: 7 hits, 2 lives).
 

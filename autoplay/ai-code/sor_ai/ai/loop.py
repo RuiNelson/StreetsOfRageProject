@@ -189,7 +189,7 @@ class AgentLoop:
         # replied at once with its release frame): skip the tick, pad
         # untouched, as lockstep does with its capture's press_pending. A
         # decision made now would be about a body the press has not acted on
-        # yet -- live, a ReleaseToRegrab chosen mid-press was pressed again
+        # yet -- live, a release chosen mid-press was pressed again
         # after the release and lost the re-grab -- and the old blocking
         # PRESS_BUTTONS never let one be made: it held the tick until release.
         uptime_frames = (snapshot.raw or {}).get("uptime_frames")

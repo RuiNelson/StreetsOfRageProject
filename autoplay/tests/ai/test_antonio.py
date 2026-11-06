@@ -565,29 +565,28 @@ class PlanEngageTests(unittest.TestCase):
 
 
 class HoldStepTests(unittest.TestCase):
-    """Knee, knee, release -- the holding player's own bytes, as for Souther."""
+    """Knee, knee, cross over, suplex -- the holding player's own bytes, as for Souther."""
 
     def _front(self, knees: int, **overrides) -> Myself:
         last = {0: 0, 1: 0x6A, 2: 0x6C}[knees]
         flags = PLAYER_KNEE_CHAIN_BIT if knees else 0
         return _actor(160, 60, action_state=0x60, action_flags=flags, knee_chain_last=last, **overrides)
 
-    def test_two_knees_then_the_release(self) -> None:
+    def test_two_knees_then_the_crossover(self) -> None:
         antonio = _antonio(200, 60, primary_state=4)
         self.assertIs(plan.hold_step(self._front(0), antonio), plan.HoldStep.KNEE)
         self.assertIs(plan.hold_step(self._front(1), antonio), plan.HoldStep.KNEE)
-        self.assertIs(plan.hold_step(self._front(2), antonio), plan.HoldStep.RELEASE)
+        self.assertIs(plan.hold_step(self._front(2), antonio), plan.HoldStep.CROSS)
 
     def test_the_third_knee_only_when_it_kills(self) -> None:
         antonio = _antonio(200, 60, primary_state=4, health=3)
         self.assertIs(plan.hold_step(self._front(2), antonio), plan.HoldStep.KNEE)
 
-    def test_a_back_hold_crosses_once_and_suplexes_only_to_kill(self) -> None:
+    def test_a_back_hold_suplexes_at_once(self) -> None:
         back = _actor(160, 60, action_state=0x66)
         spent = _actor(160, 60, action_state=0x66, crossover_spent=True)
-        self.assertIs(plan.hold_step(back, _antonio(primary_state=4)), plan.HoldStep.CROSS)
-        self.assertIs(plan.hold_step(spent, _antonio(primary_state=4)), plan.HoldStep.RELEASE)
-        self.assertIs(plan.hold_step(back, _antonio(primary_state=4, health=5)), plan.HoldStep.SUPLEX)
+        self.assertIs(plan.hold_step(back, _antonio(primary_state=4)), plan.HoldStep.SUPLEX)
+        self.assertIs(plan.hold_step(spent, _antonio(primary_state=4)), plan.HoldStep.SUPLEX)
 
     def test_the_crossover_bit_is_the_players(self) -> None:
         self.assertEqual(PLAYER_CROSSOVER_SPENT_BIT, 0x80)

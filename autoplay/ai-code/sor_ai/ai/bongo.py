@@ -1281,14 +1281,11 @@ def simulate(
 
 
 def hold_step(actor: PlayableCharacter, bongo: Bongo) -> HoldStep:
-    """Knee, knee, release -- and only ever finish when finishing kills.
+    """Knee until the hold ends -- never the suplex or the throw.
 
-    Souther's loop (``souther.hold_step``): the knee chain, the release
-    countdown and the crossover flag are the holding player's own bytes, and
-    a released later boss goes to primary 1 in front of the actor through the
-    shared ``$17CF2`` -- Bongo 32 px out (``$17D76``), facing it, straight
-    into his wind-up: 21 updates in which the walking box, already touching
-    his body, takes him again.
+    User: against Bongo the suplex and the throw lose the fight, so the front
+    hold is all knees (the third, ``$6E``, is the knockback that ends it). A
+    back hold has no knee: cross over to the front once, else let go.
 
     Nothing about the flame belongs here: one still igniting when a front
     hold starts is placed on him and lands on the holder whatever it does
@@ -1297,7 +1294,12 @@ def hold_step(actor: PlayableCharacter, bongo: Bongo) -> HoldStep:
     ``plan_engage`` scores as the hit it is (``_grab_is_burnt``).
     """
 
-    return _shared_hold_step(actor, bongo)
+    base = actor.action_base
+    if base == 0x60:
+        return HoldStep.KNEE
+    if base == 0x66:
+        return HoldStep.RELEASE if actor.crossover_spent else HoldStep.CROSS
+    return HoldStep.WAIT
 
 
 def linked_flame(bongo: Bongo, projectiles: Sequence[Projectile]) -> Projectile | None:

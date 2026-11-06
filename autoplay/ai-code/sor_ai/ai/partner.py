@@ -34,8 +34,7 @@ Four consequences of that same ROM routine bound what is filtered here:
 - with no damage out, the same contact is a **grab** between the players,
   and ``$3266`` takes the same front/back hold on the partner it takes on an
   enemy, linking ``+$4C`` to the partner's object. The hold moves
-  (``AttackHeldEnemy``/``Supplex``/``ThrowHeldEnemy``/``FlipHold``/
-  ``ReleaseToRegrab``) act on that body whatever enemy they name, so they
+  (``AttackHeldEnemy``/``Supplex``/``ThrowHeldEnemy``/``FlipHold``) act on that body whatever enemy they name, so they
   are withdrawn exactly while the link names the partner (user: "The AI
   grabbed me and supplexed me, it shouldn't, because it should never hurt
   it's partner!"); ``decide.could_hold_actions`` offers ``ReleasePartner``
@@ -115,7 +114,6 @@ from .tokens import (
     Pickup,
     Punch,
     RearAttack,
-    ReleaseToRegrab,
     Supplex,
     ThrowHeldEnemy,
     ThrowKnife,
@@ -427,7 +425,6 @@ _HOLD_TESTS: dict[type[Verb], WithdrawTest] = {
     Supplex: _hold_move_lands_on_partner,
     ThrowHeldEnemy: _hold_move_lands_on_partner,
     FlipHold: _hold_move_lands_on_partner,
-    ReleaseToRegrab: _hold_move_lands_on_partner,
     CounterGrab: _counter_throws_partner,
 }
 

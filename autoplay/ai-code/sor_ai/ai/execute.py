@@ -37,7 +37,6 @@ from .tokens import (
     OpenBreakable,
     ReleaseGrab,
     ReleasePartner,
-    ReleaseToRegrab,
     Supplex,
     TechRecover,
     ThrowHeldEnemy,
@@ -2012,40 +2011,6 @@ def state_machine_engage_jack(verb: EngageJack, context: Context, gamepad: Virtu
     gamepad.hold(mask)
 
 
-def state_machine_release_to_regrab(
-    verb: ReleaseToRegrab, context: Context, gamepad: VirtualGamepad
-) -> None:
-    """Hold back until ``loc_235A`` drops the hold, then turn straight back in.
-
-    The back press is one timed press sized from the ROM's own countdown
-    (``+$63``, ``souther.release_press_frames``), so it ends on the frame the
-    hold drops rather than walking the actor away for however long the next
-    poll takes; the walk back in is latched in the same tick, and the next
-    tick's ``EngageSouther`` walk-in carries it on. Measured in lockstep: the
-    re-grab survives three frames of added latency -- he commits four frames
-    after the release, and his leaning body still walks into the actor's box.
-
-    If the press ends a frame short, the countdown keeps what it spent (nothing
-    resets it mid-hold) and the next tick's press finishes the job.
-
-    Any held later boss: the countdown and the release are the player's own
-    code, and Antonio reads the release through the same ``$17CF2`` Souther
-    does. Antonio lands 40 px out rather than 32, and ``EngageAntonio``'s
-    lookahead carries the walk back in from the next tick.
-    """
-
-    actor = _find_actor(context, verb.actor_slot)
-    target = find(context, Enemy, slot=verb.target_slot)
-    if actor is None or target is None:
-        gamepad.release()
-        return
-    back = _back_direction_mask(actor)
-    toward = LEFT_MASK if target.world_x < actor.world_x else RIGHT_MASK
-    frames = souther_plan.release_press_frames(actor.hold_release_countdown)
-    _press(gamepad, back, frames=frames)
-    gamepad.hold(toward)
-
-
 def state_machine_hit_antonio_boomerang(
     verb: HitAntonioBoomerang, context: Context, gamepad: VirtualGamepad
 ) -> None:
@@ -2708,7 +2673,7 @@ def state_machine_release_partner(
 ) -> None:
     """Hold back, and press nothing else, until ``loc_235A`` lets the partner go.
 
-    The same timed back press as ``ReleaseToRegrab``, sized from the ROM's own
+    A timed back press sized from the ROM's own
     ``+$63`` countdown -- a property of the hold, not of who is in it -- but
     without the walk back in, which would take the partner again. B and C are
     never pressed: in a hold they are the knee, the throw and the crossover
@@ -3169,7 +3134,6 @@ _HANDLERS = {
     EngageTwins: state_machine_engage_twins,
     EngageMrX: state_machine_engage_mr_x,
     EngageGrunts: state_machine_engage_grunts,
-    ReleaseToRegrab: state_machine_release_to_regrab,
     HitAntonioBoomerang: state_machine_hit_antonio_boomerang,
     HitTable: state_machine_hit_table,
     WalkToAdvanceStage: state_machine_walk_to_advance_stage,

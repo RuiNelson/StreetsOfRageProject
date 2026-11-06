@@ -1216,20 +1216,15 @@ def reads_the_hold(boss: Boss) -> bool:
 
 
 def hold_step(actor: PlayableCharacter, boss: Boss) -> HoldStep:
-    """Knee, knee, release -- each on an update he reads -- and a finisher
-    only when it kills.
+    """Knee, knee, cross over, suplex -- each on an update he reads.
 
-    Front hold (``$60``): two knees (2 points each), then the release -- he
-    reads the cleared ``+$7D`` and goes to state 3, whose first contact test
-    on his feet 24 px in front of the actor is the re-grab. The third knee
-    (``$6E``, 3 points) only when it kills: otherwise it knocks him down and
-    the next hold is a whole charge away.
+    Front hold (``$60``): two knees (2 points each), then the crossover to
+    his back; the third knee (``$6E``, 3 points) only when it kills, or when
+    the crossover is spent, since otherwise it knocks him down and the next
+    hold is a whole charge away.
 
-    Back hold (``$66``, a grab taken from behind): the suplex (5 points) only
-    when it kills; else the one crossover the hold allows, which he reads as
-    "held on" (9: the timer at 30) and which lands the actor in a front hold
-    and its knees -- in state ``$D`` (a back hold he was handed as one) a
-    crossover frees him, so that one is released.
+    Back hold (``$66``): the suplex (5 points). No release (user: handing him
+    back for a re-grab is not a move a person has).
     """
 
     hp = signed_health(boss)
@@ -1238,18 +1233,13 @@ def hold_step(actor: PlayableCharacter, boss: Boss) -> HoldStep:
     if base == 0x60:
         if not reading:
             return HoldStep.WAIT
-        if actor.knees_in_chain < 2 or hp <= HOLD_THIRD_KNEE_DAMAGE:
+        if actor.knees_in_chain < 2 or hp <= HOLD_THIRD_KNEE_DAMAGE or actor.crossover_spent:
             return HoldStep.KNEE
-        return HoldStep.RELEASE
+        return HoldStep.CROSS
     if base == 0x66:
-        if hp <= HOLD_SUPLEX_DAMAGE:
-            return HoldStep.SUPLEX
-        if boss.primary_state == PRIMARY_HELD:
-            if not reading:
-                return HoldStep.WAIT
-            if not actor.crossover_spent:
-                return HoldStep.CROSS
-        return HoldStep.RELEASE
+        if boss.primary_state == PRIMARY_HELD and not reading:
+            return HoldStep.WAIT
+        return HoldStep.SUPLEX
     return HoldStep.WAIT
 
 

@@ -740,21 +740,20 @@ def reads_the_hold(primary: int, substate: int) -> bool:
     return primary == model.PRIMARY_HELD and substate == 1
 
 
-def hold_step(*, action_base: int, knees_in_chain: int, primary: int, substate: int, health: int) -> str:
-    """Knee, knee, release -- each on an update he reads. A knee is the
-    holder's ``+$34`` (2); at 2 or less it kills, so the last one needs no
+def hold_step(
+    *, action_base: int, knees_in_chain: int, primary: int, substate: int, health: int, crossover_spent: bool = False
+) -> str:
+    """Knee, knee, cross over, suplex -- each on an update he reads. A knee is
+    the holder's ``+$34`` (2); at 2 or less it kills, so the last one needs no
     finisher. A back hold (``$66``: he was grabbed from behind, state ``$B``)
-    has the suplex (5) only, and is released otherwise -- a crossover frees
-    him there. Returns "knee", "release", "suplex" or "wait"."""
+    has the suplex (5). Returns "knee", "cross", "suplex" or "wait"."""
 
     if action_base == 0x60:
         if not reads_the_hold(primary, substate):
             return "wait"
-        if knees_in_chain < 2 or health <= 2:
+        if knees_in_chain < 2 or health <= 2 or crossover_spent:
             return "knee"
-        return "release"
+        return "cross"
     if action_base == 0x66:
-        if primary == model.PRIMARY_HELD_BACK and health <= 5:
-            return "suplex"
-        return "release"
+        return "suplex"
     return "wait"

@@ -29,6 +29,7 @@ from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_ai.ai.inference import generate_inference_tokens
 from sor_ai.ai.priority import determine_priority_verb
 from sor_ai.ai.tokens import (
+    ReleaseGrab,
     AttackHeldEnemy,
     CameraRange,
     EngageMrX,
@@ -38,7 +39,6 @@ from sor_ai.ai.tokens import (
     MrX,
     MrXOffice,
     Projectile,
-    ReleaseToRegrab,
     ThrowHeldEnemy,
     Verb,
     find_all,
@@ -201,12 +201,12 @@ class HoldTests(unittest.TestCase):
 
     def test_a_garcia_over_him_before_a_knee_is_spent_lets_him_go(self) -> None:
         # Holding him on his read, a Garcia walks up from beyond him: his jab
-        # lands before a knee, the release and a step fit -- no knee.
+        # lands before a knee -- no knee, a plain release.
         me = _myself(300.0, 60.0, action_state=0x60, held_enemy_slot="obj04",
                      combat_phase=CombatPhase.HOLDING, knee_chain_last=0)
         him = _mr_x(324.0, 60.0, primary=model.PRIMARY_HELD, sub=1, t54=40)
         verbs = _infer(could_hold_actions)({me, him, _garcia(390.0, 60.0), MrXOffice(), CAMERA})
-        self.assertEqual([type(v) for v in verbs], [ReleaseToRegrab])
+        self.assertEqual([type(v) for v in verbs], [ReleaseGrab])
 
     def test_far_off_the_knee_stands(self) -> None:
         me = _myself(300.0, 60.0, action_state=0x60, held_enemy_slot="obj04",

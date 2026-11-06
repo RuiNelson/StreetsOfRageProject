@@ -33,7 +33,6 @@ from sor_ai.ai.tokens import (
     Myself,
     Projectile,
     Punch,
-    ReleaseToRegrab,
     ScorePickup,
     Souther,
     Verb,
@@ -152,9 +151,9 @@ class HoldLoopTests(unittest.TestCase):
         verbs = _infer(could_hold_actions)({_holding(1), _held_antonio()})
         self.assertEqual({type(v) for v in verbs}, {AttackHeldEnemy})
 
-    def test_releases_to_regrab_after_two_knees(self) -> None:
+    def test_crosses_over_after_two_knees(self) -> None:
         verbs = _infer(could_hold_actions)({_holding(2), _held_antonio()})
-        self.assertEqual({type(v) for v in verbs}, {ReleaseToRegrab})
+        self.assertEqual({type(v) for v in verbs}, {FlipHold})
 
     def test_the_third_knee_when_it_kills(self) -> None:
         verbs = _infer(could_hold_actions)({_holding(2), _held_antonio(health=3)})
@@ -203,15 +202,6 @@ class RankingTests(unittest.TestCase):
         }
         self.assertIsInstance(self._winner(context), HitAntonioBoomerang)
 
-    def test_the_release_tops_the_hold_family_on_him(self) -> None:
-        context = {
-            _holding(2),
-            _held_antonio(),
-            ReleaseToRegrab(actor_slot="P1", target_slot="obj09"),
-            FlipHold(actor_slot="P1", target_slot="obj09"),
-        }
-        self.assertIsInstance(self._winner(context), ReleaseToRegrab)
-
     def test_police_no_longer_outranks_a_combo_at_half_health(self) -> None:
         souther = Souther(
             slot="obj11",
@@ -259,18 +249,6 @@ class ExecuteTests(unittest.TestCase):
             gamepad,
         )
         self.assertTrue(gamepad.held & RIGHT)
-
-    def test_release_to_regrab_works_on_him(self) -> None:
-        actor = _myself(action_state=0x60, held_enemy_slot="obj09", hold_release_countdown=3)
-        gamepad, client = _gamepad()
-        execute_verb(
-            ReleaseToRegrab(actor_slot="P1", target_slot="obj09"),
-            {actor, _held_antonio(), CAMERA},
-            gamepad,
-        )
-        self.assertTrue(client.queue_press_buttons.called)
-        self.assertTrue(gamepad.held & RIGHT)
-
 
 class PoliceIsTheLastResortTests(unittest.TestCase):
     """User: "A AI está a depender muito da chamada da polícia!"."""

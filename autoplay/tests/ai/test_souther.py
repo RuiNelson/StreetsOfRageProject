@@ -196,28 +196,29 @@ class HoldStepTests(unittest.TestCase):
             held_enemy_slot="obj11", **overrides
         )
 
-    def test_two_knees_then_the_release(self) -> None:
+    def test_two_knees_then_the_crossover(self) -> None:
         souther = _souther(health=20)
         self.assertIs(plan.hold_step(self._front(knees=0), souther), plan.HoldStep.KNEE)
         self.assertIs(plan.hold_step(self._front(knees=1), souther), plan.HoldStep.KNEE)
-        self.assertIs(plan.hold_step(self._front(knees=2), souther), plan.HoldStep.RELEASE)
+        self.assertIs(plan.hold_step(self._front(knees=2), souther), plan.HoldStep.CROSS)
 
     def test_a_third_knee_only_when_it_kills(self) -> None:
         self.assertIs(
             plan.hold_step(self._front(knees=2), _souther(health=3)), plan.HoldStep.KNEE
         )
         self.assertIs(
-            plan.hold_step(self._front(knees=2), _souther(health=4)), plan.HoldStep.RELEASE
+            plan.hold_step(self._front(knees=2), _souther(health=4)), plan.HoldStep.CROSS
         )
+        spent = self._front(knees=2, crossover_spent=True)
+        self.assertIs(plan.hold_step(spent, _souther(health=20)), plan.HoldStep.KNEE)
 
-    def test_a_back_hold_crosses_once_and_only_suplexes_to_kill(self) -> None:
+    def test_a_back_hold_suplexes_at_once(self) -> None:
         back = _actor(100, 50, action_state=0x66, held_enemy_slot="obj11")
-        self.assertIs(plan.hold_step(back, _souther(health=20)), plan.HoldStep.CROSS)
+        self.assertIs(plan.hold_step(back, _souther(health=20)), plan.HoldStep.SUPLEX)
         self.assertIs(
             plan.hold_step(replace(back, crossover_spent=True), _souther(health=20)),
-            plan.HoldStep.RELEASE,
+            plan.HoldStep.SUPLEX,
         )
-        self.assertIs(plan.hold_step(back, _souther(health=5)), plan.HoldStep.SUPLEX)
 
     def test_nothing_during_an_animation_lock(self) -> None:
         crossing = _actor(100, 50, action_state=0x76, held_enemy_slot="obj11")

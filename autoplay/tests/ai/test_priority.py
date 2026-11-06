@@ -20,7 +20,6 @@ from sor_ai.ai.tokens import (
     Punch,
     RearAttack,
     ReleasePartner,
-    ReleaseToRegrab,
     ScorePickup,
     SpecialPickup,
     OpenBreakable,
@@ -2404,18 +2403,6 @@ class SoutherVerbEmergencyTests(unittest.TestCase):
         fields = dict(action_state=0x60, held_enemy_slot="obj11")
         fields.update(overrides)
         return _souther_actor(**fields)
-
-    def test_the_hand_back_tops_the_hold_family(self) -> None:
-        held = _souther("obj11", CombatPhase.RECOVERY, world_x=152, primary_state=4)
-        context = {
-            self._holding(),
-            held,
-            ReleaseToRegrab(actor_slot="P1", target_slot="obj11"),
-            AttackHeldEnemy(actor_slot="P1", target_slot="obj11"),
-            FlipHold(actor_slot="P1", target_slot="obj11"),
-        }
-        winner = find_all(determine_priority_verb(context), Verb)[0]
-        self.assertIsInstance(winner, ReleaseToRegrab)
 
     def test_a_souther_knee_is_not_rationed_by_the_knee_budget(self) -> None:
         # souther.hold_step reads the ROM's own chain count; the tick budget

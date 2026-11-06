@@ -75,7 +75,6 @@ from .tokens import (
     Punch,
     RearAttack,
     ReleaseGrab,
-    ReleaseToRegrab,
     RivalPlayer,
     Supplex,
     TechRecover,
@@ -223,9 +222,9 @@ _HOLD_VERBS = {
     THROW: (ThrowHeldEnemy,),
     FLIP: (FlipHold,),
     SUPLEX: (Supplex,),
-    RELEASE: (ReleaseGrab, ReleaseToRegrab),
+    RELEASE: (ReleaseGrab,),
 }
-_ANY_HOLD_VERB = (AttackHeldEnemy, ThrowHeldEnemy, FlipHold, Supplex, ReleaseGrab, ReleaseToRegrab)
+_ANY_HOLD_VERB = (AttackHeldEnemy, ThrowHeldEnemy, FlipHold, Supplex, ReleaseGrab)
 
 
 @dataclass(slots=True)

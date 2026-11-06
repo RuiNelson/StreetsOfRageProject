@@ -256,21 +256,19 @@ class HoldStepTests(unittest.TestCase):
         fields.update(kw)
         return mr_x_plan.hold_step(**fields)
 
-    def test_knee_knee_release_each_on_his_read(self) -> None:
+    def test_knee_knee_cross_each_on_his_read(self) -> None:
         self.assertEqual(self._step(), "knee")
         self.assertEqual(self._step(knees_in_chain=1), "knee")
-        self.assertEqual(self._step(knees_in_chain=2), "release")
+        self.assertEqual(self._step(knees_in_chain=2), "cross")
+        self.assertEqual(self._step(knees_in_chain=2, crossover_spent=True), "knee")
         self.assertEqual(self._step(substate=3), "wait")  # the shake a knee buys
         self.assertEqual(self._step(substate=0), "wait")  # stood back in front
 
     def test_the_last_knee_kills(self) -> None:
         self.assertEqual(self._step(knees_in_chain=2, health=2), "knee")
 
-    def test_a_back_hold_is_released_unless_the_suplex_kills(self) -> None:
-        self.assertEqual(self._step(action_base=0x66, primary=model.PRIMARY_HELD_BACK), "release")
-        self.assertEqual(
-            self._step(action_base=0x66, primary=model.PRIMARY_HELD_BACK, health=5), "suplex"
-        )
+    def test_a_back_hold_suplexes(self) -> None:
+        self.assertEqual(self._step(action_base=0x66, primary=model.PRIMARY_HELD_BACK), "suplex")
 
 
 if __name__ == "__main__":

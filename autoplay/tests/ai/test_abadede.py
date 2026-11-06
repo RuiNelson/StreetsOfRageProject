@@ -423,7 +423,7 @@ class ClosedLoopTests(unittest.TestCase):
 
 
 class HoldStepTests(unittest.TestCase):
-    """``hold_step``: knee, knee, release -- each on an update he reads."""
+    """``hold_step``: knee, knee, cross over, suplex -- each on an update he reads."""
 
     def test_a_knee_only_on_an_update_he_reads(self) -> None:
         self.assertIs(plan.hold_step(_holder(), _abadede()), plan.HoldStep.KNEE)
@@ -431,23 +431,27 @@ class HoldStepTests(unittest.TestCase):
             with self.subTest(sub=sub):
                 self.assertIs(plan.hold_step(_holder(knees=1), _abadede(substate=sub)), plan.HoldStep.WAIT)
 
-    def test_after_two_knees_the_release(self) -> None:
+    def test_after_two_knees_the_crossover(self) -> None:
         self.assertIs(plan.hold_step(_holder(knees=1), _abadede()), plan.HoldStep.KNEE)
-        self.assertIs(plan.hold_step(_holder(knees=2), _abadede()), plan.HoldStep.RELEASE)
+        self.assertIs(plan.hold_step(_holder(knees=2), _abadede()), plan.HoldStep.CROSS)
 
     def test_the_third_knee_only_when_it_kills(self) -> None:
         self.assertIs(plan.hold_step(_holder(knees=2), _abadede(health=3)), plan.HoldStep.KNEE)
-        self.assertIs(plan.hold_step(_holder(knees=2), _abadede(health=4)), plan.HoldStep.RELEASE)
+        self.assertIs(plan.hold_step(_holder(knees=2), _abadede(health=4)), plan.HoldStep.CROSS)
 
-    def test_a_back_hold_crosses_over_suplexes_to_kill_or_lets_go(self) -> None:
+    def test_a_back_hold_suplexes(self) -> None:
         back = _holder(action=0x66)
-        self.assertIs(plan.hold_step(back, _abadede()), plan.HoldStep.CROSS)
-        self.assertIs(plan.hold_step(back, _abadede(health=5)), plan.HoldStep.SUPLEX)
+        self.assertIs(plan.hold_step(back, _abadede()), plan.HoldStep.SUPLEX)
         spent = _holder(action=0x66, crossover_spent=True)
-        self.assertIs(plan.hold_step(spent, _abadede()), plan.HoldStep.RELEASE)
-        # State $D (handed a back hold): a crossover would free him.
+        self.assertIs(plan.hold_step(spent, _abadede()), plan.HoldStep.SUPLEX)
+        # State $D (handed a back hold) too.
         self.assertIs(
-            plan.hold_step(back, _abadede(primary_state=plan.PRIMARY_HELD_BACK)), plan.HoldStep.RELEASE
+            plan.hold_step(back, _abadede(primary_state=plan.PRIMARY_HELD_BACK)), plan.HoldStep.SUPLEX
+        )
+
+    def test_a_spent_crossover_falls_back_to_the_third_knee(self) -> None:
+        self.assertIs(
+            plan.hold_step(_holder(knees=2, crossover_spent=True), _abadede()), plan.HoldStep.KNEE
         )
 
     def test_his_run_presses_from_two_updates_before_it_is_decided(self) -> None:

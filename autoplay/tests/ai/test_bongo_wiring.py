@@ -25,6 +25,7 @@ from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_ai.ai.inference import generate_inference_tokens
 from sor_ai.ai.priority import determine_priority_verb
 from sor_ai.ai.tokens import (
+    FlipHold,
     AttackHeldEnemy,
     Bongo,
     CameraRange,
@@ -33,7 +34,6 @@ from sor_ai.ai.tokens import (
     Myself,
     Projectile,
     Punch,
-    ReleaseToRegrab,
     Verb,
     Weapon,
     find_all,
@@ -149,18 +149,17 @@ class HoldLoopTests(unittest.TestCase):
         verbs = _infer(could_hold_actions)({self._holding(0), self._held()})
         self.assertEqual({type(v) for v in verbs}, {AttackHeldEnemy})
 
-    def test_after_two_knees_it_lets_him_go_to_take_him_again(self) -> None:
+    def test_after_two_knees_it_keeps_kneeing(self) -> None:
+        # The third knee is the knockback that ends the hold; never a cross
+        # over to a suplex, never a throw.
         verbs = _infer(could_hold_actions)({self._holding(2), self._held()})
-        self.assertEqual({type(v) for v in verbs}, {ReleaseToRegrab})
+        self.assertEqual({type(v) for v in verbs}, {AttackHeldEnemy})
 
-    def test_a_grunt_striking_from_behind_gets_an_early_release(self) -> None:
-        # The round's grunt behind the holder, its strike committed and about
-        # to land sooner than a knee: released early (never thrown -- Bongo
-        # is too heavy to pick up, by design) so the actor is free of it.
+    def test_a_grunt_striking_from_behind_does_not_change_the_knees(self) -> None:
         holder = self._holding(0)
         grunt = _grunt(144, 60, facing_left=False, combat_phase=CombatPhase.ATTACKING)
         verbs = _infer(could_hold_actions)({holder, self._held(), grunt})
-        self.assertEqual({type(v) for v in verbs}, {ReleaseToRegrab})
+        self.assertEqual({type(v) for v in verbs}, {AttackHeldEnemy})
 
     def test_a_quiet_grunt_leaves_the_loop_alone(self) -> None:
         holder = self._holding(0)
@@ -169,12 +168,10 @@ class HoldLoopTests(unittest.TestCase):
         self.assertEqual({type(v) for v in verbs}, {AttackHeldEnemy})
 
     def test_a_back_hold_never_suplexes_him_either(self) -> None:
-        # Souther's loop would finish a back hold with a suplex once he is at
-        # lethal HP (souther.HOLD_SUPLEX_DAMAGE); Bongo is released instead,
-        # by design -- released, not lifted.
+        # Crossed over to the front once (for the knees), then let go.
         holder = self._holding(0, action_state=0x66)
         verbs = _infer(could_hold_actions)({holder, self._held(health=5)})
-        self.assertEqual({type(v) for v in verbs}, {ReleaseToRegrab})
+        self.assertEqual({type(v) for v in verbs}, {FlipHold})
 
 
 class RankingTests(unittest.TestCase):

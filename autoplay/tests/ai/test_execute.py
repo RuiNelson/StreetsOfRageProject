@@ -21,7 +21,6 @@ from sor_ai.ai.tokens import (
     RearAttack,
     ReleaseGrab,
     ReleasePartner,
-    ReleaseToRegrab,
     Supplex,
     TechRecover,
     ThrowKnife,
@@ -3460,33 +3459,6 @@ class EngageSoutherExecuteTests(unittest.TestCase):
         )
         client.queue_press_buttons.assert_not_called()
         self.assertEqual(self._held(client), 0)
-
-
-class ReleaseToRegrabExecuteTests(unittest.TestCase):
-    def _run(self, countdown: int):
-        actor = replace(
-            _myself(world_x=100, world_y=50, action_state=0x60, facing_left=False),
-            hold_release_countdown=countdown,
-            held_enemy_slot="obj11",
-        )
-        held = _souther_token(world_x=132, primary_state=4, combat_phase=CombatPhase.RECOVERY)
-        client = MagicMock()
-        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
-        execute_verb(
-            ReleaseToRegrab(actor_slot="P1", target_slot="obj11"), {actor, held}, gamepad
-        )
-        return client
-
-    def test_the_back_press_spans_the_countdown_then_walks_back_in(self) -> None:
-        client = self._run(3)
-        client.queue_press_buttons.assert_called_once()
-        pressed = client.queue_press_buttons.call_args.kwargs
-        self.assertEqual(pressed["buttons"], LEFT)  # facing right: back is left
-        self.assertEqual(pressed["frames"], 8)
-        self.assertEqual(client.hold_buttons.call_args.kwargs["player1"], RIGHT)
-
-    def test_a_spent_countdown_presses_only_what_is_left(self) -> None:
-        self.assertEqual(self._run(1).queue_press_buttons.call_args.kwargs["frames"], 4)
 
 
 class ReleasePartnerExecuteTests(unittest.TestCase):

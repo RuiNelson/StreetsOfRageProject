@@ -99,7 +99,6 @@ classDiagram
     GrabMechanics <|-- FlipHold
     GrabMechanics <|-- ReleaseGrab
     GrabMechanics <|-- ReleasePartner
-    GrabMechanics <|-- ReleaseToRegrab
     MeleeAttacks <|-- JumpAttack
     Attack <|-- OpenBreakable
     MeleeAttacks <|-- RearAttack

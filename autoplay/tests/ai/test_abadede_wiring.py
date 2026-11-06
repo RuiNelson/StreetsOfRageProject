@@ -26,6 +26,7 @@ from sor_ai.ai.gamepad import SharedGamepadState, VirtualGamepad
 from sor_ai.ai.inference import generate_inference_tokens
 from sor_ai.ai.priority import determine_priority_verb
 from sor_ai.ai.tokens import (
+    FlipHold,
     Abadede,
     AttackHeldEnemy,
     CameraRange,
@@ -33,7 +34,6 @@ from sor_ai.ai.tokens import (
     Garcia,
     Myself,
     Punch,
-    ReleaseToRegrab,
     Verb,
     Weapon,
     find_all,
@@ -157,9 +157,9 @@ class HoldLoopTests(unittest.TestCase):
         )
         self.assertEqual(verbs, set())
 
-    def test_after_two_knees_it_lets_him_go_to_take_him_again(self) -> None:
+    def test_after_two_knees_it_crosses_over(self) -> None:
         verbs = _infer(could_hold_actions)({self._holding(2), self._held()})
-        self.assertEqual({type(v) for v in verbs}, {ReleaseToRegrab})
+        self.assertEqual({type(v) for v in verbs}, {FlipHold})
 
 
 class RankingTests(unittest.TestCase):

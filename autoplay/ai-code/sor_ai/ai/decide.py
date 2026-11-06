@@ -49,7 +49,6 @@ from .tokens import (
     RearAttack,
     ReleaseGrab,
     ReleasePartner,
-    ReleaseToRegrab,
     OpenBreakable,
     Supplex,
     TechRecover,
@@ -539,35 +538,6 @@ def could_hold_actions(context: Context) -> Context:
         # is antonio.hold_step as well -- and returns the one input that
         # keeps him in the actor's hands.
         held = reach.held_enemy(actor, enemies)
-        if isinstance(held, Bongo) and base == 0x60:
-            # Round 4 keeps a grunt coming through the whole fight (user: "não
-            # se focar nesse inimigo, mas prevenir ataques iminentes"). A
-            # strike from behind that lands before a knee could finish used to
-            # be answered by throwing the body in hand back into it (B+back),
-            # like any other hold; by design (user: Bongo is too heavy for a
-            # character to lift), he is never thrown or suplexed, so an early
-            # release stands in instead -- it gives up the knee progress but
-            # gets the actor free of the strike rather than locked in a 41-46
-            # frame throw animation. The ROM itself has no weight check on the
-            # move (ai-analysis/enemy-ai.md, "Holding him": suplex/throw are
-            # flat, boss-type-agnostic damage like every later boss), so this
-            # is a deliberate behavior choice, not a ROM constraint. The other
-            # measured case, a type-$22 punch from in front, over the held
-            # Bongo, 8 points mid-knee, still has no hold move that answers it
-            # (release loses the knee progress for nothing, since the punch
-            # already lands before a walk-in could regrab), so it is left
-            # alone. Bongo only -- Souther's and Antonio's rounds are swept
-            # clean and their loops were measured without it.
-            grace = reach.frames_until_any_melee_lands(
-                actor, enemies, ignore_slots=frozenset({held.slot})
-            )
-            if (
-                grace is not None
-                and grace < kinematics.hold_knee_frames(actor.character_id)
-                and reach.rear_threats(actor, enemies)
-            ):
-                verbs.add(ReleaseToRegrab(actor_slot=actor.slot, target_slot=held.slot))
-                continue
 
         def crossover_lands_under_a_press(body_in_hand: Enemy) -> bool:
             # The crossover carries the actor over the body in hand to the
@@ -615,22 +585,21 @@ def could_hold_actions(context: Context) -> Context:
                 verbs.add(ThrowHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
             continue
         if isinstance(held, MrX):
-            # Mr. X's loop (mr_x_plan.hold_step): knee, knee, release, each on
-            # the one substate of his hold that reads the holder's +$7D, and
-            # the walk straight back in re-grabs him on the retreat's first
-            # update. A Garcia of his whose blow lands from behind before a
+            # Mr. X's loop (mr_x_plan.hold_step): knee, knee, cross over,
+            # suplex, each on the one substate of his hold that reads the
+            # holder's +$7D. A Garcia of his whose blow lands from behind before a
             # knee finishes gets him thrown back into it (B+back), as for
             # Bongo's grunt; one from in front, over him, no hold move answers.
             threat = _office_threat(context, actor) if base == 0x60 else None
             if threat is not None and threat[0] < mr_x_plan.HOLD_KNEE_SAFE_UPDATES:
                 # A Garcia's blow (garcia.py plays his approach and trigger)
-                # lands before a knee, the release after it and a step could
-                # all be spent: no knee -- let go now, and the engage has the
+                # lands before a knee could finish: no knee -- let go now (a
+                # plain walk away, no instant re-grab), and the engage has the
                 # actor free to punch the Garcia first or step off his jab.
                 # Not the throw, from either side: it locks the holder 41-46
                 # frames, and his flight hops 48 px at its apex ($13356), over
                 # a Garcia close behind.
-                verbs.add(ReleaseToRegrab(actor_slot=actor.slot, target_slot=held.slot))
+                verbs.add(ReleaseGrab(actor_slot=actor.slot, target_slot=held.slot))
                 continue
             step = mr_x_plan.hold_step(
                 action_base=base,
@@ -638,17 +607,19 @@ def could_hold_actions(context: Context) -> Context:
                 primary=held.primary_state,
                 substate=held.substate,
                 health=held.health if held.health is not None else 0,
+                crossover_spent=actor.crossover_spent,
             )
             if step == "knee":
                 verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
-            elif step == "release":
-                verbs.add(ReleaseToRegrab(actor_slot=actor.slot, target_slot=held.slot))
+            elif step == "cross":
+                verbs.add(FlipHold(actor_slot=actor.slot, target_slot=held.slot))
             elif step == "suplex":
                 verbs.add(Supplex(actor_slot=actor.slot, target_slot=held.slot))
             continue
         if isinstance(held, (Souther, Antonio, Bongo, Abadede)):
-            # Abadede's loop is the same three moves, each pressed on an
-            # update his hold reads the holder's +$7D (abadede.hold_step).
+            # Abadede's loop is the same moves, each pressed on an update his
+            # hold reads the holder's +$7D (abadede.hold_step). Bongo's is
+            # knees only (bongo.hold_step): he is never suplexed or thrown.
             if isinstance(held, Abadede):
                 step = abadede_plan.hold_step(actor, held)
             elif isinstance(held, Souther) and (
@@ -659,19 +630,16 @@ def could_hold_actions(context: Context) -> Context:
                 # Round 6: the other one is free while this one is in hand, and
                 # the hold roots the actor (souther_pair.hold_step).
                 step = souther_pair.hold_step(actor, held, others)
+            elif isinstance(held, Bongo):
+                step = bongo_plan.hold_step(actor, held)
             else:
                 step = souther_plan.hold_step(actor, held)
             if step is souther_plan.HoldStep.CROSS and crossover_lands_under_a_press(held):
                 step = souther_plan.HoldStep.KNEE
-            if isinstance(held, Bongo) and step is souther_plan.HoldStep.SUPLEX:
-                # By design, never suplex Bongo either (see the throw note
-                # above): release instead of finishing from a back hold, and
-                # the next front hold's knee chain kills him instead.
-                step = souther_plan.HoldStep.RELEASE
             if step is souther_plan.HoldStep.KNEE:
                 verbs.add(AttackHeldEnemy(actor_slot=actor.slot, target_slot=held.slot))
             elif step is souther_plan.HoldStep.RELEASE:
-                verbs.add(ReleaseToRegrab(actor_slot=actor.slot, target_slot=held.slot))
+                verbs.add(ReleaseGrab(actor_slot=actor.slot, target_slot=held.slot))
             elif step is souther_plan.HoldStep.CROSS:
                 verbs.add(FlipHold(actor_slot=actor.slot, target_slot=held.slot))
             elif step is souther_plan.HoldStep.SUPLEX:

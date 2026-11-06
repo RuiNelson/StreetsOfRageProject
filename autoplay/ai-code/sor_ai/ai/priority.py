@@ -59,7 +59,6 @@ from .tokens import (
     OpenBreakable,
     ReleaseGrab,
     ReleasePartner,
-    ReleaseToRegrab,
     Supplex,
     TechRecover,
     ThrowHeldEnemy,
@@ -244,7 +243,7 @@ _EMERGENCY_HOLD_KNEE_FRESH = 67
 # clusters, a proximity estimate -- neither the throw's nor the suplex's
 # landing spot is ROM-measured the way jump_kick.py's flight is), and only
 # for the two hold moves that actually send the body somewhere: FlipHold/
-# AttackHeldEnemy/ReleaseGrab/ReleaseToRegrab never let it go near anyone.
+# AttackHeldEnemy/ReleaseGrab never let it go near anyone.
 _EMERGENCY_HOLD_CLUSTER_EXTRA_HIT = 2
 _HOLD_CLUSTER_EXTRA_HITS_COUNTED = 2
 
@@ -262,9 +261,6 @@ def _hold_cluster_bonus(verb: Verb, context: Context) -> int:
 
 
 _EMERGENCY_HOLD_RELEASE = 50
-# Souther's hand-back (ReleaseToRegrab): the one input souther.hold_step chose,
-# at the top of the hold family so nothing else can take the tick from it.
-_EMERGENCY_HOLD_REGRAB = 69
 # Letting go of the partner (ReleasePartner). decide.could_hold_actions offers
 # it alone for a hold on the other player, so it never actually meets a hold
 # move; it still tops the whole hold family, so nothing that lands on the
@@ -1164,7 +1160,6 @@ _EMERGENCY_FUNCS: dict[type[Verb], Callable[[Verb, Context], int]] = {
     FlipHold: _held_enemy_emergency(_EMERGENCY_HOLD_FLIP),
     AttackHeldEnemy: _emergency_attack_held_enemy,
     ReleaseGrab: _held_enemy_emergency(_EMERGENCY_HOLD_RELEASE),
-    ReleaseToRegrab: _held_enemy_emergency(_EMERGENCY_HOLD_REGRAB),
     ReleasePartner: _emergency_release_partner,
     JumpAttack: _emergency_jump_attack,
     ThrowKnife: _emergency_throw_knife,

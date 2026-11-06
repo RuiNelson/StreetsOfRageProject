@@ -31,7 +31,6 @@ from sor_ai.ai.tokens import (
     Punch,
     RearAttack,
     ReleasePartner,
-    ReleaseToRegrab,
     ScorePickup,
     SpecialPickup,
     Supplex,
@@ -357,7 +356,7 @@ class OtherActorTests(unittest.TestCase):
 class HoldOnPartnerTests(unittest.TestCase):
     """The body in hand is the partner: ``$3266`` linked ``+$4C`` to them."""
 
-    HOLD_MOVES = (AttackHeldEnemy, Supplex, FlipHold, ThrowHeldEnemy, ReleaseToRegrab)
+    HOLD_MOVES = (AttackHeldEnemy, Supplex, FlipHold, ThrowHeldEnemy)
 
     def _context(self, verb, *, held):
         return {

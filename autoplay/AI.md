@@ -230,10 +230,10 @@ by a lookahead over his own AI: one update of `$16DA0
 screen test, the dash and kick gates, every tactical handler, `$17AB8`'s
 integration, and the renderer's latched boxes that decide what collides),
 played out for each of the nine stick positions under both update orders.
-The hold is then `souther.hold_step`'s loop -- the release, the knee chain
-and the crossover are the holding player's own bytes -- with
-`ReleaseToRegrab` handing him back 40 px out and the engage walking straight
-back into him.
+The hold is then `souther.hold_step`'s loop -- the knee chain and the
+crossover are the holding player's own bytes: knee, knee, crossover, suplex.
+(Until 2026-11-06 it handed him back with a `ReleaseToRegrab` and walked
+straight back in; the user ruled that a frame-perfect input no hand can do.)
 
 The model says there is one geometry that is kick-proof and grab-ready by
 construction -- 8-16 px above his lane, where `$16EAE` needs `< $08` and the
@@ -292,9 +292,8 @@ engage just under a punch on it, as in Bongo's round.
 Souther is fought by one plan, `ai/souther.py`, and two verbs: **take one
 hold, and never give him back a turn.** `EngageSouther` is the whole approach
 (`souther.plan_engage`) and the hold it ends in is the contact result of
-walking into him; `souther.hold_step` then runs knee, knee, `ReleaseToRegrab`
-(hold back until `loc_235A`'s `+$63` countdown drops the hold, walk straight
-back in) until he is dead. Every generic verb against him — punch, chord,
+walking into him; `souther.hold_step` then runs knee, knee, crossover,
+suplex until he is dead (Bongo: knees only, `bongo.hold_step`). Every generic verb against him — punch, chord,
 grab reason, walk-in, retreat — stands down.
 
 The model it rests on is the ROM's, and three parts of it were wrong in every
@@ -1085,7 +1084,7 @@ the way `priority.py` and `execute.py` already dispatch:
 - `RearAttack` while the partner is inside the `$322A` chord's real band on
   the side it stands;
 - the hold moves — `AttackHeldEnemy`, `Supplex`, `ThrowHeldEnemy`,
-  `FlipHold`, `ReleaseToRegrab` — while the body in the actor's hands *is*
+  `FlipHold` — while the body in the actor's hands *is*
   the partner (`+$4C` names it; see [Knowing that a hold exists at
   all](#knowing-that-a-hold-exists-at-all)). They act on that body whatever
   enemy they name. `could_hold_actions` already offers only

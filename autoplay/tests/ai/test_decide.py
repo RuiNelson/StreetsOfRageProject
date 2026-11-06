@@ -18,7 +18,6 @@ from sor_ai.ai.tokens import (
     Punch,
     RearAttack,
     ReleasePartner,
-    ReleaseToRegrab,
     Supplex,
     TechRecover,
     ThrowKnife,
@@ -3536,10 +3535,18 @@ class SoutherHoldLoopTests(unittest.TestCase):
                     {AttackHeldEnemy(actor_slot="P1", target_slot="obj11")},
                 )
 
-    def test_two_knees_hand_him_back_for_the_regrab(self) -> None:
+    def test_two_knees_cross_over_to_his_back(self) -> None:
         self.assertEqual(
             could_hold_actions({self._holding(0x60, knees=2), self._held()}),
-            {ReleaseToRegrab(actor_slot="P1", target_slot="obj11")},
+            {FlipHold(actor_slot="P1", target_slot="obj11")},
+        )
+
+    def test_a_spent_crossover_falls_back_to_the_third_knee(self) -> None:
+        self.assertEqual(
+            could_hold_actions(
+                {self._holding(0x60, knees=2, crossover_spent=True), self._held()}
+            ),
+            {AttackHeldEnemy(actor_slot="P1", target_slot="obj11")},
         )
 
     def test_the_third_knee_only_when_it_kills(self) -> None:
@@ -3548,30 +3555,21 @@ class SoutherHoldLoopTests(unittest.TestCase):
             {AttackHeldEnemy(actor_slot="P1", target_slot="obj11")},
         )
 
-    def test_never_a_throw_flip_or_suplex_from_the_front(self) -> None:
-        # Each of them leaves him 100-165 px down the actor's lane.
-        for knees in (0, 1, 2):
+    def test_never_a_throw_flip_or_suplex_before_two_knees(self) -> None:
+        for knees in (0, 1):
             with self.subTest(knees=knees):
                 verbs = could_hold_actions({self._holding(0x60, knees=knees), self._held()})
                 self.assertFalse(
                     any(isinstance(v, (ThrowHeldEnemy, FlipHold, Supplex)) for v in verbs)
                 )
 
-    def test_a_back_hold_crosses_once(self) -> None:
-        self.assertEqual(
-            could_hold_actions({self._holding(0x66), self._held()}),
-            {FlipHold(actor_slot="P1", target_slot="obj11")},
-        )
-        self.assertEqual(
-            could_hold_actions({self._holding(0x66, crossover_spent=True), self._held()}),
-            {ReleaseToRegrab(actor_slot="P1", target_slot="obj11")},
-        )
-
-    def test_a_back_hold_suplexes_only_to_kill(self) -> None:
-        self.assertEqual(
-            could_hold_actions({self._holding(0x66), self._held(health=5)}),
-            {Supplex(actor_slot="P1", target_slot="obj11")},
-        )
+    def test_a_back_hold_suplexes_at_once(self) -> None:
+        for spent in (False, True):
+            with self.subTest(crossover_spent=spent):
+                self.assertEqual(
+                    could_hold_actions({self._holding(0x66, crossover_spent=spent), self._held()}),
+                    {Supplex(actor_slot="P1", target_slot="obj11")},
+                )
 
 
 class LifeItemsRefusedNearSoutherTests(unittest.TestCase):

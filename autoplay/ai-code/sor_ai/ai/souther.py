@@ -333,37 +333,31 @@ class HoldStep(Enum):
 
 
 def hold_step(actor: PlayableCharacter, boss: Boss) -> HoldStep:
-    """Knee, knee, release -- and only ever finish when finishing kills.
+    """Knee, knee, cross over, suplex -- the moves a person has.
 
-    Front hold: two knees, then hand him back to the walk-in (the release),
-    because the third B is ``$6E``'s knockback, which throws him 90 px down
-    the actor's lane and makes the next hold a re-approach. The one exception
-    is a knee that kills.
+    Front hold: two knees, then the crossover (C) to his back; the third knee
+    is ``$6E``'s knockback, which throws him 90 px down the actor's lane, so it
+    only comes when it kills or when the crossover is already spent.
 
-    Back hold (a grab taken from behind): the suplex only when it is lethal,
-    since otherwise it leaves him 100 px away; else the one crossover this
-    hold allows, back to the front and its knees -- or, with that crossover
-    already spent, the release.
+    Back hold (a grab taken from behind, or the crossover's result): the
+    suplex, at once. No release: handing him back for an instant re-grab is a
+    frame-perfect input (user: not something a hand on a pad can do).
 
-    Nothing here is Souther's: the knee chain, the release countdown and the
-    crossover flag are the holding *player's* bytes, the damage is the
-    player's move, and every later boss (``$55``-``$58``) reads the release
-    through the same ``$17CF2``. ``antonio.hold_step`` is this function.
+    Nothing here is Souther's: the knee chain and the crossover flag are the
+    holding *player's* bytes, the damage is the player's move, and every
+    later boss (``$55``-``$58``) reads the hold through the same ``$17CF2``.
+    ``antonio.hold_step`` is this function; ``bongo.hold_step`` is not (he is
+    never suplexed or thrown).
     """
 
     hp = signed_health(boss)
     base = actor.action_base
     if base == 0x66:
-        if hp <= HOLD_SUPLEX_DAMAGE:
-            return HoldStep.SUPLEX
-        return HoldStep.RELEASE if actor.crossover_spent else HoldStep.CROSS
+        return HoldStep.SUPLEX
     if base == 0x60:
-        knees = actor.knees_in_chain
-        if knees < 2:
+        if actor.knees_in_chain < 2 or hp <= HOLD_THIRD_KNEE_DAMAGE:
             return HoldStep.KNEE
-        if hp <= HOLD_THIRD_KNEE_DAMAGE:
-            return HoldStep.KNEE
-        return HoldStep.RELEASE
+        return HoldStep.KNEE if actor.crossover_spent else HoldStep.CROSS
     return HoldStep.WAIT
 
 

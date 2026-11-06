@@ -423,12 +423,11 @@ def hold_step(
     body in hand lands 100-165 px off, knocked down for ~30 updates): taken
     while another knee *and* the throw after it would no longer both fit
     before he commits. A release would not do -- the body let go lands 32 px in
-    front on the actor's lane, inside his own gate, and commits at once unless
-    it is walked straight back into.
+    front on the actor's lane, inside his own gate, and commits at once.
     """
 
     step = single.hold_step(actor, held)
-    if actor.action_base != 0x60 or step not in (single.HoldStep.KNEE, single.HoldStep.RELEASE):
+    if actor.action_base != 0x60 or step not in (single.HoldStep.KNEE, single.HoldStep.CROSS):
         return step
     if step is single.HoldStep.KNEE and single.signed_health(held) <= single.HOLD_THIRD_KNEE_DAMAGE:
         return step  # the knee that kills ends it sooner than a throw would
