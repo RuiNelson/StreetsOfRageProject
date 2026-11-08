@@ -89,9 +89,7 @@ The apps are not signed, so your system will warn you the first time. It is safe
 
 ### macOS
 
-Before opening the `.dmg`, drag it onto [I Am Sure I Want To Open This App](https://github.com/RuiNelson/IAmSureIWantToOpenThisApp). Then open the `.dmg` and run **Streets of Rage Builder** from it.
-
-If you opened the dmg before unquarantining it, unmount it: Open Finder, press command + shift + C, and right click the icon and then click "Eject".
+Open the `.dmg`, drag **Streets of Rage Builder** onto **I am sure I want to open this App** (the arrow points there), then run the Builder from the dmg or after copying it to Applications.
 
 ### Windows
 

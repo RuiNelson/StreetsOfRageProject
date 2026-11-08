@@ -105,11 +105,22 @@ jobs:
           LDAI_UPDATE_INFORMATION: gh-releases-zsync|RuiNelson|StreetsOfRageProject|latest|StreetsOfRageBuilder-*-${{ matrix.arch }}.AppImage.zsync
         run: |
           case "${{ matrix.kind }}" in
-            dmg)      bundle="--bundles dmg" ;;
+            dmg)      bundle="--bundles app" ;;  # the .dmg is made below, not by Tauri
             appimage) bundle="--bundles appimage" ;;
             exe)      bundle="--no-bundle" ;;
           esac
           npm run tauri -- build --target "${{ matrix.target }}" $bundle
+
+      # The macOS disk image: the Builder plus a copy of "I am sure I want to open this App", with a
+      # "drop into" arrow (StreetsOfRageBuilder/Dmg). Not Tauri's own .dmg.
+      - name: Make the disk image
+        if: matrix.kind == 'dmg'
+        run: |
+          pip3 install --break-system-packages dmgbuild 2>/dev/null || pip3 install dmgbuild
+          out="StreetsOfRageBuilder/Intermediaries/cargo/${{ matrix.target }}/release"
+          mkdir -p "$out/bundle/dmg"
+          python3 StreetsOfRageBuilder/Dmg/make_dmg.py --app "$out/bundle/macos/Streets of Rage Builder.app" \
+            --out "$out/bundle/dmg/StreetsOfRageBuilder.dmg"
 
       # Release file names: StreetsOfRageBuilder-<version>-<platform>.<ext>
       # (Linux: -<x86_64|aarch64>.AppImage plus a .AppImage.zsync for updates)

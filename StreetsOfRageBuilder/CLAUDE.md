@@ -178,6 +178,13 @@ On the last step Next becomes **Finish** (always enabled: the shortcut is option
 
 ## Release builds (GitHub Actions)
 
+**The macOS `.dmg` is not Tauri's** (user decision): the workflow builds with `--bundles app`, then
+`Dmg/make_dmg.py` (dmgbuild, no Finder needed) makes the image with the Builder, a copy of
+[I Am Sure I Want To Open This App](https://github.com/RuiNelson/IAmSureIWantToOpenThisApp) (pinned release and SHA-256 in
+the script, bump both together) and a "drop into" arrow between them, 160 px icons. Layout in `Dmg/settings.py`;
+`Dmg/background.tiff` is drawn by `swift Dmg/background.swift` (1x + 2x, `tiffutil -cathidpicheck`). Checked
+locally with a stub app and a Finder window; not run on a runner or with the real universal app.
+
 `.github/workflows/builder.yml` (meta-repository root) builds the Builder on demand
 (`workflow_dispatch` only, never on push; user decision) with a checkbox per platform: macOS
 universal `.dmg`, Windows x64 and ARM64 as a **bare `.exe`** (no installer: `tauri build
