@@ -1,0 +1,275 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 860" width="1200" height="860" role="img" aria-label="Animated diagram of the Streets of Rage Project's development: the ROM is analysed, RageDecompiler transpiles the reachable code into C++ through a discovery loop, MegaDriveEnvironment supplies the hardware, routines are rewritten by hand, Genesis Plus GX renders the soundtrack, a symbolic AI plays through the controller, the game ships to Windows, macOS, Linux and the PS5, and four roadmap steps follow.">
+<title>From cartridge to C++</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&amp;family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&amp;display=swap');
+.lbl{font-family:"IBM Plex Mono","Courier New",monospace;font-size:12px;font-weight:600;letter-spacing:.14em;fill:#14130f}
+.inv{fill:#f4efe0}.mut{fill:#6b6657}.rtx{fill:#c8321f}
+.body{font-family:"IBM Plex Mono","Courier New",monospace;font-size:13px;fill:#14130f}
+.note{font-family:"IBM Plex Mono","Courier New",monospace;font-size:12px;font-style:italic;fill:#3a372e}
+.disp{font-family:"Big Shoulders Display","Arial Narrow",sans-serif;font-weight:800;letter-spacing:.02em;fill:#14130f}
+.cap{font-family:"IBM Plex Mono","Courier New",monospace;font-size:15px;fill:#14130f}
+.ln{fill:none;stroke:#14130f;stroke-width:1.5}
+.red{stroke:#c8321f}.blu{stroke:#1f4fa8}.vio{stroke:#6b3fa0}.grn{stroke:#1f7a45}.brn{stroke:#6b4423}
+.dr{stroke-dasharray:1;stroke-dashoffset:1}
+.tx,.cp{opacity:0}
+.d1,.d2,.d3,.d4,.d5,.d6,.d7,.d8,.d9,.d10{animation-duration:97s;animation-timing-function:linear;animation-iteration-count:infinite}
+.t1,.t2,.t3,.t4,.t5,.t6,.t7,.t8,.t9,.t10,.c1,.c2,.c3,.c4,.c5,.c6,.c7,.c8,.c9,.c10{animation-duration:97s;animation-timing-function:steps(4,end);animation-iteration-count:infinite}
+.d1{animation-name:d1}.d2{animation-name:d2}.d3{animation-name:d3}.d4{animation-name:d4}.d5{animation-name:d5}.d6{animation-name:d6}.d7{animation-name:d7}.d8{animation-name:d8}.d9{animation-name:d9}.d10{animation-name:d10}
+.t1{animation-name:t1}.t2{animation-name:t2}.t3{animation-name:t3}.t4{animation-name:t4}.t5{animation-name:t5}.t6{animation-name:t6}.t7{animation-name:t7}.t8{animation-name:t8}.t9{animation-name:t9}.t10{animation-name:t10}
+.c1{animation-name:c1}.c2{animation-name:c2}.c3{animation-name:c3}.c4{animation-name:c4}.c5{animation-name:c5}.c6{animation-name:c6}.c7{animation-name:c7}.c8{animation-name:c8}.c9{animation-name:c9}.c10{animation-name:c10}
+@keyframes d1{0%,0.62%{stroke-dashoffset:1;opacity:1}1.85%,98.04%{stroke-dashoffset:0;opacity:1}99.59%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes d2{0%,4.64%{stroke-dashoffset:1;opacity:1}5.88%,98.04%{stroke-dashoffset:0;opacity:1}99.59%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes d3{0%,9.28%{stroke-dashoffset:1;opacity:1}11.44%,98.04%{stroke-dashoffset:0;opacity:1}99.59%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes d4{0%,14.85%{stroke-dashoffset:1;opacity:1}16.7%,98.04%{stroke-dashoffset:0;opacity:1}99.59%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes d5{0%,21.03%{stroke-dashoffset:1;opacity:1}22.27%,98.04%{stroke-dashoffset:0;opacity:1}99.59%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes d6{0%,26.6%{stroke-dashoffset:1;opacity:1}27.84%,98.04%{stroke-dashoffset:0;opacity:1}99.59%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes d7{0%,35.57%{stroke-dashoffset:1;opacity:1}37.73%,98.04%{stroke-dashoffset:0;opacity:1}99.59%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes d8{0%,41.13%{stroke-dashoffset:1;opacity:1}42.68%,98.04%{stroke-dashoffset:0;opacity:1}99.59%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes d9{0%,46.08%{stroke-dashoffset:1;opacity:1}47.63%,98.04%{stroke-dashoffset:0;opacity:1}99.59%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes d10{0%,49.79%{stroke-dashoffset:1;opacity:1}51.03%,98.04%{stroke-dashoffset:0;opacity:1}99.59%,100%{stroke-dashoffset:0;opacity:0}}
+@keyframes t1{0%,1.85%{opacity:0}2.47%,98.04%{opacity:1}99.59%,100%{opacity:0}}
+@keyframes t2{0%,5.88%{opacity:0}6.49%,98.04%{opacity:1}99.59%,100%{opacity:0}}
+@keyframes t3{0%,11.44%{opacity:0}12.06%,98.04%{opacity:1}99.59%,100%{opacity:0}}
+@keyframes t4{0%,16.7%{opacity:0}17.32%,98.04%{opacity:1}99.59%,100%{opacity:0}}
+@keyframes t5{0%,22.27%{opacity:0}22.89%,98.04%{opacity:1}99.59%,100%{opacity:0}}
+@keyframes t6{0%,27.84%{opacity:0}28.46%,98.04%{opacity:1}99.59%,100%{opacity:0}}
+@keyframes t7{0%,37.73%{opacity:0}38.35%,98.04%{opacity:1}99.59%,100%{opacity:0}}
+@keyframes t8{0%,42.68%{opacity:0}43.3%,98.04%{opacity:1}99.59%,100%{opacity:0}}
+@keyframes t9{0%,47.63%{opacity:0}48.25%,98.04%{opacity:1}99.59%,100%{opacity:0}}
+@keyframes t10{0%,51.03%{opacity:0}51.65%,98.04%{opacity:1}99.59%,100%{opacity:0}}
+@keyframes c1{0%,0.62%{opacity:0}1.12%,4.35%{opacity:1}4.64%,100%{opacity:0}}
+@keyframes c2{0%,4.64%{opacity:0}5.15%,9.04%{opacity:1}9.28%,100%{opacity:0}}
+@keyframes c3{0%,9.28%{opacity:0}9.76%,14.58%{opacity:1}14.85%,100%{opacity:0}}
+@keyframes c4{0%,14.85%{opacity:0}15.37%,20.78%{opacity:1}21.03%,100%{opacity:0}}
+@keyframes c5{0%,21.03%{opacity:0}21.58%,26.33%{opacity:1}26.6%,100%{opacity:0}}
+@keyframes c6{0%,26.6%{opacity:0}27.12%,35.3%{opacity:1}35.57%,100%{opacity:0}}
+@keyframes c7{0%,35.57%{opacity:0}36.09%,40.84%{opacity:1}41.13%,100%{opacity:0}}
+@keyframes c8{0%,41.13%{opacity:0}41.63%,45.79%{opacity:1}46.08%,100%{opacity:0}}
+@keyframes c9{0%,46.08%{opacity:0}46.58%,49.55%{opacity:1}49.79%,100%{opacity:0}}
+@keyframes c10{0%,49.79%{opacity:0}50.34%,98.04%{opacity:1}99.59%,100%{opacity:0}}
+.bar{transform-origin:552px 173px;transform:scaleX(0);animation:bar 97s steps(20,end) infinite}
+@keyframes bar{0%,28.46%{transform:scaleX(0);opacity:1}33.41%,98.04%{transform:scaleX(1);opacity:1}99.59%,100%{transform:scaleX(1);opacity:0}}
+.spin{transform-origin:360px 440px;animation:spin 3.2s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.tick{fill:#f4efe0;animation:tick 2.4s steps(1,end) infinite}
+@keyframes tick{0%,16.6%{fill:#1f7a45}16.7%,100%{fill:#f4efe0}}
+.k2{animation-delay:.4s}.k3{animation-delay:.8s}.k4{animation-delay:1.2s}.k5{animation-delay:1.6s}.k6{animation-delay:2s}
+@media (prefers-reduced-motion:reduce){.dr{animation:none!important;stroke-dashoffset:0}.tx{animation:none!important;opacity:1}.cp{animation:none!important;opacity:0}.cp.c10{opacity:1}.bar{animation:none!important;transform:none}.spin,.tick{animation:none!important}}
+</style>
+<defs>
+<pattern id="gm" width="16" height="16" patternUnits="userSpaceOnUse"><path d="M16 0H0V16" fill="none" stroke="rgba(31,79,168,.13)" stroke-width="1"></path></pattern>
+<pattern id="gM" width="80" height="80" patternUnits="userSpaceOnUse"><rect width="80" height="80" fill="url(#gm)"></rect><path d="M80 0H0V80" fill="none" stroke="rgba(31,79,168,.28)" stroke-width="1"></path></pattern>
+</defs>
+<rect width="1200" height="860" fill="#f4efe0"></rect>
+<rect x="16" y="16" width="1168" height="828" fill="url(#gM)"></rect>
+<rect x="16" y="16" width="1168" height="828" fill="none" stroke="#14130f" stroke-width="1.5"></rect>
+<path d="M16 112H1184M16 700H1184" stroke="#14130f" stroke-width="1" fill="none"></path>
+
+<text x="40" y="52" class="lbl mut">STREETS OF RAGE PROJECT · DOCS/DEVELOPERJOURNEY.MD</text>
+<text x="40" y="96" class="disp" font-size="46">FROM CARTRIDGE TO C++</text>
+<text x="1160" y="46" class="lbl mut" text-anchor="end">SHEET 01 / REV B</text>
+<text x="800" y="75" class="lbl mut" text-anchor="end">PENS</text>
+<rect x="820" y="62" width="14" height="14" fill="#14130f"></rect>
+<rect x="880" y="62" width="14" height="14" fill="#c8321f"></rect>
+<rect x="940" y="62" width="14" height="14" fill="#1f4fa8"></rect>
+<rect x="1000" y="62" width="14" height="14" fill="#6b3fa0"></rect>
+<rect x="1060" y="62" width="14" height="14" fill="#1f7a45"></rect>
+<rect x="1120" y="62" width="14" height="14" fill="#6b4423"></rect>
+<text x="827" y="98" class="lbl mut" text-anchor="middle">C++</text>
+<text x="887" y="98" class="lbl mut" text-anchor="middle">LOOP</text>
+<text x="947" y="98" class="lbl mut" text-anchor="middle">HAND</text>
+<text x="1007" y="98" class="lbl mut" text-anchor="middle">SOUND</text>
+<text x="1067" y="98" class="lbl mut" text-anchor="middle">AI</text>
+<text x="1127" y="98" class="lbl mut" text-anchor="middle">SHIP</text>
+
+<g class="tx t1">
+<rect x="52" y="244" width="160" height="84" fill="#14130f"></rect>
+<rect x="48" y="240" width="160" height="84" fill="#f4efe0"></rect>
+<rect x="48" y="240" width="160" height="24" fill="#14130f"></rect>
+<text x="58" y="256.5" class="lbl inv">YOUR ROM</text>
+<text x="58" y="288" class="body">SOR.bin · 512 KiB</text>
+<text x="58" y="308" class="note">never patched</text>
+</g>
+<path class="ln dr d1" pathLength="1" d="M48 240h160v84h-160Z"></path>
+
+<g class="tx t2">
+<text x="248" y="160" class="note" text-anchor="end">+ output/ asm</text>
+<text x="248" y="176" class="note" text-anchor="end">+ ai-analysis/</text>
+<rect x="264" y="136" width="200" height="72" fill="#14130f"></rect>
+<rect x="260" y="132" width="200" height="72" fill="#f4efe0"></rect>
+<rect x="260" y="132" width="200" height="24" fill="#14130f"></rect>
+<text x="270" y="148.5" class="lbl inv">CODE-ANALYSIS</text>
+<text x="270" y="176" class="body">labels · aux addresses</text>
+<text x="270" y="194" class="note">manual_functions.txt</text>
+</g>
+<path class="ln dr d2" pathLength="1" d="M260 132h200v72h-200Z"></path>
+
+<g class="tx t3">
+<rect x="264" y="244" width="200" height="84" fill="#14130f"></rect>
+<rect x="260" y="240" width="200" height="84" fill="#f4efe0"></rect>
+<rect x="260" y="240" width="200" height="24" fill="#14130f"></rect>
+<text x="270" y="256.5" class="lbl inv">RAGEDECOMPILER</text>
+<text x="270" y="288" class="body">disassemble, transpile</text>
+<text x="270" y="308" class="note">only reachable code</text>
+<rect x="544" y="244" width="170" height="84" fill="#14130f"></rect>
+<rect x="540" y="240" width="170" height="84" fill="#f4efe0"></rect>
+<rect x="540" y="240" width="170" height="24" fill="#14130f"></rect>
+<text x="550" y="256.5" class="lbl inv">GENERATED C++</text>
+<text x="550" y="288" class="body">translated opcodes</text>
+<text x="550" y="308" class="note">runs, hard to read</text>
+<circle cx="884" cy="304" r="62" fill="#14130f"></circle>
+<circle cx="880" cy="300" r="62" fill="#f4efe0"></circle>
+<text x="880" y="314" class="disp" font-size="46" text-anchor="middle">SOR</text>
+<text x="880" y="336" class="lbl mut" text-anchor="middle">EXECUTABLE</text>
+<path d="M252 278L260 282L252 286ZM356 232L360 240L364 232ZM532 278L540 282L532 286ZM812 278L820 282L812 286Z" fill="#14130f"></path>
+</g>
+<path class="ln dr d3" pathLength="1" d="M260 240h200v84h-200Z"></path>
+<path class="ln dr d3" pathLength="1" d="M540 240h170v84h-170Z"></path>
+<path class="ln dr d3" pathLength="1" d="M818 300a62 62 0 1 0 124 0a62 62 0 1 0 -124 0"></path>
+<path class="ln dr d3" pathLength="1" d="M208 282H252M360 204V232M460 282H532M710 282H812"></path>
+
+<path class="ln red dr d4" pathLength="1" d="M360 324V388"></path>
+<path class="ln red dr d4" pathLength="1" d="M360 388a52 52 0 1 1 0 104a52 52 0 1 1 0 -104"></path>
+<g class="tx t4">
+<rect x="355" y="383" width="10" height="10" fill="#f4efe0" stroke="#c8321f" stroke-width="1.5"></rect>
+<rect x="407" y="435" width="10" height="10" fill="#f4efe0" stroke="#c8321f" stroke-width="1.5"></rect>
+<rect x="355" y="487" width="10" height="10" fill="#f4efe0" stroke="#c8321f" stroke-width="1.5"></rect>
+<rect x="303" y="435" width="10" height="10" fill="#f4efe0" stroke="#c8321f" stroke-width="1.5"></rect>
+<text x="372" y="380" class="lbl">RECOMPILE</text>
+<text x="424" y="444" class="lbl">PLAY AGAIN</text>
+<text x="372" y="512" class="lbl">EXERCISE THE GAME</text>
+<text x="296" y="444" class="lbl" text-anchor="end">RECORD ADDRESSES</text>
+<g class="spin"><path d="M353 382L367 388L353 394Z" fill="#c8321f"></path></g>
+<text x="360" y="550" class="lbl rtx" text-anchor="middle">DISCOVERY LOOP</text>
+<text x="360" y="568" class="note" text-anchor="middle">sor --aux-addr-file, exit 42</text>
+<text x="360" y="586" class="note" text-anchor="middle">only confirmed addresses stay</text>
+</g>
+
+<g class="tx t5">
+<rect x="774" y="424" width="220" height="84" fill="#14130f"></rect>
+<rect x="770" y="420" width="220" height="84" fill="#f4efe0"></rect>
+<rect x="770" y="420" width="220" height="24" fill="#14130f"></rect>
+<text x="780" y="436.5" class="lbl inv">MEGADRIVEENVIRONMENT</text>
+<text x="780" y="468" class="body">VDP · sound · pads</text>
+<text x="780" y="488" class="note">over SDL3; a library too</text>
+<path d="M876 370L880 362L884 370Z" fill="#14130f"></path>
+</g>
+<path class="ln dr d5" pathLength="1" d="M770 420h220v84h-220Z"></path>
+<path class="ln dr d5" pathLength="1" d="M880 420V370"></path>
+
+<g class="tx t6">
+<rect x="544" y="136" width="170" height="72" fill="#14130f"></rect>
+<rect x="540" y="132" width="170" height="72" fill="#f4efe0"></rect>
+<rect x="540" y="132" width="170" height="24" fill="#14130f"></rect>
+<text x="550" y="148.5" class="lbl inv">HAND-WRITTEN C++</text>
+<text x="550" y="198" class="note">100+ routines by hand</text>
+<text x="633" y="226" class="note">rewrite</text>
+<path d="M621 212L625 204L629 212ZM876 230L880 238L884 230Z" fill="#1f4fa8"></path>
+</g>
+<rect class="bar" x="552" y="166" width="146" height="14" fill="#1f4fa8"></rect>
+<g class="tx t6">
+<path d="M559.3 166v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14m7.3 -14v14" stroke="#f4efe0" stroke-width="1" fill="none"></path>
+<rect x="552" y="166" width="146" height="14" fill="none" stroke="#14130f" stroke-width="1.5"></rect>
+</g>
+<path class="ln dr d6" pathLength="1" d="M540 132h170v72h-170Z"></path>
+<path class="ln blu dr d6" pathLength="1" d="M625 240V212M710 168H880V230"></path>
+
+<g class="tx t7">
+<rect x="52" y="604" width="160" height="84" fill="#14130f"></rect>
+<rect x="48" y="600" width="160" height="84" fill="#f4efe0"></rect>
+<rect x="48" y="600" width="160" height="24" fill="#14130f"></rect>
+<text x="58" y="616.5" class="lbl inv">GENESIS PLUS GX</text>
+<text x="58" y="648" class="body">ROM's own engine</text>
+<text x="58" y="668" class="note">music, effects, voices</text>
+<text x="240" y="634" class="note">FLAC · 48 kHz · two stems</text>
+<path d="M124 592L128 600L132 592ZM828 340L836 344L828 348Z" fill="#6b3fa0"></path>
+</g>
+<path class="ln dr d7" pathLength="1" d="M48 600h160v84h-160Z"></path>
+<path class="ln vio dr d7" pathLength="1" d="M128 324V592M208 642H740V344H828"></path>
+
+<g class="tx t8">
+<rect x="1014" y="136" width="160" height="250" fill="#14130f"></rect>
+<rect x="1010" y="132" width="160" height="250" fill="#f4efe0"></rect>
+<rect x="1010" y="132" width="160" height="24" fill="#14130f"></rect>
+<text x="1020" y="148.5" class="lbl inv">AUTOPLAY · AI</text>
+<rect class="tick" x="1022" y="170" width="10" height="10" stroke="#1f7a45" stroke-width="1.5"></rect>
+<rect class="tick k2" x="1022" y="198" width="10" height="10" stroke="#1f7a45" stroke-width="1.5"></rect>
+<rect class="tick k3" x="1022" y="226" width="10" height="10" stroke="#1f7a45" stroke-width="1.5"></rect>
+<rect class="tick k4" x="1022" y="254" width="10" height="10" stroke="#1f7a45" stroke-width="1.5"></rect>
+<rect class="tick k5" x="1022" y="282" width="10" height="10" stroke="#1f7a45" stroke-width="1.5"></rect>
+<rect class="tick k6" x="1022" y="310" width="10" height="10" stroke="#1f7a45" stroke-width="1.5"></rect>
+<text x="1042" y="180" class="lbl">OBSERVE</text>
+<text x="1042" y="208" class="lbl">INFER</text>
+<text x="1042" y="236" class="lbl">PROPOSE</text>
+<text x="1042" y="264" class="lbl">FILTER</text>
+<text x="1042" y="292" class="lbl">RANK</text>
+<text x="1042" y="320" class="lbl">EXECUTE</text>
+<text x="1022" y="352" class="note">never writes RAM</text>
+<text x="1022" y="370" class="note">symbolic, untrained</text>
+<text x="1004" y="226" class="note" text-anchor="end">embedded Python</text>
+<path d="M944 271.4L938 278L946.9 278.8Z" fill="#1f7a45"></path>
+</g>
+<path class="ln dr d8" pathLength="1" d="M1010 132h160v250h-160Z"></path>
+<path class="ln grn dr d8" pathLength="1" d="M1010 250L945 275"></path>
+
+<path class="ln brn dr d9" pathLength="1" d="M934 331H1000V590M833 590H1121M833 590V604M929 590V604M1025 590V604M1121 590V604"></path>
+<g class="tx t9">
+<rect x="790" y="604" width="86" height="34" fill="#f4efe0" stroke="#6b4423" stroke-width="1.5"></rect>
+<rect x="886" y="604" width="86" height="34" fill="#f4efe0" stroke="#6b4423" stroke-width="1.5"></rect>
+<rect x="982" y="604" width="86" height="34" fill="#f4efe0" stroke="#6b4423" stroke-width="1.5"></rect>
+<rect x="1078" y="604" width="86" height="34" fill="#f4efe0" stroke="#6b4423" stroke-width="1.5"></rect>
+<text x="833" y="625.5" class="lbl" text-anchor="middle">WINDOWS</text>
+<text x="929" y="625.5" class="lbl" text-anchor="middle">MACOS</text>
+<text x="1025" y="625.5" class="lbl" text-anchor="middle">LINUX</text>
+<text x="1121" y="625.5" class="lbl" text-anchor="middle">PS5</text>
+<text x="790" y="664" class="note">Builder · PS5 toolchain in a container</text>
+</g>
+
+<g class="tx t10">
+<text x="40" y="776" class="lbl">WHERE IT IS GOING</text>
+<text x="40" y="796" class="note">the roadmap</text>
+<rect x="220" y="748" width="220" height="72" fill="#f4efe0" stroke="#14130f" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+<rect x="452" y="748" width="220" height="72" fill="#f4efe0" stroke="#14130f" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+<rect x="684" y="748" width="220" height="72" fill="#f4efe0" stroke="#14130f" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+<rect x="916" y="748" width="220" height="72" fill="#f4efe0" stroke="#14130f" stroke-width="1.5" stroke-dasharray="4 3"></rect>
+<text x="232" y="782" class="disp" font-size="28" fill="#1f4fa8">01</text>
+<text x="464" y="782" class="disp" font-size="28" fill="#1f4fa8">02</text>
+<text x="696" y="782" class="disp" font-size="28" fill="#1f4fa8">03</text>
+<text x="928" y="782" class="disp" font-size="28" fill="#1f4fa8">04</text>
+<text x="268" y="772" class="lbl">REIMPLEMENT ALL</text>
+<text x="268" y="792" class="note">every procedure</text>
+<text x="268" y="808" class="note">in C++</text>
+<text x="500" y="772" class="lbl">READABLE C++</text>
+<text x="500" y="792" class="note">named routines,</text>
+<text x="500" y="808" class="note">same RAM layout</text>
+<text x="732" y="772" class="lbl">NO EMULATED HW</text>
+<text x="732" y="792" class="note">graphics, audio and</text>
+<text x="732" y="808" class="note">input through SDL</text>
+<text x="964" y="772" class="lbl">ENHANCEMENTS</text>
+<text x="964" y="792" class="note">HD assets, frame</text>
+<text x="964" y="808" class="note">interpolation</text>
+</g>
+
+<text x="40" y="728" class="cap cp c1">01 · A 512 KiB Mega Drive cartridge: your ROM, never patched.</text>
+<text x="40" y="728" class="cap cp c2">02 · code-analysis/ guides the tools: labels, entry points, manual list.</text>
+<text x="40" y="728" class="cap cp c3">03 · RageDecompiler transpiles only the code the game reaches.</text>
+<text x="40" y="728" class="cap cp c4">04 · Exercise, record new addresses, recompile, play again.</text>
+<text x="40" y="728" class="cap cp c5">05 · MegaDriveEnvironment supplies VDP, sound and pads.</text>
+<text x="40" y="728" class="cap cp c6">06 · 100+ routines rewritten by hand; game state keeps its RAM address.</text>
+<text x="40" y="728" class="cap cp c7">07 · Genesis Plus GX renders the soundtrack to FLAC.</text>
+<text x="40" y="728" class="cap cp c8">08 · A symbolic AI reads RAM and plays through the pad.</text>
+<text x="40" y="728" class="cap cp c9">09 · The Builder ships it; the PS5 toolchain is built in a container.</text>
+<text x="40" y="728" class="cap cp c10">10 · Next: all C++, readable, no emulated hardware, then enhancements.</text>
+
+<path d="M1010 717h10v10h-10ZM1026 717h10v10h-10ZM1042 717h10v10h-10ZM1058 717h10v10h-10ZM1074 717h10v10h-10ZM1090 717h10v10h-10ZM1106 717h10v10h-10ZM1122 717h10v10h-10ZM1138 717h10v10h-10ZM1154 717h10v10h-10Z" fill="none" stroke="#6b6657" stroke-width="1"></path>
+<rect class="tx t1" x="1010" y="717" width="10" height="10" fill="#14130f"></rect>
+<rect class="tx t2" x="1026" y="717" width="10" height="10" fill="#14130f"></rect>
+<rect class="tx t3" x="1042" y="717" width="10" height="10" fill="#14130f"></rect>
+<rect class="tx t4" x="1058" y="717" width="10" height="10" fill="#c8321f"></rect>
+<rect class="tx t5" x="1074" y="717" width="10" height="10" fill="#14130f"></rect>
+<rect class="tx t6" x="1090" y="717" width="10" height="10" fill="#1f4fa8"></rect>
+<rect class="tx t7" x="1106" y="717" width="10" height="10" fill="#6b3fa0"></rect>
+<rect class="tx t8" x="1122" y="717" width="10" height="10" fill="#1f7a45"></rect>
+<rect class="tx t9" x="1138" y="717" width="10" height="10" fill="#6b4423"></rect>
+<rect class="tx t10" x="1154" y="717" width="10" height="10" fill="#14130f"></rect>
+</svg>

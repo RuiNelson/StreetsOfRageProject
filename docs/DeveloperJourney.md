@@ -10,6 +10,10 @@
 program that runs on Windows, macOS, Linux and the PS5, plays a lossless render of its own
 soundtrack and can be played by an AI, and where each piece of that work lives.
 
+<p align="center">
+ <img src="developer-journey.svg" width="900" alt="Animated diagram of the development process, from the ROM to the PS5 port and the roadmap">
+</p>
+
 - [The project at a glance](#the-project-at-a-glance)
 - [Reading the game](#reading-the-game)
 - [From 68000 code to C++: `RageDecompiler`](#from-68000-code-to-c-ragedecompiler)
