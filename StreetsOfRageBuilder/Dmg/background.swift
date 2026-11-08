@@ -43,6 +43,17 @@ func render(scale: Int) -> Data {
     let size = text.size(withAttributes: attrs)
     text.draw(at: NSPoint(x: (x0 + x1) / 2 - size.width / 2, y: midY + 26), withAttributes: attrs)
 
+    // The order matters: the helper must be opened first, then the Builder dropped into its window.
+    let steps = ["1. Open \u{201C}I am sure I want to open this App\u{201D} first", "2. Then drag Streets of Rage Builder into its window"] as [NSString]
+    let stepAttrs: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 17, weight: .medium),
+        .foregroundColor: NSColor(calibratedWhite: 0.25, alpha: 1),
+    ]
+    for (i, line) in steps.enumerated() {
+        let sz = line.size(withAttributes: stepAttrs)
+        line.draw(at: NSPoint(x: CGFloat(width) / 2 - sz.width / 2, y: CGFloat(height) - 52 - CGFloat(i) * 28), withAttributes: stepAttrs)
+    }
+
     NSGraphicsContext.restoreGraphicsState()
     return rep.representation(using: .png, properties: [:])!
 }
