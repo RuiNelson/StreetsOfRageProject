@@ -26,6 +26,7 @@ study.
 - **1 Player AI Assist** — play the game in 2P mode, with P1 controlled by you and P2 controlled by a very smart yet human-like AI built for this project. You can even betray the AI at the end. ;)
 - **Widescreen 16:9** — the backgrounds and the play arena have both been expanded. Claude did a great job recalculating the enemy logic (such as hiding beyond the edge of the screen).
 - **6 action buttons** — in the original, the game had to fit on a 3-button controller; here you also get a shortcut for the back attack (B+C, if you remember), plus dedicated "pick up item" and "throw knife" buttons. That means you no longer pick up an item when you meant to attack the enemy in front of you, or throw the knife by accident.
+- **Save support** — save and continue the game, it's not a save state like in emulators, but a proper checkpoint-based save.
 
 ## Secondary features (all optional)
 

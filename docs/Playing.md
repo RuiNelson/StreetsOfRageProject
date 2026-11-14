@@ -107,22 +107,14 @@ pre-rendered soundtrack, the music keeps playing a little quieter.
 
 ### Saving
 
-**SAVE AND QUIT** asks "SAVE AND QUIT?", with the cursor on NO; any player answers. YES saves the game
-and goes back to the Sega logo. **CONTINUE** on the mode menu then takes you back.
+**SAVE AND QUIT** saves the game **CONTINUE** on the mode menu then takes you back.
 
-A save is a checkpoint, not the moment you paused: you continue at the start of the wave you were in (the
-last place where the screen stopped scrolling and the GO arrow came), with the round, the mode, the
-characters, and each player's score, lives, continues, specials and health as they were there. Weapons in
-hand and items lying around are not kept. In round 7 you continue on the elevator's floor. Once round 8's camera moves into Mr. X's room,
-SAVE AND QUIT is dimmed: that fight cannot be saved.
-
-There is one save, `checkpoint.yaml` next to `controls.yaml`, and it is used once: CONTINUE deletes
-it.
+A save is a checkpoint, not the moment you paused: you continue at the start of the wave you were in. **CONTINUE** "spends" the save.
 
 **FORFEIT** asks "ARE YOU SURE PLAYER N?", with the cursor on NO. YES takes away that player's continues
 and lives, and they die at once. In a two-player game each player is asked in turn and answers only for
 themself, so one can give up while the other plays on. In 1 PLAYER AI ASSIST the first player answers for
-both.
+itself and the AI.
 
 ## Video settings
 
