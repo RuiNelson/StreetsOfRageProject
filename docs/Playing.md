@@ -113,7 +113,7 @@ and goes back to the Sega logo. **CONTINUE** on the mode menu then takes you bac
 A save is a checkpoint, not the moment you paused: you continue at the start of the wave you were in (the
 last place where the screen stopped scrolling and the GO arrow came), with the round, the mode, the
 characters, and each player's score, lives, continues, specials and health as they were there. Weapons in
-hand and items lying around are not kept. Round 7, the elevator, starts again from its beginning.
+hand and items lying around are not kept. In round 7 you continue on the elevator's floor.
 
 There is one save, `checkpoint.yaml` next to `controls.yaml`, and it is used once: CONTINUE deletes
 it.
