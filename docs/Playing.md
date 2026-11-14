@@ -5,7 +5,7 @@
 - [Starting the game](#starting-the-game)
 - [Game modes](#game-modes)
 - [Controls](#controls)
-- [Pausing and forfeiting](#pausing-and-forfeiting)
+- [Pausing, saving and forfeiting](#pausing-saving-and-forfeiting)
 - [Video settings](#video-settings)
 - [Quality-of-life settings](#quality-of-life-settings)
 - [Widescreen (Mode 48)](#widescreen-mode-48)
@@ -36,12 +36,13 @@ lists what differs there.
 
 ## Game modes
 
-The menu has the original 1 and 2 player games, and two rows the cartridge never had:
+The menu has the original 1 and 2 player games, and rows the cartridge never had:
 
 - **1 PLAYER AI ASSIST:** a two-player game with [the AI](DeveloperJourney.md#1-player-ai-assist) as
   your partner. Choose your character, then the one for the `COMPUTER`. The mode appears only if the
   game can find the AI's code.
-- **QUIT**, after OPTIONS, ends the game.
+- **CONTINUE**, after OPTIONS, appears while a game is saved (see [Saving](#saving)).
+- **QUIT**, the last row, ends the game.
 
 ## Controls
 
@@ -99,10 +100,23 @@ Controls are saved at once in `~/.config/StreetsOfRageProject/controls.yaml`
 (`%USERPROFILE%\.config\StreetsOfRageProject\controls.yaml` on Windows). The settings files below live in
 the same folder.
 
-## Pausing and forfeiting
+## Pausing, saving and forfeiting
 
 Start pauses the game and opens a menu. **RESUME**, or Start again, goes back to the game. With the
 pre-rendered soundtrack, the music keeps playing a little quieter.
+
+### Saving
+
+**SAVE AND QUIT** asks "SAVE AND QUIT?", with the cursor on NO; any player answers. YES saves the game
+and goes back to the Sega logo. **CONTINUE** on the mode menu then takes you back.
+
+A save is a checkpoint, not the moment you paused: you continue at the start of the wave you were in (the
+last place where the screen stopped scrolling and the GO arrow came), with the round, the mode, the
+characters, and each player's score, lives, continues, specials and health as they were there. Weapons in
+hand and items lying around are not kept. Round 7, the elevator, starts again from its beginning.
+
+There is one save, `checkpoint.yaml` next to `controls.yaml`, and it is used once: CONTINUE deletes
+it.
 
 **FORFEIT** asks "ARE YOU SURE PLAYER N?", with the cursor on NO. YES takes away that player's continues
 and lives, and they die at once. In a two-player game each player is asked in turn and answers only for
