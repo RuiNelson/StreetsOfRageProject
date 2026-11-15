@@ -345,7 +345,7 @@ class MrXSim:
 
 
 def set_anim(m: MrXSim, anim: int) -> None:
-    """``sub_140CE``/``init_object_animation_frame``: frame 0, boxes now."""
+    """``mr_x_set_animation``/``init_object_animation_frame``: frame 0, boxes now."""
 
     m.anim = anim
     m.frame = 0

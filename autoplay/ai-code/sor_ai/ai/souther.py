@@ -44,7 +44,7 @@ The hold
     actor is behind (back ``$66``). Knees are ``$2BA8``'s chain ``$6A``
     -> ``$6C`` -> ``$6E`` (2, 2, then 3 and a knockback that ends the hold).
     Holding *back* in a front hold counts ``+$63`` down from 3 and drops the
-    hold when it goes negative (``loc_235A``); the boss is then released
+    hold when it goes negative (``player_hold_release_step``); the boss is then released
     straight to primary 1, 32 px in front of the actor (``$17D76``), on the
     actor's lane. Only one crossover per hold (``$26E2`` refuses a second via
     the player's ``+$4B`` bit 7, and the second one lands the actor next to a
@@ -364,7 +364,7 @@ def hold_step(actor: PlayableCharacter, boss: Boss) -> HoldStep:
 def release_press_frames(countdown: int) -> int:
     """How many frames of *back* drop the hold from this countdown value.
 
-    ``loc_235A`` releases on the frame ``+$63`` goes negative, so from ``c``
+    ``player_hold_release_step`` releases on the frame ``+$63`` goes negative, so from ``c``
     that is ``c + 1`` steps. A value outside 0..3 (``$FF`` right after a
     release) is treated as a fresh 3.
     """

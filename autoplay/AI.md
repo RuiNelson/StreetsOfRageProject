@@ -894,7 +894,7 @@ back `$66` hold it takes on an enemy, writing the partner's object into
 `+$4C` (decoded `P1`/`P2`: `PlayableCharacter.is_holding_player`). From
 there the knee, the throw, and the C crossover into the suplex all land on
 the partner. So `could_hold_actions` offers `ReleasePartner` alone — hold
-back and press nothing else until `loc_235A` drops the hold — and
+back and press nothing else until `player_hold_release_step` drops the hold — and
 `reach.held_enemy` answers `None` rather than letting its contact fallbacks
 name a bystander. That fallback was the reported bug (user: "The AI grabbed
 me and supplexed me, it shouldn't, because it should never hurt it's

@@ -309,7 +309,7 @@ class ReleasePartner(GrabMechanics):
     crosses over into the back hold whose B is the suplex (user: "The AI
     grabbed me and supplexed me, it shouldn't, because it should never hurt
     it's partner!"). Produced by ``could_hold_actions`` instead of all of
-    them; the executor holds back and presses nothing else, so ``loc_235A``
+    them; the executor holds back and presses nothing else, so ``player_hold_release_step``
     drops the hold and hands the partner its own release (``+$7D`` = 5).
 
     Raises emergency: (the partner in the actor's hands)×72.

@@ -46,7 +46,7 @@ class PauseSpecialTests(unittest.TestCase):
 
 
 class FloorTableTests(unittest.TestCase):
-    """``$19C04``'s per-round class tables, read the way ``sub_0000AD30`` does."""
+    """``$19C04``'s per-round class tables, read the way ``probe_floor_at_object_offset`` does."""
 
     def test_round_6_has_a_wall_two_belts_and_no_floor_class_that_drops(self) -> None:
         self.assertTrue(is_hole_class(ROUND_6, 0))

@@ -3658,7 +3658,7 @@ class ExecuteTickKeepsOffThePartnerTests(unittest.TestCase):
         self.assertGreater(actor.world_x, partner.world_x + 40)
 
     def test_the_release_press_is_never_filtered(self) -> None:
-        # In a hold, back is loc_235A's release input, not a walk -- and it has
+        # In a hold, back is player_hold_release_step's release input, not a walk -- and it has
         # to reach the ROM, or the AI holds her for good. Her body sits close
         # in front, near enough that a *walk* back would read as contact.
         actor = replace(

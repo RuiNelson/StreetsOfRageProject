@@ -2680,7 +2680,7 @@ def state_machine_flip_hold(verb: FlipHold, context: Context, gamepad: VirtualGa
 def state_machine_release_partner(
     verb: ReleasePartner, context: Context, gamepad: VirtualGamepad
 ) -> None:
-    """Hold back, and press nothing else, until ``loc_235A`` lets the partner go.
+    """Hold back, and press nothing else, until ``player_hold_release_step`` lets the partner go.
 
     A timed back press sized from the ROM's own
     ``+$63`` countdown -- a property of the hold, not of who is in it -- but

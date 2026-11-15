@@ -220,7 +220,7 @@ OBJ_ACTION_FLAGS = 0x58  # player combo/action flags; bit5 queues next normal hi
 # away and ends the hold.
 PLAYER_KNEE_CHAIN_BIT = 0x40
 OBJ_KNEE_CHAIN_LAST = 0x61
-# loc_235A's front-hold release countdown: $3266 seeds it with 3 when a hold
+# player_hold_release_step's front-hold release countdown: $3266 seeds it with 3 when a hold
 # is taken, each frame the stick is held *back* decrements it, and the hold is
 # dropped on the frame it goes negative. Nothing resets it mid-hold.
 OBJ_HOLD_RELEASE_COUNTDOWN = 0x63

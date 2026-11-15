@@ -7,10 +7,10 @@ tambem sao um 'breakable'" -- the office occasionally throws a table
 (furniture) at the player, right at the start of the level. Static
 disassembly of the object-type-$45 dispatcher (``sor.asm`` $7534, state table
 at $7540) found: a 3-state machine (state 0 $7546 camera-gated arm/idle,
-state 1 $75E6 flight + hit check via ``sub_00007392``, state 2 $75EE
+state 1 $75E6 flight + hit check via ``prop_hit_reaction``, state 2 $75EE
 gravity/bounce after a punch knocks it away), a per-variant (+$40) launch
 velocity table at $75DC (only ~5-6 px/frame, entries 1-4: +5, +6, -5, -6),
-and a hit-response in ``sub_00007392`` that explicitly special-cases type
+and a hit-response in ``prop_hit_reaction`` that explicitly special-cases type
 $45 (``cmpi.b #$0045, $0(a0)``) for a stronger vertical recoil when punched
 while its variant is nonzero. That reading left the actual spawn trigger and
 real flight speed unconfirmed from static analysis alone (state 0 never

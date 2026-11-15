@@ -4,7 +4,7 @@ Two different mechanisms produce the same shape of box, and the difference
 matters for anything that wants to *observe* them:
 
 * **Players** cache their boxes in work RAM. ``$4140`` runs in the player
-  update path (its only call site is ``$1CC6`` inside ``sub_001bdc``, which
+  update path (its only call site is ``$1CC6`` inside ``update_player_object`` (``$1C44``), which
   identifies itself as player code by testing the character id at ``+$50``)
   and writes six absolute words at ``+$64`` (attack) and ``+$70`` (body).
   Those are readable directly -- see :func:`cached_box`.

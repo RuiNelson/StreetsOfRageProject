@@ -234,7 +234,7 @@ class PlayableCharacter(Character, ABC):
     # player +$61: the last knee of the current front-hold chain ($6A, then
     # $6C) -- see knees_in_chain.
     knee_chain_last: int = 0
-    # player +$63: loc_235A's front-hold release countdown (memory_map.
+    # player +$63: player_hold_release_step's front-hold release countdown (memory_map.
     # OBJ_HOLD_RELEASE_COUNTDOWN). Seeded with 3 by the grab; each frame held
     # back decrements it, and the hold drops on the frame it goes negative.
     hold_release_countdown: int = 0

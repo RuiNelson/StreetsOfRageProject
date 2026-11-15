@@ -800,7 +800,7 @@ def _flip(t: TwinSim) -> None:
 
 
 def _fall(t: TwinSim) -> None:
-    """``loc_15AF4``: airborne under gravity, or landed back in state 1."""
+    """``onihime_yasha_fall_or_land``: airborne under gravity, or landed back in state 1."""
 
     if not _on_floor(t):
         t.vz += GRAVITY

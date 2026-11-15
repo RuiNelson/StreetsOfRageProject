@@ -516,7 +516,7 @@ def _approach_step(b: AbadedeSim, t: ActorSim) -> None:
     _reaim(b, t)
     lane, adx = _gaps(b, t)
     if lane >= APPROACH_LANE_GATE:
-        # loc_1564A: the lane always, X only this far out. No clamp.
+        # abadede_step_axes: the lane always, X only this far out. No clamp.
         b.y += b.vy
         if adx >= APPROACH_X_GATE:
             b.x += b.vx
@@ -593,7 +593,7 @@ def _charge_step(b: AbadedeSim, t: ActorSim) -> None:
         else:
             stop = b.screen_x >= arena.hi(CHARGE_EDGE_RIGHT, b.widescreen)
         if stop:
-            # loc_14C74
+            # the tail of abadede_state7_run_update ($14C74): walk set-up, steer, pause
             _walk_aimed(b, t)
             _reaim(b, t)
             b.t54 = 1
@@ -632,7 +632,7 @@ def _struck_setup(b: AbadedeSim, t: ActorSim) -> None:
 
 
 def _shake_step(b: AbadedeSim) -> None:
-    """``$147A6``: a pixel either way (loc_12ADC), then the retreat."""
+    """``$147A6``: a pixel either way (bespoke_boss_shake), then the retreat."""
 
     b.t54 = (b.t54 - 1) & 0xFFFF
     if not b.t54:

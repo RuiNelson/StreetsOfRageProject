@@ -102,7 +102,7 @@ AI_LATENCY_FRAMES = FRAMES_PER_TICK
 
 # How far a constant-velocity extrapolation is trusted at all. Half a second
 # of an enemy holding exactly its current velocity is already generous: the
-# scripted lunges (enemy-ai.md's Signal slide, Nora/Jack's shared lunge) do
+# scripted moves (enemy-ai.md's Signal slide, Jack's diagonal back-off) do
 # hold one, but an ordinary chase re-steers constantly. Every lead below is
 # clamped to this, so an unreachable target (one fleeing about as fast as the
 # actor can close) produces a far-away prediction that simply fails the band

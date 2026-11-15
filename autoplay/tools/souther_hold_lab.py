@@ -15,7 +15,7 @@ on its own (see ``autoplay/CLAUDE.md``, "Souther: the ROM model"):
     already set; only a fresh grab (``$3266``) clears it. So the second
     crossover of one hold should drop the body.
 ``release_regrab``
-    knee, knee, then hold *back* until ``loc_235A``'s ``+$63`` countdown
+    knee, knee, then hold *back* until ``player_hold_release_step``'s ``+$63`` countdown
     releases the hold, then walk *toward* him at once (``--regrab-delay``
     frames of nothing in between). Does the walk-in re-take the hold before
     ``$15EDA`` commits, and does the grab contact pre-empt his claw box?

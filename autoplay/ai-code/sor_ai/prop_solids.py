@@ -5,9 +5,9 @@ gives every solid prop an explicit rectangle that no moving object's **own
 position** may end up inside, and that rectangle is not the prop's animation
 body box.
 
-``sub_00003B8A`` walks the object table once per moving object, skipping any
+``resolve_solid_object_collisions`` walks the object table once per moving object, skipping any
 slot without bit 0 of ``+$3A`` (the solid flag -- set on every intact
-breakable sampled live), and ``sub_00003BAE`` runs the test::
+breakable sampled live), and ``test_solid_object_collision`` runs the test::
 
     d0 = mover.x    (+$10)        ; the mover's own position: a *point*,
     d1 = mover.lane (+$14)        ; never its body box
@@ -82,7 +82,7 @@ class SolidBox:
     """One prop's push-back rectangle, in absolute world coordinates.
 
     ``y`` is the lane axis, as everywhere else in this package. There is no
-    height axis: ``sub_00003BAE`` tests x and lane only.
+    height axis: ``test_solid_object_collision`` tests x and lane only.
     """
 
     x0: int
@@ -109,7 +109,7 @@ class SolidBox:
 
 
 def record_for_type(type_id: int) -> tuple[int, int, int, int]:
-    """The table record ``sub_00003BAE``'s compare chain would select."""
+    """The table record ``test_solid_object_collision``'s compare chain would select."""
 
     return _RECORDS[_RECORD_BY_TYPE.get(type_id, DEFAULT_RECORD)]
 

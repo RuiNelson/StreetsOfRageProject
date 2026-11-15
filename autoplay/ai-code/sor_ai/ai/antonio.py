@@ -16,7 +16,7 @@ the same arrangement ``souther.py`` has for round 2.
    without ever letting the kick box meet the actor's body;
 2. *hold loop* -- knee, knee, release, re-grab, repeated from that one hold
    until he is dead (``hold_step``), exactly as against Souther: the release is
-   player-side (``loc_235A``) and so is the knee chain, and a released later
+   player-side (``player_hold_release_step``) and so is the knee chain, and a released later
    boss goes straight back to primary 1 in front of the actor.
 
 The facts it rests on, all read from the disassembly (``$16CE4`` onwards; see
@@ -1500,7 +1500,7 @@ def hold_step(actor: PlayableCharacter, antonio: Antonio) -> HoldStep:
     """Knee, knee, release -- and only ever finish when finishing kills.
 
     The same loop as Souther's (``souther.hold_step``): every piece of it is
-    the *player's* code -- the knee chain in ``+$58``/``+$61``, ``loc_235A``'s
+    the *player's* code -- the knee chain in ``+$58``/``+$61``, ``player_hold_release_step``'s
     release countdown, the one crossover in ``+$4B`` bit 7 -- and a released
     later boss goes to primary 1 in front of the actor through the shared
     ``$17CF2``. Antonio lands 40 px out (``$17D76``'s ``$28``) where Souther

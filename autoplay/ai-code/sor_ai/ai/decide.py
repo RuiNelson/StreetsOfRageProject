@@ -1850,7 +1850,7 @@ def could_engage_souther(context: Context) -> Context:
 
     Armed or not: ``$AAA0``'s grab code never looks at the carried weapon (it
     wants a walking attack box, ``+$34`` clear, ``+$4C`` clear and 8 px of
-    elevation), and ``loc_235A`` releases an armed holder into the armed walk
+    elevation), and ``player_hold_release_step`` releases an armed holder into the armed walk
     ``$30``, so the whole loop runs with a weapon in hand. Handing an armed
     actor to the generic approach instead walked it down his lane inside the
     commit band -- the one hit in the validation batch.
@@ -1883,7 +1883,7 @@ def could_engage_antonio(context: Context) -> Context:
     One candidate per live ``Antonio`` while the actor is free to move (not
     mid-animation, not held, not holding a body, not airborne), armed or not
     for the same reason as ``could_engage_souther``: ``$AAA0``'s grab never
-    reads the carried weapon, and ``loc_235A`` releases an armed holder into
+    reads the carried weapon, and ``player_hold_release_step`` releases an armed holder into
     the armed walk. ``antonio.plan_engage`` picks the stick every tick from a
     lookahead over his own AI; the hold is the contact result of that walk,
     and the loop that follows is ``could_hold_actions``'.

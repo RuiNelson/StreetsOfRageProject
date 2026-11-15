@@ -1,6 +1,6 @@
 """Round 6's drop press (type ``$42``): when it falls, and where it hurts.
 
-Read off the disassembly (``sub_00007A6C``, whose state table is ``$7A7C``)
+Read off the disassembly (``object_type42_dispatcher``, whose state table is ``$7A7C``)
 and checked against live traces (``tools/stage_walk_diag.py --level 6``): six
 presses stand on lane 112 -- the bottom of the street -- at X 1832, 2632,
 3688, 4520, 4776 and 4904, each at z ``$40``, 96 px over the floor.
@@ -10,7 +10,7 @@ presses stand on lane 112 -- the bottom of the street -- at X 1832, 2632,
 - **Shaking** (2, ``$7ADE``) for 11 updates.
 - **Falling** (3, ``$7B48``): 2 px an update, half a pixel more every
   update, and on every one of them it tests two attack boxes against both
-  players (``sub_00007BCE`` with ``+$2`` = ``$F4``, then ``$EA``): 20 damage
+  players (``object_type42_contact_reaction`` with ``+$2`` = ``$F4``, then ``$EA``): 20 damage
   (``+$34`` = ``$14``, ``$7A8E``) and a knockdown. Each box is 16 px tall at
   the press's own height, so it meets a standing body only under z ~112 --
   about the last 6 of the 16 updates the fall takes.

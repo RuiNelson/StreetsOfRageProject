@@ -227,7 +227,7 @@ class ObstacleTests(unittest.TestCase):
         self.assertEqual(rect, Rect(70, 30, 60, 24))
 
     def test_a_breakable_is_measured_against_the_actors_origin(self) -> None:
-        # sub_00003BAE tests the mover's own position against the box, never
+        # test_solid_object_collision tests the mover's own position against the box, never
         # its body, so the obstacle a body-collision search needs is the box
         # shrunk by the body -- the same restatement a pit already gets.
         prop = Breakable(slot="obj09", world_x=100, world_y=50, type_id=0x1F)

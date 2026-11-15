@@ -9,9 +9,9 @@ from functools import lru_cache
 from .world_map import LANE_Y_MAX_DEFAULT, lane_y_max_for_level
 
 # What a collision class *is* depends on the round. The class map ($FFA000)
-# holds a nibble per 8x8 cell, and sub_00019BD8 points $FFFC34 at a byte
+# holds a nibble per 8x8 cell, and init_level_collision_tables_and_background_effects points $FFFC34 at a byte
 # table of floor kinds and $FFFC38 at a word table of surface heights for the
-# round, both indexed by class. sub_0000AD30 answers "what floor is at this
+# round, both indexed by class. probe_floor_at_object_offset answers "what floor is at this
 # point" from them:
 #
 #     kind = kinds[class]  if probe_z >= surfaces[class]  else 0
@@ -19,7 +19,7 @@ from .world_map import LANE_Y_MAX_DEFAULT, lane_y_max_for_level
 # where z grows downward and a standing player's z *is* its floor's surface
 # ($3E78 writes it). The floor probe under the feet ($3D34) jumps on the kind
 # through a four-entry table: 0 is no floor -- the player falls ($3DDC) until
-# sub_0000358C takes a life at z $1C0; 1 is floor; 2 is floor that carries
+# player_fall_out_of_arena_check takes a life at z $1C0; 1 is floor; 2 is floor that carries
 # the player +1 px an update ($3E4A) and 3 the same at -1 ($3E52), round 6's
 # conveyor belts. The wall probe ($3C92) asks the same question 8 px ahead of
 # the mover on its own lane, 8 px above its feet, and a floor standing that
@@ -156,7 +156,7 @@ def collision_class_at(
     world_x: int,
     lane_y: int,
 ) -> int:
-    """Return the 4-bit collision class at world (X, lane), matching ``sub_0000AD30``.
+    """Return the 4-bit collision class at world (X, lane), matching ``probe_floor_at_object_offset``.
 
     Indexing:
       col = world_x >> 4

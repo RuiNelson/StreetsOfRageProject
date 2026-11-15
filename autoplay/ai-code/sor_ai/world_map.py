@@ -172,7 +172,7 @@ class MapEntity:
     tech_latched: int = 0  # player +$46; C+Up latched before land
     combo_state: int = 0  # player +$5D
     knee_chain_last: int = 0  # player +$61; last knee of the front-hold chain
-    hold_release_countdown: int = 0  # player +$63; loc_235A release countdown
+    hold_release_countdown: int = 0  # player +$63; player_hold_release_step release countdown
     crossover_spent: bool = False  # player +$4B bit 7; this hold's crossover is used
     tactical: int = 0  # boss +$67
     pair_role: int = 0  # later-boss +$5D (1/2) when kind==boss
