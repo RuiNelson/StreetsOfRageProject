@@ -1480,3 +1480,83 @@ class JumpKickFlightTests(unittest.TestCase):
             "kick lands on empty air where the actor stood",
         )
 
+
+
+class ItemUnderfootStabilityTests(unittest.TestCase):
+    """``$3136`` turns a grounded B beside an item into a pickup of the
+    lowest-slot item in its box. Two loops this used to make, driven through
+    the whole pipeline with each tick's walk fed back:
+
+    - two players, a walk to a gem with the partner's food (a lower slot)
+      beside it: the press at the gem was the food's, the pad stepped off it,
+      the walk came back -- x 92 <-> 96 for as long as the run lasted;
+    - one player, a knife in hand over a bottle: each swing was a swap, and
+      the next swing swapped back.
+    """
+
+    def _pipeline(self, client, gamepad, tokens):
+        from sor_ai.ai.partner import PartnerFightTracker
+
+        context = set(tokens) | {
+            CameraRange(left=0, right=600, top=16, bottom=112),
+            Stage(level_index=0, direction="right"),
+        }
+        context |= generate_inference_tokens(context)
+        context |= PartnerFightTracker().update(context)
+        context |= generate_verb_tokens(context)
+        context = do_not_harm_partner(context)
+        context = determine_priority_verb(context)
+        verbs = find_all(context, Verb)
+        client.pressed = 0
+        execute_tick(verbs[0] if verbs else None, context, gamepad)
+        return (verbs[0] if verbs else None), context
+
+    def test_the_walk_to_a_gem_beside_the_partners_food_takes_the_gem(self) -> None:
+        from sor_ai.ai.tokens import HealthPickup, ScorePickup
+
+        client = _FakeClient()
+        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+        partner = Partner(
+            slot="P2", player_index=2, character_id=2, character_name="Blaze",
+            world_x=400, world_y=60, health=20, health_percent=25.0, lives=3,
+            specials=1, held_weapon_type=0, facing_left=True,
+            combat_phase=CombatPhase.NORMAL, action_state=0x02, is_airborne=False,
+        )
+        food = HealthPickup(slot="obj05", world_x=96, world_y=60, pickup_type=0x4B, health_delta=20)
+        gem = ScorePickup(slot="obj07", world_x=112, world_y=60, pickup_type=0x4E, points=1000)
+        ax, facing_left, masks, taken = 60, False, [], None
+        for _ in range(60):
+            actor = replace(_actor(ax, 60, facing_left), health=100)
+            _, context = self._pipeline(client, gamepad, [actor, partner, food, gem])
+            if client.pressed & B:
+                taken = reach.item_a_b_press_takes(context, actor)
+                break
+            masks.append(client.held)
+            if client.held & RIGHT:
+                ax, facing_left = ax + STEP_X, False
+            elif client.held & LEFT:
+                ax, facing_left = ax - STEP_X, True
+        self.assertIs(taken, gem)
+        self.assertEqual(_reversals(masks, RIGHT, LEFT), 0)
+
+    def test_an_armed_swing_over_a_worse_weapon_steps_off_and_strikes(self) -> None:
+        from sor_ai.ai.tokens import Weapon
+
+        client = _FakeClient()
+        gamepad = VirtualGamepad(SharedGamepadState(client), player_index=1)
+        bottle = Weapon(slot="obj04", world_x=104, world_y=60, weapon_type=0x09)
+        enemy = _enemy(140, 60, CombatPhase.NORMAL)
+        ax, facing_left, masks, taken = 100, False, [], "none"
+        for _ in range(40):
+            actor = replace(_actor(ax, 60, facing_left), held_weapon_type=0x08)
+            _, context = self._pipeline(client, gamepad, [actor, bottle, enemy])
+            if client.pressed & B:
+                taken = reach.item_a_b_press_takes(context, actor)
+                break
+            masks.append(client.held)
+            if client.held & RIGHT:
+                ax, facing_left = ax + STEP_X, False
+            elif client.held & LEFT:
+                ax, facing_left = ax - STEP_X, True
+        self.assertIsNone(taken)  # the press is the knife's, not a swap
+        self.assertEqual(_reversals(masks, RIGHT, LEFT), 0)

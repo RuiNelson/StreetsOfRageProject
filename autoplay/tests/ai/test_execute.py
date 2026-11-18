@@ -3703,15 +3703,20 @@ class ExecuteTickKeepsOffThePartnerTests(unittest.TestCase):
         gamepad, _client = _gamepad()
 
         self.assertIsNot(_partner_safe_gamepad(walk, {actor, partner}, actor, gamepad), gamepad)
-        # A menu cursor is not a body; a jump reads 2 at $45D4; and with no
-        # partner there is nothing to keep off.
+        # A menu cursor is not a body; a jump reads 2 at $45D4.
         menu = HandleMrXDialog(actor_slot="P1")
         self.assertIs(_partner_safe_gamepad(menu, {actor, partner}, actor, gamepad), gamepad)
         airborne = replace(actor, is_airborne=True)
         self.assertIs(
             _partner_safe_gamepad(walk, {airborne, partner}, airborne, gamepad), gamepad
         )
-        self.assertIs(_partner_safe_gamepad(walk, {actor}, actor, gamepad), gamepad)
+        # With no partner there is nothing to keep off, but a B press is still
+        # judged for the item underfoot ($3136): the pad wraps, and passes
+        # every walk through unchanged.
+        alone = _partner_safe_gamepad(walk, {actor}, actor, gamepad)
+        self.assertIsNot(alone, gamepad)
+        alone.hold(0x0008)
+        self.assertEqual(gamepad.held, 0x0008)
 
 
 if __name__ == "__main__":

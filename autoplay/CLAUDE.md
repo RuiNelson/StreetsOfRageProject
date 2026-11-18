@@ -121,6 +121,14 @@ link; `navigation.partner_obstacles` routes round them. Not filtered: the pit es
 strictly worse armed (a tie is the AI's to try); a 1UP to whoever has fewer lives. **Any grounded B within ±20 px X, ±16 lanes of an item is a pickup**
 (`$3136`, `reach.item_a_b_press_takes`), so the partner pad turns it into a step off (`execute._redirect_b_press`).
 
+**Items underfoot** (user: "a IA fica baralhada com items no chão"). `$3136` takes the **lowest-slot** item in its box, armed swings included, not the
+one walked to. `decide.item_take_is_harmful` (the partner's item, a weapon no better than the one in hand, a weapon the fight's plan refuses, food or a 1UP the fight
+leaves, `--no-food` too) is asked of every grounded B, partner or not: the pad steps off instead (`execute._redirect_b_press`), the grunt plan does not
+strike over any item, and a walk to an item presses only where it takes that item (`decide.pickup_stand`; no clean ground, no walk). Of two weapons of one
+rank the nearer is walked to (user). Before: a knife and a bottle swapped on every swing; beside the partner's food a walk to a gem stepped off and back
+every tick. Offline only (`test_items_underfoot.py`, `ItemUnderfootStabilityTests`); not measured live. Unhandled: the step off can still repeat beside a crate
+whose smash stand is in a harmful item's box.
+
 **Leave the partner's fight to them** (user). `reach.partner_is_engaging` + `partner.PartnerFightTracker` (`PartnerFight` tokens, remembered 45 frames);
 `do_not_harm_partner` withdraws attacks and walks at that enemy, except **self-defence** (`reach.is_incoming_melee`) and a kick already airborne.
 With only their enemies left, the AI waits.

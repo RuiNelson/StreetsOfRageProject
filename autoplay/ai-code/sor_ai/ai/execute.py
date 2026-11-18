@@ -101,6 +101,8 @@ from .decide import (
     catch_up_point_x,
     centering_point_x,
     in_smash_range,
+    item_take_is_harmful,
+    pickup_stand,
 )
 from .reach import (
     in_rear_band,
@@ -116,13 +118,13 @@ from .reach import (
     in_playable_lane,
     incoming_melee_targets,
     item_a_b_press_takes,
+    item_a_press_takes,
     live_enemies,
     pit_endangers,
     walking_box_would_grab,
 )
-from .partner import item_is_the_partners
 from .. import prop_solids
-from ..phases import is_dangerous, is_punishable
+from ..phases import CombatPhase, is_dangerous, is_punishable
 from ..memory_map import OBJ_PRIMARY_STATE
 from ..world_map import LANE_Y_MIN
 
@@ -1912,9 +1914,13 @@ def engage_grunts_plan(verb: EngageGrunts, context: Context, held: int = 0) -> g
         1 if held & DOWN_MASK else (-1 if held & UP_MASK else 0),
     )
     memory = _GRUNT_MEMORY.setdefault(verb.actor_slot, grunt_plan.PlanMemory())
-    # Armed, B is the weapon's swing (grunt_plan.actor_step models it); bare-
-    # handed, B over an item underfoot is a pickup (abadede_can_punch).
-    can_strike = actor.held_weapon_type in grunt_plan.SWING_WEAPONS or abadede_can_punch(actor, context)
+    # Armed, B is the weapon's swing (grunt_plan.actor_step models it) --
+    # but armed or bare-handed, B over an item underfoot is a pickup ($3136
+    # runs on the swing path too): armed, it let go of the weapon in hand,
+    # which the next swing took back, and the actor never struck.
+    can_strike = (
+        actor.held_weapon_type == 0 or actor.held_weapon_type in grunt_plan.SWING_WEAPONS
+    ) and item_a_b_press_takes(context, actor) is None
     return grunt_plan.plan(
         a, sims, committed=committed, memory=memory, can_punch=can_strike, knives=a.knives or (),
     )
@@ -2787,7 +2793,19 @@ def _walk_to_item(verb: Verb, context: Context, gamepad: VirtualGamepad, target_
         gamepad.release()
         return
     if abs(target.world_x - actor.world_x) <= PICKUP_RANGE_X and abs(target.world_y - actor.world_y) <= PICKUP_RANGE_Y:
-        _press(gamepad, pickup_mask(context), frames=PUNCH_FRAMES)
+        # $3136 takes the lowest-slot item in its box, not this one. Press
+        # only when what it takes may be taken; otherwise step to the clean
+        # ground decide.pickup_stand found (pressing there was a step off the
+        # partner's food and a walk back, every tick).
+        taken = item_a_press_takes(context, actor)
+        if taken is None or taken.slot == target.slot or not item_take_is_harmful(context, actor, taken):
+            _press(gamepad, pickup_mask(context), frames=PUNCH_FRAMES)
+            return
+        stand = pickup_stand(context, actor, target)
+        if stand is None:
+            gamepad.release()
+            return
+        _hold_steered(gamepad, _movement_mask(context, actor.world_x, actor.world_y, stand[0], stand[1]))
         return
 
     goal = nav.strike_goal(
@@ -3478,17 +3496,18 @@ def _step_off_item(context: Context, actor: Myself, item: Pickup | Weapon) -> in
 
 
 class _PartnerSafeGamepad:
-    """The pad a verb handler drives while a partner is on screen.
+    """The pad a verb handler drives on the ground (``_partner_safe_gamepad``).
 
-    Every mask goes through ``_keep_off_partner`` *before* it reaches the link.
+    With a partner on screen, every mask goes through ``_keep_off_partner``
+    *before* it reaches the link.
     Stripping it after the handler would be too late: the handler's own
     ``hold_buttons`` has already gone out by then, and a vblank between the two
     calls is a walking frame with the box on the partner.
 
-    A press is judged once more first (``redirect``): a grounded B with an
-    item that is the partner's inside ``$3136``'s box would pick it up rather
-    than strike, so it becomes the step that clears the box instead, and the
-    strike goes out on a later tick from clear ground.
+    A press is judged once more first (``redirect``), partner or not: a
+    grounded B with an item it must not take inside ``$3136``'s box would pick
+    it up rather than strike, so it becomes the step that clears the box
+    instead, and the strike goes out on a later tick from clear ground.
     """
 
     def __init__(
@@ -3529,20 +3548,26 @@ class _PartnerSafeGamepad:
 def _partner_safe_gamepad(
     verb: Verb, context: Context, actor: Myself | None, gamepad: VirtualGamepad
 ):
-    """``gamepad``, wrapped so no walk this tick takes hold of the partner --
-    or ``gamepad`` itself when there is nothing to keep off.
+    """``gamepad``, wrapped so no walk this tick takes hold of the partner and
+    no B press picks up an item it must not -- or ``gamepad`` itself when
+    there is nothing to keep off.
+
+    The partner half needs a partner; the item half (``_redirect_b_press``)
+    applies alone too, since ``$3136`` turns any grounded B beside an item
+    into a pickup whoever else is playing.
 
     Not while airborne: a jump reads 2 at ``$45D4``, so it can hit but never
-    grab, and its launch direction is committed. Not while the actor holds a
-    body: in a hold the pad's directions are the release and throw inputs,
-    and ``ReleasePartner``'s back press is exactly one of them (the walk that
-    follows a release is judged on the next tick). Not for ``MoveAwayFromPartner``,
-    which judges its own lane step. Not for a ``Dialog`` verb,
-    whose Up/Down move a menu cursor rather than a body.
+    grab, its launch direction is committed, and an airborne B is the kick,
+    which never runs ``$3136``. Not while the actor holds a body: in a hold
+    the pad's directions are the release and throw inputs, and
+    ``ReleasePartner``'s back press is exactly one of them (the walk that
+    follows a release is judged on the next tick). Not for
+    ``MoveAwayFromPartner``, which judges its own lane step. Not for a
+    ``Dialog`` verb, whose Up/Down move a menu cursor rather than a body.
     """
 
     partner = find(context, Partner)
-    if actor is None or partner is None:
+    if actor is None:
         return gamepad
     if actor.is_airborne:
         # One judgment still applies in the air: the kick edge. A flight is
@@ -3551,7 +3576,11 @@ def _partner_safe_gamepad(
         # (jump_kick.airborne_hits_player) -- the direction stays held. Only
         # for JumpAttack: a WalkToAdvanceStage hop kicks for the hang time
         # that clears a pit, and falling short costs a life.
-        if isinstance(verb, JumpAttack) and actor.action_base in JUMP_FREE_FLIGHT_ACTIONS:
+        if (
+            partner is not None
+            and isinstance(verb, JumpAttack)
+            and actor.action_base in JUMP_FREE_FLIGHT_ACTIONS
+        ):
             return _PartnerSafeGamepad(
                 gamepad,
                 lambda mask: mask,
@@ -3560,31 +3589,36 @@ def _partner_safe_gamepad(
         return gamepad
     if actor.is_holding_enemy or isinstance(verb, (Dialog, MoveAwayFromPartner)):
         return gamepad
-    return _PartnerSafeGamepad(
-        gamepad,
-        lambda mask: _keep_off_partner(context, actor, partner, mask),
-        lambda mask: _redirect_b_press(context, actor, partner, mask),
-    )
+    if partner is None:
+        keep = lambda mask: mask  # noqa: E731
+    else:
+        keep = lambda mask: _keep_off_partner(context, actor, partner, mask)  # noqa: E731
+    return _PartnerSafeGamepad(gamepad, keep, lambda mask: _redirect_b_press(context, actor, mask))
 
 
-def _redirect_b_press(context: Context, actor: Myself, partner: Partner, mask: int) -> int | None:
-    """The step to take instead of a B press that would pick up the partner's
-    item, or ``None`` to let the press through.
+def _redirect_b_press(context: Context, actor: Myself, mask: int) -> int | None:
+    """The step to take instead of a B press that would pick up an item it
+    must not, or ``None`` to let the press through.
 
     ``$3136 (find_close_interaction_target)`` runs on every grounded B that
     is not the B+C chord (``$322A`` reads the chord first, ahead of ``$3028``),
-    and a match picks the item up instead of striking
-    (``reach.item_a_b_press_takes``). When that item is the partner's
-    (``partner.item_is_the_partners``) the press becomes the walk that clears
-    the box -- the strike waits a tick or two, the food stays on the floor.
-    Not the verb's business, which is why it is not a withdrawal: the punch is
-    still the right thing to do, only not from where the actor stands.
+    the held-weapon swing included, and a match picks the item up instead of
+    striking (``reach.item_a_b_press_takes``). When taking that item does harm
+    (``decide.item_take_is_harmful``: the partner's, a weapon no better than
+    the one in hand, food or a 1UP the fight must leave) the press becomes the
+    walk that clears the box -- the strike waits a tick or two, the item stays
+    on the floor. Not the verb's business, which is why it is not a
+    withdrawal: the punch is still the right thing to do, only not from where
+    the actor stands. Not while an enemy holds the actor: that B is
+    ``CounterGrab``'s edge, and ``$3136`` is not reached from a hold.
     """
 
     if not mask & PUNCH_MASK or mask & JUMP_MASK:
         return None
+    if actor.combat_phase is CombatPhase.HELD_BY_ENEMY:
+        return None
     item = item_a_b_press_takes(context, actor)
-    if item is None or not item_is_the_partners(actor, partner, item):
+    if item is None or not item_take_is_harmful(context, actor, item):
         return None
     return _step_off_item(context, actor, item)
 

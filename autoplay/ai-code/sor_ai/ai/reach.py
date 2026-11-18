@@ -60,7 +60,9 @@ from .tokens import (
     Enemy,
     GrabReason,
     Grunt,
+    HealthPickup,
     Jack,
+    LifePickup,
     PlayableCharacter,
     Pickup,
     Pit,
@@ -1352,26 +1354,24 @@ def _object_slot_order(slot: str) -> int:
     return 1 << 16
 
 
-def item_a_b_press_takes(context: Context, actor: PlayableCharacter) -> Pickup | Weapon | None:
-    """The floor item a grounded B press would pick up right now, or ``None``.
+def item_a_press_takes(context: Context, actor: PlayableCharacter) -> Pickup | Weapon | None:
+    """The floor item ``$3136``'s search would pick up for ``actor`` right
+    now, whatever button the layout puts it on, or ``None``.
 
     ``$3136`` accepts a free weapon (``+$51`` clear, wear ``< 3``) -- even with
     a weapon already in hand, which it lets go of -- and the six consumable
     types. ``Weapon``/``Pickup`` tokens exist only for free ground items, so
     the wear is the one test left to make here. The height test (``±8``) is
-    always met by a grounded actor and an item on its floor, and an airborne B
-    is the jump kick (``$3914``), which never reaches ``$3136``.
+    always met by a grounded actor and an item on its floor, and an airborne
+    press is the jump kick (``$3914``), which never reaches ``$3136``.
 
-    So a punch thrown with food at the actor's feet is not a punch: it eats
-    the food. That is how the AI used to take food the partner needed more
-    while fighting beside it (user: "a IA a usar um item de recuperação de
-    vida quando o partner precisa mais dele").
-
-    Under the 6-button layout B never picks anything up (Y does), so there is
-    nothing to take.
+    **The first eligible item in object-table slot order wins**, not the
+    nearest and not the one the actor walked to: an item with a lower slot
+    inside the box is taken first (``decide.pickup_stand`` keeps a walk-to-item
+    out of such a box when taking it would do harm).
     """
 
-    if actor.is_airborne or find(context, SixButtonLayout) is not None:
+    if actor.is_airborne:
         return None
     candidates = [
         item
@@ -1381,6 +1381,59 @@ def item_a_b_press_takes(context: Context, actor: PlayableCharacter) -> Pickup |
         and not (isinstance(item, Weapon) and item.wear >= 3)
     ]
     return min(candidates, key=lambda item: _object_slot_order(item.slot), default=None)
+
+
+def item_a_b_press_takes(context: Context, actor: PlayableCharacter) -> Pickup | Weapon | None:
+    """The floor item a grounded B press would pick up right now, or ``None``.
+
+    ``item_a_press_takes`` on the original three-button layout, where every
+    grounded B press runs ``$3136`` before committing to a strike. So a punch
+    thrown with food at the actor's feet is not a punch: it eats the food.
+    That is how the AI used to take food the partner needed more while
+    fighting beside it (user: "a IA a usar um item de recuperação de vida
+    quando o partner precisa mais dele"), and how an armed actor swapped
+    weapons on every swing over a floor weapon.
+
+    Under the 6-button layout B never picks anything up (Y does), so there is
+    nothing to take.
+    """
+
+    if find(context, SixButtonLayout) is not None:
+        return None
+    return item_a_press_takes(context, actor)
+
+
+def item_is_the_partners(actor: PlayableCharacter, partner: PlayableCharacter, item: Pickup | Weapon) -> bool:
+    """Whether ``item`` is the partner's to take rather than ``actor``'s.
+
+    The user's rule: "A IA só deve usar items de recuperação se estiver sem
+    partner, ou se tiver partner, a personagem dela precisar mais do item que
+    o partner. O mesmo para armas, só apanhar uma arma se tiver na mão nenhuma
+    ou uma pior, e se o partner não tiver uma melhor (no caso de empate,
+    tentar pegar)". Read as a question of who needs it more:
+
+    - **food** is the actor's only while the actor is strictly the hurter of
+      the two -- equally hurt leaves it for the partner;
+    - a **weapon** is the partner's only while the partner is strictly the
+      worse armed (``weapon_rank``: knife 5 > bat/pipe 4 > bottle 3 >
+      pepper 2, unarmed 0), so a tie -- both unarmed included -- is the
+      actor's to try. Whether it is an upgrade for the actor at all is
+      ``weapon_upgrade_rank``'s question, asked before this one;
+    - a **1UP** goes to the one with fewer lives, a tie being the actor's.
+
+    ``SpecialPickup`` and ``ScorePickup`` are claimed by neither. Shared by
+    ``partner``'s walk-to-item withdrawals, by ``decide.item_take_is_harmful``
+    and through it by ``execute``'s pad, which must not let a B press pick one
+    up either (``item_a_b_press_takes``).
+    """
+
+    if isinstance(item, HealthPickup):
+        return not actor.health_percent < partner.health_percent
+    if isinstance(item, LifePickup):
+        return partner.lives < actor.lives
+    if isinstance(item, Weapon):
+        return weapon_rank(partner.held_weapon_type) < weapon_rank(actor.held_weapon_type)
+    return False
 
 
 # --- Whose fight it is -------------------------------------------------------

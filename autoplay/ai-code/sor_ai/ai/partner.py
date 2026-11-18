@@ -88,6 +88,7 @@ from typing import Callable
 
 from . import jump_kick, kinematics, reach
 from .decide import in_smash_range
+from .reach import item_is_the_partners  # noqa: F401 -- the rule's home is reach
 from .tokens import (
     AttackHeldEnemy,
     Breakable,
@@ -101,11 +102,9 @@ from .tokens import (
     Enemy,
     FlipHold,
     GrabEnemy,
-    HealthPickup,
     HitAntonioBoomerang,
     HitTable,
     JumpAttack,
-    LifePickup,
     MeleeWeaponAttack,
     Myself,
     OpenBreakable,
@@ -126,7 +125,6 @@ from .tokens import (
     Weapon,
     find,
     find_all,
-    weapon_rank,
 )
 
 # One test per concrete Verb class: "would this verb, executed now, land on
@@ -202,39 +200,6 @@ def _rear_attack_hits_partner(
     """The ``$322A`` chord's real box, on the side the partner stands."""
 
     return reach.in_rear_band(actor, partner)
-
-
-def item_is_the_partners(actor: Myself, partner: Partner, item: Pickup | Weapon) -> bool:
-    """Whether ``item`` is the partner's to take rather than ``actor``'s.
-
-    The user's rule: "A IA só deve usar items de recuperação se estiver sem
-    partner, ou se tiver partner, a personagem dela precisar mais do item que
-    o partner. O mesmo para armas, só apanhar uma arma se tiver na mão nenhuma
-    ou uma pior, e se o partner não tiver uma melhor (no caso de empate,
-    tentar pegar)". Read as a question of who needs it more:
-
-    - **food** is the actor's only while the actor is strictly the hurter of
-      the two -- equally hurt leaves it for the partner;
-    - a **weapon** is the partner's only while the partner is strictly the
-      worse armed (``weapon_rank``: knife 5 > bat/pipe 4 > bottle 3 >
-      pepper 2, unarmed 0), so a tie -- both unarmed included -- is the
-      actor's to try. Whether it is an upgrade for the actor at all is
-      ``reach.weapon_upgrade_rank``'s question, asked before this one;
-    - a **1UP** goes to the one with fewer lives, a tie being the actor's.
-
-    ``SpecialPickup`` and ``ScorePickup`` are claimed by neither. Shared by
-    the walk-to-item withdrawals below and by ``execute``'s partner pad, which
-    must not let a B press pick one up either (``$3136`` turns any grounded B
-    near an item into a pickup -- ``reach.item_a_b_press_takes``).
-    """
-
-    if isinstance(item, HealthPickup):
-        return not actor.health_percent < partner.health_percent
-    if isinstance(item, LifePickup):
-        return partner.lives < actor.lives
-    if isinstance(item, Weapon):
-        return weapon_rank(partner.held_weapon_type) < weapon_rank(actor.held_weapon_type)
-    return False
 
 
 def _weapon_belongs_to_partner(

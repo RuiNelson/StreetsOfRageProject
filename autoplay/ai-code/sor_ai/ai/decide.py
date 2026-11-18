@@ -82,6 +82,7 @@ from .tokens import (
     SpecialPickup,
     Weapon,
     is_weapon_type,
+    weapon_rank,
 )
 from .tokens import CallPolice
 from .tokens import HandleContinueMenu, HandleMrXDialog, InContinueMenu, InMrXDialog, PlayerDuel, RivalPlayer
@@ -2526,6 +2527,16 @@ def _a_weapon_would_disarm_the_plan(context: Context) -> bool:
 
 
 def could_walk_to_weapon(context: Context) -> Context:
+    """Walk to a weapon that is an upgrade: the nearest of each rank.
+
+    One candidate per rank, so ``priority``'s rank-scaled emergency still
+    favours the better weapon, and among weapons of one rank the nearest
+    (user: two of a kind used to tie at every distance, and the tie went to
+    the lower object slot, so the actor walked past a bat at its feet to
+    fetch one across the screen). Only weapons a pickup press can take
+    without first taking something it must not (``pickup_stand``).
+    """
+
     verbs: set[Token] = set()
     camera = find(context, CameraRange)
     if _a_weapon_would_disarm_the_plan(context):
@@ -2538,15 +2549,25 @@ def could_walk_to_weapon(context: Context) -> Context:
         if _is_holding_enemy(actor):
             continue
         # reach.weapon_upgrade_rank is the judgment "in camera, still usable,
-        # and better than what this actor holds" -- one candidate per
-        # upgrade, since priority.py's rank-scaled emergency favours the
-        # better one rather than a min/max pick made here.
+        # and better than what this actor holds".
+        nearest: dict[int, tuple[float, str, Weapon]] = {}
         for weapon in find_all(context, Weapon):
-            if reach.weapon_upgrade_rank(actor, weapon, camera) is None:
+            rank = reach.weapon_upgrade_rank(actor, weapon, camera)
+            if rank is None:
                 continue
             if reach.any_pit_endangers(context, weapon.world_x, weapon.world_y):
                 # Never walk toward a target sitting in a pit's danger zone.
                 continue
+            if pickup_stand(context, actor, weapon) is None:
+                continue
+            key = (
+                math.hypot(weapon.world_x - actor.world_x, weapon.world_y - actor.world_y),
+                weapon.slot,
+                weapon,
+            )
+            if rank not in nearest or key[:2] < nearest[rank][:2]:
+                nearest[rank] = key
+        for _, _, weapon in nearest.values():
             verbs.add(WalkToWeapon(actor_slot=actor.slot, target_slot=weapon.slot))
     return verbs
 
@@ -2654,8 +2675,142 @@ def could_walk_to_pickup(context: Context) -> Context:
         # _emergency_walk_to_pickup already ranks by type/urgency, so no
         # selection belongs here.
         for pickup in useful:
+            if pickup_stand(context, actor, pickup) is None:
+                continue
             verbs.add(WalkToPickup(actor_slot=actor.slot, target_slot=pickup.slot))
     return verbs
+
+
+def item_take_is_harmful(context: Context, actor: PlayableCharacter, item: Pickup | Weapon) -> bool:
+    """Whether a pickup press that takes ``item`` would do harm.
+
+    ``$3136`` turns any grounded B beside an item into a pickup
+    (``reach.item_a_b_press_takes``), so this is asked of every press, not
+    only of the walks to items. Harm, not mere waste (food eaten at full
+    health is only waste, and the press is the strike again on the next
+    tick):
+
+    - the **partner's** item (``reach.item_is_the_partners``);
+    - a **weapon** while armed with one as good or better: ``$3136`` lets go
+      of the held weapon, which then lies underfoot, and the next press takes
+      it back -- live, a knife and a bottle traded places on every swing while
+      the enemy stood in reach;
+    - a weapon at all where the fight's plan refuses one
+      (``_a_weapon_would_disarm_the_plan``);
+    - **food** the fight must leave (``_food_is_spoken_for``, which includes
+      ``--no-food``, and ``_life_items_refused``), and a **1UP** where life
+      items are refused.
+    """
+
+    partner = find(context, Partner)
+    if partner is not None and reach.item_is_the_partners(actor, partner, item):
+        return True
+    if isinstance(item, Weapon):
+        if actor.held_weapon_type:
+            return weapon_rank(item.weapon_type) <= weapon_rank(actor.held_weapon_type)
+        return _a_weapon_would_disarm_the_plan(context)
+    if isinstance(item, HealthPickup):
+        return _food_is_spoken_for(context) or _life_items_refused(context)
+    if isinstance(item, LifePickup):
+        return _life_items_refused(context)
+    return False
+
+
+# How far inside the clean ground the stand point sits: the straight walk that
+# reaches it stops within execute.MOVE_DEADBAND_X / _Y (5 / 3) of it, so a point
+# this far in leaves the whole stop on clean ground.
+PICKUP_STAND_INSET_X = 6
+PICKUP_STAND_INSET_Y = 4
+# Lower-slot items further than this from the target cannot share $3136's box
+# with it from anywhere the actor could take the target.
+_PICKUP_REACH_X = 18  # execute.PICKUP_RANGE_X
+_PICKUP_REACH_Y = 14  # execute.PICKUP_RANGE_Y
+# At most this many blockers are worked round; more and the item is left.
+_PICKUP_MAX_BLOCKERS = 3
+
+
+def _pickup_blockers(context: Context, actor: PlayableCharacter, target: Pickup | Weapon) -> list[Pickup | Weapon]:
+    """Items ``$3136`` would take before ``target`` somewhere ``target`` is in
+    reach, and that must not be taken (``item_take_is_harmful``)."""
+
+    order = reach._object_slot_order(target.slot)
+    blockers = []
+    for item in (*find_all(context, Weapon), *find_all(context, Pickup)):
+        if item.slot == target.slot or reach._object_slot_order(item.slot) >= order:
+            continue
+        if isinstance(item, Weapon) and item.wear >= 3:
+            continue
+        if abs(item.world_x - target.world_x) > _PICKUP_REACH_X + reach.B_PRESS_PICKUP_X:
+            continue
+        if abs(item.world_y - target.world_y) > _PICKUP_REACH_Y + reach.B_PRESS_PICKUP_Y:
+            continue
+        if item_take_is_harmful(context, actor, item):
+            blockers.append(item)
+    return blockers
+
+
+def pickup_stand(
+    context: Context, actor: PlayableCharacter, target: Pickup | Weapon
+) -> tuple[float, float] | None:
+    """Where ``actor`` stands for a pickup press to take ``target``, or
+    ``None`` when no ground does that without first taking an item it must
+    not take.
+
+    ``$3136`` takes the first eligible item in object-table slot order, not
+    the one walked to, so a lower-slot item beside the target is taken
+    instead. Taken by a harmful press, that is the partner's food eaten, or
+    -- when the pad steps off it -- a walk back and a step off on every tick
+    (live-reproduced on synthetic ticks: x 92 <-> 96 beside a gem). The clean
+    ground is the target's reach (``PICKUP_RANGE_X`` / ``_Y``) less every such
+    blocker's ``$3136`` box (``B_PRESS_PICKUP_X`` / ``_Y``), inside the lane
+    band and the walk clamp; the stand is the point of it nearest the actor,
+    ``PICKUP_STAND_INSET_*`` inside. With no blocker it is the target's reach
+    itself, so every walk to an item is as before.
+    """
+
+    x0 = target.world_x - _PICKUP_REACH_X
+    x1 = target.world_x + _PICKUP_REACH_X
+    y0 = target.world_y - _PICKUP_REACH_Y
+    y1 = target.world_y + _PICKUP_REACH_Y
+    blockers = _pickup_blockers(context, actor, target)
+    if not blockers:
+        return (
+            min(max(actor.world_x, x0), x1),
+            min(max(actor.world_y, y0), y1),
+        )
+    if len(blockers) > _PICKUP_MAX_BLOCKERS:
+        return None
+    lo, hi = nav.lane_bounds(context)
+    y0, y1 = max(y0, lo), min(y1, hi)
+    camera = find(context, CameraRange)
+    if camera is not None:
+        x0, x1 = max(x0, camera.left), min(x1, camera.right)
+    rects = [(x0, x1, y0, y1)]
+    for item in blockers:
+        bx, by = reach.B_PRESS_PICKUP_X + 1, reach.B_PRESS_PICKUP_Y + 1
+        cut = []
+        for rx0, rx1, ry0, ry1 in rects:
+            # Off the blocker's box on one side of one axis.
+            cut.append((max(rx0, item.world_x + bx), rx1, ry0, ry1))
+            cut.append((rx0, min(rx1, item.world_x - bx), ry0, ry1))
+            cut.append((rx0, rx1, max(ry0, item.world_y + by), ry1))
+            cut.append((rx0, rx1, ry0, min(ry1, item.world_y - by)))
+        rects = [
+            r for r in cut
+            if r[1] - r[0] >= 2 * PICKUP_STAND_INSET_X and r[3] - r[2] >= 2 * PICKUP_STAND_INSET_Y
+        ]
+        if not rects:
+            return None
+    best = None
+    for rx0, rx1, ry0, ry1 in rects:
+        x = min(max(actor.world_x, rx0 + PICKUP_STAND_INSET_X), rx1 - PICKUP_STAND_INSET_X)
+        y = min(max(actor.world_y, ry0 + PICKUP_STAND_INSET_Y), ry1 - PICKUP_STAND_INSET_Y)
+        if reach.any_pit_endangers(context, int(x), int(y)):
+            continue
+        d = math.hypot(x - actor.world_x, y - actor.world_y)
+        if best is None or d < best[0]:
+            best = (d, x, y)
+    return None if best is None else (best[1], best[2])
 
 
 def breakable_smash_outer_x(prop: Breakable) -> int:
