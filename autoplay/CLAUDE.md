@@ -126,7 +126,8 @@ one walked to. `decide.item_take_is_harmful` (the partner's item, a weapon no be
 leaves, `--no-food` too) is asked of every grounded B, partner or not: the pad steps off instead (`execute._redirect_b_press`), the grunt plan does not
 strike over any item, and a walk to an item presses only where it takes that item (`decide.pickup_stand`; no clean ground, no walk). Of two weapons of one
 rank the nearer is walked to (user). Before: a knife and a bottle swapped on every swing; beside the partner's food a walk to a gem stepped off and back
-every tick. Offline only (`test_items_underfoot.py`, `ItemUnderfootStabilityTests`); not measured live. Unhandled: the step off can still repeat beside a crate
+every tick. Tests: `test_items_underfoot.py`, `ItemUnderfootStabilityTests`. User accepted it live (2026-11-18); `grunt_fight.py --family all --level 1`, one
+run each: damage 16 -> 4, food eaten under `--no-food` 1 -> 0, 90.8 -> 96.9 s. Unhandled: the step off can still repeat beside a crate
 whose smash stand is in a harmful item's box.
 
 **Leave the partner's fight to them** (user). `reach.partner_is_engaging` + `partner.PartnerFightTracker` (`PartnerFight` tokens, remembered 45 frames);
