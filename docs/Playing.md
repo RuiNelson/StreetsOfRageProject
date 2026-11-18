@@ -42,7 +42,25 @@ The menu has the original 1 and 2 player games, and rows the cartridge never had
   your partner. Choose your character, then the one for the `COMPUTER`. The mode appears only if the
   game can find the AI's code.
 - **CONTINUE**, after OPTIONS, appears while a game is saved (see [Saving](#saving)).
+- **EXTRA**, before QUIT, has the special modes (see [Survival mode](#survival-mode)).
 - **QUIT**, the last row, ends the game.
+
+### Survival mode
+
+**EXTRA > SURVIVAL MODE**: choose 1 or 2 players and a round, then START and your characters. The round
+is only the place you fight in: the screen stays where the round starts and the game is the same in all
+eight, with no holes and round 7's elevator standing still.
+
+- Each player has 3 lives and no continue, whatever OPTIONS says, and nobody can join mid-game.
+- Regular enemies keep coming from the sides, of every kind and colour, picked at random: two at a time at
+  first, one more for every 10 beaten, up to five.
+- Each enemy beaten is a point for whoever landed the last blow, shown as that player's score.
+- One enemy in six leaves an apple, a chicken, a knife, a pipe or a bottle.
+- There is no clock and no police special, and SAVE AND QUIT is off.
+
+When everyone is out, the game shows how many enemies fell and goes back to SURVIVAL MODE. The best
+result for 1 player and for 2 players (the two scores added up) is kept in `survival.yaml`, beside
+`controls.yaml`.
 
 ## Controls
 
