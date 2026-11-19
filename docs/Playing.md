@@ -47,20 +47,21 @@ The menu has the original 1 and 2 player games, and rows the cartridge never had
 
 ### Survival mode
 
-**EXTRA > SURVIVAL MODE**: choose 1 or 2 players and a round, then START and your characters. The round
-is only the place you fight in: the screen stays where the round starts and the game is the same in all
-eight, with no holes and round 7's elevator standing still.
+**EXTRA > SURVIVAL MODE**: choose 1 or 2 players and a round, then START. Each player enters their
+initials (the last ones used, or those of QUALITY-OF-LIFE, are already there) and chooses a character. The
+round is only the place you fight in: the screen stays where the round starts and the game is the same in
+all eight, with no holes and round 7's elevator standing still (enemies from the right fall from the sky).
 
 - Each player has 3 lives and no continue, whatever OPTIONS says, and nobody can join mid-game.
-- Regular enemies keep coming from the sides, of every kind and colour, picked at random: two at a time at
-  first, one more for every 10 beaten, up to five.
+- Regular enemies keep coming from the sides, of every kind and colour, picked at random: one at first, two
+  after the first is beaten, three after three, then one more every two beaten, up to sixteen.
 - Each enemy beaten is a point for whoever landed the last blow, shown as that player's score.
 - One enemy in six leaves an apple, a chicken, a knife, a pipe or a bottle.
 - There is no clock and no police special, and SAVE AND QUIT is off.
 
-When everyone is out, the game shows how many enemies fell and goes back to SURVIVAL MODE. The best
-result for 1 player and for 2 players (the two scores added up) is kept in `survival.yaml`, beside
-`controls.yaml`.
+When everyone is out, the game shows how many enemies fell and goes back to SURVIVAL MODE. The three best
+results for 1 player and for 2 players (the two scores added up), with the initials, are kept in
+`survival.yaml`, beside `controls.yaml`, and shown on the SURVIVAL MODE screen.
 
 ## Controls
 
