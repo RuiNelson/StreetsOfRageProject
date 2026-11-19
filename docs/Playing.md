@@ -166,9 +166,8 @@ Open **OPTIONS > VIDEO**:
   is Apple's MetalFX upscaler. The default is `HYBRID` on macOS and `NEAREST` on Windows, Linux and the PS5.
   On macOS the game draws at the display's real pixels.
 - **FRAME GENERATION** (macOS 26 and newer, on a Mac whose GPU supports it; the row is not shown elsewhere): MetalFX
-  draws frames between those the game draws. The game changes its picture 30 times a second, so it is shown at 60
-  on a 60 Hz screen (one frame between each two, each real frame about 17 ms later) and at 120 on a 120 Hz screen
-  (three between, about 25 ms later). Only with VSYNC `AUTO` and without
+  draws a frame between each two the game draws. The game changes its picture 30 times a second, so it is shown
+  at 60 (on a 120 Hz screen too), each real frame about 17 ms later. Only with VSYNC `AUTO` and without
   `--turbo`. `ON`: a character changing pose shows both poses blended in the frame between. `ON, NO POSE BLEND`:
   it keeps its old pose there, moved halfway, and changes pose on the real frame. `OFF` by default.
 - **RESET TO DEFAULTS:** puts the defaults back on the screen. They count only after SAVE AND APPLY.
