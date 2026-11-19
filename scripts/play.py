@@ -57,6 +57,7 @@ DEFAULTS: dict[str, Any] = {
     "widescreen": "",  # --widescreen / --no-widescreen
     "integer_scaling": "",  # --integer-scaling / --no-integer-scaling, whole-number scale factors only
     "scaling_filter": "",  # "" = the game's video.yaml; "nearest", "bilinear", "hybrid", "metalfx": sor --scaling-filter
+    "frame_generation": "",  # --frame-generation / --no-frame-generation, MetalFX frame interpolation (macOS 26)
     "default_video": False,  # --default-video, ignore video.yaml altogether
     "qol": "",  # --qol, comma-separated options to turn on over qol.yaml (OPTIONS > QUALITY-OF-LIFE)
     "default_qol": False,  # --default-qol, ignore qol.yaml altogether
@@ -84,6 +85,7 @@ VIDEO_SWITCHES = {
     "fullscreen": ("--fullscreen", "--windowed"),
     "widescreen": ("--widescreen", "--no-widescreen"),
     "integer_scaling": ("--integer-scaling", "--no-integer-scaling"),
+    "frame_generation": ("--frame-generation", "--no-frame-generation"),
 }
 
 QOL_OPTIONS = ("cam", "grab", "damage")  # sor --qol choices
@@ -395,7 +397,7 @@ SWEEP_CHOICES = [("none", ""), ("street enemies", "street"), ("until Mr. X (roun
 CHOICES = {
     "lang": LANG_CHOICES, "turbo": TURBO_CHOICES, "frame_sync": FRAME_SYNC_CHOICES, "hz": HZ_CHOICES, "sound": SOUND_CHOICES,
     "fullscreen": FULLSCREEN_CHOICES, "widescreen": WIDESCREEN_CHOICES, "integer_scaling": INTEGER_SCALING_CHOICES,
-    "scaling_filter": SCALING_FILTER_CHOICES,
+    "scaling_filter": SCALING_FILTER_CHOICES, "frame_generation": INTEGER_SCALING_CHOICES,
     "reach": REACH_CHOICES, "sweep": SWEEP_CHOICES,
 }
 
@@ -469,14 +471,15 @@ class PlayWindow:
         self.combo(host, 7, "Picture (^W)", "widescreen")
         self.combo(host, 8, "Integer scaling (^U)", "integer_scaling")
         self.combo(host, 9, "Scaling filter", "scaling_filter")
-        self.check(host, 10, "Ignore the game's video.yaml, --default-video", "default_video")
-        self.entry(host, 11, f"Quality-of-life, --qol ({', '.join(QOL_OPTIONS)})", "qol")
-        self.check(host, 12, "Ignore the game's qol.yaml, --default-qol", "default_qol")
-        self.check(host, 13, "Debug utils: remote access, hotkeys (^D)", "debug_utils")
-        self.check(host, 14, "Log CPU/VDP state, --debug-log", "debug")
-        self.entry(host, 15, "Call log file", "call_log")
-        self.entry(host, 16, "ROM file", "rom")
-        self.entry(host, 17, "AI folder, --ai-path (empty = autoplay/ai-code)", "ai_path", browse=True)
+        self.combo(host, 10, "Frame generation (macOS 26)", "frame_generation")
+        self.check(host, 11, "Ignore the game's video.yaml, --default-video", "default_video")
+        self.entry(host, 12, f"Quality-of-life, --qol ({', '.join(QOL_OPTIONS)})", "qol")
+        self.check(host, 13, "Ignore the game's qol.yaml, --default-qol", "default_qol")
+        self.check(host, 14, "Debug utils: remote access, hotkeys (^D)", "debug_utils")
+        self.check(host, 15, "Log CPU/VDP state, --debug-log", "debug")
+        self.entry(host, 16, "Call log file", "call_log")
+        self.entry(host, 17, "ROM file", "rom")
+        self.entry(host, 18, "AI folder, --ai-path (empty = autoplay/ai-code)", "ai_path", browse=True)
 
         self.check(autoplay, 0, "AI plays P1 (^7)", "agent_p1")
         self.check(autoplay, 1, "AI plays P2 (^8)", "agent_p2")
