@@ -167,8 +167,9 @@ Open **OPTIONS > VIDEO**:
   On macOS the game draws at the display's real pixels.
 - **FRAME GENERATION** (macOS 26 and newer, on a Mac whose GPU supports it; the row is not shown elsewhere): MetalFX
   draws a frame between each two the game draws. The game changes its picture 30 times a second, so it is shown
-  at 60, each real frame about 17 ms later. Only with VSYNC `AUTO` and without `--turbo`. A character changing
-  pose shows both poses blended in the frame between. Off by default.
+  at 60 (on a 120 Hz screen too), each real frame about 17 ms later. Only with VSYNC `AUTO` and without
+  `--turbo`. `ON`: a character changing pose shows both poses blended in the frame between. `ON, NO POSE BLEND`:
+  it keeps its old pose there, moved halfway, and changes pose on the real frame. `OFF` by default.
 - **RESET TO DEFAULTS:** puts the defaults back on the screen. They count only after SAVE AND APPLY.
 - **SAVE AND APPLY:** uses the settings at once and keeps them for next time, in `video.yaml`.
 - **CANCEL:** leaves without changing anything, as do Start and Esc.
@@ -331,7 +332,7 @@ console only for `--debug-utils`, `--debug-log`, `--call-log`, `--aux-addr-file`
 | `--widescreen`, `--no-widescreen`                   | Use [Mode 48](#widescreen-mode-48) instead of Mode 40, or not                                               |
 | `--integer-scaling`, `--no-integer-scaling`         | Scale by whole multiples only, centred with borders: 320×224 on a 1920×1080 screen is drawn 4× at 1280×896 |
 | `--scaling-filter nearest\|bilinear\|hybrid\|metalfx` | How the picture is scaled: see SCALING FILTER under [Video settings](#video-settings). `metalfx` is macOS 13 and newer only (elsewhere `hybrid`). Default: as in `video.yaml`; without one, `hybrid` on macOS, `nearest` elsewhere |
-| `--frame-generation`, `--no-frame-generation`       | MetalFX frame generation, or not: see FRAME GENERATION under [Video settings](#video-settings). macOS 26 and newer only |
+| `--frame-generation off\|on\|no-pose-blend`        | MetalFX frame generation: see FRAME GENERATION under [Video settings](#video-settings). macOS 26 and newer only. Default: as in `video.yaml`, `off` without one |
 | `--frame-sync auto\|vsync\|vsync-half\|vsync-third` | What sets the game's speed. `auto`, the default, is the internal timer: right on any monitor, with no tearing, and VRR monitors can follow it (use fullscreen for VRR). The others follow the monitor, every 1, 2 or 3 refreshes |
 | `--default-video`                                   | Ignore `video.yaml` for this run, keeping any other video option given. For scripts and measurements        |
 

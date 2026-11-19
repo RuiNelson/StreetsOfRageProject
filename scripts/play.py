@@ -57,7 +57,7 @@ DEFAULTS: dict[str, Any] = {
     "widescreen": "",  # --widescreen / --no-widescreen
     "integer_scaling": "",  # --integer-scaling / --no-integer-scaling, whole-number scale factors only
     "scaling_filter": "",  # "" = the game's video.yaml; "nearest", "bilinear", "hybrid", "metalfx": sor --scaling-filter
-    "frame_generation": "",  # --frame-generation / --no-frame-generation, MetalFX frame interpolation (macOS 26)
+    "frame_generation": "",  # "" = the game's video.yaml; "off", "on", "no-pose-blend": sor --frame-generation (macOS 26)
     "default_video": False,  # --default-video, ignore video.yaml altogether
     "qol": "",  # --qol, comma-separated options to turn on over qol.yaml (OPTIONS > QUALITY-OF-LIFE)
     "default_qol": False,  # --default-qol, ignore qol.yaml altogether
@@ -85,7 +85,6 @@ VIDEO_SWITCHES = {
     "fullscreen": ("--fullscreen", "--windowed"),
     "widescreen": ("--widescreen", "--no-widescreen"),
     "integer_scaling": ("--integer-scaling", "--no-integer-scaling"),
-    "frame_generation": ("--frame-generation", "--no-frame-generation"),
 }
 
 QOL_OPTIONS = ("cam", "grab", "damage")  # sor --qol choices
@@ -234,6 +233,8 @@ def host_arguments(s: dict[str, Any], *, with_autoplay: bool) -> list[str]:
             args.append(on if s[key] == "on" else off)
     if s["scaling_filter"]:
         args += ["--scaling-filter", s["scaling_filter"]]
+    if s["frame_generation"]:
+        args += ["--frame-generation", s["frame_generation"]]
     args += ["--port", str(s["port"])]
     if s["silent"]:
         args.append("--silent")
@@ -386,6 +387,7 @@ FRAME_SYNC_CHOICES = [(FROM_GAME, ""), ("auto", "auto"), ("VSync", "vsync"), ("V
 FULLSCREEN_CHOICES = [(FROM_GAME, ""), ("window", "off"), ("fullscreen", "on")]
 WIDESCREEN_CHOICES = [(FROM_GAME, ""), ("original 4:3", "off"), ("widescreen 16:9", "on")]
 INTEGER_SCALING_CHOICES = [(FROM_GAME, ""), ("off", "off"), ("on", "on")]
+FRAME_GENERATION_CHOICES = [(FROM_GAME, ""), ("off", "off"), ("on", "on"), ("on, no pose blend", "no-pose-blend")]
 SCALING_FILTER_CHOICES = [(FROM_GAME, ""), ("nearest", "nearest"), ("bilinear", "bilinear"), ("hybrid", "hybrid"),
                           ("MetalFX (macOS)", "metalfx")]
 HZ_CHOICES = [("default", 0), ("60 (NTSC)", 60), ("50 (PAL)", 50)]
@@ -397,7 +399,7 @@ SWEEP_CHOICES = [("none", ""), ("street enemies", "street"), ("until Mr. X (roun
 CHOICES = {
     "lang": LANG_CHOICES, "turbo": TURBO_CHOICES, "frame_sync": FRAME_SYNC_CHOICES, "hz": HZ_CHOICES, "sound": SOUND_CHOICES,
     "fullscreen": FULLSCREEN_CHOICES, "widescreen": WIDESCREEN_CHOICES, "integer_scaling": INTEGER_SCALING_CHOICES,
-    "scaling_filter": SCALING_FILTER_CHOICES, "frame_generation": INTEGER_SCALING_CHOICES,
+    "scaling_filter": SCALING_FILTER_CHOICES, "frame_generation": FRAME_GENERATION_CHOICES,
     "reach": REACH_CHOICES, "sweep": SWEEP_CHOICES,
 }
 
