@@ -7,8 +7,6 @@
 
 https://github.com/user-attachments/assets/84983bde-22ba-4627-94a7-a1f49b7dac3b
 
-<iframe width="560" height="315" src="https://www.youtube-nocookie.com/embed/wJJg-4HKym4?si=vGT5gyG69VYpA_1P" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-
 Welcome to my reverse-engineering and recompilation project for SEGA's
 celebrated Mega Drive classic (released as SEGA Genesis in the United States),
 *Streets of Rage*.
