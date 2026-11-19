@@ -158,7 +158,11 @@ Open **OPTIONS > VIDEO**:
   or 3 refreshes; the menu shows your refresh rate and the speed that gives.
 - **PICTURE:** `ORIGINAL 4:3`, or `WIDESCREEN 16:9` for a [wider view of the game](#widescreen-mode-48).
 - **DISPLAY:** `WINDOW` or `FULLSCREEN`.
-- **INTEGER SCALING:** sharp, even pixels, with borders around the picture.
+- **INTEGER SCALING:** whole multiples only: even pixels, with borders around the picture.
+- **SCALING FILTER:** how the picture is scaled. `NEAREST` is sharp, but off whole multiples some pixels are
+  wider than others; `BILINEAR` is smooth and a little blurred; `HYBRID`, the default, scales sharp to the
+  next whole multiple and then smoothly down to the size, so pixels are sharp and even; `METALFX` (macOS 13
+  and newer) is Apple's MetalFX upscaler. On macOS the game draws at the display's real pixels.
 - **RESET TO DEFAULTS:** puts the defaults back on the screen. They count only after SAVE AND APPLY.
 - **SAVE AND APPLY:** uses the settings at once and keeps them for next time, in `video.yaml`.
 - **CANCEL:** leaves without changing anything, as do Start and Esc.
@@ -319,7 +323,8 @@ console only for `--debug-utils`, `--debug-log`, `--call-log`, `--aux-addr-file`
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `--fullscreen`, `--windowed`                        | Start in desktop fullscreen, or in a window. Default: as in `video.yaml`                                    |
 | `--widescreen`, `--no-widescreen`                   | Use [Mode 48](#widescreen-mode-48) instead of Mode 40, or not                                               |
-| `--integer-scaling`, `--no-integer-scaling`         | Scale by whole multiples only, centred with borders and nearest-neighbour: 320×224 on a 1920×1080 screen is drawn 4× at 1280×896 |
+| `--integer-scaling`, `--no-integer-scaling`         | Scale by whole multiples only, centred with borders: 320×224 on a 1920×1080 screen is drawn 4× at 1280×896 |
+| `--scaling-filter nearest\|bilinear\|hybrid\|metalfx` | How the picture is scaled: see SCALING FILTER under [Video settings](#video-settings). `metalfx` is macOS 13 and newer only (elsewhere `hybrid`). Default: as in `video.yaml`, `hybrid` without one |
 | `--frame-sync auto\|vsync\|vsync-half\|vsync-third` | What sets the game's speed. `auto`, the default, is the internal timer: right on any monitor, with no tearing, and VRR monitors can follow it (use fullscreen for VRR). The others follow the monitor, every 1, 2 or 3 refreshes |
 | `--default-video`                                   | Ignore `video.yaml` for this run, keeping any other video option given. For scripts and measurements        |
 
