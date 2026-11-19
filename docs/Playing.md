@@ -41,8 +41,10 @@ The menu has the original 1 and 2 player games, and rows the cartridge never had
 - **1 PLAYER AI ASSIST:** a two-player game with [the AI](DeveloperJourney.md#1-player-ai-assist) as
   your partner. Choose your character, then the one for the `COMPUTER`. The mode appears only if the
   game can find the AI's code.
-- **CONTINUE**, after OPTIONS, appears while a game is saved (see [Saving](#saving)).
-- **EXTRA**, before QUIT, has the special modes (see [Survival mode](#survival-mode)).
+- **CONTINUE** goes back to a saved game (see [Saving](#saving)). Without a save it is dimmed and the
+  cursor skips it.
+- **EXTRA** has the special modes (see [Survival mode](#survival-mode)).
+- **OPTIONS**, always the row before QUIT.
 - **QUIT**, the last row, ends the game.
 
 ### Survival mode
