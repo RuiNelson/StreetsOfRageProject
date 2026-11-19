@@ -43,7 +43,7 @@ The menu has the original 1 and 2 player games, and rows the cartridge never had
   game can find the AI's code.
 - **CONTINUE** goes back to a saved game (see [Saving](#saving)). Without a save it is dimmed and the
   cursor skips it.
-- **EXTRA** has the special modes (see [Survival mode](#survival-mode)).
+- **EXTRA** has the special modes (see [Survival mode](#survival-mode) and [GTA 6](#gta-6)).
 - **OPTIONS**, always the row before QUIT.
 - **QUIT**, the last row, ends the game.
 
@@ -64,6 +64,18 @@ starts and the game is the same in all of them, with no holes.
 When everyone is out, the game shows how many enemies fell and goes back to SURVIVAL MODE. The three best
 results for 1 player and for 2 players (the two scores added up), with the initials, are kept in
 `survival.yaml`, beside `controls.yaml`, and shown on the SURVIVAL MODE screen.
+
+### GTA 6
+
+**EXTRA > GTA 6** is a mode just for fun, for one player: the whole game, rounds and bosses included,
+driving the police car instead of a fighter. Choose a character (only the car is seen), then:
+
+- Any enemy or boss the car touches dies at once.
+- The car drives at three times Blaze's speed and never turns round: going back is reversing. It cannot
+  punch, jump or pick up food or weapons.
+  Special still calls the police.
+- It takes damage and loses lives as a player does, and a hole is still a hole.
+- Nobody can join, SAVE AND QUIT is off, and the score never enters the high scores.
 
 ## Controls
 
