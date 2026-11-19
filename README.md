@@ -36,6 +36,14 @@ study.
 - **Friend grab keeps weapon** — in the original, you dropped your weapon if a friend accidentally grabbed you, which was unfair
 - **Enable the cheat in the menu** — in the original, you needed a second gamepad to enable the cheat; now you don't need to buy extra hardware
 - **Pause Menu** — you can forfeit the game in the pause screen
+- **MetalFX Frame Generation (Mac only)** — optional frame interpolation that smooths the motion to 60 fps. The game only changes its picture at 30 fps, so this fills in the gaps. A variant keeps a sprite's old pose in the in-between frame instead of blending poses.
+
+## Extra modes
+
+Found in the **EXTRA** row of the mode menu:
+
+- **Survival Mode** — 1 or 2 players. Pick a round as the backdrop and fight endless random enemies, every type and color, in growing numbers (up to 16 at once). High-scores.
+- **GTA 6** — a meme mode: play the campaign alone, but as the police car (do we need to say more).
 
 This project is open source and open to improvement suggestions!
 
